@@ -274,6 +274,61 @@ describe("depositEmbedSignIn", () => {
   });
 });
 
+describe("depositEmbedSignIn — PORTAL_SSO", () => {
+  beforeEach(() => {
+    mockResolve.mockResolvedValue({ ...RESOLVED, authMode: "PORTAL_SSO" });
+  });
+
+  it("refuses the magic-link path outright, never consulting a portal session", async () => {
+    // The confirmed product decision: no magic-link fallback for this mode. A
+    // portal cookie session — even a real, live one from signing in to some
+    // other PORTAL source — must never be used to authorize a PORTAL_SSO
+    // deposit. This is the "reject a magic-link request clearly" requirement:
+    // an `unavailable` result here, not a 500 and not a silent success.
+    await expect(depositEmbedSignIn({ token: TOKEN, nonce: NONCE, origin: WIDGET_ORIGIN })).resolves.toEqual({
+      status: "unavailable",
+      error:
+        "This feedback source only accepts sign-in through SSO Identify. Close this window — the page you came from should sign you in automatically once it identifies you.",
+    });
+    expect(mockSession).not.toHaveBeenCalled();
+    expect(mockDeposit).not.toHaveBeenCalled();
+    expect(mockClaim).not.toHaveBeenCalled();
+  });
+
+  it("refuses the magic-link path even when a portal session already exists", async () => {
+    mockSession.mockResolvedValue({ ...IDENTITY });
+    await expect(depositEmbedSignIn({ token: TOKEN, nonce: NONCE, origin: WIDGET_ORIGIN })).resolves.toMatchObject({
+      status: "unavailable",
+    });
+    expect(mockSession).not.toHaveBeenCalled();
+    expect(mockDeposit).not.toHaveBeenCalled();
+  });
+
+  it("still refuses an unrecognized origin first, before naming the mode restriction", async () => {
+    await expect(
+      depositEmbedSignIn({ token: TOKEN, nonce: NONCE, origin: "https://attacker.example.com" })
+    ).resolves.toEqual({
+      status: "unavailable",
+      error:
+        "This sign-in cannot be completed from an unrecognized origin. Ask whoever embedded this prototype to add your origin to its allowed list.",
+    });
+  });
+
+  it("charges only the read quota, never the write quota, for a refusal that writes nothing", async () => {
+    await depositEmbedSignIn({ token: TOKEN, nonce: NONCE, origin: WIDGET_ORIGIN });
+    expect(mockRate).toHaveBeenCalledWith("token-1", "READ");
+    expect(mockRate).not.toHaveBeenCalledWith("token-1", "SUBMIT");
+  });
+
+  it("refuses a bad credential before ever reaching the mode check", async () => {
+    mockResolve.mockRejectedValue(new EmbedSourceError(401, "Invalid embed token"));
+    await expect(depositEmbedSignIn({ token: TOKEN, nonce: NONCE, origin: WIDGET_ORIGIN })).resolves.toEqual({
+      status: "unavailable",
+      error: "Invalid embed token",
+    });
+  });
+});
+
 describe("depositEmbedSignIn — INTERNAL_SSO", () => {
   beforeEach(() => {
     mockResolve.mockResolvedValue({ ...RESOLVED, authMode: "INTERNAL_SSO" });

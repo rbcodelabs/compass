@@ -18,20 +18,38 @@
  * portal cookie is `SameSite=Lax`, so it does not accompany a cross-site POST
  * even as a top-level form submission.
  *
- * ## Two identities, chosen by the source and never by the request
+ * ## Three identities, chosen by the source and never by the request
  *
  * `FeedbackSource.authMode` decides which kind of sign-in this popup brokers:
- * `PORTAL` (an external reviewer, magic link, `PortalAccount`) or `INTERNAL_SSO`
- * (a Compass user who is a member of the workspace owning the source). The mode
- * comes off the resolved source row — the widget cannot ask to be treated as
- * internal, any more than it can ask which artifact its comments land on.
+ * `PORTAL` (an external reviewer, magic link, `PortalAccount`), `PORTAL_SSO`
+ * (also a `PortalAccount`, but *only* reachable through Portal SSO Identify —
+ * see below), or `INTERNAL_SSO` (a Compass user who is a member of the
+ * workspace owning the source). The mode comes off the resolved source row —
+ * the widget cannot ask to be treated as internal, any more than it can ask
+ * which artifact its comments land on.
+ *
+ * ## PORTAL_SSO has no magic-link half at all
+ *
+ * A PORTAL_SSO source's only sign-in path is `POST /api/embed/sso` — the
+ * widget exchanging a Portal SSO Identify JWT the host page handed it, with no
+ * popup involved. This popup's own handoff mechanism (the portal cookie,
+ * checked via `getPortalSession()` below) is a *different* credential from
+ * that JWT exchange, so even a visitor who happens to hold a live portal
+ * session — from signing in to some other PORTAL source, say — must not have
+ * it accepted here for a PORTAL_SSO source. That would be exactly the
+ * magic-link fallback the product decision rules out. So this mode is refused
+ * immediately, before `getPortalSession()` is ever called, with a terminal
+ * `unavailable` result rather than a `signin_required` one: nothing this popup
+ * can observe by polling will ever turn into a deposit for this mode, so
+ * polling would just be a wait with no possible outcome.
  *
  * ## The flow, and why only the PORTAL half polls
  *
  * 1. The widget draws a 32-byte nonce and opens this page with it.
  * 2. This action reports `signin_required` until the relevant session exists,
  *    naming the mode so the popup can render the right affordance.
- * 3. The visitor signs in. **This is where the two modes genuinely differ.**
+ * 3. The visitor signs in. **This is where PORTAL and INTERNAL_SSO genuinely
+ *    differ** (PORTAL_SSO never reaches this step at all — see above).
  *
  *    PORTAL: the emailed link opens wherever their mail client sends it — a new
  *    tab, possibly a different window — so it can never redirect the popup back
@@ -223,6 +241,22 @@ export async function depositEmbedSignIn(input: {
         token: minted.token,
         expiresAt: minted.expiresAt.toISOString(),
         origin: input.origin,
+      };
+    }
+
+    if (source.authMode === "PORTAL_SSO") {
+      // No magic-link fallback for this mode (lib/embed-auth-mode.ts) — see
+      // this file's module header. Refused before `getPortalSession()` is
+      // even called, so an existing portal cookie from some other PORTAL
+      // source can never be repurposed as a sign-in for this one, and
+      // terminal (`unavailable`, not `signin_required`) because nothing this
+      // action does can ever turn into a deposit for this mode: the real
+      // sign-in path is the widget's own POST /api/embed/sso exchange, which
+      // this popup never observes.
+      return {
+        status: "unavailable",
+        error:
+          "This feedback source only accepts sign-in through SSO Identify. Close this window — the page you came from should sign you in automatically once it identifies you.",
       };
     }
 

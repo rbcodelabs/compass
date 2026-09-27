@@ -16,6 +16,11 @@
  * visitor token through POST /api/embed/sso and never open a popup or touch
  * a cookie.
  *
+ * A PORTAL_SSO-mode source (lib/embed-auth-mode.ts) requires this exchange —
+ * there is no magic-link fallback, so this file never renders the "Sign in"
+ * button that would open that popup for such a source; see renderIdentity's
+ * `authMode === "PORTAL_SSO"` branch below.
+ *
  * ## The one rule that matters most in this file
  *
  * Every comment body and author name rendered here was typed by a member of the
@@ -392,6 +397,14 @@
     artifactId: null,
     comments: [],
     identity: null, // { email, name } once signed in
+    // The resolved source's FeedbackSource.authMode, from GET /api/embed/comments
+    // (see lib/embed-auth-mode.ts). Null until that first read completes, and left
+    // at whatever it last was on a failed read rather than reset — the same
+    // "prefer stale to wrong" choice state.artifactId and state.comments already
+    // make. Its only use so far is renderIdentity(): a "PORTAL_SSO" source has no
+    // magic-link fallback, so the widget must not offer a Sign in button that
+    // would open a popup with nothing it can do.
+    authMode: null,
     open: false,
     picking: false,
     readBlocked: false, // set by a 403; see refreshComments
@@ -724,6 +737,24 @@
       var out = make("button", { type: "button", "class": "iconbtn", "data-compass": "signout" }, "Sign out");
       out.addEventListener("click", guarded("signout", signOut));
       ui.who.appendChild(out);
+      return;
+    }
+
+    if (state.authMode === "PORTAL_SSO") {
+      // No magic-link fallback for this mode (lib/embed-auth-mode.ts): the only
+      // way to sign in is the host page handing this widget a Portal SSO
+      // Identify JWT, via data-compass-sso-token at boot or identify() at any
+      // time. There is nothing for a click to do here, so unlike every other
+      // mode this renders no button at all — offering one would open the
+      // magic-link popup onto a mode that popup can only ever refuse (see
+      // app/embed/signin/actions.ts), a dead end for the visitor.
+      ui.who.appendChild(
+        make(
+          "span",
+          { "class": "grow", "data-compass": "sso-waiting" },
+          "Waiting to be signed in by this page’s SSO integration…"
+        )
+      );
       return;
     }
 
@@ -1779,6 +1810,14 @@
 
         state.artifactId = result.data.artifactId || null;
         state.comments = Array.isArray(result.data.comments) ? result.data.comments : [];
+        // Threaded through from the resolved source (see the route) rather than
+        // fetched separately. renderAll() does not touch the identity bar, so
+        // it is called out here explicitly whenever this value could have
+        // changed what renderIdentity() would show.
+        if (typeof result.data.authMode === "string") {
+          state.authMode = result.data.authMode;
+          renderIdentity();
+        }
         renderAll();
       })
     );

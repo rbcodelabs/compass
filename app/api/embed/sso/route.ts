@@ -32,9 +32,15 @@
  *      call, the SUBMIT bucket only once a JWT has actually verified (see
  *      below).
  *
- * ## Why PORTAL-only, and why that check runs unconditionally
+ * ## Why PORTAL and PORTAL_SSO, and why that check runs unconditionally
  *
- * `FeedbackSource.authMode` decides which identity a source accepts.
+ * `FeedbackSource.authMode` decides which identity a source accepts. This
+ * route is the one place PORTAL and PORTAL_SSO are the same check: both
+ * resolve to a `PortalAccount`, and the only thing that differs between them
+ * is whether a magic-link email is *also* available (app/embed/signin's
+ * popup refuses that path for PORTAL_SSO — see lib/embed-auth-mode.ts). The
+ * JWT verification below does not care which of the two let the visitor in.
+ *
  * INTERNAL_SSO sources are untouched by this feature on purpose — that mode
  * already has its own SSO path (Compass's own `auth()` session, checked
  * against workspace membership in app/embed/signin/actions.ts), and mixing a
@@ -108,8 +114,12 @@ export async function POST(request: NextRequest) {
     // Runs unconditionally, before the ssoEnabled lookup — see the module
     // header for why an INTERNAL_SSO source's refusal must not double as a
     // hint about the workspace's SSO Identify configuration.
-    if (source.authMode !== "PORTAL") {
-      return embedError(403, "SSO Identify sign-in is only available for feedback sources in PORTAL mode.", METHODS)
+    if (source.authMode !== "PORTAL" && source.authMode !== "PORTAL_SSO") {
+      return embedError(
+        403,
+        "SSO Identify sign-in is only available for feedback sources in PORTAL or PORTAL_SSO mode.",
+        METHODS
+      )
     }
 
     let payload: unknown
