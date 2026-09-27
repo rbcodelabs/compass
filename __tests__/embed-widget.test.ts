@@ -1527,6 +1527,78 @@ describe("identify via data-compass-sso-token", () => {
 })
 
 /* ------------------------------------------------------------------ *
+ * authMode: PORTAL_SSO (no magic-link fallback)
+ * ------------------------------------------------------------------ */
+
+describe("authMode: PORTAL_SSO", () => {
+  it("does not offer the magic-link Sign in button, showing a waiting message instead", async () => {
+    on("GET /api/embed/comments", reply(200, { artifactId: "art_1", comments: [], authMode: "PORTAL_SSO" }))
+    await mount()
+
+    // There is no email fallback for this mode (lib/embed-auth-mode.ts), so
+    // opening the popup would be a dead end — the widget must not offer it.
+    expect(maybePart("signin")).toBeNull()
+    expect(part("who").textContent).toMatch(/sso/i)
+  })
+
+  it("never opens the sign-in popup for this mode", async () => {
+    on("GET /api/embed/comments", reply(200, { artifactId: "art_1", comments: [], authMode: "PORTAL_SSO" }))
+    await mount()
+    expect(openCalls).toHaveLength(0)
+  })
+
+  it("still renders the normal Sign in button for PORTAL and INTERNAL_SSO sources", async () => {
+    on("GET /api/embed/comments", reply(200, { artifactId: "art_1", comments: [], authMode: "PORTAL" }))
+    await mount()
+    expect(maybePart("signin")).not.toBeNull()
+  })
+
+  it("still renders the normal Sign in button when authMode is absent (older/unset sources)", async () => {
+    on("GET /api/embed/comments", reply(200, { artifactId: "art_1", comments: [] }))
+    await mount()
+    expect(maybePart("signin")).not.toBeNull()
+  })
+
+  it("still completes sign-in through identify(), the mechanism this mode actually uses", async () => {
+    on("GET /api/embed/comments", reply(200, { artifactId: "art_1", comments: [], authMode: "PORTAL_SSO" }))
+    on("POST /api/embed/sso", reply(200, {
+      token: VISITOR,
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      email: "dana@example.com",
+      name: "Dana",
+    }))
+    await mount()
+    expect(maybePart("signin")).toBeNull()
+
+    const result = await widgetGlobal().identify("customer-jwt")
+
+    expect(result).toEqual({ signedIn: true })
+    expect(part("who").textContent).toContain("Dana")
+    expect(maybePart("signout")).not.toBeNull()
+  })
+
+  it("goes back to the waiting message, not the Sign in button, after signing out", async () => {
+    on("GET /api/embed/comments", reply(200, { artifactId: "art_1", comments: [], authMode: "PORTAL_SSO" }))
+    on("DELETE /api/embed/session", reply(200, { signedIn: false }))
+    on("POST /api/embed/sso", reply(200, {
+      token: VISITOR,
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      email: "dana@example.com",
+      name: "Dana",
+    }))
+    await mount()
+    await widgetGlobal().identify("customer-jwt")
+    await flush()
+
+    click(part("signout"))
+    await flush()
+
+    expect(maybePart("signin")).toBeNull()
+    expect(part("who").textContent).toMatch(/sso/i)
+  })
+})
+
+/* ------------------------------------------------------------------ *
  * Screenshots
  * ------------------------------------------------------------------ */
 

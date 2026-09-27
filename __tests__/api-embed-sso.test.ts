@@ -191,6 +191,23 @@ describe("POST /api/embed/sso", () => {
     expect(accounts.size).toBe(1);
   });
 
+  it("mints a visitor token for a valid JWT against a PORTAL_SSO source", async () => {
+    mockResolve.mockResolvedValue({ ...RESOLVED, authMode: "PORTAL_SSO" });
+    const jwt = await signSsoToken({ email: "dana@example.com" });
+    const response = await POST(post({ ssoToken: jwt }));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      token: "cmpvt_minted",
+      expiresAt: "2026-01-01T00:00:00.000Z",
+      email: "dana@example.com",
+      name: null,
+    });
+    expect(mockMint).toHaveBeenCalledWith({
+      feedbackSourceId: "source-1",
+      identity: { portalAccountId: expect.any(String) },
+    });
+  });
+
   it("rejects an INTERNAL_SSO source with 403 regardless of workspace SSO config", async () => {
     mockResolve.mockResolvedValue({ ...RESOLVED, authMode: "INTERNAL_SSO" });
     const jwt = await signSsoToken();
@@ -202,7 +219,7 @@ describe("POST /api/embed/sso", () => {
     // (ssoEnabled true here, false in the next test) produce the same status
     // and, more importantly, the same message.
     const body = await response.json();
-    expect(body.error).toBe("SSO Identify sign-in is only available for feedback sources in PORTAL mode.");
+    expect(body.error).toBe("SSO Identify sign-in is only available for feedback sources in PORTAL or PORTAL_SSO mode.");
   });
 
   it("gives an INTERNAL_SSO source the identical refusal whether or not SSO Identify is configured", async () => {
@@ -211,7 +228,7 @@ describe("POST /api/embed/sso", () => {
     const response = await POST(post({ ssoToken: jwt }));
     expect(response.status).toBe(403);
     const body = await response.json();
-    expect(body.error).toBe("SSO Identify sign-in is only available for feedback sources in PORTAL mode.");
+    expect(body.error).toBe("SSO Identify sign-in is only available for feedback sources in PORTAL or PORTAL_SSO mode.");
   });
 
   it("rejects a PORTAL source whose workspace has not enabled SSO Identify", async () => {

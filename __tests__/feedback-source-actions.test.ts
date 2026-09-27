@@ -155,6 +155,21 @@ describe("createFeedbackSource", () => {
     expect(mocks.feedbackSource.create.mock.calls[0][0].data).toMatchObject({ authMode: "PORTAL" });
   });
 
+  it("accepts PORTAL_SSO the same way, with no schema change required", async () => {
+    // FeedbackSource.authMode is a bare VarChar with no CHECK constraint (see
+    // lib/embed-auth-mode.ts), so a third mode is a value, not a migration —
+    // this pins that createFeedbackSource genuinely takes it as-is.
+    const result = await createFeedbackSource("org", "ws", {
+      name: "Proto",
+      artifactId: "artifact-1",
+      allowedOrigins: [],
+      authMode: "PORTAL_SSO",
+    });
+
+    expect(result).toMatchObject({ ok: true, authMode: "PORTAL_SSO" });
+    expect(mocks.feedbackSource.create.mock.calls[0][0].data).toMatchObject({ authMode: "PORTAL_SSO" });
+  });
+
   it("refuses a mode it does not recognize rather than quietly defaulting", async () => {
     // Silently filing an unrecognized value as the default would flip a source the
     // operator believed was set to external reviewers — a widening of who may

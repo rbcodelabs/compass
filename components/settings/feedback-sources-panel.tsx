@@ -38,10 +38,15 @@ import { DEFAULT_EMBED_AUTH_MODE, type EmbedAuthMode } from "@/lib/embed-auth-mo
  *
  * Written for someone deciding who should see a prototype, not for someone who has
  * read lib/embed-auth-mode.ts — hence "your team" rather than "INTERNAL_SSO". The
- * external option names its own prerequisite, because a deployment without email
- * delivery cannot send the magic link it depends on, and the failure would
- * otherwise surface to the operator as a visitor reporting that sign-in does
- * nothing.
+ * external-by-email option names its own prerequisite, because a deployment
+ * without email delivery cannot send the magic link it depends on, and the
+ * failure would otherwise surface to the operator as a visitor reporting that
+ * sign-in does nothing.
+ *
+ * `PORTAL_SSO`'s hint here is the *eligible* wording (SSO Identify already
+ * configured); `authModeHint` below swaps in a different sentence when it is
+ * not, since the option is always listed (disabled until then) rather than
+ * hidden — see the SelectItem `disabled` prop at each render site.
  */
 const AUTH_MODE_OPTIONS: { value: EmbedAuthMode; label: string; hint: string }[] = [
   {
@@ -54,6 +59,12 @@ const AUTH_MODE_OPTIONS: { value: EmbedAuthMode; label: string; hint: string }[]
     label: "External reviewers, by email link",
     hint: "Reviewers sign in with a link emailed to them. This needs email delivery, which this deployment does not have configured — choose it only if you know yours does.",
   },
+  {
+    value: "PORTAL_SSO",
+    label: "External reviewers, via SSO",
+    hint:
+      "Reviewers sign in only through Portal SSO Identify: the page embedding this widget hands it a signed JWT (as data-compass-sso-token on the script tag, or by calling window.__compassFeedbackWidget.identify(jwt)). No magic-link email is ever sent for this source — there is no email fallback.",
+  },
 ]
 
 /**
@@ -64,20 +75,45 @@ const AUTH_MODE_OPTIONS: { value: EmbedAuthMode; label: string; hint: string }[]
  * UI in components/settings/portal-settings-panel.tsx, and this panel only
  * needs to point an operator who already knows about that feature at the
  * widget-side hook for it.
+ *
+ * Reworded once PORTAL_SSO existed as its own option: this sentence used to be
+ * the only place SSO Identify was mentioned for the widget at all. It still
+ * describes something true of PORTAL (SSO Identify there is an optional
+ * shortcut alongside the email link, not a replacement for it — see
+ * lib/embed-auth-mode.ts), but now also points at the dedicated option for an
+ * operator who wants SSO-only with no email fallback at all.
  */
 const SSO_IDENTIFY_HINT =
-  " This workspace also has SSO Identify configured (see Portal settings above), so a reviewer's own sign-in can skip the emailed link entirely: render the same JWT your backend mints for the portal into this widget's script tag as data-compass-sso-token, or call window.__compassFeedbackWidget.identify(jwt) directly."
+  " This workspace also has SSO Identify configured (see Portal settings above), so a reviewer's own SSO sign-in can skip the emailed link here too: render the same JWT your backend mints for the portal into this widget's script tag as data-compass-sso-token, or call window.__compassFeedbackWidget.identify(jwt) directly. For a source with no email fallback at all, choose “External reviewers, via SSO” instead."
+
+/** Shown for PORTAL_SSO in place of its normal hint until the prerequisite is met. */
+const PORTAL_SSO_INELIGIBLE_HINT =
+  "Enable Portal SSO Identify in Settings → Portal first — until then this option cannot be selected."
 
 /**
- * `ssoIdentifyEnabled` only ever extends the PORTAL hint — INTERNAL_SSO
- * sources already have their own SSO path (Compass's own login, checked
- * against workspace membership) and are untouched by Portal SSO Identify
- * entirely, so appending this sentence there would advertise a capability
- * that source cannot use.
+ * `ssoIdentifyEnabled` changes two of the three hints:
+ *
+ *   - PORTAL gains a sentence about the same optional shortcut (only when
+ *     eligible — advertising a hook that would not work is worse than saying
+ *     nothing).
+ *   - PORTAL_SSO's own hint is entirely replaced by the prerequisite message
+ *     when not yet eligible, since its normal hint describes a mode that
+ *     cannot actually be selected yet.
+ *
+ * INTERNAL_SSO is untouched either way — it already has its own SSO path
+ * (Compass's own login, checked against workspace membership) and is
+ * unaffected by Portal SSO Identify entirely.
  */
 function authModeHint(mode: EmbedAuthMode, ssoIdentifyEnabled: boolean): string {
   const base = AUTH_MODE_OPTIONS.find((option) => option.value === mode)?.hint ?? ""
-  return mode === "PORTAL" && ssoIdentifyEnabled ? base + SSO_IDENTIFY_HINT : base
+  if (mode === "PORTAL" && ssoIdentifyEnabled) return base + SSO_IDENTIFY_HINT
+  if (mode === "PORTAL_SSO" && !ssoIdentifyEnabled) return PORTAL_SSO_INELIGIBLE_HINT
+  return base
+}
+
+/** The one rule for whether a "Who can comment" option can be picked right now. */
+function isAuthModeSelectable(mode: EmbedAuthMode, ssoIdentifyEnabled: boolean): boolean {
+  return mode !== "PORTAL_SSO" || ssoIdentifyEnabled
 }
 
 export type FeedbackSourceTokenRow = {
@@ -444,7 +480,11 @@ export function FeedbackSourcesPanel({
                 </SelectTrigger>
                 <SelectContent>
                   {AUTH_MODE_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
+                    <SelectItem
+                      key={option.value}
+                      value={option.value}
+                      disabled={!isAuthModeSelectable(option.value, ssoIdentifyEnabled)}
+                    >
                       {option.label}
                     </SelectItem>
                   ))}
@@ -641,7 +681,11 @@ export function FeedbackSourcesPanel({
               </SelectTrigger>
               <SelectContent>
                 {AUTH_MODE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
+                  <SelectItem
+                    key={option.value}
+                    value={option.value}
+                    disabled={!isAuthModeSelectable(option.value, ssoIdentifyEnabled)}
+                  >
                     {option.label}
                   </SelectItem>
                 ))}

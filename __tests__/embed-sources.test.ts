@@ -176,6 +176,13 @@ describe("resolveEmbedToken", () => {
       await expect(resolveEmbedToken(RAW_TOKEN)).resolves.toMatchObject({ authMode: "INTERNAL_SSO" });
     }
   });
+
+  it("reads a stored PORTAL_SSO value through unchanged, same as PORTAL", async () => {
+    mockToken.findUnique.mockResolvedValue(
+      storedToken({ feedbackSource: { ...storedToken().feedbackSource, authMode: "PORTAL_SSO" } })
+    );
+    await expect(resolveEmbedToken(RAW_TOKEN)).resolves.toMatchObject({ authMode: "PORTAL_SSO" });
+  });
 });
 
 describe("isOriginAllowed", () => {
