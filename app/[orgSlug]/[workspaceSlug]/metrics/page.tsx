@@ -19,7 +19,7 @@ export default async function MetricsPage({ params }: Props) {
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) redirect("/dashboard");
 
-  const actor = { userId: session.user.id, purpose: "USER" as const };
+  const actor = { userId: session.user.id, purpose: "USER" as const, scopeWorkspaceId: workspace.id };
   const [metrics, connections] = await Promise.all([
     listDashboardMetrics(actor, workspace.id),
     listConnections(actor, workspace.id),

@@ -51,6 +51,13 @@ describe("analytics server action identity", () => {
     const input = { name: "Views", unit: "views", provider: "vercel" as const, query: { metric: "pageviews" as const } };
     await createAnalyticsMetric("org", "workspace", input);
     expect(mocks.workspace).toHaveBeenCalledWith("org", "workspace", "human-user");
-    expect(mocks.create).toHaveBeenCalledWith({ userId: "human-user", purpose: "USER" }, "member-workspace", input);
+    // scopeWorkspaceId must be set: in managed-pilot mode (lib/mcp-authz.ts's
+    // assertActorWorkspaceScope), a session actor missing this field is
+    // rejected outright — see __tests__/managed-pilot-session-actor-scope.test.ts.
+    expect(mocks.create).toHaveBeenCalledWith(
+      { userId: "human-user", purpose: "USER", scopeWorkspaceId: "member-workspace" },
+      "member-workspace",
+      input
+    );
   });
 });

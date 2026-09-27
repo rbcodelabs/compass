@@ -31,7 +31,7 @@ export async function GET(request: Request) {
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id)
   if (!workspace) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-  const actor: McpActor = { userId: session.user.id, purpose: "USER" }
+  const actor: McpActor = { userId: session.user.id, purpose: "USER", scopeWorkspaceId: workspace.id }
   try {
     const [bindings, metrics] = await Promise.all([
       analytics.listBindings(actor, workspace.id, target.data),
