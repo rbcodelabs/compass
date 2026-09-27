@@ -161,7 +161,7 @@ export default async function SettingsPage({ params }: Props) {
     rawMembers.find((m) => m.userId === session.user?.id)?.id ?? null;
   const currentWorkspaceRole = rawMembers.find((m) => m.userId === session.user?.id)?.role;
   const canManageCapabilityPacks = normalizeWorkspaceRole(currentWorkspaceRole) === "ADMIN" || isOrgAdminRole(workspace.organization.members[0]?.role);
-  const analyticsActor = { userId: session.user.id, purpose: "USER" as const };
+  const analyticsActor = { userId: session.user.id, purpose: "USER" as const, scopeWorkspaceId: workspace.id };
   const [analyticsConnections, analyticsMetrics] = await Promise.all([
     listConnections(analyticsActor, workspace.id),
     listMetrics(analyticsActor, workspace.id),
