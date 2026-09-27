@@ -17,7 +17,7 @@ async function context(orgSlug: string, workspaceSlug: string) {
   if (!session?.user?.id) throw new Error("Unauthorized");
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) throw new Error("Workspace not found");
-  const actor: McpActor = { userId: session.user.id, purpose: "USER" };
+  const actor: McpActor = { userId: session.user.id, purpose: "USER", scopeWorkspaceId: workspace.id };
   return { actor, workspaceId: workspace.id };
 }
 
