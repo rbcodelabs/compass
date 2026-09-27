@@ -79,6 +79,8 @@ const RESOLVED = {
   artifactId: "artifact-1",
   allowedOrigins: [WIDGET_ORIGIN],
   authMode: "PORTAL" as const,
+  ssoEnabled: false,
+  ssoSecretEncrypted: null,
 };
 
 const IDENTITY = { portalAccountId: "portal-1", email: "dana@example.com", name: "Dana" };

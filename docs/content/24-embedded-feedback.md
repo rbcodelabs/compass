@@ -56,6 +56,15 @@ confirms it by clicking a link. Their comments are attributed to that verified
 address rather than to a Compass account. Use this for customers, agencies, and
 anyone who has no reason to have a Compass login.
 
+If this workspace also has **SSO Identify** configured (**Settings → Portal →
+SSO Identify**), a source set to external reviewers can skip that email link
+entirely: the host page passes the same JWT it already mints for its own
+portal integration, either as `data-compass-sso-token` on the widget's script
+tag or by calling `window.__compassFeedbackWidget.identify(jwt)`, and Compass
+exchanges it directly for a signed-in reviewer — no popup, no cookie. This is
+for a host application that already knows who the reviewer is and wants them
+to arrive pre-signed-in rather than typing their email a second time.
+
 Sign-in happens in a popup served by Compass, on the Compass origin, with the
 Compass URL in a real address bar. The page the widget is embedded in never
 sees the reviewer's email address or their sign-in link, and it cannot frame

@@ -51,6 +51,10 @@ function storedToken(overrides: Record<string, unknown> = {}) {
       // Stated explicitly rather than left null so the default-resolution tests
       // below are the only place a missing value is exercised.
       authMode: "PORTAL",
+      // Not exercised by most tests here — see __tests__/api-embed-sso.test.ts for
+      // the SSO Identify policy itself. Present with a realistic shape so the
+      // resolved-source assertions below stay exact rather than partial.
+      workspace: { ssoEnabled: false, ssoSecretEncrypted: null },
     },
     ...overrides,
   };
@@ -96,6 +100,8 @@ describe("resolveEmbedToken", () => {
       artifactId: "artifact-1",
       allowedOrigins: ["https://prototype.example.com"],
       authMode: "PORTAL",
+      ssoEnabled: false,
+      ssoSecretEncrypted: null,
     });
     // Looked up by hash, never by the raw value.
     expect(mockToken.findUnique).toHaveBeenCalledWith(

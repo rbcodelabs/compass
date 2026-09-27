@@ -53,6 +53,19 @@ export type ResolvedEmbedSource = {
    * internal.
    */
   authMode: EmbedAuthMode
+  /**
+   * The owning workspace's Portal SSO Identify configuration, carried alongside
+   * the source rather than fetched separately by every caller that needs it.
+   *
+   * `resolveEmbedToken` already joins through `feedbackSource` to reach the
+   * workspace row for `workspaceId`, so adding two more columns to the same
+   * `select` costs nothing extra to fetch and keeps every embed route reading
+   * these fields from one place instead of each doing its own
+   * `workspace.findUnique`. Every caller pays two extra boolean/text columns on a
+   * query that already runs; only `/api/embed/sso` reads them.
+   */
+  ssoEnabled: boolean
+  ssoSecretEncrypted: string | null
 }
 
 export function hashEmbedToken(token: string): string {
@@ -155,6 +168,7 @@ export async function resolveEmbedToken(rawToken: string): Promise<ResolvedEmbed
           enabled: true,
           allowedOrigins: true,
           authMode: true,
+          workspace: { select: { ssoEnabled: true, ssoSecretEncrypted: true } },
         },
       },
     },
@@ -182,6 +196,8 @@ export async function resolveEmbedToken(rawToken: string): Promise<ResolvedEmbed
     artifactId: source.artifactId,
     allowedOrigins: parseAllowedOrigins(source.allowedOrigins),
     authMode: resolveEmbedAuthMode(source.authMode),
+    ssoEnabled: source.workspace?.ssoEnabled === true,
+    ssoSecretEncrypted: source.workspace?.ssoSecretEncrypted ?? null,
   }
 }
 
