@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
 import { decrypt } from "@/lib/crypto-secrets";
 import { verifySsoToken } from "@/lib/portal-sso";
-import { createPortalSession, normalizePortalEmail } from "@/lib/portal-auth";
+import { createPortalSession, upsertPortalAccountFromSsoIdentity } from "@/lib/portal-auth";
 
 type Params = { orgSlug: string; workspaceSlug: string };
 
@@ -77,19 +77,7 @@ export async function GET(
     );
   }
 
-  const email = normalizePortalEmail(identity.email);
-
-  const portalAccount = await prisma.portalAccount.upsert({
-    where: { email },
-    update: {
-      ...(identity.name ? { name: identity.name } : {}),
-    },
-    create: {
-      email,
-      name: identity.name ?? null,
-      emailVerified: new Date(),
-    },
-  });
+  const portalAccount = await upsertPortalAccountFromSsoIdentity(identity);
 
   await createPortalSession(portalAccount.id);
 

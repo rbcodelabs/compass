@@ -58,6 +58,8 @@ const RESOLVED = {
   artifactId: "artifact-1",
   allowedOrigins: [ORIGIN],
   authMode: "PORTAL" as const,
+  ssoEnabled: false,
+  ssoSecretEncrypted: null,
 };
 
 const IDENTITY = {

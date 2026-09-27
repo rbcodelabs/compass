@@ -13,6 +13,7 @@ import { randomBytes, createHash } from "crypto";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import getPrisma from "@/lib/db";
+import type { SsoIdentity } from "@/lib/portal-sso";
 
 export const PORTAL_SESSION_COOKIE = "compass_portal_session";
 
@@ -22,6 +23,37 @@ const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 /** Normalizes a portal-facing email for storage/lookup: trim + lowercase. */
 export function normalizePortalEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+/**
+ * Upserts a `PortalAccount` for a verified SSO Identify JWT, by normalized
+ * email.
+ *
+ * Shared by both callers that turn a customer-signed identity into an
+ * account: app/api/portal/[orgSlug]/[workspaceSlug]/sso/route.ts (the
+ * cookie-based popup exchange) and app/api/embed/sso/route.ts (the widget's
+ * direct token exchange, which mints a visitor token instead of a cookie).
+ * Kept here rather than duplicated so "how an SSO identity becomes a
+ * PortalAccount" has exactly one implementation — an upsert rather than a
+ * plain create, so the same customer user signing in a second time (from
+ * either surface) updates the existing row instead of colliding on the
+ * unique email index.
+ *
+ * `update` only ever touches `name`, and only when the incoming token
+ * actually carries one: an SSO Identify JWT need not include a display name
+ * on every mint, and a customer's backend omitting it on a later token must
+ * not erase a name captured earlier.
+ */
+export async function upsertPortalAccountFromSsoIdentity(
+  identity: SsoIdentity
+): Promise<{ id: string; email: string; name: string | null }> {
+  const email = normalizePortalEmail(identity.email);
+  const account = await getPrisma().portalAccount.upsert({
+    where: { email },
+    update: identity.name ? { name: identity.name } : {},
+    create: { email, name: identity.name ?? null, emailVerified: new Date() },
+  });
+  return { id: account.id, email: account.email, name: account.name };
 }
 
 function hashToken(rawToken: string): string {

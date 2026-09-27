@@ -56,8 +56,28 @@ const AUTH_MODE_OPTIONS: { value: EmbedAuthMode; label: string; hint: string }[]
   },
 ]
 
-function authModeHint(mode: EmbedAuthMode): string {
-  return AUTH_MODE_OPTIONS.find((option) => option.value === mode)?.hint ?? ""
+/**
+ * Appended to the PORTAL hint only when this workspace has Portal SSO
+ * Identify configured (see the Portal section's "SSO Identify" setting
+ * above). Kept as a plain sentence rather than fetching or displaying the
+ * workspace's actual secret/JWT shape here — that already has its own reveal
+ * UI in components/settings/portal-settings-panel.tsx, and this panel only
+ * needs to point an operator who already knows about that feature at the
+ * widget-side hook for it.
+ */
+const SSO_IDENTIFY_HINT =
+  " This workspace also has SSO Identify configured (see Portal settings above), so a reviewer's own sign-in can skip the emailed link entirely: render the same JWT your backend mints for the portal into this widget's script tag as data-compass-sso-token, or call window.__compassFeedbackWidget.identify(jwt) directly."
+
+/**
+ * `ssoIdentifyEnabled` only ever extends the PORTAL hint — INTERNAL_SSO
+ * sources already have their own SSO path (Compass's own login, checked
+ * against workspace membership) and are untouched by Portal SSO Identify
+ * entirely, so appending this sentence there would advertise a capability
+ * that source cannot use.
+ */
+function authModeHint(mode: EmbedAuthMode, ssoIdentifyEnabled: boolean): string {
+  const base = AUTH_MODE_OPTIONS.find((option) => option.value === mode)?.hint ?? ""
+  return mode === "PORTAL" && ssoIdentifyEnabled ? base + SSO_IDENTIFY_HINT : base
 }
 
 export type FeedbackSourceTokenRow = {
@@ -109,6 +129,15 @@ type Props = {
    * than about making the widget work at all.
    */
   artifactFeedbackPublic: boolean
+  /**
+   * `Workspace.ssoEnabled`, already fetched by the settings page for
+   * PortalSettingsPanel. Threaded through here too so the PORTAL hint below
+   * can mention the widget's SSO Identify hook only on a workspace where it
+   * would actually work — a general "if you've configured..." sentence would
+   * be true on every workspace, which is a worse hint than one that only
+   * appears when it applies.
+   */
+  ssoIdentifyEnabled: boolean
 }
 
 function linesToOrigins(value: string): string[] {
@@ -122,6 +151,7 @@ export function FeedbackSourcesPanel({
   artifacts,
   embedBaseUrl,
   artifactFeedbackPublic,
+  ssoIdentifyEnabled,
 }: Props) {
   const [sources, setSources] = useState<FeedbackSourceRow[]>(initialSources)
   const [isPending, startTransition] = useTransition()
@@ -420,7 +450,7 @@ export function FeedbackSourcesPanel({
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">{authModeHint(source.authMode)}</p>
+              <p className="text-xs text-muted-foreground">{authModeHint(source.authMode, ssoIdentifyEnabled)}</p>
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -617,7 +647,7 @@ export function FeedbackSourcesPanel({
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">{authModeHint(newAuthMode)}</p>
+            <p className="text-xs text-muted-foreground">{authModeHint(newAuthMode, ssoIdentifyEnabled)}</p>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="new-feedback-source-origins" className="text-xs">

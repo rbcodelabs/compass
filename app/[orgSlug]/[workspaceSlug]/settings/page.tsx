@@ -395,6 +395,7 @@ export default async function SettingsPage({ params }: Props) {
           artifacts={feedbackArtifacts}
           embedBaseUrl={embedBaseUrl}
           artifactFeedbackPublic={workspace.artifactFeedbackPublic ?? false}
+          ssoIdentifyEnabled={workspace.ssoEnabled ?? false}
         />
       </SettingsSection>}
 

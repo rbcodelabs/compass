@@ -194,7 +194,7 @@ async function flush(rounds = 40) {
   for (let i = 0; i < rounds; i++) await Promise.resolve()
 }
 
-type MountOptions = { token?: string | null; src?: string; pagePath?: string; tokenAttr?: string }
+type MountOptions = { token?: string | null; src?: string; pagePath?: string; tokenAttr?: string; ssoToken?: string }
 
 function installScript(options: MountOptions = {}) {
   const tag = document.createElement("script")
@@ -202,6 +202,7 @@ function installScript(options: MountOptions = {}) {
   const token = options.token === undefined ? TOKEN : options.token
   if (token !== null) tag.setAttribute(options.tokenAttr ?? "data-compass-token", token)
   if (options.pagePath) tag.setAttribute("data-compass-page-path", options.pagePath)
+  if (options.ssoToken) tag.setAttribute("data-compass-sso-token", options.ssoToken)
   document.head.appendChild(tag)
   return tag
 }
@@ -276,6 +277,18 @@ function storeVisitor(embedToken = TOKEN, expiresAt: string | null = new Date(Da
 
 function storedVisitor(embedToken = TOKEN) {
   return window.localStorage.getItem(storageKey(embedToken))
+}
+
+/**
+ * The one global this file claims, typed loosely for the one member these
+ * tests call directly. `mounted` already exists (asserted elsewhere); `identify`
+ * is what this describe block below is testing.
+ */
+function widgetGlobal(): { mounted: boolean; identify: (ssoToken: unknown) => Promise<{ signedIn: boolean }> } {
+  return (window as unknown as Record<string, unknown>).__compassFeedbackWidget as {
+    mounted: boolean
+    identify: (ssoToken: unknown) => Promise<{ signedIn: boolean }>
+  }
 }
 
 /** The nonce the stubbed CSPRNG produces on its Nth draw, N counting from 0. */
@@ -1380,6 +1393,136 @@ describe("sign-in", () => {
     // The in-memory fallback carries the credential for the life of the page; the
     // visitor simply signs in again on the next navigation.
     expect(lastCall("POST /api/embed/comments").headers["X-Compass-Visitor"]).toBe(VISITOR)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * SSO Identify (direct exchange, no popup, no cookie)
+ * ------------------------------------------------------------------ */
+
+describe("identify()", () => {
+  it("is present on the global as soon as the widget evaluates", async () => {
+    await mount()
+    expect(typeof widgetGlobal().identify).toBe("function")
+  })
+
+  it("posts the JWT to /api/embed/sso and stores the returned visitor token on success", async () => {
+    await mount()
+    on("POST /api/embed/sso", (body) => {
+      expect(body).toEqual({ ssoToken: "customer-jwt" })
+      return {
+        status: 200,
+        data: {
+          token: VISITOR,
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          email: "dana@example.com",
+          name: "Dana",
+        },
+      }
+    })
+
+    const result = await widgetGlobal().identify("customer-jwt")
+
+    expect(result).toEqual({ signedIn: true })
+    expect(JSON.parse(storedVisitor() as string).token).toBe(VISITOR)
+    expect(part("who").textContent).toContain("Dana")
+    expect(maybePart("signout")).not.toBeNull()
+    // No visitor header on the way in — there is no token yet, and this request
+    // is exactly the one that mints it.
+    expect(lastCall("POST /api/embed/sso").headers["X-Compass-Visitor"]).toBeUndefined()
+  })
+
+  it("resumes an interrupted submit once identify() completes, the same as the popup path", async () => {
+    on("POST /api/embed/comments", reply(201, { comment: { id: "cmt_new", createdAt: new Date().toISOString() } }))
+    on("POST /api/embed/sso", reply(200, {
+      token: VISITOR,
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      email: "dana@example.com",
+      name: "Dana",
+    }))
+    await mount()
+
+    type(part("composer-body"), "Worth keeping.")
+    click(part("composer-submit"))
+    await flush()
+    expect(callsTo("POST /api/embed/comments")).toHaveLength(0)
+
+    await widgetGlobal().identify("customer-jwt")
+    await flush()
+
+    const submitted = lastCall("POST /api/embed/comments")
+    expect((submitted.body as Json).body).toBe("Worth keeping.")
+    expect(submitted.headers["X-Compass-Visitor"]).toBe(VISITOR)
+  })
+
+  it("resolves { signedIn: false } and never rejects when the exchange fails", async () => {
+    await mount()
+    on("POST /api/embed/sso", reply(401, { error: "This sign-in cannot be completed." }))
+
+    await expect(widgetGlobal().identify("bad-jwt")).resolves.toEqual({ signedIn: false })
+    expect(storedVisitor()).toBeNull()
+    expect(maybePart("signin")).not.toBeNull()
+  })
+
+  it("resolves { signedIn: false } for a blank or non-string token without calling the network", async () => {
+    await mount()
+    await expect(widgetGlobal().identify("   ")).resolves.toEqual({ signedIn: false })
+    await expect(widgetGlobal().identify(undefined)).resolves.toEqual({ signedIn: false })
+    expect(callsTo("POST /api/embed/sso")).toHaveLength(0)
+  })
+
+  it("never rejects even when fetch itself throws", async () => {
+    window.fetch = vi.fn(() => {
+      throw new Error("network is down")
+    }) as unknown as typeof fetch
+    await mount()
+    await expect(widgetGlobal().identify("customer-jwt")).resolves.toEqual({ signedIn: false })
+  })
+})
+
+describe("identify via data-compass-sso-token", () => {
+  it("auto-identifies at boot when the attribute is present and no visitor token is stored", async () => {
+    on("POST /api/embed/sso", (body) => {
+      expect(body).toEqual({ ssoToken: "auto-jwt" })
+      return {
+        status: 200,
+        data: {
+          token: VISITOR,
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          email: "dana@example.com",
+          name: "Dana",
+        },
+      }
+    })
+
+    await mount({ ssoToken: "auto-jwt" })
+
+    expect(callsTo("POST /api/embed/sso")).toHaveLength(1)
+    expect(JSON.parse(storedVisitor() as string).token).toBe(VISITOR)
+    expect(part("who").textContent).toContain("Dana")
+  })
+
+  it("does not auto-identify when a still-valid visitor token is already stored", async () => {
+    storeVisitor()
+    on("GET /api/embed/session", reply(200, { signedIn: true, email: "ada@example.com", name: "Ada" }))
+    on("POST /api/embed/sso", reply(200, {
+      token: "should-not-be-minted",
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      email: "someone-else@example.com",
+      name: null,
+    }))
+
+    await mount({ ssoToken: "auto-jwt" })
+
+    // The synchronous local check happens before refreshSession()'s network
+    // round trip returns, so a still-fresh stored token wins even though it is
+    // never actually re-validated here — see maybeAutoIdentify's own comment.
+    expect(callsTo("POST /api/embed/sso")).toHaveLength(0)
+  })
+
+  it("does nothing when the attribute is absent", async () => {
+    await mount()
+    expect(callsTo("POST /api/embed/sso")).toHaveLength(0)
   })
 })
 
