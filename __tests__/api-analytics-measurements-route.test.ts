@@ -52,7 +52,10 @@ describe("GET /api/analytics/measurements", () => {
   });
 
   it("returns bindings with their observations and the metric catalogue, as the server-derived actor", async () => {
-    const actor = { userId: "human-user", purpose: "USER" };
+    // scopeWorkspaceId must be set: in managed-pilot mode (lib/mcp-authz.ts's
+    // assertActorWorkspaceScope), a session actor missing this field is
+    // rejected outright — see __tests__/managed-pilot-session-actor-scope.test.ts.
+    const actor = { userId: "human-user", purpose: "USER", scopeWorkspaceId: "member-workspace" };
     mocks.listBindings.mockResolvedValue([{ id: "binding" }]);
     mocks.observations.mockResolvedValue([{ id: "observation" }]);
     mocks.listMetrics.mockResolvedValue([{ id: "metric" }]);
