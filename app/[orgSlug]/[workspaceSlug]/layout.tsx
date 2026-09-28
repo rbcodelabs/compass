@@ -21,6 +21,7 @@ import { ThemeProvider } from "@/components/theme/theme-provider"
 import { workspaceThemeInitScript } from "@/lib/theme"
 import getPrisma from "@/lib/db"
 import { workspaceUpdatesAvailable } from "@/lib/workspace-updates-capture"
+import { ReadOnlyBanner } from "@/components/workspace/read-only-banner"
 
 interface WorkspaceLayoutProps {
   children: React.ReactNode
@@ -48,7 +49,7 @@ export default async function WorkspaceLayout({
     getUserWorkspaces(user.id),
     cookies(),
   ])
-  const { workspace, isOrgAdmin } = ctx
+  const { workspace, isOrgAdmin, isReadOnly } = ctx
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false"
   // Read beside sidebar_state, for the same reason: the detail panel's layout
   // has to be correct in the first painted frame, not corrected after
@@ -134,6 +135,7 @@ export default async function WorkspaceLayout({
 
             {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}
             <SidebarInset className="min-w-0 overflow-y-auto bg-surface-app pb-16 md:pb-0">
+              {isReadOnly && <ReadOnlyBanner />}
               {children}
             </SidebarInset>
 
