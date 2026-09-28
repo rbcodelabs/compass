@@ -174,6 +174,15 @@ model Organization {
   id            String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   slug          String               @unique @db.VarChar(255)
   name          String               @db.VarChar(255)
+  // When true, every OrganizationMember of this org gets implicit read-only
+  // access to every Workspace the org owns, without a WorkspaceMember row.
+  // Org-wide, not per-workspace (v1) -- the analogue of Workspace.roadmapPublic
+  // / artifactFeedbackPublic, but scoped to authenticated org members rather
+  // than anonymous portal visitors. Settings, member management, and billing
+  // surfaces still require a real WorkspaceMember row; this flag only ever
+  // widens read access. Default off so enabling it is always an explicit
+  // organization-admin decision.
+  memberWorkspaceReadOnlyAccess Boolean? @default(false) @map("member_workspace_read_only_access")
   createdAt     DateTime             @default(now()) @map("created_at")
   workspaces    Workspace[]
   members       OrganizationMember[]

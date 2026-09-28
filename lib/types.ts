@@ -5,6 +5,15 @@
 
 export type OrgRole = "OWNER" | "ADMIN" | "MEMBER"
 export type WorkspaceRole = "ADMIN" | "MEMBER"
+/**
+ * The caller's *effective* access to a workspace, as resolved by
+ * lib/workspace-context.ts / lib/workspace.ts. Distinct from `WorkspaceRole`,
+ * which is what `WorkspaceMember.role` stores in the database -- a synthetic
+ * "READONLY" context never corresponds to a WorkspaceMember row, so it must
+ * never be written back to that column. Only the resolved-context types
+ * (WorkspaceContext, the getWorkspace() return type) use this union.
+ */
+export type EffectiveWorkspaceRole = WorkspaceRole | "READONLY"
 export type CycleStatus = "DRAFT" | "ACTIVE" | "CLOSED"
 export type ObjectiveStatus = "ON_TRACK" | "AT_RISK" | "OFF_TRACK" | "COMPLETE"
 export type OpportunityStatus = "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | "ARCHIVED"
