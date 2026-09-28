@@ -8,14 +8,25 @@ export type UserWorkspace = {
   slug: string
   orgSlug: string
   orgName: string
+  /** True when access comes only from Organization.memberWorkspaceReadOnlyAccess, not a WorkspaceMember row. */
+  isReadOnly: boolean
 }
+
+/**
+ * `isReadOnly` is synthetic -- never a column on Workspace -- true only when
+ * this row was resolved through the org-wide read-only fallback below
+ * instead of a real WorkspaceMember row. Every caller that performs a write
+ * after calling `getWorkspace()` must check it (see `assertWorkspaceWritable`
+ * in lib/workspace-context.ts); read-only callers can ignore it entirely.
+ */
+export type WorkspaceWithReadAccess = Workspace & { organization: Organization; isReadOnly: boolean }
 
 export const getWorkspace = cache(
   async (
     orgSlug: string,
     workspaceSlug: string,
     userId: string
-  ): Promise<(Workspace & { organization: Organization }) | null> => {
+  ): Promise<WorkspaceWithReadAccess | null> => {
     const prisma = getPrisma()
 
     const workspace = await prisma.workspace.findFirst({
@@ -44,7 +55,35 @@ export const getWorkspace = cache(
       orderBy: { createdAt: "asc" },
     })
 
-    return workspace
+    if (workspace) return { ...workspace, isReadOnly: false }
+
+    // No direct WorkspaceMember row. Fall back to org-wide read-only access:
+    // caller must be an OrganizationMember of this exact org, and the org
+    // must have memberWorkspaceReadOnlyAccess on. Mirrors the fallback in
+    // getWorkspaceContext (lib/workspace-context.ts) -- kept as a second
+    // implementation rather than a shared call because that resolver reaches
+    // @/lib/session -> @/auth -> next-auth (see the module-doc comment at the
+    // top of workspace-context.ts for why this file stays auth-free), and
+    // because it returns a WORKSPACE_SUMMARY_SELECT projection while this one
+    // returns the full Workspace + Organization row every existing caller of
+    // getWorkspace() already expects.
+    const readOnlyWorkspace = await prisma.workspace.findFirst({
+      where: {
+        slug: workspaceSlug,
+        organization: { slug: orgSlug, memberWorkspaceReadOnlyAccess: true },
+      },
+      include: { organization: true },
+      orderBy: { createdAt: "asc" },
+    })
+    if (!readOnlyWorkspace) return null
+
+    const orgMember = await prisma.organizationMember.findFirst({
+      where: { organizationId: readOnlyWorkspace.organizationId, userId },
+      select: { id: true },
+    })
+    if (!orgMember) return null
+
+    return { ...readOnlyWorkspace, isReadOnly: true }
   }
 )
 
@@ -134,17 +173,31 @@ export const getOrgWorkspaces = cache(
 export const getUserWorkspaces = cache(
   async (userId: string): Promise<UserWorkspace[]> => {
     const prisma = getPrisma()
-    const workspaces = await prisma.workspace.findMany({
-      where: { members: { some: { userId } } },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        organization: { select: { slug: true, name: true } },
-      },
-      orderBy: { name: "asc" },
-    })
-    return workspaces.flatMap((workspace): UserWorkspace[] => {
+    const [workspaces, readOnlyOrgMemberships] = await Promise.all([
+      prisma.workspace.findMany({
+        where: { members: { some: { userId } } },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          organization: { select: { slug: true, name: true } },
+        },
+        orderBy: { name: "asc" },
+      }),
+      // Orgs where this user gets implicit read-only access to every
+      // workspace via Organization.memberWorkspaceReadOnlyAccess. Almost
+      // always empty (the flag defaults off), so this second query is cheap
+      // in the common case and only feeds the second findMany below when
+      // there is actually a read-only org to expand.
+      prisma.organizationMember.findMany({
+        where: { userId, organization: { memberWorkspaceReadOnlyAccess: true } },
+        select: { organizationId: true, organization: { select: { slug: true, name: true } } },
+      }),
+    ])
+
+    const memberWorkspaceIds = new Set<string>()
+    const memberResults: UserWorkspace[] = workspaces.flatMap((workspace): UserWorkspace[] => {
+      memberWorkspaceIds.add(workspace.id)
       if (!workspace.organization) {
         console.error(
           `[getUserWorkspaces] Dropping orphaned Workspace ${workspace.id} for user ${userId}: ` +
@@ -158,7 +211,38 @@ export const getUserWorkspaces = cache(
         slug: workspace.slug,
         orgSlug: workspace.organization.slug,
         orgName: workspace.organization.name,
+        isReadOnly: false,
       }]
     })
+
+    if (readOnlyOrgMemberships.length === 0) {
+      return memberResults.sort((a, b) => a.name.localeCompare(b.name))
+    }
+
+    const orgMetaById = new Map(
+      readOnlyOrgMemberships.map((m) => [m.organizationId, m.organization])
+    )
+    const readOnlyWorkspaces = await prisma.workspace.findMany({
+      where: { organizationId: { in: [...orgMetaById.keys()] } },
+      select: { id: true, name: true, slug: true, organizationId: true },
+      orderBy: { name: "asc" },
+    })
+    const readOnlyResults: UserWorkspace[] = readOnlyWorkspaces.flatMap((workspace): UserWorkspace[] => {
+      // Real membership always wins over the read-only fallback -- never
+      // downgrade a workspace the user actually belongs to.
+      if (memberWorkspaceIds.has(workspace.id)) return []
+      const org = orgMetaById.get(workspace.organizationId)
+      if (!org) return []
+      return [{
+        id: workspace.id,
+        name: workspace.name,
+        slug: workspace.slug,
+        orgSlug: org.slug,
+        orgName: org.name,
+        isReadOnly: true,
+      }]
+    })
+
+    return [...memberResults, ...readOnlyResults].sort((a, b) => a.name.localeCompare(b.name))
   }
 )
