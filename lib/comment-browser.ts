@@ -14,10 +14,15 @@ export class CommentHttpError extends Error {
 export type CommentActor = { userId: string; name: string; workspaceId: string; admin: boolean }
 export type BrowserDocAnchor = { commentId: string; anchorText: string; anchorPrefix: string | null; anchorSuffix: string | null; anchorStart: number | null; anchorEnd: number | null }
 export type BrowserSolutionPlanProposal = { commentId: string; trackedDecisionRequestId: string | null; legacyPlanStatus: string | null }
+export type BrowserElementAnchor = {
+  commentId: string; artifactId: string; artifactRevisionId: string | null; pageUrl: string; pagePath: string
+  elementSelector: string | null; elementFingerprint: unknown; screenshotUrl: string | null
+}
 export type BrowserCommentRow = {
   id: string; workspaceId: string; targetType: string; targetId: string; parentId: string | null
   body: string; status: string; authorId: string | null; authorName: string; authorType: string; source: string
   createdAt: Date; updatedAt: Date; docAnchor: BrowserDocAnchor | null; solutionPlanProposal: BrowserSolutionPlanProposal | null
+  elementAnchor?: BrowserElementAnchor | null
 }
 export type BrowserCommentDto = Omit<BrowserCommentRow, "createdAt" | "updatedAt"> & {
   createdAt: string; updatedAt: string; edited: boolean; canEdit: boolean; canDelete: boolean; canModerate: boolean; replies: BrowserCommentDto[]
@@ -76,7 +81,7 @@ export async function authorizeComment(commentId: string) {
 export async function listBrowserComments(workspaceId: string, targetType: CommentTargetType, targetId: string) {
   const comments = await getPrisma().comment.findMany({
     where: { workspaceId, targetType, targetId, ...(targetType === "SOLUTION" ? { solutionPlanProposal: { is: null } } : {}) },
-    include: { docAnchor: true, solutionPlanProposal: true },
+    include: { docAnchor: true, solutionPlanProposal: true, elementAnchor: true },
     orderBy: { createdAt: "asc" },
   }) as BrowserCommentRow[]
   return resolveCommentAuthors(comments)

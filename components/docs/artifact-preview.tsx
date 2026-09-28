@@ -1,11 +1,48 @@
 "use client"
 
 import { ExternalLink } from "lucide-react"
-import { ARTIFACT_IFRAME_SANDBOX, ARTIFACT_PREVIEW_MESSAGE_SCOPE, ARTIFACT_PREVIEW_READY_TIMEOUT_MS, ArtifactSandboxedFrame } from "@/components/artifact-sandboxed-frame"
+import {
+  ARTIFACT_IFRAME_SANDBOX,
+  ARTIFACT_PREVIEW_MESSAGE_SCOPE,
+  ARTIFACT_PREVIEW_READY_TIMEOUT_MS,
+  ArtifactSandboxedFrame,
+  type AnchorRequest,
+  type AnchorResolutionMap,
+  type PickedElement,
+} from "@/components/artifact-sandboxed-frame"
+import type { AnchorResolution } from "@/lib/artifact-anchor-match"
+import type { ReactNode } from "react"
 
 export { ARTIFACT_IFRAME_SANDBOX, ARTIFACT_PREVIEW_MESSAGE_SCOPE, ARTIFACT_PREVIEW_READY_TIMEOUT_MS }
+export type { AnchorRequest, AnchorResolutionMap, PickedElement }
 
-export function ArtifactPreview({ title, html, externalUrl }: { title: string; html?: string; externalUrl?: string | null }) {
+type AnchoredResolution = Extract<AnchorResolution, { status: "anchored" }>
+
+export function ArtifactPreview({
+  title,
+  html,
+  externalUrl,
+  pickMode,
+  onElementPicked,
+  onPickModeExited,
+  anchorsToResolve,
+  onAnchorsResolved,
+  resolutions,
+  renderPin,
+  fill,
+}: {
+  title: string
+  html?: string
+  externalUrl?: string | null
+  pickMode?: boolean
+  onElementPicked?: (picked: PickedElement) => void
+  onPickModeExited?: () => void
+  anchorsToResolve?: AnchorRequest[]
+  onAnchorsResolved?: (resolutions: AnchorResolutionMap) => void
+  resolutions?: AnchorResolutionMap
+  renderPin?: (commentId: string, resolution: AnchoredResolution) => ReactNode
+  fill?: boolean
+}) {
   if (externalUrl) {
     return <div className="rounded-lg border border-border-default bg-surface-panel p-8 text-center">
       <div className="mb-2 text-xs font-medium uppercase tracking-wide text-text-subtle">External</div>
@@ -16,5 +53,17 @@ export function ArtifactPreview({ title, html, externalUrl }: { title: string; h
     </div>
   }
   if (!html) return <p className="text-sm text-text-subtle">Preview content is unavailable.</p>
-  return <ArtifactSandboxedFrame key={html} title={title} html={html} />
+  return <ArtifactSandboxedFrame
+    key={html}
+    title={title}
+    html={html}
+    pickMode={pickMode}
+    onElementPicked={onElementPicked}
+    onPickModeExited={onPickModeExited}
+    anchorsToResolve={anchorsToResolve}
+    onAnchorsResolved={onAnchorsResolved}
+    resolutions={resolutions}
+    renderPin={renderPin}
+    fill={fill}
+  />
 }

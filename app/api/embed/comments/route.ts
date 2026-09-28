@@ -306,6 +306,13 @@ export async function GET(request: NextRequest) {
     return embedJson(
       {
         artifactId: source.artifactId,
+        // Already resolved by resolveEmbedToken — nothing extra to fetch. The
+        // widget uses this to decide whether the "Sign in" affordance can open
+        // the magic-link popup at all: a PORTAL_SSO source has no magic-link
+        // path (lib/embed-auth-mode.ts), so it must not offer one. Not
+        // sensitive: this is the operator's own "Who can comment" setting for
+        // a source the caller already holds a live token for.
+        authMode: source.authMode,
         comments: rows.filter((row) => !row.parentId).map((row) => toDto(row, byParent.get(row.id) ?? [])),
       },
       METHODS

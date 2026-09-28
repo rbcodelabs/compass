@@ -43,8 +43,8 @@ since the widget has to be loaded from an absolute URL.
 
 ## Who can comment
 
-Each source picks one of two identities, and this is the setting worth thinking
-about before you share a link:
+Each source picks one of three identities, and this is the setting worth
+thinking about before you share a link:
 
 **Your team, signed in with Compass SSO.** The reviewer signs in to Compass
 normally and must be a **member of the workspace that owns the source**. Being
@@ -56,10 +56,32 @@ confirms it by clicking a link. Their comments are attributed to that verified
 address rather than to a Compass account. Use this for customers, agencies, and
 anyone who has no reason to have a Compass login.
 
-Sign-in happens in a popup served by Compass, on the Compass origin, with the
-Compass URL in a real address bar. The page the widget is embedded in never
-sees the reviewer's email address or their sign-in link, and it cannot frame
-that popup.
+If this workspace also has **SSO Identify** configured (**Settings → Portal →
+SSO Identify**), a source set to this mode can *also* skip the email link: the
+host page passes the same JWT it already mints for its own portal integration,
+either as `data-compass-sso-token` on the widget's script tag or by calling
+`window.__compassFeedbackWidget.identify(jwt)`, and Compass exchanges it
+directly for a signed-in reviewer — no popup, no cookie. The email link keeps
+working alongside it; this is an optional shortcut for a returning visitor, not
+a replacement.
+
+**External reviewers, via SSO.** The same verified-email identity as the mode
+above, but reached *only* through SSO Identify — there is no email link at
+all for a source in this mode, so an integration must actually hand the
+widget a JWT before anyone can comment. Requesting the emailed link is
+refused outright rather than silently doing nothing. Choose this when your
+own application already knows who the reviewer is on every page load and an
+email fallback would just be an unused, unmonitored second path in.
+
+This option is greyed out in the dropdown until this workspace has **SSO
+Identify** configured (**Settings → Portal → SSO Identify**) — there being
+nothing else that could ever sign a reviewer in for it.
+
+Sign-in for the two email-capable modes happens in a popup served by Compass,
+on the Compass origin, with the Compass URL in a real address bar. The page
+the widget is embedded in never sees the reviewer's email address or their
+sign-in link, and it cannot frame that popup. The SSO-only mode never opens
+that popup at all — there is nothing for it to do.
 
 ## Who can read existing feedback
 
@@ -97,5 +119,13 @@ screenshot of the element as an aid to whoever reads the thread later.
 Comments arrive on the artifact you bound the source to and can be read there
 like any other comment. The element context is stored with each comment and is
 served back to the widget, so a reviewer returning to the prototype sees the
-existing thread in place; Compass's own artifact views show the comments
-without that on-page context.
+existing thread in place, and Compass's own artifact viewer renders the same
+anchors as pins over the artifact (falling back to a "could not be
+re-anchored" notice rather than a misplaced pin when the page has changed too
+much to re-locate the element confidently).
+
+This widget only runs on a prototype hosted at your own `https://` origin. For
+an HTML file you uploaded directly into Compass, use the native picker built
+into the artifact viewer instead — no script tag or token needed, since it
+runs in the same page as your Compass session. See
+[Artifact feedback](/help/25-artifact-feedback).

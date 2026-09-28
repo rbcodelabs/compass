@@ -145,6 +145,22 @@ describe("createComment element anchors and external authors", () => {
     expect(prisma.comment.create).not.toHaveBeenCalled()
   })
 
+  it("attaches an element anchor for a signed-in internal caller, with no external-author row", async () => {
+    // The riskiest assumption behind the native (non-embed) picker: the
+    // ARTIFACT+anchor branch added for the embed widget must be reusable by
+    // an ordinary signed-in Compass session, not implicitly embed-only.
+    await createComment({
+      ...baseInput,
+      source: "UI",
+      authorId: "user-1",
+      elementAnchor: { pageUrl: "https://compass.test/acme/product/docs/artifacts/art-1", pagePath: "/acme/product/docs/artifacts/art-1", elementSelector: "button.cta" },
+    })
+    expect(prisma.commentElementAnchor.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ commentId: "comment-1", artifactId: ARTIFACT, elementSelector: "button.cta" }),
+    })
+    expect(prisma.commentExternalAuthor.create).not.toHaveBeenCalled()
+  })
+
   it("removes both extension rows before compensating for a failed create", async () => {
     // With two writable extensions, a failure on the second would otherwise leave
     // the first behind — and the emulated Restrict would then make the

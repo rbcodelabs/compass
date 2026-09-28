@@ -67,6 +67,8 @@ const RESOLVED = {
   artifactId: "artifact-1",
   allowedOrigins: [ORIGIN],
   authMode: "PORTAL" as const,
+  ssoEnabled: false,
+  ssoSecretEncrypted: null,
 };
 
 // An opaque scoped visitor token, not an embed token — the two credentials are
@@ -552,6 +554,14 @@ describe("GET /api/embed/comments", () => {
     mockComment.findMany.mockResolvedValueOnce([commentRow()]).mockResolvedValueOnce([]);
     const payload = await (await GET(get())).json();
     expect(payload.comments[0].anchor).toHaveProperty("screenshotUrl", null);
+  });
+
+  it("reports the resolved source's authMode so the widget can render sign-in accordingly", async () => {
+    mockWorkspace.findUnique.mockResolvedValue({ artifactFeedbackPublic: true });
+    mockComment.findMany.mockResolvedValue([]);
+    mockResolve.mockResolvedValue({ ...RESOLVED, authMode: "PORTAL_SSO" });
+    const payload = await (await GET(get())).json();
+    expect(payload.authMode).toBe("PORTAL_SSO");
   });
 
   it("exposes nothing that identifies the submitter beyond their display name", async () => {

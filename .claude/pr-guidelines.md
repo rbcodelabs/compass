@@ -209,3 +209,16 @@ User-facing docs live in `docs/content/` (rendered at `/help/[slug]`).
 ## Tracking
 
 No Linear integration — track work in Compass itself.
+
+**Every PR must link the Compass Task/Solution/Roadmap Item it delivers before
+it is opened.** This is enforced by the shared `pr-checklist` skill's Step 0.5
+(delivery tracking link), which resolves the `delivery` provider from
+`Products/Compass/pm-config.md` (`compass_tasks` here) and treats a missing
+link as an incomplete checklist — not something to defer or skip because none
+was named. If the work genuinely has no Compass counterpart (e.g. a one-line
+typo fix or CI-only change), say so explicitly in the PR description with a
+real reason; don't just omit the line.
+
+This exists because five PRs merged here on 2026-09-26 (#296, #303, #305,
+#306, #308) with no Task or Solution link at all, silently drifting Compass's
+roadmap/solution state out of sync with what had actually shipped.

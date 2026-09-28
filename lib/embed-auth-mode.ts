@@ -1,7 +1,7 @@
 /**
  * Which identity a feedback source accepts from someone leaving a comment.
  *
- * Two modes, and the distinction is about who the prototype is for:
+ * Three modes:
  *
  *   - **INTERNAL_SSO** — the commenter is a Compass user, signed in through the
  *     ordinary SSO flow, **and a member of the workspace that owns the source**.
@@ -9,7 +9,20 @@
  *   - **PORTAL** — the commenter is a verified `PortalAccount`, reached by an
  *     emailed magic link, and their comments carry a `CommentExternalAuthor`
  *     shim instead. This is the original mode and the only one that existed
- *     first.
+ *     first. A workspace with Portal SSO Identify configured can *also* let a
+ *     PORTAL source's visitor skip the magic link via `POST /api/embed/sso` —
+ *     that is an optional shortcut alongside the email path, not a different
+ *     mode.
+ *   - **PORTAL_SSO** — the same `PortalAccount` identity as PORTAL, reached
+ *     *only* through Portal SSO Identify (`POST /api/embed/sso`). There is no
+ *     magic-link fallback for this mode: the widget never offers one, and the
+ *     first-party sign-in popup (app/embed/signin/actions.ts) refuses the
+ *     magic-link path outright for a source in this mode, even when a portal
+ *     session already exists from somewhere else. Distinct from PORTAL because
+ *     the product decision (Compass Task cec67fab-92bc-4004-9527-ab62e291e054)
+ *     is that an operator choosing "who can comment" sees this as a separate,
+ *     explicit option rather than a hidden sub-mode of PORTAL gated by a
+ *     workspace-level toggle.
  *
  * ## Why INTERNAL_SSO is the default, including for a NULL column
  *
@@ -35,7 +48,7 @@
  * `workspaces.artifact_feedback_public`.
  */
 
-export const EMBED_AUTH_MODES = ["INTERNAL_SSO", "PORTAL"] as const
+export const EMBED_AUTH_MODES = ["INTERNAL_SSO", "PORTAL", "PORTAL_SSO"] as const
 
 export type EmbedAuthMode = (typeof EMBED_AUTH_MODES)[number]
 

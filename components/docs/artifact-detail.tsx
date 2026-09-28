@@ -5,7 +5,7 @@ import { MessageSquare } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { archiveArtifact, linkArtifact, replaceArtifactRevision, unlinkArtifact, unlinkArtifactDecision, updateArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
-import { ArtifactPreview } from "./artifact-preview"
+import { ArtifactViewer } from "./artifact-viewer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -51,7 +51,7 @@ export function ArtifactDetail({ artifact, html, workspaceId, basePath, solution
       </div>
     </header>
     {artifact.status === "ARCHIVED" && <div className="rounded-md bg-status-warning-surface p-3 text-sm text-status-warning">This artifact is archived.</div>}
-    <ArtifactPreview title={artifact.title} html={html} externalUrl={artifact.currentRevision?.externalUrl} />
+    <ArtifactViewer title={artifact.title} html={html} externalUrl={artifact.currentRevision?.externalUrl} artifactId={artifact.id} fullScreenHref={`${basePath}/artifacts/${artifact.id}/full-screen`} onFeedbackPosted={() => setCommentsVisits((visits) => visits + 1)} />
     <div className="grid gap-6 md:grid-cols-2">
       <form className="space-y-3 rounded-lg border p-4" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); run(() => updateArtifact(workspaceId, artifact.id, { title: String(data.get("title")), description: String(data.get("description")) }, basePath)) }}>
         <h2 className="font-semibold">Details</h2><Input name="title" defaultValue={artifact.title} required /><Textarea name="description" defaultValue={artifact.description ?? ""} /><Button type="submit" disabled={pending}>Save details</Button>

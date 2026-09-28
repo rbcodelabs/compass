@@ -6,6 +6,21 @@
  *   <script src="https://compass.example.com/embed/widget.js"
  *           data-compass-token="cmpfb_…" defer></script>
  *
+ * A PORTAL-mode source that also has Portal SSO Identify configured
+ * (lib/portal-sso.ts) can skip the widget's own magic-link popup entirely: a
+ * host page that already mints that JWT for its own portal integration can
+ * hand it straight to this file, either by adding `data-compass-sso-token`
+ * to the tag above (read once at boot — see SSO_TOKEN_ATTR below) or by
+ * calling `window[GLOBAL_KEY].identify(jwt)` at any time, where GLOBAL_KEY is
+ * this file's one global (see below). Both paths exchange the JWT for a
+ * visitor token through POST /api/embed/sso and never open a popup or touch
+ * a cookie.
+ *
+ * A PORTAL_SSO-mode source (lib/embed-auth-mode.ts) requires this exchange —
+ * there is no magic-link fallback, so this file never renders the "Sign in"
+ * button that would open that popup for such a source; see renderIdentity's
+ * `authMode === "PORTAL_SSO"` branch below.
+ *
  * ## The one rule that matters most in this file
  *
  * Every comment body and author name rendered here was typed by a member of the
@@ -59,6 +74,19 @@
    */
   var TOKEN_ATTR = "data-compass-token";
   var PAGE_PATH_ATTR = "data-compass-page-path";
+  /**
+   * Optional. A Portal SSO Identify JWT (lib/portal-sso.ts), read once at boot
+   * and exchanged automatically — see `maybeAutoIdentify` below — so a host
+   * page whose server already mints this JWT for its own portal integration
+   * does not have to call `identify()` itself just to cover the first paint.
+   *
+   * The JWT this names is short-lived (5 minutes, enforced server-side) by
+   * design, so this attribute is meant to be rendered fresh into the page on
+   * every server response, the same way the host mints it for its own portal
+   * link — never cached or baked into static HTML, where it would already be
+   * expired by the time a visitor loads the page.
+   */
+  var SSO_TOKEN_ATTR = "data-compass-sso-token";
 
   /** Mirrors MAX_BODY_LENGTH in app/api/embed/comments/route.ts. */
   var MAX_BODY_LENGTH = 4000;
@@ -136,10 +164,30 @@
 
   var pagePath = (scriptTag.getAttribute(PAGE_PATH_ATTR) || "").trim() || window.location.pathname;
 
+  /** See SSO_TOKEN_ATTR above. Empty string when the attribute is absent or blank. */
+  var initialSsoToken = (scriptTag.getAttribute(SSO_TOKEN_ATTR) || "").trim();
+
   if (window[GLOBAL_KEY]) return;
   // Claimed before any async work starts, so a second copy of the tag that begins
   // evaluating while our first fetch is in flight still bails.
   window[GLOBAL_KEY] = { mounted: false };
+  /**
+   * Attached here, at top-level setup, rather than at the end of `mount()`: a
+   * host page may call this the moment the tag evaluates — including from a
+   * `defer`red inline script that runs before `document.body` exists, which is
+   * exactly when `mount()` has not run yet. `identify` itself only touches
+   * `request`, `writeStored`, and `state`, none of which need the DOM, and its
+   * one DOM-touching step — `renderIdentity()` — already no-ops safely until
+   * `ui.who` exists (see `renderIdentity`'s own guard), and `mount()` calls
+   * `renderIdentity()` again unconditionally once it finishes building the
+   * panel — so an identify() that completes before mount() still renders
+   * correctly once mount() catches up. See `identify` below for the
+   * implementation.
+   */
+  // `identify` is a function declaration further down this same IIFE scope, so
+  // it is fully hoisted and safe to reference here, before its textual
+  // definition.
+  window[GLOBAL_KEY].identify = identify;
 
   /* ------------------------------------------------------------------ *
    * Small utilities
@@ -349,6 +397,14 @@
     artifactId: null,
     comments: [],
     identity: null, // { email, name } once signed in
+    // The resolved source's FeedbackSource.authMode, from GET /api/embed/comments
+    // (see lib/embed-auth-mode.ts). Null until that first read completes, and left
+    // at whatever it last was on a failed read rather than reset — the same
+    // "prefer stale to wrong" choice state.artifactId and state.comments already
+    // make. Its only use so far is renderIdentity(): a "PORTAL_SSO" source has no
+    // magic-link fallback, so the widget must not offer a Sign in button that
+    // would open a popup with nothing it can do.
+    authMode: null,
     open: false,
     picking: false,
     readBlocked: false, // set by a 403; see refreshComments
@@ -681,6 +737,24 @@
       var out = make("button", { type: "button", "class": "iconbtn", "data-compass": "signout" }, "Sign out");
       out.addEventListener("click", guarded("signout", signOut));
       ui.who.appendChild(out);
+      return;
+    }
+
+    if (state.authMode === "PORTAL_SSO") {
+      // No magic-link fallback for this mode (lib/embed-auth-mode.ts): the only
+      // way to sign in is the host page handing this widget a Portal SSO
+      // Identify JWT, via data-compass-sso-token at boot or identify() at any
+      // time. There is nothing for a click to do here, so unlike every other
+      // mode this renders no button at all — offering one would open the
+      // magic-link popup onto a mode that popup can only ever refuse (see
+      // app/embed/signin/actions.ts), a dead end for the visitor.
+      ui.who.appendChild(
+        make(
+          "span",
+          { "class": "grow", "data-compass": "sso-waiting" },
+          "Waiting to be signed in by this page’s SSO integration…"
+        )
+      );
       return;
     }
 
@@ -1578,6 +1652,75 @@
     scheduleSignInPoll();
   }
 
+  /**
+   * Exchanges a Portal SSO Identify JWT for a visitor token via POST
+   * /api/embed/sso, with no popup and no cookie — see that route's module
+   * header for why this is safe to call directly from a page Compass does not
+   * serve. This is the function `window[GLOBAL_KEY].identify` is bound to at
+   * top-level setup, above, and it is also what `maybeAutoIdentify` below
+   * calls for the `data-compass-sso-token` attribute.
+   *
+   * Deliberately NOT wrapped in `guarded()`: that helper is built for
+   * void-returning event handlers and swallows a synchronous throw by
+   * returning `undefined`, which would break the promise-returning contract
+   * callers of a public `identify(jwt)` API reasonably expect. Instead this
+   * function catches its own failures at both the synchronous and the
+   * asynchronous boundary and always resolves — never rejects — with
+   * `{ signedIn: boolean }`, matching this file's "fail soft" rule while still
+   * being awaitable.
+   */
+  function identify(ssoToken) {
+    try {
+      var token = typeof ssoToken === "string" ? ssoToken.trim() : "";
+      if (!token) return Promise.resolve({ signedIn: false });
+
+      return request("/sso", { method: "POST", body: { ssoToken: token } }).then(function (result) {
+        try {
+          if (!result.ok || !result.data || typeof result.data.token !== "string") {
+            return { signedIn: false };
+          }
+
+          // Same completion steps as onSignInMessage's popup path: persist,
+          // record identity, render, re-ask for the thread now that identity
+          // changed, and resume whatever the visitor was doing when a prior
+          // submit demanded sign-in.
+          writeStored(result.data.token, result.data.expiresAt);
+          state.identity = { email: result.data.email, name: result.data.name };
+          renderIdentity();
+          setMessage("Signed in. " + (state.identity.email || ""), "info");
+          rereadThread();
+
+          var resume = pendingIntent;
+          pendingIntent = null;
+          if (resume) resume();
+
+          return { signedIn: true };
+        } catch (err) {
+          warn("identify", err);
+          return { signedIn: false };
+        }
+      });
+    } catch (err) {
+      warn("identify", err);
+      return Promise.resolve({ signedIn: false });
+    }
+  }
+
+  /**
+   * Auto-identify for `data-compass-sso-token`. Called once, from `boot()`.
+   *
+   * Skipped when a stored visitor token still looks locally valid —
+   * `visitorToken()` already discards an expired one via `readStored()`'s own
+   * `expiresAt` check, so this is purely an optimization against a redundant
+   * exchange on every page load, not a trust decision: the server re-checks
+   * whatever credential is actually presented on every request regardless.
+   */
+  function maybeAutoIdentify() {
+    if (!initialSsoToken) return;
+    if (visitorToken()) return;
+    identify(initialSsoToken);
+  }
+
   function signOut() {
     // Revokes only the widget's visitor session. The visitor's portal session in
     // another tab is deliberately untouched — see the DELETE handler's note.
@@ -1667,6 +1810,14 @@
 
         state.artifactId = result.data.artifactId || null;
         state.comments = Array.isArray(result.data.comments) ? result.data.comments : [];
+        // Threaded through from the resolved source (see the route) rather than
+        // fetched separately. renderAll() does not touch the identity bar, so
+        // it is called out here explicitly whenever this value could have
+        // changed what renderIdentity() would show.
+        if (typeof result.data.authMode === "string") {
+          state.authMode = result.data.authMode;
+          renderIdentity();
+        }
         renderAll();
       })
     );
@@ -1847,6 +1998,9 @@
     // 120/min read budget.
     refreshSession();
     refreshComments();
+    // Independent of both reads above: this is the data-compass-sso-token
+    // attribute, not the stored visitor token refreshSession() is checking.
+    maybeAutoIdentify();
   }
 
   try {
