@@ -1,13 +1,8 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
+import { getWorkspaceContext } from "@/lib/workspace-context";
 
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { searchParams } = new URL(req.url);
   const orgSlug = searchParams.get("orgSlug");
   const workspaceSlug = searchParams.get("workspaceSlug");
@@ -16,19 +11,19 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Missing orgSlug or workspaceSlug" }, { status: 400 });
   }
 
-  const prisma = getPrisma();
-
-  const workspace = await prisma.workspace.findFirst({
-    where: {
-      slug: workspaceSlug,
-      organization: { slug: orgSlug },
-    },
-    select: { id: true },
-  });
-
-  if (!workspace) {
+  // The shared resolver checks the session AND workspace membership in one
+  // lookup. A missing workspace and a workspace the caller is not a member of
+  // are deliberately indistinguishable (both 404).
+  const context = await getWorkspaceContext(orgSlug, workspaceSlug);
+  if (context.status === "unauthenticated") {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (context.status === "not-found") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  const workspace = { id: context.workspace.id };
+
+  const prisma = getPrisma();
 
   const [rawOpportunities, rawSquads] = await Promise.all([
     prisma.opportunity.findMany({

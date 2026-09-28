@@ -126,10 +126,12 @@ export function FeedbackGrid({
       buildFeedbackColumns({
         opportunities,
         workspaceId,
+        orgSlug,
+        workspaceSlug,
         roadmapPath,
         onOpen: (id) => openPanel("feedback", id),
       }),
-    [opportunities, workspaceId, roadmapPath, openPanel],
+    [opportunities, workspaceId, orgSlug, workspaceSlug, roadmapPath, openPanel],
   );
 
   /**
@@ -207,6 +209,8 @@ export function FeedbackGrid({
           row={row}
           opportunities={opportunities}
           workspaceId={workspaceId}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
           roadmapPath={roadmapPath}
         />
 
@@ -217,7 +221,7 @@ export function FeedbackGrid({
         )}
       </div>
     ),
-    [openPanel, opportunities, workspaceId, roadmapPath],
+    [openPanel, opportunities, workspaceId, orgSlug, workspaceSlug, roadmapPath],
   );
 
   // A workspace with no feedback at all gets the full call-to-action empty
