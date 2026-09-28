@@ -151,3 +151,88 @@ describe("review request page — \"Send to agent\" on a decided banner", () => 
     expect(screen.queryByRole("link", { name: /send to agent/i })).toBeNull()
   })
 })
+
+describe("review request page — tracked decisions with custom options", () => {
+  afterEach(cleanup)
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    auth.mockResolvedValue({ user: { id: "user-1" } })
+    findTaskLinks.mockResolvedValue([])
+    eligibleAssignees.mockResolvedValue([])
+    findArtifacts.mockResolvedValue([])
+    linkedArtifacts.mockResolvedValue([])
+  })
+
+  const choiceRows = [
+    { id: "c1", actionKey: "CHOICE_1", label: "Ship now", description: "Release this week.", outcomeClass: "APPROVE", continuationKey: "NO_ACTION", sortOrder: 0 },
+    { id: "c2", actionKey: "CHOICE_2", label: "Wait a sprint", description: null, outcomeClass: "APPROVE", continuationKey: "NO_ACTION", sortOrder: 1 },
+    { id: "chg", actionKey: "REQUEST_CHANGES", label: "Request changes", description: null, outcomeClass: "REQUEST_CHANGES", continuationKey: "NO_ACTION", sortOrder: 2 },
+    { id: "rej", actionKey: "REJECT", label: "Reject", description: null, outcomeClass: "REJECT", continuationKey: "NO_ACTION", sortOrder: 3 },
+  ]
+  const standardRows = [
+    { id: "a", actionKey: "APPROVE", label: "Approve", description: null, outcomeClass: "APPROVE", continuationKey: "NO_ACTION", sortOrder: 0 },
+    { id: "chg", actionKey: "REQUEST_CHANGES", label: "Request changes", description: null, outcomeClass: "REQUEST_CHANGES", continuationKey: "NO_ACTION", sortOrder: 1 },
+    { id: "rej", actionKey: "REJECT", label: "Reject", description: null, outcomeClass: "REJECT", continuationKey: "NO_ACTION", sortOrder: 2 },
+  ]
+  const page = async () => render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+
+  function withOptions(options: typeof choiceRows, decisionOptionId?: string) {
+    const request = reviewRequest("TRACKED_DECISION")
+    request.currentRevision.options = options as never[]
+    if (decisionOptionId) {
+      request.currentRevision.decisions = [{ option: options.find((option) => option.id === decisionOptionId), optionId: decisionOptionId, actorRole: "ADMIN", decidedAt: new Date("2026-09-01T00:00:00Z"), rationale: "Because." }] as never[]
+    }
+    return request
+  }
+
+  it("offers custom options as selectable cards with Request changes and Reject as secondary buttons", async () => {
+    findFirst.mockResolvedValue(withOptions(choiceRows))
+    await page()
+    expect(screen.getAllByRole("radio")).toHaveLength(2)
+    expect(screen.getByText("Release this week.")).toBeDefined()
+    expect(screen.getByRole("button", { name: "Confirm choice" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Request changes" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDefined()
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull()
+  })
+
+  it("keeps Approve / Request changes / Reject as plain buttons when no custom options exist", async () => {
+    findFirst.mockResolvedValue(withOptions(standardRows as typeof choiceRows))
+    await page()
+    expect(screen.queryAllByRole("radio")).toHaveLength(0)
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Request changes" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDefined()
+    expect(screen.queryByText("Options offered")).toBeNull()
+  })
+
+  it("shows the chosen option's label and description once decided, and offers Send to agent (APPROVE outcome)", async () => {
+    findFirst.mockResolvedValue(withOptions(choiceRows, "c1"))
+    await page()
+    expect(screen.getByText(/Decision recorded:/).textContent).toContain("Ship now")
+    expect(screen.getAllByText("Release this week.")).toHaveLength(1)
+    expect(screen.queryAllByRole("radio")).toHaveLength(0)
+    expect(screen.getByRole("link", { name: /send to agent/i })).toBeDefined()
+  })
+
+  it("shows a chosen option with no description without an empty description line", async () => {
+    findFirst.mockResolvedValue(withOptions(choiceRows, "c2"))
+    await page()
+    expect(screen.getByText(/Decision recorded:/).textContent).toContain("Wait a sprint")
+    expect(screen.queryByText("Release this week.")).toBeNull()
+  })
+
+  it("shows non-deciders the offered options while the decision waits", async () => {
+    const request = withOptions(choiceRows)
+    request.workspace.members = [{ id: "member-1", role: "MEMBER" }]
+    findFirst.mockResolvedValue(request)
+    await page()
+    expect(screen.getByText("Waiting for a workspace or organization admin to decide.")).toBeDefined()
+    expect(screen.getByText("Options offered")).toBeDefined()
+    expect(screen.getByText("Ship now")).toBeDefined()
+    expect(screen.getByText("Release this week.")).toBeDefined()
+    expect(screen.queryAllByRole("radio")).toHaveLength(0)
+    expect(screen.queryByText("Request changes")).toBeNull()
+  })
+})

@@ -6,7 +6,7 @@ import getPrisma from "@/lib/db"
 import { recordDecision } from "@/lib/decision-service"
 import { isOrgAdminRole } from "@/lib/roles"
 import { queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator } from "@/lib/release-authorization"
-import { createTrackedDecisionRequest, reviseTrackedDecisionRequest, recordDecisionNoAction, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { createTrackedDecisionRequest, reviseTrackedDecisionRequest, recordDecisionNoAction, type TrackedDecisionOptionInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
 import { createDecisionFollowUpTask } from "@/lib/decision-followthrough"
 import type { TaskAssignee } from "@/lib/task-assignment"
 
@@ -45,6 +45,8 @@ export async function createTrackedDecisionAction(input: {
   subjectId: string
   question: string
   context: string
+  /** Optional 2-4 choices. On a revision, omitted inherits the prior options and [] clears them. */
+  options?: TrackedDecisionOptionInput[]
   idempotencyKey: string
   revise?: { requestId: string; expectedDecisionId: string; reason: string }
 }) {

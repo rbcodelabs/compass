@@ -401,6 +401,13 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "064_embed_feedback_sources",
     filePath: path.join(process.cwd(), "prisma/migrations/064_embed_feedback_sources/migration.sql"),
   },
+  {
+    // Optional description on review_options, so a tracked decision can carry
+    // caller-supplied options. Plain nullable ADD COLUMN (DSQL: no constraints,
+    // no index), so it needs no async-wait or postcondition handling.
+    name: "065_review_option_description",
+    filePath: path.join(process.cwd(), "prisma/migrations/065_review_option_description/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));

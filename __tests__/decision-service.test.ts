@@ -152,6 +152,51 @@ describe("recordDecision", () => {
     expect(mockPrisma.decisionRecord.create).not.toHaveBeenCalled()
   })
 
+  describe("tracked decisions with custom options", () => {
+    const trackedRevision = {
+      ...revision,
+      request: { ...revision.request, gateType: "TRACKED_DECISION" },
+      options: [
+        { id: "choice-1", actionKey: "CHOICE_1", label: "Ship now", description: "Release this week.", outcomeClass: "APPROVE", continuationKey: "NO_ACTION" },
+        { id: "choice-2", actionKey: "CHOICE_2", label: "Wait", description: null, outcomeClass: "APPROVE", continuationKey: "NO_ACTION" },
+        { id: "changes", actionKey: "REQUEST_CHANGES", label: "Request changes", outcomeClass: "REQUEST_CHANGES", continuationKey: "NO_ACTION" },
+        { id: "reject", actionKey: "REJECT", label: "Reject", outcomeClass: "REJECT", continuationKey: "NO_ACTION" },
+      ],
+    }
+    const decide = (optionId: string, rationale?: string) => recordDecision({ actor: { kind: "USER", userId: "user-1" }, revisionId: "rev-1", fingerprint: "fp-1", optionId, rationale, idempotencyKey: `key-${optionId}` })
+
+    beforeEach(() => {
+      mockPrisma.decisionRecord.findUnique.mockResolvedValue(null)
+      mockPrisma.reviewRevision.findUnique.mockResolvedValue(trackedRevision)
+      mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+      mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
+      mockPrisma.decisionRecord.findFirst.mockResolvedValue(null)
+      mockPrisma.decisionRecord.create.mockResolvedValue({ id: "decision-choice" })
+    })
+
+    it("records a chosen custom option without a rationale", async () => {
+      await expect(decide("choice-1")).resolves.toEqual({ id: "decision-choice" })
+      expect(mockPrisma.decisionRecord.create).toHaveBeenCalledWith({ data: expect.objectContaining({ optionId: "choice-1", rationale: null }) })
+      expect(mockPrisma.reviewRequest.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ state: "DECIDED" }) }))
+    })
+
+    it("stores an optional rationale alongside a chosen option", async () => {
+      await decide("choice-2", "  Capacity is tight.  ")
+      expect(mockPrisma.decisionRecord.create).toHaveBeenCalledWith({ data: expect.objectContaining({ optionId: "choice-2", rationale: "Capacity is tight." }) })
+    })
+
+    it.each(["changes", "reject"])("still requires a rationale for %s", async (optionId) => {
+      await expect(decide(optionId, "  ")).rejects.toEqual(expect.objectContaining({ code: "RATIONALE_REQUIRED" }))
+      expect(mockPrisma.decisionRecord.create).not.toHaveBeenCalled()
+      await expect(decide(optionId, "Not viable.")).resolves.toEqual({ id: "decision-choice" })
+    })
+
+    it("rejects an option that belongs to another revision", async () => {
+      await expect(decide("choice-from-elsewhere")).rejects.toEqual(expect.objectContaining({ code: "OPTION_MISMATCH" }))
+      expect(mockPrisma.decisionRecord.create).not.toHaveBeenCalled()
+    })
+  })
+
   it("rejects a competing terminal response", async () => {
     mockPrisma.decisionRecord.findUnique.mockResolvedValue(null)
     mockPrisma.reviewRevision.findUnique.mockResolvedValue(revision)

@@ -95,7 +95,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "063_metrics_dashboard": "06d66304c5b88e7ef7f57a2e0d8d401e0bb5b2267281604ef4d841df21869947",
   "064_solution_scoring": "21f12a454e74c576b421be93f5fd65228126682d46ffb21eb7baf5f4d9a5456b",
   // Embedded feedback widget (RFC #298). Last, matching its MIGRATIONS position.
-  "064_embed_feedback_sources": "767145991806adc79c0867428a513a14410fd8e6bd0a5023e3541bd73078643e"
+  "064_embed_feedback_sources": "767145991806adc79c0867428a513a14410fd8e6bd0a5023e3541bd73078643e",
+  // Review option description (question/options on tracked decisions). Last, matching its MIGRATIONS position.
+  "065_review_option_description": "bfd2f9f0dc95b85477bc83fc104c1d48cba82b3e20b0809d39ec17f14bad3b70"
 };
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {

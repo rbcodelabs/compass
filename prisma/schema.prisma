@@ -1270,6 +1270,7 @@ model ReviewOption {
   revisionId        String           @map("revision_id") @db.Uuid
   actionKey         String           @map("action_key") @db.VarChar(50)
   label             String           @db.VarChar(120)
+  description       String?          @db.Text
   outcomeClass      String           @map("outcome_class") @db.VarChar(30)
   continuationKey   String           @map("continuation_key") @db.VarChar(80)
   sortOrder         Int              @default(0) @map("sort_order")
