@@ -605,6 +605,11 @@ export function FeedbackSourcesPanel({
                     <code className="break-all rounded border border-border bg-surface-panel px-2 py-1 font-mono text-xs">
                       {snippet}
                     </code>
+                    <p className="text-xs text-muted-foreground">
+                      Optional: add data-compass-position (bottom-right, bottom-left, top-right, top-left, right,
+                      left), data-compass-button (text, icon, tab) and data-compass-label to move or restyle the
+                      button.
+                    </p>
                   </>
                 ) : (
                   <p className="text-xs text-muted-foreground">
