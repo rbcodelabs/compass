@@ -329,3 +329,24 @@ diagnosed (Findings A and B above), neither of which was safe or in-scope to fix
 
 Until then, ADR 0018's Step 0 go/no-go is not met, and advancing to Step 1 (IAM posture/SDK
 versioning) or beyond is not authorized by this report.
+
+## Update 2026-09-28: Finding A fixed on `main`; hosted re-verification NOT VERIFIED
+
+**Finding A is fixed.** Session actors now carry `scopeWorkspaceId`, so the managed-mode branch of
+`assertActorWorkspaceScope` no longer 500s the Settings page (PR #318, `6c6f948` on `main`; hand-adapted
+cherry-pick `2ceeb38` on `feat/geode-docs-preview-pilot`).
+
+**The hosted re-check of that fix was attempted and is NOT VERIFIED.** Deployment
+`dpl_Gy6Q3mhDicT2k8wJpgen9fpmYPiA` (`2ceeb38`, READY) rejects every `/api/preview-automation/*` call with
+`401 Invalid preview request`. Cause: `getManagedPilotContext()` in
+`lib/preview-automation/managed-context.ts` hard-requires `VERCEL_GIT_PULL_REQUEST_ID === "276"`. PR #276
+merged on 2026-09-25, so any later push to the branch deploys with `prId: null` and fails that guard
+before any grant is verified. The pre-fix deployment (`c9fe909`) still carries PR 276 but predates the fix.
+This is the pilot's risk-accepted guard working as designed, not a bug in the verification script. The
+guard was deliberately left unchanged.
+
+**Consequence for closing Phase 0:** checklist item 6 (create/read/save, retry, stale-revision rejection,
+history, restore, fresh-context read against private Blob) remains **unverified on a hosted deployment**.
+Closing it requires a new managed pilot with a guard that matches its own PR (an ADR 0017 control change
+that needs its own approval), not a re-push to the merged PR 276 branch. The ADR 0018 Step 0 go/no-go
+therefore remains **not met**.
