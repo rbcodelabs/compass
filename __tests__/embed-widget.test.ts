@@ -694,6 +694,17 @@ describe("launcher position and style", () => {
     expect(WIDGET_SOURCE).toContain("[data-beside='true'][data-open='true'] .launcher { visibility: hidden; }")
   })
 
+  it("does not hand-set the left tab's corners or shadow, which its 180deg rotation already flips", () => {
+    // Regression: setting `border-radius: 0 10px 10px 0` on the rotated left tab
+    // double-flipped it, putting the rounded side against the screen edge. jsdom has no
+    // layout, so this pins the rule's shape; the geometry was checked in a real browser.
+    const rule = WIDGET_SOURCE.split("\n").find((line) => line.includes("[data-btn='tab'][data-side='left'] .launcher {"))
+    expect(rule).toBeTruthy()
+    expect(rule).toContain("--rot: 180deg")
+    expect(rule).not.toContain("border-radius")
+    expect(rule).not.toContain("box-shadow")
+  })
+
   it("documents each attribute in the shipped file", () => {
     for (const attr of ["data-compass-position", "data-compass-button", "data-compass-label"]) {
       expect(WIDGET_SOURCE).toContain('"' + attr + '"')
