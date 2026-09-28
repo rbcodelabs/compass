@@ -11,8 +11,8 @@ import { MarketingFooter } from "@/components/marketing/marketing-footer"
 import type { MarketingViewer } from "@/lib/marketing-viewer"
 
 const workspaces = [
-  { id: "ws-1", name: "Compass", slug: "compass", orgSlug: "rbcodelabs", orgName: "RB Code Labs" },
-  { id: "ws-2", name: "Compass", slug: "compass", orgSlug: "acme", orgName: "Acme" },
+  { id: "ws-1", name: "Compass", slug: "compass", orgSlug: "rbcodelabs", orgName: "RB Code Labs", isReadOnly: false },
+  { id: "ws-2", name: "Compass", slug: "compass", orgSlug: "acme", orgName: "Acme", isReadOnly: false },
 ]
 
 const user = { name: "Rick Bowman", email: "rick@example.com", image: null }

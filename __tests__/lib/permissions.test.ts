@@ -232,4 +232,32 @@ describe("resolveWorkspaceAdmin", () => {
 
     await expect(resolveWorkspaceAdmin("org", "ws")).rejects.toThrow("Forbidden: workspace admin required");
   });
+
+  // ── org-wide read-only access (Organization.memberWorkspaceReadOnlyAccess)
+  //    must never reach Settings/Members/billing ─────────────────────────
+
+  it("rejects an org OWNER granted only org-wide read-only access -- no WorkspaceMember row means no admin actions, full stop", async () => {
+    // This is the exact scenario the read-only feature introduces: an org
+    // OWNER/ADMIN who is NOT a WorkspaceMember of this workspace, resolved
+    // only through Organization.memberWorkspaceReadOnlyAccess elsewhere
+    // (lib/workspace-context.ts / lib/workspace.ts). Those two resolvers are
+    // read-only-aware; this one deliberately is not, and must never become
+    // so -- Settings, member management, and billing are the one surface
+    // that flag must never widen.
+    //
+    // The query itself requires `members: { some: { userId } } }` in its
+    // WHERE clause (not a post-hoc filter), so a caller with no real
+    // WorkspaceMember row can never make this findFirst resolve to a row in
+    // the first place -- regardless of how privileged their org role is.
+    mockWorkspace.findFirst.mockResolvedValue(null);
+
+    await expect(resolveWorkspaceAdmin("org", "ws")).rejects.toThrow("Workspace not found");
+    expect(mockWorkspace.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          members: { some: { userId: "user-1" } },
+        }),
+      })
+    );
+  });
 });
