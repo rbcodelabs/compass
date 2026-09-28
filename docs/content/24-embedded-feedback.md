@@ -41,6 +41,49 @@ the source.
 The snippet only appears when `NEXT_PUBLIC_APP_URL` is set for the deployment,
 since the widget has to be loaded from an absolute URL.
 
+## Position and button style
+
+By default the widget is a dark **Feedback** pill in the bottom-right corner.
+Three optional attributes on the same script tag change where it sits and what
+it looks like. They are cosmetic only — they never affect who can comment or
+what is collected — and an unrecognised value falls back to the default (with a
+console warning) instead of stopping the widget.
+
+| Attribute | Values | Default |
+| --- | --- | --- |
+| `data-compass-position` | `bottom-right`, `bottom-left`, `top-right`, `top-left`, `right`, `left` | `bottom-right` |
+| `data-compass-button` | `text`, `icon`, `tab` | `text` |
+| `data-compass-label` | Any text, up to 24 characters | `Feedback` |
+
+- **`text`** is the labelled pill.
+- **`icon`** is a small round speech-bubble button. The label becomes its
+  tooltip and accessible name, and the comment count still shows as a badge.
+- **`tab`** is a slim vertical tab flush against a side edge of the screen. It
+  takes its side from the position (`…-left` and `left` use the left edge,
+  everything else the right) and its height from it too (`top-…` near the top,
+  `bottom-…` near the bottom, `left` / `right` vertically centred).
+- **`right`** and **`left`** hug that screen edge, vertically centred. The
+  corner positions sit 20px in from the corner.
+
+The feedback panel opens on the same side as the launcher, above or below a
+corner button and beside a tab or an edge-centred button, so it never covers
+the button that opened it.
+
+```html
+<!-- A small icon in the top-left corner -->
+<script src="https://your-compass-host/embed/widget.js"
+        data-compass-token="cmpfb_…"
+        data-compass-position="top-left"
+        data-compass-button="icon" defer></script>
+
+<!-- A vertical "Give feedback" tab on the right edge -->
+<script src="https://your-compass-host/embed/widget.js"
+        data-compass-token="cmpfb_…"
+        data-compass-position="right"
+        data-compass-button="tab"
+        data-compass-label="Give feedback" defer></script>
+```
+
 ## Who can comment
 
 Each source picks one of three identities, and this is the setting worth
