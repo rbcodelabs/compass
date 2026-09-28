@@ -600,8 +600,13 @@
     ".layer[data-btn='tab'] .launcher { gap: 8px; height: auto; width: 36px; padding: 14px 0;",
     "  border-radius: 10px 0 0 10px; writing-mode: vertical-rl; right: 0; bottom: auto; font-size: 13px;",
     "  letter-spacing: 0.02em; box-shadow: -2px 4px 14px rgba(15, 18, 25, 0.25); }",
-    ".layer[data-btn='tab'][data-side='left'] .launcher { right: auto; left: 0; border-radius: 0 10px 10px 0; --rot: 180deg;",
-    "  box-shadow: 2px 4px 14px rgba(15, 18, 25, 0.25); }",
+    /* The left tab is the right tab rotated 180deg (so its text reads bottom-to-top).
+       That rotation also flips the corner radius and shadow, so they are deliberately
+       NOT overridden here: the right tab's `10px 0 0 10px` and leftward shadow become
+       rounded-toward-the-page and cast-toward-the-page once rotated. Setting the
+       "left" values by hand double-flips them, leaving the rounded side against the
+       screen edge. */
+    ".layer[data-btn='tab'][data-side='left'] .launcher { right: auto; left: 0; --rot: 180deg; }",
     ".layer[data-btn='tab'][data-vertical='bottom'] .launcher { bottom: 20px; top: auto; }",
     ".layer[data-btn='tab'][data-vertical='top'] .launcher { top: 20px; bottom: auto; }",
     ".layer[data-btn='tab'][data-vertical='center'] .launcher { top: 50%; bottom: auto; --ty: -50%; }",
