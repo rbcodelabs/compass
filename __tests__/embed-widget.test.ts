@@ -194,7 +194,16 @@ async function flush(rounds = 40) {
   for (let i = 0; i < rounds; i++) await Promise.resolve()
 }
 
-type MountOptions = { token?: string | null; src?: string; pagePath?: string; tokenAttr?: string; ssoToken?: string }
+type MountOptions = {
+  token?: string | null
+  src?: string
+  pagePath?: string
+  tokenAttr?: string
+  ssoToken?: string
+  position?: string
+  button?: string
+  label?: string
+}
 
 function installScript(options: MountOptions = {}) {
   const tag = document.createElement("script")
@@ -203,6 +212,9 @@ function installScript(options: MountOptions = {}) {
   if (token !== null) tag.setAttribute(options.tokenAttr ?? "data-compass-token", token)
   if (options.pagePath) tag.setAttribute("data-compass-page-path", options.pagePath)
   if (options.ssoToken) tag.setAttribute("data-compass-sso-token", options.ssoToken)
+  if (options.position !== undefined) tag.setAttribute("data-compass-position", options.position)
+  if (options.button !== undefined) tag.setAttribute("data-compass-button", options.button)
+  if (options.label !== undefined) tag.setAttribute("data-compass-label", options.label)
   document.head.appendChild(tag)
   return tag
 }
@@ -521,6 +533,182 @@ describe("boot and configuration", () => {
     evaluateWidget()
     await flush()
     expect(document.querySelectorAll("[data-compass-feedback]")).toHaveLength(1)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * Launcher position and style
+ * ------------------------------------------------------------------ */
+
+describe("launcher position and style", () => {
+  function layer() {
+    return shadow().querySelector(".layer") as HTMLElement
+  }
+
+  it("defaults to a bottom-right text pill labelled Feedback, opening the panel above it", async () => {
+    await mount()
+    expect(layer().dataset.side).toBe("right")
+    expect(layer().dataset.vertical).toBe("bottom")
+    expect(layer().dataset.btn).toBe("text")
+    expect(layer().dataset.beside).toBe("false")
+    expect(part("launcher").textContent).toContain("Feedback")
+    expect(part("launcher").getAttribute("aria-label")).toBe("Open Compass feedback")
+  })
+
+  it.each([
+    ["bottom-right", "right", "bottom"],
+    ["bottom-left", "left", "bottom"],
+    ["top-right", "right", "top"],
+    ["top-left", "left", "top"],
+    ["right", "right", "center"],
+    ["left", "left", "center"],
+  ])("maps data-compass-position=%s to side=%s vertical=%s", async (position, side, vertical) => {
+    await mount({ position })
+    expect(layer().dataset.side).toBe(side)
+    expect(layer().dataset.vertical).toBe(vertical)
+  })
+
+  it("accepts values in any case and with stray whitespace", async () => {
+    await mount({ position: "  Top-Left ", button: " ICON " })
+    expect(layer().dataset.side).toBe("left")
+    expect(layer().dataset.vertical).toBe("top")
+    expect(layer().dataset.btn).toBe("icon")
+  })
+
+  it("falls back to the defaults, with a warning, on an unrecognised value rather than failing to boot", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    await mount({ position: "middle-of-nowhere", button: "banner" })
+    expect(hostElement()).not.toBeNull()
+    expect(layer().dataset.side).toBe("right")
+    expect(layer().dataset.vertical).toBe("bottom")
+    expect(layer().dataset.btn).toBe("text")
+    expect(warn).toHaveBeenCalledTimes(2)
+  })
+
+  it("renders an icon-only launcher with an SVG glyph, no visible text, and an accessible name", async () => {
+    await mount({ button: "icon" })
+    const launcher = part("launcher")
+    expect(launcher.querySelector("svg")).not.toBeNull()
+    expect(launcher.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true")
+    expect(launcher.textContent).toBe("")
+    expect(launcher.getAttribute("aria-label")).toBe("Open Compass feedback")
+    expect(launcher.getAttribute("title")).toBe("Feedback")
+  })
+
+  it("keeps the unread count on an icon-only launcher", async () => {
+    on("GET /api/embed/comments", reply(200, { artifactId: "art_1", comments: [comment()] }))
+    await mount({ button: "icon" })
+    expect(part("count").textContent).toBe("1")
+    expect(part("count").hidden).toBe(false)
+  })
+
+  it("uses a custom label for the text launcher and as its accessible name", async () => {
+    await mount({ label: "Send feedback" })
+    expect(part("launcher").textContent).toContain("Send feedback")
+    expect(part("launcher").getAttribute("aria-label")).toBe("Send feedback")
+  })
+
+  it("uses the custom label as the icon's tooltip and accessible name", async () => {
+    await mount({ button: "icon", label: "Report a bug" })
+    expect(part("launcher").getAttribute("title")).toBe("Report a bug")
+    expect(part("launcher").getAttribute("aria-label")).toBe("Report a bug")
+  })
+
+  it("caps the label at 24 characters, collapses whitespace, and renders it as text not markup", async () => {
+    await mount({ label: "  <b>x</b>   " + "y".repeat(40) })
+    const text = part("launcher").textContent ?? ""
+    expect(part("launcher").querySelector("b")).toBeNull()
+    expect(text.startsWith("<b>x</b> yyyy")).toBe(true)
+    expect(part("launcher").getAttribute("aria-label")?.length).toBe(24)
+  })
+
+  it("treats a blank label as the default", async () => {
+    await mount({ label: "   " })
+    expect(part("launcher").textContent).toContain("Feedback")
+    expect(part("launcher").getAttribute("aria-label")).toBe("Open Compass feedback")
+  })
+
+  it("opens the panel beside the launcher for a tab", async () => {
+    await mount({ button: "tab" })
+    expect(layer().dataset.beside).toBe("true")
+    expect(layer().dataset.side).toBe("right")
+  })
+
+  it("opens the panel beside the launcher for any vertically centred placement", async () => {
+    await mount({ position: "left" })
+    expect(layer().dataset.beside).toBe("true")
+    expect(layer().dataset.vertical).toBe("center")
+  })
+
+  it("takes a tab's side and vertical anchor from the position", async () => {
+    await mount({ button: "tab", position: "top-left" })
+    expect(layer().dataset.side).toBe("left")
+    expect(layer().dataset.vertical).toBe("top")
+    expect(layer().dataset.btn).toBe("tab")
+  })
+
+  it("measures the launcher on open so the panel clears it, on the right edge", async () => {
+    await mount({ button: "tab", position: "right" })
+    Object.defineProperty(document.documentElement, "clientWidth", { value: 1000, configurable: true })
+    stubRect(part("launcher"), rect(964, 300, 36, 120))
+    click(part("launcher"))
+    // 1000 - 964 = 36 of launcher, plus the 8px gap.
+    expect(part("panel").style.getPropertyValue("--inset")).toBe("44px")
+    expect(part("panel").getAttribute("data-open")).toBe("true")
+  })
+
+  it("measures the launcher on open so the panel clears it, on the left edge", async () => {
+    await mount({ button: "text", position: "left" })
+    stubRect(part("launcher"), rect(20, 300, 110, 44))
+    click(part("launcher"))
+    // The launcher's right edge is at 130, plus the 8px gap.
+    expect(part("panel").style.getPropertyValue("--inset")).toBe("138px")
+  })
+
+  it("does not set an inset for a stacked panel", async () => {
+    await mount({ position: "top-left" })
+    click(part("launcher"))
+    expect(part("panel").style.getPropertyValue("--inset")).toBe("")
+  })
+
+  it("leaves the CSS default inset when there is no layout to measure", async () => {
+    await mount({ position: "right" })
+    click(part("launcher"))
+    // jsdom lays nothing out, so the rect is zero-width and the CSS default stands.
+    expect(part("panel").style.getPropertyValue("--inset")).toBe("")
+  })
+
+  it("mirrors the panel's open state onto the layer, which the narrow-screen CSS keys on", async () => {
+    await mount({ button: "tab" })
+    expect(layer().dataset.open).toBe("false")
+    click(part("launcher"))
+    expect(layer().dataset.open).toBe("true")
+    click(part("close"))
+    expect(layer().dataset.open).toBe("false")
+  })
+
+  it("ships a narrow-screen rule so a beside-panel cannot run off a phone", () => {
+    // jsdom has no layout, so the geometry itself is checked in a real browser (see the
+    // QA report); this pins that the rule exists and hides the launcher while open.
+    expect(WIDGET_SOURCE).toContain("@media (max-width: 560px)")
+    expect(WIDGET_SOURCE).toContain("[data-beside='true'][data-open='true'] .launcher { visibility: hidden; }")
+  })
+
+  it("does not hand-set the left tab's corners or shadow, which its 180deg rotation already flips", () => {
+    // Regression: setting `border-radius: 0 10px 10px 0` on the rotated left tab
+    // double-flipped it, putting the rounded side against the screen edge. jsdom has no
+    // layout, so this pins the rule's shape; the geometry was checked in a real browser.
+    const rule = WIDGET_SOURCE.split("\n").find((line) => line.includes("[data-btn='tab'][data-side='left'] .launcher {"))
+    expect(rule).toBeTruthy()
+    expect(rule).toContain("--rot: 180deg")
+    expect(rule).not.toContain("border-radius")
+    expect(rule).not.toContain("box-shadow")
+  })
+
+  it("documents each attribute in the shipped file", () => {
+    for (const attr of ["data-compass-position", "data-compass-button", "data-compass-label"]) {
+      expect(WIDGET_SOURCE).toContain('"' + attr + '"')
+    }
   })
 })
 

@@ -87,6 +87,30 @@
    * expired by the time a visitor loads the page.
    */
   var SSO_TOKEN_ATTR = "data-compass-sso-token";
+  /**
+   * Optional launcher placement and style. All three are cosmetic and forgiving:
+   * an unrecognised value logs one warning and falls back to the default rather
+   * than failing the boot, because a typo in a cosmetic attribute must never cost
+   * a site its feedback widget.
+   *
+   *   data-compass-position  bottom-right (default) | bottom-left | top-right |
+   *                          top-left | right | left
+   *                          `right` / `left` hug that screen edge, vertically centred.
+   *   data-compass-button    text (default) | icon | tab
+   *                          `tab` is a slim vertical tab flush against a side edge; it
+   *                          takes its side from the position (…-left / left → left edge,
+   *                          otherwise right) and its vertical anchor from it too
+   *                          (top-… → top, bottom-… → bottom, left/right → centred).
+   *   data-compass-label     Launcher text for `text` and `tab` (max 24 chars,
+   *                          default "Feedback"); also the accessible name for `icon`.
+   */
+  var POSITION_ATTR = "data-compass-position";
+  var BUTTON_ATTR = "data-compass-button";
+  var LABEL_ATTR = "data-compass-label";
+  var POSITIONS = ["bottom-right", "bottom-left", "top-right", "top-left", "right", "left"];
+  var BUTTONS = ["text", "icon", "tab"];
+  var MAX_LABEL_LENGTH = 24;
+  var DEFAULT_LABEL = "Feedback";
 
   /** Mirrors MAX_BODY_LENGTH in app/api/embed/comments/route.ts. */
   var MAX_BODY_LENGTH = 4000;
@@ -167,6 +191,36 @@
   /** See SSO_TOKEN_ATTR above. Empty string when the attribute is absent or blank. */
   var initialSsoToken = (scriptTag.getAttribute(SSO_TOKEN_ATTR) || "").trim();
 
+  /** Reads one enumerated cosmetic attribute; anything unrecognised is the default. */
+  function readChoice(attr, allowed, fallback) {
+    var raw = (scriptTag.getAttribute(attr) || "").trim().toLowerCase();
+    if (!raw) return fallback;
+    if (allowed.indexOf(raw) === -1) {
+      warn(attr + " must be one of " + allowed.join(", ") + "; using " + fallback, raw);
+      return fallback;
+    }
+    return raw;
+  }
+
+  var buttonStyle = readChoice(BUTTON_ATTR, BUTTONS, "text");
+  var positionChoice = readChoice(POSITION_ATTR, POSITIONS, "bottom-right");
+  var customLabel = (scriptTag.getAttribute(LABEL_ATTR) || "").replace(/\s+/g, " ").trim().slice(0, MAX_LABEL_LENGTH);
+  var launcherLabel = customLabel || DEFAULT_LABEL;
+
+  /**
+   * Reduces the position + style choice to three orthogonal facts the CSS keys on:
+   * which side, where vertically, and whether the panel opens *beside* the launcher
+   * (a tab, or anything vertically centred, where stacking above/below would land
+   * on top of the launcher) or *stacked* above/below it (a corner pill or icon).
+   */
+  var placement = (function () {
+    var side = positionChoice.indexOf("left") !== -1 ? "left" : "right";
+    var vertical = positionChoice === "left" || positionChoice === "right"
+      ? "center"
+      : positionChoice.indexOf("top") === 0 ? "top" : "bottom";
+    return { side: side, vertical: vertical, beside: buttonStyle === "tab" || vertical === "center" };
+  })();
+
   if (window[GLOBAL_KEY]) return;
   // Claimed before any async work starts, so a second copy of the tag that begins
   // evaluating while our first fetch is in flight still bails.
@@ -244,6 +298,23 @@
     }
     if (text != null) node.textContent = String(text);
     return node;
+  }
+
+  /**
+   * The icon-only launcher's speech bubble. Built with createElementNS rather than
+   * markup, for the same reason nothing here touches innerHTML.
+   */
+  function makeGlyph() {
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("class", "glyph");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var path = document.createElementNS(ns, "path");
+    path.setAttribute("d", "M5 3h14a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-8.2L5.9 21.6A.8.8 0 0 1 4.6 21v-3.1A3 3 0 0 1 2 15V6a3 3 0 0 1 3-3z");
+    svg.appendChild(path);
+    return svg;
   }
 
   function clear(node) {
@@ -504,13 +575,44 @@
     "  text-transform: none; font-weight: 400; font-style: normal; -webkit-font-smoothing: antialiased; }",
     ".layer * { box-sizing: border-box; }",
 
-    /* Launcher */
+    /* Launcher. Position and style come from data-side / data-vertical / data-btn on
+       .layer (see `placement` in the script header); the transform is assembled from
+       three custom properties so centring, the left-tab flip and the press effect
+       compose instead of overwriting each other. */
     ".launcher { pointer-events: auto; position: fixed; right: 20px; bottom: 20px; display: flex;",
     "  align-items: center; gap: 8px; height: 44px; padding: 0 16px; border: 0; border-radius: 22px;",
     "  background: #1f2430; color: #ffffff; font: inherit; font-weight: 500; cursor: pointer;",
-    "  box-shadow: 0 6px 20px rgba(15, 18, 25, 0.28); transition: background-color 120ms ease, transform 120ms ease; }",
+    "  box-shadow: 0 6px 20px rgba(15, 18, 25, 0.28); transition: background-color 120ms ease, transform 120ms ease;",
+    "  transform: translateY(var(--ty, 0)) rotate(var(--rot, 0deg)) scale(var(--sc, 1)); }",
     ".launcher:hover { background: #343b4d; }",
-    ".launcher:active { transform: scale(0.97); }",
+    ".launcher:active { --sc: 0.97; }",
+    ".layer[data-side='left'] .launcher { right: auto; left: 20px; }",
+    ".layer[data-vertical='top'] .launcher { bottom: auto; top: 20px; }",
+    ".layer[data-vertical='center'] .launcher { bottom: auto; top: 50%; --ty: -50%; }",
+
+    /* Icon-only: a small round button; the count becomes a badge on its corner. */
+    ".layer[data-btn='icon'] .launcher { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 50%; }",
+    ".launcher .glyph { width: 20px; height: 20px; flex: none; fill: currentColor; }",
+    ".layer[data-btn='icon'] .launcher .count { position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px;",
+    "  padding: 0 5px; border-radius: 9px; font-size: 11px; line-height: 18px; box-shadow: 0 0 0 2px #ffffff; }",
+
+    /* Edge tab: slim, vertical, flush against the screen edge. */
+    ".layer[data-btn='tab'] .launcher { gap: 8px; height: auto; width: 36px; padding: 14px 0;",
+    "  border-radius: 10px 0 0 10px; writing-mode: vertical-rl; right: 0; bottom: auto; font-size: 13px;",
+    "  letter-spacing: 0.02em; box-shadow: -2px 4px 14px rgba(15, 18, 25, 0.25); }",
+    /* The left tab is the right tab rotated 180deg (so its text reads bottom-to-top).
+       That rotation also flips the corner radius and shadow, so they are deliberately
+       NOT overridden here: the right tab's `10px 0 0 10px` and leftward shadow become
+       rounded-toward-the-page and cast-toward-the-page once rotated. Setting the
+       "left" values by hand double-flips them, leaving the rounded side against the
+       screen edge. */
+    ".layer[data-btn='tab'][data-side='left'] .launcher { right: auto; left: 0; --rot: 180deg; }",
+    ".layer[data-btn='tab'][data-vertical='bottom'] .launcher { bottom: 20px; top: auto; }",
+    ".layer[data-btn='tab'][data-vertical='top'] .launcher { top: 20px; bottom: auto; }",
+    ".layer[data-btn='tab'][data-vertical='center'] .launcher { top: 50%; bottom: auto; --ty: -50%; }",
+    ".layer[data-btn='tab'] .launcher:active { --sc: 1; }",
+    ".layer[data-btn='tab'] .launcher .count { writing-mode: horizontal-tb; }",
+    ".layer[data-btn='tab'][data-side='left'] .launcher .count { transform: rotate(180deg); }",
     ".launcher:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }",
     ".launcher .count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;",
     "  background: #4f7cff; color: #ffffff; font-size: 12px; line-height: 20px; text-align: center; }",
@@ -521,6 +623,15 @@
     "  border: 1px solid #dfe3ec; border-radius: 14px; background: #ffffff; overflow: hidden;",
     "  box-shadow: 0 18px 48px rgba(15, 18, 25, 0.22); }",
     ".panel[data-open='true'] { display: flex; }",
+    /* Stacked (corner pill/icon): mirror the default above or below the launcher. */
+    ".layer[data-side='left'] .panel { right: auto; left: 20px; }",
+    ".layer[data-vertical='top'] .panel { bottom: auto; top: 76px; }",
+    /* Beside (tab, or vertically centred): clear the launcher horizontally; the inset is
+       measured at open time (see layoutPanel) because a label can be any width. */
+    ".layer[data-beside='true'] .panel { right: var(--inset, 64px); bottom: 20px; }",
+    ".layer[data-beside='true'][data-side='left'] .panel { right: auto; left: var(--inset, 64px); }",
+    ".layer[data-beside='true'][data-vertical='top'] .panel { bottom: auto; top: 20px; }",
+    ".layer[data-beside='true'][data-vertical='center'] .panel { bottom: auto; top: 50%; transform: translateY(-50%); }",
     ".head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; border-bottom: 1px solid #eef0f6; }",
     ".title { flex: 1; margin: 0; font-size: 14px; font-weight: 600; }",
     ".iconbtn { display: inline-flex; align-items: center; justify-content: center; min-width: 30px;",
@@ -587,6 +698,16 @@
     ".pin:focus-visible { outline: 2px solid #1f2430; outline-offset: 2px; }",
     ".pin[data-selected='true'] { background: #1f2430; }",
 
+    /* Narrow screens: there is no room to open a panel *beside* a launcher (a 390px phone
+       has 350px of panel and a 36-160px launcher), so it goes full width instead and the
+       launcher steps out of the way while it is open. The panel's own close button, and
+       Escape, bring the launcher back. */
+    "@media (max-width: 560px) {",
+    "  .layer[data-beside='true'] .panel, .layer[data-beside='true'][data-side='left'] .panel {",
+    "    left: 12px; right: 12px; width: auto; max-width: none; }",
+    "  .layer[data-beside='true'][data-open='true'] .launcher { visibility: hidden; }",
+    "}",
+
     /* An operator who asked for less motion gets none of ours. */
     "@media (prefers-reduced-motion: reduce) {",
     "  .layer *, .layer *::before, .layer *::after { transition: none !important; animation: none !important; }",
@@ -622,7 +743,15 @@
     style.textContent = CSS;
     shadow.appendChild(style);
 
-    var layer = make("div", { "class": "layer" });
+    var layer = make("div", {
+      "class": "layer",
+      "data-open": "false",
+      "data-side": placement.side,
+      "data-vertical": placement.vertical,
+      "data-btn": buttonStyle,
+      "data-beside": placement.beside ? "true" : "false"
+    });
+    ui.layer = layer;
 
     ui.hint = make("div", { "class": "hint", "data-compass": "hint", "data-on": "false" },
       "Click any element to comment on it \u2014 press Escape to cancel");
@@ -631,12 +760,25 @@
 
     ui.launcher = make(
       "button",
-      { type: "button", "class": "launcher", "data-compass": "launcher", "aria-label": "Open Compass feedback", "aria-expanded": "false" }
+      {
+        type: "button",
+        "class": "launcher",
+        "data-compass": "launcher",
+        // A custom label must be in the accessible name too, so a screen-reader user
+        // hears what a sighted one reads; the icon has no text and always needs one.
+        "aria-label": customLabel || "Open Compass feedback",
+        "aria-expanded": "false",
+        title: buttonStyle === "icon" ? launcherLabel : null
+      }
     );
-    ui.launcherLabel = make("span", null, "Feedback");
+    if (buttonStyle === "icon") {
+      ui.launcher.appendChild(makeGlyph());
+    } else {
+      ui.launcherLabel = make("span", null, launcherLabel);
+      ui.launcher.appendChild(ui.launcherLabel);
+    }
     ui.launcherCount = make("span", { "class": "count", "data-compass": "count" });
     ui.launcherCount.hidden = true;
-    ui.launcher.appendChild(ui.launcherLabel);
     ui.launcher.appendChild(ui.launcherCount);
 
     ui.panel = make("div", {
@@ -1929,14 +2071,32 @@
    * Panel open/close and events
    * ------------------------------------------------------------------ */
 
+  /**
+   * For a panel that opens beside the launcher, sets how far in from the screen edge
+   * it sits so it clears the launcher, whatever its label width. Measured rather
+   * than guessed, and falling back to the CSS default where there is no layout
+   * (zero-size rect).
+   */
+  function layoutPanel() {
+    if (!placement.beside || !ui.panel || !ui.launcher) return;
+    var rect = ui.launcher.getBoundingClientRect();
+    if (!rect || !rect.width) return;
+    var viewportWidth = document.documentElement.clientWidth || window.innerWidth || 0;
+    var inset = placement.side === "left" ? rect.right + 8 : viewportWidth - rect.left + 8;
+    if (isFiniteNumber(inset) && inset > 0) ui.panel.style.setProperty("--inset", Math.round(inset) + "px");
+  }
+
   function openPanel() {
     state.open = true;
+    layoutPanel();
+    if (ui.layer) ui.layer.setAttribute("data-open", "true");
     if (ui.panel) ui.panel.setAttribute("data-open", "true");
     if (ui.launcher) ui.launcher.setAttribute("aria-expanded", "true");
   }
 
   function closePanel(keepFlag) {
     state.open = false;
+    if (ui.layer) ui.layer.setAttribute("data-open", "false");
     if (ui.panel) ui.panel.setAttribute("data-open", "false");
     if (ui.launcher) ui.launcher.setAttribute("aria-expanded", "false");
     if (!keepFlag && state.picking) stopPicking();

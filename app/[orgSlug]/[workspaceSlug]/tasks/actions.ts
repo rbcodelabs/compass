@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import getPrisma from "@/lib/db";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
+import { assertWorkspaceWritable } from "@/lib/workspace-context";
 import { assignmentUpdate, resolveTaskAssignees, validateTaskLink, validateTaskReferences, type AssignmentInput, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
 
@@ -255,6 +256,9 @@ async function requireLinkedEntityWorkspace(
   if (!session?.user?.id) throw new Error("Unauthorized");
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) throw new Error("Not found");
+  // Both callers of this helper (addLinkedTask, linkExistingTask) create or
+  // attach a Task -- always a write.
+  assertWorkspaceWritable(workspace);
   await validateTaskLink(workspace.id, linkedType, linkedId);
   return workspace;
 }

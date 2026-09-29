@@ -50,6 +50,7 @@ export function AddItemForm({
   const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(null);
   const [selectedExperimentId, setSelectedExperimentId] = useState<string | null>(null);
   const [isPrivate, setIsPrivate] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   function reset() {
@@ -58,6 +59,7 @@ export function AddItemForm({
     setSelectedOpportunityId(null);
     setSelectedExperimentId(null);
     setIsPrivate(false);
+    setError(null);
     formRef.current?.reset();
   }
 
@@ -73,58 +75,70 @@ export function AddItemForm({
     const startDate = startDateRaw ? new Date(startDateRaw) : undefined;
     const endDate = endDateRaw ? new Date(endDateRaw) : undefined;
 
+    setError(null);
     startTransition(async () => {
-      const item = await addRoadmapItem(
-        workspaceId,
-        {
-          title,
-          description: (data.get("description") as string).trim() || undefined,
-          horizon,
-          keyResultId: selectedKRId ?? undefined,
-          solutionId: selectedSolutionId ?? undefined,
-          opportunityId: selectedOpportunityId ?? undefined,
-          experimentId: selectedExperimentId ?? undefined,
-          startDate,
-          endDate,
-          isPrivate,
-        }
-      );
-      const linkedExperiment = selectedExperimentId
-        ? (availableExperiments?.find((e) => e.id === selectedExperimentId) ?? null)
-        : null;
-      onAdd?.({
-        id: item.id,
-        title: item.title,
-        description: item.description ?? null,
-        horizon: item.horizon as Horizon,
-        sortOrder: item.sortOrder,
-        isPrivate: item.isPrivate,
-        solutionId: item.solutionId ?? null,
-        keyResultId: item.keyResultId ?? null,
-        opportunityId: item.opportunityId ?? null,
-        experimentId: item.experimentId ?? null,
-        feedbackId: null,
-        updatedAt: item.updatedAt.toISOString(),
-        startDate: item.startDate ? item.startDate.toISOString() : null,
-        endDate: item.endDate ? item.endDate.toISOString() : null,
-        solution: null,
-        keyResult: null,
-        opportunity: selectedOpportunityId
-          ? (availableOpportunities?.find((o) => o.id === selectedOpportunityId) ?? null)
-          : null,
-        experiment: linkedExperiment
-          ? { id: linkedExperiment.id, title: linkedExperiment.title }
-          : null,
-        feedback: null,
-        // The add-item form has no squad picker (squad is set via
-        // promoteToRoadmap's squadId param, not this manual-add path) — new
-        // items always start unassigned here, same as before this field existed.
-        squad: null,
-        launchChecklist: null,
-        deliveryStatus: "NOT_STARTED",
-      });
-      setOpen(false);
-      reset();
+      try {
+        const item = await addRoadmapItem(
+          workspaceId,
+          {
+            title,
+            description: (data.get("description") as string).trim() || undefined,
+            horizon,
+            keyResultId: selectedKRId ?? undefined,
+            solutionId: selectedSolutionId ?? undefined,
+            opportunityId: selectedOpportunityId ?? undefined,
+            experimentId: selectedExperimentId ?? undefined,
+            startDate,
+            endDate,
+            isPrivate,
+          }
+        );
+        const linkedExperiment = selectedExperimentId
+          ? (availableExperiments?.find((e) => e.id === selectedExperimentId) ?? null)
+          : null;
+        onAdd?.({
+          id: item.id,
+          title: item.title,
+          description: item.description ?? null,
+          horizon: item.horizon as Horizon,
+          sortOrder: item.sortOrder,
+          isPrivate: item.isPrivate,
+          solutionId: item.solutionId ?? null,
+          keyResultId: item.keyResultId ?? null,
+          opportunityId: item.opportunityId ?? null,
+          experimentId: item.experimentId ?? null,
+          feedbackId: null,
+          updatedAt: item.updatedAt.toISOString(),
+          startDate: item.startDate ? item.startDate.toISOString() : null,
+          endDate: item.endDate ? item.endDate.toISOString() : null,
+          solution: null,
+          keyResult: null,
+          opportunity: selectedOpportunityId
+            ? (availableOpportunities?.find((o) => o.id === selectedOpportunityId) ?? null)
+            : null,
+          experiment: linkedExperiment
+            ? { id: linkedExperiment.id, title: linkedExperiment.title }
+            : null,
+          feedback: null,
+          // The add-item form has no squad picker (squad is set via
+          // promoteToRoadmap's squadId param, not this manual-add path) — new
+          // items always start unassigned here, same as before this field existed.
+          squad: null,
+          launchChecklist: null,
+          deliveryStatus: "NOT_STARTED",
+        });
+        setOpen(false);
+        reset();
+      } catch (err) {
+        // requireWorkspaceMember (and every other workspace-membership check
+        // this action chain calls through) throws a bare Error rather than
+        // returning a result -- previously unreachable for a non-member (they
+        // had no way to open this form at all), now reachable-but-blocked for
+        // an org-wide read-only viewer. Without this catch the rejection was
+        // unhandled and surfaced as Next's raw runtime-error overlay instead
+        // of a clean, expected "you don't have permission" message.
+        setError(err instanceof Error ? err.message : "Failed to add item");
+      }
     });
   }
 
@@ -311,6 +325,8 @@ export function AddItemForm({
           Private (hidden from public roadmap)
         </Label>
       </div>
+
+      {error && <p className="text-xs text-destructive">{error}</p>}
 
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={isPending}>
