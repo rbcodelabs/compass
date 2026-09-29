@@ -5,7 +5,7 @@ import getPrisma from "@/lib/db"
 // server code while client components can import the constants alone from
 // `./tracked-decision-types` without pulling Prisma/`pg` into their bundle.
 export { TRACKED_SUBJECT_TYPES, TRACKED_SUBJECT_LABELS, TRACKED_SOURCE_TYPES, TRACKED_OPTION_LIMITS, type TrackedSubjectType, type TrackedSourceType, type TrackedDecisionOptionInput, type TrackedDecisionPacketOption } from "./tracked-decision-types"
-import { TRACKED_SOURCE_TYPES, TRACKED_OPTION_LIMITS, CHOICE_ACTION_KEY_PREFIX, type TrackedSubjectType, type TrackedSourceType, type TrackedDecisionOptionInput, type TrackedDecisionPacketOption } from "./tracked-decision-types"
+import { TRACKED_SOURCE_TYPES, TRACKED_OPTION_LIMITS, RESERVED_OPTION_LABELS, CHOICE_ACTION_KEY_PREFIX, type TrackedSubjectType, type TrackedSourceType, type TrackedDecisionOptionInput, type TrackedDecisionPacketOption } from "./tracked-decision-types"
 export type TrackedDecisionSourceInput = { type: TrackedSourceType; id: string }
 const TRACKED_GATE = "TRACKED_DECISION"
 
@@ -39,7 +39,6 @@ async function resolveEntity(prisma: ReturnType<typeof getPrisma>, workspaceId: 
 
 function required(value: string, label: string, max: number) { const v = value.trim(); if (!v) throw new TrackedDecisionError("INVALID_INPUT", `${label} is required.`); if (v.length > max) throw new TrackedDecisionError("INVALID_INPUT", `${label} must be ${max} characters or fewer.`); return v }
 function uuid(value: string, label: string) { if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new TrackedDecisionError("INVALID_INPUT", `${label} must be a UUID.`); return value }
-const STANDARD_PUSHBACK_LABELS = new Set(["request changes", "reject"])
 /**
  * Validates and normalizes caller-supplied options. Returns `undefined` for
  * "no custom options" (omitted, null, or an empty list) so the default
@@ -55,7 +54,7 @@ function normalizeOptions(options: TrackedDecisionOptionInput[] | null | undefin
     const key = label.toLowerCase()
     // Request changes / Reject are always appended after the caller's choices,
     // so a choice reusing either label would render as two identical buttons.
-    if (STANDARD_PUSHBACK_LABELS.has(key)) throw new TrackedDecisionError("INVALID_INPUT", `Option label "${label}" is reserved; Request changes and Reject are always offered.`)
+    if (RESERVED_OPTION_LABELS.has(key)) throw new TrackedDecisionError("INVALID_INPUT", `Option label "${label}" is reserved; Request changes and Reject are always offered.`)
     if (seen.has(key)) throw new TrackedDecisionError("INVALID_INPUT", "Option labels must be unique.")
     seen.add(key)
     const description = option.description?.trim()

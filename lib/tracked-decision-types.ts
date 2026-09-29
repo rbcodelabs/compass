@@ -17,5 +17,7 @@ export const TRACKED_OPTION_LIMITS = { min: 2, max: 4, labelMax: 120, descriptio
 export type TrackedDecisionOptionInput = { label: string; description?: string | null }
 /** The normalized shape stored in the packet: trimmed, description omitted when empty. */
 export type TrackedDecisionPacketOption = { label: string; description?: string }
+/** Lower-cased labels a custom option may not reuse: Request changes / Reject are always appended after the choices. */
+export const RESERVED_OPTION_LABELS: ReadonlySet<string> = new Set(["request changes", "reject"])
 export const CHOICE_ACTION_KEY_PREFIX = "CHOICE_"
 export function isChoiceActionKey(actionKey: string | null | undefined): boolean { return Boolean(actionKey?.startsWith(CHOICE_ACTION_KEY_PREFIX)) }

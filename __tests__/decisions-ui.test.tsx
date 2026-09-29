@@ -181,6 +181,20 @@ describe("new decision form options editor", () => {
     expect(create).not.toHaveBeenCalled()
   })
 
+  it("explains duplicate and reserved labels on the client instead of relying on a masked server error", () => {
+    renderForm()
+    fillCore()
+    fireEvent.click(screen.getByRole("button", { name: "Add answer options" }))
+    fireEvent.change(screen.getByLabelText("Option 1 label"), { target: { value: "Postgres" } })
+    fireEvent.change(screen.getByLabelText("Option 2 label"), { target: { value: " postgres " } })
+    submit()
+    expect(screen.getByRole("alert").textContent).toMatch(/must be unique/)
+    fireEvent.change(screen.getByLabelText("Option 2 label"), { target: { value: "Reject" } })
+    submit()
+    expect(screen.getByRole("alert").textContent).toMatch(/reserved/)
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it("prefills the prior options in revise mode and lets them be cleared back to the defaults", async () => {
     renderForm({
       initial: { type: "WORKSPACE", id: "ws-1", question: "Which plan?", context: "Pick one.", options: [{ label: "Ship now", description: "Soon" }, { label: "Wait" }] },

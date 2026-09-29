@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { createTrackedDecisionAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
-import { TRACKED_OPTION_LIMITS, type TrackedSubjectType } from "@/lib/tracked-decision-types"
+import { RESERVED_OPTION_LABELS, TRACKED_OPTION_LIMITS, type TrackedSubjectType } from "@/lib/tracked-decision-types"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -57,6 +57,16 @@ export function NewDecisionForm({ workspaceId, orgSlug, workspaceSlug, subjects,
     const filled = optionDrafts.filter((draft) => draft.label.trim() || draft.description.trim())
     if (filled.some((draft) => !draft.label.trim())) { setError("Give every option a label."); return }
     if (filled.length === 1) { setError(`Add at least ${minOptions} options, or remove them to use Approve / Request changes / Reject.`); return }
+    // Mirror the server rules here: production builds mask server-action error
+    // messages behind a generic React error, so the reviewer-facing wording has
+    // to come from the client.
+    const seen = new Set<string>()
+    for (const draft of filled) {
+      const key = draft.label.trim().toLowerCase()
+      if (RESERVED_OPTION_LABELS.has(key)) { setError(`"${draft.label.trim()}" is reserved — Request changes and Reject are always offered. Choose a different label.`); return }
+      if (seen.has(key)) { setError("Option labels must be unique — two options are both called \"" + draft.label.trim() + "\"."); return }
+      seen.add(key)
+    }
     const options = filled.map((draft) => ({ label: draft.label.trim(), ...(draft.description.trim() ? { description: draft.description.trim() } : {}) }))
     startTransition(async () => {
       try {
