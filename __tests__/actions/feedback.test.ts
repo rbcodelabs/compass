@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockFeedbackItem = {
   update: vi.fn(),
+  updateMany: vi.fn(),
   create: vi.fn(),
 };
 
@@ -13,7 +14,13 @@ const mockWorkspace = {
   findFirst: vi.fn(),
 };
 
+const mockOpportunity = { findFirst: vi.fn() };
+
+const mockOrgMember = { findFirst: vi.fn() };
+
 const mockPrisma = {
+  opportunity: mockOpportunity,
+  organizationMember: mockOrgMember,
   feedbackItem: mockFeedbackItem,
   feedbackAttachment: mockFeedbackAttachment,
   workspace: mockWorkspace,
@@ -39,6 +46,11 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+vi.mock("next/navigation", () => ({
+  redirect: vi.fn(),
+  notFound: vi.fn(),
+}));
+
 vi.mock("@/auth", () => ({
   auth: vi.fn(),
 }));
@@ -55,12 +67,17 @@ import {
 } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 
 const mockAuth = vi.mocked(auth);
+const ORG = "acme";
+const WS = "widgets";
 const mockRevalidatePath = vi.mocked(revalidatePath);
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockAuth.mockResolvedValue({ user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T> ? T : never);
   mockFeedbackItem.update.mockResolvedValue({ id: "fb-1" });
+  mockFeedbackItem.updateMany.mockResolvedValue({ count: 1 });
+  mockOpportunity.findFirst.mockResolvedValue({ id: "opp-1" });
+  mockOrgMember.findFirst.mockResolvedValue({ role: "MEMBER" });
   mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1" });
   mockFeedbackItem.create.mockResolvedValue({
     id: "fb-new",
@@ -94,11 +111,11 @@ beforeEach(() => {
 // trigger support, so the column is otherwise never bumped.
 
 describe("updateFeedbackStatus", () => {
-  it("updates the status field and stamps updatedAt", async () => {
-    const result = await updateFeedbackStatus("fb-1", "REVIEWED", "/path");
+  it("updates the status field and stamps updatedAt, bound to the member workspace", async () => {
+    const result = await updateFeedbackStatus(ORG, WS, "fb-1", "REVIEWED", "/path");
     expect(result).toEqual({ ok: true });
-    expect(mockFeedbackItem.update).toHaveBeenCalledWith({
-      where: { id: "fb-1" },
+    expect(mockFeedbackItem.updateMany).toHaveBeenCalledWith({
+      where: { id: "fb-1", workspaceId: "ws-1" },
       data: { status: "REVIEWED", updatedAt: expect.any(Date) },
     });
   });
@@ -106,38 +123,53 @@ describe("updateFeedbackStatus", () => {
   it("returns an error result instead of throwing when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
     await expect(
-      updateFeedbackStatus("fb-1", "REVIEWED", "/path")
+      updateFeedbackStatus(ORG, WS, "fb-1", "REVIEWED", "/path")
     ).resolves.toEqual({ ok: false, error: "You are not signed in." });
-    expect(mockFeedbackItem.update).not.toHaveBeenCalled();
+    expect(mockFeedbackItem.updateMany).not.toHaveBeenCalled();
   });
 
   it("returns an error result when user id is absent", async () => {
     mockAuth.mockResolvedValue({ user: {} } as ReturnType<typeof auth> extends Promise<infer T> ? T : never);
     await expect(
-      updateFeedbackStatus("fb-1", "REVIEWED", "/path")
+      updateFeedbackStatus(ORG, WS, "fb-1", "REVIEWED", "/path")
     ).resolves.toEqual({ ok: false, error: "You are not signed in." });
-    expect(mockFeedbackItem.update).not.toHaveBeenCalled();
+    expect(mockFeedbackItem.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns an error result and skips the write when the caller is not a workspace member", async () => {
+    mockWorkspace.findFirst.mockResolvedValue(null);
+    const result = await updateFeedbackStatus(ORG, WS, "fb-1", "REVIEWED", "/path");
+    expect(result.ok).toBe(false);
+    expect(mockFeedbackItem.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("reports not-found when no row in the workspace matches the id", async () => {
+    mockFeedbackItem.updateMany.mockResolvedValue({ count: 0 });
+    await expect(
+      updateFeedbackStatus(ORG, WS, "fb-999", "NEW", "/path")
+    ).resolves.toEqual({ ok: false, error: "Feedback item not found" });
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 
   it("converts DB errors into an error result rather than rejecting", async () => {
-    mockFeedbackItem.update.mockRejectedValue(new Error("not found"));
+    mockFeedbackItem.updateMany.mockRejectedValue(new Error("boom"));
     await expect(
-      updateFeedbackStatus("fb-999", "NEW", "/path")
-    ).resolves.toEqual({ ok: false, error: "not found" });
+      updateFeedbackStatus(ORG, WS, "fb-1", "NEW", "/path")
+    ).resolves.toEqual({ ok: false, error: "boom" });
   });
 
   it("never rejects, so the grid's rollback path always runs", async () => {
-    mockFeedbackItem.update.mockRejectedValue(new Error("boom"));
+    mockFeedbackItem.updateMany.mockRejectedValue(new Error("boom"));
     // If this ever rejects again, an inline edit becomes an unhandled rejection
     // and the optimistic cell is stuck showing a value the server refused.
-    const result = await updateFeedbackStatus("fb-1", "OPEN", "/path").catch(
+    const result = await updateFeedbackStatus(ORG, WS, "fb-1", "OPEN", "/path").catch(
       () => "REJECTED" as const
     );
     expect(result).not.toBe("REJECTED");
   });
 
   it("revalidates when given a path", async () => {
-    await updateFeedbackStatus("fb-1", "OPEN", "/acme/widgets/feedback");
+    await updateFeedbackStatus(ORG, WS, "fb-1", "OPEN", "/acme/widgets/feedback");
     expect(mockRevalidatePath).toHaveBeenCalledWith("/acme/widgets/feedback");
   });
 
@@ -147,15 +179,15 @@ describe("updateFeedbackStatus", () => {
     // payload, which pulls the just-edited row out from under the user and
     // destroys the grid's stay-and-mark behaviour. Verified in a real browser
     // (see e2e/functional/specs/feedback-grid.spec.ts).
-    const result = await updateFeedbackStatus("fb-1", "OPEN", null);
+    const result = await updateFeedbackStatus(ORG, WS, "fb-1", "OPEN", null);
     expect(result).toEqual({ ok: true });
-    expect(mockFeedbackItem.update).toHaveBeenCalled();
+    expect(mockFeedbackItem.updateMany).toHaveBeenCalled();
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 
   it("accepts any status string (no Zod validation on this field)", async () => {
-    await updateFeedbackStatus("fb-1", "ARCHIVED", "/path");
-    const data = mockFeedbackItem.update.mock.calls[0][0].data;
+    await updateFeedbackStatus(ORG, WS, "fb-1", "ARCHIVED", "/path");
+    const data = mockFeedbackItem.updateMany.mock.calls[0][0].data;
     expect(data.status).toBe("ARCHIVED");
   });
 });
@@ -163,19 +195,31 @@ describe("updateFeedbackStatus", () => {
 // ─── linkFeedbackToOpportunity ────────────────────────────────────────────────
 
 describe("linkFeedbackToOpportunity", () => {
-  it("links feedback to an opportunity", async () => {
-    const result = await linkFeedbackToOpportunity("fb-1", "opp-1", "/path");
+  it("links feedback to an opportunity in the same workspace", async () => {
+    const result = await linkFeedbackToOpportunity(ORG, WS, "fb-1", "opp-1", "/path");
     expect(result).toEqual({ ok: true });
-    expect(mockFeedbackItem.update).toHaveBeenCalledWith({
-      where: { id: "fb-1" },
+    expect(mockOpportunity.findFirst).toHaveBeenCalledWith({
+      where: { id: "opp-1", workspaceId: "ws-1" },
+      select: { id: true },
+    });
+    expect(mockFeedbackItem.updateMany).toHaveBeenCalledWith({
+      where: { id: "fb-1", workspaceId: "ws-1" },
       data: { opportunityId: "opp-1", updatedAt: expect.any(Date) },
     });
   });
 
+  it("refuses an opportunity outside the workspace", async () => {
+    mockOpportunity.findFirst.mockResolvedValue(null);
+    const result = await linkFeedbackToOpportunity(ORG, WS, "fb-1", "opp-other", "/path");
+    expect(result).toEqual({ ok: false, error: "Opportunity not found" });
+    expect(mockFeedbackItem.updateMany).not.toHaveBeenCalled();
+  });
+
   it("clears the opportunity link when null is passed", async () => {
-    await linkFeedbackToOpportunity("fb-1", null, "/path");
-    expect(mockFeedbackItem.update).toHaveBeenCalledWith({
-      where: { id: "fb-1" },
+    await linkFeedbackToOpportunity(ORG, WS, "fb-1", null, "/path");
+    expect(mockOpportunity.findFirst).not.toHaveBeenCalled();
+    expect(mockFeedbackItem.updateMany).toHaveBeenCalledWith({
+      where: { id: "fb-1", workspaceId: "ws-1" },
       data: { opportunityId: null, updatedAt: expect.any(Date) },
     });
   });
@@ -183,20 +227,20 @@ describe("linkFeedbackToOpportunity", () => {
   it("returns an error result instead of throwing when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
     await expect(
-      linkFeedbackToOpportunity("fb-1", "opp-1", "/path")
+      linkFeedbackToOpportunity(ORG, WS, "fb-1", "opp-1", "/path")
     ).resolves.toEqual({ ok: false, error: "You are not signed in." });
-    expect(mockFeedbackItem.update).not.toHaveBeenCalled();
+    expect(mockFeedbackItem.updateMany).not.toHaveBeenCalled();
   });
 
   it("converts DB errors into an error result rather than rejecting", async () => {
-    mockFeedbackItem.update.mockRejectedValue(new Error("DB error"));
+    mockFeedbackItem.updateMany.mockRejectedValue(new Error("DB error"));
     await expect(
-      linkFeedbackToOpportunity("fb-999", "opp-1", "/path")
+      linkFeedbackToOpportunity(ORG, WS, "fb-1", "opp-1", "/path")
     ).resolves.toEqual({ ok: false, error: "DB error" });
   });
 
   it("skips revalidation entirely when the path is null", async () => {
-    await linkFeedbackToOpportunity("fb-1", "opp-1", null);
+    await linkFeedbackToOpportunity(ORG, WS, "fb-1", "opp-1", null);
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
@@ -205,18 +249,18 @@ describe("linkFeedbackToOpportunity", () => {
 
 describe("updateFeedbackType", () => {
   it("updates the type field to BUG", async () => {
-    const result = await updateFeedbackType("fb-1", "BUG", "/path");
+    const result = await updateFeedbackType(ORG, WS, "fb-1", "BUG", "/path");
     expect(result).toEqual({ ok: true });
-    expect(mockFeedbackItem.update).toHaveBeenCalledWith({
-      where: { id: "fb-1" },
+    expect(mockFeedbackItem.updateMany).toHaveBeenCalledWith({
+      where: { id: "fb-1", workspaceId: "ws-1" },
       data: { type: "BUG", updatedAt: expect.any(Date) },
     });
   });
 
   it("updates the type field to IDEA", async () => {
-    await updateFeedbackType("fb-1", "IDEA", "/path");
-    expect(mockFeedbackItem.update).toHaveBeenCalledWith({
-      where: { id: "fb-1" },
+    await updateFeedbackType(ORG, WS, "fb-1", "IDEA", "/path");
+    expect(mockFeedbackItem.updateMany).toHaveBeenCalledWith({
+      where: { id: "fb-1", workspaceId: "ws-1" },
       data: { type: "IDEA", updatedAt: expect.any(Date) },
     });
   });
@@ -224,20 +268,20 @@ describe("updateFeedbackType", () => {
   it("returns an error result instead of throwing when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
     await expect(
-      updateFeedbackType("fb-1", "BUG", "/path")
+      updateFeedbackType(ORG, WS, "fb-1", "BUG", "/path")
     ).resolves.toEqual({ ok: false, error: "You are not signed in." });
-    expect(mockFeedbackItem.update).not.toHaveBeenCalled();
+    expect(mockFeedbackItem.updateMany).not.toHaveBeenCalled();
   });
 
   it("converts DB errors into an error result rather than rejecting", async () => {
-    mockFeedbackItem.update.mockRejectedValue(new Error("not found"));
+    mockFeedbackItem.updateMany.mockRejectedValue(new Error("boom"));
     await expect(
-      updateFeedbackType("fb-999", "BUG", "/path")
-    ).resolves.toEqual({ ok: false, error: "not found" });
+      updateFeedbackType(ORG, WS, "fb-1", "BUG", "/path")
+    ).resolves.toEqual({ ok: false, error: "boom" });
   });
 
   it("skips revalidation entirely when the path is null", async () => {
-    await updateFeedbackType("fb-1", "BUG", null);
+    await updateFeedbackType(ORG, WS, "fb-1", "BUG", null);
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });

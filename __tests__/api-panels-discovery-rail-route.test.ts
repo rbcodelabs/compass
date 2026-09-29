@@ -10,11 +10,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockWorkspace = { findFirst: vi.fn() };
 const mockOpportunity = { findMany: vi.fn() };
 const mockSquad = { findMany: vi.fn() };
+const mockOrgMember = { findFirst: vi.fn() };
 
 const mockPrisma = {
   workspace: mockWorkspace,
   opportunity: mockOpportunity,
   squad: mockSquad,
+  organizationMember: mockOrgMember,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -24,6 +26,8 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/auth", () => ({
   auth: vi.fn(),
 }));
+
+vi.mock("next/navigation", () => ({ redirect: vi.fn(), notFound: vi.fn() }));
 
 import { auth } from "@/auth";
 import { GET } from "@/app/api/panels/discovery-rail/route";
@@ -36,6 +40,7 @@ function makeRequest(query: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockOrgMember.findFirst.mockResolvedValue({ role: "MEMBER" });
 });
 
 describe("GET /api/panels/discovery-rail", () => {
@@ -69,7 +74,7 @@ describe("GET /api/panels/discovery-rail", () => {
 
   it("returns opportunities grouped with their squad and workspaceId on success", async () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1" } } as never);
-    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1" });
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", slug: "ws", name: "WS" });
     mockOpportunity.findMany.mockResolvedValue([
       {
         id: "opp-1",

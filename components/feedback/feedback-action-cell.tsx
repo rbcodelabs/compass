@@ -55,6 +55,8 @@ export type FeedbackActionCellProps = {
   row: FeedbackRow;
   opportunities: readonly FeedbackOpportunityOption[];
   workspaceId: string;
+  orgSlug: string;
+  workspaceSlug: string;
   /** `/{org}/{workspace}/roadmap` */
   roadmapPath: string;
 };
@@ -63,6 +65,8 @@ export function FeedbackActionCell({
   row,
   opportunities,
   workspaceId,
+  orgSlug,
+  workspaceSlug,
 }: FeedbackActionCellProps) {
   const [isPromoting, startPromote] = useTransition();
   // Server truth for a freshly promoted row does not arrive until a refresh
@@ -170,7 +174,7 @@ export function FeedbackActionCell({
     // Server Action that revalidates anything re-delivers this route's RSC
     // payload (verified in a browser — see `RevalidateTarget` in the actions
     // module), which would fight the local state below.
-    void linkFeedbackToOpportunity(row.id, next, null).then((result) => {
+    void linkFeedbackToOpportunity(orgSlug, workspaceSlug, row.id, next, null).then((result) => {
       setLinkPending(false);
       if (!result.ok) {
         setLinkedId(previous);

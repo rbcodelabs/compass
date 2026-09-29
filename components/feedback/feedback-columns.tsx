@@ -74,6 +74,9 @@ const STATUS_OPTIONS: GridEditOption[] = FEEDBACK_STATUSES.map((status) => ({
 export type BuildFeedbackColumnsOptions = {
   opportunities: readonly FeedbackOpportunityOption[];
   workspaceId: string;
+  /** Slugs the feedback mutations are authorized against on the server. */
+  orgSlug: string;
+  workspaceSlug: string;
   /** `/{org}/{workspace}/roadmap` */
   roadmapPath: string;
   /** Opens the detail panel for a feedback item. */
@@ -83,6 +86,8 @@ export type BuildFeedbackColumnsOptions = {
 export function buildFeedbackColumns({
   opportunities,
   workspaceId,
+  orgSlug,
+  workspaceSlug,
   roadmapPath,
   onOpen,
 }: BuildFeedbackColumnsOptions): GridColumnDef<FeedbackRow>[] {
@@ -177,7 +182,7 @@ export function buildFeedbackColumns({
           // re-deliver the RSC payload for the route it was called from, which
           // pulls the just-edited row out from under the user and destroys
           // stay-and-mark. See `RevalidateTarget` in the actions module.
-          save: (row, next) => updateFeedbackType(row.id, next, null),
+          save: (row, next) => updateFeedbackType(orgSlug, workspaceSlug, row.id, next, null),
         },
       },
     },
@@ -222,7 +227,7 @@ export function buildFeedbackColumns({
             </StatusBadge>
           ),
           // `null` revalidate path — see the `type` column above.
-          save: (row, next) => updateFeedbackStatus(row.id, next, null),
+          save: (row, next) => updateFeedbackStatus(orgSlug, workspaceSlug, row.id, next, null),
         },
       },
     },
@@ -256,6 +261,8 @@ export function buildFeedbackColumns({
           row={row.original}
           opportunities={opportunities}
           workspaceId={workspaceId}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
           roadmapPath={roadmapPath}
         />
       ),
