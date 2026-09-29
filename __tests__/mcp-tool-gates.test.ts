@@ -9,14 +9,16 @@
  *    unmapped tools for per-user callers, and wires representative tools to the
  *    right membership/role/landmine checks.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 // ── Prisma mock (for enforcement cases) ─────────────────────────────────────
 const mockPrisma = {
-  workspace: { findFirst: vi.fn() },
+  workspace: { findFirst: vi.fn(), findUnique: vi.fn() },
   workspaceMember: { findFirst: vi.fn() },
   organization: { findUnique: vi.fn() },
   organizationMember: { findFirst: vi.fn() },
+  scoringModel: { findUnique: vi.fn() },
+  agentOrgAdminGrant: { findFirst: vi.fn() },
   opportunity: { findUnique: vi.fn(), update: vi.fn() },
   solution: { findUnique: vi.fn(), update: vi.fn() },
   roadmapItem: { findUnique: vi.fn(), update: vi.fn() },
@@ -228,6 +230,71 @@ describe("research study agent policy", () => {
     await expect(applyToolGate("issue_research_link", { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1", studyId: "study-1" }))
       .rejects.toThrow("Tool requires a human identity: issue_research_link")
   })
+})
+
+describe("ADR 0020: AgentOrgAdminGrant for delegated scoring-model admin", () => {
+  const SCORING_ADMIN_TOOLS = ["create_scoring_model", "update_scoring_model", "archive_scoring_model", "set_workspace_scoring_model"]
+  const AGENT = { userId: "agent-owner", purpose: "AGENT" as const, agentId: "agent-1" }
+
+  // Args shaped to reach each tool's gate without tripping on an unrelated
+  // missing field. set_workspace_scoring_model's scoringModelId is null so
+  // the gate never reaches the second, unconditional (non-admin)
+  // assertScoringModelAccess call — this test suite is only about the
+  // assertWorkspaceAdmin half of that gate.
+  function argsFor(tool: string): Record<string, unknown> {
+    switch (tool) {
+      case "create_scoring_model": return { orgSlug: "acme" }
+      case "update_scoring_model": return { scoringModelId: "model-1" }
+      case "archive_scoring_model": return { scoringModelId: "model-1" }
+      case "set_workspace_scoring_model": return { workspaceId: "ws-1", scoringModelId: null }
+      default: throw new Error(`no args mapping for ${tool}`)
+    }
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1" })
+    mockPrisma.organization.findUnique.mockResolvedValue({ id: "org-1" })
+    mockPrisma.workspace.findUnique.mockResolvedValue({ organizationId: "org-1" })
+    mockPrisma.scoringModel.findUnique.mockResolvedValue({ organizationId: "org-1" })
+  })
+  afterEach(() => vi.unstubAllEnvs())
+
+  it.each(SCORING_ADMIN_TOOLS)("%s is classified as an agent write, not DENY", (tool) => {
+    expect(AGENT_TOOL_POLICY[tool]).toBe("WRITE")
+  })
+
+  it.each(SCORING_ADMIN_TOOLS)("%s denies an agent identity with no AgentOrgAdminGrant row", async (tool) => {
+    mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate(tool, AGENT, argsFor(tool))).rejects.toThrow("Human administrator required.")
+  })
+
+  it.each(SCORING_ADMIN_TOOLS)("%s succeeds for an agent identity holding a live, valid grant", async (tool) => {
+    mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    await expect(applyToolGate(tool, AGENT, argsFor(tool))).resolves.toBeUndefined()
+  })
+
+  // The load-bearing regression test for the ADR's time-of-check design:
+  // revokedAt is still null on the grant row, but the human who issued it no
+  // longer holds an org admin role, so the grant must not authorize anything.
+  it.each(SCORING_ADMIN_TOOLS)("%s still denies once the grantor has been demoted, even though revokedAt is null", async (tool) => {
+    mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "MEMBER" })
+    await expect(applyToolGate(tool, AGENT, argsFor(tool))).rejects.toThrow("Human administrator required.")
+  })
+
+  // Proves the grant doesn't leak scope: these two stay unconditionally
+  // human-only per ADR 0020, even for an agent holding a live grant.
+  it.each(["create_workspace", "request_release_authorization"])(
+    "%s remains denied for an agent identity holding a valid SCORING_MODEL_ADMIN grant",
+    async (tool) => {
+      mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
+      mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+      const args = tool === "create_workspace" ? { orgSlug: "acme" } : { workspaceId: "ws-1" }
+      await expect(applyToolGate(tool, AGENT, args)).rejects.toThrow(/human identity/)
+    },
+  )
 })
 
 describe("TOOL_GATES completeness", () => {

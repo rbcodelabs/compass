@@ -453,12 +453,17 @@ export const TOOL_GATES: Record<string, Gate> = {
   // Scoring models (org-scoped) ---------------------------------------------
   list_scoring_models: async (a, x) => void (await assertOrgMemberBySlug(a, x.orgSlug)),
   get_scoring_model: async (a, x) => void (await assertScoringModelAccess(a, x.scoringModelId)),
-  create_scoring_model: async (a, x) => void (await assertOrgAdminBySlug(a, x.orgSlug)),
-  update_scoring_model: async (a, x) => void (await assertScoringModelAccess(a, x.scoringModelId, { admin: true })),
-  archive_scoring_model: async (a, x) => void (await assertScoringModelAccess(a, x.scoringModelId, { admin: true })),
+  // ADR 0020: these four accept an elevated agent identity holding a live
+  // AgentOrgAdminGrant("SCORING_MODEL_ADMIN") in place of a human org admin.
+  // See lib/mcp-authz.ts's `opts.agentCapability` doc comments for exactly
+  // what that requires. An agent with no such grant is denied identically to
+  // before this ADR.
+  create_scoring_model: async (a, x) => void (await assertOrgAdminBySlug(a, x.orgSlug, { agentCapability: "SCORING_MODEL_ADMIN" })),
+  update_scoring_model: async (a, x) => void (await assertScoringModelAccess(a, x.scoringModelId, { admin: true, agentCapability: "SCORING_MODEL_ADMIN" })),
+  archive_scoring_model: async (a, x) => void (await assertScoringModelAccess(a, x.scoringModelId, { admin: true, agentCapability: "SCORING_MODEL_ADMIN" })),
   get_workspace_scoring_model: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   set_workspace_scoring_model: async (a, x) => {
-    await assertWorkspaceAdmin(a, x.workspaceId)
+    await assertWorkspaceAdmin(a, x.workspaceId, { agentCapability: "SCORING_MODEL_ADMIN" })
     if (x.scoringModelId) await assertScoringModelAccess(a, x.scoringModelId)
   },
   score_opportunity: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
@@ -647,8 +652,20 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
     "link_artifact_to_decision", "unlink_artifact_from_decision",
     "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "create_doc_version", "restore_doc_version", "add_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "update_artifact", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity", "score_solution", "set_custom_field_value",
   ].map(name => [name, "WRITE"]),
+  // ADR 0020: no longer unconditionally human-only. Each of these four now
+  // carries its own agentCapability check inside its TOOL_GATES entry above
+  // (assertOrgAdminBySlug/assertScoringModelAccess/assertWorkspaceAdmin with
+  // `{ agentCapability: "SCORING_MODEL_ADMIN" }`) — an agent identity reaches
+  // that check only when classified WRITE here, and is still denied there
+  // unless it holds a live AgentOrgAdminGrant. This map answers a narrower
+  // question than "may a human-elevated agent ever call this" (yes, per the
+  // ADR); the actual authorization is enforced downstream, not here.
+  ...["create_scoring_model", "update_scoring_model", "archive_scoring_model", "set_workspace_scoring_model"].map(name => [name, "WRITE"]),
   // Legacy comments lack a durable agent author ID; body edits could retain a human label or approval badge.
-  ...["update_comment", "update_solution_comment", "update_doc_comment", "create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization", "create_scoring_model", "update_scoring_model", "archive_scoring_model", "set_workspace_scoring_model"].map(name => [name, "DENY"]),
+  // create_workspace, approve_solution_plan, reject_solution_plan, and
+  // request_release_authorization remain unconditionally human-only per ADR
+  // 0020 — explicitly out of scope for AgentOrgAdminGrant delegation.
+  ...["update_comment", "update_solution_comment", "update_doc_comment", "create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization"].map(name => [name, "DENY"]),
 ])
 
 /**

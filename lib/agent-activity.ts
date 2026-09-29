@@ -11,8 +11,14 @@ export async function withAgentActivity<T>(actor: McpActor, toolName: string, mu
   // branches, and API_KEY is what the column means for every row written before
   // ADR 0015. A null would be a third value with no meaning.
   const row = await prisma.agentToolCall.create({ data: { agentId: actor.agentId, userId: actor.userId, credentialId: actor.credentialId, credentialType: actor.credentialType ?? "API_KEY", toolName, status: "STARTED" }, select: { id: true } })
+  // agentAdminGrantId (ADR 0020) can only be known once `gate()` below has run
+  // — hasValidAgentOrgAdminGrant sets it on `actor` only after validating a
+  // live grant, and that happens inside the gate, after this row is already
+  // created. So it is threaded into `finish`'s update, exactly like
+  // `workspaceId: actor.authorizedWorkspaceId` above it, which has the same
+  // gate-populates-the-actor shape.
   const finish = async (status: string) => {
-    try { await prisma.agentToolCall.update({ where: { id: row.id }, data: { status, workspaceId: actor.authorizedWorkspaceId, finishedAt: new Date() } }) }
+    try { await prisma.agentToolCall.update({ where: { id: row.id }, data: { status, workspaceId: actor.authorizedWorkspaceId, agentAdminGrantId: actor.agentAdminGrantId ?? null, finishedAt: new Date() } }) }
     catch { console.error("Unable to record agent operation outcome", { operationId: row.id }) }
   }
   try { await gate() } catch (error) { await finish("DENIED"); throw error }

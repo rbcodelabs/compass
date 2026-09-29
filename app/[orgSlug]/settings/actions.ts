@@ -1,12 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { isPermissionError, resolveOrgAdmin } from "@/lib/permissions";
+import { auth } from "@/auth";
+import { isPermissionError, PermissionError, resolveOrgAdmin } from "@/lib/permissions";
 import { findMetricConfigIssues, type MetricConfigIssue } from "@/lib/scoring";
 import type { ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { SLUG_PATTERN } from "@/lib/slug";
 import { createWorkspaceInOrg } from "@/lib/workspace-service";
+import { agentsEnabled } from "@/lib/agent-access";
 
 export interface ScoringMetricInput {
   key: string;
@@ -433,6 +435,86 @@ export async function deleteOrganization(
     revalidatePath("/", "layout");
 
     return { ok: true, redirectTo: "/dashboard" };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+// ─── Agent Org Admin Grants (ADR 0020, org admin only) ─────────────────────
+
+export type AgentAdminGrantResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Grants (or re-grants, if previously revoked) an ACTIVE agent the
+ * SCORING_MODEL_ADMIN capability within this organization, so it can call
+ * create_scoring_model/update_scoring_model/archive_scoring_model/
+ * set_workspace_scoring_model over MCP. Only reachable from this
+ * session-authed server action — no MCP tool wraps it, and `resolveOrgAdmin`
+ * requires the CALLER (not the agent) to be a current org OWNER/ADMIN, so an
+ * agent identity can never grant itself (or another agent) this capability.
+ * See ADR 0020 (Compass Docs — Architecture Decisions).
+ */
+export async function grantAgentScoringModelAdmin(
+  orgSlug: string,
+  agentId: string
+): Promise<AgentAdminGrantResult> {
+  try {
+    const session = await auth();
+    if (!session?.user?.id) throw new PermissionError("Unauthorized");
+    const { prisma, organizationId } = await resolveOrgAdmin(orgSlug);
+    if (!agentsEnabled()) return { ok: false, error: "Agent changes are currently disabled" };
+
+    const agent = await prisma.agent.findFirst({ where: { id: agentId, status: "ACTIVE" } });
+    if (!agent) return { ok: false, error: "Agent not found" };
+
+    // The grant is org-scoped (not workspace-scoped), so the owner check is
+    // against OrganizationMember, not WorkspaceMember.
+    const ownerMembership = await prisma.organizationMember.findFirst({
+      where: { organizationId, userId: agent.ownerUserId },
+      select: { id: true },
+    });
+    if (!ownerMembership) return { ok: false, error: "Agent owner must be a current organization member" };
+
+    const data = {
+      grantedByUserId: session.user.id,
+      revokedAt: null,
+      revokedByUserId: null,
+      updatedAt: new Date(),
+    };
+    await prisma.agentOrgAdminGrant.upsert({
+      where: { agentId_organizationId_capability: { agentId, organizationId, capability: "SCORING_MODEL_ADMIN" } },
+      create: { agentId, organizationId, capability: "SCORING_MODEL_ADMIN", ...data },
+      update: data,
+    });
+
+    revalidatePath(`/${orgSlug}/settings`);
+    return { ok: true };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
+/**
+ * Revokes an agent's SCORING_MODEL_ADMIN grant in this organization, if one
+ * is currently live. Idempotent — revoking an already-revoked or nonexistent
+ * grant is a no-op success, matching revokeWorkspaceAgent's convention.
+ */
+export async function revokeAgentScoringModelAdmin(
+  orgSlug: string,
+  agentId: string
+): Promise<AgentAdminGrantResult> {
+  try {
+    const session = await auth();
+    if (!session?.user?.id) throw new PermissionError("Unauthorized");
+    const { prisma, organizationId } = await resolveOrgAdmin(orgSlug);
+
+    await prisma.agentOrgAdminGrant.updateMany({
+      where: { organizationId, agentId, capability: "SCORING_MODEL_ADMIN", revokedAt: null },
+      data: { revokedAt: new Date(), revokedByUserId: session.user.id, updatedAt: new Date() },
+    });
+
+    revalidatePath(`/${orgSlug}/settings`);
+    return { ok: true };
   } catch (error) {
     return toFailure(error);
   }

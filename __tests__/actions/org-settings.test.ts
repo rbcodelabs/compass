@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockScoringModel = {
   create: vi.fn(),
@@ -15,6 +15,8 @@ const mockOrganizationMember = { findFirst: vi.fn(), findMany: vi.fn() };
 const mockOrganization = { findUnique: vi.fn() };
 const mockWorkspace = { findFirst: vi.fn(), create: vi.fn() };
 const mockWorkspaceMember = { createMany: vi.fn() };
+const mockAgent = { findFirst: vi.fn() };
+const mockAgentOrgAdminGrant = { upsert: vi.fn(), updateMany: vi.fn() };
 
 const mockPrisma = {
   scoringModel: mockScoringModel,
@@ -23,6 +25,8 @@ const mockPrisma = {
   organization: mockOrganization,
   workspace: mockWorkspace,
   workspaceMember: mockWorkspaceMember,
+  agent: mockAgent,
+  agentOrgAdminGrant: mockAgentOrgAdminGrant,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -45,6 +49,8 @@ import {
   updateScoringModelDetails,
   updateScoringModelMetrics,
   archiveScoringModel,
+  grantAgentScoringModelAdmin,
+  revokeAgentScoringModelAdmin,
 } from "@/app/[orgSlug]/settings/actions";
 
 const mockAuth = vi.mocked(auth);
@@ -567,5 +573,272 @@ describe("archiveScoringModel", () => {
       ok: false,
       error: "Forbidden: organization admin required",
     });
+  });
+});
+
+// ─── Agent Org Admin Grants (ADR 0020) ──────────────────────────────────────
+//
+// The no-self-escalation guarantee lives here, not in the schema: resolveOrgAdmin
+// requires the SESSION caller (mockAuth / a current OrganizationMember row) to be
+// an org OWNER/ADMIN. No MCP tool wraps either action — only this session-authed
+// path can ever write agent_org_admin_grants.
+
+describe("grantAgentScoringModelAdmin", () => {
+  beforeEach(() => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1");
+    mockAgent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "owner-1", status: "ACTIVE" });
+    mockOrganizationMember.findFirst.mockResolvedValue({ role: "ADMIN", organizationId: "org-1" });
+    mockAgentOrgAdminGrant.upsert.mockResolvedValue({ id: "grant-1" });
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("upserts a live grant naming the session caller as grantor", async () => {
+    const result = await grantAgentScoringModelAdmin("org", "agent-1");
+
+    expect(result).toEqual({ ok: true });
+    expect(mockAgentOrgAdminGrant.upsert).toHaveBeenCalledWith({
+      where: { agentId_organizationId_capability: { agentId: "agent-1", organizationId: "org-1", capability: "SCORING_MODEL_ADMIN" } },
+      create: {
+        agentId: "agent-1",
+        organizationId: "org-1",
+        capability: "SCORING_MODEL_ADMIN",
+        grantedByUserId: "user-1",
+        revokedAt: null,
+        revokedByUserId: null,
+        updatedAt: expect.any(Date),
+      },
+      update: {
+        grantedByUserId: "user-1",
+        revokedAt: null,
+        revokedByUserId: null,
+        updatedAt: expect.any(Date),
+      },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/org/settings");
+  });
+
+  it("returns a clean error when the session is missing", async () => {
+    mockAuth.mockResolvedValue(null as never);
+    await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+      ok: false,
+      error: "You are not signed in.",
+    });
+    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
+  });
+
+  it("returns a clean error when the caller is not an org admin", async () => {
+    mockOrganizationMember.findFirst.mockResolvedValue({ role: "MEMBER", organizationId: "org-1" });
+    await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+      ok: false,
+      error: "Forbidden: organization admin required",
+    });
+    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
+  });
+
+  it("refuses when agent changes are disabled", async () => {
+    vi.unstubAllEnvs();
+    await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+      ok: false,
+      error: "Agent changes are currently disabled",
+    });
+    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
+  });
+
+  it("returns a clean error when the agent does not exist or is not ACTIVE", async () => {
+    mockAgent.findFirst.mockResolvedValue(null);
+    await expect(grantAgentScoringModelAdmin("org", "agent-missing")).resolves.toEqual({
+      ok: false,
+      error: "Agent not found",
+    });
+  });
+
+  it("returns a clean error when the agent's owner is not a current organization member", async () => {
+    // First call resolves the agent (ACTIVE); the second is the owner-membership
+    // check inside grantAgentScoringModelAdmin itself, which must fail.
+    mockOrganizationMember.findFirst
+      .mockResolvedValueOnce({ role: "ADMIN", organizationId: "org-1" })
+      .mockResolvedValueOnce(null);
+    await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+      ok: false,
+      error: "Agent owner must be a current organization member",
+    });
+    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("revokeAgentScoringModelAdmin", () => {
+  beforeEach(() => {
+    mockAgentOrgAdminGrant.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("revokes any live grant for this agent/capability, stamping the session caller", async () => {
+    const result = await revokeAgentScoringModelAdmin("org", "agent-1");
+
+    expect(result).toEqual({ ok: true });
+    expect(mockAgentOrgAdminGrant.updateMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", agentId: "agent-1", capability: "SCORING_MODEL_ADMIN", revokedAt: null },
+      data: { revokedAt: expect.any(Date), revokedByUserId: "user-1", updatedAt: expect.any(Date) },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/org/settings");
+  });
+
+  it("is a no-op success when no live grant exists", async () => {
+    mockAgentOrgAdminGrant.updateMany.mockResolvedValue({ count: 0 });
+    await expect(revokeAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({ ok: true });
+  });
+
+  it("returns a clean error when the session is missing", async () => {
+    mockAuth.mockResolvedValue(null as never);
+    await expect(revokeAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+      ok: false,
+      error: "You are not signed in.",
+    });
+    expect(mockAgentOrgAdminGrant.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns a clean error when the caller is not an org admin", async () => {
+    mockOrganizationMember.findFirst.mockResolvedValue({ role: "MEMBER", organizationId: "org-1" });
+    await expect(revokeAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+      ok: false,
+      error: "Forbidden: organization admin required",
+    });
+  });
+});
+
+// ─── grantAgentScoringModelAdmin / revokeAgentScoringModelAdmin (ADR 0020) ──
+//
+// These are the ONLY writer of agent_org_admin_grants — never an MCP tool.
+// "No self-escalation" here means the CALLER (session user, checked by
+// resolveOrgAdmin) must be a current org OWNER/ADMIN; it says nothing about
+// the agent's own owner, which is why "agent owner must be a current
+// organization member" is a separate, explicit check below.
+describe("grantAgentScoringModelAdmin", () => {
+  beforeEach(() => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1");
+    mockAgent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "owner-1", status: "ACTIVE" });
+    // First call (resolveOrgAdmin's own gate) resolves the caller; the second
+    // (this action's explicit owner-membership check) resolves the agent
+    // owner. Both hit organizationMember.findFirst, so this mock must satisfy
+    // either shape.
+    mockOrganizationMember.findFirst.mockResolvedValue({ role: "ADMIN", organizationId: "org-1", id: "member-1" });
+    mockAgentOrgAdminGrant.upsert.mockResolvedValue({ id: "grant-1" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("upserts a live grant for an active agent whose owner is a current org member", async () => {
+    const result = await grantAgentScoringModelAdmin("org", "agent-1");
+
+    expect(result).toEqual({ ok: true });
+    expect(mockAgentOrgAdminGrant.upsert).toHaveBeenCalledWith({
+      where: { agentId_organizationId_capability: { agentId: "agent-1", organizationId: "org-1", capability: "SCORING_MODEL_ADMIN" } },
+      create: {
+        agentId: "agent-1",
+        organizationId: "org-1",
+        capability: "SCORING_MODEL_ADMIN",
+        grantedByUserId: "user-1",
+        revokedAt: null,
+        revokedByUserId: null,
+        updatedAt: expect.any(Date),
+      },
+      update: {
+        grantedByUserId: "user-1",
+        revokedAt: null,
+        revokedByUserId: null,
+        updatedAt: expect.any(Date),
+      },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/org/settings");
+  });
+
+  it("returns a clean error when the session is missing", async () => {
+    mockAuth.mockResolvedValue(null as never);
+    await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+      ok: false,
+      error: "You are not signed in.",
+    });
+    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
+  });
+
+  it("returns a clean error when the caller is not an org admin", async () => {
+    mockOrganizationMember.findFirst.mockResolvedValue({ role: "MEMBER", organizationId: "org-1" });
+    await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+      ok: false,
+      error: "Forbidden: organization admin required",
+    });
+    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
+  });
+
+  it("returns a clean error when agent changes are disabled", async () => {
+    vi.unstubAllEnvs();
+    await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+      ok: false,
+      error: "Agent changes are currently disabled",
+    });
+    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
+  });
+
+  it("returns a clean error when the agent does not exist or is not ACTIVE", async () => {
+    mockAgent.findFirst.mockResolvedValue(null);
+    await expect(grantAgentScoringModelAdmin("org", "agent-missing")).resolves.toEqual({
+      ok: false,
+      error: "Agent not found",
+    });
+    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
+  });
+
+  it("returns a clean error when the agent's owner is not a current organization member", async () => {
+    // First lookup (resolveOrgAdmin, the caller) succeeds; second lookup (the
+    // agent owner's membership) fails.
+    mockOrganizationMember.findFirst
+      .mockResolvedValueOnce({ role: "ADMIN", organizationId: "org-1" })
+      .mockResolvedValueOnce(null);
+    await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+      ok: false,
+      error: "Agent owner must be a current organization member",
+    });
+    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("revokeAgentScoringModelAdmin", () => {
+  beforeEach(() => {
+    mockAgentOrgAdminGrant.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("revokes the live grant, attributing the revocation to the caller", async () => {
+    const result = await revokeAgentScoringModelAdmin("org", "agent-1");
+
+    expect(result).toEqual({ ok: true });
+    expect(mockAgentOrgAdminGrant.updateMany).toHaveBeenCalledWith({
+      where: { organizationId: "org-1", agentId: "agent-1", capability: "SCORING_MODEL_ADMIN", revokedAt: null },
+      data: { revokedAt: expect.any(Date), revokedByUserId: "user-1", updatedAt: expect.any(Date) },
+    });
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/org/settings");
+  });
+
+  it("is idempotent when no live grant exists (updateMany matches zero rows, still ok)", async () => {
+    mockAgentOrgAdminGrant.updateMany.mockResolvedValue({ count: 0 });
+    await expect(revokeAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({ ok: true });
+  });
+
+  it("returns a clean error when the session is missing", async () => {
+    mockAuth.mockResolvedValue(null as never);
+    await expect(revokeAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+      ok: false,
+      error: "You are not signed in.",
+    });
+    expect(mockAgentOrgAdminGrant.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns a clean error when the caller is not an org admin", async () => {
+    mockOrganizationMember.findFirst.mockResolvedValue({ role: "MEMBER", organizationId: "org-1" });
+    await expect(revokeAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+      ok: false,
+      error: "Forbidden: organization admin required",
+    });
+    expect(mockAgentOrgAdminGrant.updateMany).not.toHaveBeenCalled();
   });
 });

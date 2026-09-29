@@ -2450,6 +2450,47 @@ model AgentWorkspaceGrant {
   @@map("agent_workspace_grants")
 }
 
+/// Explicit, auditable grant of an admin-level MCP capability to a specific
+/// agent, scoped to one organization. Unlike AgentWorkspaceGrant (workspace-
+/// scoped READ/WRITE on ordinary discovery data), this only ever authorizes
+/// the narrow, named admin action(s) in `capability` — today exactly one
+/// value, "SCORING_MODEL_ADMIN" (create/update/archive an org ScoringModel,
+/// and assign one to a workspace via set_workspace_scoring_model). See
+/// ADR 0020 (Compass Docs — Architecture Decisions).
+///
+/// Never reachable via any MCP tool. Only app/[orgSlug]/settings/actions.ts
+/// (a session-authed server action gated by resolveOrgAdmin) writes this
+/// table — "no self-escalation" is enforced by that gate requiring the
+/// CALLER to be a current org OWNER/ADMIN, not by anything in this schema.
+///
+/// Time-of-check, not time-of-grant: lib/mcp-authz.ts re-verifies
+/// `grantedByUserId`'s CURRENT organization role on every use of the grant,
+/// the same way assertOrgAdminBySlug re-queries OrganizationMember.role live
+/// instead of trusting a cached value. If the granting human is later
+/// demoted or removed from the org, the grant silently stops authorizing
+/// anything (McpAuthzError("Human administrator required.")) even though
+/// `revokedAt` is still null — no separate cleanup job required, and no
+/// stale delegated authority can outlive the human who issued it.
+///
+/// DSQL: no FKs; no @updatedAt (set explicitly in app code).
+model AgentOrgAdminGrant {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentId         String    @map("agent_id") @db.Uuid
+  organizationId  String    @map("organization_id") @db.Uuid
+  /// Extensible discriminator for which admin capability this grant confers.
+  /// Only "SCORING_MODEL_ADMIN" exists today.
+  capability      String    @db.VarChar(40)
+  grantedByUserId String    @map("granted_by_user_id") @db.Uuid
+  revokedAt       DateTime? @map("revoked_at")
+  revokedByUserId String?   @map("revoked_by_user_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @map("updated_at")
+
+  @@unique([agentId, organizationId, capability])
+  @@index([organizationId, capability])
+  @@map("agent_org_admin_grants")
+}
+
 model AgentToolCall {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   agentId String @map("agent_id") @db.Uuid
@@ -2469,6 +2510,11 @@ model AgentToolCall {
   status String @default("STARTED") @db.VarChar(20)
   createdAt DateTime @default(now()) @map("created_at")
   finishedAt DateTime? @map("finished_at")
+  /// AgentOrgAdminGrant.id this call was authorized under, when the tool
+  /// required an elevated-agent admin capability and the caller was an
+  /// agent. Null for every other call. A grant can be revoked later without
+  /// invalidating this historical pointer.
+  agentAdminGrantId String? @map("agent_admin_grant_id") @db.Uuid
   @@index([agentId, createdAt])
   @@index([workspaceId, createdAt])
   @@map("agent_tool_calls")
