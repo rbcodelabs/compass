@@ -13,6 +13,17 @@ import type { EntityLinkType } from "@/lib/entity-links"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, recencySortSchema } from "@/lib/mcp-recency"
+import {
+  KEYSET_PAGE_DEFAULT,
+  decodeKeysetCursor,
+  encodeKeysetCursor,
+  filterFingerprint,
+  keysetAfter,
+  keysetCursorSchema,
+  keysetFooter,
+  keysetLimitSchema,
+  type KeysetCursor,
+} from "@/lib/mcp-keyset"
 import { runWithMcpActor, getMcpActor } from "@/lib/mcp-authz"
 import { applyToolGate, AGENT_TOOL_POLICY, scopesSatisfy, type ToolScope } from "@/lib/mcp-tool-gates"
 import { bearerChallenge, requiredScopeForPayload } from "@/lib/mcp-oauth-challenge"
@@ -1036,7 +1047,10 @@ const _handler = createMcpHandler(
       "list_opportunities",
       {
         title: "List Opportunities",
-        description: "Lists opportunities in a workspace, with optional filters by status, squad and last-updated window.",
+        description:
+          "Lists opportunities in a workspace, with optional filters by status, squad and last-updated window. " +
+          "Paginated: returns at most `limit` items (default 50) plus the total and a `nextCursor` when more remain. " +
+          "To walk a whole workspace, keep calling with the returned cursor until `hasMore` is false.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by status"),
@@ -1044,38 +1058,97 @@ const _handler = createMcpHandler(
           updatedSince: z.string().datetime().optional().describe("Filter to opportunities updated at or after this ISO timestamp"),
           updatedBefore: z.string().datetime().optional().describe("Filter to opportunities updated before this ISO timestamp (useful for stale-work scans)"),
           sort: recencySortSchema,
+          limit: keysetLimitSchema,
+          cursor: keysetCursorSchema,
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, status, squadId, updatedSince, updatedBefore, sort }) => {
+      async ({ workspaceId, status, squadId, updatedSince, updatedBefore, sort, limit, cursor }) => {
         const prisma = getPrisma()
-        const opportunities = await prisma.opportunity.findMany({
-          where: {
-            workspaceId,
-            ...(status ? { status } : {}),
-            ...(squadId ? { squadId } : {}),
-            ...(updatedSince || updatedBefore
-              ? {
-                  updatedAt: {
-                    ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
-                    ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
-                  },
-                }
-              : {}),
-          },
-          include: {
-            linkedKeyResult: { select: { title: true, objective: { select: { workspaceId: true, title: true } } } },
-            squad: { select: { name: true } },
-            _count: { select: { solutions: { where: { workspaceId } } } },
-          },
-          orderBy: recencyOrderBy(sort) ?? { createdAt: "desc" },
-        })
+        // The cursor is only meaningful under the ordering and filters that
+        // produced it, so both are pinned into it and rechecked here.
+        const fingerprint = filterFingerprint({ status, squadId, updatedSince, updatedBefore, sort })
+        let decodedCursor: KeysetCursor | null = null
+        if (cursor !== undefined) {
+          decodedCursor = decodeKeysetCursor(cursor)
+          if (!decodedCursor) {
+            return fail("Invalid opportunity cursor. Call list_opportunities without a cursor to start again.")
+          }
+          if (decodedCursor.w !== workspaceId || decodedCursor.f !== fingerprint) {
+            return fail(
+              "Opportunity cursor does not match the requested workspace, filters or sort. " +
+                "Repeat the original filters alongside the cursor, or omit the cursor to start again.",
+            )
+          }
+        }
+        // `sort` absent means the default createdAt ordering; the keyset bound has
+        // to be expressed in whichever key the ordering actually uses.
+        const sortKey = sort ? "updatedAt" : "createdAt"
+        const sortDirection = sort === "leastRecentlyUpdated" ? "asc" : "desc"
+        const resolvedLimit = limit ?? KEYSET_PAGE_DEFAULT
+        const where = {
+          workspaceId,
+          ...(status ? { status } : {}),
+          ...(squadId ? { squadId } : {}),
+          ...(updatedSince || updatedBefore
+            ? {
+                updatedAt: {
+                  ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
+                  ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
+                },
+              }
+            : {}),
+        }
+        // `total` is counted against the unpaginated filter set: it is the
+        // denominator the caller needs to know the page is not the whole story.
+        const [rows, total] = await Promise.all([
+          prisma.opportunity.findMany({
+            where: decodedCursor ? { ...where, ...keysetAfter(sortKey, sortDirection, decodedCursor) } : where,
+            include: {
+              linkedKeyResult: { select: { title: true, objective: { select: { workspaceId: true, title: true } } } },
+              squad: { select: { name: true } },
+              _count: { select: { solutions: { where: { workspaceId } } } },
+            },
+            // A stable id tiebreaker on the default ordering too — `createdAt` is
+            // not unique, and a keyset cursor over a non-deterministic ordering
+            // both skips and repeats rows.
+            orderBy: recencyOrderBy(sort) ?? [{ createdAt: "desc" }, { id: "asc" }],
+            // One extra row is the cheapest way to learn whether a next page exists.
+            take: resolvedLimit + 1,
+          }),
+          prisma.opportunity.count({ where }),
+        ])
+        const hasMore = rows.length > resolvedLimit
+        const opportunities = hasMore ? rows.slice(0, resolvedLimit) : rows
+        if (!opportunities.length) {
+          // Distinguish an empty workspace from the end of a walk: paging off the
+          // end of a list whose last page was exactly full is success, not a
+          // not-found, and must not read as "this workspace has no opportunities".
+          return decodedCursor
+            ? ok(keysetFooter({ toolName: "list_opportunities", start: decodedCursor.s + 1, end: decodedCursor.s, total, nextCursor: null }), {
+                items: [],
+                count: 0,
+                total,
+                hasMore: false,
+                nextCursor: null,
+              })
+            : fail("No opportunities found.")
+        }
+        const alreadySeen = decodedCursor?.s ?? 0
+        const lastRow = opportunities[opportunities.length - 1]
+        const nextCursor = hasMore
+          ? encodeKeysetCursor({
+              v: 1,
+              w: workspaceId,
+              f: fingerprint,
+              k: new Date(lastRow[sortKey]).toISOString(),
+              i: lastRow.id,
+              s: alreadySeen + opportunities.length,
+            })
+          : null
         // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
         for (const o of opportunities) if (o.linkedKeyResult && o.linkedKeyResult.objective.workspaceId !== workspaceId) o.linkedKeyResult = null
-        if (!opportunities.length) {
-          return fail("No opportunities found.")
-        }
-        // Additive: the typed Opportunity<->Objective links, one workspace-filtered batch for the whole list.
+        // Additive: the typed Opportunity<->Objective links, one workspace-filtered batch for the page.
         // `linkedKeyResult` above stays derived from the legacy column only and is never inferred from these.
         const linkedObjectives = await getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunities.map(o => o.id), { preverified: true })
         const lines = opportunities.map(o => {
@@ -1089,7 +1162,19 @@ const _handler = createMcpHandler(
             `\n  ID: ${o.id}`
           )
         })
-        return ok(lines.join("\n"), {
+        // Appended only when paging is actually in play, so a listing that fits in
+        // one page is byte-identical to what callers got before pagination existed.
+        const footer =
+          hasMore || decodedCursor
+            ? `\n\n${keysetFooter({
+                toolName: "list_opportunities",
+                start: alreadySeen + 1,
+                end: alreadySeen + opportunities.length,
+                total,
+                nextCursor,
+              })}`
+            : ""
+        return ok(lines.join("\n") + footer, {
           items: opportunities.map((o) => ({
             id: o.id,
             title: o.title,
@@ -1103,6 +1188,9 @@ const _handler = createMcpHandler(
             linkedObjectives: linkedObjectives.get(o.id) ?? [],
           })),
           count: opportunities.length,
+          total,
+          hasMore,
+          nextCursor,
         })
       }
     )
