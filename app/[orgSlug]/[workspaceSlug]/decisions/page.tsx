@@ -24,6 +24,7 @@ import { DecisionsFilters } from "@/components/decisions/decisions-filters"
 import { DecisionsTabs } from "@/components/decisions/decisions-tabs"
 import { buttonVariants } from "@/components/ui/button"
 import { isOrgAdminRole } from "@/lib/roles"
+import { isChoiceActionKey } from "@/lib/tracked-decision-types"
 
 const LABELS: Record<string, string> = TRACKED_SUBJECT_LABELS
 
@@ -164,6 +165,7 @@ export default async function DecisionsPage({ params, searchParams }: {
                       </p>
                       <h2 className="mt-0.5 truncate text-sm font-semibold text-text-primary">{revision?.title ?? "Decision"}</h2>
                       <p className="mt-1 line-clamp-2 text-sm text-text-secondary">{revision?.summary}</p>
+                      {decision && isChoiceActionKey(decision.option.actionKey) && <p className="mt-1 line-clamp-2 break-words text-sm text-text-primary [overflow-wrap:anywhere]"><span className="text-text-subtle">Chosen:</span> <span className="font-medium">{decision.option.label}</span></p>}
                       <p className="mt-2 text-xs text-text-subtle">
                         Updated {request.updatedAt.toLocaleDateString()}
                         {decision ? ` • ${reviewerNames.get(decision.actorUserId) ?? "Workspace admin"}` : ""}

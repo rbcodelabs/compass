@@ -534,4 +534,24 @@ describe("schema.prisma stays DSQL-compatible", () => {
     expect(planTable).toContain('"state" VARCHAR(30) NOT NULL DEFAULT \'DRAFT\'');
     expect(planTable).not.toContain('"state" VARCHAR(30) NOT NULL DEFAULT \'ACTIVE\'');
   });
+
+  it("registers 065_review_option_description as one plain, DSQL-safe nullable ADD COLUMN matching schema.prisma", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === "065_review_option_description")).toHaveLength(1);
+    expect(names.indexOf("065_review_option_description")).toBeGreaterThan(names.indexOf("064_embed_feedback_sources"));
+
+    const statements = sqlFor("065_review_option_description")
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n")
+      .split(";")
+      .map((statement) => statement.trim())
+      .filter(Boolean);
+    // One DDL statement, and DSQL rejects any constraint (DEFAULT included) on ADD COLUMN.
+    expect(statements).toEqual(['ALTER TABLE "review_options" ADD COLUMN IF NOT EXISTS "description" TEXT']);
+
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    const model = schema.match(/model ReviewOption \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(model).toMatch(/description\s+String\?\s+@db\.Text/);
+  });
 });

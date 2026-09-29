@@ -150,6 +150,7 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
+import { decisionOptionsInputSchema } from "@/lib/decision-option-schema"
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
 import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
@@ -1841,7 +1842,7 @@ const _handler = createMcpHandler(
       "request_decision",
       {
         title: "Request Decision",
-        description: "Creates a tracking-only human decision request linked to a workspace or Compass item. This never changes the linked item.",
+        description: "Creates a tracking-only human decision request linked to a workspace or Compass item. This never changes the linked item. Optionally pass `options` (2-4 labelled choices, like a multiple-choice question) to let the human pick one answer; without it the human sees Approve / Request changes / Reject. Choosing an option records an APPROVE outcome plus that option; Request changes and Reject are always still offered (rationale required for those two). Read the chosen option back with get_decision.",
         inputSchema: {
           workspaceId: z.string().uuid(),
           subjectType: z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"]),
@@ -1852,6 +1853,7 @@ const _handler = createMcpHandler(
             type: z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK", "EVIDENCE"]),
             id: z.string().uuid(),
           })).max(12).optional().describe("Supporting Compass objects to snapshot and show alongside the primary linked item."),
+          options: decisionOptionsInputSchema,
           idempotencyKey: z.string().uuid(),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
@@ -1863,7 +1865,7 @@ const _handler = createMcpHandler(
       "list_decisions",
       {
         title: "List Decisions",
-        description: "Lists tracking-only decision requests in a workspace, newest first.",
+        description: "Lists tracking-only decision requests in a workspace, newest first. Each request includes its `options` (label, description, outcomeClass) and, once decided, the `chosenOption`.",
         inputSchema: {
           workspaceId: z.string().uuid(),
           state: z.enum(["PENDING", "DECIDED", "AWAITING_FOLLOW_THROUGH"]).optional().describe("AWAITING_FOLLOW_THROUGH: DECIDED decisions with no linked follow-up Task and not explicitly closed as no-action-needed."),
@@ -1883,7 +1885,7 @@ const _handler = createMcpHandler(
       "get_decision",
       {
         title: "Get Decision",
-        description: "Reads one tracking-only decision request, its immutable revision history, live supporting artifacts (separate from frozen evidence), the resolved requester (user or agent), and any linked follow-up Tasks.",
+        description: "Reads one tracking-only decision request, its immutable revision history, live supporting artifacts (separate from frozen evidence), the resolved requester (user or agent), any linked follow-up Tasks, and the offered `options` plus the `chosenOption` once decided (an option chosen from request_decision `options` reports outcomeClass APPROVE; the human's rationale, if any, is on the decision record).",
         inputSchema: { workspaceId: z.string().uuid(), requestId: z.string().uuid() },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -1953,7 +1955,7 @@ const _handler = createMcpHandler(
       "get_review_request",
       {
         title: "Get Review Request",
-        description: "Reads a Compass-native review request, its current immutable revision, options, decision state, and live supporting artifacts for ordinary tracked Decisions.",
+        description: "Reads a Compass-native review request, its current immutable revision, options (with the flattened `options` and `chosenOption`), decision state, and live supporting artifacts for ordinary tracked Decisions.",
         inputSchema: { requestId: z.string().uuid().describe("UUID of the Review Request") },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },

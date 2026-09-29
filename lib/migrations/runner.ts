@@ -402,6 +402,13 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     filePath: path.join(process.cwd(), "prisma/migrations/064_embed_feedback_sources/migration.sql"),
   },
   {
+    // Optional description on review_options, so a tracked decision can carry
+    // caller-supplied options. Plain nullable ADD COLUMN (DSQL: no constraints,
+    // no index), so it needs no async-wait or postcondition handling.
+    name: "065_review_option_description",
+    filePath: path.join(process.cwd(), "prisma/migrations/065_review_option_description/migration.sql"),
+  },
+  {
     // Org-wide member read-only workspace access flag. See migration file
     // header for the DSQL-safe nullable-then-backfill shape.
     name: "065_org_member_workspace_readonly",

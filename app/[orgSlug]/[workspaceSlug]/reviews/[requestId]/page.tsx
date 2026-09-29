@@ -12,6 +12,7 @@ import { SendToAgentPicker } from "@/components/agent/send-to-agent-picker"
 import { getDecisionArtifacts } from "@/lib/artifacts"
 import { buildFollowUpDraft, suggestFollowUpAssignee } from "@/lib/decision-followthrough"
 import { eligibleTaskAssignees } from "@/lib/task-assignment"
+import { isChoiceActionKey } from "@/lib/tracked-decision-types"
 
 function parsePacket(raw: string): Record<string, unknown> {
   try { return JSON.parse(raw) as Record<string, unknown> } catch { return {} }
@@ -60,6 +61,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
     entity?: { type?: string; id?: string; title?: string }
   }
   const decided = revision.decisions[0]
+  const choiceOptions = revision.options.filter((option) => isChoiceActionKey(option.actionKey))
   const isRelease = request.gateType === "RELEASE_AUTHORIZATION"
   const isInvestment = request.gateType === "BUILDING_INVESTMENT" || request.gateType === "BUILDING_INVESTMENT_REVOCATION"
   const isRevocation = request.gateType === "BUILDING_INVESTMENT_REVOCATION"
@@ -151,15 +153,22 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
         </section>
       ) : decided ? (
         <section className="space-y-2 rounded-lg border bg-status-success-surface p-4 text-sm text-status-success">
-          <p>Decision recorded: <strong>{decided.option.label}</strong> by {decided.actorRole} at {decided.decidedAt.toLocaleString()}.</p>
+          <p className="break-words [overflow-wrap:anywhere]">Decision recorded: <strong>{decided.option.label}</strong> by {decided.actorRole} at {decided.decidedAt.toLocaleString()}.</p>
+          {decided.option.description && <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-foreground/80">{decided.option.description}</p>}
           <DecisionLongForm className="text-foreground" content={decided.rationale} />
           {isTracked && decided.option.outcomeClass === "REQUEST_CHANGES" && <a className="inline-block font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/decisions/new?reviseRequestId=${request.id}`}>Create revised request</a>}
           {isTracked && decided.option.outcomeClass === "APPROVE" && <SendToAgentPicker orgSlug={orgSlug} workspaceSlug={workspaceSlug} entityType="decision" entityId={request.id} className="inline-block font-medium text-primary underline">Send to agent</SendToAgentPicker>}
         </section>
       ) : isTracked && canDecide ? (
-        <DecisionActions workspaceId={request.workspaceId} revisionId={revision.id} fingerprint={revision.fingerprint} options={revision.options.map((option) => ({ id: option.id, label: option.label, outcomeClass: option.outcomeClass }))} />
+        <DecisionActions workspaceId={request.workspaceId} revisionId={revision.id} fingerprint={revision.fingerprint} options={revision.options.map((option) => ({ id: option.id, label: option.label, outcomeClass: option.outcomeClass, actionKey: option.actionKey, description: option.description }))} />
       ) : isTracked ? (
-        <section className="rounded-lg border p-4 text-sm text-muted-foreground">Waiting for a workspace or organization admin to decide.</section>
+        <section className="space-y-3 rounded-lg border p-4 text-sm text-muted-foreground">
+          <p>Waiting for a workspace or organization admin to decide.</p>
+          {choiceOptions.length > 0 && <div className="space-y-2">
+            <p className="font-medium text-foreground">Options offered</p>
+            <ul className="space-y-2">{choiceOptions.map((option) => <li key={option.id} className="min-w-0 rounded-md border bg-background p-3"><span className="block break-words [overflow-wrap:anywhere] font-medium text-foreground">{option.label}</span>{option.description && <span className="mt-0.5 block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{option.description}</span>}</li>)}</ul>
+          </div>}
+        </section>
       ) : (
         <div className="flex flex-wrap gap-3">
           {revision.options.map((option) => (

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockAuth, mockRecord, mockQueueRelease } = vi.hoisted(() => ({
-  mockAuth: vi.fn(), mockRecord: vi.fn(), mockQueueRelease: vi.fn(),
+const { mockAuth, mockRecord, mockQueueRelease, mockCreateTracked, mockReviseTracked } = vi.hoisted(() => ({
+  mockAuth: vi.fn(), mockRecord: vi.fn(), mockQueueRelease: vi.fn(), mockCreateTracked: vi.fn(), mockReviseTracked: vi.fn(),
 }))
 const prisma = {
   workspace: { findFirst: vi.fn() },
@@ -17,8 +17,13 @@ vi.mock("@/lib/release-authorization", () => ({
   unconfiguredReleaseSourceRevalidator: { revalidate: vi.fn() },
 }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
+vi.mock("@/lib/tracked-decisions", () => ({
+  createTrackedDecisionRequest: mockCreateTracked,
+  reviseTrackedDecisionRequest: mockReviseTracked,
+  recordDecisionNoAction: vi.fn(),
+}))
 
-import { decideReviewAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
+import { createTrackedDecisionAction, decideReviewAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
 
 describe("review actions ownership", () => {
   beforeEach(() => {
@@ -67,5 +72,42 @@ describe("review actions ownership", () => {
       "source-fp",
       expect.objectContaining({ revalidate: expect.any(Function) }),
     )
+  })
+})
+
+describe("createTrackedDecisionAction options", () => {
+  const input = { workspaceId: "ws-1", subjectType: "SOLUTION" as const, subjectId: "solution-1", question: "Which plan?", context: "Pick one.", idempotencyKey: "00000000-0000-4000-8000-000000000001" }
+  const options = [{ label: "Ship now", description: "Soon" }, { label: "Wait" }]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockAuth.mockResolvedValue({ user: { id: "user-1" } })
+    prisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", members: [{ id: "member-1" }], organization: { members: [] } })
+    mockCreateTracked.mockResolvedValue({ requestId: "request-1", id: "rev-1" })
+    mockReviseTracked.mockResolvedValue({ requestId: "request-1", id: "rev-2" })
+  })
+
+  it("passes options to a new request", async () => {
+    await expect(createTrackedDecisionAction({ ...input, options })).resolves.toEqual({ requestId: "request-1", revisionId: "rev-1" })
+    expect(mockCreateTracked).toHaveBeenCalledWith(expect.objectContaining({ options, idempotencyKey: input.idempotencyKey, requestedById: "user-1" }))
+  })
+
+  it("passes options, including an empty clearing list, to a revision", async () => {
+    const revise = { requestId: "request-1", expectedDecisionId: "decision-1", reason: "Changes needed." }
+    await createTrackedDecisionAction({ ...input, options, revise })
+    expect(mockReviseTracked).toHaveBeenLastCalledWith(expect.objectContaining({ options, ...revise, requestedById: "user-1" }))
+    await createTrackedDecisionAction({ ...input, options: [], revise })
+    expect(mockReviseTracked).toHaveBeenLastCalledWith(expect.objectContaining({ options: [] }))
+  })
+
+  it("leaves options undefined on a revision when none were sent, so the service inherits the prior ones", async () => {
+    await createTrackedDecisionAction({ ...input, revise: { requestId: "request-1", expectedDecisionId: "decision-1", reason: "Changes needed." } })
+    expect(mockReviseTracked.mock.calls[0][0].options).toBeUndefined()
+  })
+
+  it("does not create anything for a user outside the workspace", async () => {
+    prisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(createTrackedDecisionAction({ ...input, options })).rejects.toThrow("Workspace not found")
+    expect(mockCreateTracked).not.toHaveBeenCalled()
   })
 })

@@ -106,6 +106,8 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "064_solution_scoring": "21f12a454e74c576b421be93f5fd65228126682d46ffb21eb7baf5f4d9a5456b",
   // Embedded feedback widget (RFC #298). Last, matching its MIGRATIONS position.
   "064_embed_feedback_sources": "767145991806adc79c0867428a513a14410fd8e6bd0a5023e3541bd73078643e",
+  // Review option description (question/options on tracked decisions). Last, matching its MIGRATIONS position.
+  "065_review_option_description": "bfd2f9f0dc95b85477bc83fc104c1d48cba82b3e20b0809d39ec17f14bad3b70",
   // Org-wide member read-only workspace access. Last, matching its MIGRATIONS position.
   "065_org_member_workspace_readonly": "23494bba1b038c15392f9f8d1d7c41be858dc33bebbd96b5f2185d2675676f5c",
   "066_agent_org_admin_grants": "083b64d82e25724c5827a34c8eea97c1a63c21be6ead6c9caeaf3eac89288371"

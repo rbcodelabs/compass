@@ -407,7 +407,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
 | `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, `isPrivate`, or links (`keyResultId`, `opportunityId`, `solutionId`, `squadId`). Omit a link to preserve it; pass a UUID to set it or `null` to clear it. USER/AGENT targets must belong to the item's workspace, even when the caller can access both workspaces. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow (rejected here — see below — and gated by the workspace's Marketing launch setting) |
-| `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
+| `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources and optionally 2–4 single-choice `options` |
 | `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state (`PENDING`, `DECIDED`, or `AWAITING_FOLLOW_THROUGH`), linked item type, outcome, reviewer, or search text |
 | `get_decision` | Read one tracking-only decision, its immutable revision history, the resolved requester (the human or Agent who raised it), and any linked follow-up Tasks |
 | `close_decision_no_action` | Explicitly close a DECIDED decision as needing no follow-up work, with a required reason. Refuses if the decision already has a linked follow-up Task or was already closed this way |
@@ -444,6 +444,23 @@ declared workspace, and snapshots the source title and `updatedAt` version into
 the immutable packet. If any source is missing or belongs to another workspace,
 the whole request fails and no review is created. Put readable reasoning in the
 Markdown `context`; do not embed source UUIDs there.
+
+`request_decision.options` turns the request into a single-choice question. It
+is an optional array of 2–4 `{ label, description? }` objects (`label` 1–120
+characters and unique case-insensitively; `description` up to 500 characters;
+the labels "Request changes" and "Reject" are reserved). When supplied, the
+human sees your choices as selectable cards, followed by **Request changes** and
+**Reject** so they can always push back. Choosing one of your options records an
+`APPROVE` outcome on that option; the rationale is optional for it and still
+required for Request changes and Reject. There is no built-in "Other" — the
+rationale box is the free-text field. When `options` is omitted the human gets
+the standard Approve / Request changes / Reject, exactly as before. The options
+are part of the immutable packet, so retrying the same `idempotencyKey` with
+different options is rejected as a conflict. `get_decision`,
+`list_decisions`, and `get_review_request` return the offered `options`
+(`label`, `description`, `outcomeClass`) and, once decided, the `chosenOption`.
+Revising a request-changes decision inherits the previous options unless new
+ones are supplied.
 
 `apply_recorded_decision` applies a decided review request through the
 applicator matching its `gateType`, and is idempotent: a repeat call replays
