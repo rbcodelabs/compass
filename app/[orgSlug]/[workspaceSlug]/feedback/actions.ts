@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
+import { requireWorkspaceContextOrThrow } from "@/lib/workspace-context";
 import { feedbackOpportunityLinkData, validateFeedbackInput } from "@/lib/feedback";
 import {
   deleteFeedbackBlobs,
@@ -340,68 +342,109 @@ function toFailure(error: unknown): { ok: false; error: string } {
   };
 }
 
+/**
+ * Resolve the workspace named by the slugs through the shared, membership-
+ * checked resolver. A server action is a public POST endpoint: a session alone
+ * must never be enough to touch a workspace. "No such workspace" and "not a
+ * member" are indistinguishable by design.
+ */
+async function requireMemberWorkspaceId(orgSlug: string, workspaceSlug: string) {
+  const context = await requireWorkspaceContextOrThrow(orgSlug, workspaceSlug);
+  return context.workspace.id;
+}
+
+const FEEDBACK_NOT_FOUND = "Feedback item not found";
+
+/**
+ * Shared write path for the three feedback mutations. The feedback ID comes
+ * from the client, so it is bound to the authorized workspace *in the write
+ * itself* (`updateMany` with `workspaceId` in the filter) rather than looked up
+ * separately, and a zero count is reported as "not found" instead of silently
+ * succeeding.
+ */
+async function updateWorkspaceFeedback(
+  orgSlug: string,
+  workspaceSlug: string,
+  feedbackId: string,
+  data: Prisma.FeedbackItemUpdateManyMutationInput | Prisma.FeedbackItemUncheckedUpdateManyInput,
+  revalidatePathStr: RevalidateTarget,
+  beforeWrite?: (workspaceId: string) => Promise<string | null>
+): Promise<FeedbackMutationResult> {
+  try {
+    const workspaceId = await requireMemberWorkspaceId(orgSlug, workspaceSlug);
+    if (beforeWrite) {
+      const rejection = await beforeWrite(workspaceId);
+      if (rejection) return { ok: false, error: rejection };
+    }
+
+    const { count } = await getPrisma().feedbackItem.updateMany({
+      where: { id: feedbackId, workspaceId },
+      data,
+    });
+    if (count === 0) return { ok: false, error: FEEDBACK_NOT_FOUND };
+
+    // `null` = the caller owns an optimistic overlay; see RevalidateTarget.
+    if (revalidatePathStr) revalidatePath(revalidatePathStr);
+    return { ok: true };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
 export async function updateFeedbackStatus(
+  orgSlug: string,
+  workspaceSlug: string,
   feedbackId: string,
   status: string,
   revalidatePathStr: RevalidateTarget
 ): Promise<FeedbackMutationResult> {
-  try {
-    await requireAuth();
-    const prisma = getPrisma();
-
-    await prisma.feedbackItem.update({
-      where: { id: feedbackId },
-      data: { status, updatedAt: new Date() },
-    });
-
-    // `null` = the caller owns an optimistic overlay; see RevalidateTarget.
-    if (revalidatePathStr) revalidatePath(revalidatePathStr);
-    return { ok: true };
-  } catch (error) {
-    return toFailure(error);
-  }
+  return updateWorkspaceFeedback(
+    orgSlug,
+    workspaceSlug,
+    feedbackId,
+    { status, updatedAt: new Date() },
+    revalidatePathStr
+  );
 }
 
 export async function linkFeedbackToOpportunity(
+  orgSlug: string,
+  workspaceSlug: string,
   feedbackId: string,
   opportunityId: string | null,
   revalidatePathStr: RevalidateTarget
 ): Promise<FeedbackMutationResult> {
-  try {
-    await requireAuth();
-    const prisma = getPrisma();
-
-    await prisma.feedbackItem.update({
-      where: { id: feedbackId },
-      data: feedbackOpportunityLinkData(opportunityId),
-    });
-
-    // `null` = the caller owns an optimistic overlay; see RevalidateTarget.
-    if (revalidatePathStr) revalidatePath(revalidatePathStr);
-    return { ok: true };
-  } catch (error) {
-    return toFailure(error);
-  }
+  return updateWorkspaceFeedback(
+    orgSlug,
+    workspaceSlug,
+    feedbackId,
+    feedbackOpportunityLinkData(opportunityId),
+    revalidatePathStr,
+    // The opportunity ID is client-supplied too: it must live in the same
+    // workspace as the feedback item, or the link would point across tenants.
+    async (workspaceId) => {
+      if (opportunityId === null) return null;
+      const opportunity = await getPrisma().opportunity.findFirst({
+        where: { id: opportunityId, workspaceId },
+        select: { id: true },
+      });
+      return opportunity ? null : "Opportunity not found";
+    }
+  );
 }
 
 export async function updateFeedbackType(
+  orgSlug: string,
+  workspaceSlug: string,
   feedbackId: string,
   type: string,
   revalidatePathStr: RevalidateTarget
 ): Promise<FeedbackMutationResult> {
-  try {
-    await requireAuth();
-    const prisma = getPrisma();
-
-    await prisma.feedbackItem.update({
-      where: { id: feedbackId },
-      data: { type, updatedAt: new Date() },
-    });
-
-    // `null` = the caller owns an optimistic overlay; see RevalidateTarget.
-    if (revalidatePathStr) revalidatePath(revalidatePathStr);
-    return { ok: true };
-  } catch (error) {
-    return toFailure(error);
-  }
+  return updateWorkspaceFeedback(
+    orgSlug,
+    workspaceSlug,
+    feedbackId,
+    { type, updatedAt: new Date() },
+    revalidatePathStr
+  );
 }

@@ -39,8 +39,14 @@ const mockWorkspace = {
   findFirst: vi.fn(),
 }
 
+const mockOrganizationMember = {
+  findFirst: vi.fn(),
+  findMany: vi.fn(),
+}
+
 const mockPrisma = {
   workspace: mockWorkspace,
+  organizationMember: mockOrganizationMember,
 }
 
 vi.mock("@/lib/db", () => ({
@@ -51,6 +57,10 @@ import { getUserWorkspaces, getWorkspace } from "@/lib/workspace"
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Default: no org-wide read-only fallback in play. Individual tests below
+  // override these to exercise that path explicitly.
+  mockOrganizationMember.findFirst.mockResolvedValue(null)
+  mockOrganizationMember.findMany.mockResolvedValue([])
 })
 
 describe("getWorkspace", () => {
@@ -85,6 +95,58 @@ describe("getWorkspace", () => {
       })
     )
   })
+
+  it("tags a real WorkspaceMember row as isReadOnly: false", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({
+      id: "ws-1",
+      organizationId: "org-1",
+      organization: { id: "org-1" },
+    })
+
+    const workspace = await getWorkspace("org-1", "alpha", "user-1")
+
+    expect(workspace?.isReadOnly).toBe(false)
+  })
+
+  describe("org-wide read-only fallback", () => {
+    it("resolves the workspace read-only when there is no membership but the org flag is on", async () => {
+      mockWorkspace.findFirst
+        .mockResolvedValueOnce(null) // membership-scoped lookup fails
+        .mockResolvedValueOnce({
+          id: "ws-1",
+          organizationId: "org-1",
+          organization: { id: "org-1" },
+        }) // read-only fallback lookup succeeds
+      mockOrganizationMember.findFirst.mockResolvedValue({ id: "orgmember-1" })
+
+      const workspace = await getWorkspace("org-1", "alpha", "user-1")
+
+      expect(workspace).toMatchObject({ id: "ws-1", isReadOnly: true })
+    })
+
+    it("returns null when the org flag is off (fallback lookup matches nothing)", async () => {
+      mockWorkspace.findFirst.mockResolvedValue(null)
+
+      const workspace = await getWorkspace("org-1", "alpha", "user-1")
+
+      expect(workspace).toBeNull()
+    })
+
+    it("returns null when the org-flagged workspace exists but the caller has no OrganizationMember row", async () => {
+      mockWorkspace.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: "ws-1",
+          organizationId: "org-1",
+          organization: { id: "org-1" },
+        })
+      mockOrganizationMember.findFirst.mockResolvedValue(null)
+
+      const workspace = await getWorkspace("org-1", "alpha", "user-1")
+
+      expect(workspace).toBeNull()
+    })
+  })
 })
 
 describe("getUserWorkspaces", () => {
@@ -101,7 +163,7 @@ describe("getUserWorkspaces", () => {
     const result = await getUserWorkspaces("user-1")
 
     expect(result).toEqual([
-      { id: "ws-1", name: "Alpha", slug: "alpha", orgSlug: "org-1", orgName: "Org One" },
+      { id: "ws-1", name: "Alpha", slug: "alpha", orgSlug: "org-1", orgName: "Org One", isReadOnly: false },
     ])
   })
 
@@ -142,7 +204,7 @@ describe("getUserWorkspaces", () => {
     // The healthy sibling still comes back — one orphan must not take out the
     // whole authenticated surface, which was the production failure.
     await expect(getUserWorkspaces("user-1")).resolves.toEqual([
-      { id: "ws-2", name: "Beta", slug: "beta", orgSlug: "org-2", orgName: "Org Two" },
+      { id: "ws-2", name: "Beta", slug: "beta", orgSlug: "org-2", orgName: "Org Two", isReadOnly: false },
     ])
 
     // The orphan is logged, not silently dropped without a trace.
@@ -159,5 +221,56 @@ describe("getUserWorkspaces", () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
 
     await expect(getUserWorkspaces("user-1")).resolves.toEqual([])
+  })
+
+  describe("org-wide read-only fallback", () => {
+    it("unions in workspaces from a read-only org, tagged isReadOnly: true", async () => {
+      // No real memberships at all.
+      mockWorkspace.findMany.mockResolvedValueOnce([])
+      mockOrganizationMember.findMany.mockResolvedValue([
+        { organizationId: "org-9", organization: { slug: "org-9", name: "Org Nine" } },
+      ])
+      // Second findMany call: every workspace owned by the read-only org.
+      mockWorkspace.findMany.mockResolvedValueOnce([
+        { id: "ws-9", name: "Nine Workspace", slug: "nine", organizationId: "org-9" },
+      ])
+
+      const result = await getUserWorkspaces("user-1")
+
+      expect(result).toEqual([
+        { id: "ws-9", name: "Nine Workspace", slug: "nine", orgSlug: "org-9", orgName: "Org Nine", isReadOnly: true },
+      ])
+    })
+
+    it("never downgrades a workspace the user is a real member of, even if the org flag is also on", async () => {
+      mockWorkspace.findMany.mockResolvedValueOnce([
+        { id: "ws-9", name: "Nine Workspace", slug: "nine", organization: { slug: "org-9", name: "Org Nine" } },
+      ])
+      mockOrganizationMember.findMany.mockResolvedValue([
+        { organizationId: "org-9", organization: { slug: "org-9", name: "Org Nine" } },
+      ])
+      // The read-only org owns two workspaces; the user is a real member of
+      // one of them (ws-9, already in the first result set above).
+      mockWorkspace.findMany.mockResolvedValueOnce([
+        { id: "ws-9", name: "Nine Workspace", slug: "nine", organizationId: "org-9" },
+        { id: "ws-10", name: "Ten Workspace", slug: "ten", organizationId: "org-9" },
+      ])
+
+      const result = await getUserWorkspaces("user-1")
+
+      expect(result).toEqual([
+        { id: "ws-9", name: "Nine Workspace", slug: "nine", orgSlug: "org-9", orgName: "Org Nine", isReadOnly: false },
+        { id: "ws-10", name: "Ten Workspace", slug: "ten", orgSlug: "org-9", orgName: "Org Nine", isReadOnly: true },
+      ])
+    })
+
+    it("skips the second query entirely when no org grants read-only access", async () => {
+      mockWorkspace.findMany.mockResolvedValueOnce([])
+      mockOrganizationMember.findMany.mockResolvedValue([])
+
+      await getUserWorkspaces("user-1")
+
+      expect(mockWorkspace.findMany).toHaveBeenCalledTimes(1)
+    })
   })
 })

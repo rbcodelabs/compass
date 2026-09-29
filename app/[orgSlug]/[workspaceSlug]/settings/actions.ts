@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
-import { isPermissionError, resolveWorkspaceAdmin } from "@/lib/permissions";
+import { isPermissionError, resolveOrgAdmin, resolveWorkspaceAdmin } from "@/lib/permissions";
 import { countWorkspaceAdmins, normalizeWorkspaceRole } from "@/lib/roles";
 import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
 import { encrypt } from "@/lib/crypto-secrets";
@@ -1070,4 +1070,39 @@ export async function updateLaunchWorkflowSettings(
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
   revalidatePath(`/${orgSlug}/${workspaceSlug}/roadmap`);
+}
+
+// ─── Organization: member read-only workspace access ──────────────────────────
+
+/**
+ * Toggles Organization.memberWorkspaceReadOnlyAccess. Gated on org
+ * OWNER/ADMIN (`resolveOrgAdmin`), deliberately NOT `resolveWorkspaceAdmin` --
+ * this flag reaches every workspace the org owns, so a workspace-only admin
+ * who is not also an org owner/admin must not be able to flip it, even though
+ * they can flip every other toggle on this page. See lib/permissions.ts:
+ * resolveOrgAdmin throws "Unauthorized" (no session), "Organization not
+ * found" (not an org member), or "Forbidden: organization admin required"
+ * (member but not OWNER/ADMIN) -- all three are exactly what should stop this
+ * write, and OrgReadOnlyAccessPanel surfaces whichever one is thrown.
+ *
+ * Revalidates broadly (`"/", "layout"`) rather than only this workspace's
+ * settings page, matching the precedent in app/[orgSlug]/settings/actions.ts's
+ * `deleteOrganization` -- the change is visible in the sidebar workspace
+ * switcher (badge) and the read-only fallback on every OTHER workspace this
+ * org owns too, none of which this action knows the slugs of.
+ */
+export async function updateMemberWorkspaceReadOnlyAccess(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: { memberWorkspaceReadOnlyAccess: boolean }
+) {
+  const { prisma, organizationId } = await resolveOrgAdmin(orgSlug);
+
+  await prisma.organization.update({
+    where: { id: organizationId },
+    data: { memberWorkspaceReadOnlyAccess: input.memberWorkspaceReadOnlyAccess },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  revalidatePath("/", "layout");
 }

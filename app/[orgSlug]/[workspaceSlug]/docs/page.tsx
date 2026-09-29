@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect, notFound } from "next/navigation";
 import { BookOpen } from "lucide-react";
 import getPrisma from "@/lib/db";
+import { resolveWorkspaceAccess } from "@/lib/workspace-context";
 import { createFirstDoc } from "./actions";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/patterns/empty-state";
@@ -21,16 +22,14 @@ export default async function DocsIndexPage({ params }: Props) {
   const { orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
 
-  const workspace = await prisma.workspace.findFirst({
-    where: {
-      slug: workspaceSlug,
-      organization: { slug: orgSlug },
-      members: { some: { userId: session.user.id } },
-    },
-    select: { id: true },
-  });
-
-  if (!workspace) notFound();
+  // Membership-or-org-read-only-fallback check. Redundant with docs/layout.tsx's
+  // own requireWorkspaceContext() gate above this page in the tree, but kept
+  // (rather than trusting the layout alone) for the same reason the original
+  // membership-only version of this query existed: a page that renders under a
+  // gated layout should not silently rely on that layout never changing.
+  const access = await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id);
+  if (!access) notFound();
+  const workspace = { id: access.workspaceId };
 
   const firstDoc = await prisma.doc.findFirst({
     where: { workspaceId: workspace.id },

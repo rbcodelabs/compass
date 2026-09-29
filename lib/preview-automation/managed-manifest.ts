@@ -18,6 +18,16 @@ import path from "node:path";
  * digest was recorded from the shipped SQL rather than produced by a fresh audit,
  * and it is here for the same reason: membership and ordering are pinned, so the
  * MIGRATIONS array cannot load without it. Please review that line.
+ *
+ * Same caveat again for `065_org_member_workspace_readonly` (org-wide member
+ * read-only workspace access): a single nullable ADD COLUMN + backfill UPDATE
+ * on `organizations`, following the exact shape of `055_workspace_launch_workflow_flag`.
+ * Digest recorded from the shipped SQL; please review that line too.
+ *
+ * And again for `066_agent_org_admin_grants` (ADR 0020): creates the org-scoped
+ * `agent_org_admin_grants` table plus one nullable ADD COLUMN on `agent_tool_calls`,
+ * following the shape of `049_agent_identity`. The SQL was re-read for this pin:
+ * additive DDL only, IF NOT EXISTS throughout, no data writes. Please review that line.
  */
 const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "001_init": "f22fed1ed336c56fbfb3380e0497c45ba355efd14906f0e4c8f4c1a5279eb12e",
@@ -97,7 +107,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Embedded feedback widget (RFC #298). Last, matching its MIGRATIONS position.
   "064_embed_feedback_sources": "767145991806adc79c0867428a513a14410fd8e6bd0a5023e3541bd73078643e",
   // Review option description (question/options on tracked decisions). Last, matching its MIGRATIONS position.
-  "065_review_option_description": "bfd2f9f0dc95b85477bc83fc104c1d48cba82b3e20b0809d39ec17f14bad3b70"
+  "065_review_option_description": "bfd2f9f0dc95b85477bc83fc104c1d48cba82b3e20b0809d39ec17f14bad3b70",
+  // Org-wide member read-only workspace access. Last, matching its MIGRATIONS position.
+  "065_org_member_workspace_readonly": "23494bba1b038c15392f9f8d1d7c41be858dc33bebbd96b5f2185d2675676f5c",
+  "066_agent_org_admin_grants": "083b64d82e25724c5827a34c8eea97c1a63c21be6ead6c9caeaf3eac89288371"
 };
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {

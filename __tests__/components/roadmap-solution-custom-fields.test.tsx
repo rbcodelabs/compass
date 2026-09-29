@@ -40,6 +40,9 @@ vi.mock("@/components/discovery/evidence-list", () => ({ EvidenceList: () => nul
 vi.mock("@/components/research/flesh-this-out-link", () => ({ FleshThisOutLink: () => null }));
 vi.mock("@/components/research/pm-interview-history", () => ({ PmInterviewHistory: () => null }));
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({ promoteToRoadmap: vi.fn() }));
+// SolutionScoringPanel (embedded in SolutionPanel) writes through the discovery
+// server actions module, which imports next-auth — not loadable in this jsdom test.
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({ saveSolutionScore: vi.fn() }));
 
 import { RoadmapItemPanel } from "@/components/panels/roadmap-item-panel";
 import { SolutionPanel } from "@/components/panels/solution-panel";

@@ -36,6 +36,11 @@ vi.mock("@/components/panels/solution-artifacts", () => ({ SolutionArtifacts: ()
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({
   promoteToRoadmap: vi.fn(),
 }));
+// The Solution panel embeds SolutionScoringPanel, which writes through the
+// discovery server actions module (imports next-auth) — same boundary as above.
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({
+  saveSolutionScore: vi.fn(),
+}));
 // Roadmap item panel children
 vi.mock("@/components/panels/launch-checklist", () => ({ LaunchChecklist: () => null }));
 vi.mock("@/components/panels/launch-tier-picker", () => ({ LaunchTierPicker: () => null }));

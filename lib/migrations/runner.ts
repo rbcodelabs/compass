@@ -408,6 +408,16 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "065_review_option_description",
     filePath: path.join(process.cwd(), "prisma/migrations/065_review_option_description/migration.sql"),
   },
+  {
+    // Org-wide member read-only workspace access flag. See migration file
+    // header for the DSQL-safe nullable-then-backfill shape.
+    name: "065_org_member_workspace_readonly",
+    filePath: path.join(process.cwd(), "prisma/migrations/065_org_member_workspace_readonly/migration.sql"),
+  },
+  {
+    name: "066_agent_org_admin_grants",
+    filePath: path.join(process.cwd(), "prisma/migrations/066_agent_org_admin_grants/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));

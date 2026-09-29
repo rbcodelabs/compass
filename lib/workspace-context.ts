@@ -71,6 +71,15 @@ export type WorkspaceContext =
       /** Raw stored value; the column is a bare VarChar. Prefer isOrgAdmin. */
       orgRole: string | null
       isOrgAdmin: boolean
+      /**
+       * True when this context was resolved without a real WorkspaceMember
+       * row -- the caller is an OrganizationMember of the owning org and
+       * Organization.memberWorkspaceReadOnlyAccess is on. See
+       * `assertWorkspaceWritable` below: every write path reached through
+       * this context (page actions, API routes) must check this before
+       * mutating anything.
+       */
+      isReadOnly: boolean
     }
 
 /**
@@ -114,18 +123,50 @@ export const getWorkspaceContext = cache(
       }),
     ])
 
-    if (!workspace) return { status: "not-found" }
-
-    return {
-      status: "ok",
-      user,
-      userId: user.id,
-      workspace,
-      orgSlug,
-      workspaceSlug,
-      orgRole: orgMember?.role ?? null,
-      isOrgAdmin: isOrgAdminRole(orgMember?.role),
+    if (workspace) {
+      return {
+        status: "ok",
+        user,
+        userId: user.id,
+        workspace,
+        orgSlug,
+        workspaceSlug,
+        orgRole: orgMember?.role ?? null,
+        isOrgAdmin: isOrgAdminRole(orgMember?.role),
+        isReadOnly: false,
+      }
     }
+
+    // No direct WorkspaceMember row. Fall back to org-wide read-only access:
+    // the caller must already be an OrganizationMember of this exact org (not
+    // merely signed in) *and* the org must have opted every workspace it owns
+    // into member-readable access. Both conditions are re-checked here rather
+    // than trusted from the query above, since `orgMember` alone says nothing
+    // about the flag.
+    if (orgMember) {
+      const readOnlyWorkspace = await prisma.workspace.findFirst({
+        where: {
+          slug: workspaceSlug,
+          organization: { slug: orgSlug, memberWorkspaceReadOnlyAccess: true },
+        },
+        select: WORKSPACE_SUMMARY_SELECT,
+      })
+      if (readOnlyWorkspace) {
+        return {
+          status: "ok",
+          user,
+          userId: user.id,
+          workspace: readOnlyWorkspace,
+          orgSlug,
+          workspaceSlug,
+          orgRole: orgMember.role,
+          isOrgAdmin: isOrgAdminRole(orgMember.role),
+          isReadOnly: true,
+        }
+      }
+    }
+
+    return { status: "not-found" }
   }
 )
 
@@ -170,5 +211,78 @@ export async function requireWorkspaceContextOrThrow(
   if (ctx.status === "unauthenticated") throw new PermissionError("Unauthorized")
   if (ctx.status === "not-found") throw new PermissionError("Workspace not found")
   return ctx
+}
+
+/**
+ * The single write-path gate for org-wide read-only workspace access.
+ *
+ * Call this at the top of every mutation (POST/PUT/PATCH/DELETE route
+ * handler, every server action that writes) immediately after resolving a
+ * context/workspace that could carry `isReadOnly: true` -- from
+ * `getWorkspaceContext`/`requireWorkspaceContext`/`requireWorkspaceContextOrThrow`
+ * above, or from `getWorkspace()` in lib/workspace.ts. Read (GET) paths must
+ * NOT call this -- a read-only context is supposed to render data normally.
+ *
+ * Deliberately takes the narrowest shape that satisfies both resolvers
+ * (`{ isReadOnly: boolean }`) rather than the full context type, so callers
+ * don't have to thread an unused `orgRole`/`isOrgAdmin` through call sites
+ * that only ever had a `getWorkspace()` result.
+ */
+export function assertWorkspaceWritable(context: { isReadOnly: boolean }): void {
+  if (context.isReadOnly) {
+    throw new PermissionError("Forbidden: workspace is read-only")
+  }
+}
+
+/**
+ * Resolves whether `userId` may READ the named workspace: a real
+ * WorkspaceMember row, or (fallback) org-wide read-only access via
+ * `Organization.memberWorkspaceReadOnlyAccess`. Returns just the id and the
+ * read-only flag, not a projection -- callers that need specific columns run
+ * their own follow-up query by id, since every page in this route tree wants
+ * a different projection of Workspace and a generic `select` here would just
+ * push the type-juggling problem onto every caller instead of solving it.
+ *
+ * This is the read-path counterpart to `getWorkspaceContext` for the several
+ * page.tsx files in app/[orgSlug]/[workspaceSlug]/** that run their own
+ * inline `workspace.findFirst` instead of going through the shared resolver
+ * (see those files' history for why: they select a narrower projection than
+ * WORKSPACE_SUMMARY_SELECT). Not cached with `cache()`, unlike
+ * `getWorkspaceContext` -- callers already do a second query by the returned
+ * id in the same request, so there is no repeat-call pattern here to dedupe.
+ */
+export async function resolveWorkspaceAccess(
+  orgSlug: string,
+  workspaceSlug: string,
+  userId: string
+): Promise<{ workspaceId: string; isReadOnly: boolean } | null> {
+  const prisma = getPrisma()
+  const member = await prisma.workspace.findFirst({
+    where: {
+      slug: workspaceSlug,
+      organization: { slug: orgSlug },
+      members: { some: { userId } },
+    },
+    select: { id: true },
+  })
+  if (member) return { workspaceId: member.id, isReadOnly: false }
+
+  const [readOnlyWorkspace, orgMember] = await Promise.all([
+    prisma.workspace.findFirst({
+      where: {
+        slug: workspaceSlug,
+        organization: { slug: orgSlug, memberWorkspaceReadOnlyAccess: true },
+      },
+      select: { id: true },
+    }),
+    prisma.organizationMember.findFirst({
+      where: { organization: { slug: orgSlug }, userId },
+      select: { id: true },
+    }),
+  ])
+  if (readOnlyWorkspace && orgMember) {
+    return { workspaceId: readOnlyWorkspace.id, isReadOnly: true }
+  }
+  return null
 }
 

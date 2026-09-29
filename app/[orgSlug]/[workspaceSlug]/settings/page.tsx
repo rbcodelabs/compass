@@ -7,6 +7,7 @@ import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
 import { parseSelectOptions } from "@/lib/shared-field-options";
 import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel";
 import { ManageMembersPanel } from "@/components/settings/manage-members-panel";
+import { OrgReadOnlyAccessPanel } from "@/components/settings/org-readonly-access-panel";
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
 import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
 import { DeliveryLimitsPanel } from "@/components/settings/delivery-limits-panel";
@@ -58,7 +59,13 @@ export default async function SettingsPage({ params }: Props) {
     select: {
       id: true,
       organizationId: true,
-      organization: { select: { members: { where: { userId: session.user?.id }, select: { role: true } } } },
+      organization: {
+        select: {
+          name: true,
+          members: { where: { userId: session.user?.id }, select: { role: true } },
+          memberWorkspaceReadOnlyAccess: true,
+        },
+      },
       name: true,
       feedbackEnabled: true,
       roadmapPublic: true,
@@ -169,6 +176,13 @@ export default async function SettingsPage({ params }: Props) {
     rawMembers.find((m) => m.userId === session.user?.id)?.id ?? null;
   const currentWorkspaceRole = rawMembers.find((m) => m.userId === session.user?.id)?.role;
   const canManageCapabilityPacks = normalizeWorkspaceRole(currentWorkspaceRole) === "ADMIN" || isOrgAdminRole(workspace.organization.members[0]?.role);
+  // Deliberately NOT combined with canManageCapabilityPacks/workspace-admin
+  // above: the Organization section below controls
+  // Organization.memberWorkspaceReadOnlyAccess, which reaches every
+  // workspace the org owns, not just this one. A workspace admin who is not
+  // also an org OWNER/ADMIN must not see or use it, even though they pass
+  // every other admin gate on this page.
+  const isOrgAdmin = isOrgAdminRole(workspace.organization.members[0]?.role);
   const analyticsActor = { userId: session.user.id, purpose: "USER" as const, scopeWorkspaceId: workspace.id };
   const analyticsConnections = await listConnections(analyticsActor, workspace.id);
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: workspace.id, revokedAt: null } });
@@ -275,6 +289,19 @@ export default async function SettingsPage({ params }: Props) {
           currentUserMembershipId={currentUserMembershipId}
         />
       </SettingsSection>
+
+      {isOrgAdmin && (
+        <SettingsSection
+          title="Organization"
+          description={`Settings here apply to the whole "${workspace.organization.name ?? "organization"}" organization — every workspace it owns, not just ${workspace.name}. Visible only to organization owners/admins.`}
+        >
+          <OrgReadOnlyAccessPanel
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            memberWorkspaceReadOnlyAccess={workspace.organization.memberWorkspaceReadOnlyAccess ?? false}
+          />
+        </SettingsSection>
+      )}
 
       <SettingsSection title="Shared option sets" description="One editable picklist that any select or multi-select field can borrow — across different object types. Edit the list here and every field using it updates at once.">
         <SharedOptionSetsPanel

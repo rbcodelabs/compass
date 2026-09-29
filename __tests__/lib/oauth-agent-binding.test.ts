@@ -37,8 +37,17 @@ const oAuthToken = { findFirst: vi.fn(), update: vi.fn() }
 const agentToolCall = { create: vi.fn(), update: vi.fn() }
 const apiKey = { findFirst: vi.fn(), update: vi.fn() }
 const agentWorkspaceGrant = { findMany: vi.fn() }
-const workspace = { findFirst: vi.fn() }
-vi.mock("@/lib/db", () => ({ default: () => ({ agent, oAuthToken, agentToolCall, apiKey, agentWorkspaceGrant, workspace }) }))
+const workspace = { findFirst: vi.fn(), findUnique: vi.fn() }
+const agentOrgAdminGrant = { findFirst: vi.fn() }
+const organizationMember = { findFirst: vi.fn() }
+const organization = { findUnique: vi.fn() }
+const scoringModel = { findUnique: vi.fn() }
+vi.mock("@/lib/db", () => ({
+  default: () => ({
+    agent, oAuthToken, agentToolCall, apiKey, agentWorkspaceGrant, workspace,
+    agentOrgAdminGrant, organizationMember, organization, scoringModel,
+  }),
+}))
 
 import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { withAgentActivity } from "@/lib/agent-activity"
@@ -245,6 +254,30 @@ describe("an agent-bound OAuth token engages the agent authorization model", () 
     const actor = actorFromAuth(await validateMcpAuth(bearer()))
     await expect(assertWorkspaceAdmin(actor, "granted-1")).rejects.toThrow("Human administrator required.")
     await expect(assertOrgAdminBySlug(actor, "rbcodelabs")).rejects.toThrow("Human administrator required.")
+  })
+
+  // ADR 0020: even with the agentCapability escape hatch supplied, an
+  // agent-bound OAuth token with no AgentOrgAdminGrant row is still refused —
+  // the opt-in parameter alone grants nothing.
+  it("assertOrgAdminBySlug still throws for an agentCapability call with no grant present", async () => {
+    const actor = actorFromAuth(await validateMcpAuth(bearer()))
+    organization.findUnique.mockResolvedValue({ id: "org-1" })
+    agentOrgAdminGrant.findFirst.mockResolvedValue(null)
+    await expect(
+      assertOrgAdminBySlug(actor, "rbcodelabs", { agentCapability: "SCORING_MODEL_ADMIN" }),
+    ).rejects.toThrow("Human administrator required.")
+  })
+
+  // The full real seam, end to end: bearer header -> validateMcpAuth -> the
+  // actor route.ts builds -> applyToolGate -> assertScoringModelAccess ->
+  // hasValidAgentOrgAdminGrant, with a live grant whose grantor currently
+  // holds an org admin role. Nothing here is hand-constructed.
+  it("applyToolGate(update_scoring_model) succeeds for an agent-bound OAuth token holding a live, valid grant", async () => {
+    const actor = actorFromAuth(await validateMcpAuth(bearer()))
+    scoringModel.findUnique.mockResolvedValue({ organizationId: "org-1" })
+    agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
+    organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    await expect(applyToolGate("update_scoring_model", actor, { scoringModelId: "model-1" })).resolves.toBeUndefined()
   })
 
   it("is refused entirely, rather than narrowed, once its agent is suspended", async () => {

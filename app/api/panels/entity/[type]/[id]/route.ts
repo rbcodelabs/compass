@@ -92,6 +92,14 @@ export async function PATCH(
   if (!workspace) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  // Org-wide read-only members can view every entity through GET above but
+  // may not edit any of them -- see assertWorkspaceWritable's doc comment in
+  // lib/workspace-context.ts. Checked directly rather than via that helper's
+  // throw so the response stays a clean 403 JSON body like every other error
+  // path in this route, instead of an uncaught exception.
+  if (workspace.isReadOnly) {
+    return NextResponse.json({ error: "Forbidden: workspace is read-only" }, { status: 403 });
+  }
 
   let body: { field?: unknown; value?: unknown };
   try {

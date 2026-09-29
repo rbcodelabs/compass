@@ -41,6 +41,7 @@ export function CreateExperimentForm({
   const [isPending, startTransition] = useTransition()
   const [squadId, setSquadId] = useState<string | null>(null)
   const [assumptionId, setAssumptionId] = useState<string | null>(prefillAssumptionId)
+  const [error, setError] = useState<string | null>(null)
   const formRef = useRef<HTMLFormElement>(null)
 
   // This squad option renders a colour dot alongside the name, so `Select`
@@ -62,19 +63,30 @@ export function CreateExperimentForm({
 
     if (!title || !hypothesis || !method || !killCondition) return
 
+    setError(null)
     startTransition(async () => {
-      await createExperiment(workspaceId, {
-        title,
-        hypothesis,
-        method,
-        killCondition,
-        squadId,
-        assumptionId: assumptionId ?? undefined,
-      })
-      setOpen(false)
-      setSquadId(null)
-      setAssumptionId(null)
-      formRef.current?.reset()
+      try {
+        await createExperiment(workspaceId, {
+          title,
+          hypothesis,
+          method,
+          killCondition,
+          squadId,
+          assumptionId: assumptionId ?? undefined,
+        })
+        setOpen(false)
+        setSquadId(null)
+        setAssumptionId(null)
+        formRef.current?.reset()
+      } catch (err) {
+        // requireProductWorkspace (lib/product-action-auth.ts) throws a bare
+        // Error rather than returning a result -- previously unreachable for
+        // a non-member (they had no way to open this form), now
+        // reachable-but-blocked for an org-wide read-only viewer. Without
+        // this catch the rejection was unhandled and surfaced as Next's raw
+        // runtime-error overlay instead of a clean, expected message.
+        setError(err instanceof Error ? err.message : "Failed to create experiment")
+      }
     })
   }
 
@@ -223,6 +235,8 @@ export function CreateExperimentForm({
         </div>
       )}
 
+      {error && <p className="text-xs text-destructive">{error}</p>}
+
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={isPending}>
           {isPending ? "Creating..." : "Create Experiment"}
@@ -236,6 +250,7 @@ export function CreateExperimentForm({
             setOpen(false)
             setSquadId(null)
             setAssumptionId(null)
+            setError(null)
             formRef.current?.reset()
           }}
         >

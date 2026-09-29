@@ -747,6 +747,20 @@ Agent credentials cannot expand their own access or perform human approval
 operations. Workspace lists and organization-wide rankings return only granted
 workspaces. Registration, grants, and key management use authenticated settings.
 
+**Delegated admin capability (scoring models).** `create_scoring_model`,
+`update_scoring_model`, `archive_scoring_model`, and `set_workspace_scoring_model`
+are otherwise human-only, but an org OWNER/ADMIN can explicitly delegate that
+one capability to a specific registered agent from **Settings → Organization**.
+The grant is narrow (only these four tools, only within that organization),
+re-verified against the granting human's *current* org role on every call —
+so it silently stops working the moment that human is demoted or removed, with
+no separate revocation step required — and it is only ever created or revoked
+through that authenticated settings page, never through an MCP tool. An agent
+with no such grant is refused these tools exactly as before. Every call made
+under a grant is attributed to it in the agent's audit trail. See ADR 0020
+("Explicit, Auditable Admin Grants for Delegated Agent Identities") in
+Compass Docs → Architecture Decisions.
+
 Solution comments and plans created with agent credentials use the authenticated
 agent's name and `AGENT` author type, overriding caller-supplied attribution.
 Built-in assistant turns use “Compass assistant.” Agent credentials cannot call

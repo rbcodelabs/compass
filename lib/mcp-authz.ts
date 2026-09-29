@@ -35,7 +35,7 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import getPrisma from "@/lib/db"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
-import { agentWorkspaceWhere } from "@/lib/agent-access"
+import { agentWorkspaceWhere, hasValidAgentOrgAdminGrant, type AgentAdminCapability } from "@/lib/agent-access"
 import { getManagedPilotContext } from "@/lib/preview-automation/managed-context"
 
 export type McpActor = {
@@ -47,6 +47,12 @@ export type McpActor = {
   credentialType?: "API_KEY" | "OAUTH"
   requiredAgentAccess?: "READ" | "WRITE"
   authorizedWorkspaceId?: string
+  /**
+   * AgentOrgAdminGrant.id this call was authorized under (ADR 0020), set by
+   * hasValidAgentOrgAdminGrant the moment it validates a live grant. Read by
+   * lib/agent-activity.ts to attribute the resulting AgentToolCall row.
+   */
+  agentAdminGrantId?: string
   scopeWorkspaceId?: string | null
   scopeConversationId?: string | null
   scopeClaimId?: string | null
@@ -123,11 +129,29 @@ export async function assertWorkspaceMember(actor: McpActor, workspaceId: string
   actor.authorizedWorkspaceId = workspaceId
 }
 
-/** Assert the actor is a workspace ADMIN of `workspaceId`. */
-export async function assertWorkspaceAdmin(actor: McpActor, workspaceId: string): Promise<void> {
+/**
+ * Assert the actor is a workspace ADMIN of `workspaceId`.
+ *
+ * `opts.agentCapability` is the ADR 0020 escape hatch: when set and the actor
+ * is AGENT/AGENT_TURN, a live AgentOrgAdminGrant for that capability in the
+ * workspace's organization authorizes the call in place of the human-only
+ * throw below. Omitting it (every pre-existing call site) preserves today's
+ * unconditional denial exactly.
+ */
+export async function assertWorkspaceAdmin(
+  actor: McpActor,
+  workspaceId: string,
+  opts: { agentCapability?: AgentAdminCapability } = {},
+): Promise<void> {
   assertActorWorkspaceScope(actor, workspaceId)
   if (isService(actor)) return
-  if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") throw new McpAuthzError("Human administrator required.")
+  if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") {
+    if (opts.agentCapability) {
+      const ws = await getPrisma().workspace.findUnique({ where: { id: workspaceId }, select: { organizationId: true } })
+      if (ws && (await hasValidAgentOrgAdminGrant(actor, ws.organizationId, opts.agentCapability))) return
+    }
+    throw new McpAuthzError("Human administrator required.")
+  }
   const prisma = getPrisma()
   const [member, orgMember] = await Promise.all([
     prisma.workspaceMember.findFirst({ where: { workspaceId, userId: actor.userId! }, select: { role: true } }),
@@ -194,14 +218,27 @@ export async function assertOrgMemberBySlug(
   return { organizationId: member.organizationId }
 }
 
-/** Assert the actor is an OWNER/ADMIN of the org identified by `orgSlug`. */
+/**
+ * Assert the actor is an OWNER/ADMIN of the org identified by `orgSlug`.
+ *
+ * See assertWorkspaceAdmin's doc comment for `opts.agentCapability` — same
+ * ADR 0020 escape hatch, resolved against the org this slug names instead of
+ * a workspace's parent org.
+ */
 export async function assertOrgAdminBySlug(
   actor: McpActor,
-  orgSlug: string
+  orgSlug: string,
+  opts: { agentCapability?: AgentAdminCapability } = {}
 ): Promise<{ organizationId: string }> {
   if (getManagedPilotContext()) throw new McpAuthzError("Organization-wide mutations are unavailable in the managed pilot.")
-  if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") throw new McpAuthzError("Human administrator required.")
   const prisma = getPrisma()
+  if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") {
+    if (opts.agentCapability) {
+      const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
+      if (org && (await hasValidAgentOrgAdminGrant(actor, org.id, opts.agentCapability))) return { organizationId: org.id }
+    }
+    throw new McpAuthzError("Human administrator required.")
+  }
   if (isService(actor)) {
     const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
     if (!org) throw new McpAuthzError(`Organization not found: ${orgSlug}`)
@@ -377,16 +414,33 @@ export async function assertEntityAccess(
  * Assert the actor may act on an org-level scoring model by id. `admin: true`
  * requires org OWNER/ADMIN (create/update/archive); otherwise any org member
  * (read). Returns the owning `organizationId`.
+ *
+ * `opts.agentCapability` is the ADR 0020 escape hatch, checked only inside
+ * the `admin` branch: when set and the actor is AGENT/AGENT_TURN, a live
+ * AgentOrgAdminGrant for that capability authorizes the call and returns
+ * immediately — mirroring the `isService` short-circuit below rather than
+ * falling through to the plain-member org-role check, since the whole point
+ * of the grant is that the acting agent's OWNER need not be an org admin
+ * themselves (see hasValidAgentOrgAdminGrant's doc comment).
  */
 export async function assertScoringModelAccess(
   actor: McpActor,
   scoringModelId: string,
-  opts: { admin?: boolean } = {}
+  opts: { admin?: boolean; agentCapability?: AgentAdminCapability } = {}
 ): Promise<{ organizationId: string }> {
   if (opts.admin && getManagedPilotContext()) throw new McpAuthzError("Organization-wide mutations are unavailable in the managed pilot.")
   const prisma = getPrisma()
   if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") {
-    if (opts.admin) throw new McpAuthzError("Human administrator required.")
+    if (opts.admin) {
+      if (opts.agentCapability) {
+        const model = await prisma.scoringModel.findUnique({ where: { id: scoringModelId }, select: { organizationId: true } })
+        if (!model) throw new McpAuthzError(`Scoring model not found or access denied: ${scoringModelId}`)
+        if (await hasValidAgentOrgAdminGrant(actor, model.organizationId, opts.agentCapability)) {
+          return { organizationId: model.organizationId }
+        }
+      }
+      throw new McpAuthzError("Human administrator required.")
+    }
     const config = await prisma.workspaceScoringConfig.findFirst({
       where: {
         OR: [{ opportunityScoringModelId: scoringModelId }, { solutionScoringModelId: scoringModelId }],

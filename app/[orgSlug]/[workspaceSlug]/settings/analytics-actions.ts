@@ -5,43 +5,46 @@ import { getWorkspace } from "@/lib/workspace";
 import * as analytics from "@/lib/analytics/service";
 import type { McpActor } from "@/lib/mcp-authz";
 import { analyticsAction } from "@/lib/analytics/action-result";
+import { assertWorkspaceWritable } from "@/lib/workspace-context";
 
 export async function disconnectAnalytics(orgSlug: string, workspaceSlug: string, connectionId: string) {
-  const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
+  const { actor, workspaceId } = await writableContext(orgSlug, workspaceSlug);
   return analyticsAction(() => analytics.disconnectConnection(actor, workspaceId, connectionId));
 }
 
 export async function editAnalyticsMetric(orgSlug: string, workspaceSlug: string, metricId: string, input: analytics.MetricInput & { expectedRevision: number }) {
-  const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
+  const { actor, workspaceId } = await writableContext(orgSlug, workspaceSlug);
   return analyticsAction(() => analytics.updateMetric(actor, workspaceId, metricId, input));
 }
 
 export async function archiveAnalyticsMetric(orgSlug: string, workspaceSlug: string, metricId: string) {
-  const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
+  const { actor, workspaceId } = await writableContext(orgSlug, workspaceSlug);
   return analyticsAction(() => analytics.archiveMetric(actor, workspaceId, metricId));
 }
 
 export async function linkAnalyticsMetric(orgSlug: string, workspaceSlug: string, input: analytics.LinkMetricInput) {
-  const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
+  const { actor, workspaceId } = await writableContext(orgSlug, workspaceSlug);
   return analyticsAction(() => analytics.linkMetric(actor, workspaceId, input));
 }
 
 export async function updateAnalyticsMeasurement(orgSlug: string, workspaceSlug: string, bindingId: string, input: analytics.UpdateMetricBindingInput) {
-  const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
+  const { actor, workspaceId } = await writableContext(orgSlug, workspaceSlug);
   return analyticsAction(() => analytics.updateBinding(actor, workspaceId, bindingId, input));
 }
 
 export async function unlinkAnalyticsMetric(orgSlug: string, workspaceSlug: string, bindingId: string) {
-  const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
+  const { actor, workspaceId } = await writableContext(orgSlug, workspaceSlug);
   return analyticsAction(() => analytics.unlinkMetric(actor, workspaceId, bindingId));
 }
 
 export async function refreshAnalyticsMeasurement(orgSlug: string, workspaceSlug: string, bindingId: string, requestId: string) {
-  const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
+  const { actor, workspaceId } = await writableContext(orgSlug, workspaceSlug);
   return analyticsAction(() => analytics.refreshBinding(actor, workspaceId, bindingId, requestId));
 }
 
 export async function listAnalyticsConnections(orgSlug: string, workspaceSlug: string) {
+  // Read: intentionally uses the plain (non-writable-asserting) context, so
+  // org-wide read-only members can still see connected analytics providers.
   const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
   return analytics.listConnections(actor, workspaceId);
 }
@@ -52,16 +55,23 @@ async function context(orgSlug: string, workspaceSlug: string) {
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) throw new Error("Workspace not found");
   const actor: McpActor = { userId: session.user.id, purpose: "USER", scopeWorkspaceId: workspace.id };
-  return { actor, workspaceId: workspace.id };
+  return { actor, workspaceId: workspace.id, isReadOnly: workspace.isReadOnly };
+}
+
+/** Every write action in this file goes through this instead of `context()` directly. */
+async function writableContext(orgSlug: string, workspaceSlug: string) {
+  const ctx = await context(orgSlug, workspaceSlug);
+  assertWorkspaceWritable(ctx);
+  return ctx;
 }
 
 export async function createAnalyticsMetric(orgSlug: string, workspaceSlug: string, input: analytics.MetricInput) {
-  const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
+  const { actor, workspaceId } = await writableContext(orgSlug, workspaceSlug);
   return analyticsAction(() => analytics.createMetric(actor, workspaceId, input));
 }
 
 export async function connectAnalytics(orgSlug: string, workspaceSlug: string, input: { projectId: string; teamId?: string; token: string }) {
-  const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
+  const { actor, workspaceId } = await writableContext(orgSlug, workspaceSlug);
   // The shared service independently requires a human workspace/org admin.
   return analyticsAction(() => analytics.saveVercelConnection(actor, workspaceId, input));
 }
