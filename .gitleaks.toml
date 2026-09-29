@@ -50,6 +50,23 @@ id = "generic-api-key"
     '''docs/.*''',
   ]
 
+  # docs/testing/geode-pilot-required-evidence.md quotes real `vercel logs`
+  # output verbatim as verification evidence. One line includes the pilot's
+  # synthetic workspace UUID (54a22b13-...), which trips the generic-api-key
+  # entropy heuristic even though a workspace ID is operational metadata, not
+  # a credential -- it identifies a synthetic, non-production DSQL workspace
+  # and grants no access on its own. Allowlisted by the exact UUID and file,
+  # not the rule or a blanket path, so a real key added anywhere else (or to
+  # a different line of this same file) is still reported.
+  [[rules.allowlists]]
+  description = "Synthetic pilot workspace UUID quoted in hosted verification log evidence"
+  condition = "AND"
+  regexTarget = "line"
+  regexes = ['''54a22b13-572b-4ee8-9328-41c4b5fe6cfd''']
+  paths = [
+    '''docs/testing/geode-pilot-required-evidence\.md''',
+  ]
+
 # ---------------------------------------------------------------------------
 # private-key
 #
