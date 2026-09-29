@@ -18,19 +18,38 @@ vi.mock("@/lib/entity-detail", async () => {
   return { ...actual, getEntityDetail: vi.fn() };
 });
 
+vi.mock("@/lib/entity-mutations", () => ({ updateEntityField: vi.fn() }));
+
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
 import { getEntityDetail } from "@/lib/entity-detail";
-import { GET } from "@/app/api/panels/entity/[type]/[id]/route";
+import { updateEntityField } from "@/lib/entity-mutations";
+import { GET, PATCH } from "@/app/api/panels/entity/[type]/[id]/route";
 
 const mockAuth = vi.mocked(auth);
 const mockGetWorkspace = vi.mocked(getWorkspace);
 const mockGetEntityDetail = vi.mocked(getEntityDetail);
+const mockUpdateEntityField = vi.mocked(updateEntityField);
 
 function call(type: string, id: string, query = "?orgSlug=acme&workspaceSlug=ws") {
   return GET(new Request(`http://localhost/api/panels/entity/${type}/${id}${query}`), {
     params: Promise.resolve({ type, id }),
   });
+}
+
+function patch(
+  type: string,
+  id: string,
+  body: unknown,
+  query = "?orgSlug=acme&workspaceSlug=ws"
+) {
+  return PATCH(
+    new Request(`http://localhost/api/panels/entity/${type}/${id}${query}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+    { params: Promise.resolve({ type, id }) }
+  );
 }
 
 const signedIn = () => mockAuth.mockResolvedValue({ user: { id: "user-1" } } as never);
@@ -90,5 +109,32 @@ describe("GET /api/panels/entity/[type]/[id]", () => {
     await expect(res.json()).resolves.toEqual(detail);
     // scoped to the workspace getWorkspace resolved, not anything client-supplied
     expect(mockGetEntityDetail).toHaveBeenCalledWith("experiment", "exp-1", "ws-1");
+  });
+});
+
+describe("PATCH /api/panels/entity/[type]/[id]", () => {
+  it("403s a read-only (org-wide fallback) context and never calls updateEntityField", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: true } as never);
+    const res = await patch("opportunity", "opp-1", { field: "title", value: "New" });
+    expect(res.status).toBe(403);
+    expect(mockUpdateEntityField).not.toHaveBeenCalled();
+  });
+
+  it("succeeds for a real member (isReadOnly: false)", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: false } as never);
+    mockUpdateEntityField.mockResolvedValue({ ok: true } as never);
+    mockGetEntityDetail.mockResolvedValue({ type: "opportunity", data: { id: "opp-1" } } as never);
+    const res = await patch("opportunity", "opp-1", { field: "title", value: "New" });
+    expect(res.status).toBe(200);
+    expect(mockUpdateEntityField).toHaveBeenCalledWith(
+      "opportunity",
+      "opp-1",
+      "ws-1",
+      "title",
+      "New",
+      { kind: "USER", id: "user-1" }
+    );
   });
 });

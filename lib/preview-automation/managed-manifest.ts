@@ -18,6 +18,11 @@ import path from "node:path";
  * digest was recorded from the shipped SQL rather than produced by a fresh audit,
  * and it is here for the same reason: membership and ordering are pinned, so the
  * MIGRATIONS array cannot load without it. Please review that line.
+ *
+ * Same caveat again for `065_org_member_workspace_readonly` (org-wide member
+ * read-only workspace access): a single nullable ADD COLUMN + backfill UPDATE
+ * on `organizations`, following the exact shape of `055_workspace_launch_workflow_flag`.
+ * Digest recorded from the shipped SQL; please review that line too.
  */
 const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "001_init": "f22fed1ed336c56fbfb3380e0497c45ba355efd14906f0e4c8f4c1a5279eb12e",
@@ -95,7 +100,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "063_metrics_dashboard": "06d66304c5b88e7ef7f57a2e0d8d401e0bb5b2267281604ef4d841df21869947",
   "064_solution_scoring": "21f12a454e74c576b421be93f5fd65228126682d46ffb21eb7baf5f4d9a5456b",
   // Embedded feedback widget (RFC #298). Last, matching its MIGRATIONS position.
-  "064_embed_feedback_sources": "767145991806adc79c0867428a513a14410fd8e6bd0a5023e3541bd73078643e"
+  "064_embed_feedback_sources": "767145991806adc79c0867428a513a14410fd8e6bd0a5023e3541bd73078643e",
+  // Org-wide member read-only workspace access. Last, matching its MIGRATIONS position.
+  "065_org_member_workspace_readonly": "23494bba1b038c15392f9f8d1d7c41be858dc33bebbd96b5f2185d2675676f5c"
 };
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {

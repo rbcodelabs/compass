@@ -7,6 +7,7 @@ import getPrisma from "@/lib/db";
 import { getHumanActivityPrisma } from "@/lib/analytics/activity";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
+import { assertWorkspaceWritable } from "@/lib/workspace-context";
 import { setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
 
 // ─── Create Cycle ─────────────────────────────────────────────────────────────
@@ -180,6 +181,7 @@ export async function setObjectiveParentKR(
   if (!session?.user?.id) throw new Error("Unauthorized");
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) throw new Error("Workspace not found");
+  assertWorkspaceWritable(workspace);
 
   await setObjectiveParentKeyResult({
     workspaceId: workspace.id,

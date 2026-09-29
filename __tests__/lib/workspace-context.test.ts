@@ -35,7 +35,14 @@ const redirect = vi.hoisted(() => vi.fn((url: string) => { throw new Error(`NEXT
 const notFound = vi.hoisted(() => vi.fn(() => { throw new Error("NEXT_NOT_FOUND") }))
 vi.mock("next/navigation", () => ({ redirect, notFound }))
 
-import { getWorkspaceContext, requireWorkspaceContext, requireWorkspaceContextOrThrow, WORKSPACE_SUMMARY_SELECT } from "@/lib/workspace-context"
+import {
+  getWorkspaceContext,
+  requireWorkspaceContext,
+  requireWorkspaceContextOrThrow,
+  WORKSPACE_SUMMARY_SELECT,
+  assertWorkspaceWritable,
+  resolveWorkspaceAccess,
+} from "@/lib/workspace-context"
 
 const WORKSPACE = {
   id: "ws-1",
@@ -118,6 +125,98 @@ describe("getWorkspaceContext", () => {
     orgFindFirst.mockResolvedValue(role === null ? null : { role })
     const ctx = await getWorkspaceContext("acme", "core")
     expect(ctx.status === "ok" && ctx.isOrgAdmin).toBe(expected)
+  })
+
+  it("marks a real WorkspaceMember row as isReadOnly: false", async () => {
+    const ctx = await getWorkspaceContext("acme", "core")
+    expect(ctx.status === "ok" && ctx.isReadOnly).toBe(false)
+  })
+
+  describe("org-wide read-only fallback", () => {
+    it("resolves a read-only context when there is no membership but the org flag is on", async () => {
+      orgFindFirst.mockResolvedValue({ role: "MEMBER" })
+      // First call is the membership-scoped lookup (fails); second call is the
+      // read-only fallback lookup scoped to organization.memberWorkspaceReadOnlyAccess.
+      findFirst.mockImplementation(async ({ where }: { where: { members?: unknown } }) => {
+        if (where.members) return null
+        return WORKSPACE
+      })
+
+      const ctx = await getWorkspaceContext("acme", "core")
+      expect(ctx.status).toBe("ok")
+      if (ctx.status !== "ok") throw new Error("unreachable")
+      expect(ctx.isReadOnly).toBe(true)
+      expect(ctx.workspace.id).toBe("ws-1")
+      expect(ctx.orgRole).toBe("MEMBER")
+    })
+
+    it("stays not-found when there is no membership and the org flag is off", async () => {
+      orgFindFirst.mockResolvedValue({ role: "MEMBER" })
+      // Both the membership lookup and the read-only fallback lookup fail --
+      // simulates memberWorkspaceReadOnlyAccess being off, so the fallback
+      // where-clause matches nothing.
+      findFirst.mockResolvedValue(null)
+
+      const ctx = await getWorkspaceContext("acme", "core")
+      expect(ctx.status).toBe("not-found")
+    })
+
+    it("never attempts the fallback when the caller isn't an OrganizationMember of this org at all", async () => {
+      orgFindFirst.mockResolvedValue(null)
+      findFirst.mockResolvedValue(null)
+
+      const ctx = await getWorkspaceContext("acme", "core")
+      expect(ctx.status).toBe("not-found")
+      // Only the membership-scoped lookup should run -- no org membership
+      // means there is nothing for the flag to grant.
+      expect(findFirst).toHaveBeenCalledTimes(1)
+    })
+  })
+})
+
+describe("assertWorkspaceWritable", () => {
+  it("is a no-op for a writable (non-read-only) context", () => {
+    expect(() => assertWorkspaceWritable({ isReadOnly: false })).not.toThrow()
+  })
+
+  it("throws for a read-only context", () => {
+    expect(() => assertWorkspaceWritable({ isReadOnly: true })).toThrow("read-only")
+  })
+})
+
+describe("resolveWorkspaceAccess", () => {
+  it("returns the workspace id and isReadOnly: false for a real member", async () => {
+    findFirst.mockResolvedValueOnce({ id: "ws-1" })
+    const access = await resolveWorkspaceAccess("acme", "core", "user-1")
+    expect(access).toEqual({ workspaceId: "ws-1", isReadOnly: false })
+  })
+
+  it("returns isReadOnly: true when the org flag grants fallback access", async () => {
+    findFirst
+      .mockResolvedValueOnce(null) // membership lookup fails
+      .mockResolvedValueOnce({ id: "ws-1" }) // read-only fallback lookup succeeds
+    orgFindFirst.mockResolvedValueOnce({ id: "orgmember-1" })
+
+    const access = await resolveWorkspaceAccess("acme", "core", "user-1")
+    expect(access).toEqual({ workspaceId: "ws-1", isReadOnly: true })
+  })
+
+  it("returns null when neither membership nor the read-only fallback resolves", async () => {
+    findFirst.mockResolvedValue(null)
+    orgFindFirst.mockResolvedValueOnce(null)
+
+    const access = await resolveWorkspaceAccess("acme", "core", "user-1")
+    expect(access).toBeNull()
+  })
+
+  it("returns null when the workspace is flagged read-only but the caller isn't an org member", async () => {
+    findFirst
+      .mockResolvedValueOnce(null) // membership lookup fails
+      .mockResolvedValueOnce({ id: "ws-1" }) // the org-flagged workspace does exist
+    orgFindFirst.mockResolvedValueOnce(null) // but caller has no OrganizationMember row
+
+    const access = await resolveWorkspaceAccess("acme", "core", "user-1")
+    expect(access).toBeNull()
   })
 })
 

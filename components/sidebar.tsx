@@ -60,7 +60,7 @@ interface SidebarProps {
   userName: string
   userEmail: string
   userImage?: string
-  workspaces: { id: string; name: string; slug: string; orgSlug: string }[]
+  workspaces: { id: string; name: string; slug: string; orgSlug: string; isReadOnly?: boolean }[]
   /** Org admins/owners see an "Org Settings" link in the account menu. */
   isOrgAdmin?: boolean
   researchCaptureEnabled?: boolean
@@ -243,7 +243,12 @@ export function Sidebar({
                           <Check className="size-3.5 text-primary" aria-hidden="true" />
                         )}
                     </div>
-                    <span className="truncate">{workspace.name}</span>
+                    <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
+                    {workspace.isReadOnly && (
+                      <span className="shrink-0 rounded border border-border-default px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-subtle">
+                        Read-only
+                      </span>
+                    )}
                   </DropdownMenuItem>
                 ))}
                 {otherWorkspaces.length === 0 && (

@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { resolveWorkspaceAccess } from "@/lib/workspace-context";
 import { listDocCommentsCore } from "@/lib/doc-comments";
 import { cookies } from "next/headers";
 import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin";
@@ -22,9 +23,10 @@ export async function generateMetadata({ params }: Props) {
   const session = await auth();
   if (!session?.user?.id) return { title: "Document" };
   const { docId, orgSlug, workspaceSlug } = await params;
-  const prisma = getPrisma();
-  const doc = await prisma.doc.findFirst({
-    where: { id: docId, workspace: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } } },
+  const access = await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id);
+  if (!access) return { title: "Document" };
+  const doc = await getPrisma().doc.findFirst({
+    where: { id: docId, workspaceId: access.workspaceId },
     select: { title: true },
   });
   return { title: doc?.title ?? "Untitled" };
@@ -37,16 +39,9 @@ export default async function DocPage({ params }: Props) {
   const { orgSlug, workspaceSlug, docId } = await params;
   const prisma = getPrisma();
 
-  const workspace = await prisma.workspace.findFirst({
-    where: {
-      slug: workspaceSlug,
-      organization: { slug: orgSlug },
-      members: { some: { userId: session.user.id } },
-    },
-    select: { id: true },
-  });
-
-  if (!workspace) notFound();
+  const access = await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id);
+  if (!access) notFound();
+  const workspace = { id: access.workspaceId };
 
   const storedDoc = await prisma.doc.findFirst({
     where: { id: docId, workspaceId: workspace.id },

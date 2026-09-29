@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation"
 import getPrisma from "@/lib/db"
 import { getArtifactStorage } from "@/lib/artifact-storage"
 import { buildSandboxedHtml } from "@/lib/artifacts"
+import { resolveWorkspaceAccess } from "@/lib/workspace-context"
 import { ArtifactViewer } from "@/components/docs/artifact-viewer"
 
 /**
@@ -18,8 +19,9 @@ export default async function ArtifactFullScreenPage({ params }: { params: Promi
   if (!session?.user?.id) redirect("/login")
   const { orgSlug, workspaceSlug, artifactId } = await params
   const prisma = getPrisma()
-  const workspace = await prisma.workspace.findFirst({ where: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } }, select: { id: true } })
-  if (!workspace) notFound()
+  const access = await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id)
+  if (!access) notFound()
+  const workspace = { id: access.workspaceId }
   const artifact = await prisma.artifact.findFirst({ where: { id: artifactId, workspaceId: workspace.id }, include: { currentRevision: true } })
   if (!artifact) notFound()
   let html: string | undefined
