@@ -93,7 +93,7 @@ export function SolutionScoringPanel({
   return (
     <div className="flex flex-col gap-4">
       {existingScore?.stale && (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className="flex items-start gap-2 rounded-lg border border-status-warning bg-status-warning-surface px-3 py-2 text-xs text-status-warning">
           <AlertTriangleIcon className="size-3.5 shrink-0 mt-0.5" />
           <span>
             This solution was scored under an earlier version (v{existingScore.modelVersion}) of
