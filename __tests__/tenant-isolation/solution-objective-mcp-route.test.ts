@@ -92,6 +92,65 @@ describe("get_opportunity hides nested solutions that are not in the opportunity
   });
 });
 
+describe("get_okr_cycle hides nested objectives that are not in the cycle's workspace", () => {
+  const kr = (id: string, supporting: Array<Record<string, unknown>> = []) => ({ id, title: id, current: 1, target: 10, unit: null, supportingObjectives: supporting });
+  const objective = (id: string, workspaceId: string | null, extra: Record<string, unknown> = {}) => ({
+    id, workspaceId, title: id, status: "ON_TRACK", squad: null, parentKeyResult: null, keyResults: [kr(`kr-of-${id}`)], ...extra,
+  });
+  const supporting = (id: string, workspaceId: string | null) => ({ id, workspaceId, title: id, status: "ON_TRACK", cycle: { id: "c", title: "Cycle" } });
+
+  function stub(objectives: unknown[]) {
+    const cycle = { id: "cycle-a", workspaceId: WS_A.id, title: "Q1", status: "ACTIVE", startDate: new Date("2026-01-01"), endDate: new Date("2026-03-31"), objectives };
+    (fake.current!.client.oKRCycle as { findUnique: unknown }).findUnique = async () => cycle;
+  }
+
+  it("omits a NULL-workspace objective and a drifted one, with their key results, keeping the consistent one", async () => {
+    stub([objective("obj-ok", WS_A.id), objective("obj-null", null), objective("obj-drift", WS_B.id)]);
+    const result = await call("get_okr_cycle", { cycleId: "cycle-a" });
+    const text = result.content[0].text;
+    expect(text).toContain("obj-ok");
+    expect(text).toContain("kr-of-obj-ok");
+    for (const hidden of ["obj-null", "obj-drift", "kr-of-obj-null", "kr-of-obj-drift"]) expect(text).not.toContain(hidden);
+    // The structured payload is filtered too, not just the rendered text.
+    expect(JSON.stringify((result as unknown as { structuredContent: unknown }).structuredContent)).not.toContain("obj-null");
+  });
+
+  it("omits NULL / drifted supporting objectives under a visible key result", async () => {
+    stub([objective("obj-ok", WS_A.id, { keyResults: [kr("kr-1", [supporting("sup-ok", WS_A.id), supporting("sup-null", null), supporting("sup-drift", WS_B.id)])] })]);
+    const text = (await call("get_okr_cycle", { cycleId: "cycle-a" })).content[0].text;
+    expect(text).toContain("sup-ok");
+    expect(text).not.toContain("sup-null");
+    expect(text).not.toContain("sup-drift");
+  });
+
+  it("drops a parent-KR link whose objective is in another workspace or has no workspaceId", async () => {
+    const parent = (workspaceId: string | null) => ({ id: "pkr", title: "Parent KR", objective: { workspaceId, title: "Parent objective", cycle: { title: "Annual" } } });
+    stub([objective("obj-a", WS_A.id, { parentKeyResult: parent(WS_A.id) }), objective("obj-b", WS_A.id, { parentKeyResult: parent(WS_B.id) }), objective("obj-c", WS_A.id, { parentKeyResult: parent(null) })]);
+    const text = (await call("get_okr_cycle", { cycleId: "cycle-a" })).content[0].text;
+    expect(text.match(/Supports:/g)).toHaveLength(1);
+  });
+
+  it("a cycle in another workspace is still denied by the gate", async () => {
+    await expect(call("get_okr_cycle", { cycleId: "cycle-b" })).rejects.toThrow(/not found or access denied/);
+  });
+});
+
+describe("list counts use the same workspace scope as their lists", () => {
+  it("list_okr_cycles counts only objectives with the workspace's own workspaceId", async () => {
+    const seen: unknown[] = [];
+    (fake.current!.client.oKRCycle as { findMany: unknown }).findMany = async (args: unknown) => { seen.push(args); return [{ id: "cycle-a", title: "Q1", status: "ACTIVE", startDate: new Date(), endDate: new Date(), _count: { objectives: 1 } }]; };
+    await call("list_okr_cycles", { workspaceId: WS_A.id });
+    expect(JSON.stringify(seen[0])).toContain(`"_count":{"select":{"objectives":{"where":{"workspaceId":"${WS_A.id}"}}}}`);
+  });
+
+  it("list_opportunities counts only solutions with the workspace's own workspaceId", async () => {
+    const seen: unknown[] = [];
+    (fake.current!.client.opportunity as { findMany: unknown }).findMany = async (args: unknown) => { seen.push(args); return [{ id: "opp-a", title: "A", status: "EXPLORING", squad: null, linkedKeyResult: null, _count: { solutions: 1 } }]; };
+    await call("list_opportunities", { workspaceId: WS_A.id });
+    expect(JSON.stringify(seen[0])).toContain(`"_count":{"select":{"solutions":{"where":{"workspaceId":"${WS_A.id}"}}}}`);
+  });
+});
+
 describe("assign_squad", () => {
   it("refuses a squad from a different workspace than the object, even for a member of both", async () => {
     // Alice is a member of BOTH workspaces, so she passes the object check and the squad check separately.

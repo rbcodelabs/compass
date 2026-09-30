@@ -138,7 +138,7 @@ describe("list_opportunities MCP tool", () => {
           select: { title: true, objective: { select: { title: true } } },
         },
         squad: { select: { name: true } },
-        _count: { select: { solutions: true } },
+        _count: { select: { solutions: { where: { workspaceId: "workspace-1" } } } },
       },
       orderBy: { createdAt: "desc" },
     })

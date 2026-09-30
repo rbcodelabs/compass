@@ -535,7 +535,7 @@ const _handler = createMcpHandler(
         const cycles = await prisma.oKRCycle.findMany({
           where: { workspaceId },
           orderBy: { startDate: "desc" },
-          select: { id: true, title: true, status: true, startDate: true, endDate: true, _count: { select: { objectives: true } } },
+          select: { id: true, title: true, status: true, startDate: true, endDate: true, _count: { select: { objectives: { where: { workspaceId } } } } },
         })
         if (!cycles.length) {
           return fail("No OKR cycles found for this workspace.")
@@ -619,6 +619,7 @@ const _handler = createMcpHandler(
                     supportingObjectives: {
                       select: {
                         id: true,
+                        workspaceId: true,
                         title: true,
                         status: true,
                         cycle: { select: { id: true, title: true } },
@@ -633,7 +634,7 @@ const _handler = createMcpHandler(
                     id: true,
                     title: true,
                     objective: {
-                      select: { title: true, cycle: { select: { title: true } } },
+                      select: { workspaceId: true, title: true, cycle: { select: { title: true } } },
                     },
                   },
                 },
@@ -644,6 +645,17 @@ const _handler = createMcpHandler(
         if (!cycle) {
           return fail(`OKR cycle "${cycleId}" not found.`)
         }
+        // Every nested Objective must carry the cycle's own workspaceId: an Objective with a NULL or different
+        // workspaceId (old-instance insert, drift) is hidden here exactly as it is denied on every other path,
+        // along with the supporting objectives and parent KR links that would otherwise leak it.
+        const scope = cycle.workspaceId
+        cycle.objectives = cycle.objectives
+          .filter((o) => o.workspaceId === scope)
+          .map((o) => ({
+            ...o,
+            keyResults: o.keyResults.map((kr) => ({ ...kr, supportingObjectives: kr.supportingObjectives.filter((s) => s.workspaceId === scope) })),
+            parentKeyResult: o.parentKeyResult && o.parentKeyResult.objective.workspaceId === scope ? o.parentKeyResult : null,
+          }))
 
         const lines: string[] = [
           `**${cycle.title}** (${cycle.status})`,
@@ -962,7 +974,7 @@ const _handler = createMcpHandler(
           include: {
             linkedKeyResult: { select: { title: true, objective: { select: { title: true } } } },
             squad: { select: { name: true } },
-            _count: { select: { solutions: true } },
+            _count: { select: { solutions: { where: { workspaceId } } } },
           },
           orderBy: recencyOrderBy(sort) ?? { createdAt: "desc" },
         })
@@ -1323,14 +1335,15 @@ const _handler = createMcpHandler(
       },
       async ({ solutionId, title, description, riskLevel }) => {
         const prisma = getPrisma()
-        // Two hops: an Assumption's workspace (and the discovery page its panel
-        // opens on) live up through Solution -> Opportunity.
+        // The link's slugs come from the Solution's own workspace; only the discovery page id
+        // (the opportunity it opens under) is read off the Solution's opportunityId.
         const solution = await prisma.solution.findUnique({
           where: { id: solutionId },
           select: {
             id: true,
             title: true,
-            opportunity: { select: { id: true, workspace: { select: WORKSPACE_LINK_SELECT } } },
+            opportunityId: true,
+            workspace: { select: WORKSPACE_LINK_SELECT },
           },
         })
         if (!solution) {
@@ -1340,10 +1353,10 @@ const _handler = createMcpHandler(
         return ok(
           withUrlLine(
             `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
-            workspaceEntityUrl(solution.opportunity?.workspace, {
+            workspaceEntityUrl(solution.workspace, {
               type: "assumption",
               id: assumption.id,
-              opportunityId: solution.opportunity?.id,
+              opportunityId: solution.opportunityId,
             }),
           ),
           {
@@ -1517,7 +1530,7 @@ const _handler = createMcpHandler(
         const prisma = getPrisma()
         const solution = await prisma.solution.findUnique({
           where: { id: solutionId },
-          include: { opportunity: { select: { id: true, title: true, squadId: true, workspaceId: true, workspace: { select: WORKSPACE_LINK_SELECT } } } },
+          include: { workspace: { select: WORKSPACE_LINK_SELECT }, opportunity: { select: { id: true, title: true, squadId: true } } },
         })
         if (!solution) {
           return fail(`Solution "${solutionId}" not found.`)
@@ -1546,7 +1559,7 @@ const _handler = createMcpHandler(
             // workspace need not match — only link when they do, rather than
             // pointing at a roadmap the item isn't on.
             solution.workspaceId === workspaceId
-              ? workspaceEntityUrl(solution.opportunity.workspace, { type: "roadmapItem", id: item.id })
+              ? workspaceEntityUrl(solution.workspace, { type: "roadmapItem", id: item.id })
               : null,
           ),
           {

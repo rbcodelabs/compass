@@ -167,7 +167,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         sortOrder: true,
         squadId: true,
         score: { select: { normalizedScore: true, modelVersion: true } },
-        _count: { select: { solutions: true, evidence: true } },
+        _count: { select: { solutions: { where: { workspaceId: workspace.id } }, evidence: true } },
       },
     }),
     // Distinct source-type count per opportunity, used for the "from N sources" badge.

@@ -105,6 +105,8 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
           where: { objectiveId: { in: objectiveIds } },
           include: {
             supportingObjectives: {
+              // NULL / drifted objectives are hidden, like every other scoped read.
+              where: { workspaceId: workspace.id },
               include: {
                 cycle: { select: { id: true, title: true } },
                 squad: { select: { id: true, name: true, color: true } },

@@ -10,8 +10,10 @@ import {
   backfillWorkspaceIdOnSolutionObjective,
   getWorkspaceIdBackfillStatus,
   isOccConflict,
+  repairWorkspaceIdResidual,
   withOccRetry,
 } from "@/lib/migrations/workspace-id-on-solution-objective";
+import { selectMigrationsToRun } from "@/lib/migrations/runner";
 import { REVIEWED_MIGRATION_CODE_SHA256, assertReviewedMigrationCode } from "@/lib/preview-automation/managed-manifest";
 
 const conflict = () => Object.assign(new Error("change conflicts with another transaction, please retry: (OC000)"), { code: "40001" });
@@ -104,8 +106,29 @@ describe("assertWorkspaceIdOnSolutionObjective", () => {
 
   it("counts orphans with a LEFT JOIN (no correlated NOT EXISTS) and names them in the error", async () => {
     const { client, query } = fakeClient((sql) => (sql.includes("LEFT JOIN") ? { rows: [{ total: "3", with_parent: "1" }] } : healthy(sql)));
-    await expect(assertWorkspaceIdOnSolutionObjective(client, "s")).rejects.toThrow(/3 solutions rows still have NULL workspace_id \(2 have no opportunities parent\)/);
+    await expect(assertWorkspaceIdOnSolutionObjective(client, "s")).rejects.toThrow(/3 solutions rows still have NULL workspace_id \(2 reference a missing opportunities row, 0 have no opportunity_id at all/);
     expect(query.mock.calls.some(([sql]) => /NOT EXISTS/i.test(sql as string))).toBe(false);
+  });
+
+  it("names the migration it is running as, so a 069 failure says 069 (not 068)", async () => {
+    const nulls = (sql: string) => (sql.includes("LEFT JOIN") ? { rows: [{ total: "1", with_parent: "0" }] } : healthy(sql));
+    const { client } = fakeClient(nulls);
+    await expect(assertWorkspaceIdOnSolutionObjective(client, "s", "069_workspace_id_residual_backfill")).rejects.toThrow(/^069_workspace_id_residual_backfill: backfill postcondition failed/);
+    await expect(assertWorkspaceIdOnSolutionObjective(client, "s")).rejects.toThrow(/^068_workspace_id_on_solution_objective: backfill postcondition failed/);
+    const missingColumn = fakeClient((sql) => (sql.includes("information_schema.columns") ? { rows: [] } : healthy(sql)));
+    await expect(assertWorkspaceIdOnSolutionObjective(missingColumn.client, "s", "069_workspace_id_residual_backfill")).rejects.toThrow(/^069_workspace_id_residual_backfill: column postcondition failed/);
+  });
+
+  it("reports a row with neither a workspace_id nor a parent key (e.g. a cycle-less Objective) separately, and still fails closed", async () => {
+    // Phase 1 makes objectives.cycle_id optional. A cycle-less Objective that somehow has no workspace_id has nothing to derive one from.
+    const { client } = fakeClient((sql) => {
+      if (sql.includes("LEFT JOIN") && sql.includes('"objectives"')) return { rows: [{ total: "2", with_parent: "0" }] };
+      if (sql.includes("child.cycle_id IS NULL")) return { rows: [{ n: "2" }] };
+      return healthy(sql);
+    });
+    await expect(assertWorkspaceIdOnSolutionObjective(client, "s", "069_workspace_id_residual_backfill")).rejects.toThrow(
+      /2 objectives rows still have NULL workspace_id \(0 reference a missing okr_cycles row, 2 have no cycle_id at all and nothing to derive a workspace from/,
+    );
   });
 
   it("fails on parent/child drift", async () => {
@@ -116,6 +139,70 @@ describe("assertWorkspaceIdOnSolutionObjective", () => {
   it("fails when an index is missing or invalid", async () => {
     const { client } = fakeClient((sql) => (sql.includes("pg_index") ? { rows: [] } : healthy(sql)));
     await expect(assertWorkspaceIdOnSolutionObjective(client, "s")).rejects.toThrow(/index postcondition failed: idx_solutions_workspace_id/);
+  });
+});
+
+describe("069 is explicit-only and the residual repair is repeatable", () => {
+  it("an untargeted POST never runs 069; a targeted POST does", () => {
+    const pending = [{ name: "070_x" }, { name: "069_workspace_id_residual_backfill" }, { name: "071_y" }];
+    expect(selectMigrationsToRun(pending).map((m) => m.name)).toEqual(["070_x", "071_y"]);
+    expect(selectMigrationsToRun(pending, "069_workspace_id_residual_backfill").map((m) => m.name)).toEqual(["069_workspace_id_residual_backfill"]);
+    expect(selectMigrationsToRun(pending, "070_x").map((m) => m.name)).toEqual(["070_x"]);
+  });
+
+  function poolWith(handler: (sql: string, params: unknown[]) => { rows?: unknown[]; rowCount?: number }) {
+    const { client, query } = fakeClient(handler);
+    const release = vi.fn();
+    return { pool: { connect: async () => ({ ...(client as object), query, release }) } as never, query, release };
+  }
+  const columnsPresent = (sql: string) => (sql.includes("information_schema.columns") && sql.includes("ANY") ? { rows: [{ table_name: "solutions" }, { table_name: "objectives" }] } : null);
+
+  it("refuses before touching data when 068 has not been applied", async () => {
+    const { pool, release } = poolWith(() => ({ rows: [] }));
+    await expect(repairWorkspaceIdResidual(pool, "s", noSleep)).rejects.toThrow(/apply 068/);
+    expect(release).toHaveBeenCalled();
+  });
+
+  it("backfills NULL rows, runs the postconditions, and returns before/after counts; repeatable", async () => {
+    let remaining = 2;
+    const { pool, query } = poolWith((sql) => {
+      const present = columnsPresent(sql);
+      if (present) return present;
+      if (sql.startsWith("SELECT child.id")) {
+        if (!sql.includes('"solutions"') || remaining === 0) return { rows: [] };
+        const rows = Array.from({ length: remaining }, (_, i) => ({ id: `s${i}`, workspace_id: "wa" }));
+        remaining = 0;
+        return { rows };
+      }
+      if (sql.startsWith("UPDATE")) return { rowCount: 2 };
+      if (sql.includes("is_nullable")) return { rows: [{ is_nullable: "YES" }] };
+      if (sql.includes("pg_index")) return { rows: [{ indisvalid: true }] };
+      if (sql.includes("LEFT JOIN") && sql.includes("count(parent.id)")) return { rows: [{ total: "0", with_parent: "0" }] };
+      return { rows: [{ n: "0", count: "0" }] };
+    });
+    const first = await repairWorkspaceIdResidual(pool, "s", noSleep);
+    expect(first.log).toContain("  ✓ backfilled 2 solutions.workspace_id rows");
+    expect(first.after.nullWorkspaceId).toEqual({ solutions: 0, objectives: 0 });
+    const second = await repairWorkspaceIdResidual(pool, "s", noSleep);
+    expect(second.log).toContain("  ✓ backfilled 0 solutions.workspace_id rows");
+    expect(query.mock.calls.some(([sql]) => /CREATE|ALTER|INSERT INTO "s"\._prisma_migrations/i.test(sql as string))).toBe(false); // no DDL, no receipt
+  });
+
+  it("fails closed on an orphan and attaches the before-counts and log for the operator", async () => {
+    const { pool } = poolWith((sql) => {
+      const present = columnsPresent(sql);
+      if (present) return present;
+      if (sql.startsWith("SELECT child.id")) return { rows: [] };
+      if (sql.includes("is_nullable")) return { rows: [{ is_nullable: "YES" }] };
+      if (sql.includes("pg_index")) return { rows: [{ indisvalid: true }] };
+      if (sql.includes("LEFT JOIN") && sql.includes("count(parent.id)")) return { rows: [{ total: "1", with_parent: "0" }] };
+      return { rows: [{ n: "0", count: "0" }] };
+    });
+    await expect(repairWorkspaceIdResidual(pool, "s", noSleep)).rejects.toMatchObject({
+      message: expect.stringContaining("backfill-workspace-id: backfill postcondition failed"),
+      before: { columnsPresent: true },
+      log: expect.any(Array),
+    });
   });
 });
 
