@@ -80,6 +80,38 @@ describe("add_solution", () => {
   });
 });
 
+describe("get_opportunity hides nested solutions that are not in the opportunity's workspace", () => {
+  it("omits a NULL-workspace solution and a drifted one, keeps the consistent one", async () => {
+    const solution = (id: string, workspaceId: string | null) => ({ id, workspaceId, title: id, status: "IDEA", comments: [], assumptions: [], _count: { comments: 0 } });
+    const opportunity = { id: "opp-a", workspaceId: WS_A.id, title: "Opp", status: "EXPLORING", description: null, squad: null, linkedKeyResult: null, solutions: [solution("sol-ok", WS_A.id), solution("sol-null", null), solution("sol-drift", WS_B.id)] };
+    (fake.current!.client.opportunity as { findUnique: unknown }).findUnique = async () => opportunity;
+    const text = (await call("get_opportunity", { opportunityId: "opp-a" })).content[0].text;
+    expect(text).toContain("sol-ok");
+    expect(text).not.toContain("sol-null");
+    expect(text).not.toContain("sol-drift");
+  });
+});
+
+describe("assign_squad", () => {
+  it("refuses a squad from a different workspace than the object, even for a member of both", async () => {
+    // Alice is a member of BOTH workspaces, so she passes the object check and the squad check separately.
+    fake.current!.addMember(WS_B.id, USERS.alice);
+    await expect(call("assign_squad", { objectType: "opportunity", objectId: "opp-a", squadId: "squad-b" })).rejects.toThrow(/same workspace/);
+    await expect(call("assign_squad", { objectType: "opportunity", objectId: "opp-b", squadId: "squad-a" })).rejects.toThrow(/same workspace/);
+    expect(state().writes).toEqual([]);
+  });
+
+  it("allows a squad from the same workspace as the object", async () => {
+    fake.current!.addMember(WS_B.id, USERS.alice);
+    await expect(call("assign_squad", { objectType: "opportunity", objectId: "opp-a", squadId: "squad-a" })).resolves.toBeTruthy();
+    expect(state().writes).toContain("opportunity.update:opp-a");
+  });
+
+  it("still denies a squad the caller is not a member of at all", async () => {
+    await expect(call("assign_squad", { objectType: "opportunity", objectId: "opp-a", squadId: "squad-b" })).rejects.toThrow(/not found or access denied/);
+  });
+});
+
 describe("Solution and Objective mutations are denied across tenants and for unbackfilled rows", () => {
   const cases: Array<[string, Record<string, unknown>]> = [
     ["update_solution", { solutionId: "sol-b", title: "x" }],

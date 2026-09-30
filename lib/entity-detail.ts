@@ -175,6 +175,8 @@ async function fetchOpportunity(id: string, workspaceId: string) {
       },
       squad: { select: { id: true, name: true, color: true } },
       solutions: {
+        // Hide a NULL / other-workspace solution instead of trusting its opportunity parent.
+        where: { workspaceId },
         include: {
           _count: { select: { assumptions: true, evidence: true } },
           score: { select: { normalizedScore: true, modelVersion: true } },

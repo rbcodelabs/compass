@@ -1035,6 +1035,8 @@ const _handler = createMcpHandler(
         if (!opp) {
           return fail(`Opportunity "${opportunityId}" not found.`)
         }
+        // Hide a solution whose own workspaceId is NULL or names another workspace, rather than trusting its parent.
+        opp.solutions = opp.solutions.filter((sol) => sol.workspaceId === opp.workspaceId)
 
         const lines: string[] = [
           `# ${opp.title} [${opp.status}]`,

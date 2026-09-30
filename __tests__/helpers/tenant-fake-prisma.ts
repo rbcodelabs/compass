@@ -107,6 +107,7 @@ export function createTenantFakePrisma() {
   const tables: Record<string, Graph[]> = {
     workspace: workspaceRows,
     opportunity: opportunities as unknown as Graph[],
+    squad: squads as unknown as Graph[],
     okrCycle: okrCycles,
     solution: graphSolutions,
     objective: objectives,
@@ -116,6 +117,7 @@ export function createTenantFakePrisma() {
   };
   const relations: Record<string, Record<string, { model: string; fk: string }>> = {
     opportunity: { workspace: { model: "workspace", fk: "workspaceId" } },
+    squad: { workspace: { model: "workspace", fk: "workspaceId" } },
     okrCycle: { workspace: { model: "workspace", fk: "workspaceId" } },
     solution: { workspace: { model: "workspace", fk: "workspaceId" }, opportunity: { model: "opportunity", fk: "opportunityId" } },
     objective: { workspace: { model: "workspace", fk: "workspaceId" }, cycle: { model: "okrCycle", fk: "cycleId" } },
@@ -333,6 +335,7 @@ export function createTenantFakePrisma() {
         opportunities.filter((o) => matches("opportunity", o as unknown as Graph, where)),
     },
     squad: {
+      ...delegate("squad"),
       findMany: async ({ where }: { where: Where }) =>
         squads.filter((s) => eq(s as unknown as Record<string, unknown>, where, ["workspaceId"])),
     },
@@ -340,6 +343,11 @@ export function createTenantFakePrisma() {
 
   return {
     client,
+    /** Add a user to a workspace's members (for multi-workspace member scenarios). */
+    addMember: (workspaceId: string, userId: string) => {
+      const workspace = workspaces.find((w) => w.id === workspaceId);
+      if (workspace && !workspace.members.includes(userId)) workspace.members.push(userId);
+    },
     state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles },
     /** Snapshot of every feedback row, for before/after "nothing changed" assertions. */
     snapshotFeedback: () => JSON.parse(JSON.stringify(feedback)) as unknown,

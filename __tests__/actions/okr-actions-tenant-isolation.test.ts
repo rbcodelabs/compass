@@ -5,8 +5,9 @@
  * the client and act on it with no membership check, so any signed-in user could
  * mutate another workspace's rows. They now resolve the row through
  * requireProductEntity (real helper, not mocked) which folds workspace
- * membership into the lookup. Scoping here walks the existing parent chain:
- * cycle.workspaceId, objective.cycle.workspaceId, keyResult.objective.cycle.workspaceId.
+ * membership into the lookup. Objective carries its own workspaceId (migration 068),
+ * Key Result scopes through its Objective, and a NULL workspaceId is denied even
+ * though the parent chain (cycle) still points at the caller's workspace.
  *
  * The fake honours those `where` clauses, so a missing filter shows up as a
  * foreign row being read or written.
@@ -30,26 +31,38 @@ function makeDb() {
     workspace: workspaces,
     okrCycle: [{ id: "cycle-a", workspaceId: W_A }, { id: "cycle-b", workspaceId: W_B }],
     objective: [
-      { id: "obj-a", cycleId: "cycle-a", squadId: "00000000-0000-4000-8000-00000000000a", status: "ON_TRACK", sortOrder: 0 },
-      { id: "obj-b", cycleId: "cycle-b", squadId: "00000000-0000-4000-8000-00000000000b", status: "ON_TRACK", sortOrder: 0 },
+      { id: "obj-a", workspaceId: W_A, cycleId: "cycle-a", squadId: "00000000-0000-4000-8000-00000000000a", status: "ON_TRACK", sortOrder: 0 },
+      { id: "obj-b", workspaceId: W_B, cycleId: "cycle-b", squadId: "00000000-0000-4000-8000-00000000000b", status: "ON_TRACK", sortOrder: 0 },
+      { id: "obj-null", workspaceId: null, cycleId: "cycle-a", squadId: null, status: "ON_TRACK", sortOrder: 0 },
     ],
-    keyResult: [{ id: "kr-a", objectiveId: "obj-a", current: 0, sortOrder: 0 }, { id: "kr-b", objectiveId: "obj-b", current: 0, sortOrder: 0 }],
+    keyResult: [
+      { id: "kr-a", objectiveId: "obj-a", current: 0, sortOrder: 0 },
+      { id: "kr-b", objectiveId: "obj-b", current: 0, sortOrder: 0 },
+      { id: "kr-null", objectiveId: "obj-null", current: 0, sortOrder: 0 },
+    ],
     squad: [{ id: "00000000-0000-4000-8000-00000000000a", workspaceId: W_A, name: "A" }, { id: "00000000-0000-4000-8000-00000000000b", workspaceId: W_B, name: "B" }],
     opportunity: [{ id: "opp-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b" }],
-    experiment: [], roadmapItem: [{ id: "rm-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b" }], task: [],
+    experiment: [],
+    roadmapItem: [{ id: "rm-a", workspaceId: W_A, squadId: null }, { id: "rm-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b" }],
+    task: [{ id: "task-a", workspaceId: W_A, squadId: "00000000-0000-4000-8000-00000000000a" }, { id: "task-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b" }],
     checkIn: [],
   };
   const relations: Record<string, Record<string, [string, string]>> = {
     okrCycle: { workspace: ["workspace", "workspaceId"] },
-    objective: { cycle: ["okrCycle", "cycleId"] },
+    objective: { cycle: ["okrCycle", "cycleId"], workspace: ["workspace", "workspaceId"] },
     keyResult: { objective: ["objective", "objectiveId"] },
     squad: { workspace: ["workspace", "workspaceId"] },
     opportunity: { workspace: ["workspace", "workspaceId"] },
     roadmapItem: { workspace: ["workspace", "workspaceId"] },
+    task: { workspace: ["workspace", "workspaceId"] },
   };
   const writes: string[] = [];
   const matches = (model: string, row: Row, where: Row = {}): boolean => {
     for (const [key, cond] of Object.entries(where)) {
+      if (key === "OR") {
+        if (!(cond as Row[]).some((c) => matches(model, row, c))) return false;
+        continue;
+      }
       if (model === "workspace" && key === "members") {
         if (!(row.members as string[]).includes((cond as { some: { userId: string } }).some.userId)) return false;
         continue;
@@ -76,11 +89,7 @@ function makeDb() {
       // Emulate the `select` shapes the helper asks for.
       const out: Row = { ...row };
       const rel = relations[model];
-      if (model === "objective") out.cycle = tables.okrCycle.find((c) => c.id === row.cycleId);
-      if (model === "keyResult") {
-        const objective = tables.objective.find((o) => o.id === row.objectiveId)!;
-        out.objective = { ...objective, cycle: tables.okrCycle.find((c) => c.id === objective.cycleId) };
-      }
+      if (model === "keyResult") out.objective = tables.objective.find((o) => o.id === row.objectiveId);
       void rel;
       return out;
     },
@@ -137,8 +146,21 @@ describe("requireProductEntity for OKR kinds", () => {
     // Positive control: without the expectation the same row resolves.
     await expect(requireProductEntity("objective", "obj-a")).resolves.toMatchObject({ workspaceId: W_A });
     await expect(requireProductEntity("objective", "obj-a", W_B)).rejects.toThrow(DENIED);
+    await expect(requireProductEntity("task", "task-a")).resolves.toMatchObject({ workspaceId: W_A });
+    await expect(requireProductEntity("task", "task-a", W_B)).rejects.toThrow(DENIED);
     await expect(requireProductEntity("keyResult", "kr-a", W_B)).rejects.toThrow(DENIED);
   });
+
+  it.each([["objective", "obj-null"], ["keyResult", "kr-null"]] as const)(
+    "denies %s %s: a NULL workspaceId fails closed although its cycle belongs to the caller", async (kind, id) => {
+      await expect(requireProductEntity(kind, id)).rejects.toThrow(DENIED);
+    });
+
+  it.each([["task", "task-a", "task-b"], ["roadmapItem", "rm-a", "rm-b"], ["squad", "00000000-0000-4000-8000-00000000000a", "00000000-0000-4000-8000-00000000000b"]] as const)(
+    "the %s kind resolves the caller's row and denies another workspace's", async (kind, own, foreign) => {
+      await expect(requireProductEntity(kind, own)).resolves.toMatchObject({ workspaceId: W_A });
+      await expect(requireProductEntity(kind, foreign)).rejects.toThrow(DENIED);
+    });
 
   it("rejects an unauthenticated caller", async () => {
     session.userId = null;
@@ -148,6 +170,10 @@ describe("requireProductEntity for OKR kinds", () => {
 
 describe("OKR server actions", () => {
   const denied: Array<[string, () => Promise<unknown>]> = [
+    ["addKeyResult(unbackfilled objective)", () => okr.addKeyResult("obj-null", "acme", "alpha", form({ title: "KR", target: "5" }))],
+    ["logCheckIn(key result under an unbackfilled objective)", () => okr.logCheckIn("kr-null", "acme", "alpha", form({ value: "3" }))],
+    ["updateObjectiveStatus(unbackfilled)", () => okr.updateObjectiveStatus("obj-null", "AT_RISK", "acme", "alpha")],
+    ["deleteObjective(unbackfilled)", () => okr.deleteObjective("obj-null", "/p")],
     ["createCycle(foreign workspace)", () => okr.createCycle(W_B, "globex", "beta", form({ title: "Q", startDate: "2026-01-01", endDate: "2026-03-31" }))],
     ["createObjective(foreign cycle)", () => okr.createObjective("cycle-b", "globex", "beta", form({ title: "X" }))],
     ["createObjective(own cycle, foreign squad)", () => okr.createObjective("cycle-a", "acme", "alpha", form({ title: "X", squadId: "00000000-0000-4000-8000-00000000000b" }))],
@@ -191,11 +217,15 @@ describe("squad server actions", () => {
   });
 
   it("deleteSquad on the caller's own squad only clears rows in the caller's workspace", async () => {
-    // A foreign objective that (incorrectly) points at the caller's squad must survive.
+    // Foreign rows that (incorrectly) point at the caller's squad must survive.
     db.current!.tables.objective.find((o) => o.id === "obj-b")!.squadId = "00000000-0000-4000-8000-00000000000a";
+    db.current!.tables.task.find((t) => t.id === "task-b")!.squadId = "00000000-0000-4000-8000-00000000000a";
     await settings.deleteSquad("acme", "alpha", "00000000-0000-4000-8000-00000000000a");
     expect(db.current!.tables.objective.find((o) => o.id === "obj-a")!.squadId).toBeNull();
+    // Task.squadId is cleared too (the fifth table with a squad_id column), scoped to the workspace.
+    expect(db.current!.tables.task.find((t) => t.id === "task-a")!.squadId).toBeNull();
     expect(db.current!.tables.objective.find((o) => o.id === "obj-b")!.squadId).toBe("00000000-0000-4000-8000-00000000000a");
+    expect(db.current!.tables.task.find((t) => t.id === "task-b")!.squadId).toBe("00000000-0000-4000-8000-00000000000a");
   });
 
   it("updateSquad refuses another workspace's squad", async () => {

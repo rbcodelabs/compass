@@ -99,6 +99,15 @@ beforeEach(() => {
   models.workspaceScoringConfig.findUnique.mockResolvedValue(null);
 });
 
+describe("getEntityDetail — nested solutions are scoped by their own workspaceId", () => {
+  it("filters the opportunity's nested solutions so a NULL or drifted row is hidden, not trusted via its parent", async () => {
+    models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [], solutions: [] });
+    await getEntityDetail("opportunity", ID, WS);
+    const include = (models.opportunity.findFirst.mock.calls[0][0] as { include: { solutions: { where: unknown } } }).include;
+    expect(include.solutions.where).toEqual({ workspaceId: WS });
+  });
+});
+
 describe("isEntityType", () => {
   it("accepts every known entity type", () => {
     for (const t of ENTITY_TYPES) expect(isEntityType(t)).toBe(true);

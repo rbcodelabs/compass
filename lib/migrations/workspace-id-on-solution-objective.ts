@@ -1,6 +1,8 @@
 import type { PoolClient } from "pg"
 
 export const WORKSPACE_ID_MIGRATION = "068_workspace_id_on_solution_objective"
+/** Later, DDL-free second pass that re-runs the same backfill and postconditions for rows old code inserted after 068's receipt. */
+export const WORKSPACE_ID_RESIDUAL_MIGRATION = "069_workspace_id_residual_backfill"
 
 /**
  * DSQL caps a write transaction at 3,000 modified rows, and each row also
