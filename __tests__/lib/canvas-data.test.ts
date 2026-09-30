@@ -67,11 +67,10 @@ describe("getCanvasOverview", () => {
     expect(result).toEqual(EMPTY_OVERVIEW);
   });
 
-  it("does not query key results, solutions, assumptions, or positions when there are no objectives/opportunities/solutions", async () => {
+  it("does not query key results, assumptions, or positions when there are no objectives/solutions", async () => {
     const prisma = makeFakePrisma({});
     await getCanvasOverview(prisma, "ws-1");
     expect(prisma.keyResult.findMany).not.toHaveBeenCalled();
-    expect(prisma.solution.findMany).not.toHaveBeenCalled();
     expect(prisma.assumption.findMany).not.toHaveBeenCalled();
     expect(prisma.canvasNodePosition.findMany).not.toHaveBeenCalled();
   });
@@ -81,7 +80,7 @@ describe("getCanvasOverview", () => {
     await getCanvasOverview(prisma, "ws-1");
     expect(prisma.objective.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { cycle: { workspaceId: "ws-1" } },
+        where: { workspaceId: "ws-1" },
       })
     );
   });
@@ -155,7 +154,7 @@ describe("getCanvasOverview", () => {
     ]);
   });
 
-  it("maps solutions scoped to fetched opportunity ids", async () => {
+  it("maps solutions scoped by their own workspaceId", async () => {
     const prisma = makeFakePrisma({
       opportunities: [{ id: "opp-1", title: "Opp", status: "EXPLORING", squadId: null, linkedKeyResultId: null }],
       solutions: [{ id: "sol-1", opportunityId: "opp-1", title: "Sol", status: "IDEA" }],
@@ -164,7 +163,7 @@ describe("getCanvasOverview", () => {
     const result = await getCanvasOverview(prisma, "ws-1");
 
     expect(prisma.solution.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { opportunityId: { in: ["opp-1"] } } })
+      expect.objectContaining({ where: { workspaceId: "ws-1" } })
     );
     expect(result.solutions).toEqual([
       { id: "sol-1", opportunityId: "opp-1", title: "Sol", status: "IDEA", position: null },

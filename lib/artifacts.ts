@@ -176,7 +176,7 @@ export async function linkArtifactToSolution(input: {
   const prisma = getPrisma()
   const [artifact, solution] = await Promise.all([
     prisma.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true, workspaceId: true } }),
-    prisma.solution.findFirst({ where: { id: input.solutionId, opportunity: { workspaceId: input.workspaceId } }, select: { id: true } }),
+    prisma.solution.findFirst({ where: { id: input.solutionId, workspaceId: input.workspaceId }, select: { id: true } }),
   ])
   if (!artifact || !solution) throw new Error("Artifact and Solution must exist in the same workspace")
   const existing = await prisma.artifactLink.findFirst({ where: { artifactId: artifact.id, linkedType: "SOLUTION", linkedId: solution.id } })

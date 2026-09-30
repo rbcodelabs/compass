@@ -447,7 +447,7 @@ describe("getOpportunityScore", () => {
 
 describe("scoreSolution", () => {
   beforeEach(() => {
-    mockSolution.findUnique.mockResolvedValue({ id: SOL_ID, title: "Add SSO", opportunity: { workspaceId: WS_ID } })
+    mockSolution.findUnique.mockResolvedValue({ id: SOL_ID, title: "Add SSO", workspaceId: WS_ID })
     mockWorkspaceScoringConfig.findUnique.mockResolvedValue({
       solutionScoringModel: { id: MODEL_ID, formulaType: "WEIGHTED_SUM", version: 3, metrics: weightedSumMetrics },
     })

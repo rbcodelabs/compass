@@ -77,7 +77,8 @@ export async function createObjective(
     throw new Error(parsed.error.issues[0].message);
   }
 
-  // The cycle must belong to a workspace the caller is a member of.
+  // The Objective's workspace is derived from the authorized cycle, never from
+  // client input, so it cannot disagree with the cycle it is created under.
   const { workspaceId } = await requireProductEntity("okrCycle", cycleId);
   const prisma = getPrisma();
   // A client-supplied squad must live in the same workspace as the cycle.
@@ -85,6 +86,7 @@ export async function createObjective(
 
   await prisma.objective.create({
     data: {
+      workspaceId,
       cycleId,
       title: parsed.data.title,
       description: parsed.data.description,

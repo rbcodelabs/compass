@@ -117,8 +117,8 @@ async function ownerInterview(actor: McpActor, id: string) {
 
 async function readTarget(tx: AppTransactionClient, type: string, id: string, workspaceId: string) {
   if (type === "OPPORTUNITY") return tx.opportunity.findFirst({ where: { id, workspaceId } })
-  if (type === "SOLUTION") return tx.solution.findFirst({ where: { id, opportunity: { workspaceId } } })
-  if (type === "ASSUMPTION") return tx.assumption.findFirst({ where: { id, solution: { opportunity: { workspaceId } } } })
+  if (type === "SOLUTION") return tx.solution.findFirst({ where: { id, workspaceId } })
+  if (type === "ASSUMPTION") return tx.assumption.findFirst({ where: { id, solution: { workspaceId } } })
   return tx.experiment.findFirst({ where: { id, workspaceId } })
 }
 

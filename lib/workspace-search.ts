@@ -66,7 +66,7 @@ export async function searchWorkspace(input: {
       prisma.opportunity.findMany({ ...queryOptions, where: directWhere, select: { id: true, title: true, status: true } }),
       prisma.solution.findMany({
         ...queryOptions,
-        where: { opportunity: { workspaceId: input.workspaceId }, title: titleFilter },
+        where: { workspaceId: input.workspaceId, title: titleFilter },
         select: { id: true, title: true, status: true, opportunity: { select: { id: true, title: true } } },
       }),
       prisma.experiment.findMany({ ...queryOptions, where: directWhere, select: { id: true, title: true, status: true, conclusion: true } }),

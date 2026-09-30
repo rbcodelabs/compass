@@ -209,11 +209,11 @@ async function resolveReference(db: LegacyDecisionRepairClient, workspaceId: str
     return { ...base, title: cleanTitle(String(found.title), "Opportunity"), updatedAt: found.updatedAt as Date, linkType: reference.type, linkId: reference.id }
   }
   if (reference.type === "SOLUTION") {
-    const found = row(await db.solution.findFirst({ where: { id: reference.id, opportunity: { workspaceId } }, select: { id: true, title: true, updatedAt: true } }))
+    const found = row(await db.solution.findFirst({ where: { id: reference.id, workspaceId }, select: { id: true, title: true, updatedAt: true } }))
     return { ...base, title: cleanTitle(String(found.title), "Solution"), updatedAt: found.updatedAt as Date, linkType: reference.type, linkId: reference.id }
   }
   if (reference.type === "ASSUMPTION") {
-    const found = row(await db.assumption.findFirst({ where: { id: reference.id, solution: { opportunity: { workspaceId } } }, select: { id: true, title: true, updatedAt: true } }))
+    const found = row(await db.assumption.findFirst({ where: { id: reference.id, solution: { workspaceId } }, select: { id: true, title: true, updatedAt: true } }))
     return { ...base, title: cleanTitle(String(found.title), "Assumption"), updatedAt: found.updatedAt as Date, linkType: reference.type, linkId: reference.id }
   }
   if (reference.type === "ROADMAP_ITEM") {

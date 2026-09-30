@@ -21,17 +21,19 @@ export async function requireProductEntity(kind: ProductEntityKind, entityId: st
   const db = getPrisma();
   const workspace = { members: { some: { userId: id } } };
   const deny = () => new Error("Entity not found or access denied");
-  // Objective and Key Result are scoped through their cycle's workspace. The
-  // membership filter is part of the lookup, so a foreign row is "not found".
   if (kind === "objective") {
-    const row = await db.objective.findFirst({ where: { id: entityId, cycle: { workspace } }, select: { cycle: { select: { workspaceId: true } } } });
-    if (!row || (expectedWorkspaceId && row.cycle.workspaceId !== expectedWorkspaceId)) throw deny();
-    return { workspaceId: row.cycle.workspaceId, opportunityId: null };
+    // Objective carries its own workspace_id (migration 068); a NULL column
+    // never matches the membership filter, so an un-backfilled row is denied.
+    const row = await db.objective.findFirst({ where: { id: entityId, workspace }, select: { workspaceId: true } });
+    if (!row || !row.workspaceId || (expectedWorkspaceId && row.workspaceId !== expectedWorkspaceId)) throw deny();
+    return { workspaceId: row.workspaceId, opportunityId: null };
   }
   if (kind === "keyResult") {
-    const row = await db.keyResult.findFirst({ where: { id: entityId, objective: { cycle: { workspace } } }, select: { objective: { select: { cycle: { select: { workspaceId: true } } } } } });
-    if (!row || (expectedWorkspaceId && row.objective.cycle.workspaceId !== expectedWorkspaceId)) throw deny();
-    return { workspaceId: row.objective.cycle.workspaceId, opportunityId: null };
+    // A Key Result is scoped through its Objective's workspace_id.
+    const row = await db.keyResult.findFirst({ where: { id: entityId, objective: { workspace } }, select: { objective: { select: { workspaceId: true } } } });
+    const workspaceId = row?.objective.workspaceId;
+    if (!row || !workspaceId || (expectedWorkspaceId && workspaceId !== expectedWorkspaceId)) throw deny();
+    return { workspaceId, opportunityId: null };
   }
   if (kind === "okrCycle" || kind === "squad" || kind === "roadmapItem" || kind === "task") {
     const delegate = { okrCycle: db.oKRCycle, squad: db.squad, roadmapItem: db.roadmapItem, task: db.task }[kind] as unknown as {
@@ -42,9 +44,11 @@ export async function requireProductEntity(kind: ProductEntityKind, entityId: st
     return { workspaceId: row.workspaceId, opportunityId: null };
   }
   if (kind === "solution") {
-    const row = await db.solution.findFirst({ where: { id: entityId, opportunity: { workspace } }, select: { id: true, opportunityId: true, opportunity: { select: { workspaceId: true } } } });
-    if (!row || (expectedWorkspaceId && row.opportunity.workspaceId !== expectedWorkspaceId)) throw new Error("Entity not found or access denied");
-    return { workspaceId: row.opportunity.workspaceId, opportunityId: row.opportunityId };
+    // Tenant scope is the Solution's own workspace_id. A NULL column never
+    // matches the membership filter, so an un-backfilled row is denied.
+    const row = await db.solution.findFirst({ where: { id: entityId, workspace }, select: { id: true, opportunityId: true, workspaceId: true } });
+    if (!row || !row.workspaceId || (expectedWorkspaceId && row.workspaceId !== expectedWorkspaceId)) throw deny();
+    return { workspaceId: row.workspaceId, opportunityId: row.opportunityId };
   }
   const row = kind === "experiment"
     ? await db.experiment.findFirst({ where: { id: entityId, workspace }, select: { workspaceId: true } })

@@ -72,9 +72,9 @@ beforeEach(() => vi.clearAllMocks())
 
 describe("update_roadmap_item source-workspace link boundaries", () => {
   const targets = [
-    ["keyResultId", "keyResult", (workspaceId: string) => ({ objective: { cycle: { workspaceId } } })],
+    ["keyResultId", "keyResult", (workspaceId: string) => ({ objective: { workspaceId } })],
     ["opportunityId", "opportunity", (workspaceId: string) => ({ workspaceId })],
-    ["solutionId", "solution", (workspaceId: string) => ({ opportunity: { workspaceId } })],
+    ["solutionId", "solution", (workspaceId: string) => ({ workspaceId })],
     ["squadId", "squad", (workspaceId: string) => ({ workspaceId })],
   ] as const
 
@@ -461,7 +461,7 @@ describe("applyToolGate", () => {
   })
 
   it("update_solution_status preserves the solution workspace boundary", async () => {
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-1" } })
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
 
     await expect(
@@ -478,7 +478,7 @@ describe("applyToolGate", () => {
 
   it("promote_to_roadmap: rejects a workspaceId that doesn't own the solution (landmine)", async () => {
     // Solution belongs to ws-1, but the caller passes ws-2.
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-1" } })
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" }) // member of the real workspace
     await expect(
       applyToolGate("promote_to_roadmap", MEMBER, { solutionId: "sol-1", workspaceId: "ws-2" })
@@ -501,7 +501,7 @@ describe("applyToolGate", () => {
   it("update_roadmap_item rejects a cross-workspace Solution before writing", async () => {
     mockPrisma.roadmapItem.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-2" } })
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
 
     await expect(callTool("update_roadmap_item", MEMBER, {
       itemId: "item-1",
@@ -519,7 +519,7 @@ describe("applyToolGate", () => {
       horizon: "NEXT",
       status: "ACTIVE",
     })
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-1" } })
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     mockPrisma.roadmapItem.update.mockResolvedValue({
       id: "item-1",
@@ -545,7 +545,7 @@ describe("applyToolGate", () => {
 
   it("link_artifact_to_solution: rejects cross-workspace targets", async () => {
     mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-2" } })
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     await expect(applyToolGate("link_artifact_to_solution", MEMBER, {
       artifactId: "art-1", solutionId: "sol-1", workspaceId: "ws-1",
@@ -622,7 +622,7 @@ describe("applyToolGate", () => {
 // per-user actor scope — no direct applyToolGate call.
 describe("register() wrapper enforces gates end-to-end", () => {
   it("denies update_solution_status before its handler can read or write", async () => {
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-1" } })
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
 
     await expect(callTool("update_solution_status", MEMBER, {

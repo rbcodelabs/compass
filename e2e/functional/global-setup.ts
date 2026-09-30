@@ -13,6 +13,7 @@ import { backfillRoadmapCommitmentProvenance } from "../../lib/dsql-backfill";
 import { seedE2E } from "./fixtures/seed-e2e";
 import { setRunToken } from "./fixtures/run-token";
 import { assertIsolatedE2EDatabase } from "./fixtures/isolated-database";
+import { backfillWorkspaceIdOnSolutionObjective } from "../../lib/migrations/workspace-id-on-solution-objective";
 
 const schema = process.env.PGSCHEMA
   ? `${process.env.PGSCHEMA}_dev`
@@ -39,6 +40,7 @@ async function ensureFunctionalSchema(pool: pg.Pool) {
     "prisma/migrations/064_embed_feedback_sources/migration.sql",
     "prisma/migrations/065_review_option_description/migration.sql",
     "prisma/migrations/067_decision_answers/migration.sql",
+    "prisma/migrations/068_workspace_id_on_solution_objective/migration.sql",
   ];
 
   const client = await pool.connect();
@@ -80,6 +82,9 @@ async function ensureFunctionalSchema(pool: pg.Pool) {
         }
       }
     }
+    // Fixture rows left by earlier runs predate migration 068's columns; fill
+    // them from their parent exactly as the registered migration's hook does.
+    await backfillWorkspaceIdOnSolutionObjective(client, schema, []);
   } finally {
     client.release();
   }

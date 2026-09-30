@@ -638,8 +638,11 @@ export async function deleteWorkspace(
 
   // ── Step 1: Break the Objective <-> KeyResult circular reference ────────────
   // Objective.parentKeyResultId references KeyResult; null it before deleting KRs.
+  // Teardown, not authorization: match the Objective's own workspaceId OR its
+  // cycle's, so a row whose workspaceId is still NULL (created mid-rollout,
+  // before migration 068's backfill) is still released before KRs are deleted.
   await prisma.objective.updateMany({
-    where: { cycle: { workspaceId } },
+    where: { OR: [{ workspaceId }, { cycle: { workspaceId } }] },
     data: { parentKeyResultId: null },
   });
 

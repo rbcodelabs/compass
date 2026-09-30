@@ -121,10 +121,8 @@ async function resolveSolutionPlan({ workspaceId, userId, entityId }: ResolveInp
       id: entityId,
       commentType: "PLAN",
       solution: {
-        opportunity: {
-          workspaceId,
-          workspace: { members: { some: { userId } } },
-        },
+        workspaceId,
+        workspace: { members: { some: { userId } } },
       },
     },
     select: {

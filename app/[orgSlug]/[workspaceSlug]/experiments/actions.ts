@@ -22,7 +22,7 @@ export async function createExperiment(
   await requireProductWorkspace(workspaceId)
   const prisma = getPrisma()
 
-  if (data.assumptionId && !await prisma.assumption.findFirst({ where: { id: data.assumptionId, solution: { opportunity: { workspaceId } } }, select: { id: true } })) throw new Error("Assumption not found in workspace")
+  if (data.assumptionId && !await prisma.assumption.findFirst({ where: { id: data.assumptionId, solution: { workspaceId } }, select: { id: true } })) throw new Error("Assumption not found in workspace")
   if (data.squadId && !await prisma.squad.findFirst({ where: { id: data.squadId, workspaceId }, select: { id: true } })) throw new Error("Squad not found in workspace")
 
   const experiment = await captureWorkspaceMutation(prisma, "experiment", "create", "UI", undefined, tx => tx.experiment.create({
@@ -114,7 +114,7 @@ export async function concludeExperiment(
   const experiment = await retryUpdatesTransaction(prisma, async tx => {
   const current = await tx.experiment.findFirst({ where: { id: experimentId, workspaceId }, select: { assumptionId: true, status: true } })
   if (!current) throw new Error("Experiment not found")
-  if (current.assumptionId && !await tx.assumption.findFirst({ where: { id: current.assumptionId, solution: { opportunity: { workspaceId } } }, select: { id: true } })) throw new Error("Assumption not found in workspace")
+  if (current.assumptionId && !await tx.assumption.findFirst({ where: { id: current.assumptionId, solution: { workspaceId } }, select: { id: true } })) throw new Error("Assumption not found in workspace")
   const updated = await tx.experiment.update({
     where: { id: experimentId },
     data: {

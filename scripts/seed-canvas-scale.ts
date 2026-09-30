@@ -225,8 +225,8 @@ async function main() {
       const obj = await one<{ id: string }>(
         `
         INSERT INTO "${S}".objectives
-          (id, cycle_id, title, status, sort_order, created_at, updated_at)
-        VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())
+          (id, workspace_id, cycle_id, title, status, sort_order, created_at, updated_at)
+        VALUES (gen_random_uuid(), (SELECT workspace_id FROM "${S}".okr_cycles WHERE id = $1), $1, $2, $3, $4, NOW(), NOW())
         RETURNING id
       `,
         [cycle.id, objTitle, pick(OBJECTIVE_STATUSES), i]
@@ -288,8 +288,8 @@ async function main() {
       const sol = await one<{ id: string }>(
         `
         INSERT INTO "${S}".solutions
-          (id, opportunity_id, title, status, sort_order, created_at, updated_at)
-        VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())
+          (id, workspace_id, opportunity_id, title, status, sort_order, created_at, updated_at)
+        VALUES (gen_random_uuid(), (SELECT workspace_id FROM "${S}".opportunities WHERE id = $1), $1, $2, $3, $4, NOW(), NOW())
         RETURNING id
       `,
         [oppId, `Synthetic Solution ${solutionCounter}`, pick(SOLUTION_STATUSES), i]
