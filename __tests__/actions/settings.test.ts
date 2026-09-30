@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockSquad = {
+  findFirst: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   delete: vi.fn(),
@@ -198,6 +199,9 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// Real-helper cross-tenant denial is covered in okr-actions-tenant-isolation.test.ts.
+const mockRequireProductEntity = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/product-action-auth", () => ({ requireProductEntity: mockRequireProductEntity }));
 
 vi.mock("@/auth", () => ({
   auth: vi.fn(),
@@ -237,6 +241,8 @@ beforeEach(() => {
   // resolveWorkspace always finds the workspace
   mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1" });
   mockWorkspace.update.mockResolvedValue({ id: "ws-1" });
+  mockSquad.findFirst.mockResolvedValue({ id: "squad-1" });
+  mockRequireProductEntity.mockResolvedValue({ workspaceId: "ws-1", opportunityId: null });
   mockSquad.create.mockResolvedValue({ id: "squad-1" });
   mockSquad.update.mockResolvedValue({ id: "squad-1" });
   mockSquad.delete.mockResolvedValue({ id: "squad-1" });
@@ -391,6 +397,12 @@ describe("updateSquad", () => {
     expect(data.name).toBeUndefined();
   });
 
+  it("refuses a squad that is not in the caller's workspace", async () => {
+    mockSquad.findFirst.mockResolvedValue(null);
+    await expect(updateSquad("org", "ws", "foreign-squad", { name: "Beta" })).rejects.toThrow("Squad not found in this workspace");
+    expect(mockSquad.update).not.toHaveBeenCalled();
+  });
+
   it("throws Unauthorized when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
     await expect(
@@ -406,24 +418,33 @@ describe("deleteSquad", () => {
     await deleteSquad("org", "ws", "squad-1");
 
     // All four related models should have been updated
+    // Every null-out is scoped to the caller's workspace.
     expect(mockObjective.updateMany).toHaveBeenCalledWith({
-      where: { squadId: "squad-1" },
+      where: { squadId: "squad-1", cycle: { workspaceId: "ws-1" } },
       data: { squadId: null },
     });
     expect(mockOpportunity.updateMany).toHaveBeenCalledWith({
-      where: { squadId: "squad-1" },
+      where: { squadId: "squad-1", workspaceId: "ws-1" },
       data: { squadId: null },
     });
     expect(mockExperiment.updateMany).toHaveBeenCalledWith({
-      where: { squadId: "squad-1" },
+      where: { squadId: "squad-1", workspaceId: "ws-1" },
       data: { squadId: null },
     });
     expect(mockRoadmapItem.updateMany).toHaveBeenCalledWith({
-      where: { squadId: "squad-1" },
+      where: { squadId: "squad-1", workspaceId: "ws-1" },
       data: { squadId: null, updatedAt: expect.any(Date) },
     });
 
     expect(mockSquad.delete).toHaveBeenCalledWith({ where: { id: "squad-1" } });
+  });
+
+  it("refuses a squad that is not in the caller's workspace and touches nothing", async () => {
+    mockSquad.findFirst.mockResolvedValue(null);
+    await expect(deleteSquad("org", "ws", "foreign-squad")).rejects.toThrow("Squad not found in this workspace");
+    expect(mockSquad.findFirst).toHaveBeenCalledWith({ where: { id: "foreign-squad", workspaceId: "ws-1" }, select: { id: true } });
+    expect(mockObjective.updateMany).not.toHaveBeenCalled();
+    expect(mockSquad.delete).not.toHaveBeenCalled();
   });
 
   it("throws Unauthorized when session is missing", async () => {
@@ -452,6 +473,20 @@ describe("assignSquad", () => {
       where: { id: "roadmap-1" },
       data: { squadId: "squad-1", updatedAt: expect.any(Date) },
     });
+  });
+
+  it("authorizes the object first and refuses a squad from another workspace", async () => {
+    mockSquad.findFirst.mockResolvedValue(null);
+    await expect(assignSquad("objective", "obj-1", "foreign-squad", "/path")).rejects.toThrow("Squad not found in this workspace");
+    expect(mockRequireProductEntity).toHaveBeenCalledWith("objective", "obj-1");
+    expect(mockSquad.findFirst).toHaveBeenCalledWith({ where: { id: "foreign-squad", workspaceId: "ws-1" }, select: { id: true } });
+    expect(mockPrisma.objective.update).not.toHaveBeenCalled();
+  });
+
+  it("does not write when the object belongs to another tenant", async () => {
+    mockRequireProductEntity.mockRejectedValue(new Error("Entity not found or access denied"));
+    await expect(assignSquad("objective", "foreign-obj", "squad-1", "/path")).rejects.toThrow("Entity not found or access denied");
+    expect(mockPrisma.objective.update).not.toHaveBeenCalled();
   });
 
   it("throws Unauthorized when session is missing", async () => {
