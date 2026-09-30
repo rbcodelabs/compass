@@ -40,7 +40,7 @@ it.each(["decision", "review"])("adds live artifact metadata to the %s getter wi
   // no linked task_links, and no noActionAt); getReviewRequest does not.
   // Both getters also lift the revision's options and chosen option to the top
   // level; this fixture has no options or decisions, so they are empty/null.
-  const extra = { options: [], chosenOption: null, ...(kind === "decision" ? { requestedBy: null, followUpTasks: [], noAction: null } : {}) }
+  const extra = { options: [], chosenOption: null, questions: [], answers: [], ...(kind === "decision" ? { requestedBy: null, followUpTasks: [], noAction: null } : {}) }
   expect(result.structuredContent.data).toEqual({ ...request, reviewUrl: null, artifacts: [{ id: "artifact", title: "Prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }], ...extra })
   expect(mocks.artifacts).toHaveBeenCalledWith("workspace", "decision")
 })

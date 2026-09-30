@@ -218,3 +218,201 @@ describe("new decision form options editor", () => {
     await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ options: [{ label: "Ship now", description: "Soon" }, { label: "Wait" }] })))
   })
 })
+
+describe("decision UI with multiple questions", () => {
+  afterEach(cleanup)
+  beforeEach(() => { vi.clearAllMocks() })
+
+  const options = [
+    { id: "sub", label: "Submit answers", description: null, outcomeClass: "APPROVE", actionKey: "SUBMIT_ANSWERS" },
+    { id: "chg", label: "Request changes", outcomeClass: "REQUEST_CHANGES", actionKey: "REQUEST_CHANGES", description: null },
+    { id: "rej", label: "Reject", outcomeClass: "REJECT", actionKey: "REJECT", description: null },
+  ]
+  const questions = [
+    { header: "Timing", question: "When do we ship?", options: [{ label: "Now", description: "This week." }, { label: "Later" }] },
+    { question: "Who announces it?", options: [{ label: "PM" }, { label: "Marketing" }] },
+  ]
+  const renderActions = () => render(<DecisionActions workspaceId="ws-1" revisionId="rev-1" fingerprint="fp" options={options} questions={questions} />)
+
+  it("renders each question as its own radio group with its header, question, options and descriptions", () => {
+    renderActions()
+    const groups = screen.getAllByRole("group")
+    expect(groups).toHaveLength(2)
+    expect(within(groups[0]).getByText("Timing")).toBeDefined()
+    expect(within(groups[0]).getByText("When do we ship?")).toBeDefined()
+    expect(within(groups[0]).getAllByRole("radio")).toHaveLength(2)
+    expect(within(groups[0]).getByText("This week.")).toBeDefined()
+    expect(within(groups[1]).getByText("Who announces it?")).toBeDefined()
+    expect(within(groups[1]).getAllByRole("radio")).toHaveLength(2)
+    expect(screen.getByRole("button", { name: "Request changes" })).toBeDefined()
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDefined()
+    expect(screen.queryByRole("button", { name: "Confirm choice" })).toBeNull()
+  })
+
+  it("keeps Submit answers disabled until every question is answered, then submits one answer per question", async () => {
+    renderActions()
+    const submit = screen.getByRole("button", { name: "Submit answers" }) as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    expect(screen.getByText("2 questions left to answer.")).toBeDefined()
+    fireEvent.click(within(screen.getAllByRole("group")[0]).getByRole("radio", { name: /Now/ }))
+    expect(submit.disabled).toBe(true)
+    expect(screen.getByText("1 question left to answer.")).toBeDefined()
+    fireEvent.click(within(screen.getAllByRole("group")[1]).getByRole("radio", { name: /Marketing/ }))
+    expect(submit.disabled).toBe(false)
+    fireEvent.click(submit)
+    await waitFor(() => expect(decide).toHaveBeenCalledWith({ workspaceId: "ws-1", revisionId: "rev-1", fingerprint: "fp", optionId: "sub", rationale: "", answers: [{ questionIndex: 0, chosenOption: "Now" }, { questionIndex: 1, chosenOption: "Marketing" }] }))
+  })
+
+  it("lets an answer be changed before submitting", async () => {
+    renderActions()
+    const groups = screen.getAllByRole("group")
+    fireEvent.click(within(groups[0]).getByRole("radio", { name: /Now/ }))
+    fireEvent.click(within(groups[0]).getByRole("radio", { name: /Later/ }))
+    fireEvent.click(within(groups[1]).getByRole("radio", { name: /PM/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Submit answers" }))
+    await waitFor(() => expect(decide).toHaveBeenCalledWith(expect.objectContaining({ answers: [{ questionIndex: 0, chosenOption: "Later" }, { questionIndex: 1, chosenOption: "PM" }] })))
+  })
+
+  it.each(["Request changes", "Reject"])("applies %s to the whole request: needs a rationale, not answers", async (label) => {
+    renderActions()
+    fireEvent.click(screen.getByRole("button", { name: label }))
+    expect((await screen.findByRole("alert")).textContent).toMatch(/rationale/i)
+    expect(decide).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText(/rationale/i), { target: { value: "Not viable." } })
+    fireEvent.click(screen.getByRole("button", { name: label }))
+    await waitFor(() => expect(decide).toHaveBeenCalledWith({ workspaceId: "ws-1", revisionId: "rev-1", fingerprint: "fp", optionId: label === "Reject" ? "rej" : "chg", rationale: "Not viable." }))
+  })
+
+  it("wraps long questions and labels instead of clipping them", () => {
+    const long = "Q".repeat(200)
+    const longLabel = "L".repeat(120)
+    render(<DecisionActions workspaceId="ws-1" revisionId="rev-1" fingerprint="fp" options={options} questions={[{ question: long, options: [{ label: longLabel }, { label: "B" }] }]} />)
+    expect(screen.getByText(long).className).toContain("break-words")
+    expect(screen.getByText(longLabel).className).toContain("break-words")
+  })
+
+  it("renders the legacy single-options cards unchanged when no questions are passed", () => {
+    render(<DecisionActions workspaceId="ws-1" revisionId="rev-1" fingerprint="fp" options={[
+      { id: "c1", label: "Ship now", description: null, outcomeClass: "APPROVE", actionKey: "CHOICE_1" },
+      { id: "c2", label: "Wait", description: null, outcomeClass: "APPROVE", actionKey: "CHOICE_2" },
+      { id: "chg", label: "Request changes", outcomeClass: "REQUEST_CHANGES", actionKey: "REQUEST_CHANGES" },
+    ]} />)
+    expect(screen.getByRole("button", { name: "Confirm choice" })).toBeDefined()
+    expect(screen.queryByRole("button", { name: "Submit answers" })).toBeNull()
+  })
+})
+
+describe("new decision form questions editor", () => {
+  afterEach(cleanup)
+  beforeEach(() => {
+    vi.clearAllMocks()
+    create.mockResolvedValue({ requestId: "request-1", revisionId: "rev-1" })
+  })
+
+  const subjects = [{ type: "WORKSPACE" as const, id: "ws-1", title: "Workspace" }]
+  const renderForm = (props: Partial<Parameters<typeof NewDecisionForm>[0]> = {}) => render(<NewDecisionForm workspaceId="ws-1" orgSlug="acme" workspaceSlug="product" subjects={subjects} {...props} />)
+  const fillCore = () => {
+    fireEvent.change(screen.getByPlaceholderText("What needs to be decided?"), { target: { value: "Plan the launch" } })
+    fireEvent.change(screen.getByPlaceholderText(/Give the reviewer enough context/), { target: { value: "Answer each." } })
+  }
+  const submit = () => fireEvent.click(screen.getByRole("button", { name: "Request decision" }))
+  const fillQuestion = (n: number, text: string, a: string, b: string) => {
+    fireEvent.change(screen.getByLabelText(`Question ${n} text`), { target: { value: text } })
+    fireEvent.change(screen.getByLabelText(`Question ${n} option 1 label`), { target: { value: a } })
+    fireEvent.change(screen.getByLabelText(`Question ${n} option 2 label`), { target: { value: b } })
+  }
+
+  it("submits an empty questions list on the legacy path so nothing changes", async () => {
+    renderForm()
+    fillCore()
+    submit()
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ options: [], questions: [] })))
+  })
+
+  it("adds questions (each starting with two options) up to four and removes them", () => {
+    renderForm()
+    fireEvent.click(screen.getByRole("button", { name: "Add questions" }))
+    expect(screen.getAllByLabelText(/Question \d text/)).toHaveLength(1)
+    expect(screen.getAllByLabelText(/Question 1 option \d label/)).toHaveLength(2)
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole("button", { name: "Add question" }))
+    expect(screen.getAllByLabelText(/Question \d text/)).toHaveLength(4)
+    expect((screen.getByRole("button", { name: "Add question" }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "Remove question 4" }))
+    expect(screen.getAllByLabelText(/Question \d text/)).toHaveLength(3)
+    fireEvent.click(screen.getByRole("button", { name: "Add option to question 1" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add option to question 1" }))
+    expect((screen.getByRole("button", { name: "Add option to question 1" }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("submits trimmed questions with headers and descriptions", async () => {
+    renderForm()
+    fillCore()
+    fireEvent.click(screen.getByRole("button", { name: "Add questions" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add question" }))
+    fireEvent.change(screen.getByLabelText("Question 1 header"), { target: { value: " Timing " } })
+    fillQuestion(1, " When? ", " Now ", "Later")
+    fireEvent.change(screen.getByLabelText("Question 1 option 1 description"), { target: { value: " This week " } })
+    fillQuestion(2, "Who?", "PM", "Marketing")
+    submit()
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      question: "Plan the launch",
+      options: [],
+      questions: [
+        { header: "Timing", question: "When?", options: [{ label: "Now", description: "This week" }, { label: "Later" }] },
+        { question: "Who?", options: [{ label: "PM" }, { label: "Marketing" }] },
+      ],
+    })))
+  })
+
+  it("makes questions and the single options editor mutually exclusive", () => {
+    renderForm()
+    fireEvent.click(screen.getByRole("button", { name: "Add answer options" }))
+    expect((screen.getByRole("button", { name: "Add questions" }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "Remove option 1" }))
+    fireEvent.click(screen.getByRole("button", { name: "Remove option 1" }))
+    expect((screen.getByRole("button", { name: "Add questions" }) as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByRole("button", { name: "Add questions" }))
+    expect((screen.getByRole("button", { name: "Add answer options" }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("ignores an untouched blank question instead of blocking a plain decision", async () => {
+    renderForm()
+    fillCore()
+    fireEvent.click(screen.getByRole("button", { name: "Add questions" }))
+    submit()
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ questions: [] })))
+  })
+
+  it("explains a missing question text, too few options, duplicate labels and reserved labels without calling the action", async () => {
+    renderForm()
+    fillCore()
+    fireEvent.click(screen.getByRole("button", { name: "Add questions" }))
+    fireEvent.change(screen.getByLabelText("Question 1 option 1 label"), { target: { value: "A" } })
+    submit()
+    expect(screen.getByRole("alert").textContent).toBe("Question 1 needs its question text.")
+
+    fireEvent.change(screen.getByLabelText("Question 1 text"), { target: { value: "Which?" } })
+    submit()
+    expect(screen.getByRole("alert").textContent).toMatch(/Question 1 needs at least 2 options/)
+
+    fireEvent.change(screen.getByLabelText("Question 1 option 2 label"), { target: { value: " a " } })
+    submit()
+    expect(screen.getByRole("alert").textContent).toMatch(/Question 1: Option labels must be unique/)
+
+    fireEvent.change(screen.getByLabelText("Question 1 option 2 label"), { target: { value: "Reject" } })
+    submit()
+    expect(screen.getByRole("alert").textContent).toMatch(/Question 1: "Reject" is reserved/)
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it("prefills prior questions in revise mode and lets them be cleared back to the defaults", async () => {
+    renderForm({
+      initial: { type: "WORKSPACE", id: "ws-1", question: "Plan", context: "C", questions: [{ header: "Timing", question: "When?", options: [{ label: "Now" }, { label: "Later" }] }] },
+      revise: { requestId: "request-1", expectedDecisionId: "decision-1", reason: "Changes." },
+    })
+    expect((screen.getByLabelText("Question 1 text") as HTMLInputElement).value).toBe("When?")
+    fireEvent.click(screen.getByRole("button", { name: "Remove question 1" }))
+    submit()
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ options: [], questions: [], revise: expect.objectContaining({ requestId: "request-1" }) })))
+  })
+})

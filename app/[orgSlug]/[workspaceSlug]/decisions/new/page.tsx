@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { getWorkspace } from "@/lib/workspace"
+import { parsePacketQuestions } from "@/lib/tracked-decision-types"
 import { PageHeader } from "@/components/patterns/page-header"
 import { NewDecisionForm, type DecisionSubjectOption } from "@/components/decisions/new-decision-form"
 
@@ -34,15 +35,16 @@ export default async function NewDecisionPage({ params, searchParams }: {
     ...feedback.slice(0, 100).map((row) => ({ type: "FEEDBACK" as const, ...row })),
   ]
 
-  let initial = { type: query.subjectType as DecisionSubjectOption["type"] | undefined, id: query.subjectId, question: undefined as string | undefined, context: undefined as string | undefined, options: undefined as Array<{ label: string; description?: string }> | undefined }
+  let initial = { type: query.subjectType as DecisionSubjectOption["type"] | undefined, id: query.subjectId, question: undefined as string | undefined, context: undefined as string | undefined, options: undefined as Array<{ label: string; description?: string }> | undefined, questions: undefined as Array<{ header?: string; question: string; options: Array<{ label: string; description?: string }> }> | undefined }
   let revise: { requestId: string; expectedDecisionId: string; reason: string } | undefined
   if (query.reviseRequestId) {
     const previous = await prisma.reviewRequest.findFirst({ where: { id: query.reviseRequestId, workspaceId: workspace.id, gateType: "TRACKED_DECISION", state: "DECIDED" }, include: { currentRevision: { include: { decisions: { include: { option: true } } } } } })
     if (!previous?.currentRevision?.decisions[0]) notFound()
     const packet = JSON.parse(previous.currentRevision.packetJson) as { question: string; context: string; entity: { type: DecisionSubjectOption["type"]; id: string }; options?: Array<{ label: string; description?: string }> }
+    const priorQuestions = parsePacketQuestions(previous.currentRevision.packetJson)
     // Prefill the prior choices so revising keeps them by default; the form
     // always submits its current list, so clearing them there resets to defaults.
-    initial = { type: packet.entity.type, id: packet.entity.id, question: packet.question, context: packet.context, options: Array.isArray(packet.options) ? packet.options : undefined }
+    initial = { type: packet.entity.type, id: packet.entity.id, question: packet.question, context: packet.context, options: Array.isArray(packet.options) ? packet.options : undefined, questions: priorQuestions.length ? priorQuestions : undefined }
     revise = { requestId: previous.id, expectedDecisionId: previous.currentRevision.decisions[0].id, reason: previous.currentRevision.decisions[0].rationale ?? "Follow up on the previous decision." }
   }
 

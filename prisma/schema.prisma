@@ -1301,6 +1301,7 @@ model DecisionRecord {
   actorUserId     String                @map("actor_user_id") @db.Uuid
   actorRole       String                @map("actor_role") @db.VarChar(30)
   rationale       String?               @db.Text
+  answersJson     String?               @map("answers_json") @db.Text
   idempotencyKey  String                @unique(map: "idx_decision_records_idempotency") @map("idempotency_key") @db.VarChar(128)
   decidedAt       DateTime              @default(now()) @map("decided_at")
   request         ReviewRequest         @relation(fields: [requestId], references: [id])

@@ -67,3 +67,34 @@ describe("decisions list page", () => {
     expect(mocks.list).toHaveBeenCalledWith(expect.objectContaining({ outcome: "APPROVE", tab: "DECIDED" }))
   })
 })
+
+describe("decisions list page — multi-question answers", () => {
+  afterEach(cleanup)
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.auth.mockResolvedValue({ user: { id: "user-1" } })
+    mocks.getWorkspace.mockResolvedValue({ id: "ws-1", organizationId: "org-1" })
+    mocks.members.mockResolvedValue([{ userId: "user-1", user: { name: "Rick", email: "rick@example.com" } }])
+    mocks.orgMembers.mockResolvedValue([])
+  })
+
+  it("shows each question and its chosen answer on a decided multi-question request", async () => {
+    const decided = row("r1", "Plan the launch", option("SUBMIT_ANSWERS", "Submit answers", "APPROVE"))
+    decided.currentRevision.decisions = [{ actorUserId: "user-1", option: option("SUBMIT_ANSWERS", "Submit answers", "APPROVE"), answersJson: JSON.stringify([{ questionIndex: 0, question: "When do we ship?", chosenOption: "Now" }, { questionIndex: 1, question: "Who announces it?", chosenOption: "PM" }]) }] as never[]
+    mocks.list.mockResolvedValue({ requests: [decided], total: 1, page: 1, pageSize: 20, pageCount: 1 })
+    render(await DecisionsPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product" }), searchParams: Promise.resolve({ tab: "decided" }) }))
+    const answers = screen.getByRole("list", { name: "Answers" })
+    expect(answers.textContent).toContain("When do we ship?")
+    expect(answers.textContent).toContain("Now")
+    expect(answers.textContent).toContain("Who announces it?")
+    expect(answers.textContent).toContain("PM")
+    expect(screen.getByText("Approved")).toBeDefined()
+    expect(screen.queryByText("Chosen:")).toBeNull()
+  })
+
+  it("renders no answers list for a pending or answer-less request", async () => {
+    mocks.list.mockResolvedValue({ requests: [row("r1", "Open", null), row("r2", "Plain", option("APPROVE", "Approve", "APPROVE"))], total: 2, page: 1, pageSize: 20, pageCount: 1 })
+    render(await DecisionsPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product" }), searchParams: Promise.resolve({ tab: "decided" }) }))
+    expect(screen.queryByRole("list", { name: "Answers" })).toBeNull()
+  })
+})

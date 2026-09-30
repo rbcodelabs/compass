@@ -252,3 +252,107 @@ describe("recordDecision", () => {
       .rejects.toEqual(expect.objectContaining({ code: "ALREADY_DECIDED" }))
   })
 })
+
+describe("recordDecision with per-question answers", () => {
+  const questions = [
+    { header: "Timing", question: "When do we ship?", options: [{ label: "Now" }, { label: "Later" }] },
+    { question: "Who announces it?", options: [{ label: "PM" }, { label: "Marketing" }] },
+  ]
+  const multiRevision = {
+    ...revision,
+    request: { ...revision.request, gateType: "TRACKED_DECISION" },
+    packetJson: JSON.stringify({ schemaVersion: "tracked-decision/v2", question: "Plan", context: "c", entity: { type: "SOLUTION", id: "s" }, sources: [], questions }),
+    options: [
+      { id: "submit", actionKey: "SUBMIT_ANSWERS", label: "Submit answers", outcomeClass: "APPROVE", continuationKey: "NO_ACTION" },
+      { id: "changes", actionKey: "REQUEST_CHANGES", label: "Request changes", outcomeClass: "REQUEST_CHANGES", continuationKey: "NO_ACTION" },
+      { id: "reject", actionKey: "REJECT", label: "Reject", outcomeClass: "REJECT", continuationKey: "NO_ACTION" },
+    ],
+  }
+  const decide = (optionId: string, extra: { rationale?: string; answers?: Array<{ questionIndex: number; chosenOption: string }> } = {}) =>
+    recordDecision({ actor: { kind: "USER", userId: "user-1" }, revisionId: "rev-1", fingerprint: "fp-1", optionId, idempotencyKey: `key-${optionId}`, ...extra })
+  const goodAnswers = [{ questionIndex: 1, chosenOption: "Marketing" }, { questionIndex: 0, chosenOption: "Now" }]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    updates.enabled = false
+    mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma))
+    mockPrisma.decisionRecord.findUnique.mockResolvedValue(null)
+    mockPrisma.reviewRevision.findUnique.mockResolvedValue(multiRevision)
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
+    mockPrisma.decisionRecord.findFirst.mockResolvedValue(null)
+    mockPrisma.decisionRecord.create.mockResolvedValue({ id: "decision-multi" })
+  })
+
+  it("records an APPROVE with every answer, ordered by question, snapshotting the question text", async () => {
+    await expect(decide("submit", { answers: goodAnswers })).resolves.toEqual({ id: "decision-multi" })
+    const data = mockPrisma.decisionRecord.create.mock.calls[0][0].data
+    expect(data.optionId).toBe("submit")
+    expect(data.rationale).toBeNull()
+    expect(JSON.parse(data.answersJson)).toEqual([
+      { questionIndex: 0, question: "When do we ship?", chosenOption: "Now" },
+      { questionIndex: 1, question: "Who announces it?", chosenOption: "Marketing" },
+    ])
+  })
+
+  it("rejects a submission that misses a question", async () => {
+    await expect(decide("submit", { answers: [{ questionIndex: 0, chosenOption: "Now" }] })).rejects.toEqual(expect.objectContaining({ code: "ANSWERS_INCOMPLETE" }))
+    await expect(decide("submit")).rejects.toEqual(expect.objectContaining({ code: "ANSWERS_INCOMPLETE" }))
+    expect(mockPrisma.decisionRecord.create).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["an unknown option label", [{ questionIndex: 0, chosenOption: "Never" }, { questionIndex: 1, chosenOption: "PM" }]],
+    ["another question's option", [{ questionIndex: 0, chosenOption: "PM" }, { questionIndex: 1, chosenOption: "PM" }]],
+    ["an out-of-range question", [...goodAnswers, { questionIndex: 2, chosenOption: "PM" }]],
+    ["a repeated question", [...goodAnswers, { questionIndex: 0, chosenOption: "Later" }]],
+  ])("rejects %s", async (_name, answers) => {
+    await expect(decide("submit", { answers })).rejects.toEqual(expect.objectContaining({ code: "ANSWER_INVALID" }))
+    expect(mockPrisma.decisionRecord.create).not.toHaveBeenCalled()
+  })
+
+  it.each(["changes", "reject"])("lets %s apply to the whole request with a rationale and no answers", async (optionId) => {
+    await expect(decide(optionId, { rationale: "Not now." })).resolves.toEqual({ id: "decision-multi" })
+    expect(mockPrisma.decisionRecord.create.mock.calls[0][0].data).not.toHaveProperty("answersJson")
+  })
+
+  it.each(["changes", "reject"])("still requires a rationale for %s", async (optionId) => {
+    await expect(decide(optionId, { rationale: " " })).rejects.toEqual(expect.objectContaining({ code: "RATIONALE_REQUIRED" }))
+  })
+
+  it("refuses answers attached to Request changes or Reject", async () => {
+    await expect(decide("changes", { rationale: "No.", answers: goodAnswers })).rejects.toEqual(expect.objectContaining({ code: "ANSWERS_NOT_ALLOWED" }))
+    expect(mockPrisma.decisionRecord.create).not.toHaveBeenCalled()
+  })
+
+  it("does not write answersJson for a decision without questions", async () => {
+    mockPrisma.reviewRevision.findUnique.mockResolvedValue({ ...revision, request: { ...revision.request, gateType: "TRACKED_DECISION" }, packetJson: "{}" })
+    await decide("option-1")
+    expect(mockPrisma.decisionRecord.create.mock.calls[0][0].data).not.toHaveProperty("answersJson")
+  })
+
+  describe("idempotent replay", () => {
+    const record = (answers: unknown) => ({ id: "decision-multi", actorUserId: "user-1", revisionId: "rev-1", optionId: "submit", fingerprint: "fp-1", requestId: "request-1", answersJson: answers ? JSON.stringify(answers) : null })
+    const stored = [{ questionIndex: 0, question: "When do we ship?", chosenOption: "Now" }, { questionIndex: 1, question: "Who announces it?", chosenOption: "Marketing" }]
+
+    beforeEach(() => {
+      mockPrisma.reviewRequest.findUnique.mockResolvedValue({ currentRevisionId: "rev-1", state: "DECIDED" })
+    })
+
+    it("replays the stored decision when the same answers are resubmitted, in any order", async () => {
+      mockPrisma.decisionRecord.findUnique.mockResolvedValue(record(stored))
+      await expect(decide("submit", { answers: goodAnswers })).resolves.toEqual(expect.objectContaining({ id: "decision-multi" }))
+      expect(mockPrisma.decisionRecord.create).not.toHaveBeenCalled()
+    })
+
+    it("conflicts when the same key is reused with different answers", async () => {
+      mockPrisma.decisionRecord.findUnique.mockResolvedValue(record(stored))
+      await expect(decide("submit", { answers: [{ questionIndex: 0, chosenOption: "Later" }, { questionIndex: 1, chosenOption: "Marketing" }] })).rejects.toEqual(expect.objectContaining({ code: "IDEMPOTENCY_KEY_CONFLICT" }))
+    })
+
+    it("still replays an answer-less decision recorded before answers existed", async () => {
+      mockPrisma.decisionRecord.findUnique.mockResolvedValue({ ...record(null), optionId: "changes" })
+      await expect(decide("changes", { rationale: "x" })).resolves.toEqual(expect.objectContaining({ id: "decision-multi" }))
+    })
+  })
+})
