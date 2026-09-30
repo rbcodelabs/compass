@@ -111,3 +111,34 @@ describe("createTrackedDecisionAction options", () => {
     expect(mockCreateTracked).not.toHaveBeenCalled()
   })
 })
+
+describe("multi-question actions", () => {
+  const input = { workspaceId: "ws-1", subjectType: "SOLUTION" as const, subjectId: "solution-1", question: "Plan", context: "Pick.", idempotencyKey: "00000000-0000-4000-8000-000000000001" }
+  const questions = [{ question: "When?", options: [{ label: "Now" }, { label: "Later" }] }]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockAuth.mockResolvedValue({ user: { id: "user-1" } })
+    prisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", members: [{ id: "member-1" }], organization: { members: [] } })
+    mockCreateTracked.mockResolvedValue({ requestId: "request-1", id: "rev-1" })
+    mockReviseTracked.mockResolvedValue({ requestId: "request-1", id: "rev-2" })
+    mockRecord.mockResolvedValue({ id: "decision-1" })
+    prisma.reviewRevision.findUnique.mockResolvedValue({ id: "rev-1", request: { workspaceId: "ws-1", gateType: "TRACKED_DECISION" } })
+  })
+
+  it("passes questions to a new request and to a revision, including an empty clearing list", async () => {
+    await createTrackedDecisionAction({ ...input, questions })
+    expect(mockCreateTracked).toHaveBeenCalledWith(expect.objectContaining({ questions }))
+    const revise = { requestId: "request-1", expectedDecisionId: "decision-1", reason: "Changes needed." }
+    await createTrackedDecisionAction({ ...input, questions: [], revise })
+    expect(mockReviseTracked).toHaveBeenLastCalledWith(expect.objectContaining({ questions: [] }))
+    await createTrackedDecisionAction({ ...input, revise })
+    expect(mockReviseTracked.mock.calls[1][0].questions).toBeUndefined()
+  })
+
+  it("forwards the per-question answers to the decision service", async () => {
+    const answers = [{ questionIndex: 0, chosenOption: "Now" }]
+    await decideReviewAction({ workspaceId: "ws-1", revisionId: "rev-1", fingerprint: "fp", optionId: "sub", answers })
+    expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ optionId: "sub", answers }))
+  })
+})

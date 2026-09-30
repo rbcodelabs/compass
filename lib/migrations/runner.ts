@@ -418,6 +418,13 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "066_agent_org_admin_grants",
     filePath: path.join(process.cwd(), "prisma/migrations/066_agent_org_admin_grants/migration.sql"),
   },
+  {
+    // Nullable answers_json on decision_records: per-question answers for
+    // multi-question tracked decisions. Plain nullable ADD COLUMN (DSQL: no
+    // constraints, no index), so no async-wait or postcondition handling.
+    name: "067_decision_answers",
+    filePath: path.join(process.cwd(), "prisma/migrations/067_decision_answers/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));

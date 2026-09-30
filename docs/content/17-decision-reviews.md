@@ -55,6 +55,29 @@ chosen option back with `get_decision`. Revising a request-changes decision
 keeps the previous options by default; the revision form lets you edit or clear
 them.
 
+## Decisions with several questions
+
+When one decision needs more than one answer, use the **Questions** section of
+the request form instead of a single set of options. Add **1 to 4 questions**;
+each has an optional short label (up to 40 characters), the question itself (up
+to 255 characters) and its own **2 to 4 options**. The top-level decision
+question stays the title of the request. Questions and the single **Answer
+options** editor are mutually exclusive: the form disables one while the other
+is in use.
+
+The review page shows each question as its own group of selectable cards with a
+single **Submit answers** button, which stays disabled until every question is
+answered. Submitting records an approval together with each answer. **Request
+changes** and **Reject** remain available as secondary actions; they apply to the
+whole request, need no answers, and still require a rationale. The decided banner
+and the Decisions list show every question with its chosen answer, and the
+**Approved** filter includes these decisions.
+
+Agents pass `questions` to `request_decision` (never together with `options`) and
+read each answer back from `answers` on `get_decision`. Revising a
+request-changes decision keeps the previous questions by default; the revision
+form lets you edit or clear them.
+
 ## Supporting Artifacts
 
 Wireframes and prototypes can be linked directly in **Linked to**, beneath the original subject. Workspace members select an active same-workspace Artifact with **Artifact to link** and choose **Link**. Open its title to view the current preview; **Unlink** removes only the relationship. Artifact detail shows reciprocal **Linked decisions** and also supports unlinking. A URL pasted into a discussion does not create this structured relationship.

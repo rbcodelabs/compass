@@ -6,8 +6,9 @@ import getPrisma from "@/lib/db"
 import { recordDecision } from "@/lib/decision-service"
 import { isOrgAdminRole } from "@/lib/roles"
 import { queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator } from "@/lib/release-authorization"
-import { createTrackedDecisionRequest, reviseTrackedDecisionRequest, recordDecisionNoAction, type TrackedDecisionOptionInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { createTrackedDecisionRequest, reviseTrackedDecisionRequest, recordDecisionNoAction, type TrackedDecisionOptionInput, type TrackedDecisionQuestionInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
 import { createDecisionFollowUpTask } from "@/lib/decision-followthrough"
+import type { TrackedDecisionAnswerInput } from "@/lib/tracked-decision-types"
 import type { TaskAssignee } from "@/lib/task-assignment"
 
 /**
@@ -47,6 +48,8 @@ export async function createTrackedDecisionAction(input: {
   context: string
   /** Optional 2-4 choices. On a revision, omitted inherits the prior options and [] clears them. */
   options?: TrackedDecisionOptionInput[]
+  /** Optional 1-4 questions with their own options; mutually exclusive with `options`. Same revision semantics as `options`. */
+  questions?: TrackedDecisionQuestionInput[]
   idempotencyKey: string
   revise?: { requestId: string; expectedDecisionId: string; reason: string }
 }) {
@@ -65,6 +68,8 @@ export async function decideReviewAction(input: {
   fingerprint: string
   optionId: string
   rationale?: string
+  /** One answer per question when submitting a multi-question request. */
+  answers?: TrackedDecisionAnswerInput[]
 }) {
   const prisma = getPrisma()
   const revision = await prisma.reviewRevision.findUnique({ where: { id: input.revisionId }, include: { request: true } })
@@ -77,6 +82,7 @@ export async function decideReviewAction(input: {
     fingerprint: input.fingerprint,
     optionId: input.optionId,
     rationale: input.rationale,
+    answers: input.answers,
     idempotencyKey: `review:${input.revisionId}:${input.optionId}:${userId}`,
   })
   if (revision.request.gateType === "TRACKED_DECISION") {

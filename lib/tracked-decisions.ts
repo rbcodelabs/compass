@@ -4,8 +4,8 @@ import getPrisma from "@/lib/db"
 // Re-exported (not redefined) so this stays the single source of truth for
 // server code while client components can import the constants alone from
 // `./tracked-decision-types` without pulling Prisma/`pg` into their bundle.
-export { TRACKED_SUBJECT_TYPES, TRACKED_SUBJECT_LABELS, TRACKED_SOURCE_TYPES, TRACKED_OPTION_LIMITS, type TrackedSubjectType, type TrackedSourceType, type TrackedDecisionOptionInput, type TrackedDecisionPacketOption } from "./tracked-decision-types"
-import { TRACKED_SOURCE_TYPES, TRACKED_OPTION_LIMITS, RESERVED_OPTION_LABELS, CHOICE_ACTION_KEY_PREFIX, type TrackedSubjectType, type TrackedSourceType, type TrackedDecisionOptionInput, type TrackedDecisionPacketOption } from "./tracked-decision-types"
+export { TRACKED_SUBJECT_TYPES, TRACKED_SUBJECT_LABELS, TRACKED_SOURCE_TYPES, TRACKED_OPTION_LIMITS, TRACKED_QUESTION_LIMITS, SUBMIT_ANSWERS_ACTION_KEY,type TrackedSubjectType, type TrackedSourceType, type TrackedDecisionOptionInput, type TrackedDecisionPacketOption, type TrackedDecisionQuestionInput, type TrackedDecisionPacketQuestion, type TrackedDecisionAnswerInput, type TrackedDecisionAnswer } from "./tracked-decision-types"
+import { TRACKED_SOURCE_TYPES, TRACKED_OPTION_LIMITS, TRACKED_QUESTION_LIMITS, SUBMIT_ANSWERS_ACTION_KEY,RESERVED_OPTION_LABELS, CHOICE_ACTION_KEY_PREFIX, type TrackedSubjectType, type TrackedSourceType, type TrackedDecisionOptionInput, type TrackedDecisionPacketOption, type TrackedDecisionQuestionInput, type TrackedDecisionPacketQuestion } from "./tracked-decision-types"
 export type TrackedDecisionSourceInput = { type: TrackedSourceType; id: string }
 const TRACKED_GATE = "TRACKED_DECISION"
 
@@ -18,8 +18,8 @@ type EntitySummary = { id: string; title: string; workspaceId: string; updatedAt
 // `options` is present only when the caller supplied custom choices. Option-less
 // packets must stay byte-identical to what was written before options existed:
 // the packet feeds the revision fingerprint and the idempotency comparison.
-type PacketV1 = { schemaVersion: "tracked-decision/v1"; question: string; context: string; entity: { type: TrackedSubjectType; id: string; title: string }; options?: TrackedDecisionPacketOption[] }
-type PacketV2 = { schemaVersion: "tracked-decision/v2"; question: string; context: string; entity: TrackedDecisionSourceSnapshot & { type: TrackedSubjectType }; sources: TrackedDecisionSourceSnapshot[]; options?: TrackedDecisionPacketOption[] }
+type PacketV1 = { schemaVersion: "tracked-decision/v1"; question: string; context: string; entity: { type: TrackedSubjectType; id: string; title: string }; options?: TrackedDecisionPacketOption[]; questions?: TrackedDecisionPacketQuestion[] }
+type PacketV2 = { schemaVersion: "tracked-decision/v2"; question: string; context: string; entity: TrackedDecisionSourceSnapshot & { type: TrackedSubjectType }; sources: TrackedDecisionSourceSnapshot[]; options?: TrackedDecisionPacketOption[]; questions?: TrackedDecisionPacketQuestion[] }
 type Packet = PacketV1 | PacketV2
 
 async function resolveEntity(prisma: ReturnType<typeof getPrisma>, workspaceId: string, type: TrackedSourceType, id: string): Promise<EntitySummary> {
@@ -63,12 +63,52 @@ function normalizeOptions(options: TrackedDecisionOptionInput[] | null | undefin
   })
 }
 const optionsKey = (options: TrackedDecisionPacketOption[] | undefined) => JSON.stringify((options ?? []).map((option) => [option.label, option.description ?? ""]))
+const questionsKey = (questions: TrackedDecisionPacketQuestion[] | undefined) => JSON.stringify((questions ?? []).map((q) => [q.header ?? "", q.question, optionsKey(q.options)]))
+
+/**
+ * Validates and normalizes a multi-question list. Returns `undefined` for "no
+ * questions" (omitted, null, or empty) so every existing path is untouched.
+ * Each question's options reuse the single-options rules (2-4, unique labels,
+ * reserved Request changes / Reject labels).
+ */
+function normalizeQuestions(questions: TrackedDecisionQuestionInput[] | null | undefined): TrackedDecisionPacketQuestion[] | undefined {
+  if (!questions || questions.length === 0) return undefined
+  const { min, max, headerMax, questionMax } = TRACKED_QUESTION_LIMITS
+  if (questions.length < min || questions.length > max) throw new TrackedDecisionError("INVALID_INPUT", `Questions must contain between ${min} and ${max} items.`)
+  return questions.map((item, index) => {
+    const n = index + 1
+    const text = required(item?.question ?? "", `Question ${n}`, questionMax)
+    const header = item.header?.trim()
+    if (header && header.length > headerMax) throw new TrackedDecisionError("INVALID_INPUT", `Question ${n} header must be ${headerMax} characters or fewer.`)
+    let options: TrackedDecisionPacketOption[] | undefined
+    try { options = normalizeOptions(item.options) } catch (error) {
+      if (error instanceof TrackedDecisionError) throw new TrackedDecisionError(error.code, `Question ${n}: ${error.message}`)
+      throw error
+    }
+    if (!options) throw new TrackedDecisionError("INVALID_INPUT", `Question ${n} needs between ${TRACKED_OPTION_LIMITS.min} and ${TRACKED_OPTION_LIMITS.max} options.`)
+    return { ...(header ? { header } : {}), question: text, options }
+  })
+}
+/**
+ * Resolves the choice mode of a request from the caller's inputs. `questions`
+ * and `options` are mutually exclusive. On a revision (`inherited` given),
+ * sending neither inherits the prior packet's mode; sending either replaces it
+ * (an empty list clears back to Approve / Request changes / Reject).
+ */
+function resolveChoiceMode(input: { options?: TrackedDecisionOptionInput[] | null; questions?: TrackedDecisionQuestionInput[] | null }, inherited?: { options?: TrackedDecisionPacketOption[]; questions?: TrackedDecisionPacketQuestion[] }) {
+  const explicit = input.options !== undefined || input.questions !== undefined
+  const customOptions = normalizeOptions(explicit || !inherited ? input.options : inherited.options)
+  const customQuestions = normalizeQuestions(explicit || !inherited ? input.questions : inherited.questions)
+  if (customOptions && customQuestions) throw new TrackedDecisionError("INVALID_INPUT", "Pass either options or questions, not both.")
+  return { customOptions, customQuestions }
+}
 function samePacket(raw: string, packet: Packet) {
   try {
     const p = JSON.parse(raw) as Packet
     const coreMatches = p.question === packet.question && p.context === packet.context && p.entity?.type === packet.entity.type && p.entity?.id === packet.entity.id
     if (!coreMatches) return false
     if (optionsKey(p.options) !== optionsKey(packet.options)) return false
+    if (questionsKey(p.questions) !== questionsKey(packet.questions)) return false
     if (p.schemaVersion !== "tracked-decision/v2" || packet.schemaVersion !== "tracked-decision/v2") return p.schemaVersion !== "tracked-decision/v2" && packet.schemaVersion === "tracked-decision/v2" && packet.sources.length === 0
     const identities = (sources: TrackedDecisionSourceSnapshot[]) => [...new Set(sources.map((source) => `${source.type}:${source.id}`))].sort()
     return JSON.stringify(identities(p.sources)) === JSON.stringify(identities(packet.sources))
@@ -103,7 +143,10 @@ const options = [
  * (choosing it *is* approving, with that answer) and Request changes / Reject
  * follow so the decider can always push back.
  */
-function reviewOptionRows(custom: TrackedDecisionPacketOption[] | undefined) {
+function reviewOptionRows(custom: TrackedDecisionPacketOption[] | undefined, hasQuestions = false) {
+  // Multi-question: one APPROVE-class "Submit answers" row (answers ride on the
+  // decision record), then the usual pushback rows.
+  if (hasQuestions) return [{ actionKey: SUBMIT_ANSWERS_ACTION_KEY, label: "Submit answers", outcomeClass: "APPROVE", continuationKey: "NO_ACTION", sortOrder: 0 }, { ...options[1], sortOrder: 1 }, { ...options[2], sortOrder: 2 }]
   if (!custom) return options
   return [
     ...custom.map((option, index) => ({ actionKey: `${CHOICE_ACTION_KEY_PREFIX}${index + 1}`, label: option.label, ...(option.description ? { description: option.description } : {}), outcomeClass: "APPROVE", continuationKey: "NO_ACTION", sortOrder: index })),
@@ -112,12 +155,12 @@ function reviewOptionRows(custom: TrackedDecisionPacketOption[] | undefined) {
   ]
 }
 
-export async function createTrackedDecisionRequest(input: { workspaceId: string; subjectType: TrackedSubjectType; subjectId: string; question: string; context: string; idempotencyKey: string; sources?: TrackedDecisionSourceInput[]; options?: TrackedDecisionOptionInput[] | null; requestedById?: string | null; requestedByAgentId?: string | null; assignedToId?: string | null }) {
+export async function createTrackedDecisionRequest(input: { workspaceId: string; subjectType: TrackedSubjectType; subjectId: string; question: string; context: string; idempotencyKey: string; sources?: TrackedDecisionSourceInput[]; options?: TrackedDecisionOptionInput[] | null; questions?: TrackedDecisionQuestionInput[] | null; requestedById?: string | null; requestedByAgentId?: string | null; assignedToId?: string | null }) {
   const question = required(input.question, "Question", 255), context = required(input.context, "Context", 20_000), identity = uuid(input.idempotencyKey, "Idempotency key")
-  const customOptions = normalizeOptions(input.options)
+  const { customOptions, customQuestions } = resolveChoiceMode(input)
   const normalizedSourceInputs = normalizeSourceInputs(input.sources, { type: input.subjectType, id: input.subjectId })
   const prisma = getPrisma(), [entity, sources] = await Promise.all([resolveEntity(prisma, input.workspaceId, input.subjectType, input.subjectId), resolveSources(prisma, input.workspaceId, normalizedSourceInputs)])
-  const packet: PacketV2 = { schemaVersion: "tracked-decision/v2", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title, updatedAt: entity.updatedAt?.toISOString?.() ?? new Date(0).toISOString() }, sources, ...(customOptions ? { options: customOptions } : {}) }
+  const packet: PacketV2 = { schemaVersion: "tracked-decision/v2", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title, updatedAt: entity.updatedAt?.toISOString?.() ?? new Date(0).toISOString() }, sources, ...(customOptions ? { options: customOptions } : {}), ...(customQuestions ? { questions: customQuestions } : {}) }
   const identityWhere = { workspaceId: input.workspaceId, gateType: TRACKED_GATE, subjectType: TRACKED_GATE, subjectId: identity }
   const replay = async () => { const found = await prisma.reviewRequest.findFirst({ where: identityWhere, include: { currentRevision: true } }); if (found?.currentRevision && samePacket(found.currentRevision.packetJson, packet)) return found.currentRevision; throw new TrackedDecisionError("IDEMPOTENCY_KEY_CONFLICT", "That idempotency key belongs to a different decision request.") }
   const existing = await prisma.reviewRequest.findFirst({ where: identityWhere, include: { currentRevision: true } })
@@ -127,14 +170,14 @@ export async function createTrackedDecisionRequest(input: { workspaceId: string;
       const request = await tx.reviewRequest.create({ data: { ...identityWhere, state: "DRAFT", requestedById: input.requestedById ?? null, requestedByAgentId: input.requestedByAgentId ?? null, assignedToId: input.assignedToId ?? null } })
       const revisionNumber = 1, decisionCycle = 1
       const fingerprint = createHash("sha256").update(JSON.stringify({ requestId: request.id, decisionCycle, revisionNumber, packet })).digest("hex")
-      const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, fingerprint, title: question, summary: context, packetJson: JSON.stringify(packet), requiredRole: "ADMIN", options: { create: reviewOptionRows(customOptions) } } })
+      const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, fingerprint, title: question, summary: context, packetJson: JSON.stringify(packet), requiredRole: "ADMIN", options: { create: reviewOptionRows(customOptions, Boolean(customQuestions)) } } })
       await tx.reviewRequest.update({ where: { id: request.id }, data: { state: "PENDING", currentRevisionId: revision.id, revisionCount: 1, decisionCycle: 1, updatedAt: new Date() } })
       return revision
     })
   } catch (error) { if (isUnique(error)) return replay(); throw error }
 }
 
-export async function reviseTrackedDecisionRequest(input: { workspaceId: string; requestId: string; subjectType: TrackedSubjectType; subjectId: string; question: string; context: string; expectedDecisionId: string; reason: string; options?: TrackedDecisionOptionInput[] | null; requestedById?: string | null; requestedByAgentId?: string | null; assignedToId?: string | null }) {
+export async function reviseTrackedDecisionRequest(input: { workspaceId: string; requestId: string; subjectType: TrackedSubjectType; subjectId: string; question: string; context: string; expectedDecisionId: string; reason: string; options?: TrackedDecisionOptionInput[] | null; questions?: TrackedDecisionQuestionInput[] | null; requestedById?: string | null; requestedByAgentId?: string | null; assignedToId?: string | null }) {
   const question = required(input.question, "Question", 255), context = required(input.context, "Context", 20_000), reason = required(input.reason, "Revision reason", 2_000)
   const prisma = getPrisma(), entity = await resolveEntity(prisma, input.workspaceId, input.subjectType, input.subjectId)
   let packet: Packet
@@ -151,20 +194,24 @@ export async function reviseTrackedDecisionRequest(input: { workspaceId: string;
       // `options` undefined inherits the prior packet's choices; an explicit
       // value (including an empty list, meaning "back to Approve / Request
       // changes / Reject") replaces them.
-      let customOptions: TrackedDecisionPacketOption[] | undefined
-      try { customOptions = normalizeOptions(input.options === undefined ? currentPacket.options : input.options) } catch (error) {
-        if (input.options === undefined) throw new TrackedDecisionError("INVALID_PACKET", "The current decision packet is invalid.")
+      // Neither `options` nor `questions` sent inherits the prior packet's choice
+      // mode; sending either replaces it (an empty list means "back to Approve /
+      // Request changes / Reject").
+      let mode: ReturnType<typeof resolveChoiceMode>
+      try { mode = resolveChoiceMode(input, currentPacket) } catch (error) {
+        if (input.options === undefined && input.questions === undefined) throw new TrackedDecisionError("INVALID_PACKET", "The current decision packet is invalid.")
         throw error
       }
+      const { customOptions, customQuestions } = mode
       packet = currentPacket.schemaVersion === "tracked-decision/v2"
-        ? { schemaVersion: "tracked-decision/v2", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title, updatedAt: entity.updatedAt?.toISOString?.() ?? new Date(0).toISOString() }, sources: currentPacket.sources, ...(customOptions ? { options: customOptions } : {}) }
-        : { schemaVersion: "tracked-decision/v1", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title }, ...(customOptions ? { options: customOptions } : {}) }
+        ? { schemaVersion: "tracked-decision/v2", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title, updatedAt: entity.updatedAt?.toISOString?.() ?? new Date(0).toISOString() }, sources: currentPacket.sources, ...(customOptions ? { options: customOptions } : {}), ...(customQuestions ? { questions: customQuestions } : {}) }
+        : { schemaVersion: "tracked-decision/v1", question, context, entity: { type: input.subjectType, id: entity.id, title: entity.title }, ...(customOptions ? { options: customOptions } : {}), ...(customQuestions ? { questions: customQuestions } : {}) }
       const prior = await tx.decisionRecord.findUnique({ where: { id: input.expectedDecisionId }, include: { option: true } })
       if (!prior || prior.requestId !== request.id || prior.revisionId !== request.currentRevisionId) throw new TrackedDecisionError("DECISION_MISMATCH", "The selected decision does not belong to the current revision.")
       if (prior.option.outcomeClass !== "REQUEST_CHANGES") throw new TrackedDecisionError("OUTCOME_NOT_REVISABLE", "Only a request-changes decision can be revised.")
       const revisionNumber = request.revisionCount + 1, decisionCycle = request.decisionCycle + 1
       const fingerprint = createHash("sha256").update(JSON.stringify({ requestId: request.id, decisionCycle, revisionNumber, packet })).digest("hex")
-      const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, fingerprint, title: question, summary: context, packetJson: JSON.stringify(packet), requiredRole: "ADMIN", options: { create: reviewOptionRows(customOptions) } } })
+      const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, fingerprint, title: question, summary: context, packetJson: JSON.stringify(packet), requiredRole: "ADMIN", options: { create: reviewOptionRows(customOptions, Boolean(customQuestions)) } } })
       const claimed = await tx.reviewRequest.updateMany({ where: { id: request.id, state: "DECIDED", currentRevisionId: request.currentRevisionId, decisionCycle: request.decisionCycle }, data: { state: "PENDING", currentRevisionId: revision.id, revisionCount: revisionNumber, decisionCycle, requestedById: input.requestedById ?? request.requestedById, requestedByAgentId: input.requestedByAgentId ?? request.requestedByAgentId, assignedToId: input.assignedToId ?? request.assignedToId, reopenReason: reason, reopenedById: input.requestedById ?? null, reconsidersDecisionId: input.expectedDecisionId, updatedAt: new Date() } })
       if (claimed.count !== 1) throw new TrackedDecisionError("REVISION_CONFLICT", "The decision changed before the revision could be created.")
       await tx.reviewRevision.update({ where: { id: request.currentRevisionId }, data: { supersededAt: new Date() } })

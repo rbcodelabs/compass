@@ -407,7 +407,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
 | `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, `isPrivate`, or links (`keyResultId`, `opportunityId`, `solutionId`, `squadId`). Omit a link to preserve it; pass a UUID to set it or `null` to clear it. USER/AGENT targets must belong to the item's workspace, even when the caller can access both workspaces. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow (rejected here — see below — and gated by the workspace's Marketing launch setting) |
-| `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources and optionally 2–4 single-choice `options` |
+| `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources and optionally 2–4 single-choice `options`, or 1–4 `questions` each with its own single-choice options |
 | `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state (`PENDING`, `DECIDED`, or `AWAITING_FOLLOW_THROUGH`), linked item type, outcome, reviewer, or search text |
 | `get_decision` | Read one tracking-only decision, its immutable revision history, the resolved requester (the human or Agent who raised it), and any linked follow-up Tasks |
 | `close_decision_no_action` | Explicitly close a DECIDED decision as needing no follow-up work, with a required reason. Refuses if the decision already has a linked follow-up Task or was already closed this way |
@@ -461,6 +461,28 @@ different options is rejected as a conflict. `get_decision`,
 (`label`, `description`, `outcomeClass`) and, once decided, the `chosenOption`.
 Revising a request-changes decision inherits the previous options unless new
 ones are supplied.
+
+`request_decision.questions` asks **several questions in one request**, like
+AskUserQuestion's `questions[]`. It is an optional array of 1–4 items
+`{ header?, question, options }`: `header` is a short label (up to 40
+characters), `question` is 1–255 characters, and `options` is 2–4
+`{ label, description? }` objects with the same rules as `options` above
+(unique case-insensitively **within a question**; "Request changes" and
+"Reject" reserved). `questions` and `options` are mutually exclusive — sending
+both is rejected — and the top-level `question` stays required as the request's
+title. The human answers every question with one option each and submits once
+(**Submit answers**, disabled until every question is answered); that records an
+`APPROVE` outcome with the per-question answers. **Request changes** and
+**Reject** apply to the whole request, still require a rationale, and need no
+answers. `get_decision`, `list_decisions`, and `get_review_request` return
+`questions` (`header`, `question`, and `options` with `label` / `description`)
+and, once decided with answers, `answers` as
+`[{ questionIndex, question, chosenOption }]`; both are empty arrays for requests
+without questions. As with `options`, the questions are part of the immutable
+packet, so retrying an `idempotencyKey` with different questions is a conflict.
+Revising a request-changes decision inherits the previous questions unless you
+send new `questions`, send `options` (which replaces them), or send an empty
+array to clear back to Approve / Request changes / Reject.
 
 `apply_recorded_decision` applies a decided review request through the
 applicator matching its `gateType`, and is idempotent: a repeat call replays

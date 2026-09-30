@@ -24,7 +24,7 @@ import { DecisionsFilters } from "@/components/decisions/decisions-filters"
 import { DecisionsTabs } from "@/components/decisions/decisions-tabs"
 import { buttonVariants } from "@/components/ui/button"
 import { isOrgAdminRole } from "@/lib/roles"
-import { isChoiceActionKey } from "@/lib/tracked-decision-types"
+import { isChoiceActionKey, parseDecisionAnswers } from "@/lib/tracked-decision-types"
 
 const LABELS: Record<string, string> = TRACKED_SUBJECT_LABELS
 
@@ -166,6 +166,9 @@ export default async function DecisionsPage({ params, searchParams }: {
                       <h2 className="mt-0.5 truncate text-sm font-semibold text-text-primary">{revision?.title ?? "Decision"}</h2>
                       <p className="mt-1 line-clamp-2 text-sm text-text-secondary">{revision?.summary}</p>
                       {decision && isChoiceActionKey(decision.option.actionKey) && <p className="mt-1 line-clamp-2 break-words text-sm text-text-primary [overflow-wrap:anywhere]"><span className="text-text-subtle">Chosen:</span> <span className="font-medium">{decision.option.label}</span></p>}
+                      {decision && parseDecisionAnswers(decision.answersJson).length > 0 && <ul aria-label="Answers" className="mt-1 space-y-0.5 text-sm">
+                        {parseDecisionAnswers(decision.answersJson).map((answer) => <li key={answer.questionIndex} className="min-w-0 break-words text-text-primary [overflow-wrap:anywhere]"><span className="text-text-subtle">{answer.question}</span> <span aria-hidden className="text-text-subtle">→</span> <span className="font-medium">{answer.chosenOption}</span></li>)}
+                      </ul>}
                       <p className="mt-2 text-xs text-text-subtle">
                         Updated {request.updatedAt.toLocaleDateString()}
                         {decision ? ` • ${reviewerNames.get(decision.actorUserId) ?? "Workspace admin"}` : ""}

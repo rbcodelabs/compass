@@ -21,3 +21,38 @@ export type TrackedDecisionPacketOption = { label: string; description?: string 
 export const RESERVED_OPTION_LABELS: ReadonlySet<string> = new Set(["request changes", "reject"])
 export const CHOICE_ACTION_KEY_PREFIX = "CHOICE_"
 export function isChoiceActionKey(actionKey: string | null | undefined): boolean { return Boolean(actionKey?.startsWith(CHOICE_ACTION_KEY_PREFIX)) }
+
+// Multi-question requests: one tracked decision carrying 1-4 questions, each
+// with its own single-choice options. The questions live in the immutable
+// packet; the reviewer's per-question answers live in
+// decision_records.answers_json. The revision's ReviewOptions are then
+// Submit answers (APPROVE) / Request changes / Reject, so Request changes and
+// Reject apply to the whole request and need no answers.
+export const TRACKED_QUESTION_LIMITS = { min: 1, max: 4, headerMax: 40, questionMax: 255 } as const
+export type TrackedDecisionQuestionInput = { header?: string | null; question: string; options: TrackedDecisionOptionInput[] }
+/** The normalized shape stored in the packet: trimmed, header omitted when empty. */
+export type TrackedDecisionPacketQuestion = { header?: string; question: string; options: TrackedDecisionPacketOption[] }
+/** A reviewer's answer to one question, as submitted (the option label chosen). */
+export type TrackedDecisionAnswerInput = { questionIndex: number; chosenOption: string }
+/** An answer as persisted and read back, with the question text snapshotted. */
+export type TrackedDecisionAnswer = { questionIndex: number; question: string; chosenOption: string }
+export const SUBMIT_ANSWERS_ACTION_KEY = "SUBMIT_ANSWERS"
+export function isSubmitAnswersActionKey(actionKey: string | null | undefined): boolean { return actionKey === SUBMIT_ANSWERS_ACTION_KEY }
+
+/** Questions carried by a stored packet; [] for option-less and single-options packets, or an unreadable one. */
+export function parsePacketQuestions(packetJson: string | null | undefined): TrackedDecisionPacketQuestion[] {
+  if (!packetJson) return []
+  try {
+    const questions = (JSON.parse(packetJson) as { questions?: unknown }).questions
+    return Array.isArray(questions) ? (questions as TrackedDecisionPacketQuestion[]) : []
+  } catch { return [] }
+}
+
+/** Answers persisted on a decision record; [] when none were recorded or the value is unreadable. */
+export function parseDecisionAnswers(answersJson: string | null | undefined): TrackedDecisionAnswer[] {
+  if (!answersJson) return []
+  try {
+    const answers = JSON.parse(answersJson) as unknown
+    return Array.isArray(answers) ? (answers as TrackedDecisionAnswer[]) : []
+  } catch { return [] }
+}

@@ -555,3 +555,30 @@ describe("schema.prisma stays DSQL-compatible", () => {
     expect(model).toMatch(/description\s+String\?\s+@db\.Text/);
   });
 });
+
+describe("067_decision_answers", () => {
+  it("registers 067_decision_answers as one plain, DSQL-safe nullable ADD COLUMN matching schema.prisma", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === "067_decision_answers")).toHaveLength(1);
+    expect(names.indexOf("067_decision_answers")).toBeGreaterThan(names.indexOf("066_agent_org_admin_grants"));
+
+    const statements = sqlFor("067_decision_answers")
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n")
+      .split(";")
+      .map((statement) => statement.trim())
+      .filter(Boolean);
+    // One DDL statement, and DSQL rejects any constraint (DEFAULT included) on ADD COLUMN.
+    expect(statements).toEqual(['ALTER TABLE "decision_records" ADD COLUMN IF NOT EXISTS "answers_json" TEXT']);
+
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    const model = schema.match(/model DecisionRecord \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(model).toMatch(/answersJson\s+String\?\s+@map\("answers_json"\)\s+@db\.Text/);
+  });
+
+  it("is applied by the functional e2e schema setup", () => {
+    const setup = readFileSync(path.join(ROOT, "e2e/functional/global-setup.ts"), "utf-8");
+    expect(setup).toContain("prisma/migrations/067_decision_answers/migration.sql");
+  });
+});
