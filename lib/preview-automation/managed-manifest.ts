@@ -112,7 +112,22 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "065_org_member_workspace_readonly": "23494bba1b038c15392f9f8d1d7c41be858dc33bebbd96b5f2185d2675676f5c",
   "066_agent_org_admin_grants": "083b64d82e25724c5827a34c8eea97c1a63c21be6ead6c9caeaf3eac89288371",
   // Per-question answers on decision records (multi-question tracked decisions). Last, matching its MIGRATIONS position.
-  "067_decision_answers": "d79f88798ff1764d42fd8e0a08dc65510fb39bef6f8d9bdf32aec1abe13ce14f"
+  "067_decision_answers": "d79f88798ff1764d42fd8e0a08dc65510fb39bef6f8d9bdf32aec1abe13ce14f",
+  // REVIEW REQUEST, NOT A PASS. Card sort rounds and proposals, last and matching
+  // its MIGRATIONS position. Pinned here only because assertReviewedManagedManifest
+  // pins membership AND ordering as well as digests, so the MIGRATIONS array cannot
+  // load without an entry. The digest was taken from the file as written rather
+  // than produced by an independent SQL audit, and the author of a migration
+  // cannot be its reviewer. For the auditor: two purely additive CREATE TABLEs
+  // plus three ASYNC indexes, no ALTER and no backfill. Please audit the SQL and
+  // re-confirm this pin before merge.
+  "067_card_sort_rounds": "dcc4a678a63bd6d8dd46f33338f06ccb4acd4fc54a932417f3656ab5a8689285",
+  // REVIEW REQUEST, NOT A PASS. Proposed new entries for card sort rounds, last
+  // and matching its MIGRATIONS position. Same caveat as 067: the digest was
+  // taken from the file as written, not from an independent SQL audit. For the
+  // auditor: one purely additive CREATE TABLE plus one ASYNC index, no ALTER and
+  // no backfill. Please audit the SQL and re-confirm this pin before merge.
+  "068_card_sort_new_entries": "133d41beb53cbab557ab9075df6bdc4a9bc625c3f46b93dc7979cbba2d75d6e7"
 };
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {
