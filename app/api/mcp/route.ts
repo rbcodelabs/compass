@@ -997,12 +997,14 @@ const _handler = createMcpHandler(
               : {}),
           },
           include: {
-            linkedKeyResult: { select: { title: true, objective: { select: { title: true } } } },
+            linkedKeyResult: { select: { title: true, objective: { select: { workspaceId: true, title: true } } } },
             squad: { select: { name: true } },
             _count: { select: { solutions: { where: { workspaceId } } } },
           },
           orderBy: recencyOrderBy(sort) ?? { createdAt: "desc" },
         })
+        // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
+        for (const o of opportunities) if (o.linkedKeyResult && o.linkedKeyResult.objective.workspaceId !== workspaceId) o.linkedKeyResult = null
         if (!opportunities.length) {
           return fail("No opportunities found.")
         }
@@ -1047,7 +1049,7 @@ const _handler = createMcpHandler(
         const opp = await prisma.opportunity.findUnique({
           where: { id: opportunityId },
           include: {
-            linkedKeyResult: { select: { id: true, title: true, objective: { select: { title: true } } } },
+            linkedKeyResult: { select: { id: true, title: true, objective: { select: { workspaceId: true, title: true } } } },
             squad: { select: { name: true } },
             solutions: {
               orderBy: { createdAt: "asc" },
@@ -1074,6 +1076,8 @@ const _handler = createMcpHandler(
         }
         // Hide a solution whose own workspaceId is NULL or names another workspace, rather than trusting its parent.
         opp.solutions = opp.solutions.filter((sol) => sol.workspaceId === opp.workspaceId)
+        // Same for the linked KR: its Objective must be in the opportunity's workspace, or the link is hidden.
+        if (opp.linkedKeyResult && opp.linkedKeyResult.objective.workspaceId !== opp.workspaceId) opp.linkedKeyResult = null
 
         const lines: string[] = [
           `# ${opp.title} [${opp.status}]`,

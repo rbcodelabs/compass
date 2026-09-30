@@ -135,6 +135,33 @@ describe("get_okr_cycle hides nested objectives that are not in the cycle's work
   });
 });
 
+describe("a linked key result is hidden when its objective is not in the opportunity's workspace", () => {
+  const linked = (workspaceId: string | null) => ({ id: "kr-1", title: "Secret KR", objective: { workspaceId, title: "Secret objective title" } });
+
+  it("list_opportunities omits the KR (text and structured payload) for NULL and drifted objectives, keeps a consistent one", async () => {
+    const opp = (id: string, workspaceId: string | null) => ({ id, title: id, status: "EXPLORING", squad: null, linkedKeyResult: linked(workspaceId), _count: { solutions: 0 } });
+    (fake.current!.client.opportunity as { findMany: unknown }).findMany = async () => [opp("opp-ok", WS_A.id), opp("opp-null", null), opp("opp-drift", WS_B.id)];
+    const result = await call("list_opportunities", { workspaceId: WS_A.id });
+    const text = result.content[0].text;
+    expect(text.match(/Secret objective title/g)).toHaveLength(1); // only opp-ok
+    const items = (result as unknown as { structuredContent: { data: { items: Array<{ id: string; linkedKeyResult: unknown }> } } }).structuredContent.data.items;
+    expect(items.map((i) => [i.id, i.linkedKeyResult !== null && i.linkedKeyResult !== undefined])).toEqual([["opp-ok", true], ["opp-null", false], ["opp-drift", false]]);
+  });
+
+  it("get_opportunity omits the KR for a NULL or drifted objective", async () => {
+    for (const workspaceId of [null, WS_B.id]) {
+      const opportunity = { id: "opp-a", workspaceId: WS_A.id, title: "Opp", status: "EXPLORING", description: null, squad: null, linkedKeyResult: linked(workspaceId), solutions: [] };
+      (fake.current!.client.opportunity as { findUnique: unknown }).findUnique = async () => opportunity;
+      const text = (await call("get_opportunity", { opportunityId: "opp-a" })).content[0].text;
+      expect(text).not.toContain("Secret objective title");
+      expect(text).not.toContain("Linked KR");
+    }
+    const ok = { id: "opp-a", workspaceId: WS_A.id, title: "Opp", status: "EXPLORING", description: null, squad: null, linkedKeyResult: linked(WS_A.id), solutions: [] };
+    (fake.current!.client.opportunity as { findUnique: unknown }).findUnique = async () => ok;
+    expect((await call("get_opportunity", { opportunityId: "opp-a" })).content[0].text).toContain("Secret objective title");
+  });
+});
+
 describe("list counts use the same workspace scope as their lists", () => {
   it("list_okr_cycles counts only objectives with the workspace's own workspaceId", async () => {
     const seen: unknown[] = [];

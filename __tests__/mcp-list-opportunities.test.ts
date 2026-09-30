@@ -70,7 +70,7 @@ describe("list_opportunities MCP tool", () => {
         squad: { name: "Activation" },
         linkedKeyResult: {
           title: "Increase activated workspaces",
-          objective: { title: "Improve onboarding" },
+          objective: { workspaceId: "workspace-1", title: "Improve onboarding" },
         },
         _count: { solutions: 2 },
       },
@@ -135,7 +135,7 @@ describe("list_opportunities MCP tool", () => {
       },
       include: {
         linkedKeyResult: {
-          select: { title: true, objective: { select: { title: true } } },
+          select: { title: true, objective: { select: { workspaceId: true, title: true } } },
         },
         squad: { select: { name: true } },
         _count: { select: { solutions: { where: { workspaceId: "workspace-1" } } } },
