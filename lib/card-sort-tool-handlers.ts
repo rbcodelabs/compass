@@ -111,7 +111,7 @@ export async function createCardSortRoundTool({
   )
   if (isFailure(result)) return fail(result.__fail)
   return ok(
-    `Created card sort round "${result.name}" (${result.id}) on ${result.factorName}. It is OPEN: participants can propose moves, and nobody but you can see anyone else's proposals or the tally until you reveal it.`,
+    `Created card sort round "${result.name}" on ${result.factorName}.\nID: ${result.id}\nIt is OPEN: participants can propose moves, and nobody but you can see anyone else's proposals or the tally until you reveal it.`,
     result
   )
 }
@@ -165,7 +165,7 @@ export async function setCardSortRoundStateTool({
     state === "REVEALED"
       ? " Everyone in the workspace can now see the tally. This cannot be undone."
       : " No further proposals will be accepted."
-  return ok(`Round "${result.name}" is now ${result.state}.${note}`, result)
+  return ok(`Round "${result.name}" is now ${result.state}.${note}\nID: ${roundId}`, result)
 }
 
 // ── propose_card_sort_move ─────────────────────────────────────────────────
@@ -201,7 +201,7 @@ export async function proposeCardSortMoveTool({
         .join(", ")}.`
     : ""
   return ok(
-    `Recorded ${result.applied.length} proposal(s) to move to "${proposedValue}".${skippedNote}`,
+    `Recorded ${result.applied.length} proposal(s) to move to "${proposedValue}".${skippedNote}\nID: ${roundId}`,
     result
   )
 }
@@ -223,7 +223,7 @@ export async function withdrawCardSortProposalTool({
   )
   if (isFailure(result)) return fail(result.__fail)
   return ok(
-    "Withdrew your proposal. That object now records no opinion from you — which is not the same as you proposing it stay where it is.",
+    `Withdrew your proposal. That object now records no opinion from you — which is not the same as you proposing it stay where it is.\nID: ${roundId}`,
     result
   )
 }
