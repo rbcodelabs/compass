@@ -375,6 +375,21 @@ export default async function globalTeardown() {
         `DELETE FROM "${S}".docs WHERE workspace_id = $1`,
         [wsId]
       );
+      // Card sort: proposals and new entries hang off a round (no workspace_id
+      // of their own), and rounds reference a custom field, so they go first.
+      for (const table of ["card_sort_proposals", "card_sort_new_entries"]) {
+        await pool.query(
+          `DELETE FROM "${S}"."${table}"
+           WHERE round_id IN (
+             SELECT id FROM "${S}".card_sort_rounds WHERE workspace_id = $1
+           )`,
+          [wsId]
+        );
+      }
+      await pool.query(
+        `DELETE FROM "${S}".card_sort_rounds WHERE workspace_id = $1`,
+        [wsId]
+      );
       await pool.query(
         `DELETE FROM "${S}".custom_field_values
          WHERE field_id IN (
