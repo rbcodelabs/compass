@@ -60,6 +60,12 @@ const CreateObjectiveSchema = z.object({
   squadId: z.string().uuid().optional(),
 });
 
+/** Authorized workspace for a new Objective: the cycle's when given, else the membership-checked slugs'. */
+async function resolveObjectiveWorkspaceId(cycleId: string | null, orgSlug: string, workspaceSlug: string): Promise<string> {
+  if (cycleId) return (await requireProductEntity("okrCycle", cycleId)).workspaceId;
+  return requireProductWorkspaceBySlug(orgSlug, workspaceSlug);
+}
+
 /**
  * `cycleId === null` creates a cycle-less (persistent) Objective; its workspace
  * then comes from the membership-checked org/workspace slugs instead of a cycle.
@@ -84,9 +90,7 @@ export async function createObjective(
   // The Objective's workspace is derived from the authorized cycle (or, with no
   // cycle, from the membership-checked slugs), never from client-supplied ids,
   // so it cannot disagree with the cycle it is created under.
-  const workspaceId = cycleId
-    ? (await requireProductEntity("okrCycle", cycleId)).workspaceId
-    : await requireProductWorkspaceBySlug(orgSlug, workspaceSlug);
+  const workspaceId = await resolveObjectiveWorkspaceId(cycleId, orgSlug, workspaceSlug);
   const prisma = getPrisma();
   // A client-supplied squad must live in the same workspace as the cycle.
   if (parsed.data.squadId) await requireProductEntity("squad", parsed.data.squadId, workspaceId);

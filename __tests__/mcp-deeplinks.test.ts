@@ -156,7 +156,7 @@ describe("create_objective deeplink", () => {
   })
 
   it("creates a cycle-less Objective when cycleId is omitted (migration 070) and still links to it", async () => {
-    mockPrisma.workspace.findUnique.mockResolvedValue(SLUGGED)
+    mockPrisma.workspace.findUnique.mockResolvedValue({ id: "ws-1", ...SLUGGED })
     mockPrisma.objective.create.mockResolvedValue({ id: "obj-2", title: "Always-on goal", status: "ON_TRACK", description: null, owner: null, squadId: null, parentKeyResultId: null })
     const text = (await call("create_objective", { workspaceId: "ws-1", title: "Always-on goal" })).content[0].text
     expect(mockPrisma.oKRCycle.findFirst).not.toHaveBeenCalled()

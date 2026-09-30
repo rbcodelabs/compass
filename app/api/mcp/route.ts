@@ -726,10 +726,16 @@ const _handler = createMcpHandler(
         if (cycleId && !cycle) {
           return fail(`OKR cycle "${cycleId}" not found in workspace.`)
         }
-        const workspaceLink = cycle
-          ? cycle.workspace
-          : await prisma.workspace.findUnique({ where: { id: workspaceId }, select: WORKSPACE_LINK_SELECT })
-        if (!workspaceLink) {
+        // The row the Objective's workspace is taken from: the verified cycle, or the declared workspace itself.
+        const declaredWorkspace = cycle
+          ? null
+          : await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true, ...WORKSPACE_LINK_SELECT } })
+        const scope = cycle
+          ? { workspaceId: cycle.workspaceId, link: cycle.workspace }
+          : declaredWorkspace
+            ? { workspaceId: declaredWorkspace.id, link: declaredWorkspace }
+            : null
+        if (!scope) {
           return fail(`Workspace "${workspaceId}" not found.`)
         }
         if (squadId && !(await prisma.squad.findFirst({ where: { id: squadId, workspaceId }, select: { id: true } }))) {
@@ -743,15 +749,14 @@ const _handler = createMcpHandler(
               : "The parent KR must belong to an open cycle or to a cycle-less Objective in this workspace.")
           }
         }
-        const scopeWorkspaceId = cycle ? cycle.workspaceId : workspaceId
         const objective = await prisma.objective.create({
           // workspaceId comes from the cycle just verified to live in the authorized workspace (or, with no cycle, the gate-authorized workspaceId), never from unverified input.
-          data: { workspaceId: scopeWorkspaceId, cycleId: cycleId ?? null, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
+          data: { workspaceId: scope.workspaceId, cycleId: cycleId ?? null, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
         })
         return ok(
           withUrlLine(
             `**Objective created** ${cycle ? `in cycle "${cycle.title}"` : `with no cycle (${NO_CYCLE_LABEL})`}\nID: ${objective.id}\nTitle: ${objective.title}\nStatus: ${objective.status}`,
-            workspaceEntityUrl(workspaceLink, { type: "objective", id: objective.id }),
+            workspaceEntityUrl(scope.link, { type: "objective", id: objective.id }),
           ),
           {
             id: objective.id,
