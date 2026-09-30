@@ -193,7 +193,7 @@ export default async function globalTeardown() {
            SELECT id FROM "${S}".key_results
            WHERE objective_id IN (
              SELECT id FROM "${S}".objectives
-             WHERE cycle_id IN (
+             WHERE workspace_id = $1 OR cycle_id IN (
                SELECT id FROM "${S}".okr_cycles WHERE workspace_id = $1
              )
            )
@@ -304,15 +304,16 @@ export default async function globalTeardown() {
         `DELETE FROM "${S}".key_results
          WHERE objective_id IN (
            SELECT id FROM "${S}".objectives
-           WHERE cycle_id IN (
+           WHERE workspace_id = $1 OR cycle_id IN (
              SELECT id FROM "${S}".okr_cycles WHERE workspace_id = $1
            )
          )`,
         [wsId]
       );
       await pool.query(
+        // A cycle-less Objective (070) is reachable only through its own workspace_id.
         `DELETE FROM "${S}".objectives
-         WHERE cycle_id IN (
+         WHERE workspace_id = $1 OR cycle_id IN (
            SELECT id FROM "${S}".okr_cycles WHERE workspace_id = $1
          )`,
         [wsId]
