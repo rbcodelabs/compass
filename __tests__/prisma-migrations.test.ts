@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
+import { REVIEWED_MIGRATION_CODE_SHA256, assertReviewedMigrationCode } from "@/lib/preview-automation/managed-manifest";
 
 /**
  * Guards the DDL that actually reaches Aurora DSQL.
@@ -674,10 +675,14 @@ describe("070_objective_optional_cycle", () => {
       .map((statement) => statement.trim())
       .filter(Boolean);
 
-  it("is registered exactly once, after 068_workspace_id_on_solution_objective", () => {
+  it("is registered exactly once, in order 068 < 069 < 070", () => {
+    // TODO(#335): when 071 lands, extend this to 068 < 069 < 070 < 071.
     const names = registeredMigrations();
     expect(names.filter((name) => name === NAME)).toHaveLength(1);
-    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("068_workspace_id_on_solution_objective"));
+    const at = (name: string) => names.indexOf(name);
+    expect(at("068_workspace_id_on_solution_objective")).toBeGreaterThan(-1);
+    expect(at("069_workspace_id_residual_backfill")).toBeGreaterThan(at("068_workspace_id_on_solution_objective"));
+    expect(at(NAME)).toBeGreaterThan(at("069_workspace_id_residual_backfill"));
   });
 
   it("is exactly one DSQL-safe DDL statement: DROP NOT NULL on objectives.cycle_id, no data change", () => {
@@ -690,6 +695,19 @@ describe("070_objective_optional_cycle", () => {
     const body = schema.match(/model Objective \{[\s\S]*?\n\}/)?.[0] ?? "";
     expect(body).toMatch(/cycleId\s+String\?\s+@map\("cycle_id"\)\s+@db\.Uuid/);
     expect(body).toMatch(/cycle\s+OKRCycle\?\s+@relation\(fields: \[cycleId\]/);
+  });
+
+  it("pins onDelete/onUpdate: Restrict on Objective.cycle (an optional relation defaults to SetNull, which would silently turn a deleted cycle's Objectives into cycle-less ones)", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    const body = schema.match(/model Objective \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(body).toMatch(/cycle\s+OKRCycle\?\s+@relation\(fields: \[cycleId\], references: \[id\], onDelete: Restrict, onUpdate: Restrict\)/);
+  });
+
+  it("pins its postcondition hook in the reviewed code digests, so changing it needs review", () => {
+    const hook = "lib/migrations/objective-optional-cycle.ts";
+    expect(REVIEWED_MIGRATION_CODE_SHA256[NAME]?.[hook]).toMatch(/^[0-9a-f]{64}$/);
+    expect(() => assertReviewedMigrationCode(NAME)).not.toThrow();
+    expect(() => assertReviewedMigrationCode(NAME, () => Buffer.from("// tampered"))).toThrow(/code digest changed: 070_objective_optional_cycle/);
   });
 
   it("asserts the column is nullable in the runner before the receipt is recorded", () => {

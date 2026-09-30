@@ -26,6 +26,7 @@ vi.mock("@/lib/db", () => ({
 // Membership/cross-tenant denial runs the real helper in okr-actions-tenant-isolation.test.ts.
 vi.mock("@/lib/product-action-auth", () => ({
   requireProductWorkspace: vi.fn().mockResolvedValue("workspace-1"),
+  requireProductWorkspaceBySlug: vi.fn().mockResolvedValue("workspace-1"),
   requireProductEntity: vi.fn().mockResolvedValue({ workspaceId: "workspace-1", opportunityId: null }),
 }));
 

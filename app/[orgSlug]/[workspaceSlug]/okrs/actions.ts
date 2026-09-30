@@ -62,8 +62,12 @@ const CreateObjectiveSchema = z.object({
 
 /** Authorized workspace for a new Objective: the cycle's when given, else the membership-checked slugs'. */
 async function resolveObjectiveWorkspaceId(cycleId: string | null, orgSlug: string, workspaceSlug: string): Promise<string> {
-  if (cycleId) return (await requireProductEntity("okrCycle", cycleId)).workspaceId;
-  return requireProductWorkspaceBySlug(orgSlug, workspaceSlug);
+  const slugWorkspaceId = await requireProductWorkspaceBySlug(orgSlug, workspaceSlug);
+  if (!cycleId) return slugWorkspaceId;
+  // The URL and the cycle must agree (parity with the MCP tool): a cycle from another
+  // workspace the caller belongs to is rejected instead of silently winning.
+  const { workspaceId } = await requireProductEntity("okrCycle", cycleId, slugWorkspaceId);
+  return workspaceId;
 }
 
 /**

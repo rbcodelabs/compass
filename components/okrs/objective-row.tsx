@@ -327,7 +327,7 @@ export function ObjectiveRow({
             anchor={actionsRef}
             align="end"
             inputPlaceholder="Search cycles, objectives, and KRs…"
-            emptyMessage="No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle's dates."
+            emptyMessage="No eligible parent KRs. A cycle-less Objective can support any Key Result in a Draft or Active cycle; otherwise the parent cycle must be Draft or Active, longer, and fully contain this cycle's dates."
           />
         </Combobox>
       )}

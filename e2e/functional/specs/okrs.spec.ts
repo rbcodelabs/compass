@@ -206,10 +206,14 @@ test.describe("OKRs", () => {
     const objectiveTitle = `E2E Persistent Objective ${ts}`;
     const krTitle = `E2E Persistent KR ${ts}`;
 
-    // The index always offers the labeled card for cycle-less Objectives.
+    // With cycles (or cycle-less Objectives) the index shows the labeled card; a workspace with neither
+    // shows the empty state, which offers the same route as a link. Either entry reaches /okrs/none.
     await page.goto(`${base}/okrs`);
     await page.waitForLoadState("networkidle");
-    await page.getByTestId("persistent-objectives-card").click();
+    await page
+      .locator('[data-testid="persistent-objectives-card"], [data-testid="persistent-objectives-link"]')
+      .first()
+      .click();
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("heading", { name: "No cycle / Persistent" })).toBeVisible();
 

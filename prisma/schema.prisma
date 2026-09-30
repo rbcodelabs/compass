@@ -694,7 +694,7 @@ model Objective {
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @default(now()) @map("updated_at")
   workspace         Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  cycle             OKRCycle?   @relation(fields: [cycleId], references: [id])
+  cycle             OKRCycle?   @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   squad             Squad?      @relation(fields: [squadId], references: [id])
   parentKeyResult   KeyResult?  @relation("SquadKRSupport", fields: [parentKeyResultId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   keyResults        KeyResult[]

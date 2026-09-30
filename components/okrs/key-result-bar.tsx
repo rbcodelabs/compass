@@ -132,7 +132,8 @@ export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, s
     });
   }
 
-  const canLinkSupporting = !!supportingObjectiveOptions && localSupportingOptions.length > 0;  const menuItems: CardMenuItem[] = [
+  const canLinkSupporting = !!supportingObjectiveOptions && localSupportingOptions.length > 0;
+  const menuItems: CardMenuItem[] = [
     ...(canLinkSupporting
       ? [
           {

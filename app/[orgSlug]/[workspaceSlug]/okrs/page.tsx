@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
@@ -8,6 +9,7 @@ import { CreateCycleForm } from "@/components/okrs/create-cycle-form";
 import { Target } from "lucide-react";
 import type { CycleStatus } from "@/lib/types";
 import { EmptyState, PageHeader } from "@/components/patterns";
+import { NO_CYCLE_LABEL, PERSISTENT_CYCLE_SLUG } from "@/lib/okr-cycle-scope";
 
 export const metadata = {
   title: "OKRs",
@@ -62,7 +64,13 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
             workspaceId={workspace.id}
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
-          />} />
+          />} secondaryAction={<Link
+            href={`/${orgSlug}/${workspaceSlug}/okrs/${PERSISTENT_CYCLE_SLUG}`}
+            data-testid="persistent-objectives-link"
+            className="inline-flex h-8 items-center rounded-lg border border-border px-3 text-sm text-text-subtle hover:text-text-primary"
+          >
+            Or add an Objective with no cycle ({NO_CYCLE_LABEL})
+          </Link>} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {cycles.map((cycle) => (

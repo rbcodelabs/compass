@@ -67,6 +67,15 @@ describe("createObjective with no cycle", () => {
     expect(writes()).toEqual([]);
   });
 
+  it("rejects a cycle whose workspace differs from the URL's workspace even for a member of both", async () => {
+    // The fake has no user who belongs to both workspaces, so simulate one: the cycle lookup
+    // succeeds (membership is satisfied) and reports workspace B while the slugs name workspace A.
+    const client = fake.current!.client as unknown as { oKRCycle: { findFirst: (args: unknown) => Promise<unknown> } };
+    client.oKRCycle.findFirst = async () => ({ workspaceId: WS_B.id });
+    await expect(okrActions.createObjective("cycle-b", WS_A.org, WS_A.slug, form({ title: "Mismatch" }))).rejects.toThrow("Entity not found or access denied");
+    expect(writes()).toEqual([]);
+  });
+
   it("still verifies the cycle when one is provided (B's cycle under A is denied)", async () => {
     await expect(okrActions.createObjective("cycle-b", WS_A.org, WS_A.slug, form({ title: "Sneaky" }))).rejects.toThrow("Entity not found or access denied");
     expect(writes()).toEqual([]);

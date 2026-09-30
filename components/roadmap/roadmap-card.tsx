@@ -18,6 +18,7 @@ import { DeliveryStatusBadge } from "./delivery-status-badge";
 import type { Horizon } from "@/lib/types";
 import type { RoadmapDeliveryStatus } from "@/lib/roadmap-delivery-status";
 import { isLaunchHorizon } from "@/lib/roadmap";
+import { PERSISTENT_CYCLE_SLUG } from "@/lib/okr-cycle-scope";
 
 export type RoadmapCardData = {
   id: string;
@@ -298,7 +299,7 @@ export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, o
                           <Link
                             href={item.keyResult.cycleId
                               ? `${base}/okrs/${item.keyResult.cycleId}`
-                              : `${base}/okrs`}
+                              : `${base}/okrs/${PERSISTENT_CYCLE_SLUG}`}
                             className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-indigo-600 transition-colors"
                             onClick={(e) => e.stopPropagation()}
                           />

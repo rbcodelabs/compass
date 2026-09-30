@@ -121,7 +121,7 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "069_workspace_id_residual_backfill": "9edcc2e6020df3065bde0bf0e2fd836f710adceef6f5ba0a018347ff8bdba74d",
   // objectives.cycle_id DROP NOT NULL (ADR Phase 1): one DDL statement, no data writes.
   // Digest recorded from the shipped SQL; please review that line.
-  "070_objective_optional_cycle": "f19c10f5affff71aea1ed7be15253d87c586b78ffac5239a42d5c3f1a886157b"
+  "070_objective_optional_cycle": "4a6c14548f4cd58efe6509ad21976ac7728b364a619e644c208492fd12e56dfe"
 };
 
 /**
@@ -135,6 +135,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   "069_workspace_id_residual_backfill": {
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 070 postcondition (objectives.cycle_id must really be nullable before the receipt).
+  "070_objective_optional_cycle": {
+    "lib/migrations/objective-optional-cycle.ts": "a81fe680f7a4e1510df7fda78997760d9c1bcf4168eeb4691feff5a49e7f30dc",
   },
 };
 

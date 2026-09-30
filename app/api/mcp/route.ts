@@ -683,7 +683,7 @@ const _handler = createMcpHandler(
           lines.push(`Objective ID: ${obj.id}`)
           if (obj.parentKeyResult) {
             lines.push(
-              `Supports: ${obj.parentKeyResult.objective.cycle?.title ?? NO_CYCLE_LABEL} /${obj.parentKeyResult.objective.title} / ${obj.parentKeyResult.title} (${obj.parentKeyResult.id})`
+              `Supports: ${obj.parentKeyResult.objective.cycle?.title ?? NO_CYCLE_LABEL} / ${obj.parentKeyResult.objective.title} / ${obj.parentKeyResult.title} (${obj.parentKeyResult.id})`
             )
           }
           for (const kr of obj.keyResults) {
