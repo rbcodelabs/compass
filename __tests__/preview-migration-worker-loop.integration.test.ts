@@ -4,6 +4,10 @@
  * callers, so the worker must opt in (`includeExplicitOnly`), otherwise it burns all 180 attempts on
  * pending: ["069_..."] and provisioning fails for every PR.
  *
+ * NOT GATED IN CI: this only runs locally when WORKSPACE_ID_TEST_DATABASE_URL points at the local compass_e2e
+ * database; otherwise it is skipped. It also never exercises the DSQL-only ASYNC-wait paths (DATABASE_URL is set, so
+ * ASYNC is stripped and index jobs are not awaited).
+ *
  * Runs the real runner and the worker's real loop and readiness gate against throwaway schemas in local compass_e2e.
  * The full 001..067 chain cannot be replayed on local PostgreSQL (042 refuses the partial-039 catalog shape, a DSQL
  * artifact), so each schema gets the real 001_init tables and a finished receipt for every other migration ahead of
@@ -82,8 +86,16 @@ describe.skipIf(!databaseUrl)("preview worker migration loop on a fresh schema",
     }
     const status = await statusOf(schema);
     expect(status.pending).toEqual([RESIDUAL]);
+    // GET status names the explicit-only pending migrations separately, so `pending: ["069..."]` is not misread as a
+    // deploy that did not finish.
+    expect(((await (await getMigrationStatus(pool, schema)).json()) as { explicitOnlyPending: string[] }).explicitOnlyPending).toEqual([RESIDUAL]);
     expect(status.appliedMigrations).toContain("068_workspace_id_on_solution_objective");
     expect(status.appliedMigrations).not.toContain(RESIDUAL);
+
+    // A well-typed but unregistered script name is a 404, not "All migrations up to date".
+    const unknown = await applyMigrations(pool, schema, "999_not_a_migration", { preProvisionedSchema: true });
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toMatchObject({ error: expect.stringContaining('Unknown migration "999_not_a_migration"') });
 
     const again = await applyMigrations(pool, schema, undefined, { preProvisionedSchema: true });
     const body = (await again.json()) as { message: string; skippedExplicitOnly?: string[] };
@@ -101,5 +113,6 @@ describe.skipIf(!databaseUrl)("preview worker migration loop on a fresh schema",
     const explicit = await applyMigrations(pool, schema, RESIDUAL, { preProvisionedSchema: true });
     expect(explicit.status).toBe(200);
     expect((await statusOf(schema)).pending).toEqual([]);
+    expect(((await (await getMigrationStatus(pool, schema)).json()) as { explicitOnlyPending: string[] }).explicitOnlyPending).toEqual([]);
   }, 120_000);
 });

@@ -1614,6 +1614,9 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       retriedMigrations,
       manifest: MIGRATIONS.map((m) => m.name),
       pending: pending.map((m) => m.name),
+      // Pending migrations that an untargeted POST deliberately never runs (they must be POSTed by name at the right
+      // moment). `pending` still lists them, so read THIS field before concluding a deploy did not finish.
+      explicitOnlyPending: pending.filter((m) => EXPLICIT_ONLY_MIGRATIONS.includes(m.name)).map((m) => m.name),
       notApplicable,
       researchCaptureHardening,
       researchGuidedUx,
@@ -1661,6 +1664,10 @@ export function assertManagedMigrationManifest(schema: string): void {
 export async function applyMigrations(pool: Pool, schema: string, targetScript?: string, options: { preProvisionedSchema?: boolean; managedPilot?: boolean; legacyDecisionRepairManifest?: LegacyDecisionRepairManifest; includeExplicitOnly?: boolean } = {}) {
   if (options.managedPilot && (!options.preProvisionedSchema || !/^compass_pr_276_[a-f0-9]{12}$/.test(schema) || !targetScript)) throw new Error("Invalid managed migration invocation");
   if (options.managedPilot) assertManagedMigrationManifest(schema);
+  // A well-typed but unregistered name is a mistake (typo, wrong branch), not "all migrations up to date".
+  if (targetScript && !MIGRATIONS_BY_NAME.has(targetScript)) {
+    return NextResponse.json({ error: `Unknown migration "${targetScript}". Nothing was applied. GET this endpoint for the registered manifest.`, schema }, { status: 404 });
+  }
   const client = await pool.connect();
   const log: string[] = [`Using schema: ${schema}`];
   const researchCaptureAsyncIndexJobIds: string[] = [];

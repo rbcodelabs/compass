@@ -174,6 +174,13 @@ describe("069 is explicit-only and the residual repair is repeatable", () => {
     }
   });
 
+  it("the vercel-managed request path is handled before the strict body parser, so its own body contract is untouched", () => {
+    const route = readFileSync(path.join(process.cwd(), "app/api/admin/migrate/route.ts"), "utf8");
+    const post = route.slice(route.indexOf("export async function POST"));
+    expect(post.indexOf('return managedRequest(req, true)')).toBeGreaterThan(-1);
+    expect(post.indexOf("managedRequest(req, true)")).toBeLessThan(post.indexOf("parseMigratePostBody("));
+  });
+
   it("the managed (vercel-managed) path still advances only by an explicit script", async () => {
     const managed = readFileSync(path.join(process.cwd(), "lib/preview-automation/managed-migrations.ts"), "utf8");
     expect(managed).toMatch(/applyMigrations\(pool, context\.schema, script, \{ preProvisionedSchema: true, managedPilot: true \}\)/);

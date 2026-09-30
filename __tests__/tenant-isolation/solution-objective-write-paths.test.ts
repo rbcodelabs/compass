@@ -267,7 +267,8 @@ export function scanFile(text: string): Finding[] {
 export function checkRawInserts(text: string): { table: string; verdict: Verdict }[] {
   const out: { table: string; verdict: Verdict }[] = [];
   // INSERT INTO ${table} (...) : the whole table name is interpolated, so it cannot be verified to not be solutions/objectives.
-  for (const m of text.matchAll(/INSERT\s+INTO\s+"?\$\{[^}]+\}"?(?=[\s(])/gi)) out.push({ table: m[0], verdict: "dynamic table name cannot be verified" });
+  // Also the realistic evasion where only the table is dynamic after a schema-qualified prefix: INSERT INTO "${S}".${table} (...).
+  for (const m of text.matchAll(/INSERT\s+INTO\s+(?:"?[\w$]+"?\.|"?\$\{[^}]+\}"?\.)?"?\$\{[^}]+\}"?(?=[\s(])/gi)) out.push({ table: m[0], verdict: "dynamic table name cannot be verified" });
   for (const m of text.matchAll(/INSERT\s+INTO\s+[^\s(]*?"?(solutions|objectives)"?\s*(\(([^)]*)\))?/gi)) {
     const table = m[1];
     if (!m[2]) out.push({ table, verdict: "no column list (cannot verify workspace_id)" });
@@ -387,6 +388,10 @@ describe("the write-path checker itself (canaries: a miss cannot pass vacuously)
     // a dynamic table name cannot be shown not to be solutions/objectives
     expect(verdicts("await pool.query(`INSERT INTO ${table} (id, workspace_id) VALUES ($1, $2)`)")[0]).toMatch(/dynamic table name/);
     expect(verdicts("await pool.query(`INSERT INTO \"${S}\" (id) VALUES ($1)`)")[0]).toMatch(/dynamic table name/);
+    // the realistic evasion: a schema-qualified prefix with a dynamic table after it
+    expect(verdicts("await pool.query(`INSERT INTO \"${S}\".${table} (id, workspace_id) VALUES ($1, $2)`)")[0]).toMatch(/dynamic table name/);
+    expect(verdicts("await pool.query(`INSERT INTO ${schema}.${table} (id) VALUES ($1)`)")[0]).toMatch(/dynamic table name/);
+    expect(verdicts("await pool.query(`INSERT INTO public.${table} (id) VALUES ($1)`)")[0]).toMatch(/dynamic table name/);
     // ...but a schema-qualified literal table is checked normally
     expect(verdicts("await pool.query(`INSERT INTO \"${S}\".solutions (id, workspace_id) VALUES ($1, $2)`)")).toEqual([null]);
     expect(verdicts("INSERT INTO ${S}.objectives (id, workspace_id) VALUES ($1, $2)")).toEqual([null]);
@@ -417,11 +422,13 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   // INSERT INTO ${ownerTable}: the managed-pilot ownership table (see DYNAMIC_INSERT_ALLOWED); counted so a second one is noticed.
   "lib/preview-automation/managed-migrations.ts": 1,
   "e2e/functional/fixtures/seed-e2e.ts": 2,
-  "e2e/functional/specs/kanban-mobile-scroll.spec.ts": 1,
+  "e2e/functional/specs/kanban-mobile-scroll.spec.ts": 2, // 1 literal solutions insert + 1 allow-listed dynamic (board.table)
+  "e2e/functional/specs/markdown-description.spec.ts": 1, // allow-listed dynamic (kind)
   "e2e/functional/specs/opportunity-composer.spec.ts": 1,
   "e2e/functional/specs/opportunity-detail.spec.ts": 1,
   "e2e/functional/specs/opportunity-relationships.spec.ts": 1,
   "scripts/seed-canvas-scale.ts": 2,
+  "scripts/verify-managed-pilot-migrations.ts": 1, // allow-listed dynamic (sentinel table)
   "seed-screenshots.ts": 2,
 };
 /** Creates that deliberately leave workspaceId unset. Each must carry the marker comment at the site. */
@@ -433,8 +440,11 @@ const INTENTIONAL_NULL_RAW_INSERTS: Record<string, string> = {
   "__tests__/workspace-id-on-solution-objective-migration.integration.test.ts": "simulates pre-068 rows and late rows inserted by old instances so the backfill has something to fill",
 };
 /** Dynamic-table inserts that are reviewed and known not to target solutions/objectives. Matched by file AND the exact interpolated name. */
-const DYNAMIC_INSERT_ALLOWED: Record<string, { name: string; reason: string }> = {
-  "lib/preview-automation/managed-migrations.ts": { name: "${ownerTable}", reason: "the managed-pilot ownership table, resolved by table(context); never solutions or objectives" },
+const DYNAMIC_INSERT_ALLOWED: Record<string, Array<{ name: string; reason: string }>> = {
+  "lib/preview-automation/managed-migrations.ts": [{ name: "${ownerTable}", reason: "the managed-pilot ownership table, resolved by table(context); never solutions or objectives" }],
+  "e2e/functional/specs/kanban-mobile-scroll.spec.ts": [{ name: "${board.table}", reason: "board.table comes from a fixed list: tasks, opportunities, experiments, roadmap_items" }],
+  "e2e/functional/specs/markdown-description.spec.ts": [{ name: "compass_dev.${kind}", reason: "kind is typed to 'opportunities' | 'tasks' | 'roadmap_items'" }],
+  "scripts/verify-managed-pilot-migrations.ts": [{ name: "${table}", reason: "table comes from a fixed list of synthetic OAuth sentinel tables" }],
 };
 const INTENTIONAL_MARKER = "INTENTIONAL NULL workspaceId";
 
@@ -483,7 +493,7 @@ describe("every Solution and Objective create sets workspaceId", () => {
     const offenders = raw
       .filter((r) => r.verdict)
       .filter((r) => !(INTENTIONAL_NULL_RAW_INSERTS[r.file] && files.find((x) => x.file === r.file)!.text.includes(INTENTIONAL_MARKER)))
-      .filter((r) => !(DYNAMIC_INSERT_ALLOWED[r.file] && r.table.includes(DYNAMIC_INSERT_ALLOWED[r.file].name)))
+      .filter((r) => !(DYNAMIC_INSERT_ALLOWED[r.file] ?? []).some((allowed) => r.verdict === "dynamic table name cannot be verified" && r.table.includes(allowed.name)))
       .map((r) => `${r.file}: INSERT INTO ${r.table}: ${r.verdict}`);
     expect(offenders).toEqual([]);
     for (const file of Object.keys(INTENTIONAL_NULL_RAW_INSERTS)) expect(files.find((x) => x.file === file)!.text, file).toContain(INTENTIONAL_MARKER);

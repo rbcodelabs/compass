@@ -31,12 +31,13 @@ import { POST } from "@/app/api/admin/migrate/route";
 import { WorkspaceIdBackfillRefusal } from "@/lib/migrations/workspace-id-on-solution-objective";
 
 const ORIGINAL = { ...process.env };
-const post = (body: unknown, secret: string | null = "s3cret") =>
+const postRaw = (text: string | undefined, secret: string | null = "s3cret") =>
   POST(new NextRequest("http://localhost/api/admin/migrate", {
     method: "POST",
     headers: { "content-type": "application/json", ...(secret ? { "x-migration-secret": secret } : {}) },
-    body: JSON.stringify(body),
+    ...(text === undefined ? {} : { body: text }),
   }));
+const post = (body: unknown, secret: string | null = "s3cret") => postRaw(JSON.stringify(body), secret);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -130,10 +131,58 @@ describe("backfill-workspace-id action", () => {
     expect(mocks.end).not.toHaveBeenCalled();
   });
 
-  it("a non-object body is treated as an ordinary untargeted POST, not as an action", async () => {
-    await post([1, 2, 3]);
-    expect(mocks.applyMigrations).toHaveBeenCalledWith(expect.anything(), "compass_preview", undefined);
+  it.each([123, [], "", null, {}, true, ["068_workspace_id_on_solution_objective"], 0, false])("rejects a script of %j with 400: a non-string or empty script must never become POST-all", async (script) => {
+    const response = await post({ script });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: expect.stringContaining('"script" must be a non-empty string') });
+    expect(mocks.applyMigrations).not.toHaveBeenCalled();
+    expect(mocks.end).not.toHaveBeenCalled();
+  });
+
+  it.each([[[1, 2, 3], "JSON object"], ["a string", "JSON object"], [42, "JSON object"], [true, "JSON object"], [null, "JSON object"]])("rejects non-object JSON %j with 400", async (body, message) => {
+    const response = await post(body);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: expect.stringContaining(message) });
+    expect(mocks.applyMigrations).not.toHaveBeenCalled();
+  });
+
+  it.each(["{not json", '{"script": "068_x"', "undefined", "<html>"])("rejects non-parseable non-empty body %j with 400", async (text) => {
+    const response = await postRaw(text);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Request body is not valid JSON." });
+    expect(mocks.applyMigrations).not.toHaveBeenCalled();
+  });
+
+  it.each([{ scrpt: "068_workspace_id_on_solution_objective" }, { script: "068_x", extra: 1 }, { actions: "backfill-workspace-id" }, { Script: "068_x" }])("rejects unknown keys %j with 400 (a typo must never become POST-all)", async (body) => {
+    const response = await post(body);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: expect.stringMatching(/Unknown field/) });
+    expect(mocks.applyMigrations).not.toHaveBeenCalled();
     expect(mocks.repair).not.toHaveBeenCalled();
+  });
+
+  it("an EMPTY body still works exactly as before: untargeted apply-pending (no body, empty string, whitespace, {})", async () => {
+    for (const send of [() => postRaw(undefined), () => postRaw(""), () => postRaw("  \n "), () => post({})]) {
+      mocks.applyMigrations.mockClear();
+      const response = await send();
+      expect(response.status).toBe(200);
+      expect(mocks.applyMigrations).toHaveBeenCalledTimes(1);
+      expect(mocks.applyMigrations).toHaveBeenCalledWith(expect.anything(), "compass_preview", undefined);
+    }
+    expect(mocks.repair).not.toHaveBeenCalled();
+  });
+
+  it("a well-formed script POST passes exactly that script", async () => {
+    await post({ script: "068_workspace_id_on_solution_objective" });
+    expect(mocks.applyMigrations).toHaveBeenCalledWith(expect.anything(), "compass_preview", "068_workspace_id_on_solution_objective");
+  });
+
+  it("logs the pg error code for a server fault when there is one", async () => {
+    mocks.repair.mockRejectedValue(Object.assign(new Error("boom"), { code: "40001", before: { columnsPresent: true } }));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect((await post({ action: "backfill-workspace-id" })).status).toBe(500);
+    expect(JSON.parse(error.mock.calls[0][0])).toMatchObject({ outcome: "error", code: "40001" });
+    error.mockRestore();
   });
 
   it("rejects a wrong secret of the same length in constant time (still 401)", async () => {
