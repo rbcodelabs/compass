@@ -681,7 +681,7 @@ model Objective {
   /// add a NOT NULL column to a populated table; every write path sets it and
   /// every read path treats NULL as deny.
   workspaceId       String?     @map("workspace_id") @db.Uuid
-  /// Optional (migration 069): an Objective without a cycle is a persistent /
+  /// Optional (migration 070): an Objective without a cycle is a persistent /
   /// cross-cycle Objective. NULL means "no cycle", not "unknown".
   cycleId           String?     @map("cycle_id") @db.Uuid
   squadId           String?     @map("squad_id") @db.Uuid

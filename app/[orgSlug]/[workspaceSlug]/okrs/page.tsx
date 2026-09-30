@@ -42,7 +42,7 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
     },
   });
 
-  // Objectives with no cycle (migration 069) belong to no cycle card, so they
+  // Objectives with no cycle (migration 070) belong to no cycle card, so they
   // get their own labeled card rather than disappearing from this index.
   const persistentObjectiveCount = await prisma.objective.count({
     where: { workspaceId: workspace.id, cycleId: null },

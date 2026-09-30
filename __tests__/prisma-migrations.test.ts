@@ -637,8 +637,8 @@ describe("068_workspace_id_on_solution_objective", () => {
   });
 });
 
-describe("069_objective_optional_cycle", () => {
-  const NAME = "069_objective_optional_cycle";
+describe("070_objective_optional_cycle", () => {
+  const NAME = "070_objective_optional_cycle";
   const statements = () =>
     sqlFor(NAME)
       .split("\n")

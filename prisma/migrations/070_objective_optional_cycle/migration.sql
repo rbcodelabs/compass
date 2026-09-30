@@ -1,4 +1,4 @@
--- Migration 069: Objective.cycle_id becomes optional
+-- Migration 070: Objective.cycle_id becomes optional
 -- (ADR "Thinking-model presets and typed links", Phase 1, decisions 5-7).
 --
 -- An Objective may now exist without a cycle (a persistent / cross-cycle

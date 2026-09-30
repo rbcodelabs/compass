@@ -538,7 +538,7 @@ const _handler = createMcpHandler(
           orderBy: { startDate: "desc" },
           select: { id: true, title: true, status: true, startDate: true, endDate: true, _count: { select: { objectives: true } } },
         })
-        // Cycle-less Objectives (migration 069) are in no cycle's list; surface them here so they never vanish.
+        // Cycle-less Objectives (migration 070) are in no cycle's list; surface them here so they never vanish.
         const persistentObjectives = await prisma.objective.findMany({
           where: { workspaceId, cycleId: null },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],

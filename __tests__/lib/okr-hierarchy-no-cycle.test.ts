@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Migration 069: Objective.cycleId is optional. Containment and CLOSED-cycle
+ * Migration 070: Objective.cycleId is optional. Containment and CLOSED-cycle
  * checks have an explicit "no cycle" case: skipped, never failed, never thrown.
  */
 

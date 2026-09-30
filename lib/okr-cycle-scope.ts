@@ -1,5 +1,5 @@
 /**
- * Shared vocabulary for Objectives that have no cycle (migration 069).
+ * Shared vocabulary for Objectives that have no cycle (migration 070).
  *
  * Client-safe: no database imports, so components can use it too.
  *

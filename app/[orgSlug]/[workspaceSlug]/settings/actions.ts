@@ -652,7 +652,7 @@ export async function deleteWorkspace(
     .then((c) => c.map((x) => x.id));
 
   // Objectives are owned by the workspace directly (068) and may have no cycle
-  // (069), so the cycle list alone would miss cycle-less Objectives and leave
+  // (070), so the cycle list alone would miss cycle-less Objectives and leave
   // their Key Results and CheckIns behind. Teardown matches either path.
   const objectiveScope = { OR: [{ workspaceId }, { cycleId: { in: cycleIds } }] };
   {

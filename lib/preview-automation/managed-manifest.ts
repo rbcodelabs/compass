@@ -118,7 +118,7 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "068_workspace_id_on_solution_objective": "efc74d966e413e3cd5ad211f41ac96bbc6bcb6fa5cd230c9ac3e6a050ffbe9e1",
   // objectives.cycle_id DROP NOT NULL (ADR Phase 1): one DDL statement, no data writes.
   // Digest recorded from the shipped SQL; please review that line.
-  "069_objective_optional_cycle": "98ce1139657f686a770a9f84b72356a5fa193e6f74f0f9b9f3865e449f144703"
+  "070_objective_optional_cycle": "f19c10f5affff71aea1ed7be15253d87c586b78ffac5239a42d5c3f1a886157b"
 };
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {

@@ -3,7 +3,7 @@ import { NO_CYCLE_LABEL } from "@/lib/okr-cycle-scope";
 
 /**
  * Cycle fields are null (title NO_CYCLE_LABEL) for an Objective with no cycle
- * (migration 069). Such an Objective is "persistent": cycle date containment and
+ * (migration 070). Such an Objective is "persistent": cycle date containment and
  * the CLOSED-cycle rule do not apply to it, in either direction.
  */
 export type ParentKeyResultOption = {

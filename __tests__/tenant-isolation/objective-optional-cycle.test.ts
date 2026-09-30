@@ -1,5 +1,5 @@
 /**
- * Objective.cycleId is optional (migration 069, ADR Phase 1).
+ * Objective.cycleId is optional (migration 070, ADR Phase 1).
  *
  * Authorization reads Objective.workspaceId, never the cycle, so a cycle-less
  * Objective must be exactly as reachable to its own workspace's members, and

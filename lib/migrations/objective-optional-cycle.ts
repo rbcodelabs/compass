@@ -1,9 +1,9 @@
 import type { PoolClient } from "pg"
 
-export const OBJECTIVE_OPTIONAL_CYCLE_MIGRATION = "069_objective_optional_cycle"
+export const OBJECTIVE_OPTIONAL_CYCLE_MIGRATION = "070_objective_optional_cycle"
 
 /**
- * Postcondition for 069. Runs before the migration receipt is recorded, so an
+ * Postcondition for 070. Runs before the migration receipt is recorded, so an
  * attempt where the DROP NOT NULL did not take effect stays unfinished and the
  * next POST retries it. Existing rows are deliberately not inspected: the
  * migration changes no data.

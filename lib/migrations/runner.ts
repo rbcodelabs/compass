@@ -439,8 +439,8 @@ const MIGRATIONS: readonly MigrationEntry[] = [
   {
     // objectives.cycle_id DROP NOT NULL (ADR Phase 1). Single DDL, no data change;
     // the runner hook asserts the column is really nullable before the receipt.
-    name: "069_objective_optional_cycle",
-    filePath: path.join(process.cwd(), "prisma/migrations/069_objective_optional_cycle/migration.sql"),
+    name: "070_objective_optional_cycle",
+    filePath: path.join(process.cwd(), "prisma/migrations/070_objective_optional_cycle/migration.sql"),
   },
 ];
 

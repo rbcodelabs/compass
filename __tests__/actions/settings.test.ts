@@ -885,7 +885,7 @@ describe("deleteWorkspace", () => {
     expect(mockWorkspace.delete).not.toHaveBeenCalled();
   });
 
-  it("deletes cycle-less Objectives' Key Results and CheckIns even when the workspace has no cycles (069)", async () => {
+  it("deletes cycle-less Objectives' Key Results and CheckIns even when the workspace has no cycles (070)", async () => {
     mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "ADMIN" }] });
     mockOKRCycle.findMany.mockResolvedValue([]);
     mockObjective.findMany.mockResolvedValue([{ id: "obj-nocycle" }]);

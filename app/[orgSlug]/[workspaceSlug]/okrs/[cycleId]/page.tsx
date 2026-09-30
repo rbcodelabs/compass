@@ -71,7 +71,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
 
   if (!workspace) notFound();
 
-  // "none" is the fixed route for Objectives that have no cycle (migration 069).
+  // "none" is the fixed route for Objectives that have no cycle (migration 070).
   const isPersistent = cycleId === PERSISTENT_CYCLE_SLUG;
   const cycle = isPersistent
     ? null
