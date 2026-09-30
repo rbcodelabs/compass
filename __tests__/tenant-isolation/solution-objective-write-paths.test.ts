@@ -268,7 +268,8 @@ export function checkRawInserts(text: string): { table: string; verdict: Verdict
   const out: { table: string; verdict: Verdict }[] = [];
   // INSERT INTO ${table} (...) : the whole table name is interpolated, so it cannot be verified to not be solutions/objectives.
   // Also the realistic evasion where only the table is dynamic after a schema-qualified prefix: INSERT INTO "${S}".${table} (...).
-  for (const m of text.matchAll(/INSERT\s+INTO\s+(?:"?[\w$]+"?\.|"?\$\{[^}]+\}"?\.)?"?\$\{[^}]+\}"?(?=[\s(])/gi)) out.push({ table: m[0], verdict: "dynamic table name cannot be verified" });
+  // Whitespace is allowed around each dot and up to two prefix segments (db."${S}".${table}).
+  for (const m of text.matchAll(/INSERT\s+INTO\s+(?:(?:"?[\w$]+"?|"?\$\{[^}]+\}"?)\s*\.\s*){0,2}"?\$\{[^}]+\}"?(?=[\s(])/gi)) out.push({ table: m[0], verdict: "dynamic table name cannot be verified" });
   for (const m of text.matchAll(/INSERT\s+INTO\s+[^\s(]*?"?(solutions|objectives)"?\s*(\(([^)]*)\))?/gi)) {
     const table = m[1];
     if (!m[2]) out.push({ table, verdict: "no column list (cannot verify workspace_id)" });
@@ -392,6 +393,9 @@ describe("the write-path checker itself (canaries: a miss cannot pass vacuously)
     expect(verdicts("await pool.query(`INSERT INTO \"${S}\".${table} (id, workspace_id) VALUES ($1, $2)`)")[0]).toMatch(/dynamic table name/);
     expect(verdicts("await pool.query(`INSERT INTO ${schema}.${table} (id) VALUES ($1)`)")[0]).toMatch(/dynamic table name/);
     expect(verdicts("await pool.query(`INSERT INTO public.${table} (id) VALUES ($1)`)")[0]).toMatch(/dynamic table name/);
+    expect(verdicts("await pool.query(`INSERT INTO db.\"${S}\".${table} (id) VALUES ($1)`)")[0]).toMatch(/dynamic table name/);
+    expect(verdicts("await pool.query(`INSERT INTO \"${S}\" . ${table} (id) VALUES ($1)`)")[0]).toMatch(/dynamic table name/);
+    expect(verdicts("await pool.query(`INSERT INTO public\n  .\n  ${table} (id) VALUES ($1)`)")[0]).toMatch(/dynamic table name/);
     // ...but a schema-qualified literal table is checked normally
     expect(verdicts("await pool.query(`INSERT INTO \"${S}\".solutions (id, workspace_id) VALUES ($1, $2)`)")).toEqual([null]);
     expect(verdicts("INSERT INTO ${S}.objectives (id, workspace_id) VALUES ($1, $2)")).toEqual([null]);

@@ -13,7 +13,7 @@ import {
   repairWorkspaceIdResidual,
   withOccRetry,
 } from "@/lib/migrations/workspace-id-on-solution-objective";
-import { selectMigrationsToRun, skippedExplicitOnly } from "@/lib/migrations/runner";
+import { applyMigrations, selectMigrationsToRun, skippedExplicitOnly } from "@/lib/migrations/runner";
 import { WorkspaceIdBackfillRefusal } from "@/lib/migrations/workspace-id-on-solution-objective";
 import { REVIEWED_MIGRATION_CODE_SHA256, assertReviewedMigrationCode } from "@/lib/preview-automation/managed-manifest";
 
@@ -140,6 +140,22 @@ describe("assertWorkspaceIdOnSolutionObjective", () => {
   it("fails when an index is missing or invalid", async () => {
     const { client } = fakeClient((sql) => (sql.includes("pg_index") ? { rows: [] } : healthy(sql)));
     await expect(assertWorkspaceIdOnSolutionObjective(client, "s")).rejects.toThrow(/index postcondition failed: idx_solutions_workspace_id/);
+  });
+});
+
+describe("an unregistered script name is refused before any connection is made", () => {
+  it("returns 404 without calling pool.connect (ungated: no database needed)", async () => {
+    const connect = vi.fn().mockRejectedValue(new Error("must not connect"));
+    const response = await applyMigrations({ connect } as never, "compass_dev", "999_not_a_migration");
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining('Unknown migration "999_not_a_migration"'), schema: "compass_dev" });
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("a registered name still proceeds to connect (so the 404 is specifically about the name)", async () => {
+    const connect = vi.fn().mockRejectedValue(new Error("connect reached"));
+    await expect(applyMigrations({ connect } as never, "compass_dev", "068_workspace_id_on_solution_objective")).rejects.toThrow("connect reached");
+    expect(connect).toHaveBeenCalledTimes(1);
   });
 });
 
