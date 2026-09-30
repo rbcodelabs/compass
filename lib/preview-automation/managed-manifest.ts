@@ -133,7 +133,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // 071 pins only its own hook: it carries a private copy of withOccRetry rather than importing the 068 hook.
   "071_typed_link_tables": {
-    "lib/migrations/typed-link-tables.ts": "ea26307d7abe9268944b38f259870e95a37b53c0ba60babb25c9854bae75d32b",
+    "lib/migrations/typed-link-tables.ts": "a9fc1442fb2faea92aca32204bd798332bf58719fdff460c8df94c2ee408a5dd",
   },
 };
 

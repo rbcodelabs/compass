@@ -127,7 +127,7 @@ export async function assertTypedLinkPreconditions(client: PoolClient, schema: s
   }
   const nulls = await count(client, `SELECT count(*)::text AS n FROM "${schema}"."objectives" WHERE workspace_id IS NULL`)
   if (nulls !== 0) {
-    throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: precondition failed: ${nulls} objectives rows have a NULL workspace_id. Repair them (see ${WORKSPACE_ID_MIGRATION}) first; nothing was changed.`)
+    throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: precondition failed: ${nulls} objectives rows have a NULL workspace_id. Apply migration 069 (PR #331) until legacyObjectiveWorkspaceNull is 0, then re-POST 071; nothing was changed.`)
   }
 }
 
@@ -389,7 +389,7 @@ export async function assertTypedLinkTables(client: PoolClient, schema: string) 
   // written with an unlinked pointer that is neither linked nor quarantined.
   const partition = await getLegacyPointerPartition(client, schema)
   if (partition.objectiveWorkspaceNull !== 0) {
-    throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: partition postcondition failed: ${partition.objectiveWorkspaceNull} legacy pointers reference an objective with a NULL workspace_id (run the workspace_id residual backfill, then retry)`)
+    throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: partition postcondition failed: ${partition.objectiveWorkspaceNull} legacy pointers reference an objective with a NULL workspace_id (apply migration 069 (PR #331) until legacyObjectiveWorkspaceNull is 0, then re-POST 071)`)
   }
   const classified = partition.sameWorkspace + partition.crossWorkspace + partition.dangling + partition.objectiveWorkspaceNull
   if (classified !== partition.total) {
