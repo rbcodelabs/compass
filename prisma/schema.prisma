@@ -693,7 +693,7 @@ model Objective {
   sortOrder         Int         @default(0) @map("sort_order")
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @default(now()) @map("updated_at")
-  workspace         Workspace?  @relation(fields: [workspaceId], references: [id])
+  workspace         Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   cycle             OKRCycle?   @relation(fields: [cycleId], references: [id])
   squad             Squad?      @relation(fields: [squadId], references: [id])
   parentKeyResult   KeyResult?  @relation("SquadKRSupport", fields: [parentKeyResultId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -785,7 +785,7 @@ model Solution {
   sortOrder     Int               @default(0) @map("sort_order")
   createdAt     DateTime          @default(now()) @map("created_at")
   updatedAt     DateTime          @default(now()) @map("updated_at")
-  workspace     Workspace?        @relation(fields: [workspaceId], references: [id])
+  workspace     Workspace?        @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   opportunity   Opportunity       @relation(fields: [opportunityId], references: [id])
   assumptions   Assumption[]
   roadmapItems  RoadmapItem[]

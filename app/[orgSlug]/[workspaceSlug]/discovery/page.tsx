@@ -134,8 +134,10 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         sortOrder: true,
         squadId: true,
         score: { select: { normalizedScore: true, modelVersion: true } },
-        _count: { select: { solutions: true, evidence: true } },
+        _count: { select: { solutions: { where: { workspaceId: workspace.id } }, evidence: true } },
         solutions: {
+          // A solution whose own workspaceId is NULL or names another workspace is hidden, not trusted via its parent.
+          where: { workspaceId: workspace.id },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: {
             id: true,

@@ -88,6 +88,8 @@ export async function createObjective(
     ? (await requireProductEntity("okrCycle", cycleId)).workspaceId
     : await requireProductWorkspaceBySlug(orgSlug, workspaceSlug);
   const prisma = getPrisma();
+  // A client-supplied squad must live in the same workspace as the cycle.
+  if (parsed.data.squadId) await requireProductEntity("squad", parsed.data.squadId, workspaceId);
 
   await prisma.objective.create({
     data: {

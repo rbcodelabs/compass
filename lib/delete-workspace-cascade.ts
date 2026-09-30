@@ -30,13 +30,15 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   // 1. Break the KeyResult↔Objective Restrict cycle.
   //
   // Solutions and Objectives are selected by their own workspaceId (migration
-  // 068) OR by the parent chain. Teardown must be complete, so unlike the
-  // authorization paths it deliberately also reaches rows whose workspaceId is
-  // still NULL (created mid-rollout, before backfill) through their parent.
+  // 068), plus, only while it is still NULL, by the parent chain. Teardown must
+  // be complete, so unlike the authorization paths it also reaches un-backfilled
+  // rows; it never reaches a row whose workspaceId names a different workspace.
   const ownedCycleIds = await ids(
     prisma.oKRCycle.findMany({ where: { workspaceId }, select: { id: true } })
   );
-  const objectiveScope = { OR: [{ workspaceId }, { cycleId: { in: ownedCycleIds } }] };
+  // A row is ours by its own workspaceId, or (only while that is still NULL) by its parent. Matching the
+  // parent unconditionally would let a row whose own workspaceId names ANOTHER workspace be deleted with this one.
+  const objectiveScope = { OR: [{ workspaceId }, { workspaceId: null, cycleId: { in: ownedCycleIds } }] };
   await prisma.objective.updateMany({
     where: objectiveScope,
     data: { parentKeyResultId: null },
@@ -147,7 +149,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   }
   const solutionIds = await ids(
     prisma.solution.findMany({
-      where: { OR: [{ workspaceId }, { opportunityId: { in: opportunityIds } }] },
+      where: { OR: [{ workspaceId }, { workspaceId: null, opportunityId: { in: opportunityIds } }] },
       select: { id: true },
     })
   );

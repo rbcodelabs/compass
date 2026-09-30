@@ -386,7 +386,7 @@ describe("deleteOrganization", () => {
 
     // ── Per-workspace: null-out steps ──
     expect(mockObjective.updateMany).toHaveBeenCalledWith({
-      where: { OR: [{ workspaceId: "ws-1" }, { cycleId: { in: ["cycle-1"] } }] },
+      where: { OR: [{ workspaceId: "ws-1" }, { workspaceId: null, cycleId: { in: ["cycle-1"] } }] },
       data: { parentKeyResultId: null },
     });
     expect(mockExperiment.updateMany).toHaveBeenCalledWith({

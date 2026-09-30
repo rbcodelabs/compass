@@ -607,17 +607,24 @@ describe("068_workspace_id_on_solution_objective", () => {
       "CREATE INDEX ASYNC IF NOT EXISTS idx_solutions_workspace_id ON solutions (workspace_id)",
       "CREATE INDEX ASYNC IF NOT EXISTS idx_objectives_workspace_id ON objectives (workspace_id)",
     ]);
-    const executable = statements().join("\n");
-    expect(executable).not.toMatch(/NOT NULL|DEFAULT|REFERENCES|FOREIGN KEY|SET NOT NULL/i);
+    expect(statements().join("\n")).not.toMatch(/NOT NULL|DEFAULT|REFERENCES|FOREIGN KEY|SET NOT NULL/i);
   });
 
-  it("matches schema.prisma on both models, including the index", () => {
+  it("matches schema.prisma on both models: nullable column, the index, and a Restrict relation (never SetNull)", () => {
     const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
     for (const [model, index] of [["Solution", "idx_solutions_workspace_id"], ["Objective", "idx_objectives_workspace_id"]] as const) {
       const body = schema.match(new RegExp(`model ${model} \\{[\\s\\S]*?\\n\\}`))?.[0] ?? "";
       expect(body).toMatch(/workspaceId\s+String\?\s+@map\("workspace_id"\)\s+@db\.Uuid/);
       expect(body).toContain(`@@index([workspaceId], map: "${index}")`);
+      // Under relationMode "prisma" an optional relation defaults to onDelete SetNull, which would silently
+      // NULL every child's workspaceId when a workspace is deleted. Restrict makes that a loud error instead.
+      expect(body).toMatch(/workspace\s+Workspace\?\s+@relation\(fields: \[workspaceId\], references: \[id\], onDelete: Restrict, onUpdate: Restrict\)/);
     }
+  });
+
+  it("is applied by the functional e2e schema setup", () => {
+    const setup = readFileSync(path.join(ROOT, "e2e/functional/global-setup.ts"), "utf-8");
+    expect(setup).toContain(`prisma/migrations/${NAME}/migration.sql`);
   });
 
   it("runs its backfill and postconditions in the runner before the receipt is recorded, and waits on async index jobs", () => {
@@ -630,10 +637,29 @@ describe("068_workspace_id_on_solution_objective", () => {
     expect(receipt).toBeGreaterThan(assertion);
     expect(runner.match(new RegExp(NAME, "g"))!.length).toBeGreaterThanOrEqual(3);
   });
+});
 
-  it("is applied by the functional e2e schema setup", () => {
-    const setup = readFileSync(path.join(ROOT, "e2e/functional/global-setup.ts"), "utf-8");
-    expect(setup).toContain(`prisma/migrations/${NAME}/migration.sql`);
+describe("069_workspace_id_residual_backfill", () => {
+  const NAME = "069_workspace_id_residual_backfill";
+
+  it("is registered exactly once, after 068", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === NAME)).toHaveLength(1);
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("068_workspace_id_on_solution_objective"));
+  });
+
+  it("contains no executable SQL (no DDL): the work is the pinned runner hook", () => {
+    const executable = sqlFor(NAME)
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n")
+      .trim();
+    expect(executable).toBe("");
+  });
+
+  it("runs the same backfill and postconditions before its receipt", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    expect(runner).toMatch(/migration\.name === WORKSPACE_ID_MIGRATION \|\| migration\.name === WORKSPACE_ID_RESIDUAL_MIGRATION/);
   });
 });
 

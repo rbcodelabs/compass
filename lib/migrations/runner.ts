@@ -24,7 +24,7 @@ import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-upda
 import { assertMcpConnectorsMigration } from "@/lib/migrations/mcp-connectors";
 import { assertMetricsDashboardMigration } from "@/lib/migrations/metrics-dashboard";
 import { assertObjectiveCycleIdNullable, OBJECTIVE_OPTIONAL_CYCLE_MIGRATION } from "@/lib/migrations/objective-optional-cycle";
-import { assertWorkspaceIdOnSolutionObjective, backfillWorkspaceIdOnSolutionObjective, WORKSPACE_ID_MIGRATION } from "@/lib/migrations/workspace-id-on-solution-objective";
+import { assertWorkspaceIdOnSolutionObjective, backfillWorkspaceIdOnSolutionObjective, getWorkspaceIdBackfillStatus, WORKSPACE_ID_MIGRATION, WORKSPACE_ID_RESIDUAL_MIGRATION } from "@/lib/migrations/workspace-id-on-solution-objective";
 import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-manifest";
 
 
@@ -435,6 +435,13 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // receipt is recorded. Idempotent and resumable.
     name: "068_workspace_id_on_solution_objective",
     filePath: path.join(process.cwd(), "prisma/migrations/068_workspace_id_on_solution_objective/migration.sql"),
+  },
+  {
+    // No DDL. Re-runs 068's backfill + postconditions for rows the previous deploy's
+    // instances inserted with a NULL workspace_id after 068's receipt was written.
+    // POST it only after the deploy that writes the column has fully rolled out.
+    name: "069_workspace_id_residual_backfill",
+    filePath: path.join(process.cwd(), "prisma/migrations/069_workspace_id_residual_backfill/migration.sql"),
   },
   {
     // objectives.cycle_id DROP NOT NULL (ADR Phase 1). Single DDL, no data change;
@@ -1623,6 +1630,8 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       decisionMigrationProgress,
       legacyDecisionReviewRepair,
       geodeDocumentStorage: await getGeodeDocumentStorageHealth(client, schema, appliedNames.includes("059_geode_document_storage")),
+      // Orphan / NULL / parent-drift counts for 068, visible before a human POSTs it.
+      workspaceIdBackfill: await getWorkspaceIdBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
     });
   } finally {
     client.release();
@@ -1892,7 +1901,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "059_geode_document_storage") await assertGeodeDocumentStorageMigration(client, schema)
       if (migration.name === "060_workspace_updates") await assertWorkspaceUpdatesMigration(client, schema)
       if (migration.name === "062_mcp_connectors") await assertMcpConnectorsMigration(client, schema)
-      if (migration.name === WORKSPACE_ID_MIGRATION) {
+      if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {
         // Data half: backfill from the parent in bounded batches, then prove it.
         // Both run before the receipt below, so a failure leaves an unfinished
         // attempt and the next POST resumes from the remaining NULL rows.

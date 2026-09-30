@@ -114,12 +114,36 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Per-question answers on decision records (multi-question tracked decisions). Last, matching its MIGRATIONS position.
   "067_decision_answers": "d79f88798ff1764d42fd8e0a08dc65510fb39bef6f8d9bdf32aec1abe13ce14f",
   // Direct workspace_id on solutions and objectives (ADR Phase 0). The pinned SQL is DDL only;
-  // the batched backfill and its postconditions run in the runner hook, not in this file.
+  // the batched backfill and its postconditions run in the runner hook, which is pinned
+  // separately in REVIEWED_MIGRATION_CODE_SHA256.
   "068_workspace_id_on_solution_objective": "efc74d966e413e3cd5ad211f41ac96bbc6bcb6fa5cd230c9ac3e6a050ffbe9e1",
+  // DDL-free residual backfill: the SQL file is comments only, the work is the pinned hook below.
+  "069_workspace_id_residual_backfill": "9edcc2e6020df3065bde0bf0e2fd836f710adceef6f5ba0a018347ff8bdba74d",
   // objectives.cycle_id DROP NOT NULL (ADR Phase 1): one DDL statement, no data writes.
   // Digest recorded from the shipped SQL; please review that line.
   "070_objective_optional_cycle": "f19c10f5affff71aea1ed7be15253d87c586b78ffac5239a42d5c3f1a886157b"
 };
+
+/**
+ * Migrations whose data half lives in TypeScript run by the runner (a backfill
+ * hook plus its postconditions). The SQL pin above cannot see that code, so the
+ * hook file is pinned here too: changing it requires the same explicit review.
+ */
+export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "068_workspace_id_on_solution_objective": {
+    "lib/migrations/workspace-id-on-solution-objective.ts": "df2d4eac140c8ca764adf6f4547af00c113dc294779efd7a87854ec9fad182d9",
+  },
+  "069_workspace_id_residual_backfill": {
+    "lib/migrations/workspace-id-on-solution-objective.ts": "df2d4eac140c8ca764adf6f4547af00c113dc294779efd7a87854ec9fad182d9",
+  },
+};
+
+export function assertReviewedMigrationCode(name: string, read: (relativePath: string) => Buffer = (relativePath) => readFileSync(path.join(process.cwd(), relativePath))): void {
+  for (const [relativePath, expected] of Object.entries(REVIEWED_MIGRATION_CODE_SHA256[name] ?? {})) {
+    const digest = createHash("sha256").update(read(relativePath)).digest("hex");
+    if (digest !== expected) throw new Error(`Reviewed managed manifest code digest changed: ${name} ${relativePath}`);
+  }
+}
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {
   const names = migrations.map(migration => migration.name);
@@ -132,5 +156,6 @@ export function assertReviewedManagedManifest(migrations: readonly { name: strin
     if (path.resolve(migration.filePath) !== filePath) throw new Error("Reviewed managed manifest path changed");
     const digest = createHash("sha256").update(readFileSync(filePath)).digest("hex");
     if (digest !== REVIEWED_SQL_SHA256[migration.name]) throw new Error(`Reviewed managed manifest digest changed: ${migration.name}`);
+    assertReviewedMigrationCode(migration.name);
   }
 }
