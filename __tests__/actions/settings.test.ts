@@ -120,6 +120,8 @@ const mockPrisma = {
   workspaceUpdateEvent: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   workspaceUpdatesReadState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   workspaceUpdatesState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  follow: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  notification: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   analyticsConnection: { deleteMany: vi.fn() },
   metricDefinition: { deleteMany: vi.fn() },
   metricRevision: { deleteMany: vi.fn() },
@@ -945,6 +947,11 @@ describe("deleteWorkspace", () => {
     expect(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRequest.deleteMany.mock.invocationCallOrder[0]);
     expect(mockPortfolioCapacityReservation.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockRoadmapItem.deleteMany.mock.invocationCallOrder[0]);
 
+    // Follow state for the workspace is cleaned up before the workspace row goes
+    expect(mockPrisma.notification.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "ws-1" } }));
+    expect(mockPrisma.follow.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "ws-1" } }));
+    expect(mockPrisma.follow.findMany.mock.invocationCallOrder[0]).toBeLessThan(mockWorkspace.delete.mock.invocationCallOrder[0]);
+
     // Workspace deleted
     expect(mockWorkspace.delete).toHaveBeenCalledWith({ where: { id: "ws-1" } });
 
@@ -1260,6 +1267,32 @@ describe("removeWorkspaceMember", () => {
     expect(mockWorkspaceMember.updateMany).toHaveBeenCalledWith({ where: { id: "ws-member-1", role: "MEMBER" }, data: { role: "MEMBER" } });
     expect(mockWorkspaceMember.updateMany.mock.invocationCallOrder[0]).toBeLessThan(mockPrisma.agent.findMany.mock.invocationCallOrder[0]);
     expect(mockPrisma.agent.findMany.mock.invocationCallOrder[0]).toBeLessThan(mockWorkspaceMember.delete.mock.invocationCallOrder[0]);
+  });
+
+  it("clears the departing member's follow state for this workspace after the removal commits", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", userId: "user-9", role: "MEMBER" });
+    mockCounts(2, ["ADMIN", "MEMBER"]);
+    mockPrisma.follow.findMany.mockResolvedValueOnce([{ id: "f1" }]);
+    mockPrisma.notification.findMany.mockResolvedValueOnce([{ id: "n1" }]);
+
+    await removeWorkspaceMember("org", "ws", "ws-member-1");
+
+    expect(mockPrisma.follow.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "ws-1", userId: "user-9" } }));
+    expect(mockPrisma.notification.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "ws-1", recipientUserId: "user-9" } }));
+    expect(mockPrisma.follow.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["f1"] } } });
+    expect(mockWorkspaceMember.delete.mock.invocationCallOrder[0]).toBeLessThan(mockPrisma.follow.findMany.mock.invocationCallOrder[0]);
+  });
+
+  it("still succeeds when the follow-state cleanup fails, because the removal has already committed", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", userId: "user-9", role: "MEMBER" });
+    mockCounts(2, ["ADMIN", "MEMBER"]);
+    mockPrisma.follow.findMany.mockRejectedValueOnce(new Error("connection lost"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(removeWorkspaceMember("org", "ws", "ws-member-1")).resolves.toBeUndefined();
+
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
   });
 
   it("does not overwrite a concurrent role change when locking a departing member", async () => {

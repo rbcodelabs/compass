@@ -5,6 +5,7 @@ import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-dat
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
 import { deleteWorkspaceUpdates } from "@/lib/workspace-updates-cleanup";
+import { deleteWorkspaceNotifications } from "@/lib/follow-cleanup";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
@@ -235,6 +236,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
   await deleteWorkspaceAgentData(prisma, workspaceId);
   await deleteWorkspaceUpdates(prisma, workspaceId);
+  await deleteWorkspaceNotifications(prisma, workspaceId);
   await prisma.workspaceScoringConfig.deleteMany({ where: { workspaceId } });
   await prisma.canvasNodePosition.deleteMany({ where: { workspaceId } });
 
