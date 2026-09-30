@@ -698,6 +698,9 @@ const _handler = createMcpHandler(
         if (!cycle) {
           return fail(`OKR cycle "${cycleId}" not found in workspace.`)
         }
+        if (squadId && !(await prisma.squad.findFirst({ where: { id: squadId, workspaceId }, select: { id: true } }))) {
+          return fail(`Squad "${squadId}" not found in workspace.`)
+        }
         if (parentKeyResultId) {
           const eligible = await getEligibleParentKeyResults(workspaceId, cycleId)
           if (!eligible.some((kr) => kr.id === parentKeyResultId)) {
