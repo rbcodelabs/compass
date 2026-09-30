@@ -418,6 +418,11 @@ export const TOOL_GATES: Record<string, Gate> = {
   list_artifacts: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_artifact: async (a, x) => void (await assertEntityAccess(a, "artifact", x.artifactId)),
   create_artifact: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  // Gated exactly like create_artifact (workspace member; agents allowed via the
+  // WRITE entries in AGENT_TOOL_POLICY). The service scopes the source and the
+  // bound artifact to the declared workspace.
+  create_feedback_source: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  update_feedback_source: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   update_artifact: (a, x) => assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId),
   link_artifact_to_solution: async (a, x) => {
     await assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId)
@@ -542,7 +547,7 @@ const WRITE_TOOLS = [
   "approve_solution_plan", "archive_artifact", "archive_research_study",
   "archive_scoring_model", "assign_squad", "close_decision_no_action", "close_research_study",
   "conclude_experiment", "create_artifact", "create_checklist_template", "create_doc",
-  "create_doc_version", "create_experiment", "create_feedback", "create_objective",
+  "create_doc_version", "create_experiment", "create_feedback", "create_feedback_source", "update_feedback_source", "create_objective",
   "create_okr_cycle", "create_opportunity", "create_research_study", "create_scoring_model",
   "create_squad", "create_task", "create_workspace", "delete_assumption", "delete_comment",
   "delete_doc_comment", "delete_key_result", "delete_objective", "delete_solution_comment",
@@ -650,7 +655,7 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ].map(name => [name, "READ"]),
   ...[
     "link_artifact_to_decision", "unlink_artifact_from_decision",
-    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "create_doc_version", "restore_doc_version", "add_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "update_artifact", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity", "score_solution", "set_custom_field_value",
+    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "create_doc_version", "restore_doc_version", "add_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "update_artifact", "create_feedback_source", "update_feedback_source", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity", "score_solution", "set_custom_field_value",
   ].map(name => [name, "WRITE"]),
   // ADR 0020: no longer unconditionally human-only. Each of these four now
   // carries its own agentCapability check inside its TOOL_GATES entry above

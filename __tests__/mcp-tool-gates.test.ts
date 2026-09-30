@@ -297,6 +297,28 @@ describe("ADR 0020: AgentOrgAdminGrant for delegated scoring-model admin", () =>
   )
 })
 
+describe("feedback source tools are gated like create_artifact", () => {
+  const tools = ["create_feedback_source", "update_feedback_source"]
+  it.each(tools)("%s admits a plain workspace member", async (tool) => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+  })
+  it.each(tools)("%s denies a non-member", async (tool) => {
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(/not found or access denied/)
+  })
+  it.each(tools)("%s is write-scoped and allowed for agents exactly as create_artifact is", async (tool) => {
+    expect(requiredToolScope(tool)).toBe("mcp:write")
+    expect(AGENT_TOOL_POLICY[tool]).toBe(AGENT_TOOL_POLICY.create_artifact)
+    expect(AGENT_TOOL_POLICY[tool]).toBe("WRITE")
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent" })
+    const agent = { userId: "user-1", purpose: "AGENT" as const, agentId: "agent" }
+    await expect(applyToolGate("create_artifact", agent, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+    await expect(applyToolGate(tool, agent, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+  })
+})
+
 describe("TOOL_GATES completeness", () => {
   it("classifies every registered tool for agent access", () => {
     expect(Object.keys(registeredTools).filter(name => !AGENT_TOOL_POLICY[name])).toEqual([])
