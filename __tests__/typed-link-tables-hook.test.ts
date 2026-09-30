@@ -1,0 +1,271 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import type { PoolClient } from "pg";
+import {
+  TYPED_LINK_BACKFILL_BATCH_SIZE,
+  TYPED_LINK_TABLES_MIGRATION,
+  assertTypedLinkPreconditions,
+  assertTypedLinkTables,
+  backfillOpportunityObjectiveLinks,
+  getTypedLinkStatus,
+} from "@/lib/migrations/typed-link-tables";
+import { REVIEWED_MIGRATION_CODE_SHA256, assertReviewedMigrationCode } from "@/lib/preview-automation/managed-manifest";
+
+const noSleep = async () => {};
+const conflict = () => Object.assign(new Error("change conflicts with another transaction, please retry: (OC000)"), { code: "40001" });
+
+type Reply = { rows?: unknown[]; rowCount?: number } | Error | undefined;
+function fakeClient(handler: (sql: string, params: unknown[]) => Reply) {
+  const query = vi.fn(async (sql: string, params: unknown[] = []) => {
+    const result = handler(sql, params);
+    if (result instanceof Error) throw result;
+    return { rows: [], rowCount: 0, ...result };
+  });
+  return { client: { query } as unknown as PoolClient, query };
+}
+
+// SQL shape markers shared between the module and these tests.
+const isCrossWorkspaceQuery = (sql: string) => /obj\.workspace_id <> o\.workspace_id/.test(sql) && sql.startsWith("SELECT o.id");
+const isDanglingQuery = (sql: string) => /kr\.id IS NULL OR obj\.id IS NULL/.test(sql) && sql.startsWith("SELECT o.id");
+const isCandidateQuery = (sql: string) => /l\.id IS NULL/.test(sql) && sql.includes("linked_key_result_id");
+
+describe("batch size", () => {
+  it("stays inside DSQL's 3,000-row write limit once each link row's three secondary index entries are counted", () => {
+    expect(TYPED_LINK_BACKFILL_BATCH_SIZE).toBeGreaterThanOrEqual(250);
+    expect(TYPED_LINK_BACKFILL_BATCH_SIZE).toBeLessThanOrEqual(500);
+    // 1 table row + 3 secondary index entries per inserted link.
+    expect(TYPED_LINK_BACKFILL_BATCH_SIZE * 4).toBeLessThan(3000);
+  });
+});
+
+describe("assertTypedLinkPreconditions (fail closed before any DDL)", () => {
+  const healthy = (sql: string): Reply => {
+    if (sql.includes("_prisma_migrations")) return { rows: [{ n: "1" }] };
+    if (sql.includes("information_schema.columns")) return { rows: [{ column_name: "workspace_id" }] };
+    return { rows: [{ n: "0" }] };
+  };
+
+  it("passes when 068 has a receipt, the column exists and no objective has a NULL workspace_id", async () => {
+    const { client } = fakeClient(healthy);
+    await expect(assertTypedLinkPreconditions(client, "s")).resolves.toBeUndefined();
+  });
+
+  it("throws a clear message when 068 is not applied", async () => {
+    const { client } = fakeClient((sql) => (sql.includes("_prisma_migrations") ? { rows: [{ n: "0" }] } : healthy(sql)));
+    await expect(assertTypedLinkPreconditions(client, "s")).rejects.toThrow(/071_typed_link_tables[\s\S]*068_workspace_id_on_solution_objective[\s\S]*not applied/);
+  });
+
+  it("throws when objectives.workspace_id is missing", async () => {
+    const { client } = fakeClient((sql) => (sql.includes("information_schema.columns") ? { rows: [] } : healthy(sql)));
+    await expect(assertTypedLinkPreconditions(client, "s")).rejects.toThrow(/objectives\.workspace_id does not exist/);
+  });
+
+  it("throws when any objective still has a NULL workspace_id", async () => {
+    const { client } = fakeClient((sql) => (sql.includes("IS NULL") ? { rows: [{ n: "3" }] } : healthy(sql)));
+    await expect(assertTypedLinkPreconditions(client, "s")).rejects.toThrow(/3 objectives rows have a NULL workspace_id/);
+  });
+});
+
+describe("backfillOpportunityObjectiveLinks", () => {
+  const candidate = (i: number) => ({ opportunity_id: `o${i}`, workspace_id: "wa", objective_id: `b${i}` });
+  const preconditionsOk = (sql: string): Reply => {
+    if (sql.includes("_prisma_migrations")) return { rows: [{ n: "1" }] };
+    if (sql.includes("information_schema.columns")) return { rows: [{ column_name: "workspace_id" }] };
+    if (/"objectives"\s+WHERE workspace_id IS NULL/.test(sql)) return { rows: [{ n: "0" }] };
+    return undefined;
+  };
+  const quietQuarantine = (sql: string): Reply => preconditionsOk(sql) ?? (isCrossWorkspaceQuery(sql) || isDanglingQuery(sql) ? { rows: [] } : undefined);
+
+  it("inserts candidates as LEGACY/MIGRATION rows in bounded batches, looping until a batch is empty", async () => {
+    const pending = Array.from({ length: TYPED_LINK_BACKFILL_BATCH_SIZE + 3 }, (_, i) => candidate(i));
+    const inserts: unknown[][] = [];
+    const { client, query } = fakeClient((sql, params) => {
+      const quiet = quietQuarantine(sql);
+      if (quiet) return quiet;
+      if (isCandidateQuery(sql)) return { rows: pending.splice(0, params[0] as number) };
+      expect(sql).toContain("INSERT INTO");
+      expect(sql).toContain("'LEGACY'");
+      expect(sql).toContain("'MIGRATION'");
+      inserts.push(params);
+      return { rowCount: params.length / 3 };
+    });
+    const log: string[] = [];
+    const result = await backfillOpportunityObjectiveLinks(client, "s", log, noSleep);
+    expect(inserts.map((p) => p.length / 3)).toEqual([TYPED_LINK_BACKFILL_BATCH_SIZE, 3]);
+    expect(result.inserted).toBe(TYPED_LINK_BACKFILL_BATCH_SIZE + 3);
+    expect(log.join("\n")).toContain(`inserted ${TYPED_LINK_BACKFILL_BATCH_SIZE + 3} LEGACY opportunity_objective_links`);
+    // No ON CONFLICT (unverified against DSQL ASYNC unique indexes) and no CTE.
+    expect(query.mock.calls.every(([sql]) => !/ON CONFLICT|\bWITH\b/i.test(sql as string))).toBe(true);
+  });
+
+  it("retries a conflicting INSERT, and gives up (leaving the migration unfinished) when conflicts never clear", async () => {
+    let failures = 1;
+    const pending = [candidate(1)];
+    const flaky = fakeClient((sql, params) => {
+      const quiet = quietQuarantine(sql);
+      if (quiet) return quiet;
+      if (isCandidateQuery(sql)) return { rows: pending.splice(0, params[0] as number) };
+      if (failures-- > 0) return conflict();
+      return { rowCount: 1 };
+    });
+    await expect(backfillOpportunityObjectiveLinks(flaky.client, "s", [], noSleep)).resolves.toMatchObject({ inserted: 1 });
+
+    const stuck = fakeClient((sql) => quietQuarantine(sql) ?? (isCandidateQuery(sql) ? { rows: [candidate(1)] } : conflict()));
+    await expect(backfillOpportunityObjectiveLinks(stuck.client, "s", [], noSleep)).rejects.toThrow(/OC000/);
+  });
+
+  it("reports quarantined orphans by id, never links them, and never touches opportunities", async () => {
+    const { client, query } = fakeClient((sql) => {
+      const ok = preconditionsOk(sql);
+      if (ok) return ok;
+      if (isCrossWorkspaceQuery(sql)) return { rows: [{ opportunity_id: "x1" }, { opportunity_id: "x2" }] };
+      if (isDanglingQuery(sql)) return { rows: [{ opportunity_id: "d1" }] };
+      return { rows: [] };
+    });
+    const log: string[] = [];
+    const result = await backfillOpportunityObjectiveLinks(client, "s", log, noSleep);
+    expect(result.quarantined).toEqual({ crossWorkspace: ["x1", "x2"], dangling: ["d1"] });
+    expect(log.join("\n")).toMatch(/quarantined 2 cross-workspace[^\n]*x1, x2/);
+    expect(log.join("\n")).toMatch(/quarantined 1 dangling[^\n]*d1/);
+    const select = query.mock.calls.map(([sql]) => sql as string).find(isCandidateQuery)!;
+    expect(select).toContain("obj.workspace_id = o.workspace_id");
+    expect(query.mock.calls.every(([sql]) => !/\b(UPDATE|DELETE)\b/i.test(sql as string))).toBe(true);
+  });
+
+  it("checks preconditions first and inserts nothing when they fail", async () => {
+    const { client, query } = fakeClient((sql) => (sql.includes("_prisma_migrations") ? { rows: [{ n: "0" }] } : { rows: [] }));
+    await expect(backfillOpportunityObjectiveLinks(client, "s", [], noSleep)).rejects.toThrow(/not applied/);
+    expect(query.mock.calls.some(([sql]) => /INSERT INTO/.test(sql as string))).toBe(false);
+  });
+});
+
+describe("assertTypedLinkTables postconditions", () => {
+  const COLUMNS: Record<string, string[]> = {
+    opportunity_objective_links: ["id", "workspace_id", "opportunity_id", "objective_id", "origin", "source", "created_by_id", "created_at"],
+    solution_key_result_links: ["id", "workspace_id", "solution_id", "key_result_id", "source", "created_by_id", "created_at"],
+  };
+  const healthy = (sql: string, params: unknown[]): Reply => {
+    if (sql.includes("information_schema.columns")) {
+      return { rows: COLUMNS[params[1] as string].map((column_name) => ({ column_name, is_nullable: column_name === "created_by_id" ? "YES" : "NO" })) };
+    }
+    if (sql.includes("pg_index")) return { rows: [{ indisvalid: true, indisunique: /_pair$/.test(params[1] as string) }] };
+    return { rows: [{ n: "0" }] };
+  };
+
+  it("passes when tables, indexes and all integrity counts are clean", async () => {
+    const { client } = fakeClient(healthy);
+    await expect(assertTypedLinkTables(client, "s")).resolves.toBeUndefined();
+  });
+
+  it("fails when a table is missing or workspace_id is nullable", async () => {
+    const missing = fakeClient((sql, p) => (sql.includes("information_schema.columns") ? { rows: [] } : healthy(sql, p)));
+    await expect(assertTypedLinkTables(missing.client, "s")).rejects.toThrow(/table postcondition failed: opportunity_objective_links/);
+    const nullable = fakeClient((sql, p) => {
+      const base = healthy(sql, p) as { rows: { column_name: string; is_nullable: string }[] };
+      if (!sql.includes("information_schema.columns")) return base;
+      return { rows: base.rows.map((r) => (r.column_name === "workspace_id" ? { ...r, is_nullable: "YES" } : r)) };
+    });
+    await expect(assertTypedLinkTables(nullable.client, "s")).rejects.toThrow(/workspace_id must be NOT NULL/);
+  });
+
+  it("fails when an index is missing, invalid, or a pair index is not unique", async () => {
+    const missing = fakeClient((sql, p) => (sql.includes("pg_index") ? { rows: [] } : healthy(sql, p)));
+    await expect(assertTypedLinkTables(missing.client, "s")).rejects.toThrow(/index postcondition failed: idx_opportunity_objective_links_pair/);
+    const invalid = fakeClient((sql, p) => (sql.includes("pg_index") ? { rows: [{ indisvalid: false, indisunique: true }] } : healthy(sql, p)));
+    await expect(assertTypedLinkTables(invalid.client, "s")).rejects.toThrow(/missing or invalid/);
+    const notUnique = fakeClient((sql, p) => (sql.includes("pg_index") ? { rows: [{ indisvalid: true, indisunique: false }] } : healthy(sql, p)));
+    await expect(assertTypedLinkTables(notUnique.client, "s")).rejects.toThrow(/must be unique/);
+  });
+
+  const cases: Array<[string, (sql: string) => boolean, RegExp]> = [
+    ["legacy rows without a link", isCandidateQuery, /2 legacy opportunity rows lack a link/],
+    ["workspace mismatch", (sql) => sql.includes("IS DISTINCT FROM") && sql.includes("opportunity_objective_links"), /2 opportunity_objective_links rows have a workspace_id that differs/],
+    ["dangling endpoint", (sql) => /o\.id IS NULL OR obj\.id IS NULL/.test(sql) && sql.includes("opportunity_objective_links"), /2 opportunity_objective_links rows point at a missing endpoint/],
+    ["duplicates", (sql) => sql.includes("HAVING count(*) > 1") && sql.includes("opportunity_objective_links"), /2 duplicate opportunity_objective_links pairs/],
+    ["an origin outside DIRECT/LEGACY", (sql) => sql.includes("origin NOT IN"), /2 opportunity_objective_links rows have an origin other than DIRECT or LEGACY/],
+  ];
+  it.each(cases)("fails closed on %s", async (_name, matches, message) => {
+    const { client } = fakeClient((sql, p) => (matches(sql) ? { rows: [{ n: "2" }] } : healthy(sql, p)));
+    await expect(assertTypedLinkTables(client, "s")).rejects.toThrow(message);
+  });
+});
+
+describe("getTypedLinkStatus (GET /api/admin/migrate)", () => {
+  const bothTables = { rows: [{ table_name: "opportunity_objective_links" }, { table_name: "solution_key_result_links" }] };
+
+  it("returns a null linkIntegrity while the tables do not exist, with the orphan preflight still readable", async () => {
+    const { client } = fakeClient((sql) => {
+      if (sql.includes("information_schema.tables")) return { rows: [] };
+      if (sql.includes("information_schema.columns")) return { rows: [{ column_name: "workspace_id" }] };
+      return { rows: [{ n: "4" }] };
+    });
+    const status = await getTypedLinkStatus(client, "s");
+    expect(status.linkIntegrity).toBeNull();
+    expect(status.preflight).toMatchObject({ tablesPresent: false, legacyDangling: 4, legacyCrossWorkspace: 4 });
+  });
+
+  it("reports cross-workspace as null (not zero) when objectives.workspace_id does not exist yet", async () => {
+    const { client } = fakeClient((sql) => {
+      if (sql.includes("information_schema")) return { rows: [] };
+      return { rows: [{ n: "1" }] };
+    });
+    expect((await getTypedLinkStatus(client, "s")).preflight.legacyCrossWorkspace).toBeNull();
+  });
+
+  it("reports each anomaly class as a count once the tables exist", async () => {
+    const { client } = fakeClient((sql) => {
+      if (sql.includes("information_schema.tables")) return bothTables;
+      if (sql.includes("information_schema.columns")) return { rows: [{ column_name: "workspace_id" }] };
+      let n = "0";
+      if (isCandidateQuery(sql)) n = "5";
+      else if (isCrossWorkspaceQuery(sql) || /obj\.workspace_id <> o\.workspace_id/.test(sql)) n = "6";
+      else if (/kr\.id IS NULL OR obj\.id IS NULL/.test(sql) && !sql.includes("solution_key_result_links")) n = "7";
+      else if (sql.includes("IS DISTINCT FROM") && sql.includes("opportunity_objective_links")) n = "2";
+      else if (/o\.id IS NULL OR obj\.id IS NULL/.test(sql)) n = "3";
+      else if (sql.includes("HAVING count(*) > 1") && sql.includes("opportunity_objective_links")) n = "4";
+      return { rows: [{ n }] };
+    });
+    const { linkIntegrity } = await getTypedLinkStatus(client, "s");
+    expect(linkIntegrity).toMatchObject({
+      legacyWithoutLink: 5,
+      workspaceMismatch: 2,
+      danglingEndpoint: 3,
+      duplicates: 4,
+      legacyCrossWorkspace: 6,
+      legacyDangling: 7,
+    });
+  });
+
+  it("sums the solution/key-result table into the same totals", async () => {
+    const { client } = fakeClient((sql) => {
+      if (sql.includes("information_schema.tables")) return bothTables;
+      if (sql.includes("information_schema.columns")) return { rows: [{ column_name: "workspace_id" }] };
+      return { rows: [{ n: sql.includes("solution_key_result_links") && sql.includes("HAVING count(*) > 1") ? "9" : "0" }] };
+    });
+    expect((await getTypedLinkStatus(client, "s")).linkIntegrity?.duplicates).toBe(9);
+  });
+
+  it("only ever runs read-only SELECT queries", async () => {
+    const { client, query } = fakeClient((sql) => {
+      if (sql.includes("information_schema.tables")) return bothTables;
+      if (sql.includes("information_schema.columns")) return { rows: [{ column_name: "workspace_id" }] };
+      return { rows: [{ n: "0" }] };
+    });
+    await getTypedLinkStatus(client, "s");
+    expect(query.mock.calls.length).toBeGreaterThan(3);
+    expect(query.mock.calls.every(([sql]) => /^\s*SELECT/i.test(sql as string))).toBe(true);
+  });
+});
+
+describe("managed manifest pins the hook code", () => {
+  const HOOK = "lib/migrations/typed-link-tables.ts";
+  it("accepts the reviewed hook as on disk and rejects a changed one", () => {
+    expect(() => assertReviewedMigrationCode(TYPED_LINK_TABLES_MIGRATION)).not.toThrow();
+    const real = readFileSync(path.join(process.cwd(), HOOK));
+    expect(createHash("sha256").update(real).digest("hex")).toBe(REVIEWED_MIGRATION_CODE_SHA256[TYPED_LINK_TABLES_MIGRATION][HOOK]);
+    const tampered = Buffer.from(real.toString("utf8") + "\n// changed\n");
+    expect(() => assertReviewedMigrationCode(TYPED_LINK_TABLES_MIGRATION, () => tampered)).toThrow(/code digest changed: 071_typed_link_tables/);
+  });
+});

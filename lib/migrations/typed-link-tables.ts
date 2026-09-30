@@ -1,0 +1,342 @@
+import type { PoolClient } from "pg"
+import { withOccRetry } from "@/lib/migrations/workspace-id-on-solution-objective"
+
+export const TYPED_LINK_TABLES_MIGRATION = "071_typed_link_tables"
+const WORKSPACE_ID_MIGRATION = "068_workspace_id_on_solution_objective"
+
+/**
+ * DSQL caps a write transaction at 3,000 modified rows, and index entries count
+ * toward it: each inserted link is 1 table row plus 3 secondary index entries
+ * (pair, reverse, workspace) = 4. 500 links is ~2,000, leaving a third of the
+ * budget as headroom. Reusable as-is by a later residual migration.
+ */
+export const TYPED_LINK_BACKFILL_BATCH_SIZE = 500
+
+/** Logged orphan ids are capped so a pathological dataset cannot bloat the response; the count is always exact. */
+const LOGGED_ORPHAN_ID_CAP = 200
+
+type LinkTable = {
+  table: "opportunity_objective_links" | "solution_key_result_links"
+  columns: readonly string[]
+  /** [index name, must be unique] */
+  indexes: readonly (readonly [string, boolean])[]
+}
+
+const LINK_TABLES: readonly LinkTable[] = [
+  {
+    table: "opportunity_objective_links",
+    columns: ["id", "workspace_id", "opportunity_id", "objective_id", "origin", "source", "created_by_id", "created_at"],
+    indexes: [
+      ["idx_opportunity_objective_links_pair", true],
+      ["idx_opportunity_objective_links_objective", false],
+      ["idx_opportunity_objective_links_workspace", false],
+    ],
+  },
+  {
+    table: "solution_key_result_links",
+    columns: ["id", "workspace_id", "solution_id", "key_result_id", "source", "created_by_id", "created_at"],
+    indexes: [
+      ["idx_solution_key_result_links_pair", true],
+      ["idx_solution_key_result_links_key_result", false],
+      ["idx_solution_key_result_links_workspace", false],
+    ],
+  },
+]
+
+const num = (value: unknown) => Number(value ?? "0")
+const count = async (client: PoolClient, sql: string, params: unknown[] = []) =>
+  num((await client.query<{ n: string }>(sql, params)).rows[0]?.n)
+
+/** The legacy pointer chain: opportunity -> key result -> objective. Shared by every legacy query below. */
+const legacyFrom = (schema: string) => `FROM "${schema}"."opportunities" AS o
+         JOIN "${schema}"."key_results" AS kr ON kr.id = o.linked_key_result_id
+         JOIN "${schema}"."objectives" AS obj ON obj.id = kr.objective_id`
+
+/** Same-workspace legacy rows that do not have their link yet. */
+const legacyUnlinkedFromWhere = (schema: string) => `${legacyFrom(schema)}
+         LEFT JOIN "${schema}"."opportunity_objective_links" AS l ON l.opportunity_id = o.id AND l.objective_id = obj.id
+         WHERE o.linked_key_result_id IS NOT NULL AND obj.workspace_id = o.workspace_id AND l.id IS NULL`
+
+const crossWorkspaceFromWhere = (schema: string) => `${legacyFrom(schema)}
+         WHERE o.linked_key_result_id IS NOT NULL AND obj.workspace_id <> o.workspace_id`
+
+const danglingFromWhere = (schema: string) => `FROM "${schema}"."opportunities" AS o
+         LEFT JOIN "${schema}"."key_results" AS kr ON kr.id = o.linked_key_result_id
+         LEFT JOIN "${schema}"."objectives" AS obj ON obj.id = kr.objective_id
+         WHERE o.linked_key_result_id IS NOT NULL AND (kr.id IS NULL OR obj.id IS NULL)`
+
+/**
+ * Fail closed, before any DDL or receipt: the links copy objectives.workspace_id
+ * comparisons from migration 068, so 068 must be applied and complete.
+ */
+export async function assertTypedLinkPreconditions(client: PoolClient, schema: string) {
+  const receipt = await count(
+    client,
+    `SELECT count(*)::text AS n FROM "${schema}"._prisma_migrations WHERE migration_name = $1 AND finished_at IS NOT NULL`,
+    [WORKSPACE_ID_MIGRATION],
+  )
+  if (receipt === 0) {
+    throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: precondition failed: ${WORKSPACE_ID_MIGRATION} is not applied. Apply it first; nothing was changed.`)
+  }
+  const column = await client.query(
+    "SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'objectives' AND column_name = 'workspace_id'",
+    [schema],
+  )
+  if (column.rows.length !== 1) {
+    throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: precondition failed: objectives.workspace_id does not exist. Nothing was changed.`)
+  }
+  const nulls = await count(client, `SELECT count(*)::text AS n FROM "${schema}"."objectives" WHERE workspace_id IS NULL`)
+  if (nulls !== 0) {
+    throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: precondition failed: ${nulls} objectives rows have a NULL workspace_id. Repair them (see ${WORKSPACE_ID_MIGRATION}) first; nothing was changed.`)
+  }
+}
+
+export type QuarantinedLegacyLinks = { crossWorkspace: string[]; dangling: string[] }
+
+/**
+ * Legacy pointers that must NOT become links: the key result's objective lives in
+ * a different workspace than the opportunity, or the key result / objective row is
+ * gone. They are left exactly as they are on the opportunity and reported.
+ */
+export async function findQuarantinedLegacyLinks(client: PoolClient, schema: string): Promise<QuarantinedLegacyLinks> {
+  const ids = async (sql: string) => (await client.query<{ opportunity_id: string }>(sql)).rows.map((r) => r.opportunity_id)
+  return {
+    crossWorkspace: await ids(`SELECT o.id AS opportunity_id ${crossWorkspaceFromWhere(schema)} ORDER BY o.id`),
+    dangling: await ids(`SELECT o.id AS opportunity_id ${danglingFromWhere(schema)} ORDER BY o.id`),
+  }
+}
+
+function logQuarantine(log: string[], label: string, ids: string[]) {
+  if (ids.length === 0) return
+  const shown = ids.slice(0, LOGGED_ORPHAN_ID_CAP).join(", ")
+  const more = ids.length > LOGGED_ORPHAN_ID_CAP ? ` … and ${ids.length - LOGGED_ORPHAN_ID_CAP} more` : ""
+  log.push(`  ! quarantined ${ids.length} ${label} legacy linked_key_result_id pointer(s), left unlinked and untouched (opportunity ids): ${shown}${more}`)
+}
+
+/**
+ * Copies same-workspace legacy Opportunity -> KR -> Objective pointers into
+ * opportunity_objective_links as origin LEGACY, source MIGRATION, in bounded
+ * batches. Idempotent and resumable: the candidate query anti-joins the links
+ * already present, so a rerun after a crash continues and a finished run inserts
+ * nothing. Loops until a batch is empty.
+ *
+ * Deliberately no ON CONFLICT: its behaviour against an ASYNC unique index on DSQL
+ * is unverified (migration 036 avoids it for the same reason). The anti-join makes
+ * a duplicate impossible here, and the unique index still rejects one if a racing
+ * writer ever appears, which fails the run closed instead of silently skipping.
+ *
+ * Plain SELECT-then-INSERT (no CTE with LIMIT), as in migration 068's hook.
+ */
+export async function backfillOpportunityObjectiveLinks(
+  client: PoolClient,
+  schema: string,
+  log: string[],
+  sleep?: (ms: number) => Promise<void>,
+): Promise<{ inserted: number; quarantined: QuarantinedLegacyLinks }> {
+  await assertTypedLinkPreconditions(client, schema)
+
+  let inserted = 0
+  while (true) {
+    const batch = await client.query<{ opportunity_id: string; workspace_id: string; objective_id: string }>(
+      `SELECT o.id AS opportunity_id, o.workspace_id AS workspace_id, obj.id AS objective_id
+         ${legacyUnlinkedFromWhere(schema)}
+         LIMIT $1`,
+      [TYPED_LINK_BACKFILL_BATCH_SIZE],
+    )
+    if (batch.rows.length === 0) break
+    const params: string[] = []
+    const values = batch.rows.map((row, i) => {
+      params.push(row.workspace_id, row.opportunity_id, row.objective_id)
+      const n = i * 3
+      return `($${n + 1}::uuid, $${n + 2}::uuid, $${n + 3}::uuid, 'LEGACY', 'MIGRATION')`
+    })
+    const result = await withOccRetry(
+      () => client.query(
+        `INSERT INTO "${schema}"."opportunity_objective_links" (workspace_id, opportunity_id, objective_id, origin, source) VALUES ${values.join(", ")}`,
+        params,
+      ),
+      sleep,
+    )
+    inserted += result.rowCount ?? 0
+  }
+  log.push(`  ✓ inserted ${inserted} LEGACY opportunity_objective_links rows`)
+
+  const quarantined = await findQuarantinedLegacyLinks(client, schema)
+  logQuarantine(log, "cross-workspace", quarantined.crossWorkspace)
+  logQuarantine(log, "dangling", quarantined.dangling)
+  log.push(`  ✓ quarantined ${quarantined.crossWorkspace.length} cross-workspace and ${quarantined.dangling.length} dangling legacy pointers (not blocking)`)
+  return { inserted, quarantined }
+}
+
+/** Per-table endpoint checks. The alias names are part of the query shape the unit tests pin. */
+type EndpointSql = {
+  label: string
+  table: LinkTable["table"]
+  /** Links whose workspace_id differs from either endpoint's. NULL endpoint workspace counts as a difference. */
+  mismatch: (schema: string) => string
+  dangling: (schema: string) => string
+  duplicates: (schema: string) => string
+}
+
+const ENDPOINT_SQL: readonly EndpointSql[] = [
+  {
+    label: "opportunity_objective_links",
+    table: "opportunity_objective_links",
+    mismatch: (s) => `SELECT count(*)::text AS n FROM "${s}"."opportunity_objective_links" AS l
+       JOIN "${s}"."opportunities" AS o ON o.id = l.opportunity_id
+       JOIN "${s}"."objectives" AS obj ON obj.id = l.objective_id
+       WHERE l.workspace_id IS DISTINCT FROM o.workspace_id OR l.workspace_id IS DISTINCT FROM obj.workspace_id`,
+    dangling: (s) => `SELECT count(*)::text AS n FROM "${s}"."opportunity_objective_links" AS l
+       LEFT JOIN "${s}"."opportunities" AS o ON o.id = l.opportunity_id
+       LEFT JOIN "${s}"."objectives" AS obj ON obj.id = l.objective_id
+       WHERE o.id IS NULL OR obj.id IS NULL`,
+    duplicates: (s) => `SELECT count(*)::text AS n FROM (SELECT 1 FROM "${s}"."opportunity_objective_links" GROUP BY opportunity_id, objective_id HAVING count(*) > 1) AS d`,
+  },
+  {
+    label: "solution_key_result_links",
+    table: "solution_key_result_links",
+    // A key result has no workspace column of its own: its workspace is its objective's.
+    mismatch: (s) => `SELECT count(*)::text AS n FROM "${s}"."solution_key_result_links" AS l
+       JOIN "${s}"."solutions" AS sol ON sol.id = l.solution_id
+       JOIN "${s}"."key_results" AS kr ON kr.id = l.key_result_id
+       JOIN "${s}"."objectives" AS obj ON obj.id = kr.objective_id
+       WHERE l.workspace_id IS DISTINCT FROM sol.workspace_id OR l.workspace_id IS DISTINCT FROM obj.workspace_id`,
+    dangling: (s) => `SELECT count(*)::text AS n FROM "${s}"."solution_key_result_links" AS l
+       LEFT JOIN "${s}"."solutions" AS sol ON sol.id = l.solution_id
+       LEFT JOIN "${s}"."key_results" AS kr ON kr.id = l.key_result_id
+       LEFT JOIN "${s}"."objectives" AS obj ON obj.id = kr.objective_id
+       WHERE sol.id IS NULL OR kr.id IS NULL OR obj.id IS NULL`,
+    duplicates: (s) => `SELECT count(*)::text AS n FROM (SELECT 1 FROM "${s}"."solution_key_result_links" GROUP BY solution_id, key_result_id HAVING count(*) > 1) AS d`,
+  },
+]
+
+/**
+ * Postconditions, all of which must hold before the receipt is recorded:
+ *   1. both tables exist with the expected columns and a NOT NULL workspace_id;
+ *   2. every index exists and is valid, and both pair indexes are unique;
+ *   3. opportunity_objective_links.origin is DIRECT or LEGACY everywhere;
+ *   4. no same-workspace legacy pointer lacks its link (quarantined orphans excluded);
+ *   5. every link's workspace_id equals both endpoints' workspace_id;
+ *   6. no link has a missing endpoint;
+ *   7. no duplicate (left, right) pairs.
+ */
+export async function assertTypedLinkTables(client: PoolClient, schema: string) {
+  for (const target of LINK_TABLES) {
+    const columns = await client.query<{ column_name: string; is_nullable: string }>(
+      "SELECT column_name, is_nullable FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2",
+      [schema, target.table],
+    )
+    const present = new Set(columns.rows.map((r) => r.column_name))
+    const missing = target.columns.filter((c) => !present.has(c))
+    if (missing.length > 0) {
+      throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: table postcondition failed: ${target.table} is missing ${missing.join(", ")}`)
+    }
+    if (columns.rows.find((r) => r.column_name === "workspace_id")?.is_nullable !== "NO") {
+      throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: table postcondition failed: ${target.table}.workspace_id must be NOT NULL`)
+    }
+    for (const [indexName, mustBeUnique] of target.indexes) {
+      const index = await client.query<{ indisvalid: boolean; indisunique: boolean }>(
+        `SELECT i.indisvalid, i.indisunique
+         FROM pg_index i
+         JOIN pg_class c ON c.oid = i.indexrelid
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = $1 AND c.relname = $2`,
+        [schema, indexName],
+      )
+      if (index.rows.length !== 1 || index.rows[0].indisvalid !== true) {
+        throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: index postcondition failed: ${indexName} missing or invalid`)
+      }
+      if (mustBeUnique && index.rows[0].indisunique !== true) {
+        throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: index postcondition failed: ${indexName} must be unique`)
+      }
+    }
+  }
+
+  const badOrigin = await count(client, `SELECT count(*)::text AS n FROM "${schema}"."opportunity_objective_links" WHERE origin NOT IN ('DIRECT', 'LEGACY')`)
+  if (badOrigin !== 0) {
+    throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: origin postcondition failed: ${badOrigin} opportunity_objective_links rows have an origin other than DIRECT or LEGACY`)
+  }
+
+  const unlinked = await count(client, `SELECT count(*)::text AS n ${legacyUnlinkedFromWhere(schema)}`)
+  if (unlinked !== 0) {
+    throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: backfill postcondition failed: ${unlinked} legacy opportunity rows lack a link`)
+  }
+
+  for (const endpoint of ENDPOINT_SQL) {
+    const mismatch = await count(client, endpoint.mismatch(schema))
+    if (mismatch !== 0) {
+      throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: agreement postcondition failed: ${mismatch} ${endpoint.label} rows have a workspace_id that differs from an endpoint's`)
+    }
+    const dangling = await count(client, endpoint.dangling(schema))
+    if (dangling !== 0) {
+      throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: endpoint postcondition failed: ${dangling} ${endpoint.label} rows point at a missing endpoint`)
+    }
+    const duplicates = await count(client, endpoint.duplicates(schema))
+    if (duplicates !== 0) {
+      throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: uniqueness postcondition failed: ${duplicates} duplicate ${endpoint.label} pairs`)
+    }
+  }
+}
+
+export type TypedLinkPreflight = {
+  tablesPresent: boolean
+  /** Legacy pointers whose key result or objective row is missing. Readable before the migration runs. */
+  legacyDangling: number
+  /** Legacy pointers whose objective is in another workspace. Null until objectives.workspace_id exists (migration 068). */
+  legacyCrossWorkspace: number | null
+}
+
+export type TypedLinkIntegrity = {
+  legacyWithoutLink: number
+  workspaceMismatch: number
+  danglingEndpoint: number
+  duplicates: number
+  legacyCrossWorkspace: number
+  legacyDangling: number
+}
+
+/**
+ * Read-only status for GET /api/admin/migrate. Counts only, no row data.
+ * `linkIntegrity` is null while the tables do not exist; `preflight` is always
+ * present so the quarantine size is visible before 071 is posted.
+ */
+export async function getTypedLinkStatus(
+  client: PoolClient,
+  schema: string,
+): Promise<{ preflight: TypedLinkPreflight; linkIntegrity: TypedLinkIntegrity | null }> {
+  const tables = await client.query<{ table_name: string }>(
+    "SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = ANY($2::text[])",
+    [schema, LINK_TABLES.map((t) => t.table)],
+  )
+  const tablesPresent = LINK_TABLES.every((t) => tables.rows.some((r) => r.table_name === t.table))
+  const workspaceColumn = await client.query(
+    "SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'objectives' AND column_name = 'workspace_id'",
+    [schema],
+  )
+  const legacyDangling = await count(client, `SELECT count(*)::text AS n ${danglingFromWhere(schema)}`)
+  const legacyCrossWorkspace = workspaceColumn.rows.length === 1
+    ? await count(client, `SELECT count(*)::text AS n ${crossWorkspaceFromWhere(schema)}`)
+    : null
+  const preflight: TypedLinkPreflight = { tablesPresent, legacyDangling, legacyCrossWorkspace }
+  if (!tablesPresent || legacyCrossWorkspace === null) return { preflight, linkIntegrity: null }
+
+  let workspaceMismatch = 0
+  let danglingEndpoint = 0
+  let duplicates = 0
+  for (const endpoint of ENDPOINT_SQL) {
+    workspaceMismatch += await count(client, endpoint.mismatch(schema))
+    danglingEndpoint += await count(client, endpoint.dangling(schema))
+    duplicates += await count(client, endpoint.duplicates(schema))
+  }
+  return {
+    preflight,
+    linkIntegrity: {
+      legacyWithoutLink: await count(client, `SELECT count(*)::text AS n ${legacyUnlinkedFromWhere(schema)}`),
+      workspaceMismatch,
+      danglingEndpoint,
+      duplicates,
+      legacyCrossWorkspace,
+      legacyDangling,
+    },
+  }
+}

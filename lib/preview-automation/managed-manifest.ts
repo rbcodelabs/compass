@@ -116,7 +116,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Direct workspace_id on solutions and objectives (ADR Phase 0). The pinned SQL is DDL only;
   // the batched backfill and its postconditions run in the runner hook, which is pinned
   // separately in REVIEWED_MIGRATION_CODE_SHA256.
-  "068_workspace_id_on_solution_objective": "efc74d966e413e3cd5ad211f41ac96bbc6bcb6fa5cd230c9ac3e6a050ffbe9e1"
+  "068_workspace_id_on_solution_objective": "efc74d966e413e3cd5ad211f41ac96bbc6bcb6fa5cd230c9ac3e6a050ffbe9e1",
+  // Typed link tables (ADR Phase 2, PR-1). DDL only here; the precondition, backfill with orphan
+  // quarantine and integrity postconditions are pinned in REVIEWED_MIGRATION_CODE_SHA256.
+  "071_typed_link_tables": "ed2bbdf524c02436eceba30b20b73a32111ddec3a4dbf9011f389984be189606"
 };
 
 /**
@@ -126,6 +129,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
  */
 export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "068_workspace_id_on_solution_objective": {
+    "lib/migrations/workspace-id-on-solution-objective.ts": "d13c5799d4cf7d95360c4e919dbbdae9e70e7af1523a41cf91a1de8945a73ece",
+  },
+  // 071 reuses withOccRetry from the 068 hook, so that file is pinned here as well.
+  "071_typed_link_tables": {
+    "lib/migrations/typed-link-tables.ts": "9b33e35701c7b1fe6111ef87621431177f11872616afeaf3edfef35840b3d178",
     "lib/migrations/workspace-id-on-solution-objective.ts": "d13c5799d4cf7d95360c4e919dbbdae9e70e7af1523a41cf91a1de8945a73ece",
   },
 };
