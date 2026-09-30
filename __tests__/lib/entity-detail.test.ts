@@ -108,6 +108,17 @@ describe("getEntityDetail — nested solutions are scoped by their own workspace
   });
 });
 
+describe("getEntityDetail — an opportunity's linked key result is scoped through its objective's workspaceId", () => {
+  const kr = (workspaceId: string | null) => ({ id: "kr-1", title: "KR", current: 1, target: 2, unit: null, objective: { id: "o", workspaceId, title: "Objective", cycleId: "c" } });
+  const run = async (workspaceId: string | null) => {
+    models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [], solutions: [], linkedKeyResult: kr(workspaceId) });
+    return ((await getEntityDetail("opportunity", ID, WS)) as { data: { linkedKeyResult: unknown } }).data.linkedKeyResult;
+  };
+  it("shows the link when the objective is in this workspace", async () => { expect(await run(WS)).not.toBeNull(); });
+  it("hides it when the objective has no workspaceId", async () => { expect(await run(null)).toBeNull(); });
+  it("hides it when the objective belongs to another workspace", async () => { expect(await run("other-ws")).toBeNull(); });
+});
+
 describe("getEntityDetail — OKR nested reads are scoped by workspaceId", () => {
   it("filters a key result's supporting objectives by the workspace's own workspaceId", async () => {
     models.keyResult.findFirst.mockResolvedValue({ id: ID });

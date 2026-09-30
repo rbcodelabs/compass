@@ -7,18 +7,29 @@
  * Objective (server actions, MCP handlers, seeds, scripts, raw-SQL fixtures, tests)
  * must set `workspace_id` / `workspaceId` from a DERIVED value.
  *
+ * THIS IS A LINT-GRADE TRIPWIRE, NOT PROOF. It is a textual scanner: it catches the ways a create
+ * has gone missing in practice and the evasions listed below, but a determined or unusual construct
+ * (a delegate passed through a function argument, code generated at runtime, a wrapper that sets the
+ * field from somewhere it cannot follow) can still slip past it. The real guarantees are the read-side
+ * NULL = deny paths, the tenant-isolation tests, and the migration postconditions; this only makes the
+ * obvious regression loud.
+ *
  * It parses the call rather than grepping a window, and it fails closed on shapes it
  * cannot verify (spreads, non-literal `data`, dynamic delegates, nested writes), which
  * forces the field to be written out where a reviewer sees it:
- *   - delegate calls are found across newlines, through destructured / aliased delegates
- *     (`const { solution } = tx; solution.create(...)`), and `tx[model].create(...)` is
- *     rejected as unverifiable;
+ *   - delegate calls are found across newlines, optional chaining (`solution?.create(`), a generic
+ *     argument (`create<T>(`), destructured delegates (`const { solution } = tx`), renamed ones
+ *     (`const { objective: obj } = prisma`) and aliases (`const sol = tx.solution`); `tx[model].create(...)`
+ *     is rejected as unverifiable;
  *   - nested writes (`data: { solutions: { create ... } }`) are rejected outright;
- *   - the `workspaceId` VALUE must be derived: not undefined/null/a literal, not a bare
- *     identifier that is only a function parameter, and not a member of something named
- *     like request input (`input.workspaceId`, `args.workspaceId`, ...);
- *   - raw SQL (in .ts, .sql and .md alike) must list `workspace_id` in the INSERT column
- *     list, INSERT ... SELECT included; an insert with no column list is rejected;
+ *   - the `workspaceId` VALUE must be derived: not undefined/null/a literal, not a member of something
+ *     named like request input (`input.workspaceId`, `args.workspaceId`, ...), and a bare identifier must
+ *     be a local binding whose initialiser is an authorization/resolution call (`requireProduct*`,
+ *     `assert*`, `resolve*`) or a member of an already-authorized row (`cycle.workspaceId`), so
+ *     `const workspaceId = input.workspaceId` is NOT accepted;
+ *   - raw SQL (in .ts, .cjs, .mts, .sh, .sql, .md, ... alike) must list `workspace_id` in the INSERT
+ *     column list, INSERT ... SELECT included; an insert with no column list is rejected, and so is a
+ *     dynamic table name (`INSERT INTO ${table}`);
  *   - the set of known create sites is an EXACT map, so a site the scanner cannot see
  *     fails the count instead of passing silently.
  */
@@ -30,7 +41,7 @@ const ROOT = path.resolve(__dirname, "../..");
 const SELF = "__tests__/tenant-isolation/solution-objective-write-paths.test.ts";
 // Directories never scanned: dependencies and build output only. docs/ and public/ ARE scanned (text files only).
 const SKIP_DIRS = new Set(["node_modules", ".next", ".git", ".claude", ".worktrees", ".pnpm-store", "test-results", "playwright-report"]);
-const SOURCE = /\.(ts|tsx|mjs|js|sql|md|mdx)$/;
+const SOURCE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|sh|sql|md|mdx)$/;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -149,15 +160,32 @@ function derivedVerdict(expr: string, text: string, callIndex: number): Verdict 
   if (/^["'`][^"'`$]*["'`]$|^\d+$/.test(e)) return "workspaceId is a literal";
   if (/^[A-Za-z_$][\w$]*$/.test(e)) {
     if (INPUT_NAMES.test(e)) return `workspaceId comes straight from "${e}"`;
-    // A bare identifier must be a local binding (const { workspaceId } = await requireProductEntity(...) etc.),
-    // not just a parameter that was handed in.
+    // A bare identifier must be a local binding whose initialiser is itself derived: the result of an
+    // authorization/resolution call, or a member of an already-authorized row. A function parameter, an
+    // undeclared name, or a copy of request input (`const workspaceId = input.workspaceId`) is rejected.
     const before = stripComments(text.slice(0, callIndex));
-    const declared = new RegExp(String.raw`\b(?:const|let|var)\s+(?:\{[^}]*\b${e}\b[^}]*\}|${e})\s*(?::[^=]+)?=`).test(before);
-    return declared ? null : `workspaceId "${e}" is not derived locally (a function parameter or an undeclared name)`;
+    const declaration = new RegExp(String.raw`\b(?:const|let|var)\s+(?:\{[^}]*\b${e}\b[^}]*\}|${e})\s*(?::[^=]+)?=\s*([^;\n]+)`, "g");
+    let init: string | null = null;
+    for (const m of before.matchAll(declaration)) init = m[1];
+    if (init === null) return `workspaceId "${e}" is not derived locally (a function parameter or an undeclared name)`;
+    return initialiserVerdict(init.trim(), e);
   }
   const root = /^([A-Za-z_$][\w$]*)\s*(?:\?\.|\.|\[)/.exec(e)?.[1];
   if (root && INPUT_NAMES.test(root)) return `workspaceId comes straight from "${root}"`;
   return null;
+}
+
+/** Is the right-hand side of `const workspaceId = <init>` an authorized derivation? */
+function initialiserVerdict(init: string, name: string): Verdict {
+  const awaited = init.replace(/^await\s+/, "");
+  const call = /^([A-Za-z_$][\w$.]*)\s*\(/.exec(awaited)?.[1];
+  if (call) {
+    const callee = call.split(".").pop()!;
+    return /^(require[A-Z]\w*|assert[A-Z]\w*|resolve[A-Z]\w*)$/.test(callee) ? null : `workspaceId "${name}" comes from ${callee}(...), which is not a recognised authorization call`;
+  }
+  const root = /^([A-Za-z_$][\w$]*)\s*(?:\?\.|\.|\[)/.exec(awaited)?.[1];
+  if (root) return INPUT_NAMES.test(root) ? `workspaceId "${name}" is copied from "${root}"` : null;
+  return `workspaceId "${name}" is initialised from an expression that cannot be verified`;
 }
 
 function checkObjectLiteral(text: string, at: number | null, label: string, callIndex: number): Verdict {
@@ -195,9 +223,21 @@ export function checkPrismaCall(text: string, op: string, openParen: number): Ve
 
 const OPS = "createManyAndReturn|createMany|create|upsert";
 /** Delegate calls: `.solution.create(`, `solution.create(` (destructured or aliased), across newlines. */
-const DELEGATE_CALL = new RegExp(String.raw`\b(solution|objective)\s*\.\s*(${OPS})\s*\(`, "g");
+const DELEGATE_CALL = new RegExp(String.raw`\b(solution|objective)\s*(?:\?\.|\.)\s*(${OPS})\s*(?:<[^>()]*>)?\s*\(`, "g");
+/** Local names that stand for a Solution/Objective delegate: `const sol = tx.solution`, `const { objective: obj } = prisma`. */
+function delegateAliases(text: string): Array<{ alias: string; model: string }> {
+  const out: Array<{ alias: string; model: string }> = [];
+  for (const m of text.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*[\w$.?]*?\.\s*(solution|objective)\s*(?=[;\n,)])/g)) out.push({ alias: m[1], model: m[2] });
+  for (const m of text.matchAll(/\b(?:const|let|var)\s*\{([^}]*)\}\s*=\s*[\w$.()?\s]+/g)) {
+    for (const part of m[1].split(",")) {
+      const renamed = /^\s*(solution|objective)\s*:\s*(\w+)\s*$/.exec(part);
+      if (renamed) out.push({ alias: renamed[2], model: renamed[1] });
+    }
+  }
+  return out.filter(({ alias, model }) => alias !== model);
+}
 /** `tx[model].create(`: the delegate is not statically known, so it cannot be verified. */
-const DYNAMIC_CALL = new RegExp(String.raw`\]\s*\.\s*(${OPS})\s*\(`, "g");
+const DYNAMIC_CALL = new RegExp(String.raw`\]\s*(?:\?\.|\.)\s*(${OPS})\s*(?:<[^>()]*>)?\s*\(`, "g");
 /** Nested writes through a relation: `data: { solutions: { create: ... } }`. */
 const NESTED_WRITE = /\b(solutions|objectives)\s*:\s*\{\s*(create|createMany|connectOrCreate|upsert)\b/g;
 
@@ -209,6 +249,10 @@ export function scanFile(text: string): Finding[] {
   const findings: Finding[] = [];
   for (const m of stripped.matchAll(DELEGATE_CALL)) {
     findings.push({ kind: "prisma", label: `${m[1]}.${m[2]}`, verdict: checkPrismaCall(stripped, m[2], m.index! + m[0].length - 1) });
+  }
+  for (const { alias, model } of delegateAliases(stripped)) {
+    const aliasCall = new RegExp(String.raw`\b${alias}\s*(?:\?\.|\.)\s*(${OPS})\s*(?:<[^>()]*>)?\s*\(`, "g");
+    for (const m of stripped.matchAll(aliasCall)) findings.push({ kind: "prisma", label: `${model} (as ${alias}).${m[1]}`, verdict: checkPrismaCall(stripped, m[1], m.index! + m[0].length - 1) });
   }
   for (const m of stripped.matchAll(DYNAMIC_CALL)) {
     findings.push({ kind: "dynamic", label: `[...].${m[1]}`, verdict: "dynamic delegate: cannot verify it is not a Solution/Objective create" });
@@ -222,6 +266,8 @@ export function scanFile(text: string): Finding[] {
 /** Verdicts for every INSERT INTO solutions/objectives in a file's text (any file type). */
 export function checkRawInserts(text: string): { table: string; verdict: Verdict }[] {
   const out: { table: string; verdict: Verdict }[] = [];
+  // INSERT INTO ${table} (...) : the whole table name is interpolated, so it cannot be verified to not be solutions/objectives.
+  for (const m of text.matchAll(/INSERT\s+INTO\s+"?\$\{[^}]+\}"?(?=[\s(])/gi)) out.push({ table: m[0], verdict: "dynamic table name cannot be verified" });
   for (const m of text.matchAll(/INSERT\s+INTO\s+[^\s(]*?"?(solutions|objectives)"?\s*(\(([^)]*)\))?/gi)) {
     const table = m[1];
     if (!m[2]) out.push({ table, verdict: "no column list (cannot verify workspace_id)" });
@@ -264,9 +310,24 @@ describe("the write-path checker itself (canaries: a miss cannot pass vacuously)
     expect(bad("prisma.objective.\n  create(\n{ data: { title } })")).toHaveLength(1);
   });
 
-  it("finds destructured and aliased delegates", () => {
+  it("finds destructured delegates", () => {
     expect(bad("const { solution } = tx;\nawait solution.create({ data: { title } })")).toHaveLength(1);
-    expect(bad("const { objective: obj, solution } = prisma\nawait solution.createMany({ data: [{ title }] })")).toHaveLength(1);
+  });
+
+  it("finds renamed and aliased delegates (the alias is followed, not just the model name)", () => {
+    expect(bad("const { objective: obj } = prisma\nawait obj.create({ data: { title } })")[0]?.label).toBe("objective (as obj).create");
+    expect(bad("const { solution: sol, other } = tx\nawait sol.createMany({ data: [{ title }] })")[0]?.label).toBe("solution (as sol).createMany");
+    expect(bad("const sol = tx.solution;\nawait sol.create({ data: { title } })")[0]?.label).toBe("solution (as sol).create");
+    expect(bad("const obj = this.prisma?.objective\nawait obj?.upsert({ where, update: {}, create: { title } })")[0]?.label).toBe("objective (as obj).upsert");
+    // and an aliased create that does set a derived workspaceId is fine
+    expect(bad("const { workspaceId } = await requireProductEntity('x', 'y');\nconst sol = tx.solution;\nawait sol.create({ data: { workspaceId, title } })")).toEqual([]);
+  });
+
+  it("finds optional chaining and a generic argument", () => {
+    expect(bad("await tx.solution?.create({ data: { title } })")).toHaveLength(1);
+    expect(bad("await prisma.objective.create<Prisma.ObjectiveCreateArgs>({ data: { title } })")).toHaveLength(1);
+    expect(bad("await prisma.solution?.createMany<X>({ data: [{ title }] })")).toHaveLength(1);
+    expect(bad("await prisma.objective?.create<X>({ data: { workspaceId: cycle.workspaceId } })")).toEqual([]);
   });
 
   it("rejects dynamic delegates it cannot verify", () => {
@@ -290,8 +351,18 @@ describe("the write-path checker itself (canaries: a miss cannot pass vacuously)
 
   it("rejects a bare identifier that is only a function parameter, accepts one bound locally", () => {
     expect(bad("async function f(workspaceId: string) {\n await prisma.solution.create({ data: { workspaceId, title } })\n}")[0]?.verdict).toMatch(/not derived locally/);
-    expect(bad("async function f(input) {\n const workspaceId = input.workspaceId;\n await prisma.solution.create({ data: { workspaceId, title } })\n}")).toEqual([]);
     expect(bad("async function f() {\n const { workspaceId } = await requireProductEntity('x', 'y');\n await prisma.solution.create({ data: { workspaceId, title } })\n}")).toEqual([]);
+    expect(bad("async function f() {\n const workspaceId = cycle.workspaceId;\n await prisma.solution.create({ data: { workspaceId, title } })\n}")).toEqual([]);
+  });
+
+  it("does NOT accept a local that merely copies request input, or comes from an unrecognised call", () => {
+    for (const init of ["input.workspaceId", "args?.workspaceId", "body['workspaceId']", "data.workspaceId"]) {
+      const src = `async function f(input) {\n const workspaceId = ${init};\n await prisma.solution.create({ data: { workspaceId, title } })\n}`;
+      expect(bad(src)[0]?.verdict, init).toMatch(/copied from/);
+    }
+    expect(bad("async function f(input) {\n const workspaceId = await getWorkspaceId(input);\n await prisma.solution.create({ data: { workspaceId, title } })\n}")[0]?.verdict).toMatch(/not a recognised authorization call/);
+    expect(bad("async function f(input) {\n const { workspaceId } = parse(input);\n await prisma.solution.create({ data: { workspaceId, title } })\n}")[0]?.verdict).toMatch(/not a recognised authorization call/);
+    expect(bad("async function f() {\n const workspaceId = 'ws-1';\n await prisma.solution.create({ data: { workspaceId, title } })\n}")[0]?.verdict).toMatch(/cannot be verified/);
   });
 
   it("rejects unverifiable shapes: spread and non-literal data", () => {
@@ -313,6 +384,12 @@ describe("the write-path checker itself (canaries: a miss cannot pass vacuously)
     expect(verdicts('INSERT INTO "${S}".objectives (id, workspace_id, cycle_id) SELECT gen_random_uuid(), w, c FROM x')).toEqual([null]);
     expect(verdicts("INSERT INTO s.solutions (id, title) SELECT id, title FROM legacy WHERE workspace_id = 1")[0]).toMatch(/no workspace_id/);
     expect(verdicts("```sql\nINSERT INTO objectives SELECT * FROM legacy;\n```")[0]).toMatch(/no column list/);
+    // a dynamic table name cannot be shown not to be solutions/objectives
+    expect(verdicts("await pool.query(`INSERT INTO ${table} (id, workspace_id) VALUES ($1, $2)`)")[0]).toMatch(/dynamic table name/);
+    expect(verdicts("await pool.query(`INSERT INTO \"${S}\" (id) VALUES ($1)`)")[0]).toMatch(/dynamic table name/);
+    // ...but a schema-qualified literal table is checked normally
+    expect(verdicts("await pool.query(`INSERT INTO \"${S}\".solutions (id, workspace_id) VALUES ($1, $2)`)")).toEqual([null]);
+    expect(verdicts("INSERT INTO ${S}.objectives (id, workspace_id) VALUES ($1, $2)")).toEqual([null]);
     expect(verdicts("-- migration\nINSERT INTO solutions (id, opportunity_id) VALUES (1, 2);")[0]).toMatch(/no workspace_id/);
   });
 });
@@ -337,6 +414,8 @@ const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
 };
 const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   "__tests__/workspace-id-on-solution-objective-migration.integration.test.ts": 12,
+  // INSERT INTO ${ownerTable}: the managed-pilot ownership table (see DYNAMIC_INSERT_ALLOWED); counted so a second one is noticed.
+  "lib/preview-automation/managed-migrations.ts": 1,
   "e2e/functional/fixtures/seed-e2e.ts": 2,
   "e2e/functional/specs/kanban-mobile-scroll.spec.ts": 1,
   "e2e/functional/specs/opportunity-composer.spec.ts": 1,
@@ -352,6 +431,10 @@ const INTENTIONAL_NULL_CREATES: Record<string, string> = {
 /** Raw inserts that deliberately omit workspace_id (they simulate rows written by pre-068 code). Same marker rule. */
 const INTENTIONAL_NULL_RAW_INSERTS: Record<string, string> = {
   "__tests__/workspace-id-on-solution-objective-migration.integration.test.ts": "simulates pre-068 rows and late rows inserted by old instances so the backfill has something to fill",
+};
+/** Dynamic-table inserts that are reviewed and known not to target solutions/objectives. Matched by file AND the exact interpolated name. */
+const DYNAMIC_INSERT_ALLOWED: Record<string, { name: string; reason: string }> = {
+  "lib/preview-automation/managed-migrations.ts": { name: "${ownerTable}", reason: "the managed-pilot ownership table, resolved by table(context); never solutions or objectives" },
 };
 const INTENTIONAL_MARKER = "INTENTIONAL NULL workspaceId";
 
@@ -400,6 +483,7 @@ describe("every Solution and Objective create sets workspaceId", () => {
     const offenders = raw
       .filter((r) => r.verdict)
       .filter((r) => !(INTENTIONAL_NULL_RAW_INSERTS[r.file] && files.find((x) => x.file === r.file)!.text.includes(INTENTIONAL_MARKER)))
+      .filter((r) => !(DYNAMIC_INSERT_ALLOWED[r.file] && r.table.includes(DYNAMIC_INSERT_ALLOWED[r.file].name)))
       .map((r) => `${r.file}: INSERT INTO ${r.table}: ${r.verdict}`);
     expect(offenders).toEqual([]);
     for (const file of Object.keys(INTENTIONAL_NULL_RAW_INSERTS)) expect(files.find((x) => x.file === file)!.text, file).toContain(INTENTIONAL_MARKER);

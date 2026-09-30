@@ -13,7 +13,8 @@ import {
   repairWorkspaceIdResidual,
   withOccRetry,
 } from "@/lib/migrations/workspace-id-on-solution-objective";
-import { selectMigrationsToRun } from "@/lib/migrations/runner";
+import { selectMigrationsToRun, skippedExplicitOnly } from "@/lib/migrations/runner";
+import { WorkspaceIdBackfillRefusal } from "@/lib/migrations/workspace-id-on-solution-objective";
 import { REVIEWED_MIGRATION_CODE_SHA256, assertReviewedMigrationCode } from "@/lib/preview-automation/managed-manifest";
 
 const conflict = () => Object.assign(new Error("change conflicts with another transaction, please retry: (OC000)"), { code: "40001" });
@@ -150,6 +151,37 @@ describe("069 is explicit-only and the residual repair is repeatable", () => {
     expect(selectMigrationsToRun(pending, "070_x").map((m) => m.name)).toEqual(["070_x"]);
   });
 
+  it("a fresh-schema caller (the scoped preview worker) opts in and gets everything, 069 last; production callers do not", () => {
+    const pending = [{ name: "068_workspace_id_on_solution_objective" }, { name: "069_workspace_id_residual_backfill" }];
+    expect(selectMigrationsToRun(pending, undefined, true).map((m) => m.name)).toEqual(["068_workspace_id_on_solution_objective", "069_workspace_id_residual_backfill"]);
+    expect(selectMigrationsToRun(pending, undefined, false).map((m) => m.name)).toEqual(["068_workspace_id_on_solution_objective"]);
+    expect(selectMigrationsToRun(pending).map((m) => m.name)).toEqual(["068_workspace_id_on_solution_objective"]);
+  });
+
+  it("reports what an untargeted run skipped, and nothing when targeted or opted in", () => {
+    const pending = [{ name: "070_x" }, { name: "069_workspace_id_residual_backfill" }];
+    expect(skippedExplicitOnly(pending)).toEqual(["069_workspace_id_residual_backfill"]);
+    expect(skippedExplicitOnly(pending, "070_x")).toEqual([]);
+    expect(skippedExplicitOnly(pending, undefined, true)).toEqual([]);
+    expect(skippedExplicitOnly([{ name: "070_x" }])).toEqual([]);
+  });
+
+  it("the scoped preview worker opts in (source check), and no production-style caller does", () => {
+    const worker = readFileSync(path.join(process.cwd(), "scripts/preview-automation/migrate.ts"), "utf8");
+    expect(worker).toMatch(/applyMigrations\(pool, schema, undefined, \{[^}]*includeExplicitOnly: true/);
+    for (const file of ["app/api/admin/migrate/route.ts", "lib/preview-automation/managed-migrations.ts"]) {
+      expect(readFileSync(path.join(process.cwd(), file), "utf8"), file).not.toContain("includeExplicitOnly");
+    }
+  });
+
+  it("the managed (vercel-managed) path still advances only by an explicit script", async () => {
+    const managed = readFileSync(path.join(process.cwd(), "lib/preview-automation/managed-migrations.ts"), "utf8");
+    expect(managed).toMatch(/applyMigrations\(pool, context\.schema, script, \{ preProvisionedSchema: true, managedPilot: true \}\)/);
+    // applyMigrations itself refuses a managed invocation with no target.
+    const runner = readFileSync(path.join(process.cwd(), "lib/migrations/runner.ts"), "utf8");
+    expect(runner).toMatch(/options\.managedPilot && \(.*!targetScript\)\) throw new Error\("Invalid managed migration invocation"\)/);
+  });
+
   function poolWith(handler: (sql: string, params: unknown[]) => { rows?: unknown[]; rowCount?: number }) {
     const { client, query } = fakeClient(handler);
     const release = vi.fn();
@@ -159,6 +191,7 @@ describe("069 is explicit-only and the residual repair is repeatable", () => {
 
   it("refuses before touching data when 068 has not been applied", async () => {
     const { pool, release } = poolWith(() => ({ rows: [] }));
+    await expect(repairWorkspaceIdResidual(pool, "s", noSleep)).rejects.toBeInstanceOf(WorkspaceIdBackfillRefusal);
     await expect(repairWorkspaceIdResidual(pool, "s", noSleep)).rejects.toThrow(/apply 068/);
     expect(release).toHaveBeenCalled();
   });
@@ -198,6 +231,7 @@ describe("069 is explicit-only and the residual repair is repeatable", () => {
       if (sql.includes("LEFT JOIN") && sql.includes("count(parent.id)")) return { rows: [{ total: "1", with_parent: "0" }] };
       return { rows: [{ n: "0", count: "0" }] };
     });
+    await expect(repairWorkspaceIdResidual(pool, "s", noSleep)).rejects.toBeInstanceOf(WorkspaceIdBackfillRefusal);
     await expect(repairWorkspaceIdResidual(pool, "s", noSleep)).rejects.toMatchObject({
       message: expect.stringContaining("backfill-workspace-id: backfill postcondition failed"),
       before: { columnsPresent: true },

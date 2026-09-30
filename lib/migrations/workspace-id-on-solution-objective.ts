@@ -1,5 +1,17 @@
 import type { Pool, PoolClient } from "pg"
 
+/**
+ * A deliberate, data-level refusal (a postcondition failed, or 068 has not been applied): the operator must act on the
+ * data, and nothing was half-applied that a retry cannot resume. Anything that is NOT this class (a dropped connection,
+ * an unexpected SQL error) is a server fault. The admin route maps the two to 409 and 500 respectively.
+ */
+export class WorkspaceIdBackfillRefusal extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "WorkspaceIdBackfillRefusal"
+  }
+}
+
 export const WORKSPACE_ID_MIGRATION = "068_workspace_id_on_solution_objective"
 /** Later, DDL-free second pass that re-runs the same backfill and postconditions for rows old code inserted after 068's receipt. */
 export const WORKSPACE_ID_RESIDUAL_MIGRATION = "069_workspace_id_residual_backfill"
@@ -113,7 +125,7 @@ export async function assertWorkspaceIdOnSolutionObjective(client: PoolClient, s
       "SELECT is_nullable FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = 'workspace_id'",
       [schema, target.table],
     )
-    if (column.rows.length !== 1) throw new Error(`${migrationName}: column postcondition failed: ${target.table}.workspace_id missing`)
+    if (column.rows.length !== 1) throw new WorkspaceIdBackfillRefusal(`${migrationName}: column postcondition failed: ${target.table}.workspace_id missing`)
 
     const index = await client.query<{ indisvalid: boolean }>(
       `SELECT i.indisvalid
@@ -124,7 +136,7 @@ export async function assertWorkspaceIdOnSolutionObjective(client: PoolClient, s
       [schema, target.indexName],
     )
     if (index.rows.length !== 1 || index.rows[0].indisvalid !== true) {
-      throw new Error(`${migrationName}: index postcondition failed: ${target.indexName} missing or invalid`)
+      throw new WorkspaceIdBackfillRefusal(`${migrationName}: index postcondition failed: ${target.indexName} missing or invalid`)
     }
 
     // LEFT JOIN instead of a correlated NOT EXISTS inside an aggregate FILTER:
@@ -143,7 +155,7 @@ export async function assertWorkspaceIdOnSolutionObjective(client: PoolClient, s
         `SELECT count(*)::text AS n FROM "${schema}"."${target.table}" AS child WHERE child.workspace_id IS NULL AND child.${target.parentKey} IS NULL`,
       )).rows[0]?.n ?? "0")
       const dangling = total - Number(nulls.rows[0]?.with_parent ?? "0") - parentless
-      throw new Error(`${migrationName}: backfill postcondition failed: ${total} ${target.table} rows still have NULL workspace_id (${dangling} reference a missing ${target.parentTable} row, ${parentless} have no ${target.parentKey} at all and nothing to derive a workspace from; repair or remove them by hand)`)
+      throw new WorkspaceIdBackfillRefusal(`${migrationName}: backfill postcondition failed: ${total} ${target.table} rows still have NULL workspace_id (${dangling} reference a missing ${target.parentTable} row, ${parentless} have no ${target.parentKey} at all and nothing to derive a workspace from; repair or remove them by hand)`)
     }
 
     // NULLs were ruled out above, so a plain inequality is exact here.
@@ -154,7 +166,7 @@ export async function assertWorkspaceIdOnSolutionObjective(client: PoolClient, s
        WHERE child.workspace_id <> parent.workspace_id`,
     )
     if (mismatched.rows[0]?.count !== "0") {
-      throw new Error(`${migrationName}: agreement postcondition failed: ${mismatched.rows[0]?.count} ${target.table} rows disagree with their ${target.parentTable} parent's workspace_id`)
+      throw new WorkspaceIdBackfillRefusal(`${migrationName}: agreement postcondition failed: ${mismatched.rows[0]?.count} ${target.table} rows disagree with their ${target.parentTable} parent's workspace_id`)
     }
   }
 }
@@ -207,7 +219,7 @@ export async function repairWorkspaceIdResidual(pool: Pool, schema: string, slee
   const client = await pool.connect()
   try {
     const before = await getWorkspaceIdBackfillStatus(client, schema)
-    if (!before.columnsPresent) throw Object.assign(new Error("workspace_id columns are missing; apply 068_workspace_id_on_solution_objective first"), { before })
+    if (!before.columnsPresent) throw Object.assign(new WorkspaceIdBackfillRefusal("workspace_id columns are missing; apply 068_workspace_id_on_solution_objective first"), { before })
     const log: string[] = []
     try {
       await backfillWorkspaceIdOnSolutionObjective(client, schema, log, sleep)

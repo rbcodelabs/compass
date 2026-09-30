@@ -11,7 +11,7 @@ async function main() {
   const signer = new DsqlSigner({ hostname: required("PGHOST"), region: required("AWS_REGION"), expiresIn: 900 })
   const pool = new Pool({ host: required("PGHOST"), user: `${schema}_migrate`, database: "postgres", port: 5432, ssl: true, password: () => signer.getDbConnectAuthToken(), max: 1 })
   try {
-    await migrateToReady(async () => (await applyMigrations(pool, schema, undefined, { preProvisionedSchema: true })).status, async () => {
+    await migrateToReady(async () => (await applyMigrations(pool, schema, undefined, { preProvisionedSchema: true, includeExplicitOnly: true })).status, async () => {
       const status = await (await getMigrationStatus(pool, schema)).json()
       const indexes = await pool.query("SELECT COUNT(*) AS pending FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname=$1 AND (NOT i.indisvalid OR NOT i.indisready)", [schema])
       // Both halves of this gate read the runner's grouped current state, not

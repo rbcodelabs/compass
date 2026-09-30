@@ -175,7 +175,7 @@ async function fetchOpportunity(id: string, workspaceId: string) {
           current: true,
           target: true,
           unit: true,
-          objective: { select: { id: true, title: true, cycleId: true } },
+          objective: { select: { id: true, workspaceId: true, title: true, cycleId: true } },
         },
       },
       squad: { select: { id: true, name: true, color: true } },
@@ -236,8 +236,10 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OPPORTUNITY", objectId: id }),
   ]);
   const solutionScoringModel = item.workspace?.scoringConfig?.solutionScoringModel ?? null;
+  // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
+  const linkedKeyResult = item.linkedKeyResult && item.linkedKeyResult.objective.workspaceId === workspaceId ? item.linkedKeyResult : null;
   return {
-    ...item, evidence, ...linkedTasks, squads, customFields,
+    ...item, ...(item.linkedKeyResult ? { linkedKeyResult } : {}), evidence, ...linkedTasks, squads, customFields,
     existingScore: toOpportunityScoreData(item.score, item.workspace?.scoringConfig?.opportunityScoringModel as ScoringModelData | null),
     // Threaded onto each nested solution row so the panel's SolutionsList can
     // render a ScoreBadge without a second workspace round trip.
