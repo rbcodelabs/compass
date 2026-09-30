@@ -2,8 +2,9 @@
  * MCP handlers for embedded-feedback sources (`create_feedback_source`,
  * `update_feedback_source`).
  *
- * Authorization (workspace ADMIN, same bar as the settings UI) is enforced by
- * the gates in lib/mcp-tool-gates.ts before these run; the data rules live in
+ * Authorization (workspace member, gated like create_artifact; the Settings UI
+ * actions stay admin-only) is enforced by the gates in lib/mcp-tool-gates.ts
+ * before these run; the data rules live in
  * lib/embed-source-service.ts so the UI and MCP cannot drift.
  *
  * The raw embed token is returned exactly once, in the create response. It is

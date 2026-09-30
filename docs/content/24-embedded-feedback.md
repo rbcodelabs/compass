@@ -44,8 +44,9 @@ since the widget has to be loaded from an absolute URL.
 ## Agents and MCP
 
 An agent that builds a prototype (for example v0) can wire the widget itself
-with two MCP tools. Both require a **workspace admin**, the same bar as the
-settings page, and neither can be used by a registered agent identity.
+with two MCP tools. Both are available to any workspace member and to registered
+agents with write access, the same as `create_artifact`. (The Settings page
+itself still requires a workspace admin.)
 
 - `create_feedback_source` — `workspaceId`, `artifactId`, `name`,
   `allowedOrigins`, optional `authMode` (`INTERNAL_SSO` by default, or

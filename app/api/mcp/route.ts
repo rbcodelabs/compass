@@ -3053,12 +3053,12 @@ const _handler = createMcpHandler(
     }, updateArtifact)
     register("create_feedback_source", {
       title: "Create Feedback Source",
-      description: "Creates an embedded-feedback source bound to an ACTIVE Artifact in the workspace and mints its first token. Returns the raw token ONCE plus a ready-to-paste <script> snippet for the prototype's root layout. Requires workspace admin. allowedOrigins are exact https origins (no wildcards; http only for localhost); the widget is refused from any other origin, so pass a provisional origin now and call update_feedback_source once the real deploy origin is known (an empty list accepts nothing yet).",
+      description: "Creates an embedded-feedback source bound to an ACTIVE Artifact in the workspace and mints its first token. Returns the raw token ONCE plus a ready-to-paste <script> snippet for the prototype's root layout. allowedOrigins are exact https origins (no wildcards; http only for localhost); the widget is refused from any other origin, so pass a provisional origin now and call update_feedback_source once the real deploy origin is known (an empty list accepts nothing yet).",
       inputSchema: { workspaceId: z.string().uuid(), artifactId: z.string().uuid(), name: z.string().min(1).max(255), allowedOrigins: z.array(z.string()), authMode: z.enum(["INTERNAL_SSO", "PORTAL"]).optional().describe("Who can comment: INTERNAL_SSO (workspace members, default) or PORTAL (external reviewers by verified email)") }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, createFeedbackSourceTool)
     register("update_feedback_source", {
       title: "Update Feedback Source",
-      description: "Updates an embedded-feedback source in the workspace: replace allowedOrigins (the full list, not a delta), enable/disable it, rename it, or change authMode. Changing authMode signs out existing visitors. Requires workspace admin. Does not return or rotate the token.",
+      description: "Updates an embedded-feedback source in the workspace: replace allowedOrigins (the full list, not a delta), enable/disable it, rename it, or change authMode. Changing authMode signs out existing visitors. Does not return or rotate the token.",
       inputSchema: { workspaceId: z.string().uuid(), sourceId: z.string().uuid(), allowedOrigins: z.array(z.string()).optional(), enabled: z.boolean().optional(), name: z.string().min(1).max(255).optional(), authMode: z.enum(["INTERNAL_SSO", "PORTAL"]).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, updateFeedbackSourceTool)
     register("link_artifact_to_solution", {
