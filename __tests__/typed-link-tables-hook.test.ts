@@ -4,6 +4,9 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { PoolClient } from "pg";
 import {
+  OCC_MAX_ATTEMPTS,
+  isOccConflict,
+  withOccRetry,
   TYPED_LINK_BACKFILL_BATCH_SIZE,
   TYPED_LINK_TABLES_MIGRATION,
   assertTypedLinkPreconditions,
@@ -29,7 +32,9 @@ function fakeClient(handler: (sql: string, params: unknown[]) => Reply) {
 // SQL shape markers shared between the module and these tests.
 const isCrossWorkspaceQuery = (sql: string) => /obj\.workspace_id <> o\.workspace_id/.test(sql) && sql.startsWith("SELECT o.id");
 const isDanglingQuery = (sql: string) => /kr\.id IS NULL OR obj\.id IS NULL/.test(sql) && sql.startsWith("SELECT o.id");
-const isCandidateQuery = (sql: string) => /l\.id IS NULL/.test(sql) && sql.includes("linked_key_result_id");
+const isPruneSelect = (sql: string) => sql.startsWith("SELECT l.id AS id") && sql.includes("l.origin = 'LEGACY'");
+const isPruneDelete = (sql: string) => sql.startsWith("DELETE FROM");
+const isCandidateQuery =(sql: string) => /l\.id IS NULL/.test(sql) && sql.includes("linked_key_result_id");
 
 describe("batch size", () => {
   it("stays inside DSQL's 3,000-row write limit once each link row's three secondary index entries are counted", () => {
@@ -37,6 +42,38 @@ describe("batch size", () => {
     expect(TYPED_LINK_BACKFILL_BATCH_SIZE).toBeLessThanOrEqual(500);
     // 1 table row + 3 secondary index entries per inserted link.
     expect(TYPED_LINK_BACKFILL_BATCH_SIZE * 4).toBeLessThan(3000);
+  });
+});
+
+describe("withOccRetry (private copy, same behaviour as the 068 hook's)", () => {
+  it("recognises DSQL optimistic-concurrency conflicts by SQLSTATE or message, and nothing else", () => {
+    expect(isOccConflict(conflict())).toBe(true);
+    expect(isOccConflict(Object.assign(new Error("x"), { code: "40001" }))).toBe(true);
+    expect(isOccConflict(new Error("OC001 conflict"))).toBe(true);
+    expect(isOccConflict(Object.assign(new Error("boom"), { code: "23505" }))).toBe(false);
+    expect(isOccConflict(null)).toBe(false);
+  });
+
+  it("retries with growing backoff, is bounded, and does not retry non-conflicts", async () => {
+    const work = vi.fn().mockRejectedValueOnce(conflict()).mockRejectedValueOnce(conflict()).mockResolvedValue("ok");
+    const sleeps: number[] = [];
+    await expect(withOccRetry(work, async (ms) => { sleeps.push(ms); })).resolves.toBe("ok");
+    expect(sleeps).toHaveLength(2);
+    expect(sleeps[1]).toBeGreaterThan(sleeps[0] - 1);
+
+    const never = vi.fn().mockRejectedValue(conflict());
+    await expect(withOccRetry(never, noSleep)).rejects.toThrow(/OC000/);
+    expect(never).toHaveBeenCalledTimes(OCC_MAX_ATTEMPTS);
+
+    const syntax = vi.fn().mockRejectedValue(Object.assign(new Error("syntax error"), { code: "42601" }));
+    await expect(withOccRetry(syntax, noSleep)).rejects.toThrow("syntax error");
+    expect(syntax).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not import the 068 hook, so an edit there cannot break this hook's digest pin", () => {
+    const source = readFileSync(path.join(process.cwd(), "lib/migrations/typed-link-tables.ts"), "utf8");
+    expect(source).not.toMatch(/from\s+["'][^"']*workspace-id-on-solution-objective/);
+    expect(Object.keys(REVIEWED_MIGRATION_CODE_SHA256[TYPED_LINK_TABLES_MIGRATION])).toEqual(["lib/migrations/typed-link-tables.ts"]);
   });
 });
 
@@ -76,7 +113,8 @@ describe("backfillOpportunityObjectiveLinks", () => {
     if (/"objectives"\s+WHERE workspace_id IS NULL/.test(sql)) return { rows: [{ n: "0" }] };
     return undefined;
   };
-  const quietQuarantine = (sql: string): Reply => preconditionsOk(sql) ?? (isCrossWorkspaceQuery(sql) || isDanglingQuery(sql) ? { rows: [] } : undefined);
+  const quietQuarantine = (sql: string): Reply =>
+    preconditionsOk(sql) ?? (isCrossWorkspaceQuery(sql) || isDanglingQuery(sql) || isPruneSelect(sql) ? { rows: [] } : undefined);
 
   it("inserts candidates as LEGACY/MIGRATION rows in bounded batches, looping until a batch is empty", async () => {
     const pending = Array.from({ length: TYPED_LINK_BACKFILL_BATCH_SIZE + 3 }, (_, i) => candidate(i));
@@ -131,7 +169,55 @@ describe("backfillOpportunityObjectiveLinks", () => {
     expect(log.join("\n")).toMatch(/quarantined 1 dangling[^\n]*d1/);
     const select = query.mock.calls.map(([sql]) => sql as string).find(isCandidateQuery)!;
     expect(select).toContain("obj.workspace_id = o.workspace_id");
-    expect(query.mock.calls.every(([sql]) => !/\b(UPDATE|DELETE)\b/i.test(sql as string))).toBe(true);
+    // The only write besides the link INSERT/DELETE is nothing: opportunities are never updated or deleted.
+    expect(query.mock.calls.every(([sql]) => !/\bUPDATE\b|DELETE FROM "s"\."opportunities"/i.test(sql as string))).toBe(true);
+  });
+
+  it("prunes stale LEGACY links before inserting, only ever by origin = 'LEGACY', in batches within the 500 cap", async () => {
+    const stale = Array.from({ length: TYPED_LINK_BACKFILL_BATCH_SIZE + 2 }, (_, i) => ({ id: `l${i}` }));
+    const order: string[] = [];
+    const deletes: string[][] = [];
+    const { client, query } = fakeClient((sql, params) => {
+      const ok = preconditionsOk(sql);
+      if (ok) return ok;
+      if (isPruneSelect(sql)) { order.push("select-stale"); return { rows: stale.splice(0, params[0] as number) }; }
+      if (isPruneDelete(sql)) {
+        order.push("delete");
+        expect(sql).toContain("origin = 'LEGACY'");
+        deletes.push(params[0] as string[]);
+        return { rowCount: (params[0] as string[]).length };
+      }
+      if (isCandidateQuery(sql)) { order.push("candidates"); return { rows: [] }; }
+      return { rows: [] };
+    });
+    const log: string[] = [];
+    const result = await backfillOpportunityObjectiveLinks(client, "s", log, noSleep);
+    expect(result.pruned).toBe(TYPED_LINK_BACKFILL_BATCH_SIZE + 2);
+    expect(deletes.map((ids) => ids.length)).toEqual([TYPED_LINK_BACKFILL_BATCH_SIZE, 2]);
+    expect(order.indexOf("candidates")).toBeGreaterThan(order.lastIndexOf("delete"));
+    expect(log.join("\n")).toContain(`pruned ${TYPED_LINK_BACKFILL_BATCH_SIZE + 2} stale LEGACY opportunity_objective_links rows`);
+    const select = query.mock.calls.map(([sql]) => sql as string).find(isPruneSelect)!;
+    // Stale = endpoint gone, pointer cleared/changed (kr joined on the link's objective), or workspace drift.
+    expect(select).toContain("kr.objective_id = l.objective_id");
+    expect(select).toMatch(/o\.id IS NULL OR kr\.id IS NULL OR obj\.id IS NULL/);
+    expect(select).toContain("l.workspace_id IS DISTINCT FROM o.workspace_id");
+    expect(select).toContain("l.workspace_id IS DISTINCT FROM obj.workspace_id");
+  });
+
+  it("retries a conflicting prune DELETE, and throws rather than loop when a guarded DELETE removes nothing", async () => {
+    let failures = 1;
+    const once = [{ id: "l1" }];
+    const flaky = fakeClient((sql, params) => {
+      const ok = preconditionsOk(sql);
+      if (ok) return ok;
+      if (isPruneSelect(sql)) return { rows: once.splice(0, params[0] as number) };
+      if (isPruneDelete(sql)) return failures-- > 0 ? conflict() : { rowCount: 1 };
+      return { rows: [] };
+    });
+    await expect(backfillOpportunityObjectiveLinks(flaky.client, "s", [], noSleep)).resolves.toMatchObject({ pruned: 1 });
+
+    const stuck = fakeClient((sql) => preconditionsOk(sql) ?? (isPruneSelect(sql) ? { rows: [{ id: "l1" }] } : isPruneDelete(sql) ? { rowCount: 0 } : { rows: [] }));
+    await expect(backfillOpportunityObjectiveLinks(stuck.client, "s", [], noSleep)).rejects.toThrow(/prune made no progress/);
   });
 
   it("checks preconditions first and inserts nothing when they fail", async () => {
@@ -181,6 +267,8 @@ describe("assertTypedLinkTables postconditions", () => {
 
   const cases: Array<[string, (sql: string) => boolean, RegExp]> = [
     ["legacy rows without a link", isCandidateQuery, /2 legacy opportunity rows lack a link/],
+    ["a pointer to an objective with a NULL workspace_id", (sql) => sql.startsWith("SELECT count") && /obj\.workspace_id IS NULL/.test(sql), /2 legacy pointers reference an objective with a NULL workspace_id/],
+    ["a pointer that falls in no class (partition not exhaustive)", (sql) => sql.includes('FROM "s"."opportunities" AS o WHERE o.linked_key_result_id IS NOT NULL') && !sql.includes("JOIN"), /2 legacy pointers but only 0 fall in a known class/],
     ["workspace mismatch", (sql) => sql.includes("IS DISTINCT FROM") && sql.includes("opportunity_objective_links"), /2 opportunity_objective_links rows have a workspace_id that differs/],
     ["dangling endpoint", (sql) => /o\.id IS NULL OR obj\.id IS NULL/.test(sql) && sql.includes("opportunity_objective_links"), /2 opportunity_objective_links rows point at a missing endpoint/],
     ["duplicates", (sql) => sql.includes("HAVING count(*) > 1") && sql.includes("opportunity_objective_links"), /2 duplicate opportunity_objective_links pairs/],
@@ -203,7 +291,7 @@ describe("getTypedLinkStatus (GET /api/admin/migrate)", () => {
     });
     const status = await getTypedLinkStatus(client, "s");
     expect(status.linkIntegrity).toBeNull();
-    expect(status.preflight).toMatchObject({ tablesPresent: false, legacyDangling: 4, legacyCrossWorkspace: 4 });
+    expect(status.preflight).toMatchObject({ tablesPresent: false, legacyDangling: 4, legacyCrossWorkspace: 4, legacyObjectiveWorkspaceNull: 4 });
   });
 
   it("reports cross-workspace as null (not zero) when objectives.workspace_id does not exist yet", async () => {
@@ -211,7 +299,9 @@ describe("getTypedLinkStatus (GET /api/admin/migrate)", () => {
       if (sql.includes("information_schema")) return { rows: [] };
       return { rows: [{ n: "1" }] };
     });
-    expect((await getTypedLinkStatus(client, "s")).preflight.legacyCrossWorkspace).toBeNull();
+    const { preflight } = await getTypedLinkStatus(client, "s");
+    expect(preflight.legacyCrossWorkspace).toBeNull();
+    expect(preflight.legacyObjectiveWorkspaceNull).toBeNull();
   });
 
   it("reports each anomaly class as a count once the tables exist", async () => {
@@ -220,6 +310,7 @@ describe("getTypedLinkStatus (GET /api/admin/migrate)", () => {
       if (sql.includes("information_schema.columns")) return { rows: [{ column_name: "workspace_id" }] };
       let n = "0";
       if (isCandidateQuery(sql)) n = "5";
+      else if (/obj\.workspace_id IS NULL/.test(sql)) n = "8";
       else if (isCrossWorkspaceQuery(sql) || /obj\.workspace_id <> o\.workspace_id/.test(sql)) n = "6";
       else if (/kr\.id IS NULL OR obj\.id IS NULL/.test(sql) && !sql.includes("solution_key_result_links")) n = "7";
       else if (sql.includes("IS DISTINCT FROM") && sql.includes("opportunity_objective_links")) n = "2";
@@ -235,6 +326,7 @@ describe("getTypedLinkStatus (GET /api/admin/migrate)", () => {
       duplicates: 4,
       legacyCrossWorkspace: 6,
       legacyDangling: 7,
+      legacyObjectiveWorkspaceNull: 8,
     });
   });
 

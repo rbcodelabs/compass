@@ -131,10 +131,9 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "068_workspace_id_on_solution_objective": {
     "lib/migrations/workspace-id-on-solution-objective.ts": "d13c5799d4cf7d95360c4e919dbbdae9e70e7af1523a41cf91a1de8945a73ece",
   },
-  // 071 reuses withOccRetry from the 068 hook, so that file is pinned here as well.
+  // 071 pins only its own hook: it carries a private copy of withOccRetry rather than importing the 068 hook.
   "071_typed_link_tables": {
-    "lib/migrations/typed-link-tables.ts": "9b33e35701c7b1fe6111ef87621431177f11872616afeaf3edfef35840b3d178",
-    "lib/migrations/workspace-id-on-solution-objective.ts": "d13c5799d4cf7d95360c4e919dbbdae9e70e7af1523a41cf91a1de8945a73ece",
+    "lib/migrations/typed-link-tables.ts": "ea26307d7abe9268944b38f259870e95a37b53c0ba60babb25c9854bae75d32b",
   },
 };
 

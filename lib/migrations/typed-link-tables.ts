@@ -1,8 +1,39 @@
 import type { PoolClient } from "pg"
-import { withOccRetry } from "@/lib/migrations/workspace-id-on-solution-objective"
 
 export const TYPED_LINK_TABLES_MIGRATION = "071_typed_link_tables"
 const WORKSPACE_ID_MIGRATION = "068_workspace_id_on_solution_objective"
+
+/*
+ * Private copy of the optimistic-concurrency retry used by migration 068's hook
+ * (lib/migrations/workspace-id-on-solution-objective.ts), kept byte-for-byte in
+ * behaviour: SQLSTATE 40001 / OC000 / OC001, bounded, exponential with jitter.
+ * It is deliberately NOT imported from the 068 hook. Each reviewed hook file is
+ * pinned by digest in the managed manifest, and other PRs edit the 068 hook, so
+ * importing it would turn an unrelated edit there into a red digest check here
+ * (and vice versa) for whichever PR lands second.
+ */
+/** Aurora DSQL uses optimistic concurrency: a conflicting commit fails with SQLSTATE 40001 (OC000/OC001) and must be retried. */
+export const OCC_MAX_ATTEMPTS = 6
+const OCC_BASE_DELAY_MS = 50
+
+export function isOccConflict(error: unknown): boolean {
+  const e = error as { code?: string; message?: string } | null
+  return e?.code === "40001" || /\bOC00[01]\b|change conflicts with another transaction/i.test(e?.message ?? "")
+}
+
+export async function withOccRetry<T>(
+  work: () => Promise<T>,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await work()
+    } catch (error) {
+      if (!isOccConflict(error) || attempt >= OCC_MAX_ATTEMPTS) throw error
+      await sleep(OCC_BASE_DELAY_MS * 2 ** (attempt - 1) + Math.floor(Math.random() * OCC_BASE_DELAY_MS))
+    }
+  }
+}
 
 /**
  * DSQL caps a write transaction at 3,000 modified rows, and index entries count
@@ -59,6 +90,15 @@ const legacyUnlinkedFromWhere = (schema: string) => `${legacyFrom(schema)}
 
 const crossWorkspaceFromWhere = (schema: string) => `${legacyFrom(schema)}
          WHERE o.linked_key_result_id IS NOT NULL AND obj.workspace_id <> o.workspace_id`
+
+/**
+ * The objective exists but its workspace_id is NULL, so `=` and `<>` are both NULL
+ * and the pointer would otherwise be in no class at all. Old code can keep creating
+ * NULL-workspace objectives until the workspace_id writers deploy and 069 runs, so
+ * this is re-checked at the postcondition, not only by the precondition.
+ */
+const objectiveWorkspaceNullFromWhere = (schema: string) => `${legacyFrom(schema)}
+         WHERE o.linked_key_result_id IS NOT NULL AND obj.workspace_id IS NULL`
 
 const danglingFromWhere = (schema: string) => `FROM "${schema}"."opportunities" AS o
          LEFT JOIN "${schema}"."key_results" AS kr ON kr.id = o.linked_key_result_id
@@ -132,8 +172,15 @@ export async function backfillOpportunityObjectiveLinks(
   schema: string,
   log: string[],
   sleep?: (ms: number) => Promise<void>,
-): Promise<{ inserted: number; quarantined: QuarantinedLegacyLinks }> {
+): Promise<{ pruned: number; inserted: number; quarantined: QuarantinedLegacyLinks }> {
   await assertTypedLinkPreconditions(client, schema)
+
+  // Old code keeps running between a failed attempt and its resume (and between
+  // 071 and a later 072). It can delete an opportunity or objective, clear or
+  // change linked_key_result_id, or drift a workspace after links were inserted.
+  // Insert-only would then fail the postconditions forever with no data-repair
+  // path, so stale LEGACY links are removed first. DIRECT links are never touched.
+  const pruned = await pruneStaleLegacyLinks(client, schema, log, sleep)
 
   let inserted = 0
   while (true) {
@@ -159,13 +206,86 @@ export async function backfillOpportunityObjectiveLinks(
     )
     inserted += result.rowCount ?? 0
   }
-  log.push(`  ✓ inserted ${inserted} LEGACY opportunity_objective_links rows`)
+  log.push(`  ✓ inserted ${inserted} LEGACY opportunity_objective_links rows (pruned ${pruned} stale first)`)
 
   const quarantined = await findQuarantinedLegacyLinks(client, schema)
   logQuarantine(log, "cross-workspace", quarantined.crossWorkspace)
   logQuarantine(log, "dangling", quarantined.dangling)
   log.push(`  ✓ quarantined ${quarantined.crossWorkspace.length} cross-workspace and ${quarantined.dangling.length} dangling legacy pointers (not blocking)`)
-  return { inserted, quarantined }
+  return { pruned, inserted, quarantined }
+}
+
+/**
+ * A LEGACY link is current only while its legacy pointer still maps to exactly
+ * that (opportunity, objective) pair in a consistent workspace. It is stale when
+ * an endpoint row is gone, the pointer was cleared or now leads to a different
+ * objective, or the link's workspace_id disagrees with either endpoint's
+ * (an objective with a NULL workspace counts as disagreeing).
+ *
+ * The join to key_results carries `kr.objective_id = l.objective_id`, so a changed
+ * pointer simply finds no key result and the link is stale. origin = 'LEGACY' is in
+ * both the SELECT and the DELETE, so a DIRECT row can never be selected or removed.
+ */
+const staleLegacyLinkSelect = (schema: string) => `SELECT l.id AS id
+         FROM "${schema}"."opportunity_objective_links" AS l
+         LEFT JOIN "${schema}"."opportunities" AS o ON o.id = l.opportunity_id
+         LEFT JOIN "${schema}"."key_results" AS kr ON kr.id = o.linked_key_result_id AND kr.objective_id = l.objective_id
+         LEFT JOIN "${schema}"."objectives" AS obj ON obj.id = kr.objective_id
+         WHERE l.origin = 'LEGACY'
+           AND (o.id IS NULL OR kr.id IS NULL OR obj.id IS NULL
+                OR l.workspace_id IS DISTINCT FROM o.workspace_id OR l.workspace_id IS DISTINCT FROM obj.workspace_id)`
+
+/**
+ * Deletes stale LEGACY links in batches. Every deleted link is 4 modified rows
+ * (table row + 3 index entries), so the same 500 cap as the insert applies.
+ * Idempotent: a clean table selects nothing. A link whose pointer is still valid
+ * but whose workspace drifted is deleted here and re-inserted correctly by the
+ * backfill that follows. Part of the shared function a later 072 re-runs.
+ */
+export async function pruneStaleLegacyLinks(
+  client: PoolClient,
+  schema: string,
+  log: string[],
+  sleep?: (ms: number) => Promise<void>,
+): Promise<number> {
+  let pruned = 0
+  while (true) {
+    const stale = await client.query<{ id: string }>(`${staleLegacyLinkSelect(schema)}
+         LIMIT $1`, [TYPED_LINK_BACKFILL_BATCH_SIZE])
+    if (stale.rows.length === 0) break
+    const result = await withOccRetry(
+      () => client.query(
+        `DELETE FROM "${schema}"."opportunity_objective_links" WHERE id = ANY($1::uuid[]) AND origin = 'LEGACY'`,
+        [stale.rows.map((row) => row.id)],
+      ),
+      sleep,
+    )
+    const deleted = result.rowCount ?? 0
+    // Selected rows that the guarded DELETE cannot remove would loop forever.
+    if (deleted === 0) throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: prune made no progress on ${stale.rows.length} stale LEGACY links`)
+    pruned += deleted
+  }
+  log.push(`  ✓ pruned ${pruned} stale LEGACY opportunity_objective_links rows (endpoint gone, pointer cleared or changed, or workspace drift)`)
+  return pruned
+}
+
+export type LegacyPointerPartition = {
+  total: number
+  sameWorkspace: number
+  crossWorkspace: number
+  dangling: number
+  objectiveWorkspaceNull: number
+}
+
+/** Every non-NULL legacy pointer must fall in exactly one class; opportunities.workspace_id is NOT NULL so the four are exhaustive. */
+export async function getLegacyPointerPartition(client: PoolClient, schema: string): Promise<LegacyPointerPartition> {
+  return {
+    total: await count(client, `SELECT count(*)::text AS n FROM "${schema}"."opportunities" AS o WHERE o.linked_key_result_id IS NOT NULL`),
+    sameWorkspace: await count(client, `SELECT count(*)::text AS n ${legacyFrom(schema)} WHERE o.linked_key_result_id IS NOT NULL AND obj.workspace_id = o.workspace_id`),
+    crossWorkspace: await count(client, `SELECT count(*)::text AS n ${crossWorkspaceFromWhere(schema)}`),
+    dangling: await count(client, `SELECT count(*)::text AS n ${danglingFromWhere(schema)}`),
+    objectiveWorkspaceNull: await count(client, `SELECT count(*)::text AS n ${objectiveWorkspaceNullFromWhere(schema)}`),
+  }
 }
 
 /** Per-table endpoint checks. The alias names are part of the query shape the unit tests pin. */
@@ -190,6 +310,8 @@ const ENDPOINT_SQL: readonly EndpointSql[] = [
        LEFT JOIN "${s}"."opportunities" AS o ON o.id = l.opportunity_id
        LEFT JOIN "${s}"."objectives" AS obj ON obj.id = l.objective_id
        WHERE o.id IS NULL OR obj.id IS NULL`,
+    // Belt and braces next to the unique pair index: whether DSQL enforces an ASYNC unique index
+    // completely while it builds is unverified, so uniqueness is also checked directly.
     duplicates: (s) => `SELECT count(*)::text AS n FROM (SELECT 1 FROM "${s}"."opportunity_objective_links" GROUP BY opportunity_id, objective_id HAVING count(*) > 1) AS d`,
   },
   {
@@ -262,6 +384,18 @@ export async function assertTypedLinkTables(client: PoolClient, schema: string) 
     throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: backfill postcondition failed: ${unlinked} legacy opportunity rows lack a link`)
   }
 
+  // Fail closed on a pointer the classification cannot place. A NULL objective
+  // workspace makes both `=` and `<>` NULL, so without this the receipt could be
+  // written with an unlinked pointer that is neither linked nor quarantined.
+  const partition = await getLegacyPointerPartition(client, schema)
+  if (partition.objectiveWorkspaceNull !== 0) {
+    throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: partition postcondition failed: ${partition.objectiveWorkspaceNull} legacy pointers reference an objective with a NULL workspace_id (run the workspace_id residual backfill, then retry)`)
+  }
+  const classified = partition.sameWorkspace + partition.crossWorkspace + partition.dangling + partition.objectiveWorkspaceNull
+  if (classified !== partition.total) {
+    throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: partition postcondition failed: ${partition.total} legacy pointers but only ${classified} fall in a known class`)
+  }
+
   for (const endpoint of ENDPOINT_SQL) {
     const mismatch = await count(client, endpoint.mismatch(schema))
     if (mismatch !== 0) {
@@ -284,6 +418,8 @@ export type TypedLinkPreflight = {
   legacyDangling: number
   /** Legacy pointers whose objective is in another workspace. Null until objectives.workspace_id exists (migration 068). */
   legacyCrossWorkspace: number | null
+  /** Legacy pointers whose objective has a NULL workspace_id. 071 refuses its receipt while this is non-zero. Null until the column exists. */
+  legacyObjectiveWorkspaceNull: number | null
 }
 
 export type TypedLinkIntegrity = {
@@ -293,6 +429,7 @@ export type TypedLinkIntegrity = {
   duplicates: number
   legacyCrossWorkspace: number
   legacyDangling: number
+  legacyObjectiveWorkspaceNull: number
 }
 
 /**
@@ -317,8 +454,11 @@ export async function getTypedLinkStatus(
   const legacyCrossWorkspace = workspaceColumn.rows.length === 1
     ? await count(client, `SELECT count(*)::text AS n ${crossWorkspaceFromWhere(schema)}`)
     : null
-  const preflight: TypedLinkPreflight = { tablesPresent, legacyDangling, legacyCrossWorkspace }
-  if (!tablesPresent || legacyCrossWorkspace === null) return { preflight, linkIntegrity: null }
+  const legacyObjectiveWorkspaceNull = workspaceColumn.rows.length === 1
+    ? await count(client, `SELECT count(*)::text AS n ${objectiveWorkspaceNullFromWhere(schema)}`)
+    : null
+  const preflight: TypedLinkPreflight = { tablesPresent, legacyDangling, legacyCrossWorkspace, legacyObjectiveWorkspaceNull }
+  if (!tablesPresent || legacyCrossWorkspace === null || legacyObjectiveWorkspaceNull === null) return { preflight, linkIntegrity: null }
 
   let workspaceMismatch = 0
   let danglingEndpoint = 0
@@ -337,6 +477,7 @@ export async function getTypedLinkStatus(
       duplicates,
       legacyCrossWorkspace,
       legacyDangling,
+      legacyObjectiveWorkspaceNull,
     },
   }
 }

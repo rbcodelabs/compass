@@ -8,6 +8,8 @@
  *     npx vitest run __tests__/typed-link-tables-migration.integration.test.ts
  */
 import { randomUUID } from "node:crypto";
+import { readdirSync } from "node:fs";
+import path from "node:path";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyMigrations, getMigrationStatus } from "@/lib/migrations/runner";
@@ -113,7 +115,7 @@ describe.skipIf(!databaseUrl)("071 typed link tables (registered migration)", ()
   it("status preflight shows the quarantine size and a null linkIntegrity before the tables exist", async () => {
     const before = await status();
     expect(before.linkIntegrity).toBeNull();
-    expect(before.preflight).toEqual({ tablesPresent: false, legacyDangling: 2, legacyCrossWorkspace: 1 });
+    expect(before.preflight).toEqual({ tablesPresent: false, legacyDangling: 2, legacyCrossWorkspace: 1, legacyObjectiveWorkspaceNull: 0 });
   });
 
   it("backfills same-workspace rows across batches as LEGACY/MIGRATION and quarantines orphans without linking them", async () => {
@@ -149,13 +151,13 @@ describe.skipIf(!databaseUrl)("071 typed link tables (registered migration)", ()
     expect(await receipts()).toBe(1);
 
     const after = await status();
-    expect(after.linkIntegrity).toEqual({ legacyWithoutLink: 0, workspaceMismatch: 0, danglingEndpoint: 0, duplicates: 0, legacyCrossWorkspace: 1, legacyDangling: 2 });
+    expect(after.linkIntegrity).toEqual({ legacyWithoutLink: 0, workspaceMismatch: 0, danglingEndpoint: 0, duplicates: 0, legacyCrossWorkspace: 1, legacyDangling: 2, legacyObjectiveWorkspaceNull: 0 });
   });
 
   it("GET status carries the linkIntegrity block", async () => {
     const response = await getMigrationStatus(pool, schema);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.linkIntegrity).toEqual({ legacyWithoutLink: 0, workspaceMismatch: 0, danglingEndpoint: 0, duplicates: 0, legacyCrossWorkspace: 1, legacyDangling: 2 });
+    expect(body.linkIntegrity).toEqual({ legacyWithoutLink: 0, workspaceMismatch: 0, danglingEndpoint: 0, duplicates: 0, legacyCrossWorkspace: 1, legacyDangling: 2, legacyObjectiveWorkspaceNull: 0 });
   });
 
   it("is idempotent: a second run applies nothing and leaves the links and the single receipt alone", async () => {
@@ -185,9 +187,10 @@ describe.skipIf(!databaseUrl)("071 typed link tables (registered migration)", ()
 
   it("postcondition failure fails closed with no receipt, and resumes after repair", async () => {
     await q(`DELETE FROM {S}._prisma_migrations WHERE migration_name = $1`, [MIGRATION]);
-    // A link whose workspace_id disagrees with its endpoints: the backfill never rewrites existing links.
+    // A DIRECT link whose workspace_id disagrees with its endpoints. LEGACY drift is healed by the prune
+    // step; DIRECT links are user data, never rewritten or deleted, so this must fail the postconditions.
     const victim = (await q<{ id: string }>(`SELECT id FROM {S}.opportunity_objective_links WHERE workspace_id = $1 LIMIT 1`, [WS_A])).rows[0].id;
-    await q(`UPDATE {S}.opportunity_objective_links SET workspace_id = $2 WHERE id = $1`, [victim, WS_B]);
+    await q(`UPDATE {S}.opportunity_objective_links SET workspace_id = $2, origin = 'DIRECT' WHERE id = $1`, [victim, WS_B]);
     expect((await status()).linkIntegrity?.workspaceMismatch).toBe(1);
     const failed = await apply();
     expect(failed.status).toBe(500);
@@ -219,5 +222,194 @@ describe.skipIf(!databaseUrl)("071 typed link tables (registered migration)", ()
     await expect(
       q(`INSERT INTO {S}.opportunity_objective_links (workspace_id, opportunity_id, objective_id, origin) VALUES ($1,$2,$3,'DIRECT')`, [WS_A, existing.opportunity_id, existing.objective_id]),
     ).rejects.toThrow(/duplicate key|unique/i);
+  });
+
+  // ── Old code keeps running between attempts: stale LEGACY links are pruned, DIRECT links never are ──
+
+  async function rerun() {
+    await q(`DELETE FROM {S}._prisma_migrations WHERE migration_name = $1`, [MIGRATION]);
+    const result = await apply();
+    expect(result.body, JSON.stringify(result.body)).not.toHaveProperty("error");
+    expect(result.status).toBe(200);
+    expect(await receipts()).toBe(1);
+    return String(result.body.message);
+  }
+  const pickLegacy = async (workspace = WS_A) =>
+    (await q<{ id: string; opportunity_id: string; objective_id: string }>(
+      `SELECT id, opportunity_id, objective_id FROM {S}.opportunity_objective_links WHERE origin = 'LEGACY' AND workspace_id = $1 ORDER BY id LIMIT 1`,
+      [workspace],
+    )).rows[0];
+  const linkFor = async (opportunityId: string) =>
+    (await q<{ workspace_id: string; objective_id: string; origin: string }>(`SELECT workspace_id, objective_id, origin FROM {S}.opportunity_objective_links WHERE opportunity_id = $1`, [opportunityId])).rows;
+
+  it("prune: a link whose opportunity was deleted after the first batch is removed, and a rerun is idempotent", async () => {
+    const victim = await pickLegacy();
+    const before = await linkCount();
+    await q(`DELETE FROM {S}.opportunities WHERE id = $1`, [victim.opportunity_id]);
+    expect(await rerun()).toContain("pruned 1 stale LEGACY opportunity_objective_links rows");
+    expect(await linkCount()).toBe(before - 1);
+    expect(await linkFor(victim.opportunity_id)).toEqual([]);
+
+    const again = await rerun();
+    expect(again).toContain("pruned 0 stale LEGACY opportunity_objective_links rows");
+    expect(again).toContain("inserted 0 LEGACY opportunity_objective_links rows");
+    expect(await linkCount()).toBe(before - 1);
+  });
+
+  it("prune: a link whose objective was deleted is removed, and the now-dangling pointer is quarantined, not blocking", async () => {
+    const cycle = (await q<{ cycle_id: string }>(`SELECT cycle_id FROM {S}.objectives WHERE id = $1`, [objA])).rows[0].cycle_id;
+    const [objC, krC] = [randomUUID(), randomUUID()];
+    await q(`INSERT INTO {S}.objectives (id, cycle_id, title) VALUES ($1, $2, 'obj C')`, [objC, cycle]);
+    await q(`INSERT INTO {S}.key_results (id, objective_id, title, target) VALUES ($1, $2, 'kr C', 1)`, [krC, objC]);
+    await q(`INSERT INTO {S}.opportunities (id, workspace_id, title, linked_key_result_id) SELECT gen_random_uuid(), $1, 'on C ' || g, $2 FROM generate_series(1, 3) g`, [WS_A, krC]);
+    // 068 already ran: new objectives need their own workspace_id (what the writers deployed with PR-B do).
+    await q(`UPDATE {S}.objectives SET workspace_id = $2 WHERE id = $1`, [objC, WS_A]);
+    expect(await rerun()).toContain("inserted 3 LEGACY opportunity_objective_links rows");
+    const before = await linkCount();
+
+    await q(`DELETE FROM {S}.objectives WHERE id = $1`, [objC]);
+    const message = await rerun();
+    expect(message).toContain("pruned 3 stale LEGACY opportunity_objective_links rows");
+    expect(message).toMatch(/quarantined \d+ dangling/);
+    expect(await linkCount()).toBe(before - 3);
+    const left = await q(`SELECT count(*)::int AS n FROM {S}.opportunity_objective_links WHERE objective_id = $1`, [objC]);
+    expect(left.rows[0].n).toBe(0);
+  });
+
+  it("prune: a cleared legacy pointer removes its LEGACY link", async () => {
+    const victim = await pickLegacy();
+    const before = await linkCount();
+    await q(`UPDATE {S}.opportunities SET linked_key_result_id = NULL WHERE id = $1`, [victim.opportunity_id]);
+    expect(await rerun()).toContain("pruned 1 stale LEGACY opportunity_objective_links rows");
+    expect(await linkCount()).toBe(before - 1);
+    expect(await linkFor(victim.opportunity_id)).toEqual([]);
+  });
+
+  it("prune: a changed legacy pointer replaces the LEGACY link with one to the new objective", async () => {
+    const cycle = (await q<{ cycle_id: string }>(`SELECT cycle_id FROM {S}.objectives WHERE id = $1`, [objA])).rows[0].cycle_id;
+    const [objA2, krA2] = [randomUUID(), randomUUID()];
+    await q(`INSERT INTO {S}.objectives (id, cycle_id, title, workspace_id) VALUES ($1, $2, 'obj A2', $3)`, [objA2, cycle, WS_A]);
+    await q(`INSERT INTO {S}.key_results (id, objective_id, title, target) VALUES ($1, $2, 'kr A2', 1)`, [krA2, objA2]);
+    const victim = await pickLegacy();
+    const before = await linkCount();
+    await q(`UPDATE {S}.opportunities SET linked_key_result_id = $2 WHERE id = $1`, [victim.opportunity_id, krA2]);
+    const message = await rerun();
+    expect(message).toContain("pruned 1 stale LEGACY opportunity_objective_links rows");
+    expect(message).toContain("inserted 1 LEGACY opportunity_objective_links rows");
+    expect(await linkCount()).toBe(before);
+    expect(await linkFor(victim.opportunity_id)).toEqual([{ workspace_id: WS_A, objective_id: objA2, origin: "LEGACY" }]);
+  });
+
+  it("prune: a LEGACY link whose workspace drifted is replaced by a correct one", async () => {
+    const victim = await pickLegacy();
+    const before = await linkCount();
+    await q(`UPDATE {S}.opportunity_objective_links SET workspace_id = $2 WHERE id = $1`, [victim.id, WS_B]);
+    expect((await status()).linkIntegrity?.workspaceMismatch).toBeGreaterThanOrEqual(1);
+    const message = await rerun();
+    expect(message).toContain("pruned 1 stale LEGACY opportunity_objective_links rows");
+    expect(message).toContain("inserted 1 LEGACY opportunity_objective_links rows");
+    expect(await linkCount()).toBe(before);
+    expect(await linkFor(victim.opportunity_id)).toEqual([{ workspace_id: WS_A, objective_id: victim.objective_id, origin: "LEGACY" }]);
+    expect((await status()).linkIntegrity?.workspaceMismatch).toBe(0);
+  });
+
+  it("prune never touches DIRECT links, even when their legacy pointer is cleared", async () => {
+    const victim = await pickLegacy();
+    await q(`UPDATE {S}.opportunity_objective_links SET origin = 'DIRECT', source = 'UI' WHERE id = $1`, [victim.id]);
+    await q(`UPDATE {S}.opportunities SET linked_key_result_id = NULL WHERE id = $1`, [victim.opportunity_id]);
+    const before = await linkCount();
+    const message = await rerun();
+    expect(message).toContain("pruned 0 stale LEGACY opportunity_objective_links rows");
+    expect(await linkCount()).toBe(before);
+    expect(await linkFor(victim.opportunity_id)).toEqual([{ workspace_id: WS_A, objective_id: victim.objective_id, origin: "DIRECT" }]);
+  });
+
+  it("fails closed, before any change, while an objective that a pointer references has a NULL workspace_id", async () => {
+    await q(`DELETE FROM {S}._prisma_migrations WHERE migration_name = $1`, [MIGRATION]);
+    await q(`UPDATE {S}.objectives SET workspace_id = NULL WHERE id = $1`, [objB]);
+    expect((await status()).preflight.legacyObjectiveWorkspaceNull).toBeGreaterThanOrEqual(SAME_WORKSPACE_B);
+    const before = await linkCount();
+    const failed = await apply();
+    expect(failed.status).toBe(500);
+    expect(String(failed.body.error)).toMatch(/objectives rows have a NULL workspace_id/);
+    expect(await receipts()).toBe(0);
+    expect(await linkCount()).toBe(before);
+    await q(`UPDATE {S}.objectives SET workspace_id = $2 WHERE id = $1`, [objB, WS_B]);
+    expect((await apply()).status).toBe(200);
+    expect(await receipts()).toBe(1);
+  });
+});
+
+/**
+ * Old-client evidence: against a schema WITHOUT the link tables (what every deployment looks
+ * like between the deploy of this PR and the POST of 071), the real generated Prisma client's
+ * create/update/delete paths for Opportunity, Objective, Solution and KeyResult work and never
+ * mention the new tables.
+ */
+describe.skipIf(!databaseUrl)("existing CRUD works against a schema without the link tables", () => {
+  const schema = `tlold_${randomUUID().replaceAll("-", "")}`;
+  const pool = new Pool({ connectionString: databaseUrl, max: 2 });
+  const previous = process.env.DATABASE_URL;
+
+  afterAll(async () => {
+    try {
+      await pool.query(`DROP SCHEMA "${schema}" CASCADE`);
+    } finally {
+      await pool.end();
+      if (previous === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previous;
+    }
+  });
+
+  it("creates, updates and deletes opportunities, objectives, solutions and key results without touching link tables", async () => {
+    const url = new URL(databaseUrl!);
+    if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/compass_e2e") {
+      throw new Error("Requires the local compass_e2e database");
+    }
+    process.env.DATABASE_URL = databaseUrl;
+    await pool.query(`CREATE SCHEMA "${schema}"`);
+    // The pre-071 world: every table the CRUD below (and Prisma's relationMode=prisma delete checks)
+    // touches exists, the link tables do not. The multi-step decision-gate migrations (039+) cannot run
+    // on local Postgres and are irrelevant to these models, so only the earlier simple ones are applied.
+    const names = readdirSync(path.join(process.cwd(), "prisma/migrations"))
+      .filter((name) => name < "039" || name === "064_solution_scoring" || name === PREREQUISITE)
+      .sort();
+    for (const name of names) {
+      const applied = await applyMigrations(pool, schema, name);
+      const body = (await applied.json()) as { error?: string };
+      expect(applied.status, `${name}: ${body.error}`).toBe(200);
+    }
+    const linkTables = await pool.query(`SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('opportunity_objective_links','solution_key_result_links')`, [schema]);
+    expect(linkTables.rows[0].n).toBe(0);
+
+    const { PrismaClient } = await import("@prisma/client");
+    const { PrismaPg } = await import("@prisma/adapter-pg");
+    const statements: string[] = [];
+    const prisma = new PrismaClient({ adapter: new PrismaPg(pool, { schema }), log: [{ emit: "event", level: "query" }] });
+    (prisma as unknown as { $on(event: "query", cb: (e: { query: string }) => void): void }).$on("query", (e) => statements.push(e.query));
+    try {
+      const workspaceId = randomUUID(); // relationMode = "prisma": no FK, the workspace row is not needed
+      const cycle = await prisma.oKRCycle.create({ data: { workspaceId, title: "c", startDate: new Date("2026-01-01"), endDate: new Date("2026-03-31") } });
+      const objective = await prisma.objective.create({ data: { cycleId: cycle.id, title: "o" } });
+      const keyResult = await prisma.keyResult.create({ data: { objectiveId: objective.id, title: "k", target: 1 } });
+      const opportunity = await prisma.opportunity.create({ data: { workspaceId, title: "opp", linkedKeyResultId: keyResult.id } });
+      const solution = await prisma.solution.create({ data: { opportunityId: opportunity.id, title: "s" } });
+
+      await prisma.opportunity.update({ where: { id: opportunity.id }, data: { title: "opp 2", linkedKeyResultId: null } });
+      await prisma.objective.update({ where: { id: objective.id }, data: { title: "o 2" } });
+      await prisma.keyResult.update({ where: { id: keyResult.id }, data: { title: "k 2" } });
+      await prisma.solution.update({ where: { id: solution.id }, data: { title: "s 2" } });
+
+      await prisma.solution.delete({ where: { id: solution.id } });
+      await prisma.opportunity.delete({ where: { id: opportunity.id } });
+      await prisma.keyResult.delete({ where: { id: keyResult.id } });
+      await prisma.objective.delete({ where: { id: objective.id } });
+      await prisma.oKRCycle.delete({ where: { id: cycle.id } });
+
+      expect(statements.length).toBeGreaterThan(10);
+      expect(statements.filter((sql) => /opportunity_objective_links|solution_key_result_links/.test(sql))).toEqual([]);
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 });
