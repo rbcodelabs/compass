@@ -1,4 +1,4 @@
-import type { PoolClient } from "pg"
+import type { Pool, PoolClient } from "pg"
 
 export const WORKSPACE_ID_MIGRATION = "068_workspace_id_on_solution_objective"
 /** Later, DDL-free second pass that re-runs the same backfill and postconditions for rows old code inserted after 068's receipt. */
@@ -107,13 +107,13 @@ export async function backfillWorkspaceIdOnSolutionObjective(
  *   2. no row has a NULL workspace_id (an orphan whose parent is gone counts);
  *   3. every row's workspace_id equals its parent's workspace_id.
  */
-export async function assertWorkspaceIdOnSolutionObjective(client: PoolClient, schema: string) {
+export async function assertWorkspaceIdOnSolutionObjective(client: PoolClient, schema: string, migrationName: string = WORKSPACE_ID_MIGRATION) {
   for (const target of TARGETS) {
     const column = await client.query<{ is_nullable: string }>(
       "SELECT is_nullable FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = 'workspace_id'",
       [schema, target.table],
     )
-    if (column.rows.length !== 1) throw new Error(`${WORKSPACE_ID_MIGRATION}: column postcondition failed: ${target.table}.workspace_id missing`)
+    if (column.rows.length !== 1) throw new Error(`${migrationName}: column postcondition failed: ${target.table}.workspace_id missing`)
 
     const index = await client.query<{ indisvalid: boolean }>(
       `SELECT i.indisvalid
@@ -124,7 +124,7 @@ export async function assertWorkspaceIdOnSolutionObjective(client: PoolClient, s
       [schema, target.indexName],
     )
     if (index.rows.length !== 1 || index.rows[0].indisvalid !== true) {
-      throw new Error(`${WORKSPACE_ID_MIGRATION}: index postcondition failed: ${target.indexName} missing or invalid`)
+      throw new Error(`${migrationName}: index postcondition failed: ${target.indexName} missing or invalid`)
     }
 
     // LEFT JOIN instead of a correlated NOT EXISTS inside an aggregate FILTER:
@@ -137,8 +137,13 @@ export async function assertWorkspaceIdOnSolutionObjective(client: PoolClient, s
     )
     const total = Number(nulls.rows[0]?.total ?? "0")
     if (total !== 0) {
-      const orphans = total - Number(nulls.rows[0]?.with_parent ?? "0")
-      throw new Error(`${WORKSPACE_ID_MIGRATION}: backfill postcondition failed: ${total} ${target.table} rows still have NULL workspace_id (${orphans} have no ${target.parentTable} parent)`)
+      // A row with neither a workspace_id nor a parent key (e.g. a cycle-less Objective, Phase 1) has nothing to derive
+      // a workspace from; report it separately from a dangling parent reference. Both fail closed.
+      const parentless = Number((await client.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM "${schema}"."${target.table}" AS child WHERE child.workspace_id IS NULL AND child.${target.parentKey} IS NULL`,
+      )).rows[0]?.n ?? "0")
+      const dangling = total - Number(nulls.rows[0]?.with_parent ?? "0") - parentless
+      throw new Error(`${migrationName}: backfill postcondition failed: ${total} ${target.table} rows still have NULL workspace_id (${dangling} reference a missing ${target.parentTable} row, ${parentless} have no ${target.parentKey} at all and nothing to derive a workspace from; repair or remove them by hand)`)
     }
 
     // NULLs were ruled out above, so a plain inequality is exact here.
@@ -149,7 +154,7 @@ export async function assertWorkspaceIdOnSolutionObjective(client: PoolClient, s
        WHERE child.workspace_id <> parent.workspace_id`,
     )
     if (mismatched.rows[0]?.count !== "0") {
-      throw new Error(`${WORKSPACE_ID_MIGRATION}: agreement postcondition failed: ${mismatched.rows[0]?.count} ${target.table} rows disagree with their ${target.parentTable} parent's workspace_id`)
+      throw new Error(`${migrationName}: agreement postcondition failed: ${mismatched.rows[0]?.count} ${target.table} rows disagree with their ${target.parentTable} parent's workspace_id`)
     }
   }
 }
@@ -190,4 +195,28 @@ export async function getWorkspaceIdBackfillStatus(client: PoolClient, schema: s
     }
   }
   return { columnsPresent, orphans, nullWorkspaceId: columnsPresent ? nullWorkspaceId : null, parentDrift: columnsPresent ? parentDrift : null }
+}
+
+/**
+ * Repeatable, authenticated repair for rows that old instances insert with a NULL workspace_id AFTER a receipted
+ * migration (the runner never re-runs a receipt). Backed by POST /api/admin/migrate {"action":"backfill-workspace-id"}.
+ * Idempotent: only NULL rows are touched. It applies no DDL and records no receipt, and it runs the same postconditions,
+ * so it fails closed (and reports before-counts) on an orphan, a parentless row, or drift.
+ */
+export async function repairWorkspaceIdResidual(pool: Pool, schema: string, sleep?: (ms: number) => Promise<void>) {
+  const client = await pool.connect()
+  try {
+    const before = await getWorkspaceIdBackfillStatus(client, schema)
+    if (!before.columnsPresent) throw Object.assign(new Error("workspace_id columns are missing; apply 068_workspace_id_on_solution_objective first"), { before })
+    const log: string[] = []
+    try {
+      await backfillWorkspaceIdOnSolutionObjective(client, schema, log, sleep)
+      await assertWorkspaceIdOnSolutionObjective(client, schema, "backfill-workspace-id")
+    } catch (error) {
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { before, log })
+    }
+    return { before, log, after: await getWorkspaceIdBackfillStatus(client, schema) }
+  } finally {
+    client.release()
+  }
 }

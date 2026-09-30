@@ -1639,6 +1639,11 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
   }
 }
 
+/** Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shot 069. */
+export function selectMigrationsToRun<T extends { name: string }>(pending: readonly T[], targetScript?: string): T[] {
+  return targetScript ? pending.filter((m) => m.name === targetScript) : pending.filter((m) => m.name !== WORKSPACE_ID_RESIDUAL_MIGRATION);
+}
+
 // POST — apply a migration (or all pending)
 export function assertManagedMigrationManifest(schema: string): void {
   if (!/^compass_pr_276_[a-f0-9]{12}$/.test(schema)) throw new Error("Invalid managed migration schema");
@@ -1699,7 +1704,14 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       }
     }
 
-    const toRun = targetScript ? pending.filter((m) => m.name === targetScript) : pending;
+    // 069 is a ONE-SHOT second pass that is only correct after the deploy that writes workspace_id has fully rolled out.
+    // A POST-all would run it at the wrong time and, because receipts are final, leave later NULL rows hidden, so it is
+    // only ever run when named explicitly. (Rows that appear afterwards are fixed by the repeatable
+    // {"action":"backfill-workspace-id"} repair, which records no receipt.)
+    const toRun = selectMigrationsToRun(pending, targetScript);
+    if (!targetScript && pending.some((m) => m.name === WORKSPACE_ID_RESIDUAL_MIGRATION)) {
+      log.push(`Skipping ${WORKSPACE_ID_RESIDUAL_MIGRATION}: it must be POSTed explicitly ({"script":"${WORKSPACE_ID_RESIDUAL_MIGRATION}"}) after the workspace_id deploy has fully rolled out.`)
+    }
 
     if (toRun.length === 0) {
       const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup, researchVoiceControlPlane] = await Promise.all([
@@ -1906,7 +1918,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         // Both run before the receipt below, so a failure leaves an unfinished
         // attempt and the next POST resumes from the remaining NULL rows.
         await backfillWorkspaceIdOnSolutionObjective(client, schema, log)
-        await assertWorkspaceIdOnSolutionObjective(client, schema)
+        await assertWorkspaceIdOnSolutionObjective(client, schema, migration.name)
       }
       if (migration.name === OBJECTIVE_OPTIONAL_CYCLE_MIGRATION) await assertObjectiveCycleIdNullable(client, schema)
 

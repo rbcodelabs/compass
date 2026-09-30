@@ -131,10 +131,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
  */
 export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "068_workspace_id_on_solution_objective": {
-    "lib/migrations/workspace-id-on-solution-objective.ts": "df2d4eac140c8ca764adf6f4547af00c113dc294779efd7a87854ec9fad182d9",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "2c5383166664c3f51851aa7d557ed3d5006de6829df27282cb12710c24d6f04c",
   },
   "069_workspace_id_residual_backfill": {
-    "lib/migrations/workspace-id-on-solution-objective.ts": "df2d4eac140c8ca764adf6f4547af00c113dc294779efd7a87854ec9fad182d9",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "2c5383166664c3f51851aa7d557ed3d5006de6829df27282cb12710c24d6f04c",
   },
 };
 

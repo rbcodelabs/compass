@@ -113,6 +113,7 @@ async function fetchObjective(id: string, workspaceId: string) {
           objective: {
             select: {
               id: true,
+              workspaceId: true,
               title: true,
               cycle: { select: { id: true, title: true, status: true } },
             },
@@ -122,7 +123,9 @@ async function fetchObjective(id: string, workspaceId: string) {
     },
   });
   if (!item) return null;
-  return { ...item, ...(await fetchLinkedTasksBundle(workspaceId, "OBJECTIVE", id)) };
+  // The parent KR's objective must be in this workspace too; otherwise the link is hidden, not followed.
+  const parentKeyResult = item.parentKeyResult && item.parentKeyResult.objective.workspaceId === workspaceId ? item.parentKeyResult : null;
+  return { ...item, parentKeyResult, ...(await fetchLinkedTasksBundle(workspaceId, "OBJECTIVE", id)) };
 }
 
 async function fetchKeyResult(id: string, workspaceId: string) {
@@ -138,6 +141,8 @@ async function fetchKeyResult(id: string, workspaceId: string) {
       roadmapItems: { select: { id: true, title: true, horizon: true, status: true } },
       opportunities: { select: { id: true, title: true, status: true } },
       supportingObjectives: {
+        // Only objectives that carry this workspace's own workspaceId (NULL / drifted rows are hidden).
+        where: { workspaceId },
         select: {
           id: true,
           title: true,
@@ -251,7 +256,7 @@ async function fetchSolution(id: string, workspaceId: string) {
   const solution = await prisma.solution.findFirst({
     where: { id, workspaceId },
     include: {
-      opportunity: { select: { id: true, title: true, workspaceId: true, squadId: true } },
+      opportunity: { select: { id: true, title: true, squadId: true } },
       score: {
         select: { id: true, scoringModelId: true, formulaSnapshot: true, rawValues: true, normalizedScore: true, rawScore: true, modelVersion: true, scoredAt: true },
       },
@@ -295,7 +300,8 @@ async function fetchSolution(id: string, workspaceId: string) {
   const linkedIds = new Set(links.map((link) => link.artifactId))
   const solutionScoringModel = (scoringConfig?.solutionScoringModel as ScoringModelData | null) ?? null
   return {
-    ...solution, evidence, ...linkedTasks,
+    // workspaceId is the authorized parameter (findFirst above matched it on the Solution's own column).
+    ...solution, workspaceId, evidence, ...linkedTasks,
     artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts,
     pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews, customFields,
     scoringModel: solutionScoringModel,

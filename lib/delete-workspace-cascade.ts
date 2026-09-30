@@ -10,6 +10,19 @@ import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
 
 /**
+ * Aurora DSQL fails a transaction that modifies more than ~3,000 rows, and the workspace_id indexes on Solution and
+ * Objective add an index entry per modified row. Every multi-row write below that is driven by an id list is split into
+ * chunks of this size, one statement (one transaction) each.
+ */
+export const CASCADE_CHUNK_SIZE = 500;
+
+export function chunked<T>(list: readonly T[], size: number = CASCADE_CHUNK_SIZE): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
+
+/**
  * Deletes a single workspace and every row that hangs off it, children before
  * parents. Aurora DSQL runs with relationMode="prisma" — no FK cascades, and
  * `onDelete: Restrict`/1:1-unique relations are EMULATED, so a Restrict
@@ -38,11 +51,20 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   );
   // A row is ours by its own workspaceId, or (only while that is still NULL) by its parent. Matching the
   // parent unconditionally would let a row whose own workspaceId names ANOTHER workspace be deleted with this one.
-  const objectiveScope = { OR: [{ workspaceId }, { workspaceId: null, cycleId: { in: ownedCycleIds } }] };
-  await prisma.objective.updateMany({
-    where: objectiveScope,
-    data: { parentKeyResultId: null },
-  });
+  //
+  // Drift residue: a Solution whose own workspaceId names ANOTHER workspace but whose opportunity is ours is neither
+  // selected nor deleted here, so the opportunity delete below fails loudly on its emulated Restrict. That is the
+  // intended outcome (a drifted row is data corruption someone should look at), not something to paper over by deleting
+  // another tenant's row.
+  const objectiveIds = await ids(
+    prisma.objective.findMany({ where: { OR: [{ workspaceId }, { workspaceId: null, cycleId: { in: ownedCycleIds } }] }, select: { id: true } })
+  );
+  for (const chunk of chunked(objectiveIds)) {
+    await prisma.objective.updateMany({
+      where: { id: { in: chunk } },
+      data: { parentKeyResultId: null },
+    });
+  }
 
   await deleteWorkspaceResearchData(prisma, workspaceId);
 
@@ -142,9 +164,9 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   const opportunityIds = await ids(
     prisma.opportunity.findMany({ where: { workspaceId }, select: { id: true } })
   );
-  if (opportunityIds.length > 0) {
+  for (const chunk of chunked(opportunityIds)) {
     await prisma.opportunityScore.deleteMany({
-      where: { opportunityId: { in: opportunityIds } },
+      where: { opportunityId: { in: chunk } },
     });
   }
   const solutionIds = await ids(
@@ -153,17 +175,17 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
       select: { id: true },
     })
   );
-  if (solutionIds.length > 0) {
+  for (const chunk of chunked(solutionIds)) {
     await prisma.solutionScore.deleteMany({
-      where: { solutionId: { in: solutionIds } },
+      where: { solutionId: { in: chunk } },
     });
     await prisma.assumption.deleteMany({
-      where: { solutionId: { in: solutionIds } },
+      where: { solutionId: { in: chunk } },
     });
     await prisma.solutionComment.deleteMany({
-      where: { solutionId: { in: solutionIds } },
+      where: { solutionId: { in: chunk } },
     });
-    await prisma.solution.deleteMany({ where: { id: { in: solutionIds } } });
+    await prisma.solution.deleteMany({ where: { id: { in: chunk } } });
   }
   await prisma.opportunity.deleteMany({ where: { workspaceId } });
 
@@ -179,25 +201,22 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   await prisma.experiment.deleteMany({ where: { workspaceId } });
 
   // 11. OKR subtree: check-ins → key results → objectives → cycles.
-  const objectiveIds = await ids(
-    prisma.objective.findMany({ where: objectiveScope, select: { id: true } })
-  );
-  if (objectiveIds.length > 0) {
+  for (const objectiveChunk of chunked(objectiveIds)) {
     const keyResultIds = await ids(
       prisma.keyResult.findMany({
-        where: { objectiveId: { in: objectiveIds } },
+        where: { objectiveId: { in: objectiveChunk } },
         select: { id: true },
       })
     );
-    if (keyResultIds.length > 0) {
+    for (const keyResultChunk of chunked(keyResultIds)) {
       await prisma.checkIn.deleteMany({
-        where: { keyResultId: { in: keyResultIds } },
+        where: { keyResultId: { in: keyResultChunk } },
       });
       await prisma.keyResult.deleteMany({
-        where: { id: { in: keyResultIds } },
+        where: { id: { in: keyResultChunk } },
       });
     }
-    await prisma.objective.deleteMany({ where: { id: { in: objectiveIds } } });
+    await prisma.objective.deleteMany({ where: { id: { in: objectiveChunk } } });
   }
   await prisma.oKRCycle.deleteMany({ where: { workspaceId } });
 

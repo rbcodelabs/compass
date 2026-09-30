@@ -131,8 +131,7 @@ describe("add_solution deeplink", () => {
 describe("add_assumption deeplink", () => {
   it("opens the assumption panel on the owning opportunity page (two-hop scope)", async () => {
     mockPrisma.solution.findUnique.mockResolvedValue({
-      id: "sol-1", title: "Guided setup",
-      opportunity: { id: "opp-1", workspace: SLUGGED },
+      id: "sol-1", title: "Guided setup", opportunityId: "opp-1", workspace: SLUGGED,
     })
     mockPrisma.assumption.create.mockResolvedValue({ id: "asm-1", title: "Users will finish", riskLevel: "HIGH", status: "UNTESTED", description: null })
     const text = (await call("add_assumption", { solutionId: "sol-1", title: "Users will finish", riskLevel: "HIGH" })).content[0].text
@@ -229,8 +228,8 @@ describe("add_to_roadmap deeplink", () => {
 describe("promote_to_roadmap deeplink", () => {
   it("opens the new roadmap item panel on the roadmap", async () => {
     mockPrisma.solution.findUnique.mockResolvedValue({
-      id: "sol-1", title: "Guided setup", workspaceId: "ws-1",
-      opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null, workspaceId: "ws-1", workspace: SLUGGED },
+      id: "sol-1", title: "Guided setup", workspaceId: "ws-1", workspace: SLUGGED,
+      opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null },
     })
     mockPrisma.roadmapItem.create.mockResolvedValue({ id: "item-2", title: "Guided setup", isPrivate: false, squadId: null })
     const text = (await call("promote_to_roadmap", { solutionId: "sol-1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
@@ -239,8 +238,8 @@ describe("promote_to_roadmap deeplink", () => {
 
   it("omits the URL line when the solution belongs to a different workspace", async () => {
     mockPrisma.solution.findUnique.mockResolvedValue({
-      id: "sol-1", title: "Guided setup", workspaceId: "other-ws",
-      opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null, workspaceId: "other-ws", workspace: SLUGGED },
+      id: "sol-1", title: "Guided setup", workspaceId: "other-ws", workspace: SLUGGED,
+      opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null },
     })
     mockPrisma.roadmapItem.create.mockResolvedValue({ id: "item-2", title: "Guided setup", isPrivate: false, squadId: null })
     const text = (await call("promote_to_roadmap", { solutionId: "sol-1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text

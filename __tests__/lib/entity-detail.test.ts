@@ -108,6 +108,25 @@ describe("getEntityDetail — nested solutions are scoped by their own workspace
   });
 });
 
+describe("getEntityDetail — OKR nested reads are scoped by workspaceId", () => {
+  it("filters a key result's supporting objectives by the workspace's own workspaceId", async () => {
+    models.keyResult.findFirst.mockResolvedValue({ id: ID });
+    await getEntityDetail("keyResult", ID, WS);
+    const include = (models.keyResult.findFirst.mock.calls[0][0] as { include: { supportingObjectives: { where: unknown } } }).include;
+    expect(include.supportingObjectives.where).toEqual({ workspaceId: WS });
+  });
+
+  it("hides an objective's parent KR when that KR's objective is in another workspace or has no workspaceId", async () => {
+    const parent = (workspaceId: string | null) => ({ id: "pkr", title: "P", objective: { id: "po", workspaceId, title: "PO", cycle: { id: "c", title: "C", status: "ACTIVE" } } });
+    models.objective.findFirst.mockResolvedValueOnce({ id: ID, parentKeyResult: parent(WS) });
+    expect(((await getEntityDetail("objective", ID, WS)) as { data: { parentKeyResult: unknown } }).data.parentKeyResult).not.toBeNull();
+    models.objective.findFirst.mockResolvedValueOnce({ id: ID, parentKeyResult: parent("other-ws") });
+    expect(((await getEntityDetail("objective", ID, WS)) as { data: { parentKeyResult: unknown } }).data.parentKeyResult).toBeNull();
+    models.objective.findFirst.mockResolvedValueOnce({ id: ID, parentKeyResult: parent(null) });
+    expect(((await getEntityDetail("objective", ID, WS)) as { data: { parentKeyResult: unknown } }).data.parentKeyResult).toBeNull();
+  });
+});
+
 describe("isEntityType", () => {
   it("accepts every known entity type", () => {
     for (const t of ENTITY_TYPES) expect(isEntityType(t)).toBe(true);

@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 import { getMigrationStatus, applyMigrations } from "@/lib/migrations/runner";
+import { repairWorkspaceIdResidual } from "@/lib/migrations/workspace-id-on-solution-objective";
 export { normalizeConstraintDefinition } from "@/lib/migrations/runner";
 export { getDecisionGateExpectedCatalog, getDecisionGateInfrastructureHealth } from "@/lib/migrations/runner";
 
@@ -65,7 +66,20 @@ export async function POST(req: NextRequest) {
   if (!checkAuth(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const pool = await getPool();
-  try { return await applyMigrations(pool, getActiveSchema(), body.script); } finally { await pool.end(); }
+  try {
+    // Repeatable residual backfill for solutions/objectives that old instances inserted with a NULL workspace_id after a
+    // receipted migration. Read-then-backfill, idempotent, no DDL and no receipt; same postconditions as 068/069.
+    if (body.action === "backfill-workspace-id") {
+      const schema = getActiveSchema();
+      try {
+        return NextResponse.json({ schema, ...(await repairWorkspaceIdResidual(pool, schema)) });
+      } catch (error) {
+        const detail = error as Error & { before?: unknown; log?: string[] };
+        return NextResponse.json({ schema, error: detail.message, before: detail.before, log: detail.log?.join("\n") }, { status: 409 });
+      }
+    }
+    return await applyMigrations(pool, getActiveSchema(), body.script);
+  } finally { await pool.end(); }
 }
 
 async function managedRequest(req: NextRequest, write: boolean) {

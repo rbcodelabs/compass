@@ -50,7 +50,8 @@ describe("resolveAgentHandoffContext — solutionPlan", () => {
       solution: {
         id: "sol-1",
         title: "Redesigned onboarding",
-        opportunity: { id: "opp-1", workspace: workspaceSelection() },
+        opportunityId: "opp-1",
+        workspace: workspaceSelection(),
       },
     })
 
@@ -81,7 +82,7 @@ describe("resolveAgentHandoffContext — solutionPlan", () => {
       id: "plan-1",
       body: "Draft plan.",
       planStatus: "PENDING",
-      solution: { id: "sol-1", title: "Redesigned onboarding", opportunity: { id: "opp-1", workspace: workspaceSelection() } },
+      solution: { id: "sol-1", title: "Redesigned onboarding", opportunityId: "opp-1", workspace: workspaceSelection() },
     })
     const result = await resolveAgentHandoffContext({
       workspaceId: WORKSPACE_ID,

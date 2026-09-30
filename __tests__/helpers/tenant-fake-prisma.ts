@@ -230,6 +230,14 @@ export function createTenantFakePrisma() {
       for (const row of rows) { Object.assign(row, data); writes.push(`${model}.updateMany:${row.id}`); }
       return { count: rows.length };
     },
+    deleteMany: async ({ where }: { where: Where }) => {
+      const doomed = tables[model].filter((r) => matches(model, r, where));
+      for (const row of doomed) {
+        tables[model].splice(tables[model].indexOf(row), 1);
+        writes.push(`${model}.deleteMany:${row.id}`);
+      }
+      return { count: doomed.length };
+    },
     delete: async ({ where }: { where: Where }) => {
       const index = tables[model].findIndex((r) => matches(model, r, where));
       if (index < 0) throw new Error("Record to delete does not exist.");
