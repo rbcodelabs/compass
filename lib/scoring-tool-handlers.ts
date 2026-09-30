@@ -540,14 +540,15 @@ export async function scoreSolution({
   const prisma = getPrisma()
   const solution = await prisma.solution.findUnique({
     where: { id: solutionId },
-    select: { id: true, title: true, opportunity: { select: { workspaceId: true } } },
+    select: { id: true, title: true, workspaceId: true },
   })
-  if (!solution) {
+  // A NULL workspaceId is treated as not found: an unscoped row is never scored.
+  if (!solution?.workspaceId) {
     return fail(`Solution "${solutionId}" not found.`)
   }
 
   const config = await prisma.workspaceScoringConfig.findUnique({
-    where: { workspaceId: solution.opportunity.workspaceId },
+    where: { workspaceId: solution.workspaceId },
     include: { solutionScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
   })
   if (!config?.solutionScoringModel) {

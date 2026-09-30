@@ -46,7 +46,7 @@ describe("tracked decisions", () => {
   })
 
   it("creates a pending tracking-only request for a workspace-scoped entity", async () => {
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
 
     await createTrackedDecisionRequest({
       workspaceId: "ws-1",
@@ -74,8 +74,8 @@ describe("tracked decisions", () => {
   it("snapshots, deduplicates, and canonically orders supporting sources in a v2 packet", async () => {
     const capturedAt = new Date("2026-09-04T12:00:00.000Z")
     prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Brand test", workspaceId: "ws-1", updatedAt: capturedAt })
-    prisma.assumption.findUnique.mockResolvedValue({ id: "assumption-1", title: "People understand the brand", updatedAt: capturedAt, solution: { opportunity: { workspaceId: "ws-1" } } })
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Brand concepts", updatedAt: capturedAt, opportunity: { workspaceId: "ws-1" } })
+    prisma.assumption.findUnique.mockResolvedValue({ id: "assumption-1", title: "People understand the brand", updatedAt: capturedAt, solution: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Brand concepts", updatedAt: capturedAt, workspaceId: "ws-1" })
 
     await createTrackedDecisionRequest({
       workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1",
@@ -123,7 +123,7 @@ describe("tracked decisions", () => {
   it("treats normalized sources as part of idempotency equality", async () => {
     const updatedAt = new Date("2026-09-04T12:00:00.000Z")
     prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Brand test", workspaceId: "ws-1", updatedAt })
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Brand concepts", updatedAt, opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Brand concepts", updatedAt, workspaceId: "ws-1" })
     const packetJson = JSON.stringify({ schemaVersion: "tracked-decision/v2", question: "Ready?", context: "Review it.", entity: { type: "EXPERIMENT", id: "experiment-1", title: "Brand test", updatedAt: updatedAt.toISOString() }, sources: [] })
     prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision: { packetJson } })
 
@@ -143,7 +143,7 @@ describe("tracked decisions", () => {
     }) }
     prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision })
     prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Renamed test", workspaceId: "ws-1", updatedAt: new Date("2026-09-05T12:00:00.000Z") })
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Renamed concepts", updatedAt: new Date("2026-09-05T12:00:00.000Z"), opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Renamed concepts", updatedAt: new Date("2026-09-05T12:00:00.000Z"), workspaceId: "ws-1" })
 
     await expect(createTrackedDecisionRequest({
       workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1",
@@ -164,8 +164,8 @@ describe("tracked decisions", () => {
     }) }
     prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision })
     prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Test", workspaceId: "ws-1", updatedAt })
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Concepts", updatedAt, opportunity: { workspaceId: "ws-1" } })
-    prisma.assumption.findUnique.mockResolvedValue({ id: "assumption-1", title: "Assumption", updatedAt, solution: { opportunity: { workspaceId: "ws-1" } } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Concepts", updatedAt, workspaceId: "ws-1" })
+    prisma.assumption.findUnique.mockResolvedValue({ id: "assumption-1", title: "Assumption", updatedAt, solution: { workspaceId: "ws-1" } })
 
     await expect(createTrackedDecisionRequest({
       workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1",
@@ -201,7 +201,7 @@ describe("tracked decisions", () => {
   })
 
   it("returns the current revision when the same pending request is retried", async () => {
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
     const currentRevision = { id: "revision-current", requestId: "request-1", packetJson: JSON.stringify({ question: "Build it?", context: "Same context", entity: { type: "SOLUTION", id: "solution-1", title: "Simple decisions" } }) }
     prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", state: "PENDING", currentRevisionId: "revision-current", currentRevision, revisionCount: 1, decisionCycle: 1 })
 
@@ -264,7 +264,7 @@ describe("tracked decisions", () => {
   })
 
   it("allows many independent decisions to link to the same entity", async () => {
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
     await createTrackedDecisionRequest({ workspaceId: "ws-1", subjectType: "SOLUTION", subjectId: "solution-1", question: "First question?", context: "First context", idempotencyKey: key1 })
     await createTrackedDecisionRequest({ workspaceId: "ws-1", subjectType: "SOLUTION", subjectId: "solution-1", question: "Second question?", context: "Second context", idempotencyKey: key2 })
     expect(prisma.reviewRequest.create).toHaveBeenNthCalledWith(1, { data: expect.objectContaining({ subjectId: key1 }) })
@@ -272,7 +272,7 @@ describe("tracked decisions", () => {
   })
 
   it("returns the committed request when concurrent identical creates race", async () => {
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
     prisma.$transaction.mockRejectedValueOnce({ code: "P2002" })
     const currentRevision = { id: "revision-winner", requestId: "request-winner", packetJson: JSON.stringify({ question: "Build it?", context: "Same context", entity: { type: "SOLUTION", id: "solution-1", title: "Simple decisions" } }) }
     prisma.reviewRequest.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "request-winner", state: "PENDING", currentRevision })
@@ -304,7 +304,7 @@ describe("tracked decisions", () => {
   })
 
   it("persists requestedByAgentId alongside requestedById on create", async () => {
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
 
     await createTrackedDecisionRequest({
       workspaceId: "ws-1", subjectType: "SOLUTION", subjectId: "solution-1",
@@ -519,7 +519,7 @@ describe("tracked decision options (question with choices)", () => {
     prisma.reviewRevision.create.mockResolvedValue({ id: "revision-1", requestId: "request-1", fingerprint: "fp" })
     prisma.reviewRequest.update.mockResolvedValue({})
     prisma.reviewRequest.updateMany.mockResolvedValue({ count: 1 })
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
   })
 
   const createdData = () => prisma.reviewRevision.create.mock.calls[0][0].data
@@ -693,7 +693,7 @@ describe("tracked decision questions (multi-question requests)", () => {
     prisma.reviewRevision.create.mockResolvedValue({ id: "revision-1", requestId: "request-1", fingerprint: "fp" })
     prisma.reviewRequest.update.mockResolvedValue({})
     prisma.reviewRequest.updateMany.mockResolvedValue({ count: 1 })
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
   })
 
   const createdData = () => prisma.reviewRevision.create.mock.calls[0][0].data

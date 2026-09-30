@@ -112,7 +112,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "065_org_member_workspace_readonly": "23494bba1b038c15392f9f8d1d7c41be858dc33bebbd96b5f2185d2675676f5c",
   "066_agent_org_admin_grants": "083b64d82e25724c5827a34c8eea97c1a63c21be6ead6c9caeaf3eac89288371",
   // Per-question answers on decision records (multi-question tracked decisions). Last, matching its MIGRATIONS position.
-  "067_decision_answers": "d79f88798ff1764d42fd8e0a08dc65510fb39bef6f8d9bdf32aec1abe13ce14f"
+  "067_decision_answers": "d79f88798ff1764d42fd8e0a08dc65510fb39bef6f8d9bdf32aec1abe13ce14f",
+  // Direct workspace_id on solutions and objectives (ADR Phase 0). The pinned SQL is DDL only;
+  // the batched backfill and its postconditions run in the runner hook, not in this file.
+  "068_workspace_id_on_solution_objective": "efc74d966e413e3cd5ad211f41ac96bbc6bcb6fa5cd230c9ac3e6a050ffbe9e1"
 };
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {

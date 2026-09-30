@@ -32,7 +32,7 @@ export async function getArtifact({ artifactId }: { artifactId: string }) {
   const prisma = getPrisma()
   const artifact = await prisma.artifact.findUnique({ where: { id: artifactId }, include: { currentRevision: true, revisions: { orderBy: { revisionNumber: "desc" } }, links: { where: { linkedType: "SOLUTION" } } } })
   if (!artifact) return fail(`Artifact "${artifactId}" not found.`)
-  const solutions = artifact.links.length ? await prisma.solution.findMany({ where: { id: { in: artifact.links.map((link) => link.linkedId) }, opportunity: { workspaceId: artifact.workspaceId } }, select: { id: true, title: true } }) : []
+  const solutions = artifact.links.length ? await prisma.solution.findMany({ where: { id: { in: artifact.links.map((link) => link.linkedId) }, workspaceId: artifact.workspaceId }, select: { id: true, title: true } }) : []
   const decisions = await getArtifactDecisions(artifact.workspaceId, artifact.id)
   const safeRevisions = artifact.revisions.map(({ blobPathname: _privatePath, ...revision }) => revision)
   const text = [`# ${artifact.title}`, `ID: ${artifact.id}`, `Type: ${artifact.sourceType}`, `Status: ${artifact.status}`, `Current revision: ${artifact.currentRevision?.revisionNumber ?? "None"}`, `Linked solutions: ${solutions.map((solution) => `${solution.title} (${solution.id})`).join(", ") || "None"}`].join("\n")

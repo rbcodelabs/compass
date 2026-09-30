@@ -158,17 +158,17 @@ describe("create_objective deeplink", () => {
 })
 
 describe("add_key_result deeplink", () => {
-  it("opens the key result panel on the OKRs page (scoped through objective -> cycle)", async () => {
+  it("opens the key result panel on the OKRs page (scoped through the objective's own workspace)", async () => {
     mockPrisma.objective.findUnique.mockResolvedValue({
-      id: "obj-1", title: "Grow activation", cycle: { workspace: SLUGGED },
+      id: "obj-1", title: "Grow activation", workspaceId: "ws-1", workspace: SLUGGED,
     })
     mockPrisma.keyResult.create.mockResolvedValue({ id: "kr-1", title: "Activation rate", target: 50, unit: "%", current: 0 })
     const text = (await call("add_key_result", { objectiveId: "obj-1", title: "Activation rate", target: 50 })).content[0].text
     expect(text).toContain(`URL: ${BASE}/okrs?detail=keyResult%3Akr-1`)
   })
 
-  it("omits the URL line when the cycle's workspace slugs are unavailable", async () => {
-    mockPrisma.objective.findUnique.mockResolvedValue({ id: "obj-1", title: "Grow activation" })
+  it("omits the URL line when the workspace slugs are unavailable", async () => {
+    mockPrisma.objective.findUnique.mockResolvedValue({ id: "obj-1", title: "Grow activation", workspaceId: "ws-1" })
     mockPrisma.keyResult.create.mockResolvedValue({ id: "kr-1", title: "Activation rate", target: 50, unit: null, current: 0 })
     const text = (await call("add_key_result", { objectiveId: "obj-1", title: "Activation rate", target: 50 })).content[0].text
     expect(text).toContain("ID: kr-1")
@@ -197,7 +197,7 @@ describe("add_to_roadmap deeplink", () => {
 describe("promote_to_roadmap deeplink", () => {
   it("opens the new roadmap item panel on the roadmap", async () => {
     mockPrisma.solution.findUnique.mockResolvedValue({
-      id: "sol-1", title: "Guided setup",
+      id: "sol-1", title: "Guided setup", workspaceId: "ws-1",
       opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null, workspaceId: "ws-1", workspace: SLUGGED },
     })
     mockPrisma.roadmapItem.create.mockResolvedValue({ id: "item-2", title: "Guided setup", isPrivate: false, squadId: null })
@@ -205,9 +205,9 @@ describe("promote_to_roadmap deeplink", () => {
     expect(text).toContain(`URL: ${BASE}/roadmap?detail=roadmapItem%3Aitem-2`)
   })
 
-  it("omits the URL line when the solution's opportunity belongs to a different workspace", async () => {
+  it("omits the URL line when the solution belongs to a different workspace", async () => {
     mockPrisma.solution.findUnique.mockResolvedValue({
-      id: "sol-1", title: "Guided setup",
+      id: "sol-1", title: "Guided setup", workspaceId: "other-ws",
       opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null, workspaceId: "other-ws", workspace: SLUGGED },
     })
     mockPrisma.roadmapItem.create.mockResolvedValue({ id: "item-2", title: "Guided setup", isPrivate: false, squadId: null })

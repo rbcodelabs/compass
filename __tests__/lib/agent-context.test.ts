@@ -72,8 +72,8 @@ describe("resolveAgentHandoffContext — solutionPlan", () => {
     const arg = mockPrisma.solutionComment.findFirst.mock.calls[0][0]
     expect(arg.where.id).toBe("plan-1")
     expect(arg.where.commentType).toBe("PLAN")
-    expect(arg.where.solution.opportunity.workspaceId).toBe(WORKSPACE_ID)
-    expect(arg.where.solution.opportunity.workspace.members.some.userId).toBe(USER_ID)
+    expect(arg.where.solution.workspaceId).toBe(WORKSPACE_ID)
+    expect(arg.where.solution.workspace.members.some.userId).toBe(USER_ID)
   })
 
   it("returns null when the plan is not APPROVED (e.g. still PENDING)", async () => {
@@ -104,7 +104,7 @@ describe("resolveAgentHandoffContext — solutionPlan", () => {
     })
     expect(result).toBeNull()
     const arg = mockPrisma.solutionComment.findFirst.mock.calls[0][0]
-    expect(arg.where.solution.opportunity.workspaceId).toBe(WORKSPACE_ID)
+    expect(arg.where.solution.workspaceId).toBe(WORKSPACE_ID)
   })
 
   it("returns null when the plan id does not exist", async () => {

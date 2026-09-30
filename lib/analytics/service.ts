@@ -152,11 +152,11 @@ export async function archiveMetric(actor: McpActor, workspaceId: string, metric
 }
 async function assertTarget(db: AppTransactionClient, workspaceId: string, target: MetricTarget, fence = false) {
   targetSchema.parse(target)
-  const found = target.targetType === "EXPERIMENT" ? await db.experiment.findFirst({ where: { id: target.targetId, workspaceId }, select: { id: true } }) : target.targetType === "ROADMAP_ITEM" ? await db.roadmapItem.findFirst({ where: { id: target.targetId, workspaceId }, select: { id: true } }) : await db.keyResult.findFirst({ where: { id: target.targetId, objective: { cycle: { workspaceId } } }, select: { id: true } })
+  const found = target.targetType === "EXPERIMENT" ? await db.experiment.findFirst({ where: { id: target.targetId, workspaceId }, select: { id: true } }) : target.targetType === "ROADMAP_ITEM" ? await db.roadmapItem.findFirst({ where: { id: target.targetId, workspaceId }, select: { id: true } }) : await db.keyResult.findFirst({ where: { id: target.targetId, objective: { workspaceId } }, select: { id: true } })
   if (!found) throw denied()
   if (fence) {
     const data = { updatedAt: new Date() }
-    const updated = target.targetType === "EXPERIMENT" ? await db.experiment.updateMany({ where: { id: target.targetId, workspaceId }, data }) : target.targetType === "ROADMAP_ITEM" ? await db.roadmapItem.updateMany({ where: { id: target.targetId, workspaceId }, data }) : await db.keyResult.updateMany({ where: { id: target.targetId, objective: { cycle: { workspaceId } } }, data })
+    const updated = target.targetType === "EXPERIMENT" ? await db.experiment.updateMany({ where: { id: target.targetId, workspaceId }, data }) : target.targetType === "ROADMAP_ITEM" ? await db.roadmapItem.updateMany({ where: { id: target.targetId, workspaceId }, data }) : await db.keyResult.updateMany({ where: { id: target.targetId, objective: { workspaceId } }, data })
     if (!updated.count) throw denied()
   }
 }
@@ -362,7 +362,7 @@ export async function listDashboardMetrics(actor: McpActor, workspaceId: string)
   const [experiments, roadmapItems, keyResults] = await Promise.all([
     experimentIds.length ? db.experiment.findMany({ where: { id: { in: experimentIds }, workspaceId }, select: { id: true, title: true } }) : Promise.resolve([]),
     roadmapIds.length ? db.roadmapItem.findMany({ where: { id: { in: roadmapIds }, workspaceId }, select: { id: true, title: true } }) : Promise.resolve([]),
-    keyResultIds.length ? db.keyResult.findMany({ where: { id: { in: keyResultIds }, objective: { cycle: { workspaceId } } }, select: { id: true, title: true } }) : Promise.resolve([]),
+    keyResultIds.length ? db.keyResult.findMany({ where: { id: { in: keyResultIds }, objective: { workspaceId } }, select: { id: true, title: true } }) : Promise.resolve([]),
   ])
   const targetTitle = (targetType: string, targetId: string): string =>
     (targetType === "EXPERIMENT" ? experiments.find(e => e.id === targetId)?.title

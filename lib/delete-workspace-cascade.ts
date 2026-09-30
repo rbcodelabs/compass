@@ -28,8 +28,17 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   ): Promise<string[]> => (await rows).map((r) => r.id);
 
   // 1. Break the KeyResult↔Objective Restrict cycle.
+  //
+  // Solutions and Objectives are selected by their own workspaceId (migration
+  // 068) OR by the parent chain. Teardown must be complete, so unlike the
+  // authorization paths it deliberately also reaches rows whose workspaceId is
+  // still NULL (created mid-rollout, before backfill) through their parent.
+  const ownedCycleIds = await ids(
+    prisma.oKRCycle.findMany({ where: { workspaceId }, select: { id: true } })
+  );
+  const objectiveScope = { OR: [{ workspaceId }, { cycleId: { in: ownedCycleIds } }] };
   await prisma.objective.updateMany({
-    where: { cycle: { workspaceId } },
+    where: objectiveScope,
     data: { parentKeyResultId: null },
   });
 
@@ -135,24 +144,24 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await prisma.opportunityScore.deleteMany({
       where: { opportunityId: { in: opportunityIds } },
     });
-    const solutionIds = await ids(
-      prisma.solution.findMany({
-        where: { opportunityId: { in: opportunityIds } },
-        select: { id: true },
-      })
-    );
-    if (solutionIds.length > 0) {
-      await prisma.solutionScore.deleteMany({
-        where: { solutionId: { in: solutionIds } },
-      });
-      await prisma.assumption.deleteMany({
-        where: { solutionId: { in: solutionIds } },
-      });
-      await prisma.solutionComment.deleteMany({
-        where: { solutionId: { in: solutionIds } },
-      });
-      await prisma.solution.deleteMany({ where: { id: { in: solutionIds } } });
-    }
+  }
+  const solutionIds = await ids(
+    prisma.solution.findMany({
+      where: { OR: [{ workspaceId }, { opportunityId: { in: opportunityIds } }] },
+      select: { id: true },
+    })
+  );
+  if (solutionIds.length > 0) {
+    await prisma.solutionScore.deleteMany({
+      where: { solutionId: { in: solutionIds } },
+    });
+    await prisma.assumption.deleteMany({
+      where: { solutionId: { in: solutionIds } },
+    });
+    await prisma.solutionComment.deleteMany({
+      where: { solutionId: { in: solutionIds } },
+    });
+    await prisma.solution.deleteMany({ where: { id: { in: solutionIds } } });
   }
   await prisma.opportunity.deleteMany({ where: { workspaceId } });
 
@@ -168,33 +177,25 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   await prisma.experiment.deleteMany({ where: { workspaceId } });
 
   // 11. OKR subtree: check-ins → key results → objectives → cycles.
-  const cycleIds = await ids(
-    prisma.oKRCycle.findMany({ where: { workspaceId }, select: { id: true } })
+  const objectiveIds = await ids(
+    prisma.objective.findMany({ where: objectiveScope, select: { id: true } })
   );
-  if (cycleIds.length > 0) {
-    const objectiveIds = await ids(
-      prisma.objective.findMany({
-        where: { cycleId: { in: cycleIds } },
+  if (objectiveIds.length > 0) {
+    const keyResultIds = await ids(
+      prisma.keyResult.findMany({
+        where: { objectiveId: { in: objectiveIds } },
         select: { id: true },
       })
     );
-    if (objectiveIds.length > 0) {
-      const keyResultIds = await ids(
-        prisma.keyResult.findMany({
-          where: { objectiveId: { in: objectiveIds } },
-          select: { id: true },
-        })
-      );
-      if (keyResultIds.length > 0) {
-        await prisma.checkIn.deleteMany({
-          where: { keyResultId: { in: keyResultIds } },
-        });
-        await prisma.keyResult.deleteMany({
-          where: { id: { in: keyResultIds } },
-        });
-      }
-      await prisma.objective.deleteMany({ where: { id: { in: objectiveIds } } });
+    if (keyResultIds.length > 0) {
+      await prisma.checkIn.deleteMany({
+        where: { keyResultId: { in: keyResultIds } },
+      });
+      await prisma.keyResult.deleteMany({
+        where: { id: { in: keyResultIds } },
+      });
     }
+    await prisma.objective.deleteMany({ where: { id: { in: objectiveIds } } });
   }
   await prisma.oKRCycle.deleteMany({ where: { workspaceId } });
 

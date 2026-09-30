@@ -121,7 +121,7 @@ export async function updateEntityField(
       const prisma = getPrisma();
       const target = field === "squadId"
         ? await prisma.squad.findFirst({ where: { id: value, workspaceId }, select: { id: true } })
-        : await prisma.keyResult.findFirst({ where: { id: value, objective: { cycle: { workspaceId } } }, select: { id: true } });
+        : await prisma.keyResult.findFirst({ where: { id: value, objective: { workspaceId } }, select: { id: true } });
       if (!target) return { ok: false, status: 404, error: "Not found" };
     }
     data = { [field]: value };

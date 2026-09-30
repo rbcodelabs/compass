@@ -112,7 +112,7 @@ export async function createOpportunityWithLinks(
       if (
         fields.linkedKeyResultId &&
         !(await tx.keyResult.findFirst({
-          where: { id: fields.linkedKeyResultId, objective: { cycle: { workspaceId } } },
+          where: { id: fields.linkedKeyResultId, objective: { workspaceId } },
           select: { id: true },
         }))
       ) {

@@ -63,18 +63,18 @@ const CASES: Array<{
   >;
   where: Record<string, unknown>;
 }> = [
-  { type: "objective", model: "objective", where: { id: ID, cycle: { workspaceId: WS } } },
+  { type: "objective", model: "objective", where: { id: ID, workspaceId: WS } },
   {
     type: "keyResult",
     model: "keyResult",
-    where: { id: ID, objective: { cycle: { workspaceId: WS } } },
+    where: { id: ID, objective: { workspaceId: WS } },
   },
   { type: "opportunity", model: "opportunity", where: { id: ID, workspaceId: WS } },
-  { type: "solution", model: "solution", where: { id: ID, opportunity: { workspaceId: WS } } },
+  { type: "solution", model: "solution", where: { id: ID, workspaceId: WS } },
   {
     type: "assumption",
     model: "assumption",
-    where: { id: ID, solution: { opportunity: { workspaceId: WS } } },
+    where: { id: ID, solution: { workspaceId: WS } },
   },
   { type: "experiment", model: "experiment", where: { id: ID, workspaceId: WS } },
   { type: "roadmapItem", model: "roadmapItem", where: { id: ID, workspaceId: WS } },
@@ -157,7 +157,7 @@ describe("getEntityDetail — return shape", () => {
     const result = await getEntityDetail("opportunity", ID, WS);
     expect(result?.data).toMatchObject({ squads: [{ id: "squad" }], availableKeyResults: [{ id: "kr", objectiveTitle: "Objective" }], customFields: [] });
     expect(models.squad.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS } }));
-    expect(models.keyResult.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { objective: { cycle: { workspaceId: WS } } } }));
+    expect(models.keyResult.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { objective: { workspaceId: WS } } }));
     expect(models.opportunity.findFirst).toHaveBeenCalledWith(expect.objectContaining({ include: expect.objectContaining({ solutions: expect.objectContaining({ include: expect.objectContaining({ assumptions: expect.objectContaining({ include: expect.objectContaining({ experiments: expect.any(Object) }) }) }) }) }) }));
   });
   it("only loads linked feedback in the opportunity workspace, newest first with a stable tie break", async () => {

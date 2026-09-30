@@ -75,13 +75,13 @@ export function isEntityType(value: string): value is EntityType {
 export function entityScopeWhere(type: EntityType, id: string, workspaceId: string) {
   switch (type) {
     case "objective":
-      return { id, cycle: { workspaceId } };
+      return { id, workspaceId };
     case "keyResult":
-      return { id, objective: { cycle: { workspaceId } } };
+      return { id, objective: { workspaceId } };
     case "solution":
-      return { id, opportunity: { workspaceId } };
+      return { id, workspaceId };
     case "assumption":
-      return { id, solution: { opportunity: { workspaceId } } };
+      return { id, solution: { workspaceId } };
     case "opportunity":
     case "experiment":
     case "roadmapItem":
@@ -98,7 +98,7 @@ export function entityScopeWhere(type: EntityType, id: string, workspaceId: stri
 
 async function fetchObjective(id: string, workspaceId: string) {
   const item = await getPrisma().objective.findFirst({
-    where: { id, cycle: { workspaceId } },
+    where: { id, workspaceId },
     include: {
       cycle: { select: { id: true, title: true, startDate: true, endDate: true } },
       squad: { select: { id: true, name: true, color: true } },
@@ -127,7 +127,7 @@ async function fetchObjective(id: string, workspaceId: string) {
 
 async function fetchKeyResult(id: string, workspaceId: string) {
   const item = await getPrisma().keyResult.findFirst({
-    where: { id, objective: { cycle: { workspaceId } } },
+    where: { id, objective: { workspaceId } },
     include: {
       objective: { select: { id: true, title: true, cycleId: true } },
       checkIns: {
@@ -225,7 +225,7 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     fetchLinkedTasksBundle(workspaceId, "OPPORTUNITY", id),
     resolveEvidenceProvenance(item.evidence),
     getPrisma().squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
-    getPrisma().keyResult.findMany({ where: { objective: { cycle: { workspaceId } } }, select: { id: true, title: true, objective: { select: { title: true } } }, orderBy: { createdAt: "asc" } }),
+    getPrisma().keyResult.findMany({ where: { objective: { workspaceId } }, select: { id: true, title: true, objective: { select: { title: true } } }, orderBy: { createdAt: "asc" } }),
     loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OPPORTUNITY", objectId: id }),
   ]);
   const solutionScoringModel = item.workspace?.scoringConfig?.solutionScoringModel ?? null;
@@ -247,7 +247,7 @@ async function fetchOpportunity(id: string, workspaceId: string) {
 async function fetchSolution(id: string, workspaceId: string) {
   const prisma = getPrisma()
   const solution = await prisma.solution.findFirst({
-    where: { id, opportunity: { workspaceId } },
+    where: { id, workspaceId },
     include: {
       opportunity: { select: { id: true, title: true, workspaceId: true, squadId: true } },
       score: {
@@ -303,7 +303,7 @@ async function fetchSolution(id: string, workspaceId: string) {
 
 async function fetchAssumption(id: string, workspaceId: string) {
   const item = await getPrisma().assumption.findFirst({
-    where: { id, solution: { opportunity: { workspaceId } } },
+    where: { id, solution: { workspaceId } },
     include: {
       solution: {
         select: {
@@ -502,10 +502,10 @@ async function fetchTask(id: string, workspaceId: string) {
   const [opps, sols, roadmapItems, objectives, keyResults, docs, experiments, feedbackItems, decisionRequests] =
     await Promise.all([
       prisma.opportunity.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
-      prisma.solution.findMany({ where: { opportunity: { workspaceId } }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.solution.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
       prisma.roadmapItem.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
-      prisma.objective.findMany({ where: { cycle: { workspaceId } }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
-      prisma.keyResult.findMany({ where: { objective: { cycle: { workspaceId } } }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.objective.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.keyResult.findMany({ where: { objective: { workspaceId } }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
       prisma.doc.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
       prisma.experiment.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
       prisma.feedbackItem.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
