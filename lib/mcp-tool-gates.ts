@@ -418,6 +418,11 @@ export const TOOL_GATES: Record<string, Gate> = {
   list_artifacts: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_artifact: async (a, x) => void (await assertEntityAccess(a, "artifact", x.artifactId)),
   create_artifact: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  // Minting an embed credential / editing its origin allowlist is workspace-ADMIN,
+  // matching the settings UI (resolveWorkspaceAdmin). assertWorkspaceAdmin also
+  // denies agent identities (no agentCapability is offered), so these are human-only.
+  create_feedback_source: (a, x) => assertWorkspaceAdmin(a, x.workspaceId),
+  update_feedback_source: (a, x) => assertWorkspaceAdmin(a, x.workspaceId),
   update_artifact: (a, x) => assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId),
   link_artifact_to_solution: async (a, x) => {
     await assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId)
@@ -542,7 +547,7 @@ const WRITE_TOOLS = [
   "approve_solution_plan", "archive_artifact", "archive_research_study",
   "archive_scoring_model", "assign_squad", "close_decision_no_action", "close_research_study",
   "conclude_experiment", "create_artifact", "create_checklist_template", "create_doc",
-  "create_doc_version", "create_experiment", "create_feedback", "create_objective",
+  "create_doc_version", "create_experiment", "create_feedback", "create_feedback_source", "update_feedback_source", "create_objective",
   "create_okr_cycle", "create_opportunity", "create_research_study", "create_scoring_model",
   "create_squad", "create_task", "create_workspace", "delete_assumption", "delete_comment",
   "delete_doc_comment", "delete_key_result", "delete_objective", "delete_solution_comment",
@@ -665,7 +670,7 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   // create_workspace, approve_solution_plan, reject_solution_plan, and
   // request_release_authorization remain unconditionally human-only per ADR
   // 0020 — explicitly out of scope for AgentOrgAdminGrant delegation.
-  ...["update_comment", "update_solution_comment", "update_doc_comment", "create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization"].map(name => [name, "DENY"]),
+  ...["create_feedback_source", "update_feedback_source", "update_comment", "update_solution_comment", "update_doc_comment", "create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization"].map(name => [name, "DENY"]),
 ])
 
 /**

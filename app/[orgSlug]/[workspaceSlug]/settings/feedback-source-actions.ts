@@ -32,29 +32,15 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { isPermissionError, resolveWorkspaceAdmin } from "@/lib/permissions";
+import { EmbedOriginError, mintEmbedToken, revokeEmbedToken } from "@/lib/embed-sources";
+import type { EmbedAuthMode } from "@/lib/embed-auth-mode";
 import {
-  EmbedOriginError,
-  mintEmbedToken,
-  normalizeAllowedOrigins,
-  revokeEmbedToken,
-} from "@/lib/embed-sources";
-import {
-  DEFAULT_EMBED_AUTH_MODE,
-  parseEmbedAuthMode,
-  resolveEmbedAuthMode,
-  type EmbedAuthMode,
-} from "@/lib/embed-auth-mode";
+  EmbedSourceInputError as InputError,
+  createEmbedSource,
+  updateEmbedSource,
+} from "@/lib/embed-source-service";
 
-const MAX_NAME_LENGTH = 255;
 const MAX_LABEL_LENGTH = 255;
-
-/** Operator-facing input failures, distinct from a bug or a permission denial. */
-class InputError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "InputError";
-  }
-}
 
 type Err = { ok: false; error: string };
 
@@ -98,31 +84,6 @@ async function guard<T extends { ok: true }>(run: () => Promise<T>): Promise<T |
   }
 }
 
-function requireName(value: string): string {
-  const name = value.trim();
-  if (!name) throw new InputError("Give this feedback source a name.");
-  if (name.length > MAX_NAME_LENGTH) {
-    throw new InputError(`A name may be at most ${MAX_NAME_LENGTH} characters.`);
-  }
-  return name;
-}
-
-/**
- * Validates an operator-chosen auth mode, or falls back to the safe default.
- *
- * `undefined` means "the caller did not ask", which is a create form that predates
- * this field or an update touching only the origins — both get the default rather
- * than an error. A *present but unrecognized* value is rejected loudly instead:
- * that is a mismatched client, and silently filing it as INTERNAL_SSO would flip a
- * source the operator believed was set to external reviewers.
- */
-function requireAuthMode(value: string | undefined): EmbedAuthMode {
-  if (value === undefined) return DEFAULT_EMBED_AUTH_MODE;
-  const parsed = parseEmbedAuthMode(value);
-  if (!parsed) throw new InputError("Choose who can comment on this prototype.");
-  return parsed;
-}
-
 function optionalLabel(value: string | null | undefined): string | null {
   const label = value?.trim();
   if (!label) return null;
@@ -145,26 +106,6 @@ async function adminContext(orgSlug: string, workspaceSlug: string) {
   return { prisma, workspaceId, userId: session?.user?.id ?? null };
 }
 
-/**
- * A source is only usable when bound to an artifact in *this* workspace —
- * resolveEmbedToken refuses an unbound source with a 501, and a cross-workspace
- * binding would let an admin of one workspace open a write path into another.
- */
-async function requireArtifact(
-  prisma: Awaited<ReturnType<typeof adminContext>>["prisma"],
-  workspaceId: string,
-  artifactId: string
-): Promise<string> {
-  const id = artifactId.trim();
-  if (!id) throw new InputError("Choose which prototype this feedback belongs to.");
-  const artifact = await prisma.artifact.findFirst({
-    where: { id, workspaceId, status: "ACTIVE" },
-    select: { id: true },
-  });
-  if (!artifact) throw new InputError("That prototype no longer exists in this workspace.");
-  return artifact.id;
-}
-
 export async function createFeedbackSource(
   orgSlug: string,
   workspaceSlug: string,
@@ -172,38 +113,19 @@ export async function createFeedbackSource(
 ): Promise<CreateFeedbackSourceResult> {
   return guard(async () => {
     const { prisma, workspaceId, userId } = await adminContext(orgSlug, workspaceSlug);
-    const name = requireName(input.name);
-    const allowedOrigins = normalizeAllowedOrigins(input.allowedOrigins);
-    const authMode = requireAuthMode(input.authMode);
-    const artifactId = await requireArtifact(prisma, workspaceId, input.artifactId);
-
-    const source = await prisma.feedbackSource.create({
-      // `authMode` is written explicitly on create even though NULL would read as
-      // INTERNAL_SSO anyway. The column has no database default (DSQL cannot add
-      // one to an existing column), so a row created here and a row created before
-      // this field existed would otherwise be indistinguishable — and an operator
-      // who chose the default deserves a row that records the choice.
-      data: { workspaceId, artifactId, name, allowedOrigins, enabled: true, authMode, createdById: userId },
-      select: { id: true },
-    });
-    // Minted in the same action rather than as a second step: a source with no
-    // token cannot be embedded, and making the operator press two buttons to
-    // reach a usable state is how half-configured sources happen.
-    const minted = await mintEmbedToken({
-      feedbackSourceId: source.id,
-      label: "Initial token",
-      createdById: userId,
-    });
+    // Validation, artifact scoping and token minting live in the shared service
+    // so the MCP tool applies exactly the same rules.
+    const created = await createEmbedSource({ prisma, workspaceId, userId }, input);
 
     revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
     return {
       ok: true as const,
-      id: source.id,
-      token: minted.token,
-      tokenId: minted.tokenId,
-      tokenPrefix: minted.tokenPrefix,
-      allowedOrigins,
-      authMode,
+      id: created.id,
+      token: created.token,
+      tokenId: created.tokenId,
+      tokenPrefix: created.tokenPrefix,
+      allowedOrigins: created.allowedOrigins,
+      authMode: created.authMode,
     };
   });
 }
@@ -216,49 +138,10 @@ export async function updateFeedbackSource(
 ): Promise<UpdateFeedbackSourceResult> {
   return guard(async () => {
     const { prisma, workspaceId } = await adminContext(orgSlug, workspaceSlug);
-
-    // Scoped by workspaceId, not just id: `sourceId` arrives from the browser and
-    // a valid uuid belonging to another workspace must not be editable here.
-    const existing = await prisma.feedbackSource.findFirst({
-      where: { id: sourceId, workspaceId },
-      select: { id: true, name: true, allowedOrigins: true, enabled: true, authMode: true },
-    });
-    if (!existing) throw new InputError("That feedback source no longer exists.");
-
-    const name = input.name === undefined ? existing.name : requireName(input.name);
-    const allowedOrigins =
-      input.allowedOrigins === undefined
-        ? (existing.allowedOrigins as string[])
-        : normalizeAllowedOrigins(input.allowedOrigins);
-    const enabled = input.enabled === undefined ? existing.enabled : input.enabled;
-    // `requireAuthMode` is not reused here: its `undefined` case means "default",
-    // which is right on create and wrong on update — a caller toggling `enabled`
-    // must not silently reset a PORTAL source to internal. An omitted field keeps
-    // the stored value, read through resolveEmbedAuthMode so a legacy NULL comes
-    // back as a real mode and gets persisted as one on the next save.
-    const authMode =
-      input.authMode === undefined ? resolveEmbedAuthMode(existing.authMode) : requireAuthMode(input.authMode);
-
-    await prisma.feedbackSource.update({
-      where: { id: existing.id },
-      data: { name, allowedOrigins, enabled, authMode, updatedAt: new Date() },
-    });
-
-    // A visitor session minted under the OLD mode keeps working under it for up
-    // to its remaining 12-hour TTL otherwise: the write routes only re-check
-    // workspace membership for an INTERNAL-kind visitor, they never re-check
-    // `source.authMode` against `visitor.kind` on every write. Revoking on an
-    // actual mode change forces every existing visitor to sign in again under
-    // whichever mode is now in effect.
-    if (authMode !== resolveEmbedAuthMode(existing.authMode)) {
-      await prisma.embedVisitorSession.updateMany({
-        where: { feedbackSourceId: existing.id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-    }
+    const updated = await updateEmbedSource({ prisma, workspaceId, userId: null }, sourceId, input);
 
     revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
-    return { ok: true as const, name, allowedOrigins, enabled, authMode };
+    return { ok: true as const, ...updated };
   });
 }
 

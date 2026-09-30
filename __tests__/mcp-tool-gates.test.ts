@@ -297,6 +297,29 @@ describe("ADR 0020: AgentOrgAdminGrant for delegated scoring-model admin", () =>
   )
 })
 
+describe("feedback source tools are workspace-admin only", () => {
+  it.each(["create_feedback_source", "update_feedback_source"])("%s denies a plain workspace member", async (tool) => {
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "MEMBER" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "MEMBER" })
+    await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(/workspace admin required/)
+  })
+  it.each(["create_feedback_source", "update_feedback_source"])("%s denies a non-member without revealing existence", async (tool) => {
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue(null)
+    mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(/not found or access denied/)
+  })
+  it.each(["create_feedback_source", "update_feedback_source"])("%s admits a workspace admin", async (tool) => {
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+  })
+  it.each(["create_feedback_source", "update_feedback_source"])("%s is human-only and write-scoped", async (tool) => {
+    expect(AGENT_TOOL_POLICY[tool]).toBe("DENY")
+    expect(requiredToolScope(tool)).toBe("mcp:write")
+    await expect(applyToolGate(tool, { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1" })).rejects.toThrow(/human identity/)
+  })
+})
+
 describe("TOOL_GATES completeness", () => {
   it("classifies every registered tool for agent access", () => {
     expect(Object.keys(registeredTools).filter(name => !AGENT_TOOL_POLICY[name])).toEqual([])

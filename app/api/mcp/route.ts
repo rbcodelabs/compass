@@ -63,6 +63,7 @@ import {
   unlinkArtifact,
   updateArtifact,
 } from "@/lib/artifact-tool-handlers"
+import { createFeedbackSourceTool, updateFeedbackSourceTool } from "@/lib/feedback-source-tool-handlers"
 import {
   createDocVersion,
   listDocVersions,
@@ -3050,6 +3051,16 @@ const _handler = createMcpHandler(
       title: "Update Artifact", description: "Updates Artifact metadata and optionally creates a new immutable HTML or URL revision.",
       inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid(), title: z.string().min(1).optional(), description: z.string().nullable().optional(), html: z.string().optional(), filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, updateArtifact)
+    register("create_feedback_source", {
+      title: "Create Feedback Source",
+      description: "Creates an embedded-feedback source bound to an ACTIVE Artifact in the workspace and mints its first token. Returns the raw token ONCE plus a ready-to-paste <script> snippet for the prototype's root layout. Requires workspace admin. allowedOrigins are exact https origins (no wildcards; http only for localhost); the widget is refused from any other origin, so pass a provisional origin now and call update_feedback_source once the real deploy origin is known (an empty list accepts nothing yet).",
+      inputSchema: { workspaceId: z.string().uuid(), artifactId: z.string().uuid(), name: z.string().min(1).max(255), allowedOrigins: z.array(z.string()), authMode: z.enum(["INTERNAL_SSO", "PORTAL"]).optional().describe("Who can comment: INTERNAL_SSO (workspace members, default) or PORTAL (external reviewers by verified email)") }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, createFeedbackSourceTool)
+    register("update_feedback_source", {
+      title: "Update Feedback Source",
+      description: "Updates an embedded-feedback source in the workspace: replace allowedOrigins (the full list, not a delta), enable/disable it, rename it, or change authMode. Changing authMode signs out existing visitors. Requires workspace admin. Does not return or rotate the token.",
+      inputSchema: { workspaceId: z.string().uuid(), sourceId: z.string().uuid(), allowedOrigins: z.array(z.string()).optional(), enabled: z.boolean().optional(), name: z.string().min(1).max(255).optional(), authMode: z.enum(["INTERNAL_SSO", "PORTAL"]).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, updateFeedbackSourceTool)
     register("link_artifact_to_solution", {
       title: "Link Artifact to Solution", description: "Idempotently links an Artifact to a Solution in the same workspace.",
       inputSchema: { artifactId: z.string().uuid(), solutionId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,

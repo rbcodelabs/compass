@@ -41,6 +41,40 @@ the source.
 The snippet only appears when `NEXT_PUBLIC_APP_URL` is set for the deployment,
 since the widget has to be loaded from an absolute URL.
 
+## Agents and MCP
+
+An agent that builds a prototype (for example v0) can wire the widget itself
+with two MCP tools. Both require a **workspace admin**, the same bar as the
+settings page, and neither can be used by a registered agent identity.
+
+- `create_feedback_source` — `workspaceId`, `artifactId`, `name`,
+  `allowedOrigins`, optional `authMode` (`INTERNAL_SSO` by default, or
+  `PORTAL`). Returns the source id, the token (**shown once**), its prefix, the
+  stored origins and a ready-to-paste snippet.
+- `update_feedback_source` — `workspaceId`, `sourceId`, and any of
+  `allowedOrigins` (the full replacement list), `enabled`, `name`,
+  `authMode`. Returns the stored state. Changing `authMode` signs out
+  existing visitors.
+
+There is deliberately no delete, token-mint or token-revoke tool; those stay in
+**Settings → Embedded feedback**.
+
+The recipe, because the deploy origin is not known until after the first deploy:
+
+1. `create_artifact` — register the prototype in Compass.
+2. `create_feedback_source` with that artifact and a **provisional** origin
+   (for example `http://localhost:3000`, or an empty list). Origins are exact;
+   there are no wildcards.
+3. Put the returned `snippet` in the prototype's root layout, then deploy.
+4. `update_feedback_source` with the real deployed origin added to
+   `allowedOrigins`. Until then the widget is refused on the deployed site.
+5. `link_artifact_to_solution` — attach the artifact to the Solution it
+   tests.
+
+If the Compass deployment has no public URL configured, the response has no
+`snippet`; it returns the token and `/embed/widget.js` path separately with a
+note, and you build the script URL from your Compass host.
+
 ## Position and button style
 
 By default the widget is a dark **Feedback** pill in the bottom-right corner.
