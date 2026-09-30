@@ -55,7 +55,7 @@ Public portal (no auth):
 Organization
   └── Workspace
         ├── OKRCycle
-        │     └── Objective (→ Squad, → parent KeyResult for squad alignment)
+        │     └── Objective (→ Squad, → parent KeyResult for squad alignment; cycle optional)
         │           └── KeyResult (target / current / unit)
         │                 └── CheckIn (timestamped progress log)
         │
@@ -116,10 +116,10 @@ The API key is stored in the Vercel project settings and in `.env.local` as `MCP
 #### OKRs
 | Tool | Description |
 |---|---|
-| `list_okr_cycles` | All cycles with status and date ranges |
+| `list_okr_cycles` | All cycles with status and date ranges, plus cycle-less objectives under "No cycle / Persistent" |
 | `create_okr_cycle` | Create a new cycle (DRAFT or ACTIVE) |
 | `get_okr_cycle` | Full cycle with all objectives + KRs + progress % |
-| `create_objective` | Add an objective to a cycle; optionally link to squad or parent KR |
+| `create_objective` | Add an objective, optionally to a cycle (omit `cycleId` for a cycle-less / persistent objective); optionally link to squad or parent KR |
 | `add_key_result` | Add a KR with numeric target and unit |
 | `log_checkin` | Record a progress value for a KR |
 | `set_objective_parent_kr` | Link a squad objective to a company-level KR |
@@ -437,6 +437,8 @@ create_objective(workspaceId, cycleId, title, owner) → get objectiveId
 add_key_result(objectiveId, title, target, unit)     → get keyResultId
 log_checkin(keyResultId, value, note)
 ```
+
+`cycleId` is optional on `create_objective`: omit it for a persistent objective that spans cycles. Cycle-less objectives are not returned by `get_okr_cycle` (they belong to no cycle); find them in the "No cycle / Persistent" group of `list_okr_cycles`. Parent-KR linking skips the date-containment rule when either objective has no cycle.
 
 ### 2. Discovery: Opportunity → Solution → Assumption → Experiment
 

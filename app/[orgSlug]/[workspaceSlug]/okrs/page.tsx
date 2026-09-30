@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { CycleCard } from "@/components/okrs/cycle-card";
+import { PersistentObjectivesCard } from "@/components/okrs/persistent-objectives-card";
 import { CreateCycleForm } from "@/components/okrs/create-cycle-form";
 import { Target } from "lucide-react";
 import type { CycleStatus } from "@/lib/types";
@@ -41,6 +42,12 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
     },
   });
 
+  // Objectives with no cycle (migration 069) belong to no cycle card, so they
+  // get their own labeled card rather than disappearing from this index.
+  const persistentObjectiveCount = await prisma.objective.count({
+    where: { workspaceId: workspace.id, cycleId: null },
+  });
+
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8">
       <PageHeader title="OKRs" description="Track objectives and key results across cycles." actions={<CreateCycleForm
@@ -49,7 +56,7 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
           workspaceSlug={workspaceSlug}
         />} />
 
-      {cycles.length === 0 ? (
+      {cycles.length === 0 && persistentObjectiveCount === 0 ? (
         <EmptyState icon={<Target className="size-6" />} title="No OKR cycles yet" description="Cycles group your objectives into time-boxed periods. Create one to start setting goals." primaryAction={<CreateCycleForm
             workspaceId={workspace.id}
             orgSlug={orgSlug}
@@ -65,6 +72,11 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
               workspaceSlug={workspaceSlug}
             />
           ))}
+          <PersistentObjectivesCard
+            objectiveCount={persistentObjectiveCount}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+          />
         </div>
       )}
     </main>

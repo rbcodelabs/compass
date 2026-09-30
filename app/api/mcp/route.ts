@@ -37,6 +37,7 @@ import {
   updateFeedbackType,
   promoteFeedbackToRoadmap,
 } from "@/lib/feedback-tool-handlers"
+import { NO_CYCLE_LABEL } from "@/lib/okr-cycle-scope"
 import { FEEDBACK_STATUSES } from "@/lib/feedback-meta"
 import { FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES } from "@/lib/feedback-attachments"
 import {
@@ -524,7 +525,7 @@ const _handler = createMcpHandler(
       "list_okr_cycles",
       {
         title: "List OKR Cycles",
-        description: "Lists all OKR cycles for a workspace with their IDs, titles, dates, and status.",
+        description: "Lists all OKR cycles for a workspace with their IDs, titles, dates, and status. Objectives that have no cycle (persistent / cross-cycle) are listed separately under \"No cycle / Persistent\" with their own IDs, since they belong to no cycle and get_okr_cycle cannot return them.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
         },
@@ -537,13 +538,24 @@ const _handler = createMcpHandler(
           orderBy: { startDate: "desc" },
           select: { id: true, title: true, status: true, startDate: true, endDate: true, _count: { select: { objectives: true } } },
         })
-        if (!cycles.length) {
+        // Cycle-less Objectives (migration 069) are in no cycle's list; surface them here so they never vanish.
+        const persistentObjectives = await prisma.objective.findMany({
+          where: { workspaceId, cycleId: null },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          select: { id: true, title: true, status: true },
+        })
+        if (!cycles.length && !persistentObjectives.length) {
           return fail("No OKR cycles found for this workspace.")
         }
         const lines = cycles.map(c =>
           `• **${c.title}** [${c.status}] ${c.startDate.toLocaleDateString()} – ${c.endDate.toLocaleDateString()} — ${c._count.objectives} objectives — ID: ${c.id}`
         )
+        if (persistentObjectives.length) {
+          lines.push("", `**${NO_CYCLE_LABEL}** — ${persistentObjectives.length} objectives`)
+          for (const o of persistentObjectives) lines.push(`  • ${o.title} [${o.status}] — Objective ID: ${o.id}`)
+        }
         return ok(lines.join("\n"), {
+          persistentObjectives,
           items: cycles.map((c) => ({
             id: c.id,
             title: c.title,
@@ -659,14 +671,14 @@ const _handler = createMcpHandler(
           lines.push(`Objective ID: ${obj.id}`)
           if (obj.parentKeyResult) {
             lines.push(
-              `Supports: ${obj.parentKeyResult.objective.cycle.title} / ${obj.parentKeyResult.objective.title} / ${obj.parentKeyResult.title} (${obj.parentKeyResult.id})`
+              `Supports: ${obj.parentKeyResult.objective.cycle?.title ?? NO_CYCLE_LABEL} /${obj.parentKeyResult.objective.title} / ${obj.parentKeyResult.title} (${obj.parentKeyResult.id})`
             )
           }
           for (const kr of obj.keyResults) {
             const pct = kr.target > 0 ? ((kr.current / kr.target) * 100).toFixed(0) : "—"
             lines.push(`  • ${kr.title}: ${kr.current}/${kr.target}${kr.unit ? " " + kr.unit : ""} (${pct}%) — KR ID: ${kr.id}`)
             for (const supporting of kr.supportingObjectives) {
-              lines.push(`    ↳ ${supporting.cycle.title} / ${supporting.title} [${supporting.status}] — Objective ID: ${supporting.id}`)
+              lines.push(`    ↳ ${supporting.cycle?.title ?? NO_CYCLE_LABEL} / ${supporting.title} [${supporting.status}] — Objective ID: ${supporting.id}`)
             }
           }
           lines.push("")
@@ -680,10 +692,10 @@ const _handler = createMcpHandler(
       "create_objective",
       {
         title: "Create Objective",
-        description: "Creates a new Objective inside an OKR cycle. Optionally assign a squad or link it to a higher-level KR from a longer cycle.",
+        description: "Creates a new Objective, optionally inside an OKR cycle. Omit cycleId to create a cycle-less (persistent / cross-cycle) Objective that is not tied to a planning period; it is listed by list_okr_cycles under \"No cycle / Persistent\". Optionally assign a squad or link it to a higher-level KR (from a longer cycle that contains this one, or from a cycle-less Objective).",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          cycleId: z.string().uuid().describe("UUID of the OKR cycle"),
+          cycleId: z.string().uuid().optional().describe("UUID of the OKR cycle. Omit for an Objective with no cycle."),
           title: z.string().min(1).describe("Short title for the objective"),
           description: z.string().optional().describe("Longer description"),
           owner: z.string().optional().describe("Name or email of the accountable owner"),
@@ -694,30 +706,43 @@ const _handler = createMcpHandler(
       },
       async ({ workspaceId, cycleId, title, description, owner, squadId, parentKeyResultId }) => {
         const prisma = getPrisma()
-        const cycle = await prisma.oKRCycle.findFirst({ where: { id: cycleId, workspaceId }, select: { id: true, title: true, workspaceId: true, workspace: { select: WORKSPACE_LINK_SELECT } } })
-        if (!cycle) {
+        // With a cycle: it must live in the declared (gate-authorized) workspace. Without one the
+        // Objective is cycle-less and only the declared workspace, already membership-checked by the gate, scopes it.
+        const cycle = cycleId
+          ? await prisma.oKRCycle.findFirst({ where: { id: cycleId, workspaceId }, select: { id: true, title: true, workspaceId: true, workspace: { select: WORKSPACE_LINK_SELECT } } })
+          : null
+        if (cycleId && !cycle) {
           return fail(`OKR cycle "${cycleId}" not found in workspace.`)
         }
+        const workspaceLink = cycle
+          ? cycle.workspace
+          : await prisma.workspace.findUnique({ where: { id: workspaceId }, select: WORKSPACE_LINK_SELECT })
+        if (!workspaceLink) {
+          return fail(`Workspace "${workspaceId}" not found.`)
+        }
         if (parentKeyResultId) {
-          const eligible = await getEligibleParentKeyResults(workspaceId, cycleId)
+          const eligible = await getEligibleParentKeyResults(workspaceId, cycleId ?? null)
           if (!eligible.some((kr) => kr.id === parentKeyResultId)) {
-            return fail("The parent KR must be in an open, longer-horizon cycle that contains this cycle.")
+            return fail(cycleId
+              ? "The parent KR must be in an open cycle that is longer-horizon and contains this cycle, or belong to a cycle-less Objective."
+              : "The parent KR must belong to an open cycle or to a cycle-less Objective in this workspace.")
           }
         }
+        const scopeWorkspaceId = cycle ? cycle.workspaceId : workspaceId
         const objective = await prisma.objective.create({
-          // workspaceId comes from the cycle just verified to live in the authorized workspace, never from input.
-          data: { workspaceId: cycle.workspaceId, cycleId, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
+          // workspaceId comes from the cycle just verified to live in the authorized workspace (or, with no cycle, the gate-authorized workspaceId), never from unverified input.
+          data: { workspaceId: scopeWorkspaceId, cycleId: cycleId ?? null, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
         })
         return ok(
           withUrlLine(
-            `**Objective created** in cycle "${cycle.title}"\nID: ${objective.id}\nTitle: ${objective.title}\nStatus: ${objective.status}`,
-            workspaceEntityUrl(cycle.workspace, { type: "objective", id: objective.id }),
+            `**Objective created** ${cycle ? `in cycle "${cycle.title}"` : `with no cycle (${NO_CYCLE_LABEL})`}\nID: ${objective.id}\nTitle: ${objective.title}\nStatus: ${objective.status}`,
+            workspaceEntityUrl(workspaceLink, { type: "objective", id: objective.id }),
           ),
           {
             id: objective.id,
             title: objective.title,
             status: objective.status,
-            cycleId,
+            cycleId: cycleId ?? null,
             description: objective.description,
             owner: objective.owner,
             squadId: objective.squadId,
@@ -872,10 +897,10 @@ const _handler = createMcpHandler(
       "list_eligible_parent_key_results",
       {
         title: "List Eligible Parent Key Results",
-        description: "Lists KRs in open, longer-horizon cycles that can be supported by Objectives in a specified child cycle.",
+        description: "Lists KRs that can be supported by Objectives in a specified child cycle: KRs in open, longer-horizon cycles that contain it, plus KRs of cycle-less Objectives. Omit cycleId for a cycle-less child Objective: every KR in an open cycle or on a cycle-less Objective qualifies (no date containment).",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          cycleId: z.string().uuid().describe("UUID of the child OKR cycle"),
+          cycleId: z.string().uuid().optional().describe("UUID of the child OKR cycle. Omit for a child Objective with no cycle."),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },

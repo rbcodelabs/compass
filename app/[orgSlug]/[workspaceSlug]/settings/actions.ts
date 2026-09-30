@@ -651,9 +651,13 @@ export async function deleteWorkspace(
     .findMany({ where: { workspaceId }, select: { id: true } })
     .then((c) => c.map((x) => x.id));
 
-  if (cycleIds.length > 0) {
+  // Objectives are owned by the workspace directly (068) and may have no cycle
+  // (069), so the cycle list alone would miss cycle-less Objectives and leave
+  // their Key Results and CheckIns behind. Teardown matches either path.
+  const objectiveScope = { OR: [{ workspaceId }, { cycleId: { in: cycleIds } }] };
+  {
     const objectiveIds = await prisma.objective
-      .findMany({ where: { cycleId: { in: cycleIds } }, select: { id: true } })
+      .findMany({ where: objectiveScope, select: { id: true } })
       .then((o) => o.map((x) => x.id));
 
     if (objectiveIds.length > 0) {
@@ -750,9 +754,9 @@ export async function deleteWorkspace(
   await prisma.experiment.deleteMany({ where: { workspaceId } });
 
   // ── Step 14: Delete KeyResults then Objectives then OKRCycles ───────────────
-  if (cycleIds.length > 0) {
+  {
     const objectiveIds = await prisma.objective
-      .findMany({ where: { cycleId: { in: cycleIds } }, select: { id: true } })
+      .findMany({ where: objectiveScope, select: { id: true } })
       .then((o) => o.map((x) => x.id));
 
     if (objectiveIds.length > 0) {

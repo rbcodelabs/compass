@@ -885,6 +885,25 @@ describe("deleteWorkspace", () => {
     expect(mockWorkspace.delete).not.toHaveBeenCalled();
   });
 
+  it("deletes cycle-less Objectives' Key Results and CheckIns even when the workspace has no cycles (069)", async () => {
+    mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "ADMIN" }] });
+    mockOKRCycle.findMany.mockResolvedValue([]);
+    mockObjective.findMany.mockResolvedValue([{ id: "obj-nocycle" }]);
+    mockKeyResult.findMany.mockResolvedValue([{ id: "kr-nocycle" }]);
+    mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
+
+    await deleteWorkspace("org", "ws");
+
+    // Selected by the Objective's own workspaceId (or a cycle), never by cycles alone.
+    expect(mockObjective.findMany).toHaveBeenCalledWith({
+      where: { OR: [{ workspaceId: "ws-1" }, { cycleId: { in: [] } }] },
+      select: { id: true },
+    });
+    expect(mockCheckIn.deleteMany).toHaveBeenCalledWith({ where: { keyResultId: { in: ["kr-nocycle"] } } });
+    expect(mockKeyResult.deleteMany).toHaveBeenCalledWith({ where: { objectiveId: { in: ["obj-nocycle"] } } });
+    expect(mockObjective.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["obj-nocycle"] } } });
+  });
+
   it("throws Workspace not found when workspace does not exist", async () => {
     // Override the first findFirst call (used by deleteWorkspace directly, not resolveWorkspace)
     mockWorkspace.findFirst.mockResolvedValue(null);

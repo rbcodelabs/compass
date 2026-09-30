@@ -197,4 +197,37 @@ test.describe("OKRs", () => {
     await expect(page.getByText(quarterlyObjective)).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("okr-hierarchy-mobile.png"), fullPage: true });
   });
+
+  test("an Objective with no cycle is created, listed under 'No cycle / Persistent', and keeps its KR", async ({
+    page,
+    base,
+  }) => {
+    const ts = Date.now();
+    const objectiveTitle = `E2E Persistent Objective ${ts}`;
+    const krTitle = `E2E Persistent KR ${ts}`;
+
+    // The index always offers the labeled card for cycle-less Objectives.
+    await page.goto(`${base}/okrs`);
+    await page.waitForLoadState("networkidle");
+    await page.getByTestId("persistent-objectives-card").click();
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("heading", { name: "No cycle / Persistent" })).toBeVisible();
+
+    await page.getByRole("button", { name: /Add objective/i }).click();
+    await page.getByLabel("Title").fill(objectiveTitle);
+    await page.getByRole("button", { name: "Add objective" }).click();
+    await expect(page.getByText(objectiveTitle)).toBeVisible({ timeout: 10_000 });
+
+    await page.getByRole("button", { name: /Add key result/i }).click();
+    await page.getByLabel("Title").fill(krTitle);
+    await page.getByLabel("Target").fill("10");
+    await page.getByRole("button", { name: "Add key result" }).click();
+    await expect(page.getByLabel("Target")).not.toBeVisible({ timeout: 20_000 });
+    await page.reload();
+    await expect(page.getByText(krTitle)).toBeVisible({ timeout: 10_000 });
+
+    // It survives a reload of the index and stays reachable (never vanishes).
+    await page.goto(`${base}/okrs`);
+    await expect(page.getByTestId("persistent-objectives-card")).toContainText(/\d+ objectives?/);
+  });
 });

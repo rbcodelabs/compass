@@ -15,6 +15,7 @@ import {
 } from "./panel-parts";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
+import { NO_CYCLE_LABEL, cycleRouteSegment } from "@/lib/okr-cycle-scope";
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
 
 type KeyResultData = {
@@ -23,7 +24,7 @@ type KeyResultData = {
   current: number;
   target: number;
   unit: string | null;
-  objective: { id: string; title: string; cycleId: string } | null;
+  objective: { id: string; title: string; cycleId: string | null } | null;
   checkIns: Array<{ id: string; value: number; note: string | null; createdAt: string }>;
   roadmapItems: Array<{ id: string; title: string; horizon: string; status: string }>;
   opportunities: Array<{ id: string; title: string; status: string }>;
@@ -31,7 +32,7 @@ type KeyResultData = {
     id: string;
     title: string;
     status: string;
-    cycle: { id: string; title: string };
+    cycle: { id: string; title: string } | null;
     squad: { id: string; name: string; color: string } | null;
     keyResults: Array<{ current: number; target: number }>;
   }>;
@@ -97,7 +98,7 @@ export function KeyResultPanel({
       id: objective.id,
       title: objective.title,
       badge: {
-        label: `${objective.cycle.title} · ${progress}%`,
+        label: `${objective.cycle?.title ?? NO_CYCLE_LABEL} · ${progress}%`,
         className: "bg-accent text-accent-foreground",
       },
     };
@@ -107,7 +108,7 @@ export function KeyResultPanel({
     <PanelContainer>
       {data.objective && (
         <FullPageLink
-          href={`/${orgSlug}/${workspaceSlug}/okrs/${data.objective.cycleId}`}
+          href={`/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.objective.cycleId)}`}
         />
       )}
 
@@ -153,7 +154,7 @@ export function KeyResultPanel({
           linkedId={data.id}
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
-          revalidatePathStr={data.objective ? `/${orgSlug}/${workspaceSlug}/okrs/${data.objective.cycleId}` : `/${orgSlug}/${workspaceSlug}/okrs`}
+          revalidatePathStr={data.objective ? `/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.objective.cycleId)}` : `/${orgSlug}/${workspaceSlug}/okrs`}
           tasks={data.deliveryTasks}
           linkableTasks={data.linkableTasks}
           members={data.members}

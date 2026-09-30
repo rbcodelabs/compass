@@ -681,7 +681,9 @@ model Objective {
   /// add a NOT NULL column to a populated table; every write path sets it and
   /// every read path treats NULL as deny.
   workspaceId       String?     @map("workspace_id") @db.Uuid
-  cycleId           String      @map("cycle_id") @db.Uuid
+  /// Optional (migration 069): an Objective without a cycle is a persistent /
+  /// cross-cycle Objective. NULL means "no cycle", not "unknown".
+  cycleId           String?     @map("cycle_id") @db.Uuid
   squadId           String?     @map("squad_id") @db.Uuid
   parentKeyResultId String?     @map("parent_key_result_id") @db.Uuid
   title             String      @db.VarChar(255)
@@ -692,7 +694,7 @@ model Objective {
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @default(now()) @map("updated_at")
   workspace         Workspace?  @relation(fields: [workspaceId], references: [id])
-  cycle             OKRCycle    @relation(fields: [cycleId], references: [id])
+  cycle             OKRCycle?   @relation(fields: [cycleId], references: [id])
   squad             Squad?      @relation(fields: [squadId], references: [id])
   parentKeyResult   KeyResult?  @relation("SquadKRSupport", fields: [parentKeyResultId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   keyResults        KeyResult[]

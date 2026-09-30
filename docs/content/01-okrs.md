@@ -22,9 +22,9 @@ To create a new cycle, click **+ New Cycle** at the top of the OKRs page.
 
 ## Objectives
 
-An Objective is a qualitative, inspiring statement of what you want to achieve. It should be directional but not measurable — the Key Results handle measurement. Each Objective belongs to a cycle.
+An Objective is a qualitative, inspiring statement of what you want to achieve. It should be directional but not measurable — the Key Results handle measurement. An Objective usually belongs to a cycle, but the cycle is optional: an Objective that is not tied to a planning period (a persistent, cross-cycle goal) can exist with no cycle.
 
-Click **+ Add Objective** inside a cycle to create one. Objectives can be assigned to a squad and tagged with custom fields.
+Click **+ Add Objective** inside a cycle to create one. Objectives with no cycle live in the **No cycle / Persistent** card on the OKRs page, which opens a page with the same list and **+ Add Objective** form. Objectives can be assigned to a squad and tagged with custom fields.
 
 ## Key Results
 
@@ -57,7 +57,7 @@ You can create the relationship from either side. Both sides use the row's **⋯
 
 The link action only appears in the menu when there's actually something eligible to link, so cards stay uncluttered when there's nothing to do.
 
-Compass offers parent Key Results only from Draft or Active longer-horizon cycles whose dates fully contain the shorter cycle. On the annual side, it offers only unlinked Objectives from strictly shorter, fully contained cycles. For example, a January 1–December 31 annual cycle can be the parent of a January 1–March 31 quarterly cycle. Compass does not create cycles or Objectives automatically.
+Compass offers parent Key Results only from Draft or Active longer-horizon cycles whose dates fully contain the shorter cycle. On the annual side, it offers only unlinked Objectives from strictly shorter, fully contained cycles. For example, a January 1–December 31 annual cycle can be the parent of a January 1–March 31 quarterly cycle. An Objective with no cycle has no dates to compare, so the date rule is skipped for it: it can support a Key Result in any Draft or Active cycle, and Key Results on a cycle-less Objective can be supported by Objectives in any cycle. A closed cycle still cannot receive new supporting Objectives. Compass does not create cycles or Objectives automatically.
 
 The quarterly Objective shows its selected parent KR. The annual KR lists every supporting quarterly Objective, including its cycle, squad, and current progress. Existing relationships remain visible after a cycle closes, but closed cycles cannot receive new supporting Objectives.
 

@@ -636,3 +636,46 @@ describe("068_workspace_id_on_solution_objective", () => {
     expect(setup).toContain(`prisma/migrations/${NAME}/migration.sql`);
   });
 });
+
+describe("069_objective_optional_cycle", () => {
+  const NAME = "069_objective_optional_cycle";
+  const statements = () =>
+    sqlFor(NAME)
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n")
+      .split(";")
+      .map((statement) => statement.trim())
+      .filter(Boolean);
+
+  it("is registered exactly once, after 068_workspace_id_on_solution_objective", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === NAME)).toHaveLength(1);
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("068_workspace_id_on_solution_objective"));
+  });
+
+  it("is exactly one DSQL-safe DDL statement: DROP NOT NULL on objectives.cycle_id, no data change", () => {
+    expect(statements()).toEqual(["ALTER TABLE objectives ALTER COLUMN cycle_id DROP NOT NULL"]);
+    expect(statements().join("\n")).not.toMatch(/\b(UPDATE|INSERT|DELETE|REFERENCES|FOREIGN KEY|SET NOT NULL)\b/i);
+  });
+
+  it("matches schema.prisma: Objective.cycleId and its relation are optional", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    const body = schema.match(/model Objective \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(body).toMatch(/cycleId\s+String\?\s+@map\("cycle_id"\)\s+@db\.Uuid/);
+    expect(body).toMatch(/cycle\s+OKRCycle\?\s+@relation\(fields: \[cycleId\]/);
+  });
+
+  it("asserts the column is nullable in the runner before the receipt is recorded", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    const assertion = runner.indexOf("await assertObjectiveCycleIdNullable(");
+    const receipt = runner.indexOf("SET finished_at = CURRENT_TIMESTAMP WHERE id = $1");
+    expect(assertion).toBeGreaterThan(-1);
+    expect(receipt).toBeGreaterThan(assertion);
+  });
+
+  it("is applied by the functional e2e schema setup", () => {
+    const setup = readFileSync(path.join(ROOT, "e2e/functional/global-setup.ts"), "utf-8");
+    expect(setup).toContain(`prisma/migrations/${NAME}/migration.sql`);
+  });
+});

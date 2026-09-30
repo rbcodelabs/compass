@@ -9,7 +9,7 @@ import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
 import { assertWorkspaceWritable } from "@/lib/workspace-context";
 import { setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
-import { requireProductEntity, requireProductWorkspace } from "@/lib/product-action-auth";
+import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
 
 // ─── Create Cycle ─────────────────────────────────────────────────────────────
 
@@ -60,8 +60,12 @@ const CreateObjectiveSchema = z.object({
   squadId: z.string().uuid().optional(),
 });
 
+/**
+ * `cycleId === null` creates a cycle-less (persistent) Objective; its workspace
+ * then comes from the membership-checked org/workspace slugs instead of a cycle.
+ */
 export async function createObjective(
-  cycleId: string,
+  cycleId: string | null,
   orgSlug: string,
   workspaceSlug: string,
   formData: FormData
@@ -77,15 +81,18 @@ export async function createObjective(
     throw new Error(parsed.error.issues[0].message);
   }
 
-  // The Objective's workspace is derived from the authorized cycle, never from
-  // client input, so it cannot disagree with the cycle it is created under.
-  const { workspaceId } = await requireProductEntity("okrCycle", cycleId);
+  // The Objective's workspace is derived from the authorized cycle (or, with no
+  // cycle, from the membership-checked slugs), never from client-supplied ids,
+  // so it cannot disagree with the cycle it is created under.
+  const workspaceId = cycleId
+    ? (await requireProductEntity("okrCycle", cycleId)).workspaceId
+    : await requireProductWorkspaceBySlug(orgSlug, workspaceSlug);
   const prisma = getPrisma();
 
   await prisma.objective.create({
     data: {
       workspaceId,
-      cycleId,
+      cycleId: cycleId ?? null,
       title: parsed.data.title,
       description: parsed.data.description,
       owner: parsed.data.owner,

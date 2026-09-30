@@ -185,9 +185,9 @@ export async function listEligibleParentKeyResults({
   cycleId,
 }: {
   workspaceId: string;
-  cycleId: string;
+  cycleId?: string;
 }) {
-  const options = await getEligibleParentKeyResults(workspaceId, cycleId);
+  const options = await getEligibleParentKeyResults(workspaceId, cycleId ?? null);
   const text = options.length
     ? options
         .map((kr) => `${kr.cycleTitle} / ${kr.objectiveTitle} / ${kr.title}\nID: ${kr.id}`)

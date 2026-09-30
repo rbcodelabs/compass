@@ -23,6 +23,7 @@ import { assertGeodeDocumentStorageMigration, getGeodeDocumentStorageHealth } fr
 import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-updates";
 import { assertMcpConnectorsMigration } from "@/lib/migrations/mcp-connectors";
 import { assertMetricsDashboardMigration } from "@/lib/migrations/metrics-dashboard";
+import { assertObjectiveCycleIdNullable, OBJECTIVE_OPTIONAL_CYCLE_MIGRATION } from "@/lib/migrations/objective-optional-cycle";
 import { assertWorkspaceIdOnSolutionObjective, backfillWorkspaceIdOnSolutionObjective, WORKSPACE_ID_MIGRATION } from "@/lib/migrations/workspace-id-on-solution-objective";
 import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-manifest";
 
@@ -434,6 +435,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // receipt is recorded. Idempotent and resumable.
     name: "068_workspace_id_on_solution_objective",
     filePath: path.join(process.cwd(), "prisma/migrations/068_workspace_id_on_solution_objective/migration.sql"),
+  },
+  {
+    // objectives.cycle_id DROP NOT NULL (ADR Phase 1). Single DDL, no data change;
+    // the runner hook asserts the column is really nullable before the receipt.
+    name: "069_objective_optional_cycle",
+    filePath: path.join(process.cwd(), "prisma/migrations/069_objective_optional_cycle/migration.sql"),
   },
 ];
 
@@ -1892,6 +1899,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         await backfillWorkspaceIdOnSolutionObjective(client, schema, log)
         await assertWorkspaceIdOnSolutionObjective(client, schema)
       }
+      if (migration.name === OBJECTIVE_OPTIONAL_CYCLE_MIGRATION) await assertObjectiveCycleIdNullable(client, schema)
 
       // Only this distinct attempt becomes a successful receipt. A failed
       // attempt remains unfinished as forensic evidence and is never relabeled.

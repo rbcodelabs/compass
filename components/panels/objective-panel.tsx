@@ -17,6 +17,7 @@ import {
 } from "./panel-parts";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
+import { NO_CYCLE_LABEL, cycleRouteSegment } from "@/lib/okr-cycle-scope";
 
 type ObjectiveData = {
   id: string;
@@ -39,7 +40,7 @@ type ObjectiveData = {
     objective: {
       id: string;
       title: string;
-      cycle: { id: string; title: string; status: string };
+      cycle: { id: string; title: string; status: string } | null;
     };
   } | null;
   deliveryTasks: LinkedTaskData[];
@@ -98,7 +99,7 @@ export function ObjectivePanel({
         id: data.parentKeyResult.id,
         title: data.parentKeyResult.title,
         badge: {
-          label: data.parentKeyResult.objective.cycle.title,
+          label: data.parentKeyResult.objective.cycle?.title ?? NO_CYCLE_LABEL,
           className: "bg-accent text-accent-foreground",
         },
       }]
@@ -106,9 +107,7 @@ export function ObjectivePanel({
 
   return (
     <PanelContainer>
-      {data.cycle && (
-        <FullPageLink href={`/${orgSlug}/${workspaceSlug}/okrs/${data.cycle.id}`} />
-      )}
+      <FullPageLink href={`/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.cycle?.id)}`} />
 
       <PanelTitle
         title={data.title}
@@ -126,13 +125,11 @@ export function ObjectivePanel({
         className="text-sm text-foreground/80 leading-relaxed"
       />
 
-      {(data.owner || data.squad || data.cycle) && (
-        <div className="flex flex-col gap-3">
-          {data.owner && <Field label="Owner">{data.owner}</Field>}
-          {data.squad && <Field label="Squad">{data.squad.name}</Field>}
-          {data.cycle && <Field label="Cycle">{data.cycle.title}</Field>}
-        </div>
-      )}
+      <div className="flex flex-col gap-3">
+        {data.owner && <Field label="Owner">{data.owner}</Field>}
+        {data.squad && <Field label="Squad">{data.squad.name}</Field>}
+        <Field label="Cycle">{data.cycle?.title ?? NO_CYCLE_LABEL}</Field>
+      </div>
 
       <Section label="Key Results" count={data.keyResults.length}>
         <RelationList items={krItems} empty="No key results yet." />
@@ -148,7 +145,7 @@ export function ObjectivePanel({
           linkedId={data.id}
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
-          revalidatePathStr={data.cycle ? `/${orgSlug}/${workspaceSlug}/okrs/${data.cycle.id}` : `/${orgSlug}/${workspaceSlug}/okrs`}
+          revalidatePathStr={`/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.cycle?.id)}`}
           tasks={data.deliveryTasks}
           linkableTasks={data.linkableTasks}
           members={data.members}
