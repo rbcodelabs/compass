@@ -41,14 +41,14 @@ export async function assertCardSortNewEntriesMigration(client: PoolClient, sche
   const missing = REQUIRED_COLUMNS.filter((column) => !byName.has(column))
   if (missing.length > 0) {
     throw new Error(
-      `Migration 066 postcondition failed: card_sort_new_entries is missing column(s) ${missing.join(", ")}.`,
+      `Migration 068_card_sort_new_entries postcondition failed: card_sort_new_entries is missing column(s) ${missing.join(", ")}.`,
     )
   }
 
   const status = byName.get("status")!
   if (status.is_nullable !== "NO" || status.column_default === null) {
     throw new Error(
-      "Migration 066 postcondition failed: card_sort_new_entries.status must be NOT NULL with a default, or 'still PENDING' stops being a reliable claim.",
+      "Migration 068_card_sort_new_entries postcondition failed: card_sort_new_entries.status must be NOT NULL with a default, or 'still PENDING' stops being a reliable claim.",
     )
   }
 
@@ -61,7 +61,7 @@ export async function assertCardSortNewEntriesMigration(client: PoolClient, sche
   )
   if (unhealthy.length > 0) {
     throw new Error(
-      `Migration 066 postcondition failed: index(es) missing or not valid: ${unhealthy.join(", ")}.`,
+      `Migration 068_card_sort_new_entries postcondition failed: index(es) missing or not valid: ${unhealthy.join(", ")}.`,
     )
   }
 }

@@ -73,13 +73,13 @@ export async function assertCardSortRoundsMigration(client: PoolClient, schema: 
   const byName = new Map(columns.rows.map((row) => [`${row.table_name}.${row.column_name}`, row]))
   const missing = REQUIRED_COLUMNS.filter((column) => !byName.has(column))
   if (missing.length > 0) {
-    throw new Error(`Migration 065 postcondition failed: missing column(s) ${missing.join(", ")}.`)
+    throw new Error(`Migration 067_card_sort_rounds postcondition failed: missing column(s) ${missing.join(", ")}.`)
   }
 
   const fromValue = byName.get("card_sort_proposals.from_value")!
   if (fromValue.is_nullable !== "YES") {
     throw new Error(
-      "Migration 065 postcondition failed: card_sort_proposals.from_value must be nullable so a proposal on an object with no current value can record that honestly.",
+      "Migration 067_card_sort_rounds postcondition failed: card_sort_proposals.from_value must be nullable so a proposal on an object with no current value can record that honestly.",
     )
   }
 
@@ -92,14 +92,14 @@ export async function assertCardSortRoundsMigration(client: PoolClient, schema: 
   )
   if (unhealthy.length > 0) {
     throw new Error(
-      `Migration 065 postcondition failed: index(es) missing or not valid: ${unhealthy.join(", ")}.`,
+      `Migration 067_card_sort_rounds postcondition failed: index(es) missing or not valid: ${unhealthy.join(", ")}.`,
     )
   }
 
   const latestWins = indexes.rows.find((row) => row.name === CARD_SORT_UNIQUE_INDEX)
   if (!latestWins?.unique) {
     throw new Error(
-      `Migration 065 postcondition failed: ${CARD_SORT_UNIQUE_INDEX} exists but is not UNIQUE, so one person could hold several live proposals for the same object and every tally would double-count them.`,
+      `Migration 067_card_sort_rounds postcondition failed: ${CARD_SORT_UNIQUE_INDEX} exists but is not UNIQUE, so one person could hold several live proposals for the same object and every tally would double-count them.`,
     )
   }
 }
