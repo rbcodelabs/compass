@@ -1,4 +1,4 @@
-import matter from "gray-matter"
+import { safeMatter } from "@/lib/safe-matter"
 import path from "node:path"
 import { referencedAssets, type NormalizedCapabilityPack } from "@/lib/capability-pack"
 
@@ -31,7 +31,7 @@ export function compileCapabilityPackInstructions(artifact: NormalizedCapability
       if (!TEXT_ASSETS.has(path.posix.extname(ref).toLowerCase())) throw new Error(`Unsupported capability pack asset in tool-less runtime: ${ref}`)
       if (!assets.has(ref)) assets.set(ref, text(ref))
     }
-    return { id: `${artifact.manifest.id}:${id}`, path: skill.path, instructions: matter(markdown).content.trim() }
+    return { id: `${artifact.manifest.id}:${id}`, path: skill.path, instructions: safeMatter(markdown).content.trim() }
   })
   const compiled = JSON.stringify({
     packId: artifact.manifest.id,
