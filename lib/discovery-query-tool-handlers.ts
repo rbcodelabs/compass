@@ -29,11 +29,15 @@ export async function listSolutions({
   const solutions = await getPrisma().solution.findMany({
     where: {
       ...(status ? { status } : {}),
-      opportunity: {
-        workspaceId,
-        ...(opportunityStatus ? { status: opportunityStatus } : {}),
-        ...(squadId ? { squadId } : {}),
-      },
+      workspaceId,
+      ...(opportunityStatus || squadId
+        ? {
+            opportunity: {
+              ...(opportunityStatus ? { status: opportunityStatus } : {}),
+              ...(squadId ? { squadId } : {}),
+            },
+          }
+        : {}),
       ...(hasRoadmapItem === true ? { roadmapItems: { some: {} } } : {}),
       ...(hasRoadmapItem === false ? { roadmapItems: { none: {} } } : {}),
       ...(updatedSince || updatedBefore
@@ -103,12 +107,16 @@ export async function listAssumptions({
       ...(status ? { status } : {}),
       ...(riskLevel ? { riskLevel } : {}),
       solution: {
+        workspaceId,
         ...(solutionStatus ? { status: solutionStatus } : {}),
-        opportunity: {
-          workspaceId,
-          ...(opportunityStatus ? { status: opportunityStatus } : {}),
-          ...(squadId ? { squadId } : {}),
-        },
+        ...(opportunityStatus || squadId
+          ? {
+              opportunity: {
+                ...(opportunityStatus ? { status: opportunityStatus } : {}),
+                ...(squadId ? { squadId } : {}),
+              },
+            }
+          : {}),
       },
       ...(updatedSince || updatedBefore
         ? {

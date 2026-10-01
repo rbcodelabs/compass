@@ -37,7 +37,8 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
     where: { workspaceId: workspace.id },
     orderBy: { startDate: "desc" },
     include: {
-      _count: { select: { objectives: true } },
+      // Count only objectives whose own workspaceId matches, so the card agrees with the (scoped) list.
+      _count: { select: { objectives: { where: { workspaceId: workspace.id } } } },
     },
   });
 

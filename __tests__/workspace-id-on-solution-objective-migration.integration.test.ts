@@ -1,4 +1,8 @@
 /**
+ * INTENTIONAL NULL workspaceId: the raw INSERTs below deliberately omit workspace_id. They simulate rows written by
+ * pre-068 code (and late rows inserted by old instances) so the backfill has something to fill. The write-path guard
+ * (__tests__/tenant-isolation/solution-objective-write-paths.test.ts) allow-lists this file by name and requires this marker.
+ *
  * Runs the REGISTERED migration 068 through the real runner (`applyMigrations`)
  * against a throwaway schema in the local compass_e2e database. Never touches
  * Aurora or any shared environment.
@@ -10,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyMigrations } from "@/lib/migrations/runner";
-import { WORKSPACE_ID_BACKFILL_BATCH_SIZE, getWorkspaceIdBackfillStatus } from "@/lib/migrations/workspace-id-on-solution-objective";
+import { WORKSPACE_ID_BACKFILL_BATCH_SIZE, getWorkspaceIdBackfillStatus, repairWorkspaceIdResidual } from "@/lib/migrations/workspace-id-on-solution-objective";
 
 const MIGRATION = "068_workspace_id_on_solution_objective";
 const databaseUrl = process.env.WORKSPACE_ID_TEST_DATABASE_URL;
@@ -135,7 +139,7 @@ describe.skipIf(!databaseUrl)("068 workspace_id on solutions and objectives (reg
     expect((await preflight()).orphans.solutions).toBe(1);
     const failed = await apply();
     expect(failed.status).toBe(500);
-    expect(String(failed.body.error)).toMatch(/backfill postcondition failed: 1 solutions rows still have NULL workspace_id \(1 have no opportunities parent\)/);
+    expect(String(failed.body.error)).toMatch(/^068_workspace_id_on_solution_objective: backfill postcondition failed: 1 solutions rows still have NULL workspace_id \(1 reference a missing opportunities row, 0 have no opportunity_id at all/);
     expect(await receipts()).toBe(0);
 
     // Operator repairs the data; the same migration then completes.
@@ -160,5 +164,97 @@ describe.skipIf(!databaseUrl)("068 workspace_id on solutions and objectives (reg
     const recovered = await apply();
     expect(recovered.status, JSON.stringify(recovered.body)).toBe(200);
     expect(await receipts()).toBe(1);
+  });
+
+  describe("069 residual backfill (rows inserted by old code after 068's receipt)", () => {
+    const RESIDUAL = "069_workspace_id_residual_backfill";
+    const applyResidual = async () => {
+      const response = await applyMigrations(pool, schema, RESIDUAL);
+      return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+    };
+    const residualReceipts = async () =>
+      Number((await q(`SELECT count(*)::int AS n FROM {S}._prisma_migrations WHERE migration_name = $1 AND finished_at IS NOT NULL`, [RESIDUAL])).rows[0].n);
+
+    it("068 is already receipted, so a late NULL row is invisible to it, but 069 backfills it and records its own receipt", async () => {
+      // Old code (no workspace_id in its INSERT) keeps inserting after 068's receipt was written.
+      await q(`INSERT INTO {S}.solutions (id, opportunity_id, title) SELECT gen_random_uuid(), $1, 'late ' || g FROM generate_series(1, 3) g`, [oppA]);
+      await q(`INSERT INTO {S}.objectives (id, cycle_id, title) VALUES (gen_random_uuid(), $1, 'late objective')`, [cycleB]);
+      expect((await preflight()).nullWorkspaceId).toEqual({ solutions: 3, objectives: 1 });
+      const again068 = await apply();
+      expect(String(again068.body.message)).toContain("Nothing to apply");
+      expect((await preflight()).nullWorkspaceId).toEqual({ solutions: 3, objectives: 1 });
+
+      const result = await applyResidual();
+      expect(result.body, JSON.stringify(result.body)).not.toHaveProperty("error");
+      expect(result.status).toBe(200);
+      expect(String(result.body.message)).toContain("backfilled 3 solutions.workspace_id rows");
+      expect(String(result.body.message)).toContain("backfilled 1 objectives.workspace_id rows");
+      expect((await preflight()).nullWorkspaceId).toEqual({ solutions: 0, objectives: 0 });
+      expect(Number((await q(`SELECT count(*)::int AS n FROM {S}.solutions WHERE opportunity_id = $1 AND workspace_id = $2`, [oppA, WS_A])).rows[0].n)).toBe(SOLUTIONS_PER_WORKSPACE + 3);
+      expect(await residualReceipts()).toBe(1);
+      expect((await applyResidual()).body.message).toContain("Nothing to apply");
+    });
+
+    it("fails closed with no receipt when an orphan appeared", async () => {
+      await q(`DELETE FROM {S}._prisma_migrations WHERE migration_name = $1`, [RESIDUAL]);
+      await q(`INSERT INTO {S}.objectives (id, cycle_id, title) VALUES (gen_random_uuid(), $1, 'orphan objective')`, [randomUUID()]);
+      const failed = await applyResidual();
+      expect(failed.status).toBe(500);
+      // The error names 069 (not 068) and says what kind of orphan it is.
+      expect(String(failed.body.error)).toMatch(/^069_workspace_id_residual_backfill: backfill postcondition failed: 1 objectives rows still have NULL workspace_id \(1 reference a missing okr_cycles row, 0 have no cycle_id at all/);
+      expect(await residualReceipts()).toBe(0);
+    });
+
+    it("an Objective with NEITHER a workspace_id NOR a cycle (Phase 1 cycle-less) cannot derive a workspace: fails closed, reported separately, and is skipped by the join", async () => {
+      await q(`DELETE FROM {S}.objectives WHERE title = 'orphan objective'`);
+      // Phase 1 (#332) makes objectives.cycle_id nullable; simulate it in the throwaway schema.
+      await q(`ALTER TABLE {S}.objectives ALTER COLUMN cycle_id DROP NOT NULL`);
+      // A cycle-less Objective that DOES carry its workspace_id (what Phase 1 create_objective writes) is fine...
+      await q(`INSERT INTO {S}.objectives (id, workspace_id, cycle_id, title) VALUES (gen_random_uuid(), $1, NULL, 'cycle-less with workspace')`, [WS_A]);
+      await q(`DELETE FROM {S}._prisma_migrations WHERE migration_name = $1`, [RESIDUAL]);
+      const ok = await applyResidual();
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(await residualReceipts()).toBe(1);
+      // ...and neither the backfill nor the agreement check touches it.
+      expect(Number((await q(`SELECT count(*)::int AS n FROM {S}.objectives WHERE title = 'cycle-less with workspace' AND workspace_id = $1`, [WS_A])).rows[0].n)).toBe(1);
+
+      // One with no workspace_id AND no cycle has nothing to derive from.
+      await q(`INSERT INTO {S}.objectives (id, cycle_id, title) VALUES (gen_random_uuid(), NULL, 'cycle-less, no workspace')`);
+      await q(`DELETE FROM {S}._prisma_migrations WHERE migration_name = $1`, [RESIDUAL]);
+      const failed = await applyResidual();
+      expect(failed.status).toBe(500);
+      expect(String(failed.body.error)).toMatch(/^069_workspace_id_residual_backfill: .*1 objectives rows still have NULL workspace_id \(0 reference a missing okr_cycles row, 1 have no cycle_id at all and nothing to derive a workspace from/);
+      expect(await residualReceipts()).toBe(0);
+      await q(`DELETE FROM {S}.objectives WHERE title = 'cycle-less, no workspace'`);
+      const recovered = await applyResidual();
+      expect(recovered.status, JSON.stringify(recovered.body)).toBe(200);
+    });
+
+    it("the repeatable repair fills late NULL rows AFTER the one-shot receipt, every time it is run, with no receipt and no DDL", async () => {
+      const receiptsBefore = await residualReceipts();
+      for (const round of [1, 2]) {
+        await q(`INSERT INTO {S}.solutions (id, opportunity_id, title) VALUES (gen_random_uuid(), $1, $2)`, [oppB, `after the receipt ${round}`]);
+        expect((await preflight()).nullWorkspaceId?.solutions).toBe(1);
+        const client = pool;
+        const result = await repairWorkspaceIdResidual(client, schema);
+        expect(result.before.nullWorkspaceId).toEqual({ solutions: 1, objectives: 0 });
+        expect(result.log).toContain("  ✓ backfilled 1 solutions.workspace_id rows");
+        expect(result.after.nullWorkspaceId).toEqual({ solutions: 0, objectives: 0 });
+      }
+      expect(Number((await q(`SELECT count(*)::int AS n FROM {S}.solutions WHERE title LIKE 'after the receipt %' AND workspace_id = $1`, [WS_B])).rows[0].n)).toBe(2);
+      expect(await residualReceipts()).toBe(receiptsBefore); // no new receipt
+      // Idempotent when there is nothing to do.
+      expect((await repairWorkspaceIdResidual(pool, schema)).log).toContain("  ✓ backfilled 0 solutions.workspace_id rows");
+    });
+
+    it("the repeatable repair fails closed, reporting before-counts, on an orphan", async () => {
+      const orphan = randomUUID();
+      await q(`INSERT INTO {S}.solutions (id, opportunity_id, title) VALUES ($1, $2, 'orphan for repair')`, [orphan, randomUUID()]);
+      await expect(repairWorkspaceIdResidual(pool, schema)).rejects.toMatchObject({
+        message: expect.stringMatching(/^backfill-workspace-id: backfill postcondition failed: 1 solutions rows still have NULL workspace_id/),
+        before: { columnsPresent: true, orphans: { solutions: 1 } },
+      });
+      await q(`DELETE FROM {S}.solutions WHERE id = $1`, [orphan]);
+    });
   });
 });

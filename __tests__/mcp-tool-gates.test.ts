@@ -72,9 +72,9 @@ beforeEach(() => vi.clearAllMocks())
 
 describe("update_roadmap_item source-workspace link boundaries", () => {
   const targets = [
-    ["keyResultId", "keyResult", (workspaceId: string) => ({ objective: { cycle: { workspaceId } } })],
+    ["keyResultId", "keyResult", (workspaceId: string) => ({ objective: { workspaceId } })],
     ["opportunityId", "opportunity", (workspaceId: string) => ({ workspaceId })],
-    ["solutionId", "solution", (workspaceId: string) => ({ opportunity: { workspaceId } })],
+    ["solutionId", "solution", (workspaceId: string) => ({ workspaceId })],
     ["squadId", "squad", (workspaceId: string) => ({ workspaceId })],
   ] as const
 
@@ -461,7 +461,7 @@ describe("applyToolGate", () => {
   })
 
   it("update_solution_status preserves the solution workspace boundary", async () => {
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-1" } })
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
 
     await expect(
@@ -478,7 +478,7 @@ describe("applyToolGate", () => {
 
   it("promote_to_roadmap: rejects a workspaceId that doesn't own the solution (landmine)", async () => {
     // Solution belongs to ws-1, but the caller passes ws-2.
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-1" } })
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" }) // member of the real workspace
     await expect(
       applyToolGate("promote_to_roadmap", MEMBER, { solutionId: "sol-1", workspaceId: "ws-2" })
@@ -501,7 +501,7 @@ describe("applyToolGate", () => {
   it("update_roadmap_item rejects a cross-workspace Solution before writing", async () => {
     mockPrisma.roadmapItem.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-2" } })
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
 
     await expect(callTool("update_roadmap_item", MEMBER, {
       itemId: "item-1",
@@ -519,7 +519,7 @@ describe("applyToolGate", () => {
       horizon: "NEXT",
       status: "ACTIVE",
     })
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-1" } })
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     mockPrisma.roadmapItem.update.mockResolvedValue({
       id: "item-1",
@@ -545,7 +545,7 @@ describe("applyToolGate", () => {
 
   it("link_artifact_to_solution: rejects cross-workspace targets", async () => {
     mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-2" } })
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     await expect(applyToolGate("link_artifact_to_solution", MEMBER, {
       artifactId: "art-1", solutionId: "sol-1", workspaceId: "ws-1",
@@ -622,7 +622,7 @@ describe("applyToolGate", () => {
 // per-user actor scope — no direct applyToolGate call.
 describe("register() wrapper enforces gates end-to-end", () => {
   it("denies update_solution_status before its handler can read or write", async () => {
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-1" } })
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
 
     await expect(callTool("update_solution_status", MEMBER, {
@@ -660,5 +660,52 @@ describe("register() wrapper enforces gates end-to-end", () => {
       content: { text: string }[]
     }
     expect(result.content[0].text).toContain("Reduce churn")
+  })
+})
+
+describe("card sort tool policy", () => {
+  const WRITE_TOOLS = ["create_card_sort_round", "set_card_sort_round_state", "propose_card_sort_move", "withdraw_card_sort_proposal"]
+  const READ_TOOL_NAMES = ["list_card_sort_factors", "list_card_sort_rounds", "get_card_sort_proposals", "get_card_sort_board", "get_card_sort_tally"]
+  const ALL = [...WRITE_TOOLS, ...READ_TOOL_NAMES]
+
+  it.each(ALL)("%s is registered and has a TOOL_GATES entry", (tool) => {
+    expect(registeredTools[tool]).toBeTypeOf("function")
+    expect(TOOL_GATES[tool]).toBeTypeOf("function")
+  })
+
+  // A CardSortProposal has no agent author column, so an agent's proposal would be
+  // stored as, and read back as, the delegating human's own opinion.
+  it.each(WRITE_TOOLS)("%s is human-only (DENY for agent identities)", (tool) => {
+    expect(AGENT_TOOL_POLICY[tool]).toBe("DENY")
+  })
+  it.each(READ_TOOL_NAMES)("%s is an ordinary agent read", (tool) => {
+    expect(AGENT_TOOL_POLICY[tool]).toBe("READ")
+  })
+
+  it.each(WRITE_TOOLS)("%s is refused for an agent identity even with a workspace grant", async (tool) => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    try {
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent" })
+      mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }])
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+      await expect(
+        applyToolGate(tool, { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1" }),
+      ).rejects.toThrow(/human identity/)
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it.each(ALL)("%s requires workspace membership for a per-user caller", async (tool) => {
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(/not found or access denied/)
+
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+  })
+
+  it.each(READ_TOOL_NAMES)("%s needs only the read OAuth scope", (tool) => {
+    expect(requiredToolScope(tool)).toBe("mcp:read")
+  })
+  it.each(WRITE_TOOLS)("%s needs the write OAuth scope", (tool) => {
+    expect(requiredToolScope(tool)).toBe("mcp:write")
   })
 })

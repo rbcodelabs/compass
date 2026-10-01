@@ -132,7 +132,7 @@ export async function getCanvasOverview(
     await Promise.all([
       prisma.squad.findMany({ where: { workspaceId } }),
       prisma.objective.findMany({
-        where: { cycle: { workspaceId } },
+        where: { workspaceId },
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       }),
       prisma.opportunity.findMany({
@@ -165,12 +165,12 @@ export async function getCanvasOverview(
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         })
       : Promise.resolve([]),
-    opportunityIds.length > 0
-      ? prisma.solution.findMany({
-          where: { opportunityId: { in: opportunityIds } },
-          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        })
-      : Promise.resolve([]),
+    // Scoped by the Solution's own workspaceId (migration 068); a NULL row is
+    // simply not returned.
+    prisma.solution.findMany({
+      where: { workspaceId },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    }),
   ]);
 
   const solutionIds = solutionsRaw.map((s) => s.id);

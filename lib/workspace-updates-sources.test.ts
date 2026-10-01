@@ -205,14 +205,14 @@ describe("Updates source links and visibility", () => {
     expect(models.solution.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          opportunity: { workspaceId: "workspace" },
+          workspaceId: "workspace",
         }),
       }),
     );
     expect(models.assumption.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          solution: { opportunity: { workspaceId: "workspace" } },
+          solution: { workspaceId: "workspace" },
         }),
       }),
     );

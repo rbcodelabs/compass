@@ -40,8 +40,8 @@ async function seedLinkTargets(stamp: number) {
     if (!workspace) throw new Error("E2E workspace (with an OKR cycle) has not been seeded");
     const krTitle = `E2E Composer KR ${stamp}`;
     const { rows: [objective] } = await pool.query(
-      `INSERT INTO ${S}.objectives (id, cycle_id, title) VALUES (gen_random_uuid(), $1, $2) RETURNING id`,
-      [workspace.cycle_id, `E2E Composer Objective ${stamp}`],
+      `INSERT INTO ${S}.objectives (id, workspace_id, cycle_id, title) VALUES (gen_random_uuid(), $1, $2, $3) RETURNING id`,
+      [workspace.id, workspace.cycle_id, `E2E Composer Objective ${stamp}`],
     );
     await pool.query(
       `INSERT INTO ${S}.key_results (id, objective_id, title, target, current) VALUES (gen_random_uuid(), $1, $2, 40, 10)`,

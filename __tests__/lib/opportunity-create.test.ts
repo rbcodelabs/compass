@@ -33,8 +33,8 @@ function makeDb(initial: State) {
         s.squads.find((row) => row.id === where.id && row.workspaceId === where.workspaceId) ?? null,
     },
     keyResult: {
-      findFirst: async ({ where }: { where: { id: string; objective: { cycle: { workspaceId: string } } } }) =>
-        s.keyResults.find((row) => row.id === where.id && row.workspaceId === where.objective.cycle.workspaceId) ?? null,
+      findFirst: async ({ where }: { where: { id: string; objective: { workspaceId: string } } }) =>
+        s.keyResults.find((row) => row.id === where.id && row.workspaceId === where.objective.workspaceId) ?? null,
     },
     feedbackItem: {
       findMany: async ({ where }: { where: { id: { in: string[] }; workspaceId: string } }) =>

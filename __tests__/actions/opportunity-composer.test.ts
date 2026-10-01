@@ -78,7 +78,7 @@ describe("createOpportunityFromComposer", () => {
     expect(result).toEqual({ ok: true, opportunity: { id: "opp-new", title: "Onboarding stalls" } });
     expect(m.db.$transaction).toHaveBeenCalledOnce();
     expect(m.db.keyResult.findFirst).toHaveBeenCalledWith({
-      where: { id: "kr-1", objective: { cycle: { workspaceId: "ws-1" } } },
+      where: { id: "kr-1", objective: { workspaceId: "ws-1" } },
       select: { id: true },
     });
     expect(m.db.opportunity.create.mock.calls[0][0].data).toMatchObject({
@@ -147,7 +147,7 @@ describe("loadOpportunityComposerOptions", () => {
         feedback: [{ id: "fb-1", title: "Slow", type: "BUG", status: "OPEN", opportunity: null }],
       },
     });
-    expect(m.db.keyResult.findMany.mock.calls[0][0].where).toEqual({ objective: { cycle: { workspaceId: "ws-1" } } });
+    expect(m.db.keyResult.findMany.mock.calls[0][0].where).toEqual({ objective: { workspaceId: "ws-1" } });
     expect(m.db.feedbackItem.findMany.mock.calls[0][0].where).toEqual({ workspaceId: "ws-1" });
   });
 });

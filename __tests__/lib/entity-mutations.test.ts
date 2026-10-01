@@ -69,7 +69,7 @@ describe("opportunity relationship edits", () => {
     expect(await updateEntityField("opportunity", "e1", WS, field, "target")).toEqual({ ok: true });
     expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { [field]: "target", updatedAt: expect.any(Date) } });
     const targetQuery = field === "squadId" ? database.squad.findFirst : models.keyResult.findFirst;
-    expect(targetQuery).toHaveBeenCalledWith({ where: field === "squadId" ? { id: "target", workspaceId: WS } : { id: "target", objective: { cycle: { workspaceId: WS } } }, select: { id: true } });
+    expect(targetQuery).toHaveBeenCalledWith({ where: field === "squadId" ? { id: "target", workspaceId: WS } : { id: "target", objective: { workspaceId: WS } }, select: { id: true } });
     expect(await updateEntityField("opportunity", "e1", WS, field, null)).toEqual({ ok: true });
   });
   it.each(["squadId", "linkedKeyResultId"])("rejects a missing or foreign %s and invalid values", async (field) => {
@@ -356,7 +356,7 @@ describe("updateEntityField — workspace scoping (write-side IDOR guard)", () =
   it("verifies with the parent-chain scope for indirect entities before updating", async () => {
     await updateEntityField("solution", "sol-1", WS, "title", "New");
     expect(models.solution.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "sol-1", opportunity: { workspaceId: WS } } })
+      expect.objectContaining({ where: { id: "sol-1", workspaceId: WS } })
     );
     expect(models.solution.update).toHaveBeenCalled();
   });

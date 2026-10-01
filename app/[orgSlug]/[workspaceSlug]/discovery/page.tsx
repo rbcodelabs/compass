@@ -14,8 +14,9 @@ import { resolveWorkspaceScoringModel, toScoreSummary } from "@/lib/scoring-mode
 import type { OpportunityStatus, SolutionStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
-import { ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ChevronRight, Shuffle } from "lucide-react";
+import Link from "next/link";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { loadCustomFieldDefinitions } from "@/lib/custom-field-definitions";
 import {
@@ -134,8 +135,10 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         sortOrder: true,
         squadId: true,
         score: { select: { normalizedScore: true, modelVersion: true } },
-        _count: { select: { solutions: true, evidence: true } },
+        _count: { select: { solutions: { where: { workspaceId: workspace.id } }, evidence: true } },
         solutions: {
+          // A solution whose own workspaceId is NULL or names another workspace is hidden, not trusted via its parent.
+          where: { workspaceId: workspace.id },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: {
             id: true,
@@ -165,7 +168,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         sortOrder: true,
         squadId: true,
         score: { select: { normalizedScore: true, modelVersion: true } },
-        _count: { select: { solutions: true, evidence: true } },
+        _count: { select: { solutions: { where: { workspaceId: workspace.id } }, evidence: true } },
       },
     }),
     // Distinct source-type count per opportunity, used for the "from N sources" badge.
@@ -322,6 +325,12 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
               customFieldGroups={customFieldGroups}
               activeCustomFieldId={customFieldFilter?.fieldId ?? null}
             />
+            <Link
+              href={`/${orgSlug}/${workspaceSlug}/card-sort`}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              <Shuffle className="size-4" /> Card sort
+            </Link>
           </div>
         </Suspense>
       )}

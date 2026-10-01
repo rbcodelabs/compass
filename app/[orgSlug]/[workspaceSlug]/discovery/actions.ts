@@ -106,7 +106,7 @@ export async function loadOpportunityComposerOptions(
   const [squads, keyResults, feedback] = await Promise.all([
     prisma.squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
     prisma.keyResult.findMany({
-      where: { objective: { cycle: { workspaceId } } },
+      where: { objective: { workspaceId } },
       select: { id: true, title: true, objective: { select: { title: true } } },
       orderBy: { createdAt: "asc" },
     }),
@@ -147,10 +147,13 @@ export async function addSolution(
   data: { title: string; description?: string },
   revalidatePathStr: string
 ) {
-  await requireProductEntity("opportunity", opportunityId);
+  // The Solution's workspace is derived from the authorized parent Opportunity,
+  // never from client input.
+  const { workspaceId } = await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
   const solution = await captureWorkspaceMutation(prisma, "solution", "create", "UI", undefined, tx => tx.solution.create({
     data: {
+      workspaceId,
       opportunityId,
       title: data.title,
       description: data.description,
@@ -538,7 +541,7 @@ export async function saveSolutionScore(
   const { prisma, workspaceId, userId } = await resolveWorkspace(orgSlug, workspaceSlug);
 
   const solution = await prisma.solution.findFirst({
-    where: { id: solutionId, opportunity: { workspaceId } },
+    where: { id: solutionId, workspaceId },
     select: { id: true },
   });
   if (!solution) throw new Error("Solution not found");

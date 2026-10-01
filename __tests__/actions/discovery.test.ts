@@ -153,7 +153,8 @@ describe("addSolution", () => {
   it("creates a solution linked to the opportunity", async () => {
     const result = await addSolution("opp-1", { title: "New Solution" }, "/path");
     expect(mockSolution.create).toHaveBeenCalledWith({
-      data: { opportunityId: "opp-1", title: "New Solution", description: undefined },
+      // workspaceId is derived from the authorized parent Opportunity, never client input.
+      data: { workspaceId: "ws-1", opportunityId: "opp-1", title: "New Solution", description: undefined },
     });
     expect(result).toEqual({ id: "sol-1", title: "Test Sol" });
   });

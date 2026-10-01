@@ -65,7 +65,7 @@ describe("findLinkReferences (canary: the guard catches known-bad text)", () => 
     ["type M = 'OpportunityObjectiveLink'", "link model/table name"],
     ["opportunity-objective-link", "link model/table name"],
     ["const delegate = prisma[modelName]", "dynamic delegate access"],
-    ["tx[`${kind}Link`].create(args)", "dynamic delegate access"],
+    ["tx[`${kind}Link`].findMany(args)", "dynamic delegate access"],
     ["Object.keys(Prisma.ModelName)", "model introspection"],
     ["Prisma.dmmf.datamodel.models", "model introspection"],
   ])("flags %s", (text, reason) => {

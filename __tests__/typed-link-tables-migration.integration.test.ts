@@ -8,7 +8,7 @@
  *     npx vitest run __tests__/typed-link-tables-migration.integration.test.ts
  */
 import { randomUUID } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -66,20 +66,23 @@ describe.skipIf(!databaseUrl)("071 typed link tables (registered migration)", ()
     await pool.query(`CREATE SCHEMA "${schema}"`);
     const init = await applyMigrations(pool, schema, "001_init");
     expect(init.status, JSON.stringify(await init.json())).toBe(200);
+  });
 
+  /** Seeded only after 068 is applied, so every objective row is written with its workspace_id like current code does. */
+  async function seed() {
     const [cycleA, cycleB] = [randomUUID(), randomUUID()];
     [objA, objB] = [randomUUID(), randomUUID()];
     const [krA, krB, krNoObjective] = [randomUUID(), randomUUID(), randomUUID()];
     [crossOpp, danglingKrOpp, danglingObjOpp] = [randomUUID(), randomUUID(), randomUUID()];
     await q(`INSERT INTO {S}.okr_cycles (id, workspace_id, title, start_date, end_date) VALUES ($1,$2,'A','2026-01-01','2026-03-31'), ($3,$4,'B','2026-01-01','2026-03-31')`, [cycleA, WS_A, cycleB, WS_B]);
-    await q(`INSERT INTO {S}.objectives (id, cycle_id, title) VALUES ($1,$2,'obj A'), ($3,$4,'obj B')`, [objA, cycleA, objB, cycleB]);
+    await q(`INSERT INTO {S}.objectives (id, cycle_id, workspace_id, title) VALUES ($1,$2,$3,'obj A'), ($4,$5,$6,'obj B')`, [objA, cycleA, WS_A, objB, cycleB, WS_B]);
     await q(`INSERT INTO {S}.key_results (id, objective_id, title, target) VALUES ($1,$2,'kr A',1), ($3,$4,'kr B',1), ($5,$6,'kr without objective',1)`, [krA, objA, krB, objB, krNoObjective, randomUUID()]);
     await q(`INSERT INTO {S}.opportunities (id, workspace_id, title, linked_key_result_id) SELECT gen_random_uuid(), $1, 'good A ' || g, $2 FROM generate_series(1, $3::int) g`, [WS_A, krA, SAME_WORKSPACE_A]);
     await q(`INSERT INTO {S}.opportunities (id, workspace_id, title, linked_key_result_id) SELECT gen_random_uuid(), $1, 'good B ' || g, $2 FROM generate_series(1, $3::int) g`, [WS_B, krB, SAME_WORKSPACE_B]);
     await q(`INSERT INTO {S}.opportunities (id, workspace_id, title) VALUES ('${randomUUID()}', $1, 'never linked')`, [WS_A]);
     // Orphans: cross-workspace (WS_A opportunity -> KR under WS_B's objective), dangling KR, KR whose objective is gone.
     await q(`INSERT INTO {S}.opportunities (id, workspace_id, title, linked_key_result_id) VALUES ($1,$2,'cross',$3), ($4,$2,'dangling kr',$5), ($6,$2,'dangling objective',$7)`, [crossOpp, WS_A, krB, danglingKrOpp, randomUUID(), danglingObjOpp, krNoObjective]);
-  });
+  }
 
   afterAll(async () => {
     try {
@@ -103,6 +106,7 @@ describe.skipIf(!databaseUrl)("071 typed link tables (registered migration)", ()
   it("precondition: fails closed when 068 is applied but an objective still has a NULL workspace_id", async () => {
     const prerequisite = await apply(PREREQUISITE);
     expect(prerequisite.status, JSON.stringify(prerequisite.body)).toBe(200);
+    await seed();
     await q(`UPDATE {S}.objectives SET workspace_id = NULL WHERE id = $1`, [objA]);
     const failed = await apply();
     expect(failed.status).toBe(500);
@@ -259,11 +263,9 @@ describe.skipIf(!databaseUrl)("071 typed link tables (registered migration)", ()
   it("prune: a link whose objective was deleted is removed, and the now-dangling pointer is quarantined, not blocking", async () => {
     const cycle = (await q<{ cycle_id: string }>(`SELECT cycle_id FROM {S}.objectives WHERE id = $1`, [objA])).rows[0].cycle_id;
     const [objC, krC] = [randomUUID(), randomUUID()];
-    await q(`INSERT INTO {S}.objectives (id, cycle_id, title) VALUES ($1, $2, 'obj C')`, [objC, cycle]);
+    await q(`INSERT INTO {S}.objectives (id, cycle_id, workspace_id, title) VALUES ($1, $2, $3, 'obj C')`, [objC, cycle, WS_A]);
     await q(`INSERT INTO {S}.key_results (id, objective_id, title, target) VALUES ($1, $2, 'kr C', 1)`, [krC, objC]);
     await q(`INSERT INTO {S}.opportunities (id, workspace_id, title, linked_key_result_id) SELECT gen_random_uuid(), $1, 'on C ' || g, $2 FROM generate_series(1, 3) g`, [WS_A, krC]);
-    // 068 already ran: new objectives need their own workspace_id (what the writers deployed with PR-B do).
-    await q(`UPDATE {S}.objectives SET workspace_id = $2 WHERE id = $1`, [objC, WS_A]);
     expect(await rerun()).toContain("inserted 3 LEGACY opportunity_objective_links rows");
     const before = await linkCount();
 
@@ -371,7 +373,10 @@ describe.skipIf(!databaseUrl)("existing CRUD works against a schema without the 
     // The pre-071 world: every table the CRUD below (and Prisma's relationMode=prisma delete checks)
     // touches exists, the link tables do not. The multi-step decision-gate migrations (039+) cannot run
     // on local Postgres and are irrelevant to these models, so only the earlier simple ones are applied.
-    const names = readdirSync(path.join(process.cwd(), "prisma/migrations"))
+    const migrationsDir = path.join(process.cwd(), "prisma/migrations");
+    const names = readdirSync(migrationsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && existsSync(path.join(migrationsDir, entry.name, "migration.sql")))
+      .map((entry) => entry.name)
       .filter((name) => name < "039" || name === "064_solution_scoring" || name === PREREQUISITE)
       .sort();
     for (const name of names) {
@@ -390,10 +395,10 @@ describe.skipIf(!databaseUrl)("existing CRUD works against a schema without the 
     try {
       const workspaceId = randomUUID(); // relationMode = "prisma": no FK, the workspace row is not needed
       const cycle = await prisma.oKRCycle.create({ data: { workspaceId, title: "c", startDate: new Date("2026-01-01"), endDate: new Date("2026-03-31") } });
-      const objective = await prisma.objective.create({ data: { cycleId: cycle.id, title: "o" } });
+      const objective = await prisma.objective.create({ data: { cycleId: cycle.id, workspaceId: cycle.workspaceId, title: "o" } });
       const keyResult = await prisma.keyResult.create({ data: { objectiveId: objective.id, title: "k", target: 1 } });
       const opportunity = await prisma.opportunity.create({ data: { workspaceId, title: "opp", linkedKeyResultId: keyResult.id } });
-      const solution = await prisma.solution.create({ data: { opportunityId: opportunity.id, title: "s" } });
+      const solution = await prisma.solution.create({ data: { opportunityId: opportunity.id, workspaceId: opportunity.workspaceId, title: "s" } });
 
       await prisma.opportunity.update({ where: { id: opportunity.id }, data: { title: "opp 2", linkedKeyResultId: null } });
       await prisma.objective.update({ where: { id: objective.id }, data: { title: "o 2" } });

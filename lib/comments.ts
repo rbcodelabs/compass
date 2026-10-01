@@ -89,21 +89,21 @@ export async function resolveCommentTarget(targetType: CommentTargetType, target
   const prisma = getPrisma()
   switch (targetType) {
     case "OBJECTIVE": {
-      const row = await prisma.objective.findUnique({ where: { id: targetId }, select: { cycle: { select: { workspaceId: true } } } })
-      return row ? { workspaceId: row.cycle.workspaceId } : null
+      const row = await prisma.objective.findUnique({ where: { id: targetId }, select: { workspaceId: true } })
+      return row?.workspaceId ? { workspaceId: row.workspaceId } : null
     }
     case "KEY_RESULT": {
-      const row = await prisma.keyResult.findUnique({ where: { id: targetId }, select: { objective: { select: { cycle: { select: { workspaceId: true } } } } } })
-      return row ? { workspaceId: row.objective.cycle.workspaceId } : null
+      const row = await prisma.keyResult.findUnique({ where: { id: targetId }, select: { objective: { select: { workspaceId: true } } } })
+      return row?.objective.workspaceId ? { workspaceId: row.objective.workspaceId } : null
     }
     case "OPPORTUNITY": return prisma.opportunity.findUnique({ where: { id: targetId }, select: { workspaceId: true } })
     case "SOLUTION": {
-      const row = await prisma.solution.findUnique({ where: { id: targetId }, select: { opportunity: { select: { workspaceId: true } } } })
-      return row ? { workspaceId: row.opportunity.workspaceId } : null
+      const row = await prisma.solution.findUnique({ where: { id: targetId }, select: { workspaceId: true } })
+      return row?.workspaceId ? { workspaceId: row.workspaceId } : null
     }
     case "ASSUMPTION": {
-      const row = await prisma.assumption.findUnique({ where: { id: targetId }, select: { solution: { select: { opportunity: { select: { workspaceId: true } } } } } })
-      return row ? { workspaceId: row.solution.opportunity.workspaceId } : null
+      const row = await prisma.assumption.findUnique({ where: { id: targetId }, select: { solution: { select: { workspaceId: true } } } })
+      return row?.solution.workspaceId ? { workspaceId: row.solution.workspaceId } : null
     }
     case "EXPERIMENT": return prisma.experiment.findUnique({ where: { id: targetId }, select: { workspaceId: true } })
     case "ROADMAP_ITEM": return prisma.roadmapItem.findUnique({ where: { id: targetId }, select: { workspaceId: true } })

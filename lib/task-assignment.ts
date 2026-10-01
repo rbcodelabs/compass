@@ -91,10 +91,10 @@ export async function validateTaskLink(workspaceId: string, linkedType: TaskLink
   const prisma = getPrisma();
   const where = { id: linkedId, workspaceId };
   const target = await (linkedType === "OPPORTUNITY" ? prisma.opportunity.findFirst({ where })
-    : linkedType === "SOLUTION" ? prisma.solution.findFirst({ where: { id: linkedId, opportunity: { workspaceId } } })
+    : linkedType === "SOLUTION" ? prisma.solution.findFirst({ where: { id: linkedId, workspaceId } })
     : linkedType === "ROADMAP_ITEM" ? prisma.roadmapItem.findFirst({ where })
-    : linkedType === "OBJECTIVE" ? prisma.objective.findFirst({ where: { id: linkedId, cycle: { workspaceId } } })
-    : linkedType === "KEY_RESULT" ? prisma.keyResult.findFirst({ where: { id: linkedId, objective: { cycle: { workspaceId } } } })
+    : linkedType === "OBJECTIVE" ? prisma.objective.findFirst({ where: { id: linkedId, workspaceId } })
+    : linkedType === "KEY_RESULT" ? prisma.keyResult.findFirst({ where: { id: linkedId, objective: { workspaceId } } })
     : linkedType === "DOC" ? prisma.doc.findFirst({ where, select: { id: true } })
     : linkedType === "EXPERIMENT" ? prisma.experiment.findFirst({ where })
     : linkedType === "DECISION" ? prisma.reviewRequest.findFirst({ where })
@@ -104,8 +104,7 @@ export async function validateTaskLink(workspaceId: string, linkedType: TaskLink
 }
 
 export function taskLinkScope(workspaceId: string, linkedType: string): Record<string, unknown> {
-  if (linkedType === "SOLUTION") return { opportunity: { workspaceId } };
-  if (linkedType === "OBJECTIVE") return { cycle: { workspaceId } };
-  if (linkedType === "KEY_RESULT") return { objective: { cycle: { workspaceId } } };
+  if (linkedType === "KEY_RESULT") return { objective: { workspaceId } };
+  // Solution and Objective carry their own workspaceId (migration 068).
   return { workspaceId };
 }

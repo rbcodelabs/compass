@@ -81,6 +81,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
     prisma.objective.findMany({
       where: {
         cycleId: cycle.id,
+        workspaceId: workspace.id,
         ...(squadFilter ? { squadId: squadFilter } : {}),
       },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
@@ -104,6 +105,8 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
           where: { objectiveId: { in: objectiveIds } },
           include: {
             supportingObjectives: {
+              // NULL / drifted objectives are hidden, like every other scoped read.
+              where: { workspaceId: workspace.id },
               include: {
                 cycle: { select: { id: true, title: true } },
                 squad: { select: { id: true, name: true, color: true } },
@@ -189,7 +192,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
     ? await prisma.keyResult.findMany({
         where: {
           id: { in: missingCurrentParents },
-          objective: { cycle: { workspaceId: workspace.id } },
+          objective: { workspaceId: workspace.id },
         },
         include: {
           objective: {

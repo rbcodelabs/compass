@@ -121,10 +121,8 @@ async function resolveSolutionPlan({ workspaceId, userId, entityId }: ResolveInp
       id: entityId,
       commentType: "PLAN",
       solution: {
-        opportunity: {
-          workspaceId,
-          workspace: { members: { some: { userId } } },
-        },
+        workspaceId,
+        workspace: { members: { some: { userId } } },
       },
     },
     select: {
@@ -135,12 +133,8 @@ async function resolveSolutionPlan({ workspaceId, userId, entityId }: ResolveInp
         select: {
           id: true,
           title: true,
-          opportunity: {
-            select: {
-              id: true,
-              workspace: { select: { slug: true, organization: { select: { slug: true } } } },
-            },
-          },
+          opportunityId: true,
+          workspace: { select: { slug: true, organization: { select: { slug: true } } } },
         },
       },
     },
@@ -148,9 +142,10 @@ async function resolveSolutionPlan({ workspaceId, userId, entityId }: ResolveInp
   if (!plan || plan.planStatus !== "APPROVED") return null
 
   const { solution } = plan
-  const { opportunity } = solution
-  const base = `/${opportunity.workspace.organization.slug}/${opportunity.workspace.slug}`
-  const sourceUrl = `${base}/discovery/${opportunity.id}?detail=solution:${solution.id}`
+  // The Solution's own workspace row (never its Opportunity's) supplies the slugs.
+  if (!solution.workspace) return null
+  const base = `/${solution.workspace.organization.slug}/${solution.workspace.slug}`
+  const sourceUrl = `${base}/discovery/${solution.opportunityId}?detail=solution:${solution.id}`
   const summary = plan.body.trim().slice(0, 280)
 
   return {
