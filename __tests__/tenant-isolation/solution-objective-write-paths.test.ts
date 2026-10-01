@@ -415,6 +415,8 @@ const files = walk(ROOT)
  */
 const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "__tests__/preview-automation-qa/postgres-integration.test.ts": 1,
+  // 071 old-client CRUD test: one objective + one solution create, both with a derived workspaceId (cycle.workspaceId, opportunity.workspaceId).
+  "__tests__/typed-link-tables-migration.integration.test.ts": 2,
   "app/[orgSlug]/[workspaceSlug]/discovery/actions.ts": 1,
   "app/[orgSlug]/[workspaceSlug]/okrs/actions.ts": 1,
   "app/api/mcp/route.ts": 2,
@@ -422,6 +424,8 @@ const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "e2e/functional/specs/pm-interview.spec.ts": 1,
 };
 const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
+  // 071 migration integration test: three objective inserts, each listing workspace_id (seeded after 068 is applied).
+  "__tests__/typed-link-tables-migration.integration.test.ts": 3,
   "__tests__/workspace-id-on-solution-objective-migration.integration.test.ts": 12,
   // INSERT INTO ${ownerTable}: the managed-pilot ownership table (see DYNAMIC_INSERT_ALLOWED); counted so a second one is noticed.
   "lib/preview-automation/managed-migrations.ts": 1,

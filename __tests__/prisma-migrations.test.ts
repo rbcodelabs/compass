@@ -662,3 +662,84 @@ describe("069_workspace_id_residual_backfill", () => {
     expect(runner).toMatch(/migration\.name === WORKSPACE_ID_MIGRATION \|\| migration\.name === WORKSPACE_ID_RESIDUAL_MIGRATION/);
   });
 });
+
+describe("071_typed_link_tables", () => {
+  const NAME = "071_typed_link_tables";
+  const statements = () =>
+    sqlFor(NAME)
+      .split(";")
+      .map((statement) => statement.trim().replace(/\s+/g, " "))
+      .filter(Boolean);
+
+  it("is registered exactly once, after 068_workspace_id_on_solution_objective", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === NAME)).toHaveLength(1);
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("068_workspace_id_on_solution_objective"));
+  });
+
+  it("creates the two tables then six ASYNC indexes, one DDL per statement, no FK, idempotent", () => {
+    const all = statements();
+    expect(all).toHaveLength(8);
+    expect(all.slice(0, 2).every((s) => /^CREATE TABLE IF NOT EXISTS (opportunity_objective_links|solution_key_result_links) \(/.test(s))).toBe(true);
+    expect(all.slice(2)).toEqual([
+      "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_opportunity_objective_links_pair ON opportunity_objective_links (opportunity_id, objective_id)",
+      "CREATE INDEX ASYNC IF NOT EXISTS idx_opportunity_objective_links_objective ON opportunity_objective_links (objective_id, opportunity_id)",
+      "CREATE INDEX ASYNC IF NOT EXISTS idx_opportunity_objective_links_workspace ON opportunity_objective_links (workspace_id)",
+      "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_solution_key_result_links_pair ON solution_key_result_links (solution_id, key_result_id)",
+      "CREATE INDEX ASYNC IF NOT EXISTS idx_solution_key_result_links_key_result ON solution_key_result_links (key_result_id, solution_id)",
+      "CREATE INDEX ASYNC IF NOT EXISTS idx_solution_key_result_links_workspace ON solution_key_result_links (workspace_id)",
+    ]);
+    expect(sqlFor(NAME)).not.toMatch(/REFERENCES|FOREIGN KEY|ALTER TABLE|ON CONFLICT|INSERT INTO/i);
+  });
+
+  it("declares workspace_id NOT NULL and the agreed columns on both tables", () => {
+    const [links, krLinks] = statements();
+    for (const column of ["id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY", "workspace_id UUID NOT NULL", "source VARCHAR(20) NOT NULL DEFAULT 'UI'", "created_by_id UUID,", "created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP"]) {
+      expect(links).toContain(column);
+      expect(krLinks).toContain(column);
+    }
+    expect(links).toContain("opportunity_id UUID NOT NULL");
+    expect(links).toContain("objective_id UUID NOT NULL");
+    expect(links).toContain("origin VARCHAR(20) NOT NULL");
+    expect(krLinks).toContain("solution_id UUID NOT NULL");
+    expect(krLinks).toContain("key_result_id UUID NOT NULL");
+    expect(krLinks).not.toContain("origin");
+  });
+
+  it("schema.prisma declares both models with snake_case maps, matching index names, and NO relation fields", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    const links = schema.match(/model OpportunityObjectiveLink \{[\s\S]*?\n\}/)?.[0] ?? "";
+    const krLinks = schema.match(/model SolutionKeyResultLink \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(links).toContain('@@map("opportunity_objective_links")');
+    expect(krLinks).toContain('@@map("solution_key_result_links")');
+    expect(links).toContain('@@unique([opportunityId, objectiveId], map: "idx_opportunity_objective_links_pair")');
+    expect(links).toContain('@@index([objectiveId, opportunityId], map: "idx_opportunity_objective_links_objective")');
+    expect(links).toContain('@@index([workspaceId], map: "idx_opportunity_objective_links_workspace")');
+    expect(krLinks).toContain('@@unique([solutionId, keyResultId], map: "idx_solution_key_result_links_pair")');
+    expect(krLinks).toContain('@@index([keyResultId, solutionId], map: "idx_solution_key_result_links_key_result")');
+    expect(krLinks).toContain('@@index([workspaceId], map: "idx_solution_key_result_links_workspace")');
+    // Under relationMode = "prisma" a relation field makes Prisma query the child table on parent deletes,
+    // which would make old code paths read these tables.
+    expect(links + krLinks).not.toMatch(/@relation/);
+    for (const parent of ["Opportunity", "Objective", "Solution", "KeyResult"]) {
+      const body = schema.match(new RegExp(`model ${parent} \\{[\\s\\S]*?\\n\\}`))?.[0] ?? "";
+      expect(body).not.toMatch(/ObjectiveLink|KeyResultLink/);
+    }
+  });
+
+  it("runs the precondition before the attempt, then backfill and postconditions before the receipt, and waits on async index jobs", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    const precondition = runner.indexOf("await assertTypedLinkPreconditions(");
+    const attempt = runner.indexOf("INSERT INTO \"${schema}\"._prisma_migrations (id, migration_name) VALUES ($1, $2)");
+    const hook = runner.indexOf("await backfillOpportunityObjectiveLinks(");
+    const assertion = runner.indexOf("await assertTypedLinkTables(");
+    const receipt = runner.indexOf("SET finished_at = CURRENT_TIMESTAMP WHERE id = $1");
+    expect(precondition).toBeGreaterThan(-1);
+    expect(attempt).toBeGreaterThan(precondition);
+    expect(hook).toBeGreaterThan(attempt);
+    expect(assertion).toBeGreaterThan(hook);
+    expect(receipt).toBeGreaterThan(assertion);
+    // MIGRATIONS entry, ASYNC_WAIT list, and the no-job-id resume list.
+    expect(runner.match(new RegExp(`"${NAME}"`, "g"))!.length).toBeGreaterThanOrEqual(3);
+  });
+});
