@@ -33,6 +33,7 @@ import { RoadmapItemPanel } from "./roadmap-item-panel";
 import { FeedbackPanel } from "./feedback-panel";
 import { FeedbackComposer } from "@/components/feedback/feedback-composer";
 import { OpportunityComposer } from "@/components/discovery/opportunity-composer";
+import { ExperimentComposer } from "@/components/experiments/experiment-composer";
 import { isComposerPanelType } from "./composer-panel-types";
 import { TaskDetail } from "@/components/tasks/task-detail";
 
@@ -47,6 +48,7 @@ const PANEL_TITLES: Record<string, string> = {
   feedback: "Feedback",
   "feedback-new": "New feedback",
   "opportunity-new": "New opportunity",
+  "experiment-new": "New experiment",
   task: "Task",
   "discovery-rail": "Discovery",
 };
@@ -255,6 +257,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
       {panel?.type === "feedback" && <FeedbackPanel id={panel.id} {...common} />}
       {panel?.type === "feedback-new" && <FeedbackComposer {...common} />}
       {panel?.type === "opportunity-new" && <OpportunityComposer composerId={panel.id} {...common} />}
+      {panel?.type === "experiment-new" && <ExperimentComposer composerId={panel.id} {...common} />}
       {panel?.type === "task" && (
         <TaskDetail taskId={panel.id} variant="panel" {...common} />
       )}

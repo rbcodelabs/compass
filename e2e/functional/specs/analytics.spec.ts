@@ -29,8 +29,8 @@ test.describe("Analytics measurements", () => {
     await page.getByLabel("Title", { exact: true }).fill(experimentName);
     await page.getByLabel("Hypothesis").fill("A clearer result prompt increases recorded learning.");
     await page.getByLabel("Method").fill("Compare two explicit production windows.");
-    await page.getByLabel("Kill Condition").fill("Stop if recorded learning declines.");
-    await page.getByRole("button", { name: "Create Experiment" }).click();
+    await page.getByLabel("Kill Condition", { exact: true }).fill("Stop if recorded learning declines.");
+    await page.getByRole("button", { name: "Submit" }).click();
     await page.getByRole("button", { name: experimentName, exact: true }).click();
     const fullPageHref = await page.getByRole("link", { name: "Open full page" }).getAttribute("href");
     expect(fullPageHref).toBeTruthy();

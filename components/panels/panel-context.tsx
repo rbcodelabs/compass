@@ -35,6 +35,8 @@ export type EntityPanelType = (typeof PANEL_ENTITY_TYPES)[number];
  *   submit the composer is *replaced* by the new item's detail panel, so
  *   creating and viewing are one continuous surface. Its id is always
  *   `FEEDBACK_COMPOSER_ID`.
+ * - `experiment-new` is the "New experiment" composer, on the same terms. Its
+ *   id is `new`, or `new-<assumptionId>` to preselect an assumption.
  * - `opportunity-new` is the "New opportunity" composer, on the same terms.
  *   Its id is `new`, or `new-<status>` when a board column presets the
  *   starting status (see lib/opportunity-draft.ts).
