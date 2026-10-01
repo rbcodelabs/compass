@@ -614,9 +614,12 @@ describe("073_workspace_thinking_model", () => {
     expect(manifest.match(new RegExp(`"${NAME}"`, "g"))).toHaveLength(1);
   });
 
-  it("does NOT yet declare the columns in schema.prisma (deploy ordering: migration first, code later)", () => {
+  // Inverted by the code PR (as PR #331 inverted PR-A's "schema unchanged" test):
+  // migration 073 has landed first, so schema.prisma now declares the columns.
+  it("declares both columns in schema.prisma now that the code PR reads them", () => {
     const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
     const model = schema.match(/model Workspace \{[\s\S]*?\n\}/)?.[0] ?? "";
-    expect(model).not.toMatch(/thinkingModel|thinking_model/);
+    expect(model).toMatch(/thinkingModel\s+String\?\s+@map\("thinking_model"\)\s+@db\.VarChar\(40\)/);
+    expect(model).toMatch(/thinkingModelLabels\s+String\?\s+@map\("thinking_model_labels"\)\s+@db\.Text/);
   });
 });
