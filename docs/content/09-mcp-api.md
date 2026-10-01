@@ -547,6 +547,24 @@ Custom fields let a workspace tag Opportunities, Solutions, Experiments, Objecti
 
 Passing `null` (or an empty string or empty array) to `set_custom_field_value` clears the field, matching the Settings UI's own clearing behavior. The value is validated against the field's type — a SELECT/MULTI_SELECT value must be one of the field's currently defined options. The tool also rejects a `fieldId` that belongs to a different object type, or to a different workspace, than the target object.
 
+### Card sort
+
+Card sort rounds let a team propose moves between the buckets of a single-select custom field without editing the official value. See the Card sort page for the concept. Every card sort tool takes `workspaceId` and gates on workspace membership; whether the caller is the round's facilitator, and whether a proposal is theirs, is enforced in the service layer so it holds identically here and in the UI.
+
+| Tool | What it does |
+| --- | --- |
+| `list_card_sort_factors` | List the single-select custom fields usable as a factor for an object type, with each one's effective options (including options inherited from a shared option set) |
+| `list_card_sort_rounds` | List the workspace's rounds with state, factor, total proposal count and how many are the caller's own; optionally filter by state |
+| `get_card_sort_board` | Read a round's items with their current bucket. Never includes other people's proposals |
+| `get_card_sort_proposals` | The caller's own proposals in a round, with the snapshotted from-value |
+| `get_card_sort_tally` | Everyone's proposals, aggregated. Refused for everyone except the facilitator until the round is revealed |
+| `create_card_sort_round` | Start an OPEN round on a factor; the caller becomes its facilitator |
+| `propose_card_sort_move` | Propose moving one or more objects to a bucket (replaces the caller's earlier proposal for each) |
+| `withdraw_card_sort_proposal` | Remove the caller's own proposal for one object |
+| `set_card_sort_round_state` | Reveal or close a round. Facilitator only, and irreversible |
+
+**The four write tools are human-only.** `create_card_sort_round`, `propose_card_sort_move`, `withdraw_card_sort_proposal` and `set_card_sort_round_state` are denied to agent identities: a proposal has no agent author column, so one cast by an agent would be stored and read back as the delegating human's own opinion, and revealing a round discloses other people's in-progress positions. Agents may use the five read tools.
+
 ### Feedback
 
 | Tool | Description |

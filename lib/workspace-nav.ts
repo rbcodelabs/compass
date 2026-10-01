@@ -14,6 +14,7 @@ export const TOP_LEVEL_SECTIONS: ReadonlySet<string> = new Set([
   "agent",
   "canvas",
   "capture",
+  "card-sort",
   "decisions",
   "discovery",
   "docs",

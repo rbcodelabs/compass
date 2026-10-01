@@ -2,7 +2,8 @@ import { test, expect } from "../fixtures/index";
 
 test("dated and undated items support native zoom, date editing and Board roundtrips", async ({ page, base }) => {
   const prefix = `E2E Timeline ${Date.now()}`;
-  const month = new Date().toISOString().slice(0, 7);
+  const now = new Date();
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`; // browser-local, like the app
   const start = `${month}-05`;
   const end = `${month}-25`;
   await page.goto(`${base}/roadmap`);
@@ -17,13 +18,16 @@ test("dated and undated items support native zoom, date editing and Board roundt
     await expect(page.getByText(title, { exact: true })).toBeVisible();
   }
   await page.getByRole("tab", { name: "Timeline", exact: true }).click();
-  await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+  await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
   for (const zoom of ["Quarter", "Month"]) {
     await page.getByRole("button", { name: "View options", exact: true }).click();
     await page.getByRole("menuitemradio", { name: zoom, exact: true }).click();
     await expect(page.getByRole("menuitemradio", { name: zoom, exact: true })).toHaveAttribute("aria-checked", "true");
     await page.keyboard.press("Escape");
   }
+  // An undated item sits at today, which the initial window (opened two months back)
+  // can place beyond the rendered range late in a month; bring it into view like a user would.
+  await page.getByRole("button", { name: "Go to today", exact: true }).click();
   await page.getByRole("button", { name: `Edit dates for ${prefix} undated`, exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Start", { exact: true }).fill(start);

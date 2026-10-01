@@ -13,6 +13,7 @@ import { generateSsoSecret } from "@/lib/portal-sso";
 import { requireProductEntity } from "@/lib/product-action-auth";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { revokeMemberAgentGrants } from "@/lib/agent-lifecycle";
+import { deleteMemberFollowState } from "@/lib/follow-cleanup";
 import {
   normalizeSelectOptions,
   parseSelectOptions,
@@ -272,6 +273,16 @@ export async function removeWorkspaceMember(
     await revokeMemberAgentGrants(tx, workspaceId, member.userId);
     await tx.workspaceMember.delete({ where: { id: memberId } });
   });
+
+  // Hygiene only: read-time membership checks already hide this user's follows
+  // and notifications. Runs after the commit and outside the transaction (a
+  // missing-table error would abort it), and must not fail a removal that has
+  // already happened.
+  try {
+    await deleteMemberFollowState(prisma, workspaceId, member.userId);
+  } catch (error) {
+    console.error("[follows] member follow-state cleanup failed", error);
+  }
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }

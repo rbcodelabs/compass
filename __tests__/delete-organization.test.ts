@@ -72,6 +72,8 @@ const mockPrisma = {
   workspaceUpdateEvent: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   workspaceUpdatesReadState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   workspaceUpdatesState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  follow: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  notification: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   $transaction: vi.fn(),
   analyticsConnection: { deleteMany: vi.fn() },
   metricDefinition: { deleteMany: vi.fn() },

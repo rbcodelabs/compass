@@ -161,6 +161,17 @@ import {
   getCustomFieldValues,
   setCustomFieldValue,
 } from "@/lib/custom-field-tool-handlers"
+import {
+  listCardSortFactorsTool,
+  createCardSortRoundTool,
+  listCardSortRoundsTool,
+  setCardSortRoundStateTool,
+  proposeCardSortMoveTool,
+  withdrawCardSortProposalTool,
+  getCardSortProposalsTool,
+  getCardSortBoardTool,
+  getCardSortTallyTool,
+} from "@/lib/card-sort-tool-handlers"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -2564,6 +2575,203 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       setCustomFieldValue
+    )
+
+    // ════════════════════════════════════════════════════════════════
+    // CARD SORT
+    // ════════════════════════════════════════════════════════════════
+    // Prioritization by proposal rather than by edit. A round names a factor —
+    // any SELECT custom field, whose options are the buckets — and participants
+    // propose moving objects between those buckets without touching the official
+    // values, which stay exactly as they are.
+    //
+    // Two properties are load-bearing and are enforced in lib/card-sort.ts, so
+    // they hold identically here and on the HTTP routes:
+    //
+    //   1. Proposals are SPARSE. A row exists only where somebody actively
+    //      disagreed. No proposal means no opinion recorded — never agreement.
+    //   2. While a round is OPEN, only the person who created it can see anyone
+    //      else's proposals or the tally. get_card_sort_tally returns a failure
+    //      for every other member until the round is REVEALED.
+    //
+    // Every tool takes workspaceId as well as roundId so each one gates on plain
+    // workspace membership; lib/card-sort.ts separately verifies the round
+    // belongs to that workspace.
+
+    register(
+      "list_card_sort_factors",
+      {
+        title: "List Card Sort Factors",
+        description:
+          "Lists the custom fields that can serve as a factor for a card sort on this object type. A factor must " +
+          "be a SELECT field with at least one option — those options become the buckets objects are sorted into. " +
+          "Includes each factor's effective options, whether they come from the field itself or are inherited from " +
+          "a shared option set. MULTI_SELECT fields are excluded: \"propose moving this to X\" has no clear meaning " +
+          "when an object already holds three values.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          objectType: customFieldObjectTypeSchema.describe("Which object type to sort"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listCardSortFactorsTool
+    )
+
+    register(
+      "create_card_sort_round",
+      {
+        title: "Create Card Sort Round",
+        description:
+          "Starts a card sort round on one factor. Rounds are the unit of repeatability: next quarter's round is a " +
+          "separate round, so its proposals never pollute this quarter's tally. The round opens in OPEN state, and " +
+          "the caller becomes its facilitator — the only person who can see other people's proposals or reveal it.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          name: z.string().min(1).describe("Human-readable name, e.g. \"Q1 2027 prioritization\""),
+          fieldDefinitionId: z
+            .string()
+            .uuid()
+            .describe("UUID of the SELECT custom field to sort by — see list_card_sort_factors"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      createCardSortRoundTool
+    )
+
+    register(
+      "list_card_sort_rounds",
+      {
+        title: "List Card Sort Rounds",
+        description:
+          "Lists the workspace's card sort rounds with their state, factor, total proposal count and how many of " +
+          "those are the caller's own. The bare total is visible in an OPEN round deliberately — it names no object, " +
+          "target or proposer, and withholding it would leave a participant unable to tell a round is live.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          state: z
+            .enum(["OPEN", "REVEALED", "CLOSED"])
+            .optional()
+            .describe("Filter to rounds in this state only"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listCardSortRoundsTool
+    )
+
+    register(
+      "set_card_sort_round_state",
+      {
+        title: "Reveal or Close a Card Sort Round",
+        description:
+          "Reveals or closes a round. Facilitator only — the person who created it. REVEALED makes the tally visible " +
+          "to everyone in the workspace and stops accepting new proposals; it is irreversible by design, because " +
+          "un-revealing a result people have already read would not un-read it. CLOSED archives the round.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          roundId: z.string().uuid().describe("UUID of the round"),
+          state: z.enum(["REVEALED", "CLOSED"]).describe("New state"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      setCardSortRoundStateTool
+    )
+
+    register(
+      "propose_card_sort_move",
+      {
+        title: "Propose a Card Sort Move",
+        description:
+          "Records the caller's proposal to move one or more objects into a different bucket. Does NOT change the " +
+          "object's official custom field value — that is the entire point. proposedValue must be one of the " +
+          "factor's effective options, and must differ from the object's current official value: proposing that " +
+          "something stay where it is is not an opinion, and is rejected. The object's value at the time of the " +
+          "proposal is snapshotted server-side, never taken from the caller. One proposal per person per object — " +
+          "proposing again replaces your previous one. With several objectIds, objects already sitting in the target " +
+          "bucket are reported as skipped rather than failing the batch; with exactly one, that same condition is an " +
+          "error, because a single request that changed nothing should say so.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          roundId: z.string().uuid().describe("UUID of the round — must be OPEN"),
+          objectIds: z
+            .array(z.string().uuid())
+            .min(1)
+            .describe("UUIDs of the objects to propose moving"),
+          proposedValue: z.string().describe("Target bucket — one of the factor's option values"),
+          rationale: z.string().optional().describe("Optional short reason for the move"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      proposeCardSortMoveTool
+    )
+
+    register(
+      "withdraw_card_sort_proposal",
+      {
+        title: "Withdraw a Card Sort Proposal",
+        description:
+          "Removes the caller's own proposal for one object, returning it to \"no opinion recorded\" — which is not " +
+          "the same as proposing it stay put. Can only remove the caller's own proposal, never anybody else's.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          roundId: z.string().uuid().describe("UUID of the round — must be OPEN"),
+          objectId: z.string().uuid().describe("UUID of the object to withdraw the proposal for"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      withdrawCardSortProposalTool
+    )
+
+    register(
+      "get_card_sort_proposals",
+      {
+        title: "Get My Card Sort Proposals",
+        description:
+          "The caller's own proposals in a round, with the snapshotted from-value and the proposed target. Always " +
+          "available regardless of round state — hiding your own ballot from you serves nothing. Returns only the " +
+          "caller's proposals; use get_card_sort_tally for everyone's, which requires the round to be REVEALED.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          roundId: z.string().uuid().describe("UUID of the round"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getCardSortProposalsTool
+    )
+
+    register(
+      "get_card_sort_board",
+      {
+        title: "Get Card Sort Board",
+        description:
+          "The sort board: every object grouped by its current bucket in the factor's own option order, with the " +
+          "caller's own proposals shown inline. Other people's proposals are absent from this payload in every round " +
+          "state, by design — reading the room is what get_card_sort_tally is for.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          roundId: z.string().uuid().describe("UUID of the round"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getCardSortBoardTool
+    )
+
+    register(
+      "get_card_sort_tally",
+      {
+        title: "Get Card Sort Tally",
+        description:
+          "The result: per object, its current bucket plus every proposed target with a count and the proposers; " +
+          "directional net flow between buckets; and a ranking of the most contested objects. Contested means the " +
+          "number of DIFFERENT buckets proposed for an object — five people proposing the same move is unanimous " +
+          "disagreement, not contention. Objects nobody proposed a move for are absent: that means no opinion was " +
+          "recorded, not that everyone agreed. Fails while the round is OPEN for anyone but the facilitator.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          roundId: z.string().uuid().describe("UUID of the round"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getCardSortTallyTool
     )
 
     // ════════════════════════════════════════════════════════════════
