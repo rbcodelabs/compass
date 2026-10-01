@@ -25,6 +25,7 @@ import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import type { OpportunityStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { MarkdownContent } from "@/components/markdown-content";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { linkToPlaceholder } from "@/lib/thinking-model/copy";
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
   EXPLORING: "Exploring",
@@ -166,7 +167,7 @@ export function OpportunityOverview({
             disabled={isPending}
           >
             <ComboboxTrigger size="sm" className="w-64">
-              <ComboboxValue placeholder={`Link ${labels.keyResult.lower}…`} />
+              <ComboboxValue placeholder={linkToPlaceholder(labels.keyResult)} />
             </ComboboxTrigger>
             <ComboboxContent />
           </Combobox>

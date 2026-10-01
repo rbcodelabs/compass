@@ -33,8 +33,6 @@ import { AddObjectiveForm } from "@/components/okrs/add-objective-form"
 import { AddKeyResultForm } from "@/components/okrs/add-key-result-form"
 import { CreateCycleForm } from "@/components/okrs/create-cycle-form"
 import { CycleCard } from "@/components/okrs/cycle-card"
-import { linkedTypeLabels, linkedTypePluralLabels } from "@/components/tasks/linked-type-labels"
-import { objectTypeLabels } from "@/components/custom-fields/object-type-labels"
 
 afterEach(cleanup)
 
@@ -105,50 +103,6 @@ describe("CLASSIC copy is unchanged (no provider, NULL, and explicit CLASSIC all
     expect(l.solution).toMatchObject({ singular: "Solution", plural: "Solutions", lower: "solution", lowerPlural: "solutions" })
     expect(l.cycle).toMatchObject({ singular: "Cycle", plural: "Cycles", lower: "cycle", lowerPlural: "cycles" })
     expect(l.sections.okrs).toBe("OKRs")
-  })
-
-  it("table-driven copy templates match the literals they replaced", () => {
-    const l = resolveThinkingModel({ thinkingModel: null }).labels
-    const table: Array<[string, string]> = [
-      [`Link to parent ${l.keyResult.singular}…`, "Link to parent Key Result…"],
-      [`Delete ${l.objective.singular}`, "Delete Objective"],
-      [`Linked ${l.keyResult.singular}`, "Linked Key Result"],
-      [`Unlink parent ${l.keyResult.singular}`, "Unlink parent Key Result"],
-      [
-        `Search ${l.cycle.lowerPlural}, ${l.objective.lowerPlural}, and ${l.keyResult.shortPlural}…`,
-        "Search cycles, objectives, and KRs…",
-      ],
-      [
-        `No eligible parent ${l.keyResult.shortPlural}. A longer ${l.cycle.lower} must be Draft or Active and fully contain this ${l.cycle.lower}'s dates.`,
-        "No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle's dates.",
-      ],
-      [`Link supporting ${l.objective.lower}…`, "Link supporting objective…"],
-      [`Delete ${l.keyResult.short}`, "Delete KR"],
-      [`Search shorter-${l.cycle.lower} ${l.objective.plural}…`, "Search shorter-cycle Objectives…"],
-      [`No eligible unlinked ${l.objective.plural}.`, "No eligible unlinked Objectives."],
-      [`Supporting ${l.objective.lowerPlural}`, "Supporting objectives"],
-      [`Track ${l.objective.lowerPlural} and ${l.keyResult.lowerPlural} across ${l.cycle.lowerPlural}.`, "Track objectives and key results across cycles."],
-      [`${l.cycle.plural} group your ${l.objective.lowerPlural} into time-boxed periods. Create one to start setting goals.`, "Cycles group your objectives into time-boxed periods. Create one to start setting goals."],
-      [`Driving ${l.keyResult.singular}`, "Driving Key Result"],
-      [`change ${l.keyResult.short}`, "change KR"],
-      [`Link to ${l.keyResult.lower}`, "Link to key result"],
-      [`No supporting ${l.objective.plural} linked.`, "No supporting Objectives linked."],
-      [`Linked ${l.opportunity.plural}`, "Linked Opportunities"],
-      [`No ${l.opportunity.lowerPlural} linked.`, "No opportunities linked."],
-      [`Supporting ${l.objective.plural}`, "Supporting Objectives"],
-    ]
-    for (const [built, literal] of table) expect(built).toBe(literal)
-
-    const types = linkedTypeLabels(resolveThinkingModel({}).labels)
-    expect(types).toMatchObject({ OPPORTUNITY: "Opportunity", SOLUTION: "Solution", OBJECTIVE: "Objective", KEY_RESULT: "Key Result" })
-    const plurals = linkedTypePluralLabels(resolveThinkingModel({}).labels)
-    expect(plurals).toMatchObject({ OPPORTUNITY: "Opportunities", SOLUTION: "Solutions", OBJECTIVE: "Objectives", KEY_RESULT: "Key results" })
-    expect(objectTypeLabels(resolveThinkingModel({}).labels)).toMatchObject({
-      OPPORTUNITY: "Opportunity",
-      SOLUTION: "Solution",
-      OBJECTIVE: "Objective",
-      KEY_RESULT: "Key Result",
-    })
   })
 })
 

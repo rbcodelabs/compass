@@ -23,7 +23,7 @@ import { updateThinkingModel } from "@/app/[orgSlug]/[workspaceSlug]/settings/th
 
 const wsA = () => fake.current!.state.workspaces.find((w) => w.id === WS_A.id)!;
 const wsB = () => fake.current!.state.workspaces.find((w) => w.id === WS_B.id)!;
-const torres = { thinkingModel: "TORRES_OST", labels: { solution: { singular: "Bet" } } };
+const torres = { thinkingModel: "TORRES_OST", labels: { keyResult: { singular: "Bet" } } };
 
 beforeEach(() => {
   fake.current = createTenantFakePrisma();
@@ -39,7 +39,7 @@ describe("updateThinkingModel authorization", () => {
     const r = await updateThinkingModel(WS_A.org, WS_A.slug, torres);
     expect(r).toEqual({ ok: true, thinkingModel: "TORRES_OST" });
     expect(wsA().thinkingModel).toBe("TORRES_OST");
-    expect(JSON.parse(wsA().thinkingModelLabels!)).toEqual({ solution: { singular: "Bet" } });
+    expect(JSON.parse(wsA().thinkingModelLabels!)).toEqual({ keyResult: { singular: "Bet" } });
     expect(revalidate).toHaveBeenCalledWith(`/${WS_A.org}/${WS_A.slug}`, "layout");
   });
 
@@ -103,6 +103,40 @@ describe("updateThinkingModel input handling", () => {
     expect(wsA().thinkingModel).toBeNull();
   });
 
+  it("rejects renaming an entity other than Objective and Key Result, with a clear message", async () => {
+    const r = await updateThinkingModel(WS_A.org, WS_A.slug, {
+      thinkingModel: "CLASSIC",
+      labels: { solution: { singular: "Bet" } },
+    });
+    expect(r).toEqual({ ok: false, error: expect.stringContaining("is not available yet") });
+    expect(wsA().thinkingModel).toBeNull();
+  });
+
+  it("does not newly accept the preset that is defined but not offered", async () => {
+    const r = await updateThinkingModel(WS_A.org, WS_A.slug, { thinkingModel: "OPPORTUNITY_FIRST_OKR" });
+    expect(r).toEqual({ ok: false, error: "That thinking model is not available yet." });
+    expect(wsA().thinkingModel).toBeNull();
+  });
+
+  it("lets a workspace already on the hidden preset keep saving", async () => {
+    wsA().thinkingModel = "OPPORTUNITY_FIRST_OKR";
+    const r = await updateThinkingModel(WS_A.org, WS_A.slug, { thinkingModel: "OPPORTUNITY_FIRST_OKR", labels: { objective: { singular: "Goal" } } });
+    expect(r.ok).toBe(true);
+  });
+
+  it("logs only the error name and code when a write fails, never label text", async () => {
+    const original = fake.current!.client.workspace.update;
+    fake.current!.client.workspace.update = async () => {
+      throw Object.assign(new Error('Invalid value for thinking_model_labels: {"objective":{"singular":"SECRET-LABEL"}}'), { code: "P2022" });
+    };
+    const r = await updateThinkingModel(WS_A.org, WS_A.slug, { thinkingModel: "CLASSIC", labels: { objective: { singular: "SECRET-LABEL" } } });
+    fake.current!.client.workspace.update = original;
+    expect(r).toEqual({ ok: false, error: "Something went wrong. Please try again." });
+    const logged = JSON.stringify(vi.mocked(console.error).mock.calls);
+    expect(logged).toContain("P2022");
+    expect(logged).not.toContain("SECRET-LABEL");
+  });
+
   it("rejects NULL / missing key (the UI never writes NULL)", async () => {
     expect((await updateThinkingModel(WS_A.org, WS_A.slug, { thinkingModel: null })).ok).toBe(false);
     expect((await updateThinkingModel(WS_A.org, WS_A.slug, {})).ok).toBe(false);
@@ -118,7 +152,7 @@ describe("updateThinkingModel input handling", () => {
   });
 
   it("writes an explicit CLASSIC key (never NULL) and clears labels when none are given", async () => {
-    wsA().thinkingModelLabels = JSON.stringify({ solution: { singular: "Bet" } });
+    wsA().thinkingModelLabels = JSON.stringify({ keyResult: { singular: "Bet" } });
     const r = await updateThinkingModel(WS_A.org, WS_A.slug, { thinkingModel: "CLASSIC" });
     expect(r.ok).toBe(true);
     expect(wsA().thinkingModel).toBe("CLASSIC");
@@ -127,7 +161,7 @@ describe("updateThinkingModel input handling", () => {
 
   it("logs one structured line with ids and keys but no label text", async () => {
     wsA().thinkingModel = "CLASSIC";
-    await updateThinkingModel(WS_A.org, WS_A.slug, { thinkingModel: "TORRES_OST", labels: { solution: { singular: "Bet" } } });
+    await updateThinkingModel(WS_A.org, WS_A.slug, { thinkingModel: "TORRES_OST", labels: { keyResult: { singular: "Bet" } } });
     const info = vi.mocked(console.info).mock.calls;
     expect(info).toHaveLength(1);
     const line = String(info[0][0]);

@@ -38,7 +38,26 @@ export type EntityLabel = {
    * lower-casing user text would mangle names like "R&D need".
    */
   sentence?: { singular: string; plural: string }
+  /**
+   * Indefinite article ("a" / "an") for presets whose label is known, so CLASSIC
+   * can say "Link to an opportunity…" exactly as before. Overrides never carry
+   * one, because the article depends on text we cannot predict; their copy
+   * drops it ("Link to idea…").
+   */
+  article?: "a" | "an"
 }
+
+/**
+ * Entities a workspace may rename. Deliberately narrower than the entity list:
+ * overrides must not outrun the label conversion, and these two are what Torres
+ * renames and what the converted surfaces cover best. Open the others up only
+ * after canvas, the discovery board and panels, the portal and help are converted.
+ */
+export const OVERRIDABLE_ENTITIES = ["objective", "keyResult"] as const satisfies readonly ThinkingModelEntity[]
+export type OverridableEntity = (typeof OVERRIDABLE_ENTITIES)[number]
+
+/** Presets offered in the settings picker. Others stay defined and resolvable. */
+export const PICKABLE_THINKING_MODEL_KEYS = ["CLASSIC", "TORRES_OST"] as const satisfies readonly ThinkingModelKey[]
 
 export type LinkEmphasis = "primary" | "secondary" | "hidden"
 export type TreeShape = "kr-rooted" | "objective-rooted-pool" | "outcome-rooted"
@@ -66,16 +85,17 @@ export type ThinkingModelPreset = {
 }
 
 const CLASSIC_LABELS: ThinkingModelPreset["labels"] = {
-  opportunity: { singular: "Opportunity", plural: "Opportunities" },
-  objective: { singular: "Objective", plural: "Objectives" },
+  opportunity: { singular: "Opportunity", plural: "Opportunities", article: "an" },
+  objective: { singular: "Objective", plural: "Objectives", article: "an" },
   keyResult: {
     singular: "Key Result",
     plural: "Key Results",
     short: { singular: "KR", plural: "KRs" },
     sentence: { singular: "Key result", plural: "Key results" },
+    article: "a",
   },
-  solution: { singular: "Solution", plural: "Solutions" },
-  cycle: { singular: "Cycle", plural: "Cycles" },
+  solution: { singular: "Solution", plural: "Solutions", article: "a" },
+  cycle: { singular: "Cycle", plural: "Cycles", article: "a" },
 }
 
 export const THINKING_MODEL_PRESETS: Readonly<Record<ThinkingModelKey, ThinkingModelPreset>> = {
@@ -102,8 +122,8 @@ export const THINKING_MODEL_PRESETS: Readonly<Record<ThinkingModelKey, ThinkingM
     name: "Torres opportunity solution tree",
     labels: {
       ...CLASSIC_LABELS,
-      objective: { singular: "Outcome", plural: "Outcomes" },
-      keyResult: { singular: "Success metric", plural: "Success metrics" },
+      objective: { singular: "Outcome", plural: "Outcomes", article: "an" },
+      keyResult: { singular: "Success metric", plural: "Success metrics", article: "a" },
     },
     sections: { okrs: null },
     links: { oppToKr: "hidden", oppToObjective: "primary", solToKr: "secondary" },

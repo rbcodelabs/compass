@@ -17,6 +17,7 @@ import { addRoadmapItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions"
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import { EXPERIMENT_STATUS_BADGE } from "@/lib/discovery";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { linkToPlaceholder } from "@/lib/thinking-model/copy";
 import type { ExperimentStatus, Horizon } from "@/lib/types";
 
 type AvailableKR = { id: string; title: string; objectiveTitle: string };
@@ -220,7 +221,7 @@ export function AddItemForm({
             disabled={isPending}
           >
             <ComboboxTrigger id={`item-opportunity-${horizon}`} size="sm">
-              <ComboboxValue placeholder={`Link ${labels.opportunity.lower}…`} />
+              <ComboboxValue placeholder={linkToPlaceholder(labels.opportunity)} />
             </ComboboxTrigger>
             <ComboboxContent />
           </Combobox>
@@ -280,7 +281,7 @@ export function AddItemForm({
             disabled={isPending}
           >
             <ComboboxTrigger id={`item-kr-${horizon}`} size="sm">
-              <ComboboxValue placeholder={`Link ${labels.keyResult.lower}…`} />
+              <ComboboxValue placeholder={linkToPlaceholder(labels.keyResult)} />
             </ComboboxTrigger>
             <ComboboxContent />
           </Combobox>
@@ -309,7 +310,7 @@ export function AddItemForm({
             disabled={isPending}
           >
             <ComboboxTrigger id={`item-solution-${horizon}`} size="sm">
-              <ComboboxValue placeholder={`Link ${labels.solution.lower}…`} />
+              <ComboboxValue placeholder={linkToPlaceholder(labels.solution)} />
             </ComboboxTrigger>
             <ComboboxContent />
           </Combobox>

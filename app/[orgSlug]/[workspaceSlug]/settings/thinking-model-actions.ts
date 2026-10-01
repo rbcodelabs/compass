@@ -25,7 +25,7 @@
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { isPermissionError, resolveWorkspaceAdmin } from "@/lib/permissions"
-import { THINKING_MODEL_KEYS } from "@/lib/thinking-model/presets"
+import { PICKABLE_THINKING_MODEL_KEYS, THINKING_MODEL_KEYS } from "@/lib/thinking-model/presets"
 import { validateLabelOverrides } from "@/lib/thinking-model/validate"
 
 export type UpdateThinkingModelResult = { ok: true; thinkingModel: string } | { ok: false; error: string }
@@ -46,13 +46,20 @@ export async function updateThinkingModel(
     const parsed = inputSchema.safeParse(input)
     if (!parsed.success) return { ok: false, error: "Choose a valid thinking model." }
 
-    const labels = validateLabelOverrides(parsed.data.labels ?? {}, parsed.data.thinkingModel)
-    if (!labels.ok) return { ok: false, error: labels.error }
-
     const previous = await prisma.workspace.findFirst({
       where: { id: workspaceId },
       select: { thinkingModel: true },
     })
+    // A preset that is defined but not offered yet (see PICKABLE_THINKING_MODEL_KEYS)
+    // cannot be newly chosen; a workspace already on it may keep saving.
+    const offered = (PICKABLE_THINKING_MODEL_KEYS as readonly string[]).includes(parsed.data.thinkingModel)
+    if (!offered && previous?.thinkingModel !== parsed.data.thinkingModel) {
+      return { ok: false, error: "That thinking model is not available yet." }
+    }
+
+    const labels = validateLabelOverrides(parsed.data.labels ?? {}, parsed.data.thinkingModel)
+    if (!labels.ok) return { ok: false, error: labels.error }
+
     const hasLabels = Object.keys(labels.value).length > 0
 
     await prisma.workspace.update({
@@ -77,7 +84,9 @@ export async function updateThinkingModel(
     return { ok: true, thinkingModel: parsed.data.thinkingModel }
   } catch (error) {
     if (isPermissionError(error)) return { ok: false, error: error.message }
-    console.error("[thinking-model] update failed", error)
+    // Name and code only: Prisma errors can echo the failing row, which holds label text.
+    const e = error as { name?: string; code?: string }
+    console.error("[thinking-model] update failed", { name: e?.name, code: e?.code })
     return { ok: false, error: "Something went wrong. Please try again." }
   }
 }

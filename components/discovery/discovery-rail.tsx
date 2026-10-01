@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { linkedToLabel } from "@/lib/thinking-model/copy";
 
 export type DiscoveryRailOpportunity = {
   id: string;
@@ -50,6 +52,7 @@ export function DiscoveryRail({
   activeOpportunityId = null,
   onNavigate,
 }: DiscoveryRailProps) {
+  const labels = useLabels();
   const [query, setQuery] = React.useState("");
   const [collapsed, setCollapsed] = React.useState(false);
 
@@ -104,7 +107,7 @@ export function DiscoveryRail({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search opportunities…"
+            placeholder={`Search ${labels.opportunity.lowerPlural}…`}
             className="h-8 w-full bg-transparent pl-7 pr-2 text-xs"
           />
         </div>
@@ -169,7 +172,7 @@ export function DiscoveryRail({
 
         {filtered.length === 0 && (
           <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-            No opportunities match &ldquo;{query}&rdquo;.
+            No {labels.opportunity.lowerPlural} match &ldquo;{query}&rdquo;.
           </p>
         )}
       </div>
@@ -193,6 +196,7 @@ function RailRow({
   isActive: boolean;
   onNavigate?: () => void;
 }) {
+  const labels = useLabels();
   return (
     <Link
       href={href}
@@ -221,7 +225,7 @@ function RailRow({
       {opportunity.linkedKeyResultId && (
         <TrendingUp
           className="mt-0.5 size-3 shrink-0 text-primary"
-          aria-label="Linked to a key result"
+          aria-label={linkedToLabel(labels.keyResult)}
         />
       )}
     </Link>

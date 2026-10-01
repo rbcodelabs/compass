@@ -434,12 +434,12 @@ export default async function SettingsPage({ params }: Props) {
       {/* Admin only, enforced again by updateThinkingModel (resolveWorkspaceAdmin).
           Has no switches, so its position cannot shift the positional-index specs. */}
       {canManageCapabilityPacks && (
-        <SettingsSection title="Thinking model" description="How this workspace names and relates its goals, measures, discovery items and tactics. Presentation only: your data and links are the same in every model, so you can switch back at any time.">
+        <SettingsSection title="Thinking model" description="What this workspace calls its goals and measures. Names only: your data is the same under every choice, so you can switch back at any time.">
           <ThinkingModelPanel
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
             initialKey={thinkingModel.key}
-            initialOverrides={parseStoredLabelOverrides(workspace.thinkingModelLabels)}
+            initialOverrides={parseStoredLabelOverrides(workspace.thinkingModelLabels, thinkingModel.key)}
           />
         </SettingsSection>
       )}

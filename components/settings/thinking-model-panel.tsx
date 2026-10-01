@@ -6,31 +6,27 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { updateThinkingModel } from "@/app/[orgSlug]/[workspaceSlug]/settings/thinking-model-actions"
 import {
-  THINKING_MODEL_ENTITIES,
-  THINKING_MODEL_KEYS,
+  OVERRIDABLE_ENTITIES,
+  PICKABLE_THINKING_MODEL_KEYS,
   THINKING_MODEL_PRESETS,
-  type ThinkingModelEntity,
+  type OverridableEntity,
   type ThinkingModelKey,
 } from "@/lib/thinking-model/presets"
 import { MAX_LABEL_LENGTH, validateLabelOverrides, type LabelOverrides } from "@/lib/thinking-model/validate"
 
+// Describe only what ships: the presets differ in names today, nothing else.
 const PRESET_DESCRIPTIONS: Record<ThinkingModelKey, string> = {
-  CLASSIC: "Objectives and Key Results inside OKR cycles. Today's behavior.",
-  OPPORTUNITY_FIRST_OKR:
-    "Same names as Classic. Opportunities are a pool you choose from when you set Objectives.",
-  TORRES_OST:
-    "Opportunity solution tree vocabulary: Objectives are called Outcomes, Key Results are Success metrics, and cycles take a back seat.",
+  CLASSIC: "Objectives and Key Results, as Compass has always named them.",
+  OPPORTUNITY_FIRST_OKR: "Same names as Classic.",
+  TORRES_OST: "Renames Objective to Outcome and Key Result to Success metric.",
 }
 
-const ENTITY_TITLES: Record<ThinkingModelEntity, string> = {
-  opportunity: "Opportunity",
+const ENTITY_TITLES: Record<OverridableEntity, string> = {
   objective: "Objective",
   keyResult: "Key Result",
-  solution: "Solution",
-  cycle: "Cycle",
 }
 
-type FormLabels = Record<ThinkingModelEntity, { singular: string; plural: string }>
+type FormLabels = Record<OverridableEntity, { singular: string; plural: string }>
 
 interface Props {
   orgSlug: string
@@ -41,13 +37,13 @@ interface Props {
 
 function toForm(overrides: LabelOverrides): FormLabels {
   return Object.fromEntries(
-    THINKING_MODEL_ENTITIES.map((e) => [e, { singular: overrides[e]?.singular ?? "", plural: overrides[e]?.plural ?? "" }]),
+    OVERRIDABLE_ENTITIES.map((e) => [e, { singular: overrides[e]?.singular ?? "", plural: overrides[e]?.plural ?? "" }]),
   ) as FormLabels
 }
 
 function fromForm(form: FormLabels): LabelOverrides {
   const out: LabelOverrides = {}
-  for (const entity of THINKING_MODEL_ENTITIES) {
+  for (const entity of OVERRIDABLE_ENTITIES) {
     const { singular, plural } = form[entity]
     // An empty singular means "use the preset's name"; a plural alone is kept so
     // validation can say it needs a singular.
@@ -63,8 +59,13 @@ export function ThinkingModelPanel({ orgSlug, workspaceSlug, initialKey, initial
   const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null)
   const [isPending, startTransition] = useTransition()
   const preset = THINKING_MODEL_PRESETS[key]
+  // A preset that is no longer offered (OPPORTUNITY_FIRST_OKR until its picker
+  // exists) still shows when it is the stored one, so the form never silently
+  // un-selects the current model.
+  const offered: ThinkingModelKey[] = [...PICKABLE_THINKING_MODEL_KEYS]
+  if (!offered.includes(initialKey)) offered.push(initialKey)
 
-  function setField(entity: ThinkingModelEntity, field: "singular" | "plural", value: string) {
+  function setField(entity: OverridableEntity, field: "singular" | "plural", value: string) {
     setMessage(null)
     setForm((current) => ({ ...current, [entity]: { ...current[entity], [field]: value } }))
   }
@@ -84,9 +85,14 @@ export function ThinkingModelPanel({ orgSlug, workspaceSlug, initialKey, initial
 
   return (
     <div className="flex flex-col gap-5" data-testid="thinking-model-panel">
+      <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground" data-testid="thinking-model-notice">
+        Some screens still use the standard names whatever you choose here: the canvas, the discovery board and its
+        panels, the public portal, and help. Agents and API tools always use the standard names.
+      </p>
+
       <fieldset className="flex flex-col gap-2" disabled={isPending}>
         <legend className="mb-1 text-sm font-medium">Model</legend>
-        {THINKING_MODEL_KEYS.map((presetKey) => (
+        {offered.map((presetKey) => (
           <label
             key={presetKey}
             className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-card px-4 py-3 has-[:checked]:border-primary"
@@ -114,11 +120,11 @@ export function ThinkingModelPanel({ orgSlug, workspaceSlug, initialKey, initial
       <fieldset className="flex flex-col gap-3" disabled={isPending}>
         <legend className="mb-1 text-sm font-medium">Names</legend>
         <p className="text-xs text-muted-foreground">
-          Rename anything for this workspace. Leave a field empty to keep the model&apos;s name. If you leave the plural
+          Rename these for this workspace. Leave a field empty to keep the model&apos;s name. If you leave the plural
           empty, an &quot;s&quot; is added, so give a plural when that would be wrong. Letters, numbers, spaces and
-          &apos; &amp; / - only, up to {MAX_LABEL_LENGTH} characters. Agents and API tools keep the standard names.
+          &apos; &amp; / - only, up to {MAX_LABEL_LENGTH} characters.
         </p>
-        {THINKING_MODEL_ENTITIES.map((entity) => (
+        {OVERRIDABLE_ENTITIES.map((entity) => (
           <div key={entity} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="flex flex-col gap-1">
               <Label htmlFor={`tm-${entity}-singular`}>{ENTITY_TITLES[entity]} (singular)</Label>

@@ -15,6 +15,8 @@ export type ResolvedEntityLabel = {
   /** Sentence-case form where today's copy uses one ("Key result"), else the label as written. */
   sentence: string
   sentencePlural: string
+  /** "an opportunity" for a preset label; the bare lower-case label for an override (no article). */
+  indefinite: string
 }
 
 export type ResolvedLabels = Record<ThinkingModelEntity, ResolvedEntityLabel> & {
@@ -39,12 +41,25 @@ export function derivePlural(singular: string): string {
   return `${singular}s`
 }
 
+/**
+ * Lower-case for mid-sentence use, keeping all-caps words of two or more letters
+ * ("SKY", "R&D") as written so an acronym is not turned into a word.
+ */
+export function toLowerLabel(text: string): string {
+  return text
+    .split(" ")
+    .map((word) => (/^[\p{Lu}\p{N}&/'’-]{2,}$/u.test(word) && /\p{Lu}.*\p{Lu}/u.test(word) ? word : word.toLowerCase()))
+    .join(" ")
+}
+
 export function buildResolvedLabel(label: EntityLabel): ResolvedEntityLabel {
+  const lower = toLowerLabel(label.singular)
   return {
     singular: label.singular,
     plural: label.plural,
-    lower: label.singular.toLowerCase(),
-    lowerPlural: label.plural.toLowerCase(),
+    lower,
+    lowerPlural: toLowerLabel(label.plural),
+    indefinite: label.article ? `${label.article} ${lower}` : lower,
     short: label.short?.singular ?? label.singular,
     shortPlural: label.short?.plural ?? label.plural,
     sentence: label.sentence?.singular ?? label.singular,

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { THINKING_MODEL_KEYS } from "@/lib/thinking-model/presets"
-import { derivePlural } from "@/lib/thinking-model/labels"
+import { derivePlural, toLowerLabel } from "@/lib/thinking-model/labels"
 
 const classic = resolveThinkingModel({ thinkingModel: "CLASSIC", thinkingModelLabels: null })
+const stored = (value: unknown) => JSON.stringify(value)
 
 describe("resolveThinkingModel", () => {
   it("treats NULL as CLASSIC, deep-equal to the explicit key", () => {
@@ -23,10 +24,7 @@ describe("resolveThinkingModel", () => {
   )
 
   it("ignores overrides when the key is unknown (CLASSIC with no overrides)", () => {
-    const r = resolveThinkingModel({
-      thinkingModel: "NOPE",
-      thinkingModelLabels: JSON.stringify({ objective: { singular: "Goal" } }),
-    })
+    const r = resolveThinkingModel({ thinkingModel: "NOPE", thinkingModelLabels: stored({ objective: { singular: "Goal" } }) })
     expect(r).toEqual(classic)
   })
 
@@ -42,8 +40,9 @@ describe("resolveThinkingModel", () => {
     expect(torres.labels.sections.okrs).toBe("Outcomes")
   })
 
-  it("OPPORTUNITY_FIRST_OKR has CLASSIC labels", () => {
+  it("OPPORTUNITY_FIRST_OKR stays defined and resolvable (not offered in the picker) with CLASSIC labels", () => {
     const r = resolveThinkingModel({ thinkingModel: "OPPORTUNITY_FIRST_OKR" })
+    expect(r.key).toBe("OPPORTUNITY_FIRST_OKR")
     expect(r.labels).toEqual(classic.labels)
     expect(r.tree).toBe("objective-rooted-pool")
   })
@@ -51,15 +50,37 @@ describe("resolveThinkingModel", () => {
   it("merges overrides over the preset and derives lower/plural forms", () => {
     const r = resolveThinkingModel({
       thinkingModel: "TORRES_OST",
-      thinkingModelLabels: JSON.stringify({
-        objective: { singular: "Theme", plural: "Themes" },
-        solution: { singular: "Bet" },
-      }),
+      thinkingModelLabels: stored({ objective: { singular: "Theme", plural: "Themes" }, keyResult: { singular: "Signal" } }),
     })
     expect(r.labels.objective).toMatchObject({ singular: "Theme", plural: "Themes", lower: "theme", lowerPlural: "themes" })
-    expect(r.labels.solution.plural).toBe("Bets")
-    expect(r.labels.keyResult.singular).toBe("Success metric")
+    expect(r.labels.keyResult).toMatchObject({ singular: "Signal", plural: "Signals", short: "Signal", sentence: "Signal" })
     expect(r.labels.sections.okrs).toBe("Themes")
+    expect(r.hasLabelOverrides).toBe(true)
+  })
+
+  it("an override drops the preset's article, so copy cannot say 'a idea'", () => {
+    const r = resolveThinkingModel({ thinkingModel: "CLASSIC", thinkingModelLabels: stored({ objective: { singular: "Idea" } }) })
+    expect(r.labels.objective.indefinite).toBe("idea")
+    expect(classic.labels.objective.indefinite).toBe("an objective")
+    expect(classic.labels.keyResult.indefinite).toBe("a key result")
+    expect(classic.labels.opportunity.indefinite).toBe("an opportunity")
+    expect(classic.labels.solution.indefinite).toBe("a solution")
+    expect(resolveThinkingModel({ thinkingModel: "TORRES_OST" }).labels.objective.indefinite).toBe("an outcome")
+  })
+
+  describe("stored overrides are re-validated on every read (all or nothing)", () => {
+    const cases: Array<[string, unknown]> = [
+      ["an entity that is not overridable", { objective: { singular: "Goal" }, solution: { singular: "Bet" } }],
+      ["a reserved nav name", { objective: { singular: "Roadmap" } }],
+      ["a full-width reserved nav name", { objective: { singular: "ＲＯＡＤＭＡＰ" } }],
+      ["markup", { objective: { singular: "<b>Goal</b>" } }],
+      ["an over-long label", { objective: { singular: "x".repeat(33) } }],
+      ["a collision with another entity", { objective: { singular: "Solution" } }],
+      ["an unknown inner key", { objective: { singular: "Goal", extra: "x" } }],
+    ]
+    it.each(cases)("%s => no overrides at all", (_name, value) => {
+      expect(resolveThinkingModel({ thinkingModel: "CLASSIC", thinkingModelLabels: stored(value) })).toEqual(classic)
+    })
   })
 
   it("every preset key resolves to itself", () => {
@@ -82,4 +103,21 @@ describe("derivePlural", () => {
     ["Match", "Matches"],
     ["Key Result", "Key Results"],
   ])("%s -> %s", (s, p) => expect(derivePlural(s)).toBe(p))
+
+  // Known naive cases: the settings form invites an explicit plural for these.
+  it.each([
+    ["Hero", "Heros"],
+    ["Con", "Cons"],
+  ])("naive: %s -> %s (give an explicit plural when this is wrong)", (s, p) => expect(derivePlural(s)).toBe(p))
+})
+
+describe("toLowerLabel", () => {
+  it.each([
+    ["Key Result", "key result"],
+    ["Hero", "hero"],
+    ["SKY", "SKY"],
+    ["R&D need", "R&D need"],
+    ["Success metric", "success metric"],
+    ["Q", "q"],
+  ])("%s -> %s", (s, l) => expect(toLowerLabel(s)).toBe(l))
 })

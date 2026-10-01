@@ -45,6 +45,9 @@ export const CONVERTED_FILES = [
   "components/tasks/link-task-dialog.tsx",
   "components/tasks/linked-type-labels.ts",
   "components/roadmap/add-item-form.tsx",
+  "components/roadmap/edit-item-dialog.tsx",
+  "components/discovery/discovery-rail.tsx",
+  "app/[orgSlug]/[workspaceSlug]/metrics/page.tsx",
   "components/custom-fields/manage-fields-panel.tsx",
   "components/custom-fields/shared-option-sets-panel.tsx",
   "components/custom-fields/object-type-labels.ts",
@@ -54,13 +57,12 @@ export const CONVERTED_FILES = [
 
 /**
  * Raw words deliberately left, as [file, exact fragment]. "OKR" is the name of
- * the framework, not an entity, and these three prefixes keep today's copy
+ * the framework, not an entity, and these prefixes keep today's copy
  * ("New OKR Cycle") identical under CLASSIC. Known residue under Torres.
  */
 const ALLOWED: Array<[string, string]> = [
   ["components/okrs/create-cycle-form.tsx", "New OKR"],
   ["app/[orgSlug]/[workspaceSlug]/okrs/page.tsx", "No OKR yet"],
-  ["app/[orgSlug]/[workspaceSlug]/okrs/[cycleId]/page.tsx", "OKR"],
   // Markdown template inserted into a new opportunity's description; a heading in
   // user-owned content, not the name of an entity.
   ["components/discovery/opportunity-composer.tsx", "## Who's affected\\n\\n\\n\\n## Current pain\\n\\n\\n\\n## Evidence\\n\\n\\n\\n## Desired outcome\\n\\n"],
@@ -118,9 +120,22 @@ function jsxTextFragments(source: string): string[] {
 export function rawEntityCopy(source: string): string[] {
   const cleaned = stripNonCopy(source)
   const hits: string[] = []
+  // Strings that are copy by position, so even a lone lowercase token counts:
+  // label="objective", placeholder="…", `label: "…"`, aria-label, title, alt.
+  const copyPositions =
+    /\b(?:label|aria-label|placeholder|title|alt|emptyMessage|inputPlaceholder|description|templateLabel)\s*[=:]\s*\{?\s*(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)')/g
+  const positional = new Set<string>()
+  for (const m of cleaned.matchAll(copyPositions)) {
+    const text = m[1] ?? m[2] ?? ""
+    if (ENTITY_WORD.test(text)) {
+      positional.add(text)
+      hits.push(text)
+    }
+  }
   for (const fragment of stringFragments(cleaned)) {
     const f = fragment.trim()
     if (!ENTITY_WORD.test(f)) continue
+    if (positional.has(fragment)) continue
     const singleToken = !/\s/.test(f)
     // Identifiers and paths: "objective", "OBJECTIVE", "keyResult", "/okrs/".
     if (singleToken && !/^[A-Z][a-z]+s?$/.test(f)) continue
@@ -143,6 +158,14 @@ describe("converted surfaces carry no raw entity copy (tripwire)", () => {
     expect(offenders).toEqual([])
   })
 
+  it("every ALLOWED entry is still produced by its file (no stale allowlist)", () => {
+    for (const [file, fragment] of ALLOWED) {
+      const hits = rawEntityCopy(readFileSync(path.join(ROOT, file), "utf-8")).map(normalize)
+      expect(hits, `${file}: stale allowlist entry ${JSON.stringify(fragment)}`).toContain(fragment)
+      expect(CONVERTED_FILES).toContain(file)
+    }
+  })
+
   it("RESERVED_SECTION_NAMES covers every static label in the sidebar and bottom nav", () => {
     const labels = ["components/sidebar.tsx", "components/bottom-nav.tsx"].flatMap((file) =>
       [...readFileSync(path.join(ROOT, file), "utf-8").matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]),
@@ -163,5 +186,9 @@ describe("converted surfaces carry no raw entity copy (tripwire)", () => {
     expect(rawEntityCopy('type: "OBJECTIVE"')).toEqual([])
     expect(rawEntityCopy("// Add objective in a comment")).toEqual([])
     expect(rawEntityCopy("<p>Add {labels.objective.lower}</p>")).toEqual([])
+    // A lone lowercase token in a copy position is copy, not an identifier.
+    expect(rawEntityCopy('<PanelError label="objective" />')).toEqual(["objective"])
+    expect(rawEntityCopy('<X aria-label="Linked to a key result" />')).toEqual(["Linked to a key result"])
+    expect(rawEntityCopy('const items = [{ label: "solution" }]')).toEqual(["solution"])
   })
 })

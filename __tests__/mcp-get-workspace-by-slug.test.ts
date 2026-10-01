@@ -131,7 +131,7 @@ describe("get_workspace_by_slug MCP tool", () => {
     })
     const handler = getHandler("get_workspace_by_slug")
     const text = textOf(await handler({ orgSlug: "rbcodelabs", workspaceSlug: "compass" }))
-    expect(text).toContain('This workspace calls Objectives "Outcomes"')
+    expect(text).toContain("custom display names for Objectives and Key Results")
     expect(text).toContain("API and tool names are unchanged")
 
     mockPrisma.workspace.findFirst.mockResolvedValue({
@@ -142,7 +142,7 @@ describe("get_workspace_by_slug MCP tool", () => {
       thinkingModel: null,
       thinkingModelLabels: null,
     })
-    expect(textOf(await handler({ orgSlug: "rbcodelabs", workspaceSlug: "compass" }))).not.toContain("This workspace calls")
+    expect(textOf(await handler({ orgSlug: "rbcodelabs", workspaceSlug: "compass" }))).not.toContain("custom display names")
   })
 
   it("omits the description line when the workspace has none", async () => {

@@ -33,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FEEDBACK_STATUS_META, type FeedbackStatus } from "@/lib/feedback-meta";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { linkPlaceholder } from "@/lib/thinking-model/copy";
 import {
   NEW_OPPORTUNITY_STATUSES,
   OPPORTUNITY_SEED_FEEDBACK_MAX,
@@ -481,9 +482,7 @@ function KeyResultField({
           disabled={disabled}
         >
           <ComboboxTrigger aria-label={labels.keyResult.sentence} className="w-full">
-            {/* "a" is pinned by an existing component test (opportunity-composer.test.tsx).
-                Correct for the shipped presets; a vowel-initial override reads "a idea". */}
-            <ComboboxValue placeholder={`Link a ${labels.keyResult.lower}`} />
+            <ComboboxValue placeholder={linkPlaceholder(labels.keyResult)} />
           </ComboboxTrigger>
           <ComboboxContent align="start" inputPlaceholder={`Search ${labels.keyResult.lowerPlural}…`} emptyMessage={`No matching ${labels.keyResult.lowerPlural}.`} />
         </Combobox>

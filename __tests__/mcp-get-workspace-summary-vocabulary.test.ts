@@ -65,7 +65,7 @@ describe("get_workspace_summary thinking-model vocabulary", () => {
   it("Torres workspace: structured labels and the vocabulary line", async () => {
     mockPrisma.workspace.findUnique.mockResolvedValue({ name: "W", thinkingModel: "TORRES_OST", thinkingModelLabels: null })
     const result = await call({ workspaceId: ID })
-    expect(result.content[0].text).toContain('This workspace calls Objectives "Outcomes" and Key Results "Success metrics"; API and tool names are unchanged.')
+    expect(result.content[0].text).toContain("custom display names for Objectives and Key Results")
     const data = (result.structuredContent as { data: { thinkingModel?: { key: string; name: string; labels: Record<string, unknown> } } }).data
     const tm = data.thinkingModel
     expect(tm?.key).toBe("TORRES_OST")
@@ -75,7 +75,7 @@ describe("get_workspace_summary thinking-model vocabulary", () => {
   it("NULL workspace: CLASSIC structured data and no extra text line", async () => {
     mockPrisma.workspace.findUnique.mockResolvedValue({ name: "W", thinkingModel: null, thinkingModelLabels: null })
     const result = await call({ workspaceId: ID })
-    expect(result.content[0].text).not.toContain("This workspace calls")
+    expect(result.content[0].text).not.toContain("custom display names")
     expect(JSON.stringify(result)).toContain('"key":"CLASSIC"')
   })
 })

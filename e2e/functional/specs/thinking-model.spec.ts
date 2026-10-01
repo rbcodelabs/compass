@@ -78,7 +78,11 @@ test.describe("Thinking model", () => {
     const panel = page.getByTestId("thinking-model-panel");
     await panel.scrollIntoViewIfNeeded();
     await panel.getByTestId("thinking-model-TORRES_OST").check();
-    await panel.getByLabel("Solution (singular)").fill("Bet");
+    // Only the presets that ship are offered, and only Objective / Key Result can be renamed.
+    await expect(panel.getByTestId("thinking-model-OPPORTUNITY_FIRST_OKR")).toHaveCount(0);
+    await expect(panel.getByLabel("Solution (singular)")).toHaveCount(0);
+    await expect(panel.getByTestId("thinking-model-notice")).toContainText("canvas");
+    await panel.getByLabel("Key Result (singular)").fill("Signal");
     await panel.getByTestId("thinking-model-save").click();
     await expect(panel.getByText("Saved.")).toBeVisible({ timeout: 15_000 });
 
@@ -90,7 +94,7 @@ test.describe("Thinking model", () => {
     await page.goto(`${base}/settings`);
     await page.waitForLoadState("networkidle");
     const again = page.getByTestId("thinking-model-panel");
-    await again.getByLabel("Opportunity (singular)").fill("<b>Need</b>");
+    await again.getByLabel("Objective (singular)").fill("<b>Need</b>");
     await again.getByTestId("thinking-model-save").click();
     await expect(again.getByRole("alert")).toBeVisible();
   });

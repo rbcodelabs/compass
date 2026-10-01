@@ -10,10 +10,10 @@
  * links or validation.
  */
 
-import { buildResolvedLabels, derivePlural, normalizeLabelText, type ResolvedLabels } from "./labels"
+import { buildResolvedLabels, derivePlural, type ResolvedLabels } from "./labels"
 import {
   DEFAULT_THINKING_MODEL_KEY,
-  THINKING_MODEL_ENTITIES,
+  OVERRIDABLE_ENTITIES,
   THINKING_MODEL_PRESETS,
   isThinkingModelKey,
   type CycleEmphasis,
@@ -23,7 +23,7 @@ import {
   type ThinkingModelPreset,
   type TreeShape,
 } from "./presets"
-import { LABEL_PATTERN, MAX_LABEL_LENGTH, type LabelOverrides } from "./validate"
+import { validateLabelOverrides, type LabelOverrides } from "./validate"
 
 export type ResolvedThinkingModel = {
   key: ThinkingModelKey
@@ -41,8 +41,17 @@ export type ThinkingModelSource = {
   thinkingModelLabels?: string | null
 }
 
-/** Lenient read of a stored override column. Invalid entries are dropped, never thrown. */
-export function parseStoredLabelOverrides(raw: string | null | undefined): LabelOverrides {
+/**
+ * Read a stored override column under today's rules. All-or-nothing: if the
+ * stored document is not valid JSON, names an entity that is not overridable, or
+ * fails any validation rule (charset, length, reserved nav names, uniqueness,
+ * size), NO overrides apply. That re-checks on every read, so the settings
+ * action need not be the only line of defence. Never throws.
+ */
+export function parseStoredLabelOverrides(
+  raw: string | null | undefined,
+  presetKey: string = DEFAULT_THINKING_MODEL_KEY,
+): LabelOverrides {
   if (!raw) return {}
   let data: unknown
   try {
@@ -50,19 +59,8 @@ export function parseStoredLabelOverrides(raw: string | null | undefined): Label
   } catch {
     return {}
   }
-  if (typeof data !== "object" || data === null || Array.isArray(data)) return {}
-  const out: LabelOverrides = {}
-  for (const entity of THINKING_MODEL_ENTITIES) {
-    const entry = (data as Record<string, unknown>)[entity]
-    if (typeof entry !== "object" || entry === null) continue
-    const { singular, plural } = entry as { singular?: unknown; plural?: unknown }
-    const s = typeof singular === "string" ? normalizeLabelText(singular) : ""
-    if (!s || [...s].length > MAX_LABEL_LENGTH || !LABEL_PATTERN.test(s)) continue
-    const p = typeof plural === "string" ? normalizeLabelText(plural) : ""
-    const validPlural = p && [...p].length <= MAX_LABEL_LENGTH && LABEL_PATTERN.test(p)
-    out[entity] = validPlural ? { singular: s, plural: p } : { singular: s }
-  }
-  return out
+  const checked = validateLabelOverrides(data, presetKey)
+  return checked.ok ? checked.value : {}
 }
 
 export function resolveThinkingModel(source: ThinkingModelSource = {}): ResolvedThinkingModel {
@@ -70,14 +68,15 @@ export function resolveThinkingModel(source: ThinkingModelSource = {}): Resolved
   const key = known ? (source.thinkingModel as ThinkingModelKey) : DEFAULT_THINKING_MODEL_KEY
   const preset = THINKING_MODEL_PRESETS[key]
   // Overrides ride on a known key only; an unknown key is CLASSIC with no overrides.
-  const overrides = known || source.thinkingModel == null ? parseStoredLabelOverrides(source.thinkingModelLabels) : {}
+  const overrides = known || source.thinkingModel == null ? parseStoredLabelOverrides(source.thinkingModelLabels, key) : {}
 
   const labels = { ...preset.labels } as Record<ThinkingModelEntity, EntityLabel>
   let hasLabelOverrides = false
-  for (const entity of THINKING_MODEL_ENTITIES) {
+  for (const entity of OVERRIDABLE_ENTITIES) {
     const override = overrides[entity]
     if (!override) continue
     hasLabelOverrides = true
+    // No article, no sentence/short forms: those belong to the preset's own words.
     labels[entity] = {
       singular: override.singular,
       plural: override.plural ?? derivePlural(override.singular),
