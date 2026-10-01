@@ -123,6 +123,24 @@ describe("OutcomeTreeView", () => {
     expect(screen.getByTestId("outcome-pool")).toHaveTextContent("Opportunities not linked to bets")
   })
 
+  it("says so when link data is unavailable, instead of presenting empty links as fact", () => {
+    const degraded = buildOutcomeTree({ linksUnavailable: true, objectives: [{ id: "o1", title: "Goal", sortOrder: 0 }], keyResults: [], opportunities: [{ id: "p1", title: "Need", status: "EXPLORING", sortOrder: 0 }], solutions: [], objectiveOpportunityLinks: [], solutionKeyResultEdges: [], legacyPointers: [] })
+    render(withModel({ thinkingModel: "TORRES_OST" }, <OutcomeTreeView tree={degraded} />))
+    expect(screen.getByTestId("outcome-links-unavailable")).toHaveTextContent("Link data is unavailable right now")
+    expect(screen.getByTestId("outcome-links-unavailable").textContent).toContain("opportunities")
+    cleanup()
+    render(withModel({ thinkingModel: "TORRES_OST" }, <OutcomeTreeView tree={tree("outcome-rooted")} />))
+    expect(screen.queryByTestId("outcome-links-unavailable")).toBeNull()
+  })
+
+  it("shows both numbers when an outcome has only stub rows, so it never reads as empty above stub rows", () => {
+    render(withModel({ thinkingModel: "TORRES_OST" }, <OutcomeTreeView tree={tree("outcome-rooted")} />))
+    // o2 holds only the stub of p1: 0 here, +1 also under other outcomes.
+    expect(screen.getByTestId("outcome-root-o2")).toHaveTextContent("0 opportunities · 0 solutions · +1 also under other outcomes")
+    // o1 holds the subtree itself: no extra clause.
+    expect(screen.getByTestId("outcome-root-o1").querySelector("header")!.textContent).not.toContain("also under other")
+  })
+
   it("renders an empty state in the preset's words", () => {
     const empty = buildOutcomeTree({ objectives: [], keyResults: [], opportunities: [], solutions: [], objectiveOpportunityLinks: [], solutionKeyResultEdges: [], legacyPointers: [] })
     render(withModel({ thinkingModel: "TORRES_OST" }, <OutcomeTreeView tree={empty} />))
@@ -144,6 +162,10 @@ describe("OutcomesIndex", () => {
     expect(screen.queryByTestId("outcomes-index-cycle-o2")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Persistent goal" }))
     expect(openPanel).toHaveBeenCalledWith("objective", "o2")
+  })
+  it("says so when link data is unavailable", () => {
+    render(withModel({ thinkingModel: "TORRES_OST" }, <OutcomesIndex rows={rows} linksUnavailable />))
+    expect(screen.getByTestId("outcomes-index-links-unavailable")).toHaveTextContent("counts may be incomplete")
   })
   it("renders nothing for an empty list", () => {
     const { container } = render(withModel({ thinkingModel: "TORRES_OST" }, <OutcomesIndex rows={[]} />))
@@ -196,22 +218,28 @@ describe("Opportunity header picker", () => {
     expect(screen.getByTestId("opportunity-objective-picker")).toHaveTextContent("Objectives")
   })
 
+  it("says so and offers no changes when link data is unavailable", () => {
+    render(withModel({ thinkingModel: "TORRES_OST" }, header({ linkedObjectives: [], availableObjectives: available, linksUnavailable: true })))
+    expect(screen.getByTestId("picker-links-unavailable")).toHaveTextContent("Link data is unavailable right now")
+    expect(screen.queryByRole("button", { name: "Choose outcomes" })).toBeNull()
+  })
+
   it("does not render the picker when the option list was not provided", () => {
     render(withModel({ thinkingModel: "TORRES_OST" }, header()))
     expect(screen.queryByTestId("opportunity-objective-picker")).toBeNull()
   })
 
-  it("links and unlinks through the server actions, sending only ids and a path", async () => {
+  it("links and unlinks through the server actions, sending only the two ids", async () => {
     const onChanged = vi.fn()
     render(withModel({ thinkingModel: "TORRES_OST" }, header({ ...picker, onChanged })))
     fireEvent.click(screen.getByRole("button", { name: "Choose outcomes" }))
     const cutCosts = await screen.findByRole("menuitemcheckbox", { name: /Cut costs/ })
     fireEvent.click(cutCosts)
-    await waitFor(() => expect(link).toHaveBeenCalledWith("opp-1", "o2", "/acme/alpha/discovery/opp-1"))
+    await waitFor(() => expect(link).toHaveBeenCalledWith("opp-1", "o2"))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
     const retention = await screen.findByRole("menuitemcheckbox", { name: /Grow retention/ })
     fireEvent.click(retention)
-    await waitFor(() => expect(unlink).toHaveBeenCalledWith("opp-1", "o1", "/acme/alpha/discovery/opp-1"))
+    await waitFor(() => expect(unlink).toHaveBeenCalledWith("opp-1", "o1"))
   })
 
   it("shows the server's message when a call is denied and leaves the selection alone", async () => {

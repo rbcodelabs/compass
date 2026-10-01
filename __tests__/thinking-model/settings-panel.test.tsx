@@ -31,7 +31,8 @@ describe("ThinkingModelPanel", () => {
     render(<ThinkingModelPanel {...base} />)
     const torres = screen.getByTestId("thinking-model-TORRES_OST").closest("label")!.textContent ?? ""
     expect(torres).toContain("outcome tree")
-    expect(torres).toContain("does not need a cycle")
+    expect(torres).toContain("flat list of all outcomes")
+    expect(torres).toContain("still belong to a cycle")
     const first = screen.getByTestId("thinking-model-OPPORTUNITY_FIRST_OKR").closest("label")!.textContent ?? ""
     expect(first).toContain("pool of opportunities")
     expect(first).toContain("link an opportunity")

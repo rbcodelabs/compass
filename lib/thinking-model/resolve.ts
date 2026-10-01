@@ -6,8 +6,10 @@
  * no overrides and never throw. NULL means CLASSIC forever. The result is plain
  * serializable data so the server layout can hand it to a client provider.
  *
- * Presentation only. Nothing server-side may branch on the result for data,
- * links or validation.
+ * Presentation only. Nothing server-side may branch on the result for writes, authorization, validation,
+ * or which rows are visible. (Display decisions do read it: the tree route, the Torres index query and the
+ * picker option list are only produced for the presets that show them.) Data, links and
+ * validation never depend on it.
  */
 
 import { buildResolvedLabels, derivePlural, type ResolvedLabels } from "./labels"

@@ -34,7 +34,10 @@
  *    was quarantined does not land in the pool. Link rows always win.
  *  - Cycles are never required: a cycle chip appears only where the Objective has one.
  *  - A child Objective (parentKeyResultId) gets a "supports" chip; it is not nested.
- *  - Output order is fully determined by (sortOrder, createdAt, id), never input order.
+ *  - Output order is fully determined by (sortOrder, createdAt, id), never input order. NOTE: Objective.sortOrder is
+ *    per cycle, so across cycles the "first Objective" that holds a multi-parent Opportunity's subtree is in practice
+ *    decided by createdAt: deterministic and stable, but not a meaningful ranking. It is a display choice only; every
+ *    other Objective still lists the Opportunity as an "also under" stub.
  */
 import type { TreeShape } from "./presets"
 
@@ -71,6 +74,8 @@ export type BuildOutcomeTreeInput = {
   legacyPointers: readonly LegacyPointerInput[]
   /** Defaults to "outcome-rooted". */
   shape?: OutcomeTreeShape
+  /** The loader could not read link data (link table missing), so placement and counts may be incomplete. */
+  linksUnavailable?: boolean
 }
 
 export type KeyResultStripItem = {
@@ -145,6 +150,8 @@ export type OpportunityNode = {
 
 export type OutcomeTree = {
   shape: OutcomeTreeShape
+  /** True when link data could not be read; the view says so instead of presenting empty links as fact. */
+  linksUnavailable: boolean
   roots: OutcomeRoot[]
   pool: string[]
   opportunities: Record<string, OpportunityNode>
@@ -329,6 +336,7 @@ export function buildOutcomeTree(input: BuildOutcomeTreeInput): OutcomeTree {
 
   return {
     shape,
+    linksUnavailable: input.linksUnavailable === true,
     roots,
     pool,
     opportunities: opportunityNodes,

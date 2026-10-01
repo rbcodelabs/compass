@@ -1,0 +1,11 @@
+fix(thinking-model): review follow-ups for Phase 3C (docs, visible link degradation, action hardening, lighter index)
+
+- docs: new Thinking models page, plus sections in OKRs and Discovery.
+- Silent degradation made visible: the loaders flag linksUnavailable (probe only when the tolerant reads found no links); the tree, the Outcomes index and the picker show a notice, and the picker offers no changes.
+- Server actions: revalidation paths are derived server-side (no client path); authorization failures keep the shared message, infrastructure errors log name and code only and answer generically.
+- /okrs uses a lighter dedicated index read (no solutions, no solution links), run beside the cycles query; it shares the tree's derivation so counts agree.
+- Tree: header shows stub counts next to the home counts; the first-Objective rule is documented as display-only.
+- Comments and copy: stale presentation-only comments, Torres description, typed-link-access exemption narrowed to COUNT and DELETE per statement.
+- Tests: links-unavailable (loader, tree, index, picker), chunking with 1,201 real links, index loader parity, infrastructure-failure and revalidation tests.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>

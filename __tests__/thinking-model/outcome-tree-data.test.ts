@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { loadOutcomeTree, loadOutcomeTreeInput } from "@/lib/thinking-model/outcome-tree-data"
+import { loadOutcomeTree, loadOutcomeTreeInput, loadOutcomesIndex } from "@/lib/thinking-model/outcome-tree-data"
 import { WS_A, WS_B, createTenantFakePrisma } from "../helpers/tenant-fake-prisma"
 
 /**
@@ -66,21 +66,23 @@ describe("loadOutcomeTreeInput (tenant scoping)", () => {
   })
 
   it("is read-only and filters every query by workspaceId (no unscoped read)", async () => {
-    const { fake, db } = setup()
+    const { fake, db, link } = setup()
+    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
     const spies = ["objective", "oKRCycle", "keyResult", "opportunity", "solution"].map((model) =>
       vi.spyOn((fake.client as unknown as Record<string, { findMany: (a: { where: Record<string, unknown> }) => Promise<unknown> }>)[model], "findMany"),
     )
     await loadOutcomeTreeInput(db, WS_A.id)
+    // objective is read twice by design: the loader, then the link readers' title join (also workspace-filtered).
+    spies.forEach((spy, index) => expect(spy).toHaveBeenCalledTimes(index === 0 ? 2 : 1))
     for (const spy of spies) {
-      expect(spy).toHaveBeenCalledTimes(1)
-      const where = spy.mock.calls[0][0].where
-      expect(JSON.stringify(where)).toContain(WS_A.id)
+      for (const call of spy.mock.calls) expect(JSON.stringify(call[0].where)).toContain(WS_A.id)
     }
     expect(fake.state.writes).toEqual([])
   })
 
   it("issues one query per table, not one per row (no N+1)", async () => {
-    const { fake, db } = setup()
+    const { fake, db, link } = setup()
+    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
     for (let i = 0; i < 40; i++) {
       fake.state.opportunities.push({ ...fake.state.opportunities[0], id: `opp-many-${i}` })
       fake.state.solutions.push({ ...fake.state.solutions[0], id: `sol-many-${i}`, opportunityId: `opp-many-${i}` })
@@ -89,7 +91,97 @@ describe("loadOutcomeTreeInput (tenant scoping)", () => {
     const counted = ["objective", "oKRCycle", "keyResult", "opportunity", "solution", "opportunityObjectiveLink", "solutionKeyResultLink"]
     const spies = counted.map((model) => vi.spyOn(client[model], "findMany"))
     await loadOutcomeTreeInput(db, WS_A.id)
-    for (const spy of spies) expect(spy.mock.calls.length).toBeLessThanOrEqual(1)
+    // 40 extra opportunities and solutions add no queries: at most one per table, two for objective (loader + link title join).
+    for (const spy of spies) expect(spy.mock.calls.length).toBeLessThanOrEqual(2)
+    expect(spies[counted.indexOf("opportunity")].mock.calls.length).toBe(1)
+    expect(spies[counted.indexOf("solution")].mock.calls.length).toBe(1)
+    expect(spies[counted.indexOf("opportunityObjectiveLink")].mock.calls.length).toBe(1)
+  })
+})
+
+describe("link reads with real links (chunking, no N+1)", () => {
+  it("reads 1,201 linked opportunities in three link queries and a bounded number of objective queries, not one per row", async () => {
+    const { fake, db, link } = setup()
+    for (let i = 0; i < 1200; i++) {
+      const id = `opp-bulk-${i}`
+      fake.state.opportunities.push({ ...fake.state.opportunities[0], id, sortOrder: i + 1 })
+      link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: id, objectiveId: "obj-a", origin: "DIRECT" })
+    }
+    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
+    const client = fake.client as unknown as Record<string, { findMany: (a: unknown) => Promise<unknown> }>
+    const linkReads = vi.spyOn(client.opportunityObjectiveLink, "findMany")
+    const objectiveReads = vi.spyOn(client.objective, "findMany")
+    const input = await loadOutcomeTreeInput(db, WS_A.id)
+    expect(input.opportunities).toHaveLength(1201)
+    expect(input.objectiveOpportunityLinks).toHaveLength(1201)
+    // 1,201 ids in chunks of 500: three link reads, and one title read per chunk plus the loader's own.
+    expect(linkReads).toHaveBeenCalledTimes(3)
+    expect(objectiveReads.mock.calls.length).toBeLessThanOrEqual(4)
+    expect(input.linksUnavailable).toBe(false)
+  })
+})
+
+describe("link table missing (migration 071 not applied)", () => {
+  const missingTable = () => Object.assign(new Error("relation does not exist"), { code: "P2021" })
+
+  it("flags linksUnavailable instead of silently presenting every opportunity as unlinked", async () => {
+    const { fake, db } = setup()
+    const client = fake.client as unknown as Record<string, { findMany: unknown }>
+    client.opportunityObjectiveLink.findMany = async () => { throw missingTable() }
+    client.solutionKeyResultLink.findMany = async () => { throw missingTable() }
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const tree = await loadOutcomeTree(db, WS_A.id)
+    expect(tree.linksUnavailable).toBe(true)
+    expect(tree.pool).toEqual(["opp-a"])
+    expect((await loadOutcomesIndex(db, WS_A.id)).linksUnavailable).toBe(true)
+  })
+
+  it("does not flag a workspace that simply has no links yet", async () => {
+    const { db } = setup()
+    expect((await loadOutcomeTree(db, WS_A.id)).linksUnavailable).toBe(false)
+    expect((await loadOutcomesIndex(db, WS_A.id)).linksUnavailable).toBe(false)
+  })
+
+  it("does not flag unrelated link failures as a missing table (they keep throwing)", async () => {
+    const { fake, db } = setup()
+    const client = fake.client as unknown as Record<string, { findMany: unknown }>
+    client.opportunityObjectiveLink.findMany = async () => { throw Object.assign(new Error("permission denied"), { code: "42501" }) }
+    await expect(loadOutcomeTree(db, WS_A.id)).rejects.toThrow("permission denied")
+  })
+
+  it("an empty workspace issues no probe and is not flagged", async () => {
+    const { fake, db } = setup()
+    fake.state.opportunities.length = 0
+    expect((await loadOutcomeTree(db, WS_A.id)).linksUnavailable).toBe(false)
+  })
+})
+
+describe("loadOutcomesIndex (the lighter read)", () => {
+  it("agrees with the tree on linked counts, including the legacy pointer fallback, and skips solutions", async () => {
+    const { fake, db, link } = setup()
+    fake.state.opportunities.push({ ...fake.state.opportunities[0], id: "opp-legacy", linkedKeyResultId: "kr-a", sortOrder: 1 })
+    fake.state.opportunities.push({ ...fake.state.opportunities[0], id: "opp-b-links", sortOrder: 2 })
+    fake.state.objectives.push({ id: "obj-a2", workspaceId: WS_A.id, cycleId: null, title: "A2", status: "ON_TRACK", sortOrder: 1 })
+    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" })
+    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-b-links", objectiveId: "obj-a", origin: "DIRECT" })
+    link(fake.state.opportunityObjectiveLinks, { workspaceId: WS_A.id, opportunityId: "opp-b-links", objectiveId: "obj-a2", origin: "DIRECT" })
+    const client = fake.client as unknown as Record<string, { findMany: (a: unknown) => Promise<unknown> }>
+    const solutionReads = vi.spyOn(client.solution, "findMany")
+    const solutionLinkReads = vi.spyOn(client.solutionKeyResultLink, "findMany")
+    const index = await loadOutcomesIndex(db, WS_A.id)
+    const tree = await loadOutcomeTree(db, WS_A.id)
+    expect(index.rows).toEqual(tree.roots.map((r) => ({ id: r.id, title: r.title, status: r.status, cycle: r.cycle, linkedOpportunityCount: r.linkedOpportunityCount })))
+    expect(index.rows.find((r) => r.id === "obj-a")!.linkedOpportunityCount).toBe(3)
+    expect(index.rows.find((r) => r.id === "obj-a2")!.cycle).toBeNull()
+    // Only the full tree load read solutions (once each): the index read none.
+    expect(solutionReads).toHaveBeenCalledTimes(1)
+    expect(solutionLinkReads).toHaveBeenCalledTimes(1)
+  })
+
+  it("hides NULL-workspace objectives and is scoped to the workspace", async () => {
+    const { db } = setup()
+    expect((await loadOutcomesIndex(db, WS_A.id)).rows.map((r) => r.id)).toEqual(["obj-a"])
+    expect((await loadOutcomesIndex(db, WS_B.id)).rows.map((r) => r.id)).toEqual(["obj-b"])
   })
 })
 

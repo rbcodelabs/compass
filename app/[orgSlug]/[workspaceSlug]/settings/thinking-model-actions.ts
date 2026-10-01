@@ -18,8 +18,11 @@
  * workspace id is rejected rather than ignored. It always writes an explicit key,
  * never NULL (NULL is reserved for "never chosen", which means CLASSIC).
  *
- * Presentation only: no data or links change, and nothing server-side branches
- * on the stored preset.
+ * Presentation only: no data or links change, and no write, authorization or
+ * validation branches on the stored preset. Server code does read it to decide
+ * what to RENDER or fetch for display: the label resolver, the workspace tree route
+ * (a 404 under CLASSIC), the Torres Outcomes index query on /okrs, and the picker
+ * option list in the opportunity detail payload.
  */
 
 import { revalidatePath } from "next/cache"

@@ -9,7 +9,7 @@ import type { CycleStatus } from "@/lib/types";
 import { EmptyState, PageHeader } from "@/components/patterns";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
-import { loadOutcomeTree } from "@/lib/thinking-model/outcome-tree-data";
+import { loadOutcomesIndex } from "@/lib/thinking-model/outcome-tree-data";
 import { OutcomesIndex } from "@/components/okrs/outcomes-index";
 
 interface OKRsPageProps {
@@ -39,29 +39,22 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
 
   if (!workspace) notFound();
 
-  const cycles = await prisma.oKRCycle.findMany({
-    where: { workspaceId: workspace.id },
-    orderBy: { startDate: "desc" },
-    include: {
-      // Count only objectives whose own workspaceId matches, so the card agrees with the (scoped) list.
-      _count: { select: { objectives: { where: { workspaceId: workspace.id } } } },
-    },
-  });
-
   const model = resolveThinkingModel(workspace);
   const { labels } = model;
 
-  // TORRES_OST only: a flat index of every Objective, reachable without picking a cycle. Other presets are untouched.
-  const outcomesIndexRows =
-    model.key === "TORRES_OST"
-      ? (await loadOutcomeTree(prisma, workspace.id)).roots.map((root) => ({
-          id: root.id,
-          title: root.title,
-          status: root.status,
-          cycle: root.cycle,
-          linkedOpportunityCount: root.linkedOpportunityCount,
-        }))
-      : null;
+  // The cycles query and (TORRES_OST only) the lighter flat index of every Objective run together. The index is
+  // reachable without picking a cycle; other presets run no extra query and are untouched.
+  const [cycles, outcomesIndex] = await Promise.all([
+    prisma.oKRCycle.findMany({
+      where: { workspaceId: workspace.id },
+      orderBy: { startDate: "desc" },
+      include: {
+        // Count only objectives whose own workspaceId matches, so the card agrees with the (scoped) list.
+        _count: { select: { objectives: { where: { workspaceId: workspace.id } } } },
+      },
+    }),
+    model.key === "TORRES_OST" ? loadOutcomesIndex(prisma, workspace.id) : Promise.resolve(null),
+  ]);
 
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8">
@@ -71,7 +64,7 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
           workspaceSlug={workspaceSlug}
         />} />
 
-      {outcomesIndexRows && <OutcomesIndex rows={outcomesIndexRows} />}
+      {outcomesIndex && <OutcomesIndex rows={outcomesIndex.rows} linksUnavailable={outcomesIndex.linksUnavailable} />}
 
       {cycles.length === 0 ? (
         <EmptyState icon={<Target className="size-6" />} title={`No OKR ${labels.cycle.lowerPlural} yet`} description={`${labels.cycle.plural} group your ${labels.objective.lowerPlural} into time-boxed periods. Create one to start setting goals.`} primaryAction={<CreateCycleForm

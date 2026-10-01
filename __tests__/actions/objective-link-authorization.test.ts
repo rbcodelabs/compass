@@ -26,7 +26,8 @@ import {
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/objective-link-actions"
 
 const DENIED = { ok: false, error: "Entity not found or access denied" }
-const PATH = `/${WS_A.org}/${WS_A.slug}/discovery/opp-a`
+const BASE = `/${WS_A.org}/${WS_A.slug}`
+const SCREENS = [`${BASE}/discovery/opp-a`, `${BASE}/discovery/tree`, `${BASE}/okrs`]
 const state = () => fake.current!.state
 const links = () => state().opportunityObjectiveLinks
 const linkWrites = () => state().writes.filter((w) => /Link\./.test(w))
@@ -42,7 +43,7 @@ beforeEach(() => {
 
 describe("linkOpportunityToObjectiveAction", () => {
   it("links a member's own opportunity to their own objective, stamping the opportunity's workspace", async () => {
-    const result = await linkOpportunityToObjectiveAction("opp-a", "obj-a", PATH)
+    const result = await linkOpportunityToObjectiveAction("opp-a", "obj-a")
     expect(result).toEqual({ ok: true, changed: true })
     expect(links()).toHaveLength(1)
     expect(links()[0]).toMatchObject({
@@ -53,19 +54,19 @@ describe("linkOpportunityToObjectiveAction", () => {
       source: "UI",
       createdById: USERS.alice,
     })
-    expect(revalidate).toHaveBeenCalledWith(PATH)
+    expect(revalidate.mock.calls.map((c) => c[0])).toEqual(SCREENS)
   })
 
   it("is idempotent", async () => {
-    await linkOpportunityToObjectiveAction("opp-a", "obj-a", PATH)
-    const again = await linkOpportunityToObjectiveAction("opp-a", "obj-a", PATH)
+    await linkOpportunityToObjectiveAction("opp-a", "obj-a")
+    const again = await linkOpportunityToObjectiveAction("opp-a", "obj-a")
     expect(again).toEqual({ ok: true, changed: false })
     expect(links()).toHaveLength(1)
   })
 
   it("ignores a forged workspace id smuggled as an extra argument", async () => {
     const forged = linkOpportunityToObjectiveAction as unknown as (...args: unknown[]) => Promise<unknown>
-    await forged("opp-a", "obj-a", PATH, WS_B.id, { workspaceId: WS_B.id })
+    await forged("opp-a", "obj-a", "/x", WS_B.id, { workspaceId: WS_B.id })
     expect(links()).toHaveLength(1)
     expect(links()[0]).toMatchObject({ workspaceId: WS_A.id })
   })
@@ -77,7 +78,7 @@ describe("linkOpportunityToObjectiveAction", () => {
     ["a missing objective", "opp-a", "does-not-exist"],
     ["a missing opportunity", "does-not-exist", "obj-a"],
   ])("denies %s with no writes and one message", async (_label, opportunityId, objectiveId) => {
-    const result = await linkOpportunityToObjectiveAction(opportunityId, objectiveId, PATH)
+    const result = await linkOpportunityToObjectiveAction(opportunityId, objectiveId)
     expect(result).toEqual(DENIED)
     expect(links()).toHaveLength(0)
     expect(linkWrites()).toEqual([])
@@ -87,39 +88,79 @@ describe("linkOpportunityToObjectiveAction", () => {
   it("denies a signed-in non-member, a member of only the other workspace, and an anonymous caller", async () => {
     for (const userId of [USERS.eve, USERS.bob, null]) {
       session.userId = userId
-      expect(await linkOpportunityToObjectiveAction("opp-a", "obj-a", PATH)).toEqual(DENIED)
+      expect(await linkOpportunityToObjectiveAction("opp-a", "obj-a")).toEqual(DENIED)
     }
     expect(links()).toHaveLength(0)
     expect(linkWrites()).toEqual([])
   })
 
   it("a member of A cannot link B's rows even if they know the ids, and bob cannot link A's", async () => {
-    expect(await linkOpportunityToObjectiveAction("opp-b", "obj-b", PATH)).toEqual(DENIED)
+    expect(await linkOpportunityToObjectiveAction("opp-b", "obj-b")).toEqual(DENIED)
     session.userId = USERS.bob
-    expect(await linkOpportunityToObjectiveAction("opp-a", "obj-b", PATH)).toEqual(DENIED)
+    expect(await linkOpportunityToObjectiveAction("opp-a", "obj-b")).toEqual(DENIED)
     // Bob can link inside his own workspace.
-    expect(await linkOpportunityToObjectiveAction("opp-b", "obj-b", `/${WS_B.org}/${WS_B.slug}/discovery`)).toEqual({ ok: true, changed: true })
+    expect(await linkOpportunityToObjectiveAction("opp-b", "obj-b")).toEqual({ ok: true, changed: true })
     expect(links().map((l) => l.workspaceId)).toEqual([WS_B.id])
   })
 
   it("rejects malformed input before any lookup", async () => {
     const bad = linkOpportunityToObjectiveAction as unknown as (...args: unknown[]) => Promise<unknown>
-    expect(await bad({ id: "opp-a" }, "obj-a", PATH)).toEqual({ ok: false, error: "Invalid request" })
-    expect(await bad("opp-a", "", PATH)).toEqual({ ok: false, error: "Invalid request" })
-    expect(await bad("opp-a", "x".repeat(200), PATH)).toEqual({ ok: false, error: "Invalid request" })
+    expect(await bad({ id: "opp-a" }, "obj-a")).toEqual({ ok: false, error: "Invalid request" })
+    expect(await bad("opp-a", "")).toEqual({ ok: false, error: "Invalid request" })
+    expect(await bad("opp-a", "x".repeat(200))).toEqual({ ok: false, error: "Invalid request" })
     expect(links()).toHaveLength(0)
   })
 
-  it("does not revalidate a non-local path", async () => {
-    await linkOpportunityToObjectiveAction("opp-a", "obj-a", "//evil.example/x")
-    await linkOpportunityToObjectiveAction("opp-a", "obj-a", "https://evil.example/x")
-    expect(revalidate).not.toHaveBeenCalled()
+  it("never revalidates a path the client supplies: a smuggled third argument is ignored", async () => {
+    const forged = linkOpportunityToObjectiveAction as unknown as (...args: unknown[]) => Promise<unknown>
+    await forged("opp-a", "obj-a", "//evil.example/x")
+    await forged("opp-a", "obj-a", "/other-org/other-ws")
+    const paths = revalidate.mock.calls.map((c) => c[0] as string)
+    expect(paths.length).toBeGreaterThan(0)
+    expect(paths.every((p) => p.startsWith(BASE))).toBe(true)
   })
 
   it("gives not-found and forbidden the same message (no existence oracle)", async () => {
-    const foreign = await linkOpportunityToObjectiveAction("opp-a", "obj-b", PATH)
-    const missing = await linkOpportunityToObjectiveAction("opp-a", "nope", PATH)
+    const foreign = await linkOpportunityToObjectiveAction("opp-a", "obj-b")
+    const missing = await linkOpportunityToObjectiveAction("opp-a", "nope")
     expect(foreign).toEqual(missing)
+  })
+})
+
+describe("infrastructure failures are not reported as not-found", () => {
+  const failWith = (code: string) => {
+    const original = fake.current!.client.opportunity.findFirst
+    fake.current!.client.opportunity.findFirst = (async () => {
+      throw Object.assign(new Error("column opportunities.workspace_id SECRET-ROW-DATA does not exist"), { name: "PrismaClientKnownRequestError", code })
+    }) as never
+    return () => { fake.current!.client.opportunity.findFirst = original }
+  }
+
+  it("a database error during authorization answers with a generic failure and logs only the name and code", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+    const restore = failWith("P2022")
+    const result = await linkOpportunityToObjectiveAction("opp-a", "obj-a")
+    restore()
+    expect(result).toEqual({ ok: false, error: "Something went wrong. Please try again." })
+    const text = JSON.stringify(logged.mock.calls)
+    expect(text).toContain("P2022")
+    expect(text).toContain("PrismaClientKnownRequestError")
+    expect(text).not.toContain("SECRET-ROW-DATA")
+    expect(links()).toHaveLength(0)
+    logged.mockRestore()
+  })
+
+  it("a failure inside the write transaction is also generic, and the authorization message stays for real denials", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+    const original = fake.current!.client.opportunityObjectiveLink.findFirst
+    fake.current!.client.opportunityObjectiveLink.findFirst = (async () => {
+      throw Object.assign(new Error("connection terminated"), { name: "Error", code: "ECONNRESET" })
+    }) as never
+    expect(await linkOpportunityToObjectiveAction("opp-a", "obj-a")).toEqual({ ok: false, error: "Something went wrong. Please try again." })
+    fake.current!.client.opportunityObjectiveLink.findFirst = original
+    expect(await linkOpportunityToObjectiveAction("opp-a", "obj-b")).toEqual(DENIED)
+    expect(JSON.stringify(logged.mock.calls)).toContain("ECONNRESET")
+    logged.mockRestore()
   })
 })
 
@@ -129,19 +170,19 @@ describe("unlinkOpportunityFromObjectiveAction", () => {
 
   it("removes a DIRECT link", async () => {
     seedLink()
-    expect(await unlinkOpportunityFromObjectiveAction("opp-a", "obj-a", PATH)).toEqual({ ok: true, changed: true })
+    expect(await unlinkOpportunityFromObjectiveAction("opp-a", "obj-a")).toEqual({ ok: true, changed: true })
     expect(links()).toHaveLength(0)
-    expect(revalidate).toHaveBeenCalledWith(PATH)
+    expect(revalidate.mock.calls.map((c) => c[0])).toEqual(SCREENS.map((p) => p.replace("opp-a", "opp-a")))
   })
 
   it("is a no-op when the pair is not linked", async () => {
-    expect(await unlinkOpportunityFromObjectiveAction("opp-a", "obj-a", PATH)).toEqual({ ok: true, changed: false })
+    expect(await unlinkOpportunityFromObjectiveAction("opp-a", "obj-a")).toEqual({ ok: true, changed: false })
   })
 
   it("keeps the link and says so while the legacy key result pointer still leads to the objective", async () => {
     state().opportunities[0].linkedKeyResultId = "kr-a"
     seedLink({ origin: "LEGACY" })
-    expect(await unlinkOpportunityFromObjectiveAction("opp-a", "obj-a", PATH)).toEqual({ ok: true, changed: false, stillLinkedViaKeyResult: true })
+    expect(await unlinkOpportunityFromObjectiveAction("opp-a", "obj-a")).toEqual({ ok: true, changed: false, stillLinkedViaKeyResult: true })
     expect(links()).toHaveLength(1)
   })
 
@@ -152,7 +193,7 @@ describe("unlinkOpportunityFromObjectiveAction", () => {
   ])("denies %s and leaves every link untouched", async (_label, opportunityId, objectiveId) => {
     seedLink()
     links().push({ id: "l-b", workspaceId: WS_B.id, opportunityId: "opp-b", objectiveId: "obj-b", origin: "DIRECT", source: "UI", createdById: null, createdAt: new Date(11) })
-    expect(await unlinkOpportunityFromObjectiveAction(opportunityId, objectiveId, PATH)).toEqual(DENIED)
+    expect(await unlinkOpportunityFromObjectiveAction(opportunityId, objectiveId)).toEqual(DENIED)
     expect(links()).toHaveLength(2)
     expect(linkWrites()).toEqual([])
   })
@@ -161,7 +202,7 @@ describe("unlinkOpportunityFromObjectiveAction", () => {
     seedLink()
     for (const userId of [USERS.eve, USERS.bob, null]) {
       session.userId = userId
-      expect(await unlinkOpportunityFromObjectiveAction("opp-a", "obj-a", PATH)).toEqual(DENIED)
+      expect(await unlinkOpportunityFromObjectiveAction("opp-a", "obj-a")).toEqual(DENIED)
     }
     expect(links()).toHaveLength(1)
   })

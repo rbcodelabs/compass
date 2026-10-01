@@ -14,6 +14,8 @@ OKRs (Objectives and Key Results) are the starting point for discovery in Compas
 
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
 
+> **Different words in your workspace?** A workspace admin can switch the thinking model in Settings. Under **Torres** an Objective is called an **Outcome** and a Key Result a **Success metric**, the sidebar entry reads **Outcomes**, and a flat list of all outcomes appears above the cycles. See [Thinking models](/help/27-thinking-models).
+
 ## OKR Cycles
 
 Every workspace has one or more **OKR cycles** — time-boxed periods (typically a quarter) during which you track progress toward your objectives. A cycle has a name (e.g. "Q3 2025") and optional start and end dates. You can have multiple cycles open at once, which is useful when teams operate on different cadences.

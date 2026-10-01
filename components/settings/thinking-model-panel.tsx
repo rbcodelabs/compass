@@ -19,7 +19,7 @@ import { MAX_LABEL_LENGTH, validateLabelOverrides, type LabelOverrides } from "@
 const PRESET_DESCRIPTIONS: Record<ThinkingModelKey, string> = {
   CLASSIC: "Objectives and Key Results, as Compass has always named them.",
   OPPORTUNITY_FIRST_OKR: "Same names as Classic. Adds a tree that starts from a pool of opportunities and runs through objectives and key results to solutions, and lets you link an opportunity to the objectives you chose to pursue.",
-  TORRES_OST: "Renames Objective to Outcome and Key Result to Success metric. Adds an outcome tree under Discovery, a flat list of outcomes that does not need a cycle, and lets you link an opportunity to several outcomes.",
+  TORRES_OST: "Renames Objective to Outcome and Key Result to Success metric. Adds an outcome tree under Discovery, a flat list of all outcomes on the Outcomes page, and lets you link an opportunity to several outcomes. New outcomes still belong to a cycle for now.",
 }
 
 const ENTITY_TITLES: Record<OverridableEntity, string> = {

@@ -169,6 +169,15 @@ Click **+ Add Evidence** from any opportunity, solution, or assumption to attach
 
 Because evidence doesn't roll up the tree, attach it to the specific node it actually supports — evidence for a particular solution belongs on that solution, not on the parent opportunity.
 
+## Linking an opportunity to Objectives, and the workspace tree
+
+Workspaces that use the **Opportunity-first OKRs** or **Torres** thinking model (a workspace admin picks it in Settings) get two extra things in Discovery:
+
+- On an opportunity, a multi-select box (titled **Objectives**, or **Outcomes** under Torres) to link the opportunity to every Objective you chose to pursue it for. Each tick saves immediately.
+- A tree button in the Discovery header (**Objective tree** / **Outcome tree**) that opens a tree for the whole workspace: Objectives, their linked opportunities and the solutions under them, with unlinked opportunities gathered in a pool.
+
+Classic workspaces see neither. Details are on the [Thinking models](/help/27-thinking-models) page.
+
 ## The OST Tree View
 
 Switch from board view to **Tree view** using the toggle at the top right of the Discovery page. The Tree view renders your full Opportunity Solution Tree:

@@ -55,7 +55,8 @@ const LINK_MODULE = "lib/typed-links.ts";
  * would leave them behind in the shared e2e database): the typed-links spec's afterAll and the suite's global teardown. The spec
  * verifies behaviour through the MCP tools.
  */
-// thinking-model-tree.spec.ts also seeds one edge by raw SQL (as the module would write it) and removes its own link rows by id in afterAll.
+// thinking-model-tree.spec.ts creates its edge through the UI (the picker, i.e. lib/typed-links.ts). Raw SQL there may only COUNT link rows
+// and DELETE its own in afterAll; the narrower per-statement check below enforces that so a raw INSERT or UPDATE cannot slip in.
 const E2E_CLEANUP_SPECS = new Set(["e2e/functional/specs/typed-links.spec.ts", "e2e/functional/specs/thinking-model-tree.spec.ts", "e2e/functional/global-teardown.ts"]);
 const isLinkModuleOrSchema = (file: string) => relPosix(file) === LINK_MODULE || relPosix(file) === "prisma/schema.prisma" || E2E_CLEANUP_SPECS.has(relPosix(file));
 
@@ -121,6 +122,17 @@ describe("typed link models are reached only through lib/typed-links.ts", () => 
       for (const line of text.split("\n").filter((l) => LINK_NAME.test(l) && /(?:SELECT|DELETE|INSERT|UPDATE)\s/i.test(l))) {
         expect(line, `${spec}: ${line.trim()}`).toMatch(/DELETE FROM|SELECT count/i);
       }
+    }
+  });
+
+  it("thinking-model-tree.spec.ts: every SQL literal that names a link table is a COUNT or a DELETE, nothing else", () => {
+    const text = readFileSync(path.join(ROOT, "e2e/functional/specs/thinking-model-tree.spec.ts"), "utf-8");
+    const literals = [...text.matchAll(/`([^`]*)`|"([^"\n]*)"|'([^'\n]*)'/g)].map((m) => m[1] ?? m[2] ?? m[3] ?? "");
+    const naming = literals.filter((literal) => LINK_NAME.test(literal));
+    expect(naming.length).toBeGreaterThan(0);
+    for (const literal of naming) {
+      expect(literal, literal).toMatch(/^\s*(?:DELETE FROM|SELECT count)/i);
+      expect(literal, literal).not.toMatch(/\b(?:INSERT|UPDATE)\b/i);
     }
   });
 

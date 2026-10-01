@@ -42,12 +42,25 @@ export function OutcomeTreeView({ tree }: { tree: OutcomeTree }) {
       return next
     })
 
+  const unavailableNotice = tree.linksUnavailable && (
+    <p
+      role="status"
+      data-testid="outcome-links-unavailable"
+      className="rounded-lg border border-status-warning bg-status-warning-surface px-3 py-2 text-xs text-status-warning"
+    >
+      Link data is unavailable right now, so {labels.opportunity.lowerPlural} may look unlinked and counts may be incomplete.
+    </p>
+  )
+
   if (tree.roots.length === 0 && tree.pool.length === 0) {
     return (
-      <EmptyState
+      <>
+        {unavailableNotice}
+        <EmptyState
         title={`No ${labels.objective.lowerPlural} or ${labels.opportunity.lowerPlural} yet`}
         description={`Add ${labels.objective.indefinite} and link ${labels.opportunity.lowerPlural} to it to grow the tree.`}
-      />
+        />
+      </>
     )
   }
 
@@ -146,6 +159,8 @@ export function OutcomeTreeView({ tree }: { tree: OutcomeTree }) {
         )}
         <span className="text-xs text-text-subtle">
           {plural(root.rollup.opportunities, labels.opportunity)} · {plural(root.rollup.solutions, labels.solution)}
+          {root.linkedOpportunityCount > root.rollup.opportunities &&
+            ` · +${root.linkedOpportunityCount - root.rollup.opportunities} also under other ${labels.objective.lowerPlural}`}
         </span>
       </header>
 
@@ -218,6 +233,7 @@ export function OutcomeTreeView({ tree }: { tree: OutcomeTree }) {
 
   return (
     <div data-testid="outcome-tree" data-shape={tree.shape} className="flex min-w-0 flex-col gap-4">
+      {unavailableNotice}
       {tree.shape === "objective-rooted-pool" && pool}
       {tree.roots.map(rootCard)}
       {tree.shape === "outcome-rooted" && pool}
