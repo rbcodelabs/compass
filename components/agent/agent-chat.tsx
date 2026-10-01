@@ -1,27 +1,46 @@
 "use client"
 
-// Agent chat surface (ADR 0001, Phase 4). Consumes the SSE stream from
-// POST /api/agent/turn (the Phase 3 turn service) and renders a conversation.
+// Agent chat surface (ADR 0001, Phase 4).
 //
 // Conversation selection is server-driven via the `?c=<id>` search param (the
 // page server-loads that conversation's messages), so this component only owns
 // the active thread + composer + live streaming of the current turn.
+//
+// Two transports, because the server has two paths (see app/api/agent/turn):
+//
+//   * `202 { runId }` — the turn is a *detached run*. The agent is no longer
+//     attached to the POST at all: this component becomes a viewer that tails
+//     /api/agent/runs/:runId/stream, can be closed and reopened, and reattaches
+//     on mount via /api/agent/conversations/:id/run. Closing the tab no longer
+//     abandons the turn, which is the whole point of detached runs.
+//   * `text/event-stream` — the pre-migration fallback, where the turn lives and
+//     dies with this request exactly as it used to.
+//
+// Both reduce through lib/agent-run-stream.ts so the two views of one turn cannot
+// drift apart.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Check, Loader2, Plus, Send, Sparkles } from "lucide-react"
+import { Check, Loader2, Plus, Send, Sparkles, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { parseSseFrames } from "@/lib/sse-frames"
-import { humanizeToolName } from "@/lib/agent-tools"
+import {
+  applyAgentSdkEvent,
+  emptyAgentTurnState,
+  runFailureText,
+  settleSteps,
+  type AgentTurnState,
+  type SerializedRun,
+  type ToolStep,
+} from "@/lib/agent-run-stream"
 import { Markdown } from "@/components/agent/markdown"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 
 type Role = "user" | "assistant"
-type ToolStep = { id: string; label: string; status: "running" | "done" }
 type Message = { id: string; role: Role; content: string; toolCalls?: ToolStep[] }
 type ConversationSummary = { id: string; title: string | null }
 type SeedEntity = { entityType: string; entityId: string; label: string; summary: string; sourceUrl: string }
@@ -112,12 +131,25 @@ export function AgentChat({
   const [streamingText, setStreamingText] = useState("")
   const [liveToolSteps, setLiveToolSteps] = useState<ToolStep[]>([])
   const [error, setError] = useState<string | null>(null)
+  /** The detached run this tab is currently viewing, if any. */
+  const [activeRun, setActiveRun] = useState<SerializedRun | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const [processing, setProcessing] = useState<Processing | null>(null)
   const [processingLoading, setProcessingLoading] = useState(Boolean(activeConversationId))
   const started = useRef(new Set<string>())
   const sending = useRef(false)
   const streamController = useRef<AbortController | null>(null)
+  /**
+   * Aborts the *viewer* of a detached run — never the run itself, which lives in
+   * a sandbox and is stopped only by DELETE or by the sweeper.
+   */
+  const runController = useRef<AbortController | null>(null)
+  /**
+   * Runs with a live reader in this tab. The tab that started a run is already
+   * watching it, so the reattach effect must not open a second reader that
+   * replays the same events into the same transcript.
+   */
+  const watchedRuns = useRef(new Set<string>())
   // Kept in a ref so a parent passing an inline arrow can't change `send`'s
   // identity on every render — `send` is what the handoff auto-dispatch effect
   // reads through `sendRef`, and churning it there is how you get a double
@@ -143,10 +175,17 @@ export function AgentChat({
   }, [isStreaming])
   const composerBlocked = processingLoading || Boolean(processing && (!processing.canContinue || processing.status === "RUNNING" || processing.status === "PENDING"))
 
+  // Unmount only — deliberately NOT keyed on `activeConversationId`.
+  //
+  // Turn 1 of a brand-new chat adopts the server's conversation id while its run
+  // is still going, so a cleanup keyed on that id would hang up on the run it had
+  // just started. A genuine thread switch aborts in the re-seed effect below,
+  // which is the one place that can tell adoption and switching apart.
   useEffect(() => () => {
     streamController.current?.abort()
+    runController.current?.abort()
     sending.current = false
-  }, [activeConversationId])
+  }, [])
 
   // Re-seed the transcript whenever the selected conversation changes — with one
   // exception, consumed exactly once.
@@ -169,6 +208,13 @@ export function AgentChat({
       selfCreated.current.delete(activeConversationId)
       return
     }
+    // A real thread switch: stop reading the previous thread's run. The run keeps
+    // going server-side, and coming back to that thread reattaches to it.
+    streamController.current?.abort()
+    runController.current?.abort()
+    runController.current = null
+    sending.current = false
+    setActiveRun(null)
     setMessages(initialMessages)
     setStreamingText("")
     setLiveToolSteps([])
@@ -179,6 +225,174 @@ export function AgentChat({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
   }, [messages, streamingText, liveToolSteps, phase])
+
+  /**
+   * View a detached run to completion.
+   *
+   * Everything here is a *read*: the SSE tail and the snapshot route both only
+   * query rows the sandbox writes, so this can be started, abandoned and started
+   * again — on a different day, in a different tab — and it converges on the same
+   * transcript. That is why the fallbacks below are allowed to be as blunt as
+   * "start over from `afterSeq`".
+   */
+  const watchRun = useCallback(async (runId: string, controller: AbortController) => {
+    if (watchedRuns.current.has(runId)) return
+    watchedRuns.current.add(runId)
+
+    let turn: AgentTurnState = emptyAgentTurnState
+    let afterSeq = 0
+    let run: SerializedRun | null = null
+    let resultText: string | null = null
+    let reportedFailure: string | null = null
+    let consecutiveFailures = 0
+
+    const apply = (next: AgentTurnState) => {
+      if (next === turn) return
+      turn = next
+      setStreamingText(turn.text)
+      setLiveToolSteps(turn.steps)
+    }
+    const ingest = (event: { seq: number; type: string; payload: unknown }) => {
+      // Monotonic, and never trusted to arrive in order: `afterSeq` is the cursor
+      // every resume is built on, so moving it backwards would replay events.
+      if (event.seq > afterSeq) afterSeq = event.seq
+      const payload = (event.payload ?? {}) as Record<string, unknown>
+      if (event.type === "agent") apply(applyAgentSdkEvent(event.payload, turn))
+      else if (event.type === "status") setPhase(payload.phase === "running" ? "running" : "booting")
+      else if (event.type === "result") { if (typeof payload.text === "string") resultText = payload.text }
+      else if (event.type === "error") reportedFailure = typeof payload.message === "string" ? payload.message : "The agent hit an error."
+    }
+    const adoptRun = (next: SerializedRun) => {
+      run = next
+      setActiveRun(next)
+      if (!next.done) setPhase(next.status === "QUEUED" ? "booting" : "running")
+    }
+    /** Polling fallback for when the tail is unavailable but the run is fine. */
+    const snapshot = async (): Promise<SerializedRun | null> => {
+      let latest: SerializedRun | null = null
+      for (let page = 0; page < 20; page += 1) {
+        const res = await fetch(`/api/agent/runs/${runId}?afterSeq=${afterSeq}`, { signal: controller.signal })
+        if (!res.ok) return latest
+        const body = await res.json() as { run: SerializedRun; events: { seq: number; type: string; payload: unknown }[]; hasMore: boolean }
+        for (const event of body.events) ingest(event)
+        latest = body.run
+        if (!body.hasMore) break
+      }
+      return latest
+    }
+
+    try {
+      for (;;) {
+        if (controller.signal.aborted) return
+        try {
+          const res = await fetch(`/api/agent/runs/${runId}/stream?afterSeq=${afterSeq}`, {
+            signal: controller.signal,
+            headers: { accept: "text/event-stream" },
+          })
+          if (res.status === 404) throw new Error("This run is no longer available.")
+          if (!res.ok || !res.body) throw new Error(`Run stream failed (${res.status}).`)
+          consecutiveFailures = 0
+          const reader = res.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ""
+          let finished = false
+          let hungUp = false
+          for (;;) {
+            const { value, done } = await reader.read()
+            if (controller.signal.aborted) return
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const { frames, rest } = parseSseFrames(buffer)
+            buffer = rest
+            for (const { event, data } of frames) {
+              let payload: unknown
+              try {
+                payload = JSON.parse(data)
+              } catch {
+                continue
+              }
+              if (event === "run") adoptRun(payload as SerializedRun)
+              else if (event === "event") ingest(payload as { seq: number; type: string; payload: unknown })
+              else if (event === "done") finished = true
+              // `reconnect` is the server hanging up before its function times
+              // out, and `error` is its tail failing — both mean "ask again from
+              // afterSeq", which is what falling out of this loop does.
+              else if (event === "reconnect" || event === "error") hungUp = true
+            }
+            if (finished || hungUp) break
+          }
+          if (finished) break
+        } catch (caught) {
+          if (controller.signal.aborted) return
+          consecutiveFailures += 1
+          if (consecutiveFailures > 5) throw caught
+          // The run outlives its readers, so a dead connection is not a dead run.
+          // Ask the snapshot route, which both advances the transcript and reveals
+          // whether the thing we lost contact with has already finished.
+          const recovered = await snapshot().catch(() => null)
+          if (recovered) {
+            adoptRun(recovered)
+            if (recovered.done) break
+          }
+          await new Promise((resolve) => setTimeout(resolve, Math.min(1_000 * consecutiveFailures, 5_000)))
+        }
+      }
+
+      if (controller.signal.aborted) return
+      // Re-widened deliberately: `run` is only ever assigned inside `adoptRun`, and
+      // TypeScript's flow analysis does not look into that closure — so without this
+      // it narrows to `null` here and the status checks below become unreachable.
+      const finalRun = run as SerializedRun | null
+      const text = (resultText ?? turn.text).trim()
+      const succeeded = !finalRun || finalRun.status === "SUCCEEDED"
+      if (text || succeeded) {
+        // Keyed on the run id, so a reattach that lands after the server already
+        // wrote its own assistant message is at worst a duplicate on screen until
+        // the next server render — never a lost reply.
+        setMessages((m) => [
+          ...m,
+          { id: `run-${runId}`, role: "assistant", content: text || "(no response)", toolCalls: settleSteps(turn.steps) },
+        ])
+      }
+      if (reportedFailure) setError(reportedFailure)
+      else if (finalRun && !succeeded) setError(runFailureText(finalRun.status, finalRun.error))
+      setStreamingText("")
+      setLiveToolSteps([])
+      setPhase("idle")
+      setActiveRun(null)
+      // Deferred to here on purpose: `router.refresh()` re-renders the server
+      // component that supplies `initialMessages`, and doing that mid-run would
+      // re-seed the transcript out from under the stream the user is reading.
+      if (!isRail) router.refresh()
+    } catch (caught) {
+      if (controller.signal.aborted) return
+      setError(caught instanceof Error ? caught.message : "Lost contact with the agent run.")
+      setStreamingText("")
+      setLiveToolSteps([])
+      setPhase("idle")
+    } finally {
+      // Dropped even on abort: an abandoned viewer must not stop the next one from
+      // reattaching to the same run.
+      watchedRuns.current.delete(runId)
+      if (runController.current === controller) {
+        runController.current = null
+        sending.current = false
+      }
+    }
+  }, [isRail, router])
+
+  /**
+   * Stop a run server-side. No local state change: the watcher sees the terminal
+   * status and reports whatever actually happened, which may be a result that
+   * landed while the request was in flight.
+   */
+  const cancelRun = useCallback(async (runId: string) => {
+    try {
+      await fetch(`/api/agent/runs/${runId}`, { method: "DELETE" })
+    } catch {
+      setError("Could not reach the server to stop this run.")
+    }
+  }, [])
 
   // `handoffKind` is passed in rather than read from `processing` because the
   // auto-dispatch below fires from the same tick as its `setProcessing`, so this
@@ -193,6 +407,9 @@ export function AgentChat({
     sending.current = true
     const controller = new AbortController()
     streamController.current = controller
+    // The same controller covers the POST and, on the detached path, the viewer it
+    // hands off to — so the two abort points (unmount, thread switch) stop both.
+    runController.current = controller
     setInput("")
     setError(null)
     setMessages((m) => [...m, { id: `local-${Date.now()}`, role: "user", content: text }])
@@ -210,8 +427,8 @@ export function AgentChat({
         : undefined
     if (seedContextForThisTurn) setPendingSeedEntity(undefined)
 
+    let turn: AgentTurnState = emptyAgentTurnState
     let assembled = ""
-    let steps: ToolStep[] = []
     let newConversationId: string | null = null
     try {
       const res = await fetch("/api/agent/turn", {
@@ -236,6 +453,25 @@ export function AgentChat({
             : serverMsg || `Request failed (${res.status}).`
         )
       }
+      // 202 Accepted = the turn is a detached run. The POST is already over; the
+      // agent is not attached to it, and neither is this tab's survival. From here
+      // on this component is only a viewer.
+      if (res.status === 202) {
+        const accepted = await res.json() as { runId: string; conversationId: string }
+        const createdId = accepted.conversationId && accepted.conversationId !== activeConversationId ? accepted.conversationId : null
+        if (createdId) {
+          selfCreated.current.add(createdId)
+          onConversationCreatedRef.current?.(createdId)
+          // Rewrite `?c=` immediately so a reload — or a tab closed now and
+          // reopened in an hour — lands on the conversation that owns this run and
+          // reattaches to it. `router.refresh()` waits until the run is done; see
+          // watchRun.
+          if (!isRail) router.replace(`${basePath}/agent?c=${createdId}`)
+        }
+        await watchRun(accepted.runId, controller)
+        return
+      }
+
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ""
@@ -258,23 +494,14 @@ export function AgentChat({
             setPhase(p.phase === "running" ? "running" : "booting")
             if (typeof p.conversationId === "string") newConversationId = p.conversationId
           } else if (event === "agent") {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const sdk = (p.message ?? {}) as any
-            const content = sdk?.message?.content
-            if (Array.isArray(content)) {
-              for (const block of content as Record<string, unknown>[]) {
-                if (block.type === "text" && typeof block.text === "string") {
-                  assembled += block.text
-                  setStreamingText(assembled)
-                } else if (block.type === "tool_use" && typeof block.name === "string") {
-                  steps = [...steps, { id: String(block.id ?? steps.length), label: humanizeToolName(block.name), status: "running" }]
-                  setLiveToolSteps(steps)
-                } else if (block.type === "tool_result") {
-                  const tid = String(block.tool_use_id ?? "")
-                  steps = steps.map((s) => (s.id === tid ? { ...s, status: "done" } : s))
-                  setLiveToolSteps(steps)
-                }
-              }
+            // Same reducer the detached viewer uses — the payload shape is
+            // identical because both originate in scripts/agent/turn-entry.ts.
+            const next = applyAgentSdkEvent(p, turn)
+            if (next !== turn) {
+              turn = next
+              assembled = turn.text
+              setStreamingText(turn.text)
+              setLiveToolSteps(turn.steps)
             }
           } else if (event === "result") {
             if (typeof p.text === "string" && p.text) assembled = p.text
@@ -285,10 +512,9 @@ export function AgentChat({
         }
       }
 
-      const finalSteps = steps.map((s) => ({ ...s, status: "done" as const }))
       setMessages((m) => [
         ...m,
-        { id: `a-${Date.now()}`, role: "assistant", content: assembled || "(no response)", toolCalls: finalSteps },
+        { id: `a-${Date.now()}`, role: "assistant", content: assembled || "(no response)", toolCalls: settleSteps(turn.steps) },
       ])
       setStreamingText("")
       setLiveToolSteps([])
@@ -321,7 +547,46 @@ export function AgentChat({
     } finally {
       if (streamController.current === controller) sending.current = false
     }
-  }, [input, workspaceId, activeConversationId, basePath, router, isRail, processing?.canContinue, pendingSeedEntity])
+  }, [input, workspaceId, activeConversationId, basePath, router, isRail, processing?.canContinue, pendingSeedEntity, watchRun])
+
+  // Reattach to a run already in flight for this conversation.
+  //
+  // This is the payoff for making runs durable: a reopened tab asks the
+  // conversation what is running, then replays the event log from seq 0 to rebuild
+  // the live view. It is also harmless in the tab that started the run — watchRun's
+  // own guard means the second reader is never opened.
+  useEffect(() => {
+    if (!activeConversationId) return
+    let cancelled = false
+    const lookup = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/agent/conversations/${activeConversationId}/run?workspaceId=${encodeURIComponent(workspaceId)}`,
+          { signal: lookup.signal },
+        )
+        if (cancelled || !res.ok) return
+        const body = await res.json() as { run: SerializedRun | null; available: boolean }
+        if (cancelled || !body.run || body.run.done) return
+        if (watchedRuns.current.has(body.run.id)) return
+        const controller = new AbortController()
+        runController.current = controller
+        // Block the composer for the duration: one conversation may have only one
+        // run in flight, and the server would 409 a second turn anyway.
+        sending.current = true
+        setActiveRun(body.run)
+        setPhase(body.run.status === "QUEUED" ? "booting" : "running")
+        await watchRun(body.run.id, controller)
+      } catch {
+        // Best-effort: failing to reattach leaves a normal, idle chat on screen,
+        // and the run carries on regardless.
+      }
+    })()
+    return () => {
+      cancelled = true
+      lookup.abort()
+    }
+  }, [activeConversationId, workspaceId, watchRun])
 
   const sendRef = useRef(send)
   useEffect(() => { sendRef.current = send }, [send])
@@ -467,6 +732,14 @@ export function AgentChat({
               />
             )}
 
+            {/* Only shown for a detached run, because it is only true of one: the
+                synchronous fallback still dies with this request. */}
+            {activeRun && !activeRun.done && (
+              <p className="pl-10 text-xs text-text-subtle">
+                This runs on the server — you can close this tab and pick the reply up here later.
+              </p>
+            )}
+
             {error && (
               <div className="rounded-lg border border-default bg-status-danger-surface px-4 py-3 text-sm text-status-danger">
                 {error}
@@ -502,9 +775,21 @@ export function AgentChat({
               disabled={isStreaming || composerBlocked}
               className="max-h-40 flex-1"
             />
-            <Button size="icon" onClick={() => void send()} disabled={isStreaming || composerBlocked || !input.trim()} aria-label="Send message">
-              <Send className="size-4" aria-hidden="true" />
-            </Button>
+            {activeRun && !activeRun.done ? (
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={() => void cancelRun(activeRun.id)}
+                aria-label="Stop this agent run"
+                title="Stop this run"
+              >
+                <Square className="size-4" aria-hidden="true" />
+              </Button>
+            ) : (
+              <Button size="icon" onClick={() => void send()} disabled={isStreaming || composerBlocked || !input.trim()} aria-label="Send message">
+                <Send className="size-4" aria-hidden="true" />
+              </Button>
+            )}
           </div>
         </div>
       </div>

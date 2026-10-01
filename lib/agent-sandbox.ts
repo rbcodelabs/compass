@@ -129,9 +129,37 @@ export async function buildGoldenSnapshot(opts?: {
 /**
  * Boot a fresh sandbox FROM a golden snapshot (warm path). Dependencies are
  * already installed; the caller writes the per-turn entry script and runs it.
+ *
+ * `timeoutMs` exists for detached runs: a detached run outlives its starting request,
+ * so the sandbox's own timeout — not the function's — is what bounds it. The
+ * 5-minute default is kept for the synchronous fallback path. `name` makes the
+ * sandbox addressable later (`Sandbox.get({ name })`), which is how the sweeper
+ * reaches a run nobody is watching.
  */
-export async function bootSandboxFromSnapshot(snapshotId: string): Promise<Sandbox> {
-  return Sandbox.create({ source: { type: "snapshot", snapshotId }, timeout: SANDBOX_TIMEOUT_MS })
+export async function bootSandboxFromSnapshot(
+  snapshotId: string,
+  opts?: { timeoutMs?: number; name?: string; tags?: Record<string, string> }
+): Promise<Sandbox> {
+  return Sandbox.create({
+    source: { type: "snapshot", snapshotId },
+    timeout: opts?.timeoutMs ?? SANDBOX_TIMEOUT_MS,
+    ...(opts?.name ? { name: opts.name } : {}),
+    ...(opts?.tags ? { tags: opts.tags } : {}),
+  })
+}
+
+/**
+ * Stop a sandbox by name, for a caller that holds only the name — the run
+ * sweeper and the run finalizer, neither of which has the original handle.
+ *
+ * Throws when the sandbox cannot be reached (already stopped, already collected,
+ * never created). Callers treat that as "nothing left to stop": the sandbox's own
+ * platform-side timeout is the backstop, so a failed stop costs money, not
+ * correctness.
+ */
+export async function stopSandboxByName(name: string): Promise<void> {
+  const sandbox = await Sandbox.get({ name })
+  await sandbox.stop()
 }
 
 /**

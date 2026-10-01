@@ -153,7 +153,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "075_roadmap_item_provenance": "2d4d390790ff8cb20c7918e0b56b2a37ccbc99eddc5216622668ba50602ed0e6",
   // External / manual research studies: five nullable ADD COLUMNs (research_studies and
   // research_sessions), no index, no backfill, no hook. Digest recorded from the shipped SQL; please review it.
-  "076_research_external_studies": "01cc40f387b9171fc6761f598db0ce20e0dae1df9ca58f9755bdbe481bd97cb0"
+  "076_research_external_studies": "01cc40f387b9171fc6761f598db0ce20e0dae1df9ca58f9755bdbe481bd97cb0",
+  // Durable background agent runs: two additive CREATE TABLEs (agent_runs, agent_run_events)
+  // and six ASYNC indexes, two of them unique (worker-token lookup, (run_id, seq) idempotency).
+  // No ALTER, no backfill, no foreign keys. Digest recorded from the shipped SQL; please review it.
+  "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301"
 };
 
 /**
