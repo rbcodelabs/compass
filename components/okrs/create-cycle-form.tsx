@@ -5,6 +5,7 @@ import { PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { createCycle } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 
 interface CreateCycleFormProps {
@@ -18,6 +19,7 @@ export function CreateCycleForm({
   orgSlug,
   workspaceSlug,
 }: CreateCycleFormProps) {
+  const labels = useLabels();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -43,7 +45,7 @@ export function CreateCycleForm({
     return (
       <Button onClick={() => setOpen(true)}>
         <PlusIcon />
-        New Cycle
+        New {labels.cycle.singular}
       </Button>
     );
   }
@@ -54,7 +56,7 @@ export function CreateCycleForm({
       action={handleSubmit}
       className="rounded-xl ring-1 ring-border bg-muted/30 p-4 flex flex-col gap-3 w-full max-w-sm"
     >
-      <p className="text-sm font-medium">New OKR Cycle</p>
+      <p className="text-sm font-medium">New OKR {labels.cycle.singular}</p>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="cycle-title">Title</Label>
@@ -94,7 +96,7 @@ export function CreateCycleForm({
 
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={isPending}>
-          {isPending ? "Creating…" : "Create cycle"}
+          {isPending ? "Creating…" : `Create ${labels.cycle.lower}`}
         </Button>
         <Button
           type="button"

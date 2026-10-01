@@ -9,6 +9,7 @@ import { GripVertical, X } from "lucide-react";
 import { CheckInForm } from "@/components/okrs/check-in-form";
 import { CardMenu, type CardMenuItem } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { deleteKeyResult, setObjectiveParentKR } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import { Combobox, ComboboxContent } from "@/components/ui/combobox";
 import { ProgressRing } from "@/components/ui/progress-ring";
@@ -45,6 +46,7 @@ export interface SupportingObjectiveOption {
 
 export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObjectiveOptions }: KeyResultBarProps) {
   const router = useRouter();
+  const labels = useLabels();
   const [, startTransition] = useTransition();
   const [isLinkPending, startLinkTransition] = useTransition();
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -135,14 +137,14 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
     ...(canLinkSupporting
       ? [
           {
-            label: "Link supporting objective…",
+            label: `Link supporting ${labels.objective.lower}…`,
             // Defer until the dropdown has closed so focus moves cleanly into the combobox popup.
             onClick: () => requestAnimationFrame(() => setIsLinkOpen(true)),
           },
         ]
       : []),
     {
-      label: "Delete KR",
+      label: `Delete ${labels.keyResult.short}`,
       onClick: () => handleDelete(),
       destructive: true,
       separator: canLinkSupporting,
@@ -210,8 +212,8 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
           <ComboboxContent
             anchor={actionsRef}
             align="end"
-            inputPlaceholder="Search shorter-cycle Objectives…"
-            emptyMessage="No eligible unlinked Objectives."
+            inputPlaceholder={`Search shorter-${labels.cycle.lower} ${labels.objective.plural}…`}
+            emptyMessage={`No eligible unlinked ${labels.objective.plural}.`}
           />
         </Combobox>
       )}
@@ -220,7 +222,7 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
       {localSupportingObjectives.length > 0 && (
         <div className="ml-5 mt-1 flex flex-col gap-1 rounded-md bg-muted/50 px-2.5 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Supporting objectives
+            Supporting {labels.objective.lowerPlural}
           </p>
           {localSupportingObjectives.map((objective) => (
             <div key={objective.id} className="flex items-start justify-between gap-3 rounded-sm py-0.5 sm:items-center">

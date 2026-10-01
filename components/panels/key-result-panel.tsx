@@ -15,6 +15,7 @@ import {
 } from "./panel-parts";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
 
 type KeyResultData = {
@@ -56,7 +57,9 @@ export function KeyResultPanel({
     workspaceSlug
   );
 
-  if (error) return <PanelError label="key result" />;
+  const labels = useLabels();
+
+  if (error) return <PanelError label={labels.keyResult.lower} />;
   if (!data) return <PanelSkeleton />;
 
   const edit: EditContext = {
@@ -131,16 +134,16 @@ export function KeyResultPanel({
         </div>
       </div>
 
-      <Section label="Objective">
-        <RelationList items={objectiveItems} empty="No parent objective." />
+      <Section label={labels.objective.singular}>
+        <RelationList items={objectiveItems} empty={`No parent ${labels.objective.lower}.`} />
       </Section>
 
-      <Section label="Supporting Objectives" count={data.supportingObjectives.length}>
-        <RelationList items={supportingItems} empty="No supporting Objectives linked." />
+      <Section label={`Supporting ${labels.objective.plural}`} count={data.supportingObjectives.length}>
+        <RelationList items={supportingItems} empty={`No supporting ${labels.objective.plural} linked.`} />
       </Section>
 
-      <Section label="Linked Opportunities" count={data.opportunities.length}>
-        <RelationList items={oppItems} empty="No opportunities linked." />
+      <Section label={`Linked ${labels.opportunity.plural}`} count={data.opportunities.length}>
+        <RelationList items={oppItems} empty={`No ${labels.opportunity.lowerPlural} linked.`} />
       </Section>
 
       <Section label="Roadmap" count={data.roadmapItems.length}>

@@ -12,6 +12,7 @@ import {
   ComboboxTrigger,
   ComboboxValue,
 } from "@/components/ui/combobox";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { createObjective } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import type { SquadData } from "@/lib/types";
 
@@ -28,6 +29,7 @@ export function AddObjectiveForm({
   workspaceSlug,
   squads = [],
 }: AddObjectiveFormProps) {
+  const labels = useLabels();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -56,7 +58,7 @@ export function AddObjectiveForm({
         className="flex items-center gap-1.5 w-full rounded-lg border border-dashed border-border/60 py-2 px-3 text-xs text-muted-foreground hover:text-foreground hover:border-border transition-colors"
       >
         <PlusIcon className="w-3.5 h-3.5" />
-        Add objective
+        Add {labels.objective.lower}
       </button>
     );
   }
@@ -67,7 +69,7 @@ export function AddObjectiveForm({
       action={handleSubmit}
       className="rounded-xl ring-1 ring-border bg-muted/30 p-4 flex flex-col gap-3 w-full max-w-sm"
     >
-      <p className="text-sm font-medium">Add Objective</p>
+      <p className="text-sm font-medium">Add {labels.objective.singular}</p>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="obj-title">Title</Label>
@@ -138,7 +140,7 @@ export function AddObjectiveForm({
 
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={isPending}>
-          {isPending ? "Adding…" : "Add objective"}
+          {isPending ? "Adding…" : `Add ${labels.objective.lower}`}
         </Button>
         <Button
           type="button"

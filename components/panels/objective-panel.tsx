@@ -17,6 +17,7 @@ import {
 } from "./panel-parts";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 
 type ObjectiveData = {
   id: string;
@@ -72,7 +73,9 @@ export function ObjectivePanel({
     workspaceSlug
   );
 
-  if (error) return <PanelError label="objective" />;
+  const labels = useLabels();
+
+  if (error) return <PanelError label={labels.objective.lower} />;
   if (!data) return <PanelSkeleton />;
 
   const edit: EditContext = {
@@ -130,16 +133,16 @@ export function ObjectivePanel({
         <div className="flex flex-col gap-3">
           {data.owner && <Field label="Owner">{data.owner}</Field>}
           {data.squad && <Field label="Squad">{data.squad.name}</Field>}
-          {data.cycle && <Field label="Cycle">{data.cycle.title}</Field>}
+          {data.cycle && <Field label={labels.cycle.singular}>{data.cycle.title}</Field>}
         </div>
       )}
 
-      <Section label="Key Results" count={data.keyResults.length}>
-        <RelationList items={krItems} empty="No key results yet." />
+      <Section label={labels.keyResult.plural} count={data.keyResults.length}>
+        <RelationList items={krItems} empty={`No ${labels.keyResult.lowerPlural} yet.`} />
       </Section>
 
       <Section label="Supports">
-        <RelationList items={parentItems} empty="No higher-level Key Result." />
+        <RelationList items={parentItems} empty={`No higher-level ${labels.keyResult.singular}.`} />
       </Section>
 
       <Section label="Delivery tasks" count={data.deliveryTasks.length}>

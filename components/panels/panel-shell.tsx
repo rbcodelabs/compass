@@ -35,21 +35,24 @@ import { FeedbackComposer } from "@/components/feedback/feedback-composer";
 import { OpportunityComposer } from "@/components/discovery/opportunity-composer";
 import { isComposerPanelType } from "./composer-panel-types";
 import { TaskDetail } from "@/components/tasks/task-detail";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import type { ResolvedLabels } from "@/lib/thinking-model/labels";
 
-const PANEL_TITLES: Record<string, string> = {
-  objective: "Objective",
-  keyResult: "Key Result",
-  opportunity: "Opportunity",
-  solution: "Solution",
+// A function because the four entity titles come from the workspace's thinking model.
+const panelTitles = (labels: ResolvedLabels): Record<string, string> => ({
+  objective: labels.objective.singular,
+  keyResult: labels.keyResult.singular,
+  opportunity: labels.opportunity.singular,
+  solution: labels.solution.singular,
   assumption: "Assumption",
   experiment: "Experiment",
   roadmapItem: "Roadmap Item",
   feedback: "Feedback",
   "feedback-new": "New feedback",
-  "opportunity-new": "New opportunity",
+  "opportunity-new": `New ${labels.opportunity.lower}`,
   task: "Task",
   "discovery-rail": "Discovery",
-};
+});
 
 /**
  * Upper bound on how long the deep-link panel waits for a browser idle period
@@ -81,6 +84,7 @@ export interface PanelShellProps {
 
 export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps = {}) {
   const { panel, closePanel, orgSlug, workspaceSlug, setDetailPanelDock } = usePanelContext();
+  const labels = useLabels();
   const [hydrated, setHydrated] = useState(false);
   const { pinned, width, viewportAllowsPin, isPinnedMode, togglePinned, commitWidth } = usePanelPin("detail", initialPin);
   const asideRef = useRef<HTMLElement | null>(null);
@@ -225,7 +229,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
     closePanel();
   };
 
-  const title = panel ? PANEL_TITLES[panel.type] ?? panel.type : "";
+  const title = panel ? panelTitles(labels)[panel.type] ?? panel.type : "";
   const fullPageRoute = panel?.type === "task" ? "tasks" : panel?.type === "opportunity" ? "discovery" : null;
   const hasCompactHeader = fullPageRoute !== null;
   const fullPageAction = fullPageRoute && panel ? (

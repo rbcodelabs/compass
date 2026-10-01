@@ -20,14 +20,17 @@ import type {
 } from "@/lib/types";
 import { PageHeader, StatusBadge } from "@/components/patterns";
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
-
-export const metadata = {
-  title: "OKR Cycle",
-};
+import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
 
 interface CyclePageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string; cycleId: string }>;
   searchParams: Promise<{ squad?: string }>;
+}
+
+export async function generateMetadata({ params }: CyclePageProps) {
+  const { orgSlug, workspaceSlug } = await params;
+  const { labels } = await getThinkingModelForSlugs(orgSlug, workspaceSlug);
+  return { title: `OKR ${labels.cycle.singular}` };
 }
 
 const CYCLE_STATUS_TONE: Record<CycleStatus, "success" | "neutral"> = {
