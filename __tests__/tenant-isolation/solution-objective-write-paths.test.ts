@@ -426,7 +426,6 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   // 071 migration integration test: three objective inserts, each listing workspace_id (seeded after 068 is applied).
   "__tests__/typed-link-tables-migration.integration.test.ts": 3,
   "__tests__/workspace-id-on-solution-objective-migration.integration.test.ts": 12,
-  "__tests__/typed-link-tables-migration.integration.test.ts": 3, // objectives: one before 068 exists (allow-listed below), two listing workspace_id
   "__tests__/typed-links-residual-migration.integration.test.ts": 1, // objectives, listing workspace_id (068 is applied first)
   "__tests__/typed-links-race.integration.test.ts": 2, // one objective and one solution, each listing workspace_id
   "__tests__/typed-links-delete.integration.test.ts": 2, // objectives and a solution for the delete scenarios, each listing workspace_id
