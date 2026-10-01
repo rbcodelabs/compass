@@ -663,6 +663,45 @@ describe("069_workspace_id_residual_backfill", () => {
   });
 });
 
+describe("072_typed_links_residual_backfill", () => {
+  const NAME = "072_typed_links_residual_backfill";
+
+  it("is registered exactly once, after 071_typed_link_tables", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === NAME)).toHaveLength(1);
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("071_typed_link_tables"));
+  });
+
+  it("contains no executable SQL (no DDL): the work is the pinned runner hook", () => {
+    const executable = sqlFor(NAME)
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n")
+      .trim();
+    expect(executable).toBe("");
+  });
+
+  it("is explicit-only (an untargeted POST never runs it), like 069", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    expect(runner).toMatch(/EXPLICIT_ONLY_MIGRATIONS: readonly string\[\] = \[WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION\]/);
+  });
+
+  it("runs the same precondition, backfill and postconditions as 071 before its receipt, and needs no async index wait", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    expect(runner).toMatch(/migration\.name === TYPED_LINK_TABLES_MIGRATION \|\| migration\.name === TYPED_LINK_RESIDUAL_MIGRATION\) await assertTypedLinkPreconditions\(client, schema, migration\.name\)/);
+    expect(runner).toMatch(/backfillOpportunityObjectiveLinks\(client, schema, log, undefined, migration\.name\)/);
+    expect(runner).toMatch(/assertTypedLinkTables\(client, schema, migration\.name\)/);
+    const receipt = runner.indexOf("SET finished_at = CURRENT_TIMESTAMP WHERE id = $1");
+    expect(runner.indexOf("await assertTypedLinkTables(client, schema, migration.name)")).toBeLessThan(receipt);
+    // No DDL, so it is in neither async-wait list.
+    for (const line of runner.split("\n").filter((l) => l.includes("ASYNC_WAIT_MIGRATIONS = ") || l.includes("if (!jobId && ["))) expect(line).not.toContain(NAME);
+  });
+
+  it("does not change 071's SQL (the pin in the managed manifest still holds)", () => {
+    expect(sqlFor("071_typed_link_tables")).toContain("CREATE TABLE IF NOT EXISTS opportunity_objective_links");
+  });
+});
+
 describe("071_typed_link_tables", () => {
   const NAME = "071_typed_link_tables";
   const statements = () =>

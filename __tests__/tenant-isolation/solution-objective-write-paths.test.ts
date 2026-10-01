@@ -415,6 +415,7 @@ const files = walk(ROOT)
  */
 const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "__tests__/preview-automation-qa/postgres-integration.test.ts": 1,
+  "__tests__/typed-link-tables-migration.integration.test.ts": 2, // objective + solution in the old-client CRUD check; both set a workspaceId derived from the created rows
   "app/[orgSlug]/[workspaceSlug]/discovery/actions.ts": 1,
   "app/[orgSlug]/[workspaceSlug]/okrs/actions.ts": 1,
   "app/api/mcp/route.ts": 2,
@@ -423,6 +424,8 @@ const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
 };
 const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   "__tests__/workspace-id-on-solution-objective-migration.integration.test.ts": 12,
+  "__tests__/typed-link-tables-migration.integration.test.ts": 3, // objectives: one before 068 exists (allow-listed below), two listing workspace_id
+  "__tests__/typed-links-residual-migration.integration.test.ts": 1, // objectives, listing workspace_id (068 is applied first)
   // INSERT INTO ${ownerTable}: the managed-pilot ownership table (see DYNAMIC_INSERT_ALLOWED); counted so a second one is noticed.
   "lib/preview-automation/managed-migrations.ts": 1,
   "e2e/functional/fixtures/seed-e2e.ts": 2,
@@ -431,6 +434,7 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   "e2e/functional/specs/opportunity-composer.spec.ts": 1,
   "e2e/functional/specs/opportunity-detail.spec.ts": 1,
   "e2e/functional/specs/opportunity-relationships.spec.ts": 1,
+  "e2e/functional/specs/typed-links.spec.ts": 1, // objectives for the typed-link fixture, listing workspace_id
   "scripts/seed-canvas-scale.ts": 2,
   "scripts/verify-managed-pilot-migrations.ts": 1, // allow-listed dynamic (sentinel table)
   "seed-screenshots.ts": 2,
@@ -441,6 +445,7 @@ const INTENTIONAL_NULL_CREATES: Record<string, string> = {
 };
 /** Raw inserts that deliberately omit workspace_id (they simulate rows written by pre-068 code). Same marker rule. */
 const INTENTIONAL_NULL_RAW_INSERTS: Record<string, string> = {
+  "__tests__/typed-link-tables-migration.integration.test.ts": "inserts objectives before 068 has added the column, so 068's backfill has pre-068 rows to fill",
   "__tests__/workspace-id-on-solution-objective-migration.integration.test.ts": "simulates pre-068 rows and late rows inserted by old instances so the backfill has something to fill",
 };
 /** Dynamic-table inserts that are reviewed and known not to target solutions/objectives. Matched by file AND the exact interpolated name. */
