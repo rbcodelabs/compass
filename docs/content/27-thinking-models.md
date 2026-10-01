@@ -29,14 +29,14 @@ Under Torres the OKRs entry in the sidebar is called **Outcomes**, and the new w
 - Your Objectives, Key Results, Opportunities, Solutions, cycles and links are the same under every model.
 - Agents and API tools always use the standard names (Objective, Key Result), whatever your workspace calls them.
 - The places listed under [What still uses the standard names](#what-still-uses-the-standard-names) keep them under every model and every rename.
-- A Classic workspace sees no new screens and no new controls at all, and its text is exactly what it was before names became a setting.
+- A Classic workspace sees no new screens, and its text is exactly what it was before names became a setting. (Its admins do see the rename fields in Settings, which stay empty until someone fills them in.)
 
 ## Renaming your entities
 
-On the same Settings section you can give any of the five entities (**Opportunity**, **Objective**, **Key Result**, **Solution** and **Cycle**) a workspace-specific name. Each has a singular and an optional plural; if you leave the plural empty an "s" is added, so give one when that would be wrong ("Story" becomes "Stories", but an irregular noun needs its plural typed). Leave a field empty to keep the model's own name.
+On the same Settings section you can give any of the five entities (**Opportunity**, **Objective**, **Key Result**, **Solution** and **Cycle**) a workspace-specific name. Each has a singular and an optional plural; if you leave the plural empty Compass derives one ("Bet" becomes "Bets", "Story" becomes "Stories", "Focus" becomes "Focuses"), so type the plural when the guess would be wrong ("Hero" would become "Heros"). Leave a field empty to keep the model's own name.
 
 - Letters, numbers, spaces and `' ’ & / -` only, starting with a letter or number, up to 32 characters each, and the whole set must stay within 1 KB.
-- A name cannot be the name of a section in the navigation (Roadmap, Discovery, Docs and so on), and no two entities can share a name or a plural. That includes entities you did not rename: you cannot call Solutions "Opportunities" unless you also rename Opportunity.
+- A name cannot be the name of a section in the navigation (Roadmap, Discovery, Docs and so on) or of another thing Compass names (Experiment, Assumption, Evidence, Squad, Task, Artifact and similar), and no two entities can share a name or a plural. That includes entities you did not rename: you cannot call Solutions "Opportunities" unless you also rename Opportunity.
 - A rename replaces the model's own word. Under Torres, renaming Objective to "Aim" gives **Aim** everywhere, not Outcome.
 - A rename carries no "a" or "an", because the right one depends on the word. Compass's own words read "Link to an opportunity…"; with Opportunity renamed to "Idea" it reads "Link to idea…".
 - A workspace that renames a Cycle sees that word in the cycle forms and cards, the cycle page, the Objective panel's Cycle field and the canvas zoom label.

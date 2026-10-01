@@ -152,7 +152,7 @@ export function ThinkingModelPanel({ orgSlug, workspaceSlug, initialKey, initial
         <legend className="mb-1 text-sm font-medium">Names</legend>
         <p className="text-xs text-muted-foreground">
           Rename these for this workspace. Leave a field empty to keep the model&apos;s name. If you leave the plural
-          empty, an &quot;s&quot; is added, so give a plural when that would be wrong. Letters, numbers, spaces and
+          empty, Compass derives one (&quot;s&quot;, &quot;es&quot; or &quot;ies&quot;), so give a plural when that would be wrong. Letters, numbers, spaces and
           &apos; &amp; / - only, up to {MAX_LABEL_LENGTH} characters.
         </p>
         {OVERRIDABLE_ENTITIES.map((entity) => (

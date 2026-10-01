@@ -16,8 +16,8 @@
  *   node scripts/regenerate-thinking-model-baselines.ts ../compass-main-baseline
  *   git worktree remove --force ../compass-main-baseline
  *
- * Refuses a checkout that already contains lib/thinking-model (that would be this
- * branch, not main). The harness imports nothing from lib/thinking-model, so it
+ * Refuses (scripts/thinking-model-baseline-guard.ts) a checkout that contains lib/thinking-model, has local changes, or
+ * whose HEAD is not origin/main or an ancestor of it. The harness imports nothing from lib/thinking-model, so it
  * runs unchanged against main's components.
  */
 import { execFileSync } from "node:child_process"
@@ -25,6 +25,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSyn
 import path from "node:path"
 import { CONVERTED_FILES } from "../__tests__/thinking-model/converted-files.ts"
 import { entityFragments } from "../__tests__/thinking-model/copy-extract.ts"
+import { assertBaselineCheckout } from "./thinking-model-baseline-guard.ts"
 
 const target = process.argv[2]
 if (!target) {
@@ -33,11 +34,8 @@ if (!target) {
 }
 const main = path.resolve(target)
 const here = process.cwd()
-if (!existsSync(path.join(main, "package.json"))) throw new Error(`${main} is not a checkout`)
-if (existsSync(path.join(main, "lib/thinking-model"))) {
-  throw new Error(`${main} contains lib/thinking-model: that is the feature branch, not main. Use a checkout of origin/main.`)
-}
-const sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: main, encoding: "utf-8" }).trim()
+// Refuses a dirty checkout, the feature branch, or any HEAD that is not origin/main or an ancestor of it.
+const sha = assertBaselineCheckout(main)
 console.log(`Generating baselines from ${main} at ${sha}`)
 
 // 1. Copy fragments from main's source.

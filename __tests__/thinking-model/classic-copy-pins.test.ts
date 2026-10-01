@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import { CONVERTED_FILES } from "./converted-files"
-import { copyFragments, substitute } from "./copy-extract"
+import { copyFragments, labelAccesses, substitute } from "./copy-extract"
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { indefiniteTitle, linkPlaceholder, linkToPlaceholder, linkedToLabel } from "@/lib/thinking-model/copy"
 import { NO_CYCLE_LABEL, noCycleLabel } from "@/lib/okr-cycle-scope"
@@ -67,13 +67,56 @@ const helperOutputs = (): string[] => [
   linkedToLabel(CLASSIC.keyResult),
 ]
 
+/**
+ * Files that are label-helper modules: their main-side literals ("Objective", "Roadmap Item") now come out of a function
+ * (panelTitles(labels), linkedTypeLabels(labels), ...), so for these only, the helper outputs count as produced.
+ * Every other file is compared on its OWN fragments: a string that moved out of a component must still be produced by
+ * that component, not merely by some other file or by a label form that happens to equal it.
+ */
+const HELPER_FILES = new Set([
+  "components/panels/panel-titles.ts",
+  "components/tasks/linked-type-labels.ts",
+  "components/custom-fields/object-type-labels.ts",
+  "lib/canvas/tiers.ts",
+])
+
+/** A file that builds phrases through the copy helpers (articles, titles, tiers) produces multi-word text with them. */
+const USES_COPY_HELPER = /linkToPlaceholder|linkPlaceholder|linkedToLabel|indefiniteTitle|panelTitles|linkedTypeLabels|linkedTypePluralLabels|objectTypeLabels|noCycleLabel|tierLabels|trackedSubjectLabels|ostLegendRootLabel/
+
+/** Helpers that return a whole name map (panel titles, linked-type names, custom-field object types). */
+const USES_NAME_MAP_HELPER = /panelTitles|linkedTypeLabels|linkedTypePluralLabels|objectTypeLabels/
+
+/**
+ * Fragments a specific file no longer produces as text, with the reason and what pins it instead. Per file, so one file's
+ * exception cannot hide another file's regression.
+ */
+const FILE_EXCEPTIONS: Record<string, Record<string, string>> = {
+  "components/panels/objective-panel.tsx": { "/{}/{}/okrs": "a route, not copy: #332 appends cycleRouteSegment(cycle?.id)" },
+  "components/discovery/opportunity-field-board.tsx": { solution: "now plural(count, labels.solution); pinned by 'opportunity-field-board' in classic-text.test.tsx" },
+  "components/discovery/ost-tree-view.tsx": { Outcome: "the legend root word comes from ostLegendRootLabel(); pinned by 'ost-tree linked' in classic-text.test.tsx and the helper test" },
+}
+
+/**
+ * This file's own fragments with each `labels.x.y` expression replaced by its CLASSIC value, plus every label the file
+ * reads directly (a label passed as a prop is how it produces that word). Helper outputs count only for helper modules,
+ * and for multi-word phrases in a file that calls a copy helper. WEAKER than the render harness
+ * (classic-text.test.tsx): a file that reads a label somewhere satisfies a bare one-word fragment of that label.
+ */
+function fileFragments(file: string): Set<string> {
+  const source = readFileSync(path.join(ROOT, file), "utf-8")
+  const produced = new Set<string>()
+  for (const fragment of copyFragments(source, file)) produced.add(substitute(fragment, CLASSIC))
+  for (const token of labelAccesses(source, file)) produced.add(substitute(token, CLASSIC))
+  if (HELPER_FILES.has(file)) for (const output of helperOutputs()) produced.add(output)
+  else if (USES_NAME_MAP_HELPER.test(source)) for (const output of helperOutputs()) produced.add(output)
+  else if (USES_COPY_HELPER.test(source)) for (const output of helperOutputs()) if (/\s/.test(output)) produced.add(output)
+  return produced
+}
+
+/** All fragments the branch produces anywhere (used only to prove an EXCEPTION is really gone). */
 function branchFragments(): Set<string> {
   const produced = new Set<string>(helperOutputs())
-  for (const file of CONVERTED_FILES) {
-    for (const fragment of copyFragments(readFileSync(path.join(ROOT, file), "utf-8"))) {
-      produced.add(substitute(fragment, CLASSIC))
-    }
-  }
+  for (const file of CONVERTED_FILES) for (const f of fileFragments(file)) produced.add(f)
   return produced
 }
 
@@ -83,12 +126,29 @@ describe("CLASSIC copy equals origin/main's, string for string", () => {
     expect(Object.keys(mainCopy.files).length).toBeGreaterThan(25)
   })
 
-  it("every entity-bearing fragment main shipped is still produced under CLASSIC", () => {
-    const produced = branchFragments()
-    const missing = Object.entries(mainCopy.files).flatMap(([file, fragments]) =>
-      fragments.filter((f) => !produced.has(f) && !(f in EXCEPTIONS)).map((f) => `${file}: ${JSON.stringify(f)}`),
-    )
+  it("every entity-bearing fragment main shipped is still produced under CLASSIC, by the same file", () => {
+    const missing = Object.entries(mainCopy.files).flatMap(([file, fragments]) => {
+      const produced = fileFragments(file)
+      const fileExceptions = FILE_EXCEPTIONS[file] ?? {}
+      return fragments.filter((f) => !produced.has(f) && !(f in EXCEPTIONS) && !(f in fileExceptions)).map((f) => `${file}: ${JSON.stringify(f)}`)
+    })
     expect(missing).toEqual([])
+  })
+
+  it("every FILE_EXCEPTION is real (in main's file, and no longer produced by it)", () => {
+    for (const [file, entries] of Object.entries(FILE_EXCEPTIONS)) {
+      const produced = fileFragments(file)
+      for (const fragment of Object.keys(entries)) {
+        expect(mainCopy.files[file] ?? [], `${file}: not in main: ${fragment}`).toContain(fragment)
+        expect(produced.has(fragment), `${file}: now produced, remove the exception: ${fragment}`).toBe(false)
+      }
+    }
+  })
+
+  it("canary: a fragment that only another file or a bare label form produces does not count", () => {
+    // "Solution" is a label form, and other files say it; a file that lost its own "Solution" must still fail.
+    expect(fileFragments("components/okrs/cycle-card.tsx").has("Solution")).toBe(false)
+    expect(branchFragments().has("Solution")).toBe(true)
   })
 
   it("every EXCEPTION is real (no stale entries)", () => {

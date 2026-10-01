@@ -35,8 +35,9 @@ const actionsProxy = vi.hoisted(
 
 vi.mock("@/auth", () => ({ auth: noop }))
 vi.mock("@/lib/db", () => ({ default: noop }))
+const pathname = vi.hoisted(() => ({ value: "/acme/alpha/okrs" }))
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/acme/alpha/okrs",
+  usePathname: () => pathname.value,
   useRouter: () => ({ refresh: noop, push: noop, replace: noop }),
   useSearchParams: () => new URLSearchParams(),
 }))
@@ -101,6 +102,11 @@ import { UnscheduledItemPreview } from "@/components/roadmap/unscheduled-items-p
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel"
 import { CanvasFlow } from "@/components/canvas/canvas-flow"
 import { SolutionPanel } from "@/components/panels/solution-panel"
+import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
+import { MobileHeader } from "@/components/mobile-header"
+import { SidebarProvider } from "@/components/ui/sidebar"
+import { DiscoveryRailPanel } from "@/components/panels/discovery-rail-panel"
+import { ArtifactDetail } from "@/components/docs/artifact-detail"
 import { AssumptionPanel } from "@/components/panels/assumption-panel"
 import { FeedbackPanel } from "@/components/panels/feedback-panel"
 
@@ -377,4 +383,41 @@ describe("CLASSIC text is identical to main (Phase 4C-2 surfaces)", () => {
     recorded["feedback-panel"] = actual
     if (!WRITE) expect(actual).toBe(expected["feedback-panel"])
   })
+
+  // Added after review: surfaces the pins alone could not render.
+  check("search-palette open", <SidebarProvider><WorkspaceSearchPalette {...common} /></SidebarProvider>, () => fireEvent.click(screen.getAllByRole("button")[0]))
+  it("mobile-header on an opportunity page", () => {
+    pathname.value = "/acme/alpha/discovery/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+    try {
+      const { container } = render(<MobileHeader workspaceName="Alpha" userName="Dev User" userEmail="dev@example.com" {...common} />)
+      const actual = copyOf(container)
+      recorded["mobile-header"] = actual
+      if (!WRITE) expect(actual).toBe(expected["mobile-header"])
+    } finally {
+      pathname.value = "/acme/alpha/okrs"
+    }
+  })
+  it("discovery-rail-panel load error", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = (() => Promise.reject(new Error("offline"))) as typeof fetch
+    try {
+      const { container } = render(<DiscoveryRailPanel activeOpportunityId="o1" {...common} />)
+      await screen.findByText(/Could not load/)
+      const actual = copyOf(container)
+      recorded["discovery-rail-panel error"] = actual
+      if (!WRITE) expect(actual).toBe(expected["discovery-rail-panel error"])
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+  check(
+    "artifact-detail",
+    <ArtifactDetail
+      artifact={{ id: "a1", title: "Proto", description: null, sourceType: "EXTERNAL_LINK", status: "ACTIVE", currentRevision: { externalUrl: "https://example.com" }, revisions: [] }}
+      workspaceId="w1"
+      basePath="/acme/alpha/docs"
+      solutions={[{ id: "s1", title: "Fix", linked: true }, { id: "s2", title: "Other", linked: false }]}
+      decisions={[]}
+    />,
+  )
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { validateLabelOverrides, MAX_LABEL_LENGTH, MAX_OVERRIDES_BYTES } from "@/lib/thinking-model/validate"
+import { validateLabelOverrides, MAX_LABEL_LENGTH, MAX_OVERRIDES_BYTES, RESERVED_NOUN_NAMES } from "@/lib/thinking-model/validate"
 import { OVERRIDABLE_ENTITIES, THINKING_MODEL_ENTITIES } from "@/lib/thinking-model/presets"
 
 const run = (input: unknown, key = "CLASSIC") => validateLabelOverrides(input, key)
@@ -119,8 +119,8 @@ describe("validateLabelOverrides rejects", () => {
   })
 
   it("a derived plural is checked too (a singular whose naive plural collides with a section)", () => {
-    // "Metric" + "s" = "Metrics", a nav section.
-    expect(error({ cycle: { singular: "Metric" } })).toMatch(/name of a section/)
+    // "Canva" + "s" = "Canvas", a nav section.
+    expect(error({ cycle: { singular: "Canva" } })).toMatch(/name of a section/)
   })
 
   it("rejects an unknown inner key and a non-string plural on the new entities", () => {
@@ -150,5 +150,35 @@ describe("validateLabelOverrides rejects", () => {
     expect(error({ objective: { singular: "a>b" } })).toBe(
       "The Objective label may only use letters, numbers, spaces and the characters ' ’ & / - and must start with a letter or number.",
     )
+  })
+
+  describe("canonical nouns that are not nav sections are reserved too", () => {
+    it.each(["Experiment", "Assumption", "Evidence", "Squad", "Task", "Roadmap item", "Artifact", "Comment", "Agent", "Scoring model"])(
+      "%s cannot name any entity, singular or as the plural",
+      (noun) => {
+        for (const entity of OVERRIDABLE_ENTITIES) {
+          expect(error({ [entity]: { singular: noun } }), `${entity} singular ${noun}`).toMatch(/already the name of/)
+          expect(error({ [entity]: { singular: "Thing", plural: noun } }), `${entity} plural ${noun}`).toMatch(/already the name of/)
+        }
+      },
+    )
+
+    it("a singular that passes today only because the admin supplied a plural is still refused", () => {
+      expect(run({ solution: { singular: "Assumption", plural: "Bets" } }).ok).toBe(false)
+      expect(run({ solution: { singular: "Experiments", plural: "Bets" } }).ok).toBe(false)
+    })
+
+    it("folds full-width and case variants", () => {
+      expect(run({ solution: { singular: "ＥＸＰＥＲＩＭＥＮＴ" } }).ok).toBe(false)
+      expect(run({ solution: { singular: "eViDeNcE" } }).ok).toBe(false)
+    })
+
+    it("every reserved noun is refused as a plural", () => {
+      for (const noun of RESERVED_NOUN_NAMES) expect(run({ solution: { singular: "Thing", plural: noun } }).ok, noun).toBe(false)
+    })
+
+    it("ordinary names still pass", () => {
+      expect(run({ solution: { singular: "Bet" }, opportunity: { singular: "Problem" }, cycle: { singular: "Sprint" } }).ok).toBe(true)
+    })
   })
 })

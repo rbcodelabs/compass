@@ -52,12 +52,50 @@ export const RESERVED_SECTION_NAMES: readonly string[] = [
   "Docs",
   "Canvas",
   "Agent",
+  "Agents",
   "Updates",
   "Capture",
   "Feedback",
   "Settings",
   "Card sort",
   "Reviews",
+]
+
+/**
+ * Other canonical nouns the UI uses for things that are not one of the five entities and are not nav sections
+ * (singular and plural). Renaming an entity to one of these would make two different things read the same on screen,
+ * for instance Solution -> "Assumption". Compared after NFKC folding and case-folding, like the nav names.
+ */
+export const RESERVED_NOUN_NAMES: readonly string[] = [
+  "Experiment",
+  "Experiments",
+  "Assumption",
+  "Assumptions",
+  "Evidence",
+  "Squad",
+  "Squads",
+  "Task",
+  "Doc",
+  "Decision",
+  "Review",
+  "Roadmap item",
+  "Roadmap items",
+  "Artifact",
+  "Artifacts",
+  "Comment",
+  "Comments",
+  "Member",
+  "Members",
+  "Workspace",
+  "Workspaces",
+  "Agent",
+  "Agents",
+  "Metric",
+  "Update",
+  "Study",
+  "Studies",
+  "Scoring model",
+  "Scoring models",
 ]
 
 export type LabelOverride = { singular: string; plural?: string }
@@ -139,6 +177,7 @@ export function validateLabelOverrides(input: unknown, presetKey: string): Label
   const preset = THINKING_MODEL_PRESETS[isThinkingModelKey(presetKey) ? presetKey : "CLASSIC"]
   const value: LabelOverrides = {}
   const reserved = new Set(RESERVED_SECTION_NAMES.map(fold))
+  const reservedNouns = new Set(RESERVED_NOUN_NAMES.map(fold))
   const effective = new Map<ThinkingModelEntity, Set<string>>()
 
   for (const entity of THINKING_MODEL_ENTITIES) {
@@ -158,6 +197,7 @@ export function validateLabelOverrides(input: unknown, presetKey: string): Label
     const effectivePlural = plural ?? derivePlural(singular.value)
     for (const text of [singular.value, effectivePlural]) {
       if (reserved.has(fold(text))) return fail(`"${text}" is already the name of a section in the navigation.`)
+      if (reservedNouns.has(fold(text))) return fail(`"${text}" is already the name of something else in Compass. Choose a different name.`)
     }
     value[entity] = plural ? { singular: singular.value, plural } : { singular: singular.value }
     effective.set(entity, new Set([fold(singular.value), fold(effectivePlural)]))

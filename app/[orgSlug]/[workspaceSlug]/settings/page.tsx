@@ -26,6 +26,7 @@ import type {
   MemberData,
 } from "@/lib/types";
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles";
+import { canChangeThinkingModel } from "@/lib/thinking-model/permissions";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
 import { CapabilityPacksPanel, type CapabilityPackSettingsRow } from "@/components/settings/capability-packs-panel";
@@ -191,6 +192,9 @@ export default async function SettingsPage({ params }: Props) {
   // also an org OWNER/ADMIN must not see or use it, even though they pass
   // every other admin gate on this page.
   const isOrgAdmin = isOrgAdminRole(workspace.organization.members[0]?.role);
+  // A workspace member who is an admin of the workspace or org. An org admin who is only here through the read-only
+  // fallback (no membership) cannot change it: updateThinkingModel would answer "Workspace not found".
+  const canEditThinkingModel = canChangeThinkingModel({ workspaceRole: currentWorkspaceRole, orgRole: workspace.organization.members[0]?.role });
   const analyticsActor = { userId: session.user.id, purpose: "USER" as const, scopeWorkspaceId: workspace.id };
   const analyticsConnections = await listConnections(analyticsActor, workspace.id);
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: workspace.id, revokedAt: null } });
@@ -436,7 +440,7 @@ export default async function SettingsPage({ params }: Props) {
 
       {/* Admin only, enforced again by updateThinkingModel (resolveWorkspaceAdmin).
           Has no switches, so its position cannot shift the positional-index specs. */}
-      {canManageCapabilityPacks && (
+      {canEditThinkingModel && (
         <SettingsSection title="Thinking model" description="What this workspace calls its goals and measures. Names only: your data is the same under every choice, so you can switch back at any time.">
           <ThinkingModelPanel
             orgSlug={orgSlug}

@@ -46,23 +46,55 @@ async function resetWorkspaceToClassic() {
   );
 }
 
-/** Remove exactly what this run created, by id / unique title. */
+/**
+ * Remove exactly what this run created, by id / unique title: the rows, and the workspace-update events written for them
+ * (WORKSPACE_UPDATES_ENABLED is on for the e2e server, so creating an entity appends an event keyed by its id).
+ */
 async function cleanup(created: { opportunityId?: string; cycleTitle: string }) {
   await withPool(async (pool) => {
+    const ids: string[] = []
     if (created.opportunityId) {
-      await pool.query(`DELETE FROM "${E2E_SCHEMA}".solutions WHERE opportunity_id = $1`, [created.opportunityId]);
-      await pool.query(`DELETE FROM "${E2E_SCHEMA}".opportunities WHERE id = $1`, [created.opportunityId]);
+      const solutions = await pool.query(`SELECT id FROM "${E2E_SCHEMA}".solutions WHERE opportunity_id = $1`, [created.opportunityId])
+      ids.push(created.opportunityId, ...solutions.rows.map((row) => row.id))
+      await pool.query(`DELETE FROM "${E2E_SCHEMA}".solutions WHERE opportunity_id = $1`, [created.opportunityId])
+      await pool.query(`DELETE FROM "${E2E_SCHEMA}".opportunities WHERE id = $1`, [created.opportunityId])
     }
-    const cycle = await pool.query(`SELECT id FROM "${E2E_SCHEMA}".okr_cycles WHERE title = $1`, [created.cycleTitle]);
+    const cycle = await pool.query(`SELECT id FROM "${E2E_SCHEMA}".okr_cycles WHERE title = $1`, [created.cycleTitle])
     for (const { id } of cycle.rows) {
-      const objectives = await pool.query(`SELECT id FROM "${E2E_SCHEMA}".objectives WHERE cycle_id = $1`, [id]);
+      ids.push(id)
+      const objectives = await pool.query(`SELECT id FROM "${E2E_SCHEMA}".objectives WHERE cycle_id = $1`, [id])
       for (const objective of objectives.rows) {
-        await pool.query(`DELETE FROM "${E2E_SCHEMA}".key_results WHERE objective_id = $1`, [objective.id]);
-        await pool.query(`DELETE FROM "${E2E_SCHEMA}".objectives WHERE id = $1`, [objective.id]);
+        ids.push(objective.id)
+        await pool.query(`DELETE FROM "${E2E_SCHEMA}".key_results WHERE objective_id = $1`, [objective.id])
+        await pool.query(`DELETE FROM "${E2E_SCHEMA}".objectives WHERE id = $1`, [objective.id])
       }
-      await pool.query(`DELETE FROM "${E2E_SCHEMA}".okr_cycles WHERE id = $1`, [id]);
+      await pool.query(`DELETE FROM "${E2E_SCHEMA}".okr_cycles WHERE id = $1`, [id])
     }
-  });
+    if (ids.length > 0) {
+      await pool.query(`DELETE FROM "${E2E_SCHEMA}".workspace_update_events WHERE entity_id = ANY($1::uuid[]) OR group_id = ANY($1::uuid[])`, [ids])
+    }
+  })
+}
+
+/** The canvas viewport's current zoom (the scale in the React Flow transform). */
+async function viewportScale(page: Page): Promise<number> {
+  const transform = await page.locator(".react-flow__viewport").evaluate((el) => getComputedStyle(el).transform)
+  const match = /matrix\(([^,]+),/.exec(transform)
+  return match ? Number(match[1]) : 1
+}
+
+/** Wait until the zoom animation has finished: two reads, a frame apart, agree. */
+async function settledScale(page: Page): Promise<number> {
+  let previous = -1
+  await expect
+    .poll(async () => {
+      const current = await viewportScale(page)
+      const stable = Math.abs(current - previous) < 1e-6
+      previous = current
+      return stable
+    })
+    .toBe(true)
+  return previous
 }
 
 async function saveNames(page: Page, base: string, names: Partial<Record<keyof typeof NAMES, readonly [string, string]>>) {
@@ -178,11 +210,14 @@ test.describe("Thinking model overrides (all five entities)", () => {
     // Canvas: the middle zoom tier carries the Cycle name; the page text says no canonical entity word.
     await page.goto(`${base}/canvas`);
     await page.waitForLoadState("networkidle");
-    for (let i = 0; i < 16; i++) {
-      if (await page.getByText("Sprint", { exact: true }).isVisible().catch(() => false)) break;
+    // Condition-based: click, then wait for the zoom to move and settle, until the tier badge reads the Cycle name.
+    let scale = await settledScale(page);
+    for (let i = 0; i < 16 && !(await page.getByText("Sprint", { exact: true }).isVisible()); i++) {
       await page.locator(".react-flow__controls-zoomin").click();
-      await page.waitForTimeout(500);
+      await expect.poll(() => viewportScale(page), { timeout: 5_000 }).not.toBe(scale);
+      scale = await settledScale(page);
     }
+
     await expect(page.getByText("Sprint", { exact: true })).toBeVisible();
     await expect(page.getByText("Cycle", { exact: true })).toHaveCount(0);
 

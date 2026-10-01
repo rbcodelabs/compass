@@ -107,6 +107,24 @@ export function copyFragments(source: string, fileName = "file.tsx"): string[] {
   return out
 }
 
+/**
+ * Every `labels.<entity>.<form>` property access in the file, as the same tokens copyFragments uses. A label passed
+ * as a prop or an argument is not a text fragment on its own, but it is how a converted file produces that word.
+ */
+export function labelAccesses(source: string, fileName = "file.tsx"): string[] {
+  const sf = parse(source, fileName)
+  const out = new Set<string>()
+  function visit(node: ts.Node) {
+    if (ts.isPropertyAccessExpression(node)) {
+      const m = node.getText(sf).match(/(?:^|[.\s(])labels\.(\w+)\.(\w+)$/)
+      if (m) out.add(`${OPEN}${m[1]}.${m[2]}${CLOSE}`)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sf)
+  return [...out]
+}
+
 /** Replace label tokens with concrete values (CLASSIC, in the tests). */
 export function substitute(fragment: string, labels: LabelValues): string {
   return norm(
@@ -144,10 +162,33 @@ const COPY_POSITIONS = new Set([
 /** Identifier-looking: one token that is not a capitalized word ("objective", "OBJECTIVE", "keyResult", "/okrs/"). */
 const identifierLike = (text: string) => !/\s/.test(text) && !/^[A-Z][a-z]+s?$/.test(text)
 
+/** Calls whose string arguments are identifiers or lookups, never copy: openPanel("solution", id), set.has("x"), ... */
+const IDENTIFIER_CALLEE = /(?:^|\.)(?:openPanel|closePanel|setPanel|includes|has|get|set|add|delete|startsWith|endsWith|getByTestId|querySelector|querySelectorAll|push|indexOf|test|match|require|useEntityDetail|notifyEntityMutated|revalidatePath|redirect|fetch|Error|resolve)$/
+/** Properties whose string value is a type tag, id or key. */
+const IDENTIFIER_PROPS = new Set(["type", "kind", "id", "key", "value", "name", "panelType", "objectType", "targetType", "linkedType", "subjectType", "entityType", "role", "variant", "slot", "href", "path", "className", "testId"])
+
+/** The string sits where text reaches the screen: inside JSX children, a concatenation, or a count-based plural pick. */
+function inCopyFlow(node: ts.Node, sf: ts.SourceFile): boolean {
+  for (let cur: ts.Node | undefined = node.parent; cur; cur = cur.parent) {
+    if (ts.isCallExpression(cur) && IDENTIFIER_CALLEE.test(cur.expression.getText(sf))) return false
+    if (ts.isPropertyAssignment(cur) && IDENTIFIER_PROPS.has(cur.name.getText(sf).replace(/["']/g, ""))) return false
+    if (ts.isJsxAttribute(cur)) return false // a non-copy attribute (copy attributes were handled by position)
+    if (ts.isJsxExpression(cur) && (ts.isJsxElement(cur.parent) || ts.isJsxFragment(cur.parent))) return true
+    if (ts.isBinaryExpression(cur) && cur.operatorToken.kind === ts.SyntaxKind.PlusToken) return true
+    if (ts.isConditionalExpression(cur) && ts.isBinaryExpression(cur.condition) && ts.isNumericLiteral(cur.condition.right)) return true // n === 1 ? "x" : "xs"
+    if (ts.isStatement(cur) || ts.isFunctionLike(cur)) return false
+  }
+  return false
+}
+
 /**
  * Raw entity words in string literals, template literal text and JSX text. The
- * parser-based replacement for the earlier line scanner: it also sees copy inside
- * one-line conditionals and multi-line JSX.
+ * parser-based replacement for the earlier line scanner.
+ *
+ * Phase 4C-2 hardening: a lone lowercase word counts when it is rendered (inside a JSX expression, a concatenation or a
+ * count-based plural pick), a template whose only static text is a trailing word counts, and so does a lone word between
+ * JSX tags. Identifier contexts (comparisons, object keys, openPanel("...")-style arguments, non-copy attributes) are
+ * listed above and stay allowed.
  */
 export function rawEntityCopy(source: string, fileName = "file.tsx"): string[] {
   const sf = parse(source, fileName)
@@ -170,22 +211,20 @@ export function rawEntityCopy(source: string, fileName = "file.tsx"): string[] {
         ts.isCaseClause(p) ||
         (ts.isBinaryExpression(p) &&
           [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(p.operatorToken.kind))
-      if (!isKey && !isIndex && !isComparison && (copyPosition || !identifierLike(node.text))) add(node.text)
+      if (!isKey && !isIndex && !isComparison && (copyPosition || !identifierLike(node.text) || inCopyFlow(node, sf))) add(node.text)
       return
     }
     if (ts.isTemplateExpression(node)) {
-      // The static text only, with each ${…} removed. No whitespace is added where one was: `outcome-${id}-row` is an id.
+      // The static text only, with each ${…} removed. Whitespace anywhere (even leading or trailing, as in `${n} solutions`)
+      // makes it prose; `outcome-${id}-row` and `/${org}/okrs` have none and are ids and paths.
       const text = node.head.text + node.templateSpans.map((span) => span.literal.text).join("")
-      if (/\s/.test(text.trim())) add(text)
+      if (/\s/.test(text)) add(text)
       node.templateSpans.forEach((span) => visit(span.expression))
       return
     }
     if (ts.isJsxText(node)) {
       const text = norm(node.text)
-      // A lone lowercase word between tags is prose too, but a lone Capitalized or lowercase token is rare; keep the old rule:
-      // one word counts only when capitalized.
-      const words = text.split(/\s+/)
-      if (text && ENTITY_WORD.test(text) && (words.length >= 2 || /^[A-Z]/.test(text))) hits.push(text)
+      if (text && ENTITY_WORD.test(text)) hits.push(text)
       return
     }
     ts.forEachChild(node, visit)

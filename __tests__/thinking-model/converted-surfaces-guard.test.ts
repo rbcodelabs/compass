@@ -36,6 +36,8 @@ const ROOT = process.cwd()
  */
 const ALLOWED: Array<[string, string]> = [
   ["components/okrs/create-cycle-form.tsx", "New OKR"],
+  // Page title "OKR <Cycle>": "OKR" is the framework word, like the form's "New OKR".
+  ["app/[orgSlug]/[workspaceSlug]/okrs/[cycleId]/page.tsx", "OKR"],
   ["app/[orgSlug]/[workspaceSlug]/okrs/page.tsx", "No OKR yet"],
   // Markdown template inserted into a new opportunity's description; a heading in
   // user-owned content, not the name of an entity.
@@ -137,6 +139,32 @@ describe("converted surfaces carry no raw entity copy (tripwire)", () => {
     expect(rawEntityCopy('<PanelError label="objective" />')).toEqual(["objective"])
     expect(rawEntityCopy('<X aria-label="Linked to a key result" />')).toEqual(["Linked to a key result"])
     expect(rawEntityCopy('const items = [{ label: "solution" }]')).toEqual(["solution"])
+  })
+
+  it("canary: flags the evasions the first tripwire let through (card-sort-kanban's Badge)", () => {
+    // (a) a lone lowercase word between tags
+    expect(rawEntityCopy("const a = <Badge>{n} solutions</Badge>")).toEqual(["solutions"])
+    expect(rawEntityCopy("const a = <b>solution</b>")).toEqual(["solution"])
+    // (b) a template whose only static text is a trailing word
+    expect(rawEntityCopy("const t = `${n} solutions`")).toEqual(["solutions"])
+    // (c) lone lowercase literals inside a JSX expression, a count-based plural pick, or a concatenation
+    expect(rawEntityCopy('const a = <Badge>{n === 1 ? "solution" : "solutions"}</Badge>')).toEqual(["solution", "solutions"])
+    expect(rawEntityCopy('const label = n === 1 ? "solution" : "solutions"')).toEqual(["solution", "solutions"])
+    expect(rawEntityCopy('const t = "Add " + "opportunity"')).toEqual(["opportunity"])
+    expect(rawEntityCopy('const a = <p>{ready ? "opportunity" : null}</p>')).toEqual(["opportunity"])
+    // the real file shape, before conversion
+    expect(rawEntityCopy('function C(){ return <Badge variant="secondary">{meta.solutionCount} {meta.solutionCount === 1 ? "solution" : "solutions"}</Badge> }')).toEqual(["solution", "solutions"])
+  })
+
+  it("canary: identifier contexts stay allowed", () => {
+    expect(rawEntityCopy('openPanel("solution", id)')).toEqual([])
+    expect(rawEntityCopy('const a = kind === "solution" ? x : y')).toEqual([])
+    expect(rawEntityCopy('const o = { type: cond ? "opportunity" : "solution" }')).toEqual([])
+    expect(rawEntityCopy('const a = <X value="solution" data-slot="opportunity-board" />')).toEqual([])
+    expect(rawEntityCopy('const m = { solution: 1 }; m["solution"]')).toEqual([])
+    expect(rawEntityCopy('if (set.has("solution")) go()')).toEqual([])
+    expect(rawEntityCopy("const a = <p>{labels.solution.lowerPlural}</p>")).toEqual([])
+    expect(rawEntityCopy('const a = <p>{n === 1 ? labels.solution.lower : labels.solution.lowerPlural}</p>')).toEqual([])
   })
 
   it("canary: sees copy the old line scanner missed (one-line conditionals, ids stay ignored)", () => {

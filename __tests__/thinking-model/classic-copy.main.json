@@ -353,6 +353,13 @@
     "components/card-sort/new-round-form.tsx": [
       "This workspace has no SELECT custom fields on opportunities, so there is nothing to sort by. A factor is a SELECT field &mdash; its options become the buckets."
     ],
+    "components/card-sort/card-sort-kanban.tsx": [
+      "opportunity",
+      "solution",
+      "objective",
+      "solutions",
+      "OPPORTUNITY"
+    ],
     "components/decisions/decisions-filters.tsx": [
       "outcome",
       "Outcome"
