@@ -46,6 +46,8 @@ In Board view, use the **Group by** picker next to Filters to switch how cards a
 
 Solutions are not grouped here any more — they have their own backlog, described in [The Solutions backlog](#the-solutions-backlog). An old link with `groupBy=opportunity` opens that page instead.
 
+A Solution belongs to the Opportunity it was created on for good: there is no action, in the board, the detail panel or the MCP API, that moves it to a different Opportunity. To aim an existing idea at another Opportunity, add a new Solution there. (A Solution can additionally be linked to Key Results; see [Linking an opportunity to Objectives, and the workspace tree](#linking-an-opportunity-to-objectives-and-the-workspace-tree).)
+
 ### Card sorting by a custom field
 
 Grouping by a custom field turns the board into a card-sort exercise. To set one up, create an Opportunity custom field of type **Select** in **Settings → Custom Fields** and give it options (its own, or a shared option set). Multi-select fields aren't offered, because a card can only sit in one column.
