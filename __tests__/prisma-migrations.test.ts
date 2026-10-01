@@ -675,14 +675,14 @@ describe("070_objective_optional_cycle", () => {
       .map((statement) => statement.trim())
       .filter(Boolean);
 
-  it("is registered exactly once, in order 068 < 069 < 070", () => {
-    // TODO(#335): when 071 lands, extend this to 068 < 069 < 070 < 071.
+  it("is registered exactly once, in order 068 < 069 < 070 < 071", () => {
     const names = registeredMigrations();
     expect(names.filter((name) => name === NAME)).toHaveLength(1);
     const at = (name: string) => names.indexOf(name);
     expect(at("068_workspace_id_on_solution_objective")).toBeGreaterThan(-1);
     expect(at("069_workspace_id_residual_backfill")).toBeGreaterThan(at("068_workspace_id_on_solution_objective"));
     expect(at(NAME)).toBeGreaterThan(at("069_workspace_id_residual_backfill"));
+    expect(at("071_typed_link_tables")).toBeGreaterThan(at(NAME));
   });
 
   it("is exactly one DSQL-safe DDL statement: DROP NOT NULL on objectives.cycle_id, no data change", () => {

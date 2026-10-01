@@ -491,7 +491,8 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // Two nullable columns on workspaces (the workspace thinking model and its
     // label overrides). Plain ADD COLUMN IF NOT EXISTS (DSQL: no constraints, no
     // index, no backfill), so no async-wait or postcondition hook. Nothing reads
-    // them until the code PR that follows this migration being applied.
+    // them until the code PR that follows this migration being applied. Not
+    // explicit-only: unlike 069/072 it has no rollout dependency and is idempotent.
     name: "073_workspace_thinking_model",
     filePath: path.join(process.cwd(), "prisma/migrations/073_workspace_thinking_model/migration.sql"),
   },
