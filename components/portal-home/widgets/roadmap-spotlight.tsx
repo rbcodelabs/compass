@@ -1,4 +1,5 @@
 import { Plus, X } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { RoadmapSpotlightConfig } from "@/lib/portal-home/widgets/roadmap-spotlight"
 import { SPOTLIGHT_MAX_ITEMS } from "@/lib/portal-home/widgets/roadmap-spotlight"
 import type { ResolvedWidgetData } from "@/lib/portal-home/data"
@@ -62,17 +63,16 @@ export function RoadmapSpotlightForm({ config, onChange, options }: ConfigFormPr
         </ul>
         {config.itemIds.length < SPOTLIGHT_MAX_ITEMS && unpinned.length > 0 ? (
           <div className="flex items-center gap-2">
-            <select
-              aria-label="Pin a roadmap item"
-              className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-transparent px-2 text-sm"
-              value=""
-              onChange={(event) => event.target.value && onChange({ ...config, itemIds: [...config.itemIds, event.target.value] })}
-            >
-              <option value="">Pin an item…</option>
-              {unpinned.map((item) => (
-                <option key={item.id} value={item.id}>{item.title}</option>
-              ))}
-            </select>
+            <Select value="" onValueChange={(next) => next && onChange({ ...config, itemIds: [...config.itemIds, String(next)] })}>
+              <SelectTrigger aria-label="Pin a roadmap item" className="min-w-0 flex-1">
+                <SelectValue placeholder="Pin an item…" />
+              </SelectTrigger>
+              <SelectContent>
+                {unpinned.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>{item.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Plus className="size-4 text-text-subtle" aria-hidden />
           </div>
         ) : null}
