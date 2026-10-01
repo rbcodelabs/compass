@@ -172,6 +172,8 @@ import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewReq
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
 import { thinkingModelForMcp } from "@/lib/thinking-model/mcp"
 import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
+import { followTool, listNotificationsTool, markReadTool, unfollowTool } from "@/lib/follow-tool-handlers"
+import { FOLLOWABLE_SUBJECT_TYPES } from "@/lib/followable"
 import {
   listCustomFieldDefinitions,
   getCustomFieldValues,
@@ -301,6 +303,14 @@ const _handler = createMcpHandler(
     register("delete_comment", { title: "Delete Comment", description: "Deletes a comment and its one-level replies when it is a root.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, deleteCommentTool)
     register("resolve_comment", { title: "Resolve Comment", description: "Marks a discussion comment resolved.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, resolveComment)
     register("reopen_comment", { title: "Reopen Comment", description: "Reopens a resolved discussion comment.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, reopenComment)
+
+    // Following and the in-app notifications inbox. These act on the calling
+    // PERSON's own follows and inbox, so agent-scoped tokens are refused.
+    const followSubjectSchema = { workspaceId: z.string().uuid(), subjectType: z.enum(FOLLOWABLE_SUBJECT_TYPES).describe("Opportunity, Solution, Task and Doc are followable today; other types are rejected until their rollout slice ships"), subjectId: z.string().uuid() }
+    register("follow", { title: "Follow", description: "Follows an object so its status changes and comments appear in your notifications inbox. Acts on the calling user's own follows; agent-scoped tokens are refused. Clears a previous unfollow.", inputSchema: followSubjectSchema, outputSchema: TOOL_OUTPUT_SCHEMA }, followTool)
+    register("unfollow", { title: "Unfollow", description: "Stops notifications for an object. The unfollow is remembered, so commenting on or being assigned the object later does not silently re-follow it. Agent-scoped tokens are refused.", inputSchema: followSubjectSchema, outputSchema: TOOL_OUTPUT_SCHEMA }, unfollowTool)
+    register("list_notifications", { title: "List Notifications", description: "Lists the calling user's notifications in one workspace, newest first, with an unread count. Pass the returned nextCursor to page. Agent-scoped tokens are refused.", inputSchema: { workspaceId: z.string().uuid(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional(), unreadOnly: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listNotificationsTool)
+    register("mark_read", { title: "Mark Notifications Read", description: "Marks the calling user's notifications read: pass notificationIds (up to 100) or all: true, not both. Agent-scoped tokens are refused.", inputSchema: { workspaceId: z.string().uuid(), notificationIds: z.array(z.string().uuid()).min(1).max(100).optional(), all: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, markReadTool)
 
     // ════════════════════════════════════════════════════════════════
     // WORKSPACE

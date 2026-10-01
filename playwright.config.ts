@@ -69,6 +69,8 @@ export default defineConfig({
       env: {
         PORT: String(FUNCTIONAL_PORT),
         WORKSPACE_UPDATES_ENABLED: "1",
+        // following-notifications.spec.ts: follow buttons, the bell and inbox.
+        FOLLOWING_ENABLED: "1",
         COMPASS_RESEARCH_CAPTURE_ENABLED: "1",
         COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED: "1",
         // pm-interview.spec.ts provisions a synthetic voice session, which the

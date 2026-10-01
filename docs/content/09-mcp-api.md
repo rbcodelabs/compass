@@ -334,6 +334,19 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `resolve_comment` | Mark a comment resolved |
 | `reopen_comment` | Mark a resolved comment open |
 
+### Following and notifications
+
+Follow an object to get its status changes and comments in your in-app notifications inbox. These tools act on the **calling person's own** follows and inbox, so they need a user identity: agent-scoped tokens and credentials with no user get a clear error and never touch anyone's inbox. Following is gated by `FOLLOWING_ENABLED`; while it is off the tools return "Following is not enabled." Today `OPPORTUNITY`, `SOLUTION`, `TASK` and `DOC` are followable; the remaining subject types are rejected with "cannot be followed yet" until their rollout slice ships. Unfollowing is remembered: commenting on or being assigned an object you unfollowed does not re-follow it, but an explicit `follow` does.
+
+| Tool | Description |
+|---|---|
+| `follow` | Follow an object. Requires `workspaceId`, `subjectType`, `subjectId`. Idempotent; clears an earlier unfollow |
+| `unfollow` | Stop notifications for an object. Leaves a muted marker so automatic follows (creating, commenting, being assigned) do not undo it |
+| `list_notifications` | List your notifications in one workspace, newest first, with `unreadCount`. Optional `limit` (1–100), `cursor` (from `nextCursor`), `unreadOnly`. Titles and links are resolved at read time and are `null` for an object that was deleted or you can no longer see |
+| `mark_read` | Mark notifications read. Pass `notificationIds` (up to 100) or `all: true`, not both. Only your own notifications are affected |
+
+Notification kinds are `STATUS_CHANGED`, `COMMENT_ADDED`, `COMMENT_REPLIED` and, for Tasks only, `ASSIGNED` (sent to the assignee).
+
 ### Workspace
 
 | Tool | Description |

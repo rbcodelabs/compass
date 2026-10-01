@@ -220,6 +220,15 @@ rather than landing silently.
 | `approve_solution_plan` | Mark a PLAN entry as APPROVED (only applies to PLAN entries, not COMMENT replies) |
 | `reject_solution_plan` | Mark a PLAN entry as REJECTED (only applies to PLAN entries, not COMMENT replies) |
 
+#### Following and notifications
+Acts on the calling **person's** follows and inbox; agent-scoped tokens are refused with an error. Gated by `FOLLOWING_ENABLED`. Followable today: `OPPORTUNITY`, `SOLUTION`, `TASK`, `DOC`.
+| Tool | Description |
+|---|---|
+| `follow` | Follow an object (`workspaceId`, `subjectType`, `subjectId`) so its status changes and comments reach the inbox; idempotent, clears an earlier unfollow |
+| `unfollow` | Stop notifications; remembered, so auto-follow on comment/assign does not undo it |
+| `list_notifications` | The caller's inbox for one workspace, newest first, with `unreadCount`; optional `limit`, `cursor`, `unreadOnly` |
+| `mark_read` | Mark `notificationIds` (up to 100) or `all: true` read |
+
 #### Decisions
 | Tool | Description |
 |---|---|

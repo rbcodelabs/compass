@@ -193,6 +193,12 @@ export const TOOL_GATES: Record<string, Gate> = {
   delete_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
   resolve_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
   reopen_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
+  // Following: workspace membership only. The handler resolves the caller to a
+  // single user, and agent identities are refused by AGENT_TOOL_POLICY (DENY).
+  follow: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  unfollow: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  list_notifications: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  mark_read: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   // Workspace ---------------------------------------------------------------
   get_workspace_summary: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   // list_workspaces additionally filters its results to the caller's
@@ -586,6 +592,7 @@ const READ_TOOLS = [
   "list_solution_comments", "list_solutions", "list_squads", "list_task_assignees",
   "list_task_links", "list_tasks", "list_top_opportunities", "list_workspaces", "search_help",
   "list_links",
+  "list_notifications",
 ] as const
 
 /**
@@ -636,6 +643,8 @@ const WRITE_TOOLS = [
   "update_opportunity_status", "update_research_study", "update_roadmap_item",
   "update_scoring_model", "update_solution", "update_solution_comment",
   "update_solution_status", "update_squad", "update_task",
+  // Following changes the caller's own follow rows and read state only.
+  "follow", "unfollow", "mark_read",
 ] as const
 
 export type ToolScope = typeof SCOPE_MCP_READ | typeof SCOPE_MCP_WRITE
@@ -750,6 +759,10 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   // request_release_authorization remain unconditionally human-only per ADR
   // 0020 — explicitly out of scope for AgentOrgAdminGrant delegation.
   ...["update_comment", "update_solution_comment", "update_doc_comment", "create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization"].map(name => [name, "DENY"]),
+  // Follows and the inbox belong to a person (ADR "Following and in-app
+  // notifications", 2.7). An agent-scoped token acts as an Agent, so it must not
+  // follow on, read, or clear the inbox of the human who owns it.
+  ...["follow", "unfollow", "list_notifications", "mark_read"].map(name => [name, "DENY"]),
 ])
 
 /**

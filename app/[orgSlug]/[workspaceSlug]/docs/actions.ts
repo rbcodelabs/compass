@@ -7,6 +7,7 @@ import getPrisma from "@/lib/db";
 import { createPositioningBriefCore } from "@/lib/positioning-brief";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 import { Prisma } from "@prisma/client";
+import { followAfterCreate } from "@/lib/following-hooks";
 import { createDocument, updateDocument, snapshotDocument, restoreDocument, deleteDocument, hydrateDocument } from "@/lib/document-service";
 import {
   createDocCommentCore,
@@ -157,6 +158,7 @@ export async function createDoc(
 ) {
   const user = await requireWorkspaceMember(workspaceId);
   const doc = await createDocument({ workspaceId, parentId, title: "Untitled" }, { ...mutationToken(mutation), authorId: user.id, authorName: user.name ?? user.email ?? "Unknown" });
+  await followAfterCreate({ model: "doc", workspaceId, row: { id: doc.id }, actor: user.id ? { type: "USER", id: user.id } : { type: "SYSTEM", id: null } });
   revalidatePath(revalidatePathStr);
   return { id: doc.id, title: doc.title, revision: doc.revision };
 }

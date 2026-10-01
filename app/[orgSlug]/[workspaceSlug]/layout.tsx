@@ -23,6 +23,8 @@ import { ThemeProvider } from "@/components/theme/theme-provider"
 import { workspaceThemeInitScript } from "@/lib/theme"
 import getPrisma from "@/lib/db"
 import { workspaceUpdatesAvailable } from "@/lib/workspace-updates-capture"
+import { followingAvailable } from "@/lib/following-flag"
+import { unreadCount } from "@/lib/notifications"
 import { ReadOnlyBanner } from "@/components/workspace/read-only-banner"
 
 interface WorkspaceLayoutProps {
@@ -70,7 +72,15 @@ export default async function WorkspaceLayout({
   // to client components as plain data.
   const thinkingModel = resolveThinkingModel(workspace)
   const researchCaptureEnabled = isResearchCaptureEnabled()
-  const updatesEnabled = await workspaceUpdatesAvailable(getPrisma())
+  const [updatesEnabled, followingEnabled] = await Promise.all([
+    workspaceUpdatesAvailable(getPrisma()),
+    followingAvailable(getPrisma()),
+  ])
+  // Seeds the bell for the first painted frame; the client refetches on
+  // navigation and when the tab becomes visible. Zero cost with following off.
+  const unreadNotifications = followingEnabled
+    ? await unreadCount(user.id, workspace.id)
+    : { count: 0, overflow: false }
 
   return (
     <>
@@ -96,6 +106,8 @@ export default async function WorkspaceLayout({
           userEmail={user.email ?? ""}
           userImage={user.image ?? undefined}
           isOrgAdmin={isOrgAdmin}
+          followingEnabled={followingEnabled}
+          unreadNotifications={unreadNotifications}
         />
 
         <TooltipProvider>
@@ -126,6 +138,8 @@ export default async function WorkspaceLayout({
               isOrgAdmin={isOrgAdmin}
               researchCaptureEnabled={researchCaptureEnabled}
               updatesEnabled={updatesEnabled}
+              followingEnabled={followingEnabled}
+              unreadNotifications={unreadNotifications}
             />
 
             {/* Between the nav and main content, so the docked rail is a real

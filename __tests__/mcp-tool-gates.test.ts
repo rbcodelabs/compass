@@ -300,6 +300,29 @@ describe("ADR 0020: AgentOrgAdminGrant for delegated scoring-model admin", () =>
   )
 })
 
+describe("following tools act on a person's own inbox", () => {
+  const FOLLOW_TOOLS = ["follow", "unfollow", "list_notifications", "mark_read"] as const
+  const args = { workspaceId: "ws-1", subjectType: "TASK", subjectId: "t-1" }
+
+  it.each(FOLLOW_TOOLS)("%s is human-only: agent-scoped tokens are refused at the gate", async (tool) => {
+    expect(AGENT_TOOL_POLICY[tool]).toBe("DENY")
+    await expect(applyToolGate(tool, { userId: "u1", purpose: "AGENT", agentId: "agent-1" }, args)).rejects.toThrow(/human identity/)
+    await expect(applyToolGate(tool, { userId: "u1", purpose: "AGENT_TURN", agentId: "agent-1" }, args)).rejects.toThrow(/human identity/)
+  })
+
+  it.each(FOLLOW_TOOLS)("%s requires membership of the declared workspace for a user key", async (tool) => {
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate(tool, { userId: "u1", purpose: "USER" }, args)).rejects.toThrow(/access denied/)
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    await expect(applyToolGate(tool, { userId: "u1", purpose: "USER" }, args)).resolves.toBeUndefined()
+  })
+
+  it("classifies list_notifications as a read and the other three as writes", () => {
+    expect(TOOL_SCOPES.list_notifications).toBe("mcp:read")
+    for (const tool of ["follow", "unfollow", "mark_read"] as const) expect(TOOL_SCOPES[tool]).toBe("mcp:write")
+  })
+})
+
 describe("feedback source tools are gated like create_artifact", () => {
   const tools = ["create_feedback_source", "update_feedback_source"]
   it.each(tools)("%s admits a plain workspace member", async (tool) => {

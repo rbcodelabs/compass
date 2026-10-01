@@ -38,6 +38,7 @@ import {
   solutionStatusBadge,
 } from "@/lib/solution-status";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
+import { FollowButton } from "@/components/following/follow-button";
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
@@ -149,6 +150,7 @@ export function SolutionPanel({
         edit={edit}
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS }}
       />
+      <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="SOLUTION" subjectId={data.id} />
       <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="SOLUTION" subjectId={data.id} subjectTitle={data.title} />
       {data.pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="SOLUTION" targetId={id} />}
 

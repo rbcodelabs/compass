@@ -22,6 +22,7 @@ import {
   ComboboxTrigger,
   ComboboxValue,
 } from "@/components/ui/combobox";
+import { FollowButton } from "@/components/following/follow-button";
 import {
   useEntityDetail,
   patchEntityField,
@@ -267,6 +268,7 @@ export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
           />
         </div>
         <InlineDateField value={data.dueDate} field="dueDate" edit={edit} placeholder="Set due date" compact />
+        <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="TASK" subjectId={taskId} />
       </div>
       <EditableText
         value={data.description}

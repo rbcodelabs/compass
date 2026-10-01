@@ -17,6 +17,8 @@
  */
 export const CONVERTED_FILES = [
   "components/sidebar.tsx",
+  // Following (slice 2): label-driven from the start, no CLASSIC baseline.
+  "components/notifications/notification-inbox.tsx",
   "components/bottom-nav.tsx",
   "app/[orgSlug]/[workspaceSlug]/okrs/page.tsx",
   "app/[orgSlug]/[workspaceSlug]/okrs/[cycleId]/page.tsx",
