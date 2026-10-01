@@ -37,6 +37,13 @@ export function chunked<T>(list: readonly T[], size: number = CASCADE_CHUNK_SIZE
  */
 export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceId: string, options: { skipBlobCleanup?: boolean } = {}) {
   await assertDocumentPilotCleanupReviewed(prisma, workspaceId);
+
+  // 0. Typed links (opportunity-to-objective, solution-to-key-result), FIRST. No foreign key or emulated relation reaches these tables, so
+  //    they are deleted explicitly: by the workspaceId stamped on the row (indexed, in passes of at most 500 links because each link is 4
+  //    DSQL-modified rows), then by endpoint id in steps 9 and 11 for rows whose workspaceId drifted. It is first on purpose: this is the
+  //    one step that fails when the link tables do not exist yet (code deployed before migration 071), and failing here mutates nothing,
+  //    where failing later would leave the objective parentKeyResultId pointers already nulled.
+  await deleteWorkspaceLinks(prisma, workspaceId);
   const ids = async (
     rows: Promise<{ id: string }[]>
   ): Promise<string[]> => (await rows).map((r) => r.id);
@@ -66,12 +73,6 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
       data: { parentKeyResultId: null },
     });
   }
-
-  // 1b. Typed links (opportunity<->objective, solution<->key result). No foreign keys and no emulated
-  //     relation reach these tables, so they are deleted explicitly, BEFORE the opportunity, solution and
-  //     objective deletes below: by the workspaceId stamped on the row (indexed, in chunks of 500 because each
-  //     link is 4 DSQL-modified rows), then by endpoint id in steps 9 and 11 for rows whose workspaceId drifted.
-  await deleteWorkspaceLinks(prisma, workspaceId);
 
   await deleteWorkspaceResearchData(prisma, workspaceId);
 

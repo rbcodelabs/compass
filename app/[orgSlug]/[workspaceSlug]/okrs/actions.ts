@@ -10,7 +10,7 @@ import { getWorkspace } from "@/lib/workspace";
 import { assertWorkspaceWritable } from "@/lib/workspace-context";
 import { setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
 import { requireProductEntity, requireProductWorkspace } from "@/lib/product-action-auth";
-import { deleteLegacyLinksForOpportunities, deleteLinksFor, drainLegacyLinksForOpportunities, drainLinksFor } from "@/lib/typed-links";
+import { drainAfterParentDelete, drainLegacyLinksForOpportunities, drainLinksFor } from "@/lib/typed-links";
 
 // ─── Create Cycle ─────────────────────────────────────────────────────────────
 
@@ -243,14 +243,12 @@ export async function deleteObjective(
 ) {
   await requireProductEntity("objective", objectiveId);
   const prisma = getPrisma();
-  // No foreign keys reach the typed link tables, so the links go explicitly. An objective can hold hundreds of them and DSQL caps a
-  // transaction at ~3,000 modified rows (4 per link), so drain them in committed passes first (only when the delete can go
-  // through: an objective with key results is refused and keeps its links); the transaction then sweeps stragglers.
-  if ((await prisma.keyResult.count({ where: { objectiveId } })) === 0) await drainLinksFor(prisma, "objective", [objectiveId]);
-  await prisma.$transaction(async (tx) => {
-    await deleteLinksFor(tx, "objective", [objectiveId]);
-    await tx.objective.delete({ where: { id: objectiveId } });
-  });
+  // The objective is deleted FIRST; a refusal (Restrict: it still has key results) throws here with every link untouched. Its links are
+  // drained AFTER, in committed passes of at most 500 links (no foreign key reaches the link tables, and one transaction could not hold
+  // an objective's links under DSQL's 3,000-row cap). A failed drain is logged and swallowed: the delete succeeded, and leftovers are
+  // reported by linkIntegrity and pruned by 072.
+  await prisma.objective.delete({ where: { id: objectiveId } });
+  await drainAfterParentDelete("ui.deleteObjective", () => drainLinksFor(prisma, "objective", [objectiveId]));
   revalidatePath(revalidatePathStr);
 }
 
@@ -262,18 +260,15 @@ export async function deleteKeyResult(
 ) {
   await requireProductEntity("keyResult", keyResultId);
   const prisma = getPrisma();
-  // Drain in committed passes of at most 500 links first (see deleteObjective); the transaction sweeps stragglers.
-  const pointingBefore = await prisma.opportunity.findMany({ where: { linkedKeyResultId: keyResultId }, select: { id: true } });
-  await drainLegacyLinksForOpportunities(prisma, pointingBefore.map((o) => o.id));
-  await drainLinksFor(prisma, "keyResult", [keyResultId]);
-  await prisma.$transaction(async (tx) => {
-    // The legacy pointers to this key result are cleared by the relation's SetNull, so the LEGACY links they
-    // implied go now; DIRECT links are the user's own and stay. Solution links to the key result always go.
-    const pointing = await tx.opportunity.findMany({ where: { linkedKeyResultId: keyResultId }, select: { id: true } });
-    await deleteLegacyLinksForOpportunities(tx, pointing.map((o) => o.id));
-    await deleteLinksFor(tx, "keyResult", [keyResultId]);
-    await tx.keyResult.delete({ where: { id: keyResultId } });
-  });
+  // Read BEFORE the delete: the relation's SetNull clears these pointers, and the LEGACY links they implied are what goes afterwards.
+  const keyResult = await prisma.keyResult.findUnique({ where: { id: keyResultId }, select: { objectiveId: true } });
+  const pointing = await prisma.opportunity.findMany({ where: { linkedKeyResultId: keyResultId }, select: { id: true } });
+  // Delete the key result FIRST. It can be refused under relationMode="prisma" (Restrict: supporting objectives, check-ins); a refusal
+  // throws here and no link has been touched. Links are drained AFTER (see deleteObjective): the LEGACY links implied by the pointers
+  // (DIRECT links are the user's own and stay) and every solution link to this key result. A failed drain is logged and swallowed.
+  await prisma.keyResult.delete({ where: { id: keyResultId } });
+  await drainAfterParentDelete("ui.deleteKeyResult.legacy", () => drainLegacyLinksForOpportunities(prisma, pointing.map((o) => o.id), keyResult?.objectiveId));
+  await drainAfterParentDelete("ui.deleteKeyResult.solution", () => drainLinksFor(prisma, "keyResult", [keyResultId]));
   revalidatePath(revalidatePathStr);
 }
 

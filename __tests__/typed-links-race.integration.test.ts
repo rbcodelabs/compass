@@ -35,7 +35,7 @@ describe.skipIf(!databaseUrl)("typed links against a real Prisma client and uniq
   const q = (sql: string, params: unknown[] = []) => pool.query(sql.replaceAll("{S}", `"${schema}"`), params);
   const count = async (table: string) => Number((await q(`SELECT count(*)::int AS n FROM {S}.${table}`)).rows[0].n);
   let prisma: AppPrismaClient;
-  const statements: string[] = [];
+  const statements: { query: string; params: string }[] = [];
 
   beforeAll(async () => {
     const url = new URL(databaseUrl!);
@@ -56,13 +56,13 @@ describe.skipIf(!databaseUrl)("typed links against a real Prisma client and uniq
     const { PrismaClient } = await import("@prisma/client");
     const { PrismaPg } = await import("@prisma/adapter-pg");
     const base = new PrismaClient({ adapter: new PrismaPg(pool, { schema }), log: [{ emit: "event", level: "query" }] });
-    (base as unknown as { $on(event: "query", cb: (e: { query: string }) => void): void }).$on("query", (e) => statements.push(e.query));
+    (base as unknown as { $on(event: "query", cb: (e: { query: string; params: string }) => void): void }).$on("query", (e) => statements.push({ query: e.query, params: e.params }));
     prisma = base.$extends(injectUpdatedAtExtension) as unknown as AppPrismaClient;
   });
 
   afterAll(async () => {
     try {
-      await pool.query(`DROP SCHEMA "${schema}" CASCADE`);
+      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     } finally {
       await pool.end();
       if (previous === undefined) delete process.env.DATABASE_URL;
@@ -128,9 +128,13 @@ describe.skipIf(!databaseUrl)("typed links against a real Prisma client and uniq
     const removed = await drainLinksFor(prisma, "objective", [objective]);
     expect(removed).toBe(before);
     expect(await count("opportunity_objective_links")).toBe(0);
-    const deletes = statements.filter((sql) => /DELETE FROM/.test(sql) && /opportunity_objective_links/.test(sql));
-    // 1,151 links need at least three passes; no pass can carry more than one chunk of ids.
+    const deletes = statements.filter((s) => /DELETE FROM/.test(s.query) && /opportunity_objective_links/.test(s.query));
+    // 1,151 links need at least three passes, and no DELETE can name more than one chunk of ids (the highest bind parameter is the id count).
     expect(deletes.length).toBeGreaterThanOrEqual(Math.ceil(before / LINK_WRITE_CHUNK));
+    for (const statement of deletes) {
+      // Prisma repeats the id list in the DELETE (the original filter AND the ids it just selected), so the DISTINCT bound values are the ids per statement.
+      expect(new Set(JSON.parse(statement.params) as unknown[]).size, statement.query.slice(0, 120)).toBeLessThanOrEqual(500);
+    }
     // Idempotent: a second drain finds nothing.
     expect(await drainLinksFor(prisma, "objective", [objective])).toBe(0);
   });

@@ -16,6 +16,7 @@ vi.mock("@/lib/db", () => ({
     solutionKeyResultLink: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
     keyResult: {
       count: vi.fn().mockResolvedValue(0),
+      findUnique: vi.fn().mockResolvedValue({ objectiveId: "obj-123" }),
       create: vi.fn().mockResolvedValue({ id: "kr-123" }),
       update: vi.fn().mockResolvedValue({ id: "kr-123" }),
       delete: vi.fn().mockResolvedValue({ id: "kr-123" }),

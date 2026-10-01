@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   TypedLinkError,
+  drainAfterParentDelete,
+  isMissingLinkTable,
   drainLegacyLinksForOpportunities,
   drainLinksFor,
   resetMissingLinkTableWarning,
@@ -483,3 +485,71 @@ describe("draining a parent with many links", () => {
     expect(links.map((l) => l.origin)).toEqual(["DIRECT"]);
   });
 });
+
+describe("drain robustness", () => {
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `r${i}` }))
+
+  it("a delete that removes nothing is re-checked: the loop ends when a FIND is empty (a concurrent drain took the rows), no spurious error", async () => {
+    const { tx, fake } = setup()
+    let finds = 0
+    const delegate = fake.client.opportunityObjectiveLink as unknown as { findMany: unknown; deleteMany: unknown }
+    delegate.findMany = async () => (finds++ === 0 ? ids(3) : [])
+    delegate.deleteMany = async () => ({ count: 0 })
+    await expect(drainLinksFor(tx, "objective", ["obj-a"])).resolves.toBe(0)
+    expect(finds).toBe(2)
+  })
+
+  it("repeated stalls (rows keep appearing, none deletable) still end in an error rather than looping", async () => {
+    const { tx, fake } = setup()
+    const delegate = fake.client.opportunityObjectiveLink as unknown as { findMany: unknown; deleteMany: unknown }
+    delegate.findMany = async () => ids(3)
+    delegate.deleteMany = async () => ({ count: 0 })
+    await expect(drainLinksFor(tx, "objective", ["obj-a"])).rejects.toThrow("Link delete made no progress")
+  })
+
+  it("a runaway drain stops at the pass cap", async () => {
+    const { tx, fake } = setup()
+    const delegate = fake.client.opportunityObjectiveLink as unknown as { findMany: unknown; deleteMany: unknown }
+    delegate.findMany = async () => ids(1)
+    delegate.deleteMany = async () => ({ count: 1 })
+    await expect(drainLinksFor(tx, "objective", ["obj-a"])).rejects.toThrow("pass cap")
+  })
+
+  it("drainAfterParentDelete returns the count on success and swallows and logs a failure without row data", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {})
+    expect(await drainAfterParentDelete("t", async () => 7)).toEqual({ removed: 7, failed: false })
+    const failed = await drainAfterParentDelete("t", async () => { throw new Error("secret-id-123 broke") })
+    expect(failed).toEqual({ removed: 0, failed: true })
+    expect(String(log.mock.calls[0][0])).not.toContain("secret-id-123")
+    expect(JSON.parse(String(log.mock.calls[0][0]))).toMatchObject({ event: "typed_links.cleanup_failed", surface: "t" })
+    log.mockRestore()
+  })
+
+  it("the legacy drain with an objective id only takes the link the deleted key result implied", async () => {
+    const { tx, links } = setup()
+    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" })
+    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "LEGACY" })
+    expect(await drainLegacyLinksForOpportunities(tx, ["opp-a"], "obj-a")).toBe(1)
+    expect(links.map((l) => l.objectiveId)).toEqual(["obj-a2"])
+  })
+})
+
+describe("isMissingLinkTable only recognises a missing TABLE", () => {
+  it.each([
+    ["Prisma P2021", Object.assign(new Error("x"), { code: "P2021" }), true],
+    ["Postgres 42P01", Object.assign(new Error("x"), { code: "42P01" }), true],
+    ["adapter metadata 42P01", Object.assign(new Error("x"), { code: "P2010", meta: { driverAdapterError: { cause: { originalCode: "42P01" } } } }), true],
+    ["code-less exact message", new Error('relation "opportunity_objective_links" does not exist'), true],
+    ["code-less schema-qualified message", new Error('relation "s"."solution_key_result_links" does not exist'), true],
+    ["a missing COLUMN (P2022)", Object.assign(new Error('column "x" of relation "opportunity_objective_links" does not exist'), { code: "P2022" }), false],
+    ["a missing COLUMN (42703)", Object.assign(new Error("x"), { code: "42703" }), false],
+    ["a code-less missing COLUMN message", new Error('column "x" of relation "opportunity_objective_links" does not exist'), false],
+    ["a coded error that merely mentions the table", Object.assign(new Error('relation "opportunity_objective_links" does not exist'), { code: "42501" }), false],
+    ["permission denied", Object.assign(new Error("permission denied"), { code: "42501" }), false],
+    ["a timeout", Object.assign(new Error("timeout"), { code: "57014" }), false],
+    ["a connection error", Object.assign(new Error("reset"), { code: "ECONNRESET" }), false],
+    ["a different missing table", new Error('relation "opportunities" does not exist'), false],
+  ])("%s -> %s", (_name, error, expected) => {
+    expect(isMissingLinkTable(error)).toBe(expected)
+  })
+})

@@ -70,7 +70,7 @@ beforeEach(() => {
   mockObjective.updateMany.mockResolvedValue({ count: 2 })
   mockObjective.delete.mockResolvedValue({ id: OBJECTIVE_ID })
 
-  mockKeyResult.findUnique.mockResolvedValue({ id: KEY_RESULT_ID, title: "Reach 70% activation" })
+  mockKeyResult.findUnique.mockResolvedValue({ id: KEY_RESULT_ID, title: "Reach 70% activation", objectiveId: "objective-of-kr" })
   mockKeyResult.update.mockImplementation(({ data }) =>
     Promise.resolve({
       id: KEY_RESULT_ID,
@@ -186,15 +186,39 @@ describe("deleteObjective", () => {
     })
   })
 
-  it("removes every opportunity link to the Objective (both origins) in the delete transaction, before the Objective row", async () => {
+  it("removes every opportunity link to the Objective (both origins) AFTER the Objective row is gone", async () => {
     const order: string[] = []
-    mockOpportunityObjectiveLink.deleteMany.mockImplementation(async () => { order.push("links"); return { count: 2 } })
+    mockOpportunityObjectiveLink.findMany.mockImplementationOnce(async () => { order.push("find-links"); return [{ id: "l1" }, { id: "l2" }] })
+    mockOpportunityObjectiveLink.deleteMany.mockImplementation(async () => { order.push("delete-links"); return { count: 2 } })
     mockObjective.delete.mockImplementation(async () => { order.push("objective"); return { id: OBJECTIVE_ID } })
 
     await deleteObjective({ objectiveId: OBJECTIVE_ID })
 
-    expect(mockOpportunityObjectiveLink.deleteMany).toHaveBeenCalledWith({ where: { objectiveId: { in: [OBJECTIVE_ID] } } })
-    expect(order).toEqual(["links", "objective"])
+    expect(mockOpportunityObjectiveLink.findMany).toHaveBeenCalledWith({ where: { objectiveId: { in: [OBJECTIVE_ID] } }, select: { id: true }, take: 500 })
+    expect(order).toEqual(["objective", "find-links", "delete-links"])
+  })
+
+  it("a refused delete (child key results) touches no link at all", async () => {
+    mockObjective.findUnique.mockResolvedValueOnce({ id: OBJECTIVE_ID, title: "Improve activation", _count: { keyResults: 2 } })
+    await deleteObjective({ objectiveId: OBJECTIVE_ID })
+    expect(mockOpportunityObjectiveLink.findMany).not.toHaveBeenCalled()
+    expect(mockOpportunityObjectiveLink.deleteMany).not.toHaveBeenCalled()
+  })
+
+  it("a failed delete transaction touches no link at all", async () => {
+    mockPrisma.$transaction.mockRejectedValueOnce(new Error("conflict"))
+    await expect(deleteObjective({ objectiveId: OBJECTIVE_ID })).rejects.toThrow("conflict")
+    expect(mockOpportunityObjectiveLink.findMany).not.toHaveBeenCalled()
+  })
+
+  it("if the post-delete drain fails the Objective is still deleted and the caller still gets success (logged, swallowed)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {})
+    mockOpportunityObjectiveLink.findMany.mockRejectedValueOnce(new Error("drain failed"))
+    const result = await deleteObjective({ objectiveId: OBJECTIVE_ID })
+    expect(result.structuredContent.ok).toBe(true)
+    expect(mockObjective.delete).toHaveBeenCalled()
+    expect(JSON.parse(String(log.mock.calls[0][0]))).toMatchObject({ event: "typed_links.cleanup_failed", surface: "mcp.deleteObjective" })
+    log.mockRestore()
   })
 
   it("deletes a childless Objective and returns a plain ID line", async () => {
@@ -323,7 +347,12 @@ describe("deleteKeyResult", () => {
     expect(mockKeyResult.delete).not.toHaveBeenCalled()
   })
 
-  it("reports unlink and child-deletion counts with a plain ID line", async () => {
+  it("reports unlink, child-deletion and link-removal counts with a plain ID line", async () => {
+    mockOpportunityObjectiveLink.findMany.mockResolvedValueOnce([{ id: "l1" }, { id: "l2" }])
+    mockSolutionKeyResultLink.findMany.mockResolvedValueOnce([{ id: "s1" }])
+    mockOpportunityObjectiveLink.deleteMany.mockResolvedValue({ count: 2 })
+    mockSolutionKeyResultLink.deleteMany.mockResolvedValue({ count: 1 })
+
     const result = await deleteKeyResult({ keyResultId: KEY_RESULT_ID })
 
     expect(result.structuredContent.ok).toBe(true)
@@ -343,38 +372,58 @@ describe("deleteKeyResult", () => {
     })
   })
 
-  it("deletes the typed links in the same transaction: LEGACY links of the unlinked opportunities (never DIRECT), and every solution link to the KR", async () => {
+  it("drains, AFTER the key result is gone: the LEGACY links the unlinked opportunities had to this key result's objective (never DIRECT), and every solution link", async () => {
     await deleteKeyResult({ keyResultId: KEY_RESULT_ID })
 
+    // The pointers are read before the delete, since the transaction nulls them.
     expect(mockOpportunity.findMany).toHaveBeenCalledWith({ where: { linkedKeyResultId: KEY_RESULT_ID }, select: { id: true } })
-    expect(mockOpportunityObjectiveLink.deleteMany).toHaveBeenCalledWith({
-      where: { opportunityId: { in: ["opp-1", "opp-2", "opp-3"] }, origin: "LEGACY" },
+    expect(mockOpportunityObjectiveLink.findMany).toHaveBeenCalledWith({
+      where: { opportunityId: { in: ["opp-1", "opp-2", "opp-3"] }, origin: "LEGACY", objectiveId: "objective-of-kr" },
+      select: { id: true },
+      take: 500,
     })
-    expect(mockSolutionKeyResultLink.deleteMany).toHaveBeenCalledWith({ where: { keyResultId: { in: [KEY_RESULT_ID] } } })
-    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
+    expect(mockSolutionKeyResultLink.findMany).toHaveBeenCalledWith({ where: { keyResultId: { in: [KEY_RESULT_ID] } }, select: { id: true }, take: 500 })
+    expect(mockKeyResult.delete.mock.invocationCallOrder[0]).toBeLessThan(mockOpportunityObjectiveLink.findMany.mock.invocationCallOrder[0])
+    expect(mockKeyResult.delete.mock.invocationCallOrder[0]).toBeLessThan(mockSolutionKeyResultLink.findMany.mock.invocationCallOrder[0])
   })
 
-  it("keeps the KR and every link when the link cleanup fails (all one transaction)", async () => {
-    mockSolutionKeyResultLink.deleteMany.mockRejectedValueOnce(new Error("link cleanup failed"))
+  it("a failed or refused delete transaction leaves every link untouched", async () => {
+    mockPrisma.$transaction.mockRejectedValueOnce(new Error("Restrict: key result still referenced"))
+    await expect(deleteKeyResult({ keyResultId: KEY_RESULT_ID })).rejects.toThrow("Restrict")
+    expect(mockOpportunityObjectiveLink.findMany).not.toHaveBeenCalled()
+    expect(mockOpportunityObjectiveLink.deleteMany).not.toHaveBeenCalled()
+    expect(mockSolutionKeyResultLink.findMany).not.toHaveBeenCalled()
+    expect(mockSolutionKeyResultLink.deleteMany).not.toHaveBeenCalled()
 
-    await expect(deleteKeyResult({ keyResultId: KEY_RESULT_ID })).rejects.toThrow("link cleanup failed")
-
-    expect(mockKeyResult.delete).not.toHaveBeenCalled()
+    mockRoadmapItem.updateMany.mockRejectedValueOnce(new Error("roadmap cleanup failed"))
+    await expect(deleteKeyResult({ keyResultId: KEY_RESULT_ID })).rejects.toThrow("roadmap cleanup failed")
+    expect(mockSolutionKeyResultLink.deleteMany).not.toHaveBeenCalled()
   })
 
-  it("does not touch the link table when no opportunity pointed at the KR", async () => {
+  it("if the post-delete drain fails the key result is still deleted and the caller still gets success (logged, swallowed)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {})
+    mockSolutionKeyResultLink.findMany.mockRejectedValueOnce(new Error("drain failed"))
+    const result = await deleteKeyResult({ keyResultId: KEY_RESULT_ID })
+    expect(result.structuredContent.ok).toBe(true)
+    expect(mockKeyResult.delete).toHaveBeenCalled()
+    expect(result.structuredContent.data).toMatchObject({ deleted: true, removedSolutionLinks: 0 })
+    expect(JSON.parse(String(log.mock.calls[0][0]))).toMatchObject({ event: "typed_links.cleanup_failed", surface: "mcp.deleteKeyResult.solution" })
+    log.mockRestore()
+  })
+
+  it("does not read link rows for the pointer drain when no opportunity pointed at the KR", async () => {
     mockOpportunity.findMany.mockResolvedValue([])
 
     await deleteKeyResult({ keyResultId: KEY_RESULT_ID })
 
-    expect(mockOpportunityObjectiveLink.deleteMany).not.toHaveBeenCalled()
+    expect(mockOpportunityObjectiveLink.findMany).not.toHaveBeenCalled()
   })
 })
 
-describe("parent deletes drain links before the transaction (DSQL's 3,000-row cap, 4 rows per link)", () => {
+describe("parent deletes drain links AFTER the delete, in committed passes (DSQL's 3,000-row cap, 4 rows per link)", () => {
   const rows = (n: number, prefix: string) => Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}` }))
 
-  it("deleteObjective drains an objective's links in committed passes of at most 500, BEFORE opening the transaction", async () => {
+  it("deleteObjective drains an objective's links in passes of at most 500, after the transaction", async () => {
     const events: string[] = []
     let remaining = 1_203
     mockOpportunityObjectiveLink.findMany.mockImplementation(async ({ take }: { take: number }) => {
@@ -383,7 +432,7 @@ describe("parent deletes drain links before the transaction (DSQL's 3,000-row ca
       return rows(n, "l")
     })
     mockOpportunityObjectiveLink.deleteMany.mockImplementation(async ({ where }: { where: { id?: { in: string[] } } }) => {
-      events.push(where.id ? `drain:${where.id.in.length}` : "tx-sweep")
+      events.push(`drain:${where.id?.in.length}`)
       return { count: where.id ? where.id.in.length : 0 }
     })
     mockPrisma.$transaction.mockImplementation(async (callback) => {
@@ -393,20 +442,10 @@ describe("parent deletes drain links before the transaction (DSQL's 3,000-row ca
 
     await deleteObjective({ objectiveId: OBJECTIVE_ID })
 
-    expect(events.slice(0, 4)).toEqual(["drain:500", "drain:500", "drain:203", "transaction"])
-    expect(events.filter((e) => e.startsWith("drain")).every((e) => Number(e.split(":")[1]) <= 500)).toBe(true)
-    expect(events[events.length - 1]).toBe("tx-sweep")
+    expect(events).toEqual(["transaction", "drain:500", "drain:500", "drain:203"])
   })
 
-  it("deleteObjective drains nothing when the objective still has key results (the delete is refused and its links stay)", async () => {
-    mockKeyResult.findFirst.mockResolvedValue({ id: "kr" })
-    mockObjective.findUnique.mockResolvedValueOnce({ id: OBJECTIVE_ID, title: "Improve activation", _count: { keyResults: 1 } })
-    await deleteObjective({ objectiveId: OBJECTIVE_ID })
-    expect(mockOpportunityObjectiveLink.findMany).not.toHaveBeenCalled()
-    expect(mockObjective.delete).not.toHaveBeenCalled()
-  })
-
-  it("deleteKeyResult drains the LEGACY links of the opportunities it unlinks and the solution links, before the transaction", async () => {
+  it("deleteKeyResult drains the LEGACY and solution links in passes of at most 500, after the transaction", async () => {
     const events: string[] = []
     let legacy = 1_100
     let solution = 600
@@ -422,11 +461,11 @@ describe("parent deletes drain links before the transaction (DSQL's 3,000-row ca
       return rows(n, "s")
     })
     mockOpportunityObjectiveLink.deleteMany.mockImplementation(async ({ where }: { where: { id?: { in: string[] } } }) => {
-      if (where.id) events.push(`legacy-drain:${where.id.in.length}`)
+      events.push(`legacy-drain:${where.id?.in.length}`)
       return { count: where.id ? where.id.in.length : 0 }
     })
     mockSolutionKeyResultLink.deleteMany.mockImplementation(async ({ where }: { where: { id?: { in: string[] } } }) => {
-      if (where.id) events.push(`solution-drain:${where.id.in.length}`)
+      events.push(`solution-drain:${where.id?.in.length}`)
       return { count: where.id ? where.id.in.length : 0 }
     })
     mockPrisma.$transaction.mockImplementation(async (callback) => {
@@ -436,6 +475,6 @@ describe("parent deletes drain links before the transaction (DSQL's 3,000-row ca
 
     await deleteKeyResult({ keyResultId: KEY_RESULT_ID })
 
-    expect(events).toEqual(["legacy-drain:500", "legacy-drain:500", "legacy-drain:100", "solution-drain:500", "solution-drain:100", "transaction"])
+    expect(events).toEqual(["transaction", "legacy-drain:500", "legacy-drain:500", "legacy-drain:100", "solution-drain:500", "solution-drain:100"])
   })
 })

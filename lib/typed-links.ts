@@ -348,15 +348,45 @@ export async function deleteLinksFor(tx: Tx, kind: LinkParentKind, ids: readonly
 
 type LinkRowFinder = (take: number) => Promise<{ id: string }[]>
 
-/** Finds up to `take` link ids and deletes them by id, repeating until none are left. Each pass is its own statement. */
+/** Upper bound on passes (500 links each, so 1,000,000 links): a runaway loop becomes an error, never an endless one. */
+const MAX_DRAIN_PASSES = 2_000
+/** Consecutive passes that find rows but delete none before giving up. */
+const MAX_STALLED_PASSES = 3
+
+/**
+ * Finds up to `take` link ids and deletes them by id, repeating until a FIND comes back empty. Each pass is its own statement.
+ * A delete that removes nothing is not an error by itself: a concurrent drain (two delete clicks, or a user delete racing the
+ * workspace cascade) took those rows first, so the find is simply run again and the loop ends when it is empty. Only repeated
+ * stalls, or exceeding the pass cap, throw.
+ */
 async function drainByIds(find: LinkRowFinder, remove: (ids: string[]) => Promise<number>): Promise<number> {
   let total = 0
-  while (true) {
+  let stalled = 0
+  for (let pass = 0; pass < MAX_DRAIN_PASSES; pass += 1) {
     const rows = await find(LINK_WRITE_CHUNK)
     if (rows.length === 0) return total
     const deleted = await remove(rows.map((row) => row.id))
-    if (deleted === 0) throw new Error("Link delete made no progress")
     total += deleted
+    stalled = deleted === 0 ? stalled + 1 : 0
+    if (stalled >= MAX_STALLED_PASSES) throw new Error("Link delete made no progress")
+  }
+  throw new Error("Link drain exceeded its pass cap")
+}
+
+/**
+ * Runs the link cleanup that follows a successful parent delete. ORDER MATTERS: the parent is deleted FIRST and its links are
+ * drained AFTER, so a delete that is refused (a Restrict reference such as supporting objectives or check-ins, an OCC conflict, a
+ * row cap) has touched no link. A link to a deleted endpoint is already hidden by the workspace-filtered endpoint joins and is
+ * surfaced by linkIntegrity.directDangling (and pruned by 072 if LEGACY), so a cleanup that fails is LOGGED and SWALLOWED, never
+ * surfaced as a failed delete the user would retry against a parent that no longer exists. Returns how many links went.
+ */
+export async function drainAfterParentDelete(surface: string, cleanup: () => Promise<number>): Promise<{ removed: number; failed: boolean }> {
+  try {
+    return { removed: await cleanup(), failed: false }
+  } catch (error) {
+    // No row data: the surface and the error class only.
+    console.error(JSON.stringify({ event: "typed_links.cleanup_failed", surface, error: error instanceof Error ? error.name : "unknown", hint: "leftover links are reported by linkIntegrity and pruned by 072" }))
+    return { removed: 0, failed: true }
   }
 }
 
@@ -386,11 +416,13 @@ export async function drainLinksFor(db: Tx, kind: LinkParentKind, ids: readonly 
 }
 
 /** drainLinksFor for the LEGACY links of opportunities whose pointer is about to be cleared (DIRECT links are kept). */
-export async function drainLegacyLinksForOpportunities(db: Tx, opportunityIds: readonly string[]): Promise<number> {
+export async function drainLegacyLinksForOpportunities(db: Tx, opportunityIds: readonly string[], objectiveId?: string): Promise<number> {
   let removed = 0
   for (const part of chunk(opportunityIds, LINK_WRITE_CHUNK)) {
     removed += await drainByIds(
-      (take) => db.opportunityObjectiveLink.findMany({ where: { opportunityId: { in: part }, origin: "LEGACY" }, select: { id: true }, take }),
+      // With objectiveId only the link the deleted key result implied goes (a single pointer implies exactly one LEGACY link),
+      // so an opportunity re-pointed elsewhere in the meantime keeps its new link.
+      (take) => db.opportunityObjectiveLink.findMany({ where: { opportunityId: { in: part }, origin: "LEGACY", ...(objectiveId ? { objectiveId } : {}) }, select: { id: true }, take }),
       async (rowIds) => (await db.opportunityObjectiveLink.deleteMany({ where: { id: { in: rowIds } } })).count,
     )
   }
@@ -436,8 +468,11 @@ const byCreatedThenId = (a: { createdAt: Date; id: string }, b: { createdAt: Dat
   a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
 /**
- * Whether an error means "the link table does not exist yet" (Postgres 42P01, Prisma P2021). Checked on the code, the cause and
- * the driver-adapter metadata, and as a last resort on a message that names one of the two link tables.
+ * Whether an error means "the link table does not exist yet": Postgres 42P01 or Prisma P2021, read from the code, the cause and the
+ * driver-adapter metadata. The message is consulted ONLY when the error carries no code at all, and then it must be exactly
+ * `relation "<link table>" does not exist`. Anything else (a missing COLUMN: P2022 / 42703, a permission error 42501, a timeout, a
+ * connection error) is NOT "no links" and keeps throwing. Callers pass a client, never a `tx`: after a swallowed error Postgres
+ * would answer every further statement in that transaction with 25P02.
  */
 export function isMissingLinkTable(error: unknown): boolean {
   const e = error as {
@@ -449,7 +484,8 @@ export function isMissingLinkTable(error: unknown): boolean {
   if (!e) return false
   const codes = [e.code, e.meta?.code, e.cause?.code, e.cause?.originalCode, e.meta?.driverAdapterError?.cause?.originalCode]
   if (codes.includes("42P01") || codes.includes("P2021")) return true
-  return /(relation|table) .*(opportunity_objective_links|solution_key_result_links|OpportunityObjectiveLink|SolutionKeyResultLink).* does not exist|does not exist.*(opportunity_objective_links|solution_key_result_links)/i.test(e.message ?? "")
+  if (codes.some(Boolean)) return false
+  return /^\s*relation "(?:[^"]+"\.")?(?:opportunity_objective_links|solution_key_result_links)" does not exist\s*$/i.test(e.message ?? "")
 }
 
 let warnedMissingLinkTable = false

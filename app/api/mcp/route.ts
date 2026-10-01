@@ -1316,7 +1316,7 @@ const _handler = createMcpHandler(
       {
         title: "Unlink Opportunity from Objective",
         description:
-          "Removes the link between an Opportunity and an Objective. Returns removed:0 when there is none. If the opportunity's linked Key Result is under that objective the link is derived from it and remains until the Key Result is cleared (stillLinkedViaKeyResult:true, removed:0). That is not a failure: the call succeeded and nothing needed to change.",
+          "Removes the link between an Opportunity and an Objective. Returns removed:0 when there is none. When a link exists the call also bumps the opportunity's updatedAt (even if the link is kept because the Key Result implies it), so a concurrent edit conflicts instead of racing. If the opportunity's linked Key Result is under that objective the link is derived from it and remains until the Key Result is cleared (stillLinkedViaKeyResult:true, removed:0). That is not a failure: the call succeeded and nothing needed to change.",
         inputSchema: { ...typedLinkEnds, opportunityId: z.string().uuid().describe("UUID of the opportunity"), objectiveId: z.string().uuid().describe("UUID of the objective") },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
