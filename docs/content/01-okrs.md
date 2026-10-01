@@ -71,4 +71,11 @@ Click the **+ Check-in** button on any Key Result to record the current value. C
 
 ## Linking OKRs to Discovery
 
-Key Results are the bridge between outcomes and work. When you create an Opportunity on the Discovery board, you can link it to one or more Key Results. Roadmap items can also be linked to KRs, so you always have a clear line from "what we decided to build" back to "why we decided to build it."
+Key Results and Objectives are the bridge between outcomes and work.
+
+- **Opportunity → Key Result.** When you create an Opportunity on the Discovery board, you can choose its **Driving Key Result**, the one measure it is expected to move. An opportunity has at most one.
+- **Opportunity ↔ Objective.** An opportunity can also be linked directly to any number of Objectives, to record that you chose to pursue it for them. Choosing a Driving Key Result links the opportunity to that Key Result's Objective automatically. The box for adding other Objectives appears on opportunities in workspaces using the Opportunity-first or Torres model (see [Thinking models](/help/27-thinking-models)).
+- **Solution ↔ Key Result.** A solution can be linked to the Key Results it is meant to move; the workspace tree on those two models shows them. Agents make these links today with the link tools in the [MCP API](/help/09-mcp-api#typed-links).
+- **Roadmap items** can also be linked to KRs, so you always have a clear line from "what we decided to build" back to "why we decided to build it."
+
+Deleting a Key Result or an Objective removes the links that point at it.
