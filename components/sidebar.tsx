@@ -11,6 +11,7 @@ import {
   FlaskConical,
   HelpCircle,
   Lightbulb,
+  Puzzle,
   ListChecks,
   Map,
   MessageSquare,
@@ -70,9 +71,10 @@ interface SidebarProps {
 
 // A function, not a constant, because the OKRs entry's name comes from the
 // workspace's thinking model ("OKRs" by default, "Outcomes" under Torres).
-const buildBaseNavItems = (okrsLabel: string) => [
+const buildBaseNavItems = (okrsLabel: string, solutionsLabel: string) => [
   { label: okrsLabel, path: "okrs", Icon: Target },
   { label: "Discovery", path: "discovery", Icon: Lightbulb },
+  { label: solutionsLabel, path: "solutions", Icon: Puzzle },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
   { label: "Metrics", path: "metrics", Icon: BarChart3 },
@@ -155,7 +157,7 @@ export function Sidebar({
   const router = useRouter()
   const base = `/${orgSlug}/${workspaceSlug}`
   const labels = useLabels()
-  const baseNavItems = buildBaseNavItems(labels.sections.okrs)
+  const baseNavItems = buildBaseNavItems(labels.sections.okrs, labels.solution.plural)
   const navItems = [
     ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
     ...baseNavItems.slice(0, 6),

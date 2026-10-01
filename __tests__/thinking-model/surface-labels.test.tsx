@@ -67,8 +67,11 @@ import { AddSolutionForm } from "@/components/discovery/add-solution-form"
 import { OpportunityCard } from "@/components/discovery/opportunity-card"
 import { OpportunityBoard } from "@/components/discovery/opportunity-board"
 import { OpportunityFieldBoard } from "@/components/discovery/opportunity-field-board"
-import { SolutionSwimlaneBoard } from "@/components/discovery/solution-swimlane-board"
+import { SolutionBacklogBoard } from "@/components/solutions/solution-backlog-board"
 import { DiscoveryTableView } from "@/components/discovery/discovery-table-view"
+import { SolutionTableView } from "@/components/solutions/solution-table-view"
+import { NewSolutionDialog } from "@/components/solutions/new-solution-dialog"
+import { SolutionGroupByToggle } from "@/components/solutions/solution-group-by-toggle"
 import { ScoringPanel } from "@/components/discovery/scoring-panel"
 import { SolutionScoringPanel } from "@/components/discovery/solution-scoring-panel"
 import { OSTTreeView } from "@/components/discovery/ost-tree-view"
@@ -182,12 +185,37 @@ const SURFACES: Surface[] = [
     ),
     custom: ["Problem board grouped by Area", "2 bets", "1 problem"],
   },
-  { name: "swimlane empty", ui: () => <SolutionSwimlaneBoard opportunities={[]} workspaceId="w1" {...common} />, custom: ["No problems yet", "Create Problem to start adding Bets to it."] },
+  { name: "solution-backlog empty", ui: () => <SolutionBacklogBoard solutions={[]} workspaceId="w1" {...common} />, custom: ["No bets found", "Bets are added from problem pages in Discovery. Or adjust the filters."] },
   {
-    name: "swimlane lane",
-    ui: () => <SolutionSwimlaneBoard opportunities={[{ id: "o1", title: "Need", squad: null, solutions: [solCard] }]} workspaceId="w1" {...common} />,
-    custom: ["1 bet", "No bets", "Need bets", "Add Bet"],
+    name: "solution-backlog items",
+    ui: () => <SolutionBacklogBoard solutions={[{ ...solCard, opportunity: { id: "o1", title: "Need", squad: null } }]} workspaceId="w1" {...common} />,
+    custom: ["No bets", "Bet backlog"],
   },
+  {
+    name: "solution-backlog grouped by opportunity",
+    ui: () => <SolutionBacklogBoard solutions={[{ ...solCard, opportunity: { id: "o1", title: "Need", squad: null } }]} workspaceId="w1" groupBy="opportunity" {...common} />,
+    custom: ["Bet backlog grouped by problem", "cannot be dragged between problem columns"],
+  },
+  { name: "solution-backlog grouped empty", ui: () => <SolutionBacklogBoard solutions={[]} workspaceId="w1" groupBy="squad" {...common} />, custom: ["No bets found"] },
+  { name: "solution-table empty", ui: () => <SolutionTableView solutions={[]} {...common} />, custom: ["No bets match the current filters."] },
+  {
+    name: "solution-table rows",
+    ui: () => <SolutionTableView solutions={[{ ...solCard, opportunity: { id: "o1", title: "Need", squad: null } }]} {...common} />,
+    custom: ["Bet backlog", "Bet", "Problem"],
+  },
+  {
+    name: "new-solution-dialog open",
+    ui: () => <NewSolutionDialog opportunities={[{ id: "o1", title: "Need" }]} {...common} />,
+    interact: click(/new /i),
+    custom: ["New Bet", "Every bet belongs to one problem. Choose which.", "Select problem", "Bet title", "Describe the bet approach...", "Add Bet"],
+  },
+  {
+    name: "new-solution-dialog no opportunities",
+    ui: () => <NewSolutionDialog opportunities={[]} {...common} />,
+    interact: click(/new /i),
+    custom: ["No problems yet"],
+  },
+  { name: "solution-group-by-toggle", ui: () => <SolutionGroupByToggle groupBy="opportunity" />, custom: ["Group by:", "Problem"] },
   { name: "discovery-table empty", ui: () => <DiscoveryTableView opportunities={[]} />, custom: ["No problems match the current filters."] },
   {
     name: "discovery-table rows",

@@ -9,7 +9,8 @@ describe("Opportunity field grouping", () => {
   });
   it("resolves built-in and eligible field URLs and falls back for stale URLs", () => {
     expect(resolveDiscoveryGroupBy("field:moscow", [field])).toBe("field:moscow");
-    expect(resolveDiscoveryGroupBy("opportunity", [field])).toBe("opportunity");
+    // The retired swimlane value degrades to Status (the page redirects it to /solutions first).
+    expect(resolveDiscoveryGroupBy("opportunity", [field])).toBe("status");
     for (const value of [undefined, "field:", "field:deleted", "moscow"]) expect(resolveDiscoveryGroupBy(value, [field])).toBe("status");
   });
   it("puts absent and stale values in Unspecified without colliding with real option values", () => {
@@ -29,7 +30,6 @@ describe("Opportunity field column values", () => {
   it("round-trips the field grouping value", () => {
     expect(groupByFieldId(fieldGroupByValue("moscow"))).toBe("moscow");
     expect(groupByFieldId("status")).toBeNull();
-    expect(groupByFieldId("opportunity")).toBeNull();
   });
   it("only allows effective options or a clear on Opportunity single-select fields", () => {
     const eligible = { objectType: "OPPORTUNITY" as const, fieldType: "SELECT" as const, options };

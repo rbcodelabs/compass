@@ -271,14 +271,6 @@
       "No opportunities match the current filters.",
       "Discovery opportunities"
     ],
-    "components/discovery/solution-swimlane-board.tsx": [
-      "No solutions",
-      "solution",
-      "solutions",
-      "{} solutions",
-      "No opportunities yet",
-      "Create an Opportunity to start adding Solutions to it."
-    ],
     "components/discovery/solution-card.tsx": [
       "solution",
       "solution-card-meta"

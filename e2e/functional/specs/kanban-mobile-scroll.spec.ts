@@ -28,7 +28,7 @@ const boards = [
   { route: "roadmap", table: "roadmap_items", extra: "horizon", value: "NOW" },
 ] as const;
 
-test("solution swimlane card content supports vertical and horizontal touch scrolling", async ({ page, base }) => {
+test("solutions backlog card content supports vertical and horizontal touch scrolling", async ({ page, base }) => {
   const database = new URL(process.env.DATABASE_URL!);
   if (!["localhost", "127.0.0.1"].includes(database.hostname) || database.pathname !== "/compass_e2e") {
     throw new Error("Kanban scroll test requires the dedicated local compass_e2e database");
@@ -38,19 +38,20 @@ test("solution swimlane card content supports vertical and horizontal touch scro
   const ids = Array.from({ length: 18 }, () => randomUUID());
   try {
     const workspace = (await pool.query("SELECT w.id FROM compass_dev.workspaces w JOIN compass_dev.organizations o ON w.organization_id=o.id WHERE w.slug='e2e-workspace' AND o.slug='e2e-test-org'")).rows[0];
-    await pool.query("INSERT INTO compass_dev.opportunities (id,workspace_id,title,sort_order) VALUES ($1,$2,'Mobile solution lane',-100)", [opportunityId, workspace.id]);
+    await pool.query("INSERT INTO compass_dev.opportunities (id,workspace_id,title,sort_order) VALUES ($1,$2,'Mobile solution parent',-100)", [opportunityId, workspace.id]);
     for (const [index, id] of ids.entries()) {
-      await pool.query("INSERT INTO compass_dev.solutions (id,workspace_id,opportunity_id,title,sort_order) VALUES ($1,$2,$3,$4,$5)", [id, workspace.id, opportunityId, `Mobile solution ${index + 1}`, index]);
+      // Negative so these sort first in the flat Idea column regardless of other seeded solutions.
+      await pool.query("INSERT INTO compass_dev.solutions (id,workspace_id,opportunity_id,title,sort_order) VALUES ($1,$2,$3,$4,$5)", [id, workspace.id, opportunityId, `Mobile solution ${index + 1}`, index - 1000]);
     }
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(`${base}/discovery?view=board&groupBy=opportunity`);
+    await page.goto(`${base}/solutions`);
     await page.waitForLoadState("networkidle");
     const first = page.getByText("Mobile solution 1", { exact: true });
+    // Columns keep a fixed minimum width and the track scrolls; they are never squashed to the viewport.
     for (const width of [320, 390, 767]) {
       await page.setViewportSize({ width, height: 844 });
-      const column = first.locator("xpath=ancestor::*[@data-slot='swimlane-column'][1]");
-      const region = column.locator("xpath=ancestor::*[@role='region'][1]");
-      await expect.poll(async () => Math.abs((await column.boundingBox())!.width - (await region.boundingBox())!.width)).toBeLessThan(2);
+      const column = first.locator("xpath=ancestor::*[@data-slot='solution-backlog-column'][1]");
+      await expect.poll(async () => (await column.boundingBox())!.width).toBeGreaterThanOrEqual(279);
     }
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(first).toBeInViewport();

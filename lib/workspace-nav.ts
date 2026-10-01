@@ -24,6 +24,7 @@ export const TOP_LEVEL_SECTIONS: ReadonlySet<string> = new Set([
   "okrs",
   "roadmap",
   "settings",
+  "solutions",
   "tasks",
   "updates",
 ]);
