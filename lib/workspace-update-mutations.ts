@@ -1,5 +1,6 @@
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db";
 import { getMcpActor } from "@/lib/mcp-authz";
+import { detectFieldTransitions } from "@/lib/status-transitions";
 import {
   recordWorkspaceUpdate,
   withWorkspaceUpdates,
@@ -105,13 +106,7 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
       operation === "update" && id ? await readRow(tx, model, id) : null;
     const result = await mutate(tx);
     const after = result as Row;
-    const fields =
-      model === "roadmapItem"
-        ? (["status", "horizon"] as const)
-        : (["status"] as const);
-    const changed = fields.filter(
-      (field) => before?.[field] !== after[field] && after[field] !== undefined,
-    );
+    const changed = detectFieldTransitions(model, before, after);
     const evidenceAttached =
       model === "evidence" &&
       ["opportunityId", "solutionId", "assumptionId"].some((field) => {
@@ -154,7 +149,7 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
         ...actor,
       });
     } else {
-      for (const field of changed)
+      for (const transition of changed)
         await recordWorkspaceUpdate(tx, {
           workspaceId,
           entityType,
@@ -162,8 +157,8 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
           groupType,
           groupId,
           kind: "STATUS_CHANGED",
-          before: before?.[field],
-          after: after[field],
+          before: transition.from,
+          after: transition.to,
           ...actor,
         });
     }

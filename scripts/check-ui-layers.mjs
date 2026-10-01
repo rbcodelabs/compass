@@ -29,7 +29,7 @@ const LAYERS = {
   50: "surface (sheet backdrop + sheet content)",
   60: "panel (entity detail side panels)",
   70: "dialog (dialog + alert dialog, backdrop and content)",
-  80: "popup (select, combobox, dropdown menu, tooltip positioners)",
+  80: "popup (select, combobox, dropdown/context menu, tooltip positioners)",
 };
 
 /**
@@ -44,6 +44,7 @@ const LAYER_OWNERS = {
     "components/ui/select.tsx",
     "components/ui/combobox.tsx",
     "components/ui/dropdown-menu.tsx",
+    "components/ui/context-menu.tsx",
     "components/ui/tooltip.tsx",
   ],
 };
