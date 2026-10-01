@@ -117,3 +117,13 @@ describe("experiment composer ids", () => {
     expect(presetAssumptionFromComposerId(experimentComposerId("as-1"))).toBe("as-1");
   });
 });
+
+describe("ExperimentComposer layout", () => {
+  it("renders the kill condition as an amber semantic-token box", async () => {
+    render(<ExperimentComposer orgSlug="acme" workspaceSlug="core" composerId="new" />);
+    const field = (await screen.findByLabelText(/kill condition/i)).closest("[data-tone]");
+    expect(field).toHaveAttribute("data-tone", "warning");
+    expect(field?.className).toContain("bg-status-warning-surface");
+    expect(field?.className).toContain("border-status-warning");
+  });
+});

@@ -102,7 +102,7 @@ test.describe("Assumption ↔ Experiment linking", () => {
       await page.getByLabel("Kill Condition", { exact: true }).fill("Abandon if the link never appears.");
       await page.getByRole("button", { name: "Submit" }).click();
 
-      await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByLabel("Experiment board").getByRole("button", { name: expTitle, exact: true })).toBeVisible({ timeout: 15_000 });
 
       // ── 7. Verify the OST tree now shows the linked experiment ─────────────
       await page.goto(`${base}/discovery`);
