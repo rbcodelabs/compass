@@ -403,6 +403,28 @@ export async function assertEntityAccess(
   return { workspaceId }
 }
 
+/**
+ * Assert the actor may act on EVERY listed entity AND that they all belong to one workspace.
+ *
+ * Membership of each workspace is not enough for a call that joins two entities: a member of two
+ * workspaces could otherwise attach A's entity to B's. Access is asserted first, entity by entity,
+ * so a non-member learns nothing about whether the other end exists or where it lives; only then is
+ * the workspace comparison made. Returns the shared `workspaceId`.
+ */
+export async function assertSameWorkspaceEntities(
+  actor: McpActor,
+  entities: readonly (readonly [WorkspaceEntityType, string])[]
+): Promise<{ workspaceId: string }> {
+  const workspaceIds = new Set<string>()
+  for (const [entityType, entityId] of entities) {
+    workspaceIds.add((await assertEntityAccess(actor, entityType, entityId)).workspaceId)
+  }
+  if (workspaceIds.size !== 1) {
+    throw new McpAuthzError(`${entities.map(([type]) => type).join(" and ")} must belong to the same workspace.`)
+  }
+  return { workspaceId: [...workspaceIds][0] }
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Org-scoped child (scoring models): tools that take a scoringModelId, which
 // belongs to an organization (not a workspace).

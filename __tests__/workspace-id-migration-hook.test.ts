@@ -174,6 +174,15 @@ describe("069 is explicit-only and the residual repair is repeatable", () => {
     expect(selectMigrationsToRun(pending).map((m) => m.name)).toEqual(["068_workspace_id_on_solution_objective"]);
   });
 
+  it("072 is explicit-only too: an untargeted POST skips it, a targeted POST or a fresh-schema caller runs it", () => {
+    const pending = [{ name: "070_x" }, { name: "072_typed_links_residual_backfill" }, { name: "073_y" }];
+    expect(selectMigrationsToRun(pending).map((m) => m.name)).toEqual(["070_x", "073_y"]);
+    expect(selectMigrationsToRun(pending, "072_typed_links_residual_backfill").map((m) => m.name)).toEqual(["072_typed_links_residual_backfill"]);
+    expect(selectMigrationsToRun(pending, undefined, true).map((m) => m.name)).toEqual(["070_x", "072_typed_links_residual_backfill", "073_y"]);
+    expect(skippedExplicitOnly(pending)).toEqual(["072_typed_links_residual_backfill"]);
+    expect(skippedExplicitOnly([{ name: "069_workspace_id_residual_backfill" }, { name: "072_typed_links_residual_backfill" }])).toEqual(["069_workspace_id_residual_backfill", "072_typed_links_residual_backfill"]);
+  });
+
   it("reports what an untargeted run skipped, and nothing when targeted or opted in", () => {
     const pending = [{ name: "070_x" }, { name: "069_workspace_id_residual_backfill" }];
     expect(skippedExplicitOnly(pending)).toEqual(["069_workspace_id_residual_backfill"]);

@@ -1,5 +1,6 @@
 import getPrisma from "@/lib/db"
 import { ok } from "@/lib/mcp-output"
+import { getLinkedKeyResultsBySolution } from "@/lib/typed-links"
 import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 
 type OpportunityStatus = "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | "ARCHIVED"
@@ -59,6 +60,8 @@ export async function listSolutions({
     orderBy: recencyOrderBy(sort) ?? [{ updatedAt: "asc" }, { id: "asc" }],
   })
 
+  // Additive: typed Solution<->Key Result links, one workspace-filtered batch for the whole list.
+  const linkedKeyResults = await getLinkedKeyResultsBySolution(getPrisma(), workspaceId, solutions.map((solution) => solution.id), { preverified: true })
   const items = solutions.map((solution) => ({
     id: solution.id,
     title: solution.title,
@@ -68,6 +71,7 @@ export async function listSolutions({
     opportunityStatus: solution.opportunity.status,
     squadId: solution.opportunity.squadId,
     roadmapItems: solution.roadmapItems,
+    linkedKeyResults: linkedKeyResults.get(solution.id) ?? [],
     createdAt: solution.createdAt,
     updatedAt: solution.updatedAt,
   }))
@@ -75,7 +79,8 @@ export async function listSolutions({
     ? items.map((item) =>
       `• **${item.title}** [${item.status}] — ID: ${item.id}\n` +
       `  Opportunity: ${item.opportunityTitle} [${item.opportunityStatus}] — ID: ${item.opportunityId}` +
-      (item.roadmapItems.length ? `\n  Roadmap items: ${item.roadmapItems.map((roadmap) => roadmap.id).join(", ")}` : ""),
+      (item.roadmapItems.length ? `\n  Roadmap items: ${item.roadmapItems.map((roadmap) => roadmap.id).join(", ")}` : "") +
+      (item.linkedKeyResults.length ? `\n  Key results: ${item.linkedKeyResults.map((kr) => kr.title).join(", ")}` : ""),
     ).join("\n")
     : "No solutions found."
   return ok(message, { items, count: items.length })

@@ -27,7 +27,7 @@ import { assertFollowsNotificationsMigration } from "@/lib/migrations/follows-no
 import { assertMcpConnectorsMigration } from "@/lib/migrations/mcp-connectors";
 import { assertMetricsDashboardMigration } from "@/lib/migrations/metrics-dashboard";
 import { assertWorkspaceIdOnSolutionObjective, backfillWorkspaceIdOnSolutionObjective, getWorkspaceIdBackfillStatus, WORKSPACE_ID_MIGRATION, WORKSPACE_ID_RESIDUAL_MIGRATION } from "@/lib/migrations/workspace-id-on-solution-objective";
-import { TYPED_LINK_TABLES_MIGRATION, assertTypedLinkPreconditions, assertTypedLinkTables, backfillOpportunityObjectiveLinks, getTypedLinkStatus } from "@/lib/migrations/typed-link-tables";
+import { TYPED_LINK_RESIDUAL_MIGRATION, TYPED_LINK_TABLES_MIGRATION, assertTypedLinkPreconditions, assertTypedLinkTables, backfillOpportunityObjectiveLinks, getTypedLinkStatus } from "@/lib/migrations/typed-link-tables";
 import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-manifest";
 
 
@@ -471,6 +471,14 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // receipt is recorded. Nothing reads these tables yet. Idempotent and resumable.
     name: "071_typed_link_tables",
     filePath: path.join(process.cwd(), "prisma/migrations/071_typed_link_tables/migration.sql"),
+  },
+  {
+    // No DDL. Re-runs 071's idempotent backfill + postconditions for pointers written by instances of the previous deploy
+    // after 071's receipt was recorded (stale LEGACY links pruned, missing ones inserted; DIRECT links are never deleted, and
+    // a DIRECT link with a missing endpoint or workspace mismatch is reported, not failed on). Explicit-only, like 069:
+    // POST it only after the code that dual-writes the legacy pointer and its link has fully rolled out.
+    name: "072_typed_links_residual_backfill",
+    filePath: path.join(process.cwd(), "prisma/migrations/072_typed_links_residual_backfill/migration.sql"),
   },
 ];
 
@@ -1673,10 +1681,10 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION];
 
 /**
- * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069).
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072).
  * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
  * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
  * Production-style callers (the admin route, an untargeted POST) never set it.
@@ -1763,7 +1771,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
     const toRun = selectMigrationsToRun(pending, targetScript, options.includeExplicitOnly);
     const skippedExplicit = skippedExplicitOnly(pending, targetScript, options.includeExplicitOnly);
     const skipNote = skippedExplicit.length
-      ? `Skipped (explicit-only, still pending): ${skippedExplicit.join(", ")}. POST {"script":"${skippedExplicit[0]}"} after the workspace_id deploy has fully rolled out.`
+      ? `Skipped (explicit-only, still pending): ${skippedExplicit.join(", ")}. POST {"script":"${skippedExplicit[0]}"} after the deploy it follows has fully rolled out (see the header comment of its migration.sql).`
       : null;
     if (skipNote) log.push(skipNote)
 
@@ -1838,7 +1846,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
 
       // Fail closed before the attempt is recorded or any DDL runs: nothing is
       // changed and no unfinished receipt is left behind.
-      if (migration.name === TYPED_LINK_TABLES_MIGRATION) await assertTypedLinkPreconditions(client, schema)
+      if (migration.name === TYPED_LINK_TABLES_MIGRATION || migration.name === TYPED_LINK_RESIDUAL_MIGRATION) await assertTypedLinkPreconditions(client, schema, migration.name)
 
       const rawSql = readFileSync(migration.filePath, "utf-8");
       const voiceCatalog = ["047_research_voice_control_plane", "049_research_participant_voice"].includes(migration.name) ? voiceMigrationCatalog(rawSql, migration.name) : undefined;
@@ -1983,13 +1991,14 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         await backfillWorkspaceIdOnSolutionObjective(client, schema, log)
         await assertWorkspaceIdOnSolutionObjective(client, schema, migration.name)
       }
-      if (migration.name === TYPED_LINK_TABLES_MIGRATION) {
+      if (migration.name === TYPED_LINK_TABLES_MIGRATION || migration.name === TYPED_LINK_RESIDUAL_MIGRATION) {
         // Data half: backfill links from the legacy pointer (orphans are
         // quarantined, not linked), then prove integrity. Both run before the
         // receipt below; a failure leaves an unfinished attempt and the next
-        // POST resumes from the remaining unlinked rows.
-        await backfillOpportunityObjectiveLinks(client, schema, log)
-        await assertTypedLinkTables(client, schema)
+        // POST resumes from the remaining unlinked rows. 072 runs the very same
+        // idempotent function after the dual-writing code is live.
+        await backfillOpportunityObjectiveLinks(client, schema, log, undefined, migration.name)
+        await assertTypedLinkTables(client, schema, migration.name)
       }
 
       // Only this distinct attempt becomes a successful receipt. A failed

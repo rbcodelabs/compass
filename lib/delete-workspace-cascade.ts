@@ -9,6 +9,7 @@ import { deleteWorkspaceNotifications } from "@/lib/follow-cleanup";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
+import { drainLinksFor, deleteWorkspaceLinks } from "@/lib/typed-links";
 
 /**
  * Aurora DSQL fails a transaction that modifies more than ~3,000 rows, and the workspace_id indexes on Solution and
@@ -37,6 +38,13 @@ export function chunked<T>(list: readonly T[], size: number = CASCADE_CHUNK_SIZE
  */
 export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceId: string, options: { skipBlobCleanup?: boolean } = {}) {
   await assertDocumentPilotCleanupReviewed(prisma, workspaceId);
+
+  // 0. Typed links (opportunity-to-objective, solution-to-key-result), FIRST. No foreign key or emulated relation reaches these tables, so
+  //    they are deleted explicitly: by the workspaceId stamped on the row (indexed, in passes of at most 500 links because each link is 4
+  //    DSQL-modified rows), then by endpoint id in steps 9 and 11 for rows whose workspaceId drifted. It is first on purpose: this is the
+  //    one step that fails when the link tables do not exist yet (code deployed before migration 071), and failing here mutates nothing,
+  //    where failing later would leave the objective parentKeyResultId pointers already nulled.
+  await deleteWorkspaceLinks(prisma, workspaceId);
   const ids = async (
     rows: Promise<{ id: string }[]>
   ): Promise<string[]> => (await rows).map((r) => r.id);
@@ -169,6 +177,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await prisma.opportunityScore.deleteMany({
       where: { opportunityId: { in: chunk } },
     });
+    await drainLinksFor(prisma, "opportunity", chunk);
   }
   const solutionIds = await ids(
     prisma.solution.findMany({
@@ -180,6 +189,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await prisma.solutionScore.deleteMany({
       where: { solutionId: { in: chunk } },
     });
+    await drainLinksFor(prisma, "solution", chunk);
     await prisma.assumption.deleteMany({
       where: { solutionId: { in: chunk } },
     });
@@ -213,10 +223,12 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
       await prisma.checkIn.deleteMany({
         where: { keyResultId: { in: keyResultChunk } },
       });
+      await drainLinksFor(prisma, "keyResult", keyResultChunk);
       await prisma.keyResult.deleteMany({
         where: { id: { in: keyResultChunk } },
       });
     }
+    await drainLinksFor(prisma, "objective", objectiveChunk);
     await prisma.objective.deleteMany({ where: { id: { in: objectiveChunk } } });
   }
   await prisma.oKRCycle.deleteMany({ where: { workspaceId } });

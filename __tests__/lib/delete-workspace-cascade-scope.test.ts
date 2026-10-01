@@ -81,6 +81,34 @@ describe("deleteWorkspaceCascade against a where-honouring fake", () => {
     expect(okrCycles.map((c) => c.id)).toEqual(["cycle-b"]);
   });
 
+  it("deletes workspace A's typed links (including a drifted link row on A's endpoints) and leaves B's links alone", async () => {
+    const { fake, client } = composite();
+    const { opportunityObjectiveLinks: oLinks, solutionKeyResultLinks: sLinks } = fake.state;
+    const row = (extra: Record<string, unknown>) => ({ id: `l${oLinks.length + sLinks.length}`, createdAt: new Date(1), ...extra });
+    oLinks.push(row({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" }));
+    // Drifted: the row says B, but its opportunity is A's, so deleting A's opportunity must take it too.
+    oLinks.push(row({ workspaceId: "ws-b", opportunityId: "opp-a", objectiveId: "obj-b", origin: "LEGACY" }));
+    oLinks.push(row({ workspaceId: "ws-b", opportunityId: "opp-b", objectiveId: "obj-b", origin: "DIRECT" }));
+    sLinks.push(row({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" }));
+    sLinks.push(row({ workspaceId: "ws-b", solutionId: "sol-b", keyResultId: "kr-b" }));
+
+    await deleteWorkspaceCascade(client, WS_A.id, { skipBlobCleanup: true });
+
+    expect(oLinks.map((l) => [l.opportunityId, l.objectiveId])).toEqual([["opp-b", "obj-b"]]);
+    expect(sLinks.map((l) => l.solutionId)).toEqual(["sol-b"]);
+  });
+
+  it("a cascade for workspace B leaves A's links alone", async () => {
+    const { fake, client } = composite();
+    const { opportunityObjectiveLinks: oLinks, solutionKeyResultLinks: sLinks } = fake.state;
+    oLinks.push({ id: "la", createdAt: new Date(1), workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
+    oLinks.push({ id: "lb", createdAt: new Date(1), workspaceId: "ws-b", opportunityId: "opp-b", objectiveId: "obj-b", origin: "DIRECT" });
+    sLinks.push({ id: "sa", createdAt: new Date(1), workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" });
+    await deleteWorkspaceCascade(client, "ws-b", { skipBlobCleanup: true });
+    expect(oLinks.map((l) => l.id)).toEqual(["la"]);
+    expect(sLinks.map((l) => l.id)).toEqual(["sa"]);
+  });
+
   it("a cascade for workspace B touches nothing of A's", async () => {
     const { fake, client } = composite();
     await deleteWorkspaceCascade(client, "ws-b", { skipBlobCleanup: true });
@@ -132,6 +160,46 @@ describe("deleteWorkspaceCascade row limits (DSQL: ~3,000 modified rows per tran
     // Every solution and objective id is covered exactly once.
     expect(new Set(idLists("solution", "deleteMany", (w) => w.id?.in).flat()).size).toBe(N);
     expect(new Set(idLists("objective", "deleteMany", (w) => w.id?.in).flat()).size).toBe(N);
+  });
+});
+
+describe("deleteWorkspaceCascade typed links: order and row limits", () => {
+  it("deletes the workspace's links BEFORE any opportunity, solution or objective delete", async () => {
+    const { client, calls } = recordingPrisma({
+      "opportunityObjectiveLink.findMany": [[{ id: "l1" }], []],
+      "opportunityObjectiveLink.deleteMany": [{ count: 1 }],
+      "solutionKeyResultLink.findMany": [[{ id: "s1" }], []],
+      "solutionKeyResultLink.deleteMany": [{ count: 1 }],
+      "oKRCycle.findMany": [[{ id: "cycle-1" }]],
+      "opportunity.findMany": [[{ id: "opp-1" }]],
+      "solution.findMany": [[{ id: "sol-1" }]],
+      "objective.findMany": [[{ id: "obj-1" }]],
+    });
+    await deleteWorkspaceCascade(client, WS, { skipBlobCleanup: true });
+    const first = (model: string, op: string) => calls.findIndex((c) => c.model === model && c.op === op);
+    const linkSweep = Math.max(first("opportunityObjectiveLink", "deleteMany"), first("solutionKeyResultLink", "deleteMany"));
+    expect(first("opportunityObjectiveLink", "deleteMany")).toBeGreaterThan(-1);
+    expect(first("solutionKeyResultLink", "deleteMany")).toBeGreaterThan(-1);
+    for (const [model, op] of [["opportunity", "deleteMany"], ["solution", "deleteMany"], ["objective", "deleteMany"]] as const) {
+      expect(linkSweep, `${model}.${op}`).toBeLessThan(first(model, op));
+    }
+    // The workspace sweep is the single indexed workspaceId read, deleting by id in chunks.
+    const find = calls.find((c) => c.model === "opportunityObjectiveLink" && c.op === "findMany")!;
+    expect(find.args).toMatchObject({ where: { workspaceId: WS }, take: CASCADE_CHUNK_SIZE });
+  });
+
+  it("no link statement carries more than one chunk of ids, and a large workspace is swept to the end", async () => {
+    const N = CASCADE_CHUNK_SIZE * 2 + 17;
+    const rows = Array.from({ length: N }, (_, i) => ({ id: `l${i}` }));
+    const pages = [rows.slice(0, CASCADE_CHUNK_SIZE), rows.slice(CASCADE_CHUNK_SIZE, CASCADE_CHUNK_SIZE * 2), rows.slice(CASCADE_CHUNK_SIZE * 2), []];
+    const { client, calls } = recordingPrisma({
+      "opportunityObjectiveLink.findMany": pages,
+      "opportunityObjectiveLink.deleteMany": [{ count: CASCADE_CHUNK_SIZE }, { count: CASCADE_CHUNK_SIZE }, { count: 17 }, { count: 0 }],
+    });
+    await deleteWorkspaceCascade(client, WS, { skipBlobCleanup: true });
+    const deletes = calls.filter((c) => c.model === "opportunityObjectiveLink" && c.op === "deleteMany").map((c) => (c.args as { where: { id?: { in: string[] } } }).where.id?.in).filter(Boolean) as string[][];
+    expect(deletes.map((d) => d.length)).toEqual([CASCADE_CHUNK_SIZE, CASCADE_CHUNK_SIZE, 17]);
+    expect(deletes.flat()).toEqual(rows.map((r) => r.id));
   });
 });
 

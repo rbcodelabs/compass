@@ -18,8 +18,11 @@ const models = {
   task: { findFirst: vi.fn(), update: vi.fn() },
 };
 
+const links = { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() };
+
 const database = {
   ...models,
+  opportunityObjectiveLink: links,
   squad: { findFirst: vi.fn() },
   workspace: { findUnique: vi.fn() },
   portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
@@ -62,14 +65,48 @@ describe("EDIT_CONFIG", () => {
   });
 });
 
+describe("opportunity linkedKeyResultId edits dual-write the LEGACY link", () => {
+  beforeEach(() => {
+    models.opportunity.findFirst.mockResolvedValue({ id: "e1", workspaceId: WS, title: "Opp", linkedKeyResultId: null });
+    models.keyResult.findFirst.mockResolvedValue({ id: "target", title: "KR", objectiveId: "obj-1", objective: { workspaceId: WS } });
+    links.findFirst.mockResolvedValue(null);
+    links.create.mockResolvedValue({ id: "link-1" });
+    links.deleteMany.mockResolvedValue({ count: 0 });
+  });
+
+  it("set: validates the key result in the workspace, writes the column and the link in one transaction", async () => {
+    expect(await updateEntityField("opportunity", "e1", WS, "linkedKeyResultId", "target", { kind: "USER", id: "user-1" })).toEqual({ ok: true });
+    expect(models.keyResult.findFirst).toHaveBeenCalledWith({ where: { id: "target", objective: { workspaceId: WS } }, select: { id: true } });
+    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { linkedKeyResultId: "target", updatedAt: expect.any(Date), updatedById: "user-1" } });
+    expect(links.create).toHaveBeenCalledWith({
+      data: { workspaceId: WS, opportunityId: "e1", objectiveId: "obj-1", origin: "LEGACY", source: "UI", createdById: "user-1" },
+    });
+    expect(database.$transaction).toHaveBeenCalled();
+  });
+
+  it("clear: nulls the column and deletes only the LEGACY links of that opportunity", async () => {
+    expect(await updateEntityField("opportunity", "e1", WS, "linkedKeyResultId", null)).toEqual({ ok: true });
+    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { linkedKeyResultId: null, updatedAt: expect.any(Date) } });
+    expect(links.deleteMany).toHaveBeenCalledWith({ where: { opportunityId: "e1", origin: "LEGACY" } });
+    expect(links.create).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when the key result's objective is not in the workspace", async () => {
+    models.keyResult.findFirst.mockResolvedValue(null);
+    expect(await updateEntityField("opportunity", "e1", WS, "linkedKeyResultId", "foreign")).toMatchObject({ ok: false, status: 404 });
+    expect(models.opportunity.update).not.toHaveBeenCalled();
+    expect(links.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("opportunity relationship edits", () => {
-  it.each(["squadId", "linkedKeyResultId"])("sets and clears %s only inside the workspace", async (field) => {
+  it("sets and clears squadId only inside the workspace", async () => {
+    const field = "squadId";
     database.squad.findFirst.mockResolvedValue({ id: "target" });
     models.keyResult.findFirst.mockResolvedValue({ id: "target" });
     expect(await updateEntityField("opportunity", "e1", WS, field, "target")).toEqual({ ok: true });
     expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { [field]: "target", updatedAt: expect.any(Date) } });
-    const targetQuery = field === "squadId" ? database.squad.findFirst : models.keyResult.findFirst;
-    expect(targetQuery).toHaveBeenCalledWith({ where: field === "squadId" ? { id: "target", workspaceId: WS } : { id: "target", objective: { workspaceId: WS } }, select: { id: true } });
+    expect(database.squad.findFirst).toHaveBeenCalledWith({ where: { id: "target", workspaceId: WS }, select: { id: true } });
     expect(await updateEntityField("opportunity", "e1", WS, field, null)).toEqual({ ok: true });
   });
   it.each(["squadId", "linkedKeyResultId"])("rejects a missing or foreign %s and invalid values", async (field) => {

@@ -41,7 +41,19 @@ function makeDb() {
       { id: "kr-null", objectiveId: "obj-null", current: 0, sortOrder: 0 },
     ],
     squad: [{ id: "00000000-0000-4000-8000-00000000000a", workspaceId: W_A, name: "A" }, { id: "00000000-0000-4000-8000-00000000000b", workspaceId: W_B, name: "B" }],
-    opportunity: [{ id: "opp-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b" }],
+    opportunity: [
+      { id: "opp-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b", linkedKeyResultId: null },
+      { id: "opp-a", workspaceId: W_A, squadId: null, linkedKeyResultId: "kr-a" },
+    ],
+    opportunityObjectiveLink: [
+      { id: "l-a-legacy", workspaceId: W_A, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" },
+      { id: "l-a-direct", workspaceId: W_A, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "DIRECT" },
+      { id: "l-b", workspaceId: W_B, opportunityId: "opp-b", objectiveId: "obj-b", origin: "DIRECT" },
+    ],
+    solutionKeyResultLink: [
+      { id: "s-a", workspaceId: W_A, solutionId: "sol-a", keyResultId: "kr-a" },
+      { id: "s-b", workspaceId: W_B, solutionId: "sol-b", keyResultId: "kr-b" },
+    ],
     experiment: [],
     roadmapItem: [{ id: "rm-a", workspaceId: W_A, squadId: null }, { id: "rm-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b" }],
     task: [{ id: "task-a", workspaceId: W_A, squadId: "00000000-0000-4000-8000-00000000000a" }, { id: "task-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b" }],
@@ -57,6 +69,8 @@ function makeDb() {
     task: { workspace: ["workspace", "workspaceId"] },
   };
   const writes: string[] = [];
+  /** Ids whose delete is refused, the way Prisma's emulated Restrict refuses a parent that is still referenced. */
+  const restricted = new Set<string>();
   const matches = (model: string, row: Row, where: Row = {}): boolean => {
     for (const [key, cond] of Object.entries(where)) {
       if (key === "OR") {
@@ -70,6 +84,11 @@ function makeDb() {
       if (model === "workspace" && key === "organization") {
         if ((cond as { slug: string }).slug !== row.org) return false;
         continue;
+      }
+      if (cond !== null && typeof cond === "object" && !relations[model]?.[key] && !(model === "workspace" && (key === "members" || key === "organization"))) {
+        const op = cond as { in?: unknown[]; not?: unknown };
+        if (op.in) { if (!op.in.includes(row[key])) return false; continue; }
+        if ("not" in op) { if (row[key] === op.not) return false; continue; }
       }
       const rel = relations[model]?.[key];
       if (rel) {
@@ -93,17 +112,25 @@ function makeDb() {
       void rel;
       return out;
     },
+    count: async ({ where }: { where: Row }) => tables[model].filter((r) => matches(model, r, where)).length,
+    findMany: async ({ where }: { where: Row }) => tables[model].filter((r) => matches(model, r, where)).map((r) => ({ ...r })),
+    deleteMany: async ({ where }: { where: Row }) => {
+      const doomed = tables[model].filter((r) => matches(model, r, where));
+      for (const r of doomed) { writes.push(`${model}.deleteMany:${r.id}`); tables[model].splice(tables[model].indexOf(r), 1); }
+      return { count: doomed.length };
+    },
     create: async ({ data }: { data: Row }) => { const row = { id: `${model}-new`, ...data }; tables[model].push(row); writes.push(`${model}.create`); return row; },
     update: async ({ where, data }: { where: Row; data: Row }) => { const row = tables[model].find((r) => matches(model, r, where)); if (!row) throw new Error("not found"); Object.assign(row, data); writes.push(`${model}.update:${row.id}`); return row; },
     updateMany: async ({ where, data }: { where: Row; data: Row }) => { const rows = tables[model].filter((r) => matches(model, r, where)); rows.forEach((r) => { Object.assign(r, data); writes.push(`${model}.updateMany:${r.id}`); }); return { count: rows.length }; },
-    delete: async ({ where }: { where: Row }) => { const i = tables[model].findIndex((r) => matches(model, r, where)); if (i < 0) throw new Error("not found"); writes.push(`${model}.delete:${tables[model][i].id}`); tables[model].splice(i, 1); return {}; },
+    findUnique: async ({ where }: { where: Row }) => { const row = tables[model].find((r) => matches(model, r, where)); return row ? { ...row } : null; },
+    delete: async ({ where }: { where: Row }) => { const i = tables[model].findIndex((r) => matches(model, r, where)); if (i < 0) throw new Error("not found"); if (restricted.has(String(tables[model][i].id))) throw new Error("Restrict: still referenced");  writes.push(`${model}.delete:${tables[model][i].id}`); tables[model].splice(i, 1); return {}; },
   });
   const client: Record<string, unknown> = {
     workspace: { findFirst: async ({ where }: { where: Row }) => (workspaces.find((w) => matches("workspace", w, where)) as Row | undefined) ?? null },
     $transaction: async (fn: (tx: unknown) => unknown) => fn(client),
   };
   for (const m of Object.keys(tables)) if (m !== "workspace") client[m === "okrCycle" ? "oKRCycle" : m] = delegate(m);
-  return { client, tables, writes };
+  return { client, tables, writes, restricted };
 }
 
 vi.mock("@/lib/db", () => ({ default: () => db.current!.client }));
@@ -195,6 +222,49 @@ describe("OKR server actions", () => {
     session.userId = null;
     await expect(okr.createObjective("cycle-a", "acme", "alpha", form({ title: "X" }))).rejects.toThrow("Unauthorized");
     expect(db.current!.writes).toEqual([]);
+  });
+
+  const linkIds = () => db.current!.tables.opportunityObjectiveLink.map((r) => r.id);
+  const solutionLinkIds = () => db.current!.tables.solutionKeyResultLink.map((r) => r.id);
+
+  it("deleteKeyResult deletes the key result, THEN removes the LEGACY link and the solution links; DIRECT links and workspace B's stay", async () => {
+    await okr.deleteKeyResult("kr-a", "/p");
+    expect(linkIds()).toEqual(["l-a-direct", "l-b"]);
+    expect(solutionLinkIds()).toEqual(["s-b"]);
+    expect(db.current!.tables.keyResult.map((r) => r.id)).not.toContain("kr-a");
+    const writes = db.current!.writes;
+    expect(writes.indexOf("keyResult.delete:kr-a")).toBeGreaterThan(-1);
+    expect(writes.indexOf("keyResult.delete:kr-a")).toBeLessThan(writes.findIndex((w) => w.startsWith("opportunityObjectiveLink.deleteMany")));
+  });
+
+  it("a REFUSED key result delete (supporting objective or check-ins: Restrict) throws and every link survives", async () => {
+    db.current!.restricted.add("kr-a");
+    await expect(okr.deleteKeyResult("kr-a", "/p")).rejects.toThrow("Restrict");
+    expect(linkIds()).toEqual(["l-a-legacy", "l-a-direct", "l-b"]);
+    expect(solutionLinkIds()).toEqual(["s-a", "s-b"]);
+    expect(db.current!.writes.filter((w) => /Link\./.test(w))).toEqual([]);
+  });
+
+  it("a REFUSED objective delete (child key results: Restrict) throws and its links survive", async () => {
+    db.current!.restricted.add("obj-a");
+    await expect(okr.deleteObjective("obj-a", "/p")).rejects.toThrow("Restrict");
+    expect(linkIds()).toEqual(["l-a-legacy", "l-a-direct", "l-b"]);
+  });
+
+  it("deleteObjective deletes the objective, then removes every opportunity link to it (both origins) and only those", async () => {
+    db.current!.tables.opportunityObjectiveLink.push({ id: "l-a-direct-obj-a", workspaceId: W_A, opportunityId: "opp-a2", objectiveId: "obj-a", origin: "DIRECT" });
+    await okr.deleteObjective("obj-a", "/p");
+    expect(linkIds()).toEqual(["l-a-direct", "l-b"]);
+    expect(db.current!.writes.indexOf("objective.delete:obj-a")).toBeLessThan(db.current!.writes.findIndex((w) => w.startsWith("opportunityObjectiveLink.deleteMany")));
+  });
+
+  it("if the post-delete drain fails the delete still succeeds for the user: logged and swallowed, leftovers left for 072 / directDangling", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    (db.current!.client.opportunityObjectiveLink as { findMany: unknown }).findMany = async () => { throw new Error("link table unavailable") };
+    await expect(okr.deleteObjective("obj-a", "/p")).resolves.toBeUndefined();
+    expect(db.current!.tables.objective.map((r) => r.id)).not.toContain("obj-a");
+    expect(JSON.parse(String(log.mock.calls[0][0]))).toMatchObject({ event: "typed_links.cleanup_failed", surface: "ui.deleteObjective" });
+    log.mockRestore();
   });
 
   it("the caller's own rows still work (positive control)", async () => {

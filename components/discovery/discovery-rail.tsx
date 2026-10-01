@@ -21,6 +21,8 @@ export type DiscoveryRailOpportunity = {
   status: OpportunityStatus;
   squad: { id: string; name: string; color: string } | null;
   linkedKeyResultId: string | null;
+  /** Typed Opportunity<->Objective links (ADR Phase 2). Payload only; the rail does not render it yet. */
+  linkedObjectives?: { id: string; title: string }[];
 };
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {

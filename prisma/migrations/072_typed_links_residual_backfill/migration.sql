@@ -1,0 +1,18 @@
+-- Migration 072: residual backfill of opportunity_objective_links.
+--
+-- NO DDL. 071 created the typed link tables and copied every same-workspace
+-- Opportunity.linked_key_result_id pointer that existed when it was POSTed, but the
+-- runner never re-runs a migration once its receipt is written, and instances of the
+-- previous deploy keep writing the legacy pointer (without a link) until they drain.
+-- This migration is the second, later pass: POST it only after the deploy that
+-- dual-writes the legacy pointer and its LEGACY link has fully rolled out. The runner
+-- hook (lib/migrations/typed-link-tables.ts) re-runs the same batched, idempotent
+-- function and the same postconditions before the receipt is recorded:
+--   * stale LEGACY links are pruned, missing LEGACY links are inserted;
+--   * every LEGACY link must agree with its endpoints' workspace and exist on both ends,
+--     and every same-workspace pointer must have its link (it fails closed, like 071);
+--   * DIRECT links are never deleted. A DIRECT link (or any solution-key result link)
+--     with a missing endpoint or a workspace mismatch is REPORTED in
+--     linkIntegrity.directDangling / directWorkspaceMismatch and does not fail the receipt.
+--
+-- This file intentionally contains no executable statement; the work is the hook.

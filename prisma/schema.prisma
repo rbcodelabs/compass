@@ -3260,9 +3260,10 @@ model WorkspaceActivationState {
 // pointer. Created by migration 071, which backfills Opportunity <-> Objective from
 // that pointer; Solution <-> Key Result starts empty.
 //
-// NOTHING READS OR WRITES THESE MODELS YET (guarded by __tests__/typed-link-tables-unused.test.ts).
-// They are declared so schema.prisma and the generated client stay in step with the
-// database, and so the follow-up PR can use them.
+// ONLY lib/typed-links.ts (plus the migration hook in lib/migrations and its SQL) reads or writes
+// these models; __tests__/typed-link-access.test.ts guards that. Code that uses them must not be
+// deployed before migration 071 has created the tables: every read and write fails with the
+// database error until it has (reads included, on purpose: there is no "no links" fallback).
 //
 // Deliberately scalar ids only, no Prisma relation fields: under relationMode = "prisma"
 // a relation makes Prisma query the child table whenever a parent row is deleted or

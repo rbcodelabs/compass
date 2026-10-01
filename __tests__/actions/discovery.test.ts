@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Membership/foreign-entity denial uses real helpers in product-analytics-auth.test.ts.
 vi.mock("@/lib/product-action-auth", () => ({
@@ -38,6 +38,8 @@ const mockPrisma = {
   opportunityScore: mockOpportunityScore,
   solutionScore: mockSolutionScore,
   squad: { findFirst: vi.fn().mockResolvedValue({ id: "squad-1" }) },
+  keyResult: { findFirst: vi.fn() },
+  opportunityObjectiveLink: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
 };
 // createOpportunity writes the opportunity and its links in one transaction.
 const mockTransaction = vi.fn(async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma));
@@ -54,6 +56,7 @@ vi.mock("@/auth", () => ({
 }));
 
 import { auth } from "@/auth";
+import { requireProductEntity } from "@/lib/product-action-auth";
 import {
   createOpportunity,
   updateOpportunityStatus,
@@ -210,18 +213,65 @@ describe("updateAssumptionStatus", () => {
 // ─── linkOpportunityToKeyResult ───────────────────────────────────────────────
 
 describe("linkOpportunityToKeyResult", () => {
-  it("links an opportunity to a key result", async () => {
-    await linkOpportunityToKeyResult("opp-1", "kr-1", "/path");
-    expect(mockOpportunity.update).toHaveBeenCalledWith({
-      where: { id: "opp-1" },
-      data: { linkedKeyResultId: "kr-1" },
-    });
+  const mockLinks = mockPrisma.opportunityObjectiveLink;
+  beforeEach(() => {
+    // The action used to have NO auth call at all; it now authorizes both ends, then dual-writes.
+    vi.mocked(requireProductEntity).mockResolvedValue({ workspaceId: "ws-1", opportunityId: null });
+    mockOpportunity.findFirst.mockResolvedValue({ id: "opp-1", workspaceId: "ws-1", title: "Opp", linkedKeyResultId: null });
+    mockPrisma.keyResult.findFirst.mockResolvedValue({ id: "kr-1", title: "KR", objectiveId: "obj-1", objective: { workspaceId: "ws-1" } });
+    mockLinks.findFirst.mockResolvedValue(null);
+    mockLinks.create.mockResolvedValue({ id: "link-1" });
+    mockLinks.deleteMany.mockResolvedValue({ count: 0 });
+  });
+  afterEach(() => {
+    vi.mocked(requireProductEntity).mockResolvedValue({ workspaceId: "ws-1", opportunityId: "opp-1" });
   });
 
-  it("clears the link when null is passed", async () => {
+  it("authorizes the opportunity, then the key result inside the opportunity's workspace, before any write", async () => {
+    await linkOpportunityToKeyResult("opp-1", "kr-1", "/path");
+    expect(vi.mocked(requireProductEntity).mock.calls).toEqual([
+      ["opportunity", "opp-1"],
+      ["keyResult", "kr-1", "ws-1"],
+    ]);
+  });
+
+  it("links an opportunity to a key result: the legacy column and a LEGACY link to the key result's objective, in one transaction", async () => {
+    await linkOpportunityToKeyResult("opp-1", "kr-1", "/path");
+    expect(mockOpportunity.update).toHaveBeenCalledWith({ where: { id: "opp-1" }, data: { linkedKeyResultId: "kr-1", updatedAt: expect.any(Date), updatedById: "user-1" } });
+    expect(mockLinks.create).toHaveBeenCalledWith({
+      data: { workspaceId: "ws-1", opportunityId: "opp-1", objectiveId: "obj-1", origin: "LEGACY", source: "UI", createdById: "user-1" },
+    });
+    expect(mockTransaction).toHaveBeenCalledOnce();
+  });
+
+  it("clears the link when null is passed: nulls the column and deletes only LEGACY links", async () => {
     await linkOpportunityToKeyResult("opp-1", null, "/path");
     const callArgs = mockOpportunity.update.mock.calls[0][0].data;
     expect(callArgs.linkedKeyResultId).toBeNull();
+    expect(mockLinks.deleteMany).toHaveBeenCalledWith({ where: { opportunityId: "opp-1", origin: "LEGACY" } });
+    expect(mockLinks.create).not.toHaveBeenCalled();
+    expect(vi.mocked(requireProductEntity).mock.calls).toEqual([["opportunity", "opp-1"]]);
+  });
+
+  it("writes nothing when the opportunity is not the caller's", async () => {
+    vi.mocked(requireProductEntity).mockRejectedValueOnce(new Error("Entity not found or access denied"));
+    await expect(linkOpportunityToKeyResult("opp-1", "kr-1", "/path")).rejects.toThrow("access denied");
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockOpportunity.update).not.toHaveBeenCalled();
+    expect(mockLinks.create).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when the key result is in another workspace", async () => {
+    vi.mocked(requireProductEntity).mockResolvedValueOnce({ workspaceId: "ws-1", opportunityId: null }).mockRejectedValueOnce(new Error("Entity not found or access denied"));
+    await expect(linkOpportunityToKeyResult("opp-1", "kr-other", "/path")).rejects.toThrow("access denied");
+    expect(mockOpportunity.update).not.toHaveBeenCalled();
+    expect(mockLinks.create).not.toHaveBeenCalled();
+  });
+
+  it("still refuses inside the transaction when the key result's objective is not in the workspace (defense in depth)", async () => {
+    mockPrisma.keyResult.findFirst.mockResolvedValue(null);
+    await expect(linkOpportunityToKeyResult("opp-1", "kr-1", "/path")).rejects.toThrow("Key Result not found in this workspace");
+    expect(mockOpportunity.update).not.toHaveBeenCalled();
   });
 });
 

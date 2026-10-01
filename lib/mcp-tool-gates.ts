@@ -30,6 +30,7 @@ import {
   assertOrgMemberBySlug,
   assertOrgAdminBySlug,
   assertEntityAccess,
+  assertSameWorkspaceEntities,
   assertScoringModelAccess,
 } from "@/lib/mcp-authz"
 import { SCOPE_MCP_READ, SCOPE_MCP_WRITE } from "@/lib/oauth/constants"
@@ -222,12 +223,40 @@ export const TOOL_GATES: Record<string, Gate> = {
   list_solutions: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   list_assumptions: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_opportunity: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
-  create_opportunity: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  create_opportunity: async (a, x) => {
+    await assertWorkspaceMember(a, x.workspaceId)
+    // The key result becomes this opportunity's legacy pointer AND a typed link, so it must be in this workspace.
+    if (x.keyResultId) await assertChildInDeclaredWorkspace(a, "keyResult", x.keyResultId, x.workspaceId)
+  },
   update_opportunity: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   update_opportunity_status: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   link_opportunity_to_kr: async (a, x) => {
-    await assertEntityAccess(a, "opportunity", x.opportunityId)
-    if (x.keyResultId) await assertEntityAccess(a, "keyResult", x.keyResultId)
+    // Access to each end independently let a member of two workspaces cross-link them; both ends must share one.
+    if (x.keyResultId) await assertSameWorkspaceEntities(a, [["opportunity", x.opportunityId], ["keyResult", x.keyResultId]])
+    else await assertEntityAccess(a, "opportunity", x.opportunityId)
+  },
+
+  // Typed links (ADR Phase 2) ------------------------------------------------
+  // `workspaceId` on these is a PRECONDITION the entities must satisfy, not the source of the stored
+  // link's workspace (lib/typed-links.ts copies that from the authorized parent row). Unlinks gate only
+  // the parent: a link to an endpoint that has since vanished must still be removable, and the delete is
+  // scoped to the parent's workspace anyway.
+  link_opportunity_to_objective: async (a, x) => {
+    await assertChildInDeclaredWorkspace(a, "opportunity", x.opportunityId, x.workspaceId)
+    await assertChildInDeclaredWorkspace(a, "objective", x.objectiveId, x.workspaceId)
+  },
+  unlink_opportunity_from_objective: (a, x) => assertChildInDeclaredWorkspace(a, "opportunity", x.opportunityId, x.workspaceId),
+  link_solution_to_key_result: async (a, x) => {
+    await assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId)
+    await assertChildInDeclaredWorkspace(a, "keyResult", x.keyResultId, x.workspaceId)
+  },
+  unlink_solution_from_key_result: (a, x) => assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId),
+  list_links: async (a, x) => {
+    await assertWorkspaceMember(a, x.workspaceId)
+    if (x.opportunityId) await assertChildInDeclaredWorkspace(a, "opportunity", x.opportunityId, x.workspaceId)
+    if (x.objectiveId) await assertChildInDeclaredWorkspace(a, "objective", x.objectiveId, x.workspaceId)
+    if (x.solutionId) await assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId)
+    if (x.keyResultId) await assertChildInDeclaredWorkspace(a, "keyResult", x.keyResultId, x.workspaceId)
   },
   add_solution: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   update_solution_status: async (a, x) => void (await assertEntityAccess(a, "solution", x.solutionId)),
@@ -554,6 +583,7 @@ const READ_TOOLS = [
   "list_review_requests", "list_roadmap_items", "list_scoring_models",
   "list_solution_comments", "list_solutions", "list_squads", "list_task_assignees",
   "list_task_links", "list_tasks", "list_top_opportunities", "list_workspaces", "search_help",
+  "list_links",
 ] as const
 
 /**
@@ -588,7 +618,8 @@ const WRITE_TOOLS = [
   "delete_doc_comment", "delete_key_result", "delete_objective", "delete_solution_comment",
   "generate_research_guide", "generate_research_synthesis", "issue_research_link",
   "link_artifact_to_decision", "link_artifact_to_solution", "link_evidence",
-  "link_feedback_to_opportunity", "link_opportunity_to_kr", "link_task", "log_checkin",
+  "link_feedback_to_opportunity", "link_opportunity_to_kr", "link_opportunity_to_objective", "link_solution_to_key_result", "link_task", "log_checkin",
+  "unlink_opportunity_from_objective", "unlink_solution_from_key_result",
   "log_experiment_result", "move_task_status", "prepare_doc_image_upload", "prepare_feedback_attachment_upload",
   "promote_feedback_to_roadmap", "promote_research_finding_to_evidence", "promote_to_roadmap",
   "reject_solution_plan", "reopen_comment", "reopen_doc_comment", "request_decision",
@@ -686,11 +717,11 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ...["generate_research_guide", "create_research_study", "update_research_study", "generate_research_synthesis", "promote_research_finding_to_evidence"].map(name => [name, "WRITE"]),
   ...["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
-    "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_docs", "get_doc", "list_doc_versions", "get_doc_version", "list_doc_comments", "get_doc_comment", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values",
+    "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_docs", "get_doc", "list_doc_versions", "get_doc_version", "list_doc_comments", "get_doc_comment", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values", "list_links",
   ].map(name => [name, "READ"]),
   ...[
     "link_artifact_to_decision", "unlink_artifact_from_decision",
-    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "create_doc_version", "restore_doc_version", "add_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "update_artifact", "create_feedback_source", "update_feedback_source", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity", "score_solution", "set_custom_field_value",
+    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "link_opportunity_to_objective", "unlink_opportunity_from_objective", "link_solution_to_key_result", "unlink_solution_from_key_result", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "create_doc_version", "restore_doc_version", "add_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "update_artifact", "create_feedback_source", "update_feedback_source", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity", "score_solution", "set_custom_field_value",
   ].map(name => [name, "WRITE"]),
   // ADR 0020: no longer unconditionally human-only. Each of these four now
   // carries its own agentCapability check inside its TOOL_GATES entry above

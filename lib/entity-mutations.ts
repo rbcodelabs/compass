@@ -14,6 +14,7 @@ import getPrisma from "@/lib/db";
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations";
 import { getHumanActivityPrisma } from "@/lib/analytics/activity";
 import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
+import { TypedLinkError, setOpportunityKeyResult } from "@/lib/typed-links";
 import { SETTABLE_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 import { assignmentUpdate, type TaskAssignee } from "@/lib/task-assignment";
@@ -176,6 +177,31 @@ export async function updateEntityField(
     select: { id: true },
   });
   if (!exists) return { ok: false, status: 404, error: "Not found" };
+
+  // The legacy pointer is dual-written: the column and its LEGACY Opportunity<->Objective link commit together.
+  if (type === "opportunity" && field === "linkedKeyResultId") {
+    try {
+      await captureWorkspaceMutation(
+        mutationClient,
+        "opportunity",
+        "update",
+        { actorType: _actor.kind === "USER" ? "USER" : "SYSTEM", actorId: _actor.id },
+        id,
+        (tx) =>
+          setOpportunityKeyResult(tx, {
+            opportunityId: id,
+            keyResultId: data.linkedKeyResultId as string | null,
+            expectedWorkspaceId: workspaceId,
+            ctx: { source: "UI", createdById: _actor.kind === "USER" ? _actor.id : null },
+          }),
+        { atomic: true },
+      );
+    } catch (error) {
+      if (error instanceof TypedLinkError) return { ok: false, status: 404, error: "Not found" };
+      throw error;
+    }
+    return { ok: true };
+  }
 
   if (type === "opportunity" || type === "solution" || type === "assumption" || type === "experiment" || type === "roadmapItem") {
     await captureWorkspaceMutation(mutationClient, type, "update", { actorType: _actor.kind === "USER" ? "USER" : "SYSTEM", actorId: _actor.id }, id, async tx => {

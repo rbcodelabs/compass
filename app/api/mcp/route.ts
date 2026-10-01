@@ -151,6 +151,21 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
+import {
+  TypedLinkError,
+  assertKeyResultInWorkspace,
+  getLinkedObjectivesByOpportunity,
+  setOpportunityKeyResult,
+  syncLegacyLink,
+} from "@/lib/typed-links"
+import {
+  linkOpportunityToObjectiveTool,
+  linkSolutionToKeyResultTool,
+  listLinksTool,
+  mcpLinkContext,
+  unlinkOpportunityFromObjectiveTool,
+  unlinkSolutionFromKeyResultTool,
+} from "@/lib/typed-link-tool-handlers"
 import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
@@ -994,11 +1009,16 @@ const _handler = createMcpHandler(
         if (!opportunities.length) {
           return fail("No opportunities found.")
         }
+        // Additive: the typed Opportunity<->Objective links, one workspace-filtered batch for the whole list.
+        // `linkedKeyResult` above stays derived from the legacy column only and is never inferred from these.
+        const linkedObjectives = await getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunities.map(o => o.id), { preverified: true })
         const lines = opportunities.map(o => {
           const description = o.description?.trim().replace(/\r\n?/g, "\n")
+          const objectives = linkedObjectives.get(o.id) ?? []
           return (
             `• **${o.title}** [${o.status}]${o.squad ? ` (${o.squad.name})` : ""} — ${o._count.solutions} solutions` +
             (o.linkedKeyResult ? ` — KR: ${o.linkedKeyResult.objective.title} / ${o.linkedKeyResult.title}` : "") +
+            (objectives.length ? ` — Objectives: ${objectives.map(obj => obj.title).join(", ")}` : "") +
             (description ? `\n  Description: ${description.replace(/\n/g, "\n    ")}` : "") +
             `\n  ID: ${o.id}`
           )
@@ -1014,6 +1034,7 @@ const _handler = createMcpHandler(
             linkedKeyResult: o.linkedKeyResult
               ? { title: o.linkedKeyResult.title, objective: o.linkedKeyResult.objective.title }
               : null,
+            linkedObjectives: linkedObjectives.get(o.id) ?? [],
           })),
           count: opportunities.length,
         })
@@ -1064,12 +1085,15 @@ const _handler = createMcpHandler(
         opp.solutions = opp.solutions.filter((sol) => sol.workspaceId === opp.workspaceId)
         // Same for the linked KR: its Objective must be in the opportunity's workspace, or the link is hidden.
         if (opp.linkedKeyResult && opp.linkedKeyResult.objective.workspaceId !== opp.workspaceId) opp.linkedKeyResult = null
+        // Additive typed Opportunity<->Objective links (workspace-filtered). `linkedKeyResult` stays legacy-column-only.
+        const linkedObjectives = (await getLinkedObjectivesByOpportunity(prisma, opp.workspaceId, [opp.id], { preverified: true })).get(opp.id) ?? []
 
         const lines: string[] = [
           `# ${opp.title} [${opp.status}]`,
           `ID: ${opp.id}`,
           opp.squad ? `Squad: ${opp.squad.name}` : "",
           opp.linkedKeyResult ? `Linked KR: ${opp.linkedKeyResult.objective.title} / ${opp.linkedKeyResult.title} (${opp.linkedKeyResult.id})` : "",
+          linkedObjectives.length ? `Linked objectives: ${linkedObjectives.map(obj => `${obj.title} (${obj.id})`).join(", ")}` : "",
           opp.description ? `\n${opp.description}` : "",
           "",
         ].filter(Boolean)
@@ -1093,7 +1117,7 @@ const _handler = createMcpHandler(
           lines.push("")
         }
 
-        return ok(lines.join("\n"), opp)
+        return ok(lines.join("\n"), { ...opp, linkedObjectives })
       }
     )
 
@@ -1164,17 +1188,29 @@ const _handler = createMcpHandler(
         if (!workspace) {
           return fail(`Workspace "${workspaceId}" not found.`)
         }
-        const opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", "MCP", undefined, tx => tx.opportunity.create({
-          data: {
-            workspaceId,
-            title: title.trim(),
-            description: description?.trim(),
-            customerSegment: customerSegment?.trim(),
-            status: status ?? "EXPLORING",
-            linkedKeyResultId: keyResultId ?? null,
-            squadId: squadId ?? null,
-          },
-        }))
+        // The legacy pointer and its LEGACY Opportunity<->Objective link are written together, in one transaction.
+        let opportunity
+        try {
+          opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", "MCP", undefined, async tx => {
+            if (keyResultId) await assertKeyResultInWorkspace(tx, keyResultId, workspaceId)
+            const created = await tx.opportunity.create({
+              data: {
+                workspaceId,
+                title: title.trim(),
+                description: description?.trim(),
+                customerSegment: customerSegment?.trim(),
+                status: status ?? "EXPLORING",
+                linkedKeyResultId: keyResultId ?? null,
+                squadId: squadId ?? null,
+              },
+            })
+            if (keyResultId) await syncLegacyLink(tx, { opportunityId: created.id, workspaceId, keyResultId, ctx: mcpLinkContext() })
+            return created
+          }, { atomic: true })
+        } catch (error) {
+          if (error instanceof TypedLinkError) return fail(error.message)
+          throw error
+        }
         return ok(
           withUrlLine(
             `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
@@ -1256,7 +1292,14 @@ const _handler = createMcpHandler(
         if (!opp) {
           return fail(`Opportunity "${opportunityId}" not found.`)
         }
-        await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", opportunityId, tx => tx.opportunity.update({ where: { id: opportunityId }, data: { linkedKeyResultId: keyResultId } }))
+        // Dual-write, one transaction: the legacy column and its LEGACY link to the key result's objective (which
+        // must be in the opportunity's workspace). A DIRECT link is never touched by a clear or a change.
+        try {
+          await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", opportunityId, tx => setOpportunityKeyResult(tx, { opportunityId, keyResultId, ctx: mcpLinkContext() }), { atomic: true })
+        } catch (error) {
+          if (error instanceof TypedLinkError) return fail(error.message)
+          throw error
+        }
         return ok(
           keyResultId
             ? `Linked opportunity "${opp.title}" to KR ${keyResultId}.`
@@ -1264,6 +1307,75 @@ const _handler = createMcpHandler(
           { id: opportunityId, title: opp.title, linkedKeyResultId: keyResultId },
         )
       }
+    )
+
+    const typedLinkEnds = { workspaceId: z.string().uuid().describe("UUID of the workspace that owns both ends") }
+    register(
+      "link_opportunity_to_objective",
+      {
+        title: "Link Opportunity to Objective",
+        description:
+          "Links an Opportunity directly to an Objective in the same workspace (an objective-level link; use link_opportunity_to_kr to pick a specific Key Result). " +
+          "Idempotent: repeating returns created:false. A direct link survives clearing the opportunity's Key Result.",
+        inputSchema: { ...typedLinkEnds, opportunityId: z.string().uuid().describe("UUID of the opportunity"), objectiveId: z.string().uuid().describe("UUID of the objective") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      linkOpportunityToObjectiveTool,
+    )
+    register(
+      "unlink_opportunity_from_objective",
+      {
+        title: "Unlink Opportunity from Objective",
+        description:
+          "Removes the link between an Opportunity and an Objective. Returns removed:0 when there is none. When a link exists the call also bumps the opportunity's updatedAt (even if the link is kept because the Key Result implies it), so a concurrent edit conflicts instead of racing. If the opportunity's linked Key Result is under that objective the link is derived from it and remains until the Key Result is cleared (stillLinkedViaKeyResult:true, removed:0). That is not a failure: the call succeeded and nothing needed to change.",
+        inputSchema: { ...typedLinkEnds, opportunityId: z.string().uuid().describe("UUID of the opportunity"), objectiveId: z.string().uuid().describe("UUID of the objective") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      unlinkOpportunityFromObjectiveTool,
+    )
+    register(
+      "link_solution_to_key_result",
+      {
+        title: "Link Solution to Key Result",
+        description:
+          "Links a Solution to a Key Result in the same workspace, to show which metric the solution is meant to move. The solution keeps its single parent Opportunity. Idempotent: repeating returns created:false.",
+        inputSchema: { ...typedLinkEnds, solutionId: z.string().uuid().describe("UUID of the solution"), keyResultId: z.string().uuid().describe("UUID of the Key Result") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      linkSolutionToKeyResultTool,
+    )
+    register(
+      "unlink_solution_from_key_result",
+      {
+        title: "Unlink Solution from Key Result",
+        description: "Removes the link between a Solution and a Key Result. Returns removed:0 when there is none.",
+        inputSchema: { ...typedLinkEnds, solutionId: z.string().uuid().describe("UUID of the solution"), keyResultId: z.string().uuid().describe("UUID of the Key Result") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      unlinkSolutionFromKeyResultTool,
+    )
+    register(
+      "list_links",
+      {
+        title: "List Links",
+        description:
+          "Lists the typed links on one entity: pass exactly one of opportunityId (its objectives), objectiveId (its opportunities), solutionId (its key results) or keyResultId (its solutions). " +
+          "Ordered oldest first; pass the returned nextCursor as cursor for the next page. Links between an Opportunity and an Objective report origin DIRECT (made with the link tools) or LEGACY (derived from the opportunity's linked Key Result).",
+        inputSchema: z.object({
+          ...typedLinkEnds,
+          opportunityId: z.string().uuid().optional().describe("UUID of an opportunity"),
+          objectiveId: z.string().uuid().optional().describe("UUID of an objective"),
+          solutionId: z.string().uuid().optional().describe("UUID of a solution"),
+          keyResultId: z.string().uuid().optional().describe("UUID of a Key Result"),
+          limit: z.number().int().min(1).max(100).optional().default(50).describe("Page size (default 50)"),
+          cursor: z.string().max(512).optional().describe("nextCursor from the previous page"),
+        }).strict().refine(
+          (args) => [args.opportunityId, args.objectiveId, args.solutionId, args.keyResultId].filter(Boolean).length === 1,
+          { message: "Provide exactly one of opportunityId, objectiveId, solutionId or keyResultId." },
+        ),
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listLinksTool,
     )
 
     register(

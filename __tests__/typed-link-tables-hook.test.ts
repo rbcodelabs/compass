@@ -8,10 +8,12 @@ import {
   isOccConflict,
   withOccRetry,
   TYPED_LINK_BACKFILL_BATCH_SIZE,
+  TYPED_LINK_RESIDUAL_MIGRATION,
   TYPED_LINK_TABLES_MIGRATION,
   assertTypedLinkPreconditions,
   assertTypedLinkTables,
   backfillOpportunityObjectiveLinks,
+  getDirectLinkReport,
   getTypedLinkStatus,
 } from "@/lib/migrations/typed-link-tables";
 import { REVIEWED_MIGRATION_CODE_SHA256, assertReviewedMigrationCode } from "@/lib/preview-automation/managed-manifest";
@@ -35,6 +37,10 @@ const isDanglingQuery = (sql: string) => /kr\.id IS NULL OR obj\.id IS NULL/.tes
 const isPruneSelect = (sql: string) => sql.startsWith("SELECT l.id AS id") && sql.includes("l.origin = 'LEGACY'");
 const isPruneDelete = (sql: string) => sql.startsWith("DELETE FROM");
 const isCandidateQuery =(sql: string) => /l\.id IS NULL/.test(sql) && sql.includes("linked_key_result_id");
+// The read-only report of user-made (DIRECT / solution) links the backfill logs at the end.
+const isDirectReportQuery = (sql: string) =>
+  sql.startsWith("SELECT count(*)") &&
+  ((sql.includes("opportunity_objective_links") && sql.includes("l.origin = 'DIRECT'")) || sql.includes("solution_key_result_links"));
 
 describe("batch size", () => {
   it("stays inside DSQL's 3,000-row write limit once each link row's three secondary index entries are counted", () => {
@@ -114,7 +120,7 @@ describe("backfillOpportunityObjectiveLinks", () => {
     return undefined;
   };
   const quietQuarantine = (sql: string): Reply =>
-    preconditionsOk(sql) ?? (isCrossWorkspaceQuery(sql) || isDanglingQuery(sql) || isPruneSelect(sql) ? { rows: [] } : undefined);
+    preconditionsOk(sql) ?? (isCrossWorkspaceQuery(sql) || isDanglingQuery(sql) || isPruneSelect(sql) || isDirectReportQuery(sql) ? { rows: [] } : undefined);
 
   it("inserts candidates as LEGACY/MIGRATION rows in bounded batches, looping until a batch is empty", async () => {
     const pending = Array.from({ length: TYPED_LINK_BACKFILL_BATCH_SIZE + 3 }, (_, i) => candidate(i));
@@ -269,8 +275,8 @@ describe("assertTypedLinkTables postconditions", () => {
     ["legacy rows without a link", isCandidateQuery, /2 legacy opportunity rows lack a link/],
     ["a pointer to an objective with a NULL workspace_id", (sql) => sql.startsWith("SELECT count") && /obj\.workspace_id IS NULL/.test(sql), /2 legacy pointers reference an objective with a NULL workspace_id/],
     ["a pointer that falls in no class (partition not exhaustive)", (sql) => sql.includes('FROM "s"."opportunities" AS o WHERE o.linked_key_result_id IS NOT NULL') && !sql.includes("JOIN"), /2 legacy pointers but only 0 fall in a known class/],
-    ["workspace mismatch", (sql) => sql.includes("IS DISTINCT FROM") && sql.includes("opportunity_objective_links"), /2 opportunity_objective_links rows have a workspace_id that differs/],
-    ["dangling endpoint", (sql) => /o\.id IS NULL OR obj\.id IS NULL/.test(sql) && sql.includes("opportunity_objective_links"), /2 opportunity_objective_links rows point at a missing endpoint/],
+    ["a LEGACY link whose workspace differs from an endpoint's", (sql) => sql.includes("IS DISTINCT FROM") && sql.includes("l.origin = 'LEGACY'"), /2 LEGACY opportunity_objective_links rows have a workspace_id that differs/],
+    ["a LEGACY link with a missing endpoint", (sql) => /o\.id IS NULL OR obj\.id IS NULL/.test(sql) && sql.includes("l.origin = 'LEGACY'"), /2 LEGACY opportunity_objective_links rows point at a missing endpoint/],
     ["duplicates", (sql) => sql.includes("HAVING count(*) > 1") && sql.includes("opportunity_objective_links"), /2 duplicate opportunity_objective_links pairs/],
     ["an origin outside DIRECT/LEGACY", (sql) => sql.includes("origin NOT IN"), /2 opportunity_objective_links rows have an origin other than DIRECT or LEGACY/],
   ];
@@ -313,16 +319,22 @@ describe("getTypedLinkStatus (GET /api/admin/migrate)", () => {
       else if (/obj\.workspace_id IS NULL/.test(sql)) n = "8";
       else if (isCrossWorkspaceQuery(sql) || /obj\.workspace_id <> o\.workspace_id/.test(sql)) n = "6";
       else if (/kr\.id IS NULL OR obj\.id IS NULL/.test(sql) && !sql.includes("solution_key_result_links")) n = "7";
-      else if (sql.includes("IS DISTINCT FROM") && sql.includes("opportunity_objective_links")) n = "2";
-      else if (/o\.id IS NULL OR obj\.id IS NULL/.test(sql)) n = "3";
+      else if (sql.includes("IS DISTINCT FROM") && sql.includes("l.origin = 'LEGACY'")) n = "2";
+      else if (/o\.id IS NULL OR obj\.id IS NULL/.test(sql) && sql.includes("l.origin = 'LEGACY'")) n = "3";
+      else if (sql.includes("IS DISTINCT FROM") && sql.includes("l.origin = 'DIRECT'")) n = "11";
+      else if (/o\.id IS NULL OR obj\.id IS NULL/.test(sql) && sql.includes("l.origin = 'DIRECT'")) n = "12";
       else if (sql.includes("HAVING count(*) > 1") && sql.includes("opportunity_objective_links")) n = "4";
       return { rows: [{ n }] };
     });
     const { linkIntegrity } = await getTypedLinkStatus(client, "s");
     expect(linkIntegrity).toMatchObject({
       legacyWithoutLink: 5,
+      // LEGACY only: these are the fail-closed postconditions.
       workspaceMismatch: 2,
       danglingEndpoint: 3,
+      // User-made links (DIRECT here; the solution table adds its own, zero in this fake): reported, never failed on.
+      directDangling: 12,
+      directWorkspaceMismatch: 11,
       duplicates: 4,
       legacyCrossWorkspace: 6,
       legacyDangling: 7,
@@ -351,13 +363,115 @@ describe("getTypedLinkStatus (GET /api/admin/migrate)", () => {
   });
 });
 
+describe("072 residual pass: the same function, with DIRECT links reported rather than failed on", () => {
+  const COLUMNS: Record<string, string[]> = {
+    opportunity_objective_links: ["id", "workspace_id", "opportunity_id", "objective_id", "origin", "source", "created_by_id", "created_at"],
+    solution_key_result_links: ["id", "workspace_id", "solution_id", "key_result_id", "source", "created_by_id", "created_at"],
+  };
+  const healthy = (sql: string, params: unknown[]): Reply => {
+    if (sql.includes("information_schema.columns")) {
+      return { rows: COLUMNS[params[1] as string].map((column_name) => ({ column_name, is_nullable: column_name === "created_by_id" ? "YES" : "NO" })) };
+    }
+    if (sql.includes("pg_index")) return { rows: [{ indisvalid: true, indisunique: /_pair$/.test(params[1] as string) }] };
+    return { rows: [{ n: "0" }] };
+  };
+  const isDirectEndpointQuery = (sql: string) =>
+    (sql.includes("l.origin = 'DIRECT'") && sql.includes("opportunity_objective_links")) ||
+    (sql.includes("solution_key_result_links") && (sql.includes("IS DISTINCT FROM") || /sol\.id IS NULL OR kr\.id IS NULL/.test(sql)));
+
+  it("is registered as its own name and shares the 071 hook file and digest", () => {
+    expect(TYPED_LINK_RESIDUAL_MIGRATION).toBe("072_typed_links_residual_backfill");
+    expect(REVIEWED_MIGRATION_CODE_SHA256[TYPED_LINK_RESIDUAL_MIGRATION]).toEqual(REVIEWED_MIGRATION_CODE_SHA256[TYPED_LINK_TABLES_MIGRATION]);
+  });
+
+  describe("preconditions", () => {
+    const withReceipts = (applied: string[]) => (sql: string, params: unknown[]): Reply => {
+      if (sql.includes("_prisma_migrations")) return { rows: [{ n: applied.includes(params[0] as string) ? "1" : "0" }] };
+      if (sql.includes("information_schema.columns")) return { rows: [{ column_name: "workspace_id" }] };
+      return { rows: [{ n: "0" }] };
+    };
+    it("requires 068 and 071, naming 072 in the failure", async () => {
+      const no068 = fakeClient(withReceipts(["071_typed_link_tables"]));
+      await expect(assertTypedLinkPreconditions(no068.client, "s", TYPED_LINK_RESIDUAL_MIGRATION)).rejects.toThrow(/^072_typed_links_residual_backfill: precondition failed: 068_workspace_id_on_solution_objective is not applied/);
+      const no071 = fakeClient(withReceipts(["068_workspace_id_on_solution_objective"]));
+      await expect(assertTypedLinkPreconditions(no071.client, "s", TYPED_LINK_RESIDUAL_MIGRATION)).rejects.toThrow(/^072_typed_links_residual_backfill: precondition failed: 071_typed_link_tables is not applied/);
+      const both = fakeClient(withReceipts(["068_workspace_id_on_solution_objective", "071_typed_link_tables"]));
+      await expect(assertTypedLinkPreconditions(both.client, "s", TYPED_LINK_RESIDUAL_MIGRATION)).resolves.toBeUndefined();
+    });
+    it("071 itself still does not require a 071 receipt", async () => {
+      const only068 = fakeClient(withReceipts(["068_workspace_id_on_solution_objective"]));
+      await expect(assertTypedLinkPreconditions(only068.client, "s")).resolves.toBeUndefined();
+    });
+  });
+
+  it("does NOT fail on DIRECT links with a missing endpoint or a workspace mismatch, nor on solution links", async () => {
+    const { client } = fakeClient((sql, p) => (isDirectEndpointQuery(sql) ? { rows: [{ n: "7" }] } : healthy(sql, p)));
+    await expect(assertTypedLinkTables(client, "s", TYPED_LINK_RESIDUAL_MIGRATION)).resolves.toBeUndefined();
+    await expect(assertTypedLinkTables(client, "s")).resolves.toBeUndefined();
+  });
+
+  it("still fails closed on LEGACY rows, with the 072 name in the message", async () => {
+    const mismatch = fakeClient((sql, p) => (sql.includes("IS DISTINCT FROM") && sql.includes("l.origin = 'LEGACY'") ? { rows: [{ n: "2" }] } : healthy(sql, p)));
+    await expect(assertTypedLinkTables(mismatch.client, "s", TYPED_LINK_RESIDUAL_MIGRATION)).rejects.toThrow(/^072_typed_links_residual_backfill: agreement postcondition failed: 2 LEGACY opportunity_objective_links/);
+    const unlinked = fakeClient((sql, p) => (isCandidateQuery(sql) ? { rows: [{ n: "1" }] } : healthy(sql, p)));
+    await expect(assertTypedLinkTables(unlinked.client, "s", TYPED_LINK_RESIDUAL_MIGRATION)).rejects.toThrow(/^072_typed_links_residual_backfill: backfill postcondition failed/);
+  });
+
+  it("the DIRECT checks only ever read, and never mention a DELETE of a DIRECT row anywhere in the hook", async () => {
+    const source = readFileSync(path.join(process.cwd(), "lib/migrations/typed-link-tables.ts"), "utf8");
+    // The only DELETE the hook issues is the LEGACY prune, guarded twice.
+    const deletes = source.match(/DELETE FROM[^`]*/g) ?? [];
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0]).toContain("origin = 'LEGACY'");
+  });
+
+  it("the backfill reports the DIRECT counts in its log and leaves the DIRECT rows alone", async () => {
+    const preconditionsOk = (sql: string): Reply => {
+      if (sql.includes("_prisma_migrations")) return { rows: [{ n: "1" }] };
+      if (sql.includes("information_schema.columns")) return { rows: [{ column_name: "workspace_id" }] };
+      if (/"objectives"\s+WHERE workspace_id IS NULL/.test(sql)) return { rows: [{ n: "0" }] };
+      return undefined;
+    };
+    const { client, query } = fakeClient((sql) => {
+      const ok = preconditionsOk(sql);
+      if (ok) return ok;
+      if (isDirectEndpointQuery(sql)) return { rows: [{ n: "4" }] };
+      return { rows: [] };
+    });
+    const log: string[] = [];
+    await backfillOpportunityObjectiveLinks(client, "s", log, noSleep, TYPED_LINK_RESIDUAL_MIGRATION);
+    // 4 from the opportunity DIRECT dangling query + 4 from the solution dangling query.
+    expect(log.join("\n")).toMatch(/reported 8 DIRECT\/solution links with a missing endpoint and 8 with a workspace mismatch/);
+    expect(query.mock.calls.some(([sql]) => /DELETE FROM/.test(sql as string))).toBe(false);
+  });
+
+  it("getDirectLinkReport sums the opportunity DIRECT links and the solution links", async () => {
+    const { client } = fakeClient((sql) => {
+      if (sql.includes("l.origin = 'DIRECT'") && sql.includes("IS DISTINCT FROM")) return { rows: [{ n: "1" }] };
+      if (sql.includes("l.origin = 'DIRECT'")) return { rows: [{ n: "2" }] };
+      if (sql.includes("solution_key_result_links") && sql.includes("IS DISTINCT FROM")) return { rows: [{ n: "10" }] };
+      if (sql.includes("solution_key_result_links") && /sol\.id IS NULL/.test(sql)) return { rows: [{ n: "20" }] };
+      return { rows: [{ n: "0" }] };
+    });
+    expect(await getDirectLinkReport(client, "s")).toEqual({ directWorkspaceMismatch: 11, directDangling: 22 });
+  });
+
+  it("the DIRECT report queries never select LEGACY rows (a LEGACY row is pruned or failed on, not reported)", async () => {
+    const { client, query } = fakeClient(() => ({ rows: [{ n: "0" }] }));
+    await getDirectLinkReport(client, "s");
+    const sqls = query.mock.calls.map(([sql]) => sql as string);
+    expect(sqls.some((sql) => sql.includes("'LEGACY'"))).toBe(false);
+    expect(sqls.filter((sql) => sql.includes("opportunity_objective_links")).every((sql) => sql.includes("l.origin = 'DIRECT'"))).toBe(true);
+  });
+});
+
 describe("managed manifest pins the hook code", () => {
   const HOOK = "lib/migrations/typed-link-tables.ts";
-  it("accepts the reviewed hook as on disk and rejects a changed one", () => {
-    expect(() => assertReviewedMigrationCode(TYPED_LINK_TABLES_MIGRATION)).not.toThrow();
+  it.each([TYPED_LINK_TABLES_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION])("accepts the reviewed hook as on disk and rejects a changed one (%s)", (name) => {
+    expect(() => assertReviewedMigrationCode(name)).not.toThrow();
     const real = readFileSync(path.join(process.cwd(), HOOK));
-    expect(createHash("sha256").update(real).digest("hex")).toBe(REVIEWED_MIGRATION_CODE_SHA256[TYPED_LINK_TABLES_MIGRATION][HOOK]);
+    expect(createHash("sha256").update(real).digest("hex")).toBe(REVIEWED_MIGRATION_CODE_SHA256[name][HOOK]);
     const tampered = Buffer.from(real.toString("utf8") + "\n// changed\n");
-    expect(() => assertReviewedMigrationCode(TYPED_LINK_TABLES_MIGRATION, () => tampered)).toThrow(/code digest changed: 071_typed_link_tables/);
+    expect(() => assertReviewedMigrationCode(name, () => tampered)).toThrow(new RegExp(`code digest changed: ${name}`));
   });
 });

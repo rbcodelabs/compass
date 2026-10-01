@@ -3,6 +3,7 @@
 import getPrisma from "@/lib/db";
 import { getEligibleParentKeyResults } from "@/lib/okr-hierarchy";
 import { ok, fail } from "@/lib/mcp-output";
+import { drainAfterParentDelete, drainLegacyLinksForOpportunities, drainLinksFor } from "@/lib/typed-links";
 
 type ObjectiveStatus = "ON_TRACK" | "AT_RISK" | "OFF_TRACK" | "COMPLETE";
 
@@ -48,6 +49,8 @@ export async function updateObjective({
 
 export async function deleteObjective({ objectiveId }: { objectiveId: string }) {
   const prisma = getPrisma();
+  // The objective is deleted FIRST and its links drained AFTER (see drainAfterParentDelete): a refused or failed delete has touched no
+  // link. The drain runs in committed passes of at most 500 links, so it can never exceed DSQL's 3,000-row cap however many it holds.
   const outcome = await prisma.$transaction(async (tx) => {
     const existing = await tx.objective.findUnique({
       where: { id: objectiveId },
@@ -75,6 +78,9 @@ export async function deleteObjective({ objectiveId }: { objectiveId: string }) 
       `Objective "${outcome.existing.title}" has ${outcome.existing._count.keyResults} child Key Results. Delete those Key Results before deleting the Objective.`,
     );
   }
+
+  // No foreign keys reach the typed link tables, so the links to the deleted objective are removed explicitly, after the delete.
+  await drainAfterParentDelete("mcp.deleteObjective", () => drainLinksFor(prisma, "objective", [objectiveId]));
 
   return ok(`**Objective deleted**\nID: ${outcome.existing.id}\nTitle: ${outcome.existing.title}`, {
     id: outcome.existing.id,
@@ -131,9 +137,13 @@ export async function deleteKeyResult({ keyResultId }: { keyResultId: string }) 
   const prisma = getPrisma();
   const existing = await prisma.keyResult.findUnique({
     where: { id: keyResultId },
-    select: { id: true, title: true },
+    select: { id: true, title: true, objectiveId: true },
   });
   if (!existing) return fail(`Key Result "${keyResultId}" not found.`);
+
+  // Read BEFORE the delete: the transaction nulls these pointers, and their LEGACY links are the ones this key result implied.
+  // Nothing is deleted here; the links are drained AFTER the key result is gone (see drainAfterParentDelete).
+  const pointing = await prisma.opportunity.findMany({ where: { linkedKeyResultId: keyResultId }, select: { id: true } });
 
   const counts = await prisma.$transaction(async (tx) => {
     const updatedAt = new Date();
@@ -163,6 +173,11 @@ export async function deleteKeyResult({ keyResultId }: { keyResultId: string }) 
     return { opportunities, objectives, roadmapItems, taskLinks, customFieldValues, canvasPositions, checkIns };
   });
 
+  // Explicit link cleanup (no FKs), after the key result is gone: the LEGACY links from the opportunities just unlinked to this key
+  // result's objective (DIRECT links are the user's own, objective-level, and stay), and every link from a solution to this key result.
+  const legacy = await drainAfterParentDelete("mcp.deleteKeyResult.legacy", () => drainLegacyLinksForOpportunities(prisma, pointing.map((o) => o.id), existing.objectiveId));
+  const solution = await drainAfterParentDelete("mcp.deleteKeyResult.solution", () => drainLinksFor(prisma, "keyResult", [keyResultId]));
+
   const data = {
     id: existing.id,
     deleted: true,
@@ -173,6 +188,8 @@ export async function deleteKeyResult({ keyResultId }: { keyResultId: string }) 
     deletedCustomFieldValues: counts.customFieldValues.count,
     deletedCanvasPositions: counts.canvasPositions.count,
     deletedCheckIns: counts.checkIns.count,
+    removedOpportunityLinks: legacy.removed,
+    removedSolutionLinks: solution.removed,
   };
   return ok(
     `**Key Result deleted**\nID: ${existing.id}\nTitle: ${existing.title}\nUnlinked references: ${data.unlinkedOpportunities} opportunities, ${data.unlinkedObjectives} objectives, ${data.unlinkedRoadmapItems} roadmap items\nDeleted CheckIns: ${data.deletedCheckIns}`,

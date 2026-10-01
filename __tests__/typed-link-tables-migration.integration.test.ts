@@ -155,13 +155,13 @@ describe.skipIf(!databaseUrl)("071 typed link tables (registered migration)", ()
     expect(await receipts()).toBe(1);
 
     const after = await status();
-    expect(after.linkIntegrity).toEqual({ legacyWithoutLink: 0, workspaceMismatch: 0, danglingEndpoint: 0, duplicates: 0, legacyCrossWorkspace: 1, legacyDangling: 2, legacyObjectiveWorkspaceNull: 0 });
+    expect(after.linkIntegrity).toEqual({ legacyWithoutLink: 0, workspaceMismatch: 0, danglingEndpoint: 0, directDangling: 0, directWorkspaceMismatch: 0, duplicates: 0, legacyCrossWorkspace: 1, legacyDangling: 2, legacyObjectiveWorkspaceNull: 0 });
   });
 
   it("GET status carries the linkIntegrity block", async () => {
     const response = await getMigrationStatus(pool, schema);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.linkIntegrity).toEqual({ legacyWithoutLink: 0, workspaceMismatch: 0, danglingEndpoint: 0, duplicates: 0, legacyCrossWorkspace: 1, legacyDangling: 2, legacyObjectiveWorkspaceNull: 0 });
+    expect(body.linkIntegrity).toEqual({ legacyWithoutLink: 0, workspaceMismatch: 0, danglingEndpoint: 0, directDangling: 0, directWorkspaceMismatch: 0, duplicates: 0, legacyCrossWorkspace: 1, legacyDangling: 2, legacyObjectiveWorkspaceNull: 0 });
   });
 
   it("is idempotent: a second run applies nothing and leaves the links and the single receipt alone", async () => {
@@ -189,35 +189,51 @@ describe.skipIf(!databaseUrl)("071 typed link tables (registered migration)", ()
     expect(await receipts()).toBe(1);
   });
 
-  it("postcondition failure fails closed with no receipt, and resumes after repair", async () => {
+  it("a DIRECT link whose workspace disagrees with its endpoints is REPORTED and kept, and does not fail the receipt", async () => {
     await q(`DELETE FROM {S}._prisma_migrations WHERE migration_name = $1`, [MIGRATION]);
-    // A DIRECT link whose workspace_id disagrees with its endpoints. LEGACY drift is healed by the prune
-    // step; DIRECT links are user data, never rewritten or deleted, so this must fail the postconditions.
+    // LEGACY drift is healed by the prune step. A DIRECT link is user data: never rewritten, never deleted,
+    // never a reason to dead-end the migration. It shows up in linkIntegrity.directWorkspaceMismatch instead.
     const victim = (await q<{ id: string }>(`SELECT id FROM {S}.opportunity_objective_links WHERE workspace_id = $1 LIMIT 1`, [WS_A])).rows[0].id;
     await q(`UPDATE {S}.opportunity_objective_links SET workspace_id = $2, origin = 'DIRECT' WHERE id = $1`, [victim, WS_B]);
-    expect((await status()).linkIntegrity?.workspaceMismatch).toBe(1);
-    const failed = await apply();
-    expect(failed.status).toBe(500);
-    expect(String(failed.body.error)).toMatch(/agreement postcondition failed: 1 opportunity_objective_links rows have a workspace_id that differs/);
-    expect(await receipts()).toBe(0);
+    expect((await status()).linkIntegrity).toMatchObject({ workspaceMismatch: 0, directWorkspaceMismatch: 1, directDangling: 0 });
+    const result = await apply();
+    expect(result.status, JSON.stringify(result.body)).toBe(200);
+    expect(String(result.body.message)).toContain("reported 0 DIRECT/solution links with a missing endpoint and 1 with a workspace mismatch");
+    expect(await receipts()).toBe(1);
+    expect((await q(`SELECT workspace_id, origin FROM {S}.opportunity_objective_links WHERE id = $1`, [victim])).rows).toEqual([{ workspace_id: WS_B, origin: "DIRECT" }]);
 
     await q(`UPDATE {S}.opportunity_objective_links SET workspace_id = $2 WHERE id = $1`, [victim, WS_A]);
-    const recovered = await apply();
-    expect(recovered.status, JSON.stringify(recovered.body)).toBe(200);
-    expect(await receipts()).toBe(1);
+    expect((await status()).linkIntegrity).toMatchObject({ directWorkspaceMismatch: 0 });
   });
 
-  it("postcondition failure: a link pointing at a missing endpoint fails closed with no receipt, and resumes after repair", async () => {
+  it("a DIRECT link pointing at a missing endpoint, and a dangling solution link, are reported and kept, not failed on", async () => {
     await q(`DELETE FROM {S}._prisma_migrations WHERE migration_name = $1`, [MIGRATION]);
     const ghost = randomUUID();
     await q(`INSERT INTO {S}.opportunity_objective_links (workspace_id, opportunity_id, objective_id, origin) VALUES ($1, $2, $3, 'DIRECT')`, [WS_A, ghost, objA]);
-    expect((await status()).linkIntegrity?.danglingEndpoint).toBe(1);
-    const failed = await apply();
-    expect(failed.status).toBe(500);
-    expect(String(failed.body.error)).toMatch(/endpoint postcondition failed: 1 opportunity_objective_links rows point at a missing endpoint/);
-    expect(await receipts()).toBe(0);
+    await q(`INSERT INTO {S}.solution_key_result_links (workspace_id, solution_id, key_result_id) VALUES ($1, $2, $3)`, [WS_A, randomUUID(), randomUUID()]);
+    expect((await status()).linkIntegrity).toMatchObject({ danglingEndpoint: 0, directDangling: 2 });
+    const result = await apply();
+    expect(result.status, JSON.stringify(result.body)).toBe(200);
+    expect(String(result.body.message)).toContain("reported 2 DIRECT/solution links with a missing endpoint");
+    expect(await receipts()).toBe(1);
+    // Never silently deleted.
+    expect(Number((await q(`SELECT count(*)::int AS n FROM {S}.opportunity_objective_links WHERE opportunity_id = $1`, [ghost])).rows[0].n)).toBe(1);
+    expect(Number((await q(`SELECT count(*)::int AS n FROM {S}.solution_key_result_links`)).rows[0].n)).toBe(1);
+
     await q(`DELETE FROM {S}.opportunity_objective_links WHERE opportunity_id = $1`, [ghost]);
-    expect((await apply()).status).toBe(200);
+    await q(`DELETE FROM {S}.solution_key_result_links`);
+    expect((await status()).linkIntegrity).toMatchObject({ directDangling: 0 });
+  });
+
+  it("a LEGACY link pointing at a missing endpoint is pruned (not reported, not failed on)", async () => {
+    await q(`DELETE FROM {S}._prisma_migrations WHERE migration_name = $1`, [MIGRATION]);
+    const ghost = randomUUID();
+    await q(`INSERT INTO {S}.opportunity_objective_links (workspace_id, opportunity_id, objective_id, origin) VALUES ($1, $2, $3, 'LEGACY')`, [WS_A, ghost, objA]);
+    expect((await status()).linkIntegrity).toMatchObject({ danglingEndpoint: 1, directDangling: 0 });
+    const result = await apply();
+    expect(result.status, JSON.stringify(result.body)).toBe(200);
+    expect(String(result.body.message)).toContain("pruned 1 stale LEGACY opportunity_objective_links rows");
+    expect(Number((await q(`SELECT count(*)::int AS n FROM {S}.opportunity_objective_links WHERE opportunity_id = $1`, [ghost])).rows[0].n)).toBe(0);
     expect(await receipts()).toBe(1);
   });
 

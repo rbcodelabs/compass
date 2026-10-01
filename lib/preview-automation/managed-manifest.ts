@@ -133,7 +133,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "069_workspace_id_residual_backfill": "9edcc2e6020df3065bde0bf0e2fd836f710adceef6f5ba0a018347ff8bdba74d",
   // Typed link tables (ADR Phase 2, PR-1). DDL only here; the precondition, backfill with orphan
   // quarantine and integrity postconditions are pinned in REVIEWED_MIGRATION_CODE_SHA256.
-  "071_typed_link_tables": "ed2bbdf524c02436eceba30b20b73a32111ddec3a4dbf9011f389984be189606"
+  "071_typed_link_tables": "ed2bbdf524c02436eceba30b20b73a32111ddec3a4dbf9011f389984be189606",
+  // DDL-free residual pass of the typed link backfill (ADR Phase 2, PR-2). Comments only; the work is the pinned hook below.
+  "072_typed_links_residual_backfill": "7aed4ba070ff8e99b5d2207d76bcad9ee0cdb14d56ca2f343c44c340551a27a0"
 };
 
 /**
@@ -149,8 +151,12 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
   // 071 pins only its own hook: it carries a private copy of withOccRetry rather than importing the 068 hook.
+  // 071 and 072 run the very same hook file, so they carry the same digest: editing it re-reviews both.
   "071_typed_link_tables": {
-    "lib/migrations/typed-link-tables.ts": "a9fc1442fb2faea92aca32204bd798332bf58719fdff460c8df94c2ee408a5dd",
+    "lib/migrations/typed-link-tables.ts": "e5c230a29b094608fa3a2d0a5cc94f2b1e31c65307f1cb93e7d6a7afc41160df",
+  },
+  "072_typed_links_residual_backfill": {
+    "lib/migrations/typed-link-tables.ts": "e5c230a29b094608fa3a2d0a5cc94f2b1e31c65307f1cb93e7d6a7afc41160df",
   },
 };
 
