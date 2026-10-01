@@ -113,6 +113,18 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "066_agent_org_admin_grants": "083b64d82e25724c5827a34c8eea97c1a63c21be6ead6c9caeaf3eac89288371",
   // Per-question answers on decision records (multi-question tracked decisions). Last, matching its MIGRATIONS position.
   "067_decision_answers": "d79f88798ff1764d42fd8e0a08dc65510fb39bef6f8d9bdf32aec1abe13ce14f",
+  // Card sort rounds and proposals (two additive CREATE TABLEs, three ASYNC indexes;
+  // no ALTER, no backfill). Last, matching its MIGRATIONS position. The SQL was audited
+  // by a read-only reviewer other than its author on 2026-09-30 (DSQL compatibility,
+  // schema parity, digest match) with no blocking findings, and applied to production
+  // the same day.
+  "067_card_sort_rounds": "dcc4a678a63bd6d8dd46f33338f06ccb4acd4fc54a932417f3656ab5a8689285",
+  // Proposed new entries for card sort rounds (one additive CREATE TABLE, one ASYNC
+  // index; no ALTER, no backfill). Same 2026-09-30 audit and production apply as 067.
+  "068_card_sort_new_entries": "133d41beb53cbab557ab9075df6bdc4a9bc625c3f46b93dc7979cbba2d75d6e7",
+  // Following and in-app notifications (ADR, slice 1): two new tables and five async indexes,
+  // IF NOT EXISTS throughout, no data writes. Digest recorded from the shipped SQL; please review it.
+  "068_follows_notifications": "0ba97ca0929c09a07c15a82404d5e41fac407fca6f4171aebda50c76e60f533c",
   // Direct workspace_id on solutions and objectives (ADR Phase 0). The pinned SQL is DDL only;
   // the batched backfill and its postconditions run in the runner hook, which is pinned
   // separately in REVIEWED_MIGRATION_CODE_SHA256.
