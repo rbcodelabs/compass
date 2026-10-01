@@ -792,3 +792,50 @@ describe("link_opportunity_to_kr and create_opportunity reject a key result from
     await expect(applyToolGate("create_opportunity", MEMBER, { workspaceId: "ws-1" })).resolves.toBeUndefined()
   })
 })
+
+describe("card sort tool policy", () => {
+  const WRITE_TOOLS = ["create_card_sort_round", "set_card_sort_round_state", "propose_card_sort_move", "withdraw_card_sort_proposal"]
+  const READ_TOOL_NAMES = ["list_card_sort_factors", "list_card_sort_rounds", "get_card_sort_proposals", "get_card_sort_board", "get_card_sort_tally"]
+  const ALL = [...WRITE_TOOLS, ...READ_TOOL_NAMES]
+
+  it.each(ALL)("%s is registered and has a TOOL_GATES entry", (tool) => {
+    expect(registeredTools[tool]).toBeTypeOf("function")
+    expect(TOOL_GATES[tool]).toBeTypeOf("function")
+  })
+
+  // A CardSortProposal has no agent author column, so an agent's proposal would be
+  // stored as, and read back as, the delegating human's own opinion.
+  it.each(WRITE_TOOLS)("%s is human-only (DENY for agent identities)", (tool) => {
+    expect(AGENT_TOOL_POLICY[tool]).toBe("DENY")
+  })
+  it.each(READ_TOOL_NAMES)("%s is an ordinary agent read", (tool) => {
+    expect(AGENT_TOOL_POLICY[tool]).toBe("READ")
+  })
+
+  it.each(WRITE_TOOLS)("%s is refused for an agent identity even with a workspace grant", async (tool) => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    try {
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent" })
+      mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }])
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+      await expect(
+        applyToolGate(tool, { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1" }),
+      ).rejects.toThrow(/human identity/)
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it.each(ALL)("%s requires workspace membership for a per-user caller", async (tool) => {
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(/not found or access denied/)
+
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+  })
+
+  it.each(READ_TOOL_NAMES)("%s needs only the read OAuth scope", (tool) => {
+    expect(requiredToolScope(tool)).toBe("mcp:read")
+  })
+  it.each(WRITE_TOOLS)("%s needs the write OAuth scope", (tool) => {
+    expect(requiredToolScope(tool)).toBe("mcp:write")
+  })
+})

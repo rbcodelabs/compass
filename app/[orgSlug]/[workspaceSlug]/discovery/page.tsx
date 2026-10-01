@@ -14,8 +14,9 @@ import { resolveWorkspaceScoringModel, toScoreSummary } from "@/lib/scoring-mode
 import type { OpportunityStatus, SolutionStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
-import { ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ChevronRight, Shuffle } from "lucide-react";
+import Link from "next/link";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { loadCustomFieldDefinitions } from "@/lib/custom-field-definitions";
 import {
@@ -324,6 +325,12 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
               customFieldGroups={customFieldGroups}
               activeCustomFieldId={customFieldFilter?.fieldId ?? null}
             />
+            <Link
+              href={`/${orgSlug}/${workspaceSlug}/card-sort`}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              <Shuffle className="size-4" /> Card sort
+            </Link>
           </div>
         </Suspense>
       )}
