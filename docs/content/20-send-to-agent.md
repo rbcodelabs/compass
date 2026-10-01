@@ -46,6 +46,9 @@ text — replace it entirely if what you want is different from what Compass
 guessed. An agent turn only starts when you send it, so arriving here never
 consumes turns or counts against usage limits on its own.
 
+Once you do send it, the turn runs on the server and you can leave — see
+[Background agent runs](/help/27-agent-runs).
+
 Dismiss the chip with its **×** to send the message without the attached
 context. Dismissing the chip does not clear anything you have typed.
 

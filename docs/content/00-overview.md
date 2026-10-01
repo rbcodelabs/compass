@@ -45,6 +45,7 @@ Beyond the core OST workflow, Compass includes:
 - **Custom Fields** — Extend any object type with your own fields (text, number, date, select, etc.).
 - **Branding** — Customize a workspace's accent color, font, and logo — applied consistently across the internal app and its public feedback/roadmap portal.
 - **MCP API** — Connect AI agents to Compass via the Model Context Protocol so they can read and write discovery data programmatically.
+- **Background agent runs** — Turns you give the in-app agent run on the server, so you can close the tab and pick the reply up later; see [Background agent runs](/help/27-agent-runs).
 
 ## Signing In
 

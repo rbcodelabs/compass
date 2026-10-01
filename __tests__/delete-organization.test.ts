@@ -87,6 +87,10 @@ const mockPrisma = {
   agentConversation: { deleteMany: vi.fn() },
   agentWorkspaceGrant: { deleteMany: vi.fn() },
   agentToolCall: { deleteMany: vi.fn() },
+  // Deleting an org deletes its workspaces' background agent runs; the
+  // availability probe guarding that step reads both tables.
+  agentRun: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
+  agentRunEvent: { findFirst: vi.fn().mockResolvedValue(null), deleteMany: vi.fn() },
   organization: mockOrganization,
   organizationMember: mockOrganizationMember,
   workspace: mockWorkspace,

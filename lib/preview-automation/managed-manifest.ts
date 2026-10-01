@@ -124,7 +124,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "068_card_sort_new_entries": "133d41beb53cbab557ab9075df6bdc4a9bc625c3f46b93dc7979cbba2d75d6e7",
   // Following and in-app notifications (ADR, slice 1): two new tables and five async indexes,
   // IF NOT EXISTS throughout, no data writes. Digest recorded from the shipped SQL; please review it.
-  "068_follows_notifications": "0ba97ca0929c09a07c15a82404d5e41fac407fca6f4171aebda50c76e60f533c"
+  "068_follows_notifications": "0ba97ca0929c09a07c15a82404d5e41fac407fca6f4171aebda50c76e60f533c",
+  // Durable background agent runs: two additive CREATE TABLEs (agent_runs, agent_run_events)
+  // and six ASYNC indexes, two of them unique (worker-token lookup, (run_id, seq) idempotency).
+  // No ALTER, no backfill, no foreign keys. Digest recorded from the shipped SQL; please review it.
+  "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301"
 };
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {
