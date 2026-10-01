@@ -364,7 +364,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
+| `list_opportunities` | Fetch a page of opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result; **paginated** via `limit`/`cursor` (see [Paginating `list_opportunities`](#paginating-list_opportunities)); filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
 | `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
@@ -748,6 +748,51 @@ differ between identical calls.
 `list_feedback` is the exception worth reading closely: there `updatedSince`
 starts a stable keyset scan paged by an opaque `cursor` (see the feedback section
 above), rather than a simple filter.
+
+## Paginating `list_opportunities`
+
+`list_opportunities` returns **one page at a time**, not the whole workspace.
+Pass `limit` (1–200, default 50) and page forward with `cursor`.
+
+Every response reports where the caller is in the listing, in both the text
+block and `structuredContent.data`:
+
+| Field | Meaning |
+|---|---|
+| `count` | Items in *this* page |
+| `total` | Items matching the filters across the **whole** listing |
+| `hasMore` | Whether any matching item has not yet been returned |
+| `nextCursor` | Opaque cursor for the next page, or `null` at the end |
+
+When more remain, the text block ends with an explicit continuation line —
+`Showing 1-50 of 139. 89 not yet listed. To continue, call list_opportunities
+again with cursor: "…"` — and the final page says `End of list - every item has
+now been listed.` **Page until you see that sentence.** A full page is not
+evidence that you have seen everything; `hasMore` is.
+
+To walk the list: call once with no `cursor`, then repeat with the previous
+response's `nextCursor` **and the identical `workspaceId`, filters and `sort`**.
+The cursor pins all of them and a mismatched continuation is rejected rather than
+served, because resuming a differently-filtered listing would silently skip some
+rows and repeat others. A malformed cursor is likewise rejected instead of
+falling back to the first page, so a paging bug cannot masquerade as an endless
+supply of page one.
+
+This is keyset paging, not `OFFSET`. Inserts and deletes elsewhere in the
+workspace do not shift the rows a cursor resumes after — which is also why the
+default ordering carries an `id` tiebreaker (`createdAt desc, id asc`). Bulk
+imports give thousands of opportunities the same `createdAt`, and without the
+tiebreaker those ties come back in an arbitrary order that can differ between
+identical calls, leaving nothing stable for a cursor to name.
+
+A single-page listing that fits inside `limit` gets no footer at all, so callers
+whose workspaces are small see byte-identical output to before.
+
+> **Why this exists.** An unbounded listing of a real workspace was ~124 KB
+> (~31K tokens) in one tool result, with no total and no "more remain" signal.
+> An agent asked to work through every opportunity would process the head of the
+> list, report completion, and on its next turn start over from the same head —
+> indistinguishable, from the inside, from having finished.
 
 ### What `updatedAt` does and does not capture
 
