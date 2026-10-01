@@ -68,11 +68,10 @@ export default async function SolutionsPage({ params, searchParams }: Props) {
 
   const rows = await prisma.solution.findMany({
     where: {
-      opportunity: {
-        workspaceId: workspace.id,
-        // Squad belongs to the parent Opportunity; a Solution has none of its own.
-        ...(squadFilter ? { squadId: squadFilter } : {}),
-      },
+      // Scoped by the Solution's own workspaceId, never through the parent chain.
+      workspaceId: workspace.id,
+      // Squad belongs to the parent Opportunity; a Solution has none of its own.
+      ...(squadFilter ? { opportunity: { squadId: squadFilter } } : {}),
       ...(customFieldFilter ? { id: { in: customFieldFilter.objectIds } } : {}),
     },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
