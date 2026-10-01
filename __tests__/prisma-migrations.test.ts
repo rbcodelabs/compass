@@ -582,3 +582,50 @@ describe("067_decision_answers", () => {
     expect(setup).toContain("prisma/migrations/067_decision_answers/migration.sql");
   });
 });
+
+describe("068_workspace_id_on_solution_objective", () => {
+  const NAME = "068_workspace_id_on_solution_objective";
+  const statements = () =>
+    sqlFor(NAME)
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n")
+      .split(";")
+      .map((statement) => statement.trim())
+      .filter(Boolean);
+
+  it("is registered exactly once, after 067_decision_answers", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === NAME)).toHaveLength(1);
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("067_decision_answers"));
+  });
+
+  it("is DSQL-safe: nullable ADD COLUMN with no constraint, ASYNC indexes, no foreign key, idempotent", () => {
+    expect(statements()).toEqual([
+      "ALTER TABLE solutions ADD COLUMN IF NOT EXISTS workspace_id UUID",
+      "ALTER TABLE objectives ADD COLUMN IF NOT EXISTS workspace_id UUID",
+      "CREATE INDEX ASYNC IF NOT EXISTS idx_solutions_workspace_id ON solutions (workspace_id)",
+      "CREATE INDEX ASYNC IF NOT EXISTS idx_objectives_workspace_id ON objectives (workspace_id)",
+    ]);
+    expect(statements().join("\n")).not.toMatch(/NOT NULL|DEFAULT|REFERENCES|FOREIGN KEY|SET NOT NULL/i);
+  });
+
+  it("does NOT yet declare workspaceId in schema.prisma, so the deployed Prisma client ignores the column (zero-outage deploy)", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    for (const model of ["Solution", "Objective"]) {
+      const body = schema.match(new RegExp(`model ${model} \\{[\\s\\S]*?\\n\\}`))?.[0] ?? "";
+      expect(body).not.toMatch(/workspaceId|workspace_id/);
+    }
+  });
+
+  it("runs its backfill and postconditions in the runner before the receipt is recorded, and waits on async index jobs", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    const hook = runner.indexOf("await backfillWorkspaceIdOnSolutionObjective(");
+    const assertion = runner.indexOf("await assertWorkspaceIdOnSolutionObjective(");
+    const receipt = runner.indexOf("SET finished_at = CURRENT_TIMESTAMP WHERE id = $1");
+    expect(hook).toBeGreaterThan(-1);
+    expect(assertion).toBeGreaterThan(hook);
+    expect(receipt).toBeGreaterThan(assertion);
+    expect(runner.match(new RegExp(NAME, "g"))!.length).toBeGreaterThanOrEqual(3);
+  });
+});
