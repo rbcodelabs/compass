@@ -17,14 +17,24 @@ afterEach(() => {
 const base = { orgSlug: "acme", workspaceSlug: "alpha", initialKey: "CLASSIC" as const, initialOverrides: {} }
 
 describe("ThinkingModelPanel", () => {
-  it("offers only the shipped presets and only Objective and Key Result names", () => {
+  it("offers every shipped preset and only Objective and Key Result names", () => {
     render(<ThinkingModelPanel {...base} />)
     expect(screen.getByTestId("thinking-model-CLASSIC")).toBeInTheDocument()
     expect(screen.getByTestId("thinking-model-TORRES_OST")).toBeInTheDocument()
-    expect(screen.queryByTestId("thinking-model-OPPORTUNITY_FIRST_OKR")).toBeNull()
+    expect(screen.getByTestId("thinking-model-OPPORTUNITY_FIRST_OKR")).toBeInTheDocument()
     expect(screen.getByLabelText("Objective (singular)")).toBeInTheDocument()
     expect(screen.getByLabelText("Key Result (plural)")).toBeInTheDocument()
     expect(screen.queryByLabelText("Solution (singular)")).toBeNull()
+  })
+
+  it("describes what each non-classic preset adds, as it ships", () => {
+    render(<ThinkingModelPanel {...base} />)
+    const torres = screen.getByTestId("thinking-model-TORRES_OST").closest("label")!.textContent ?? ""
+    expect(torres).toContain("outcome tree")
+    expect(torres).toContain("does not need a cycle")
+    const first = screen.getByTestId("thinking-model-OPPORTUNITY_FIRST_OKR").closest("label")!.textContent ?? ""
+    expect(first).toContain("pool of opportunities")
+    expect(first).toContain("link an opportunity")
   })
 
   it("the notice says 'including' and names the unconverted surfaces", () => {
@@ -36,7 +46,7 @@ describe("ThinkingModelPanel", () => {
     }
   })
 
-  it("shows the hidden preset only when it is the stored one", () => {
+  it("shows the stored preset as selected", () => {
     render(<ThinkingModelPanel {...base} initialKey="OPPORTUNITY_FIRST_OKR" />)
     expect(screen.getByTestId("thinking-model-OPPORTUNITY_FIRST_OKR")).toBeChecked()
   })

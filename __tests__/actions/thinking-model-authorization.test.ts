@@ -112,13 +112,19 @@ describe("updateThinkingModel input handling", () => {
     expect(wsA().thinkingModel).toBeNull();
   });
 
-  it("does not newly accept the preset that is defined but not offered", async () => {
+  it("newly accepts the Opportunity-first preset now that its picker and tree ship", async () => {
     const r = await updateThinkingModel(WS_A.org, WS_A.slug, { thinkingModel: "OPPORTUNITY_FIRST_OKR" });
-    expect(r).toEqual({ ok: false, error: "That thinking model is not available yet." });
+    expect(r).toEqual({ ok: true, thinkingModel: "OPPORTUNITY_FIRST_OKR" });
+    expect(wsA().thinkingModel).toBe("OPPORTUNITY_FIRST_OKR");
+  });
+
+  it("still refuses a key that is not a preset", async () => {
+    const r = await updateThinkingModel(WS_A.org, WS_A.slug, { thinkingModel: "NOT_A_PRESET" });
+    expect(r).toEqual({ ok: false, error: "Choose a valid thinking model." });
     expect(wsA().thinkingModel).toBeNull();
   });
 
-  it("lets a workspace already on the hidden preset keep saving", async () => {
+  it("lets a workspace already on the preset keep saving", async () => {
     wsA().thinkingModel = "OPPORTUNITY_FIRST_OKR";
     const r = await updateThinkingModel(WS_A.org, WS_A.slug, { thinkingModel: "OPPORTUNITY_FIRST_OKR", labels: { objective: { singular: "Goal" } } });
     expect(r.ok).toBe(true);

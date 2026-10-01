@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { updateThinkingModel } from "@/app/[orgSlug]/[workspaceSlug]/settings/thinking-model-actions"
@@ -14,11 +15,11 @@ import {
 } from "@/lib/thinking-model/presets"
 import { MAX_LABEL_LENGTH, validateLabelOverrides, type LabelOverrides } from "@/lib/thinking-model/validate"
 
-// Describe only what ships: the presets differ in names today, nothing else.
+// Describe only what ships: names, plus the workspace tree and the opportunity-to-objective picker for the two non-classic models.
 const PRESET_DESCRIPTIONS: Record<ThinkingModelKey, string> = {
   CLASSIC: "Objectives and Key Results, as Compass has always named them.",
-  OPPORTUNITY_FIRST_OKR: "Same names as Classic.",
-  TORRES_OST: "Renames Objective to Outcome and Key Result to Success metric.",
+  OPPORTUNITY_FIRST_OKR: "Same names as Classic. Adds a tree that starts from a pool of opportunities and runs through objectives and key results to solutions, and lets you link an opportunity to the objectives you chose to pursue.",
+  TORRES_OST: "Renames Objective to Outcome and Key Result to Success metric. Adds an outcome tree under Discovery, a flat list of outcomes that does not need a cycle, and lets you link an opportunity to several outcomes.",
 }
 
 const ENTITY_TITLES: Record<OverridableEntity, string> = {
@@ -65,9 +66,8 @@ export function ThinkingModelPanel({ orgSlug, workspaceSlug, initialKey, initial
   const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null)
   const [isPending, startTransition] = useTransition()
   const preset = THINKING_MODEL_PRESETS[key]
-  // A preset that is no longer offered (OPPORTUNITY_FIRST_OKR until its picker
-  // exists) still shows when it is the stored one, so the form never silently
-  // un-selects the current model.
+  // A stored preset that is not in the offered list (none today) still shows, so
+  // the form never silently un-selects the current model.
   const offered: ThinkingModelKey[] = [...PICKABLE_THINKING_MODEL_KEYS]
   if (!offered.includes(initialKey)) offered.push(initialKey)
 
@@ -100,7 +100,7 @@ export function ThinkingModelPanel({ orgSlug, workspaceSlug, initialKey, initial
       {unappliedStored !== null && (
         <div
           role="alert"
-          className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+          className="flex flex-col gap-2 rounded-lg border border-status-warning bg-status-warning-surface px-3 py-2 text-xs text-status-warning"
           data-testid="thinking-model-unapplied"
         >
           <p>
@@ -109,10 +109,9 @@ export function ThinkingModelPanel({ orgSlug, workspaceSlug, initialKey, initial
           </p>
           <code className="break-all rounded bg-background/60 px-2 py-1 text-[11px]">{unappliedStored}</code>
           <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={replaceStored}
-              onChange={(e) => setReplaceStored(e.target.checked)}
+              onCheckedChange={(next) => setReplaceStored(next === true)}
               data-testid="thinking-model-replace-stored"
             />
             Replace the stored names when I save

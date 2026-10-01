@@ -36,6 +36,7 @@ import { resolveTaskAssignees } from "@/lib/task-assignment";
 import { loadCustomFieldsForObject } from "@/lib/custom-field-definitions";
 import { toOpportunityScoreData, toScoreSummary, toSolutionScoreData } from "@/lib/score-summary";
 import type { ScoringModelData } from "@/lib/types";
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 
 /**
  * ADR-0012 step 6a — the three OST detail fetchers that carry Evidence resolve
@@ -211,6 +212,9 @@ async function fetchOpportunity(id: string, workspaceId: string) {
       // Solutions list below (independent slot, same workspace config row).
       workspace: {
         select: {
+          // Decide whether the Opportunity<->Objective picker needs its option list (presets only; CLASSIC reads none).
+          thinkingModel: true,
+          thinkingModelLabels: true,
           scoringConfig: {
             select: {
               opportunityScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } },
@@ -228,7 +232,8 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     },
   });
   if (!item) return null;
-  const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields, linkedObjectivesByOpportunity] = await Promise.all([
+  const offersObjectivePicker = resolveThinkingModel(item.workspace ?? {}).links.oppToObjective === "primary";
+  const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields, linkedObjectivesByOpportunity, pickerObjectives] = await Promise.all([
     pmInterviewHistory(workspaceId, "OPPORTUNITY", id),
     fetchLinkedTasksBundle(workspaceId, "OPPORTUNITY", id),
     resolveEvidenceProvenance(item.evidence),
@@ -237,6 +242,14 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OPPORTUNITY", objectId: id }),
     // Additive typed Opportunity<->Objective links. linkedKeyResult above stays the legacy column only.
     getLinkedObjectivesByOpportunity(getPrisma(), workspaceId, [id], { preverified: true }),
+    // Options for the picker, filtered on the Objective's own workspaceId (a NULL / drifted row is not offered).
+    offersObjectivePicker
+      ? getPrisma().objective.findMany({
+          where: { workspaceId },
+          select: { id: true, title: true, cycle: { select: { title: true } } },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        })
+      : Promise.resolve(null),
   ]);
   const solutionScoringModel = item.workspace?.scoringConfig?.solutionScoringModel ?? null;
   // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
@@ -244,6 +257,9 @@ async function fetchOpportunity(id: string, workspaceId: string) {
   return {
     ...item, ...(item.linkedKeyResult ? { linkedKeyResult } : {}), evidence, ...linkedTasks, squads, customFields,
     linkedObjectives: linkedObjectivesByOpportunity.get(id) ?? [],
+    ...(pickerObjectives
+      ? { availableObjectives: pickerObjectives.map((o) => ({ id: o.id, title: o.title, cycleTitle: o.cycle?.title ?? null })) }
+      : {}),
     existingScore: toOpportunityScoreData(item.score, item.workspace?.scoringConfig?.opportunityScoringModel as ScoringModelData | null),
     // Threaded onto each nested solution row so the panel's SolutionsList can
     // render a ScoreBadge without a second workspace round trip.

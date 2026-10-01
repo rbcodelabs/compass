@@ -42,4 +42,9 @@ export const CONVERTED_FILES = [
   "components/custom-fields/object-type-labels.ts",
   "components/analytics/metrics-dashboard.tsx",
   "app/[orgSlug]/[workspaceSlug]/settings/page.tsx",
+  // Phase 3C: new surfaces, label-driven from the start (no CLASSIC baseline: they do not exist under CLASSIC).
+  "app/[orgSlug]/[workspaceSlug]/discovery/tree/page.tsx",
+  "components/discovery/outcome-tree-view.tsx",
+  "components/okrs/outcomes-index.tsx",
+  "components/discovery/opportunity-objective-picker.tsx",
 ] as const

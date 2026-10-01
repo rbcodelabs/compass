@@ -56,8 +56,12 @@ export type EntityLabel = {
 export const OVERRIDABLE_ENTITIES = ["objective", "keyResult"] as const satisfies readonly ThinkingModelEntity[]
 export type OverridableEntity = (typeof OVERRIDABLE_ENTITIES)[number]
 
-/** Presets offered in the settings picker. Others stay defined and resolvable. */
-export const PICKABLE_THINKING_MODEL_KEYS = ["CLASSIC", "TORRES_OST"] as const satisfies readonly ThinkingModelKey[]
+/**
+ * Presets offered in the settings picker. A preset defined here but absent from this list
+ * stays resolvable but cannot be newly chosen. Every preset is offered now that the
+ * Opportunity<->Objective picker, the workspace tree and the Outcomes index exist.
+ */
+export const PICKABLE_THINKING_MODEL_KEYS = ["CLASSIC", "OPPORTUNITY_FIRST_OKR", "TORRES_OST"] as const satisfies readonly ThinkingModelKey[]
 
 export type LinkEmphasis = "primary" | "secondary" | "hidden"
 export type TreeShape = "kr-rooted" | "objective-rooted-pool" | "outcome-rooted"

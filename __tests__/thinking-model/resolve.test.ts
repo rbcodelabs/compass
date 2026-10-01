@@ -40,7 +40,7 @@ describe("resolveThinkingModel", () => {
     expect(torres.labels.sections.okrs).toBe("Outcomes")
   })
 
-  it("OPPORTUNITY_FIRST_OKR stays defined and resolvable (not offered in the picker) with CLASSIC labels", () => {
+  it("OPPORTUNITY_FIRST_OKR resolves with CLASSIC labels and the pool tree", () => {
     const r = resolveThinkingModel({ thinkingModel: "OPPORTUNITY_FIRST_OKR" })
     expect(r.key).toBe("OPPORTUNITY_FIRST_OKR")
     expect(r.labels).toEqual(classic.labels)

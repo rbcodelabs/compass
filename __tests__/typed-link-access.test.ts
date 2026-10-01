@@ -55,7 +55,8 @@ const LINK_MODULE = "lib/typed-links.ts";
  * would leave them behind in the shared e2e database): the typed-links spec's afterAll and the suite's global teardown. The spec
  * verifies behaviour through the MCP tools.
  */
-const E2E_CLEANUP_SPECS = new Set(["e2e/functional/specs/typed-links.spec.ts", "e2e/functional/global-teardown.ts"]);
+// thinking-model-tree.spec.ts also seeds one edge by raw SQL (as the module would write it) and removes its own link rows by id in afterAll.
+const E2E_CLEANUP_SPECS = new Set(["e2e/functional/specs/typed-links.spec.ts", "e2e/functional/specs/thinking-model-tree.spec.ts", "e2e/functional/global-teardown.ts"]);
 const isLinkModuleOrSchema = (file: string) => relPosix(file) === LINK_MODULE || relPosix(file) === "prisma/schema.prisma" || E2E_CLEANUP_SPECS.has(relPosix(file));
 
 // Files that legitimately use non-literal Prisma delegates or model introspection today, each over a fixed

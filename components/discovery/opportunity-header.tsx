@@ -22,7 +22,8 @@ import {
 import type { OpportunityStatus, SquadData } from "@/lib/types";
 import { MarkdownContent } from "@/components/markdown-content";
 import { usePanelContext } from "@/components/panels/panel-context";
-import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
+import { OpportunityObjectivePicker, type PickerObjective } from "@/components/discovery/opportunity-objective-picker";
 import { EditableText, patchEntityField, type EditContext } from "@/components/panels/panel-parts";
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
@@ -68,6 +69,12 @@ type Props = {
     linkedKeyResult: KR | null;
   };
   availableKeyResults: AvailableKR[];
+  /**
+   * Typed Opportunity<->Objective links and the Objectives that can be linked. Used only by presets that make
+   * this link primary (the picker); CLASSIC renders nothing extra whatever is passed.
+   */
+  linkedObjectives?: Array<{ id: string; title: string }>;
+  availableObjectives?: PickerObjective[];
   squads: SquadData[];
   revalidatePathStr: string;
   edit?: EditContext;
@@ -77,12 +84,15 @@ type Props = {
 export function OpportunityHeader({
   opportunity,
   availableKeyResults,
+  linkedObjectives = [],
+  availableObjectives,
   squads,
   revalidatePathStr,
   edit,
   onChanged,
 }: Props) {
   const labels = useLabels();
+  const showObjectivePicker = useThinkingModel().links.oppToObjective === "primary" && availableObjectives !== undefined;
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const { openPanel } = usePanelContext();
@@ -176,6 +186,16 @@ export function OpportunityHeader({
         <p className="text-sm text-muted-foreground/50 italic">
           No description yet.
         </p>
+      )}
+
+      {showObjectivePicker && (
+        <OpportunityObjectivePicker
+          opportunityId={opportunity.id}
+          linked={linkedObjectives}
+          available={availableObjectives}
+          revalidatePathStr={revalidatePathStr}
+          onChanged={onChanged}
+        />
       )}
 
       {/* KR row */}

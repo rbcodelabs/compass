@@ -9,6 +9,8 @@ import type { CycleStatus } from "@/lib/types";
 import { EmptyState, PageHeader } from "@/components/patterns";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
+import { loadOutcomeTree } from "@/lib/thinking-model/outcome-tree-data";
+import { OutcomesIndex } from "@/components/okrs/outcomes-index";
 
 interface OKRsPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
@@ -46,7 +48,20 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
     },
   });
 
-  const { labels } = resolveThinkingModel(workspace);
+  const model = resolveThinkingModel(workspace);
+  const { labels } = model;
+
+  // TORRES_OST only: a flat index of every Objective, reachable without picking a cycle. Other presets are untouched.
+  const outcomesIndexRows =
+    model.key === "TORRES_OST"
+      ? (await loadOutcomeTree(prisma, workspace.id)).roots.map((root) => ({
+          id: root.id,
+          title: root.title,
+          status: root.status,
+          cycle: root.cycle,
+          linkedOpportunityCount: root.linkedOpportunityCount,
+        }))
+      : null;
 
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8">
@@ -55,6 +70,8 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
         />} />
+
+      {outcomesIndexRows && <OutcomesIndex rows={outcomesIndexRows} />}
 
       {cycles.length === 0 ? (
         <EmptyState icon={<Target className="size-6" />} title={`No OKR ${labels.cycle.lowerPlural} yet`} description={`${labels.cycle.plural} group your ${labels.objective.lowerPlural} into time-boxed periods. Create one to start setting goals.`} primaryAction={<CreateCycleForm

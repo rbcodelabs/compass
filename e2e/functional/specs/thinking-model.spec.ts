@@ -78,8 +78,8 @@ test.describe("Thinking model", () => {
     const panel = page.getByTestId("thinking-model-panel");
     await panel.scrollIntoViewIfNeeded();
     await panel.getByTestId("thinking-model-TORRES_OST").check();
-    // Only the presets that ship are offered, and only Objective / Key Result can be renamed.
-    await expect(panel.getByTestId("thinking-model-OPPORTUNITY_FIRST_OKR")).toHaveCount(0);
+    // Every shipped preset is offered, and only Objective / Key Result can be renamed.
+    await expect(panel.getByTestId("thinking-model-OPPORTUNITY_FIRST_OKR")).toHaveCount(1);
     await expect(panel.getByLabel("Solution (singular)")).toHaveCount(0);
     await expect(panel.getByTestId("thinking-model-notice")).toContainText("canvas");
     await panel.getByLabel("Key Result (singular)").fill("Signal");

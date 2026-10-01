@@ -47,6 +47,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/okrs/actions", actionsProxy)
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", actionsProxy)
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", actionsProxy)
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", actionsProxy)
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/objective-link-actions", actionsProxy)
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/actions", actionsProxy)
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/custom-field-actions", actionsProxy)
 
