@@ -3,7 +3,7 @@
  * from panel-context so layout code (PanelShell) can branch on them without
  * depending on the provider module, which many tests replace with a mock.
  */
-export const COMPOSER_PANEL_TYPES = ["feedback-new", "opportunity-new"] as const;
+export const COMPOSER_PANEL_TYPES = ["feedback-new", "opportunity-new", "experiment-new"] as const;
 
 export type ComposerPanelType = (typeof COMPOSER_PANEL_TYPES)[number];
 

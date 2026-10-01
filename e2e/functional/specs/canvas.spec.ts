@@ -185,13 +185,13 @@ test.describe("Canvas", () => {
     await expect(ostTreePanel.getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
     await ostTreePanel.getByRole("link", { name: "Test this assumption →" }).click();
     await page.waitForLoadState("networkidle");
-    await expect(page.getByText("New Experiment")).toBeVisible();
+    await expect(page.getByRole("form", { name: "New experiment" })).toBeVisible();
 
     await page.getByLabel("Title").fill(expTitle);
     await page.getByLabel("Hypothesis").fill("We believe the full OST graph renders correctly.");
     await page.getByLabel("Method").fill("Manual QA pass against /canvas.");
-    await page.getByLabel("Kill Condition").fill("Abandon if edges never appear.");
-    await page.getByRole("button", { name: "Create Experiment" }).click();
+    await page.getByLabel("Kill Condition", { exact: true }).fill("Abandon if edges never appear.");
+    await page.getByRole("button", { name: "Submit" }).click();
     await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
 
     // ── 7. Promote the Solution to the roadmap ───────────────────────────────

@@ -55,6 +55,11 @@ vi.mock("@/components/discovery/opportunity-composer", () => ({
     <div data-testid="opportunity-composer-body">{composerId}</div>
   ),
 }));
+vi.mock("@/components/experiments/experiment-composer", () => ({
+  ExperimentComposer: ({ composerId }: { composerId: string }) => (
+    <div data-testid="experiment-composer-body">{composerId}</div>
+  ),
+}));
 vi.mock("@/components/panels/solution-panel", () => ({ SolutionPanel: () => null }));
 vi.mock("@/components/panels/assumption-panel", () => ({ AssumptionPanel: () => null }));
 vi.mock("@/components/panels/experiment-panel", () => ({ ExperimentPanel: () => null }));
@@ -186,5 +191,18 @@ describe("PanelShell — opportunity composer", () => {
     rerender(<PanelShell initialPin={unpinned} />);
     expect(aside()).not.toBeNull();
     expect(screen.getByTestId("opportunity-body")).toHaveTextContent("opp-1");
+  });
+});
+
+describe("PanelShell — experiment composer", () => {
+  beforeEach(() => {
+    panelState = { type: "experiment-new", id: "new-as-1" };
+  });
+
+  it("docks as a column, titled New experiment, and passes the assumption preset through", () => {
+    render(<PanelShell initialPin={unpinned} />);
+    expect(aside()).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "New experiment" })).toBeInTheDocument();
+    expect(screen.getByTestId("experiment-composer-body")).toHaveTextContent("new-as-1");
   });
 });

@@ -24,10 +24,10 @@ test.describe("Experiments", () => {
       await page.getByLabel("Title").fill(expTitle);
       await page.getByLabel("Hypothesis").fill("We believe that this will work.");
       await page.getByLabel("Method").fill("A/B test with equal split.");
-      await page.getByLabel("Kill Condition").fill(
+      await page.getByLabel("Kill Condition", { exact: true }).fill(
         "Stop if fewer than 10% of users engage after 14 days."
       );
-      await page.getByRole("button", { name: "Create Experiment" }).click();
+      await page.getByRole("button", { name: "Submit" }).click();
 
       // Experiment card appears in DESIGNING column
       await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
@@ -97,10 +97,10 @@ test.describe("Experiments", () => {
       await page.getByLabel("Title").fill(expTitle);
       await page.getByLabel("Hypothesis").fill("We believe that this will work.");
       await page.getByLabel("Method").fill("A/B test with equal split.");
-      await page.getByLabel("Kill Condition").fill(
+      await page.getByLabel("Kill Condition", { exact: true }).fill(
         "Stop if fewer than 10% of users engage after 14 days."
       );
-      await page.getByRole("button", { name: "Create Experiment" }).click();
+      await page.getByRole("button", { name: "Submit" }).click();
       await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
 
       await page.getByRole("button", { name: expTitle }).click();
