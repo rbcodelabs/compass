@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import * as React from "react";
 import { useTransition } from "react";
 import { useSortable } from "@dnd-kit/sortable";
@@ -69,6 +70,7 @@ export function OpportunityCard({
   showScore = false,
   dragEnabled = true,
 }: Props) {
+  const labels = useLabels();
   const [isPending, startTransition] = useTransition();
   const { openPanel } = usePanelContext();
 
@@ -161,7 +163,7 @@ export function OpportunityCard({
               scoringHref={`${boardPath}/${opportunity.id}?tab=scoring`}
             />
           )}
-          <Badge variant="secondary">{opportunity._count.solutions} {opportunity._count.solutions === 1 ? "solution" : "solutions"}</Badge>
+          <Badge variant="secondary">{opportunity._count.solutions} {opportunity._count.solutions === 1 ? labels.solution.lower : labels.solution.lowerPlural}</Badge>
           <EvidenceBadge count={opportunity._count.evidence} sourceCount={opportunity.evidenceSourceCount} />
         </div>
       </EntityCard>

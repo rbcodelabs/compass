@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { validateLabelOverrides, MAX_LABEL_LENGTH, MAX_OVERRIDES_BYTES } from "@/lib/thinking-model/validate"
+import { OVERRIDABLE_ENTITIES, THINKING_MODEL_ENTITIES } from "@/lib/thinking-model/presets"
 
 const run = (input: unknown, key = "CLASSIC") => validateLabelOverrides(input, key)
 const error = (input: unknown, key = "CLASSIC") => {
@@ -20,9 +21,25 @@ describe("validateLabelOverrides accepts", () => {
     [{ objective: { singular: "Café" } }],
     [{ objective: { singular: "हिन्दी" } }],
     [{ objective: { singular: "Go\nal" } }], // a newline collapses to a space
+    [{ opportunity: { singular: "Problem", plural: "Problems" } }],
+    [{ solution: { singular: "Bet" } }],
+    [{ cycle: { singular: "Sprint", plural: "Sprints" } }],
+    [{ cycle: { singular: "Quarter" }, solution: { singular: "Idea" }, opportunity: { singular: "Need" } }],
     [{}],
   ])("%j", (input) => {
     expect(run(input).ok).toBe(true)
+  })
+
+  it("every entity is overridable, and OVERRIDABLE_ENTITIES is the single allowed set", () => {
+    expect([...OVERRIDABLE_ENTITIES].sort()).toEqual([...THINKING_MODEL_ENTITIES].sort())
+    for (const entity of OVERRIDABLE_ENTITIES) expect(run({ [entity]: { singular: "Zork" } }).ok).toBe(true)
+  })
+
+  it("all five at once, each with a plural, round-trips normalized", () => {
+    const input = Object.fromEntries(OVERRIDABLE_ENTITIES.map((e, i) => [e, { singular: ` Name${i}  x `, plural: "Names" + i }]))
+    const r = run(input)
+    expect(r.ok).toBe(true)
+    if (r.ok) for (const [i, e] of OVERRIDABLE_ENTITIES.entries()) expect(r.value[e]).toEqual({ singular: `Name${i} x`, plural: "Names" + i })
   })
 
   it("trims, collapses whitespace and NFC-normalizes", () => {
@@ -65,21 +82,63 @@ describe("validateLabelOverrides rejects", () => {
     expect(run(input).ok).toBe(false)
   })
 
-  it.each(["opportunity", "solution", "cycle"])("%s: not renamable yet, with a clear message", (entity) => {
-    const message = error({ [entity]: { singular: "Thing" } })
-    expect(message).toMatch(/is not available yet/)
-    expect(message).toMatch(/Only Objective and Key Result can be renamed/)
+  it("an unknown entity key is a shape error", () => {
+    expect(error({ roadmapItem: { singular: "Thing" } })).toMatch(/Labels must be an object keyed by entity/)
   })
 
-  it("the payload size cap is a real invariant even though two entities cannot reach it", () => {
-    // 2 entities x (singular + plural) x 32 CJK characters (96 bytes) plus JSON overhead stays under the cap.
+  it.each([
+    ["opportunity", { opportunity: { singular: "Cycle" } }],
+    ["solution", { solution: { singular: "Objective" } }],
+    ["cycle", { cycle: { singular: "Key Result" } }],
+    ["cycle against another entity's plural", { cycle: { singular: "Key Results" } }],
+    ["opportunity against the unchanged Solution", { opportunity: { singular: "solution" } }],
+    ["opportunity, full-width", { opportunity: { singular: "ＳＯＬＵＴＩＯＮ" } }],
+  ])("collides with an unchanged entity: %s", (_n, input) => {
+    expect(error(input)).toMatch(/would name both/)
+  })
+
+  it("renaming Solution to Opportunity is fine only when Opportunity is renamed away in the same save", () => {
+    expect(run({ solution: { singular: "Opportunity" } }).ok).toBe(false)
+    expect(run({ solution: { singular: "Opportunity" }, opportunity: { singular: "Problem" } }).ok).toBe(true)
+  })
+
+  it("swapping two entity names in one save is rejected only if they still overlap after the swap", () => {
+    expect(run({ solution: { singular: "Opportunity", plural: "Opportunities" }, opportunity: { singular: "Solution", plural: "Solutions" } }).ok).toBe(true)
+  })
+
+  it("duplicate across the new entities", () => {
+    expect(error({ cycle: { singular: "Sprint" }, solution: { singular: "sprint" } })).toMatch(/would name both/)
+    expect(error({ cycle: { singular: "Sprint", plural: "Sprints" }, opportunity: { singular: "Need", plural: "ｓｐｒｉｎｔｓ" } })).toMatch(/would name both/)
+  })
+
+  it.each(["opportunity", "solution", "cycle"])("%s: reserved navigation names are rejected, NFKC-folded", (entity) => {
+    expect(run({ [entity]: { singular: "Roadmap" } }).ok).toBe(false)
+    expect(run({ [entity]: { singular: "ＤＩＳＣＯＶＥＲＹ" } }).ok).toBe(false)
+    expect(run({ [entity]: { singular: "Thing", plural: "Docs" } }).ok).toBe(false)
+    expect(run({ [entity]: { singular: "okrs" } }).ok).toBe(false)
+  })
+
+  it("a derived plural is checked too (a singular whose naive plural collides with a section)", () => {
+    // "Metric" + "s" = "Metrics", a nav section.
+    expect(error({ cycle: { singular: "Metric" } })).toMatch(/name of a section/)
+  })
+
+  it("rejects an unknown inner key and a non-string plural on the new entities", () => {
+    expect(run({ cycle: { singular: "Sprint", lower: "x" } }).ok).toBe(false)
+    expect(run({ solution: { singular: "Bet", plural: 4 } }).ok).toBe(false)
+    expect(run({ opportunity: { singular: "" } }).ok).toBe(false)
+  })
+
+  it("the payload size cap is reachable with five entities, and enforced", () => {
     const cjk = (n: number) => "字".repeat(31) + String.fromCharCode(0x4e00 + n)
-    const r = run({
-      objective: { singular: cjk(1), plural: cjk(2) },
-      keyResult: { singular: cjk(3), plural: cjk(4) },
-    })
-    expect(r.ok).toBe(true)
-    if (r.ok) expect(new TextEncoder().encode(JSON.stringify(r.value)).length).toBeLessThanOrEqual(MAX_OVERRIDES_BYTES)
+    const all = OVERRIDABLE_ENTITIES.map((e, i) => [e, { singular: cjk(i * 2), plural: cjk(i * 2 + 1) }] as const)
+    const r = run(Object.fromEntries(all))
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/too long in total/)
+    // Four entities of the same size still fit.
+    const four = run(Object.fromEntries(all.slice(0, 4)))
+    expect(four.ok).toBe(true)
+    if (four.ok) expect(new TextEncoder().encode(JSON.stringify(four.value)).length).toBeLessThanOrEqual(MAX_OVERRIDES_BYTES)
   })
 
   it("collision check is preset-aware (Torres already owns 'Outcome')", () => {

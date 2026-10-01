@@ -1,5 +1,7 @@
 "use client";
 
+import { indefiniteTitle } from "@/lib/thinking-model/copy";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useState, useTransition, useId } from "react";
 import {
   DndContext,
@@ -155,6 +157,7 @@ function SwimlaneColumn({
   revalidatePathStr: string;
   scoring: SwimlaneScoringProps;
 }) {
+  const labels = useLabels();
   const columnId = makeColumnId(opportunityId, status);
   const itemIds = items.map((i) => i.id);
   const { setNodeRef, isOver } = useDroppable({
@@ -230,7 +233,7 @@ function SwimlaneColumn({
                   : "border-border-default text-text-subtle"
               )}
             >
-              No solutions
+              {`No ${labels.solution.lowerPlural}`}
             </div>
           ) : (
             items.map((solution) => (
@@ -269,6 +272,7 @@ function SwimlaneRow({
   revalidatePathStr: string;
   scoring: SwimlaneScoringProps;
 }) {
+  const labels = useLabels();
   const totalCount = SOLUTION_STATUS_ORDER.reduce(
     (sum, status) => sum + (columns[makeColumnId(opportunity.id, status)]?.length ?? 0),
     0
@@ -323,7 +327,7 @@ function SwimlaneRow({
         )}
         <span className="min-w-0 flex-1 truncate text-left font-medium">{opportunity.title}</span>
         <span className="shrink-0 text-xs text-text-subtle">
-          {totalCount} {totalCount === 1 ? "solution" : "solutions"}
+          {totalCount} {totalCount === 1 ? labels.solution.lower : labels.solution.lowerPlural}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -336,7 +340,7 @@ function SwimlaneRow({
           {/* items-stretch so every column shares the tallest column's height,
               which is what keeps the unfilled columns reading as one row. */}
           <Board
-            label={`${opportunity.title} solutions`}
+            label={`${opportunity.title} ${labels.solution.lowerPlural}`}
             className="items-stretch gap-3 pb-0"
           >
             {SOLUTION_STATUS_ORDER.map((status) => (
@@ -369,6 +373,7 @@ type Props = {
 };
 
 export function SolutionSwimlaneBoard({ opportunities, orgSlug, workspaceSlug, workspaceId, hasActiveScoringModel = false }: Props) {
+  const labels = useLabels();
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/discovery`;
   const scoring: SwimlaneScoringProps = { showScore: hasActiveScoringModel, orgSlug, workspaceSlug };
 
@@ -509,8 +514,8 @@ export function SolutionSwimlaneBoard({ opportunities, orgSlug, workspaceSlug, w
     return (
       <EmptyState
         icon={<Lightbulb className="size-5" />}
-        title="No opportunities yet"
-        description="Create an Opportunity to start adding Solutions to it."
+        title={`No ${labels.opportunity.lowerPlural} yet`}
+        description={`Create ${indefiniteTitle(labels.opportunity)} to start adding ${labels.solution.plural} to it.`}
       />
     );
   }

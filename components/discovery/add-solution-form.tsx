@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useState, useTransition, useRef, useId } from "react";
 import { PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ type Props = {
 };
 
 export function AddSolutionForm({ opportunityId, revalidatePathStr, onAdded }: Props) {
+  const labels = useLabels();
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
@@ -63,7 +65,7 @@ export function AddSolutionForm({ opportunityId, revalidatePathStr, onAdded }: P
         onClick={() => setOpen(true)}
       >
         <PlusIcon />
-        Add Solution
+        {`Add ${labels.solution.singular}`}
       </Button>
     );
   }
@@ -74,13 +76,13 @@ export function AddSolutionForm({ opportunityId, revalidatePathStr, onAdded }: P
       onSubmit={handleSubmit}
       className="rounded-xl ring-1 ring-border bg-muted/30 p-4 flex flex-col gap-3"
     >
-      <p className="text-sm font-medium">New Solution</p>
+      <p className="text-sm font-medium">{`New ${labels.solution.singular}`}</p>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor={titleId}>Title</Label>
         <Input
           id={titleId}
           name="title"
-          placeholder="Solution title"
+          placeholder={`${labels.solution.singular} title`}
           autoFocus
           required
           disabled={isPending}
@@ -91,13 +93,13 @@ export function AddSolutionForm({ opportunityId, revalidatePathStr, onAdded }: P
         <Textarea
           id={descId}
           name="description"
-          placeholder="Describe the solution approach..."
+          placeholder={`Describe the ${labels.solution.lower} approach...`}
           disabled={isPending}
         />
       </div>
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={isPending}>
-          {isPending ? "Adding..." : "Add Solution"}
+          {isPending ? "Adding..." : `Add ${labels.solution.singular}`}
         </Button>
         <Button
           type="button"

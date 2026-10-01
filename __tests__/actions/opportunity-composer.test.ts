@@ -117,6 +117,24 @@ describe("createOpportunityFromComposer", () => {
     expect(m.db.opportunity.create).not.toHaveBeenCalled();
   });
 
+  it("says the Key Result message in the workspace's own words (Torres, or a rename)", async () => {
+    m.db.keyResult.findFirst.mockResolvedValue(null);
+    m.db.workspace.findUnique.mockResolvedValue({ thinkingModel: "TORRES_OST", thinkingModelLabels: null });
+    const torres = await createOpportunityFromComposer("acme", "core", { title: "x", linkedKeyResultId: "kr-foreign" });
+    expect(torres).toEqual({ ok: false, error: "That success metric is not in this workspace." });
+    m.db.workspace.findUnique.mockResolvedValue({ thinkingModel: "CLASSIC", thinkingModelLabels: JSON.stringify({ keyResult: { singular: "Signal" } }) });
+    const renamed = await createOpportunityFromComposer("acme", "core", { title: "x", linkedKeyResultId: "kr-foreign" });
+    expect(renamed).toEqual({ ok: false, error: "That signal is not in this workspace." });
+    expect(m.db.opportunity.create).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the canonical wording when the workspace's names cannot be read", async () => {
+    m.db.keyResult.findFirst.mockResolvedValue(null);
+    m.db.workspace.findUnique.mockRejectedValue(new Error("column thinking_model does not exist"));
+    const result = await createOpportunityFromComposer("acme", "core", { title: "x", linkedKeyResultId: "kr-foreign" });
+    expect(result).toEqual({ ok: false, error: "That key result is not in this workspace." });
+  });
+
   it("returns foreign feedback as an inline error and creates nothing", async () => {
     m.db.feedbackItem.findMany.mockResolvedValue([{ id: "fb-1" }]);
     const result = await createOpportunityFromComposer("acme", "core", { title: "x", feedbackIds: ["fb-1", "fb-foreign"] });

@@ -40,6 +40,8 @@ const mainCopy = JSON.parse(readFileSync(path.join(ROOT, "__tests__/thinking-mod
 /** Main's fragments that this branch builds differently; each is pinned by a rendered case instead. */
 const EXCEPTIONS: Record<string, string> = {
   "{} objective{}": "cycle-card.tsx pluralises with a ternary now; pinned by 'cycle-card 0/1/3' in classic-text.test.tsx",
+  "Create an Opportunity to start adding Solutions to it.":
+    "built with indefiniteTitle(); pinned by 'swimlane empty' in classic-text.test.tsx",
   // #332 (optional Objective cycle) deliberately reworded this CLASSIC text; main's baseline predates it. The new text is
   // pinned verbatim below ("#332 optional-cycle copy"). When #332 reaches main and the baselines are regenerated, this
   // entry goes stale and the "every EXCEPTION is real" test says to delete it.

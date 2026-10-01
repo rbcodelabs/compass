@@ -70,12 +70,14 @@ describe("resolveThinkingModel", () => {
 
   describe("stored overrides are re-validated on every read (all or nothing)", () => {
     const cases: Array<[string, unknown]> = [
-      ["an entity that is not overridable", { objective: { singular: "Goal" }, solution: { singular: "Bet" } }],
+      ["an unknown entity key", { objective: { singular: "Goal" }, roadmapItem: { singular: "Bet" } }],
       ["a reserved nav name", { objective: { singular: "Roadmap" } }],
       ["a full-width reserved nav name", { objective: { singular: "ＲＯＡＤＭＡＰ" } }],
       ["markup", { objective: { singular: "<b>Goal</b>" } }],
       ["an over-long label", { objective: { singular: "x".repeat(33) } }],
       ["a collision with another entity", { objective: { singular: "Solution" } }],
+      ["a collision between two of the newly overridable entities", { cycle: { singular: "Sprint" }, solution: { singular: "Sprint" } }],
+      ["a reserved nav name on an opportunity", { opportunity: { singular: "Roadmap" } }],
       ["an unknown inner key", { objective: { singular: "Goal", extra: "x" } }],
     ]
     it.each(cases)("%s => no overrides at all", (_name, value) => {
@@ -104,13 +106,49 @@ describe("resolveThinkingModel", () => {
       expect(resolveThinkingModel({ thinkingModel: "FUTURE_MODEL", thinkingModelLabels: raw }).hasLabelOverrides).toBe(false)
     })
 
-    it.each(["{not json", stored({ solution: { singular: "Bet" } }), stored({ objective: { singular: "Roadmap" } })])(
+    it.each(["{not json", stored({ roadmapItem: { singular: "Bet" } }), stored({ objective: { singular: "Roadmap" } })])(
       "stored but failing today's rules (%s) is reported, never silently dropped",
       (raw) => {
         expect(inspectStoredLabels({ thinkingModel: "CLASSIC", thinkingModelLabels: raw })).toEqual({ applied: {}, unapplied: raw })
         expect(resolveThinkingModel({ thinkingModel: "CLASSIC", thinkingModelLabels: raw })).toEqual(classic)
       },
     )
+  })
+
+  describe("opportunity, solution and cycle overrides apply (they were rejected before Phase 4C-2)", () => {
+    it("a stored override for a previously non-overridable entity now simply applies", () => {
+      const raw = stored({ solution: { singular: "Bet" }, opportunity: { singular: "Problem", plural: "Problems" }, cycle: { singular: "Sprint" } })
+      const r = resolveThinkingModel({ thinkingModel: "CLASSIC", thinkingModelLabels: raw })
+      expect(r.hasLabelOverrides).toBe(true)
+      expect(r.labels.solution).toMatchObject({ singular: "Bet", plural: "Bets", lower: "bet", lowerPlural: "bets", indefinite: "bet" })
+      expect(r.labels.opportunity).toMatchObject({ singular: "Problem", plural: "Problems", lower: "problem", indefinite: "problem" })
+      expect(r.labels.cycle).toMatchObject({ singular: "Sprint", plural: "Sprints", lower: "sprint" })
+      // Untouched entities keep the preset's words and articles.
+      expect(r.labels.objective).toEqual(classic.labels.objective)
+      expect(inspectStoredLabels({ thinkingModel: null, thinkingModelLabels: raw })).toEqual({
+        applied: { solution: { singular: "Bet" }, opportunity: { singular: "Problem", plural: "Problems" }, cycle: { singular: "Sprint" } },
+        unapplied: null,
+      })
+    })
+
+    it("all five entities renamed at once under Torres", () => {
+      const labels = {
+        opportunity: { singular: "Need" },
+        objective: { singular: "Aim" },
+        keyResult: { singular: "Signal", plural: "Signals" },
+        solution: { singular: "Bet" },
+        cycle: { singular: "Sprint" },
+      }
+      const r = resolveThinkingModel({ thinkingModel: "TORRES_OST", thinkingModelLabels: stored(labels) })
+      expect(r.labels.opportunity.plural).toBe("Needs")
+      expect(r.labels.sections.okrs).toBe("Aims")
+      expect(r.labels.cycle.plural).toBe("Sprints")
+      expect(r.cycles).toBe("subdued")
+    })
+
+    it("a plural-less override of a y-noun is derived", () => {
+      expect(resolveThinkingModel({ thinkingModelLabels: stored({ opportunity: { singular: "Story" } }) }).labels.opportunity.plural).toBe("Stories")
+    })
   })
 
   it("every preset key resolves to itself", () => {

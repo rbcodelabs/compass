@@ -1,6 +1,6 @@
 {
   "generatedFrom": "origin/main",
-  "mainSha": "cfa0e372003fe64452dcaa5972ee73006bbd2461",
+  "mainSha": "ffa958f6404c6c14ef1e333261f0ab85ed4c124a",
   "files": {
     "components/sidebar.tsx": [
       "OKRs",
@@ -22,11 +22,11 @@
       "/{}/{}/okrs/{}"
     ],
     "components/okrs/add-key-result-form.tsx": [
+      "Add key result",
+      "Add Key Result",
       "kr-title",
       "kr-target",
-      "kr-unit",
-      "Add key result",
-      "Add Key Result"
+      "kr-unit"
     ],
     "components/okrs/add-objective-form.tsx": [
       "Add objective",
@@ -34,12 +34,12 @@
     ],
     "components/okrs/check-in-form.tsx": [],
     "components/okrs/create-cycle-form.tsx": [
+      "New Cycle",
+      "New OKR Cycle",
       "cycle-title",
       "cycle-start",
       "cycle-end",
-      "Create cycle",
-      "New Cycle",
-      "New OKR Cycle"
+      "Create cycle"
     ],
     "components/okrs/cycle-card.tsx": [
       "/{}/{}/okrs/{}",
@@ -52,9 +52,8 @@
       "Delete KR",
       "Search shorter-cycle Objectives…",
       "No eligible unlinked Objectives.",
-      "objective",
-      "if (objective) {",
-      "Supporting objectives"
+      "Supporting objectives",
+      "objective"
     ],
     "components/okrs/objective-row.tsx": [
       "/{}/{}/okrs",
@@ -64,12 +63,9 @@
       "Linked Key Result",
       "Unlink parent Key Result",
       "Search cycles, objectives, and KRs…",
-      "No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle's dates.",
-      "objective,"
+      "No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle's dates."
     ],
-    "components/okrs/objectives-list.tsx": [
-      "objective,"
-    ],
+    "components/okrs/objectives-list.tsx": [],
     "components/panels/objective-panel.tsx": [
       "objective",
       "/{}/{}/okrs/{}",
@@ -112,40 +108,38 @@
       "Key Result"
     ],
     "components/discovery/opportunity-composer.tsx": [
-      "## Who's affected\\n\\n\\n\\n## Current pain\\n\\n\\n\\n## Evidence\\n\\n\\n\\n## Desired outcome\\n\\n",
+      "## Who's affected ## Current pain ## Evidence ## Desired outcome",
       "opportunity",
       "Couldn't create the opportunity right now. Your draft is saved on this device — try again.",
       "New opportunity",
       "opportunity-composer",
       "What opportunity have you discovered?",
       "Insert opportunity outline",
+      "Loading key results and feedback…",
+      "Couldn&apos;t load key results and feedback. You can still create the opportunity and link them from its panel afterwards.",
       "{}-kr",
+      "Driving key result",
+      "No key results in this workspace yet.",
       "Key result",
       "Link a key result",
       "Search key results…",
       "No matching key results.",
       "Link feedback that points to this opportunity",
       "1 is linked to another opportunity and will move here.",
-      "{} are linked to other opportunities and will move here.",
-      "Loading key results and feedback…",
-      "Couldn&apos;t load key results and feedback. You can still create the opportunity and link them from its",
-      "Driving key result",
-      "No key results in this workspace yet."
+      "{} are linked to other opportunities and will move here."
     ],
     "components/discovery/opportunity-header.tsx": [
       "Could not link key result.",
       "opportunity",
-      "change KR",
-      "Link to key result",
-      "opportunity,",
       "Driving Key Result",
-      "No key result linked."
+      "No key result linked.",
+      "change KR",
+      "Link to key result"
     ],
     "components/discovery/opportunity-overview.tsx": [
       "opportunity",
       "Linked Key Result",
-      "Link to a key result…",
-      "opportunity,"
+      "Link to a key result…"
     ],
     "components/discovery/key-result-options.tsx": [],
     "components/tasks/task-links-panel.tsx": [
@@ -171,26 +165,25 @@
       "Search opportunities, docs, roadmap, and more…"
     ],
     "components/roadmap/add-item-form.tsx": [
+      "Opportunity (optional)",
       "item-opportunity-{}",
       "Link to an opportunity…",
+      "Key Result (optional)",
       "item-kr-{}",
       "Link to a key result…",
+      "Solution (optional)",
       "item-solution-{}",
-      "Link to a solution…",
-      "Opportunity (optional)",
-      "Key Result (optional)",
-      "Solution (optional)"
+      "Link to a solution…"
     ],
     "components/roadmap/edit-item-dialog.tsx": [
-      "edit-opportunity-{}",
       "Opportunity",
+      "edit-opportunity-{}",
       "Link to an opportunity…"
     ],
     "components/discovery/discovery-rail.tsx": [
       "Search opportunities…",
-      "Linked to a key result",
-      "opportunities,",
-      "opportunity,"
+      "No opportunities match &ldquo;{}&rdquo;.",
+      "Linked to a key result"
     ],
     "app/[orgSlug]/[workspaceSlug]/metrics/page.tsx": [
       "Product usage from your analytics providers, connected to experiments, roadmap launches, and key results."
@@ -208,17 +201,229 @@
       "Key Result"
     ],
     "components/analytics/metrics-dashboard.tsx": [
-      "Key result",
       "Create a metric to connect product usage from Vercel Web Analytics to an experiment, key result, or roadmap launch.",
-      "This metric will stop appearing in new bindings, but its historical observations and existing links to experiments, key results, and roadmap items are preserved — nothing is deleted, and a stale metric never becomes a silent zero."
+      "This metric will stop appearing in new bindings, but its historical observations and existing links to experiments, key results, and roadmap items are preserved — nothing is deleted, and a stale metric never becomes a silent zero.",
+      "Key result"
     ],
     "app/[orgSlug]/[workspaceSlug]/settings/page.tsx": [
       "Teams within this workspace. Squads can be assigned to objectives, opportunities, experiments, and roadmap items.",
       "Choose which org-level scoring model this workspace uses to rank Opportunities and Solutions. The two picks are independent of each other. Templates are managed by organization admins in Org Settings.",
+      "Opportunities",
+      "OPPORTUNITY",
+      "Solutions",
+      "SOLUTION"
+    ],
+    "lib/canvas/tiers.ts": [
+      "objective",
+      "opportunity",
+      "solution",
+      "Cycle"
+    ],
+    "components/canvas/canvas-flow.tsx": [
+      "objective",
+      "opportunity",
+      "solution",
+      "Add Objectives and Key Results from the OKRs page to see them here."
+    ],
+    "app/[orgSlug]/[workspaceSlug]/canvas/page.tsx": [
+      "Pan and zoom across your full OKR, discovery, and roadmap graph."
+    ],
+    "app/[orgSlug]/[workspaceSlug]/discovery/page.tsx": [
       "OPPORTUNITY",
       "SOLUTION",
+      "opportunity"
+    ],
+    "app/[orgSlug]/[workspaceSlug]/discovery/[opportunityId]/page.tsx": [
+      "Opportunity"
+    ],
+    "components/discovery/opportunity-board.tsx": [
+      "No opportunities yet",
+      "Opportunity board",
+      "opportunity-board-track"
+    ],
+    "components/discovery/opportunity-card.tsx": [
+      "opportunity",
+      "solution",
+      "solutions"
+    ],
+    "components/discovery/opportunity-field-board.tsx": [
+      "Opportunity board grouped by {}",
+      "opportunity-field-board-track",
+      "opportunity",
+      "opportunities",
+      "No opportunities",
+      "solution"
+    ],
+    "components/discovery/new-opportunity-button.tsx": [
+      "opportunity-new",
+      "Add opportunity",
+      "New Opportunity"
+    ],
+    "components/discovery/discovery-group-by-toggle.tsx": [
+      "Opportunity",
+      "opportunity"
+    ],
+    "components/discovery/discovery-table-view.tsx": [
+      "opportunity",
+      "solution",
+      "opportunity:{}",
+      "solution:{}",
+      "No opportunities match the current filters.",
+      "Discovery opportunities"
+    ],
+    "components/discovery/solution-swimlane-board.tsx": [
+      "No solutions",
+      "solution",
+      "solutions",
+      "{} solutions",
+      "No opportunities yet",
+      "Create an Opportunity to start adding Solutions to it."
+    ],
+    "components/discovery/solution-card.tsx": [
+      "solution",
+      "solution-card-meta"
+    ],
+    "components/discovery/opportunity-detail.tsx": [
+      "opportunity",
+      "Retry loading opportunity",
+      "solutions",
+      "opportunity-detail",
+      "Could not refresh opportunity. Showing the last loaded details.",
+      "OPPORTUNITY",
+      "opportunity-detail-main",
+      "Opportunity sections",
+      "Solutions ({})",
+      "No solutions yet. Add one below.",
+      "Opportunity discussion",
+      "opportunity-detail-discussion"
+    ],
+    "components/discovery/ost-tree-view.tsx": [
+      "Outcome",
+      "Opportunity",
+      "Solution",
+      "No solutions yet"
+    ],
+    "components/discovery/add-solution-form.tsx": [
+      "Add Solution",
+      "New Solution",
+      "Solution title",
+      "Describe the solution approach..."
+    ],
+    "components/discovery/solutions-list.tsx": [
+      "Could not reorder solutions. Please try again."
+    ],
+    "components/discovery/scoring-panel.tsx": [
+      "This opportunity was scored under an earlier version (v{}) of this model. The score below reflects that earlier formula — re-save to score it under the current version (v{})."
+    ],
+    "components/discovery/solution-scoring-panel.tsx": [
+      "This solution was scored under an earlier version (v{}) of this model. The score below reflects that earlier formula — re-save to score it under the current version (v{}).",
+      "solution-metric-{}"
+    ],
+    "components/discovery/opportunity-experiments-tab.tsx": [
+      "No experiments yet. Add assumptions to solutions and link experiments to them."
+    ],
+    "components/panels/discovery-rail-panel.tsx": [
+      "Could not load opportunities."
+    ],
+    "components/panels/solution-panel.tsx": [
+      "solution",
+      "opportunity",
+      "SOLUTION",
+      "Opportunity",
+      "No parent opportunity."
+    ],
+    "components/panels/assumption-panel.tsx": [
+      "solution",
+      "Solution",
+      "No parent solution."
+    ],
+    "components/panels/feedback-panel.tsx": [
+      "opportunity",
+      "Linked Opportunity",
+      "Not linked to an opportunity."
+    ],
+    "components/analytics/measurements-panel.tsx": [
+      "Refresh captures a snapshot, not an automatic conclusion or key result update. Saved evidence keeps its original dates."
+    ],
+    "components/card-sort/card-sort-new-entries.tsx": [
+      "Propose a new opportunity",
+      "This is a request, not an opportunity yet. It is only created if the person running this round accepts it. Until the round is revealed, only you and they can see it.",
+      "Open the new opportunity"
+    ],
+    "components/card-sort/new-round-form.tsx": [
+      "This workspace has no SELECT custom fields on opportunities, so there is nothing to sort by. A factor is a SELECT field &mdash; its options become the buckets."
+    ],
+    "components/decisions/decisions-filters.tsx": [
+      "outcome",
+      "Outcome"
+    ],
+    "components/decisions/new-decision-form.tsx": [
+      "Opportunity",
+      "OPPORTUNITY",
+      "Solution",
+      "SOLUTION"
+    ],
+    "components/decisions/decision-sources.tsx": [
+      "OPPORTUNITY",
+      "SOLUTION",
+      "opportunity",
+      "solution"
+    ],
+    "app/[orgSlug]/[workspaceSlug]/decisions/page.tsx": [],
+    "app/[orgSlug]/[workspaceSlug]/reviews/[requestId]/page.tsx": [
+      "Solution",
+      "Opportunity"
+    ],
+    "components/feedback/feedback-action-cell.tsx": [
+      "Link {} to an opportunity",
+      "feedback-link-opportunity",
+      "Link opportunity",
+      "No opportunities.",
+      "Search opportunities…"
+    ],
+    "components/feedback/feedback-composer.tsx": [
+      "What problem does this solve? Who runs into it, and what would a great outcome look like?"
+    ],
+    "components/mobile-header.tsx": [
+      "Browse opportunities"
+    ],
+    "components/workspace-search-palette.tsx": [
+      "Search opportunities, tasks, docs…"
+    ],
+    "components/roadmap/unscheduled-items-panel.tsx": [
+      "solution",
+      "Solution"
+    ],
+    "components/scoring-models/workspace-scoring-panel.tsx": [
+      "SOLUTION",
+      "Solutions",
       "Opportunities",
-      "Solutions"
+      "Active scoring model for Solutions"
+    ],
+    "components/settings/delete-workspace-panel.tsx": [
+      "and all its data, including OKRs, opportunities, experiments, roadmap items, and feedback. This action cannot be undone."
+    ],
+    "components/squads/manage-squads-panel.tsx": [
+      "No squads yet. Create one to start assigning ownership across opportunities, experiments, and objectives."
+    ],
+    "app/[orgSlug]/[workspaceSlug]/capture/pm/new/page.tsx": [
+      "OPPORTUNITY",
+      "Opportunities",
+      "SOLUTION",
+      "Solutions",
+      "Select an opportunity, solution, assumption, or experiment"
+    ],
+    "components/docs/artifact-detail.tsx": [
+      "Linked solutions",
+      "Not linked to a solution.",
+      "Solution to link",
+      "Select a solution…"
+    ],
+    "lib/custom-field-filter.ts": [
+      "Opportunity",
+      "Solution",
+      "Objective",
+      "Key Result"
     ]
   }
 }

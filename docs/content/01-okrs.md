@@ -14,7 +14,7 @@ OKRs (Objectives and Key Results) are the starting point for discovery in Compas
 
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
 
-> **Different words in your workspace?** A workspace admin can switch the thinking model in Settings. Under **Torres** an Objective is called an **Outcome** and a Key Result a **Success metric**, the sidebar entry reads **Outcomes**, and a flat list of all outcomes appears above the cycles. See [Thinking models](/help/27-thinking-models).
+> **Different words in your workspace?** A workspace admin can switch the thinking model in Settings. Under **Torres** an Objective is called an **Outcome** and a Key Result a **Success metric**, the sidebar entry reads **Outcomes**, and a flat list of all outcomes appears above the cycles. Admins can also rename the other entities, including Cycle. See [Thinking models](/help/27-thinking-models).
 
 ## OKR Cycles
 

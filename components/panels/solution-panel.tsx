@@ -106,7 +106,7 @@ export function SolutionPanel({
   const labels = useLabels();
   const offersKeyResultLinks = useThinkingModel().links.solToKr !== "hidden";
 
-  if (error) return <PanelError label="solution" />;
+  if (error) return <PanelError label={labels.solution.lower} />;
   if (!data) return <PanelSkeleton />;
 
   const edit: EditContext = {
@@ -176,8 +176,8 @@ export function SolutionPanel({
         </Section>
       )}
 
-      <Section {...SECTION} defaultOpen label="Opportunity" empty={oppItems.length === 0}>
-        <RelationList items={oppItems} empty="No parent opportunity." />
+      <Section {...SECTION} defaultOpen label={labels.opportunity.singular} empty={oppItems.length === 0}>
+        <RelationList items={oppItems} empty={`No parent ${labels.opportunity.lower}.`} />
       </Section>
 
       {/* Phase 4B: the Solution <-> Key Result picker, only for presets that offer it (the fetcher sends its options only then). */}

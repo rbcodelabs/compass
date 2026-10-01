@@ -3,8 +3,8 @@
  * Regenerates the two CLASSIC baselines that pin "NULL is literally identical to
  * today" for the thinking-model label conversion, from a checkout of origin/main.
  *
- *   __tests__/thinking-model/classic-text.snapshot.json   rendered text of 21 cases
- *       over 15 components (via the harness __tests__/thinking-model/classic-text.test.tsx)
+ *   __tests__/thinking-model/classic-text.snapshot.json   rendered text of the harness cases
+ *       (via the harness __tests__/thinking-model/classic-text.test.tsx)
  *   __tests__/thinking-model/classic-copy.main.json       every entity-bearing copy
  *       fragment in main's version of each converted file
  *
@@ -44,7 +44,7 @@ console.log(`Generating baselines from ${main} at ${sha}`)
 const files: Record<string, string[]> = {}
 for (const file of CONVERTED_FILES) {
   const full = path.join(main, file)
-  if (existsSync(full)) files[file] = entityFragments(readFileSync(full, "utf-8"))
+  if (existsSync(full)) files[file] = entityFragments(readFileSync(full, "utf-8"), file)
 }
 writeFileSync(
   path.join(here, "__tests__/thinking-model/classic-copy.main.json"),

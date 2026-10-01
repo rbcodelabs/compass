@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { PlusIcon, RefreshCwIcon } from "lucide-react";
 import type { BindingDTO, MetricDTO, MetricTarget, ObservationDTO } from "@/lib/analytics/service";
@@ -66,6 +67,7 @@ function formatWindow(since: string, until: string) {
 }
 
 export function MeasurementsPanel({ orgSlug, workspaceSlug, target, compact = false }: { orgSlug: string; workspaceSlug: string; target: MetricTarget; compact?: boolean }) {
+  const labels = useLabels();
   const { targetId, targetType } = target;
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [metrics, setMetrics] = useState<MetricDTO[]>([]);
@@ -157,7 +159,7 @@ export function MeasurementsPanel({ orgSlug, workspaceSlug, target, compact = fa
 
       {loadError && <p role="alert" className="rounded-lg border border-status-danger/25 bg-status-danger-surface px-3 py-2 text-sm text-status-danger">{loadError}</p>}
       {loading ? <div className="h-24 animate-pulse rounded-xl bg-muted" /> : !loadError && measurements.length === 0 ? <p className="rounded-xl border border-dashed px-4 py-6 text-sm text-muted-foreground">No metrics linked yet. Track recent activity without a baseline, or compare two periods.</p> : measurements.map((row) => <MeasurementCard key={row.binding.id} row={row} error={errors[row.binding.id]} pending={isPending} onRefresh={() => refresh(row.binding.id)} onCompare={() => { setComparing(row.binding); setMode("comparison"); setFieldErrors({}); setErrors((current) => ({ ...current, link: "" })); setLinkOpen(true); }} compact={compact} />)}
-      {!compact && <p className="text-xs leading-5 text-muted-foreground">Refresh captures a snapshot, not an automatic conclusion or key result update. Saved evidence keeps its original dates.</p>}
+      {!compact && <p className="text-xs leading-5 text-muted-foreground">{`Refresh captures a snapshot, not an automatic conclusion or ${labels.keyResult.lower} update. Saved evidence keeps its original dates.`}</p>}
 
       <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
         <DialogContent className="sm:max-w-md">

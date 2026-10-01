@@ -20,7 +20,12 @@ export type ResolvedEntityLabel = {
 }
 
 export type ResolvedLabels = Record<ThinkingModelEntity, ResolvedEntityLabel> & {
-  sections: { okrs: string }
+  sections: {
+    /** The nav entry for /okrs ("OKRs"; the Objective plural for a model that renames Objectives). */
+    okrs: string
+    /** The framework word in the singular where copy uses it ("OKR"); the Objective singular when the section is derived. */
+    okr: string
+  }
 }
 
 /**
@@ -75,5 +80,11 @@ export function buildResolvedLabels(
     (entity) => [entity, buildResolvedLabel(labels[entity])] as const,
   )
   const resolved = Object.fromEntries(entries) as Record<ThinkingModelEntity, ResolvedEntityLabel>
-  return { ...resolved, sections: { okrs: okrsSection ?? resolved.objective.plural } }
+  return {
+    ...resolved,
+    sections: {
+      okrs: okrsSection ?? resolved.objective.plural,
+      okr: okrsSection === "OKRs" ? "OKR" : resolved.objective.singular,
+    },
+  }
 }

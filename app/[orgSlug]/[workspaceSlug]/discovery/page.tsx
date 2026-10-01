@@ -25,6 +25,7 @@ import {
   parseCustomFieldFilterParams,
   resolveCustomFieldFilter,
 } from "@/lib/custom-field-filter";
+import { objectTypeLabels } from "@/components/custom-fields/object-type-labels";
 import { solutionSwimlaneKey } from "@/lib/discovery-filters";
 import { loadCustomFieldValuesForObjects } from "@/lib/custom-field-values-batch";
 import {
@@ -101,7 +102,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       filter: parseCustomFieldFilterParams({ field: fieldParam, fieldValue: fieldValueParam }),
     }),
   ]);
-  const customFieldGroups = buildCustomFieldFilterGroups(discoveryFieldDefs);
+  const customFieldGroups = buildCustomFieldFilterGroups(discoveryFieldDefs, objectTypeLabels(thinkingModel.labels));
   // Stale or ineligible field ids fall back to Status (see resolveDiscoveryGroupBy).
   const groupableFields = groupableOpportunityFields(discoveryFieldDefs);
   const groupBy = resolveDiscoveryGroupBy(requestedGroupBy, groupableFields);

@@ -27,6 +27,8 @@ export const USERS = {
   dave: "user-dave",
   /** Org member of acme (read-only access) but NOT a member of workspace A. */
   frank: "user-frank",
+  /** Org ADMIN of acme who is NOT a member of workspace A (admin of the org, not of the workspace). */
+  gina: "user-gina",
 } as const;
 
 export const WS_A = { id: "ws-a", org: "acme", slug: "alpha" } as const;
@@ -78,6 +80,7 @@ export function createTenantFakePrisma() {
     { org: WS_B.org, userId: USERS.erin, role: "MEMBER" },
     { org: WS_A.org, userId: USERS.dave, role: "ADMIN" },
     { org: WS_A.org, userId: USERS.frank, role: "MEMBER" },
+    { org: WS_A.org, userId: USERS.gina, role: "ADMIN" },
   ];
 
   const feedback: FeedbackRow[] = [

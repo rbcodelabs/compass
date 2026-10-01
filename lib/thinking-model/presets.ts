@@ -48,12 +48,18 @@ export type EntityLabel = {
 }
 
 /**
- * Entities a workspace may rename. Deliberately narrower than the entity list:
- * overrides must not outrun the label conversion, and these two are what Torres
- * renames and what the converted surfaces cover best. Open the others up only
- * after canvas, the discovery board and panels, the portal and help are converted.
+ * Entities a workspace may rename. The SINGLE source for validation, the settings form, the resolver and the
+ * converted-surfaces coverage test (__tests__/thinking-model/converted-surfaces-guard.test.ts), which fails if an
+ * entity is listed here while a known screen for it still carries raw entity copy. Opening an entity therefore
+ * requires its screens to be converted first. All five are open as of Phase 4C-2.
  */
-export const OVERRIDABLE_ENTITIES = ["objective", "keyResult"] as const satisfies readonly ThinkingModelEntity[]
+export const OVERRIDABLE_ENTITIES = [
+  "opportunity",
+  "objective",
+  "keyResult",
+  "solution",
+  "cycle",
+] as const satisfies readonly ThinkingModelEntity[]
 export type OverridableEntity = (typeof OVERRIDABLE_ENTITIES)[number]
 
 /**

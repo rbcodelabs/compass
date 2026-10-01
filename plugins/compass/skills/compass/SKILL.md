@@ -361,7 +361,7 @@ may identify an optional archive, but is not evidence accessible to Compass read
 ---
 ## Thinking models (display names vs API names)
 
-A workspace admin picks a **thinking model** in Settings: `CLASSIC` (the default, also what a workspace that never chose reports), `OPPORTUNITY_FIRST_OKR`, or `TORRES_OST`. Under Torres the humans say **Outcome** for Objective and **Success metric** for Key Result, and a workspace may rename Objective and Key Result further.
+A workspace admin picks a **thinking model** in Settings: `CLASSIC` (the default, also what a workspace that never chose reports), `OPPORTUNITY_FIRST_OKR`, or `TORRES_OST`. Under Torres the humans say **Outcome** for Objective and **Success metric** for Key Result, and a workspace may rename any of the five entities (Opportunity, Objective, Key Result, Solution, Cycle) further.
 
 - **Tool names, descriptions, inputs and outputs always use the canonical names** (Objective, Key Result, `objectiveId`, `keyResultId`) under every model. Never translate them.
 - Read the vocabulary from `get_workspace_summary` or `get_workspace_by_slug`: `thinkingModel: { key, name, labels }`, where `labels` maps `opportunity`, `objective`, `keyResult`, `solution` and `cycle` to `{ singular, plural }`. Use those words when you write *to the humans* in that workspace (summaries, comments, docs), and canonical names when you call tools.

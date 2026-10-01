@@ -8,6 +8,12 @@
  * card, "Or add an Objective with no cycle", the objective-row empty message, and
  * the Cycle field in both panels. Their CLASSIC text is pinned to what #332 shipped
  * in classic-copy-pins.test.ts ("#332 optional-cycle copy").
+ *
+ * Phase 4C-2 converted the rest of the user-visible workspace screens (canvas, the Discovery board, table and swimlane,
+ * the Solution / Assumption / Feedback panels, measurements, decisions and reviews, search, squads, card sort, the
+ * Docs artifact page) and opened overrides for Opportunity, Solution and Cycle. What is NOT converted is listed in
+ * CANONICAL_FILES / CANONICAL_PREFIXES below, each with the category id from lib/thinking-model/canonical-surfaces.ts
+ * (the one list the settings notice and the help page are built from).
  */
 export const CONVERTED_FILES = [
   "components/sidebar.tsx",
@@ -56,4 +62,172 @@ export const CONVERTED_FILES = [
   // Phase 4C-1: the optional-cycle (#332) surfaces, converted. CLASSIC text is byte-identical to what #332 shipped.
   "lib/okr-cycle-scope.ts",
   "components/okrs/persistent-objectives-card.tsx",
+  // Phase 4C-2: the remaining workspace screens, converted whole (CLASSIC text identical to origin/main).
+  "lib/canvas/tiers.ts",
+  "components/canvas/canvas-flow.tsx",
+  "app/[orgSlug]/[workspaceSlug]/canvas/page.tsx",
+  "app/[orgSlug]/[workspaceSlug]/discovery/page.tsx",
+  "app/[orgSlug]/[workspaceSlug]/discovery/[opportunityId]/page.tsx",
+  "components/discovery/opportunity-board.tsx",
+  "components/discovery/opportunity-card.tsx",
+  "components/discovery/opportunity-field-board.tsx",
+  "components/discovery/new-opportunity-button.tsx",
+  "components/discovery/discovery-group-by-toggle.tsx",
+  "components/discovery/discovery-table-view.tsx",
+  "components/discovery/solution-swimlane-board.tsx",
+  "components/discovery/solution-card.tsx",
+  "components/discovery/opportunity-detail.tsx",
+  "components/discovery/ost-tree-view.tsx",
+  "components/discovery/add-solution-form.tsx",
+  "components/discovery/solutions-list.tsx",
+  "components/discovery/scoring-panel.tsx",
+  "components/discovery/solution-scoring-panel.tsx",
+  "components/discovery/opportunity-experiments-tab.tsx",
+  "components/panels/discovery-rail-panel.tsx",
+  "components/panels/solution-panel.tsx",
+  "components/panels/assumption-panel.tsx",
+  "components/panels/feedback-panel.tsx",
+  "components/analytics/measurements-panel.tsx",
+  "components/card-sort/card-sort-new-entries.tsx",
+  "components/card-sort/new-round-form.tsx",
+  "components/decisions/decisions-filters.tsx",
+  "components/decisions/new-decision-form.tsx",
+  "components/decisions/decision-sources.tsx",
+  "app/[orgSlug]/[workspaceSlug]/decisions/page.tsx",
+  "app/[orgSlug]/[workspaceSlug]/reviews/[requestId]/page.tsx",
+  "components/feedback/feedback-action-cell.tsx",
+  "components/feedback/feedback-composer.tsx",
+  "components/mobile-header.tsx",
+  "components/workspace-search-palette.tsx",
+  "components/roadmap/unscheduled-items-panel.tsx",
+  "components/scoring-models/workspace-scoring-panel.tsx",
+  "components/settings/delete-workspace-panel.tsx",
+  "components/squads/manage-squads-panel.tsx",
+  "app/[orgSlug]/[workspaceSlug]/capture/pm/new/page.tsx",
+  "components/docs/artifact-detail.tsx",
+  "lib/custom-field-filter.ts",
 ] as const
+
+/**
+ * The screens that show each entity's name, per entity. Every one must be converted (listed above) once that entity is
+ * overridable (OVERRIDABLE_ENTITIES in lib/thinking-model/presets.ts); converted-surfaces-guard.test.ts fails otherwise,
+ * and fails if an overridable entity has no recorded screens at all. A new screen that names an entity belongs here.
+ */
+export const ENTITY_SCREENS = {
+  opportunity: [
+    "components/discovery/opportunity-board.tsx",
+    "components/discovery/opportunity-card.tsx",
+    "components/discovery/opportunity-field-board.tsx",
+    "components/discovery/new-opportunity-button.tsx",
+    "components/discovery/discovery-group-by-toggle.tsx",
+    "components/discovery/discovery-table-view.tsx",
+    "components/discovery/solution-swimlane-board.tsx",
+    "components/discovery/opportunity-detail.tsx",
+    "components/discovery/opportunity-composer.tsx",
+    "components/discovery/opportunity-header.tsx",
+    "components/discovery/opportunity-overview.tsx",
+    "components/discovery/discovery-rail.tsx",
+    "components/discovery/scoring-panel.tsx",
+    "components/panels/solution-panel.tsx",
+    "components/panels/feedback-panel.tsx",
+    "components/panels/discovery-rail-panel.tsx",
+    "components/feedback/feedback-action-cell.tsx",
+    "components/canvas/canvas-flow.tsx",
+    "components/mobile-header.tsx",
+    "components/workspace-search-palette.tsx",
+    "components/decisions/new-decision-form.tsx",
+    "components/card-sort/card-sort-new-entries.tsx",
+    "components/card-sort/new-round-form.tsx",
+    "components/scoring-models/workspace-scoring-panel.tsx",
+    "components/squads/manage-squads-panel.tsx",
+    "components/settings/delete-workspace-panel.tsx",
+    "app/[orgSlug]/[workspaceSlug]/discovery/[opportunityId]/page.tsx",
+    "app/[orgSlug]/[workspaceSlug]/capture/pm/new/page.tsx",
+  ],
+  objective: [
+    "components/panels/objective-panel.tsx",
+    "components/okrs/objective-row.tsx",
+    "components/okrs/objectives-list.tsx",
+    "components/okrs/add-objective-form.tsx",
+    "components/okrs/outcomes-index.tsx",
+    "components/discovery/outcome-tree-view.tsx",
+    "components/sidebar.tsx",
+    "components/bottom-nav.tsx",
+    "components/canvas/canvas-flow.tsx",
+    "components/squads/manage-squads-panel.tsx",
+    "app/[orgSlug]/[workspaceSlug]/okrs/page.tsx",
+    "app/[orgSlug]/[workspaceSlug]/discovery/page.tsx",
+  ],
+  keyResult: [
+    "components/panels/key-result-panel.tsx",
+    "components/okrs/key-result-bar.tsx",
+    "components/okrs/add-key-result-form.tsx",
+    "components/discovery/opportunity-header.tsx",
+    "components/discovery/opportunity-overview.tsx",
+    "components/analytics/measurements-panel.tsx",
+    "components/canvas/canvas-flow.tsx",
+    "components/roadmap/add-item-form.tsx",
+  ],
+  solution: [
+    "components/panels/solution-panel.tsx",
+    "components/panels/assumption-panel.tsx",
+    "components/panels/linked-solutions-section.tsx",
+    "components/discovery/add-solution-form.tsx",
+    "components/discovery/solutions-list.tsx",
+    "components/discovery/solution-scoring-panel.tsx",
+    "components/discovery/solution-swimlane-board.tsx",
+    "components/discovery/solution-key-result-picker.tsx",
+    "components/discovery/ost-tree-view.tsx",
+    "components/discovery/opportunity-detail.tsx",
+    "components/discovery/opportunity-experiments-tab.tsx",
+    "components/discovery/opportunity-card.tsx",
+    "components/docs/artifact-detail.tsx",
+    "components/roadmap/unscheduled-items-panel.tsx",
+    "components/decisions/decision-sources.tsx",
+    "components/scoring-models/workspace-scoring-panel.tsx",
+    "app/[orgSlug]/[workspaceSlug]/reviews/[requestId]/page.tsx",
+    "app/[orgSlug]/[workspaceSlug]/capture/pm/new/page.tsx",
+  ],
+  cycle: [
+    "components/okrs/create-cycle-form.tsx",
+    "components/okrs/cycle-card.tsx",
+    "components/okrs/persistent-objectives-card.tsx",
+    "components/panels/objective-panel.tsx",
+    "lib/okr-cycle-scope.ts",
+    "lib/canvas/tiers.ts",
+    "app/[orgSlug]/[workspaceSlug]/okrs/page.tsx",
+    "app/[orgSlug]/[workspaceSlug]/okrs/[cycleId]/page.tsx",
+  ],
+} as const
+
+/**
+ * Files outside CONVERTED_FILES that carry raw entity copy on purpose: path -> id of the category in
+ * lib/thinking-model/canonical-surfaces.ts that explains why. The repo scan (converted-surfaces-guard.test.ts) fails for
+ * any component or app file with raw entity copy that is in neither list, so a screen cannot stay unconverted unnoticed.
+ */
+export const CANONICAL_FILES: Record<string, string> = {
+  // The settings screen that describes the presets themselves, in their canonical terms.
+  "components/settings/thinking-model-panel.tsx": "help-and-docs",
+  // Thrown or returned by server code that does not read the workspace's names; see the category's details.
+  "app/[orgSlug]/[workspaceSlug]/discovery/actions.ts": "server-messages",
+  "app/[orgSlug]/[workspaceSlug]/feedback/actions.ts": "server-messages",
+  "app/[orgSlug]/[workspaceSlug]/roadmap/actions.ts": "server-messages",
+  "components/settings/agent-activity.tsx": "agents-and-api",
+  "components/ui-registry.tsx": "internal-identifiers",
+  "components/agent/agent-chat.tsx": "research-and-agent-chat",
+  "components/settings/delete-organization-panel.tsx": "account-and-org-pages",
+  "components/settings/org-readonly-access-panel.tsx": "account-and-org-pages",
+  "components/scoring-models/manage-scoring-models-panel.tsx": "account-and-org-pages",
+  "app/layout.tsx": "account-and-org-pages",
+  "app/login/page.tsx": "account-and-org-pages",
+  "app/oauth/authorize/page.tsx": "account-and-org-pages",
+  "app/onboarding/onboarding-form.tsx": "account-and-org-pages",
+}
+
+export const CANONICAL_PREFIXES: Array<[prefix: string, categoryId: string]> = [
+  ["app/api/", "agents-and-api"],
+  ["components/marketing/", "public-surfaces"],
+  ["components/research/", "research-and-agent-chat"],
+  ["app/[orgSlug]/settings/", "account-and-org-pages"],
+]
+

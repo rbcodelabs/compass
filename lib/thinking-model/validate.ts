@@ -130,23 +130,9 @@ const ENTITY_NAMES: Record<ThinkingModelEntity, string> = {
  * renaming Objective to "Opportunity" is rejected, and under Torres a label of
  * "Outcome" cannot be reused.
  *
- * Only OVERRIDABLE_ENTITIES may be renamed for now; other entity keys get a
- * specific message, anything else the generic shape error.
+ * Only OVERRIDABLE_ENTITIES may be renamed; any other key is a shape error.
  */
 export function validateLabelOverrides(input: unknown, presetKey: string): LabelValidationResult {
-  if (typeof input === "object" && input !== null && !Array.isArray(input)) {
-    const unsupported = Object.keys(input).filter(
-      (key) =>
-        (THINKING_MODEL_ENTITIES as readonly string[]).includes(key) &&
-        !(OVERRIDABLE_ENTITIES as readonly string[]).includes(key),
-    )
-    if (unsupported.length > 0) {
-      const names = unsupported.map((k) => ENTITY_NAMES[k as ThinkingModelEntity]).join(", ")
-      const allowed = OVERRIDABLE_ENTITIES.map((k) => ENTITY_NAMES[k]).join(" and ")
-      return fail(`Renaming ${names} is not available yet. Only ${allowed} can be renamed for now.`)
-    }
-  }
-
   const parsedShape = parseShape(input)
   if (!parsedShape) return fail("Labels must be an object keyed by entity, with a singular and optional plural each.")
 
@@ -156,7 +142,7 @@ export function validateLabelOverrides(input: unknown, presetKey: string): Label
   const effective = new Map<ThinkingModelEntity, Set<string>>()
 
   for (const entity of THINKING_MODEL_ENTITIES) {
-    const entry = (parsedShape as Partial<Record<ThinkingModelEntity, LabelOverride>>)[entity]
+    const entry = parsedShape[entity]
     if (!entry) {
       effective.set(entity, new Set([fold(preset.labels[entity].singular), fold(preset.labels[entity].plural)]))
       continue
@@ -173,7 +159,7 @@ export function validateLabelOverrides(input: unknown, presetKey: string): Label
     for (const text of [singular.value, effectivePlural]) {
       if (reserved.has(fold(text))) return fail(`"${text}" is already the name of a section in the navigation.`)
     }
-    value[entity as OverridableEntity] = plural ? { singular: singular.value, plural } : { singular: singular.value }
+    value[entity] = plural ? { singular: singular.value, plural } : { singular: singular.value }
     effective.set(entity, new Set([fold(singular.value), fold(effectivePlural)]))
   }
 

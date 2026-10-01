@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import { getAllDocs, getDoc, getDocRaw, getHelpTopic, searchHelp } from "@/lib/docs"
+import { REMAINING_CANONICAL_SURFACES } from "@/lib/thinking-model/canonical-surfaces"
+import { OVERRIDABLE_ENTITIES } from "@/lib/thinking-model/presets"
+import { MAX_LABEL_LENGTH, MAX_OVERRIDES_BYTES } from "@/lib/thinking-model/validate"
 import { getHelp, searchHelp as searchHelpTool } from "@/lib/help-tool-handlers"
 
 describe("thinking-model and typed-link documentation is registered with the help tools", () => {
@@ -86,5 +91,50 @@ describe("thinking-model and typed-link documentation is registered with the hel
     const discovery = getDocRaw("02-discovery")!.content
     expect(discovery).not.toMatch(/Re-parenting a Solution to a different Opportunity is a deliberate action/)
     expect(discovery).toContain("there is no action")
+  })
+
+  describe("overrides for all five entities (Phase 4C-2)", () => {
+    const page = () => getDocRaw("27-thinking-models")!.content
+    const plain = (text: string) => text.replace(/\*\*|`/g, "").replace(/\s+/g, " ").toLowerCase()
+
+    it("says every overridable entity can be renamed and no longer says only two can", () => {
+      expect([...OVERRIDABLE_ENTITIES].sort()).toEqual(["cycle", "keyResult", "objective", "opportunity", "solution"])
+      expect(page()).toContain("## Renaming your entities")
+      for (const name of ["Opportunity", "Objective", "Key Result", "Solution", "Cycle"]) expect(page(), name).toContain(`**${name}**`)
+      expect(page()).not.toMatch(/Only those two can be renamed|names are fixed for now|Renaming Objective and Key Result/)
+    })
+
+    it("states the limits the validator enforces", () => {
+      expect(MAX_LABEL_LENGTH).toBe(32)
+      expect(MAX_OVERRIDES_BYTES).toBe(1024)
+      expect(page()).toContain(`up to ${MAX_LABEL_LENGTH} characters each`)
+      expect(page()).toContain("within 1 KB")
+    })
+
+    it("lists exactly the remaining canonical surfaces, from the one list the Settings notice uses", () => {
+      const doc = plain(page())
+      for (const surface of REMAINING_CANONICAL_SURFACES) {
+        expect(doc, surface.id).toContain(plain(surface.summary))
+        expect(doc, `${surface.id} reason`).toContain(plain(surface.reason))
+        for (const detail of surface.details ?? []) expect(doc, `${surface.id} detail`).toContain(plain(detail))
+      }
+      // Nothing is listed that the code does not list: every top-level bullet under the heading is a surface.
+      const section = page().split("## What still uses the standard names")[1].split("\n## ")[0]
+      const bullets = section.split("\n").filter((line) => /^- \*\*/.test(line))
+      expect(bullets).toHaveLength(REMAINING_CANONICAL_SURFACES.length)
+    })
+
+    it("no longer lists converted screens as standard-name screens", () => {
+      const doc = plain(page())
+      for (const stale of ["some screens still use the standard names", "solution, assumption, experiment and feedback panels", "measurements panel"]) expect(doc, stale).not.toContain(stale)
+    })
+
+    it("the agent docs and the skill describe all five labels", () => {
+      expect(getDocRaw("09-mcp-api")!.content).toContain("They cover all five entities")
+      const skill = readFileSync(path.join(process.cwd(), "plugins/compass/skills/compass/SKILL.md"), "utf-8")
+      expect(skill).toContain("rename any of the five entities (Opportunity, Objective, Key Result, Solution, Cycle)")
+      expect(skill).not.toContain("a workspace may rename Objective and Key Result further")
+      expect(getDocRaw("00-overview")!.content).toContain("rename any of Opportunity, Objective, Key Result, Solution and Cycle")
+    })
   })
 })

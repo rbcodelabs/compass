@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useUrlState } from "@/hooks/use-url-state";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fieldGroupByValue, type DiscoveryGroupBy } from "@/lib/opportunity-field-board";
@@ -23,6 +24,7 @@ export function DiscoveryGroupByToggle({
   fieldOptions?: DiscoveryGroupByFieldOption[];
 }) {
   const { set } = useUrlState();
+  const labels = useLabels();
 
   return (
     <Select
@@ -35,7 +37,7 @@ export function DiscoveryGroupByToggle({
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="status">Status</SelectItem>
-        <SelectItem value="opportunity">Opportunity</SelectItem>
+        <SelectItem value="opportunity">{labels.opportunity.singular}</SelectItem>
         {fieldOptions.map((option) => (
           <SelectItem key={option.id} value={fieldGroupByValue(option.id)}>
             {option.label}

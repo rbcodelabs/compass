@@ -13,6 +13,7 @@ import { getDecisionArtifacts } from "@/lib/artifacts"
 import { buildFollowUpDraft, suggestFollowUpAssignee } from "@/lib/decision-followthrough"
 import { eligibleTaskAssignees } from "@/lib/task-assignment"
 import { isChoiceActionKey, parseDecisionAnswers, parsePacketQuestions } from "@/lib/tracked-decision-types"
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { DecisionAnswerList, DecisionQuestionList } from "@/components/decisions/decision-answers"
 
 function parsePacket(raw: string): Record<string, unknown> {
@@ -39,6 +40,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
     },
   })
   if (!request?.currentRevision || (request.workspace.members.length === 0 && !isOrgAdminRole(request.workspace.organization.members[0]?.role))) notFound()
+  const { labels } = resolveThinkingModel(request.workspace)
   const revision = request.currentRevision
   const freshness = { stale: Boolean(revision.supersededAt) }
   const packet = parsePacket(revision.packetJson) as {
@@ -111,8 +113,8 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
       <section className="min-w-0 max-w-full rounded-lg border p-4 text-sm">
         {isTracked ? <div className="space-y-5">
           {trackedPacket
-            ? <DecisionSources orgSlug={orgSlug} workspaceSlug={workspaceSlug} entity={trackedPacket.entity} sources={trackedPacket.sources} supportingArtifacts={supportingArtifacts} />
-            : <div className="space-y-2"><h2 className="text-sm font-medium">Linked to</h2><p className="mt-2 text-muted-foreground">{request.subjectType.replaceAll("_", " ").toLowerCase()}</p>{supportingArtifacts}</div>}
+            ? <DecisionSources orgSlug={orgSlug} workspaceSlug={workspaceSlug} entity={trackedPacket.entity} sources={trackedPacket.sources} supportingArtifacts={supportingArtifacts} labels={labels} />
+            : <div className="space-y-2"><h2 className="text-sm font-medium">Linked to</h2><p className="mt-2 text-muted-foreground">{request.subjectType === "OPPORTUNITY" ? labels.opportunity.lower : request.subjectType === "SOLUTION" ? labels.solution.lower : request.subjectType.replaceAll("_", " ").toLowerCase()}</p>{supportingArtifacts}</div>}
           <div className="border-t pt-4">
             <h2 className="mb-2 text-sm font-medium">Context</h2>
             <DecisionLongForm content={trackedPacket?.context ?? revision.summary} />
@@ -127,10 +129,10 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
             <dt>Covered tasks</dt><dd>{packet.taskIds?.join(", ")}</dd>
             <dt>Policy</dt><dd>{packet.releasePolicyId}</dd>
           </> : isInvestment ? <>
-            <dt>Solution</dt><dd>{packet.solution?.title}</dd>
+            <dt>{labels.solution.singular}</dt><dd>{packet.solution?.title}</dd>
             {isRevocation && <><dt>Authority decision</dt><dd className="break-all font-mono">{packet.authorityDecisionId}</dd></>}
             <dt>Status</dt><dd>{packet.solution?.status}</dd>
-            <dt>Opportunity</dt><dd>{packet.solution?.opportunityTitle}</dd>
+            <dt>{labels.opportunity.singular}</dt><dd>{packet.solution?.opportunityTitle}</dd>
           </> : isPolicyActivation ? <>
             <dt>Workspace</dt><dd>{request.workspaceId}</dd>
             <dt>Mode</dt><dd>{packet.mode}</dd>
@@ -139,8 +141,8 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
             <dt>Native approvals</dt><dd>{packet.inspection?.verifiedDecisionCount}</dd>
           </> : <>
             <dt>Roadmap item</dt><dd>{packet.roadmapItem?.title}</dd>
-            <dt>Solution</dt><dd>{packet.roadmapItem?.solutionId ?? "Not linked"}</dd>
-            <dt>Opportunity</dt><dd>{packet.roadmapItem?.opportunityId ?? "Not linked"}</dd>
+            <dt>{labels.solution.singular}</dt><dd>{packet.roadmapItem?.solutionId ?? "Not linked"}</dd>
+            <dt>{labels.opportunity.singular}</dt><dd>{packet.roadmapItem?.opportunityId ?? "Not linked"}</dd>
             <dt>Owning squad</dt><dd>{packet.roadmapItem?.squadId ?? "Unassigned"}</dd>
             <dt>Policy</dt><dd>{packet.policyVersion}</dd>
           </>}

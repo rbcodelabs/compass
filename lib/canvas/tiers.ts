@@ -1,3 +1,4 @@
+import type { ResolvedLabels } from "@/lib/thinking-model/labels";
 /**
  * Zoom-driven semantic tiers for the Canvas viewer.
  *
@@ -52,8 +53,8 @@ export function isNodeTypeVisibleAtTier(type: CanvasNodeType, tier: CanvasTier):
 
 /** Human-readable labels matching the design doc's own tier names, shown in
  * the read-only tier indicator badge. */
-export const TIER_LABELS: Record<CanvasTier, string> = {
+export const tierLabels = (labels: ResolvedLabels): Record<CanvasTier, string> => ({
   T0: "Portfolio",
-  T1: "Cycle",
+  T1: labels.cycle.singular,
   T2: "Detail",
-};
+});

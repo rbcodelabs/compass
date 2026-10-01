@@ -11,6 +11,7 @@
  * Quarter work without a code change.
  */
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -34,6 +35,7 @@ export function NewRoundForm({
   factors: FactorOption[]
 }) {
   const router = useRouter()
+  const labels = useLabels()
   const [fieldDefinitionId, setFieldDefinitionId] = useState(factors[0]?.id ?? "")
   const [name, setName] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -45,8 +47,8 @@ export function NewRoundForm({
   if (factors.length === 0) {
     return (
       <p className="text-sm text-text-secondary">
-        This workspace has no SELECT custom fields on opportunities, so there is nothing to sort by.
-        A factor is a SELECT field &mdash; its options become the buckets.
+        {`This workspace has no SELECT custom fields on ${labels.opportunity.lowerPlural}, so there is nothing to sort by.`}
+        {" "}A factor is a SELECT field &mdash; its options become the buckets.
       </p>
     )
   }

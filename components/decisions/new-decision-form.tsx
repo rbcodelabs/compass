@@ -1,5 +1,6 @@
 "use client"
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { createTrackedDecisionAction } from "@/app/[orgSlug]/[workspaceSlug]/reviews/actions"
@@ -31,6 +32,7 @@ export function NewDecisionForm({ workspaceId, orgSlug, workspaceSlug, subjects,
   initial?: Partial<Pick<DecisionSubjectOption, "type" | "id">> & { question?: string; context?: string; options?: Array<{ label: string; description?: string | null }>; questions?: Array<{ header?: string | null; question: string; options: Array<{ label: string; description?: string | null }> }> }
   revise?: { requestId: string; expectedDecisionId: string; reason: string }
 }) {
+  const labels = useLabels()
   const [idempotencyKey] = useState(() => crypto.randomUUID())
   const nextOptionKey = useRef(initial?.options?.length ?? 0)
   const [optionDrafts, setOptionDrafts] = useState<OptionDraft[]>(() => (initial?.options ?? []).map((option, index) => ({ key: index, label: option.label, description: option.description ?? "" })))
@@ -133,7 +135,7 @@ export function NewDecisionForm({ workspaceId, orgSlug, workspaceSlug, subjects,
   return <form onSubmit={submit} className="max-w-2xl space-y-5 rounded-xl border bg-card p-6">
     <label className="block space-y-1 text-sm"><span className="font-medium">Link to</span>
       <select className="w-full rounded-md border bg-background px-3 py-2" value={type} onChange={(event) => changeType(event.target.value as TrackedSubjectType)} disabled={Boolean(revise)}>
-        <option value="WORKSPACE">Workspace</option><option value="OPPORTUNITY">Opportunity</option><option value="SOLUTION">Solution</option><option value="ROADMAP_ITEM">Roadmap Item</option><option value="DOC">Doc</option><option value="EXPERIMENT">Experiment</option><option value="FEEDBACK">Feedback</option>
+        <option value="WORKSPACE">Workspace</option><option value="OPPORTUNITY">{labels.opportunity.singular}</option><option value="SOLUTION">{labels.solution.singular}</option><option value="ROADMAP_ITEM">Roadmap Item</option><option value="DOC">Doc</option><option value="EXPERIMENT">Experiment</option><option value="FEEDBACK">Feedback</option>
       </select>
     </label>
     <label className="block space-y-1 text-sm"><span className="font-medium">Item</span>

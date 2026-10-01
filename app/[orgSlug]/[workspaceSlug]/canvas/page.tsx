@@ -39,7 +39,7 @@ export default async function CanvasPage({ params }: CanvasPageProps) {
   // would make that test meaningless.
   // A preset that hides the Opportunity<->Objective link (CLASSIC) draws only user-made links, so the backfilled LEGACY ones
   // are not even read for it. The data is identical across presets; this only avoids sending rows nothing will draw.
-  const { links } = resolveThinkingModel(workspace);
+  const { links, labels } = resolveThinkingModel(workspace);
   const overview = await getCanvasOverview(prisma, workspace.id, {
     linkOrigins: links.oppToObjective === "hidden" ? "DIRECT" : "ALL",
   });
@@ -49,7 +49,7 @@ export default async function CanvasPage({ params }: CanvasPageProps) {
       <div className="p-4 pb-4 sm:p-6 sm:pb-4 md:p-8 md:pb-4">
         <PageHeader
           title="Canvas"
-          description="Pan and zoom across your full OKR, discovery, and roadmap graph."
+          description={`Pan and zoom across your full ${labels.sections.okr}, discovery, and roadmap graph.`}
         />
       </div>
       <div className="flex-1 min-h-0">

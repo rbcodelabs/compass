@@ -31,7 +31,7 @@ import {
   type GridPosition,
 } from "@/lib/canvas/layout";
 import { buildCanvasEdges } from "@/lib/canvas/edges";
-import { getTierForZoom, isNodeTypeVisibleAtTier, TIER_LABELS, type CanvasTier } from "@/lib/canvas/tiers";
+import { getTierForZoom, isNodeTypeVisibleAtTier, tierLabels, type CanvasTier } from "@/lib/canvas/tiers";
 import { ObjectiveNode, type ObjectiveNodeType } from "@/components/canvas/objective-node";
 import { KeyResultNode, type KeyResultNodeType } from "@/components/canvas/key-result-node";
 import { OpportunityNode, type OpportunityNodeType } from "@/components/canvas/opportunity-node";
@@ -184,7 +184,7 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
   // Clicking a node opens that entity's detail panel (see components/panels).
   const { openPanel } = usePanelContext();
   // Which link edges are drawn is a presentation rule of the workspace's thinking model (see buildCanvasEdges).
-  const { links: linkEmphasis } = useThinkingModel();
+  const { links: linkEmphasis, labels } = useThinkingModel();
 
   const [nodes, setNodes] = useState<CanvasFlowNode[] | null>(null);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -563,8 +563,7 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
         <div>
           <p className="font-semibold text-text-primary">Nothing to show yet</p>
           <p className="text-sm text-text-subtle mt-1 max-w-xs mx-auto">
-            Add Objectives and Key Results from the OKRs page to see them
-            here.
+            {`Add ${labels.objective.plural} and ${labels.keyResult.plural} from the ${labels.sections.okrs} page to see them here.`}
           </p>
         </div>
       </div>
@@ -646,7 +645,7 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
           position="top-left"
           className="rounded-md border border-border bg-background/90 px-2.5 py-1 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur-sm"
         >
-          {TIER_LABELS[tier]}
+          {tierLabels(labels)[tier]}
         </Panel>
       </ReactFlow>
     </div>

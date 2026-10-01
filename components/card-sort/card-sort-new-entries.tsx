@@ -1,5 +1,6 @@
 "use client"
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { useState } from "react"
 import Link from "next/link"
 import { Plus } from "lucide-react"
@@ -68,6 +69,7 @@ export function ProposeNewEntryButton({
   roundId,
   options,
 }: RoundRef & { options: Option[] }) {
+  const labels = useLabels()
   const { proposeEntry, error, setError, working } = useCardSortProposals({
     orgSlug,
     workspaceSlug,
@@ -108,10 +110,9 @@ export function ProposeNewEntryButton({
       <DialogContent>
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
-            <DialogTitle>Propose a new opportunity</DialogTitle>
+            <DialogTitle>{`Propose a new ${labels.opportunity.lower}`}</DialogTitle>
             <DialogDescription>
-              This is a request, not an opportunity yet. It is only created if the person running
-              this round accepts it. Until the round is revealed, only you and they can see it.
+              {`This is a request, not ${labels.opportunity.indefinite} yet. It is only created if the person running this round accepts it. Until the round is revealed, only you and they can see it.`}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-1">
@@ -267,6 +268,7 @@ export function CardSortNewEntries({
   options: Option[]
   entries: NewEntryItem[]
 }) {
+  const labels = useLabels()
   const { withdrawEntry, resolveEntry, error, working } = useCardSortProposals({
     orgSlug,
     workspaceSlug,
@@ -319,7 +321,7 @@ export function CardSortNewEntries({
                     className="text-xs underline"
                     href={`/${orgSlug}/${workspaceSlug}/discovery/${entry.acceptedObjectId}`}
                   >
-                    Open the new opportunity
+                    {`Open the new ${labels.opportunity.lower}`}
                   </Link>
                 )}
               </div>

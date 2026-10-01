@@ -45,10 +45,21 @@ export type NormalizedOpportunityInput = {
 
 /** A validation failure whose message is safe to show the user as-is. */
 export class OpportunityCreateError extends Error {
-  constructor(message: string) {
+  /**
+   * Set when the message names an entity, so a caller that knows the workspace's names (the composer action) can say it
+   * in their words. MCP and card sort keep the canonical `message`.
+   */
+  readonly code?: "KEY_RESULT_OUTSIDE_WORKSPACE"
+  constructor(message: string, code?: "KEY_RESULT_OUTSIDE_WORKSPACE") {
     super(message)
     this.name = "OpportunityCreateError"
+    this.code = code
   }
+}
+
+/** The error text for the workspace's own names. Only the Key Result message names an entity; the rest read as-is. */
+export function opportunityCreateErrorMessage(error: OpportunityCreateError, keyResultLower: string): string {
+  return error.code === "KEY_RESULT_OUTSIDE_WORKSPACE" ? `That ${keyResultLower} is not in this workspace.` : error.message
 }
 
 const blankToNull = (value: string | null | undefined) => {
@@ -130,7 +141,7 @@ export async function createOpportunityWithLinks(
           select: { id: true },
         }))
       ) {
-        throw new OpportunityCreateError("That key result is not in this workspace.")
+        throw new OpportunityCreateError("That key result is not in this workspace.", "KEY_RESULT_OUTSIDE_WORKSPACE")
       }
       if (objectiveIds.length > 0) {
         const found = await tx.objective.findMany({ where: { id: { in: objectiveIds }, workspaceId }, select: { id: true } })

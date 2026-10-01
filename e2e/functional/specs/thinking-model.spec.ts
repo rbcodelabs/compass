@@ -78,10 +78,13 @@ test.describe("Thinking model", () => {
     const panel = page.getByTestId("thinking-model-panel");
     await panel.scrollIntoViewIfNeeded();
     await panel.getByTestId("thinking-model-TORRES_OST").check();
-    // Every shipped preset is offered, and only Objective / Key Result can be renamed.
+    // Every shipped preset is offered, and all five entities can be renamed.
     await expect(panel.getByTestId("thinking-model-OPPORTUNITY_FIRST_OKR")).toHaveCount(1);
-    await expect(panel.getByLabel("Solution (singular)")).toHaveCount(0);
-    await expect(panel.getByTestId("thinking-model-notice")).toContainText("canvas");
+    await expect(panel.getByLabel("Solution (singular)")).toHaveCount(1);
+    await expect(panel.getByLabel("Cycle (plural)")).toHaveCount(1);
+    // The notice lists what stays canonical (the canvas and the discovery board are converted now).
+    await expect(panel.getByTestId("thinking-model-notice")).toContainText("agent (MCP) tools");
+    await expect(panel.getByTestId("thinking-model-notice")).not.toContainText("canvas");
     await panel.getByLabel("Key Result (singular)").fill("Signal");
     await panel.getByTestId("thinking-model-save").click();
     await expect(panel.getByText("Saved.")).toBeVisible({ timeout: 15_000 });

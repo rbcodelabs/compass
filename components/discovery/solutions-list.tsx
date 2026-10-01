@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useEffect, useState, useTransition, useId } from "react";
 import {
   DndContext,
@@ -33,6 +34,7 @@ export function SolutionsList({
   showScore = false,
   onChanged,
 }: Props) {
+  const labels = useLabels();
   const [solutions, setSolutions] = useState(initialSolutions);
   const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +72,7 @@ export function SolutionsList({
           onChanged?.();
         } catch {
           setSolutions(initialSolutions);
-          setError("Could not reorder solutions. Please try again.");
+          setError(`Could not reorder ${labels.solution.lowerPlural}. Please try again.`);
         }
       });
     }

@@ -40,7 +40,7 @@ Workspaces on the Opportunity-first or Torres model show these links in a worksp
 
 ### Words are a workspace setting
 
-A workspace admin can choose a **thinking model** in Settings that changes how Compass names and presents these entities. **Classic OKRs** is the default and unchanged. **Opportunity-first OKRs** puts the opportunity pool first. **Torres opportunity solution tree** calls an Objective an **Outcome** and a Key Result a **Success metric**. Choosing a model never changes your data. Agents and API tools always use the standard names. See [Thinking models](/help/27-thinking-models).
+A workspace admin can choose a **thinking model** in Settings that changes how Compass names and presents these entities. **Classic OKRs** is the default and unchanged. **Opportunity-first OKRs** puts the opportunity pool first. **Torres opportunity solution tree** calls an Objective an **Outcome** and a Key Result a **Success metric**. Admins can also rename any of Opportunity, Objective, Key Result, Solution and Cycle for their workspace. Choosing a model or a name never changes your data. Agents and API tools always use the standard names. See [Thinking models](/help/27-thinking-models).
 
 ## How the Sections Connect
 

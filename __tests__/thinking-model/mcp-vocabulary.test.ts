@@ -30,6 +30,36 @@ describe("thinkingModelForMcp", () => {
     expect(r.line).not.toMatch(/ignore/i)
   })
 
+  it("the structured payload carries all five entities, including opportunity, solution and cycle overrides", () => {
+    const r = thinkingModelForMcp({
+      thinkingModel: "TORRES_OST",
+      thinkingModelLabels: JSON.stringify({
+        opportunity: { singular: "Problem", plural: "Problems" },
+        solution: { singular: "Bet" },
+        cycle: { singular: "Sprint" },
+      }),
+    })
+    expect(Object.keys(r.structured.labels).sort()).toEqual(["cycle", "keyResult", "objective", "opportunity", "solution"])
+    expect(r.structured.labels).toEqual({
+      opportunity: { singular: "Problem", plural: "Problems" },
+      objective: { singular: "Outcome", plural: "Outcomes" },
+      keyResult: { singular: "Success metric", plural: "Success metrics" },
+      solution: { singular: "Bet", plural: "Bets" },
+      cycle: { singular: "Sprint", plural: "Sprints" },
+    })
+    // The prose names canonical entities only, never the workspace's words.
+    expect(r.line).toContain("Opportunities")
+    expect(r.line).toContain("Solutions")
+    expect(r.line).toContain("Cycles")
+    expect(r.line).not.toMatch(/Problem|Bet|Sprint/)
+  })
+
+  it("an override that only differs in the plural still counts as renamed", () => {
+    const r = thinkingModelForMcp({ thinkingModelLabels: JSON.stringify({ solution: { singular: "Solution", plural: "Solutionz" } }) })
+    expect(r.line).toContain("Solutions")
+    expect(r.structured.labels.solution.plural).toBe("Solutionz")
+  })
+
   it("corrupt stored labels fall back safely", () => {
     const r = thinkingModelForMcp({ thinkingModel: "CLASSIC", thinkingModelLabels: "{oops" })
     expect(r.line).toBeNull()

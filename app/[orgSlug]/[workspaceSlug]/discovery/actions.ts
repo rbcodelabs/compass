@@ -4,7 +4,7 @@ import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
-import { OpportunityCreateError, createOpportunityWithLinks, type NewOpportunityInput } from "@/lib/opportunity-create";
+import { OpportunityCreateError, createOpportunityWithLinks, opportunityCreateErrorMessage, type NewOpportunityInput } from "@/lib/opportunity-create";
 import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
 import { setOpportunityKeyResult } from "@/lib/typed-links";
 import { loadThinkingModelSource } from "@/lib/thinking-model/link-surfaces";
@@ -73,7 +73,18 @@ export async function createOpportunityFromComposer(
     if (data.objectiveIds?.length) revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`);
     return { ok: true, opportunity: { id: opportunity.id, title: opportunity.title } };
   } catch (error) {
-    if (error instanceof OpportunityCreateError) return { ok: false, error: error.message };
+    if (error instanceof OpportunityCreateError) {
+      // The key-result message names an entity; say it in the workspace's words (the other messages name none).
+      let keyResultLower = "key result";
+      if (error.code) {
+        try {
+          keyResultLower = resolveThinkingModel(await loadThinkingModelSource(getPrisma(), workspaceId)).labels.keyResult.lower;
+        } catch {
+          // A failed lookup must not replace the validation message; the canonical wording is still correct.
+        }
+      }
+      return { ok: false, error: opportunityCreateErrorMessage(error, keyResultLower) };
+    }
     // A failed objective link (including a missing link table) rolled the whole create back. Fail loudly but generically:
     // log only the error name and code (a database error message can carry row data) and keep the draft.
     if (data.objectiveIds?.length) {

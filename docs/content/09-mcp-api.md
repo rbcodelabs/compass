@@ -364,9 +364,9 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 ```
 
 - `key` is `CLASSIC` (also reported for a workspace that never chose a model), `OPPORTUNITY_FIRST_OKR` or `TORRES_OST`.
-- `labels` are how the people in the workspace talk. They include any workspace-specific renames of Objective and Key Result.
+- `labels` are how the people in the workspace talk. They cover all five entities (`opportunity`, `objective`, `keyResult`, `solution`, `cycle`) and include any workspace-specific renames of them.
 - **Tool names, tool descriptions, input fields and every other part of the output stay canonical** (Objective, Key Result, `objectiveId`, `keyResultId`) under every model. Use the labels only when you write to the humans in that workspace.
-- When a workspace shows custom names for Objectives or Key Results, the text output gains one line pointing at `thinkingModel.labels`. The label text itself appears only in the structured data, never in that line.
+- When a workspace shows custom names for any entity, the text output gains one line pointing at `thinkingModel.labels`. The label text itself appears only in the structured data, never in that line.
 - The model is presentation only. Data, links and validation are identical under every model, so no tool behaves differently.
 
 ### OKRs

@@ -28,16 +28,6 @@ export type CustomFieldFilterGroup = {
   options: { value: string; label: string; color: string | null }[]
 }
 
-const OBJECT_TYPE_LABELS: Record<CustomFieldObjectType, string> = {
-  OPPORTUNITY: "Opportunity",
-  SOLUTION: "Solution",
-  EXPERIMENT: "Experiment",
-  OBJECTIVE: "Objective",
-  KEY_RESULT: "Key Result",
-  ROADMAP_ITEM: "Roadmap Item",
-  TASK: "Task",
-}
-
 /**
  * The facets a page can offer: its object types' picklist fields that actually
  * have options. When a page spans two object types (Discovery renders both
@@ -45,7 +35,9 @@ const OBJECT_TYPE_LABELS: Record<CustomFieldObjectType, string> = {
  * indistinguishable in the menu, so those get an object-type suffix.
  */
 export function buildCustomFieldFilterGroups(
-  fields: readonly CustomFieldDefinitionData[]
+  fields: readonly CustomFieldDefinitionData[],
+  /** Display names for the object types: screens pass the workspace's own words, objectTypeLabels(labels). */
+  typeNames: Record<CustomFieldObjectType, string>
 ): CustomFieldFilterGroup[] {
   const filterable = fields.filter(isFilterableField)
   const nameCounts = new Map<string, number>()
@@ -56,7 +48,7 @@ export function buildCustomFieldFilterGroups(
     fieldId: field.id,
     label:
       (nameCounts.get(field.name) ?? 0) > 1
-        ? `${field.name} (${OBJECT_TYPE_LABELS[field.objectType]})`
+        ? `${field.name} (${typeNames[field.objectType]})`
         : field.name,
     objectType: field.objectType,
     options: (field.options ?? []).map((option) => ({

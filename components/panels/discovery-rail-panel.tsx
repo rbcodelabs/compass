@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useEffect, useState } from "react";
 import { DiscoveryRail, type DiscoveryRailOpportunity } from "@/components/discovery/discovery-rail";
 import { usePanelContext } from "./panel-context";
@@ -20,6 +21,7 @@ export function DiscoveryRailPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
+  const labels = useLabels();
   const { closePanel } = usePanelContext();
   const [data, setData] = useState<DiscoveryRailData | null>(null);
   const [error, setError] = useState(false);
@@ -39,7 +41,7 @@ export function DiscoveryRailPanel({
   if (error) {
     return (
       <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        Could not load opportunities.
+        {`Could not load ${labels.opportunity.lowerPlural}.`}
       </div>
     );
   }

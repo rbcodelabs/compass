@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import { RESERVED_SECTION_NAMES } from "@/lib/thinking-model/validate"
-import { CONVERTED_FILES } from "./converted-files"
+import { OVERRIDABLE_ENTITIES, THINKING_MODEL_ENTITIES, type ThinkingModelEntity } from "@/lib/thinking-model/presets"
+import { REMAINING_CANONICAL_SURFACES } from "@/lib/thinking-model/canonical-surfaces"
+import { CANONICAL_FILES, CANONICAL_PREFIXES, CONVERTED_FILES, ENTITY_SCREENS } from "./converted-files"
+import { rawEntityCopy } from "./copy-extract"
 
 /**
  * TRIPWIRE, not a proof.
@@ -12,10 +15,16 @@ import { CONVERTED_FILES } from "./converted-files"
  * literals, template literal text and JSX text, so a copy edit that reintroduces
  * "Objective" next to a label-driven "Outcome" fails loudly.
  *
- * It is heuristic: it does not parse TypeScript, it cannot see strings built
- * elsewhere, and a determined author can defeat it. A clean run means "no obvious
- * raw entity copy", not "every string is label-driven". The explicit allowlist
- * below is the complete list of raw words that are deliberately left.
+ * It parses the source (copy-extract.ts) but it is still heuristic: it cannot see
+ * strings built elsewhere or imported, and a determined author can defeat it. A clean
+ * run means "no obvious raw entity copy", not "every string is label-driven". The
+ * explicit allowlist below is the complete list of raw words that are deliberately left.
+ *
+ * Three further checks hang off the same scan (Phase 4C-2):
+ *  - an entity may only be overridable if every known screen that names it is converted;
+ *  - every component or app file with raw entity copy is either converted or listed as
+ *    canonical, with the reason category the settings notice and the help page use;
+ *  - the canonical list itself is consistent with the source tree (no stale entries).
  */
 
 const ROOT = process.cwd()
@@ -30,110 +39,83 @@ const ALLOWED: Array<[string, string]> = [
   ["app/[orgSlug]/[workspaceSlug]/okrs/page.tsx", "No OKR yet"],
   // Markdown template inserted into a new opportunity's description; a heading in
   // user-owned content, not the name of an entity.
-  ["components/discovery/opportunity-composer.tsx", "## Who's affected\\n\\n\\n\\n## Current pain\\n\\n\\n\\n## Evidence\\n\\n\\n\\n## Desired outcome\\n\\n"],
+  ["components/discovery/opportunity-composer.tsx", "## Who's affected ## Current pain ## Evidence ## Desired outcome"],
+  // "Outcome" here is the decision's outcome (Approved / Changes requested / Rejected), not an Objective.
+  ["components/decisions/decisions-filters.tsx", "Outcome"],
+  // The ordinary English word, in a placeholder.
+  ["components/feedback/feedback-composer.tsx", "What problem does this solve? Who runs into it, and what would a great outcome look like?"],
 ]
 
 const normalize = (s: string) => s.replace(/\s+/g, " ").trim()
 
-const ENTITY_WORD =
-  /\b(objectives?|key[ -]results?|krs?|okrs?|outcomes?|opportunit(?:y|ies)|solutions?|cycles?|success metrics?)\b/i
-
-export function stripNonCopy(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/(^|\s)\/\/.*$/gm, "$1")
-    .replace(/\bfrom\s+["'][^"']*["']/g, "")
-    .replace(/^\s*import\s+["'][^"']*["'];?$/gm, "")
+/** Which words name which entity, for the per-entity coverage check. */
+const ENTITY_WORDS: Record<ThinkingModelEntity, RegExp> = {
+  opportunity: /\bopportunit(?:y|ies)\b/i,
+  objective: /\b(?:objectives?|outcomes?)\b/i,
+  keyResult: /\b(?:key[ -]results?|krs?|success metrics?)\b/i,
+  solution: /\bsolutions?\b/i,
+  cycle: /\bcycles?\b/i,
 }
 
-/** Static text of "..." / '...' / `...` literals, with ${...} expressions removed. */
-function stringFragments(source: string): string[] {
-  const out: string[] = []
-  const re = /"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(source))) {
-    const raw = m[1] ?? m[2] ?? m[3] ?? ""
-    // Empty, not a space, so a path like `/${org}/${ws}/okrs/` stays one token.
-    out.push(raw.replace(/\$\{[^}]*\}/g, ""))
-  }
-  return out
-}
+const read = (file: string) => readFileSync(path.join(ROOT, file), "utf-8")
+const allowedFor = (file: string) => ALLOWED.filter(([f]) => f === file).map(([, fragment]) => fragment)
+const offendersIn = (file: string) => rawEntityCopy(read(file), file).filter((fragment) => !allowedFor(file).includes(normalize(fragment)))
 
-/** Text between tags on a line, after dropping literals and {expressions}. */
-function jsxTextFragments(source: string): string[] {
-  const out: string[] = []
-  for (const line of source.split("\n")) {
-    const text = line
-      .replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, " ")
-      .replace(/\{[^{}]*\}/g, " ")
-      .replace(/<[^>]*>?/g, "\u0000")
-    for (const segment of text.split("\u0000")) {
-      const s = segment.trim()
-      // Code never looks like prose: no operators, call parens, or statement ends.
-      // A parenthesised word ("(optional)") is prose; a call is `name(`.
-      const prose = s.replace(/&(?:apos|amp|quot);/g, "").replace(/\s\([A-Za-z ]*\)/g, "")
-      if (!s || /[=;()[\]{}<>|&]/.test(prose)) continue
-      if (!/^[A-Za-z]/.test(s)) continue
-      // Object-literal lines (`cycleId: x.id,`) and property access (`kr.id`).
-      if (/^[\w$]+\s*:/.test(s) || /\w\.\w/.test(s)) continue
-      out.push(s)
+/**
+ * For the given entities, the screens that name them but are not converted, or still carry that entity's raw words.
+ * Pure over its inputs so the canary can feed it a deliberately broken world.
+ */
+export function unconvertedScreens(
+  overridable: readonly ThinkingModelEntity[],
+  screens: Record<string, readonly string[]>,
+  converted: readonly string[],
+  scan: (file: string) => string[],
+): string[] {
+  const problems: string[] = []
+  for (const entity of overridable) {
+    const files = screens[entity] ?? []
+    if (files.length === 0) problems.push(`${entity}: overridable but no known screens are recorded for it`)
+    for (const file of files) {
+      if (!converted.includes(file)) problems.push(`${entity}: ${file} is not in CONVERTED_FILES`)
+      for (const hit of scan(file)) if (ENTITY_WORDS[entity].test(hit)) problems.push(`${entity}: ${file} still says ${JSON.stringify(hit)}`)
     }
   }
-  return out
+  return problems
 }
 
-export function rawEntityCopy(source: string): string[] {
-  const cleaned = stripNonCopy(source)
-  const hits: string[] = []
-  // Strings that are copy by position, so even a lone lowercase token counts:
-  // label="objective", placeholder="…", `label: "…"`, aria-label, title, alt.
-  const copyPositions =
-    /\b(?:label|aria-label|placeholder|title|alt|emptyMessage|inputPlaceholder|description|templateLabel)\s*[=:]\s*\{?\s*(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)')/g
-  const positional = new Set<string>()
-  for (const m of cleaned.matchAll(copyPositions)) {
-    const text = m[1] ?? m[2] ?? ""
-    if (ENTITY_WORD.test(text)) {
-      positional.add(text)
-      hits.push(text)
-    }
-  }
-  for (const fragment of stringFragments(cleaned)) {
-    const f = fragment.trim()
-    if (!ENTITY_WORD.test(f)) continue
-    if (positional.has(fragment)) continue
-    const singleToken = !/\s/.test(f)
-    // Identifiers and paths: "objective", "OBJECTIVE", "keyResult", "/okrs/".
-    if (singleToken && !/^[A-Z][a-z]+s?$/.test(f)) continue
-    hits.push(fragment)
-  }
-  for (const s of jsxTextFragments(cleaned)) {
-    if (!ENTITY_WORD.test(s)) continue
-    const words = s.split(/\s+/)
-    if (words.length < 2 && !/^[A-Z]/.test(s)) continue
-    hits.push(s)
-  }
-  return hits
+function walk(dir: string): string[] {
+  const full = path.join(ROOT, dir)
+  if (!existsSync(full)) return []
+  return readdirSync(full).flatMap((entry) => {
+    if (entry === "node_modules" || entry.startsWith(".")) return []
+    const rel = `${dir}/${entry}`
+    return statSync(path.join(ROOT, rel)).isDirectory() ? walk(rel) : /\.(ts|tsx)$/.test(entry) && !/\.(test|spec)\.|\.d\.ts$/.test(entry) ? [rel] : []
+  })
 }
+
+const canonicalCategoryOf = (file: string): string | undefined =>
+  CANONICAL_FILES[file] ?? CANONICAL_PREFIXES.find(([prefix]) => file.startsWith(prefix))?.[1]
 
 describe("converted surfaces carry no raw entity copy (tripwire)", () => {
   it.each(CONVERTED_FILES)("%s", (file) => {
-    const source = readFileSync(path.join(ROOT, file), "utf-8")
-    const allowed = ALLOWED.filter(([f]) => f === file).map(([, fragment]) => fragment)
-    const offenders = rawEntityCopy(source).filter((fragment) => !allowed.includes(normalize(fragment)))
-    expect(offenders).toEqual([])
+    expect(offendersIn(file)).toEqual([])
   })
 
   it("every ALLOWED entry is still produced by its file (no stale allowlist)", () => {
     for (const [file, fragment] of ALLOWED) {
-      const hits = rawEntityCopy(readFileSync(path.join(ROOT, file), "utf-8")).map(normalize)
+      const hits = rawEntityCopy(read(file), file).map(normalize)
       expect(hits, `${file}: stale allowlist entry ${JSON.stringify(fragment)}`).toContain(fragment)
       expect(CONVERTED_FILES).toContain(file)
     }
   })
 
+  it("every converted file exists", () => {
+    for (const file of CONVERTED_FILES) expect(existsSync(path.join(ROOT, file)), file).toBe(true)
+  })
+
   it("RESERVED_SECTION_NAMES covers every static label in the sidebar and bottom nav", () => {
     const labels = ["components/sidebar.tsx", "components/bottom-nav.tsx"].flatMap((file) =>
-      [...readFileSync(path.join(ROOT, file), "utf-8").matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]),
+      [...read(file).matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]),
     )
     expect(labels.length).toBeGreaterThan(8)
     const reserved = RESERVED_SECTION_NAMES.map((n) => n.toLowerCase())
@@ -155,5 +137,70 @@ describe("converted surfaces carry no raw entity copy (tripwire)", () => {
     expect(rawEntityCopy('<PanelError label="objective" />')).toEqual(["objective"])
     expect(rawEntityCopy('<X aria-label="Linked to a key result" />')).toEqual(["Linked to a key result"])
     expect(rawEntityCopy('const items = [{ label: "solution" }]')).toEqual(["solution"])
+  })
+
+  it("canary: sees copy the old line scanner missed (one-line conditionals, ids stay ignored)", () => {
+    expect(rawEntityCopy("const a = <div>{!compact && <p className=\"x\">Not a key result update.</p>}</div>")).toEqual(["Not a key result update."])
+    expect(rawEntityCopy("const a = cond ? <b>Open the new opportunity</b> : null")).toEqual(["Open the new opportunity"])
+    expect(rawEntityCopy("const id = `outcome-kr-chip-${a}-${b}`")).toEqual([])
+    expect(rawEntityCopy("const p = `/${org}/${ws}/okrs/${id}`")).toEqual([])
+    expect(rawEntityCopy('const el = <div data-testid="opportunity-board" />')).toEqual([])
+  })
+})
+
+describe("an entity may only be overridable once its screens are converted", () => {
+  it("ENTITY_SCREENS records screens for every entity", () => {
+    expect(Object.keys(ENTITY_SCREENS).sort()).toEqual([...THINKING_MODEL_ENTITIES].sort())
+  })
+
+  it("every overridable entity: all its known screens are converted and carry none of its raw words", () => {
+    const problems = unconvertedScreens(OVERRIDABLE_ENTITIES, ENTITY_SCREENS, CONVERTED_FILES, (file) => rawEntityCopy(read(file), file).filter((f) => !allowedFor(file).includes(normalize(f))))
+    expect(problems).toEqual([])
+  })
+
+  it("canary: the check fails for an overridable entity with an unconverted or raw screen, or none recorded", () => {
+    const fake = { opportunity: ["a.tsx", "b.tsx"], cycle: [] }
+    const scan = (file: string) => (file === "b.tsx" ? ["Add a new opportunity"] : [])
+    const problems = unconvertedScreens(["opportunity", "cycle"], fake, ["b.tsx"], scan)
+    expect(problems).toEqual([
+      "opportunity: a.tsx is not in CONVERTED_FILES",
+      'opportunity: b.tsx still says "Add a new opportunity"',
+      "cycle: overridable but no known screens are recorded for it",
+    ])
+    // A word that belongs to another entity is not this entity's problem.
+    expect(unconvertedScreens(["cycle"], { cycle: ["c.tsx"] }, ["c.tsx"], () => ["Add an objective"])).toEqual([])
+  })
+})
+
+describe("every component and app file with raw entity copy is converted or listed as canonical", () => {
+  const files = [...walk("components"), ...walk("app")]
+
+  it("scans a real tree", () => {
+    expect(files.length).toBeGreaterThan(300)
+  })
+
+  it("no file is silently left unconverted", () => {
+    const converted = new Set<string>(CONVERTED_FILES)
+    const stray = files.filter((file) => !converted.has(file) && !canonicalCategoryOf(file) && rawEntityCopy(read(file), file).length > 0)
+    expect(stray, "convert these screens (add them to CONVERTED_FILES) or list them in CANONICAL_FILES with a reason").toEqual([])
+  })
+
+  it("canonical files and prefixes name a real category, exist, and really carry raw copy (no stale entries)", () => {
+    const ids = new Set(REMAINING_CANONICAL_SURFACES.map((s) => s.id))
+    for (const [file, category] of Object.entries(CANONICAL_FILES)) {
+      expect(ids.has(category), `${file}: unknown category ${category}`).toBe(true)
+      expect(existsSync(path.join(ROOT, file)), `${file} does not exist`).toBe(true)
+      expect(rawEntityCopy(read(file), file).length, `${file} has no raw entity copy: convert-and-remove or drop the entry`).toBeGreaterThan(0)
+      expect(CONVERTED_FILES as readonly string[], `${file} is both converted and canonical`).not.toContain(file)
+    }
+    for (const [prefix, category] of CANONICAL_PREFIXES) {
+      expect(ids.has(category), `${prefix}: unknown category ${category}`).toBe(true)
+      expect(files.some((file) => file.startsWith(prefix)), `${prefix} matches no file`).toBe(true)
+    }
+  })
+
+  it("every category in the settings notice and help page is backed by the source tree", () => {
+    const used = new Set([...Object.values(CANONICAL_FILES), ...CANONICAL_PREFIXES.map(([, category]) => category)])
+    expect(REMAINING_CANONICAL_SURFACES.map((s) => s.id).filter((id) => !used.has(id))).toEqual([])
   })
 })

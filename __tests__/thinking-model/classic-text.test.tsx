@@ -50,6 +50,11 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", actionsProxy)
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/objective-link-actions", actionsProxy)
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/actions", actionsProxy)
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/custom-field-actions", actionsProxy)
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions", actionsProxy)
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/reviews/actions", actionsProxy)
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/feedback/actions", actionsProxy)
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", actionsProxy)
+vi.mock("@/lib/actions/auth-actions", actionsProxy)
 
 const entityDetail = vi.hoisted(() => ({ data: null as unknown }))
 vi.mock("@/components/panels/panel-parts", async (importOriginal) => ({
@@ -72,6 +77,32 @@ import { OpportunityOverview } from "@/components/discovery/opportunity-overview
 import { OpportunityHeader } from "@/components/discovery/opportunity-header"
 import { ObjectivePanel } from "@/components/panels/objective-panel"
 import { KeyResultPanel } from "@/components/panels/key-result-panel"
+import { NewOpportunityButton } from "@/components/discovery/new-opportunity-button"
+import { AddSolutionForm } from "@/components/discovery/add-solution-form"
+import { OpportunityCard } from "@/components/discovery/opportunity-card"
+import { OpportunityBoard } from "@/components/discovery/opportunity-board"
+import { OpportunityFieldBoard } from "@/components/discovery/opportunity-field-board"
+import { SolutionSwimlaneBoard } from "@/components/discovery/solution-swimlane-board"
+import { DiscoveryTableView } from "@/components/discovery/discovery-table-view"
+import { ScoringPanel } from "@/components/discovery/scoring-panel"
+import { SolutionScoringPanel } from "@/components/discovery/solution-scoring-panel"
+import { SolutionsList } from "@/components/discovery/solutions-list"
+import { OSTTreeView } from "@/components/discovery/ost-tree-view"
+import { OpportunityExperimentsTab } from "@/components/discovery/opportunity-experiments-tab"
+import { WorkspaceScoringPanel } from "@/components/scoring-models/workspace-scoring-panel"
+import { ManageSquadsPanel } from "@/components/squads/manage-squads-panel"
+import { DeleteWorkspacePanel } from "@/components/settings/delete-workspace-panel"
+import { DecisionSources } from "@/components/decisions/decision-sources"
+import { NewDecisionForm } from "@/components/decisions/new-decision-form"
+import { NewRoundForm } from "@/components/card-sort/new-round-form"
+import { ProposeNewEntryButton } from "@/components/card-sort/card-sort-new-entries"
+import { FeedbackActionCell } from "@/components/feedback/feedback-action-cell"
+import { UnscheduledItemPreview } from "@/components/roadmap/unscheduled-items-panel"
+import { MeasurementsPanel } from "@/components/analytics/measurements-panel"
+import { CanvasFlow } from "@/components/canvas/canvas-flow"
+import { SolutionPanel } from "@/components/panels/solution-panel"
+import { AssumptionPanel } from "@/components/panels/assumption-panel"
+import { FeedbackPanel } from "@/components/panels/feedback-panel"
 
 const SNAPSHOT = path.join(process.cwd(), "__tests__/thinking-model/classic-text.snapshot.json")
 const WRITE = process.env.WRITE_CLASSIC_SNAPSHOT === "1"
@@ -220,5 +251,130 @@ describe("CLASSIC text is identical to main", () => {
     const actual = copyOf(container)
     recorded["key-result-panel"] = actual
     if (!WRITE) expect(actual).toBe(expected["key-result-panel"])
+  })
+})
+
+// Phase 4C-2: the remaining converted surfaces. Same rule as above: the expected text comes from origin/main.
+describe("CLASSIC text is identical to main (Phase 4C-2 surfaces)", () => {
+  const scoringModel = {
+    id: "m1", name: "RICE", description: null, status: "ACTIVE", formulaType: "WEIGHTED", version: 3,
+    metrics: [{ id: "x1", key: "reach", label: "Reach", description: null, minValue: 1, maxValue: 10, weight: 1, direction: "HIGHER_IS_BETTER", order: 0 }],
+  } as never
+  const staleScore = {
+    id: "s1", scoringModelId: "m1", scoringModelName: "RICE", modelVersion: 2, formulaType: "WEIGHTED", formulaSnapshot: [],
+    rawValues: { reach: 5 }, rawScore: 5, normalizedScore: 50, scoredAt: "2026-01-01T12:00:00Z", stale: true,
+  } as never
+  const oppCard = (solutions: number) => ({ id: "o1", title: "Need", customerSegment: null, status: "EXPLORING" as const, sortOrder: 0, _count: { solutions, evidence: 0 } })
+  const solCard = { id: "s1", title: "Fix", description: null, status: "IDEA" as const, sortOrder: 0, _count: { assumptions: 1, evidence: 0 } }
+  const lane = { id: "o1", title: "Need", squad: null, solutions: [solCard] }
+
+  check("new-opportunity-button column", <NewOpportunityButton variant="column" status={"EXPLORING" as never} />)
+  check("new-opportunity-button rail", <NewOpportunityButton variant="rail" />)
+  check("add-solution closed", <AddSolutionForm opportunityId="o1" revalidatePathStr="/x" />)
+  check("add-solution open", <AddSolutionForm opportunityId="o1" revalidatePathStr="/x" />, click("Add Solution"))
+  check("opportunity-card 1", <OpportunityCard opportunity={oppCard(1)} {...common} />)
+  check("opportunity-card 3", <OpportunityCard opportunity={oppCard(3)} {...common} />)
+  check(
+    "opportunity-board empty",
+    <OpportunityBoard opportunitiesByStatus={{ EXPLORING: [], VALIDATING: [], PRIORITIZED: [], ACTIVE: [], ARCHIVED: [] }} workspaceId="w1" {...common} />,
+  )
+  check(
+    "opportunity-field-board",
+    <OpportunityFieldBoard
+      field={{ id: "f1", name: "Area", options: [{ value: "a", label: "A" } as never] }}
+      opportunities={[{ id: "o1", title: "Need", customerSegment: null, _count: { solutions: 2, evidence: 0 }, value: "a" }]}
+      workspaceId="w1"
+      {...common}
+    />,
+  )
+  check("swimlane empty", <SolutionSwimlaneBoard opportunities={[]} workspaceId="w1" {...common} />)
+  check("swimlane lane", <SolutionSwimlaneBoard opportunities={[lane]} workspaceId="w1" {...common} />)
+  check("discovery-table empty", <DiscoveryTableView opportunities={[]} />)
+  check(
+    "discovery-table rows",
+    <DiscoveryTableView
+      opportunities={[
+        {
+          id: "o1", title: "Need", customerSegment: null, status: "EXPLORING", sortOrder: 0, squad: null, evidenceCount: 0,
+          solutions: [{ id: "s1", title: "Fix", status: "IDEA", sortOrder: 0, evidenceCount: 0, assumptionCount: 2 }],
+        },
+      ]}
+    />,
+  )
+  check("scoring-panel stale", <ScoringPanel opportunityId="o1" revalidatePathStr="/x" scoringModel={scoringModel} existingScore={staleScore} {...common} />)
+  check("solution-scoring-panel stale", <SolutionScoringPanel solutionId="s1" revalidatePathStr="/x" scoringModel={scoringModel} existingScore={staleScore} {...common} />)
+  check("solutions-list", <SolutionsList solutions={[solCard]} revalidatePathStr="/x" />)
+  check(
+    "ost-tree linked",
+    <OSTTreeView
+      opportunity={{ id: "o1", title: "Need", status: "EXPLORING", linkedKeyResult: { id: "k1", title: "Reach", objective: { title: "Grow" } }, solutions: [] }}
+      {...common}
+    />,
+  )
+  check("experiments-tab empty", <OpportunityExperimentsTab experiments={[]} {...common} />)
+  check("workspace-scoring opportunity", <WorkspaceScoringPanel entityType={"OPPORTUNITY" as never} availableModels={[]} currentScoringModelId={null} {...common} />)
+  check("workspace-scoring solution", <WorkspaceScoringPanel entityType={"SOLUTION" as never} availableModels={[]} currentScoringModelId={null} {...common} />)
+  check("manage-squads empty", <ManageSquadsPanel initialSquads={[]} {...common} />)
+  check("delete-workspace open", <DeleteWorkspacePanel workspaceName="Alpha" {...common} />, click(/delete workspace/i))
+  check(
+    "decision-sources",
+    <DecisionSources
+      entity={{ type: "OPPORTUNITY", id: "o1", title: "Need" } as never}
+      sources={[{ type: "SOLUTION", id: "s1", title: "Fix", updatedAt: "2026-01-01T12:00:00Z" } as never]}
+      {...common}
+    />,
+  )
+  check(
+    "new-decision-form",
+    <NewDecisionForm workspaceId="w1" subjects={[{ type: "WORKSPACE", id: "w1", title: "Alpha" }, { type: "OPPORTUNITY", id: "o1", title: "Need" }]} {...common} />,
+  )
+  check("new-round-form empty", <NewRoundForm factors={[]} {...common} />)
+  check("propose-new-entry open", <ProposeNewEntryButton roundId="r1" options={[]} {...common} />, click(/propose new entry/i))
+  check(
+    "feedback-action-cell",
+    <FeedbackActionCell
+      row={{ id: "f1", title: "Slow", description: null, submitterName: null, submitterEmail: null, status: "NEW", voteCount: 0, type: "IDEA", opportunityId: null, roadmapItem: null, createdAt: "2026-01-01T12:00:00Z", attachments: [] } as never}
+      opportunities={[{ id: "o1", title: "Need" }]}
+      workspaceId="w1"
+      roadmapPath="/acme/alpha/roadmap"
+      {...common}
+    />,
+  )
+  check("unscheduled-solution", <UnscheduledItemPreview item={{ kind: "solution", id: "s1", title: "Fix", opportunityId: "o1", opportunityTitle: "Need", squadId: null }} />)
+  check("measurements-panel", <MeasurementsPanel target={{ targetType: "KEY_RESULT", targetId: "k1" } as never} {...common} />)
+  check(
+    "canvas empty",
+    <CanvasFlow overview={{ objectives: [], keyResults: [], opportunities: [], solutions: [], assumptions: [], experiments: [], roadmapItems: [], links: { opportunityObjective: [], solutionKeyResult: [] } } as never} />,
+  )
+  it("solution-panel", () => {
+    entityDetail.data = {
+      id: "s1", pmInterviews: [], title: "Fix", description: null, status: "IDEA", workspaceId: "w1",
+      opportunity: { id: "o1", title: "Need", squadId: null }, assumptions: [], evidence: [], comments: [], roadmapItems: [],
+      artifacts: [], availableArtifacts: [], deliveryTasks: [], linkableTasks: [], members: [], customFields: [], scoringModel: null, existingScore: null,
+    }
+    const { container } = render(<SolutionPanel id="s1" {...common} />)
+    const actual = copyOf(container)
+    recorded["solution-panel"] = actual
+    if (!WRITE) expect(actual).toBe(expected["solution-panel"])
+  })
+  it("assumption-panel", () => {
+    entityDetail.data = {
+      id: "a1", pmInterviews: [], title: "Risky", description: null, riskLevel: "HIGH", status: "UNTESTED",
+      solution: { id: "s1", title: "Fix", opportunity: { id: "o1", title: "Need" } }, experiments: [],
+    }
+    const { container } = render(<AssumptionPanel id="a1" {...common} />)
+    const actual = copyOf(container)
+    recorded["assumption-panel"] = actual
+    if (!WRITE) expect(actual).toBe(expected["assumption-panel"])
+  })
+  it("feedback-panel", () => {
+    entityDetail.data = {
+      id: "f1", title: "Slow", description: null, type: "IDEA", status: "NEW", voteCount: 0, submitterName: null,
+      opportunity: { id: "o1", title: "Need" }, attachments: [], _count: { votes: 0 }, deliveryTasks: [], linkableTasks: [], members: [],
+    }
+    const { container } = render(<FeedbackPanel id="f1" {...common} />)
+    const actual = copyOf(container)
+    recorded["feedback-panel"] = actual
+    if (!WRITE) expect(actual).toBe(expected["feedback-panel"])
   })
 })

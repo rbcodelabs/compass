@@ -1,4 +1,5 @@
 "use client";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { Discussion } from "@/components/comments/discussion";
 
 import {
@@ -66,6 +67,7 @@ export function FeedbackPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
+  const labels = useLabels();
   const { data, error, mutate, refresh } = useEntityDetail<FeedbackData>(
     "feedback",
     id,
@@ -125,8 +127,8 @@ export function FeedbackPanel({
         {data.submitterName && <Field label="Submitted by">{data.submitterName}</Field>}
       </div>
 
-      <Section label="Linked Opportunity">
-        <RelationList items={oppItems} empty="Not linked to an opportunity." />
+      <Section label={`Linked ${labels.opportunity.singular}`}>
+        <RelationList items={oppItems} empty={`Not linked to ${labels.opportunity.indefinite}.`} />
       </Section>
 
       <Section label="Attachments" count={data.attachments.length}>

@@ -13,6 +13,7 @@ import {
   type OverridableEntity,
   type ThinkingModelKey,
 } from "@/lib/thinking-model/presets"
+import { remainingCanonicalNotice } from "@/lib/thinking-model/canonical-surfaces"
 import { MAX_LABEL_LENGTH, validateLabelOverrides, type LabelOverrides } from "@/lib/thinking-model/validate"
 
 // Describe only what ships: names, plus the workspace tree and the opportunity-to-objective picker for the two non-classic models.
@@ -23,8 +24,11 @@ const PRESET_DESCRIPTIONS: Record<ThinkingModelKey, string> = {
 }
 
 const ENTITY_TITLES: Record<OverridableEntity, string> = {
+  opportunity: "Opportunity",
   objective: "Objective",
   keyResult: "Key Result",
+  solution: "Solution",
+  cycle: "Cycle",
 }
 
 type FormLabels = Record<OverridableEntity, { singular: string; plural: string }>
@@ -92,9 +96,7 @@ export function ThinkingModelPanel({ orgSlug, workspaceSlug, initialKey, initial
   return (
     <div className="flex flex-col gap-5" data-testid="thinking-model-panel">
       <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground" data-testid="thinking-model-notice">
-        Some screens still use the standard names whatever you choose here, including the canvas, the discovery board,
-        the solution, assumption, experiment and feedback panels, the measurements panel, error messages, the public
-        portal, and help. Agents and API tools always use the standard names.
+        {remainingCanonicalNotice()}
       </p>
 
       {unappliedStored !== null && (

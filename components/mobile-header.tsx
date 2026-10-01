@@ -1,5 +1,6 @@
 "use client"
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Settings, BookOpen, HelpCircle, Lightbulb, CircleUser, Building2 } from "lucide-react"
@@ -45,6 +46,7 @@ export function MobileHeader({
   userImage,
   isOrgAdmin = false,
 }: MobileHeaderProps) {
+  const labels = useLabels()
   const pathname = usePathname()
   const { openPanel } = usePanelContext()
   const base = `/${orgSlug}/${workspaceSlug}`
@@ -88,7 +90,7 @@ export function MobileHeader({
           <button
             onClick={() => openPanel("discovery-rail", discoveryDetailMatch[1])}
             className="flex flex-col items-center justify-center w-14 h-10 rounded-lg gap-0.5 text-text-subtle hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors"
-            aria-label="Browse opportunities"
+            aria-label={`Browse ${labels.opportunity.lowerPlural}`}
           >
             <Lightbulb className="w-3.5 h-3.5" aria-hidden="true" />
             <span className="text-[10px] font-medium leading-none">Browse</span>

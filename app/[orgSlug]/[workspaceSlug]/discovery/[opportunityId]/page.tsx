@@ -4,6 +4,7 @@ import { ChevronLeftIcon } from "lucide-react";
 import getPrisma from "@/lib/db";
 import { getWorkspaceContext, requireWorkspaceContext } from "@/lib/workspace-context";
 import { OpportunityDetail } from "@/components/discovery/opportunity-detail";
+import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string; opportunityId: string }>;
@@ -17,13 +18,14 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 export async function generateMetadata({ params }: Props) {
   const { orgSlug, workspaceSlug, opportunityId } = await params;
-  if (!UUID_PATTERN.test(opportunityId)) return { title: "Opportunity" };
+  const { labels } = await getThinkingModelForSlugs(orgSlug, workspaceSlug);
+  if (!UUID_PATTERN.test(opportunityId)) return { title: labels.opportunity.singular };
   const context = await getWorkspaceContext(orgSlug, workspaceSlug);
-  if (context.status !== "ok") return { title: "Opportunity" };
+  if (context.status !== "ok") return { title: labels.opportunity.singular };
   const opportunity = await getPrisma().opportunity.findFirst({
     where: { id: opportunityId, workspaceId: context.workspace.id }, select: { title: true },
   });
-  return { title: opportunity?.title ?? "Opportunity" };
+  return { title: opportunity?.title ?? labels.opportunity.singular };
 }
 
 export default async function OpportunityDetailPage({ params, searchParams }: Props) {

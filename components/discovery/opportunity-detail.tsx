@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useEffect, useId, useRef, useState, type ComponentProps } from "react";
 import { MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,7 @@ export function OpportunityDetail(props: Props) {
 }
 
 function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant, initialTab, onRetry }: Props & { onRetry: () => void }) {
+  const labels = useLabels();
   const { data, error, mutate, refresh } = useEntityDetail<OpportunityData>("opportunity", opportunityId, orgSlug, workspaceSlug);
   const { panel } = usePanelContext();
   const panelKey = panel ? `${panel.type}:${panel.id}` : null;
@@ -74,7 +76,7 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
   }, [panelKey, refresh, variant]);
   const discussionRef = useRef<HTMLElement>(null);
   const discussionId = useId();
-  if (error && !data) return <div role="alert"><PanelError label="opportunity" /><Button variant="outline" onClick={onRetry}>Retry loading opportunity</Button></div>;
+  if (error && !data) return <div role="alert"><PanelError label={labels.opportunity.lower} /><Button variant="outline" onClick={onRetry}>{`Retry loading ${labels.opportunity.lower}`}</Button></div>;
   if (!data) return <PanelSkeleton />;
 
   const detailPath = `/${orgSlug}/${workspaceSlug}/discovery/${opportunityId}`;
@@ -86,7 +88,7 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
   return (
     <div data-slot="opportunity-detail" data-variant={variant} className={`@container min-w-0 break-words pb-8 ${variant === "panel" ? "px-5" : ""}`}>
       <div className="flex min-w-0 flex-col gap-5">
-        {error && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">Could not refresh opportunity. Showing the last loaded details.<Button variant="outline" size="sm" onClick={refresh}>Retry refresh</Button></div>}
+        {error && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">{`Could not refresh ${labels.opportunity.lower}. Showing the last loaded details.`}<Button variant="outline" size="sm" onClick={refresh}>Retry refresh</Button></div>}
         <OpportunityHeader opportunity={data} squads={data.squads ?? []} availableKeyResults={data.availableKeyResults ?? []} linkedObjectives={data.linkedObjectives} availableObjectives={data.availableObjectives} revalidatePathStr={detailPath} edit={edit} onChanged={refresh} />
         <div className="flex flex-wrap items-center gap-3">
           {scoringModel && <ScoreBadge score={toScoreSummary(data.score, scoringModel)} scoringHref={`${detailPath}?tab=scoring`} />}
@@ -97,15 +99,15 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
         <div className="grid min-w-0 grid-cols-1 gap-7 @[801px]:grid-cols-[minmax(0,1fr)_310px] @[801px]:gap-8">
           <div data-slot="opportunity-detail-main" className="flex min-w-0 flex-col gap-6">
             <Tabs defaultValue={requestedTab && availableTabs.includes(requestedTab) ? requestedTab : "solutions"}>
-              <div className="max-w-full overflow-x-auto pb-1"><TabsList variant="line" aria-label="Opportunity sections">
-                <TabsTrigger value="solutions">Solutions ({data.solutions.length})</TabsTrigger>
+              <div className="max-w-full overflow-x-auto pb-1"><TabsList variant="line" aria-label={`${labels.opportunity.singular} sections`}>
+                <TabsTrigger value="solutions">{labels.solution.plural} ({data.solutions.length})</TabsTrigger>
                 <TabsTrigger value="evidence">Evidence ({data.evidence.length})</TabsTrigger>
                 <TabsTrigger value="tree">OST</TabsTrigger>
                 {scoringModel && <TabsTrigger value="scoring">Scoring</TabsTrigger>}
                 {customFields.length > 0 && <TabsTrigger value="details">Details</TabsTrigger>}
               </TabsList></div>
               <TabsContent value="solutions" className="flex min-w-0 flex-col gap-3 pt-4">
-                {!data.solutions.length && <p className="text-sm text-muted-foreground">No solutions yet. Add one below.</p>}
+                {!data.solutions.length && <p className="text-sm text-muted-foreground">{`No ${labels.solution.lowerPlural} yet. Add one below.`}</p>}
                 <SolutionsList solutions={data.solutions} revalidatePathStr={detailPath} showScore={data.hasActiveSolutionScoringModel} onChanged={refresh} />
                 <AddSolutionForm opportunityId={data.id} revalidatePathStr={detailPath} onAdded={refresh} />
               </TabsContent>
@@ -121,7 +123,7 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
             <PmInterviewHistory orgSlug={orgSlug} workspaceSlug={workspaceSlug} interviews={data.pmInterviews} />
             <LinkedFeedback feedback={data.feedback} />
           </div>
-          <aside ref={discussionRef} id={discussionId} tabIndex={-1} aria-label="Opportunity discussion" data-slot="opportunity-detail-discussion" className="min-w-0 scroll-mt-5 border-t border-border-default pt-6 focus-visible:outline-2 focus-visible:outline-ring @[801px]:border-t-0 @[801px]:border-l @[801px]:pt-0 @[801px]:pl-6"><Discussion targetType="OPPORTUNITY" targetId={opportunityId} /></aside>
+          <aside ref={discussionRef} id={discussionId} tabIndex={-1} aria-label={`${labels.opportunity.singular} discussion`} data-slot="opportunity-detail-discussion" className="min-w-0 scroll-mt-5 border-t border-border-default pt-6 focus-visible:outline-2 focus-visible:outline-ring @[801px]:border-t-0 @[801px]:border-l @[801px]:pt-0 @[801px]:pl-6"><Discussion targetType="OPPORTUNITY" targetId={opportunityId} /></aside>
         </div>
       </div>
     </div>

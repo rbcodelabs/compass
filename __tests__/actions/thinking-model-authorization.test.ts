@@ -57,6 +57,14 @@ describe("updateThinkingModel authorization", () => {
     expect(wsA().thinkingModel).toBeNull();
   });
 
+  it("rejects an org admin who is not a member of the workspace (cannot change its thinking model)", async () => {
+    session.userId = USERS.gina;
+    const r = await updateThinkingModel(WS_A.org, WS_A.slug, torres);
+    expect(r).toEqual({ ok: false, error: "Workspace not found" });
+    expect(wsA().thinkingModel).toBeNull();
+    expect(fake.current!.state.writes).toEqual([]);
+  });
+
   it("rejects a read-only org member who has no workspace membership", async () => {
     session.userId = USERS.frank;
     const r = await updateThinkingModel(WS_A.org, WS_A.slug, torres);
@@ -103,13 +111,37 @@ describe("updateThinkingModel input handling", () => {
     expect(wsA().thinkingModel).toBeNull();
   });
 
-  it("rejects renaming an entity other than Objective and Key Result, with a clear message", async () => {
-    const r = await updateThinkingModel(WS_A.org, WS_A.slug, {
-      thinkingModel: "CLASSIC",
-      labels: { solution: { singular: "Bet" } },
-    });
-    expect(r).toEqual({ ok: false, error: expect.stringContaining("is not available yet") });
-    expect(wsA().thinkingModel).toBeNull();
+  it("accepts renames of all five entities (Opportunity, Solution and Cycle are open as of Phase 4C-2)", async () => {
+    const labels = {
+      opportunity: { singular: "Problem", plural: "Problems" },
+      objective: { singular: "Aim" },
+      keyResult: { singular: "Signal" },
+      solution: { singular: "Bet" },
+      cycle: { singular: "Sprint" },
+    };
+    const r = await updateThinkingModel(WS_A.org, WS_A.slug, { thinkingModel: "CLASSIC", labels });
+    expect(r).toEqual({ ok: true, thinkingModel: "CLASSIC" });
+    expect(JSON.parse(wsA().thinkingModelLabels!)).toEqual(labels);
+  });
+
+  it("still validates the new entities server-side (reserved name, cross-entity collision, unknown key)", async () => {
+    for (const labels of [
+      { solution: { singular: "Roadmap" } },
+      { cycle: { singular: "Bet" }, solution: { singular: "bet" } },
+      { opportunity: { singular: "Cycle" } },
+      { roadmapItem: { singular: "Bet" } },
+    ]) {
+      const r = await updateThinkingModel(WS_A.org, WS_A.slug, { thinkingModel: "CLASSIC", labels });
+      expect(r.ok, JSON.stringify(labels)).toBe(false);
+    }
+    expect(wsA().thinkingModelLabels).toBeNull();
+    expect(fake.current!.state.writes).toEqual([]);
+  });
+
+  it("a workspace admin of A cannot rename entities in B", async () => {
+    const r = await updateThinkingModel(WS_B.org, WS_B.slug, { thinkingModel: "CLASSIC", labels: { solution: { singular: "Bet" } } });
+    expect(r.ok).toBe(false);
+    expect(wsB().thinkingModelLabels).toBeNull();
   });
 
   it("newly accepts the Opportunity-first preset now that its picker and tree ship", async () => {
