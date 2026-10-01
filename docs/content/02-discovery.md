@@ -45,7 +45,7 @@ In Board view, use the **Group by** picker next to Filters to switch how cards a
 - **A custom field** — every Opportunity single-select custom field with at least one option is listed after the built-in groupings (for example a **MoSCoW** field with Must, Should, Could, and Won't). See [Card sorting by a custom field](#card-sorting-by-a-custom-field) below.
 - **Opportunity** — a swimlane board for Solutions, the middle tier of the OST that otherwise only appears in a flat list inside an Opportunity's detail panel. Each active Opportunity gets its own collapsible lane (click the chevron to collapse or expand it), with five columns for the Solution lifecycle: **Idea**, **Validated**, **In delivery**, **Shipped**, **Killed**. Drag a Solution card to a different column to change its status; drag it to reorder within a column. Use **+ Add Solution** at the bottom of a lane to create a new Solution directly on that Opportunity.
 
-Dragging a Solution card only ever changes its status within its own lane — dropping it on a different Opportunity's lane snaps it back with no change. Re-parenting a Solution to a different Opportunity is a deliberate action from its detail panel, not something a board drag can do by accident.
+Dragging a Solution card only ever changes its status within its own lane — dropping it on a different Opportunity's lane snaps it back with no change. A Solution belongs to the Opportunity it was created on for good: there is no action, in the board, the detail panel or the MCP API, that moves it to a different Opportunity. To aim an existing idea at another Opportunity, add a new Solution there. (A Solution can additionally be linked to Key Results; see [Linking an opportunity to Objectives, and the workspace tree](#linking-an-opportunity-to-objectives-and-the-workspace-tree).)
 
 ### Card sorting by a custom field
 
@@ -171,12 +171,17 @@ Because evidence doesn't roll up the tree, attach it to the specific node it act
 
 ## Linking an opportunity to Objectives, and the workspace tree
 
+Discovery connects to your OKRs through links:
+
+- **Opportunity ↔ Objective.** An opportunity can be linked to as many Objectives as you chose to pursue it for. Its **Driving Key Result** (above) also links it to that Key Result's Objective, so older data is not left unlinked.
+- **Solution ↔ Key Result.** A solution can be linked to the Key Results it is meant to move, in addition to its one parent opportunity. Agents make these links today with the link tools in the [MCP API](/help/09-mcp-api#typed-links); the workspace tree below shows them.
+
 Workspaces that use the **Opportunity-first OKRs** or **Torres** thinking model (a workspace admin picks it in Settings) get two extra things in Discovery:
 
-- On an opportunity, a multi-select box (titled **Objectives**, or **Outcomes** under Torres) to link the opportunity to every Objective you chose to pursue it for. Each tick saves immediately.
-- A tree button in the Discovery header (**Objective tree** / **Outcome tree**) that opens a tree for the whole workspace: Objectives, their linked opportunities and the solutions under them, with unlinked opportunities gathered in a pool.
+- On an opportunity, a multi-select box (titled **Objectives**, or **Outcomes** under Torres) to link the opportunity to every Objective you chose to pursue it for. Select **Change** (or **Link objectives** when there are none), then tick or untick; each tick saves immediately. If an Objective is linked only because of the opportunity's Driving Key Result, unticking it explains that and changes nothing: change the Key Result instead.
+- A tree button in the Discovery header (**Objective tree** / **Outcome tree**) that opens the workspace tree at `/discovery/tree`: Objectives, their linked opportunities and the solutions under them, with opportunities that are not linked to any Objective gathered in a pool. Solutions are shown against the Key Results they are linked to.
 
-Classic workspaces see neither. Details are on the [Thinking models](/help/27-thinking-models) page.
+Classic workspaces see neither: there is no box and `/discovery/tree` is not found. The board, the Tree view and the Solutions list work the same under every model. Details are on the [Thinking models](/help/27-thinking-models) page.
 
 ## The OST Tree View
 

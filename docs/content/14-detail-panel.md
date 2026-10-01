@@ -24,7 +24,7 @@ Each panel shows the essentials for that item — its status, key fields, and th
 |---|---|
 | **Objective** | Status, cycle, and its Key Results |
 | **Key Result** | Progress, its Objective, and any linked Opportunities and Roadmap items |
-| **Opportunity** | The shared full-page detail: editable header, Key Result, Solutions, Evidence, OST Tree, configured scoring/custom fields, feedback, delivery tasks and Discussion |
+| **Opportunity** | The shared full-page detail: editable header, Key Result, Solutions, Evidence, OST Tree, configured scoring/custom fields, feedback, delivery tasks and Discussion. On Opportunity-first and Torres workspaces the header also has an **Objectives** (**Outcomes**) box listing the Objectives it is linked to, with a **Change** control to add or remove them |
 | **Solution** | Status, its Opportunity, assumptions, and roadmap links |
 | **Assumption** | Status, risk level, its Solution, and experiments |
 | **Experiment** | Status, kill condition, the assumption it tests, and results |

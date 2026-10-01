@@ -27,6 +27,7 @@ Every entity renders as its own connected card, laid out automatically:
 ## Edges
 
 - A **solid arrow** always points from parent to child in the OST chain (Objective → Key Result → Opportunity → Solution → Assumption → Experiment).
+- The Key Result → Opportunity edge comes from the opportunity's **Driving Key Result**, and the Opportunity → Solution edge from the solution's one parent opportunity. Canvas does not draw the other links yet: an opportunity linked to an Objective only (with no Driving Key Result) appears without an incoming edge, and a Solution's links to Key Results are not drawn. On Opportunity-first and Torres workspaces those links are shown in the opportunity's Objectives box and in the workspace tree (see [Thinking models](/help/27-thinking-models)); agents can read them with `list_links`.
 - **Roadmap items** are the one place the graph isn't strictly tree-shaped — an item can be promoted from a Solution, an Experiment, an Opportunity, or a Key Result, and can carry more than one of those links at once. The most specific origin (Solution, if set; otherwise Experiment; otherwise Opportunity; otherwise Key Result) gets the solid primary edge. Any additional parent links render as **dashed** secondary edges, so you can still see every connection without the graph reading as a confusing multi-parent tangle.
 - A Roadmap item with none of those links resolvable (for example, one promoted straight from customer feedback with no OST parent) renders as an **orphan node** with no incoming edge — that's expected, not a bug.
 

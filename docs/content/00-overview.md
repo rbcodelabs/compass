@@ -12,17 +12,35 @@ Compass is a product discovery and delivery platform built around Teresa Torres'
 
 ## The Core Workflow
 
-Compass organises product work into five connected layers:
+Compass organises product work into connected layers. Four entities carry the strategy, and each has one clear job:
 
-1. **Outcomes** — Defined as OKRs (Objectives and Key Results). Each workspace begins by setting the outcome it wants to achieve: what does success look like, and how will you measure it?
+1. **Opportunities** — The whole landscape of customer problems, desires, and pain points discovered through research. They exist before you commit to anything, and the ones you have not chosen stay visible as a "not now" backlog. Opportunities live on the Discovery board.
 
-2. **Opportunities** — Customer problems, desires, and pain points discovered through research. Opportunities live on the Discovery board and are the bridge between your outcomes and the solutions you build.
+2. **Objectives** — The areas you choose to attack: a selection from that landscape. In Teresa Torres' terms an Objective *is* the outcome at the root of the tree. Objectives are set in OKR cycles.
 
-3. **Solutions** — Concrete ideas for addressing an opportunity. Each opportunity can have multiple competing solutions. Rather than committing to a solution immediately, you attach assumptions to it — the riskiest things that need to be true for the solution to work.
+3. **Key Results** — The measures that show whether an Objective moved. What does success look like, and how will you measure it?
 
-4. **Experiments** — Structured tests designed to validate or invalidate the assumptions attached to your solutions. Experiments have a hypothesis, a method, kill conditions, and a conclusion (PROCEED / KILL / ITERATE).
+4. **Solutions** — The tactics you try in order to move a Key Result. Each opportunity can have multiple competing solutions, and a solution can also be linked to the Key Results it is meant to move. Rather than committing to a solution immediately, you attach assumptions to it — the riskiest things that need to be true for the solution to work.
 
-5. **Roadmap** — The three-horizon view (Now / Next / Later) of what your team is building. Roadmap items link back to the opportunities, solutions, KRs, and experiments that justify them.
+Two more layers carry the work to delivery:
+
+5. **Experiments** — Structured tests designed to validate or invalidate the assumptions attached to your solutions. Experiments have a hypothesis, a method, kill conditions, and a conclusion (PROCEED / KILL / ITERATE).
+
+6. **Roadmap** — The three-horizon view (Now / Next / Later) of what your team is building. Roadmap items link back to the opportunities, solutions, KRs, and experiments that justify them.
+
+### Links, not just parents
+
+Three kinds of connection tie these together:
+
+- **Opportunity ↔ Objective** is many-to-many: an opportunity can serve several Objectives, and an Objective can pull in many opportunities. An opportunity's single **Driving Key Result** also counts: it links the opportunity to that Key Result's Objective.
+- **Solution ↔ Key Result** is many-to-many: a solution can be aimed at several Key Results. A solution still belongs to exactly one opportunity, which does not change.
+- Everything else keeps the parent it always had: Key Results belong to one Objective, assumptions to one solution.
+
+Workspaces on the Opportunity-first or Torres model show these links in a workspace tree and offer an **Objectives** (or **Outcomes**) box on each opportunity; see [Thinking models](/help/27-thinking-models). Agents can read and change the links with the link tools in the [MCP API](/help/09-mcp-api#typed-links).
+
+### Words are a workspace setting
+
+A workspace admin can choose a **thinking model** in Settings that changes how Compass names and presents these entities. **Classic OKRs** is the default and unchanged. **Opportunity-first OKRs** puts the opportunity pool first. **Torres opportunity solution tree** calls an Objective an **Outcome** and a Key Result a **Success metric**. Choosing a model never changes your data. Agents and API tools always use the standard names. See [Thinking models](/help/27-thinking-models).
 
 ## How the Sections Connect
 
@@ -59,7 +77,7 @@ When you return to the Compass homepage while signed in, the header provides a d
 The fastest path to value is:
 
 1. Create an OKR cycle and add one Objective with at least one Key Result.
-2. Add several Opportunities discovered from customer interviews.
+2. Add several Opportunities discovered from customer interviews, and link each to the Key Result it should move (or, on an Opportunity-first or Torres workspace, to the Objectives you chose to pursue it for).
 3. Attach Solutions to your most important Opportunity.
 4. Write Assumptions for each Solution and create an Experiment to test the riskiest one.
 5. Once an Experiment concludes, add a Roadmap item linking it all together.

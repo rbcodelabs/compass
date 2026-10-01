@@ -338,10 +338,36 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `get_workspace_summary` | Returns high-level counts and status for a workspace: OKR cycles, opportunities, experiments, roadmap items, active experiments, active OKR cycle, and squads |
+| `get_workspace_summary` | Returns high-level counts and status for a workspace: OKR cycles, opportunities, experiments, roadmap items, active experiments, active OKR cycle, and squads. Also returns the workspace's `thinkingModel` (see below) |
 | `list_workspaces` | List all workspaces in an organization by org slug; use as the first call when you don't yet know a workspace ID |
-| `get_workspace_by_slug` | Look up a single workspace's ID, name, and description directly by org slug + workspace slug, without listing all workspaces |
+| `get_workspace_by_slug` | Look up a single workspace's ID, name, and description directly by org slug + workspace slug, without listing all workspaces. Also returns the workspace's `thinkingModel` (see below) |
 | `create_workspace` | Create a new workspace inside an organization |
+
+### The workspace's thinking model
+
+`get_workspace_summary` and `get_workspace_by_slug` include a `thinkingModel` object in their structured data. It is read-only: there is no tool to change a workspace's model, because that is a workspace-admin action in Settings (see [Thinking models](/help/27-thinking-models)).
+
+```json
+{
+  "thinkingModel": {
+    "key": "TORRES_OST",
+    "name": "Torres opportunity solution tree",
+    "labels": {
+      "opportunity": { "singular": "Opportunity", "plural": "Opportunities" },
+      "objective": { "singular": "Outcome", "plural": "Outcomes" },
+      "keyResult": { "singular": "Success metric", "plural": "Success metrics" },
+      "solution": { "singular": "Solution", "plural": "Solutions" },
+      "cycle": { "singular": "Cycle", "plural": "Cycles" }
+    }
+  }
+}
+```
+
+- `key` is `CLASSIC` (also reported for a workspace that never chose a model), `OPPORTUNITY_FIRST_OKR` or `TORRES_OST`.
+- `labels` are how the people in the workspace talk. They include any workspace-specific renames of Objective and Key Result.
+- **Tool names, tool descriptions, input fields and every other part of the output stay canonical** (Objective, Key Result, `objectiveId`, `keyResultId`) under every model. Use the labels only when you write to the humans in that workspace.
+- When a workspace shows custom names for Objectives or Key Results, the text output gains one line pointing at `thinkingModel.labels`. The label text itself appears only in the structured data, never in that line.
+- The model is presentation only. Data, links and validation are identical under every model, so no tool behaves differently.
 
 ### OKRs
 
@@ -350,19 +376,19 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `list_okr_cycles` | List all OKR cycles for a workspace with IDs, titles, dates, and status |
 | `create_okr_cycle` | Create a new OKR cycle for a workspace (defaults to DRAFT status) |
 | `get_okr_cycle` | Return a full OKR cycle with Objective/KR progress, higher-level parent links, and supporting Objectives |
-| `create_objective` | Create an Objective; optionally assign a squad or link to an eligible KR in a longer-horizon cycle |
+| `create_objective` | Create an Objective in an OKR cycle (`cycleId` is required); optionally assign a squad or link to an eligible KR in a longer-horizon cycle. Under the Torres model the humans in the workspace call the Objective an "Outcome", but the tool and its fields keep the Objective names |
 | `update_objective` | Partially update an Objective's title, description, or status (ON_TRACK/AT_RISK/OFF_TRACK/COMPLETE) |
-| `delete_objective` | Permanently delete a childless Objective and its Task links/entity metadata; refuses deletion while child Key Results exist |
+| `delete_objective` | Permanently delete a childless Objective and its Task links/entity metadata; refuses deletion while child Key Results exist. Its Opportunity links are removed too |
 | `add_key_result` | Add a Key Result to an existing Objective |
 | `update_key_result` | Partially update a Key Result's title, target, unit, or current value |
-| `delete_key_result` | Permanently delete a Key Result; atomically unlinks Opportunities, supporting Objectives, Roadmap Items, and Tasks, then deletes dependent Check-Ins/entity metadata |
+| `delete_key_result` | Permanently delete a Key Result; atomically unlinks Opportunities, supporting Objectives, Roadmap Items, and Tasks, then deletes dependent Check-Ins/entity metadata. Afterwards it also removes the Solution links to that Key Result and the derived (`LEGACY`) Opportunity–Objective link the Key Result implied; `DIRECT` Opportunity–Objective links stay. The result reports `removedSolutionLinks` and `removedOpportunityLinks` |
 | `log_checkin` | Record a progress check-in for a Key Result and update its current value |
 | `list_eligible_parent_key_results` | List open, longer-horizon KRs whose cycle contains the specified child cycle |
 | `set_objective_parent_kr` | Link an Objective to an eligible higher-level KR it supports, or clear the link |
 
 ### Discovery — Opportunities, Solutions, Assumptions
 
-Typed links connect an Opportunity to Objectives and a Solution to Key Results (`link_*`, `unlink_*` and `list_links` below). Both ends of a link must be in the declared workspace: a call that names an entity from another workspace is rejected, even if you are a member of both. `list_opportunities` and `get_opportunity` add a `linkedObjectives` list (`{ id, title }`, oldest link first) and `list_solutions` adds `linkedKeyResults`; `linkedKeyResult` on an opportunity still comes only from `link_opportunity_to_kr`, never from these links.
+Typed links connect an Opportunity to Objectives and a Solution to Key Results (`link_*`, `unlink_*` and `list_links` below; full reference in [Typed links](#typed-links)). Both ends of a link must be in the declared workspace: a call that names an entity from another workspace is rejected, even if you are a member of both. `list_opportunities` and `get_opportunity` add a `linkedObjectives` list (`{ id, title }`, oldest link first) and `list_solutions` adds `linkedKeyResults` (`{ id, title, objectiveId }`); `linkedKeyResult` on an opportunity still comes only from `link_opportunity_to_kr`, never from these links.
 
 | Tool | Description |
 |---|---|
@@ -370,10 +396,10 @@ Typed links connect an Opportunity to Objectives and a Solution to Key Results (
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
 | `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
-| `create_opportunity` | Create a new opportunity with title, description, status |
+| `create_opportunity` | Create a new opportunity with title, description, status. An optional `keyResultId` behaves like `link_opportunity_to_kr` (the Key Result must be in this workspace) |
 | `update_opportunity` | Update an existing opportunity's title and/or description; pass `null` to clear its description |
 | `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
-| `link_opportunity_to_kr` | Associate an opportunity with a Key Result it is expected to move (or clear the link). The Key Result must be in the opportunity's workspace; the link is also recorded as a typed Opportunity–Objective link |
+| `link_opportunity_to_kr` | Associate an opportunity with a Key Result it is expected to move (pass `keyResultId: null` to clear). An opportunity has at most one linked Key Result. The Key Result must be in the opportunity's workspace: a Key Result from another workspace is rejected, even if you are a member of both. The link is also recorded as a `LEGACY` typed Opportunity–Objective link to that Key Result's Objective (see [Typed links](#typed-links)) |
 | `link_opportunity_to_objective` | Link an Opportunity directly to an Objective in the same workspace. Idempotent: repeating returns `created: false`. A direct link is not removed when the opportunity's Key Result is cleared |
 | `unlink_opportunity_from_objective` | Remove an Opportunity–Objective link; returns `removed: 0` when there is none. A link implied by the opportunity's linked Key Result stays until that Key Result is cleared (`removed: 0, stillLinkedViaKeyResult: true` is a successful no-op, not a failure) |
 | `link_solution_to_key_result` | Link a Solution to a Key Result in the same workspace. Idempotent. The Solution keeps its single parent Opportunity |
@@ -396,6 +422,87 @@ Typed links connect an Opportunity to Objectives and a Solution to Key Results (
 | `promote_to_roadmap` | Promote a validated Solution directly to the roadmap, creating a Roadmap Item linked back to the originating opportunity. Accepts an optional `isPrivate` flag |
 
 `approve_solution_plan` and `reject_solution_plan` preserve the legacy, reversible plan-status marker only. They do not create a tracked Decision, authorize delivery, or establish authoritative approval semantics for new plans.
+
+### Typed links
+
+Compass keeps two many-to-many links, in addition to the single parent each entity already has:
+
+| Link | Meaning | Write tools |
+|---|---|---|
+| **Opportunity ↔ Objective** | "We chose to pursue this opportunity for this objective." An opportunity can serve several Objectives and an Objective can have many opportunities | `link_opportunity_to_objective`, `unlink_opportunity_from_objective` |
+| **Solution ↔ Key Result** | "This solution is meant to move this measure." A solution keeps its single parent opportunity and can additionally aim at any number of Key Results | `link_solution_to_key_result`, `unlink_solution_from_key_result` |
+
+`list_links` reads either kind. Every call needs `workspaceId`, and **both ends must belong to that workspace**. An entity from another workspace is rejected even if the caller is a member of both, and a link can never span two workspaces. The names are canonical under every [thinking model](/help/27-thinking-models): a Torres workspace calls Objectives "Outcomes", but these tools still say Objective.
+
+Every link tool is **idempotent**. Repeating a call, or removing a link that is not there, is a successful no-op, not an error, so an agent can retry safely.
+
+### `link_opportunity_to_objective`
+
+Input: `workspaceId`, `opportunityId`, `objectiveId` (all UUIDs).
+
+Output data: `{ created, originFlipped, link: { id, workspaceId, opportunityId, objectiveId, origin, source } }`.
+
+- A new link returns `created: true` with `origin: "DIRECT"`.
+- Repeating it returns `created: false` and the existing link.
+- If the pair is already linked only because the opportunity's linked Key Result sits under that Objective (`origin: "LEGACY"`), the call turns it into a `DIRECT` link and returns `created: false, originFlipped: true`. It then survives clearing or changing that Key Result.
+
+### `unlink_opportunity_from_objective`
+
+Input: `workspaceId`, `opportunityId`, `objectiveId`.
+
+Output data: `{ removed, opportunityId, objectiveId }`, plus `stillLinkedViaKeyResult: true` when that case applies.
+
+- `removed: 1` means the link was deleted.
+- `removed: 0` with no other field means there was no such link.
+- **`removed: 0, stillLinkedViaKeyResult: true` is a successful no-op.** The opportunity's linked Key Result is under this Objective, so the Objective link is derived from it and stays. A `DIRECT` link in that situation is demoted to `LEGACY`; the pair is no longer a deliberate, standalone link. To remove the link entirely, clear the Key Result with `link_opportunity_to_kr` and `keyResultId: null`, then unlink again.
+- When a link exists, the call also bumps the opportunity's `updatedAt`, even if the link is kept, so a concurrent edit conflicts instead of racing.
+- Only the opportunity is checked, not the Objective, so a link to an Objective that has since gone can still be removed.
+
+### `link_solution_to_key_result`
+
+Input: `workspaceId`, `solutionId`, `keyResultId`.
+
+Output data: `{ created, link: { id, workspaceId, solutionId, keyResultId, source } }`. `created: false` on a repeat. There is no `origin` on this link and no legacy field behind it.
+
+### `unlink_solution_from_key_result`
+
+Input: `workspaceId`, `solutionId`, `keyResultId`. Output data: `{ removed, solutionId, keyResultId }`, where `removed` is `1` or `0` (no such link). Only the solution is checked, as above.
+
+### `list_links`
+
+Input: `workspaceId` plus **exactly one** of `opportunityId` (its Objectives), `objectiveId` (its opportunities), `solutionId` (its Key Results) or `keyResultId` (its solutions); optional `limit` (1–100, default 50) and `cursor`. Passing none or several, or an unknown field, is rejected.
+
+Output data: `{ items, count, nextCursor }`, oldest link first.
+
+- An Opportunity–Objective item is `{ kind: "opportunity_objective", id, opportunityId, opportunityTitle, objectiveId, objectiveTitle, origin, source, createdAt }`.
+- A Solution–Key Result item is `{ kind: "solution_key_result", id, solutionId, solutionTitle, keyResultId, keyResultTitle, source, createdAt }`.
+- To read the next page, pass `nextCursor` back as `cursor`; `nextCursor` is `null` on the last page. The cursor is opaque, and an altered one fails with `Invalid cursor.`
+- A page can hold fewer than `limit` items without being the last: a link whose other end is missing or outside the workspace is left out. Keep paging until `nextCursor` is `null`.
+
+### Typed links: `DIRECT` and `LEGACY` origins
+
+Every Opportunity–Objective link has an `origin`:
+
+- `DIRECT`: made on purpose, with `link_opportunity_to_objective` or, in a workspace on the Opportunity-first or Torres model, from the Objectives (Outcomes) box on an opportunity in the app. `source` records which (`MCP` or `UI`).
+- `LEGACY`: derived from the opportunity's linked Key Result (`linkedKeyResult`, set with `link_opportunity_to_kr` or `create_opportunity`'s `keyResultId`, or by choosing a Driving Key Result in the app). Compass links the opportunity to that Key Result's Objective automatically and keeps the link in step when the Key Result changes or is cleared. Deleting the Key Result removes it.
+
+A `DIRECT` link is never removed by clearing or changing the linked Key Result. A pair has one origin: adding a `DIRECT` link over a `LEGACY` one upgrades it, and a Key Result change never downgrades a `DIRECT` link.
+
+### Typed links: single-value fields still work
+
+The existing fields are kept, so current agents are unaffected:
+
+- `linkedKeyResult` (and `linkedKeyResultId` in the result of `link_opportunity_to_kr`) still names the one specific Key Result. It is read from that field only and is never inferred from links, because an Objective-level link cannot say *which* Key Result.
+- Each solution still has exactly one parent opportunity (its `opportunityId` does not change), and `add_solution` is unchanged.
+- The new fields are additive: `linkedObjectives` on `list_opportunities` items and `get_opportunity`, and `linkedKeyResults` on `list_solutions` items. Both are empty lists when there are no links.
+
+### Typed links: authorization and errors
+
+- `list_links` needs `mcp:read`. The four link and unlink tools need `mcp:write`. Delegated agents may use all five.
+- A gate rejects the call before it runs if the caller is not a member of the workspace, or an id belongs to a different workspace than the declared `workspaceId`.
+- A handler failure comes back as a failed tool result with a short message and writes nothing, for example `Opportunity not found.`, `Objective not found in this workspace.`, `Key Result not found in this workspace.`, `Solution not found.` or `Provide exactly one of opportunityId, objectiveId, solutionId or keyResultId.`
+
+Deleting an Objective removes every link that names it, deleting a Key Result removes the Solution links to it (and the derived `LEGACY` link it implied), and deleting a workspace removes all of its links, so no orphan links remain.
 
 ### Experiments
 
@@ -733,6 +840,8 @@ Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-te
 | `set_workspace_scoring_model` | Set (or clear) the workspace's active scoring model |
 | `score_opportunity` | Compute and save an opportunity's score using its workspace's active scoring model |
 | `get_opportunity_score` | Get an opportunity's saved score, including a `stale` flag if the live model has since been updated |
+| `score_solution` | Compute and save a solution's score using the workspace's active Solution scoring model (a slot independent of the Opportunity model); stores the raw and 0-100 normalized score with a frozen snapshot of the formula |
+| `get_solution_score` | Get a solution's saved score, the model version it was scored under, and a `stale` flag if the live model has since been updated |
 | `list_top_opportunities` | List scored opportunities ranked by normalized score (0-100); pass `orgSlug` for a cross-workspace comparability view or `workspaceId` for a single workspace |
 
 ## Recency filtering and sorting
