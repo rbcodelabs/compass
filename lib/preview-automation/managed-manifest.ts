@@ -135,7 +135,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // quarantine and integrity postconditions are pinned in REVIEWED_MIGRATION_CODE_SHA256.
   "071_typed_link_tables": "ed2bbdf524c02436eceba30b20b73a32111ddec3a4dbf9011f389984be189606",
   // DDL-free residual pass of the typed link backfill (ADR Phase 2, PR-2). Comments only; the work is the pinned hook below.
-  "072_typed_links_residual_backfill": "7aed4ba070ff8e99b5d2207d76bcad9ee0cdb14d56ca2f343c44c340551a27a0"
+  "072_typed_links_residual_backfill": "7aed4ba070ff8e99b5d2207d76bcad9ee0cdb14d56ca2f343c44c340551a27a0",
+  // Workspace thinking model (two nullable ADD COLUMNs on workspaces; no index, no
+  // backfill, no hook). Last, matching its MIGRATIONS position. Migration only: no code
+  // reads the columns yet.
+  "073_workspace_thinking_model": "8c412a4c999568bc8ea2e802a3214ae5710f0721506d36eb3636afdd8574b7c6"
 };
 
 /**

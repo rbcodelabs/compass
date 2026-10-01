@@ -782,3 +782,41 @@ describe("071_typed_link_tables", () => {
     expect(runner.match(new RegExp(`"${NAME}"`, "g"))!.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("073_workspace_thinking_model", () => {
+  const NAME = "073_workspace_thinking_model";
+  const statements = () =>
+    sqlFor(NAME)
+      .split(";")
+      .map((statement) => statement.trim())
+      .filter(Boolean);
+
+  it("is registered exactly once and is the last registered migration", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === NAME)).toHaveLength(1);
+    expect(names[names.length - 1]).toBe(NAME);
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("067_decision_answers"));
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("068_card_sort_new_entries"));
+  });
+
+  it("is two plain nullable ADD COLUMNs: no default, backfill, index, CHECK, NOT NULL or foreign key", () => {
+    expect(statements()).toEqual([
+      "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS thinking_model VARCHAR(40)",
+      "ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS thinking_model_labels TEXT",
+    ]);
+    expect(statements().join("\n")).not.toMatch(/NOT NULL|DEFAULT|REFERENCES|FOREIGN KEY|CHECK|INDEX|UPDATE|INSERT|DROP/i);
+  });
+
+  it("needs no async-wait entry and no code hook (no index, no backfill)", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    expect(runner.match(new RegExp(NAME, "g"))).toHaveLength(2); // name + filePath, nothing else
+    const manifest = readFileSync(path.join(ROOT, "lib/preview-automation/managed-manifest.ts"), "utf-8");
+    expect(manifest.match(new RegExp(`"${NAME}"`, "g"))).toHaveLength(1);
+  });
+
+  it("does NOT yet declare the columns in schema.prisma (deploy ordering: migration first, code later)", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    const model = schema.match(/model Workspace \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(model).not.toMatch(/thinkingModel|thinking_model/);
+  });
+});
