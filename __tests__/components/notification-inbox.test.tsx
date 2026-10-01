@@ -6,6 +6,8 @@ import "@testing-library/jest-dom/vitest"
 const refresh = vi.fn()
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }), usePathname: () => "/acme/ws/notifications" }))
 
+import { ThinkingModelProvider } from "@/components/thinking-model/thinking-model-provider"
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { NotificationInbox } from "@/components/notifications/notification-inbox"
 import type { InboxGroup } from "@/lib/notification-inbox"
 
@@ -71,6 +73,18 @@ describe("NotificationInbox", () => {
     expect(screen.getByText("No notifications yet.")).toBeInTheDocument()
     expect(screen.getByText(/You follow what you create, comment on or are assigned/)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Mark all read/ })).toBeDisabled()
+  })
+
+  it("uses the workspace's thinking-model names for Opportunity and Solution", () => {
+    const labels = JSON.stringify({ opportunity: { singular: "Bet", plural: "Bets" }, solution: { singular: "Approach", plural: "Approaches" } })
+    render(
+      <ThinkingModelProvider value={resolveThinkingModel({ thinkingModel: "CLASSIC", thinkingModelLabels: labels })}>
+        <NotificationInbox orgSlug="acme" workspaceSlug="ws" groups={[group({ subjectType: "OPPORTUNITY", subjectLabel: "Opportunity" })]} unreadOnly={false} nextHref={null} totalUnread={2} />
+      </ThinkingModelProvider>,
+    )
+    expect(screen.getByText("Bet")).toBeInTheDocument()
+    expect(screen.queryByText("Opportunity")).not.toBeInTheDocument()
+    expect(screen.getByText(/on the bets, approaches, tasks and docs you follow/)).toBeInTheDocument()
   })
 
   it("has an unread filter and a link to older notifications", () => {

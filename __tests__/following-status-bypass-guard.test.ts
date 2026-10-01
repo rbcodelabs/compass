@@ -26,6 +26,7 @@ const key = (site: Pick<StatusWriteSite, "file" | "model" | "operation">) => `${
 /** Reads as a status write to a static scan but cannot change status. */
 const NOT_A_STATUS_WRITE: Allow[] = [
   { site: "lib/opportunity-tool-handlers.ts::opportunity.update", count: 1, reason: "update_opportunity data is limited to title, description, customerSegment" },
+  { site: "lib/typed-links.ts::opportunity.update", count: 1, reason: "setOpportunityKeyResult writes linkedKeyResultId and updatedAt only; callers wrap it in captureWorkspaceMutation" },
   { site: "lib/solution-tool-handlers.ts::solution.update", count: 1, reason: "update_solution data is limited to title and description" },
   { site: "lib/pm-interview-service.ts::opportunity.update", count: 1, reason: "PM_INTERVIEW_ALLOWED_FIELDS contains no status field" },
   { site: "lib/pm-interview-service.ts::solution.update", count: 1, reason: "PM_INTERVIEW_ALLOWED_FIELDS contains no status field" },

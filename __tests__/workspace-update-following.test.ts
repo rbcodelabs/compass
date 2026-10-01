@@ -64,11 +64,21 @@ describe("status hook decoupled from WORKSPACE_UPDATES_ENABLED", () => {
     expect(mocks.apply).toHaveBeenCalledTimes(1)
   })
 
-  it("resolves the workspace of a Solution through its Opportunity", async () => {
-    findUnique.mockResolvedValueOnce({ id: "s1", opportunityId: "o1", status: "DRAFT" }).mockResolvedValueOnce({ id: "o1", workspaceId: WS })
-    await captureWorkspaceMutation(db, "solution", "update", user, "s1", async () => ({ id: "s1", opportunityId: "o1", status: "BUILDING" }))
+  it("uses a Solution's own workspaceId, never its Opportunity's (migration 068)", async () => {
+    findUnique.mockResolvedValueOnce({ id: "s1", workspaceId: WS, opportunityId: "o1", status: "IDEA" })
+    await captureWorkspaceMutation(db, "solution", "update", user, "s1", async () => ({ id: "s1", workspaceId: WS, opportunityId: "o1", status: "VALIDATED" }))
     const [effects] = mocks.apply.mock.calls[0]
     expect(effects[0].event).toMatchObject({ subjectType: "SOLUTION", workspaceId: WS })
+    expect(findUnique).toHaveBeenCalledTimes(1)
+  })
+
+  it("fails closed for a Solution with no workspaceId: no effect is planned and the edit still succeeds", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    findUnique.mockResolvedValueOnce({ id: "s1", workspaceId: null, opportunityId: "o1", status: "IDEA" })
+    const result = await captureWorkspaceMutation(db, "solution", "update", user, "s1", async () => ({ id: "s1", workspaceId: null, opportunityId: "o1", status: "VALIDATED" }))
+    expect(result).toMatchObject({ id: "s1" })
+    expect(mocks.apply).not.toHaveBeenCalled()
+    expect(findUnique).toHaveBeenCalledTimes(1)
   })
 
   it("does no extra read, auth, or effect when nothing changed", async () => {
@@ -107,9 +117,10 @@ describe("status hook decoupled from WORKSPACE_UPDATES_ENABLED", () => {
 
   it("does not fail the edit when planning effects throws", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
-    findUnique.mockResolvedValueOnce({ id: "s1", opportunityId: "o1", status: "DRAFT" }).mockRejectedValueOnce(new Error("lookup failed"))
-    const result = await captureWorkspaceMutation(db, "solution", "update", user, "s1", async () => ({ id: "s1", opportunityId: "o1", status: "BUILDING" }))
-    expect(result).toMatchObject({ id: "s1" })
+    findUnique.mockResolvedValueOnce({ id: "t1", status: "TODO" })
+    // The result carries no workspaceId, so resolving the scope throws inside planning.
+    const result = await captureWorkspaceMutation(db, "task", "update", user, "t1", async () => ({ id: "t1", status: "DONE" }))
+    expect(result).toMatchObject({ id: "t1" })
     expect(mocks.apply).not.toHaveBeenCalled()
   })
 })

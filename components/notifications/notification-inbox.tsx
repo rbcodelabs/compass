@@ -7,6 +7,7 @@ import { BellOff, CheckCheck } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { NOTIFICATIONS_CHANGED_EVENT } from "@/components/notifications/notification-bell"
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import type { InboxGroup } from "@/lib/notification-inbox"
 
 function formatWhen(iso: string): string {
@@ -47,6 +48,10 @@ export function NotificationInbox({
   totalUnread: number
 }) {
   const router = useRouter()
+  const labels = useLabels()
+  // Opportunity and Solution names are workspace-configurable (thinking model); the rest are fixed.
+  const subjectLabel = (group: InboxGroup) =>
+    group.subjectType === "OPPORTUNITY" ? labels.opportunity.singular : group.subjectType === "SOLUTION" ? labels.solution.singular : group.subjectLabel
   const [readIds, setReadIds] = useState<Set<string>>(new Set())
   const [notice, setNotice] = useState("")
   const [pending, startTransition] = useTransition()
@@ -82,7 +87,7 @@ export function NotificationInbox({
         <p className="mb-2 text-xs font-medium tracking-widest text-text-subtle">THINGS YOU FOLLOW</p>
         <h1 className="text-3xl font-semibold tracking-tight text-text-primary">Notifications</h1>
         <p className="mt-2 text-text-secondary">
-          Status changes and comments on the Opportunities, Solutions, Tasks and Docs you follow.
+          Status changes and comments on the {labels.opportunity.lowerPlural}, {labels.solution.lowerPlural}, tasks and docs you follow.
         </p>
       </header>
 
@@ -107,7 +112,7 @@ export function NotificationInbox({
           <BellOff className="mx-auto mb-4 size-8 text-text-subtle" aria-hidden="true" />
           <h2 className="text-xl font-medium">{unreadOnly ? "You’re all caught up." : "No notifications yet."}</h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-text-secondary">
-            Follow an Opportunity, Solution, Task or Doc and its status changes and comments will show up here. You follow what you create, comment on or are assigned automatically.
+            Follow {labels.opportunity.indefinite}, {labels.solution.indefinite}, a task or a doc and its status changes and comments will show up here. You follow what you create, comment on or are assigned automatically.
           </p>
         </section>
       ) : (
@@ -119,7 +124,7 @@ export function NotificationInbox({
                 <div className="flex items-start justify-between gap-3 border-b border-border p-4 md:px-5">
                   <div className="min-w-0">
                     <p className="mb-1 flex items-center gap-2 text-xs text-text-subtle">
-                      <Badge variant="secondary">{group.subjectLabel}</Badge>
+                      <Badge variant="secondary">{subjectLabel(group)}</Badge>
                       <time dateTime={group.latestAt}>{formatWhen(group.latestAt)}</time>
                     </p>
                     {group.href && group.title ? (

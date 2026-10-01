@@ -189,6 +189,18 @@ test("follow, notify exactly once, mark read, unfollow stays unfollowed, removed
     await bPage.reload();
     await expect(bPage.getByRole("button", { name: "Following" })).toBeVisible({ timeout: 30_000 });
 
+    // ── Solutions carry their own workspaceId (migration 068): follow and notify still work
+    const { rows: [solution] } = await pool.query<{ id: string; status: string }>(
+      `SELECT id, status FROM "${S}".solutions WHERE workspace_id = $1 ORDER BY created_at LIMIT 1`, [workspaceId]);
+    expect(solution, "the seed provides a Solution in the workspace").toBeTruthy();
+    const followed = await bClient.put("/api/following", { data: { orgSlug: ORG, workspaceSlug: WORKSPACE, subjectType: "SOLUTION", subjectId: solution.id, following: true } });
+    expect(followed.ok()).toBe(true);
+    const beforeSolution = (await unread(bClient)).body!.count;
+    const nextStatus = solution.status === "VALIDATED" ? "IDEA" : "VALIDATED";
+    const moved2 = await page.request.patch(`/api/panels/entity/solution/${solution.id}?${query}`, { data: { field: "status", value: nextStatus } });
+    expect(moved2.ok()).toBe(true);
+    expect((await unread(bClient)).body?.count, "a Solution status change notifies its follower once").toBe(beforeSolution + 1);
+
     // ── A removed member sees nothing ─────────────────────────────────────────
     await pool.query(`DELETE FROM "${S}".workspace_members WHERE workspace_id = $1 AND user_id = $2`, [workspaceId, bUserId]);
     expect((await unread(bClient)).status).toBe(404);
