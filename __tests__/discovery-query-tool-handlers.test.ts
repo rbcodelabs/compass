@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockSolution = { findMany: vi.fn() }
 const mockAssumption = { findMany: vi.fn() }
-const mockPrisma = { solution: mockSolution, assumption: mockAssumption }
+const mockSolutionKeyResultLink = { findMany: vi.fn() }
+const mockPrisma = { solution: mockSolution, assumption: mockAssumption, solutionKeyResultLink: mockSolutionKeyResultLink }
 
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
@@ -36,6 +37,9 @@ describe("listSolutions", () => {
         roadmapItems: [],
       },
     ])
+    // The additive typed-link read: one workspace check of the listed solutions, then their (empty) link rows.
+    mockSolution.findMany.mockResolvedValueOnce([{ id: "solution-1" }])
+    mockSolutionKeyResultLink.findMany.mockResolvedValueOnce([])
 
     const result = await listSolutions({
       workspaceId: "workspace-1",
@@ -75,6 +79,7 @@ describe("listSolutions", () => {
           opportunityStatus: "ACTIVE",
           squadId: "squad-1",
           roadmapItems: [],
+          linkedKeyResults: [],
           createdAt: new Date("2026-08-01T00:00:00.000Z"),
           updatedAt: new Date("2026-09-01T00:00:00.000Z"),
         },

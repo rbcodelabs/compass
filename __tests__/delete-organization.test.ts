@@ -65,6 +65,8 @@ const mockReviewRequest = { updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
 const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
+const mockOpportunityObjectiveLink = { findMany: vi.fn(), deleteMany: vi.fn() };
+const mockSolutionKeyResultLink = { findMany: vi.fn(), deleteMany: vi.fn() };
 
 const mockPrisma = {
   docStorageObject: { findFirst: vi.fn().mockResolvedValue(null) },
@@ -158,6 +160,8 @@ const mockPrisma = {
   researchParticipantToken: mockResearchDelete,
   researchSynthesis: mockResearchDelete,
   researchStudy: mockResearchDelete,
+  opportunityObjectiveLink: mockOpportunityObjectiveLink,
+  solutionKeyResultLink: mockSolutionKeyResultLink,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -231,6 +235,8 @@ beforeEach(() => {
     mockFeedbackSourceToken,
     mockCapabilityPack,
     mockCapabilityPackVersion,
+    mockOpportunityObjectiveLink,
+    mockSolutionKeyResultLink,
   ]) {
     m.findMany.mockResolvedValue([]);
   }
@@ -266,6 +272,8 @@ beforeEach(() => {
     mockEvidence.deleteMany,
     mockOpportunity.deleteMany,
     mockOpportunityScore.deleteMany,
+    mockOpportunityObjectiveLink.deleteMany,
+    mockSolutionKeyResultLink.deleteMany,
     mockSolutionScore.deleteMany,
     mockSolution.deleteMany,
     mockAssumption.deleteMany,
@@ -412,6 +420,17 @@ describe("deleteOrganization", () => {
       where: { capabilityPackId: { in: ["pack-1"] } },
     });
     expect(mockCapabilityPack.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["pack-1"] } } });
+
+    // ── Typed links: swept by workspace, then by endpoint id, before the rows they name go ──
+    expect(mockOpportunityObjectiveLink.findMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, select: { id: true }, take: 500 });
+    expect(mockSolutionKeyResultLink.findMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, select: { id: true }, take: 500 });
+    expect(mockOpportunityObjectiveLink.deleteMany).toHaveBeenCalledWith({ where: { opportunityId: { in: ["opp-1"] } } });
+    expect(mockOpportunityObjectiveLink.deleteMany).toHaveBeenCalledWith({ where: { objectiveId: { in: ["obj-1"] } } });
+    expect(mockSolutionKeyResultLink.deleteMany).toHaveBeenCalledWith({ where: { solutionId: { in: ["sol-1"] } } });
+    expect(mockSolutionKeyResultLink.deleteMany).toHaveBeenCalledWith({ where: { keyResultId: { in: ["kr-1"] } } });
+    expect(mockOpportunityObjectiveLink.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockOpportunity.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockSolutionKeyResultLink.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockSolution.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockOpportunityObjectiveLink.deleteMany.mock.invocationCallOrder.at(-1)).toBeLessThan(mockObjective.deleteMany.mock.invocationCallOrder[0]);
 
     // ── Tasks / TaskLinks ──
     expect(mockTaskLink.deleteMany).toHaveBeenCalledWith({ where: { taskId: { in: ["task-1"] } } });
