@@ -121,7 +121,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "067_card_sort_rounds": "dcc4a678a63bd6d8dd46f33338f06ccb4acd4fc54a932417f3656ab5a8689285",
   // Proposed new entries for card sort rounds (one additive CREATE TABLE, one ASYNC
   // index; no ALTER, no backfill). Same 2026-09-30 audit and production apply as 067.
-  "068_card_sort_new_entries": "133d41beb53cbab557ab9075df6bdc4a9bc625c3f46b93dc7979cbba2d75d6e7"
+  "068_card_sort_new_entries": "133d41beb53cbab557ab9075df6bdc4a9bc625c3f46b93dc7979cbba2d75d6e7",
+  // Workspace thinking model (two nullable ADD COLUMNs on workspaces; no index, no
+  // backfill, no hook). Last, matching its MIGRATIONS position. Migration only: no code
+  // reads the columns yet.
+  "073_workspace_thinking_model": "8c412a4c999568bc8ea2e802a3214ae5710f0721506d36eb3636afdd8574b7c6"
 };
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {
