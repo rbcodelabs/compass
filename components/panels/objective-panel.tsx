@@ -98,15 +98,15 @@ export function ObjectivePanel({
       badge: pct !== null ? { label: `${pct}%`, className: "bg-primary/10 text-primary" } : undefined,
     };
   });
+  const parentCycleTitle = data.parentKeyResult
+    ? (data.parentKeyResult.objective.cycle?.title ?? (showCycleField ? noCycleLabel(labels.cycle) : null))
+    : null;
   const parentItems: RelationItem[] = data.parentKeyResult
     ? [{
         type: "keyResult",
         id: data.parentKeyResult.id,
         title: data.parentKeyResult.title,
-        badge: {
-          label: data.parentKeyResult.objective.cycle?.title ?? noCycleLabel(labels.cycle),
-          className: "bg-accent text-accent-foreground",
-        },
+        ...(parentCycleTitle ? { badge: { label: parentCycleTitle, className: "bg-accent text-accent-foreground" } } : {}),
       }]
     : [];
 

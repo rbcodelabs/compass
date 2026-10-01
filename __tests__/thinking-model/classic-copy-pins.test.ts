@@ -4,7 +4,8 @@ import path from "node:path"
 import { CONVERTED_FILES } from "./converted-files"
 import { copyFragments, substitute } from "./copy-extract"
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
-import { linkPlaceholder, linkToPlaceholder, linkedToLabel } from "@/lib/thinking-model/copy"
+import { indefiniteTitle, linkPlaceholder, linkToPlaceholder, linkedToLabel } from "@/lib/thinking-model/copy"
+import { NO_CYCLE_LABEL, noCycleLabel } from "@/lib/okr-cycle-scope"
 import { panelTitles } from "@/components/panels/panel-titles"
 import { linkedTypeLabels, linkedTypePluralLabels } from "@/components/tasks/linked-type-labels"
 import { objectTypeLabels } from "@/components/custom-fields/object-type-labels"
@@ -39,6 +40,11 @@ const mainCopy = JSON.parse(readFileSync(path.join(ROOT, "__tests__/thinking-mod
 /** Main's fragments that this branch builds differently; each is pinned by a rendered case instead. */
 const EXCEPTIONS: Record<string, string> = {
   "{} objective{}": "cycle-card.tsx pluralises with a ternary now; pinned by 'cycle-card 0/1/3' in classic-text.test.tsx",
+  // #332 (optional Objective cycle) deliberately reworded this CLASSIC text; main's baseline predates it. The new text is
+  // pinned verbatim below ("#332 optional-cycle copy"). When #332 reaches main and the baselines are regenerated, this
+  // entry goes stale and the "every EXCEPTION is real" test says to delete it.
+  "No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle's dates.":
+    "reworded by #332; the shipped text is pinned in '#332 optional-cycle copy'",
 }
 
 // A bare `{labels.keyResult.sentence}` cannot be traced by text, so every form of
@@ -90,6 +96,28 @@ describe("CLASSIC copy equals origin/main's, string for string", () => {
       expect(all.has(fragment), `not in main: ${fragment}`).toBe(true)
       expect(produced.has(fragment), `now produced, remove the exception: ${fragment}`).toBe(false)
     }
+  })
+
+  // The text #332 shipped, character for character. CLASSIC must still read exactly like this after the label conversion.
+  describe("#332 optional-cycle copy", () => {
+    it("the pseudo-cycle name", () => {
+      expect(noCycleLabel(CLASSIC.cycle)).toBe("No cycle / Persistent")
+      expect(NO_CYCLE_LABEL).toBe("No cycle / Persistent")
+    })
+
+    it("the OKRs index link", () => {
+      expect(`Or add ${indefiniteTitle(CLASSIC.objective)} with no ${CLASSIC.cycle.lower} (${noCycleLabel(CLASSIC.cycle)})`).toBe(
+        "Or add an Objective with no cycle (No cycle / Persistent)",
+      )
+    })
+
+    it("the persistent page description and the parent-KR picker message are still produced", () => {
+      const produced = branchFragments()
+      expect(produced.has("No eligible parent KRs. A cycle-less Objective can support any Key Result in a Draft or Active cycle; otherwise the parent cycle must be Draft or Active, longer, and fully contain this cycle's dates.")).toBe(true)
+      expect(`${CLASSIC.objective.plural} that are not tied to a planning period. They can support, and be supported by, ${CLASSIC.keyResult.plural} in any open ${CLASSIC.cycle.lower}.`).toBe(
+        "Objectives that are not tied to a planning period. They can support, and be supported by, Key Results in any open cycle.",
+      )
+    })
   })
 
   it("canary: a changed literal is reported", () => {

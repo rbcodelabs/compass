@@ -1,6 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import { EntityCard } from "@/components/patterns/entity-card";
-import { NO_CYCLE_LABEL, PERSISTENT_CYCLE_SLUG } from "@/lib/okr-cycle-scope";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { PERSISTENT_CYCLE_SLUG, noCycleLabel } from "@/lib/okr-cycle-scope";
 
 interface PersistentObjectivesCardProps {
   objectiveCount: number;
@@ -10,6 +13,7 @@ interface PersistentObjectivesCardProps {
 
 /** Entry point for Objectives with no cycle, so they never vanish from the OKRs index. */
 export function PersistentObjectivesCard({ objectiveCount, orgSlug, workspaceSlug }: PersistentObjectivesCardProps) {
+  const labels = useLabels();
   return (
     <Link
       href={`/${orgSlug}/${workspaceSlug}/okrs/${PERSISTENT_CYCLE_SLUG}`}
@@ -19,11 +23,11 @@ export function PersistentObjectivesCard({ objectiveCount, orgSlug, workspaceSlu
       <EntityCard
         interactive
         className="h-full group-hover:-translate-y-0.5"
-        title={NO_CYCLE_LABEL}
-        description="Objectives not tied to a planning period"
+        title={noCycleLabel(labels.cycle)}
+        description={`${labels.objective.plural} not tied to a planning period`}
       >
         <p className="text-sm text-text-subtle">
-          {objectiveCount === 0 ? "No objectives yet" : `${objectiveCount} objective${objectiveCount === 1 ? "" : "s"}`}
+          {objectiveCount === 0 ? `No ${labels.objective.lowerPlural} yet` : `${objectiveCount} ${objectiveCount === 1 ? labels.objective.lower : labels.objective.lowerPlural}`}
         </p>
       </EntityCard>
     </Link>

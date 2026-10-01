@@ -21,11 +21,12 @@ import type {
 import { PageHeader, StatusBadge } from "@/components/patterns";
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
 import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import {
-  NO_CYCLE_LABEL,
   PERSISTENT_CYCLE_SLUG,
   cycleRefOrPersistent,
   cycleRouteSegment,
+  noCycleLabel,
 } from "@/lib/okr-cycle-scope";
 
 interface CyclePageProps {
@@ -73,6 +74,9 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
   });
 
   if (!workspace) notFound();
+
+  const { labels } = resolveThinkingModel(workspace);
+  const noCycleTitle = noCycleLabel(labels.cycle);
 
   // "none" is the fixed route for Objectives that have no cycle (migration 070).
   const isPersistent = cycleId === PERSISTENT_CYCLE_SLUG;
@@ -185,7 +189,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
         ...kr,
         supportingObjectives: kr.supportingObjectives.map((supporting) => ({
           ...supporting,
-          cycle: cycleRefOrPersistent(supporting.cycle),
+          cycle: cycleRefOrPersistent(supporting.cycle, noCycleTitle),
           status: supporting.status as ObjectiveStatus,
         })),
       })),
@@ -231,7 +235,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       objectiveTitle: kr.objective.title,
       objectiveId: kr.objective.id,
       cycleId: kr.objective.cycle?.id ?? null,
-      cycleTitle: kr.objective.cycle?.title ?? NO_CYCLE_LABEL,
+      cycleTitle: kr.objective.cycle?.title ?? noCycleTitle,
       cycleStatus: kr.objective.cycle?.status ?? null,
     })),
   ];
@@ -243,7 +247,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       {cycle && cycleStatus ? (
         <PageHeader title={<span className="flex items-center gap-2">{cycle.title}<StatusBadge status={CYCLE_STATUS_TONE[cycleStatus]}>{CYCLE_STATUS_LABELS[cycleStatus]}</StatusBadge></span>} description={`${formatDate(cycle.startDate)} – ${formatDate(cycle.endDate)}`} />
       ) : (
-        <PageHeader title={NO_CYCLE_LABEL} description="Objectives that are not tied to a planning period. They can support, and be supported by, Key Results in any open cycle." />
+        <PageHeader title={noCycleTitle} description={`${labels.objective.plural} that are not tied to a planning period. They can support, and be supported by, ${labels.keyResult.plural} in any open ${labels.cycle.lower}.`} />
       )}
 
       <Suspense>

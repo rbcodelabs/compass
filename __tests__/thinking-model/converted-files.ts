@@ -3,10 +3,11 @@
  * here is NOT converted. Shared by the tripwire, the CLASSIC copy-pin test and the
  * baseline regeneration script (plain data, no imports, so Node can load it directly).
  *
- * When Phase 1 (#332) lands, ADD and CONVERT: lib/okr-cycle-scope.ts (NO_CYCLE_LABEL
- * "No cycle / Persistent"), components/okrs/persistent-objectives-card.tsx, "Or add
- * an Objective with no cycle", the objective-row empty message "A cycle-less
- * Objective can support any Key Result...", and `Field label="Cycle"`.
+ * Phase 4C-1 added the optional-cycle (#332) surfaces: lib/okr-cycle-scope.ts
+ * ("No cycle / Persistent" is noCycleLabel(labels.cycle)), the persistent-objectives
+ * card, "Or add an Objective with no cycle", the objective-row empty message, and
+ * the Cycle field in both panels. Their CLASSIC text is pinned to what #332 shipped
+ * in classic-copy-pins.test.ts ("#332 optional-cycle copy").
  */
 export const CONVERTED_FILES = [
   "components/sidebar.tsx",
@@ -52,4 +53,7 @@ export const CONVERTED_FILES = [
   "components/discovery/composer-objective-field.tsx",
   "components/discovery/linked-objectives-strip.tsx",
   "components/panels/linked-solutions-section.tsx",
+  // Phase 4C-1: the optional-cycle (#332) surfaces, converted. CLASSIC text is byte-identical to what #332 shipped.
+  "lib/okr-cycle-scope.ts",
+  "components/okrs/persistent-objectives-card.tsx",
 ] as const
