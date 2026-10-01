@@ -467,56 +467,8 @@ export type LinkedKeyResult = { id: string; title: string; objectiveId: string }
 const byCreatedThenId = (a: { createdAt: Date; id: string }, b: { createdAt: Date; id: string }) =>
   a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
-/**
- * Whether an error means "the link table does not exist yet": Postgres 42P01 or Prisma P2021, read from the code, the cause and the
- * driver-adapter metadata. The message is consulted ONLY when the error carries no code at all, and then it must be exactly
- * `relation "<link table>" does not exist`. Anything else (a missing COLUMN: P2022 / 42703, a permission error 42501, a timeout, a
- * connection error) is NOT "no links" and keeps throwing. Callers pass a client, never a `tx`: after a swallowed error Postgres
- * would answer every further statement in that transaction with 25P02.
- */
-export function isMissingLinkTable(error: unknown): boolean {
-  const e = error as {
-    code?: string
-    message?: string
-    cause?: { code?: string; originalCode?: string }
-    meta?: { code?: string; driverAdapterError?: { cause?: { originalCode?: string; kind?: string } } }
-  } | null
-  if (!e) return false
-  const codes = [e.code, e.meta?.code, e.cause?.code, e.cause?.originalCode, e.meta?.driverAdapterError?.cause?.originalCode]
-  if (codes.includes("42P01") || codes.includes("P2021")) return true
-  if (codes.some(Boolean)) return false
-  return /^\s*relation "(?:[^"]+"\.")?(?:opportunity_objective_links|solution_key_result_links)" does not exist\s*$/i.test(e.message ?? "")
-}
-
-let warnedMissingLinkTable = false
-/** One structured warning per process, no row data, so a wrong deploy order is visible in the logs without flooding them. */
-function warnMissingLinkTableOnce(surface: string) {
-  if (warnedMissingLinkTable) return
-  warnedMissingLinkTable = true
-  console.warn(JSON.stringify({ event: "typed_links.read_degraded", reason: "link_table_missing", surface, hint: "apply migration 071_typed_link_tables" }))
-}
-
-/** Test seam: forgets that the warning was already logged. */
-export function resetMissingLinkTableWarning() {
-  warnedMissingLinkTable = false
-}
-
-/**
- * TOLERANT READ. Runs a link-table read and returns [] when the table is missing, so the additive link payloads (discovery pages,
- * detail panels, canvas, MCP list/get tools, PM interview context) degrade to "no links" instead of failing the whole page when
- * this code is deployed before migration 071. ONLY the batch read helpers use it. Writes, deletes, the workspace cascade, the link
- * tools and list_links stay fail-closed on purpose.
- */
-async function tolerantLinkRead<T>(surface: string, read: () => Promise<T[]>): Promise<T[]> {
-  try {
-    return await read()
-  } catch (error) {
-    if (!isMissingLinkTable(error)) throw error
-    warnMissingLinkTableOnce(surface)
-    return []
-  }
-}
-
+// Reads FAIL LOUDLY: if a link table is missing (code deployed before migration 071) the database error propagates, exactly like every
+// write, delete and the link tools. There is deliberately no "no links" fallback.
 /** Callers that already hold ids read under this workspace's own filter may skip the re-verification query. */
 export type LinkReadOptions = { preverified?: boolean }
 
@@ -538,12 +490,10 @@ export async function getLinkedObjectivesByOpportunity(
       ? new Set(ids)
       : new Set((await db.opportunity.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true } })).map((row) => row.id))
     if (verified.size === 0) continue
-    const links = (await tolerantLinkRead("opportunity-objective", () =>
-      db.opportunityObjectiveLink.findMany({
-        where: { workspaceId, opportunityId: { in: [...verified] } },
-        select: { id: true, opportunityId: true, objectiveId: true, createdAt: true },
-      }),
-    )) as { id: string; opportunityId: string; objectiveId: string; createdAt: Date }[]
+    const links = (await db.opportunityObjectiveLink.findMany({
+      where: { workspaceId, opportunityId: { in: [...verified] } },
+      select: { id: true, opportunityId: true, objectiveId: true, createdAt: true },
+    })) as { id: string; opportunityId: string; objectiveId: string; createdAt: Date }[]
     const objectiveIds = [...new Set(links.map((link) => link.objectiveId))]
     const objectives = objectiveIds.length
       ? await db.objective.findMany({ where: { id: { in: objectiveIds }, workspaceId }, select: { id: true, title: true } })
@@ -571,12 +521,10 @@ export async function getLinkedKeyResultsBySolution(
       ? new Set(ids)
       : new Set((await db.solution.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true } })).map((row) => row.id))
     if (verified.size === 0) continue
-    const links = (await tolerantLinkRead("solution-key-result", () =>
-      db.solutionKeyResultLink.findMany({
-        where: { workspaceId, solutionId: { in: [...verified] } },
-        select: { id: true, solutionId: true, keyResultId: true, createdAt: true },
-      }),
-    )) as { id: string; solutionId: string; keyResultId: string; createdAt: Date }[]
+    const links = (await db.solutionKeyResultLink.findMany({
+      where: { workspaceId, solutionId: { in: [...verified] } },
+      select: { id: true, solutionId: true, keyResultId: true, createdAt: true },
+    })) as { id: string; solutionId: string; keyResultId: string; createdAt: Date }[]
     const keyResultIds = [...new Set(links.map((link) => link.keyResultId))]
     const keyResults = keyResultIds.length
       ? await db.keyResult.findMany({ where: { id: { in: keyResultIds }, objective: { workspaceId } }, select: { id: true, title: true, objectiveId: true } })

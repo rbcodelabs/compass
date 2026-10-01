@@ -1,11 +1,11 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   TypedLinkError,
   drainAfterParentDelete,
-  isMissingLinkTable,
   drainLegacyLinksForOpportunities,
   drainLinksFor,
-  resetMissingLinkTableWarning,
   assertSameWorkspacePair,
   deleteLinksFor,
   getLinkedKeyResultsBySolution,
@@ -402,7 +402,7 @@ describe("updatedAt: a key result edit is an edit (recency sort and the expected
   });
 });
 
-describe("tolerant reads: only the batch read helpers degrade when a link table is missing", () => {
+describe("a missing link table FAILS LOUDLY: reads, writes, deletes and the tools all propagate the database error", () => {
   const missing = (code: string) => Object.assign(new Error('relation "opportunity_objective_links" does not exist'), { code });
   const withMissingTable = (error: unknown) => {
     const { fake, tx, links } = setup();
@@ -419,32 +419,24 @@ describe("tolerant reads: only the batch read helpers degrade when a link table 
     ["Postgres 42P01 on the error", missing("42P01")],
     ["Postgres 42P01 on the cause", Object.assign(new Error("query failed"), { cause: { originalCode: "42P01" } })],
     ["driver adapter metadata", Object.assign(new Error("query failed"), { code: "P2010", meta: { driverAdapterError: { cause: { originalCode: "42P01" } } } })],
-  ])("getLinkedObjectivesByOpportunity returns every verified opportunity with no links (%s), and warns once without row data", async (_n, error) => {
-    resetMissingLinkTableWarning();
+    ["a code-less 'relation does not exist' message", new Error('relation "solution_key_result_links" does not exist')],
+  ])("both batch read helpers THROW the original error (%s), with no 'no links' fallback and no warning", async (_n, error) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { tx } = withMissingTable(error);
-    const map = await getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"]);
-    expect(map.get("opp-a")).toEqual([]);
-    await getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"]);
-    expect(warn).toHaveBeenCalledTimes(1);
-    const logged = JSON.parse(String(warn.mock.calls[0][0]));
-    expect(logged).toMatchObject({ event: "typed_links.read_degraded", reason: "link_table_missing" });
-    expect(JSON.stringify(logged)).not.toContain("opp-a");
+    await expect(getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"])).rejects.toBe(error);
+    await expect(getLinkedKeyResultsBySolution(tx, WS_A.id, ["sol-a"])).rejects.toBe(error);
+    await expect(getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"], { preverified: true })).rejects.toBe(error);
+    expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
 
-  it("getLinkedKeyResultsBySolution degrades the same way", async () => {
-    const { tx } = withMissingTable(missing("P2021"));
-    expect((await getLinkedKeyResultsBySolution(tx, WS_A.id, ["sol-a"])).get("sol-a")).toEqual([]);
-  });
-
-  it("any OTHER read error still fails", async () => {
+  it("any other read error throws too", async () => {
     const { tx } = withMissingTable(Object.assign(new Error("connection reset"), { code: "ECONNRESET" }));
     await expect(getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"])).rejects.toThrow("connection reset");
     await expect(getLinkedKeyResultsBySolution(tx, WS_A.id, ["sol-a"])).rejects.toThrow("connection reset");
   });
 
-  it("writes, deletes, the drain and list_links stay fail-closed on a missing table", async () => {
+  it("writes, deletes, the drain and list_links fail on a missing table as well", async () => {
     const { tx } = withMissingTable(missing("P2021"));
     await expect(linkOpportunityToObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a", ctx })).rejects.toThrow(/does not exist/);
     await expect(linkSolutionToKeyResult(tx, { solutionId: "sol-a", keyResultId: "kr-a", ctx })).rejects.toThrow(/does not exist/);
@@ -452,6 +444,11 @@ describe("tolerant reads: only the batch read helpers degrade when a link table 
     await expect(deleteLinksFor(tx, "objective", ["obj-a"])).rejects.toThrow(/does not exist/);
     await expect(drainLinksFor(tx, "objective", ["obj-a"])).rejects.toThrow(/does not exist/);
     await expect(listLinks(tx, { workspaceId: WS_A.id, opportunityId: "opp-a", limit: 5 })).rejects.toThrow(/does not exist/);
+  });
+
+  it("the module has no tolerant-read machinery left", () => {
+    const source = readFileSync(path.join(process.cwd(), "lib/typed-links.ts"), "utf8");
+    expect(source).not.toMatch(/tolerantLinkRead|isMissingLinkTable|read_degraded|resetMissingLinkTableWarning/);
   });
 
   it("preverified skips the workspace re-check query", async () => {
@@ -531,25 +528,5 @@ describe("drain robustness", () => {
     seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "LEGACY" })
     expect(await drainLegacyLinksForOpportunities(tx, ["opp-a"], "obj-a")).toBe(1)
     expect(links.map((l) => l.objectiveId)).toEqual(["obj-a2"])
-  })
-})
-
-describe("isMissingLinkTable only recognises a missing TABLE", () => {
-  it.each([
-    ["Prisma P2021", Object.assign(new Error("x"), { code: "P2021" }), true],
-    ["Postgres 42P01", Object.assign(new Error("x"), { code: "42P01" }), true],
-    ["adapter metadata 42P01", Object.assign(new Error("x"), { code: "P2010", meta: { driverAdapterError: { cause: { originalCode: "42P01" } } } }), true],
-    ["code-less exact message", new Error('relation "opportunity_objective_links" does not exist'), true],
-    ["code-less schema-qualified message", new Error('relation "s"."solution_key_result_links" does not exist'), true],
-    ["a missing COLUMN (P2022)", Object.assign(new Error('column "x" of relation "opportunity_objective_links" does not exist'), { code: "P2022" }), false],
-    ["a missing COLUMN (42703)", Object.assign(new Error("x"), { code: "42703" }), false],
-    ["a code-less missing COLUMN message", new Error('column "x" of relation "opportunity_objective_links" does not exist'), false],
-    ["a coded error that merely mentions the table", Object.assign(new Error('relation "opportunity_objective_links" does not exist'), { code: "42501" }), false],
-    ["permission denied", Object.assign(new Error("permission denied"), { code: "42501" }), false],
-    ["a timeout", Object.assign(new Error("timeout"), { code: "57014" }), false],
-    ["a connection error", Object.assign(new Error("reset"), { code: "ECONNRESET" }), false],
-    ["a different missing table", new Error('relation "opportunities" does not exist'), false],
-  ])("%s -> %s", (_name, error, expected) => {
-    expect(isMissingLinkTable(error)).toBe(expected)
   })
 })
