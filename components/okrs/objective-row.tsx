@@ -31,6 +31,7 @@ import {
 import { CardMenu, type CardMenuItem } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { EntityCard } from "@/components/patterns/entity-card";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 
 interface KeyResult {
   id: string;
@@ -84,6 +85,7 @@ export function ObjectiveRow({
   parentKeyResultId,
   supportingObjectiveOptions,
 }: ObjectiveRowProps) {
+  const labels = useLabels();
   const [isPending, startTransition] = useTransition();
   const [isParentKRPending, startParentKRTransition] = useTransition();
   const [parentKRError, setParentKRError] = useState<string | null>(null);
@@ -152,14 +154,14 @@ export function ObjectiveRow({
     ...(canLinkParent
       ? [
           {
-            label: "Link to parent Key Result…",
+            label: `Link to parent ${labels.keyResult.singular}…`,
             // Defer until the dropdown has closed so focus moves cleanly into the combobox popup.
             onClick: () => requestAnimationFrame(() => setIsParentLinkOpen(true)),
           },
         ]
       : []),
     {
-      label: "Delete Objective",
+      label: `Delete ${labels.objective.singular}`,
       onClick: () => handleDelete(),
       destructive: true,
       separator: canLinkParent,
@@ -271,7 +273,7 @@ export function ObjectiveRow({
               const parentKR = availableKRs.find((kr) => kr.id === localParentKRId);
               const parentLabel = parentKR
                 ? `${parentKR.title} · ${parentKR.cycleTitle}`
-                : "Linked Key Result";
+                : `Linked ${labels.keyResult.singular}`;
               return (
                 <div className="flex min-w-0 items-center gap-1 rounded-md bg-muted/50 px-2 py-1 text-[11px] text-muted-foreground">
                   <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
@@ -283,7 +285,7 @@ export function ObjectiveRow({
                     onClick={() => handleParentKRChange(null)}
                     disabled={isParentKRPending}
                     className="shrink-0 rounded p-0.5 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
-                    aria-label="Unlink parent Key Result"
+                    aria-label={`Unlink parent ${labels.keyResult.singular}`}
                   >
                     <X className="size-3" />
                   </button>
@@ -319,8 +321,8 @@ export function ObjectiveRow({
           <ComboboxContent
             anchor={actionsRef}
             align="end"
-            inputPlaceholder="Search cycles, objectives, and KRs…"
-            emptyMessage="No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle's dates."
+            inputPlaceholder={`Search ${labels.cycle.lowerPlural}, ${labels.objective.lowerPlural}, and ${labels.keyResult.shortPlural}…`}
+            emptyMessage={`No eligible parent ${labels.keyResult.shortPlural}. A longer ${labels.cycle.lower} must be Draft or Active and fully contain this ${labels.cycle.lower}'s dates.`}
           />
         </Combobox>
       )}

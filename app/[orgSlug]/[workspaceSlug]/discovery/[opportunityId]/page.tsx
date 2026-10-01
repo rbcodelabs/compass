@@ -10,8 +10,14 @@ type Props = {
   searchParams?: Promise<{ tab?: string }>;
 };
 
+// Opportunity.id is a UUID column. A path segment that isn't one (a mistyped or
+// bookmarked URL such as /discovery/card-sort) would otherwise reach Postgres
+// as an invalid uuid literal and surface as a 500 instead of a 404.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function generateMetadata({ params }: Props) {
   const { orgSlug, workspaceSlug, opportunityId } = await params;
+  if (!UUID_PATTERN.test(opportunityId)) return { title: "Opportunity" };
   const context = await getWorkspaceContext(orgSlug, workspaceSlug);
   if (context.status !== "ok") return { title: "Opportunity" };
   const opportunity = await getPrisma().opportunity.findFirst({
@@ -22,6 +28,7 @@ export async function generateMetadata({ params }: Props) {
 
 export default async function OpportunityDetailPage({ params, searchParams }: Props) {
   const { orgSlug, workspaceSlug, opportunityId } = await params;
+  if (!UUID_PATTERN.test(opportunityId)) notFound();
   const { workspace } = await requireWorkspaceContext(orgSlug, workspaceSlug);
   const opportunity = await getPrisma().opportunity.findFirst({ where: { id: opportunityId, workspaceId: workspace.id }, select: { id: true } });
   if (!opportunity) notFound();

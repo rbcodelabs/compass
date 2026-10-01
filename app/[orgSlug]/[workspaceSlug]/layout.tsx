@@ -6,6 +6,8 @@ import { Sidebar } from "@/components/sidebar"
 import { BottomNav } from "@/components/bottom-nav"
 import { MobileHeader } from "@/components/mobile-header"
 import { PanelProvider } from "@/components/panels/panel-context"
+import { ThinkingModelProvider } from "@/components/thinking-model/thinking-model-provider"
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { PanelShell } from "@/components/panels/panel-shell"
 import { AgentRailProvider } from "@/components/agent/agent-rail-context"
 import { AgentRail } from "@/components/agent/agent-rail"
@@ -64,6 +66,9 @@ export default async function WorkspaceLayout({
   const initialAgentPin = parsePanelPin(
     cookieStore.get(panelPinCookieName("agent"))?.value
   )
+  // Resolved once from the already-loaded workspace (no extra query) and handed
+  // to client components as plain data.
+  const thinkingModel = resolveThinkingModel(workspace)
   const researchCaptureEnabled = isResearchCaptureEnabled()
   const updatesEnabled = await workspaceUpdatesAvailable(getPrisma())
 
@@ -73,6 +78,7 @@ export default async function WorkspaceLayout({
       <WorkspaceThemeStyle branding={resolveWorkspaceBranding(workspace)} />
       <ThemeProvider>
         <div className="workspace-theme-scope contents">
+        <ThinkingModelProvider value={thinkingModel}>
         <PanelProvider orgSlug={orgSlug} workspaceSlug={workspaceSlug}>
         {/* Inside PanelProvider, because the rail measures around the detail
             panel and so reads that context; and at layout level rather than
@@ -153,6 +159,7 @@ export default async function WorkspaceLayout({
         <BottomNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} researchCaptureEnabled={researchCaptureEnabled} updatesEnabled={updatesEnabled} />
         </AgentRailProvider>
         </PanelProvider>
+        </ThinkingModelProvider>
         </div>
       </ThemeProvider>
     </>

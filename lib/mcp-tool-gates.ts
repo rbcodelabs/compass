@@ -374,6 +374,29 @@ export const TOOL_GATES: Record<string, Gate> = {
   get_custom_field_values: assertCustomFieldObjectAccess,
   set_custom_field_value: assertCustomFieldObjectAccess,
 
+  // Card Sort ---------------------------------------------------------------
+  // Plain workspace membership is the whole gate here, deliberately. The two
+  // finer-grained authorizations these tools need are not membership questions
+  // and cannot be expressed as one: whether the caller is the round's
+  // facilitator (reveal/close, and seeing others' proposals while OPEN), and
+  // whether a proposal belongs to the caller (withdraw). Both depend on the
+  // round row, so both are enforced in lib/card-sort.ts — canSeeOtherProposals
+  // and the userId-scoped delete filter — where the HTTP routes get them too.
+  // Duplicating either check here would create a second copy to drift.
+  //
+  // Every card sort tool therefore takes workspaceId as well as roundId, and
+  // lib/card-sort.ts independently verifies the round belongs to that
+  // workspace, so a foreign roundId is a not-found rather than a leak.
+  list_card_sort_factors: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  create_card_sort_round: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  list_card_sort_rounds: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  set_card_sort_round_state: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  propose_card_sort_move: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  withdraw_card_sort_proposal: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  get_card_sort_proposals: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  get_card_sort_board: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  get_card_sort_tally: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+
   // Tasks -------------------------------------------------------------------
   create_task: async (a, x) => {
     await assertWorkspaceMember(a, x.workspaceId)
@@ -543,6 +566,8 @@ export const TOOL_GATES: Record<string, Gate> = {
  * TOOL_GATES has.
  */
 const READ_TOOLS = [
+  "list_card_sort_factors", "list_card_sort_rounds", "get_card_sort_proposals",
+  "get_card_sort_board", "get_card_sort_tally",
   "list_analytics_connections", "list_metrics", "get_metric", "list_metric_bindings", "get_metric_binding", "list_metric_observations", "get_metric_observation",
   "get_artifact", "get_comment", "get_current_identity", "get_custom_field_values",
   "get_decision", "get_doc", "get_doc_comment", "get_doc_version", "get_experiment",
@@ -574,6 +599,12 @@ const READ_TOOLS = [
  *    `get_opportunity_score` only reads one back.
  */
 const WRITE_TOOLS = [
+  // Card sort. propose/withdraw write a proposal row, and
+  // set_card_sort_round_state is a one-way reveal — all writes. Note that none
+  // of them touch an official custom field value; a read-only token still
+  // should not be able to cast or retract a vote, or reveal a live round.
+  "create_card_sort_round", "set_card_sort_round_state", "propose_card_sort_move",
+  "withdraw_card_sort_proposal",
   "create_metric", "update_metric", "archive_metric", "link_metric", "update_metric_binding", "unlink_metric", "refresh_metric_binding",
   "activate_research_study", "add_assumption", "add_comment", "add_doc_comment",
   "add_evidence", "add_feedback_attachment", "add_key_result", "add_solution",
@@ -701,6 +732,17 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   // question than "may a human-elevated agent ever call this" (yes, per the
   // ADR); the actual authorization is enforced downstream, not here.
   ...["create_scoring_model", "update_scoring_model", "archive_scoring_model", "set_workspace_scoring_model"].map(name => [name, "WRITE"]),
+  // Card sort reads are ordinary member reads, and get_card_sort_tally carries
+  // its own OPEN-round guard regardless of who is asking.
+  ...["list_card_sort_factors", "list_card_sort_rounds", "get_card_sort_board", "get_card_sort_proposals", "get_card_sort_tally"].map(name => [name, "READ"]),
+  // Every card sort write is human-only, for the same reason the comment edits
+  // below are: a CardSortProposal has no agent author column, so a proposal an
+  // agent cast would be stored as, and read back as, the delegating human's own
+  // opinion. The whole artifact is a record of what named people think, and a
+  // forged ballot is worse than a missing capability. set_card_sort_round_state
+  // is denied too — revealing a round is an irreversible disclosure of other
+  // people's in-progress positions, which is a facilitator's judgment call.
+  ...["create_card_sort_round", "set_card_sort_round_state", "propose_card_sort_move", "withdraw_card_sort_proposal"].map(name => [name, "DENY"]),
   // Legacy comments lack a durable agent author ID; body edits could retain a human label or approval badge.
   // create_workspace, approve_solution_plan, reject_solution_plan, and
   // request_release_authorization remain unconditionally human-only per ADR

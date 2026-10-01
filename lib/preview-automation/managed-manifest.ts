@@ -113,6 +113,15 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "066_agent_org_admin_grants": "083b64d82e25724c5827a34c8eea97c1a63c21be6ead6c9caeaf3eac89288371",
   // Per-question answers on decision records (multi-question tracked decisions). Last, matching its MIGRATIONS position.
   "067_decision_answers": "d79f88798ff1764d42fd8e0a08dc65510fb39bef6f8d9bdf32aec1abe13ce14f",
+  // Card sort rounds and proposals (two additive CREATE TABLEs, three ASYNC indexes;
+  // no ALTER, no backfill). Last, matching its MIGRATIONS position. The SQL was audited
+  // by a read-only reviewer other than its author on 2026-09-30 (DSQL compatibility,
+  // schema parity, digest match) with no blocking findings, and applied to production
+  // the same day.
+  "067_card_sort_rounds": "dcc4a678a63bd6d8dd46f33338f06ccb4acd4fc54a932417f3656ab5a8689285",
+  // Proposed new entries for card sort rounds (one additive CREATE TABLE, one ASYNC
+  // index; no ALTER, no backfill). Same 2026-09-30 audit and production apply as 067.
+  "068_card_sort_new_entries": "133d41beb53cbab557ab9075df6bdc4a9bc625c3f46b93dc7979cbba2d75d6e7",
   // Direct workspace_id on solutions and objectives (ADR Phase 0). The pinned SQL is DDL only;
   // the batched backfill and its postconditions run in the runner hook, which is pinned
   // separately in REVIEWED_MIGRATION_CODE_SHA256.
@@ -123,7 +132,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // quarantine and integrity postconditions are pinned in REVIEWED_MIGRATION_CODE_SHA256.
   "071_typed_link_tables": "ed2bbdf524c02436eceba30b20b73a32111ddec3a4dbf9011f389984be189606",
   // DDL-free residual pass of the typed link backfill (ADR Phase 2, PR-2). Comments only; the work is the pinned hook below.
-  "072_typed_links_residual_backfill": "7aed4ba070ff8e99b5d2207d76bcad9ee0cdb14d56ca2f343c44c340551a27a0"
+  "072_typed_links_residual_backfill": "7aed4ba070ff8e99b5d2207d76bcad9ee0cdb14d56ca2f343c44c340551a27a0",
+  // Workspace thinking model (two nullable ADD COLUMNs on workspaces; no index, no
+  // backfill, no hook). Last, matching its MIGRATIONS position. Migration only: no code
+  // reads the columns yet.
+  "073_workspace_thinking_model": "8c412a4c999568bc8ea2e802a3214ae5710f0721506d36eb3636afdd8574b7c6"
 };
 
 /**

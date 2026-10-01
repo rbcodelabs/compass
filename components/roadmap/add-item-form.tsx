@@ -16,6 +16,8 @@ import {
 import { addRoadmapItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import { EXPERIMENT_STATUS_BADGE } from "@/lib/discovery";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { linkToPlaceholder } from "@/lib/thinking-model/copy";
 import type { ExperimentStatus, Horizon } from "@/lib/types";
 
 type AvailableKR = { id: string; title: string; objectiveTitle: string };
@@ -43,6 +45,7 @@ export function AddItemForm({
   availableOpportunities,
   availableExperiments,
 }: Props) {
+  const labels = useLabels();
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [selectedKRId, setSelectedKRId] = useState<string | null>(null);
@@ -207,7 +210,7 @@ export function AddItemForm({
 
       {availableOpportunities && availableOpportunities.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`item-opportunity-${horizon}`}>Opportunity (optional)</Label>
+          <Label htmlFor={`item-opportunity-${horizon}`}>{labels.opportunity.singular} (optional)</Label>
           <Combobox
             items={[
               { value: "__none__", label: "— None —" },
@@ -218,7 +221,7 @@ export function AddItemForm({
             disabled={isPending}
           >
             <ComboboxTrigger id={`item-opportunity-${horizon}`} size="sm">
-              <ComboboxValue placeholder="Link to an opportunity…" />
+              <ComboboxValue placeholder={linkToPlaceholder(labels.opportunity)} />
             </ComboboxTrigger>
             <ComboboxContent />
           </Combobox>
@@ -258,7 +261,7 @@ export function AddItemForm({
 
       {availableKRs && availableKRs.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`item-kr-${horizon}`}>Key Result (optional)</Label>
+          <Label htmlFor={`item-kr-${horizon}`}>{labels.keyResult.singular} (optional)</Label>
           <Combobox
             items={[
               { value: "__none__", label: "— None —" },
@@ -278,7 +281,7 @@ export function AddItemForm({
             disabled={isPending}
           >
             <ComboboxTrigger id={`item-kr-${horizon}`} size="sm">
-              <ComboboxValue placeholder="Link to a key result…" />
+              <ComboboxValue placeholder={linkToPlaceholder(labels.keyResult)} />
             </ComboboxTrigger>
             <ComboboxContent />
           </Combobox>
@@ -287,7 +290,7 @@ export function AddItemForm({
 
       {availableSolutions && availableSolutions.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`item-solution-${horizon}`}>Solution (optional)</Label>
+          <Label htmlFor={`item-solution-${horizon}`}>{labels.solution.singular} (optional)</Label>
           <Combobox
             items={[
               { value: "__none__", label: "— None —" },
@@ -307,7 +310,7 @@ export function AddItemForm({
             disabled={isPending}
           >
             <ComboboxTrigger id={`item-solution-${horizon}`} size="sm">
-              <ComboboxValue placeholder="Link to a solution…" />
+              <ComboboxValue placeholder={linkToPlaceholder(labels.solution)} />
             </ComboboxTrigger>
             <ComboboxContent />
           </Combobox>

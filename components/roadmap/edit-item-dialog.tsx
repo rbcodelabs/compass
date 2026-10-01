@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/combobox";
 import { editRoadmapItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import type { RoadmapCardData } from "./roadmap-card";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { linkToPlaceholder } from "@/lib/thinking-model/copy";
 
 type AvailableOpportunity = { id: string; title: string };
 
@@ -48,6 +50,7 @@ export function EditItemDialog({
   onSaved,
   availableOpportunities,
 }: Props) {
+  const labels = useLabels();
   const [title, setTitle] = useState(item.title);
   const [description, setDescription] = useState(item.description ?? "");
   const [startDate, setStartDate] = useState(toDateInputValue(item.startDate));
@@ -130,7 +133,7 @@ export function EditItemDialog({
 
           {availableOpportunities && (
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor={`edit-opportunity-${item.id}`}>Opportunity</Label>
+              <Label htmlFor={`edit-opportunity-${item.id}`}>{labels.opportunity.singular}</Label>
               <Combobox
                 items={[
                   { value: "__none__", label: "— None —" },
@@ -145,10 +148,10 @@ export function EditItemDialog({
               >
                 <ComboboxTrigger
                   id={`edit-opportunity-${item.id}`}
-                  aria-label="Opportunity"
+                  aria-label={labels.opportunity.singular}
                   className="w-full"
                 >
-                  <ComboboxValue placeholder="Link to an opportunity…" />
+                  <ComboboxValue placeholder={linkToPlaceholder(labels.opportunity)} />
                 </ComboboxTrigger>
                 <ComboboxContent />
               </Combobox>

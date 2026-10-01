@@ -26,6 +26,7 @@ import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-pane
 import type { CustomFieldWithValue } from "@/lib/custom-field-definitions";
 import { usePanelContext } from "./panel-context";
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 
 const ITEM_STATUS_LABELS: Record<ItemStatus, string> = {
   ACTIVE: "Active",
@@ -86,6 +87,7 @@ export function RoadmapItemPanel({
   workspaceSlug: string;
 }) {
   const { notifyEntityMutated } = usePanelContext();
+  const labels = useLabels();
   const { data, error, mutate, refresh } = useEntityDetail<RoadmapItemData>(
     "roadmapItem",
     id,
@@ -113,13 +115,13 @@ export function RoadmapItemPanel({
   // The five possible origins collapse into one "linked" list.
   const linked: RelationItem[] = [];
   if (data.opportunity)
-    linked.push({ type: "opportunity", id: data.opportunity.id, title: data.opportunity.title, badge: { label: "Opportunity", className: "bg-violet-100 text-violet-700" } });
+    linked.push({ type: "opportunity", id: data.opportunity.id, title: data.opportunity.title, badge: { label: labels.opportunity.singular, className: "bg-violet-100 text-violet-700" } });
   if (data.solution)
-    linked.push({ type: "solution", id: data.solution.id, title: data.solution.title, badge: { label: "Solution", className: "bg-blue-100 text-blue-700" } });
+    linked.push({ type: "solution", id: data.solution.id, title: data.solution.title, badge: { label: labels.solution.singular, className: "bg-blue-100 text-blue-700" } });
   if (data.experiment)
     linked.push({ type: "experiment", id: data.experiment.id, title: data.experiment.title, badge: { label: "Experiment", className: "bg-amber-100 text-amber-700" } });
   if (data.keyResult)
-    linked.push({ type: "keyResult", id: data.keyResult.id, title: data.keyResult.title, badge: { label: "Key Result", className: "bg-indigo-100 text-indigo-700" } });
+    linked.push({ type: "keyResult", id: data.keyResult.id, title: data.keyResult.title, badge: { label: labels.keyResult.singular, className: "bg-indigo-100 text-indigo-700" } });
   if (data.feedback)
     linked.push({ type: "feedback", id: data.feedback.id, title: data.feedback.title, badge: { label: "Feedback", className: "bg-surface-inset text-text-secondary" } });
 
