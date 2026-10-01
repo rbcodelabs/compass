@@ -10,7 +10,7 @@ import { getWorkspace } from "@/lib/workspace";
 import { assertWorkspaceWritable } from "@/lib/workspace-context";
 import { setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
 import { requireProductEntity, requireProductWorkspace } from "@/lib/product-action-auth";
-import { deleteLegacyLinksForOpportunities, deleteLinksFor } from "@/lib/typed-links";
+import { deleteLegacyLinksForOpportunities, deleteLinksFor, drainLegacyLinksForOpportunities, drainLinksFor } from "@/lib/typed-links";
 
 // ─── Create Cycle ─────────────────────────────────────────────────────────────
 
@@ -243,7 +243,10 @@ export async function deleteObjective(
 ) {
   await requireProductEntity("objective", objectiveId);
   const prisma = getPrisma();
-  // No foreign keys reach the typed link tables, so the links go explicitly, in the same transaction as the row.
+  // No foreign keys reach the typed link tables, so the links go explicitly. An objective can hold hundreds of them and DSQL caps a
+  // transaction at ~3,000 modified rows (4 per link), so drain them in committed passes first (only when the delete can go
+  // through: an objective with key results is refused and keeps its links); the transaction then sweeps stragglers.
+  if ((await prisma.keyResult.count({ where: { objectiveId } })) === 0) await drainLinksFor(prisma, "objective", [objectiveId]);
   await prisma.$transaction(async (tx) => {
     await deleteLinksFor(tx, "objective", [objectiveId]);
     await tx.objective.delete({ where: { id: objectiveId } });
@@ -259,6 +262,10 @@ export async function deleteKeyResult(
 ) {
   await requireProductEntity("keyResult", keyResultId);
   const prisma = getPrisma();
+  // Drain in committed passes of at most 500 links first (see deleteObjective); the transaction sweeps stragglers.
+  const pointingBefore = await prisma.opportunity.findMany({ where: { linkedKeyResultId: keyResultId }, select: { id: true } });
+  await drainLegacyLinksForOpportunities(prisma, pointingBefore.map((o) => o.id));
+  await drainLinksFor(prisma, "keyResult", [keyResultId]);
   await prisma.$transaction(async (tx) => {
     // The legacy pointers to this key result are cleared by the relation's SetNull, so the LEGACY links they
     // implied go now; DIRECT links are the user's own and stay. Solution links to the key result always go.

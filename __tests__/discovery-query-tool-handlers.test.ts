@@ -37,10 +37,8 @@ describe("listSolutions", () => {
         roadmapItems: [],
       },
     ])
-    // The additive typed-link read: one workspace check of the listed solutions, then their (empty) link rows.
-    mockSolution.findMany.mockResolvedValueOnce([{ id: "solution-1" }])
-    mockSolutionKeyResultLink.findMany.mockResolvedValueOnce([])
-
+    // The additive typed-link read runs on ids this query already filtered by workspace, so it is one link read (default: none).
+    mockSolutionKeyResultLink.findMany.mockResolvedValue([])
     const result = await listSolutions({
       workspaceId: "workspace-1",
       status: "VALIDATED",

@@ -53,7 +53,7 @@ export default async function DiscoveryLayout({ children, params }: DiscoveryLay
   const squadMap = new Map(squads.map((s) => [s.id, s]));
 
   // Additive typed links, one workspace-filtered batch for the whole rail.
-  const linkedObjectives = await getLinkedObjectivesByOpportunity(prisma, workspace.id, rawOpportunities.map((o) => o.id));
+  const linkedObjectives = await getLinkedObjectivesByOpportunity(prisma, workspace.id, rawOpportunities.map((o) => o.id), { preverified: true });
 
   const opportunities: DiscoveryRailOpportunity[] = rawOpportunities.map((o) => ({
     id: o.id,

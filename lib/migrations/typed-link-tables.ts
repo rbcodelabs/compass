@@ -85,7 +85,12 @@ const legacyFrom = (schema: string) => `FROM "${schema}"."opportunities" AS o
          JOIN "${schema}"."key_results" AS kr ON kr.id = o.linked_key_result_id
          JOIN "${schema}"."objectives" AS obj ON obj.id = kr.objective_id`
 
-/** Same-workspace legacy rows that do not have their link yet. */
+/**
+ * Same-workspace legacy rows that do not have their link yet. A link of ANY origin on the pair counts as the link: if a DIRECT link on a
+ * pointer pair has a drifted workspace_id, the pointer is still treated as linked (inserting a second row would violate the unique pair
+ * index and dead-end the receipt) while reads hide that row. It is visible only in linkIntegrity.directWorkspaceMismatch, which is why
+ * that count is reported and not ignored.
+ */
 const legacyUnlinkedFromWhere = (schema: string) => `${legacyFrom(schema)}
          LEFT JOIN "${schema}"."opportunity_objective_links" AS l ON l.opportunity_id = o.id AND l.objective_id = obj.id
          WHERE o.linked_key_result_id IS NOT NULL AND obj.workspace_id = o.workspace_id AND l.id IS NULL`
@@ -194,7 +199,7 @@ export async function backfillOpportunityObjectiveLinks(
   // change linked_key_result_id, or drift a workspace after links were inserted.
   // Insert-only would then fail the postconditions forever with no data-repair
   // path, so stale LEGACY links are removed first. DIRECT links are never touched.
-  const pruned = await pruneStaleLegacyLinks(client, schema, log, sleep)
+  const pruned = await pruneStaleLegacyLinks(client, schema, log, sleep, migrationName)
 
   let inserted = 0
   while (true) {
@@ -266,6 +271,7 @@ export async function pruneStaleLegacyLinks(
   schema: string,
   log: string[],
   sleep?: (ms: number) => Promise<void>,
+  migrationName: string = TYPED_LINK_TABLES_MIGRATION,
 ): Promise<number> {
   let pruned = 0
   while (true) {
@@ -281,7 +287,7 @@ export async function pruneStaleLegacyLinks(
     )
     const deleted = result.rowCount ?? 0
     // Selected rows that the guarded DELETE cannot remove would loop forever.
-    if (deleted === 0) throw new Error(`${TYPED_LINK_TABLES_MIGRATION}: prune made no progress on ${stale.rows.length} stale LEGACY links`)
+    if (deleted === 0) throw new Error(`${migrationName}: prune made no progress on ${stale.rows.length} stale LEGACY links`)
     pruned += deleted
   }
   log.push(`  ✓ pruned ${pruned} stale LEGACY opportunity_objective_links rows (endpoint gone, pointer cleared or changed, or workspace drift)`)

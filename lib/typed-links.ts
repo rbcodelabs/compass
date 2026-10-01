@@ -108,9 +108,31 @@ async function loadKeyResultIn(tx: Tx, id: string, workspaceId: string) {
 
 // ── Transactions ────────────────────────────────────────────────────────────
 
-const isLinkUniqueRace = (error: unknown) => {
-  const e = error as { code?: string; meta?: { modelName?: string } } | null
-  return e?.code === "P2002" && (e.meta?.modelName === "OpportunityObjectiveLink" || e.meta?.modelName === "SolutionKeyResultLink")
+const LINK_NAMES = /idx_(?:opportunity_objective|solution_key_result)_links_pair|opportunity_objective_links|solution_key_result_links|OpportunityObjectiveLink|SolutionKeyResultLink/
+
+/**
+ * A lost race on the unique pair index. Prisma reports it as P2002, but a driver adapter does not necessarily fill `meta.modelName`,
+ * so the unique-violation code (P2002, or Postgres 23505 on the error, its cause or the adapter metadata) is matched together with
+ * ANY mention of a link model, table or pair index in the message, the model name or the metadata.
+ * Verified against the repo's real client and adapter in typed-links-race.integration.test.ts.
+ */
+export function isLinkUniqueRace(error: unknown): boolean {
+  const e = error as {
+    code?: string
+    message?: string
+    meta?: { modelName?: string; code?: string; target?: unknown; driverAdapterError?: { cause?: { originalCode?: string; constraint?: unknown } } }
+    cause?: { code?: string; message?: string; constraint?: string }
+  } | null
+  if (!e) return false
+  const codes = [e.code, e.meta?.code, e.cause?.code, e.meta?.driverAdapterError?.cause?.originalCode]
+  if (!codes.includes("P2002") && !codes.includes("23505")) return false
+  let metaText = ""
+  try {
+    metaText = JSON.stringify(e.meta ?? {})
+  } catch {
+    // circular metadata: fall through to the message and the model name
+  }
+  return LINK_NAMES.test([e.message, e.meta?.modelName, e.cause?.message, e.cause?.constraint, metaText].filter(Boolean).join(" "))
 }
 
 /**
@@ -185,6 +207,10 @@ export async function unlinkOpportunityFromObjective(
   const existing = (await tx.opportunityObjectiveLink.findFirst({ where })) as LinkRow | null
   if (!existing) return { removed: 0 }
 
+  // This function READS the opportunity's pointer to decide what to do. Touching the opportunity row makes that read part of the
+  // write set, so a concurrent pointer change conflicts (DSQL detects write-write conflicts only) instead of write-skewing.
+  await tx.opportunity.update({ where: { id: opportunity.id }, data: { updatedAt: new Date() } })
+
   // While the legacy pointer still leads to this objective the pair is derived from it, and a later
   // backfill would put the row straight back. Drop only a DIRECT claim (back to LEGACY) and say so.
   if (opportunity.linkedKeyResultId) {
@@ -245,7 +271,12 @@ export async function setOpportunityKeyResult(
   const opportunity = await loadOpportunity(tx, input.opportunityId, input.expectedWorkspaceId)
   // Verified before any write, so a denied call leaves both the column and the links untouched.
   if (input.keyResultId) await loadKeyResultIn(tx, input.keyResultId, opportunity.workspaceId)
-  const updated = await tx.opportunity.update({ where: { id: opportunity.id }, data: { linkedKeyResultId: input.keyResultId } })
+  // updatedAt is explicit: it drives recency sort and the expectedUpdatedAt optimistic check, and an edit of the key result
+  // from the opportunity header is an edit. updatedById only when a human made it (an agent carries no userId here).
+  const updated = await tx.opportunity.update({
+    where: { id: opportunity.id },
+    data: { linkedKeyResultId: input.keyResultId, updatedAt: new Date(), ...(input.ctx.createdById ? { updatedById: input.ctx.createdById } : {}) },
+  })
   await syncLegacyLink(tx, { opportunityId: opportunity.id, workspaceId: opportunity.workspaceId, keyResultId: input.keyResultId, ctx: input.ctx })
   return updated
 }
@@ -297,8 +328,12 @@ export type LinkParentKind = "opportunity" | "objective" | "solution" | "keyResu
 /**
  * Explicit link deletion for a parent that is going away (there are no foreign keys and Prisma's
  * emulated relations do not reach these tables). Removes links of BOTH origins that name any of
- * `ids`, in chunks. Pass it the same transaction as the parent delete where there is one.
- * Returns the number of link rows removed.
+ * `ids`. Pass it the same transaction as the parent delete where there is one. Returns the number removed.
+ *
+ * It splits the PARENT ids into chunks of 500, not the links: every chunk is one statement, and inside a transaction all chunks
+ * share DSQL's 3,000-modified-row cap (4 rows per link: the row plus 3 index entries, so about 750 links). A parent that may hold
+ * hundreds of links must be drained first with drainLinksFor (separate committed statements of at most 500 links), leaving only
+ * stragglers for this call.
  */
 export async function deleteLinksFor(tx: Tx, kind: LinkParentKind, ids: readonly string[]): Promise<number> {
   let removed = 0
@@ -307,6 +342,57 @@ export async function deleteLinksFor(tx: Tx, kind: LinkParentKind, ids: readonly
     else if (kind === "objective") removed += (await tx.opportunityObjectiveLink.deleteMany({ where: { objectiveId: { in: part } } })).count
     else if (kind === "solution") removed += (await tx.solutionKeyResultLink.deleteMany({ where: { solutionId: { in: part } } })).count
     else removed += (await tx.solutionKeyResultLink.deleteMany({ where: { keyResultId: { in: part } } })).count
+  }
+  return removed
+}
+
+type LinkRowFinder = (take: number) => Promise<{ id: string }[]>
+
+/** Finds up to `take` link ids and deletes them by id, repeating until none are left. Each pass is its own statement. */
+async function drainByIds(find: LinkRowFinder, remove: (ids: string[]) => Promise<number>): Promise<number> {
+  let total = 0
+  while (true) {
+    const rows = await find(LINK_WRITE_CHUNK)
+    if (rows.length === 0) return total
+    const deleted = await remove(rows.map((row) => row.id))
+    if (deleted === 0) throw new Error("Link delete made no progress")
+    total += deleted
+  }
+}
+
+/**
+ * Deletes every link naming a parent in `ids`, in committed passes of at most LINK_WRITE_CHUNK LINKS each (so no statement can
+ * exceed DSQL's 3,000-row write cap however many links one parent has). Call it with the plain client BEFORE the parent-delete
+ * transaction; it is idempotent and safe to repeat, and the transaction's deleteLinksFor then only sweeps stragglers.
+ */
+export async function drainLinksFor(db: Tx, kind: LinkParentKind, ids: readonly string[]): Promise<number> {
+  let removed = 0
+  for (const part of chunk(ids, LINK_WRITE_CHUNK)) {
+    if (kind === "opportunity" || kind === "objective") {
+      const where = kind === "opportunity" ? { opportunityId: { in: part } } : { objectiveId: { in: part } }
+      removed += await drainByIds(
+        (take) => db.opportunityObjectiveLink.findMany({ where, select: { id: true }, take }),
+        async (rowIds) => (await db.opportunityObjectiveLink.deleteMany({ where: { id: { in: rowIds } } })).count,
+      )
+    } else {
+      const where = kind === "solution" ? { solutionId: { in: part } } : { keyResultId: { in: part } }
+      removed += await drainByIds(
+        (take) => db.solutionKeyResultLink.findMany({ where, select: { id: true }, take }),
+        async (rowIds) => (await db.solutionKeyResultLink.deleteMany({ where: { id: { in: rowIds } } })).count,
+      )
+    }
+  }
+  return removed
+}
+
+/** drainLinksFor for the LEGACY links of opportunities whose pointer is about to be cleared (DIRECT links are kept). */
+export async function drainLegacyLinksForOpportunities(db: Tx, opportunityIds: readonly string[]): Promise<number> {
+  let removed = 0
+  for (const part of chunk(opportunityIds, LINK_WRITE_CHUNK)) {
+    removed += await drainByIds(
+      (take) => db.opportunityObjectiveLink.findMany({ where: { opportunityId: { in: part }, origin: "LEGACY" }, select: { id: true }, take }),
+      async (rowIds) => (await db.opportunityObjectiveLink.deleteMany({ where: { id: { in: rowIds } } })).count,
+    )
   }
   return removed
 }
@@ -329,22 +415,12 @@ export async function deleteLegacyLinksForOpportunities(tx: Tx, opportunityIds: 
  * objective deletes. Endpoint-keyed sweeps (deleteLinksFor) cover rows whose workspaceId drifted.
  */
 export async function deleteWorkspaceLinks(prisma: AppTransactionClient, workspaceId: string): Promise<{ opportunityObjective: number; solutionKeyResult: number }> {
-  const sweep = async (find: (take: number) => Promise<{ id: string }[]>, remove: (ids: string[]) => Promise<number>) => {
-    let total = 0
-    while (true) {
-      const rows = await find(LINK_WRITE_CHUNK)
-      if (rows.length === 0) return total
-      const deleted = await remove(rows.map((row) => row.id))
-      if (deleted === 0) throw new Error("Link teardown made no progress")
-      total += deleted
-    }
-  }
   return {
-    opportunityObjective: await sweep(
+    opportunityObjective: await drainByIds(
       (take) => prisma.opportunityObjectiveLink.findMany({ where: { workspaceId }, select: { id: true }, take }),
       async (ids) => (await prisma.opportunityObjectiveLink.deleteMany({ where: { id: { in: ids } } })).count,
     ),
-    solutionKeyResult: await sweep(
+    solutionKeyResult: await drainByIds(
       (take) => prisma.solutionKeyResultLink.findMany({ where: { workspaceId }, select: { id: true }, take }),
       async (ids) => (await prisma.solutionKeyResultLink.deleteMany({ where: { id: { in: ids } } })).count,
     ),
@@ -360,6 +436,55 @@ const byCreatedThenId = (a: { createdAt: Date; id: string }, b: { createdAt: Dat
   a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
 /**
+ * Whether an error means "the link table does not exist yet" (Postgres 42P01, Prisma P2021). Checked on the code, the cause and
+ * the driver-adapter metadata, and as a last resort on a message that names one of the two link tables.
+ */
+export function isMissingLinkTable(error: unknown): boolean {
+  const e = error as {
+    code?: string
+    message?: string
+    cause?: { code?: string; originalCode?: string }
+    meta?: { code?: string; driverAdapterError?: { cause?: { originalCode?: string; kind?: string } } }
+  } | null
+  if (!e) return false
+  const codes = [e.code, e.meta?.code, e.cause?.code, e.cause?.originalCode, e.meta?.driverAdapterError?.cause?.originalCode]
+  if (codes.includes("42P01") || codes.includes("P2021")) return true
+  return /(relation|table) .*(opportunity_objective_links|solution_key_result_links|OpportunityObjectiveLink|SolutionKeyResultLink).* does not exist|does not exist.*(opportunity_objective_links|solution_key_result_links)/i.test(e.message ?? "")
+}
+
+let warnedMissingLinkTable = false
+/** One structured warning per process, no row data, so a wrong deploy order is visible in the logs without flooding them. */
+function warnMissingLinkTableOnce(surface: string) {
+  if (warnedMissingLinkTable) return
+  warnedMissingLinkTable = true
+  console.warn(JSON.stringify({ event: "typed_links.read_degraded", reason: "link_table_missing", surface, hint: "apply migration 071_typed_link_tables" }))
+}
+
+/** Test seam: forgets that the warning was already logged. */
+export function resetMissingLinkTableWarning() {
+  warnedMissingLinkTable = false
+}
+
+/**
+ * TOLERANT READ. Runs a link-table read and returns [] when the table is missing, so the additive link payloads (discovery pages,
+ * detail panels, canvas, MCP list/get tools, PM interview context) degrade to "no links" instead of failing the whole page when
+ * this code is deployed before migration 071. ONLY the batch read helpers use it. Writes, deletes, the workspace cascade, the link
+ * tools and list_links stay fail-closed on purpose.
+ */
+async function tolerantLinkRead<T>(surface: string, read: () => Promise<T[]>): Promise<T[]> {
+  try {
+    return await read()
+  } catch (error) {
+    if (!isMissingLinkTable(error)) throw error
+    warnMissingLinkTableOnce(surface)
+    return []
+  }
+}
+
+/** Callers that already hold ids read under this workspace's own filter may skip the re-verification query. */
+export type LinkReadOptions = { preverified?: boolean }
+
+/**
  * Batch read: opportunityIds -> the objectives linked to each, ordered by link created_at then id.
  * Additive and deterministic. Every opportunity id that is in `workspaceId` appears in the map (empty
  * list when it has no links); ids outside the workspace are absent. A link is included only when
@@ -369,16 +494,20 @@ export async function getLinkedObjectivesByOpportunity(
   db: Tx,
   workspaceId: string,
   opportunityIds: readonly string[],
+  options: LinkReadOptions = {},
 ): Promise<Map<string, LinkedObjective[]>> {
   const result = new Map<string, LinkedObjective[]>()
   for (const ids of chunk([...new Set(opportunityIds)], LINK_WRITE_CHUNK)) {
-    const inWorkspace = await db.opportunity.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true } })
-    const verified = new Set(inWorkspace.map((row) => row.id))
+    const verified = options.preverified
+      ? new Set(ids)
+      : new Set((await db.opportunity.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true } })).map((row) => row.id))
     if (verified.size === 0) continue
-    const links = (await db.opportunityObjectiveLink.findMany({
-      where: { workspaceId, opportunityId: { in: [...verified] } },
-      select: { id: true, opportunityId: true, objectiveId: true, createdAt: true },
-    })) as { id: string; opportunityId: string; objectiveId: string; createdAt: Date }[]
+    const links = (await tolerantLinkRead("opportunity-objective", () =>
+      db.opportunityObjectiveLink.findMany({
+        where: { workspaceId, opportunityId: { in: [...verified] } },
+        select: { id: true, opportunityId: true, objectiveId: true, createdAt: true },
+      }),
+    )) as { id: string; opportunityId: string; objectiveId: string; createdAt: Date }[]
     const objectiveIds = [...new Set(links.map((link) => link.objectiveId))]
     const objectives = objectiveIds.length
       ? await db.objective.findMany({ where: { id: { in: objectiveIds }, workspaceId }, select: { id: true, title: true } })
@@ -398,16 +527,20 @@ export async function getLinkedKeyResultsBySolution(
   db: Tx,
   workspaceId: string,
   solutionIds: readonly string[],
+  options: LinkReadOptions = {},
 ): Promise<Map<string, LinkedKeyResult[]>> {
   const result = new Map<string, LinkedKeyResult[]>()
   for (const ids of chunk([...new Set(solutionIds)], LINK_WRITE_CHUNK)) {
-    const inWorkspace = await db.solution.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true } })
-    const verified = new Set(inWorkspace.map((row) => row.id))
+    const verified = options.preverified
+      ? new Set(ids)
+      : new Set((await db.solution.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true } })).map((row) => row.id))
     if (verified.size === 0) continue
-    const links = (await db.solutionKeyResultLink.findMany({
-      where: { workspaceId, solutionId: { in: [...verified] } },
-      select: { id: true, solutionId: true, keyResultId: true, createdAt: true },
-    })) as { id: string; solutionId: string; keyResultId: string; createdAt: Date }[]
+    const links = (await tolerantLinkRead("solution-key-result", () =>
+      db.solutionKeyResultLink.findMany({
+        where: { workspaceId, solutionId: { in: [...verified] } },
+        select: { id: true, solutionId: true, keyResultId: true, createdAt: true },
+      }),
+    )) as { id: string; solutionId: string; keyResultId: string; createdAt: Date }[]
     const keyResultIds = [...new Set(links.map((link) => link.keyResultId))]
     const keyResults = keyResultIds.length
       ? await db.keyResult.findMany({ where: { id: { in: keyResultIds }, objective: { workspaceId } }, select: { id: true, title: true, objectiveId: true } })

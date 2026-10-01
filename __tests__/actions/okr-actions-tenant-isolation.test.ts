@@ -110,6 +110,7 @@ function makeDb() {
       void rel;
       return out;
     },
+    count: async ({ where }: { where: Row }) => tables[model].filter((r) => matches(model, r, where)).length,
     findMany: async ({ where }: { where: Row }) => tables[model].filter((r) => matches(model, r, where)).map((r) => ({ ...r })),
     deleteMany: async ({ where }: { where: Row }) => {
       const doomed = tables[model].filter((r) => matches(model, r, where));

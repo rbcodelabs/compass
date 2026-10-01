@@ -3,7 +3,7 @@
 import getPrisma from "@/lib/db";
 import { getEligibleParentKeyResults } from "@/lib/okr-hierarchy";
 import { ok, fail } from "@/lib/mcp-output";
-import { deleteLegacyLinksForOpportunities, deleteLinksFor } from "@/lib/typed-links";
+import { deleteLegacyLinksForOpportunities, deleteLinksFor, drainLegacyLinksForOpportunities, drainLinksFor } from "@/lib/typed-links";
 
 type ObjectiveStatus = "ON_TRACK" | "AT_RISK" | "OFF_TRACK" | "COMPLETE";
 
@@ -49,6 +49,11 @@ export async function updateObjective({
 
 export async function deleteObjective({ objectiveId }: { objectiveId: string }) {
   const prisma = getPrisma();
+  // An objective can hold hundreds of links and DSQL caps a transaction at ~3,000 modified rows (4 per link), so drain them in
+  // separate committed passes first; the transaction below only sweeps stragglers. Idempotent. Drain only when the objective has no
+  // key results: otherwise the delete is refused below and its links must stay.
+  const hasKeyResults = await prisma.keyResult.findFirst({ where: { objectiveId }, select: { id: true } });
+  if (!hasKeyResults) await drainLinksFor(prisma, "objective", [objectiveId]);
   const outcome = await prisma.$transaction(async (tx) => {
     const existing = await tx.objective.findUnique({
       where: { id: objectiveId },
@@ -137,6 +142,12 @@ export async function deleteKeyResult({ keyResultId }: { keyResultId: string }) 
     select: { id: true, title: true },
   });
   if (!existing) return fail(`Key Result "${keyResultId}" not found.`);
+
+  // Drain the links in separate committed passes of at most 500 links before the delete transaction (see deleteObjective); the
+  // transaction below then only sweeps stragglers. Idempotent.
+  const pointing = await prisma.opportunity.findMany({ where: { linkedKeyResultId: keyResultId }, select: { id: true } });
+  await drainLegacyLinksForOpportunities(prisma, pointing.map((o) => o.id));
+  await drainLinksFor(prisma, "keyResult", [keyResultId]);
 
   const counts = await prisma.$transaction(async (tx) => {
     const updatedAt = new Date();

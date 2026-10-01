@@ -139,7 +139,7 @@ The API key is stored in the Vercel project settings and in `.env.local` as `MCP
 | `update_opportunity_status` | Move through EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
 | `link_opportunity_to_kr` | Associate an opportunity to a Key Result (the key result must be in the opportunity's workspace) |
 | `link_opportunity_to_objective` | Link an opportunity directly to an Objective in the same workspace (objective-level; idempotent, `created:false` on repeat). A direct link survives clearing the opportunity's Key Result |
-| `unlink_opportunity_from_objective` | Remove an opportunity-objective link (`removed:0` when none). A link implied by the opportunity's linked Key Result remains until that Key Result is cleared |
+| `unlink_opportunity_from_objective` | Remove an opportunity-objective link (`removed:0` when none). A link implied by the opportunity's linked Key Result remains until that Key Result is cleared (`removed:0, stillLinkedViaKeyResult:true` is a successful no-op, not a failure) |
 | `link_solution_to_key_result` | Link a solution to a Key Result in the same workspace (idempotent). The solution keeps its single parent opportunity |
 | `unlink_solution_from_key_result` | Remove a solution-key result link (`removed:0` when none) |
 | `list_links` | List the typed links on one opportunity, objective, solution or Key Result (exactly one id), oldest first, with `limit` and `cursor` paging. Opportunity-objective links report `origin` DIRECT or LEGACY |

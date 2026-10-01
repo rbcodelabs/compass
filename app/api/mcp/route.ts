@@ -1000,7 +1000,7 @@ const _handler = createMcpHandler(
         }
         // Additive: the typed Opportunity<->Objective links, one workspace-filtered batch for the whole list.
         // `linkedKeyResult` above stays derived from the legacy column only and is never inferred from these.
-        const linkedObjectives = await getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunities.map(o => o.id))
+        const linkedObjectives = await getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunities.map(o => o.id), { preverified: true })
         const lines = opportunities.map(o => {
           const description = o.description?.trim().replace(/\r\n?/g, "\n")
           const objectives = linkedObjectives.get(o.id) ?? []
@@ -1075,7 +1075,7 @@ const _handler = createMcpHandler(
         // Same for the linked KR: its Objective must be in the opportunity's workspace, or the link is hidden.
         if (opp.linkedKeyResult && opp.linkedKeyResult.objective.workspaceId !== opp.workspaceId) opp.linkedKeyResult = null
         // Additive typed Opportunity<->Objective links (workspace-filtered). `linkedKeyResult` stays legacy-column-only.
-        const linkedObjectives = (await getLinkedObjectivesByOpportunity(prisma, opp.workspaceId, [opp.id])).get(opp.id) ?? []
+        const linkedObjectives = (await getLinkedObjectivesByOpportunity(prisma, opp.workspaceId, [opp.id], { preverified: true })).get(opp.id) ?? []
 
         const lines: string[] = [
           `# ${opp.title} [${opp.status}]`,
@@ -1316,7 +1316,7 @@ const _handler = createMcpHandler(
       {
         title: "Unlink Opportunity from Objective",
         description:
-          "Removes the link between an Opportunity and an Objective. Returns removed:0 when there is none. If the opportunity's linked Key Result is under that objective the link is derived from it and remains until the Key Result is cleared (stillLinkedViaKeyResult:true).",
+          "Removes the link between an Opportunity and an Objective. Returns removed:0 when there is none. If the opportunity's linked Key Result is under that objective the link is derived from it and remains until the Key Result is cleared (stillLinkedViaKeyResult:true, removed:0). That is not a failure: the call succeeded and nothing needed to change.",
         inputSchema: { ...typedLinkEnds, opportunityId: z.string().uuid().describe("UUID of the opportunity"), objectiveId: z.string().uuid().describe("UUID of the objective") },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },

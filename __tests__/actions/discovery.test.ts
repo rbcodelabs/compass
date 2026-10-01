@@ -237,7 +237,7 @@ describe("linkOpportunityToKeyResult", () => {
 
   it("links an opportunity to a key result: the legacy column and a LEGACY link to the key result's objective, in one transaction", async () => {
     await linkOpportunityToKeyResult("opp-1", "kr-1", "/path");
-    expect(mockOpportunity.update).toHaveBeenCalledWith({ where: { id: "opp-1" }, data: { linkedKeyResultId: "kr-1" } });
+    expect(mockOpportunity.update).toHaveBeenCalledWith({ where: { id: "opp-1" }, data: { linkedKeyResultId: "kr-1", updatedAt: expect.any(Date), updatedById: "user-1" } });
     expect(mockLinks.create).toHaveBeenCalledWith({
       data: { workspaceId: "ws-1", opportunityId: "opp-1", objectiveId: "obj-1", origin: "LEGACY", source: "UI", createdById: "user-1" },
     });

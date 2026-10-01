@@ -8,7 +8,7 @@ import { deleteWorkspaceUpdates } from "@/lib/workspace-updates-cleanup";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
-import { deleteLinksFor, deleteWorkspaceLinks } from "@/lib/typed-links";
+import { drainLinksFor, deleteWorkspaceLinks } from "@/lib/typed-links";
 
 /**
  * Aurora DSQL fails a transaction that modifies more than ~3,000 rows, and the workspace_id indexes on Solution and
@@ -175,7 +175,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await prisma.opportunityScore.deleteMany({
       where: { opportunityId: { in: chunk } },
     });
-    await deleteLinksFor(prisma, "opportunity", chunk);
+    await drainLinksFor(prisma, "opportunity", chunk);
   }
   const solutionIds = await ids(
     prisma.solution.findMany({
@@ -187,7 +187,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await prisma.solutionScore.deleteMany({
       where: { solutionId: { in: chunk } },
     });
-    await deleteLinksFor(prisma, "solution", chunk);
+    await drainLinksFor(prisma, "solution", chunk);
     await prisma.assumption.deleteMany({
       where: { solutionId: { in: chunk } },
     });
@@ -221,12 +221,12 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
       await prisma.checkIn.deleteMany({
         where: { keyResultId: { in: keyResultChunk } },
       });
-      await deleteLinksFor(prisma, "keyResult", keyResultChunk);
+      await drainLinksFor(prisma, "keyResult", keyResultChunk);
       await prisma.keyResult.deleteMany({
         where: { id: { in: keyResultChunk } },
       });
     }
-    await deleteLinksFor(prisma, "objective", objectiveChunk);
+    await drainLinksFor(prisma, "objective", objectiveChunk);
     await prisma.objective.deleteMany({ where: { id: { in: objectiveChunk } } });
   }
   await prisma.oKRCycle.deleteMany({ where: { workspaceId } });

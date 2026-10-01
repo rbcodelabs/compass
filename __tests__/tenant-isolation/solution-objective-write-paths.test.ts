@@ -426,6 +426,7 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   "__tests__/workspace-id-on-solution-objective-migration.integration.test.ts": 12,
   "__tests__/typed-link-tables-migration.integration.test.ts": 3, // objectives: one before 068 exists (allow-listed below), two listing workspace_id
   "__tests__/typed-links-residual-migration.integration.test.ts": 1, // objectives, listing workspace_id (068 is applied first)
+  "__tests__/typed-links-race.integration.test.ts": 2, // one objective and one solution, each listing workspace_id
   // INSERT INTO ${ownerTable}: the managed-pilot ownership table (see DYNAMIC_INSERT_ALLOWED); counted so a second one is noticed.
   "lib/preview-automation/managed-migrations.ts": 1,
   "e2e/functional/fixtures/seed-e2e.ts": 2,

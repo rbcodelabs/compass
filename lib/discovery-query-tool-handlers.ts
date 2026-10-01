@@ -61,7 +61,7 @@ export async function listSolutions({
   })
 
   // Additive: typed Solution<->Key Result links, one workspace-filtered batch for the whole list.
-  const linkedKeyResults = await getLinkedKeyResultsBySolution(getPrisma(), workspaceId, solutions.map((solution) => solution.id))
+  const linkedKeyResults = await getLinkedKeyResultsBySolution(getPrisma(), workspaceId, solutions.map((solution) => solution.id), { preverified: true })
   const items = solutions.map((solution) => ({
     id: solution.id,
     title: solution.title,

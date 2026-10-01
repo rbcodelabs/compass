@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   TypedLinkError,
+  drainLegacyLinksForOpportunities,
+  drainLinksFor,
+  resetMissingLinkTableWarning,
   assertSameWorkspacePair,
   deleteLinksFor,
   getLinkedKeyResultsBySolution,
@@ -351,5 +354,132 @@ describe("listLinks", () => {
     expect((await listLinks(tx, { workspaceId: WS_A.id, objectiveId: "obj-a", limit: 10 })).items[0]).toMatchObject({ opportunityId: "opp-a", origin: "LEGACY" });
     expect((await listLinks(tx, { workspaceId: WS_A.id, solutionId: "sol-a", limit: 10 })).items[0]).toMatchObject({ kind: "solution_key_result", keyResultId: "kr-a", keyResultTitle: "A key result" });
     expect((await listLinks(tx, { workspaceId: WS_A.id, keyResultId: "kr-a", limit: 10 })).items[0]).toMatchObject({ solutionId: "sol-a", solutionTitle: "A solution" });
+  });
+});
+
+describe("updatedAt: a key result edit is an edit (recency sort and the expectedUpdatedAt check depend on it)", () => {
+  it("setOpportunityKeyResult bumps updatedAt, records updatedById for a human, and invalidates a stale expectedUpdatedAt", async () => {
+    const { fake, tx } = setup();
+    const row = opp(fake, "opp-a") as Record<string, unknown>;
+    const before = new Date(1_000);
+    row.updatedAt = before;
+    await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: "kr-a", ctx: { source: "UI", createdById: "user-alice" } });
+    expect((row.updatedAt as Date).getTime()).toBeGreaterThan(before.getTime());
+    expect(row.updatedById).toBe("user-alice");
+    // The optimistic check updateOpportunity makes (where updatedAt = the value the caller read) now refuses the stale read.
+    await expect(fake.client.opportunity.update({ where: { id: "opp-a", updatedAt: before }, data: { title: "stale write" } })).rejects.toThrow(/not found/i);
+    await expect(fake.client.opportunity.update({ where: { id: "opp-a", updatedAt: row.updatedAt as Date }, data: { title: "fresh write" } })).resolves.toBeTruthy();
+  });
+
+  it("a clear bumps it too, and an agent (no createdById) does not write updatedById", async () => {
+    const { fake, tx } = setup();
+    const row = opp(fake, "opp-a") as Record<string, unknown>;
+    row.updatedAt = new Date(1_000);
+    await setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: null, ctx });
+    expect((row.updatedAt as Date).getTime()).toBeGreaterThan(1_000);
+    expect("updatedById" in row).toBe(false);
+  });
+
+  it("unlink touches the opportunity row (so its read of the pointer is in the write set) only when a link exists", async () => {
+    const { fake, tx, links } = setup();
+    const row = opp(fake, "opp-a") as Record<string, unknown>;
+    row.updatedAt = new Date(1_000);
+    await unlinkOpportunityFromObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a" });
+    expect((row.updatedAt as Date).getTime()).toBe(1_000);
+    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
+    await unlinkOpportunityFromObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a" });
+    expect((row.updatedAt as Date).getTime()).toBeGreaterThan(1_000);
+  });
+
+  it("link/unlink of a solution touches neither the solution row nor its opportunity", async () => {
+    const { fake, tx } = setup();
+    const mark = fake.state.writes.length;
+    await linkSolutionToKeyResult(tx, { solutionId: "sol-a", keyResultId: "kr-a", ctx });
+    await unlinkSolutionFromKeyResult(tx, { solutionId: "sol-a", keyResultId: "kr-a" });
+    expect(fake.state.writes.slice(mark).filter((w) => /^(solution|opportunity)\./.test(w))).toEqual([]);
+  });
+});
+
+describe("tolerant reads: only the batch read helpers degrade when a link table is missing", () => {
+  const missing = (code: string) => Object.assign(new Error('relation "opportunity_objective_links" does not exist'), { code });
+  const withMissingTable = (error: unknown) => {
+    const { fake, tx, links } = setup();
+    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
+    for (const model of ["opportunityObjectiveLink", "solutionKeyResultLink"] as const) {
+      const delegate = fake.client[model] as unknown as Record<string, () => Promise<never>>;
+      for (const op of ["findMany", "findFirst", "create", "update", "deleteMany"]) delegate[op] = async () => { throw error };
+    }
+    return { fake, tx };
+  };
+
+  it.each([
+    ["Prisma P2021", missing("P2021")],
+    ["Postgres 42P01 on the error", missing("42P01")],
+    ["Postgres 42P01 on the cause", Object.assign(new Error("query failed"), { cause: { originalCode: "42P01" } })],
+    ["driver adapter metadata", Object.assign(new Error("query failed"), { code: "P2010", meta: { driverAdapterError: { cause: { originalCode: "42P01" } } } })],
+  ])("getLinkedObjectivesByOpportunity returns every verified opportunity with no links (%s), and warns once without row data", async (_n, error) => {
+    resetMissingLinkTableWarning();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { tx } = withMissingTable(error);
+    const map = await getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"]);
+    expect(map.get("opp-a")).toEqual([]);
+    await getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(String(warn.mock.calls[0][0]));
+    expect(logged).toMatchObject({ event: "typed_links.read_degraded", reason: "link_table_missing" });
+    expect(JSON.stringify(logged)).not.toContain("opp-a");
+    warn.mockRestore();
+  });
+
+  it("getLinkedKeyResultsBySolution degrades the same way", async () => {
+    const { tx } = withMissingTable(missing("P2021"));
+    expect((await getLinkedKeyResultsBySolution(tx, WS_A.id, ["sol-a"])).get("sol-a")).toEqual([]);
+  });
+
+  it("any OTHER read error still fails", async () => {
+    const { tx } = withMissingTable(Object.assign(new Error("connection reset"), { code: "ECONNRESET" }));
+    await expect(getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"])).rejects.toThrow("connection reset");
+    await expect(getLinkedKeyResultsBySolution(tx, WS_A.id, ["sol-a"])).rejects.toThrow("connection reset");
+  });
+
+  it("writes, deletes, the drain and list_links stay fail-closed on a missing table", async () => {
+    const { tx } = withMissingTable(missing("P2021"));
+    await expect(linkOpportunityToObjective(tx, { opportunityId: "opp-a", objectiveId: "obj-a", ctx })).rejects.toThrow(/does not exist/);
+    await expect(linkSolutionToKeyResult(tx, { solutionId: "sol-a", keyResultId: "kr-a", ctx })).rejects.toThrow(/does not exist/);
+    await expect(setOpportunityKeyResult(tx, { opportunityId: "opp-a", keyResultId: "kr-a", ctx })).rejects.toThrow(/does not exist/);
+    await expect(deleteLinksFor(tx, "objective", ["obj-a"])).rejects.toThrow(/does not exist/);
+    await expect(drainLinksFor(tx, "objective", ["obj-a"])).rejects.toThrow(/does not exist/);
+    await expect(listLinks(tx, { workspaceId: WS_A.id, opportunityId: "opp-a", limit: 5 })).rejects.toThrow(/does not exist/);
+  });
+
+  it("preverified skips the workspace re-check query", async () => {
+    const { fake, tx, links } = setup();
+    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT" });
+    const spy = vi.spyOn(fake.client.opportunity, "findMany");
+    expect((await getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"], { preverified: true })).get("opp-a")).toEqual([{ id: "obj-a", title: "A objective" }]);
+    expect(spy).not.toHaveBeenCalled();
+    await getLinkedObjectivesByOpportunity(tx, WS_A.id, ["opp-a"]);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("draining a parent with many links", () => {
+  it("drainLinksFor deletes by LINK id in passes of at most 500 links, however many one parent holds", async () => {
+    const { fake, tx, links } = setup();
+    for (let i = 0; i < 1_203; i += 1) seedLink(links, { workspaceId: WS_A.id, opportunityId: `o${i}`, objectiveId: "obj-a", origin: "LEGACY" });
+    seedLink(links, { workspaceId: WS_A.id, opportunityId: "keep", objectiveId: "obj-a2", origin: "DIRECT" });
+    const spy = vi.spyOn(fake.client.opportunityObjectiveLink, "deleteMany");
+    expect(await drainLinksFor(tx, "objective", ["obj-a"])).toBe(1_203);
+    expect(links.map((l) => l.opportunityId)).toEqual(["keep"]);
+    expect(spy.mock.calls.map(([args]) => ((args as { where: { id: { in: string[] } } }).where.id.in).length)).toEqual([500, 500, 203]);
+    expect(await drainLinksFor(tx, "objective", ["obj-a"])).toBe(0);
+  });
+
+  it("drainLegacyLinksForOpportunities drains only LEGACY links", async () => {
+    const { tx, links } = setup();
+    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" });
+    seedLink(links, { workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "DIRECT" });
+    expect(await drainLegacyLinksForOpportunities(tx, ["opp-a"])).toBe(1);
+    expect(links.map((l) => l.origin)).toEqual(["DIRECT"]);
   });
 });

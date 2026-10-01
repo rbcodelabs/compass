@@ -424,13 +424,16 @@ describe("deleteOrganization", () => {
     // ── Typed links: swept by workspace, then by endpoint id, before the rows they name go ──
     expect(mockOpportunityObjectiveLink.findMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, select: { id: true }, take: 500 });
     expect(mockSolutionKeyResultLink.findMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, select: { id: true }, take: 500 });
-    expect(mockOpportunityObjectiveLink.deleteMany).toHaveBeenCalledWith({ where: { opportunityId: { in: ["opp-1"] } } });
-    expect(mockOpportunityObjectiveLink.deleteMany).toHaveBeenCalledWith({ where: { objectiveId: { in: ["obj-1"] } } });
-    expect(mockSolutionKeyResultLink.deleteMany).toHaveBeenCalledWith({ where: { solutionId: { in: ["sol-1"] } } });
-    expect(mockSolutionKeyResultLink.deleteMany).toHaveBeenCalledWith({ where: { keyResultId: { in: ["kr-1"] } } });
-    expect(mockOpportunityObjectiveLink.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockOpportunity.deleteMany.mock.invocationCallOrder[0]);
-    expect(mockSolutionKeyResultLink.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockSolution.deleteMany.mock.invocationCallOrder[0]);
-    expect(mockOpportunityObjectiveLink.deleteMany.mock.invocationCallOrder.at(-1)).toBeLessThan(mockObjective.deleteMany.mock.invocationCallOrder[0]);
+    // By endpoint id: drained by LINK id (find up to 500, delete by id), so the parent ids go into the find, not a bulk delete.
+    const drain = { select: { id: true }, take: 500 };
+    expect(mockOpportunityObjectiveLink.findMany).toHaveBeenCalledWith({ where: { opportunityId: { in: ["opp-1"] } }, ...drain });
+    expect(mockOpportunityObjectiveLink.findMany).toHaveBeenCalledWith({ where: { objectiveId: { in: ["obj-1"] } }, ...drain });
+    expect(mockSolutionKeyResultLink.findMany).toHaveBeenCalledWith({ where: { solutionId: { in: ["sol-1"] } }, ...drain });
+    expect(mockSolutionKeyResultLink.findMany).toHaveBeenCalledWith({ where: { keyResultId: { in: ["kr-1"] } }, ...drain });
+    const firstFind = (m: typeof mockOpportunityObjectiveLink) => m.findMany.mock.invocationCallOrder[0];
+    expect(firstFind(mockOpportunityObjectiveLink)).toBeLessThan(mockOpportunity.deleteMany.mock.invocationCallOrder[0]);
+    expect(firstFind(mockSolutionKeyResultLink)).toBeLessThan(mockSolution.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockOpportunityObjectiveLink.findMany.mock.invocationCallOrder.at(-1)).toBeLessThan(mockObjective.deleteMany.mock.invocationCallOrder[0]);
 
     // ── Tasks / TaskLinks ──
     expect(mockTaskLink.deleteMany).toHaveBeenCalledWith({ where: { taskId: { in: ["task-1"] } } });

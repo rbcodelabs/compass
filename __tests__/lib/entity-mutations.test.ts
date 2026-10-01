@@ -77,7 +77,7 @@ describe("opportunity linkedKeyResultId edits dual-write the LEGACY link", () =>
   it("set: validates the key result in the workspace, writes the column and the link in one transaction", async () => {
     expect(await updateEntityField("opportunity", "e1", WS, "linkedKeyResultId", "target", { kind: "USER", id: "user-1" })).toEqual({ ok: true });
     expect(models.keyResult.findFirst).toHaveBeenCalledWith({ where: { id: "target", objective: { workspaceId: WS } }, select: { id: true } });
-    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { linkedKeyResultId: "target" } });
+    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { linkedKeyResultId: "target", updatedAt: expect.any(Date), updatedById: "user-1" } });
     expect(links.create).toHaveBeenCalledWith({
       data: { workspaceId: WS, opportunityId: "e1", objectiveId: "obj-1", origin: "LEGACY", source: "UI", createdById: "user-1" },
     });
@@ -86,7 +86,7 @@ describe("opportunity linkedKeyResultId edits dual-write the LEGACY link", () =>
 
   it("clear: nulls the column and deletes only the LEGACY links of that opportunity", async () => {
     expect(await updateEntityField("opportunity", "e1", WS, "linkedKeyResultId", null)).toEqual({ ok: true });
-    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { linkedKeyResultId: null } });
+    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { linkedKeyResultId: null, updatedAt: expect.any(Date) } });
     expect(links.deleteMany).toHaveBeenCalledWith({ where: { opportunityId: "e1", origin: "LEGACY" } });
     expect(links.create).not.toHaveBeenCalled();
   });

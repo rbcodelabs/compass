@@ -197,8 +197,8 @@ export async function getCanvasOverview(
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         })
       : Promise.resolve([]),
-    getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunityIds),
-    getLinkedKeyResultsBySolution(prisma, workspaceId, solutionIds),
+    getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunityIds, { preverified: true }),
+    getLinkedKeyResultsBySolution(prisma, workspaceId, solutionIds, { preverified: true }),
   ]);
 
   // ── Positions: one round-trip covering every fetched entity id ─────────

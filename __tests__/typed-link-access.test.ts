@@ -15,14 +15,17 @@ import { describe, expect, it } from "vitest";
  */
 const ROOT = process.cwd();
 const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "generated", ".worktrees", ".claude", ".pnpm-store"]);
-const SCANNED_DIRS = ["app", "lib", "components", "hooks", "scripts", "e2e", "prisma"];
+// Every top-level source directory, not a fixed list: a new top-level folder is scanned the day it appears.
+const SCANNED_DIRS = readdirSync(process.cwd(), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && !SKIP_DIRS.has(entry.name) && entry.name !== "__tests__" && entry.name !== "public")
+  .map((entry) => entry.name);
 
 // Any spelling of either model or table: PascalCase, camelCase, snake_case, kebab, spaced.
 const LINK_NAME = /opportunity[\s_-]?objective[\s_-]?links?|solution[\s_-]?key[\s_-]?result[\s_-]?links?/i;
 /** Names split across a string concatenation are rejoined before matching ("opportunity_objective" + "_links"). */
 const rejoinConcatenation = (text: string) => text.replace(/["'`]\s*\+\s*["'`]/g, "");
 /** Generic, non-literal model access on a Prisma-like receiver: prisma[name], tx[model]. */
-const DYNAMIC_DELEGATE = /\b(?:prisma|db|tx|client)\s*\[\s*(?:`[^`]*\$\{|[^"'`\]\s])/;
+const DYNAMIC_DELEGATE = /\b(?:\w*[Pp]risma\w*|\w*[Cc]lient|db|tx|database)\s*\[\s*(?:`[^`]*\$\{|[^"'`\]\s])/;
 const DYNAMIC_MODEL_INTROSPECTION = /Prisma\.ModelName|\bdmmf\b/;
 
 function findLinkReferences(text: string): string[] {
@@ -107,6 +110,17 @@ describe("typed link models are reached only through lib/typed-links.ts", () => 
     expect(files.some((file) => rel(file).startsWith("scripts"))).toBe(true);
     expect(files.some((file) => rel(file).startsWith("e2e"))).toBe(true);
     expect(files.some((file) => rel(file) === "seed-screenshots.ts")).toBe(true);
+  });
+
+  it("the allow-listed e2e files may only DELETE from the link tables or count their rows, never INSERT or UPDATE them", () => {
+    for (const spec of E2E_CLEANUP_SPECS) {
+      const text = readFileSync(path.join(ROOT, spec), "utf-8");
+      expect(text, spec).toMatch(LINK_NAME);
+      expect(text, spec).not.toMatch(/(?:INSERT\s+INTO|UPDATE)\s+\S*(?:opportunity_objective_links|solution_key_result_links)/i);
+      for (const line of text.split("\n").filter((l) => LINK_NAME.test(l) && /(?:SELECT|DELETE|INSERT|UPDATE)\s/i.test(l))) {
+        expect(line, `${spec}: ${line.trim()}`).toMatch(/DELETE FROM|SELECT count/i);
+      }
+    }
   });
 
   it("lib/typed-links.ts does name them (so the scan below is looking at the right thing)", () => {

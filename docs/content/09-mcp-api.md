@@ -375,7 +375,7 @@ Typed links connect an Opportunity to Objectives and a Solution to Key Results (
 | `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
 | `link_opportunity_to_kr` | Associate an opportunity with a Key Result it is expected to move (or clear the link). The Key Result must be in the opportunity's workspace; the link is also recorded as a typed Opportunity–Objective link |
 | `link_opportunity_to_objective` | Link an Opportunity directly to an Objective in the same workspace. Idempotent: repeating returns `created: false`. A direct link is not removed when the opportunity's Key Result is cleared |
-| `unlink_opportunity_from_objective` | Remove an Opportunity–Objective link; returns `removed: 0` when there is none. A link implied by the opportunity's linked Key Result stays until that Key Result is cleared (`stillLinkedViaKeyResult: true`) |
+| `unlink_opportunity_from_objective` | Remove an Opportunity–Objective link; returns `removed: 0` when there is none. A link implied by the opportunity's linked Key Result stays until that Key Result is cleared (`removed: 0, stillLinkedViaKeyResult: true` is a successful no-op, not a failure) |
 | `link_solution_to_key_result` | Link a Solution to a Key Result in the same workspace. Idempotent. The Solution keeps its single parent Opportunity |
 | `unlink_solution_from_key_result` | Remove a Solution–Key Result link; returns `removed: 0` when there is none |
 | `list_links` | List the typed links on one Opportunity, Objective, Solution or Key Result (pass exactly one id plus `workspaceId`), oldest first, with `limit` and `cursor` paging |

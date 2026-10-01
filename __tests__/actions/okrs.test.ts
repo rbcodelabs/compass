@@ -11,7 +11,11 @@ vi.mock("@/lib/db", () => ({
       update: vi.fn().mockResolvedValue({ id: "obj-123", status: "ON_TRACK" }),
       delete: vi.fn().mockResolvedValue({ id: "obj-123" }),
     },
+    opportunity: { findMany: vi.fn().mockResolvedValue([]) },
+    opportunityObjectiveLink: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    solutionKeyResultLink: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
     keyResult: {
+      count: vi.fn().mockResolvedValue(0),
       create: vi.fn().mockResolvedValue({ id: "kr-123" }),
       update: vi.fn().mockResolvedValue({ id: "kr-123" }),
       delete: vi.fn().mockResolvedValue({ id: "kr-123" }),

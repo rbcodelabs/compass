@@ -7,13 +7,14 @@ const mockObjective = {
   delete: vi.fn(),
 }
 const mockKeyResult = {
+  findFirst: vi.fn(),
   findUnique: vi.fn(),
   update: vi.fn(),
   delete: vi.fn(),
 }
 const mockOpportunity = { updateMany: vi.fn(), findMany: vi.fn() }
-const mockOpportunityObjectiveLink = { deleteMany: vi.fn() }
-const mockSolutionKeyResultLink = { deleteMany: vi.fn() }
+const mockOpportunityObjectiveLink = { findMany: vi.fn(), deleteMany: vi.fn() }
+const mockSolutionKeyResultLink = { findMany: vi.fn(), deleteMany: vi.fn() }
 const mockRoadmapItem = { updateMany: vi.fn() }
 const mockCheckIn = { deleteMany: vi.fn() }
 const mockTaskLink = { deleteMany: vi.fn() }
@@ -83,6 +84,9 @@ beforeEach(() => {
   mockKeyResult.delete.mockResolvedValue({ id: KEY_RESULT_ID })
   mockOpportunity.updateMany.mockResolvedValue({ count: 3 })
   mockOpportunity.findMany.mockResolvedValue([{ id: "opp-1" }, { id: "opp-2" }, { id: "opp-3" }])
+  mockKeyResult.findFirst.mockResolvedValue(null)
+  mockOpportunityObjectiveLink.findMany.mockResolvedValue([])
+  mockSolutionKeyResultLink.findMany.mockResolvedValue([])
   mockOpportunityObjectiveLink.deleteMany.mockResolvedValue({ count: 2 })
   mockSolutionKeyResultLink.deleteMany.mockResolvedValue({ count: 1 })
   mockRoadmapItem.updateMany.mockResolvedValue({ count: 4 })
@@ -359,10 +363,79 @@ describe("deleteKeyResult", () => {
   })
 
   it("does not touch the link table when no opportunity pointed at the KR", async () => {
-    mockOpportunity.findMany.mockResolvedValueOnce([])
+    mockOpportunity.findMany.mockResolvedValue([])
 
     await deleteKeyResult({ keyResultId: KEY_RESULT_ID })
 
     expect(mockOpportunityObjectiveLink.deleteMany).not.toHaveBeenCalled()
+  })
+})
+
+describe("parent deletes drain links before the transaction (DSQL's 3,000-row cap, 4 rows per link)", () => {
+  const rows = (n: number, prefix: string) => Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}` }))
+
+  it("deleteObjective drains an objective's links in committed passes of at most 500, BEFORE opening the transaction", async () => {
+    const events: string[] = []
+    let remaining = 1_203
+    mockOpportunityObjectiveLink.findMany.mockImplementation(async ({ take }: { take: number }) => {
+      const n = Math.min(take, remaining)
+      remaining -= n
+      return rows(n, "l")
+    })
+    mockOpportunityObjectiveLink.deleteMany.mockImplementation(async ({ where }: { where: { id?: { in: string[] } } }) => {
+      events.push(where.id ? `drain:${where.id.in.length}` : "tx-sweep")
+      return { count: where.id ? where.id.in.length : 0 }
+    })
+    mockPrisma.$transaction.mockImplementation(async (callback) => {
+      events.push("transaction")
+      return callback(mockPrisma)
+    })
+
+    await deleteObjective({ objectiveId: OBJECTIVE_ID })
+
+    expect(events.slice(0, 4)).toEqual(["drain:500", "drain:500", "drain:203", "transaction"])
+    expect(events.filter((e) => e.startsWith("drain")).every((e) => Number(e.split(":")[1]) <= 500)).toBe(true)
+    expect(events[events.length - 1]).toBe("tx-sweep")
+  })
+
+  it("deleteObjective drains nothing when the objective still has key results (the delete is refused and its links stay)", async () => {
+    mockKeyResult.findFirst.mockResolvedValue({ id: "kr" })
+    mockObjective.findUnique.mockResolvedValueOnce({ id: OBJECTIVE_ID, title: "Improve activation", _count: { keyResults: 1 } })
+    await deleteObjective({ objectiveId: OBJECTIVE_ID })
+    expect(mockOpportunityObjectiveLink.findMany).not.toHaveBeenCalled()
+    expect(mockObjective.delete).not.toHaveBeenCalled()
+  })
+
+  it("deleteKeyResult drains the LEGACY links of the opportunities it unlinks and the solution links, before the transaction", async () => {
+    const events: string[] = []
+    let legacy = 1_100
+    let solution = 600
+    mockOpportunityObjectiveLink.findMany.mockImplementation(async ({ where, take }: { where: { origin?: string }; take: number }) => {
+      expect(where.origin).toBe("LEGACY")
+      const n = Math.min(take, legacy)
+      legacy -= n
+      return rows(n, "l")
+    })
+    mockSolutionKeyResultLink.findMany.mockImplementation(async ({ take }: { take: number }) => {
+      const n = Math.min(take, solution)
+      solution -= n
+      return rows(n, "s")
+    })
+    mockOpportunityObjectiveLink.deleteMany.mockImplementation(async ({ where }: { where: { id?: { in: string[] } } }) => {
+      if (where.id) events.push(`legacy-drain:${where.id.in.length}`)
+      return { count: where.id ? where.id.in.length : 0 }
+    })
+    mockSolutionKeyResultLink.deleteMany.mockImplementation(async ({ where }: { where: { id?: { in: string[] } } }) => {
+      if (where.id) events.push(`solution-drain:${where.id.in.length}`)
+      return { count: where.id ? where.id.in.length : 0 }
+    })
+    mockPrisma.$transaction.mockImplementation(async (callback) => {
+      events.push("transaction")
+      return callback(mockPrisma)
+    })
+
+    await deleteKeyResult({ keyResultId: KEY_RESULT_ID })
+
+    expect(events).toEqual(["legacy-drain:500", "legacy-drain:500", "legacy-drain:100", "solution-drain:500", "solution-drain:100", "transaction"])
   })
 })

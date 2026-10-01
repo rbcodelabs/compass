@@ -236,7 +236,7 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     getPrisma().keyResult.findMany({ where: { objective: { workspaceId } }, select: { id: true, title: true, objective: { select: { title: true } } }, orderBy: { createdAt: "asc" } }),
     loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OPPORTUNITY", objectId: id }),
     // Additive typed Opportunity<->Objective links. linkedKeyResult above stays the legacy column only.
-    getLinkedObjectivesByOpportunity(getPrisma(), workspaceId, [id]),
+    getLinkedObjectivesByOpportunity(getPrisma(), workspaceId, [id], { preverified: true }),
   ]);
   const solutionScoringModel = item.workspace?.scoringConfig?.solutionScoringModel ?? null;
   // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
@@ -303,7 +303,7 @@ async function fetchSolution(id: string, workspaceId: string) {
       select: { solutionScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
     }),
     // Additive typed Solution<->Key Result links (workspace-filtered).
-    getLinkedKeyResultsBySolution(prisma, workspaceId, [id]),
+    getLinkedKeyResultsBySolution(prisma, workspaceId, [id], { preverified: true }),
   ])
   const linkedIds = new Set(links.map((link) => link.artifactId))
   const solutionScoringModel = (scoringConfig?.solutionScoringModel as ScoringModelData | null) ?? null
