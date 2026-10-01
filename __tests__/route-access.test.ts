@@ -154,6 +154,14 @@ describe("isPublicPath", () => {
     for (const path of ["/api/internal/other", `${base}/ready`, `${base}/events/extra`, "/api/internal/research/voice/not-a-uuid/events"]) expect(isPublicPath(path)).toBe(false)
   });
 
+  it("allows only the exact bearer-authenticated agent run callbacks and the sweeper cron", () => {
+    const base = "/api/internal/agent/runs/00000000-0000-4000-8000-000000000001"
+    for (const suffix of ["heartbeat", "events"]) expect(isPublicPath(`${base}/${suffix}`)).toBe(true)
+    for (const path of [`${base}/other`, `${base}/events/extra`, "/api/internal/agent/runs/not-a-uuid/events", "/api/internal/agent/other"]) expect(isPublicPath(path)).toBe(false)
+    expect(isPublicPath("/api/cron/agent-run-sweeper")).toBe(true)
+    expect(isPublicPath("/api/cron/some-future-job")).toBe(false)
+  });
+
   it("allows the outbound MCP connector gateway, which the sandbox calls with an AGENT_TURN bearer", () => {
     expect(isPublicPath("/api/integrations/mcp/v0")).toBe(true);
     expect(isPublicPath("/api/integrations/mcp/some-provider")).toBe(true);

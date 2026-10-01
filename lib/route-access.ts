@@ -98,6 +98,16 @@ export function isPublicPath(pathname: string): boolean {
     // connect/callback flow deliberately lives elsewhere (/api/connectors/…) and is
     // NOT public: it needs the middleware login redirect to preserve its query string.
     /^\/api\/integrations\/mcp\/[a-z0-9][a-z0-9-]{0,31}$/.test(pathname) ||
+    // Agent run worker callbacks: the sandbox reports in from outside
+    // any session, bound to one run by its worker bearer token. Enumerated the
+    // same way as the voice callbacks — a `startsWith("/api/internal/")` would
+    // make every future internal route public by default.
+    /^\/api\/internal\/agent\/runs\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/(?:heartbeat|events)$/i.test(pathname) ||
+    // Vercel Cron invokes production URLs with no session at all. The sweeper
+    // authenticates CRON_SECRET (or MIGRATION_SECRET for a manual run) itself and
+    // fails closed when neither is configured. Enumerated rather than a
+    // `startsWith("/api/cron/")` so a future cron route is not public by default.
+    pathname === "/api/cron/agent-run-sweeper" ||
     // Docs API routes use session auth internally — let them handle 401 themselves
     pathname.startsWith("/api/docs/") ||
     // Agent turn route uses session auth internally (returns 401, not a 302)

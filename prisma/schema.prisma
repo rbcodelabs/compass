@@ -2731,9 +2731,96 @@ model AgentConversation {
   workspace Workspace      @relation(fields: [workspaceId], references: [id])
   user      User           @relation(fields: [userId], references: [id])
   messages  AgentMessage[]
+  runs      AgentRun[]
 
   @@index([workspaceId, userId])
   @@map("agent_conversations")
+}
+
+/// One durable, detachable agent turn. The sandbox owns execution and
+/// reports back over an authenticated callback; this row owns the *lifecycle*
+/// (status, lease, deadline, cleanup handles) so a turn survives the browser
+/// closing and can be swept by cron rather than by a request's `finally` block.
+///
+/// Lease/heartbeat/worker-token shape is deliberately the same as
+/// ResearchVoiceCall — see lib/research-voice-operations.ts for the precedent.
+/// `workerTokenHash` is SHA-256 of a single-purpose callback token that cannot
+/// call MCP tools; the MCP key is tracked separately as `apiKeyId` so both the
+/// result path and the sweeper can revoke it.
+///
+/// DSQL: no FKs enforced, no @updatedAt trigger (set explicitly), JSON as TEXT.
+model AgentRun {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId  String    @map("conversation_id") @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  /// QUEUED | RUNNING | SUCCEEDED | FAILED | INTERRUPTED | CANCELED
+  status          String    @default("QUEUED") @db.VarChar(20)
+  /// "CHAT", or the HandoffKind when this run drives a handoff claim.
+  kind            String    @default("CHAT") @db.VarChar(30)
+  /// SHA-256 of the run's callback bearer token (never the token itself).
+  workerTokenHash String    @unique(map: "idx_agent_runs_worker_token") @map("worker_token_hash") @db.VarChar(64)
+  /// The ephemeral MCP key minted for this run, revocable from either path.
+  apiKeyId        String?   @map("api_key_id") @db.Uuid
+  /// Vercel Sandbox *name* — `Sandbox.get` is keyed by name, not id. Derived
+  /// from the run id (`compass-agent-run-<runId>`) so the sweeper can reach a
+  /// sandbox even when the start path died before persisting this column.
+  sandboxName     String?   @map("sandbox_name") @db.VarChar(255)
+  sandboxStoppedAt DateTime? @map("sandbox_stopped_at")
+  /// Handoff claim this run owns, when there is one (ProcessingState.claimId).
+  claimId         String?   @map("claim_id") @db.Uuid
+  /// Wall-clock bound; enforced sandbox-side too, and checked by the sweeper
+  /// independently of the heartbeat so a dead sweeper still terminates runs.
+  deadlineAt      DateTime  @map("deadline_at")
+  lastHeartbeatAt DateTime? @map("last_heartbeat_at")
+  statusChangedAt DateTime  @default(now()) @map("status_changed_at")
+  startedAt       DateTime? @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+  /// Highest accepted event sequence; the cheap cursor the viewer tails from.
+  lastSeq         Int       @default(0) @map("last_seq")
+  /// Per-run caps: a chatty run must not be able to flood DSQL writes.
+  eventCount      Int       @default(0) @map("event_count")
+  payloadBytes    Int       @default(0) @map("payload_bytes")
+  model           String?   @db.VarChar(100)
+  inputTokens     Int?      @map("input_tokens")
+  outputTokens    Int?      @map("output_tokens")
+  numTurns        Int?      @map("num_turns")
+  costUsd         Float?    @map("cost_usd")
+  durationMs      Int?      @map("duration_ms")
+  packProvenance  String?   @map("pack_provenance") @db.Text
+  error           String?   @db.Text
+  errorCode       String?   @map("error_code") @db.VarChar(50)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @map("updated_at")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id])
+  events       AgentRunEvent[]
+
+  @@index([conversationId, createdAt], map: "idx_agent_runs_conversation_created")
+  @@index([status, lastHeartbeatAt], map: "idx_agent_runs_status_heartbeat")
+  @@index([workspaceId, userId], map: "idx_agent_runs_workspace_user")
+  @@map("agent_runs")
+}
+
+/// Append-only trace of one run: status phases, agent stream messages, the
+/// result, and heartbeats. The unique (runId, seq) is what makes a retried
+/// callback batch idempotent — a duplicate delivery collides and is discarded
+/// instead of doubling the transcript.
+model AgentRunEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  runId       String   @map("run_id") @db.Uuid
+  /// Monotonic per run, assigned in the sandbox, starting at 1.
+  seq         Int
+  /// status | agent | result | error | heartbeat
+  type        String   @db.VarChar(20)
+  payloadJson String   @map("payload_json") @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  run AgentRun @relation(fields: [runId], references: [id])
+
+  @@unique([runId, seq], map: "idx_agent_run_events_run_seq")
+  @@index([runId, createdAt], map: "idx_agent_run_events_run_created")
+  @@map("agent_run_events")
 }
 
 /// One message in an AgentConversation. `role` is "user" | "assistant".

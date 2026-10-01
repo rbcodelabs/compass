@@ -21,7 +21,20 @@ export async function failPendingInterviewProcessing(conversationId: string, use
   await prisma.agentConversation.updateMany({ where: { id: conversationId, userId, workspaceId, interviewProcessingJson: conversation!.interviewProcessingJson }, data: { interviewProcessingJson: JSON.stringify({ ...state, status: "FAILED" }), updatedAt: new Date() } })
 }
 
-export async function claimInterviewProcessing(conversationId: string, userId: string, workspaceId: string, retry: boolean) {
+/**
+ * Default claim lease. Was inlined as `Date.now() + 240_000` — the same four
+ * minutes the turn route used to be capped at.
+ *
+ * It has to be a parameter now that a run can legitimately last twenty minutes
+ *: `scopedHandoff` rejects every MCP tool call once `state.deadline`
+ * passes, so a hardcoded four-minute lease would quietly start failing the
+ * agent's tool calls a quarter of the way into a long handoff turn. The default
+ * is unchanged so the synchronous fallback path and existing callers behave
+ * exactly as before.
+ */
+export const DEFAULT_INTERVIEW_CLAIM_LEASE_MS = 240_000
+
+export async function claimInterviewProcessing(conversationId: string, userId: string, workspaceId: string, retry: boolean, leaseMs: number = DEFAULT_INTERVIEW_CLAIM_LEASE_MS) {
   const prisma = getPrisma()
   return prisma.$transaction(async tx => {
     const conversation = await tx.agentConversation.findFirst({ where: { id: conversationId, userId, workspaceId } })
@@ -31,7 +44,7 @@ export async function claimInterviewProcessing(conversationId: string, userId: s
     const status = processingStatus(state)
     if (status === "SUCCEEDED" || status === "RUNNING" || (status !== "PENDING" && !retry)) return { claimed: false as const, state: { ...state, status } }
     const claimId = randomUUID()
-    const next: ProcessingState = { ...state, status: "RUNNING", claimId, deadline: Date.now() + 240_000 }
+    const next: ProcessingState = { ...state, status: "RUNNING", claimId, deadline: Date.now() + leaseMs }
     const changed = await tx.agentConversation.updateMany({ where: { id: conversationId, interviewProcessingJson: conversation.interviewProcessingJson }, data: { interviewProcessingJson: JSON.stringify(next), updatedAt: new Date() } })
     if (changed.count !== 1) throw new Error("Interview processing changed; reopen the conversation")
     return { claimed: true as const, state: next }
