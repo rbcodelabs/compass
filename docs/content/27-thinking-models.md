@@ -48,7 +48,7 @@ Under Opportunity-first and Torres, **Discovery** has a tree button, named **Out
 - A solution shows a chip for each success metric it targets. If that metric belongs to an outcome the opportunity is *not* linked to, the chip also names that outcome, so a cross-outcome aim is visible rather than hidden.
 - An opportunity linked to several outcomes shows its full branch once, under the first of them. Under the others you see a short **Also under …** line with a **Show** button that expands the same branch. Counts at the top of each card count each opportunity and solution only once.
 - Opportunities linked to no outcome are collected at the bottom under **Opportunities not linked to outcomes**. Archived opportunities are left out.
-- A small chip shows the cycle the outcome belongs to. An outcome that supports a key result of another outcome shows a **Supports …** chip; it is not nested.
+- A small chip shows the cycle the outcome belongs to, only if it has one: an outcome with no cycle is a normal part of the tree and shows no chip. An outcome that supports a key result of another outcome shows a **Supports …** chip; it is not nested.
 
 **Opportunity-first (pool first):** the pool of unlinked opportunities comes first, then each Objective with its Key Results; each Key Result lists the solutions aimed at it, and solutions that target none of its Key Results are listed separately.
 
@@ -56,7 +56,16 @@ If an opportunity has no link but its **Driving Key Result** is set, it is place
 
 ## The Outcomes list (Torres)
 
-On the **Outcomes** page a flat list of every outcome appears above the cycles. Each row shows the status, the number of linked opportunities, and a chip for its cycle. You do not need to open a cycle first to see them. Every outcome still belongs to a cycle, and you create one inside a cycle.
+On the **Outcomes** page a flat list of every outcome appears above the cycles. Each row shows the status, the number of linked opportunities, and a chip for its cycle where it has one. You do not need to open a cycle first to see them, and outcomes with no cycle are in the list like any other.
+
+## Cycles under each model
+
+An Objective's cycle is optional under every model. An Objective with no cycle is a persistent goal that is not tied to a planning period; it still counts as an Objective everywhere (the workspace tree, link pickers, card sorts, agents).
+
+- **Classic and Opportunity-first.** The OKRs page shows an extra **No cycle / Persistent** card after the cycle cards. It opens the page at `/okrs/none`, which lists those Objectives and has the usual **+ Add Objective** form. An Objective's panel shows **No cycle / Persistent** in its Cycle field. Classic reads exactly as it did before the cycle became optional.
+- **Torres.** Cycles are subdued: they are never required and never prominent. The Outcomes list already shows every outcome, so there is no **No cycle / Persistent** card, and an outcome's panel shows a cycle only when it has one. The cycle cards are still there for outcomes that have cycles, and a quiet link under them (**Or add an Outcome with no cycle**) opens `/okrs/none` to create one without a cycle. If the workspace has no cycles and no outcomes yet, the empty state offers the same link.
+
+Renaming Objective changes these words too: with Objective renamed to "Goal", the link reads **Or add Goal with no cycle** (a rename carries no "a" or "an").
 
 ## Linking an opportunity to Outcomes or Objectives
 
@@ -68,7 +77,7 @@ You need to be a member of the workspace. Linking is the same data whatever the 
 
 ## Linking a solution to Key Results
 
-A solution can also be linked to the Key Results (success metrics) it is meant to move; it still belongs to exactly one opportunity. The workspace tree shows these links, as described above. Today they are created and removed by agents, with `link_solution_to_key_result` and `unlink_solution_from_key_result`; the tree and `list_links` are where you read them.
+A solution can also be linked to the Key Results (success metrics) it is meant to move; it still belongs to exactly one opportunity. Under Opportunity-first and Torres, open the solution and use its **Linked Key Results** box (**Linked Success metrics** under Torres): select **Change** (or **Link key results** when there are none), then tick or untick any Key Result in the workspace. Each tick saves immediately, and you need to be a member of the workspace. The Key Result's own panel has a read-only **Linked Solutions** list, each row opening that solution. Classic workspaces have neither box. The workspace tree and the [Canvas](/help/12-canvas) draw these links, and agents make and read them with `link_solution_to_key_result`, `unlink_solution_from_key_result` and `list_links`.
 
 ## Agents and the thinking model
 

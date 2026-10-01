@@ -84,10 +84,11 @@ The composer opens in the right-hand panel. On wide screens it docks beside the 
 - **Status** starts as the status of the column you opened it from. From the rail it starts as **Exploring**. You can change it before you submit.
 - **Squad** and **Customer segment** are optional.
 - **Description** supports Markdown, with the same rich editor and Markdown source mode used elsewhere. **Insert opportunity outline** adds *Who's affected*, *Current pain*, *Evidence* and *Desired outcome* headings.
+- **Objectives** (**Outcomes** under Torres) is optional and appears only on Opportunity-first and Torres workspaces, above the Driving key result. Open the box, search, and tick every Objective this opportunity is being pursued for, up to 25. Each chosen Objective shows its cycle beside it when it has one; an Objective with no cycle is listed like any other. The links are created in the same save as the opportunity. Classic workspaces do not see this box.
 - **Driving key result** is optional. Search the workspace's Key Results and choose the one this opportunity should move.
 - **Seed from feedback** is optional. Search the workspace's feedback and select every item that points to this opportunity. Selected items appear as a list, and you can remove any of them. Linking works the same way as it does from the feedback board: the item's status doesn't change, and an item that is already linked to another opportunity moves to this one. The composer tells you when that will happen.
 
-Press **⌘/Ctrl + Enter** or select **Submit** to create the opportunity. The opportunity, its Key Result link and its feedback links are saved together. If any part is invalid, for example a Key Result from another workspace, nothing is created and the error appears in the composer. When it succeeds, the new card appears on the board and the composer turns into the new opportunity's panel. Browser Back doesn't return to an empty composer.
+Press **⌘/Ctrl + Enter** or select **Submit** to create the opportunity. The opportunity, its Objective links, its Key Result link and its feedback links are saved together. If any part is invalid, for example a Key Result from another workspace, nothing is created and the error appears in the composer. When it succeeds, the new card appears on the board and the composer turns into the new opportunity's panel. Browser Back doesn't return to an empty composer.
 
 Your draft is saved on this device for each workspace as you type. If you close the panel (with **Esc** or the close button), reload, or leave the page, the draft is kept and the composer says **Restored your unsent draft** the next time you open it. **Cancel** asks before discarding a draft.
 
@@ -174,7 +175,7 @@ Because evidence doesn't roll up the tree, attach it to the specific node it act
 Discovery connects to your OKRs through links:
 
 - **Opportunity ↔ Objective.** An opportunity can be linked to as many Objectives as you chose to pursue it for. Its **Driving Key Result** (above) also links it to that Key Result's Objective, so older data is not left unlinked.
-- **Solution ↔ Key Result.** A solution can be linked to the Key Results it is meant to move, in addition to its one parent opportunity. Agents make these links today with the link tools in the [MCP API](/help/09-mcp-api#typed-links); the workspace tree below shows them.
+- **Solution ↔ Key Result.** A solution can be linked to the Key Results it is meant to move, in addition to its one parent opportunity. On Opportunity-first and Torres workspaces you make them yourself: open the solution and use its **Linked Key Results** box (**Linked Success metrics** under Torres) to tick or untick any Key Result in the workspace, each tick saving immediately. The Key Result's panel lists its **Linked Solutions**. Agents make the same links with the link tools in the [MCP API](/help/09-mcp-api#typed-links). The workspace tree below and the [Canvas](/help/12-canvas) show them.
 
 Workspaces that use the **Opportunity-first OKRs** or **Torres** thinking model (a workspace admin picks it in Settings) get two extra things in Discovery:
 

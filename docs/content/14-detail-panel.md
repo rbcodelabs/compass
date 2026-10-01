@@ -22,10 +22,10 @@ Each panel shows the essentials for that item — its status, key fields, and th
 
 | Item | Shows |
 |---|---|
-| **Objective** | Status, cycle, and its Key Results |
-| **Key Result** | Progress, its Objective, and any linked Opportunities and Roadmap items |
+| **Objective** | Status, cycle, and its Key Results. An Objective with no cycle shows **No cycle / Persistent** as its cycle (on Torres workspaces a cycle is shown only when there is one) |
+| **Key Result** | Progress, its Objective, any supporting Objectives, and any linked Opportunities and Roadmap items. On Opportunity-first and Torres workspaces it also has a read-only **Linked Solutions** list (each row opens that solution) |
 | **Opportunity** | The shared full-page detail: editable header, Key Result, Solutions, Evidence, OST Tree, configured scoring/custom fields, feedback, delivery tasks and Discussion. On Opportunity-first and Torres workspaces the header also has an **Objectives** (**Outcomes**) box listing the Objectives it is linked to, with a **Change** control to add or remove them |
-| **Solution** | Status, its Opportunity, assumptions, and roadmap links |
+| **Solution** | Status, its Opportunity, assumptions, and roadmap links. On Opportunity-first and Torres workspaces it also has a **Linked Key Results** box (**Linked Success metrics** under Torres) where you tick or untick the Key Results the solution is meant to move; each tick saves immediately |
 | **Assumption** | Status, risk level, its Solution, and experiments |
 | **Experiment** | Status, kill condition, the assumption it tests, and results |
 | **Roadmap item** | Horizon, votes, and everything it's linked to |

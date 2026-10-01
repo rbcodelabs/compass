@@ -27,7 +27,11 @@ Every entity renders as its own connected card, laid out automatically:
 ## Edges
 
 - A **solid arrow** always points from parent to child in the OST chain (Objective → Key Result → Opportunity → Solution → Assumption → Experiment).
-- The Key Result → Opportunity edge comes from the opportunity's **Driving Key Result**, and the Opportunity → Solution edge from the solution's one parent opportunity. Canvas does not draw the other links yet: an opportunity linked to an Objective only (with no Driving Key Result) appears without an incoming edge, and a Solution's links to Key Results are not drawn. On Opportunity-first and Torres workspaces those links are shown in the opportunity's Objectives box and in the workspace tree (see [Thinking models](/help/27-thinking-models)); agents can read them with `list_links`.
+- The Key Result → Opportunity edge comes from the opportunity's **Driving Key Result**, and the Opportunity → Solution edge from the solution's one parent opportunity. The other links are drawn as **dashed** arrows with the same direction (Objective → Opportunity, and Solution → Key Result), so an opportunity linked to an Objective only (with no Driving Key Result) is no longer left without an incoming edge. Which Objective → Opportunity links appear depends on the workspace's [thinking model](/help/27-thinking-models):
+  - **Classic** draws only the links someone made on purpose (in the opportunity's Objectives box or through an agent). Links Compass created automatically from older Driving Key Results are not drawn, so a Classic canvas does not change just because those links now exist.
+  - **Opportunity-first and Torres** draw every Objective → Opportunity link. A link that only repeats a Driving Key Result (the Objective already reaches the opportunity through Objective → Key Result → Opportunity) is skipped, so one relationship never has two lines.
+  - Solution → Key Result links are always user-made, so every model draws them.
+  An edge appears only when both cards are on the canvas. These link arrows are drawn on top of the layout and never move a card.
 - **Roadmap items** are the one place the graph isn't strictly tree-shaped — an item can be promoted from a Solution, an Experiment, an Opportunity, or a Key Result, and can carry more than one of those links at once. The most specific origin (Solution, if set; otherwise Experiment; otherwise Opportunity; otherwise Key Result) gets the solid primary edge. Any additional parent links render as **dashed** secondary edges, so you can still see every connection without the graph reading as a confusing multi-parent tangle.
 - A Roadmap item with none of those links resolvable (for example, one promoted straight from customer feedback with no OST parent) renders as an **orphan node** with no incoming edge — that's expected, not a bug.
 
@@ -55,7 +59,7 @@ Not yet built: click-to-focus animated navigation to jump straight to a specific
 
 ## Scope of this release
 
-Canvas renders every Objective from **every OKR cycle** in the workspace, not just the active one — this is deliberate, so the view stays useful for tracing history across a full portfolio, not just the current quarter. Opportunities, Solutions, Assumptions, and Experiments are rendered without a status filter for the same reason: excluding, say, an Archived Opportunity would leave any Solution still pointing at it with a dangling edge. Roadmap items are the one exception — only Active items render, since a Roadmap item is always an edge target and filtering it can't orphan anything downstream.
+Canvas renders every Objective from **every OKR cycle** in the workspace, not just the active one, and Objectives that have no cycle (see [OKRs](/help/01-okrs)) too — this is deliberate, so the view stays useful for tracing history across a full portfolio, not just the current quarter. Opportunities, Solutions, Assumptions, and Experiments are rendered without a status filter for the same reason: excluding, say, an Archived Opportunity would leave any Solution still pointing at it with a dangling edge. Roadmap items are the one exception — only Active items render, since a Roadmap item is always an edge target and filtering it can't orphan anything downstream.
 
 Not yet included:
 

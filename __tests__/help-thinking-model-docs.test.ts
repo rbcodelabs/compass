@@ -61,6 +61,27 @@ describe("thinking-model and typed-link documentation is registered with the hel
     expect(help.content[0].text).toContain("### The workspace's thinking model")
   })
 
+  it("documents the optional Objective cycle and no longer says a cycle is required", () => {
+    const mcp = getDocRaw("09-mcp-api")!.content
+    expect(mcp).not.toContain("`cycleId` is required")
+    expect(mcp).toContain("leave out `cycleId`")
+    const thinking = getDocRaw("27-thinking-models")!.content
+    expect(thinking).not.toContain("Every outcome still belongs to a cycle")
+    expect(thinking).toContain("/okrs/none")
+    expect(thinking).toContain("## Cycles under each model")
+    expect(getDocRaw("01-okrs")!.content).toContain("/help/27-thinking-models#cycles-under-each-model")
+  })
+
+  it("documents the Solution <-> Key Result picker and link edges instead of calling them agent-only", () => {
+    for (const slug of ["01-okrs", "02-discovery", "27-thinking-models"]) {
+      expect(getDocRaw(slug)!.content, slug).not.toMatch(/Today they are created and removed by agents|Agents make these links today/)
+      expect(getDocRaw(slug)!.content, slug).toContain("Linked Key Results")
+    }
+    expect(getDocRaw("14-detail-panel")!.content).toContain("Linked Solutions")
+    expect(getDocRaw("12-canvas")!.content).not.toContain("Canvas does not draw the other links yet")
+    expect(getDocRaw("12-canvas")!.content).toContain("Classic** draws only the links someone made on purpose")
+  })
+
   it("no longer claims that a Solution can be re-parented from its panel", () => {
     const discovery = getDocRaw("02-discovery")!.content
     expect(discovery).not.toMatch(/Re-parenting a Solution to a different Opportunity is a deliberate action/)

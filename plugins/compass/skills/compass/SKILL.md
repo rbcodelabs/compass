@@ -82,7 +82,7 @@ Organization
 ### Vocabulary: four entities, two typed links
 
 - **Opportunity** = the whole landscape of needs, pains and desires. It exists before any commitment.
-- **Objective** = an area the team chose to attack (what Torres calls the *outcome*). It belongs to one OKR cycle.
+- **Objective** = an area the team chose to attack (what Torres calls the *outcome*). It usually belongs to one OKR cycle, but the cycle is optional: a cycle-less Objective is a persistent goal (shown as "No cycle / Persistent", at `/{org}/{ws}/okrs/none`). It is an Objective like any other for links, canvas and card sorts.
 - **Key Result** = the measure of whether the Objective moved. It belongs to one Objective.
 - **Solution** = a tactic tried to move a Key Result. It belongs to exactly one Opportunity, which never changes: **there is no tool or UI action that moves a Solution to another Opportunity** (add a new Solution instead).
 
@@ -376,6 +376,8 @@ A workspace admin picks a **thinking model** in Settings: `CLASSIC` (the default
 - **`origin`**: `DIRECT` links were made on purpose (`link_opportunity_to_objective`, or the app's Objectives box) and are never removed by changing or clearing the Key Result. `LEGACY` links are derived from `linkedKeyResult` (set by `link_opportunity_to_kr` or `create_opportunity`'s `keyResultId`) and follow it. Adding a `DIRECT` link over a `LEGACY` one upgrades it (`originFlipped:true`). Solution links have no origin.
 - `linkedKeyResult` on opportunities is the one specific driving KR and is never inferred from links (an Objective link cannot say which KR). `linkedObjectives` (on `list_opportunities` items and `get_opportunity`) and `linkedKeyResults` (on `list_solutions` items) are additive; an empty list always means "no links". If the link tables are missing (migration 071 not applied) the tools fail with the database error instead of returning empty lists, so report that rather than assuming there are no links.
 - A solution has exactly one parent opportunity and cannot be moved to another; `link_solution_to_key_result` only adds Key Results it aims at.
+- Humans can make the same links in the app on the Opportunity-first and Torres models: the opportunity's Objectives box and composer Objectives field, and the Solution panel's **Linked Key Results** picker (Key Result panels list **Linked Solutions**, read-only). On Classic there is no such UI, so links there come from you (the tools) and show on Canvas only when `origin` is `DIRECT`. Tool and UI writes are the same data.
+- Cycle-less Objectives link like any other: the cycle is never part of a link or its permission.
 - `list_links` is read-only; the other four need write scope. Deleting an Objective or Key Result removes its links after the delete (a failed cleanup does not fail the delete; a leftover link is hidden from reads).
 
 ---
@@ -470,7 +472,7 @@ Bindings and observations are generated immutable evidence. A semantic no-op bin
 ```
 list_workspaces(orgSlug)           → get workspaceId
 create_okr_cycle(workspaceId, ...) → get cycleId
-create_objective(workspaceId, cycleId, title, owner) → get objectiveId
+create_objective(workspaceId, cycleId, title, owner) → get objectiveId   (cycleId is optional)
 add_key_result(objectiveId, title, target, unit)     → get keyResultId
 log_checkin(keyResultId, value, note)
 ```

@@ -26,7 +26,7 @@ To create a new cycle, click **+ New Cycle** at the top of the OKRs page.
 
 An Objective is a qualitative, inspiring statement of what you want to achieve. It should be directional but not measurable — the Key Results handle measurement. An Objective usually belongs to a cycle, but the cycle is optional: an Objective that is not tied to a planning period (a persistent, cross-cycle goal) can exist with no cycle.
 
-Click **+ Add Objective** inside a cycle to create one. Objectives with no cycle live in the **No cycle / Persistent** card on the OKRs page, which opens a page with the same list and **+ Add Objective** form. Objectives can be assigned to a squad and tagged with custom fields.
+Click **+ Add Objective** inside a cycle to create one. Objectives with no cycle live in the **No cycle / Persistent** card on the OKRs page, which opens a page (`/okrs/none`) with the same list and **+ Add Objective** form; on a new workspace with no cycles yet, the empty state offers **Or add an Objective with no cycle**. Cycle-less Objectives and their Key Results work everywhere else too: they appear on Canvas and in card sorts, can be linked to Opportunities, and agents create them with `create_objective` by leaving out `cycleId`. On workspaces that use the Torres thinking model, cycles are subdued: the list of Outcomes shows cycle-less ones directly, so there is no **No cycle / Persistent** card (see [Thinking models](/help/27-thinking-models#cycles-under-each-model)). Objectives can be assigned to a squad and tagged with custom fields.
 
 ## Key Results
 
@@ -75,7 +75,7 @@ Key Results and Objectives are the bridge between outcomes and work.
 
 - **Opportunity → Key Result.** When you create an Opportunity on the Discovery board, you can choose its **Driving Key Result**, the one measure it is expected to move. An opportunity has at most one.
 - **Opportunity ↔ Objective.** An opportunity can also be linked directly to any number of Objectives, to record that you chose to pursue it for them. Choosing a Driving Key Result links the opportunity to that Key Result's Objective automatically. The box for adding other Objectives appears on opportunities in workspaces using the Opportunity-first or Torres model (see [Thinking models](/help/27-thinking-models)).
-- **Solution ↔ Key Result.** A solution can be linked to the Key Results it is meant to move; the workspace tree on those two models shows them. Agents make these links today with the link tools in the [MCP API](/help/09-mcp-api#typed-links).
+- **Solution ↔ Key Result.** A solution can be linked to the Key Results it is meant to move; on the Opportunity-first and Torres models the solution's panel has a **Linked Key Results** box for making them, and the workspace tree and Canvas show them. Agents make the same links with the link tools in the [MCP API](/help/09-mcp-api#typed-links).
 - **Roadmap items** can also be linked to KRs, so you always have a clear line from "what we decided to build" back to "why we decided to build it."
 
 Deleting a Key Result or an Objective removes the links that point at it.

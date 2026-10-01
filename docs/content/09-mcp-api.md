@@ -373,10 +373,10 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `list_okr_cycles` | List all OKR cycles for a workspace with IDs, titles, dates, and status |
+| `list_okr_cycles` | List all OKR cycles for a workspace with IDs, titles, dates, and status, followed by the cycle-less Objectives under "No cycle / Persistent" (also returned as `persistentObjectives`) |
 | `create_okr_cycle` | Create a new OKR cycle for a workspace (defaults to DRAFT status) |
 | `get_okr_cycle` | Return a full OKR cycle with Objective/KR progress, higher-level parent links, and supporting Objectives |
-| `create_objective` | Create an Objective in an OKR cycle (`cycleId` is required); optionally assign a squad or link to an eligible KR in a longer-horizon cycle. Under the Torres model the humans in the workspace call the Objective an "Outcome", but the tool and its fields keep the Objective names |
+| `create_objective` | Create an Objective, optionally in an OKR cycle: leave out `cycleId` for a cycle-less (persistent) Objective, which `list_okr_cycles` reports under "No cycle / Persistent" and `get_okr_cycle` never returns. Optionally assign a squad or link to an eligible KR: for a cycled Objective, one in a longer-horizon cycle that contains it, or one on a cycle-less Objective; for a cycle-less Objective, any KR in an open cycle or on another cycle-less Objective. Under the Torres model the humans in the workspace call the Objective an "Outcome", but the tool and its fields keep the Objective names |
 | `update_objective` | Partially update an Objective's title, description, or status (ON_TRACK/AT_RISK/OFF_TRACK/COMPLETE) |
 | `delete_objective` | Permanently delete a childless Objective and its Task links/entity metadata; refuses deletion while child Key Results exist. Its Opportunity links are removed too |
 | `add_key_result` | Add a Key Result to an existing Objective |
