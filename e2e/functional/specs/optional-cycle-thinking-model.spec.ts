@@ -128,8 +128,12 @@ test.describe.serial("Optional cycle under Torres", () => {
     await page.getByRole("menuitemcheckbox", { name: new RegExp(outcomeTitle) }).click();
     await expect(picker.getByRole("listitem")).toContainText(outcomeTitle, { timeout: 15_000 });
     expect(await countLinks()).toBe(1);
-    const link = (await pool.query(`SELECT workspace_id, origin, source FROM ${S}.opportunity_objective_links WHERE opportunity_id = $1 AND objective_id = $2`, [opportunityId, outcomeId])).rows[0];
-    expect(link).toMatchObject({ workspace_id: workspaceId, origin: "DIRECT", source: "UI" });
+    // Stamped with the opportunity's workspace, made on purpose through the UI (count only, never read-modify-write).
+    const stamped = await pool.query(
+      `SELECT count(*)::int AS n FROM ${S}.opportunity_objective_links WHERE opportunity_id = $1 AND objective_id = $2 AND workspace_id = $3 AND origin = 'DIRECT' AND source = 'UI'`,
+      [opportunityId, outcomeId, workspaceId],
+    );
+    expect(stamped.rows[0].n).toBe(1);
 
     await page.goto(`${base}/discovery/tree`);
     await expect(page.getByTestId(`outcome-root-${outcomeId}`).getByTestId(`outcome-opportunity-${outcomeId}-${opportunityId}`)).toBeVisible({ timeout: 30_000 });
