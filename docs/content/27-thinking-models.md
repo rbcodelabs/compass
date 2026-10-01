@@ -60,7 +60,7 @@ On the **Outcomes** page a flat list of every outcome appears above the cycles. 
 
 ## Linking an opportunity to Outcomes or Objectives
 
-On an opportunity's page or panel, under Opportunity-first and Torres, an **Outcomes** (or **Objectives**) box lists what the opportunity is linked to. Select **Change** (or **Link outcomes** when there are none), then tick or untick items. Each tick saves immediately. An opportunity can serve several.
+On an opportunity's page or panel, under Opportunity-first and Torres, an **Outcomes** (or **Objectives**) box lists what the opportunity is linked to. Once the workspace has at least one, select **Change** (or **Link outcomes** when there are none), then tick or untick items. Each tick saves immediately. An opportunity can serve several.
 
 If a link exists only because the opportunity's **Driving Key Result** sits under that Objective, unticking it explains that it is still linked through the Key Result; change the Key Result to remove it.
 

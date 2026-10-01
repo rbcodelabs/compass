@@ -502,7 +502,7 @@ The existing fields are kept, so current agents are unaffected:
 - A gate rejects the call before it runs if the caller is not a member of the workspace, or an id belongs to a different workspace than the declared `workspaceId`.
 - A handler failure comes back as a failed tool result with a short message and writes nothing, for example `Opportunity not found.`, `Objective not found in this workspace.`, `Key Result not found in this workspace.`, `Solution not found.` or `Provide exactly one of opportunityId, objectiveId, solutionId or keyResultId.`
 
-Deleting an Objective removes every link that names it, deleting a Key Result removes the Solution links to it (and the derived `LEGACY` link it implied), and deleting a workspace removes all of its links, so no orphan links remain.
+Deleting an Objective removes every link that names it, deleting a Key Result removes the Solution links to it (and the derived `LEGACY` link it implied), and deleting a workspace removes all of its links. The links are removed *after* the Objective or Key Result itself is deleted, so a delete that is refused touches no link. If that cleanup fails, the delete still succeeds (the failure is logged, not returned) and a leftover link stays hidden: reads and `list_links` only return links whose other end exists in the workspace.
 
 ### Experiments
 

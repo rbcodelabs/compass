@@ -178,7 +178,7 @@ Discovery connects to your OKRs through links:
 
 Workspaces that use the **Opportunity-first OKRs** or **Torres** thinking model (a workspace admin picks it in Settings) get two extra things in Discovery:
 
-- On an opportunity, a multi-select box (titled **Objectives**, or **Outcomes** under Torres) to link the opportunity to every Objective you chose to pursue it for. Select **Change** (or **Link objectives** when there are none), then tick or untick; each tick saves immediately. If an Objective is linked only because of the opportunity's Driving Key Result, unticking it explains that and changes nothing: change the Key Result instead.
+- On an opportunity, a multi-select box (titled **Objectives**, or **Outcomes** under Torres) to link the opportunity to every Objective you chose to pursue it for. Once the workspace has at least one Objective, select **Change** (or **Link objectives** when there are none), then tick or untick; each tick saves immediately. If an Objective is linked only because of the opportunity's Driving Key Result, unticking it explains that and changes nothing: change the Key Result instead.
 - A tree button in the Discovery header (**Objective tree** / **Outcome tree**) that opens the workspace tree at `/discovery/tree`: Objectives, their linked opportunities and the solutions under them, with opportunities that are not linked to any Objective gathered in a pool. Solutions are shown against the Key Results they are linked to.
 
 Classic workspaces see neither: there is no box and `/discovery/tree` is not found. The board, the Tree view and the Solutions list work the same under every model. Details are on the [Thinking models](/help/27-thinking-models) page.

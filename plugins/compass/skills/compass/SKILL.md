@@ -376,7 +376,7 @@ A workspace admin picks a **thinking model** in Settings: `CLASSIC` (the default
 - **`origin`**: `DIRECT` links were made on purpose (`link_opportunity_to_objective`, or the app's Objectives box) and are never removed by changing or clearing the Key Result. `LEGACY` links are derived from `linkedKeyResult` (set by `link_opportunity_to_kr` or `create_opportunity`'s `keyResultId`) and follow it. Adding a `DIRECT` link over a `LEGACY` one upgrades it (`originFlipped:true`). Solution links have no origin.
 - `linkedKeyResult` on opportunities is the one specific driving KR and is never inferred from links (an Objective link cannot say which KR). `linkedObjectives` (on `list_opportunities` items and `get_opportunity`) and `linkedKeyResults` (on `list_solutions` items) are additive; an empty list always means "no links". If the link tables are missing (migration 071 not applied) the tools fail with the database error instead of returning empty lists, so report that rather than assuming there are no links.
 - A solution has exactly one parent opportunity and cannot be moved to another; `link_solution_to_key_result` only adds Key Results it aims at.
-- `list_links` is read-only; the other four need write scope. Deleting an Objective or Key Result removes its links.
+- `list_links` is read-only; the other four need write scope. Deleting an Objective or Key Result removes its links after the delete (a failed cleanup does not fail the delete; a leftover link is hidden from reads).
 
 ---
 ## Finding what changed recently
