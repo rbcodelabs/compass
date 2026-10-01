@@ -3238,3 +3238,52 @@ model WorkspaceActivationState {
   updatedAt DateTime @default(now()) @map("updated_at")
   @@map("workspace_activation_states")
 }
+
+/// A user's subscription to one subject (Following and in-app notifications,
+/// migration 068). Polymorphic: `subjectType` reuses the COMMENT_TARGET_TYPES
+/// vocabulary plus METRIC, and there is deliberately no @relation because DSQL
+/// enforces no foreign keys; integrity lives in lib/followable.ts. `userId` is
+/// always a Compass User with a WorkspaceMember row, never an Agent.
+/// state: FOLLOWING | MUTED (an unfollow tombstone that auto-follow never
+/// overrides). source: MANUAL | AUTO_CREATE | AUTO_COMMENT | AUTO_ASSIGN.
+model Follow {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  subjectType String   @map("subject_type") @db.VarChar(40)
+  subjectId   String   @map("subject_id") @db.Uuid
+  state       String   @db.VarChar(20)
+  source      String   @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  @@unique([userId, subjectType, subjectId], map: "idx_follows_user_subject")
+  @@index([subjectType, subjectId], map: "idx_follows_subject")
+  @@index([workspaceId, userId], map: "idx_follows_workspace_user")
+  @@map("follows")
+}
+
+/// One in-app notification for one recipient (migration 068). Fan-out on write,
+/// never updated after insert except `readAt`. `payload` holds machine facts
+/// only (no titles or comment excerpts); display data is resolved at read time
+/// behind an access check. `dedupeKey` + recipient is unique so a replayed emit
+/// is harmless. kind: STATUS_CHANGED | COMMENT_ADDED | COMMENT_REPLIED.
+/// actorType: USER | AGENT | EXTERNAL | SYSTEM.
+model Notification {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  recipientUserId String    @map("recipient_user_id") @db.Uuid
+  subjectType     String    @map("subject_type") @db.VarChar(40)
+  subjectId       String    @map("subject_id") @db.Uuid
+  kind            String    @db.VarChar(40)
+  actorType       String    @map("actor_type") @db.VarChar(20)
+  actorId         String?   @map("actor_id") @db.Uuid
+  payload         Json      @default("{}")
+  dedupeKey       String    @map("dedupe_key") @db.VarChar(200)
+  readAt          DateTime? @map("read_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@unique([recipientUserId, dedupeKey], map: "idx_notifications_recipient_dedupe")
+  @@index([workspaceId, recipientUserId, createdAt], map: "idx_notifications_inbox")
+  @@map("notifications")
+}

@@ -19,6 +19,7 @@ import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
 import { revokeMemberAgentGrants, deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
 import { deleteWorkspaceUpdates } from "@/lib/workspace-updates-cleanup";
+import { deleteMemberFollowState, deleteWorkspaceNotifications } from "@/lib/follow-cleanup";
 import {
   normalizeSelectOptions,
   parseSelectOptions,
@@ -262,6 +263,16 @@ export async function removeWorkspaceMember(
     await revokeMemberAgentGrants(tx, workspaceId, member.userId);
     await tx.workspaceMember.delete({ where: { id: memberId } });
   });
+
+  // Hygiene only: read-time membership checks already hide this user's follows
+  // and notifications. Runs after the commit and outside the transaction (a
+  // missing-table error would abort it), and must not fail a removal that has
+  // already happened.
+  try {
+    await deleteMemberFollowState(prisma, workspaceId, member.userId);
+  } catch (error) {
+    console.error("[follows] member follow-state cleanup failed", error);
+  }
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }
@@ -768,6 +779,7 @@ export async function deleteWorkspace(
   await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
   await deleteWorkspaceAgentData(prisma, workspaceId);
   await deleteWorkspaceUpdates(prisma, workspaceId);
+  await deleteWorkspaceNotifications(prisma, workspaceId);
 
   // ── Step 16: Delete WorkspaceMembers ────────────────────────────────────────
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
