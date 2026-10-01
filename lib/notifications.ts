@@ -221,7 +221,7 @@ const fallbackActorName = (type: string) =>
 export async function listNotifications(
   userId: string,
   workspaceId: string,
-  options: { limit?: number; cursor?: string; prisma?: AppPrismaClient } = {},
+  options: { limit?: number; cursor?: string; unreadOnly?: boolean; prisma?: AppPrismaClient } = {},
 ): Promise<NotificationPage> {
   const prisma = options.prisma ?? getPrisma()
   if (!(await followingAvailable(prisma))) return EMPTY_PAGE
@@ -233,6 +233,7 @@ export async function listNotifications(
     where: {
       recipientUserId: userId,
       workspaceId,
+      ...(options.unreadOnly ? { readAt: null } : {}),
       ...(cursor ? { OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }] } : {}),
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],

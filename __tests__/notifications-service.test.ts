@@ -261,6 +261,15 @@ describe("listNotifications", () => {
     expect((await listNotifications(U1, WS, { prisma: fake.db })).items).toEqual([])
   })
 
+  it("can restrict the page to unread rows", async () => {
+    await seed(U1, 1, { readAt: new Date() })
+    await seed(U1, 2)
+    const all = await listNotifications(U1, WS, { prisma: fake.db })
+    const unread = await listNotifications(U1, WS, { prisma: fake.db, unreadOnly: true })
+    expect(all.items).toHaveLength(2)
+    expect(unread.items.map((i) => i.createdAt.getMinutes())).toEqual([2])
+  })
+
   it("only ever returns the caller's own rows, newest first, with display resolved at read time", async () => {
     await seed(U1, 1)
     await seed(U1, 2)
