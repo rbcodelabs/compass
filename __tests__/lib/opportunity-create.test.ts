@@ -21,7 +21,8 @@ type State = {
   opportunities: Array<Record<string, unknown> & { id: string }>
   feedback: Feedback[]
   squads: Array<{ id: string; workspaceId: string }>
-  keyResults: Array<{ id: string; workspaceId: string }>
+  keyResults: Array<{ id: string; workspaceId: string; objectiveId: string }>
+  links: Array<Record<string, unknown> & { id: string; opportunityId: string; objectiveId: string; origin: string }>
 }
 
 function makeDb(initial: State) {
@@ -33,8 +34,24 @@ function makeDb(initial: State) {
         s.squads.find((row) => row.id === where.id && row.workspaceId === where.workspaceId) ?? null,
     },
     keyResult: {
-      findFirst: async ({ where }: { where: { id: string; objective: { workspaceId: string } } }) =>
-        s.keyResults.find((row) => row.id === where.id && row.workspaceId === where.objective.workspaceId) ?? null,
+      findFirst: async ({ where }: { where: { id: string; objective: { workspaceId: string } } }) => {
+        const row = s.keyResults.find((r) => r.id === where.id && r.workspaceId === where.objective.workspaceId)
+        return row ? { id: row.id, title: row.id, objectiveId: row.objectiveId, objective: { workspaceId: row.workspaceId } } : null
+      },
+    },
+    opportunityObjectiveLink: {
+      findFirst: async ({ where }: { where: { opportunityId: string; objectiveId: string } }) =>
+        s.links.find((l) => l.opportunityId === where.opportunityId && l.objectiveId === where.objectiveId) ?? null,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { id: `link-${s.links.length + 1}`, ...data } as State["links"][number]
+        s.links.push(row)
+        return row
+      },
+      deleteMany: async ({ where }: { where: { opportunityId: string; origin: string } }) => {
+        const doomed = s.links.filter((l) => l.opportunityId === where.opportunityId && l.origin === where.origin)
+        s.links = s.links.filter((l) => !doomed.includes(l))
+        return { count: doomed.length }
+      },
     },
     feedbackItem: {
       findMany: async ({ where }: { where: { id: { in: string[] }; workspaceId: string } }) =>
@@ -78,7 +95,8 @@ const seed = (): State => ({
     { id: "fb-foreign", workspaceId: "ws-2", opportunityId: null, updatedAt: new Date(0), status: "OPEN" },
   ],
   squads: [{ id: "sq-1", workspaceId: WS }, { id: "sq-foreign", workspaceId: "ws-2" }],
-  keyResults: [{ id: "kr-1", workspaceId: WS }, { id: "kr-foreign", workspaceId: "ws-2" }],
+  keyResults: [{ id: "kr-1", workspaceId: WS, objectiveId: "obj-1" }, { id: "kr-foreign", workspaceId: "ws-2", objectiveId: "obj-foreign" }],
+  links: [],
 })
 
 let db: ReturnType<typeof makeDb>
@@ -151,6 +169,35 @@ describe("createOpportunityWithLinks", () => {
     expect(fb1.updatedAt.getTime()).toBeGreaterThan(0)
     expect(fb1.status).toBe("OPEN")
     expect(fb2.status).toBe("UNDER_REVIEW")
+  })
+
+  it("dual-writes: a key result also creates the LEGACY opportunity-objective link, in the same transaction", async () => {
+    const opportunity = await create({ title: "Linked", linkedKeyResultId: "kr-1" })
+    expect(db.state.links).toEqual([
+      expect.objectContaining({ workspaceId: WS, opportunityId: opportunity.id, objectiveId: "obj-1", origin: "LEGACY", source: "UI" }),
+    ])
+    expect(db.$transaction).toHaveBeenCalledOnce()
+  })
+
+  it("writes no link when no key result is chosen, and none when the create is refused", async () => {
+    await create({ title: "Solo" })
+    expect(db.state.links).toEqual([])
+    await expect(create({ title: "Nope", linkedKeyResultId: "kr-foreign" })).rejects.toThrow(OpportunityCreateError)
+    expect(db.state.links).toEqual([])
+  })
+
+  it("rolls the link back with the opportunity when linking feedback fails after the key result was linked", async () => {
+    const before = structuredClone(db.state)
+    const originalTransaction = db.$transaction.getMockImplementation()!
+    db.$transaction.mockImplementationOnce(async (callback) =>
+      originalTransaction(async (tx) => {
+        const client = tx as { feedbackItem: { updateMany: (...a: unknown[]) => Promise<{ count: number }> } }
+        client.feedbackItem.updateMany = async () => ({ count: 0 })
+        return callback(tx)
+      }),
+    )
+    await expect(create({ title: "Half", linkedKeyResultId: "kr-1", feedbackIds: ["fb-1"] })).rejects.toThrow(/feedback/i)
+    expect(db.state).toEqual(before)
   })
 
   it("is a plain create when nothing is linked", async () => {

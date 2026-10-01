@@ -29,6 +29,7 @@
  */
 import getPrisma from "@/lib/db";
 import { isPmInterviewEnabled } from "@/lib/research-feature";
+import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity } from "@/lib/typed-links";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
@@ -227,19 +228,22 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     },
   });
   if (!item) return null;
-  const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields] = await Promise.all([
+  const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields, linkedObjectivesByOpportunity] = await Promise.all([
     pmInterviewHistory(workspaceId, "OPPORTUNITY", id),
     fetchLinkedTasksBundle(workspaceId, "OPPORTUNITY", id),
     resolveEvidenceProvenance(item.evidence),
     getPrisma().squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
     getPrisma().keyResult.findMany({ where: { objective: { workspaceId } }, select: { id: true, title: true, objective: { select: { title: true } } }, orderBy: { createdAt: "asc" } }),
     loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OPPORTUNITY", objectId: id }),
+    // Additive typed Opportunity<->Objective links. linkedKeyResult above stays the legacy column only.
+    getLinkedObjectivesByOpportunity(getPrisma(), workspaceId, [id]),
   ]);
   const solutionScoringModel = item.workspace?.scoringConfig?.solutionScoringModel ?? null;
   // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
   const linkedKeyResult = item.linkedKeyResult && item.linkedKeyResult.objective.workspaceId === workspaceId ? item.linkedKeyResult : null;
   return {
     ...item, ...(item.linkedKeyResult ? { linkedKeyResult } : {}), evidence, ...linkedTasks, squads, customFields,
+    linkedObjectives: linkedObjectivesByOpportunity.get(id) ?? [],
     existingScore: toOpportunityScoreData(item.score, item.workspace?.scoringConfig?.opportunityScoringModel as ScoringModelData | null),
     // Threaded onto each nested solution row so the panel's SolutionsList can
     // render a ScoreBadge without a second workspace round trip.
@@ -283,7 +287,7 @@ async function fetchSolution(id: string, workspaceId: string) {
     },
   });
   if (!solution) return null
-  const [links, availableArtifacts, pmInterviews, linkedTasks, evidence, customFields, scoringConfig] = await Promise.all([
+  const [links, availableArtifacts, pmInterviews, linkedTasks, evidence, customFields, scoringConfig, linkedKeyResultsBySolution] = await Promise.all([
     prisma.artifactLink.findMany({ where: { workspaceId, linkedType: "SOLUTION", linkedId: id }, select: { artifactId: true } }),
     prisma.artifact.findMany({ where: { workspaceId, status: "ACTIVE" }, select: { id: true, title: true, sourceType: true }, orderBy: { title: "asc" } }),
     pmInterviewHistory(workspaceId, "SOLUTION", id),
@@ -298,12 +302,15 @@ async function fetchSolution(id: string, workspaceId: string) {
       where: { workspaceId },
       select: { solutionScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
     }),
+    // Additive typed Solution<->Key Result links (workspace-filtered).
+    getLinkedKeyResultsBySolution(prisma, workspaceId, [id]),
   ])
   const linkedIds = new Set(links.map((link) => link.artifactId))
   const solutionScoringModel = (scoringConfig?.solutionScoringModel as ScoringModelData | null) ?? null
   return {
     // workspaceId is the authorized parameter (findFirst above matched it on the Solution's own column).
     ...solution, workspaceId, evidence, ...linkedTasks,
+    linkedKeyResults: linkedKeyResultsBySolution.get(id) ?? [],
     artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts,
     pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews, customFields,
     scoringModel: solutionScoringModel,

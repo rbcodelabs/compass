@@ -17,8 +17,16 @@ function makeFakePrisma(overrides: {
   experiments?: unknown[];
   roadmapItems?: unknown[];
   positions?: unknown[];
+  opportunityLinks?: unknown[];
+  solutionLinks?: unknown[];
 }): AppPrismaClient {
   return {
+    opportunityObjectiveLink: {
+      findMany: vi.fn().mockResolvedValue(overrides.opportunityLinks ?? []),
+    },
+    solutionKeyResultLink: {
+      findMany: vi.fn().mockResolvedValue(overrides.solutionLinks ?? []),
+    },
     squad: {
       findMany: vi.fn().mockResolvedValue(overrides.squads ?? []),
     },
@@ -149,9 +157,30 @@ describe("getCanvasOverview", () => {
     const result = await getCanvasOverview(prisma, "ws-1");
 
     expect(result.opportunities).toEqual([
-      { id: "opp-1", title: "Linked", status: "VALIDATING", squad: null, linkedKeyResultId: "kr-1", position: null },
-      { id: "opp-2", title: "Unlinked", status: "EXPLORING", squad: null, linkedKeyResultId: null, position: null },
+      { id: "opp-1", title: "Linked", status: "VALIDATING", squad: null, linkedKeyResultId: "kr-1", linkedObjectives: [], position: null },
+      { id: "opp-2", title: "Unlinked", status: "EXPLORING", squad: null, linkedKeyResultId: null, linkedObjectives: [], position: null },
     ]);
+  });
+
+  it("adds the typed links as payload only: linkedKeyResultId is untouched and links to a foreign objective are hidden", async () => {
+    const prisma = makeFakePrisma({
+      objectives: [{ id: "obj-1", title: "Objective one", status: "ON_TRACK", squadId: null, parentKeyResultId: null }],
+      opportunities: [{ id: "opp-1", title: "Opp", status: "EXPLORING", squadId: null, linkedKeyResultId: null }],
+      solutions: [{ id: "sol-1", opportunityId: "opp-1", title: "Sol", status: "IDEA" }],
+      keyResults: [{ id: "kr-1", objectiveId: "obj-1", title: "KR one", current: 0, target: 1, unit: null }],
+      opportunityLinks: [
+        { id: "l1", opportunityId: "opp-1", objectiveId: "obj-1", createdAt: new Date(1) },
+        { id: "l2", opportunityId: "opp-1", objectiveId: "obj-foreign", createdAt: new Date(2) },
+      ],
+      solutionLinks: [{ id: "s1", solutionId: "sol-1", keyResultId: "kr-1", createdAt: new Date(1) }],
+    });
+    // The helper's workspace re-checks go through the same fakes: objectives returns obj-1 only, so obj-foreign is dropped.
+    const result = await getCanvasOverview(prisma, "ws-1");
+    expect(result.opportunities[0]).toMatchObject({ linkedKeyResultId: null, linkedObjectives: [{ id: "obj-1", title: "Objective one" }] });
+    expect(result.solutions[0].linkedKeyResults).toEqual([{ id: "kr-1", title: "KR one", objectiveId: "obj-1" }]);
+    expect(prisma.opportunityObjectiveLink.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ workspaceId: "ws-1" }) }),
+    );
   });
 
   it("maps solutions scoped by their own workspaceId", async () => {
@@ -166,7 +195,7 @@ describe("getCanvasOverview", () => {
       expect.objectContaining({ where: { workspaceId: "ws-1" } })
     );
     expect(result.solutions).toEqual([
-      { id: "sol-1", opportunityId: "opp-1", title: "Sol", status: "IDEA", position: null },
+      { id: "sol-1", opportunityId: "opp-1", title: "Sol", status: "IDEA", linkedKeyResults: [], position: null },
     ]);
   });
 

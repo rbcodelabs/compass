@@ -1,5 +1,6 @@
 import getPrisma from "@/lib/db";
 import { requireWorkspaceContext } from "@/lib/workspace-context";
+import { getLinkedObjectivesByOpportunity } from "@/lib/typed-links";
 import { DiscoveryShell } from "@/components/discovery/discovery-shell";
 import type { DiscoveryRailOpportunity } from "@/components/discovery/discovery-rail";
 import type { OpportunityStatus, SquadData } from "@/lib/types";
@@ -51,12 +52,16 @@ export default async function DiscoveryLayout({ children, params }: DiscoveryLay
 
   const squadMap = new Map(squads.map((s) => [s.id, s]));
 
+  // Additive typed links, one workspace-filtered batch for the whole rail.
+  const linkedObjectives = await getLinkedObjectivesByOpportunity(prisma, workspace.id, rawOpportunities.map((o) => o.id));
+
   const opportunities: DiscoveryRailOpportunity[] = rawOpportunities.map((o) => ({
     id: o.id,
     title: o.title,
     status: o.status as OpportunityStatus,
     squad: o.squadId ? (squadMap.get(o.squadId) ?? null) : null,
     linkedKeyResultId: o.linkedKeyResultId,
+    linkedObjectives: linkedObjectives.get(o.id) ?? [],
   }));
 
   return (

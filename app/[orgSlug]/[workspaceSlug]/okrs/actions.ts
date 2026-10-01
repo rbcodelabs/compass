@@ -10,6 +10,7 @@ import { getWorkspace } from "@/lib/workspace";
 import { assertWorkspaceWritable } from "@/lib/workspace-context";
 import { setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
 import { requireProductEntity, requireProductWorkspace } from "@/lib/product-action-auth";
+import { deleteLegacyLinksForOpportunities, deleteLinksFor } from "@/lib/typed-links";
 
 // ─── Create Cycle ─────────────────────────────────────────────────────────────
 
@@ -242,7 +243,11 @@ export async function deleteObjective(
 ) {
   await requireProductEntity("objective", objectiveId);
   const prisma = getPrisma();
-  await prisma.objective.delete({ where: { id: objectiveId } });
+  // No foreign keys reach the typed link tables, so the links go explicitly, in the same transaction as the row.
+  await prisma.$transaction(async (tx) => {
+    await deleteLinksFor(tx, "objective", [objectiveId]);
+    await tx.objective.delete({ where: { id: objectiveId } });
+  });
   revalidatePath(revalidatePathStr);
 }
 
@@ -254,7 +259,14 @@ export async function deleteKeyResult(
 ) {
   await requireProductEntity("keyResult", keyResultId);
   const prisma = getPrisma();
-  await prisma.keyResult.delete({ where: { id: keyResultId } });
+  await prisma.$transaction(async (tx) => {
+    // The legacy pointers to this key result are cleared by the relation's SetNull, so the LEGACY links they
+    // implied go now; DIRECT links are the user's own and stay. Solution links to the key result always go.
+    const pointing = await tx.opportunity.findMany({ where: { linkedKeyResultId: keyResultId }, select: { id: true } });
+    await deleteLegacyLinksForOpportunities(tx, pointing.map((o) => o.id));
+    await deleteLinksFor(tx, "keyResult", [keyResultId]);
+    await tx.keyResult.delete({ where: { id: keyResultId } });
+  });
   revalidatePath(revalidatePathStr);
 }
 

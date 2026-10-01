@@ -41,7 +41,19 @@ function makeDb() {
       { id: "kr-null", objectiveId: "obj-null", current: 0, sortOrder: 0 },
     ],
     squad: [{ id: "00000000-0000-4000-8000-00000000000a", workspaceId: W_A, name: "A" }, { id: "00000000-0000-4000-8000-00000000000b", workspaceId: W_B, name: "B" }],
-    opportunity: [{ id: "opp-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b" }],
+    opportunity: [
+      { id: "opp-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b", linkedKeyResultId: null },
+      { id: "opp-a", workspaceId: W_A, squadId: null, linkedKeyResultId: "kr-a" },
+    ],
+    opportunityObjectiveLink: [
+      { id: "l-a-legacy", workspaceId: W_A, opportunityId: "opp-a", objectiveId: "obj-a", origin: "LEGACY" },
+      { id: "l-a-direct", workspaceId: W_A, opportunityId: "opp-a", objectiveId: "obj-a2", origin: "DIRECT" },
+      { id: "l-b", workspaceId: W_B, opportunityId: "opp-b", objectiveId: "obj-b", origin: "DIRECT" },
+    ],
+    solutionKeyResultLink: [
+      { id: "s-a", workspaceId: W_A, solutionId: "sol-a", keyResultId: "kr-a" },
+      { id: "s-b", workspaceId: W_B, solutionId: "sol-b", keyResultId: "kr-b" },
+    ],
     experiment: [],
     roadmapItem: [{ id: "rm-a", workspaceId: W_A, squadId: null }, { id: "rm-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b" }],
     task: [{ id: "task-a", workspaceId: W_A, squadId: "00000000-0000-4000-8000-00000000000a" }, { id: "task-b", workspaceId: W_B, squadId: "00000000-0000-4000-8000-00000000000b" }],
@@ -71,6 +83,11 @@ function makeDb() {
         if ((cond as { slug: string }).slug !== row.org) return false;
         continue;
       }
+      if (cond !== null && typeof cond === "object" && !relations[model]?.[key] && !(model === "workspace" && (key === "members" || key === "organization"))) {
+        const op = cond as { in?: unknown[]; not?: unknown };
+        if (op.in) { if (!op.in.includes(row[key])) return false; continue; }
+        if ("not" in op) { if (row[key] === op.not) return false; continue; }
+      }
       const rel = relations[model]?.[key];
       if (rel) {
         const parent = tables[rel[0]].find((r) => r.id === row[rel[1]]);
@@ -92,6 +109,12 @@ function makeDb() {
       if (model === "keyResult") out.objective = tables.objective.find((o) => o.id === row.objectiveId);
       void rel;
       return out;
+    },
+    findMany: async ({ where }: { where: Row }) => tables[model].filter((r) => matches(model, r, where)).map((r) => ({ ...r })),
+    deleteMany: async ({ where }: { where: Row }) => {
+      const doomed = tables[model].filter((r) => matches(model, r, where));
+      for (const r of doomed) { writes.push(`${model}.deleteMany:${r.id}`); tables[model].splice(tables[model].indexOf(r), 1); }
+      return { count: doomed.length };
     },
     create: async ({ data }: { data: Row }) => { const row = { id: `${model}-new`, ...data }; tables[model].push(row); writes.push(`${model}.create`); return row; },
     update: async ({ where, data }: { where: Row; data: Row }) => { const row = tables[model].find((r) => matches(model, r, where)); if (!row) throw new Error("not found"); Object.assign(row, data); writes.push(`${model}.update:${row.id}`); return row; },
@@ -195,6 +218,20 @@ describe("OKR server actions", () => {
     session.userId = null;
     await expect(okr.createObjective("cycle-a", "acme", "alpha", form({ title: "X" }))).rejects.toThrow("Unauthorized");
     expect(db.current!.writes).toEqual([]);
+  });
+
+  it("deleteKeyResult removes the LEGACY link and the solution links to that key result, keeps DIRECT links, and never touches workspace B's", async () => {
+    await okr.deleteKeyResult("kr-a", "/p");
+    const ids = (name: string) => db.current!.tables[name].map((r) => r.id);
+    expect(ids("opportunityObjectiveLink")).toEqual(["l-a-direct", "l-b"]);
+    expect(ids("solutionKeyResultLink")).toEqual(["s-b"]);
+    expect(ids("keyResult")).not.toContain("kr-a");
+  });
+
+  it("deleteObjective removes every opportunity link to it (both origins) and only those", async () => {
+    db.current!.tables.opportunityObjectiveLink.push({ id: "l-a-direct-obj-a", workspaceId: W_A, opportunityId: "opp-a2", objectiveId: "obj-a", origin: "DIRECT" });
+    await okr.deleteObjective("obj-a", "/p");
+    expect(db.current!.tables.opportunityObjectiveLink.map((r) => r.id)).toEqual(["l-a-direct", "l-b"]);
   });
 
   it("the caller's own rows still work (positive control)", async () => {

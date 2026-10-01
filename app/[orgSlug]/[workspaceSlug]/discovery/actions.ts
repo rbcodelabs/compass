@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
 import { OpportunityCreateError, createOpportunityWithLinks, type NewOpportunityInput } from "@/lib/opportunity-create";
 import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
+import { setOpportunityKeyResult } from "@/lib/typed-links";
 import { Prisma } from "@prisma/client";
 import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat";
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring";
@@ -214,11 +215,22 @@ export async function linkOpportunityToKeyResult(
   keyResultId: string | null,
   revalidatePathStr: string
 ) {
+  // A server action is a public POST endpoint: both ends need the caller's membership, and the key result
+  // must be in the opportunity's own workspace (a member of two workspaces must not cross-link them).
+  const { workspaceId } = await requireProductEntity("opportunity", opportunityId);
+  if (keyResultId) await requireProductEntity("keyResult", keyResultId, workspaceId);
+  const session = await auth();
   const prisma = getPrisma();
-  await captureWorkspaceMutation(prisma, "opportunity", "update", "UI", opportunityId, tx => tx.opportunity.update({
-    where: { id: opportunityId },
-    data: { linkedKeyResultId: keyResultId },
-  }));
+  // Dual-write in ONE transaction: the legacy column and its LEGACY Opportunity<->Objective link.
+  await captureWorkspaceMutation(
+    prisma,
+    "opportunity",
+    "update",
+    "UI",
+    opportunityId,
+    tx => setOpportunityKeyResult(tx, { opportunityId, keyResultId, expectedWorkspaceId: workspaceId, ctx: { source: "UI", createdById: session?.user?.id ?? null } }),
+    { atomic: true },
+  );
   revalidatePath(revalidatePathStr);
 }
 

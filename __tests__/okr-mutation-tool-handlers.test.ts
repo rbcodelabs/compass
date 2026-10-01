@@ -11,7 +11,9 @@ const mockKeyResult = {
   update: vi.fn(),
   delete: vi.fn(),
 }
-const mockOpportunity = { updateMany: vi.fn() }
+const mockOpportunity = { updateMany: vi.fn(), findMany: vi.fn() }
+const mockOpportunityObjectiveLink = { deleteMany: vi.fn() }
+const mockSolutionKeyResultLink = { deleteMany: vi.fn() }
 const mockRoadmapItem = { updateMany: vi.fn() }
 const mockCheckIn = { deleteMany: vi.fn() }
 const mockTaskLink = { deleteMany: vi.fn() }
@@ -22,6 +24,8 @@ const mockPrisma = {
   objective: mockObjective,
   keyResult: mockKeyResult,
   opportunity: mockOpportunity,
+  opportunityObjectiveLink: mockOpportunityObjectiveLink,
+  solutionKeyResultLink: mockSolutionKeyResultLink,
   roadmapItem: mockRoadmapItem,
   checkIn: mockCheckIn,
   taskLink: mockTaskLink,
@@ -78,6 +82,9 @@ beforeEach(() => {
   )
   mockKeyResult.delete.mockResolvedValue({ id: KEY_RESULT_ID })
   mockOpportunity.updateMany.mockResolvedValue({ count: 3 })
+  mockOpportunity.findMany.mockResolvedValue([{ id: "opp-1" }, { id: "opp-2" }, { id: "opp-3" }])
+  mockOpportunityObjectiveLink.deleteMany.mockResolvedValue({ count: 2 })
+  mockSolutionKeyResultLink.deleteMany.mockResolvedValue({ count: 1 })
   mockRoadmapItem.updateMany.mockResolvedValue({ count: 4 })
   mockCheckIn.deleteMany.mockResolvedValue({ count: 5 })
   mockTaskLink.deleteMany.mockResolvedValue({ count: 6 })
@@ -173,6 +180,17 @@ describe("deleteObjective", () => {
     expect(mockCanvasNodePosition.deleteMany).toHaveBeenCalledWith({
       where: { entityType: "OBJECTIVE", entityId: OBJECTIVE_ID },
     })
+  })
+
+  it("removes every opportunity link to the Objective (both origins) in the delete transaction, before the Objective row", async () => {
+    const order: string[] = []
+    mockOpportunityObjectiveLink.deleteMany.mockImplementation(async () => { order.push("links"); return { count: 2 } })
+    mockObjective.delete.mockImplementation(async () => { order.push("objective"); return { id: OBJECTIVE_ID } })
+
+    await deleteObjective({ objectiveId: OBJECTIVE_ID })
+
+    expect(mockOpportunityObjectiveLink.deleteMany).toHaveBeenCalledWith({ where: { objectiveId: { in: [OBJECTIVE_ID] } } })
+    expect(order).toEqual(["links", "objective"])
   })
 
   it("deletes a childless Objective and returns a plain ID line", async () => {
@@ -316,6 +334,35 @@ describe("deleteKeyResult", () => {
       deletedCustomFieldValues: 7,
       deletedCanvasPositions: 1,
       deletedCheckIns: 5,
+      removedOpportunityLinks: 2,
+      removedSolutionLinks: 1,
     })
+  })
+
+  it("deletes the typed links in the same transaction: LEGACY links of the unlinked opportunities (never DIRECT), and every solution link to the KR", async () => {
+    await deleteKeyResult({ keyResultId: KEY_RESULT_ID })
+
+    expect(mockOpportunity.findMany).toHaveBeenCalledWith({ where: { linkedKeyResultId: KEY_RESULT_ID }, select: { id: true } })
+    expect(mockOpportunityObjectiveLink.deleteMany).toHaveBeenCalledWith({
+      where: { opportunityId: { in: ["opp-1", "opp-2", "opp-3"] }, origin: "LEGACY" },
+    })
+    expect(mockSolutionKeyResultLink.deleteMany).toHaveBeenCalledWith({ where: { keyResultId: { in: [KEY_RESULT_ID] } } })
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the KR and every link when the link cleanup fails (all one transaction)", async () => {
+    mockSolutionKeyResultLink.deleteMany.mockRejectedValueOnce(new Error("link cleanup failed"))
+
+    await expect(deleteKeyResult({ keyResultId: KEY_RESULT_ID })).rejects.toThrow("link cleanup failed")
+
+    expect(mockKeyResult.delete).not.toHaveBeenCalled()
+  })
+
+  it("does not touch the link table when no opportunity pointed at the KR", async () => {
+    mockOpportunity.findMany.mockResolvedValueOnce([])
+
+    await deleteKeyResult({ keyResultId: KEY_RESULT_ID })
+
+    expect(mockOpportunityObjectiveLink.deleteMany).not.toHaveBeenCalled()
   })
 })
