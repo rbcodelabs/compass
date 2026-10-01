@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
 import { FormField } from "@/components/patterns/form-field"
 import { cn } from "@/lib/utils"
 
@@ -54,7 +55,7 @@ export function SelectField({
 export function CheckboxField({ id, label, checked, onChange }: { id: string; label: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
     <label htmlFor={id} className="flex items-center gap-2 text-sm text-text-primary">
-      <input id={id} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-[var(--color-primary)]" />
+      <Checkbox id={id} checked={checked} onCheckedChange={(next) => onChange(next === true)} />
       {label}
     </label>
   )
