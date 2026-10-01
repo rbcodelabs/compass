@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { ZodType } from "zod"
 type Meta = { inputSchema: Record<string, ZodType>; outputSchema: unknown }
 const tools: Record<string, Meta> = {}
-vi.mock("mcp-handler", () => ({ createMcpHandler: (setup: (server: { registerTool: (name: string, meta: Meta) => void }) => void) => { setup({ registerTool(name, meta) { tools[name] = meta } }); return () => new Response("ok") } }))
+vi.mock("mcp-handler", () => ({ createMcpHandler: (setup: (server: { registerTool: (name: string, meta: Meta) => void; registerResource: (...args: unknown[]) => void }) => void) => { setup({ registerTool(name, meta) { tools[name] = meta }, registerResource() {} }); return () => new Response("ok") } }))
 vi.mock("@/lib/mcp-auth", () => ({ validateMcpAuth: vi.fn() }))
 await import("@/app/api/mcp/route")
 import { applyToolGate, RESEARCH_TOOL_ALLOWLIST } from "@/lib/mcp-tool-gates"

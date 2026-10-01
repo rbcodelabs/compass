@@ -10,21 +10,42 @@ import { describe, expect, it } from "vitest"
 const source = readFileSync("scripts/agent/turn-entry.ts", "utf8")
 
 describe("agent entry capability-pack policy", () => {
-  it("keeps plugins declarative while Compass owns MCP and no built-ins are exposed", () => {
+  it("keeps plugins declarative while Compass owns MCP and no unscoped built-ins are exposed", () => {
     expect(source).toContain("skipMcpDiscovery: true")
     expect(source).toContain("strictMcpConfig: true")
-    expect(source).toMatch(/tools:\s*\[\]/)
     expect(source).toMatch(/settingSources:\s*\[\]/)
   })
 
-  it("admits Compass plus per-turn connector prefixes, and nothing wider", () => {
+  it("ADR 0019: grants exactly Read/Write/Edit/Glob, scoped to the materialized doc tree via cwd", () => {
+    // `allowedTools` does nothing under bypassPermissions (see the comment in
+    // turn-entry.ts) -- `tools` is the real gate, so this is pinned exactly
+    // rather than loosely matched. Bash is deliberately absent: it can read
+    // process.env (the MCP bearer token) and would punch a hole next to the
+    // MCP-intermediated boundary rather than through it.
+    expect(source).toContain('tools: ["Read", "Write", "Edit", "Glob"]')
+    expect(source).not.toMatch(/tools:\s*\[[^\]]*Bash/)
+    expect(source).toContain("cwd: docsRoot")
+  })
+
+  it("admits Compass, docsfs, the native doc-file tools, and per-turn connector prefixes -- nothing wider", () => {
     // The literal is pinned rather than matched loosely because the failure mode
     // is a silent widening: `allowedTools: ["mcp__*"]`, or dropping the option
     // entirely, both leave a headless agent running in bypassPermissions mode with
     // no allowlist at all. `connectorToolPrefixes` is the only sanctioned way for
     // this list to grow, and it grows per turn from the grants that user holds.
-    expect(source).toContain('allowedTools: ["mcp__compass", ...connectorToolPrefixes]')
+    expect(source).toContain('allowedTools: ["mcp__compass", "mcp__docsfs", "Read", "Write", "Edit", "Glob", ...connectorToolPrefixes]')
     expect(source).not.toMatch(/allowedTools:\s*\[[^\]]*\*/)
+  })
+
+  it("ADR 0019: supersedes write_doc/delete_doc/move_doc for this agent with the native file tools", () => {
+    // Comment/history/restore tools are deliberately NOT in this list -- there
+    // is no clean filesystem shape for them (spec §2.5), so they stay reachable
+    // over MCP exactly as they are for an external agent.
+    expect(source).toContain('"mcp__compass__write_doc"')
+    expect(source).toContain('"mcp__compass__delete_doc"')
+    expect(source).toContain('"mcp__compass__move_doc"')
+    expect(source).not.toContain('"mcp__compass__list_doc_history"')
+    expect(source).not.toContain('"mcp__compass__restore_doc_version"')
   })
 
   it("derives each connector tool prefix from a slug it has re-validated", () => {
