@@ -223,4 +223,4 @@ Switch from board view to **Tree view** using the toggle at the top right of the
 
 This view is most useful in team discussions and stakeholder reviews, where you need to show the full reasoning chain from outcome to experimental evidence.
 
-Any assumption with no linked experiment yet shows a **Test this assumption →** link. Clicking it opens the Experiments page with a new experiment form pre-filled to test that assumption, closing the loop without leaving the tree to hunt down the right assumption manually.
+Any assumption with no linked experiment yet shows a **Test this assumption →** link. Clicking it opens the Experiments page with the New Experiment panel docked on the right and that assumption already selected, closing the loop without leaving the tree to hunt down the right assumption manually.

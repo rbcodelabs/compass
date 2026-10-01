@@ -31,7 +31,7 @@ test.describe("Analytics measurements", () => {
     await page.getByLabel("Method").fill("Compare two explicit production windows.");
     await page.getByLabel("Kill Condition", { exact: true }).fill("Stop if recorded learning declines.");
     await page.getByRole("button", { name: "Submit" }).click();
-    await page.getByRole("button", { name: experimentName, exact: true }).click();
+    await page.getByLabel("Experiment board").getByRole("button", { name: experimentName, exact: true }).click();
     const fullPageHref = await page.getByRole("link", { name: "Open full page" }).getAttribute("href");
     expect(fullPageHref).toBeTruthy();
     // A direct visit exercises the full record rather than the intercepted panel route.

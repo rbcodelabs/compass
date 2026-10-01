@@ -238,7 +238,7 @@ function ComboboxItem({ className, children, ...props }: ComboboxPrimitive.Item.
       )}
       {...props}
     >
-      <span className="flex flex-1 shrink-0 items-center gap-2 whitespace-nowrap">
+      <span className="flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap">
         {children}
       </span>
       <ComboboxPrimitive.ItemIndicator

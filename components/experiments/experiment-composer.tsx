@@ -20,6 +20,7 @@ import {
 import { usePanelContext } from "@/components/panels/panel-context";
 import { Combobox, ComboboxContent, ComboboxTrigger, ComboboxValue } from "@/components/ui/combobox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import {
   EXPERIMENT_TITLE_MAX_LENGTH,
@@ -273,9 +274,10 @@ function ComposerForm({
 
         <TextField
           id={`${ids}-kill`}
+          tone="warning"
           label={
             <>
-              <AlertTriangle aria-hidden className="size-3.5 text-status-warning" />
+              <AlertTriangle aria-hidden className="size-3.5" />
               Kill Condition
             </>
           }
@@ -353,6 +355,7 @@ function TextField({
   disabled,
   rows = 4,
   hint,
+  tone = "default",
 }: {
   id: string;
   label: ReactNode;
@@ -363,10 +366,25 @@ function TextField({
   disabled: boolean;
   rows?: number;
   hint?: string;
+  /** "warning" renders the field as an amber-toned box (the kill condition gate). */
+  tone?: "default" | "warning";
 }) {
+  const warning = tone === "warning";
   return (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="flex items-center gap-1.5 text-xs font-medium text-text-secondary">
+    <div
+      className={cn(
+        "flex flex-col gap-1.5",
+        warning && "rounded-lg border border-status-warning/40 bg-status-warning-surface p-3",
+      )}
+      data-tone={tone}
+    >
+      <label
+        htmlFor={id}
+        className={cn(
+          "flex items-center gap-1.5 text-xs font-medium",
+          warning ? "text-status-warning" : "text-text-secondary",
+        )}
+      >
         {label}
       </label>
       <Textarea
@@ -377,8 +395,9 @@ function TextField({
         rows={rows}
         disabled={disabled}
         aria-invalid={invalid || undefined}
+        className={warning ? "bg-background dark:bg-background" : undefined}
       />
-      {hint && <p className="text-xs text-text-subtle">{hint}</p>}
+      {hint && <p className={cn("text-xs", warning ? "text-status-warning" : "text-text-subtle")}>{hint}</p>}
     </div>
   );
 }
@@ -403,11 +422,15 @@ function AssumptionField({
         value: a.id,
         label: a.title,
         render: (
-          <span className="flex flex-col items-start">
-            <span className="text-xs leading-tight text-muted-foreground">
+          // Menu: subtitle truncates, title wraps. Trigger (inside the
+          // combobox-value slot): the one-line box shows only the title, ellipsized.
+          <span className="flex w-full min-w-0 flex-col items-start">
+            <span className="w-full min-w-0 truncate text-xs leading-tight text-muted-foreground in-data-[slot=combobox-value]:hidden">
               {a.opportunityTitle} / {a.solutionTitle}
             </span>
-            <span>{a.title}</span>
+            <span className="w-full min-w-0 whitespace-normal break-words in-data-[slot=combobox-value]:truncate">
+              {a.title}
+            </span>
           </span>
         ),
       })),
@@ -426,7 +449,7 @@ function AssumptionField({
         disabled={disabled}
       >
         <ComboboxTrigger aria-labelledby={id} className="w-full">
-          <ComboboxValue placeholder="No assumption" />
+          <ComboboxValue placeholder="No assumption" className="min-w-0" />
         </ComboboxTrigger>
         <ComboboxContent align="start" inputPlaceholder="Search assumptions…" emptyMessage="No assumptions found." />
       </Combobox>
@@ -475,7 +498,7 @@ function SquadField({
           )}
           <SelectValue placeholder="No squad" />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent alignItemWithTrigger={false}>
           <SelectItem value={NO_SQUAD}>No squad</SelectItem>
           {squads.map((squad) => (
             <SelectItem key={squad.id} value={squad.id}>

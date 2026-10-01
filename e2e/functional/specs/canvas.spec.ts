@@ -192,7 +192,7 @@ test.describe("Canvas", () => {
     await page.getByLabel("Method").fill("Manual QA pass against /canvas.");
     await page.getByLabel("Kill Condition", { exact: true }).fill("Abandon if edges never appear.");
     await page.getByRole("button", { name: "Submit" }).click();
-    await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByLabel("Experiment board").getByRole("button", { name: expTitle, exact: true })).toBeVisible({ timeout: 15_000 });
 
     // ── 7. Promote the Solution to the roadmap ───────────────────────────────
     // Deliberately partial parent set: promoting a Solution always carries
