@@ -30,7 +30,7 @@
 import getPrisma from "@/lib/db";
 import { isPmInterviewEnabled } from "@/lib/research-feature";
 import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getLinkedSolutionsByKeyResult } from "@/lib/typed-links";
-import { loadThinkingModelSource, offersSolutionToKrSurfaces, probeSolToKrUnavailable } from "@/lib/thinking-model/link-surfaces";
+import { loadThinkingModelSource, offersSolutionToKrSurfaces } from "@/lib/thinking-model/link-surfaces";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
@@ -164,8 +164,7 @@ async function fetchKeyResult(id: string, workspaceId: string) {
   if (!offersSolutionToKrSurfaces(await loadThinkingModelSource(getPrisma(), workspaceId))) return { ...item, ...linkedTasks };
   // The key result was just read under this workspace's filter, so the reader may skip re-verifying it.
   const linkedSolutions = (await getLinkedSolutionsByKeyResult(getPrisma(), workspaceId, [id], { preverified: true })).get(id) ?? [];
-  const linksUnavailable = linkedSolutions.length === 0 && (await probeSolToKrUnavailable(getPrisma(), workspaceId, { keyResultId: id }));
-  return { ...item, ...linkedTasks, linkedSolutions, ...(linksUnavailable ? { linksUnavailable } : {}) };
+  return { ...item, ...linkedTasks, linkedSolutions };
 }
 
 async function pmInterviewHistory(workspaceId: string, targetType: string, targetId: string) {
@@ -341,7 +340,6 @@ async function fetchSolution(id: string, workspaceId: string) {
       })
     : null
   const linkedKeyResults = linkedKeyResultsBySolution.get(id) ?? []
-  const linksUnavailable = offersKeyResultPicker && linkedKeyResults.length === 0 && (await probeSolToKrUnavailable(prisma, workspaceId, { solutionId: id }))
   return {
     // workspaceId is the authorized parameter (findFirst above matched it on the Solution's own column).
     ...solution, workspaceId, evidence, ...linkedTasks,
@@ -349,7 +347,6 @@ async function fetchSolution(id: string, workspaceId: string) {
     ...(pickerKeyResults
       ? { availableKeyResults: pickerKeyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })) }
       : {}),
-    ...(linksUnavailable ? { linksUnavailable } : {}),
     artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts,
     pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews, customFields,
     scoringModel: solutionScoringModel,

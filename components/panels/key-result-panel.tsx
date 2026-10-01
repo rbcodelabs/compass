@@ -39,7 +39,6 @@ type KeyResultData = {
   }>;
   /** Typed Solution<->Key Result links (Phase 4B). Only sent for presets that offer the link. */
   linkedSolutions?: Array<{ id: string; title: string }>;
-  linksUnavailable?: boolean;
   deliveryTasks: LinkedTaskData[];
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
@@ -153,7 +152,7 @@ export function KeyResultPanel({
 
       {/* Phase 4B: present only for presets that offer the Solution <-> Key Result link (the fetcher omits it for CLASSIC). */}
       {showLinkedSolutions && (
-        <LinkedSolutionsSection solutions={data.linkedSolutions ?? []} linksUnavailable={data.linksUnavailable} />
+        <LinkedSolutionsSection solutions={data.linkedSolutions ?? []} />
       )}
 
       <Section label="Roadmap" count={data.roadmapItems.length}>

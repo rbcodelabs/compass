@@ -44,10 +44,9 @@ describe("Solution detail", () => {
     setPreset("TORRES_OST")
     seed({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" })
     const detail = await getEntityDetail("solution", "sol-a", WS_A.id)
-    const data = detail!.data as unknown as { availableKeyResults: Array<{ id: string }>; linkedKeyResults: Array<{ id: string }>; linksUnavailable?: boolean }
+    const data = detail!.data as unknown as { availableKeyResults: Array<{ id: string }>; linkedKeyResults: Array<{ id: string }> }
     expect(data.availableKeyResults.map((k) => k.id)).toEqual(["kr-a"])
     expect(data.linkedKeyResults.map((k) => k.id)).toEqual(["kr-a"])
-    expect(data.linksUnavailable).toBeUndefined()
   })
 
   it("hides a link row that points at a foreign or NULL-workspace key result", async () => {
@@ -64,22 +63,17 @@ describe("Solution detail", () => {
       setPreset(preset)
       const data = (await getEntityDetail("solution", "sol-a", WS_A.id))!.data as unknown as Record<string, unknown>
       expect("availableKeyResults" in data).toBe(false)
-      expect("linksUnavailable" in data).toBe(false)
     }
   })
 
-  it("a missing link table is surfaced as linksUnavailable, not as an empty list (and the page does not fail)", async () => {
+  it("a missing link table FAILS the solution read with the database error (no silent empty list)", async () => {
     setPreset("TORRES_OST")
     const missing = Object.assign(new Error('relation "solution_key_result_links" does not exist'), { code: "42P01" })
     const client = fake.current!.client as unknown as { solutionKeyResultLink: { findMany: unknown } }
     client.solutionKeyResultLink.findMany = async () => {
       throw missing
     }
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-    const data = (await getEntityDetail("solution", "sol-a", WS_A.id))!.data as unknown as { linkedKeyResults: unknown[]; linksUnavailable?: boolean }
-    warn.mockRestore()
-    expect(data.linkedKeyResults).toEqual([])
-    expect(data.linksUnavailable).toBe(true)
+    await expect(getEntityDetail("solution", "sol-a", WS_A.id)).rejects.toBe(missing)
   })
 
   it("a foreign or NULL-workspace solution resolves to nothing, so no option list leaks", async () => {
@@ -104,7 +98,6 @@ describe("Key Result detail", () => {
     seed({ workspaceId: WS_A.id, solutionId: "sol-a", keyResultId: "kr-a" })
     const data = (await getEntityDetail("keyResult", "kr-a", WS_A.id))!.data as unknown as Record<string, unknown>
     expect("linkedSolutions" in data).toBe(false)
-    expect("linksUnavailable" in data).toBe(false)
   })
 
   it("a foreign or NULL-workspace key result resolves to nothing", async () => {
@@ -114,16 +107,22 @@ describe("Key Result detail", () => {
     await expect(getEntityDetail("keyResult", "kr-a", WS_B.id)).resolves.toBeNull()
   })
 
-  it("a missing link table is surfaced as linksUnavailable", async () => {
+  it("a missing link table FAILS the key result read with the database error (no silent empty list)", async () => {
     setPreset("TORRES_OST")
+    const missing = Object.assign(new Error("missing"), { code: "P2021" })
     const client = fake.current!.client as unknown as { solutionKeyResultLink: { findMany: unknown } }
     client.solutionKeyResultLink.findMany = async () => {
-      throw Object.assign(new Error("missing"), { code: "P2021" })
+      throw missing
     }
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-    const data = (await getEntityDetail("keyResult", "kr-a", WS_A.id))!.data as unknown as { linkedSolutions: unknown[]; linksUnavailable?: boolean }
-    warn.mockRestore()
-    expect(data.linkedSolutions).toEqual([])
-    expect(data.linksUnavailable).toBe(true)
+    await expect(getEntityDetail("keyResult", "kr-a", WS_A.id)).rejects.toBe(missing)
+  })
+
+  it("CLASSIC never reads the link table for a key result, so it is unaffected by a missing one", async () => {
+    setPreset(null)
+    const client = fake.current!.client as unknown as { solutionKeyResultLink: { findMany: unknown } }
+    client.solutionKeyResultLink.findMany = async () => {
+      throw new Error("must not be read under CLASSIC")
+    }
+    await expect(getEntityDetail("keyResult", "kr-a", WS_A.id)).resolves.not.toBeNull()
   })
 })

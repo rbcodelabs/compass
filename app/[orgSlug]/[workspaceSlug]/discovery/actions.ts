@@ -6,7 +6,7 @@ import { auth } from "@/auth";
 import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
 import { OpportunityCreateError, createOpportunityWithLinks, type NewOpportunityInput } from "@/lib/opportunity-create";
 import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
-import { isMissingLinkTable, setOpportunityKeyResult } from "@/lib/typed-links";
+import { setOpportunityKeyResult } from "@/lib/typed-links";
 import { loadThinkingModelSource } from "@/lib/thinking-model/link-surfaces";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { Prisma } from "@prisma/client";
@@ -74,9 +74,12 @@ export async function createOpportunityFromComposer(
     return { ok: true, opportunity: { id: opportunity.id, title: opportunity.title } };
   } catch (error) {
     if (error instanceof OpportunityCreateError) return { ok: false, error: error.message };
-    // Chosen links need the link table (migration 071). The create was rolled back whole, so say so instead of throwing.
-    if (data.objectiveIds?.length && isMissingLinkTable(error)) {
-      return { ok: false, error: "Links are unavailable right now, so nothing was created. Remove the selected links, or try again later." };
+    // A failed objective link (including a missing link table) rolled the whole create back. Fail loudly but generically:
+    // log only the error name and code (a database error message can carry row data) and keep the draft.
+    if (data.objectiveIds?.length) {
+      const e = error as { name?: string; code?: string } | null;
+      console.error(JSON.stringify({ event: "opportunity_composer.link_failed", name: e?.name ?? "Error", code: e?.code ?? null }));
+      return { ok: false, error: "Something went wrong. Nothing was created. Please try again." };
     }
     throw error;
   }

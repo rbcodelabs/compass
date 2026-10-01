@@ -30,17 +30,14 @@ type Props = {
   solutionId: string
   linked: Array<{ id: string; title: string }>
   available: PickerKeyResult[]
-  /** The link table could not be read: the list above may be incomplete and writes would fail, so none are offered. */
-  linksUnavailable?: boolean
   onChanged?: () => void
 }
 
-export function SolutionKeyResultPicker({ solutionId, linked, available, linksUnavailable = false, onChanged }: Props) {
+export function SolutionKeyResultPicker({ solutionId, linked, available, onChanged }: Props) {
   const labels = useLabels()
   const [isPending, startTransition] = useTransition()
   const [linkedIds, setLinkedIds] = useState<string[]>(() => linked.map((kr) => kr.id))
   const [message, setMessage] = useState<string | null>(null)
-  const [unavailable, setUnavailable] = useState(false)
 
   // Stay in step with the server once a refresh delivers new props (adjusting state during render,
   // not in an effect, so the open menu is not remounted between toggles).
@@ -52,7 +49,6 @@ export function SolutionKeyResultPicker({ solutionId, linked, available, linksUn
   }
 
   const titleById = new Map([...linked, ...available].map((kr) => [kr.id, kr.title]))
-  const readOnly = linksUnavailable || unavailable
 
   function toggle(keyResultId: string, next: boolean) {
     setMessage(null)
@@ -62,7 +58,6 @@ export function SolutionKeyResultPicker({ solutionId, linked, available, linksUn
           ? await linkSolutionToKeyResultAction(solutionId, keyResultId)
           : await unlinkSolutionFromKeyResultAction(solutionId, keyResultId)
         if (!result.ok) {
-          if (result.linksUnavailable) setUnavailable(true)
           setMessage(result.error)
           return
         }
@@ -88,13 +83,7 @@ export function SolutionKeyResultPicker({ solutionId, linked, available, linksUn
         <p className="text-xs text-muted-foreground">No {labels.keyResult.lowerPlural} linked.</p>
       )}
 
-      {readOnly && (
-        <p role="status" data-testid="solution-links-unavailable" className="w-full text-xs text-muted-foreground">
-          Link data is unavailable right now, so this list may be incomplete and changes are off.
-        </p>
-      )}
-
-      {available.length > 0 && !readOnly && (
+      {available.length > 0 && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button type="button" variant="ghost" size="sm" disabled={isPending} aria-label={`Choose ${labels.keyResult.lowerPlural}`} />}
@@ -119,7 +108,7 @@ export function SolutionKeyResultPicker({ solutionId, linked, available, linksUn
         </DropdownMenu>
       )}
 
-      {available.length === 0 && !readOnly && linkedIds.length === 0 && (
+      {available.length === 0 && linkedIds.length === 0 && (
         <p className="w-full text-xs text-muted-foreground">There are no {labels.keyResult.lowerPlural} in this workspace yet.</p>
       )}
 

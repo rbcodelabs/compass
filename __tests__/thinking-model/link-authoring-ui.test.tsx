@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const { openPanel, link, unlink, refresh, detail, createOpportunityFromComposer, loadOpportunityComposerOptions } = vi.hoisted(() => ({
   openPanel: vi.fn(),
   refresh: vi.fn(),
-  link: vi.fn(async (): Promise<{ ok: true; changed: boolean } | { ok: false; error: string; linksUnavailable?: true }> => ({ ok: true, changed: true })),
+  link: vi.fn(async (): Promise<{ ok: true; changed: boolean } | { ok: false; error: string }> => ({ ok: true, changed: true })),
   unlink: vi.fn(async (): Promise<{ ok: true; changed: boolean } | { ok: false; error: string }> => ({ ok: true, changed: true })),
   detail: { data: {} as Record<string, unknown> },
   createOpportunityFromComposer: vi.fn(),
@@ -227,19 +227,15 @@ describe("SolutionKeyResultPicker", () => {
     expect(refresh).not.toHaveBeenCalled()
   })
 
-  it("a missing link table (read side) disables changes and says so instead of showing an empty list as fact", () => {
-    renderPicker({ linksUnavailable: true })
-    expect(screen.getByTestId("solution-links-unavailable")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Choose success metrics" })).toBeNull()
-  })
-
-  it("a missing link table (write side) flips the picker read-only after the failed attempt", async () => {
-    link.mockResolvedValueOnce({ ok: false, error: "Something went wrong. Please try again.", linksUnavailable: true })
+  it("a generic write failure is shown as is and the picker stays usable (no read-only degradation mode)", async () => {
+    link.mockResolvedValueOnce({ ok: false, error: "Something went wrong. Please try again." })
     renderPicker()
     fireEvent.click(screen.getByRole("button", { name: "Choose success metrics" }))
     fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: /Activation to 40%/ }))
-    expect(await screen.findByTestId("solution-links-unavailable")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Choose success metrics" })).toBeNull()
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong. Please try again.")
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    await waitFor(() => expect(screen.getByRole("button", { name: "Choose success metrics", hidden: true })).toBeEnabled())
+    expect(screen.queryByTestId("solution-links-unavailable")).toBeNull()
   })
 })
 
@@ -257,15 +253,10 @@ describe("Key Result panel: Linked solutions", () => {
     }
   })
 
-  it("says so when there are none, and flags unavailable link data instead of an empty list", () => {
+  it("says so when there are none", () => {
     detail.data = keyResultData({ linkedSolutions: [] })
     render(withModel(TORRES, <KeyResultPanel id="kr-1" {...common} />))
     expect(screen.getByText("No solutions linked.")).toBeInTheDocument()
-    cleanup()
-    detail.data = keyResultData({ linkedSolutions: [], linksUnavailable: true })
-    render(withModel(TORRES, <KeyResultPanel id="kr-1" {...common} />))
-    expect(screen.getByTestId("linked-solutions-unavailable")).toBeInTheDocument()
-    expect(screen.queryByText("No solutions linked.")).toBeNull()
   })
 
   it("CLASSIC, NULL and no provider: byte-identical render whether or not link data is passed", () => {

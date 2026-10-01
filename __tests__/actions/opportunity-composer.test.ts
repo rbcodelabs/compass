@@ -153,11 +153,19 @@ describe("createOpportunityFromComposer", () => {
       expect(m.db.opportunityObjectiveLink.create).not.toHaveBeenCalled();
     });
 
-    it("a missing link table is a friendly inline error (the whole create rolled back), not a thrown 500", async () => {
+    it("a missing link table FAILS the create with a generic message and logs only the error name and code", async () => {
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
       m.db.objective.findMany.mockResolvedValue([{ id: "obj-1" }]);
-      m.db.opportunityObjectiveLink.findFirst.mockRejectedValue(Object.assign(new Error("relation does not exist"), { code: "42P01" }));
+      m.db.opportunityObjectiveLink.findFirst.mockRejectedValue(
+        Object.assign(new Error('relation "opportunity_objective_links" does not exist SECRET-ROW'), { name: "PrismaClientKnownRequestError", code: "42P01" }),
+      );
       const result = await createOpportunityFromComposer("acme", "core", { title: "x", objectiveIds: ["obj-1"] });
-      expect(result).toEqual({ ok: false, error: expect.stringMatching(/Links are unavailable/) });
+      expect(result).toEqual({ ok: false, error: "Something went wrong. Nothing was created. Please try again." });
+      const text = JSON.stringify(logged.mock.calls);
+      expect(text).toContain("42P01");
+      expect(text).toContain("PrismaClientKnownRequestError");
+      expect(text).not.toContain("SECRET-ROW");
+      logged.mockRestore();
     });
 
     it("without objectives it is the same create as before: no attribution lookup, no objective query, no okrs revalidation", async () => {

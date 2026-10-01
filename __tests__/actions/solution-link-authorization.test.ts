@@ -134,7 +134,7 @@ describe("infrastructure failures are not reported as not-found", () => {
     logged.mockRestore()
   })
 
-  it("a missing link table is a generic failure flagged linksUnavailable (not a denial), with nothing written", async () => {
+  it("a missing link table FAILS (generic message, not a denial and not a silent success), logging only name and code, with nothing written", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {})
     const original = fake.current!.client.solutionKeyResultLink.findFirst
     fake.current!.client.solutionKeyResultLink.findFirst = (async () => {
@@ -142,7 +142,10 @@ describe("infrastructure failures are not reported as not-found", () => {
     }) as never
     const result = await linkSolutionToKeyResultAction("sol-a", "kr-a")
     fake.current!.client.solutionKeyResultLink.findFirst = original
-    expect(result).toEqual({ ok: false, error: "Something went wrong. Please try again.", linksUnavailable: true })
+    expect(result).toEqual({ ok: false, error: "Something went wrong. Please try again." })
+    const text = JSON.stringify(logged.mock.calls)
+    expect(text).toContain("P2021")
+    expect(text).not.toContain("solution_key_result_links")
     expect(links()).toHaveLength(0)
     logged.mockRestore()
   })

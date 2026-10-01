@@ -58,7 +58,6 @@ type SolutionData = {
   /** Typed Solution<->Key Result links (Phase 4B). The options are only sent for presets that offer the link. */
   linkedKeyResults?: Array<{ id: string; title: string; objectiveId: string }>;
   availableKeyResults?: Array<{ id: string; title: string; objectiveTitle: string }>;
-  linksUnavailable?: boolean;
   opportunity: { id: string; title: string; squadId: string | null } | null;
   assumptions: AssumptionItemData[];
   evidence: EvidenceListItem[];
@@ -188,7 +187,6 @@ export function SolutionPanel({
             solutionId={data.id}
             linked={data.linkedKeyResults ?? []}
             available={data.availableKeyResults}
-            linksUnavailable={data.linksUnavailable}
             onChanged={refresh}
           />
         </Section>

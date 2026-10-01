@@ -222,19 +222,37 @@ describe("getCanvasOverview", () => {
     expect(prisma.opportunityObjectiveLink.findMany).toHaveBeenCalledTimes(6);
   });
 
-  it("a missing link table omits link edges: no throw, empty link rows", async () => {
-    const prisma = makeFakePrisma({
+  it("a missing link table FAILS the loader with the database error: no silent 'no links', no omitted edges", async () => {
+    const base = {
       opportunities: [{ id: "opp-1", title: "Opp", status: "EXPLORING", squadId: null, linkedKeyResultId: null }],
       solutions: [{ id: "sol-1", opportunityId: "opp-1", title: "Sol", status: "IDEA" }],
-    });
+    };
     const missing = Object.assign(new Error('relation "opportunity_objective_links" does not exist'), { code: "42P01" });
-    (prisma.opportunityObjectiveLink.findMany as ReturnType<typeof vi.fn>).mockRejectedValue(missing);
-    (prisma.solutionKeyResultLink.findMany as ReturnType<typeof vi.fn>).mockRejectedValue({ ...missing, code: "P2021" });
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const result = await getCanvasOverview(prisma, "ws-1");
-    expect(result.links).toEqual({ opportunityObjective: [], solutionKeyResult: [] });
-    expect(result.opportunities).toHaveLength(1);
-    warn.mockRestore();
+    type Reader = ReturnType<typeof vi.fn>;
+    // Only the canvas's own edge-row reads (they select `origin` / are the second read) fail, so the loader itself must not swallow it.
+    const edgeRowsOnly = (error: unknown, selectKey: string) => (args: { select?: Record<string, unknown> }) =>
+      args.select && selectKey in args.select ? Promise.reject(error) : Promise.resolve([]);
+
+    const oppLinks = makeFakePrisma(base);
+    (oppLinks.opportunityObjectiveLink.findMany as Reader).mockImplementation(edgeRowsOnly(missing, "origin"));
+    await expect(getCanvasOverview(oppLinks, "ws-1")).rejects.toBe(missing);
+
+    const solLinks = makeFakePrisma(base);
+    const missingSol = Object.assign(new Error("missing"), { code: "P2021" });
+    let calls = 0;
+    (solLinks.solutionKeyResultLink.findMany as Reader).mockImplementation(() => (++calls === 2 ? Promise.reject(missingSol) : Promise.resolve([])));
+    await expect(getCanvasOverview(solLinks, "ws-1")).rejects.toBe(missingSol);
+
+    // And the additive payload reads fail too, rather than returning empty lists.
+    const payload = makeFakePrisma(base);
+    (payload.opportunityObjectiveLink.findMany as Reader).mockRejectedValue(missing);
+    await expect(getCanvasOverview(payload, "ws-1")).rejects.toBe(missing);
+  });
+
+  it("the canvas page does not swallow a loader failure", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync("app/[orgSlug]/[workspaceSlug]/canvas/page.tsx", "utf8");
+    expect(source).not.toMatch(/\bcatch\b|\.catch\(/);
   });
 
   it("any other link read failure still throws (a permission error or outage is not 'no links')", async () => {

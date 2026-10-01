@@ -29,7 +29,6 @@ import getPrisma from "@/lib/db"
 import { requireProductEntity } from "@/lib/product-action-auth"
 import {
   TypedLinkError,
-  isMissingLinkTable,
   linkSolutionToKeyResult,
   runTypedLinkTransaction,
   unlinkSolutionFromKeyResult,
@@ -37,7 +36,7 @@ import {
 
 export type SolutionLinkResult =
   | { ok: true; changed: boolean }
-  | { ok: false; error: string; /** The link table does not exist yet (migration 071 not applied): the picker shows a notice. */ linksUnavailable?: true }
+  | { ok: false; error: string }
 
 const DENIED = "Entity not found or access denied"
 const BAD_INPUT = "Invalid request"
@@ -95,10 +94,7 @@ async function revalidateLinkScreens(workspaceId: string, opportunityId: string 
 
 function failure(stage: string, error: unknown): SolutionLinkResult {
   if (error instanceof TypedLinkError) return { ok: false, error: DENIED }
-  if (isMissingLinkTable(error)) {
-    logFailure(stage, error)
-    return { ok: false, error: FAILED, linksUnavailable: true }
-  }
+  // Everything else (including a missing link table) is a generic failure: only name and code are logged.
   logFailure(stage, error)
   return { ok: false, error: FAILED }
 }
