@@ -12,6 +12,7 @@ const m = vi.hoisted(() => {
     keyResult: { findFirst: vi.fn(), findMany: vi.fn() },
     feedbackItem: { findMany: vi.fn(), updateMany: vi.fn() },
     opportunity: { create: vi.fn() },
+    opportunityObjectiveLink: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
     $transaction: vi.fn(),
   };
   return { db, auth: vi.fn(), revalidatePath: vi.fn() };
@@ -33,7 +34,10 @@ beforeEach(() => {
   m.db.$transaction.mockImplementation(async (callback: (tx: typeof m.db) => Promise<unknown>) => callback(m.db));
   m.db.opportunity.create.mockImplementation(async ({ data }: { data: { title: string } }) => ({ id: "opp-new", ...data }));
   m.db.squad.findFirst.mockResolvedValue({ id: "sq-1" });
-  m.db.keyResult.findFirst.mockResolvedValue({ id: "kr-1" });
+  m.db.keyResult.findFirst.mockResolvedValue({ id: "kr-1", title: "KR", objectiveId: "obj-1", objective: { workspaceId: "ws-1" } });
+  m.db.opportunityObjectiveLink.findFirst.mockResolvedValue(null);
+  m.db.opportunityObjectiveLink.create.mockResolvedValue({ id: "link-1" });
+  m.db.opportunityObjectiveLink.deleteMany.mockResolvedValue({ count: 0 });
   m.db.feedbackItem.findMany.mockImplementation(async ({ where }: { where: { id: { in: string[] } } }) =>
     where.id.in.map((id) => ({ id })),
   );
@@ -78,7 +82,7 @@ describe("createOpportunityFromComposer", () => {
     expect(result).toEqual({ ok: true, opportunity: { id: "opp-new", title: "Onboarding stalls" } });
     expect(m.db.$transaction).toHaveBeenCalledOnce();
     expect(m.db.keyResult.findFirst).toHaveBeenCalledWith({
-      where: { id: "kr-1", objective: { cycle: { workspaceId: "ws-1" } } },
+      where: { id: "kr-1", objective: { workspaceId: "ws-1" } },
       select: { id: true },
     });
     expect(m.db.opportunity.create.mock.calls[0][0].data).toMatchObject({
@@ -91,6 +95,10 @@ describe("createOpportunityFromComposer", () => {
     expect(m.db.feedbackItem.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["fb-1", "fb-2"] }, workspaceId: "ws-1" },
       data: { opportunityId: "opp-new", updatedAt: expect.any(Date) },
+    });
+    // The legacy pointer's LEGACY link is written in that same transaction.
+    expect(m.db.opportunityObjectiveLink.create).toHaveBeenCalledWith({
+      data: { workspaceId: "ws-1", opportunityId: "opp-new", objectiveId: "obj-1", origin: "LEGACY", source: "UI", createdById: null },
     });
     // The rail lives in the discovery layout; linked feedback moves in the grid.
     expect(m.revalidatePath).toHaveBeenCalledWith("/[orgSlug]/[workspaceSlug]/discovery", "layout");
@@ -147,7 +155,7 @@ describe("loadOpportunityComposerOptions", () => {
         feedback: [{ id: "fb-1", title: "Slow", type: "BUG", status: "OPEN", opportunity: null }],
       },
     });
-    expect(m.db.keyResult.findMany.mock.calls[0][0].where).toEqual({ objective: { cycle: { workspaceId: "ws-1" } } });
+    expect(m.db.keyResult.findMany.mock.calls[0][0].where).toEqual({ objective: { workspaceId: "ws-1" } });
     expect(m.db.feedbackItem.findMany.mock.calls[0][0].where).toEqual({ workspaceId: "ws-1" });
   });
 });

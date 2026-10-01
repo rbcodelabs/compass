@@ -131,13 +131,18 @@ The API key is stored in the Vercel project settings and in `.env.local` as `MCP
 #### Discovery (OST)
 | Tool | Description |
 |---|---|
-| `list_opportunities` | Filter by status and/or squad; recency-filterable (see [Finding what changed recently](#finding-what-changed-recently)) |
+| `list_opportunities` | Filter by status and/or squad; recency-filterable (see [Finding what changed recently](#finding-what-changed-recently)). Each item also carries `linkedObjectives` |
 | `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs; recency-filterable |
 | `list_assumptions` | Discover assumptions by status, risk, parent Solution status, and parent Opportunity status/squad; returns ancestry IDs and experiment counts; recency-filterable |
 | `get_opportunity` | Full tree: opportunity → solutions → assumptions → experiments |
 | `create_opportunity` | Create with optional KR link and squad assignment |
 | `update_opportunity_status` | Move through EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
-| `link_opportunity_to_kr` | Associate an opportunity to a Key Result |
+| `link_opportunity_to_kr` | Associate an opportunity to a Key Result (the key result must be in the opportunity's workspace) |
+| `link_opportunity_to_objective` | Link an opportunity directly to an Objective in the same workspace (objective-level; idempotent, `created:false` on repeat). A direct link survives clearing the opportunity's Key Result |
+| `unlink_opportunity_from_objective` | Remove an opportunity-objective link (`removed:0` when none). A link implied by the opportunity's linked Key Result remains until that Key Result is cleared (`removed:0, stillLinkedViaKeyResult:true` is a successful no-op, not a failure) |
+| `link_solution_to_key_result` | Link a solution to a Key Result in the same workspace (idempotent). The solution keeps its single parent opportunity |
+| `unlink_solution_from_key_result` | Remove a solution-key result link (`removed:0` when none) |
+| `list_links` | List the typed links on one opportunity, objective, solution or Key Result (exactly one id), oldest first, with `limit` and `cursor` paging. Opportunity-objective links report `origin` DIRECT or LEGACY |
 | `add_solution` | Propose a solution under an opportunity |
 | `add_assumption` | Add a testable assumption to a solution (HIGH/MEDIUM/LOW risk) |
 | `update_assumption` | Update an assumption's title, risk level, or status (UNTESTED/TESTING/VALIDATED/INVALIDATED) |

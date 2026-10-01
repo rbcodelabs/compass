@@ -16,6 +16,7 @@ import {
   isNewOpportunityStatus,
   type NewOpportunityStatus,
 } from "@/lib/opportunity-draft"
+import { syncLegacyLink } from "@/lib/typed-links"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 
 export type NewOpportunityInput = {
@@ -112,7 +113,7 @@ export async function createOpportunityWithLinks(
       if (
         fields.linkedKeyResultId &&
         !(await tx.keyResult.findFirst({
-          where: { id: fields.linkedKeyResultId, objective: { cycle: { workspaceId } } },
+          where: { id: fields.linkedKeyResultId, objective: { workspaceId } },
           select: { id: true },
         }))
       ) {
@@ -126,6 +127,17 @@ export async function createOpportunityWithLinks(
       }
 
       const opportunity = await tx.opportunity.create({ data: { workspaceId, ...fields } })
+
+      // Dual-write: the legacy pointer's LEGACY Opportunity<->Objective link, in this same transaction.
+      if (fields.linkedKeyResultId) {
+        await syncLegacyLink(tx, {
+          opportunityId: opportunity.id,
+          workspaceId,
+          keyResultId: fields.linkedKeyResultId,
+          // Derived from the pointer, so unattributed: it is not a link anyone chose to make.
+          ctx: { source: "UI", createdById: null },
+        })
+      }
 
       if (feedbackIds.length > 0) {
         const { count } = await tx.feedbackItem.updateMany({

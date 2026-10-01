@@ -122,11 +122,54 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Proposed new entries for card sort rounds (one additive CREATE TABLE, one ASYNC
   // index; no ALTER, no backfill). Same 2026-09-30 audit and production apply as 067.
   "068_card_sort_new_entries": "133d41beb53cbab557ab9075df6bdc4a9bc625c3f46b93dc7979cbba2d75d6e7",
+  // Following and in-app notifications (ADR, slice 1): two new tables and five async indexes,
+  // IF NOT EXISTS throughout, no data writes. Digest recorded from the shipped SQL; please review it.
+  "068_follows_notifications": "0ba97ca0929c09a07c15a82404d5e41fac407fca6f4171aebda50c76e60f533c",
+  // Direct workspace_id on solutions and objectives (ADR Phase 0). The pinned SQL is DDL only;
+  // the batched backfill and its postconditions run in the runner hook, which is pinned
+  // separately in REVIEWED_MIGRATION_CODE_SHA256.
+  "068_workspace_id_on_solution_objective": "efc74d966e413e3cd5ad211f41ac96bbc6bcb6fa5cd230c9ac3e6a050ffbe9e1",
+  // DDL-free residual backfill: the SQL file is comments only, the work is the pinned hook below.
+  "069_workspace_id_residual_backfill": "9edcc2e6020df3065bde0bf0e2fd836f710adceef6f5ba0a018347ff8bdba74d",
+  // Typed link tables (ADR Phase 2, PR-1). DDL only here; the precondition, backfill with orphan
+  // quarantine and integrity postconditions are pinned in REVIEWED_MIGRATION_CODE_SHA256.
+  "071_typed_link_tables": "ed2bbdf524c02436eceba30b20b73a32111ddec3a4dbf9011f389984be189606",
+  // DDL-free residual pass of the typed link backfill (ADR Phase 2, PR-2). Comments only; the work is the pinned hook below.
+  "072_typed_links_residual_backfill": "7aed4ba070ff8e99b5d2207d76bcad9ee0cdb14d56ca2f343c44c340551a27a0",
   // Workspace thinking model (two nullable ADD COLUMNs on workspaces; no index, no
   // backfill, no hook). Last, matching its MIGRATIONS position. Migration only: no code
   // reads the columns yet.
   "073_workspace_thinking_model": "8c412a4c999568bc8ea2e802a3214ae5710f0721506d36eb3636afdd8574b7c6"
 };
+
+/**
+ * Migrations whose data half lives in TypeScript run by the runner (a backfill
+ * hook plus its postconditions). The SQL pin above cannot see that code, so the
+ * hook file is pinned here too: changing it requires the same explicit review.
+ */
+export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "068_workspace_id_on_solution_objective": {
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  "069_workspace_id_residual_backfill": {
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // 071 pins only its own hook: it carries a private copy of withOccRetry rather than importing the 068 hook.
+  // 071 and 072 run the very same hook file, so they carry the same digest: editing it re-reviews both.
+  "071_typed_link_tables": {
+    "lib/migrations/typed-link-tables.ts": "e5c230a29b094608fa3a2d0a5cc94f2b1e31c65307f1cb93e7d6a7afc41160df",
+  },
+  "072_typed_links_residual_backfill": {
+    "lib/migrations/typed-link-tables.ts": "e5c230a29b094608fa3a2d0a5cc94f2b1e31c65307f1cb93e7d6a7afc41160df",
+  },
+};
+
+export function assertReviewedMigrationCode(name: string, read: (relativePath: string) => Buffer = (relativePath) => readFileSync(path.join(process.cwd(), relativePath))): void {
+  for (const [relativePath, expected] of Object.entries(REVIEWED_MIGRATION_CODE_SHA256[name] ?? {})) {
+    const digest = createHash("sha256").update(read(relativePath)).digest("hex");
+    if (digest !== expected) throw new Error(`Reviewed managed manifest code digest changed: ${name} ${relativePath}`);
+  }
+}
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {
   const names = migrations.map(migration => migration.name);
@@ -139,5 +182,6 @@ export function assertReviewedManagedManifest(migrations: readonly { name: strin
     if (path.resolve(migration.filePath) !== filePath) throw new Error("Reviewed managed manifest path changed");
     const digest = createHash("sha256").update(readFileSync(filePath)).digest("hex");
     if (digest !== REVIEWED_SQL_SHA256[migration.name]) throw new Error(`Reviewed managed manifest digest changed: ${migration.name}`);
+    assertReviewedMigrationCode(migration.name);
   }
 }

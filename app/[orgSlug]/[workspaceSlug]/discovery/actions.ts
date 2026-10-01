@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
 import { OpportunityCreateError, createOpportunityWithLinks, type NewOpportunityInput } from "@/lib/opportunity-create";
 import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
+import { setOpportunityKeyResult } from "@/lib/typed-links";
 import { Prisma } from "@prisma/client";
 import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat";
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring";
@@ -106,7 +107,7 @@ export async function loadOpportunityComposerOptions(
   const [squads, keyResults, feedback] = await Promise.all([
     prisma.squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
     prisma.keyResult.findMany({
-      where: { objective: { cycle: { workspaceId } } },
+      where: { objective: { workspaceId } },
       select: { id: true, title: true, objective: { select: { title: true } } },
       orderBy: { createdAt: "asc" },
     }),
@@ -147,10 +148,13 @@ export async function addSolution(
   data: { title: string; description?: string },
   revalidatePathStr: string
 ) {
-  await requireProductEntity("opportunity", opportunityId);
+  // The Solution's workspace is derived from the authorized parent Opportunity,
+  // never from client input.
+  const { workspaceId } = await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
   const solution = await captureWorkspaceMutation(prisma, "solution", "create", "UI", undefined, tx => tx.solution.create({
     data: {
+      workspaceId,
       opportunityId,
       title: data.title,
       description: data.description,
@@ -211,11 +215,22 @@ export async function linkOpportunityToKeyResult(
   keyResultId: string | null,
   revalidatePathStr: string
 ) {
+  // A server action is a public POST endpoint: both ends need the caller's membership, and the key result
+  // must be in the opportunity's own workspace (a member of two workspaces must not cross-link them).
+  const { workspaceId } = await requireProductEntity("opportunity", opportunityId);
+  if (keyResultId) await requireProductEntity("keyResult", keyResultId, workspaceId);
+  const session = await auth();
   const prisma = getPrisma();
-  await captureWorkspaceMutation(prisma, "opportunity", "update", "UI", opportunityId, tx => tx.opportunity.update({
-    where: { id: opportunityId },
-    data: { linkedKeyResultId: keyResultId },
-  }));
+  // Dual-write in ONE transaction: the legacy column and its LEGACY Opportunity<->Objective link.
+  await captureWorkspaceMutation(
+    prisma,
+    "opportunity",
+    "update",
+    "UI",
+    opportunityId,
+    tx => setOpportunityKeyResult(tx, { opportunityId, keyResultId, expectedWorkspaceId: workspaceId, ctx: { source: "UI", createdById: session?.user?.id ?? null } }),
+    { atomic: true },
+  );
   revalidatePath(revalidatePathStr);
 }
 
@@ -538,7 +553,7 @@ export async function saveSolutionScore(
   const { prisma, workspaceId, userId } = await resolveWorkspace(orgSlug, workspaceSlug);
 
   const solution = await prisma.solution.findFirst({
-    where: { id: solutionId, opportunity: { workspaceId } },
+    where: { id: solutionId, workspaceId },
     select: { id: true },
   });
   if (!solution) throw new Error("Solution not found");

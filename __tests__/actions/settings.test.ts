@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockSquad = {
+  findFirst: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   delete: vi.fn(),
@@ -29,6 +30,9 @@ const mockExperiment = {
   findMany: vi.fn(),
   deleteMany: vi.fn(),
   update: vi.fn(),
+};
+const mockTask = {
+  updateMany: vi.fn(),
 };
 const mockRoadmapItem = {
   update: vi.fn(),
@@ -120,6 +124,8 @@ const mockPrisma = {
   workspaceUpdateEvent: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   workspaceUpdatesReadState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   workspaceUpdatesState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  follow: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  notification: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   analyticsConnection: { deleteMany: vi.fn() },
   metricDefinition: { deleteMany: vi.fn() },
   metricRevision: { deleteMany: vi.fn() },
@@ -139,6 +145,7 @@ const mockPrisma = {
   opportunity: mockOpportunity,
   experiment: mockExperiment,
   roadmapItem: mockRoadmapItem,
+  task: mockTask,
   customFieldDefinition: mockCustomFieldDefinition,
   customFieldValue: mockCustomFieldValue,
   sharedFieldOptionSet: { deleteMany: vi.fn() },
@@ -198,6 +205,14 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// Passthrough spy: the pilot-inventory test below still exercises the real cascade guard.
+vi.mock("@/lib/delete-workspace-cascade", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/delete-workspace-cascade")>();
+  return { deleteWorkspaceCascade: vi.fn(actual.deleteWorkspaceCascade) };
+});
+// Real-helper cross-tenant denial is covered in okr-actions-tenant-isolation.test.ts.
+const mockRequireProductEntity = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/product-action-auth", () => ({ requireProductEntity: mockRequireProductEntity }));
 
 vi.mock("@/auth", () => ({
   auth: vi.fn(),
@@ -226,6 +241,8 @@ import {
   setActiveScoringModel,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
 
+import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
+
 const mockAuth = vi.mocked(auth);
 
 beforeEach(() => {
@@ -237,6 +254,8 @@ beforeEach(() => {
   // resolveWorkspace always finds the workspace
   mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1" });
   mockWorkspace.update.mockResolvedValue({ id: "ws-1" });
+  mockSquad.findFirst.mockResolvedValue({ id: "squad-1" });
+  mockRequireProductEntity.mockResolvedValue({ workspaceId: "ws-1", opportunityId: null });
   mockSquad.create.mockResolvedValue({ id: "squad-1" });
   mockSquad.update.mockResolvedValue({ id: "squad-1" });
   mockSquad.delete.mockResolvedValue({ id: "squad-1" });
@@ -244,6 +263,7 @@ beforeEach(() => {
   mockOpportunity.updateMany.mockResolvedValue({ count: 0 });
   mockExperiment.updateMany.mockResolvedValue({ count: 0 });
   mockRoadmapItem.updateMany.mockResolvedValue({ count: 0 });
+  mockTask.updateMany.mockResolvedValue({ count: 0 });
   mockCustomFieldDefinition.count.mockResolvedValue(0);
   mockCustomFieldDefinition.create.mockResolvedValue({ id: "field-1" });
   mockCustomFieldDefinition.delete.mockResolvedValue({ id: "field-1" });
@@ -391,6 +411,12 @@ describe("updateSquad", () => {
     expect(data.name).toBeUndefined();
   });
 
+  it("refuses a squad that is not in the caller's workspace", async () => {
+    mockSquad.findFirst.mockResolvedValue(null);
+    await expect(updateSquad("org", "ws", "foreign-squad", { name: "Beta" })).rejects.toThrow("Squad not found in this workspace");
+    expect(mockSquad.update).not.toHaveBeenCalled();
+  });
+
   it("throws Unauthorized when session is missing", async () => {
     mockAuth.mockResolvedValue(null as never);
     await expect(
@@ -406,24 +432,38 @@ describe("deleteSquad", () => {
     await deleteSquad("org", "ws", "squad-1");
 
     // All four related models should have been updated
+    // Every null-out is scoped to the caller's workspace.
     expect(mockObjective.updateMany).toHaveBeenCalledWith({
-      where: { squadId: "squad-1" },
+      where: { squadId: "squad-1", OR: [{ workspaceId: "ws-1" }, { workspaceId: null, cycle: { workspaceId: "ws-1" } }] },
       data: { squadId: null },
     });
+    // Task.squadId is the fifth column referencing Squad and must be cleared too.
+    expect(mockTask.updateMany).toHaveBeenCalledWith({
+      where: { squadId: "squad-1", workspaceId: "ws-1" },
+      data: { squadId: null, updatedAt: expect.any(Date) },
+    });
     expect(mockOpportunity.updateMany).toHaveBeenCalledWith({
-      where: { squadId: "squad-1" },
+      where: { squadId: "squad-1", workspaceId: "ws-1" },
       data: { squadId: null },
     });
     expect(mockExperiment.updateMany).toHaveBeenCalledWith({
-      where: { squadId: "squad-1" },
+      where: { squadId: "squad-1", workspaceId: "ws-1" },
       data: { squadId: null },
     });
     expect(mockRoadmapItem.updateMany).toHaveBeenCalledWith({
-      where: { squadId: "squad-1" },
+      where: { squadId: "squad-1", workspaceId: "ws-1" },
       data: { squadId: null, updatedAt: expect.any(Date) },
     });
 
     expect(mockSquad.delete).toHaveBeenCalledWith({ where: { id: "squad-1" } });
+  });
+
+  it("refuses a squad that is not in the caller's workspace and touches nothing", async () => {
+    mockSquad.findFirst.mockResolvedValue(null);
+    await expect(deleteSquad("org", "ws", "foreign-squad")).rejects.toThrow("Squad not found in this workspace");
+    expect(mockSquad.findFirst).toHaveBeenCalledWith({ where: { id: "foreign-squad", workspaceId: "ws-1" }, select: { id: true } });
+    expect(mockObjective.updateMany).not.toHaveBeenCalled();
+    expect(mockSquad.delete).not.toHaveBeenCalled();
   });
 
   it("throws Unauthorized when session is missing", async () => {
@@ -452,6 +492,20 @@ describe("assignSquad", () => {
       where: { id: "roadmap-1" },
       data: { squadId: "squad-1", updatedAt: expect.any(Date) },
     });
+  });
+
+  it("authorizes the object first and refuses a squad from another workspace", async () => {
+    mockSquad.findFirst.mockResolvedValue(null);
+    await expect(assignSquad("objective", "obj-1", "foreign-squad", "/path")).rejects.toThrow("Squad not found in this workspace");
+    expect(mockRequireProductEntity).toHaveBeenCalledWith("objective", "obj-1");
+    expect(mockSquad.findFirst).toHaveBeenCalledWith({ where: { id: "foreign-squad", workspaceId: "ws-1" }, select: { id: true } });
+    expect(mockPrisma.objective.update).not.toHaveBeenCalled();
+  });
+
+  it("does not write when the object belongs to another tenant", async () => {
+    mockRequireProductEntity.mockRejectedValue(new Error("Entity not found or access denied"));
+    await expect(assignSquad("objective", "foreign-obj", "squad-1", "/path")).rejects.toThrow("Entity not found or access denied");
+    expect(mockPrisma.objective.update).not.toHaveBeenCalled();
   });
 
   it("throws Unauthorized when session is missing", async () => {
@@ -892,123 +946,22 @@ describe("deleteWorkspace", () => {
     expect(mockWorkspace.delete).not.toHaveBeenCalled();
   });
 
-  it("deletes the workspace and all related data when authenticated", async () => {
-    // Set up workspace with data to delete
+  it("delegates teardown to the shared cascade (one implementation for every delete path) and redirects to a remaining workspace", async () => {
     mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "ADMIN" }] });
-
-    // Roadmap items exist
-    mockRoadmapItem.findMany.mockResolvedValue([{ id: "ri-1" }]);
-    // Feedback items exist
-    mockFeedbackItem.findMany.mockResolvedValue([{ id: "fi-1" }]);
-    // Custom fields exist
-    mockCustomFieldDefinition.findMany.mockResolvedValue([{ id: "cf-1" }]);
-    // Opportunities with solutions and assumptions
-    mockOpportunity.findMany.mockResolvedValue([{ id: "opp-1" }]);
-    mockSolution.findMany.mockResolvedValue([{ id: "sol-1" }]);
-    // Experiments exist
-    mockExperiment.findMany.mockResolvedValue([{ id: "exp-1" }]);
-    // OKR chain
-    mockOKRCycle.findMany.mockResolvedValue([{ id: "cycle-1" }]);
-    mockObjective.findMany.mockResolvedValue([{ id: "obj-1" }]);
-    mockKeyResult.findMany.mockResolvedValue([{ id: "kr-1" }]);
-    mockCapabilityPack.findMany.mockResolvedValue([{ id: "pack-1" }]);
-    mockCapabilityPackVersion.findMany.mockResolvedValue([
-      { artifactPathname: "capability-packs/shared.json" },
-    ]);
-
-    // One remaining workspace after deletion
     mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
+    vi.mocked(deleteWorkspaceCascade).mockResolvedValueOnce(undefined);
 
     const result = await deleteWorkspace("org", "ws");
 
-    expect(mockPrisma.metricObservation.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: { in: ["ws-1"] } } });
-    expect(mockPrisma.analyticsConnection.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: { in: ["ws-1"] } } });
-
-    expect(mockApiKey.deleteMany).toHaveBeenCalledWith({ where: { scopeWorkspaceId: "ws-1", scopeConversationId: { not: null } } });
-    expect(mockResearchDelete.updateMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, data: { agentConversationId: null } });
-    expect(mockPrisma.agentConversation.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
-    expect(mockReleaseDispatch.deleteMany).toHaveBeenCalled();
-    expect(mockReleaseRunTask.deleteMany).toHaveBeenCalled();
-    expect(mockReleaseRun.deleteMany).toHaveBeenCalled();
-    expect(mockDecisionApplication.deleteMany).toHaveBeenCalled();
-    expect(mockDecisionEvidenceRef.deleteMany).toHaveBeenCalled();
-    expect(mockDecisionRecord.deleteMany).toHaveBeenCalled();
-    expect(mockReviewOption.deleteMany).toHaveBeenCalled();
-    expect(mockReviewRevision.deleteMany).toHaveBeenCalled();
-    expect(mockReviewRequest.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
-    expect(mockPortfolioCapacityReservation.deleteMany).toHaveBeenCalled();
-    expect(mockPortfolioCapacityPlan.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
-    expect(mockReleaseRun.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockDecisionRecord.deleteMany.mock.invocationCallOrder[0]);
-    expect(mockDecisionApplication.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockDecisionRecord.deleteMany.mock.invocationCallOrder[0]);
-    expect(mockReviewRequest.updateMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]);
-    expect(mockDecisionEvidenceRef.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]);
-    expect(mockReviewRevision.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockReviewRequest.deleteMany.mock.invocationCallOrder[0]);
-    expect(mockPortfolioCapacityReservation.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockRoadmapItem.deleteMany.mock.invocationCallOrder[0]);
-
-    // Workspace deleted
-    expect(mockWorkspace.delete).toHaveBeenCalledWith({ where: { id: "ws-1" } });
-
-    // Roadmap votes deleted before roadmap items
-    expect(mockRoadmapVote.deleteMany).toHaveBeenCalledWith({
-      where: { roadmapItemId: { in: ["ri-1"] } },
-    });
-    expect(mockRoadmapItem.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
-
-    // Feedback votes deleted before feedback items
-    expect(mockFeedbackVote.deleteMany).toHaveBeenCalledWith({
-      where: { feedbackId: { in: ["fi-1"] } },
-    });
-    expect(mockFeedbackItem.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
-
-    // Custom field values deleted before definitions
-    expect(mockCustomFieldValue.deleteMany).toHaveBeenCalledWith({
-      where: { fieldId: { in: ["cf-1"] } },
-    });
-    expect(mockCustomFieldDefinition.deleteMany).toHaveBeenCalledWith({
-      where: { workspaceId: "ws-1" },
-    });
-
-    // Assumptions and solution comments deleted before solutions, before opportunities
-    expect(mockAssumption.deleteMany).toHaveBeenCalledWith({
-      where: { solutionId: { in: ["sol-1"] } },
-    });
-    expect(mockSolutionComment.deleteMany).toHaveBeenCalledWith({
-      where: { solutionId: { in: ["sol-1"] } },
-    });
-    expect(mockSolution.deleteMany).toHaveBeenCalledWith({
-      where: { id: { in: ["sol-1"] } },
-    });
-    expect(mockOpportunity.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
-
-    // Experiment results deleted before experiments
-    expect(mockExperimentResult.deleteMany).toHaveBeenCalledWith({
-      where: { experimentId: { in: ["exp-1"] } },
-    });
-    expect(mockExperiment.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
-
-    // Check-ins deleted before key results, objectives deleted before cycles
-    expect(mockCheckIn.deleteMany).toHaveBeenCalledWith({
-      where: { keyResultId: { in: ["kr-1"] } },
-    });
-    expect(mockKeyResult.deleteMany).toHaveBeenCalledWith({
-      where: { objectiveId: { in: ["obj-1"] } },
-    });
-    expect(mockOKRCycle.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
-
-    expect(mockWorkspaceCapabilityPack.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
-    expect(mockCapabilityPackVersion.deleteMany).toHaveBeenCalledWith({
-      where: { capabilityPackId: { in: ["pack-1"] } },
-    });
-    expect(mockCapabilityPack.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["pack-1"] } } });
-    expect(mockCapabilityPackVersion.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
-      mockCapabilityPack.deleteMany.mock.invocationCallOrder[0]
-    );
-
-    // Returns a redirect to the remaining workspace
+    expect(deleteWorkspaceCascade).toHaveBeenCalledTimes(1);
+    expect(deleteWorkspaceCascade).toHaveBeenCalledWith(mockPrisma, "ws-1");
+    // The per-table ordering (check-ins before KRs, solutions before opportunities, ...) is asserted
+    // against the real cascade in delete-organization.test.ts and delete-workspace-cascade-scope.test.ts.
     expect(result.redirectTo).toBe("/my-org/other-ws");
   });
 
   it("deletes the org when no workspaces remain after deletion", async () => {
+    vi.mocked(deleteWorkspaceCascade).mockResolvedValueOnce(undefined);
     mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "ADMIN" }] });
     // No remaining workspaces after deletion
     mockWorkspace.findMany.mockResolvedValue([]);
@@ -1023,6 +976,7 @@ describe("deleteWorkspace", () => {
   });
 
   it("does not delete the org when other workspaces remain", async () => {
+    vi.mocked(deleteWorkspaceCascade).mockResolvedValueOnce(undefined);
     mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1", organizationId: "org-1", members: [{ role: "ADMIN" }] });
     mockWorkspace.findMany.mockResolvedValue([{ id: "ws-2", slug: "other-ws" }]);
 
@@ -1260,6 +1214,32 @@ describe("removeWorkspaceMember", () => {
     expect(mockWorkspaceMember.updateMany).toHaveBeenCalledWith({ where: { id: "ws-member-1", role: "MEMBER" }, data: { role: "MEMBER" } });
     expect(mockWorkspaceMember.updateMany.mock.invocationCallOrder[0]).toBeLessThan(mockPrisma.agent.findMany.mock.invocationCallOrder[0]);
     expect(mockPrisma.agent.findMany.mock.invocationCallOrder[0]).toBeLessThan(mockWorkspaceMember.delete.mock.invocationCallOrder[0]);
+  });
+
+  it("clears the departing member's follow state for this workspace after the removal commits", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", userId: "user-9", role: "MEMBER" });
+    mockCounts(2, ["ADMIN", "MEMBER"]);
+    mockPrisma.follow.findMany.mockResolvedValueOnce([{ id: "f1" }]);
+    mockPrisma.notification.findMany.mockResolvedValueOnce([{ id: "n1" }]);
+
+    await removeWorkspaceMember("org", "ws", "ws-member-1");
+
+    expect(mockPrisma.follow.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "ws-1", userId: "user-9" } }));
+    expect(mockPrisma.notification.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "ws-1", recipientUserId: "user-9" } }));
+    expect(mockPrisma.follow.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["f1"] } } });
+    expect(mockWorkspaceMember.delete.mock.invocationCallOrder[0]).toBeLessThan(mockPrisma.follow.findMany.mock.invocationCallOrder[0]);
+  });
+
+  it("still succeeds when the follow-state cleanup fails, because the removal has already committed", async () => {
+    mockWorkspaceMember.findFirst.mockResolvedValue({ id: "ws-member-1", userId: "user-9", role: "MEMBER" });
+    mockCounts(2, ["ADMIN", "MEMBER"]);
+    mockPrisma.follow.findMany.mockRejectedValueOnce(new Error("connection lost"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(removeWorkspaceMember("org", "ws", "ws-member-1")).resolves.toBeUndefined();
+
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
   });
 
   it("does not overwrite a concurrent role change when locking a departing member", async () => {

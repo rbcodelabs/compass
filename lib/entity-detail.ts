@@ -29,6 +29,7 @@
  */
 import getPrisma from "@/lib/db";
 import { isPmInterviewEnabled } from "@/lib/research-feature";
+import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity } from "@/lib/typed-links";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
@@ -75,13 +76,13 @@ export function isEntityType(value: string): value is EntityType {
 export function entityScopeWhere(type: EntityType, id: string, workspaceId: string) {
   switch (type) {
     case "objective":
-      return { id, cycle: { workspaceId } };
+      return { id, workspaceId };
     case "keyResult":
-      return { id, objective: { cycle: { workspaceId } } };
+      return { id, objective: { workspaceId } };
     case "solution":
-      return { id, opportunity: { workspaceId } };
+      return { id, workspaceId };
     case "assumption":
-      return { id, solution: { opportunity: { workspaceId } } };
+      return { id, solution: { workspaceId } };
     case "opportunity":
     case "experiment":
     case "roadmapItem":
@@ -98,7 +99,7 @@ export function entityScopeWhere(type: EntityType, id: string, workspaceId: stri
 
 async function fetchObjective(id: string, workspaceId: string) {
   const item = await getPrisma().objective.findFirst({
-    where: { id, cycle: { workspaceId } },
+    where: { id, workspaceId },
     include: {
       cycle: { select: { id: true, title: true, startDate: true, endDate: true } },
       squad: { select: { id: true, name: true, color: true } },
@@ -113,6 +114,7 @@ async function fetchObjective(id: string, workspaceId: string) {
           objective: {
             select: {
               id: true,
+              workspaceId: true,
               title: true,
               cycle: { select: { id: true, title: true, status: true } },
             },
@@ -122,12 +124,14 @@ async function fetchObjective(id: string, workspaceId: string) {
     },
   });
   if (!item) return null;
-  return { ...item, ...(await fetchLinkedTasksBundle(workspaceId, "OBJECTIVE", id)) };
+  // The parent KR's objective must be in this workspace too; otherwise the link is hidden, not followed.
+  const parentKeyResult = item.parentKeyResult && item.parentKeyResult.objective.workspaceId === workspaceId ? item.parentKeyResult : null;
+  return { ...item, parentKeyResult, ...(await fetchLinkedTasksBundle(workspaceId, "OBJECTIVE", id)) };
 }
 
 async function fetchKeyResult(id: string, workspaceId: string) {
   const item = await getPrisma().keyResult.findFirst({
-    where: { id, objective: { cycle: { workspaceId } } },
+    where: { id, objective: { workspaceId } },
     include: {
       objective: { select: { id: true, title: true, cycleId: true } },
       checkIns: {
@@ -138,6 +142,8 @@ async function fetchKeyResult(id: string, workspaceId: string) {
       roadmapItems: { select: { id: true, title: true, horizon: true, status: true } },
       opportunities: { select: { id: true, title: true, status: true } },
       supportingObjectives: {
+        // Only objectives that carry this workspace's own workspaceId (NULL / drifted rows are hidden).
+        where: { workspaceId },
         select: {
           id: true,
           title: true,
@@ -170,11 +176,13 @@ async function fetchOpportunity(id: string, workspaceId: string) {
           current: true,
           target: true,
           unit: true,
-          objective: { select: { id: true, title: true, cycleId: true } },
+          objective: { select: { id: true, workspaceId: true, title: true, cycleId: true } },
         },
       },
       squad: { select: { id: true, name: true, color: true } },
       solutions: {
+        // Hide a NULL / other-workspace solution instead of trusting its opportunity parent.
+        where: { workspaceId },
         include: {
           _count: { select: { assumptions: true, evidence: true } },
           score: { select: { normalizedScore: true, modelVersion: true } },
@@ -220,17 +228,22 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     },
   });
   if (!item) return null;
-  const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields] = await Promise.all([
+  const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields, linkedObjectivesByOpportunity] = await Promise.all([
     pmInterviewHistory(workspaceId, "OPPORTUNITY", id),
     fetchLinkedTasksBundle(workspaceId, "OPPORTUNITY", id),
     resolveEvidenceProvenance(item.evidence),
     getPrisma().squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
-    getPrisma().keyResult.findMany({ where: { objective: { cycle: { workspaceId } } }, select: { id: true, title: true, objective: { select: { title: true } } }, orderBy: { createdAt: "asc" } }),
+    getPrisma().keyResult.findMany({ where: { objective: { workspaceId } }, select: { id: true, title: true, objective: { select: { title: true } } }, orderBy: { createdAt: "asc" } }),
     loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OPPORTUNITY", objectId: id }),
+    // Additive typed Opportunity<->Objective links. linkedKeyResult above stays the legacy column only.
+    getLinkedObjectivesByOpportunity(getPrisma(), workspaceId, [id], { preverified: true }),
   ]);
   const solutionScoringModel = item.workspace?.scoringConfig?.solutionScoringModel ?? null;
+  // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
+  const linkedKeyResult = item.linkedKeyResult && item.linkedKeyResult.objective.workspaceId === workspaceId ? item.linkedKeyResult : null;
   return {
-    ...item, evidence, ...linkedTasks, squads, customFields,
+    ...item, ...(item.linkedKeyResult ? { linkedKeyResult } : {}), evidence, ...linkedTasks, squads, customFields,
+    linkedObjectives: linkedObjectivesByOpportunity.get(id) ?? [],
     existingScore: toOpportunityScoreData(item.score, item.workspace?.scoringConfig?.opportunityScoringModel as ScoringModelData | null),
     // Threaded onto each nested solution row so the panel's SolutionsList can
     // render a ScoreBadge without a second workspace round trip.
@@ -247,9 +260,9 @@ async function fetchOpportunity(id: string, workspaceId: string) {
 async function fetchSolution(id: string, workspaceId: string) {
   const prisma = getPrisma()
   const solution = await prisma.solution.findFirst({
-    where: { id, opportunity: { workspaceId } },
+    where: { id, workspaceId },
     include: {
-      opportunity: { select: { id: true, title: true, workspaceId: true, squadId: true } },
+      opportunity: { select: { id: true, title: true, squadId: true } },
       score: {
         select: { id: true, scoringModelId: true, formulaSnapshot: true, rawValues: true, normalizedScore: true, rawScore: true, modelVersion: true, scoredAt: true },
       },
@@ -274,7 +287,7 @@ async function fetchSolution(id: string, workspaceId: string) {
     },
   });
   if (!solution) return null
-  const [links, availableArtifacts, pmInterviews, linkedTasks, evidence, customFields, scoringConfig] = await Promise.all([
+  const [links, availableArtifacts, pmInterviews, linkedTasks, evidence, customFields, scoringConfig, linkedKeyResultsBySolution] = await Promise.all([
     prisma.artifactLink.findMany({ where: { workspaceId, linkedType: "SOLUTION", linkedId: id }, select: { artifactId: true } }),
     prisma.artifact.findMany({ where: { workspaceId, status: "ACTIVE" }, select: { id: true, title: true, sourceType: true }, orderBy: { title: "asc" } }),
     pmInterviewHistory(workspaceId, "SOLUTION", id),
@@ -289,11 +302,15 @@ async function fetchSolution(id: string, workspaceId: string) {
       where: { workspaceId },
       select: { solutionScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } } },
     }),
+    // Additive typed Solution<->Key Result links (workspace-filtered).
+    getLinkedKeyResultsBySolution(prisma, workspaceId, [id], { preverified: true }),
   ])
   const linkedIds = new Set(links.map((link) => link.artifactId))
   const solutionScoringModel = (scoringConfig?.solutionScoringModel as ScoringModelData | null) ?? null
   return {
-    ...solution, evidence, ...linkedTasks,
+    // workspaceId is the authorized parameter (findFirst above matched it on the Solution's own column).
+    ...solution, workspaceId, evidence, ...linkedTasks,
+    linkedKeyResults: linkedKeyResultsBySolution.get(id) ?? [],
     artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts,
     pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews, customFields,
     scoringModel: solutionScoringModel,
@@ -303,7 +320,7 @@ async function fetchSolution(id: string, workspaceId: string) {
 
 async function fetchAssumption(id: string, workspaceId: string) {
   const item = await getPrisma().assumption.findFirst({
-    where: { id, solution: { opportunity: { workspaceId } } },
+    where: { id, solution: { workspaceId } },
     include: {
       solution: {
         select: {
@@ -502,10 +519,10 @@ async function fetchTask(id: string, workspaceId: string) {
   const [opps, sols, roadmapItems, objectives, keyResults, docs, experiments, feedbackItems, decisionRequests] =
     await Promise.all([
       prisma.opportunity.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
-      prisma.solution.findMany({ where: { opportunity: { workspaceId } }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.solution.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
       prisma.roadmapItem.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
-      prisma.objective.findMany({ where: { cycle: { workspaceId } }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
-      prisma.keyResult.findMany({ where: { objective: { cycle: { workspaceId } } }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.objective.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
+      prisma.keyResult.findMany({ where: { objective: { workspaceId } }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
       prisma.doc.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
       prisma.experiment.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),
       prisma.feedbackItem.findMany({ where: { workspaceId }, select: { id: true, title: true }, orderBy: { createdAt: "asc" } }),

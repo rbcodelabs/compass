@@ -9,6 +9,8 @@ import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
 import { assertWorkspaceWritable } from "@/lib/workspace-context";
 import { setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
+import { requireProductEntity, requireProductWorkspace } from "@/lib/product-action-auth";
+import { drainAfterParentDelete, drainLegacyLinksForOpportunities, drainLinksFor } from "@/lib/typed-links";
 
 // ─── Create Cycle ─────────────────────────────────────────────────────────────
 
@@ -34,6 +36,8 @@ export async function createCycle(
     throw new Error(parsed.error.issues[0].message);
   }
 
+  // workspaceId arrives from the client: prove the caller is a member of it.
+  await requireProductWorkspace(workspaceId);
   const prisma = getPrisma();
 
   const cycle = await prisma.oKRCycle.create({
@@ -74,10 +78,16 @@ export async function createObjective(
     throw new Error(parsed.error.issues[0].message);
   }
 
+  // The Objective's workspace is derived from the authorized cycle, never from
+  // client input, so it cannot disagree with the cycle it is created under.
+  const { workspaceId } = await requireProductEntity("okrCycle", cycleId);
   const prisma = getPrisma();
+  // A client-supplied squad must live in the same workspace as the cycle.
+  if (parsed.data.squadId) await requireProductEntity("squad", parsed.data.squadId, workspaceId);
 
   await prisma.objective.create({
     data: {
+      workspaceId,
       cycleId,
       title: parsed.data.title,
       description: parsed.data.description,
@@ -113,6 +123,7 @@ export async function addKeyResult(
     throw new Error(parsed.error.issues[0].message);
   }
 
+  await requireProductEntity("objective", objectiveId);
   const prisma = getPrisma();
 
   await prisma.keyResult.create({
@@ -149,6 +160,7 @@ export async function logCheckIn(
     throw new Error(parsed.error.issues[0].message);
   }
 
+  await requireProductEntity("keyResult", keyResultId);
   // Create check-in record and update the KR's current value in one transaction.
   await getHumanActivityPrisma().$transaction(async tx => {
     await tx.checkIn.create({
@@ -212,6 +224,7 @@ export async function updateObjectiveStatus(
     throw new Error("Invalid status value");
   }
 
+  await requireProductEntity("objective", objectiveId);
   const prisma = getPrisma();
 
   await prisma.objective.update({
@@ -228,8 +241,14 @@ export async function deleteObjective(
   objectiveId: string,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("objective", objectiveId);
   const prisma = getPrisma();
+  // The objective is deleted FIRST; a refusal (Restrict: it still has key results) throws here with every link untouched. Its links are
+  // drained AFTER, in committed passes of at most 500 links (no foreign key reaches the link tables, and one transaction could not hold
+  // an objective's links under DSQL's 3,000-row cap). A failed drain is logged and swallowed: the delete succeeded, and leftovers are
+  // reported by linkIntegrity and pruned by 072.
   await prisma.objective.delete({ where: { id: objectiveId } });
+  await drainAfterParentDelete("ui.deleteObjective", () => drainLinksFor(prisma, "objective", [objectiveId]));
   revalidatePath(revalidatePathStr);
 }
 
@@ -239,8 +258,17 @@ export async function deleteKeyResult(
   keyResultId: string,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("keyResult", keyResultId);
   const prisma = getPrisma();
+  // Read BEFORE the delete: the relation's SetNull clears these pointers, and the LEGACY links they implied are what goes afterwards.
+  const keyResult = await prisma.keyResult.findUnique({ where: { id: keyResultId }, select: { objectiveId: true } });
+  const pointing = await prisma.opportunity.findMany({ where: { linkedKeyResultId: keyResultId }, select: { id: true } });
+  // Delete the key result FIRST. It can be refused under relationMode="prisma" (Restrict: supporting objectives, check-ins); a refusal
+  // throws here and no link has been touched. Links are drained AFTER (see deleteObjective): the LEGACY links implied by the pointers
+  // (DIRECT links are the user's own and stay) and every solution link to this key result. A failed drain is logged and swallowed.
   await prisma.keyResult.delete({ where: { id: keyResultId } });
+  await drainAfterParentDelete("ui.deleteKeyResult.legacy", () => drainLegacyLinksForOpportunities(prisma, pointing.map((o) => o.id), keyResult?.objectiveId));
+  await drainAfterParentDelete("ui.deleteKeyResult.solution", () => drainLinksFor(prisma, "keyResult", [keyResultId]));
   revalidatePath(revalidatePathStr);
 }
 
@@ -251,6 +279,7 @@ export async function reorderObjective(
   sortOrder: number,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("objective", objectiveId);
   const prisma = getPrisma();
   await prisma.objective.update({
     where: { id: objectiveId },
@@ -266,6 +295,7 @@ export async function reorderKeyResult(
   sortOrder: number,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("keyResult", keyResultId);
   const prisma = getPrisma();
   await prisma.keyResult.update({
     where: { id: keyResultId },

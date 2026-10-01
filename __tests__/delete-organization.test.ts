@@ -65,6 +65,8 @@ const mockReviewRequest = { updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
 const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
+const mockOpportunityObjectiveLink = { findMany: vi.fn(), deleteMany: vi.fn() };
+const mockSolutionKeyResultLink = { findMany: vi.fn(), deleteMany: vi.fn() };
 
 const mockPrisma = {
   docStorageObject: { findFirst: vi.fn().mockResolvedValue(null) },
@@ -72,6 +74,8 @@ const mockPrisma = {
   workspaceUpdateEvent: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   workspaceUpdatesReadState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   workspaceUpdatesState: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  follow: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  notification: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
   $transaction: vi.fn(),
   analyticsConnection: { deleteMany: vi.fn() },
   metricDefinition: { deleteMany: vi.fn() },
@@ -158,6 +162,8 @@ const mockPrisma = {
   researchParticipantToken: mockResearchDelete,
   researchSynthesis: mockResearchDelete,
   researchStudy: mockResearchDelete,
+  opportunityObjectiveLink: mockOpportunityObjectiveLink,
+  solutionKeyResultLink: mockSolutionKeyResultLink,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -231,6 +237,8 @@ beforeEach(() => {
     mockFeedbackSourceToken,
     mockCapabilityPack,
     mockCapabilityPackVersion,
+    mockOpportunityObjectiveLink,
+    mockSolutionKeyResultLink,
   ]) {
     m.findMany.mockResolvedValue([]);
   }
@@ -266,6 +274,8 @@ beforeEach(() => {
     mockEvidence.deleteMany,
     mockOpportunity.deleteMany,
     mockOpportunityScore.deleteMany,
+    mockOpportunityObjectiveLink.deleteMany,
+    mockSolutionKeyResultLink.deleteMany,
     mockSolutionScore.deleteMany,
     mockSolution.deleteMany,
     mockAssumption.deleteMany,
@@ -385,8 +395,13 @@ describe("deleteOrganization", () => {
     expect(mockPortfolioCapacityReservation.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockRoadmapItem.deleteMany.mock.invocationCallOrder[0]);
 
     // ── Per-workspace: null-out steps ──
+    // Objectives are selected by their own workspaceId (or cycle while that is NULL), then released by id chunk.
+    expect(mockObjective.findMany).toHaveBeenCalledWith({
+      where: { OR: [{ workspaceId: "ws-1" }, { workspaceId: null, cycleId: { in: ["cycle-1"] } }] },
+      select: { id: true },
+    });
     expect(mockObjective.updateMany).toHaveBeenCalledWith({
-      where: { cycle: { workspaceId: "ws-1" } },
+      where: { id: { in: ["obj-1"] } },
       data: { parentKeyResultId: null },
     });
     expect(mockExperiment.updateMany).toHaveBeenCalledWith({
@@ -407,6 +422,20 @@ describe("deleteOrganization", () => {
       where: { capabilityPackId: { in: ["pack-1"] } },
     });
     expect(mockCapabilityPack.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["pack-1"] } } });
+
+    // ── Typed links: swept by workspace, then by endpoint id, before the rows they name go ──
+    expect(mockOpportunityObjectiveLink.findMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, select: { id: true }, take: 500 });
+    expect(mockSolutionKeyResultLink.findMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" }, select: { id: true }, take: 500 });
+    // By endpoint id: drained by LINK id (find up to 500, delete by id), so the parent ids go into the find, not a bulk delete.
+    const drain = { select: { id: true }, take: 500 };
+    expect(mockOpportunityObjectiveLink.findMany).toHaveBeenCalledWith({ where: { opportunityId: { in: ["opp-1"] } }, ...drain });
+    expect(mockOpportunityObjectiveLink.findMany).toHaveBeenCalledWith({ where: { objectiveId: { in: ["obj-1"] } }, ...drain });
+    expect(mockSolutionKeyResultLink.findMany).toHaveBeenCalledWith({ where: { solutionId: { in: ["sol-1"] } }, ...drain });
+    expect(mockSolutionKeyResultLink.findMany).toHaveBeenCalledWith({ where: { keyResultId: { in: ["kr-1"] } }, ...drain });
+    const firstFind = (m: typeof mockOpportunityObjectiveLink) => m.findMany.mock.invocationCallOrder[0];
+    expect(firstFind(mockOpportunityObjectiveLink)).toBeLessThan(mockOpportunity.deleteMany.mock.invocationCallOrder[0]);
+    expect(firstFind(mockSolutionKeyResultLink)).toBeLessThan(mockSolution.deleteMany.mock.invocationCallOrder[0]);
+    expect(mockOpportunityObjectiveLink.findMany.mock.invocationCallOrder.at(-1)).toBeLessThan(mockObjective.deleteMany.mock.invocationCallOrder[0]);
 
     // ── Tasks / TaskLinks ──
     expect(mockTaskLink.deleteMany).toHaveBeenCalledWith({ where: { taskId: { in: ["task-1"] } } });

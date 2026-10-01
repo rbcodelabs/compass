@@ -583,6 +583,206 @@ describe("067_decision_answers", () => {
   });
 });
 
+describe("068_workspace_id_on_solution_objective", () => {
+  const NAME = "068_workspace_id_on_solution_objective";
+  const statements = () =>
+    sqlFor(NAME)
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n")
+      .split(";")
+      .map((statement) => statement.trim())
+      .filter(Boolean);
+
+  it("is registered exactly once, after 067_decision_answers", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === NAME)).toHaveLength(1);
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("067_decision_answers"));
+  });
+
+  it("is DSQL-safe: nullable ADD COLUMN with no constraint, ASYNC indexes, no foreign key, idempotent", () => {
+    expect(statements()).toEqual([
+      "ALTER TABLE solutions ADD COLUMN IF NOT EXISTS workspace_id UUID",
+      "ALTER TABLE objectives ADD COLUMN IF NOT EXISTS workspace_id UUID",
+      "CREATE INDEX ASYNC IF NOT EXISTS idx_solutions_workspace_id ON solutions (workspace_id)",
+      "CREATE INDEX ASYNC IF NOT EXISTS idx_objectives_workspace_id ON objectives (workspace_id)",
+    ]);
+    expect(statements().join("\n")).not.toMatch(/NOT NULL|DEFAULT|REFERENCES|FOREIGN KEY|SET NOT NULL/i);
+  });
+
+  it("matches schema.prisma on both models: nullable column, the index, and a Restrict relation (never SetNull)", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    for (const [model, index] of [["Solution", "idx_solutions_workspace_id"], ["Objective", "idx_objectives_workspace_id"]] as const) {
+      const body = schema.match(new RegExp(`model ${model} \\{[\\s\\S]*?\\n\\}`))?.[0] ?? "";
+      expect(body).toMatch(/workspaceId\s+String\?\s+@map\("workspace_id"\)\s+@db\.Uuid/);
+      expect(body).toContain(`@@index([workspaceId], map: "${index}")`);
+      // Under relationMode "prisma" an optional relation defaults to onDelete SetNull, which would silently
+      // NULL every child's workspaceId when a workspace is deleted. Restrict makes that a loud error instead.
+      expect(body).toMatch(/workspace\s+Workspace\?\s+@relation\(fields: \[workspaceId\], references: \[id\], onDelete: Restrict, onUpdate: Restrict\)/);
+    }
+  });
+
+  it("is applied by the functional e2e schema setup", () => {
+    const setup = readFileSync(path.join(ROOT, "e2e/functional/global-setup.ts"), "utf-8");
+    expect(setup).toContain(`prisma/migrations/${NAME}/migration.sql`);
+  });
+
+  it("runs its backfill and postconditions in the runner before the receipt is recorded, and waits on async index jobs", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    const hook = runner.indexOf("await backfillWorkspaceIdOnSolutionObjective(");
+    const assertion = runner.indexOf("await assertWorkspaceIdOnSolutionObjective(");
+    const receipt = runner.indexOf("SET finished_at = CURRENT_TIMESTAMP WHERE id = $1");
+    expect(hook).toBeGreaterThan(-1);
+    expect(assertion).toBeGreaterThan(hook);
+    expect(receipt).toBeGreaterThan(assertion);
+    expect(runner.match(new RegExp(NAME, "g"))!.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("069_workspace_id_residual_backfill", () => {
+  const NAME = "069_workspace_id_residual_backfill";
+
+  it("is registered exactly once, after 068", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === NAME)).toHaveLength(1);
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("068_workspace_id_on_solution_objective"));
+  });
+
+  it("contains no executable SQL (no DDL): the work is the pinned runner hook", () => {
+    const executable = sqlFor(NAME)
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n")
+      .trim();
+    expect(executable).toBe("");
+  });
+
+  it("runs the same backfill and postconditions before its receipt", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    expect(runner).toMatch(/migration\.name === WORKSPACE_ID_MIGRATION \|\| migration\.name === WORKSPACE_ID_RESIDUAL_MIGRATION/);
+  });
+});
+
+describe("072_typed_links_residual_backfill", () => {
+  const NAME = "072_typed_links_residual_backfill";
+
+  it("is registered exactly once, after 071_typed_link_tables", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === NAME)).toHaveLength(1);
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("071_typed_link_tables"));
+  });
+
+  it("contains no executable SQL (no DDL): the work is the pinned runner hook", () => {
+    const executable = sqlFor(NAME)
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n")
+      .trim();
+    expect(executable).toBe("");
+  });
+
+  it("is explicit-only (an untargeted POST never runs it), like 069", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    expect(runner).toMatch(/EXPLICIT_ONLY_MIGRATIONS: readonly string\[\] = \[WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION\]/);
+  });
+
+  it("runs the same precondition, backfill and postconditions as 071 before its receipt, and needs no async index wait", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    expect(runner).toMatch(/migration\.name === TYPED_LINK_TABLES_MIGRATION \|\| migration\.name === TYPED_LINK_RESIDUAL_MIGRATION\) await assertTypedLinkPreconditions\(client, schema, migration\.name\)/);
+    expect(runner).toMatch(/backfillOpportunityObjectiveLinks\(client, schema, log, undefined, migration\.name\)/);
+    expect(runner).toMatch(/assertTypedLinkTables\(client, schema, migration\.name\)/);
+    const receipt = runner.indexOf("SET finished_at = CURRENT_TIMESTAMP WHERE id = $1");
+    expect(runner.indexOf("await assertTypedLinkTables(client, schema, migration.name)")).toBeLessThan(receipt);
+    // No DDL, so it is in neither async-wait list.
+    for (const line of runner.split("\n").filter((l) => l.includes("ASYNC_WAIT_MIGRATIONS = ") || l.includes("if (!jobId && ["))) expect(line).not.toContain(NAME);
+  });
+
+  it("does not change 071's SQL (the pin in the managed manifest still holds)", () => {
+    expect(sqlFor("071_typed_link_tables")).toContain("CREATE TABLE IF NOT EXISTS opportunity_objective_links");
+  });
+});
+
+describe("071_typed_link_tables", () => {
+  const NAME = "071_typed_link_tables";
+  const statements = () =>
+    sqlFor(NAME)
+      .split(";")
+      .map((statement) => statement.trim().replace(/\s+/g, " "))
+      .filter(Boolean);
+
+  it("is registered exactly once, after 068_workspace_id_on_solution_objective", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === NAME)).toHaveLength(1);
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("068_workspace_id_on_solution_objective"));
+  });
+
+  it("creates the two tables then six ASYNC indexes, one DDL per statement, no FK, idempotent", () => {
+    const all = statements();
+    expect(all).toHaveLength(8);
+    expect(all.slice(0, 2).every((s) => /^CREATE TABLE IF NOT EXISTS (opportunity_objective_links|solution_key_result_links) \(/.test(s))).toBe(true);
+    expect(all.slice(2)).toEqual([
+      "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_opportunity_objective_links_pair ON opportunity_objective_links (opportunity_id, objective_id)",
+      "CREATE INDEX ASYNC IF NOT EXISTS idx_opportunity_objective_links_objective ON opportunity_objective_links (objective_id, opportunity_id)",
+      "CREATE INDEX ASYNC IF NOT EXISTS idx_opportunity_objective_links_workspace ON opportunity_objective_links (workspace_id)",
+      "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_solution_key_result_links_pair ON solution_key_result_links (solution_id, key_result_id)",
+      "CREATE INDEX ASYNC IF NOT EXISTS idx_solution_key_result_links_key_result ON solution_key_result_links (key_result_id, solution_id)",
+      "CREATE INDEX ASYNC IF NOT EXISTS idx_solution_key_result_links_workspace ON solution_key_result_links (workspace_id)",
+    ]);
+    expect(sqlFor(NAME)).not.toMatch(/REFERENCES|FOREIGN KEY|ALTER TABLE|ON CONFLICT|INSERT INTO/i);
+  });
+
+  it("declares workspace_id NOT NULL and the agreed columns on both tables", () => {
+    const [links, krLinks] = statements();
+    for (const column of ["id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY", "workspace_id UUID NOT NULL", "source VARCHAR(20) NOT NULL DEFAULT 'UI'", "created_by_id UUID,", "created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP"]) {
+      expect(links).toContain(column);
+      expect(krLinks).toContain(column);
+    }
+    expect(links).toContain("opportunity_id UUID NOT NULL");
+    expect(links).toContain("objective_id UUID NOT NULL");
+    expect(links).toContain("origin VARCHAR(20) NOT NULL");
+    expect(krLinks).toContain("solution_id UUID NOT NULL");
+    expect(krLinks).toContain("key_result_id UUID NOT NULL");
+    expect(krLinks).not.toContain("origin");
+  });
+
+  it("schema.prisma declares both models with snake_case maps, matching index names, and NO relation fields", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    const links = schema.match(/model OpportunityObjectiveLink \{[\s\S]*?\n\}/)?.[0] ?? "";
+    const krLinks = schema.match(/model SolutionKeyResultLink \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(links).toContain('@@map("opportunity_objective_links")');
+    expect(krLinks).toContain('@@map("solution_key_result_links")');
+    expect(links).toContain('@@unique([opportunityId, objectiveId], map: "idx_opportunity_objective_links_pair")');
+    expect(links).toContain('@@index([objectiveId, opportunityId], map: "idx_opportunity_objective_links_objective")');
+    expect(links).toContain('@@index([workspaceId], map: "idx_opportunity_objective_links_workspace")');
+    expect(krLinks).toContain('@@unique([solutionId, keyResultId], map: "idx_solution_key_result_links_pair")');
+    expect(krLinks).toContain('@@index([keyResultId, solutionId], map: "idx_solution_key_result_links_key_result")');
+    expect(krLinks).toContain('@@index([workspaceId], map: "idx_solution_key_result_links_workspace")');
+    // Under relationMode = "prisma" a relation field makes Prisma query the child table on parent deletes,
+    // which would make old code paths read these tables.
+    expect(links + krLinks).not.toMatch(/@relation/);
+    for (const parent of ["Opportunity", "Objective", "Solution", "KeyResult"]) {
+      const body = schema.match(new RegExp(`model ${parent} \\{[\\s\\S]*?\\n\\}`))?.[0] ?? "";
+      expect(body).not.toMatch(/ObjectiveLink|KeyResultLink/);
+    }
+  });
+
+  it("runs the precondition before the attempt, then backfill and postconditions before the receipt, and waits on async index jobs", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    const precondition = runner.indexOf("await assertTypedLinkPreconditions(");
+    const attempt = runner.indexOf("INSERT INTO \"${schema}\"._prisma_migrations (id, migration_name) VALUES ($1, $2)");
+    const hook = runner.indexOf("await backfillOpportunityObjectiveLinks(");
+    const assertion = runner.indexOf("await assertTypedLinkTables(");
+    const receipt = runner.indexOf("SET finished_at = CURRENT_TIMESTAMP WHERE id = $1");
+    expect(precondition).toBeGreaterThan(-1);
+    expect(attempt).toBeGreaterThan(precondition);
+    expect(hook).toBeGreaterThan(attempt);
+    expect(assertion).toBeGreaterThan(hook);
+    expect(receipt).toBeGreaterThan(assertion);
+    // MIGRATIONS entry, ASYNC_WAIT list, and the no-job-id resume list.
+    expect(runner.match(new RegExp(`"${NAME}"`, "g"))!.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
 describe("073_workspace_thinking_model", () => {
   const NAME = "073_workspace_thinking_model";
   const statements = () =>

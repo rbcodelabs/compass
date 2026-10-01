@@ -258,6 +258,8 @@ model Workspace {
   members              WorkspaceMember[]
   okrCycles            OKRCycle[]
   opportunities        Opportunity[]
+  solutions            Solution[]
+  objectives           Objective[]
   experiments          Experiment[]
   roadmapItems         RoadmapItem[]
   customFieldDefs      CustomFieldDefinition[]
@@ -675,6 +677,11 @@ model OKRCycle {
 
 model Objective {
   id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Direct tenant scope (migration 068). Authorization reads this column, never
+  /// the cycle parent chain. Nullable in the database only because DSQL cannot
+  /// add a NOT NULL column to a populated table; every write path sets it and
+  /// every read path treats NULL as deny.
+  workspaceId       String?     @map("workspace_id") @db.Uuid
   cycleId           String      @map("cycle_id") @db.Uuid
   squadId           String?     @map("squad_id") @db.Uuid
   parentKeyResultId String?     @map("parent_key_result_id") @db.Uuid
@@ -685,6 +692,7 @@ model Objective {
   sortOrder         Int         @default(0) @map("sort_order")
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @default(now()) @map("updated_at")
+  workspace         Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   cycle             OKRCycle    @relation(fields: [cycleId], references: [id])
   squad             Squad?      @relation(fields: [squadId], references: [id])
   parentKeyResult   KeyResult?  @relation("SquadKRSupport", fields: [parentKeyResultId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -693,6 +701,7 @@ model Objective {
   updatedById       String?     @map("updated_by_id") @db.Uuid
   source            String      @default("UI") @map("source") @db.VarChar(20)
 
+  @@index([workspaceId], map: "idx_objectives_workspace_id")
   @@map("objectives")
 }
 
@@ -763,6 +772,11 @@ model Opportunity {
 
 model Solution {
   id            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Direct tenant scope (migration 068). Authorization reads this column, never
+  /// the opportunity parent chain. Nullable in the database only because DSQL
+  /// cannot add a NOT NULL column to a populated table; every write path sets
+  /// it and every read path treats NULL as deny.
+  workspaceId   String?           @map("workspace_id") @db.Uuid
   opportunityId String            @map("opportunity_id") @db.Uuid
   title         String            @db.VarChar(255)
   description   String?           @db.Text
@@ -770,6 +784,7 @@ model Solution {
   sortOrder     Int               @default(0) @map("sort_order")
   createdAt     DateTime          @default(now()) @map("created_at")
   updatedAt     DateTime          @default(now()) @map("updated_at")
+  workspace     Workspace?        @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   opportunity   Opportunity       @relation(fields: [opportunityId], references: [id])
   assumptions   Assumption[]
   roadmapItems  RoadmapItem[]
@@ -780,6 +795,7 @@ model Solution {
   comments      SolutionComment[]
   score         SolutionScore?
 
+  @@index([workspaceId], map: "idx_solutions_workspace_id")
   @@map("solutions")
 }
 
@@ -3237,4 +3253,104 @@ model WorkspaceActivationState {
   learningAt DateTime? @map("learning_at")
   updatedAt DateTime @default(now()) @map("updated_at")
   @@map("workspace_activation_states")
+}
+
+// ─── Typed link tables (migration 071) ────────────────────────────────────────
+// Many-to-many links that replace the single nullable opportunities.linked_key_result_id
+// pointer. Created by migration 071, which backfills Opportunity <-> Objective from
+// that pointer; Solution <-> Key Result starts empty.
+//
+// ONLY lib/typed-links.ts (plus the migration hook in lib/migrations and its SQL) reads or writes
+// these models; __tests__/typed-link-access.test.ts guards that. Code that uses them must not be
+// deployed before migration 071 has created the tables: every read and write fails with the
+// database error until it has (reads included, on purpose: there is no "no links" fallback).
+//
+// Deliberately scalar ids only, no Prisma relation fields: under relationMode = "prisma"
+// a relation makes Prisma query the child table whenever a parent row is deleted or
+// updated, which would make existing Opportunity/Objective/Solution/KeyResult code paths
+// touch these tables before the migration is applied. Integrity is application-level
+// (plus the migration postconditions); there is no foreign key either way.
+
+/// Opportunity <-> Objective. origin is DIRECT (created through the new UI/API) or
+/// LEGACY (copied from opportunities.linked_key_result_id by migration 071).
+model OpportunityObjectiveLink {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  opportunityId String   @map("opportunity_id") @db.Uuid
+  objectiveId   String   @map("objective_id") @db.Uuid
+  /// One of: DIRECT | LEGACY
+  origin        String   @db.VarChar(20)
+  source        String   @default("UI") @db.VarChar(20)
+  createdById   String?  @map("created_by_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([opportunityId, objectiveId], map: "idx_opportunity_objective_links_pair")
+  @@index([objectiveId, opportunityId], map: "idx_opportunity_objective_links_objective")
+  @@index([workspaceId], map: "idx_opportunity_objective_links_workspace")
+  @@map("opportunity_objective_links")
+}
+
+/// Solution <-> Key Result. Starts empty; written only by code that ships after 071.
+model SolutionKeyResultLink {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  solutionId  String   @map("solution_id") @db.Uuid
+  keyResultId String   @map("key_result_id") @db.Uuid
+  source      String   @default("UI") @db.VarChar(20)
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([solutionId, keyResultId], map: "idx_solution_key_result_links_pair")
+  @@index([keyResultId, solutionId], map: "idx_solution_key_result_links_key_result")
+  @@index([workspaceId], map: "idx_solution_key_result_links_workspace")
+  @@map("solution_key_result_links")
+}
+
+/// A user's subscription to one subject (Following and in-app notifications,
+/// migration 068). Polymorphic: `subjectType` reuses the COMMENT_TARGET_TYPES
+/// vocabulary plus METRIC, and there is deliberately no @relation because DSQL
+/// enforces no foreign keys; integrity lives in lib/followable.ts. `userId` is
+/// always a Compass User with a WorkspaceMember row, never an Agent.
+/// state: FOLLOWING | MUTED (an unfollow tombstone that auto-follow never
+/// overrides). source: MANUAL | AUTO_CREATE | AUTO_COMMENT | AUTO_ASSIGN.
+model Follow {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  subjectType String   @map("subject_type") @db.VarChar(40)
+  subjectId   String   @map("subject_id") @db.Uuid
+  state       String   @db.VarChar(20)
+  source      String   @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  @@unique([userId, subjectType, subjectId], map: "idx_follows_user_subject")
+  @@index([subjectType, subjectId], map: "idx_follows_subject")
+  @@index([workspaceId, userId], map: "idx_follows_workspace_user")
+  @@map("follows")
+}
+
+/// One in-app notification for one recipient (migration 068). Fan-out on write,
+/// never updated after insert except `readAt`. `payload` holds machine facts
+/// only (no titles or comment excerpts); display data is resolved at read time
+/// behind an access check. `dedupeKey` + recipient is unique so a replayed emit
+/// is harmless. kind: STATUS_CHANGED | COMMENT_ADDED | COMMENT_REPLIED.
+/// actorType: USER | AGENT | EXTERNAL | SYSTEM.
+model Notification {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  recipientUserId String    @map("recipient_user_id") @db.Uuid
+  subjectType     String    @map("subject_type") @db.VarChar(40)
+  subjectId       String    @map("subject_id") @db.Uuid
+  kind            String    @db.VarChar(40)
+  actorType       String    @map("actor_type") @db.VarChar(20)
+  actorId         String?   @map("actor_id") @db.Uuid
+  payload         Json      @default("{}")
+  dedupeKey       String    @map("dedupe_key") @db.VarChar(200)
+  readAt          DateTime? @map("read_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@unique([recipientUserId, dedupeKey], map: "idx_notifications_recipient_dedupe")
+  @@index([workspaceId, recipientUserId, createdAt], map: "idx_notifications_inbox")
+  @@map("notifications")
 }

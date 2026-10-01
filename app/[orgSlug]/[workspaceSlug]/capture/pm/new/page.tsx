@@ -14,8 +14,8 @@ export default async function NewPmInterviewPage({ params, searchParams }: { par
   if (!workspace) notFound()
   const [opportunities, solutions, assumptions, experiments] = await Promise.all([
     prisma.opportunity.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 100 }),
-    prisma.solution.findMany({ where: { opportunity: { workspaceId: workspace.id } }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 100 }),
-    prisma.assumption.findMany({ where: { solution: { opportunity: { workspaceId: workspace.id } } }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 100 }),
+    prisma.solution.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 100 }),
+    prisma.assumption.findMany({ where: { solution: { workspaceId: workspace.id } }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 100 }),
     prisma.experiment.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 100 }),
   ])
   const groups = [{ type: "OPPORTUNITY", label: "Opportunities", items: opportunities }, { type: "SOLUTION", label: "Solutions", items: solutions }, { type: "ASSUMPTION", label: "Assumptions", items: assumptions }, { type: "EXPERIMENT", label: "Experiments", items: experiments }]

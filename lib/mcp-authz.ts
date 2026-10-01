@@ -300,28 +300,26 @@ const WORKSPACE_ENTITY_RESOLVERS: Record<
   opportunity: async (p, id) =>
     (await p.opportunity.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   solution: async (p, id) =>
-    (await p.solution.findUnique({ where: { id }, select: { opportunity: { select: { workspaceId: true } } } }))
-      ?.opportunity?.workspaceId ?? null,
+    (await p.solution.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   assumption: async (p, id) =>
     (await p.assumption.findUnique({
       where: { id },
-      select: { solution: { select: { opportunity: { select: { workspaceId: true } } } } },
-    }))?.solution?.opportunity?.workspaceId ?? null,
+      select: { solution: { select: { workspaceId: true } } },
+    }))?.solution?.workspaceId ?? null,
   solutionComment: async (p, id) =>
     (await p.solutionComment.findUnique({
       where: { id },
-      select: { solution: { select: { opportunity: { select: { workspaceId: true } } } } },
-    }))?.solution?.opportunity?.workspaceId ?? null,
+      select: { solution: { select: { workspaceId: true } } },
+    }))?.solution?.workspaceId ?? null,
   okrCycle: async (p, id) =>
     (await p.oKRCycle.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   objective: async (p, id) =>
-    (await p.objective.findUnique({ where: { id }, select: { cycle: { select: { workspaceId: true } } } }))
-      ?.cycle?.workspaceId ?? null,
+    (await p.objective.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   keyResult: async (p, id) =>
     (await p.keyResult.findUnique({
       where: { id },
-      select: { objective: { select: { cycle: { select: { workspaceId: true } } } } },
-    }))?.objective?.cycle?.workspaceId ?? null,
+      select: { objective: { select: { workspaceId: true } } },
+    }))?.objective?.workspaceId ?? null,
   experiment: async (p, id) =>
     (await p.experiment.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   roadmapItem: async (p, id) =>
@@ -403,6 +401,28 @@ export async function assertEntityAccess(
     await assertWorkspaceMember(actor, workspaceId)
   }
   return { workspaceId }
+}
+
+/**
+ * Assert the actor may act on EVERY listed entity AND that they all belong to one workspace.
+ *
+ * Membership of each workspace is not enough for a call that joins two entities: a member of two
+ * workspaces could otherwise attach A's entity to B's. Access is asserted first, entity by entity,
+ * so a non-member learns nothing about whether the other end exists or where it lives; only then is
+ * the workspace comparison made. Returns the shared `workspaceId`.
+ */
+export async function assertSameWorkspaceEntities(
+  actor: McpActor,
+  entities: readonly (readonly [WorkspaceEntityType, string])[]
+): Promise<{ workspaceId: string }> {
+  const workspaceIds = new Set<string>()
+  for (const [entityType, entityId] of entities) {
+    workspaceIds.add((await assertEntityAccess(actor, entityType, entityId)).workspaceId)
+  }
+  if (workspaceIds.size !== 1) {
+    throw new McpAuthzError(`${entities.map(([type]) => type).join(" and ")} must belong to the same workspace.`)
+  }
+  return { workspaceId: [...workspaceIds][0] }
 }
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -51,7 +51,9 @@ type SolutionData = {
   title: string;
   description: string | null;
   status: string;
-  opportunity: { id: string; title: string; workspaceId: string; squadId: string | null } | null;
+  /** The Solution's own workspace (not its Opportunity's). */
+  workspaceId: string;
+  opportunity: { id: string; title: string; squadId: string | null } | null;
   assumptions: AssumptionItemData[];
   evidence: EvidenceListItem[];
   comments: SolutionComment[];
@@ -178,7 +180,7 @@ export function SolutionPanel({
             // server data instead of needing an effect to sync props in.
             key={data.assumptions.map((a) => a.id).join(",")}
             solutionId={data.id}
-            workspaceId={data.opportunity.workspaceId}
+            workspaceId={data.workspaceId}
             assumptions={data.assumptions}
             revalidatePathStr={revalidatePathStr}
             onChanged={refresh}
@@ -206,7 +208,7 @@ export function SolutionPanel({
         <Section {...SECTION} label="Evidence" count={data.evidence.length}>
           <div className="flex flex-col gap-2">
             <AddEvidenceDialog
-              workspaceId={data.opportunity.workspaceId}
+              workspaceId={data.workspaceId}
               nodeType="solution"
               nodeId={data.id}
               revalidatePathStr={revalidatePathStr}
@@ -228,7 +230,7 @@ export function SolutionPanel({
           {canPromote && data.opportunity && (
             <PromoteToRoadmap
               solutionId={data.id}
-              workspaceId={data.opportunity.workspaceId}
+              workspaceId={data.workspaceId}
               squadId={data.opportunity.squadId}
               opportunityId={data.opportunity.id}
               onDone={refresh}
@@ -256,7 +258,7 @@ export function SolutionPanel({
         <Section {...SECTION} label="Artifacts" count={data.artifacts.length}>
           <SolutionArtifacts
             solutionId={data.id}
-            workspaceId={data.opportunity.workspaceId}
+            workspaceId={data.workspaceId}
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
             artifacts={data.artifacts}

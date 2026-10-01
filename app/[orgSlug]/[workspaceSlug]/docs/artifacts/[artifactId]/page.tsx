@@ -23,7 +23,7 @@ export default async function ArtifactPage({ params }: { params: Promise<{ orgSl
     const bytes = await getArtifactStorage().get(artifact.currentRevision.blobPathname)
     if (bytes) html = buildSandboxedHtml(new TextDecoder().decode(bytes))
   }
-  const rawSolutions = await prisma.solution.findMany({ where: { opportunity: { workspaceId: workspace.id } }, select: { id: true, title: true }, orderBy: { title: "asc" } })
+  const rawSolutions = await prisma.solution.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { title: "asc" } })
   const linkedIds = new Set(artifact.links.map((link) => link.linkedId))
   const decisions = await getArtifactDecisions(workspace.id, artifactId)
   const initialCommentsPin = parsePanelPin((await cookies()).get(panelPinCookieName("artifactComments"))?.value)

@@ -10,15 +10,10 @@ import { countWorkspaceAdmins, normalizeWorkspaceRole } from "@/lib/roles";
 import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
 import { encrypt } from "@/lib/crypto-secrets";
 import { generateSsoSecret } from "@/lib/portal-sso";
-import { getArtifactStorage } from "@/lib/artifact-storage";
-import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
-import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
-import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
-import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
-import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
-import { deleteWorkspaceCapabilityPacks } from "@/lib/capability-pack-cleanup";
-import { revokeMemberAgentGrants, deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
-import { deleteWorkspaceUpdates } from "@/lib/workspace-updates-cleanup";
+import { requireProductEntity } from "@/lib/product-action-auth";
+import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
+import { revokeMemberAgentGrants } from "@/lib/agent-lifecycle";
+import { deleteMemberFollowState } from "@/lib/follow-cleanup";
 import {
   normalizeSelectOptions,
   parseSelectOptions,
@@ -59,8 +54,9 @@ export async function updateSquad(
   squadId: string,
   input: { name?: string; color?: string }
 ) {
-  await resolveWorkspace(orgSlug, workspaceSlug);
+  const { workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
   const prisma = getPrisma();
+  await assertSquadInWorkspace(prisma, squadId, workspaceId);
 
   await prisma.squad.update({
     where: { id: squadId },
@@ -78,14 +74,20 @@ export async function deleteSquad(
   workspaceSlug: string,
   squadId: string
 ) {
-  await resolveWorkspace(orgSlug, workspaceSlug);
+  const { workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
   const prisma = getPrisma();
+  // The squad must belong to the caller's workspace, and the null-out below is
+  // scoped to it so a foreign squad id can never touch another tenant's rows.
+  await assertSquadInWorkspace(prisma, squadId, workspaceId);
 
   // Null out squad references (no FK cascade in DSQL)
-  await prisma.objective.updateMany({ where: { squadId }, data: { squadId: null } });
-  await prisma.opportunity.updateMany({ where: { squadId }, data: { squadId: null } });
-  await prisma.experiment.updateMany({ where: { squadId }, data: { squadId: null } });
-  await prisma.roadmapItem.updateMany({ where: { squadId }, data: { squadId: null, updatedAt: new Date() } });
+  // Every table with a squad_id column (objective, opportunity, experiment, roadmap_item, task).
+  // Objectives match their own workspaceId, or (teardown completeness) their cycle's while it is still NULL.
+  await prisma.objective.updateMany({ where: { squadId, OR: [{ workspaceId }, { workspaceId: null, cycle: { workspaceId } }] }, data: { squadId: null } });
+  await prisma.opportunity.updateMany({ where: { squadId, workspaceId }, data: { squadId: null } });
+  await prisma.experiment.updateMany({ where: { squadId, workspaceId }, data: { squadId: null } });
+  await prisma.roadmapItem.updateMany({ where: { squadId, workspaceId }, data: { squadId: null, updatedAt: new Date() } });
+  await prisma.task.updateMany({ where: { squadId, workspaceId }, data: { squadId: null, updatedAt: new Date() } });
 
   await prisma.squad.delete({ where: { id: squadId } });
 
@@ -101,7 +103,11 @@ export async function assignSquad(
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
+  // Authorize the object by membership in its own workspace, and require the
+  // squad (when one is being assigned) to live in that same workspace.
+  const { workspaceId } = await requireProductEntity(objectType, objectId);
   const prisma = getPrisma();
+  if (squadId) await assertSquadInWorkspace(prisma, squadId, workspaceId);
 
   if (objectType === "objective") {
     await prisma.objective.update({ where: { id: objectId }, data: { squadId } });
@@ -116,6 +122,11 @@ export async function assignSquad(
   }
 
   revalidatePath(revalidatePathStr);
+}
+
+async function assertSquadInWorkspace(prisma: ReturnType<typeof getPrisma>, squadId: string, workspaceId: string) {
+  const squad = await prisma.squad.findFirst({ where: { id: squadId, workspaceId }, select: { id: true } });
+  if (!squad) throw new Error("Squad not found in this workspace");
 }
 
 // ─── Helper: resolve workspace and assert membership ─────────────────────────
@@ -262,6 +273,16 @@ export async function removeWorkspaceMember(
     await revokeMemberAgentGrants(tx, workspaceId, member.userId);
     await tx.workspaceMember.delete({ where: { id: memberId } });
   });
+
+  // Hygiene only: read-time membership checks already hide this user's follows
+  // and notifications. Runs after the commit and outside the transaction (a
+  // missing-table error would abort it), and must not fail a removal that has
+  // already happened.
+  try {
+    await deleteMemberFollowState(prisma, workspaceId, member.userId);
+  } catch (error) {
+    console.error("[follows] member follow-state cleanup failed", error);
+  }
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }
@@ -615,174 +636,11 @@ export async function deleteWorkspace(
   workspaceSlug: string
 ): Promise<{ redirectTo: string }> {
   const { prisma, workspaceId, organizationId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
-  await assertDocumentPilotCleanupReviewed(prisma, workspaceId);
 
-  // Decision/release/capacity aggregates reference Tasks and RoadmapItems.
-  // DSQL has no FK cascades, so clear the full child graph first.
-  await deleteWorkspaceDecisionData(prisma, workspaceId);
-  await deleteWorkspaceResearchData(prisma, workspaceId);
-
-  // ── Step 1: Break the Objective <-> KeyResult circular reference ────────────
-  // Objective.parentKeyResultId references KeyResult; null it before deleting KRs.
-  await prisma.objective.updateMany({
-    where: { cycle: { workspaceId } },
-    data: { parentKeyResultId: null },
-  });
-
-  // ── Step 2: Delete RoadmapVotes (child of RoadmapItem) ─────────────────────
-  const roadmapItemIds = await prisma.roadmapItem
-    .findMany({ where: { workspaceId }, select: { id: true } })
-    .then((items) => items.map((i) => i.id));
-
-  if (roadmapItemIds.length > 0) {
-    await prisma.roadmapVote.deleteMany({
-      where: { roadmapItemId: { in: roadmapItemIds } },
-    });
-  }
-
-  // ── Step 3: Delete RoadmapItems ─────────────────────────────────────────────
-  await prisma.roadmapItem.deleteMany({ where: { workspaceId } });
-
-  // ── Step 4: Delete CheckIns (child of KeyResult, via Objective -> OKRCycle) ─
-  const cycleIds = await prisma.oKRCycle
-    .findMany({ where: { workspaceId }, select: { id: true } })
-    .then((c) => c.map((x) => x.id));
-
-  if (cycleIds.length > 0) {
-    const objectiveIds = await prisma.objective
-      .findMany({ where: { cycleId: { in: cycleIds } }, select: { id: true } })
-      .then((o) => o.map((x) => x.id));
-
-    if (objectiveIds.length > 0) {
-      const keyResultIds = await prisma.keyResult
-        .findMany({ where: { objectiveId: { in: objectiveIds } }, select: { id: true } })
-        .then((kr) => kr.map((x) => x.id));
-
-      if (keyResultIds.length > 0) {
-        await prisma.checkIn.deleteMany({
-          where: { keyResultId: { in: keyResultIds } },
-        });
-      }
-    }
-  }
-
-  // ── Step 5: Delete ExperimentResults (child of Experiment) ──────────────────
-  const experimentIds = await prisma.experiment
-    .findMany({ where: { workspaceId }, select: { id: true } })
-    .then((e) => e.map((x) => x.id));
-
-  if (experimentIds.length > 0) {
-    await prisma.experimentResult.deleteMany({
-      where: { experimentId: { in: experimentIds } },
-    });
-  }
-
-  // ── Step 6: Delete FeedbackVotes (child of FeedbackItem) ────────────────────
-  const feedbackIds = await prisma.feedbackItem
-    .findMany({ where: { workspaceId }, select: { id: true } })
-    .then((f) => f.map((x) => x.id));
-
-  if (feedbackIds.length > 0) {
-    await prisma.feedbackVote.deleteMany({
-      where: { feedbackId: { in: feedbackIds } },
-    });
-  }
-
-  // ── Step 7: Delete FeedbackItems ────────────────────────────────────────────
-  await prisma.feedbackItem.deleteMany({ where: { workspaceId } });
-
-  // ── Step 8: Delete CustomFieldValues + CustomFieldDefinitions ───────────────
-  const fieldIds = await prisma.customFieldDefinition
-    .findMany({ where: { workspaceId }, select: { id: true } })
-    .then((f) => f.map((x) => x.id));
-
-  if (fieldIds.length > 0) {
-    await prisma.customFieldValue.deleteMany({
-      where: { fieldId: { in: fieldIds } },
-    });
-  }
-  await prisma.customFieldDefinition.deleteMany({ where: { workspaceId } });
-  // Shared option sets can only go once nothing references them any more.
-  await prisma.sharedFieldOptionSet.deleteMany({ where: { workspaceId } });
-
-  // ── Step 9: Null Experiment.assumptionId before deleting Assumptions ─────────
-  if (experimentIds.length > 0) {
-    await prisma.experiment.updateMany({
-      where: { id: { in: experimentIds } },
-      data: { assumptionId: null },
-    });
-  }
-
-  // ── Step 10: Delete Assumptions (child of Solution -> Opportunity) ───────────
-  const opportunityIds = await prisma.opportunity
-    .findMany({ where: { workspaceId }, select: { id: true } })
-    .then((o) => o.map((x) => x.id));
-
-  if (opportunityIds.length > 0) {
-    const solutionIds = await prisma.solution
-      .findMany({ where: { opportunityId: { in: opportunityIds } }, select: { id: true } })
-      .then((s) => s.map((x) => x.id));
-
-    if (solutionIds.length > 0) {
-      await prisma.assumption.deleteMany({
-        where: { solutionId: { in: solutionIds } },
-      });
-      // SolutionComment has no cascade delete (relationMode = "prisma"), so
-      // it must be cleared before the Solution rows themselves are deleted,
-      // same reasoning as the Assumption deleteMany above.
-      await prisma.solutionComment.deleteMany({
-        where: { solutionId: { in: solutionIds } },
-      });
-      // ── Step 11: Delete Solutions ───────────────────────────────────────────
-      await prisma.solution.deleteMany({
-        where: { id: { in: solutionIds } },
-      });
-    }
-  }
-
-  // ── Step 12: Delete Opportunities ───────────────────────────────────────────
-  await prisma.opportunity.deleteMany({ where: { workspaceId } });
-
-  // ── Step 13: Delete Experiments ─────────────────────────────────────────────
-  await prisma.experiment.deleteMany({ where: { workspaceId } });
-
-  // ── Step 14: Delete KeyResults then Objectives then OKRCycles ───────────────
-  if (cycleIds.length > 0) {
-    const objectiveIds = await prisma.objective
-      .findMany({ where: { cycleId: { in: cycleIds } }, select: { id: true } })
-      .then((o) => o.map((x) => x.id));
-
-    if (objectiveIds.length > 0) {
-      await prisma.keyResult.deleteMany({
-        where: { objectiveId: { in: objectiveIds } },
-      });
-      await prisma.objective.deleteMany({
-        where: { id: { in: objectiveIds } },
-      });
-    }
-    await prisma.oKRCycle.deleteMany({ where: { workspaceId } });
-  }
-
-  // ── Step 15: Delete Artifacts and private blobs ─────────────────────────────
-  await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage());
-  await deleteWorkspaceCapabilityPacks(prisma, workspaceId);
-  await deleteWorkspaceAgentData(prisma, workspaceId);
-  await deleteWorkspaceUpdates(prisma, workspaceId);
-
-  // ── Step 16: Delete WorkspaceMembers ────────────────────────────────────────
-  await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
-
-  // ── Step 17: Delete Squads ──────────────────────────────────────────────────
-  await prisma.squad.deleteMany({ where: { workspaceId } });
-
-  // ── Step 18: Delete Docs (self-referential; no DB FK so deleteMany is safe) ─
-  await prisma.doc.deleteMany({ where: { workspaceId } });
-
-  // ── Step 19: Delete the Workspace itself ────────────────────────────────────
-  await prisma.$transaction(async tx => {
-    await tx.workspace.delete({ where: { id: workspaceId } });
-    await deleteWorkspaceAnalytics(tx, workspaceId);
-  });
+  // One teardown for every path (this action, organization delete, preview
+  // cleanup). It used to be a second, hand-maintained copy that missed tables
+  // and did not know about Solution/Objective's own workspaceId.
+  await deleteWorkspaceCascade(prisma, workspaceId);
 
   // ── Step 20: If the org has no remaining workspaces, delete it too ───────────
   const remainingWorkspaces = await prisma.workspace.findMany({

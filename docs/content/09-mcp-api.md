@@ -362,6 +362,8 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 ### Discovery — Opportunities, Solutions, Assumptions
 
+Typed links connect an Opportunity to Objectives and a Solution to Key Results (`link_*`, `unlink_*` and `list_links` below). Both ends of a link must be in the declared workspace: a call that names an entity from another workspace is rejected, even if you are a member of both. `list_opportunities` and `get_opportunity` add a `linkedObjectives` list (`{ id, title }`, oldest link first) and `list_solutions` adds `linkedKeyResults`; `linkedKeyResult` on an opportunity still comes only from `link_opportunity_to_kr`, never from these links.
+
 | Tool | Description |
 |---|---|
 | `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
@@ -371,7 +373,12 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `create_opportunity` | Create a new opportunity with title, description, status |
 | `update_opportunity` | Update an existing opportunity's title and/or description; pass `null` to clear its description |
 | `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
-| `link_opportunity_to_kr` | Associate an opportunity with a Key Result it is expected to move (or clear the link) |
+| `link_opportunity_to_kr` | Associate an opportunity with a Key Result it is expected to move (or clear the link). The Key Result must be in the opportunity's workspace; the link is also recorded as a typed Opportunity–Objective link |
+| `link_opportunity_to_objective` | Link an Opportunity directly to an Objective in the same workspace. Idempotent: repeating returns `created: false`. A direct link is not removed when the opportunity's Key Result is cleared |
+| `unlink_opportunity_from_objective` | Remove an Opportunity–Objective link; returns `removed: 0` when there is none. A link implied by the opportunity's linked Key Result stays until that Key Result is cleared (`removed: 0, stillLinkedViaKeyResult: true` is a successful no-op, not a failure) |
+| `link_solution_to_key_result` | Link a Solution to a Key Result in the same workspace. Idempotent. The Solution keeps its single parent Opportunity |
+| `unlink_solution_from_key_result` | Remove a Solution–Key Result link; returns `removed: 0` when there is none |
+| `list_links` | List the typed links on one Opportunity, Objective, Solution or Key Result (pass exactly one id plus `workspaceId`), oldest first, with `limit` and `cursor` paging |
 | `add_solution` | Add a proposed Solution to an Opportunity |
 | `update_solution_status` | Update a Solution's lifecycle status (IDEA/VALIDATED/IN_DELIVERY/SHIPPED/KILLED); any valid status may transition directly to any other valid status |
 | `update_solution` | Update an existing Solution's title and/or description (pass an empty string to clear the description); at least one field must be provided |

@@ -16,10 +16,11 @@ export async function mirrorLegacyDocComment(comment: DocComment) {
 }
 
 export async function mirrorLegacySolutionComment(comment: SolutionComment) {
-  const solution = await getPrisma().solution.findUnique({ where: { id: comment.solutionId }, select: { opportunity: { select: { workspaceId: true } } } })
-  if (!solution) throw new Error("Solution not found while mirroring comment.")
+  const solution = await getPrisma().solution.findUnique({ where: { id: comment.solutionId }, select: { workspaceId: true } })
+  // A NULL workspace_id is treated as not found: never mirror into an unscoped thread.
+  if (!solution?.workspaceId) throw new Error("Solution not found while mirroring comment.")
   return createComment({
-    id: comment.id, workspaceId: solution.opportunity.workspaceId, targetType: "SOLUTION", targetId: comment.solutionId,
+    id: comment.id, workspaceId: solution.workspaceId, targetType: "SOLUTION", targetId: comment.solutionId,
     body: comment.body, authorName: comment.authorName, authorType: comment.authorType as "AGENT" | "HUMAN",
     source: comment.source as "UI" | "MCP", createdAt: comment.createdAt, updatedAt: comment.updatedAt,
     ...(comment.commentType === "PLAN" ? { solutionPlan: { legacyPlanStatus: comment.planStatus as "PENDING" | "APPROVED" | "REJECTED" } } : {}),

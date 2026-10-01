@@ -5,6 +5,13 @@ const mockPrisma = {
   opportunity: {
     findMany: vi.fn(),
   },
+  // The additive typed-link read (workspace check of the listed ids, then their link rows).
+  opportunityObjectiveLink: {
+    findMany: vi.fn(),
+  },
+  objective: {
+    findMany: vi.fn(),
+  },
 }
 
 vi.mock("@/lib/db", () => ({
@@ -58,6 +65,8 @@ function getHandler(name: string): ToolCallback {
 describe("list_opportunities MCP tool", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockPrisma.opportunityObjectiveLink.findMany.mockResolvedValue([])
+    mockPrisma.objective.findMany.mockResolvedValue([])
   })
 
   it("groups multiline descriptions under each item and preserves structured list metadata", async () => {
@@ -70,7 +79,7 @@ describe("list_opportunities MCP tool", () => {
         squad: { name: "Activation" },
         linkedKeyResult: {
           title: "Increase activated workspaces",
-          objective: { title: "Improve onboarding" },
+          objective: { workspaceId: "workspace-1", title: "Improve onboarding" },
         },
         _count: { solutions: 2 },
       },
@@ -114,6 +123,7 @@ describe("list_opportunities MCP tool", () => {
             title: "Increase activated workspaces",
             objective: "Improve onboarding",
           },
+          linkedObjectives: [],
         },
         {
           id: "opportunity-2",
@@ -123,6 +133,7 @@ describe("list_opportunities MCP tool", () => {
           squad: null,
           solutions: 0,
           linkedKeyResult: null,
+          linkedObjectives: [],
         },
       ],
       count: 2,
@@ -135,10 +146,10 @@ describe("list_opportunities MCP tool", () => {
       },
       include: {
         linkedKeyResult: {
-          select: { title: true, objective: { select: { title: true } } },
+          select: { title: true, objective: { select: { workspaceId: true, title: true } } },
         },
         squad: { select: { name: true } },
-        _count: { select: { solutions: true } },
+        _count: { select: { solutions: { where: { workspaceId: "workspace-1" } } } },
       },
       orderBy: { createdAt: "desc" },
     })

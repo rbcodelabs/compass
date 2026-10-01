@@ -57,8 +57,10 @@ export async function getEligibleParentKeyResults(
   const keyResults = await prisma.keyResult.findMany({
     where: {
       objective: {
+        // Tenant scope is the Objective's own workspaceId (migration 068); the
+        // cycle filter below only selects the time window.
+        workspaceId,
         cycle: {
-          workspaceId,
           id: { not: childCycle.id },
           status: { in: ["DRAFT", "ACTIVE"] },
           startDate: { lte: childCycle.startDate },
@@ -146,8 +148,8 @@ export async function getEligibleSupportingObjectives(
   const objectives = await prisma.objective.findMany({
     where: {
       parentKeyResultId: null,
+      workspaceId,
       cycle: {
-        workspaceId,
         id: { not: parentCycle.id },
         startDate: { gte: parentCycle.startDate },
         endDate: { lte: parentCycle.endDate },
@@ -185,7 +187,7 @@ export async function setObjectiveParentKeyResult(input: {
 }) {
   const prisma = getPrisma();
   const child = await prisma.objective.findFirst({
-    where: { id: input.objectiveId, cycle: { workspaceId: input.workspaceId } },
+    where: { id: input.objectiveId, workspaceId: input.workspaceId },
     include: { cycle: true },
   });
 
@@ -203,7 +205,7 @@ export async function setObjectiveParentKeyResult(input: {
   const parent = await prisma.keyResult.findFirst({
     where: {
       id: input.keyResultId,
-      objective: { cycle: { workspaceId: input.workspaceId } },
+      objective: { workspaceId: input.workspaceId },
     },
     include: { objective: { include: { cycle: true } } },
   });

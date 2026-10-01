@@ -19,7 +19,7 @@ export default async function NewDecisionPage({ params, searchParams }: {
   const prisma = getPrisma()
   const [opportunities, solutions, roadmapItems, docs, experiments, feedback] = await Promise.all([
     prisma.opportunity.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 101 }),
-    prisma.solution.findMany({ where: { opportunity: { workspaceId: workspace.id } }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 101 }),
+    prisma.solution.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 101 }),
     prisma.roadmapItem.findMany({ where: { workspaceId: workspace.id, status: "ACTIVE" }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 101 }),
     prisma.doc.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 101 }),
     prisma.experiment.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 101 }),

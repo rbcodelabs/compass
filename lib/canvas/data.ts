@@ -17,6 +17,12 @@
  * before).
  */
 import type { AppPrismaClient } from "@/lib/db";
+import {
+  getLinkedKeyResultsBySolution,
+  getLinkedObjectivesByOpportunity,
+  type LinkedKeyResult,
+  type LinkedObjective,
+} from "@/lib/typed-links";
 import type {
   ObjectiveStatus,
   OpportunityStatus,
@@ -55,6 +61,11 @@ export interface CanvasOpportunity {
   status: OpportunityStatus;
   squad: SquadData | null;
   linkedKeyResultId: string | null;
+  /**
+   * Typed Opportunity<->Objective links (ADR Phase 2), payload only: canvas EDGES are still drawn from
+   * linkedKeyResultId and nothing renders this yet. Optional so existing constructors stay valid.
+   */
+  linkedObjectives?: LinkedObjective[];
   position: CanvasPosition | null;
 }
 
@@ -63,6 +74,8 @@ export interface CanvasSolution {
   opportunityId: string;
   title: string;
   status: SolutionStatus;
+  /** Typed Solution<->Key Result links (ADR Phase 2), payload only. */
+  linkedKeyResults?: LinkedKeyResult[];
   position: CanvasPosition | null;
 }
 
@@ -132,7 +145,7 @@ export async function getCanvasOverview(
     await Promise.all([
       prisma.squad.findMany({ where: { workspaceId } }),
       prisma.objective.findMany({
-        where: { cycle: { workspaceId } },
+        where: { workspaceId },
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       }),
       prisma.opportunity.findMany({
@@ -165,24 +178,28 @@ export async function getCanvasOverview(
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         })
       : Promise.resolve([]),
-    opportunityIds.length > 0
-      ? prisma.solution.findMany({
-          where: { opportunityId: { in: opportunityIds } },
-          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        })
-      : Promise.resolve([]),
+    // Scoped by the Solution's own workspaceId (migration 068); a NULL row is
+    // simply not returned.
+    prisma.solution.findMany({
+      where: { workspaceId },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    }),
   ]);
 
   const solutionIds = solutionsRaw.map((s) => s.id);
 
   // ── Batch 3: depends on batch 2 ids ─────────────────────────────────────
-  const assumptionsRaw =
+  // The typed links ride along as additive payload (workspace-filtered batch reads); edges are unchanged.
+  const [assumptionsRaw, linkedObjectives, linkedKeyResults] = await Promise.all([
     solutionIds.length > 0
-      ? await prisma.assumption.findMany({
+      ? prisma.assumption.findMany({
           where: { solutionId: { in: solutionIds } },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         })
-      : [];
+      : Promise.resolve([]),
+    getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunityIds, { preverified: true }),
+    getLinkedKeyResultsBySolution(prisma, workspaceId, solutionIds, { preverified: true }),
+  ]);
 
   // ── Positions: one round-trip covering every fetched entity id ─────────
   const entityIds = [
@@ -249,6 +266,7 @@ export async function getCanvasOverview(
     status: opp.status as OpportunityStatus,
     squad: opp.squadId ? (squadById.get(opp.squadId) ?? null) : null,
     linkedKeyResultId: opp.linkedKeyResultId,
+    linkedObjectives: linkedObjectives.get(opp.id) ?? [],
     position: positionByEntity.get(`OPPORTUNITY:${opp.id}`) ?? null,
   }));
 
@@ -257,6 +275,7 @@ export async function getCanvasOverview(
     opportunityId: sol.opportunityId,
     title: sol.title,
     status: sol.status as SolutionStatus,
+    linkedKeyResults: linkedKeyResults.get(sol.id) ?? [],
     position: positionByEntity.get(`SOLUTION:${sol.id}`) ?? null,
   }));
 

@@ -116,11 +116,14 @@ export function assertCanSeeOtherProposals(
 // ── Objects under sort ──────────────────────────────────────────────────────
 
 /**
- * Per-object-type listing. Only Opportunity, Experiment, RoadmapItem and Task
- * carry workspaceId directly; the rest are reached through the same FK chains
- * lib/mcp-authz.ts walks for authorization, kept consistent with it on purpose
- * so a card sort can never see a wider set of objects than the authz layer
- * believes belongs to the workspace.
+ * Per-object-type listing. Opportunity, Solution, Experiment, Objective,
+ * RoadmapItem and Task carry workspaceId directly; only Key Result is reached
+ * through its Objective's workspaceId. These are the same columns
+ * lib/mcp-authz.ts resolves for authorization, kept consistent with it on
+ * purpose so a card sort can never see a wider set of objects than the authz
+ * layer believes belongs to the workspace. A Solution or Objective whose own
+ * workspaceId is NULL (not yet backfilled) or names another workspace is
+ * therefore absent from these lists, and a proposal naming it is NOT_FOUND.
  */
 const OBJECT_LOADERS: Record<
   CustomFieldObjectType,
@@ -130,16 +133,16 @@ const OBJECT_LOADERS: Record<
     p.opportunity.findMany({ where: { workspaceId }, select: { id: true, title: true } }),
   SOLUTION: (p, workspaceId) =>
     p.solution.findMany({
-      where: { opportunity: { workspaceId } },
+      where: { workspaceId },
       select: { id: true, title: true },
     }),
   EXPERIMENT: (p, workspaceId) =>
     p.experiment.findMany({ where: { workspaceId }, select: { id: true, title: true } }),
   OBJECTIVE: (p, workspaceId) =>
-    p.objective.findMany({ where: { cycle: { workspaceId } }, select: { id: true, title: true } }),
+    p.objective.findMany({ where: { workspaceId }, select: { id: true, title: true } }),
   KEY_RESULT: (p, workspaceId) =>
     p.keyResult.findMany({
-      where: { objective: { cycle: { workspaceId } } },
+      where: { objective: { workspaceId } },
       select: { id: true, title: true },
     }),
   ROADMAP_ITEM: (p, workspaceId) =>

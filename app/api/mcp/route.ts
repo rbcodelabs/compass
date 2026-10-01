@@ -151,6 +151,21 @@ import {
   updateKeyResult,
   updateObjective,
 } from "@/lib/okr-tool-handlers"
+import {
+  TypedLinkError,
+  assertKeyResultInWorkspace,
+  getLinkedObjectivesByOpportunity,
+  setOpportunityKeyResult,
+  syncLegacyLink,
+} from "@/lib/typed-links"
+import {
+  linkOpportunityToObjectiveTool,
+  linkSolutionToKeyResultTool,
+  listLinksTool,
+  mcpLinkContext,
+  unlinkOpportunityFromObjectiveTool,
+  unlinkSolutionFromKeyResultTool,
+} from "@/lib/typed-link-tool-handlers"
 import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
@@ -546,7 +561,7 @@ const _handler = createMcpHandler(
         const cycles = await prisma.oKRCycle.findMany({
           where: { workspaceId },
           orderBy: { startDate: "desc" },
-          select: { id: true, title: true, status: true, startDate: true, endDate: true, _count: { select: { objectives: true } } },
+          select: { id: true, title: true, status: true, startDate: true, endDate: true, _count: { select: { objectives: { where: { workspaceId } } } } },
         })
         if (!cycles.length) {
           return fail("No OKR cycles found for this workspace.")
@@ -630,6 +645,7 @@ const _handler = createMcpHandler(
                     supportingObjectives: {
                       select: {
                         id: true,
+                        workspaceId: true,
                         title: true,
                         status: true,
                         cycle: { select: { id: true, title: true } },
@@ -644,7 +660,7 @@ const _handler = createMcpHandler(
                     id: true,
                     title: true,
                     objective: {
-                      select: { title: true, cycle: { select: { title: true } } },
+                      select: { workspaceId: true, title: true, cycle: { select: { title: true } } },
                     },
                   },
                 },
@@ -655,6 +671,17 @@ const _handler = createMcpHandler(
         if (!cycle) {
           return fail(`OKR cycle "${cycleId}" not found.`)
         }
+        // Every nested Objective must carry the cycle's own workspaceId: an Objective with a NULL or different
+        // workspaceId (old-instance insert, drift) is hidden here exactly as it is denied on every other path,
+        // along with the supporting objectives and parent KR links that would otherwise leak it.
+        const scope = cycle.workspaceId
+        cycle.objectives = cycle.objectives
+          .filter((o) => o.workspaceId === scope)
+          .map((o) => ({
+            ...o,
+            keyResults: o.keyResults.map((kr) => ({ ...kr, supportingObjectives: kr.supportingObjectives.filter((s) => s.workspaceId === scope) })),
+            parentKeyResult: o.parentKeyResult && o.parentKeyResult.objective.workspaceId === scope ? o.parentKeyResult : null,
+          }))
 
         const lines: string[] = [
           `**${cycle.title}** (${cycle.status})`,
@@ -705,9 +732,12 @@ const _handler = createMcpHandler(
       },
       async ({ workspaceId, cycleId, title, description, owner, squadId, parentKeyResultId }) => {
         const prisma = getPrisma()
-        const cycle = await prisma.oKRCycle.findFirst({ where: { id: cycleId, workspaceId }, select: { id: true, title: true, workspace: { select: WORKSPACE_LINK_SELECT } } })
+        const cycle = await prisma.oKRCycle.findFirst({ where: { id: cycleId, workspaceId }, select: { id: true, title: true, workspaceId: true, workspace: { select: WORKSPACE_LINK_SELECT } } })
         if (!cycle) {
           return fail(`OKR cycle "${cycleId}" not found in workspace.`)
+        }
+        if (squadId && !(await prisma.squad.findFirst({ where: { id: squadId, workspaceId }, select: { id: true } }))) {
+          return fail(`Squad "${squadId}" not found in workspace.`)
         }
         if (parentKeyResultId) {
           const eligible = await getEligibleParentKeyResults(workspaceId, cycleId)
@@ -716,7 +746,8 @@ const _handler = createMcpHandler(
           }
         }
         const objective = await prisma.objective.create({
-          data: { cycleId, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
+          // workspaceId comes from the cycle just verified to live in the authorized workspace, never from input.
+          data: { workspaceId: cycle.workspaceId, cycleId, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
         })
         return ok(
           withUrlLine(
@@ -781,14 +812,14 @@ const _handler = createMcpHandler(
       },
       async ({ objectiveId, title, target, unit }) => {
         const prisma = getPrisma()
-        // A KeyResult is scoped through objective -> cycle -> workspace (see
+        // A KeyResult is scoped through its Objective's own workspaceId (see
         // entityScopeWhere in lib/entity-detail.ts), so the deeplink's slugs
-        // come down that same chain on the lookup already being made.
+        // come from that same row on the lookup already being made.
         const objective = await prisma.objective.findUnique({
           where: { id: objectiveId },
-          select: { id: true, title: true, cycle: { select: { workspace: { select: WORKSPACE_LINK_SELECT } } } },
+          select: { id: true, title: true, workspaceId: true, workspace: { select: WORKSPACE_LINK_SELECT } },
         })
-        if (!objective) {
+        if (!objective?.workspaceId) {
           return fail(`Objective "${objectiveId}" not found.`)
         }
         const keyResult = await prisma.keyResult.create({
@@ -797,7 +828,7 @@ const _handler = createMcpHandler(
         return ok(
           withUrlLine(
             `**Key Result created** on "${objective.title}"\nID: ${keyResult.id}\nTitle: ${keyResult.title}\nTarget: ${keyResult.target}${keyResult.unit ? " " + keyResult.unit : ""}\nCurrent: 0`,
-            workspaceEntityUrl(objective.cycle?.workspace, { type: "keyResult", id: keyResult.id }),
+            workspaceEntityUrl(objective.workspace, { type: "keyResult", id: keyResult.id }),
           ),
           {
             id: keyResult.id,
@@ -907,14 +938,15 @@ const _handler = createMcpHandler(
         const prisma = getPrisma()
         const objective = await prisma.objective.findUnique({
           where: { id: objectiveId },
-          select: { cycle: { select: { workspaceId: true } } },
+          select: { workspaceId: true },
         })
-        if (!objective) {
+        // NULL workspaceId is treated as not found: fail closed.
+        if (!objective?.workspaceId) {
           return fail(`Objective "${objectiveId}" not found.`)
         }
         try {
           await setObjectiveParentKeyResult({
-            workspaceId: objective.cycle.workspaceId,
+            workspaceId: objective.workspaceId,
             objectiveId,
             keyResultId,
           })
@@ -966,20 +998,27 @@ const _handler = createMcpHandler(
               : {}),
           },
           include: {
-            linkedKeyResult: { select: { title: true, objective: { select: { title: true } } } },
+            linkedKeyResult: { select: { title: true, objective: { select: { workspaceId: true, title: true } } } },
             squad: { select: { name: true } },
-            _count: { select: { solutions: true } },
+            _count: { select: { solutions: { where: { workspaceId } } } },
           },
           orderBy: recencyOrderBy(sort) ?? { createdAt: "desc" },
         })
+        // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
+        for (const o of opportunities) if (o.linkedKeyResult && o.linkedKeyResult.objective.workspaceId !== workspaceId) o.linkedKeyResult = null
         if (!opportunities.length) {
           return fail("No opportunities found.")
         }
+        // Additive: the typed Opportunity<->Objective links, one workspace-filtered batch for the whole list.
+        // `linkedKeyResult` above stays derived from the legacy column only and is never inferred from these.
+        const linkedObjectives = await getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunities.map(o => o.id), { preverified: true })
         const lines = opportunities.map(o => {
           const description = o.description?.trim().replace(/\r\n?/g, "\n")
+          const objectives = linkedObjectives.get(o.id) ?? []
           return (
             `• **${o.title}** [${o.status}]${o.squad ? ` (${o.squad.name})` : ""} — ${o._count.solutions} solutions` +
             (o.linkedKeyResult ? ` — KR: ${o.linkedKeyResult.objective.title} / ${o.linkedKeyResult.title}` : "") +
+            (objectives.length ? ` — Objectives: ${objectives.map(obj => obj.title).join(", ")}` : "") +
             (description ? `\n  Description: ${description.replace(/\n/g, "\n    ")}` : "") +
             `\n  ID: ${o.id}`
           )
@@ -995,6 +1034,7 @@ const _handler = createMcpHandler(
             linkedKeyResult: o.linkedKeyResult
               ? { title: o.linkedKeyResult.title, objective: o.linkedKeyResult.objective.title }
               : null,
+            linkedObjectives: linkedObjectives.get(o.id) ?? [],
           })),
           count: opportunities.length,
         })
@@ -1016,7 +1056,7 @@ const _handler = createMcpHandler(
         const opp = await prisma.opportunity.findUnique({
           where: { id: opportunityId },
           include: {
-            linkedKeyResult: { select: { id: true, title: true, objective: { select: { title: true } } } },
+            linkedKeyResult: { select: { id: true, title: true, objective: { select: { workspaceId: true, title: true } } } },
             squad: { select: { name: true } },
             solutions: {
               orderBy: { createdAt: "asc" },
@@ -1041,12 +1081,19 @@ const _handler = createMcpHandler(
         if (!opp) {
           return fail(`Opportunity "${opportunityId}" not found.`)
         }
+        // Hide a solution whose own workspaceId is NULL or names another workspace, rather than trusting its parent.
+        opp.solutions = opp.solutions.filter((sol) => sol.workspaceId === opp.workspaceId)
+        // Same for the linked KR: its Objective must be in the opportunity's workspace, or the link is hidden.
+        if (opp.linkedKeyResult && opp.linkedKeyResult.objective.workspaceId !== opp.workspaceId) opp.linkedKeyResult = null
+        // Additive typed Opportunity<->Objective links (workspace-filtered). `linkedKeyResult` stays legacy-column-only.
+        const linkedObjectives = (await getLinkedObjectivesByOpportunity(prisma, opp.workspaceId, [opp.id], { preverified: true })).get(opp.id) ?? []
 
         const lines: string[] = [
           `# ${opp.title} [${opp.status}]`,
           `ID: ${opp.id}`,
           opp.squad ? `Squad: ${opp.squad.name}` : "",
           opp.linkedKeyResult ? `Linked KR: ${opp.linkedKeyResult.objective.title} / ${opp.linkedKeyResult.title} (${opp.linkedKeyResult.id})` : "",
+          linkedObjectives.length ? `Linked objectives: ${linkedObjectives.map(obj => `${obj.title} (${obj.id})`).join(", ")}` : "",
           opp.description ? `\n${opp.description}` : "",
           "",
         ].filter(Boolean)
@@ -1070,7 +1117,7 @@ const _handler = createMcpHandler(
           lines.push("")
         }
 
-        return ok(lines.join("\n"), opp)
+        return ok(lines.join("\n"), { ...opp, linkedObjectives })
       }
     )
 
@@ -1141,17 +1188,29 @@ const _handler = createMcpHandler(
         if (!workspace) {
           return fail(`Workspace "${workspaceId}" not found.`)
         }
-        const opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", "MCP", undefined, tx => tx.opportunity.create({
-          data: {
-            workspaceId,
-            title: title.trim(),
-            description: description?.trim(),
-            customerSegment: customerSegment?.trim(),
-            status: status ?? "EXPLORING",
-            linkedKeyResultId: keyResultId ?? null,
-            squadId: squadId ?? null,
-          },
-        }))
+        // The legacy pointer and its LEGACY Opportunity<->Objective link are written together, in one transaction.
+        let opportunity
+        try {
+          opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", "MCP", undefined, async tx => {
+            if (keyResultId) await assertKeyResultInWorkspace(tx, keyResultId, workspaceId)
+            const created = await tx.opportunity.create({
+              data: {
+                workspaceId,
+                title: title.trim(),
+                description: description?.trim(),
+                customerSegment: customerSegment?.trim(),
+                status: status ?? "EXPLORING",
+                linkedKeyResultId: keyResultId ?? null,
+                squadId: squadId ?? null,
+              },
+            })
+            if (keyResultId) await syncLegacyLink(tx, { opportunityId: created.id, workspaceId, keyResultId, ctx: mcpLinkContext() })
+            return created
+          }, { atomic: true })
+        } catch (error) {
+          if (error instanceof TypedLinkError) return fail(error.message)
+          throw error
+        }
         return ok(
           withUrlLine(
             `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
@@ -1233,7 +1292,14 @@ const _handler = createMcpHandler(
         if (!opp) {
           return fail(`Opportunity "${opportunityId}" not found.`)
         }
-        await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", opportunityId, tx => tx.opportunity.update({ where: { id: opportunityId }, data: { linkedKeyResultId: keyResultId } }))
+        // Dual-write, one transaction: the legacy column and its LEGACY link to the key result's objective (which
+        // must be in the opportunity's workspace). A DIRECT link is never touched by a clear or a change.
+        try {
+          await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", opportunityId, tx => setOpportunityKeyResult(tx, { opportunityId, keyResultId, ctx: mcpLinkContext() }), { atomic: true })
+        } catch (error) {
+          if (error instanceof TypedLinkError) return fail(error.message)
+          throw error
+        }
         return ok(
           keyResultId
             ? `Linked opportunity "${opp.title}" to KR ${keyResultId}.`
@@ -1241,6 +1307,75 @@ const _handler = createMcpHandler(
           { id: opportunityId, title: opp.title, linkedKeyResultId: keyResultId },
         )
       }
+    )
+
+    const typedLinkEnds = { workspaceId: z.string().uuid().describe("UUID of the workspace that owns both ends") }
+    register(
+      "link_opportunity_to_objective",
+      {
+        title: "Link Opportunity to Objective",
+        description:
+          "Links an Opportunity directly to an Objective in the same workspace (an objective-level link; use link_opportunity_to_kr to pick a specific Key Result). " +
+          "Idempotent: repeating returns created:false. A direct link survives clearing the opportunity's Key Result.",
+        inputSchema: { ...typedLinkEnds, opportunityId: z.string().uuid().describe("UUID of the opportunity"), objectiveId: z.string().uuid().describe("UUID of the objective") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      linkOpportunityToObjectiveTool,
+    )
+    register(
+      "unlink_opportunity_from_objective",
+      {
+        title: "Unlink Opportunity from Objective",
+        description:
+          "Removes the link between an Opportunity and an Objective. Returns removed:0 when there is none. When a link exists the call also bumps the opportunity's updatedAt (even if the link is kept because the Key Result implies it), so a concurrent edit conflicts instead of racing. If the opportunity's linked Key Result is under that objective the link is derived from it and remains until the Key Result is cleared (stillLinkedViaKeyResult:true, removed:0). That is not a failure: the call succeeded and nothing needed to change.",
+        inputSchema: { ...typedLinkEnds, opportunityId: z.string().uuid().describe("UUID of the opportunity"), objectiveId: z.string().uuid().describe("UUID of the objective") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      unlinkOpportunityFromObjectiveTool,
+    )
+    register(
+      "link_solution_to_key_result",
+      {
+        title: "Link Solution to Key Result",
+        description:
+          "Links a Solution to a Key Result in the same workspace, to show which metric the solution is meant to move. The solution keeps its single parent Opportunity. Idempotent: repeating returns created:false.",
+        inputSchema: { ...typedLinkEnds, solutionId: z.string().uuid().describe("UUID of the solution"), keyResultId: z.string().uuid().describe("UUID of the Key Result") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      linkSolutionToKeyResultTool,
+    )
+    register(
+      "unlink_solution_from_key_result",
+      {
+        title: "Unlink Solution from Key Result",
+        description: "Removes the link between a Solution and a Key Result. Returns removed:0 when there is none.",
+        inputSchema: { ...typedLinkEnds, solutionId: z.string().uuid().describe("UUID of the solution"), keyResultId: z.string().uuid().describe("UUID of the Key Result") },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      unlinkSolutionFromKeyResultTool,
+    )
+    register(
+      "list_links",
+      {
+        title: "List Links",
+        description:
+          "Lists the typed links on one entity: pass exactly one of opportunityId (its objectives), objectiveId (its opportunities), solutionId (its key results) or keyResultId (its solutions). " +
+          "Ordered oldest first; pass the returned nextCursor as cursor for the next page. Links between an Opportunity and an Objective report origin DIRECT (made with the link tools) or LEGACY (derived from the opportunity's linked Key Result).",
+        inputSchema: z.object({
+          ...typedLinkEnds,
+          opportunityId: z.string().uuid().optional().describe("UUID of an opportunity"),
+          objectiveId: z.string().uuid().optional().describe("UUID of an objective"),
+          solutionId: z.string().uuid().optional().describe("UUID of a solution"),
+          keyResultId: z.string().uuid().optional().describe("UUID of a Key Result"),
+          limit: z.number().int().min(1).max(100).optional().default(50).describe("Page size (default 50)"),
+          cursor: z.string().max(512).optional().describe("nextCursor from the previous page"),
+        }).strict().refine(
+          (args) => [args.opportunityId, args.objectiveId, args.solutionId, args.keyResultId].filter(Boolean).length === 1,
+          { message: "Provide exactly one of opportunityId, objectiveId, solutionId or keyResultId." },
+        ),
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listLinksTool,
     )
 
     register(
@@ -1259,12 +1394,13 @@ const _handler = createMcpHandler(
         const prisma = getPrisma()
         const opp = await prisma.opportunity.findUnique({
           where: { id: opportunityId },
-          select: { id: true, title: true, workspace: { select: WORKSPACE_LINK_SELECT } },
+          select: { id: true, title: true, workspaceId: true, workspace: { select: WORKSPACE_LINK_SELECT } },
         })
         if (!opp) {
           return fail(`Opportunity "${opportunityId}" not found.`)
         }
-        const solution = await captureWorkspaceMutation(prisma, "solution", "create", "MCP", undefined, tx => tx.solution.create({ data: { opportunityId, title: title.trim(), description: description?.trim() } }))
+        // workspaceId is the authorized parent Opportunity's, never caller input.
+        const solution = await captureWorkspaceMutation(prisma, "solution", "create", "MCP", undefined, tx => tx.solution.create({ data: { workspaceId: opp.workspaceId, opportunityId, title: title.trim(), description: description?.trim() } }))
         return ok(
           withUrlLine(
             `**Solution created** for "${opp.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
@@ -1326,14 +1462,15 @@ const _handler = createMcpHandler(
       },
       async ({ solutionId, title, description, riskLevel }) => {
         const prisma = getPrisma()
-        // Two hops: an Assumption's workspace (and the discovery page its panel
-        // opens on) live up through Solution -> Opportunity.
+        // The link's slugs come from the Solution's own workspace; only the discovery page id
+        // (the opportunity it opens under) is read off the Solution's opportunityId.
         const solution = await prisma.solution.findUnique({
           where: { id: solutionId },
           select: {
             id: true,
             title: true,
-            opportunity: { select: { id: true, workspace: { select: WORKSPACE_LINK_SELECT } } },
+            opportunityId: true,
+            workspace: { select: WORKSPACE_LINK_SELECT },
           },
         })
         if (!solution) {
@@ -1343,10 +1480,10 @@ const _handler = createMcpHandler(
         return ok(
           withUrlLine(
             `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
-            workspaceEntityUrl(solution.opportunity?.workspace, {
+            workspaceEntityUrl(solution.workspace, {
               type: "assumption",
               id: assumption.id,
-              opportunityId: solution.opportunity?.id,
+              opportunityId: solution.opportunityId,
             }),
           ),
           {
@@ -1520,7 +1657,7 @@ const _handler = createMcpHandler(
         const prisma = getPrisma()
         const solution = await prisma.solution.findUnique({
           where: { id: solutionId },
-          include: { opportunity: { select: { id: true, title: true, squadId: true, workspaceId: true, workspace: { select: WORKSPACE_LINK_SELECT } } } },
+          include: { workspace: { select: WORKSPACE_LINK_SELECT }, opportunity: { select: { id: true, title: true, squadId: true } } },
         })
         if (!solution) {
           return fail(`Solution "${solutionId}" not found.`)
@@ -1548,8 +1685,8 @@ const _handler = createMcpHandler(
             // The item is created in `workspaceId`, which the solution's own
             // workspace need not match — only link when they do, rather than
             // pointing at a roadmap the item isn't on.
-            solution.opportunity.workspaceId === workspaceId
-              ? workspaceEntityUrl(solution.opportunity.workspace, { type: "roadmapItem", id: item.id })
+            solution.workspaceId === workspaceId
+              ? workspaceEntityUrl(solution.workspace, { type: "roadmapItem", id: item.id })
               : null,
           ),
           {
