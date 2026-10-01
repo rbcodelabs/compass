@@ -103,8 +103,14 @@ export function createTenantFakePrisma() {
     { id: "scm-b", solutionId: "sol-b", body: "B comment" },
     { id: "scm-null", solutionId: "sol-null", body: "Comment under an unbackfilled solution" },
   ];
+  // Typed link tables (ADR Phase 2). Scalar ids only, exactly like the Prisma models: no relation fields.
+  // The pair is unique, so a duplicate create throws P2002 the way the real unique index does.
+  const opportunityObjectiveLinks: Graph[] = [];
+  const solutionKeyResultLinks: Graph[] = [];
   const workspaceRows = workspaces as unknown as Graph[];
   const tables: Record<string, Graph[]> = {
+    opportunityObjectiveLink: opportunityObjectiveLinks,
+    solutionKeyResultLink: solutionKeyResultLinks,
     workspace: workspaceRows,
     opportunity: opportunities as unknown as Graph[],
     squad: squads as unknown as Graph[],
@@ -161,7 +167,10 @@ export function createTenantFakePrisma() {
       if (!(key in row)) throw new Error(`fake prisma: unsupported where key "${key}" on ${model}`);
       const value = row[key];
       if (cond !== null && typeof cond === "object" && !(cond instanceof Date)) {
-        const op = cond as { in?: unknown[]; contains?: string; not?: unknown };
+        const op = cond as { in?: unknown[]; contains?: string; not?: unknown; gt?: unknown; lt?: unknown };
+        const cmp = (a: unknown, b: unknown) => (a instanceof Date && b instanceof Date ? a.getTime() - b.getTime() : a === b ? 0 : (a as number) > (b as number) ? 1 : -1);
+        if (op.gt !== undefined) { if (value == null || cmp(value, op.gt) <= 0) return false; continue; }
+        if (op.lt !== undefined) { if (value == null || cmp(value, op.lt) >= 0) return false; continue; }
         if (op.in !== undefined) { if (!op.in.includes(value)) return false; continue; }
         if (op.contains !== undefined) {
           if (typeof value !== "string" || !value.toLowerCase().includes(op.contains.toLowerCase())) return false;
@@ -170,7 +179,7 @@ export function createTenantFakePrisma() {
         if (op.not !== undefined) { if (value === op.not) return false; continue; }
         throw new Error(`fake prisma: unsupported operator on ${model}.${key}`);
       }
-      if (value !== cond) return false;
+      if (value instanceof Date && cond instanceof Date ? value.getTime() !== cond.getTime() : value !== cond) return false;
     }
     return true;
   };
@@ -197,6 +206,11 @@ export function createTenantFakePrisma() {
   };
 
   let created = 0;
+  let linkClock = 0; // strictly increasing createdAt for link rows, so ordering assertions are deterministic
+  const LINK_PAIRS: Record<string, [string, string]> = {
+    opportunityObjectiveLink: ["opportunityId", "objectiveId"],
+    solutionKeyResultLink: ["solutionId", "keyResultId"],
+  };
   const writes: string[] = [];
   const delegate = (model: string) => ({
     findFirst: async (args: { where?: Where; select?: Record<string, unknown>; include?: Record<string, unknown> } = {}) => {
@@ -207,13 +221,30 @@ export function createTenantFakePrisma() {
       const row = tables[model].find((r) => matches(model, r, args.where));
       return row ? project(model, row, args) : null;
     },
-    findMany: async (args: { where?: Where; select?: Record<string, unknown>; include?: Record<string, unknown>; take?: number } = {}) => {
-      const rows = tables[model].filter((r) => matches(model, r, args.where)).map((r) => project(model, r, args));
+    findMany: async (args: { where?: Where; select?: Record<string, unknown>; include?: Record<string, unknown>; take?: number; orderBy?: Record<string, "asc" | "desc"> | Record<string, "asc" | "desc">[] } = {}) => {
+      const orderings = args.orderBy ? (Array.isArray(args.orderBy) ? args.orderBy : [args.orderBy]) : [];
+      const matched = tables[model].filter((r) => matches(model, r, args.where));
+      for (const ordering of [...orderings].reverse()) {
+        const [[field, direction]] = Object.entries(ordering);
+        matched.sort((a, b) => {
+          const av = a[field] as number | string | Date;
+          const bv = b[field] as number | string | Date;
+          const d = av instanceof Date && bv instanceof Date ? av.getTime() - bv.getTime() : av === bv ? 0 : av > bv ? 1 : -1;
+          return direction === "desc" ? -d : d;
+        });
+      }
+      const rows = matched.map((r) => project(model, r, args));
       return args.take ? rows.slice(0, args.take) : rows;
     },
     count: async (args: { where?: Where } = {}) => tables[model].filter((r) => matches(model, r, args.where)).length,
     create: async ({ data, select }: { data: Graph; select?: Record<string, unknown> }) => {
-      const row: Graph = { id: `${model}-new-${++created}`, createdAt: new Date(), updatedAt: new Date(), ...data };
+      const pair = LINK_PAIRS[model];
+      if (pair && tables[model].some((r) => r[pair[0]] === data[pair[0]] && r[pair[1]] === data[pair[1]])) {
+        throw Object.assign(new Error("Unique constraint failed"), { code: "P2002", meta: { modelName: model === "opportunityObjectiveLink" ? "OpportunityObjectiveLink" : "SolutionKeyResultLink" } });
+      }
+      linkClock += 1;
+      const row: Graph = { id: `${model}-new-${++created}`, createdAt: pair ? new Date(1_000 + linkClock) : new Date(), updatedAt: new Date(), ...data };
+      if (pair) delete row.updatedAt;
       tables[model].push(row);
       writes.push(`${model}.create:${row.id}`);
       return project(model, row, { select });
@@ -271,6 +302,11 @@ export function createTenantFakePrisma() {
 
   const client = {
     workspace: {
+      /** The by-id shape handlers use to fetch a name and the slugs for a deep link. */
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        const found = workspaces.find((w) => w.id === where.id);
+        return found ? { id: found.id, name: found.slug, slug: found.slug, organization: { slug: found.org } } : null;
+      },
       findFirst: async ({ where }: { where: Where }) => {
         // Generic matcher so AND-composed membership filters (agentWorkspaceWhere) are honoured too.
         const found = workspaces.find((w) => matches("workspace", w as unknown as Graph, where));
@@ -332,12 +368,15 @@ export function createTenantFakePrisma() {
     assumption: delegate("assumption"),
     solutionComment: delegate("solutionComment"),
     oKRCycle: delegate("okrCycle"),
+    opportunityObjectiveLink: delegate("opportunityObjectiveLink"),
+    solutionKeyResultLink: delegate("solutionKeyResultLink"),
     $transaction: async (work: (tx: unknown) => unknown) => work(client),
     opportunity: {
       ...delegate("opportunity"),
-      findFirst: async ({ where }: { where: Where }) => {
+      findFirst: async ({ where, select }: { where: Where; select?: Record<string, unknown> }) => {
         const row = opportunities.find((o) => matches("opportunity", o as unknown as Graph, where));
-        return row ? { id: row.id, workspaceId: row.workspaceId } : null;
+        if (!row) return null;
+        return select ? project("opportunity", row as unknown as Graph, { select }) : { id: row.id, workspaceId: row.workspaceId };
       },
       findMany: async ({ where }: { where: Where }) =>
         opportunities.filter((o) => matches("opportunity", o as unknown as Graph, where)),
@@ -356,7 +395,7 @@ export function createTenantFakePrisma() {
       const workspace = workspaces.find((w) => w.id === workspaceId);
       if (workspace && !workspace.members.includes(userId)) workspace.members.push(userId);
     },
-    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles },
+    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks },
     /** Snapshot of every feedback row, for before/after "nothing changed" assertions. */
     snapshotFeedback: () => JSON.parse(JSON.stringify(feedback)) as unknown,
   };

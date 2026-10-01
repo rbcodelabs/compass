@@ -3,11 +3,15 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * Migration-only PR: the typed link tables exist but no application code may
- * read or write them yet (old clients must be unaffected, and the code that
- * uses them must not deploy before migration 071 is applied). The only
- * allowed references are the migration hook and a comment in the runner, both
- * under lib/migrations.
+ * The typed link models and tables (opportunity_objective_links, solution_key_result_links) are reached
+ * through ONE module, lib/typed-links.ts, which owns the tenant-safety rules (workspaceId from the authorized
+ * parent, both endpoints re-verified in the transaction, origin never downgraded, workspace-filtered reads).
+ * Nothing else in app code may name them: not a model delegate, not a table, not a generic delegate lookup.
+ * The migration hook and its SQL (lib/migrations, prisma/migrations) and schema.prisma legitimately do, and so
+ * do tests.
+ *
+ * (This used to be the migration-only PR's "nothing reads these tables yet" guard. The code PR that deploys
+ * after migration 071 replaces that invariant with this narrower, permanent one.)
  */
 const ROOT = process.cwd();
 const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "generated", ".worktrees", ".claude", ".pnpm-store"]);
@@ -39,11 +43,16 @@ function sourceFiles(dir: string): string[] {
 }
 
 const rel = (file: string) => path.relative(ROOT, file);
-const isMigrationOwned = (file: string) =>
-  rel(file).startsWith(`lib${path.sep}migrations${path.sep}`) || rel(file).startsWith(`prisma${path.sep}migrations${path.sep}`);
-/** This test, its sibling tests for the migration, and schema.prisma legitimately name the tables. */
-const isOwnedTestOrSchema = (file: string) =>
-  /^__tests__\/(typed-link-tables-|prisma-migrations\.test\.ts)/.test(rel(file).split(path.sep).join("/")) || rel(file) === `prisma${path.sep}schema.prisma`;
+const relPosix = (file: string) => rel(file).split(path.sep).join("/");
+const isMigrationOwned = (file: string) => relPosix(file).startsWith("lib/migrations/") || relPosix(file).startsWith("prisma/migrations/");
+/** The one module that may name the link models, and schema.prisma (which declares them). */
+const LINK_MODULE = "lib/typed-links.ts";
+/**
+ * The one end-to-end spec that must delete its synthetic link rows by workspace id in afterAll (no foreign key reaches them, so
+ * deleting the workspace would leave them behind in the shared e2e database). It verifies behaviour through the MCP tools.
+ */
+const E2E_CLEANUP_SPECS = new Set(["e2e/functional/specs/typed-links.spec.ts"]);
+const isLinkModuleOrSchema = (file: string) => relPosix(file) === LINK_MODULE || relPosix(file) === "prisma/schema.prisma" || E2E_CLEANUP_SPECS.has(relPosix(file));
 
 // Files that legitimately use non-literal Prisma delegates or model introspection today, each over a fixed
 // model list that does not include the link models (the name check above still covers those lists).
@@ -65,7 +74,8 @@ describe("findLinkReferences (canary: the guard catches known-bad text)", () => 
     ["type M = 'OpportunityObjectiveLink'", "link model/table name"],
     ["opportunity-objective-link", "link model/table name"],
     ["const delegate = prisma[modelName]", "dynamic delegate access"],
-    ["tx[`${kind}Link`].create(args)", "dynamic delegate access"],
+    // Assembled, so this canary is not itself a dynamic-delegate create the write-path guard would flag in this file.
+    [["tx[", "`${kind}Link`", "].cre", "ate(args)"].join(""), "dynamic delegate access"],
     ["Object.keys(Prisma.ModelName)", "model introspection"],
     ["Prisma.dmmf.datamodel.models", "model introspection"],
   ])("flags %s", (text, reason) => {
@@ -82,7 +92,7 @@ describe("findLinkReferences (canary: the guard catches known-bad text)", () => 
   });
 });
 
-describe("typed link tables are not used by application code yet", () => {
+describe("typed link models are reached only through lib/typed-links.ts", () => {
   const files = SCANNED_DIRS.flatMap((dir) => {
     try {
       return sourceFiles(path.join(ROOT, dir));
@@ -98,9 +108,13 @@ describe("typed link tables are not used by application code yet", () => {
     expect(files.some((file) => rel(file) === "seed-screenshots.ts")).toBe(true);
   });
 
-  it("nothing in app/, lib/, components/, hooks/, scripts/, e2e/, prisma/ seeds or root scripts references the new models or tables", () => {
+  it("lib/typed-links.ts does name them (so the scan below is looking at the right thing)", () => {
+    expect(findLinkReferences(readFileSync(path.join(ROOT, LINK_MODULE), "utf-8"))).toContain("link model/table name");
+  });
+
+  it("nothing in app/, lib/, components/, hooks/, scripts/, e2e/, prisma/ seeds or root scripts references the link models or tables except that module and the migration hook", () => {
     const offenders = files
-      .filter((file) => !isMigrationOwned(file) && !isOwnedTestOrSchema(file))
+      .filter((file) => !isMigrationOwned(file) && !isLinkModuleOrSchema(file))
       .flatMap((file) => {
         const hits = findLinkReferences(readFileSync(file, "utf-8")).filter(
           (hit) => !(hit === "dynamic delegate access" || hit === "model introspection") || !ALLOWED_GENERIC_ACCESS.has(rel(file).split(path.sep).join("/")),
