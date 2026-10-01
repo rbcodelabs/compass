@@ -6,7 +6,9 @@ import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache"
 import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import type { ExperimentStatus, AssumptionStatus } from "@/lib/types"
-import { requireProductEntity, requireProductWorkspace } from "@/lib/product-action-auth"
+import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth"
+import type { AssumptionOptionData, SquadData } from "@/lib/types"
+import { EXPERIMENT_TITLE_MAX_LENGTH } from "@/lib/experiment-draft"
 
 export async function createExperiment(
   workspaceId: string,
@@ -204,4 +206,91 @@ export async function reorderExperiment(
     data: { sortOrder },
   }))
   revalidatePath(revalidatePathStr)
+}
+
+export type ExperimentComposerOptions = {
+  squads: SquadData[]
+  assumptions: AssumptionOptionData[]
+}
+
+/** What the "New experiment" composer's pickers choose from. */
+export async function loadExperimentComposerOptions(
+  orgSlug: string,
+  workspaceSlug: string
+): Promise<{ ok: true; options: ExperimentComposerOptions } | { ok: false; error: string }> {
+  let workspaceId: string
+  try {
+    workspaceId = await requireProductWorkspaceBySlug(orgSlug, workspaceSlug)
+  } catch {
+    return { ok: false, error: "Workspace not found or you no longer have access to it." }
+  }
+  const prisma = getPrisma()
+  const [squads, assumptions] = await Promise.all([
+    prisma.squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
+    prisma.assumption.findMany({
+      where: { solution: { opportunity: { workspaceId } } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, title: true, solution: { select: { title: true, opportunity: { select: { title: true } } } } },
+    }),
+  ])
+  return {
+    ok: true,
+    options: {
+      squads,
+      assumptions: assumptions.map((a) => ({
+        id: a.id,
+        title: a.title,
+        solutionTitle: a.solution.title,
+        opportunityTitle: a.solution.opportunity.title,
+      })),
+    },
+  }
+}
+
+export type CreateExperimentFromComposerResult =
+  | { ok: true; experiment: { id: string; title: string } }
+  | { ok: false; error: string }
+
+/** Composer entry point: resolves the workspace by slug and reports failures as values. */
+export async function createExperimentFromComposer(
+  orgSlug: string,
+  workspaceSlug: string,
+  data: {
+    title: string
+    hypothesis: string
+    method: string
+    killCondition: string
+    assumptionId?: string | null
+    squadId?: string | null
+  }
+): Promise<CreateExperimentFromComposerResult> {
+  let workspaceId: string
+  try {
+    workspaceId = await requireProductWorkspaceBySlug(orgSlug, workspaceSlug)
+  } catch {
+    return { ok: false, error: "Workspace not found or you no longer have access to it." }
+  }
+  const title = data.title.trim()
+  const hypothesis = data.hypothesis.trim()
+  const method = data.method.trim()
+  const killCondition = data.killCondition.trim()
+  if (!title || !hypothesis || !method || !killCondition) {
+    return { ok: false, error: "Title, hypothesis, method and kill condition are all required." }
+  }
+  if (title.length > EXPERIMENT_TITLE_MAX_LENGTH) {
+    return { ok: false, error: `Title must be ${EXPERIMENT_TITLE_MAX_LENGTH} characters or fewer.` }
+  }
+  try {
+    const experiment = await createExperiment(workspaceId, {
+      title,
+      hypothesis,
+      method,
+      killCondition,
+      assumptionId: data.assumptionId ?? undefined,
+      squadId: data.squadId ?? null,
+    })
+    return { ok: true, experiment: { id: experiment.id, title: experiment.title } }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Failed to create experiment" }
+  }
 }

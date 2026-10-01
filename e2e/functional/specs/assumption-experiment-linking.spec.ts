@@ -90,7 +90,7 @@ test.describe("Assumption ↔ Experiment linking", () => {
 
       // The create-experiment form should already be open (prefilled), with
       // the assumption picker showing our assumption pre-selected.
-      await expect(page.getByText("New Experiment")).toBeVisible();
+      await expect(page.getByRole("form", { name: "New experiment" })).toBeVisible();
       await expect(
         page.getByRole("combobox").filter({ hasText: assumptionTitle })
       ).toBeVisible({ timeout: 10_000 });
@@ -99,10 +99,10 @@ test.describe("Assumption ↔ Experiment linking", () => {
       await page.getByLabel("Title").fill(expTitle);
       await page.getByLabel("Hypothesis").fill("We believe linking assumptions works.");
       await page.getByLabel("Method").fill("Manual QA pass.");
-      await page.getByLabel("Kill Condition").fill("Abandon if the link never appears.");
-      await page.getByRole("button", { name: "Create Experiment" }).click();
+      await page.getByLabel("Kill Condition", { exact: true }).fill("Abandon if the link never appears.");
+      await page.getByRole("button", { name: "Submit" }).click();
 
-      await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByLabel("Experiment board").getByRole("button", { name: expTitle, exact: true })).toBeVisible({ timeout: 15_000 });
 
       // ── 7. Verify the OST tree now shows the linked experiment ─────────────
       await page.goto(`${base}/discovery`);
