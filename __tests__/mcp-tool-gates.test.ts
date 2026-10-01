@@ -19,7 +19,10 @@ const mockPrisma = {
   organizationMember: { findFirst: vi.fn() },
   scoringModel: { findUnique: vi.fn() },
   agentOrgAdminGrant: { findFirst: vi.fn() },
-  opportunity: { findUnique: vi.fn(), update: vi.fn() },
+  opportunity: { findUnique: vi.fn(), update: vi.fn(), findMany: vi.fn() },
+  objective: { findUnique: vi.fn(), findMany: vi.fn() },
+  opportunityObjectiveLink: { findMany: vi.fn() },
+  solutionKeyResultLink: { findMany: vi.fn() },
   solution: { findUnique: vi.fn(), update: vi.fn() },
   roadmapItem: { findUnique: vi.fn(), update: vi.fn() },
   artifact: { findUnique: vi.fn() },
@@ -656,9 +659,136 @@ describe("register() wrapper enforces gates end-to-end", () => {
       solutions: [],
     })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    // The additive linkedObjectives read: workspace-checked opportunity, then its (empty) link rows.
+    mockPrisma.opportunity.findMany.mockResolvedValue([{ id: "opp-1" }])
+    mockPrisma.opportunityObjectiveLink.findMany.mockResolvedValue([])
     const result = (await callTool("get_opportunity", MEMBER, { opportunityId: "opp-1" })) as {
       content: { text: string }[]
     }
     expect(result.content[0].text).toContain("Reduce churn")
+  })
+})
+
+// ── Typed links (ADR Phase 2) ───────────────────────────────────────────────
+describe("typed link tools are classified, gated, and same-workspace", () => {
+  const writeTools = ["link_opportunity_to_objective", "unlink_opportunity_from_objective", "link_solution_to_key_result", "unlink_solution_from_key_result"]
+  const entityRow: Record<string, (workspaceId: string) => unknown> = {
+    opportunity: (workspaceId) => ({ workspaceId }),
+    solution: (workspaceId) => ({ workspaceId }),
+    objective: (workspaceId) => ({ workspaceId }),
+    keyResult: (workspaceId) => ({ objective: { workspaceId } }),
+  }
+  const seed = (rows: Record<string, string | null>) => {
+    for (const [model, workspaceId] of Object.entries(rows)) {
+      ;(mockPrisma as unknown as Record<string, { findUnique: ReturnType<typeof vi.fn> }>)[model].findUnique.mockResolvedValue(workspaceId ? entityRow[model](workspaceId) : null)
+    }
+  }
+
+  it.each(writeTools)("%s is a registered write: mcp:write scope, WRITE for agents", (tool) => {
+    expect(tool in registeredTools).toBe(true)
+    expect(tool in TOOL_GATES).toBe(true)
+    expect(requiredToolScope(tool)).toBe("mcp:write")
+    expect(AGENT_TOOL_POLICY[tool]).toBe("WRITE")
+  })
+
+  it("list_links is a registered read: mcp:read scope, READ for agents", () => {
+    expect("list_links" in registeredTools).toBe(true)
+    expect(requiredToolScope("list_links")).toBe("mcp:read")
+    expect(AGENT_TOOL_POLICY.list_links).toBe("READ")
+  })
+
+  const cases: [string, Record<string, unknown>, Record<string, string | null>][] = [
+    ["link_opportunity_to_objective", { workspaceId: "ws-1", opportunityId: "o", objectiveId: "ob" }, { opportunity: "ws-1", objective: "ws-1" }],
+    ["unlink_opportunity_from_objective", { workspaceId: "ws-1", opportunityId: "o", objectiveId: "ob" }, { opportunity: "ws-1" }],
+    ["link_solution_to_key_result", { workspaceId: "ws-1", solutionId: "s", keyResultId: "k" }, { solution: "ws-1", keyResult: "ws-1" }],
+    ["unlink_solution_from_key_result", { workspaceId: "ws-1", solutionId: "s", keyResultId: "k" }, { solution: "ws-1" }],
+    ["list_links", { workspaceId: "ws-1", opportunityId: "o" }, { opportunity: "ws-1" }],
+    ["list_links", { workspaceId: "ws-1", objectiveId: "ob" }, { objective: "ws-1" }],
+    ["list_links", { workspaceId: "ws-1", solutionId: "s" }, { solution: "ws-1" }],
+    ["list_links", { workspaceId: "ws-1", keyResultId: "k" }, { keyResult: "ws-1" }],
+  ]
+
+  it.each(cases)("%s admits a member of the declared workspace (%j)", async (tool, args, rows) => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    seed(rows)
+    await expect(applyToolGate(tool, MEMBER, args)).resolves.toBeUndefined()
+  })
+
+  it.each(cases)("%s denies a non-member (%j)", async (tool, args, rows) => {
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    seed(rows)
+    await expect(applyToolGate(tool, MEMBER, args)).rejects.toThrow(/not found or access denied/)
+  })
+
+  it.each(cases)("%s denies an entity that is in another workspace than the declared one (%j)", async (tool, args, rows) => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    seed(Object.fromEntries(Object.keys(rows).map((model) => [model, "ws-2"])))
+    await expect(applyToolGate(tool, MEMBER, args)).rejects.toThrow(/does not belong to workspace/)
+  })
+
+  it("link_opportunity_to_objective denies a foreign objective even though the opportunity is the member's", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    seed({ opportunity: "ws-1", objective: "ws-2" })
+    await expect(applyToolGate("link_opportunity_to_objective", MEMBER, { workspaceId: "ws-1", opportunityId: "o", objectiveId: "ob" })).rejects.toThrow(/does not belong to workspace/)
+  })
+
+  it("agents without a write grant are denied the write tools at the workspace gate", async () => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    try {
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent" })
+      mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([])
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      seed({ opportunity: "ws-1", objective: "ws-1" })
+      await expect(applyToolGate("link_opportunity_to_objective", { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1", opportunityId: "o", objectiveId: "ob" })).rejects.toThrow(/not found or access denied/)
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it("public research credentials get none of them", async () => {
+    for (const tool of [...writeTools, "list_links"]) {
+      await expect(applyToolGate(tool, RESEARCH, { workspaceId: "ws-1" })).rejects.toThrow(/not available to research interviews/)
+    }
+  })
+})
+
+describe("link_opportunity_to_kr and create_opportunity reject a key result from another workspace", () => {
+  it("rejects a cross-workspace KR for a member of both workspaces (the gate used to check access to each independently)", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "member-of-both" })
+    mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.keyResult.findUnique.mockResolvedValue({ objective: { workspaceId: "ws-2" } })
+    await expect(applyToolGate("link_opportunity_to_kr", MEMBER, { opportunityId: "o", keyResultId: "k" })).rejects.toThrow(/same workspace/)
+  })
+
+  it("rejects it through the registered wrapper without any write", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "member-of-both" })
+    mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.keyResult.findUnique.mockResolvedValue({ objective: { workspaceId: "ws-2" } })
+    await expect(callTool("link_opportunity_to_kr", MEMBER, { opportunityId: "o", keyResultId: "k" })).rejects.toThrow(/same workspace/)
+    expect(mockPrisma.opportunity.update).not.toHaveBeenCalled()
+  })
+
+  it("admits a same-workspace KR, and a null keyResultId only needs the opportunity", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.keyResult.findUnique.mockResolvedValue({ objective: { workspaceId: "ws-1" } })
+    await expect(applyToolGate("link_opportunity_to_kr", MEMBER, { opportunityId: "o", keyResultId: "k" })).resolves.toBeUndefined()
+    mockPrisma.keyResult.findUnique.mockClear()
+    await expect(applyToolGate("link_opportunity_to_kr", MEMBER, { opportunityId: "o", keyResultId: null })).resolves.toBeUndefined()
+    expect(mockPrisma.keyResult.findUnique).not.toHaveBeenCalled()
+  })
+
+  it("denies a non-member of the opportunity's workspace before comparing workspaces (no existence leak)", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.keyResult.findUnique.mockResolvedValue({ objective: { workspaceId: "ws-2" } })
+    await expect(applyToolGate("link_opportunity_to_kr", MEMBER, { opportunityId: "o", keyResultId: "k" })).rejects.toThrow(/not found or access denied/)
+  })
+
+  it("create_opportunity denies a keyResultId from another workspace than the declared one", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    mockPrisma.keyResult.findUnique.mockResolvedValue({ objective: { workspaceId: "ws-2" } })
+    await expect(applyToolGate("create_opportunity", MEMBER, { workspaceId: "ws-1", keyResultId: "k" })).rejects.toThrow(/does not belong to workspace/)
+    mockPrisma.keyResult.findUnique.mockResolvedValue({ objective: { workspaceId: "ws-1" } })
+    await expect(applyToolGate("create_opportunity", MEMBER, { workspaceId: "ws-1", keyResultId: "k" })).resolves.toBeUndefined()
+    await expect(applyToolGate("create_opportunity", MEMBER, { workspaceId: "ws-1" })).resolves.toBeUndefined()
   })
 })
