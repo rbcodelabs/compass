@@ -1,4 +1,6 @@
 import getPrisma from "@/lib/db"
+import type { AppPrismaClient } from "@/lib/db"
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import type { CustomFieldObjectType } from "@/lib/types"
 import {
   CardSortError,
@@ -13,10 +15,13 @@ import { createOpportunityWithLinks, OpportunityCreateError } from "@/lib/opport
  * Proposing NEW entries in a card sort round.
  *
  * A card sort moves existing objects between buckets. This lets a participant
- * say "the list is missing something" — but only in OPPORTUNITY rounds, and only
- * as a request. A CardSortNewEntry is not an Opportunity: nothing in the OST
- * changes until the round's facilitator accepts it, at which point the real
- * Opportunity is created. Rejected entries are kept for the record.
+ * say "the list is missing something" — but only in OPPORTUNITY and ROADMAP_ITEM
+ * rounds, and only as a request. A CardSortNewEntry is not an Opportunity or a
+ * Roadmap Item: nothing in the OST or on the roadmap changes until the round's
+ * facilitator accepts it, at which point the real object is created (an
+ * Opportunity, or a Roadmap Item in the Later horizon — never Now, so an accept
+ * cannot slip past the Now-commitment gate). Rejected entries are kept for the
+ * record.
  *
  * ── Visibility ──────────────────────────────────────────────────────────────
  *
@@ -32,7 +37,7 @@ import { createOpportunityWithLinks, OpportunityCreateError } from "@/lib/opport
  * Optional, and never written to the official CustomFieldValue — card sort does
  * not write official values, and this is not an exception. On accept in an OPEN
  * round it becomes the proposer's ordinary CardSortProposal on the new
- * Opportunity (fromValue null, since a brand new object has no official value),
+ * object (fromValue null, since a brand new object has no official value),
  * so it is tallied like any other vote.
  */
 
@@ -40,11 +45,15 @@ export const CARD_SORT_NEW_ENTRY_STATUSES = ["PENDING", "ACCEPTED", "REJECTED"] 
 export type CardSortNewEntryStatus = (typeof CARD_SORT_NEW_ENTRY_STATUSES)[number]
 
 export const CARD_SORT_NEW_ENTRY_TITLE_MAX = OPPORTUNITY_TITLE_MAX_LENGTH
+/** Object types a round can be added to. */
+export const CARD_SORT_PROPOSABLE_TYPES = ["OPPORTUNITY", "ROADMAP_ITEM"] as const
+const isProposableType = (objectType: string) =>
+  (CARD_SORT_PROPOSABLE_TYPES as readonly string[]).includes(objectType)
 export const CARD_SORT_NEW_ENTRY_NOTE_MAX = 2000
 
 /** Only these object types can be added to from inside a round. */
 export function canProposeNewEntries(round: { objectType: string; state: string }): boolean {
-  return round.objectType === "OPPORTUNITY" && round.state === "OPEN"
+  return isProposableType(round.objectType) && round.state === "OPEN"
 }
 
 export type CardSortNewEntryView = {
@@ -67,13 +76,37 @@ const trimToNull = (value: string | null | undefined) => {
   return trimmed ? trimmed : null
 }
 
-function assertOpportunityRound(round: { objectType: string }) {
-  if (round.objectType !== "OPPORTUNITY") {
+function assertProposableRound(round: { objectType: string }) {
+  if (!isProposableType(round.objectType)) {
     throw new CardSortError(
       "INVALID_FACTOR",
-      `New entries can only be proposed in OPPORTUNITY rounds; this round sorts ${round.objectType} objects.`
+      `New entries can only be proposed in OPPORTUNITY or ROADMAP_ITEM rounds; this round sorts ${round.objectType} objects.`
     )
   }
+}
+
+/** Where an accepted Roadmap entry lands: the uncommitted horizon, appended last. */
+async function createRoadmapItemFromEntry(
+  prisma: AppPrismaClient,
+  workspaceId: string,
+  entry: { title: string; description: string | null }
+): Promise<{ id: string }> {
+  const lastItem = await prisma.roadmapItem.findFirst({
+    where: { workspaceId, horizon: "LATER", status: "ACTIVE" },
+    orderBy: [{ sortOrder: "desc" }, { id: "desc" }],
+    select: { sortOrder: true },
+  })
+  return captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, (tx) =>
+    tx.roadmapItem.create({
+      data: {
+        workspaceId,
+        title: entry.title,
+        description: entry.description,
+        horizon: "LATER",
+        sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
+      },
+    })
+  )
 }
 
 /**
@@ -97,7 +130,7 @@ export async function proposeCardSortNewEntry({
 }) {
   const prisma = getPrisma()
   const round = await loadRound(prisma, roundId, workspaceId)
-  assertOpportunityRound(round)
+  assertProposableRound(round)
   if (round.state !== "OPEN") {
     throw new CardSortError(
       "WRONG_STATE",
@@ -202,7 +235,7 @@ async function loadFacilitatedRound(
 }
 
 /**
- * Accept a pending entry: create the real Opportunity.
+ * Accept a pending entry: create the real Opportunity or Roadmap Item.
  *
  * The entry is CLAIMED first (a conditional PENDING → ACCEPTED update) and the
  * Opportunity created second, so two clicks racing cannot create two
@@ -222,7 +255,7 @@ export async function acceptCardSortNewEntry({
   entryId: string
 }) {
   const { prisma, round } = await loadFacilitatedRound(roundId, workspaceId, userId, "accept")
-  assertOpportunityRound(round)
+  assertProposableRound(round)
 
   const entry = await prisma.cardSortNewEntry.findFirst({ where: { id: entryId, roundId } })
   if (!entry) throw new CardSortError("NOT_FOUND", `New entry not found: ${entryId}`)
@@ -236,12 +269,15 @@ export async function acceptCardSortNewEntry({
     throw new CardSortError("WRONG_STATE", `That entry is already ${entry.status.toLowerCase()}.`)
   }
 
-  let opportunity: { id: string }
+  let created: { id: string }
   try {
-    opportunity = await createOpportunityWithLinks(prisma, workspaceId, {
-      title: entry.title,
-      description: entry.description,
-    })
+    created =
+      round.objectType === "ROADMAP_ITEM"
+        ? await createRoadmapItemFromEntry(prisma, workspaceId, entry)
+        : await createOpportunityWithLinks(prisma, workspaceId, {
+            title: entry.title,
+            description: entry.description,
+          })
   } catch (error) {
     await prisma.cardSortNewEntry.updateMany({
       where: { id: entryId, roundId, status: "ACCEPTED", acceptedObjectId: null },
@@ -255,7 +291,7 @@ export async function acceptCardSortNewEntry({
 
   await prisma.cardSortNewEntry.update({
     where: { id: entryId },
-    data: { acceptedObjectId: opportunity.id },
+    data: { acceptedObjectId: created.id },
   })
 
   // The proposer's suggested bucket becomes their ordinary vote — only while the
@@ -271,12 +307,12 @@ export async function acceptCardSortNewEntry({
     if (factor.options.some((option) => option.value === entry.suggestedValue)) {
       await prisma.cardSortProposal.upsert({
         where: {
-          roundId_userId_objectId: { roundId, userId: entry.userId, objectId: opportunity.id },
+          roundId_userId_objectId: { roundId, userId: entry.userId, objectId: created.id },
         },
         create: {
           roundId,
           userId: entry.userId,
-          objectId: opportunity.id,
+          objectId: created.id,
           proposedValue: entry.suggestedValue,
           fromValue: null,
           rationale: "Suggested when proposing this entry.",
@@ -287,7 +323,13 @@ export async function acceptCardSortNewEntry({
     }
   }
 
-  return { entryId, opportunityId: opportunity.id, suggestionRecorded }
+  return {
+    entryId,
+    objectId: created.id,
+    // Kept for existing callers; only meaningful for OPPORTUNITY rounds.
+    opportunityId: round.objectType === "OPPORTUNITY" ? created.id : null,
+    suggestionRecorded,
+  }
 }
 
 /** Reject a pending entry, optionally saying why. Kept on the round for the record. */
@@ -349,7 +391,7 @@ export async function listCardSortNewEntries({
 }): Promise<CardSortNewEntryView[]> {
   const prisma = getPrisma()
   const round = await loadRound(prisma, roundId, workspaceId)
-  if ((round.objectType as CustomFieldObjectType) !== "OPPORTUNITY") return []
+  if (!isProposableType(round.objectType as CustomFieldObjectType)) return []
 
   const entries = await prisma.cardSortNewEntry.findMany({
     where: { roundId, ...(canSeeOtherProposals(round, userId) ? {} : { userId }) },

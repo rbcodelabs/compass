@@ -134,6 +134,7 @@ export default async function CardSortRoundPage({
             canResolve={board.isFacilitator && board.round.state !== "CLOSED"}
             options={board.factor.options}
             entries={newEntries}
+            objectType={board.round.objectType}
           />
           <CardSortBoard
             orgSlug={orgSlug}
