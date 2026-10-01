@@ -1,0 +1,224 @@
+{
+  "generatedFrom": "origin/main",
+  "mainSha": "cfa0e372003fe64452dcaa5972ee73006bbd2461",
+  "files": {
+    "components/sidebar.tsx": [
+      "OKRs",
+      "okrs"
+    ],
+    "components/bottom-nav.tsx": [
+      "OKRs",
+      "okrs"
+    ],
+    "app/[orgSlug]/[workspaceSlug]/okrs/page.tsx": [
+      "OKRs",
+      "Track objectives and key results across cycles.",
+      "No OKR cycles yet",
+      "Cycles group your objectives into time-boxed periods. Create one to start setting goals."
+    ],
+    "app/[orgSlug]/[workspaceSlug]/okrs/[cycleId]/page.tsx": [
+      "OKR Cycle",
+      "OBJECTIVE",
+      "/{}/{}/okrs/{}"
+    ],
+    "components/okrs/add-key-result-form.tsx": [
+      "kr-title",
+      "kr-target",
+      "kr-unit",
+      "Add key result",
+      "Add Key Result"
+    ],
+    "components/okrs/add-objective-form.tsx": [
+      "Add objective",
+      "Add Objective"
+    ],
+    "components/okrs/check-in-form.tsx": [],
+    "components/okrs/create-cycle-form.tsx": [
+      "cycle-title",
+      "cycle-start",
+      "cycle-end",
+      "Create cycle",
+      "New Cycle",
+      "New OKR Cycle"
+    ],
+    "components/okrs/cycle-card.tsx": [
+      "/{}/{}/okrs/{}",
+      "No objectives yet",
+      "{} objective{}"
+    ],
+    "components/okrs/key-result-bar.tsx": [
+      "/{}/{}/okrs",
+      "Link supporting objective…",
+      "Delete KR",
+      "Search shorter-cycle Objectives…",
+      "No eligible unlinked Objectives.",
+      "objective",
+      "if (objective) {",
+      "Supporting objectives"
+    ],
+    "components/okrs/objective-row.tsx": [
+      "/{}/{}/okrs",
+      "Link to parent Key Result…",
+      "Delete Objective",
+      "objective",
+      "Linked Key Result",
+      "Unlink parent Key Result",
+      "Search cycles, objectives, and KRs…",
+      "No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle's dates.",
+      "objective,"
+    ],
+    "components/okrs/objectives-list.tsx": [
+      "objective,"
+    ],
+    "components/panels/objective-panel.tsx": [
+      "objective",
+      "/{}/{}/okrs/{}",
+      "Cycle",
+      "Key Results",
+      "No key results yet.",
+      "No higher-level Key Result.",
+      "OBJECTIVE",
+      "/{}/{}/okrs"
+    ],
+    "components/panels/key-result-panel.tsx": [
+      "key result",
+      "objective",
+      "opportunity",
+      "/{}/{}/okrs/{}",
+      "Objective",
+      "No parent objective.",
+      "Supporting Objectives",
+      "No supporting Objectives linked.",
+      "Linked Opportunities",
+      "No opportunities linked.",
+      "/{}/{}/okrs"
+    ],
+    "components/panels/panel-shell.tsx": [
+      "Objective",
+      "Key Result",
+      "Opportunity",
+      "Solution",
+      "opportunity-new",
+      "New opportunity",
+      "opportunity",
+      "objective",
+      "solution"
+    ],
+    "components/panels/roadmap-item-panel.tsx": [
+      "opportunity",
+      "Opportunity",
+      "solution",
+      "Solution",
+      "Key Result"
+    ],
+    "components/discovery/opportunity-composer.tsx": [
+      "## Who's affected\\n\\n\\n\\n## Current pain\\n\\n\\n\\n## Evidence\\n\\n\\n\\n## Desired outcome\\n\\n",
+      "opportunity",
+      "Couldn't create the opportunity right now. Your draft is saved on this device — try again.",
+      "New opportunity",
+      "opportunity-composer",
+      "What opportunity have you discovered?",
+      "Insert opportunity outline",
+      "{}-kr",
+      "Key result",
+      "Link a key result",
+      "Search key results…",
+      "No matching key results.",
+      "Link feedback that points to this opportunity",
+      "1 is linked to another opportunity and will move here.",
+      "{} are linked to other opportunities and will move here.",
+      "Loading key results and feedback…",
+      "Couldn&apos;t load key results and feedback. You can still create the opportunity and link them from its",
+      "Driving key result",
+      "No key results in this workspace yet."
+    ],
+    "components/discovery/opportunity-header.tsx": [
+      "Could not link key result.",
+      "opportunity",
+      "change KR",
+      "Link to key result",
+      "opportunity,",
+      "Driving Key Result",
+      "No key result linked."
+    ],
+    "components/discovery/opportunity-overview.tsx": [
+      "opportunity",
+      "Linked Key Result",
+      "Link to a key result…",
+      "opportunity,"
+    ],
+    "components/discovery/key-result-options.tsx": [],
+    "components/tasks/task-links-panel.tsx": [
+      "Opportunity",
+      "Solution",
+      "Objective",
+      "Key Result",
+      "opportunity",
+      "solution",
+      "objective"
+    ],
+    "components/tasks/link-task-dialog.tsx": [
+      "Opportunity",
+      "Solution",
+      "Objective",
+      "Key Result",
+      "Opportunities",
+      "Solutions",
+      "Objectives",
+      "Key results",
+      "OPPORTUNITY",
+      "SOLUTION",
+      "Search opportunities, docs, roadmap, and more…"
+    ],
+    "components/roadmap/add-item-form.tsx": [
+      "item-opportunity-{}",
+      "Link to an opportunity…",
+      "item-kr-{}",
+      "Link to a key result…",
+      "item-solution-{}",
+      "Link to a solution…",
+      "Opportunity (optional)",
+      "Key Result (optional)",
+      "Solution (optional)"
+    ],
+    "components/roadmap/edit-item-dialog.tsx": [
+      "edit-opportunity-{}",
+      "Opportunity",
+      "Link to an opportunity…"
+    ],
+    "components/discovery/discovery-rail.tsx": [
+      "Search opportunities…",
+      "Linked to a key result",
+      "opportunities,",
+      "opportunity,"
+    ],
+    "app/[orgSlug]/[workspaceSlug]/metrics/page.tsx": [
+      "Product usage from your analytics providers, connected to experiments, roadmap launches, and key results."
+    ],
+    "components/custom-fields/manage-fields-panel.tsx": [
+      "Opportunity",
+      "Solution",
+      "Objective",
+      "Key Result"
+    ],
+    "components/custom-fields/shared-option-sets-panel.tsx": [
+      "Opportunity",
+      "Solution",
+      "Objective",
+      "Key Result"
+    ],
+    "components/analytics/metrics-dashboard.tsx": [
+      "Key result",
+      "Create a metric to connect product usage from Vercel Web Analytics to an experiment, key result, or roadmap launch.",
+      "This metric will stop appearing in new bindings, but its historical observations and existing links to experiments, key results, and roadmap items are preserved — nothing is deleted, and a stale metric never becomes a silent zero."
+    ],
+    "app/[orgSlug]/[workspaceSlug]/settings/page.tsx": [
+      "Teams within this workspace. Squads can be assigned to objectives, opportunities, experiments, and roadmap items.",
+      "Choose which org-level scoring model this workspace uses to rank Opportunities and Solutions. The two picks are independent of each other. Templates are managed by organization admins in Org Settings.",
+      "OPPORTUNITY",
+      "SOLUTION",
+      "Opportunities",
+      "Solutions"
+    ]
+  }
+}

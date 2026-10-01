@@ -42,33 +42,40 @@ export type ThinkingModelSource = {
 }
 
 /**
- * Read a stored override column under today's rules. All-or-nothing: if the
- * stored document is not valid JSON, names an entity that is not overridable, or
- * fails any validation rule (charset, length, reserved nav names, uniqueness,
- * size), NO overrides apply. That re-checks on every read, so the settings
- * action need not be the only line of defence. Never throws.
+ * What is stored in the override column, under today's rules, and whether it is
+ * in effect. All-or-nothing: if the stored document is not valid JSON, names an
+ * entity that is not overridable, fails any validation rule (charset, length,
+ * reserved nav names, uniqueness, size), or sits beside an unknown preset key,
+ * NO overrides apply and the raw stored text comes back as `unapplied` so the
+ * settings screen can tell an admin instead of silently showing empty fields.
+ * The resolver below uses exactly this, so the form and the app cannot disagree.
+ * Never throws.
  */
-export function parseStoredLabelOverrides(
-  raw: string | null | undefined,
-  presetKey: string = DEFAULT_THINKING_MODEL_KEY,
-): LabelOverrides {
-  if (!raw) return {}
+export type StoredLabelsStatus = { applied: LabelOverrides; unapplied: string | null }
+
+export function inspectStoredLabels(source: ThinkingModelSource = {}): StoredLabelsStatus {
+  const raw = source.thinkingModelLabels
+  if (typeof raw !== "string" || raw.trim() === "") return { applied: {}, unapplied: null }
+  const storedKey = source.thinkingModel
+  const known = isThinkingModelKey(storedKey)
+  // Overrides ride on a known key (or NULL, which is CLASSIC); an unknown key is
+  // CLASSIC with no overrides.
+  if (!known && storedKey != null) return { applied: {}, unapplied: raw }
   let data: unknown
   try {
     data = JSON.parse(raw)
   } catch {
-    return {}
+    return { applied: {}, unapplied: raw }
   }
-  const checked = validateLabelOverrides(data, presetKey)
-  return checked.ok ? checked.value : {}
+  const checked = validateLabelOverrides(data, known ? storedKey : DEFAULT_THINKING_MODEL_KEY)
+  return checked.ok ? { applied: checked.value, unapplied: null } : { applied: {}, unapplied: raw }
 }
 
 export function resolveThinkingModel(source: ThinkingModelSource = {}): ResolvedThinkingModel {
   const known = isThinkingModelKey(source.thinkingModel)
   const key = known ? (source.thinkingModel as ThinkingModelKey) : DEFAULT_THINKING_MODEL_KEY
   const preset = THINKING_MODEL_PRESETS[key]
-  // Overrides ride on a known key only; an unknown key is CLASSIC with no overrides.
-  const overrides = known || source.thinkingModel == null ? parseStoredLabelOverrides(source.thinkingModelLabels, key) : {}
+  const overrides = inspectStoredLabels(source).applied
 
   const labels = { ...preset.labels } as Record<ThinkingModelEntity, EntityLabel>
   let hasLabelOverrides = false

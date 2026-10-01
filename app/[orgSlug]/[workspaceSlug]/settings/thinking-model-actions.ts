@@ -68,6 +68,9 @@ export async function updateThinkingModel(
         thinkingModel: parsed.data.thinkingModel,
         thinkingModelLabels: hasLabels ? JSON.stringify(labels.value) : null,
       },
+      // No select would make Prisma RETURN every workspace column, including the
+      // two new ones, so this write alone would fail before 073 is applied.
+      select: { id: true },
     })
 
     // No label contents: they are user text, and the ids and keys are the audit trail.

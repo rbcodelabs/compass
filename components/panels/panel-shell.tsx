@@ -36,23 +36,7 @@ import { OpportunityComposer } from "@/components/discovery/opportunity-composer
 import { isComposerPanelType } from "./composer-panel-types";
 import { TaskDetail } from "@/components/tasks/task-detail";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
-import type { ResolvedLabels } from "@/lib/thinking-model/labels";
-
-// A function because the four entity titles come from the workspace's thinking model.
-const panelTitles = (labels: ResolvedLabels): Record<string, string> => ({
-  objective: labels.objective.singular,
-  keyResult: labels.keyResult.singular,
-  opportunity: labels.opportunity.singular,
-  solution: labels.solution.singular,
-  assumption: "Assumption",
-  experiment: "Experiment",
-  roadmapItem: "Roadmap Item",
-  feedback: "Feedback",
-  "feedback-new": "New feedback",
-  "opportunity-new": `New ${labels.opportunity.lower}`,
-  task: "Task",
-  "discovery-rail": "Discovery",
-});
+import { panelTitles } from "./panel-titles";
 
 /**
  * Upper bound on how long the deep-link panel waits for a browser idle period

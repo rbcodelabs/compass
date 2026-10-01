@@ -33,6 +33,11 @@ interface Props {
   workspaceSlug: string
   initialKey: ThinkingModelKey
   initialOverrides: LabelOverrides
+  /**
+   * Raw stored label text that is NOT in effect (it no longer passes validation,
+   * or sits beside an unknown preset). Shown so saving cannot silently wipe it.
+   */
+  unappliedStored?: string | null
 }
 
 function toForm(overrides: LabelOverrides): FormLabels {
@@ -53,8 +58,9 @@ function fromForm(form: FormLabels): LabelOverrides {
   return out
 }
 
-export function ThinkingModelPanel({ orgSlug, workspaceSlug, initialKey, initialOverrides }: Props) {
+export function ThinkingModelPanel({ orgSlug, workspaceSlug, initialKey, initialOverrides, unappliedStored = null }: Props) {
   const [key, setKey] = useState<ThinkingModelKey>(initialKey)
+  const [replaceStored, setReplaceStored] = useState(false)
   const [form, setForm] = useState<FormLabels>(() => toForm(initialOverrides))
   const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -86,9 +92,33 @@ export function ThinkingModelPanel({ orgSlug, workspaceSlug, initialKey, initial
   return (
     <div className="flex flex-col gap-5" data-testid="thinking-model-panel">
       <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground" data-testid="thinking-model-notice">
-        Some screens still use the standard names whatever you choose here: the canvas, the discovery board and its
-        panels, the public portal, and help. Agents and API tools always use the standard names.
+        Some screens still use the standard names whatever you choose here, including the canvas, the discovery board,
+        the solution, assumption, experiment and feedback panels, the measurements panel, error messages, the public
+        portal, and help. Agents and API tools always use the standard names.
       </p>
+
+      {unappliedStored !== null && (
+        <div
+          role="alert"
+          className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+          data-testid="thinking-model-unapplied"
+        >
+          <p>
+            Custom names are stored for this workspace but are not being used, because they no longer pass the current
+            rules (or sit beside an unrecognised model). The fields below are empty. Saving replaces what is stored.
+          </p>
+          <code className="break-all rounded bg-background/60 px-2 py-1 text-[11px]">{unappliedStored}</code>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={replaceStored}
+              onChange={(e) => setReplaceStored(e.target.checked)}
+              data-testid="thinking-model-replace-stored"
+            />
+            Replace the stored names when I save
+          </label>
+        </div>
+      )}
 
       <fieldset className="flex flex-col gap-2" disabled={isPending}>
         <legend className="mb-1 text-sm font-medium">Model</legend>
@@ -151,7 +181,12 @@ export function ThinkingModelPanel({ orgSlug, workspaceSlug, initialKey, initial
       </fieldset>
 
       <div className="flex items-center gap-3">
-        <Button type="button" onClick={save} disabled={isPending} data-testid="thinking-model-save">
+        <Button
+          type="button"
+          onClick={save}
+          disabled={isPending || (unappliedStored !== null && !replaceStored)}
+          data-testid="thinking-model-save"
+        >
           {isPending ? "Saving…" : "Save"}
         </Button>
         {message && (

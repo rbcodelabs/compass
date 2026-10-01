@@ -13,7 +13,6 @@
  * all; see lib/thinking-model/mcp.ts.)
  */
 
-import { z } from "zod"
 import { derivePlural, normalizeLabelText } from "./labels"
 import {
   OVERRIDABLE_ENTITIES,
@@ -64,17 +63,30 @@ export const RESERVED_SECTION_NAMES: readonly string[] = [
 export type LabelOverride = { singular: string; plural?: string }
 export type LabelOverrides = Partial<Record<OverridableEntity, LabelOverride>>
 
-const entrySchema = z.strictObject({
-  singular: z.string(),
-  plural: z.string().optional(),
-})
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v)
 
-const overridesShape = Object.fromEntries(
-  OVERRIDABLE_ENTITIES.map((entity) => [entity, entrySchema.optional()]),
-) as Record<OverridableEntity, z.ZodOptional<typeof entrySchema>>
-
-/** Shape only (allowed keys, string types). Content rules live in validateLabelOverrides. */
-export const labelOverridesShapeSchema = z.strictObject(overridesShape)
+/**
+ * Shape only: allowed keys, string types, no extra keys. Hand-written rather than
+ * a zod schema on purpose. This module is imported by the resolver, which the
+ * client provider imports, so a zod import here would ship zod in every workspace
+ * page's client bundle. (The server action keeps zod for its own input envelope.)
+ */
+function parseShape(input: unknown): Partial<Record<OverridableEntity, LabelOverride>> | null {
+  if (!isPlainObject(input)) return null
+  const out: Partial<Record<OverridableEntity, LabelOverride>> = {}
+  for (const [key, entry] of Object.entries(input)) {
+    if (!(OVERRIDABLE_ENTITIES as readonly string[]).includes(key)) return null
+    if (entry === undefined) continue
+    if (!isPlainObject(entry)) return null
+    for (const field of Object.keys(entry)) if (field !== "singular" && field !== "plural") return null
+    if (typeof entry.singular !== "string") return null
+    if (entry.plural !== undefined && typeof entry.plural !== "string") return null
+    out[key as OverridableEntity] =
+      entry.plural === undefined ? { singular: entry.singular } : { singular: entry.singular, plural: entry.plural }
+  }
+  return out
+}
 
 export type LabelValidationResult =
   | { ok: true; value: LabelOverrides }
@@ -135,8 +147,8 @@ export function validateLabelOverrides(input: unknown, presetKey: string): Label
     }
   }
 
-  const parsed = labelOverridesShapeSchema.safeParse(input)
-  if (!parsed.success) return fail("Labels must be an object keyed by entity, with a singular and optional plural each.")
+  const parsedShape = parseShape(input)
+  if (!parsedShape) return fail("Labels must be an object keyed by entity, with a singular and optional plural each.")
 
   const preset = THINKING_MODEL_PRESETS[isThinkingModelKey(presetKey) ? presetKey : "CLASSIC"]
   const value: LabelOverrides = {}
@@ -144,7 +156,7 @@ export function validateLabelOverrides(input: unknown, presetKey: string): Label
   const effective = new Map<ThinkingModelEntity, Set<string>>()
 
   for (const entity of THINKING_MODEL_ENTITIES) {
-    const entry = (parsed.data as Partial<Record<ThinkingModelEntity, LabelOverride>>)[entity]
+    const entry = (parsedShape as Partial<Record<ThinkingModelEntity, LabelOverride>>)[entity]
     if (!entry) {
       effective.set(entity, new Set([fold(preset.labels[entity].singular), fold(preset.labels[entity].plural)]))
       continue

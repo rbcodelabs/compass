@@ -14,7 +14,7 @@ import { DeliveryLimitsPanel } from "@/components/settings/delivery-limits-panel
 import { LaunchWorkflowSettingsPanel } from "@/components/settings/launch-workflow-settings-panel";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { ThinkingModelPanel } from "@/components/settings/thinking-model-panel";
-import { parseStoredLabelOverrides, resolveThinkingModel } from "@/lib/thinking-model/resolve";
+import { inspectStoredLabels, resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { DeleteWorkspacePanel } from "@/components/settings/delete-workspace-panel";
 import { WorkspaceScoringPanel } from "@/components/scoring-models/workspace-scoring-panel";
 import type { ApiKeyRow } from "@/components/settings/manage-api-keys-panel";
@@ -180,6 +180,9 @@ export default async function SettingsPage({ params }: Props) {
     rawMembers.find((m) => m.userId === session.user?.id)?.id ?? null;
   const currentWorkspaceRole = rawMembers.find((m) => m.userId === session.user?.id)?.role;
   const thinkingModel = resolveThinkingModel(workspace);
+  // Same code path as the resolver: the form shows only what is actually applied,
+  // and anything stored but not applied is surfaced rather than silently dropped.
+  const storedLabels = inspectStoredLabels(workspace);
   const canManageCapabilityPacks = normalizeWorkspaceRole(currentWorkspaceRole) === "ADMIN" || isOrgAdminRole(workspace.organization.members[0]?.role);
   // Deliberately NOT combined with canManageCapabilityPacks/workspace-admin
   // above: the Organization section below controls
@@ -439,7 +442,8 @@ export default async function SettingsPage({ params }: Props) {
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
             initialKey={thinkingModel.key}
-            initialOverrides={parseStoredLabelOverrides(workspace.thinkingModelLabels, thinkingModel.key)}
+            initialOverrides={storedLabels.applied}
+            unappliedStored={storedLabels.unapplied}
           />
         </SettingsSection>
       )}

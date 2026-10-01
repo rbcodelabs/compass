@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
+import { inspectStoredLabels, resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { THINKING_MODEL_KEYS } from "@/lib/thinking-model/presets"
 import { derivePlural, toLowerLabel } from "@/lib/thinking-model/labels"
 
@@ -81,6 +81,36 @@ describe("resolveThinkingModel", () => {
     it.each(cases)("%s => no overrides at all", (_name, value) => {
       expect(resolveThinkingModel({ thinkingModel: "CLASSIC", thinkingModelLabels: stored(value) })).toEqual(classic)
     })
+  })
+
+  describe("inspectStoredLabels agrees with the resolver about what is applied", () => {
+    it("nothing stored: nothing applied, nothing to warn about", () => {
+      expect(inspectStoredLabels({})).toEqual({ applied: {}, unapplied: null })
+      expect(inspectStoredLabels({ thinkingModelLabels: "  " })).toEqual({ applied: {}, unapplied: null })
+      expect(inspectStoredLabels({ thinkingModel: "CLASSIC", thinkingModelLabels: "{}" })).toEqual({ applied: {}, unapplied: null })
+    })
+
+    it("valid stored labels are applied, not flagged", () => {
+      const raw = stored({ objective: { singular: "Goal" } })
+      expect(inspectStoredLabels({ thinkingModel: "CLASSIC", thinkingModelLabels: raw })).toEqual({
+        applied: { objective: { singular: "Goal" } },
+        unapplied: null,
+      })
+    })
+
+    it("an unknown stored key means NOTHING is applied and the raw text comes back", () => {
+      const raw = stored({ objective: { singular: "Goal" } })
+      expect(inspectStoredLabels({ thinkingModel: "FUTURE_MODEL", thinkingModelLabels: raw })).toEqual({ applied: {}, unapplied: raw })
+      expect(resolveThinkingModel({ thinkingModel: "FUTURE_MODEL", thinkingModelLabels: raw }).hasLabelOverrides).toBe(false)
+    })
+
+    it.each(["{not json", stored({ solution: { singular: "Bet" } }), stored({ objective: { singular: "Roadmap" } })])(
+      "stored but failing today's rules (%s) is reported, never silently dropped",
+      (raw) => {
+        expect(inspectStoredLabels({ thinkingModel: "CLASSIC", thinkingModelLabels: raw })).toEqual({ applied: {}, unapplied: raw })
+        expect(resolveThinkingModel({ thinkingModel: "CLASSIC", thinkingModelLabels: raw })).toEqual(classic)
+      },
+    )
   })
 
   it("every preset key resolves to itself", () => {
