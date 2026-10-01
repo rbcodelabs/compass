@@ -21,6 +21,7 @@ import { toScoreSummary } from "@/lib/score-summary";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
+import { FollowButton } from "@/components/following/follow-button";
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 import type { SolutionCardData } from "./solution-card";
@@ -93,6 +94,7 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
         <div className="flex flex-wrap items-center gap-3">
           {scoringModel && <ScoreBadge score={toScoreSummary(data.score, scoringModel)} scoringHref={`${detailPath}?tab=scoring`} />}
           <Button variant="ghost" size="sm" aria-controls={discussionId} onClick={() => { discussionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); discussionRef.current?.focus({ preventScroll: true }); }}><MessageSquare className="size-4" /> Discussion</Button>
+          <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="OPPORTUNITY" subjectId={data.id} />
           <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="OPPORTUNITY" subjectId={data.id} subjectTitle={data.title} />
           {data.pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="OPPORTUNITY" targetId={data.id} />}
         </div>

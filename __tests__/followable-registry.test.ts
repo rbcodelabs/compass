@@ -17,7 +17,7 @@ vi.mock("@/lib/research-feature", () => ({ isResearchCaptureEnabled: () => resea
 const WS = "00000000-0000-4000-8000-000000000001"
 
 afterEach(() => {
-  followableConfig.shippedSlice = 1
+  followableConfig.shippedSlice = 2
   vi.unstubAllEnvs()
 })
 
@@ -78,10 +78,14 @@ describe("ADR slice and event scope", () => {
 })
 
 describe("slice gate", () => {
-  it("activates no subject type until slice 2 ships, then slice 3", () => {
-    expect(FOLLOWABLE_SUBJECT_TYPES.filter(isSubjectTypeActive)).toEqual([])
-    followableConfig.shippedSlice = 2
+  it("ships slice 2 by default: only Opportunity, Solution, Task and Doc are active", () => {
+    expect(followableConfig.shippedSlice).toBe(2)
     expect(FOLLOWABLE_SUBJECT_TYPES.filter(isSubjectTypeActive).sort()).toEqual(["DOC", "OPPORTUNITY", "SOLUTION", "TASK"])
+  })
+
+  it("activates nothing at slice 1 and everything but Artifacts at slice 3", () => {
+    followableConfig.shippedSlice = 1
+    expect(FOLLOWABLE_SUBJECT_TYPES.filter(isSubjectTypeActive)).toEqual([])
     followableConfig.shippedSlice = 3
     expect(isSubjectTypeActive("METRIC")).toBe(true)
     expect(isSubjectTypeActive("ARTIFACT")).toBe(false)

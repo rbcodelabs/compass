@@ -54,6 +54,7 @@ import { getWorkspaceSwitchPath } from "@/lib/workspace-nav"
 import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
 import { useAgentRailOptional } from "@/components/agent/agent-rail-context"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
+import { NotificationBellNavItem } from "@/components/notifications/notification-bell"
 
 interface SidebarProps {
   orgSlug: string
@@ -67,6 +68,9 @@ interface SidebarProps {
   isOrgAdmin?: boolean
   researchCaptureEnabled?: boolean
   updatesEnabled?: boolean
+  /** Following is on and available: show the notifications bell. Absent in the settings tree. */
+  followingEnabled?: boolean
+  unreadNotifications?: { count: number; overflow: boolean }
 }
 
 // A function, not a constant, because the OKRs entry's name comes from the
@@ -152,6 +156,8 @@ export function Sidebar({
   isOrgAdmin = false,
   researchCaptureEnabled = true,
   updatesEnabled = false,
+  followingEnabled = false,
+  unreadNotifications = { count: 0, overflow: false },
 }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
@@ -287,6 +293,14 @@ export function Sidebar({
             </SidebarMenu>
             <nav aria-label="Main navigation">
               <SidebarMenu className="gap-0.5">
+              {followingEnabled && (
+                <NotificationBellNavItem
+                  orgSlug={orgSlug}
+                  workspaceSlug={workspaceSlug}
+                  initialCount={unreadNotifications.count}
+                  initialOverflow={unreadNotifications.overflow}
+                />
+              )}
               {navItems.map(({ label, path, Icon }) => {
                 const href = `${base}/${path}`
                 const isActive = pathname.startsWith(href)

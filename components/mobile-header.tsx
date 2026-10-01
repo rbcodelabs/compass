@@ -16,6 +16,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import { SendCompassFeedbackDialog } from "@/components/feedback/send-compass-feedback-dialog"
+import { NotificationBellHeaderLink } from "@/components/notifications/notification-bell"
 
 function getInitials(name: string): string {
   return name
@@ -35,6 +36,9 @@ interface MobileHeaderProps {
   userImage?: string
   /** Org admins/owners see an "Org Settings" link in the account menu. */
   isOrgAdmin?: boolean
+  /** Following is on and available: show the notifications bell. */
+  followingEnabled?: boolean
+  unreadNotifications?: { count: number; overflow: boolean }
 }
 
 export function MobileHeader({
@@ -45,6 +49,8 @@ export function MobileHeader({
   userEmail,
   userImage,
   isOrgAdmin = false,
+  followingEnabled = false,
+  unreadNotifications = { count: 0, overflow: false },
 }: MobileHeaderProps) {
   const labels = useLabels()
   const pathname = usePathname()
@@ -95,6 +101,14 @@ export function MobileHeader({
             <Lightbulb className="w-3.5 h-3.5" aria-hidden="true" />
             <span className="text-[10px] font-medium leading-none">Browse</span>
           </button>
+        )}
+        {followingEnabled && (
+          <NotificationBellHeaderLink
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            initialCount={unreadNotifications.count}
+            initialOverflow={unreadNotifications.overflow}
+          />
         )}
         <Link
           href={`${base}/docs`}
