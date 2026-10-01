@@ -33,6 +33,7 @@ import {
 import "@xyflow/react/dist/style.css"
 import {
   BookmarkPlus,
+  Boxes,
   Download,
   FileText,
   History,
@@ -52,6 +53,17 @@ import {
   updateDoc,
 } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
 import { createDocumentSaveQueue } from "@/lib/document-save-queue"
+import { resolveCanvasCardRefs } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
+import { CanvasCardPicker } from "@/components/docs/canvas/canvas-card-picker"
+import {
+  CANVAS_CARD_DRAG_TYPE,
+  canvasCardKey,
+  createCanvasCardNode,
+  decodeCanvasCard,
+  isCanvasCardRef,
+  type CanvasCardRef,
+} from "@/lib/canvas-cards"
+import type { CanvasCardView } from "@/lib/canvas-card-data"
 import { DocVersionHistoryPanel, type DocVersionListItem } from "@/components/docs/doc-version-history-panel"
 import type { PanelPin } from "@/lib/panel-pin"
 import {
@@ -153,7 +165,10 @@ function CanvasEditorBody({
   const isNarrow = useSyncExternalStore(subscribeNarrowViewport, getNarrowViewport, () => false)
   const [lockOverride, setLockOverride] = useState<boolean | null>(null)
   const readOnly = lockOverride ?? isNarrow
+  const locked = readOnly || isRestoring
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [cardViews, setCardViews] = useState<Record<string, CanvasCardView>>({})
   const [historyOpen, setHistoryOpen] = useState(false)
   const [showSaveVersionInput, setShowSaveVersionInput] = useState(false)
   const [currentContent, setCurrentContent] = useState(() => serializeJsonCanvas(initialCanvas))
@@ -371,15 +386,17 @@ function CanvasEditorBody({
     [commit]
   )
 
-  const addNode = useCallback(
-    (type: CanvasNodeType) => {
+  /** Insert a new node centered on `at` (flow coordinates, default: viewport center). */
+  const insertNode = useCallback(
+    (raw: JsonCanvasNode, options: { at?: { x: number; y: number }; edit?: boolean } = {}) => {
       const rect = wrapperRef.current?.getBoundingClientRect()
-      const center = rect
-        ? flow.screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
-        : { x: 0, y: 0 }
-      const raw = createCanvasNode(type, { x: center.x, y: center.y })
+      const center =
+        options.at ??
+        (rect
+          ? flow.screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+          : { x: 0, y: 0 })
       // Stagger successive cards so they do not stack exactly on top of each other.
-      const stagger = (nodesRef.current.length % 8) * 32
+      const stagger = options.at ? 0 : (nodesRef.current.length % 8) * 32
       raw.x = Math.round(center.x - raw.width / 2 + stagger)
       raw.y = Math.round(center.y - raw.height / 2 + stagger)
       const created: FlowNode = { ...nodeToFlow(raw), selected: true }
@@ -387,9 +404,48 @@ function CanvasEditorBody({
         [...nodesRef.current.map((n) => ({ ...n, selected: false })), created],
         edgesRef.current.map((e) => ({ ...e, selected: false }))
       )
-      setEditingId(type === "group" ? null : raw.id)
+      setEditingId(options.edit ? raw.id : null)
     },
     [commit, flow]
+  )
+
+  const addNode = useCallback(
+    (type: CanvasNodeType) => insertNode(createCanvasNode(type, { x: 0, y: 0 }), { edit: type !== "group" }),
+    [insertNode]
+  )
+
+  const addCard = useCallback(
+    (ref: CanvasCardRef, title: string | undefined, at?: { x: number; y: number }) =>
+      insertNode(createCanvasCardNode(newCanvasId(), ref, title, { x: 0, y: 0 }), { at }),
+    [insertNode]
+  )
+
+  // Cards dragged from the page tree (see doc-tree-sidebar.tsx) drop onto the canvas.
+  const onCanvasDragOver = useCallback(
+    (event: React.DragEvent) => {
+      if (!locked && event.dataTransfer.types.includes(CANVAS_CARD_DRAG_TYPE)) {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = "copy"
+      }
+    },
+    [locked]
+  )
+  const onCanvasDrop = useCallback(
+    (event: React.DragEvent) => {
+      if (locked) return
+      const payload = event.dataTransfer.getData(CANVAS_CARD_DRAG_TYPE)
+      if (!payload) return
+      event.preventDefault()
+      try {
+        const parsed = JSON.parse(payload) as { kind?: unknown; id?: unknown; title?: unknown }
+        const ref = { kind: parsed.kind, id: parsed.id }
+        if (!isCanvasCardRef(ref)) return
+        addCard(ref, typeof parsed.title === "string" ? parsed.title : undefined, flow.screenToFlowPosition({ x: event.clientX, y: event.clientY }))
+      } catch {
+        /* malformed drag payload: ignore */
+      }
+    },
+    [addCard, flow, locked]
   )
 
   const deleteSelection = useCallback(() => {
@@ -399,15 +455,48 @@ function CanvasEditorBody({
     onDelete({ nodes: removedNodes as unknown as Node[], edges: removedEdges as unknown as Edge[] })
   }, [onDelete])
 
+  // Live Compass cards: references are re-resolved on the server (authorized per
+  // viewer) whenever the set of referenced objects changes. Never trusted client-side.
+  const cardRefsKey = useMemo(
+    () =>
+      nodes
+        .flatMap((n) => {
+          const card = decodeCanvasCard(n.data.raw)
+          return card ? [canvasCardKey(card)] : []
+        })
+        .sort()
+        .join(","),
+    [nodes]
+  )
+  useEffect(() => {
+    if (!cardRefsKey) return
+    const refs = cardRefsKey.split(",").map((key) => {
+      const [kind, id] = key.split(":")
+      return { kind, id }
+    })
+    let cancelled = false
+    resolveCanvasCardRefs(doc.id, refs)
+      .then((views) => {
+        if (!cancelled) setCardViews((prev) => ({ ...prev, ...(views as Record<string, CanvasCardView>) }))
+      })
+      .catch(() => {
+        /* leave cards on their cached titles; the next change retries */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [cardRefsKey, doc.id])
+
   const ui = useMemo<CanvasUi>(
     () => ({
-      readOnly: readOnly || isRestoring,
+      readOnly: locked,
       editingId,
       setEditingId,
       patchNode,
       onResizeEnd: () => commit(nodesRef.current, edgesRef.current),
+      cards: cardViews,
     }),
-    [readOnly, isRestoring, editingId, patchNode, commit]
+    [locked, editingId, patchNode, commit, cardViews]
   )
 
   // ── Title, versions, export ─────────────────────────────────────────────────
@@ -452,8 +541,6 @@ function CanvasEditorBody({
   const selectedNode = nodes.find((n) => n.selected)
   const selectedEdge = !selectedNode ? edges.find((e) => e.selected) : undefined
   const inspectorColor = selectedNode?.data.raw.color ?? selectedEdge?.data.raw.color
-  const locked = readOnly || isRestoring
-
   function onKeyDown(event: React.KeyboardEvent) {
     const target = event.target as HTMLElement
     if (target.closest("input, textarea, [contenteditable=true]")) return
@@ -514,6 +601,10 @@ function CanvasEditorBody({
           <ToolButton label="Add file card" disabled={locked} onClick={() => addNode("file")}>
             <FileText className="size-4" />
             <span className="hidden lg:inline">File</span>
+          </ToolButton>
+          <ToolButton label="Add Compass card" disabled={locked} onClick={() => setPickerOpen(true)}>
+            <Boxes className="size-4" />
+            <span className="hidden lg:inline">Compass</span>
           </ToolButton>
           <ToolButton label="Add group" disabled={locked} onClick={() => addNode("group")}>
             <Square className="size-4" />
@@ -616,7 +707,20 @@ function CanvasEditorBody({
         </div>
       )}
 
-      <div ref={wrapperRef} className="relative min-h-[420px] flex-1" data-testid="canvas-surface">
+      <CanvasCardPicker
+        docId={doc.id}
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onPick={(item) => addCard({ kind: item.kind, id: item.id }, item.title)}
+      />
+
+      <div
+        ref={wrapperRef}
+        className="relative min-h-[420px] flex-1"
+        data-testid="canvas-surface"
+        onDragOver={onCanvasDragOver}
+        onDrop={onCanvasDrop}
+      >
         <CanvasUiContext.Provider value={ui}>
           <ReactFlow
             nodes={nodes as unknown as Node[]}

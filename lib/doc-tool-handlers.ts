@@ -316,7 +316,7 @@ export async function createDoc({
   // canvas when omitted) instead of running it through frontmatter parsing.
   let canvasBody: string | null = null
   if (effectiveDocType === "CANVAS") {
-    const canvas = normalizeCanvasContent(effectiveContent ?? "")
+    const canvas = normalizeCanvasContent(effectiveContent ?? "", { strictCards: true })
     if (!canvas.ok) return fail(canvas.error)
     canvasBody = canvas.content
   }
@@ -404,7 +404,7 @@ export async function updateDoc({
 
   let canvasBody: string | undefined
   if (existing.docType === "CANVAS" && content !== undefined) {
-    const canvas = normalizeCanvasContent(content)
+    const canvas = normalizeCanvasContent(content, { strictCards: true })
     if (!canvas.ok) return fail(canvas.error)
     canvasBody = canvas.content
   }

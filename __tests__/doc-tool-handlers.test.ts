@@ -395,6 +395,23 @@ describe("CANVAS docs", () => {
     expect(data.metadata).toBeUndefined()
   })
 
+  it("MCP writes accept valid Compass cards and reject invalid card references", async () => {
+    const id = "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f"
+    const card = (compass: unknown) => JSON.stringify({ nodes: [{ id: "c", type: "link", x: 0, y: 0, width: 1, height: 1, url: `compass://doc/${id}`, compass }], edges: [] })
+    const ok = await createDoc({ workspaceId: WORKSPACE_ID, title: "B", docType: "CANVAS", content: card({ kind: "doc", id, title: "T" }) })
+    expect(ok.structuredContent.ok).toBe(true)
+    expect(JSON.parse(mockDoc.create.mock.calls[0][0].data.content).nodes[0].compass).toEqual({ kind: "doc", id, title: "T" })
+    mockDoc.create.mockClear()
+    const bad = await createDoc({ workspaceId: WORKSPACE_ID, title: "B", docType: "CANVAS", content: card({ kind: "workspace", id }) })
+    expect(bad.structuredContent.ok).toBe(false)
+    expect(bad.content[0].text).toContain("compass.kind")
+    expect(mockDoc.create).not.toHaveBeenCalled()
+    mockDoc.findUnique.mockResolvedValue({ title: "Board", storageProvider: "DATABASE", docType: "CANVAS" })
+    const badUpdate = await updateDoc({ docId: DOC_ID, content: card({ kind: "doc", id: "nope" }) })
+    expect(badUpdate.structuredContent.ok).toBe(false)
+    expect(mockDoc.update).not.toHaveBeenCalled()
+  })
+
   it("updateDoc leaves non-canvas docs on the markdown path", async () => {
     mockDoc.findUnique.mockResolvedValue({ title: "Doc", storageProvider: "DATABASE", docType: "STANDARD" })
     const result = await updateDoc({ docId: DOC_ID, content: "# Hello" })

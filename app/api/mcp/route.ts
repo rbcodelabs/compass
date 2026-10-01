@@ -3382,7 +3382,8 @@ const _handler = createMcpHandler(
           "Content should be markdown (or, for docType CANVAS, a JSON Canvas 1.0 document as a JSON string). Returns the new doc ID and the docs URL. " +
           "Pass roadmapItemId and docType: GTM_POSITIONING_BRIEF to create a Positioning & Messaging Brief " +
           "linked 1:1 to a roadmap item -- if content is omitted, a starter template is used. " +
-          "Pass docType: CANVAS to create a JSON Canvas (infinite-canvas) doc; content is validated and a blank canvas is created when omitted.",
+          "Pass docType: CANVAS to create a JSON Canvas (infinite-canvas) doc; content is validated and a blank canvas is created when omitted. " +
+          "A Compass object card is a JSON Canvas link node with url \"compass://<kind>/<id>\" and a compass field {kind, id, title?}; kind must be one of opportunity, solution, metric, doc, task, experiment, objective, keyResult and id a UUID (invalid references are rejected).",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Doc title"),

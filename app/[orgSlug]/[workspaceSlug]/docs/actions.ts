@@ -15,6 +15,7 @@ import {
   deleteDocCommentCore,
 } from "@/lib/doc-comments";
 import { getArtifactStorage } from "@/lib/artifact-storage";
+import { resolveCanvasCards, searchCanvasCardTargets } from "@/lib/canvas-card-data";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { validateTaskLink } from "@/lib/task-assignment";
 import {
@@ -181,6 +182,46 @@ export async function createCanvasDoc(
   );
   revalidatePath(revalidatePathStr);
   return { id: doc.id, title: doc.title, revision: doc.revision };
+}
+
+// ─── Canvas Compass-object cards ──────────────────────────────────────────────
+// The workspace is ALWAYS derived from the canvas doc on the server -- never
+// from the client or from the references inside canvas content.
+
+/** Anyone who can open the doc page (member, or org member with read-only access). */
+async function requireCanvasReader(docId: string) {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const prisma = getPrisma();
+  const doc = await prisma.doc.findUnique({ where: { id: docId }, select: { workspaceId: true } });
+  if (!doc) throw new Error("Document not found");
+  const userId = session.user.id;
+  const workspace = await prisma.workspace.findFirst({
+    where: {
+      id: doc.workspaceId,
+      OR: [
+        { members: { some: { userId } } },
+        { organization: { memberWorkspaceReadOnlyAccess: true, members: { some: { userId } } } },
+      ],
+    },
+    select: { id: true, slug: true, organization: { select: { slug: true } } },
+  });
+  if (!workspace?.organization) throw new Error("Workspace not found or access denied");
+  return { userId, workspaceId: workspace.id, workspaceSlug: workspace.slug, orgSlug: workspace.organization.slug };
+}
+
+/** Live data for the Compass cards on a canvas; unknown/foreign ids come back `unavailable`. */
+export async function resolveCanvasCardRefs(docId: string, refs: unknown) {
+  const access = await requireCanvasReader(docId);
+  if (!Array.isArray(refs)) return {};
+  return resolveCanvasCards({ ...access, refs });
+}
+
+/** Picker search. Requires workspace membership (it is an editing action). */
+export async function searchCanvasCardItems(docId: string, query: string) {
+  const { workspaceId } = await requireDocumentMember(docId);
+  if (typeof query !== "string") return [];
+  return searchCanvasCardTargets({ workspaceId, query });
 }
 
 /**

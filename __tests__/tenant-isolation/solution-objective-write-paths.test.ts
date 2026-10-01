@@ -419,6 +419,7 @@ const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "app/[orgSlug]/[workspaceSlug]/discovery/actions.ts": 1,
   "app/[orgSlug]/[workspaceSlug]/okrs/actions.ts": 1,
   "app/api/mcp/route.ts": 2,
+  "e2e/functional/specs/canvas-doc.spec.ts": 1, // one solution fixture, created with the e2e workspace's workspaceId
   "e2e/functional/specs/decisions.spec.ts": 1,
   "e2e/functional/specs/pm-interview.spec.ts": 1,
 };

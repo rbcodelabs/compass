@@ -16,8 +16,10 @@ import { createContext, memo, useContext, useEffect, useRef, useState } from "re
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from "@xyflow/react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { ExternalLink, FileText, Link2 } from "lucide-react"
+import { ExternalLink, FileText, Link2, Lock } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { CANVAS_CARD_KIND_LABELS, canvasCardKey, decodeCanvasCard, type DecodedCanvasCard } from "@/lib/canvas-cards"
+import type { CanvasCardView } from "@/lib/canvas-card-data"
 import { resolveCanvasColor, type JsonCanvasNode } from "@/lib/json-canvas"
 
 export type CanvasRFNode = Node<{ raw: JsonCanvasNode }>
@@ -30,6 +32,8 @@ export type CanvasUi = {
   patchNode: (id: string, patch: Partial<JsonCanvasNode>) => void
   /** Called after a resize gesture finishes so geometry can be committed. */
   onResizeEnd: () => void
+  /** Live Compass card data keyed by canvasCardKey (server-authorized per viewer). */
+  cards: Record<string, CanvasCardView>
 }
 
 export const CanvasUiContext = createContext<CanvasUi>({
@@ -38,6 +42,7 @@ export const CanvasUiContext = createContext<CanvasUi>({
   setEditingId: () => {},
   patchNode: () => {},
   onResizeEnd: () => {},
+  cards: {},
 })
 
 const SIDES = [
@@ -228,9 +233,73 @@ function FileNodeComponent({ id, data, selected }: NodeProps<CanvasRFNode>) {
   )
 }
 
+/**
+ * Live Compass object card. `view` comes from the server (authorized per
+ * viewer); undefined means not loaded yet / fetch failed, in which case only
+ * the cached title stored in the canvas is shown. An explicit `unavailable`
+ * view hides even the cached title -- nothing about the object is revealed.
+ */
+function CompassCardBody({ card, view }: { card: DecodedCanvasCard; view: CanvasCardView | undefined }) {
+  const label = CANVAS_CARD_KIND_LABELS[card.kind]
+  if (view?.state === "unavailable") {
+    return (
+      <div className="flex h-full items-center gap-2 p-2" data-testid="compass-card-unavailable">
+        <Lock className="size-5 shrink-0 text-text-subtle" aria-hidden />
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-text-secondary">Unavailable {label.toLowerCase()}</div>
+          <div className="text-xs text-text-subtle">Deleted, moved, or you do not have access.</div>
+        </div>
+      </div>
+    )
+  }
+  const ok = view?.state === "ok" ? view : null
+  const title = ok?.title ?? card.title ?? label
+  const href = ok && ok.href.startsWith("/") && !ok.href.startsWith("//") ? ok.href : null
+  return (
+    <div className="flex h-full flex-col gap-1 overflow-hidden p-2" data-testid="compass-card" data-card-state={ok ? "live" : "pending"}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">{label}</span>
+        {ok?.status && <span className="truncate rounded-full bg-surface-inset px-2 py-0.5 text-[11px] text-text-secondary">{ok.status.replace(/_/g, " ")}</span>}
+      </div>
+      <div className="flex items-start justify-between gap-1">
+        <div className={cn("line-clamp-2 text-sm font-medium", !ok && "text-text-secondary")} title={title}>{title}</div>
+        {href && (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open ${label.toLowerCase()} in a new tab`}
+            className="nodrag shrink-0 rounded p-1 text-text-subtle hover:bg-surface-inset hover:text-text-primary"
+          >
+            <ExternalLink className="size-4" />
+          </a>
+        )}
+      </div>
+      {ok && ok.facts.length > 0 && (
+        <dl className="mt-auto grid grid-cols-[auto_1fr] gap-x-2 text-xs text-text-subtle">
+          {ok.facts.slice(0, 3).map((fact) => (
+            <div key={fact.label} className="contents">
+              <dt>{fact.label}</dt>
+              <dd className="truncate text-text-secondary">{fact.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  )
+}
+
 function LinkNodeComponent({ id, data, selected }: NodeProps<CanvasRFNode>) {
   const ui = useContext(CanvasUiContext)
   const raw = data.raw
+  const card = decodeCanvasCard(raw)
+  if (card) {
+    return (
+      <Shell id={id} selected={selected} raw={raw}>
+        <CompassCardBody card={card} view={ui.cards[canvasCardKey(card)]} />
+      </Shell>
+    )
+  }
   const editing = ui.editingId === id && !ui.readOnly
   const url = raw.url ?? ""
   // Only ever render http(s) as a real anchor; anything else (javascript:, data:) stays inert text.

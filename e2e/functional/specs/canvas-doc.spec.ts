@@ -11,6 +11,7 @@
  */
 import fs from "node:fs";
 import { test, expect } from "../fixtures/index";
+import getPrisma from "../../../lib/db";
 import type { Page } from "@playwright/test";
 
 const isActionPost = (response: import("@playwright/test").Response) =>
@@ -161,5 +162,98 @@ test.describe("JSON Canvas doc", () => {
     });
     await expect(page.getByText("Not a valid .canvas file")).toContainText("type must be one of");
     await expect(page).toHaveURL(/\/docs(\/[0-9a-f-]+)?$/);
+  });
+
+  test("Compass cards: add via picker -> live data -> persists -> export -> unavailable", async ({ page, base, workspaceSlug }) => {
+    const prisma = getPrisma();
+    const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug } });
+    const suffix = Date.now().toString();
+    const opportunity = await prisma.opportunity.create({
+      data: { workspaceId: workspace.id, title: `Canvas card opp ${suffix}`, status: "VALIDATED" },
+    });
+    const solution = await prisma.solution.create({
+      data: { workspaceId: workspace.id, opportunityId: opportunity.id, title: `Canvas card sol ${suffix}` },
+    });
+
+    await page.goto(`${base}/docs`);
+    await page.waitForLoadState("networkidle");
+    await page.getByTestId("new-canvas-menu").click();
+    await page.getByRole("menuitem", { name: "Blank canvas" }).click();
+    await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
+    await expect(page.getByTestId("canvas-doc-editor")).toBeVisible({ timeout: 15_000 });
+    const docId = page.url().split("/").pop()!;
+
+    // ── Add an opportunity card through the picker ───────────────────────────
+    await page.getByRole("button", { name: "Add Compass card" }).click();
+    await page.getByLabel("Search Compass objects").fill(`Canvas card opp ${suffix}`);
+    await page.getByTestId("canvas-card-results").getByRole("button", { name: new RegExp(`Canvas card opp ${suffix}`) }).click();
+    const oppCard = page.getByTestId("compass-card").filter({ hasText: `Canvas card opp ${suffix}` });
+    await expect(oppCard).toBeVisible({ timeout: 15_000 });
+    // Live data from the server, not just the cached title.
+    await expect(oppCard).toHaveAttribute("data-card-state", "live", { timeout: 15_000 });
+    await expect(oppCard).toContainText("VALIDATED");
+
+    // ── Add a solution card; dragging a tree page onto the canvas also adds a card ──
+    await page.getByRole("button", { name: "Add Compass card" }).click();
+    await page.getByLabel("Search Compass objects").fill(`Canvas card sol ${suffix}`);
+    await page.getByTestId("canvas-card-results").getByRole("button", { name: new RegExp(`Canvas card sol ${suffix}`) }).click();
+    await expect(page.getByTestId("compass-card").filter({ hasText: `Canvas card sol ${suffix}` })).toBeVisible({ timeout: 15_000 });
+
+    await page.locator(`a[href$="/docs/${docId}"]`).first().dragTo(page.getByTestId("canvas-surface"), { targetPosition: { x: 120, y: 120 } });
+    await expect(page.getByTestId("compass-card")).toHaveCount(3, { timeout: 15_000 });
+
+    // ── Autosave, reload, still live ─────────────────────────────────────────
+    await page.waitForResponse(isActionPost, { timeout: 15_000 });
+    await expect(page.getByText("Saved")).toBeVisible({ timeout: 15_000 });
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByTestId("compass-card")).toHaveCount(3, { timeout: 15_000 });
+    // (the solution card also mentions its opportunity, so take the first match)
+    await expect(page.getByTestId("compass-card").filter({ hasText: `Canvas card opp ${suffix}` }).first()).toHaveAttribute("data-card-state", "live", { timeout: 15_000 });
+
+    // ── Export is valid JSON Canvas: plain link nodes + namespaced compass field ──
+    const { json } = await readExport(page);
+    expect(json.nodes).toHaveLength(3);
+    const exported = json.nodes.find((n: { compass?: { id: string } }) => n.compass?.id === opportunity.id);
+    expect(exported).toMatchObject({
+      type: "link",
+      url: `compass://opportunity/${opportunity.id}`,
+      compass: { kind: "opportunity", id: opportunity.id, title: `Canvas card opp ${suffix}` },
+    });
+    for (const node of json.nodes) expect(node.type).toBe("link");
+
+    // ── Deleting the object degrades the card to a safe unavailable state ─────
+    await prisma.solution.delete({ where: { id: solution.id } });
+    await prisma.opportunity.delete({ where: { id: opportunity.id } });
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByTestId("compass-card-unavailable")).toHaveCount(2, { timeout: 15_000 });
+    await expect(page.getByTestId("canvas-surface")).not.toContainText(`Canvas card opp ${suffix}`);
+    await expect(page.getByTestId("canvas-surface")).not.toContainText(`Canvas card sol ${suffix}`);
+  });
+
+  test("imported cards: unknown objects are unavailable, invalid refs degrade to plain links", async ({ page, base }) => {
+    const missing = "11111111-2222-4333-8444-555555555555";
+    const imported = {
+      nodes: [
+        { id: "k1", type: "link", x: 0, y: 0, width: 280, height: 120, url: `compass://task/${missing}`, compass: { kind: "task", id: missing, title: "Secret title" } },
+        { id: "k2", type: "link", x: 400, y: 0, width: 280, height: 90, url: "https://example.com/plain", compass: { kind: "bogus", id: missing } },
+      ],
+      edges: [],
+    };
+    await page.goto(`${base}/docs`);
+    await page.waitForLoadState("networkidle");
+    await page.getByTestId("import-canvas-input").setInputFiles({ name: "cards.canvas", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(imported)) });
+    await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
+
+    await expect(page.getByTestId("compass-card-unavailable")).toHaveCount(1, { timeout: 15_000 });
+    await expect(page.getByTestId("canvas-surface")).not.toContainText("Secret title");
+    // The invalid reference degraded to an ordinary link card.
+    await expect(page.getByTestId("canvas-node-link").filter({ hasText: "example.com" })).toBeVisible();
+
+    const { json } = await readExport(page);
+    expect(json.nodes[0].compass).toEqual({ kind: "task", id: missing, title: "Secret title" });
+    expect(json.nodes[1].compass).toBeUndefined();
+    expect(json.nodes[1].url).toBe("https://example.com/plain");
   });
 });

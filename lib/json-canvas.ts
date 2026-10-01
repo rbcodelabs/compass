@@ -38,7 +38,9 @@ export type CanvasPresetColor = keyof typeof CANVAS_PRESET_COLORS
 export const MAX_CANVAS_BYTES = 800_000
 const MAX_REPORTED_ERRORS = 20
 
-type Extra = { [key: string]: unknown }
+import { sanitizeCanvasCards } from "@/lib/canvas-cards"
+
+type Extra ={ [key: string]: unknown }
 
 export type JsonCanvasNode = Extra & {
   id: string
@@ -234,12 +236,16 @@ export function serializeJsonCanvas(canvas: JsonCanvas): string {
  * Validate canvas content for storage and return the canonical string.
  * An empty/whitespace body is treated as a blank canvas (a freshly created doc).
  */
-export function normalizeCanvasContent(raw: string): CanvasNormalizeResult {
+export function normalizeCanvasContent(raw: string, options: { strictCards?: boolean } = {}): CanvasNormalizeResult {
   if (raw.trim() === "") {
     const canvas = emptyCanvas()
     return { ok: true, content: serializeJsonCanvas(canvas), canvas }
   }
   const parsed = parseJsonCanvas(raw)
   if (!parsed.ok) return { ok: false, error: `Invalid JSON Canvas: ${parsed.errors.join("; ")}` }
-  return { ok: true, content: serializeJsonCanvas(parsed.canvas), canvas: parsed.canvas }
+  // Compass object cards ride on link nodes as a `compass` field. strictCards
+  // (MCP writes) rejects invalid references; otherwise they degrade to plain links.
+  const cards = sanitizeCanvasCards(parsed.canvas, { strict: options.strictCards === true })
+  if (cards.errors.length) return { ok: false, error: `Invalid JSON Canvas: ${cards.errors.join("; ")}` }
+  return { ok: true, content: serializeJsonCanvas(cards.canvas), canvas: cards.canvas }
 }

@@ -7,6 +7,7 @@ import { FileText, Plus, ChevronRight, Shapes, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createDoc, createCanvasDoc } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
 import { parseJsonCanvas, MAX_CANVAS_BYTES } from "@/lib/json-canvas";
+import { CANVAS_CARD_DRAG_TYPE } from "@/lib/canvas-cards";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 export type DocTreeItem = {
@@ -250,7 +251,15 @@ function DocTreeNode({
         </button>
 
         {/* Icon + title link */}
-        <Link href={href} className="flex items-center gap-1.5 flex-1 min-w-0">
+        <Link
+          href={href}
+          className="flex items-center gap-1.5 flex-1 min-w-0"
+          // Drag a page onto an open canvas to add it as a live Compass card.
+          onDragStart={(event) => {
+            event.dataTransfer.setData(CANVAS_CARD_DRAG_TYPE, JSON.stringify({ kind: "doc", id: doc.id, title: doc.title }));
+            event.dataTransfer.effectAllowed = "copyLink";
+          }}
+        >
           {doc.icon ? (
             <span className="shrink-0 text-sm leading-none">{doc.icon}</span>
           ) : doc.docType === "CANVAS" ? (
