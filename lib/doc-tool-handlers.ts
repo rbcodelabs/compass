@@ -19,6 +19,7 @@ import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates"
 import { maybeSnapshotDocVersion } from "@/lib/doc-versions"
 import { createDocument, hydrateDocument, updateDocument } from "@/lib/document-service"
+import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
 import { isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { documentMcpActor } from "@/lib/document-mcp-actor"
 
@@ -326,6 +327,7 @@ export async function createDoc({
   const doc = pilot
     ? await createDocument(data, { operationId, ...documentMcpActor() })
     : await prisma.doc.create({ data })
+  await followAfterCreate({ model: "doc", workspaceId, row: { id: doc.id }, actor: async () => mcpFollowActor() ?? { type: "SYSTEM", id: null } })
 
   // This used to emit a *relative* `/{org}/{ws}/docs` — the docs index, not the
   // doc just created, and with no origin for an MCP client to resolve it

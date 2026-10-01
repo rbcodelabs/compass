@@ -94,6 +94,22 @@ describe("emitSubjectEvent fan-out", () => {
     expect(recipients()).toEqual([U1])
   })
 
+  it("restricts recipients to the named users when only some followers should hear (ASSIGNED goes to the assignee)", async () => {
+    follow(U1)
+    follow(U2)
+    const result = await emitSubjectEvent(statusEvent({ kind: "ASSIGNED", payload: { to: U1 }, dedupeKey: "assigned:1", recipientUserIds: [U1, ACTOR] }), fake.db)
+    expect(result).toMatchObject({ status: "emitted", recipients: 1 })
+    expect(recipients()).toEqual([U1])
+  })
+
+  it("still honours MUTED and the actor exclusion when recipients are restricted", async () => {
+    follow(U1, "MUTED")
+    const result = await emitSubjectEvent(statusEvent({ kind: "ASSIGNED", dedupeKey: "assigned:2", recipientUserIds: [U1] }), fake.db)
+    expect(result).toEqual({ status: "skipped", reason: "no_followers" })
+    follow(ACTOR)
+    expect(await emitSubjectEvent(statusEvent({ kind: "ASSIGNED", dedupeKey: "assigned:3", recipientUserIds: [ACTOR] }), fake.db)).toEqual({ status: "skipped", reason: "no_recipients" })
+  })
+
   it("skips MUTED tombstones", async () => {
     follow(U1, "MUTED")
     follow(U2)
