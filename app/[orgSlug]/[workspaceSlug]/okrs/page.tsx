@@ -64,7 +64,7 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
           workspaceSlug={workspaceSlug}
         />} />
 
-      {outcomesIndex && <OutcomesIndex rows={outcomesIndex.rows} linksUnavailable={outcomesIndex.linksUnavailable} />}
+      {outcomesIndex && <OutcomesIndex rows={outcomesIndex.rows} />}
 
       {cycles.length === 0 ? (
         <EmptyState icon={<Target className="size-6" />} title={`No OKR ${labels.cycle.lowerPlural} yet`} description={`${labels.cycle.plural} group your ${labels.objective.lowerPlural} into time-boxed periods. Create one to start setting goals.`} primaryAction={<CreateCycleForm

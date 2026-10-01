@@ -15,17 +15,14 @@
  * links" when the link table does not exist yet (the deploy-order tolerance already
  * defined there); they chunk their IN lists. Nothing here names a link model.
  *
- * SILENT DEGRADATION IS MADE VISIBLE. That tolerance returns an empty list with no
- * signal, which would show every opportunity as unlinked. So when the tolerant reads
- * found no links at all but there are opportunities, the loader asks the fail-closed
- * `listLinks` about one opportunity: a missing-table error there sets `linksUnavailable`,
- * which the views turn into a notice. The probe costs nothing when links exist.
+ * A missing link table (migration 071 not applied) is NOT tolerated: the batch readers propagate the database error, so
+ * these loaders throw and the page fails loudly through the normal server-component error path. Nothing here catches it.
  *
  * Read-only: no writes, no capture, no dependence on the selected preset except the
  * `shape` handed to the builder.
  */
 import type { AppPrismaClient } from "@/lib/db"
-import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, isMissingLinkTable, listLinks } from "@/lib/typed-links"
+import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity } from "@/lib/typed-links"
 import {
   buildOutcomeTree,
   type BuildOutcomeTreeInput,
@@ -34,19 +31,6 @@ import {
 } from "./outcome-tree"
 
 const ms = (value: Date | null | undefined): number | undefined => (value ? value.getTime() : undefined)
-
-/**
- * True only when the link table is missing (migration 071 not applied). Any other probe
- * failure is not "unavailable": it would have surfaced from the main reads, so it is ignored here.
- */
-export async function probeLinksUnavailable(prisma: AppPrismaClient, workspaceId: string, opportunityId: string): Promise<boolean> {
-  try {
-    await listLinks(prisma, { workspaceId, opportunityId, limit: 1 })
-    return false
-  } catch (error) {
-    return isMissingLinkTable(error)
-  }
-}
 
 export async function loadOutcomeTreeInput(
   prisma: AppPrismaClient,
@@ -89,16 +73,10 @@ export async function loadOutcomeTreeInput(
   const solutionKeyResultEdges = [...linkedKeyResults].flatMap(([solutionId, keyResults]) =>
     keyResults.map((keyResult) => ({ solutionId, keyResultId: keyResult.id })),
   )
-  const linksUnavailable =
-    objectiveOpportunityLinks.length === 0 && solutionKeyResultEdges.length === 0 && opportunityIds.length > 0
-      ? await probeLinksUnavailable(prisma, workspaceId, opportunityIds[0])
-      : false
-
   const cycleById = new Map(cycleRows.map((c) => [c.id, { id: c.id, title: c.title }]))
 
   return {
     shape,
-    linksUnavailable,
     objectives: objectiveRows.map((o) => ({
       id: o.id,
       title: o.title,
@@ -150,7 +128,6 @@ export async function loadOutcomeTree(
 }
 
 export type OutcomesIndexData = {
-  linksUnavailable: boolean
   rows: Array<{
     id: string
     title: string
@@ -183,13 +160,8 @@ export async function loadOutcomesIndex(prisma: AppPrismaClient, workspaceId: st
   const objectiveOpportunityLinks = [...linkedObjectives].flatMap(([opportunityId, objectives]) =>
     objectives.map((objective) => ({ objectiveId: objective.id, opportunityId })),
   )
-  const linksUnavailable =
-    objectiveOpportunityLinks.length === 0 && opportunityIds.length > 0
-      ? await probeLinksUnavailable(prisma, workspaceId, opportunityIds[0])
-      : false
   const cycleById = new Map(cycleRows.map((c) => [c.id, { id: c.id, title: c.title }]))
   const tree = buildOutcomeTree({
-    linksUnavailable,
     objectives: objectiveRows.map((o) => ({
       id: o.id,
       title: o.title,
@@ -206,7 +178,6 @@ export async function loadOutcomesIndex(prisma: AppPrismaClient, workspaceId: st
     legacyPointers: opportunityRows.flatMap((o) => (o.linkedKeyResultId ? [{ opportunityId: o.id, keyResultId: o.linkedKeyResultId }] : [])),
   })
   return {
-    linksUnavailable: tree.linksUnavailable,
     rows: tree.roots.map((root) => ({
       id: root.id,
       title: root.title,

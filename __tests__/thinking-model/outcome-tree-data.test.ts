@@ -117,42 +117,45 @@ describe("link reads with real links (chunking, no N+1)", () => {
     // 1,201 ids in chunks of 500: three link reads, and one title read per chunk plus the loader's own.
     expect(linkReads).toHaveBeenCalledTimes(3)
     expect(objectiveReads.mock.calls.length).toBeLessThanOrEqual(4)
-    expect(input.linksUnavailable).toBe(false)
   })
 })
 
-describe("link table missing (migration 071 not applied)", () => {
-  const missingTable = () => Object.assign(new Error("relation does not exist"), { code: "P2021" })
-
-  it("flags linksUnavailable instead of silently presenting every opportunity as unlinked", async () => {
-    const { fake, db } = setup()
+describe("link table missing (migration 071 not applied) fails loudly", () => {
+  const missingTable = () => Object.assign(new Error("relation \"opportunity_objective_links\" does not exist"), { code: "42P01" })
+  const breakLinkTables = (fake: ReturnType<typeof createTenantFakePrisma>) => {
     const client = fake.client as unknown as Record<string, { findMany: unknown }>
     client.opportunityObjectiveLink.findMany = async () => { throw missingTable() }
     client.solutionKeyResultLink.findMany = async () => { throw missingTable() }
-    vi.spyOn(console, "warn").mockImplementation(() => {})
-    const tree = await loadOutcomeTree(db, WS_A.id)
-    expect(tree.linksUnavailable).toBe(true)
-    expect(tree.pool).toEqual(["opp-a"])
-    expect((await loadOutcomesIndex(db, WS_A.id)).linksUnavailable).toBe(true)
+  }
+
+  it("the tree loader throws the database error instead of presenting every opportunity as unlinked", async () => {
+    const { fake, db } = setup()
+    breakLinkTables(fake)
+    await expect(loadOutcomeTree(db, WS_A.id)).rejects.toMatchObject({ code: "42P01" })
   })
 
-  it("does not flag a workspace that simply has no links yet", async () => {
+  it("the Outcomes index loader throws too, with no warning logged as a substitute", async () => {
+    const { fake, db } = setup()
+    breakLinkTables(fake)
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    await expect(loadOutcomesIndex(db, WS_A.id)).rejects.toMatchObject({ code: "42P01" })
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it("a workspace with no links yet is simply empty, not an error", async () => {
     const { db } = setup()
-    expect((await loadOutcomeTree(db, WS_A.id)).linksUnavailable).toBe(false)
-    expect((await loadOutcomesIndex(db, WS_A.id)).linksUnavailable).toBe(false)
+    const tree = await loadOutcomeTree(db, WS_A.id)
+    expect(tree.pool).toEqual(["opp-a"])
+    expect((await loadOutcomesIndex(db, WS_A.id)).rows.map((r) => r.id)).toEqual(["obj-a"])
   })
 
-  it("does not flag unrelated link failures as a missing table (they keep throwing)", async () => {
+  it("an empty workspace issues no link query, so it cannot fail on a missing table", async () => {
     const { fake, db } = setup()
-    const client = fake.client as unknown as Record<string, { findMany: unknown }>
-    client.opportunityObjectiveLink.findMany = async () => { throw Object.assign(new Error("permission denied"), { code: "42501" }) }
-    await expect(loadOutcomeTree(db, WS_A.id)).rejects.toThrow("permission denied")
-  })
-
-  it("an empty workspace issues no probe and is not flagged", async () => {
-    const { fake, db } = setup()
+    breakLinkTables(fake)
     fake.state.opportunities.length = 0
-    expect((await loadOutcomeTree(db, WS_A.id)).linksUnavailable).toBe(false)
+    fake.state.solutions.length = 0
+    await expect(loadOutcomeTree(db, WS_A.id)).resolves.toMatchObject({ pool: [] })
   })
 })
 

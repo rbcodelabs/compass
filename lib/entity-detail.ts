@@ -37,7 +37,6 @@ import { loadCustomFieldsForObject } from "@/lib/custom-field-definitions";
 import { toOpportunityScoreData, toScoreSummary, toSolutionScoreData } from "@/lib/score-summary";
 import type { ScoringModelData } from "@/lib/types";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
-import { probeLinksUnavailable } from "@/lib/thinking-model/outcome-tree-data";
 
 /**
  * ADR-0012 step 6a — the three OST detail fetchers that carry Evidence resolve
@@ -253,17 +252,11 @@ async function fetchOpportunity(id: string, workspaceId: string) {
       : Promise.resolve(null),
   ]);
   const solutionScoringModel = item.workspace?.scoringConfig?.solutionScoringModel ?? null;
-  // Only the picker needs to know the (silently tolerated) link table is missing: an empty list must not read as fact.
-  const linksUnavailable =
-    offersObjectivePicker && (linkedObjectivesByOpportunity.get(id) ?? []).length === 0
-      ? await probeLinksUnavailable(getPrisma(), workspaceId, id)
-      : false;
   // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
   const linkedKeyResult = item.linkedKeyResult && item.linkedKeyResult.objective.workspaceId === workspaceId ? item.linkedKeyResult : null;
   return {
     ...item, ...(item.linkedKeyResult ? { linkedKeyResult } : {}), evidence, ...linkedTasks, squads, customFields,
     linkedObjectives: linkedObjectivesByOpportunity.get(id) ?? [],
-    ...(linksUnavailable ? { linksUnavailable } : {}),
     ...(pickerObjectives
       ? { availableObjectives: pickerObjectives.map((o) => ({ id: o.id, title: o.title, cycleTitle: o.cycle?.title ?? null })) }
       : {}),
