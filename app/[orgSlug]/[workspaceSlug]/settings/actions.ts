@@ -11,6 +11,7 @@ import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
 import { encrypt } from "@/lib/crypto-secrets";
 import { generateSsoSecret } from "@/lib/portal-sso";
 import { getArtifactStorage } from "@/lib/artifact-storage";
+import { requireProductEntity } from "@/lib/product-action-auth";
 import { deleteWorkspaceArtifacts } from "@/lib/artifacts";
 import { deleteWorkspaceDecisionData } from "@/lib/delete-workspace-decision-data";
 import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
@@ -60,8 +61,9 @@ export async function updateSquad(
   squadId: string,
   input: { name?: string; color?: string }
 ) {
-  await resolveWorkspace(orgSlug, workspaceSlug);
+  const { workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
   const prisma = getPrisma();
+  await assertSquadInWorkspace(prisma, squadId, workspaceId);
 
   await prisma.squad.update({
     where: { id: squadId },
@@ -79,14 +81,17 @@ export async function deleteSquad(
   workspaceSlug: string,
   squadId: string
 ) {
-  await resolveWorkspace(orgSlug, workspaceSlug);
+  const { workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
   const prisma = getPrisma();
+  // The squad must belong to the caller's workspace, and the null-out below is
+  // scoped to it so a foreign squad id can never touch another tenant's rows.
+  await assertSquadInWorkspace(prisma, squadId, workspaceId);
 
   // Null out squad references (no FK cascade in DSQL)
-  await prisma.objective.updateMany({ where: { squadId }, data: { squadId: null } });
-  await prisma.opportunity.updateMany({ where: { squadId }, data: { squadId: null } });
-  await prisma.experiment.updateMany({ where: { squadId }, data: { squadId: null } });
-  await prisma.roadmapItem.updateMany({ where: { squadId }, data: { squadId: null, updatedAt: new Date() } });
+  await prisma.objective.updateMany({ where: { squadId, cycle: { workspaceId } }, data: { squadId: null } });
+  await prisma.opportunity.updateMany({ where: { squadId, workspaceId }, data: { squadId: null } });
+  await prisma.experiment.updateMany({ where: { squadId, workspaceId }, data: { squadId: null } });
+  await prisma.roadmapItem.updateMany({ where: { squadId, workspaceId }, data: { squadId: null, updatedAt: new Date() } });
 
   await prisma.squad.delete({ where: { id: squadId } });
 
@@ -102,7 +107,11 @@ export async function assignSquad(
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
+  // Authorize the object by membership in its own workspace, and require the
+  // squad (when one is being assigned) to live in that same workspace.
+  const { workspaceId } = await requireProductEntity(objectType, objectId);
   const prisma = getPrisma();
+  if (squadId) await assertSquadInWorkspace(prisma, squadId, workspaceId);
 
   if (objectType === "objective") {
     await prisma.objective.update({ where: { id: objectId }, data: { squadId } });
@@ -117,6 +126,11 @@ export async function assignSquad(
   }
 
   revalidatePath(revalidatePathStr);
+}
+
+async function assertSquadInWorkspace(prisma: ReturnType<typeof getPrisma>, squadId: string, workspaceId: string) {
+  const squad = await prisma.squad.findFirst({ where: { id: squadId, workspaceId }, select: { id: true } });
+  if (!squad) throw new Error("Squad not found in this workspace");
 }
 
 // ─── Helper: resolve workspace and assert membership ─────────────────────────
