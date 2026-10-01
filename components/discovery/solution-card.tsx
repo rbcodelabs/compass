@@ -78,10 +78,15 @@ type Props = {
    * backlog), where the parent is the context that is otherwise missing.
    */
   parent?: { title: string; href: string; squad?: { name: string; color: string } | null };
+  /**
+   * False on read-only boards (the Solutions backlog grouped by squad, parent or
+   * field): no drag handle and no sortable registration.
+   */
+  draggable?: boolean;
   onChanged?: () => void;
 };
 
-export function SolutionCard({ solution, revalidatePathStr, showStatus = true, showScore = false, scoringHref, parent, onChanged }: Props) {
+export function SolutionCard({ solution, revalidatePathStr, showStatus = true, showScore = false, scoringHref, parent, draggable = true, onChanged }: Props) {
   const { openPanel } = usePanelContext();
   const [isPending, startTransition] = useTransition();
 
@@ -93,7 +98,7 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, s
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: solution.id });
+  } = useSortable({ id: solution.id, disabled: !draggable });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -135,7 +140,7 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, s
         }
         description={solution.description}
         leading={
-          <button
+          draggable ? <button
             ref={setActivatorNodeRef}
             {...attributes}
             {...listeners}
@@ -143,7 +148,7 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, s
             aria-label="Drag to reorder"
           >
             <GripVertical className="size-3.5" />
-          </button>
+          </button> : undefined
         }
         status={
           showStatus ? (

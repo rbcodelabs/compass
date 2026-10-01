@@ -11,7 +11,8 @@
  *      column and each card links to its parent Opportunity.
  *   3. Drag one card to Validated; it lands there and survives a reload
  *      (status persisted via moveSolutionStatus).
- *   4. Discovery's Group by no longer offers "Opportunity", and a legacy
+ *   4. New solution, table view and group-by (see the second test).
+ *   5. Discovery's Group by no longer offers "Opportunity", and a legacy
  *      `?groupBy=opportunity` link redirects to /solutions.
  *
  * dnd-kit's PointerSensor needs real mouse movement past its 8px activation
@@ -111,5 +112,65 @@ test.describe("Solutions backlog", () => {
     await page.goto(`${base}/discovery?groupBy=opportunity`);
     await expect(page).toHaveURL(/\/solutions(\?|$)/);
     await expect(page.getByRole("heading", { name: "Solutions", exact: true })).toBeVisible();
+  });
+
+  test("New solution, the table view and group-by work from the backlog", async ({ page, base }) => {
+    const ts = Date.now();
+    const opp = `E2E Parent Opportunity ${ts}`;
+    const otherOpp = `E2E Other Opportunity ${ts}`;
+    const sol = `E2E Dialog Solution ${ts}`;
+
+    await page.goto(`${base}/discovery`);
+    await page.waitForLoadState("networkidle");
+    await createOpportunityFromBoard(page, opp);
+    await createOpportunityFromBoard(page, otherOpp);
+
+    // ── New solution: required parent picker, created under the chosen parent ─
+    await page.goto(`${base}/solutions`);
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("button", { name: "New Solution", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Title").fill(sol);
+    await expect(dialog.getByRole("button", { name: "Add Solution" })).toBeDisabled(); // no parent yet
+    await dialog.getByRole("combobox", { name: "Opportunity" }).click();
+    await page.getByRole("option", { name: opp, exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Add Solution" })).toBeEnabled();
+    await dialog.getByRole("button", { name: "Add Solution" }).click();
+    await expect(dialog).not.toBeVisible({ timeout: 15_000 });
+    await expect(column(page, "IDEA").getByText(sol)).toBeVisible({ timeout: 15_000 });
+    await expect(column(page, "IDEA").getByRole("link", { name: opp, exact: true })).toBeVisible();
+
+    // ── Table view: one row per solution, parent link, title opens the panel ─
+    await page.getByRole("tab", { name: "Table" }).click();
+    await expect(page).toHaveURL(/view=table/);
+    const table = page.getByRole("table", { name: "Solution backlog" });
+    const row = table.getByRole("row", { name: new RegExp(sol) });
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await expect(row.getByRole("link", { name: opp, exact: true })).toHaveAttribute("href", /\/discovery\/[0-9a-f-]+$/);
+    await expect(row.getByText("Idea", { exact: true })).toBeVisible();
+    await row.getByRole("button", { name: sol, exact: true }).click();
+    await expect(page.locator("[data-slot=\"sheet-content\"]").getByText(sol).first()).toBeVisible({ timeout: 10_000 });
+    await page.keyboard.press("Escape");
+
+    // ── Group by Opportunity: one column per parent, read-only ───────────────
+    await page.goto(`${base}/solutions?groupBy=opportunity`);
+    await page.waitForLoadState("networkidle");
+    const parentColumn = page.locator("[data-slot=\"solution-backlog-column\"]", { hasText: opp });
+    await expect(parentColumn.getByText(sol)).toBeVisible();
+    await expect(page.locator("[data-slot=\"solution-backlog-column\"]", { hasText: otherOpp })).toHaveCount(0); // no solutions, no column
+    await expect(page.getByLabel("Drag to reorder")).toHaveCount(0);
+    await expect(page.locator("[data-slot=\"solution-backlog-readonly-note\"]")).toContainText("read-only");
+
+    // ── Group by Squad, via the toggle, keeps the card and persists in the URL ─
+    await page.getByLabel("Group board by").click();
+    await page.getByRole("option", { name: "Squad", exact: true }).click();
+    await expect(page).toHaveURL(/groupBy=squad/);
+    await expect(page.locator("[data-slot=\"solution-backlog-column\"]", { hasText: "No squad" }).getByText(sol)).toBeVisible();
+
+    // ── Stale / unknown groupBy falls back to the Status board ───────────────
+    await page.goto(`${base}/solutions?groupBy=field:00000000-0000-0000-0000-000000000000`);
+    await page.waitForLoadState("networkidle");
+    await expect(column(page, "IDEA").getByText(sol)).toBeVisible();
+    await expect(page.getByLabel("Drag to reorder").first()).toBeVisible();
   });
 });

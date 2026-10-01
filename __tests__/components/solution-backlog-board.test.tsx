@@ -82,4 +82,56 @@ describe("SolutionBacklogBoard", () => {
     renderBoard({ solutions: [] });
     expect(screen.getByText("No solutions found")).toBeInTheDocument();
   });
+
+  describe("group by", () => {
+    const squadA = { id: "sq-a", name: "Alpha", color: "#111111" };
+    const grouped = [
+      { ...item("s1", "Wizard", "IDEA", "A"), opportunity: { id: "opp-A", title: "Opportunity A", squad: squadA }, fieldValue: "s" },
+      { ...item("s2", "Checklist", "VALIDATED", "B"), fieldValue: null },
+    ];
+    const groupColumns = () => [...document.querySelectorAll("[data-slot=solution-backlog-column]")] as HTMLElement[];
+    const heading = (column: HTMLElement) => column.querySelector("header h3")?.textContent;
+
+    it("groups by squad: each squad plus No squad, cards keep their parent link", () => {
+      renderBoard({ solutions: grouped, groupBy: "squad", squads: [squadA, { id: "sq-b", name: "Beta", color: "#222222" }] });
+      expect(groupColumns().map(heading)).toEqual(["Alpha", "Beta", "No squad"]);
+      expect(within(groupColumns()[0]).getByText("Wizard")).toBeInTheDocument();
+      expect(within(groupColumns()[2]).getByText("Checklist")).toBeInTheDocument();
+      expect(screen.getAllByRole("link", { name: "Opportunity B" })[0]).toHaveAttribute("href", "/org/ws/discovery/opp-B");
+    });
+
+    it("groups by parent opportunity", () => {
+      renderBoard({ solutions: grouped, groupBy: "opportunity" });
+      expect(groupColumns().map(heading)).toEqual(["Opportunity A", "Opportunity B"]);
+    });
+
+    it("groups by a solution field: Unspecified then each option", () => {
+      renderBoard({
+        solutions: grouped,
+        groupBy: "field:f1",
+        groupField: { id: "f1", name: "Effort", options: [{ value: "s", label: "Small" }, { value: "l", label: "Large" }] },
+      });
+      expect(groupColumns().map(heading)).toEqual(["Unspecified", "Small", "Large"]);
+      expect(within(groupColumns()[1]).getByText("Wizard")).toBeInTheDocument();
+      expect(within(groupColumns()[0]).getByText("Checklist")).toBeInTheDocument();
+    });
+
+    it("is read-only: no drag handles, a note explains it, columns keep min width and scroll", () => {
+      renderBoard({ solutions: grouped, groupBy: "opportunity" });
+      expect(screen.queryByLabelText("Drag to reorder")).not.toBeInTheDocument();
+      expect(document.querySelector("[data-slot=solution-backlog-readonly-note]")).toHaveTextContent("read-only");
+      expect(screen.getByRole("region", { name: /grouped by opportunity/i })).toHaveClass("overflow-x-auto");
+      expect(groupColumns()[0]).toHaveClass("min-w-[280px]", "flex-none");
+    });
+
+    it("keeps drag handles on the default Status grouping", () => {
+      renderBoard({ groupBy: "status" });
+      expect(screen.getAllByLabelText("Drag to reorder")).toHaveLength(3);
+    });
+
+    it("shows the empty state when nothing matches", () => {
+      renderBoard({ solutions: [], groupBy: "squad" });
+      expect(screen.getByText("No solutions found")).toBeInTheDocument();
+    });
+  });
 });

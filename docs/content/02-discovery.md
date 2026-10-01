@@ -121,8 +121,23 @@ Discovery is the Opportunity backlog. To see every Solution against each other, 
 
 - Each card shows the Solution title, its parent Opportunity (click it to open that Opportunity), a score badge when the workspace has an active Solution scoring model, and its assumption and evidence counts. Click the title to open the Solution panel.
 - Drag a card to another column to change its status. Order within a column is not draggable here, because a column mixes Solutions from many Opportunities; use **Sort by score** (shown when a Solution scoring model is active) to rank them instead.
-- **Filters** narrow the board by squad (the parent Opportunity's squad) and by Solution custom fields.
-- New Solutions are added from an Opportunity (see below). Moving a Solution to a different Opportunity is done from its panel, never by dragging.
+- **Filters** narrow the board by squad (the parent Opportunity’s squad) and by Solution custom fields. They apply to the table view too.
+- **New Solution** (top right) opens a dialog: choose the parent Opportunity (required; any non-archived Opportunity in the workspace), enter a title and an optional description, and the Solution lands in the Idea column. It is the same action as **+ Add Solution** in an Opportunity’s panel. Moving a Solution to a different Opportunity is done from its panel, never by dragging.
+
+### Board and table views
+
+The **Board / Table** toggle switches between the status board and a flat table (`?view=table`). The table has one row per Solution: title (opens the Solution panel), parent Opportunity (a link), squad, status, score (only with an active Solution scoring model), evidence, and assumptions. Rows run from Idea to Killed in board order; **Sort by score** ranks them by score instead. The table respects the same filters as the board.
+
+### Group by
+
+On the board, **Group by** changes what the columns are (`?groupBy=`):
+
+- **Status** (default): one column per status. This is the only grouping where you can drag cards, and dragging changes the status.
+- **Squad**: one column per squad, plus **No squad**. A Solution’s squad is its parent Opportunity’s squad.
+- **Opportunity**: one column per parent Opportunity that has at least one Solution matching the filters.
+- **A Solution custom field**: any single-select Solution field with options gets an entry in the menu. Columns are **Unspecified** (no value, or a value that no longer matches an option) followed by the field’s options in order.
+
+Squad, Opportunity and custom-field groupings are read-only: cards cannot be dragged between those columns (a Solution’s squad and parent belong to its Opportunity, and Solution field values are edited in the Solution panel). Use a card’s **⋯** menu to change status, or switch back to Status to drag. An unknown or stale `groupBy` value (for example a deleted field) opens the Status board.
 
 Columns keep a minimum width and the board scrolls sideways when the screen is narrower.
 

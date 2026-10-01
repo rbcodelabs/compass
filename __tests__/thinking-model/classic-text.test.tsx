@@ -85,6 +85,9 @@ import { OpportunityBoard } from "@/components/discovery/opportunity-board"
 import { OpportunityFieldBoard } from "@/components/discovery/opportunity-field-board"
 import { SolutionBacklogBoard } from "@/components/solutions/solution-backlog-board"
 import { DiscoveryTableView } from "@/components/discovery/discovery-table-view"
+import { SolutionTableView } from "@/components/solutions/solution-table-view"
+import { NewSolutionDialog } from "@/components/solutions/new-solution-dialog"
+import { SolutionGroupByToggle } from "@/components/solutions/solution-group-by-toggle"
 import { ScoringPanel } from "@/components/discovery/scoring-panel"
 import { SolutionScoringPanel } from "@/components/discovery/solution-scoring-panel"
 import { SolutionsList } from "@/components/discovery/solutions-list"
@@ -295,6 +298,15 @@ describe("CLASSIC text is identical to main (Phase 4C-2 surfaces)", () => {
   )
   check("solution-backlog empty", <SolutionBacklogBoard solutions={[]} workspaceId="w1" {...common} />)
   check("solution-backlog items", <SolutionBacklogBoard solutions={[backlogItem]} workspaceId="w1" {...common} />)
+  check("solution-backlog grouped by opportunity", <SolutionBacklogBoard solutions={[backlogItem]} workspaceId="w1" groupBy="opportunity" {...common} />)
+  check("solution-backlog grouped by squad", <SolutionBacklogBoard solutions={[backlogItem]} workspaceId="w1" groupBy="squad" {...common} />)
+  check("solution-backlog grouped empty", <SolutionBacklogBoard solutions={[]} workspaceId="w1" groupBy="squad" {...common} />)
+  check("solution-table empty", <SolutionTableView solutions={[]} {...common} />)
+  check("solution-table rows", <SolutionTableView solutions={[backlogItem]} hasActiveScoringModel {...common} />)
+  check("new-solution-dialog closed", <NewSolutionDialog opportunities={[{ id: "o1", title: "Need" }]} {...common} />)
+  check("new-solution-dialog open", <NewSolutionDialog opportunities={[{ id: "o1", title: "Need" }]} {...common} />, click(/new /i))
+  check("new-solution-dialog open no opportunities", <NewSolutionDialog opportunities={[]} {...common} />, click(/new /i))
+  check("solution-group-by-toggle", <SolutionGroupByToggle groupBy="opportunity" fieldOptions={[{ id: "f1", label: "Effort" }]} />)
   check("discovery-table empty", <DiscoveryTableView opportunities={[]} />)
   check(
     "discovery-table rows",
