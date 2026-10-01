@@ -21,7 +21,7 @@ export type OutcomesIndexRow = {
   linkedOpportunityCount: number
 }
 
-export function OutcomesIndex({ rows, linksUnavailable = false }: { rows: OutcomesIndexRow[]; linksUnavailable?: boolean }) {
+export function OutcomesIndex({ rows }: { rows: OutcomesIndexRow[] }) {
   const labels = useLabels()
   const { openPanel } = usePanelContext()
   if (rows.length === 0) return null
@@ -29,15 +29,6 @@ export function OutcomesIndex({ rows, linksUnavailable = false }: { rows: Outcom
   return (
     <section data-testid="outcomes-index" aria-label={`All ${labels.objective.lowerPlural}`} className="flex flex-col gap-3">
       <h2 className="text-sm font-semibold text-text-primary">All {labels.objective.lowerPlural}</h2>
-      {linksUnavailable && (
-        <p
-          role="status"
-          data-testid="outcomes-index-links-unavailable"
-          className="rounded-lg border border-status-warning bg-status-warning-surface px-3 py-2 text-xs text-status-warning"
-        >
-          Link data is unavailable right now, so counts may be incomplete.
-        </p>
-      )}
       <ul className="flex flex-col divide-y divide-border-default rounded-xl border border-border-default bg-surface-panel">
         {rows.map((row) => {
           const badge = row.status ? STATUS_BADGE[row.status as ObjectiveStatus] : undefined

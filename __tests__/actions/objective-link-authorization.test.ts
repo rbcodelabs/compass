@@ -164,6 +164,24 @@ describe("infrastructure failures are not reported as not-found", () => {
   })
 })
 
+describe("a missing link table (migration 071 not applied) fails the write with the generic message", () => {
+  it("link and unlink both answer generically and log only the name and code", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+    const original = fake.current!.client.opportunityObjectiveLink.findFirst
+    fake.current!.client.opportunityObjectiveLink.findFirst = (async () => {
+      throw Object.assign(new Error("relation \"opportunity_objective_links\" does not exist ROW-DATA"), { name: "PrismaClientKnownRequestError", code: "P2021" })
+    }) as never
+    expect(await linkOpportunityToObjectiveAction("opp-a", "obj-a")).toEqual({ ok: false, error: "Something went wrong. Please try again." })
+    expect(await unlinkOpportunityFromObjectiveAction("opp-a", "obj-a")).toEqual({ ok: false, error: "Something went wrong. Please try again." })
+    fake.current!.client.opportunityObjectiveLink.findFirst = original
+    const text = JSON.stringify(logged.mock.calls)
+    expect(text).toContain("P2021")
+    expect(text).not.toContain("ROW-DATA")
+    expect(links()).toHaveLength(0)
+    logged.mockRestore()
+  })
+})
+
 describe("unlinkOpportunityFromObjectiveAction", () => {
   const seedLink = (row: Record<string, unknown> = {}) =>
     links().push({ id: "l-1", workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT", source: "UI", createdById: null, createdAt: new Date(10), ...row })

@@ -34,7 +34,6 @@ type OpportunityData = ComponentProps<typeof OpportunityHeader>["opportunity"] &
   availableKeyResults: ComponentProps<typeof OpportunityHeader>["availableKeyResults"];
   linkedObjectives?: ComponentProps<typeof OpportunityHeader>["linkedObjectives"];
   availableObjectives?: ComponentProps<typeof OpportunityHeader>["availableObjectives"];
-  linksUnavailable?: boolean;
   customFields: ComponentProps<typeof CustomFieldsPanel>["fields"];
   score: { normalizedScore: number; modelVersion: number } | null;
   existingScore: OpportunityScoreData | null;
@@ -88,7 +87,7 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
     <div data-slot="opportunity-detail" data-variant={variant} className={`@container min-w-0 break-words pb-8 ${variant === "panel" ? "px-5" : ""}`}>
       <div className="flex min-w-0 flex-col gap-5">
         {error && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">Could not refresh opportunity. Showing the last loaded details.<Button variant="outline" size="sm" onClick={refresh}>Retry refresh</Button></div>}
-        <OpportunityHeader opportunity={data} squads={data.squads ?? []} availableKeyResults={data.availableKeyResults ?? []} linkedObjectives={data.linkedObjectives} availableObjectives={data.availableObjectives} linksUnavailable={data.linksUnavailable} revalidatePathStr={detailPath} edit={edit} onChanged={refresh} />
+        <OpportunityHeader opportunity={data} squads={data.squads ?? []} availableKeyResults={data.availableKeyResults ?? []} linkedObjectives={data.linkedObjectives} availableObjectives={data.availableObjectives} revalidatePathStr={detailPath} edit={edit} onChanged={refresh} />
         <div className="flex flex-wrap items-center gap-3">
           {scoringModel && <ScoreBadge score={toScoreSummary(data.score, scoringModel)} scoringHref={`${detailPath}?tab=scoring`} />}
           <Button variant="ghost" size="sm" aria-controls={discussionId} onClick={() => { discussionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); discussionRef.current?.focus({ preventScroll: true }); }}><MessageSquare className="size-4" /> Discussion</Button>
