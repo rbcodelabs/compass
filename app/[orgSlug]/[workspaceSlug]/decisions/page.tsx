@@ -15,7 +15,8 @@ import {
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { getWorkspace } from "@/lib/workspace"
-import { listTrackedDecisions, TRACKED_SUBJECT_LABELS, TRACKED_SUBJECT_TYPES, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { listTrackedDecisions, TRACKED_SUBJECT_TYPES, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { WorkspacePage } from "@/components/patterns/workspace-page"
 import { EmptyState } from "@/components/patterns/empty-state"
 import { StatusBadge } from "@/components/patterns/status-badge"
@@ -24,9 +25,7 @@ import { DecisionsFilters } from "@/components/decisions/decisions-filters"
 import { DecisionsTabs } from "@/components/decisions/decisions-tabs"
 import { buttonVariants } from "@/components/ui/button"
 import { isOrgAdminRole } from "@/lib/roles"
-import { isChoiceActionKey, parseDecisionAnswers } from "@/lib/tracked-decision-types"
-
-const LABELS: Record<string, string> = TRACKED_SUBJECT_LABELS
+import { isChoiceActionKey, parseDecisionAnswers, trackedSubjectLabels } from "@/lib/tracked-decision-types"
 
 const SUBJECT_ICON: Record<TrackedSubjectType, ComponentType<{ className?: string }>> = {
   WORKSPACE: Building2,
@@ -81,6 +80,7 @@ export default async function DecisionsPage({ params, searchParams }: {
   if (!session?.user?.id) redirect("/login")
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id)
   if (!workspace) notFound()
+  const LABELS: Record<string, string> = trackedSubjectLabels(resolveThinkingModel(workspace).labels)
   const tab = query.tab === "decided" ? "DECIDED" : query.tab === "awaiting" ? "AWAITING_FOLLOW_THROUGH" : "PENDING"
   const subjectType = TRACKED_SUBJECT_TYPES.includes(query.type as TrackedSubjectType) ? query.type as TrackedSubjectType : undefined
   const page = Math.max(1, Number.parseInt(query.page ?? "1", 10) || 1)

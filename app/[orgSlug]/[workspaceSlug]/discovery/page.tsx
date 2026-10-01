@@ -14,7 +14,8 @@ import { resolveWorkspaceScoringModel, toScoreSummary } from "@/lib/scoring-mode
 import type { OpportunityStatus, SolutionStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
-import { ChevronRight, Shuffle } from "lucide-react";
+import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
+import { ChevronRight, FolderTree, Shuffle } from "lucide-react";
 import Link from "next/link";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -24,6 +25,7 @@ import {
   parseCustomFieldFilterParams,
   resolveCustomFieldFilter,
 } from "@/lib/custom-field-filter";
+import { objectTypeLabels } from "@/components/custom-fields/object-type-labels";
 import { solutionSwimlaneKey } from "@/lib/discovery-filters";
 import { loadCustomFieldValuesForObjects } from "@/lib/custom-field-values-batch";
 import {
@@ -83,6 +85,10 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
 
   if (!workspace) notFound();
 
+  // The workspace tree exists only for the presets whose tree is not the classic KR-rooted one.
+  const thinkingModel = await getThinkingModelForSlugs(orgSlug, workspaceSlug);
+  const showWorkspaceTree = thinkingModel.tree !== "kr-rooted";
+
   // Discovery renders Opportunities *and* their Solutions, so both object
   // types contribute filter facets and either can own the active filter.
   const [discoveryFieldDefs, customFieldFilter] = await Promise.all([
@@ -96,7 +102,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       filter: parseCustomFieldFilterParams({ field: fieldParam, fieldValue: fieldValueParam }),
     }),
   ]);
-  const customFieldGroups = buildCustomFieldFilterGroups(discoveryFieldDefs);
+  const customFieldGroups = buildCustomFieldFilterGroups(discoveryFieldDefs, objectTypeLabels(thinkingModel.labels));
   // Stale or ineligible field ids fall back to Status (see resolveDiscoveryGroupBy).
   const groupableFields = groupableOpportunityFields(discoveryFieldDefs);
   const groupBy = resolveDiscoveryGroupBy(requestedGroupBy, groupableFields);
@@ -331,6 +337,14 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
             >
               <Shuffle className="size-4" /> Card sort
             </Link>
+            {showWorkspaceTree && (
+              <Link
+                href={`/${orgSlug}/${workspaceSlug}/discovery/tree`}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                <FolderTree className="size-4" /> {thinkingModel.labels.objective.singular} tree
+              </Link>
+            )}
           </div>
         </Suspense>
       )}

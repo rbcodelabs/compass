@@ -37,6 +37,7 @@ const full: OpportunityDraft = {
   squadId: "sq-1",
   keyResultId: "kr-1",
   feedbackIds: ["fb-1", "fb-2"],
+  objectiveIds: ["obj-1"],
 }
 
 describe("opportunity draft", () => {

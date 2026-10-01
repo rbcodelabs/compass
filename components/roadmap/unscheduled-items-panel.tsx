@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import * as React from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { GripVertical, Layers, Bug, MoreHorizontal } from "lucide-react";
@@ -222,13 +223,14 @@ function UnscheduledItemCard({
 }
 
 function UnscheduledItemBody({ item }: { item: UnscheduledItem }) {
+  const labels = useLabels();
   return (
     <CardContent className="flex flex-col gap-1.5 pt-0">
       {item.kind === "solution" ? (
         <>
           <Badge variant="outline" className="gap-1 w-fit">
             <Layers className="size-3" />
-            Solution
+            {labels.solution.singular}
           </Badge>
           <p className="text-[11px] text-muted-foreground/70 truncate">{item.opportunityTitle}</p>
         </>

@@ -31,6 +31,7 @@ import {
 import { CardMenu, type CardMenuItem } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { EntityCard } from "@/components/patterns/entity-card";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 
 interface KeyResult {
   id: string;
@@ -52,9 +53,12 @@ export interface ParentKROption {
   id: string;
   title: string;
   objectiveTitle: string;
-  cycleId: string;
+  /** Owning Objective; lets a cycle-less Objective exclude its own KRs. */
+  objectiveId?: string;
+  cycleId: string | null;
+  /** NO_CYCLE_LABEL for a cycle-less parent Objective. */
   cycleTitle: string;
-  cycleStatus: string;
+  cycleStatus: string | null;
 }
 
 interface ObjectiveRowProps {
@@ -84,6 +88,7 @@ export function ObjectiveRow({
   parentKeyResultId,
   supportingObjectiveOptions,
 }: ObjectiveRowProps) {
+  const labels = useLabels();
   const [isPending, startTransition] = useTransition();
   const [isParentKRPending, startParentKRTransition] = useTransition();
   const [parentKRError, setParentKRError] = useState<string | null>(null);
@@ -147,19 +152,22 @@ export function ObjectiveRow({
     });
   }
 
-  const canLinkParent = !!availableKRs && !localParentKRId && availableKRs.length > 0;
+  // A cycle-less Objective has no date window excluding its own KRs, so the
+  // picker drops them here (linking to one would be rejected as SAME_OBJECTIVE).
+  const selectableKRs = availableKRs?.filter((kr) => kr.objectiveId !== objective.id);
+  const canLinkParent = !!selectableKRs && !localParentKRId && selectableKRs.length > 0;
   const menuItems: CardMenuItem[] = [
     ...(canLinkParent
       ? [
           {
-            label: "Link to parent Key Result…",
+            label: `Link to parent ${labels.keyResult.singular}…`,
             // Defer until the dropdown has closed so focus moves cleanly into the combobox popup.
             onClick: () => requestAnimationFrame(() => setIsParentLinkOpen(true)),
           },
         ]
       : []),
     {
-      label: "Delete Objective",
+      label: `Delete ${labels.objective.singular}`,
       onClick: () => handleDelete(),
       destructive: true,
       separator: canLinkParent,
@@ -244,6 +252,7 @@ export function ObjectiveRow({
             <KeyResultBar
               key={kr.id}
               keyResult={kr}
+              objectiveId={objective.id}
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
               supportingObjectiveOptions={supportingObjectiveOptions}
@@ -271,7 +280,7 @@ export function ObjectiveRow({
               const parentKR = availableKRs.find((kr) => kr.id === localParentKRId);
               const parentLabel = parentKR
                 ? `${parentKR.title} · ${parentKR.cycleTitle}`
-                : "Linked Key Result";
+                : `Linked ${labels.keyResult.singular}`;
               return (
                 <div className="flex min-w-0 items-center gap-1 rounded-md bg-muted/50 px-2 py-1 text-[11px] text-muted-foreground">
                   <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
@@ -283,7 +292,7 @@ export function ObjectiveRow({
                     onClick={() => handleParentKRChange(null)}
                     disabled={isParentKRPending}
                     className="shrink-0 rounded p-0.5 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
-                    aria-label="Unlink parent Key Result"
+                    aria-label={`Unlink parent ${labels.keyResult.singular}`}
                   >
                     <X className="size-3" />
                   </button>
@@ -297,7 +306,7 @@ export function ObjectiveRow({
       {/* Parent-KR link picker — opened from the ⋯ menu, renders nothing until opened */}
       {canLinkParent && (
         <Combobox
-          items={availableKRs!.map((kr) => ({
+          items={selectableKRs!.map((kr) => ({
             value: kr.id,
             label: `${kr.cycleTitle} ${kr.objectiveTitle} ${kr.title}`,
             render: (
@@ -319,8 +328,8 @@ export function ObjectiveRow({
           <ComboboxContent
             anchor={actionsRef}
             align="end"
-            inputPlaceholder="Search cycles, objectives, and KRs…"
-            emptyMessage="No eligible parent KRs. A longer cycle must be Draft or Active and fully contain this cycle's dates."
+            inputPlaceholder={`Search ${labels.cycle.lowerPlural}, ${labels.objective.lowerPlural}, and ${labels.keyResult.shortPlural}…`}
+            emptyMessage={`No eligible parent ${labels.keyResult.shortPlural}. A ${labels.cycle.lower}-less ${labels.objective.singular} can support any ${labels.keyResult.singular} in a Draft or Active ${labels.cycle.lower}; otherwise the parent ${labels.cycle.lower} must be Draft or Active, longer, and fully contain this ${labels.cycle.lower}'s dates.`}
           />
         </Combobox>
       )}

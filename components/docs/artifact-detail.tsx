@@ -1,5 +1,6 @@
 "use client"
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { useRef, useState, useTransition } from "react"
 import { MessageSquare } from "lucide-react"
 import { useRouter } from "next/navigation"
@@ -25,6 +26,7 @@ type ArtifactDetailProps = {
 }
 
 export function ArtifactDetail({ artifact, html, workspaceId, basePath, solutions, decisions, initialCommentsPin }: ArtifactDetailProps) {
+  const labels = useLabels()
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -60,8 +62,8 @@ export function ArtifactDetail({ artifact, html, workspaceId, basePath, solution
         <h2 className="font-semibold">New revision</h2>{artifact.sourceType === "EXTERNAL_LINK" ? <Input name="url" type="url" required placeholder="https://…" /> : <Input name="file" type="file" accept=".html,text/html" required />}<Button type="submit" disabled={pending}>Replace current revision</Button>
       </form>
     </div>
-    <section className="rounded-lg border p-4 space-y-3"><h2 className="font-semibold">Linked solutions</h2>{linked.length === 0 ? <p className="text-sm text-text-subtle">Not linked to a solution.</p> : <ul className="space-y-2">{linked.map((solution) => <li key={solution.id} className="flex items-center justify-between gap-2"><span>{solution.title}</span><Button size="sm" variant="ghost" onClick={() => run(() => unlinkArtifact(workspaceId, artifact.id, solution.id, basePath))}>Unlink</Button></li>)}</ul>}
-      {available.length > 0 && <div className="flex gap-2"><select aria-label="Solution to link" className="flex-1 rounded-md border px-3 text-sm" value={selectedSolution} onChange={(event) => setSelectedSolution(event.target.value)}><option value="">Select a solution…</option>{available.map((solution) => <option key={solution.id} value={solution.id}>{solution.title}</option>)}</select><Button disabled={!selectedSolution || pending} onClick={() => run(() => linkArtifact(workspaceId, artifact.id, selectedSolution, basePath))}>Link</Button></div>}
+    <section className="rounded-lg border p-4 space-y-3"><h2 className="font-semibold">{`Linked ${labels.solution.lowerPlural}`}</h2>{linked.length === 0 ? <p className="text-sm text-text-subtle">{`Not linked to ${labels.solution.indefinite}.`}</p> : <ul className="space-y-2">{linked.map((solution) => <li key={solution.id} className="flex items-center justify-between gap-2"><span>{solution.title}</span><Button size="sm" variant="ghost" onClick={() => run(() => unlinkArtifact(workspaceId, artifact.id, solution.id, basePath))}>Unlink</Button></li>)}</ul>}
+      {available.length > 0 && <div className="flex gap-2"><select aria-label={`${labels.solution.singular} to link`} className="flex-1 rounded-md border px-3 text-sm" value={selectedSolution} onChange={(event) => setSelectedSolution(event.target.value)}><option value="">{`Select ${labels.solution.indefinite}…`}</option>{available.map((solution) => <option key={solution.id} value={solution.id}>{solution.title}</option>)}</select><Button disabled={!selectedSolution || pending} onClick={() => run(() => linkArtifact(workspaceId, artifact.id, selectedSolution, basePath))}>Link</Button></div>}
     </section>
     <section className="min-w-0 rounded-lg border p-4 space-y-3">
       <h2 className="font-semibold">Linked decisions</h2>

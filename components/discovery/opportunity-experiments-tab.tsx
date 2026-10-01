@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import type { ExperimentStatus, Conclusion } from "@/lib/types";
@@ -64,10 +65,11 @@ export function OpportunityExperimentsTab({
   orgSlug,
   workspaceSlug,
 }: Props) {
+  const labels = useLabels();
   if (experiments.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No experiments yet. Add assumptions to solutions and link experiments to them.
+        {`No experiments yet. Add assumptions to ${labels.solution.lowerPlural} and link experiments to them.`}
       </p>
     );
   }

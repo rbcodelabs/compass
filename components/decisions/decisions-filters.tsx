@@ -1,5 +1,6 @@
 "use client"
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { useEffect, useRef, useState } from "react"
 import { CalendarRange, Search, X } from "lucide-react"
 
@@ -8,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { FacetedFilterMenu } from "@/components/patterns/faceted-filter-menu"
-import { TRACKED_SUBJECT_LABELS, TRACKED_SUBJECT_TYPES } from "@/lib/tracked-decision-types"
+import { TRACKED_SUBJECT_TYPES, trackedSubjectLabels } from "@/lib/tracked-decision-types"
 
 const OUTCOME_OPTIONS = [
   { value: "APPROVE", label: "Approved" },
@@ -27,6 +28,7 @@ const SEARCH_DEBOUNCE_MS = 300
  * links exactly like Tasks/Experiments.
  */
 export function DecisionsFilters({ reviewers }: { reviewers: { id: string; name: string }[] }) {
+  const subjectLabels = trackedSubjectLabels(useLabels())
   const { params, set } = useUrlState()
   const q = params.get("q") ?? ""
   const from = params.get("from") ?? ""
@@ -154,7 +156,7 @@ export function DecisionsFilters({ reviewers }: { reviewers: { id: string; name:
             label: "Linked item",
             value: type,
             onValueChange: (value) => set({ type: value, page: null }),
-            options: TRACKED_SUBJECT_TYPES.map((subjectType) => ({ value: subjectType, label: TRACKED_SUBJECT_LABELS[subjectType] })),
+            options: TRACKED_SUBJECT_TYPES.map((subjectType) => ({ value: subjectType, label: subjectLabels[subjectType] })),
           },
           {
             id: "outcome",

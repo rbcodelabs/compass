@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useState, useTransition } from "react";
 import {
   Select,
@@ -38,7 +39,8 @@ export function WorkspaceScoringPanel({
   const [selected, setSelected] = useState(currentScoringModelId ?? NONE_VALUE);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const entityLabel = entityType === "SOLUTION" ? "Solutions" : "Opportunities";
+  const labels = useLabels();
+  const entityLabel = entityType === "SOLUTION" ? labels.solution.plural : labels.opportunity.plural;
 
   function handleChange(value: string | null) {
     const next = value ?? NONE_VALUE;
@@ -89,7 +91,7 @@ export function WorkspaceScoringPanel({
             was the only picker on the page before Solutions was added. */}
         <SelectTrigger
           className="w-full max-w-xs"
-          aria-label={entityType === "SOLUTION" ? "Active scoring model for Solutions" : "Active scoring model"}
+          aria-label={entityType === "SOLUTION" ? `Active scoring model for ${labels.solution.plural}` : "Active scoring model"}
         >
           <SelectValue />
         </SelectTrigger>

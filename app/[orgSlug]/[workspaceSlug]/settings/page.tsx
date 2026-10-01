@@ -13,6 +13,8 @@ import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel
 import { DeliveryLimitsPanel } from "@/components/settings/delivery-limits-panel";
 import { LaunchWorkflowSettingsPanel } from "@/components/settings/launch-workflow-settings-panel";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
+import { ThinkingModelPanel } from "@/components/settings/thinking-model-panel";
+import { inspectStoredLabels, resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { DeleteWorkspacePanel } from "@/components/settings/delete-workspace-panel";
 import { WorkspaceScoringPanel } from "@/components/scoring-models/workspace-scoring-panel";
 import type { ApiKeyRow } from "@/components/settings/manage-api-keys-panel";
@@ -24,6 +26,7 @@ import type {
   MemberData,
 } from "@/lib/types";
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles";
+import { canChangeThinkingModel } from "@/lib/thinking-model/permissions";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
 import { CapabilityPacksPanel, type CapabilityPackSettingsRow } from "@/components/settings/capability-packs-panel";
@@ -82,6 +85,8 @@ export default async function SettingsPage({ params }: Props) {
       brandingFontPresetId: true,
       brandingFontFamily: true,
       brandingLogoUrl: true,
+      thinkingModel: true,
+      thinkingModelLabels: true,
     },
   });
 
@@ -175,6 +180,10 @@ export default async function SettingsPage({ params }: Props) {
   const currentUserMembershipId =
     rawMembers.find((m) => m.userId === session.user?.id)?.id ?? null;
   const currentWorkspaceRole = rawMembers.find((m) => m.userId === session.user?.id)?.role;
+  const thinkingModel = resolveThinkingModel(workspace);
+  // Same code path as the resolver: the form shows only what is actually applied,
+  // and anything stored but not applied is surfaced rather than silently dropped.
+  const storedLabels = inspectStoredLabels(workspace);
   const canManageCapabilityPacks = normalizeWorkspaceRole(currentWorkspaceRole) === "ADMIN" || isOrgAdminRole(workspace.organization.members[0]?.role);
   // Deliberately NOT combined with canManageCapabilityPacks/workspace-admin
   // above: the Organization section below controls
@@ -183,6 +192,9 @@ export default async function SettingsPage({ params }: Props) {
   // also an org OWNER/ADMIN must not see or use it, even though they pass
   // every other admin gate on this page.
   const isOrgAdmin = isOrgAdminRole(workspace.organization.members[0]?.role);
+  // A workspace member who is an admin of the workspace or org. An org admin who is only here through the read-only
+  // fallback (no membership) cannot change it: updateThinkingModel would answer "Workspace not found".
+  const canEditThinkingModel = canChangeThinkingModel({ workspaceRole: currentWorkspaceRole, orgRole: workspace.organization.members[0]?.role });
   const analyticsActor = { userId: session.user.id, purpose: "USER" as const, scopeWorkspaceId: workspace.id };
   const analyticsConnections = await listConnections(analyticsActor, workspace.id);
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: workspace.id, revokedAt: null } });
@@ -273,7 +285,7 @@ export default async function SettingsPage({ params }: Props) {
         <ThemePreferenceControl />
       </SettingsSection>
 
-      <SettingsSection title="Squads" description="Teams within this workspace. Squads can be assigned to objectives, opportunities, experiments, and roadmap items.">
+      <SettingsSection title="Squads" description={`Teams within this workspace. Squads can be assigned to ${thinkingModel.labels.objective.lowerPlural}, ${thinkingModel.labels.opportunity.lowerPlural}, experiments, and roadmap items.`}>
         <ManageSquadsPanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
@@ -320,10 +332,10 @@ export default async function SettingsPage({ params }: Props) {
         />
       </SettingsSection>
 
-      <SettingsSection title="Scoring" description="Choose which org-level scoring model this workspace uses to rank Opportunities and Solutions. The two picks are independent of each other. Templates are managed by organization admins in Org Settings.">
+      <SettingsSection title="Scoring" description={`Choose which org-level scoring model this workspace uses to rank ${thinkingModel.labels.opportunity.plural} and ${thinkingModel.labels.solution.plural}. The two picks are independent of each other. Templates are managed by organization admins in Org Settings.`}>
         <div className="flex flex-col gap-5">
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">Opportunities</p>
+            <p className="text-sm font-medium">{thinkingModel.labels.opportunity.plural}</p>
             <WorkspaceScoringPanel
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
@@ -333,7 +345,7 @@ export default async function SettingsPage({ params }: Props) {
             />
           </div>
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">Solutions</p>
+            <p className="text-sm font-medium">{thinkingModel.labels.solution.plural}</p>
             <WorkspaceScoringPanel
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
@@ -425,6 +437,20 @@ export default async function SettingsPage({ params }: Props) {
           ssoIdentifyEnabled={workspace.ssoEnabled ?? false}
         />
       </SettingsSection>}
+
+      {/* Admin only, enforced again by updateThinkingModel (resolveWorkspaceAdmin).
+          Has no switches, so its position cannot shift the positional-index specs. */}
+      {canEditThinkingModel && (
+        <SettingsSection title="Thinking model" description="What this workspace calls its goals and measures. Names only: your data is the same under every choice, so you can switch back at any time.">
+          <ThinkingModelPanel
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            initialKey={thinkingModel.key}
+            initialOverrides={storedLabels.applied}
+            unappliedStored={storedLabels.unapplied}
+          />
+        </SettingsSection>
+      )}
 
       <SettingsSection title="Branding" description="Customize the accent color, font, and logo shown across this workspace and its public portal.">
         <WorkspaceBrandingPanel

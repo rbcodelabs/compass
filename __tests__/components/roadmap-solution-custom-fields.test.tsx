@@ -43,6 +43,11 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({ promoteToRoa
 // SolutionScoringPanel (embedded in SolutionPanel) writes through the discovery
 // server actions module, which imports next-auth — not loadable in this jsdom test.
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({ saveSolutionScore: vi.fn() }));
+// The Solution <-> Key Result picker (Phase 4B) imports its server actions, which import next-auth.
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/solution-link-actions", () => ({
+  linkSolutionToKeyResultAction: vi.fn(),
+  unlinkSolutionFromKeyResultAction: vi.fn(),
+}));
 
 import { RoadmapItemPanel } from "@/components/panels/roadmap-item-panel";
 import { SolutionPanel } from "@/components/panels/solution-panel";

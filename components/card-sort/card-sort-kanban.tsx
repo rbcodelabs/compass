@@ -1,5 +1,7 @@
 "use client"
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
+
 /**
  * The sort board as a kanban.
  *
@@ -176,6 +178,7 @@ type CardContext = {
  * the title opens the same detail panel the discovery board does.
  */
 function SolidCard({ card, ctx }: { card: PlacedCard; ctx: CardContext }) {
+  const labels = useLabels()
   const { openPanel } = usePanelContext()
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
     id: card.objectId,
@@ -253,7 +256,7 @@ function SolidCard({ card, ctx }: { card: PlacedCard; ctx: CardContext }) {
               {meta && (
                 <>
                   <Badge variant="secondary">
-                    {meta.solutionCount} {meta.solutionCount === 1 ? "solution" : "solutions"}
+                    {meta.solutionCount} {meta.solutionCount === 1 ? labels.solution.lower : labels.solution.lowerPlural}
                   </Badge>
                   <EvidenceBadge count={meta.evidenceCount} sourceCount={meta.evidenceSourceCount} />
                 </>
@@ -331,6 +334,7 @@ const GHOST_HATCH = {
  * is a tab stop — the solid card is the one to act on, and withdraw lives there.
  */
 function VacatedOutline({ slot, ctx }: { slot: VacatedSlot; ctx: CardContext }) {
+  const labels = useLabels()
   const { openPanel } = usePanelContext()
   const meta = ctx.meta[slot.objectId]
 
@@ -369,7 +373,7 @@ function VacatedOutline({ slot, ctx }: { slot: VacatedSlot; ctx: CardContext }) 
               <ScoreBadge score={meta.score} scoringHref={ctx.scoringHref(slot.objectId)} />
             )}
             <Badge variant="secondary">
-              {meta.solutionCount} {meta.solutionCount === 1 ? "solution" : "solutions"}
+              {meta.solutionCount} {meta.solutionCount === 1 ? labels.solution.lower : labels.solution.lowerPlural}
             </Badge>
           </div>
         ) : (

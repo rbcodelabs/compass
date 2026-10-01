@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { PlusIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ type Props = {
  * usable while writing.
  */
 export function NewOpportunityButton({ variant, status }: Props) {
+  const labels = useLabels();
   const { panel, openPanel } = usePanelContext();
   const id = opportunityComposerId(status);
   const composerOpen = panel?.type === "opportunity-new";
@@ -44,7 +46,7 @@ export function NewOpportunityButton({ variant, status }: Props) {
         className="flex items-center gap-1.5 w-full rounded-lg px-2.5 py-2 text-xs font-medium text-text-subtle hover:text-primary hover:bg-surface-panel/70 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <PlusIcon className="w-3.5 h-3.5" />
-        Add opportunity
+        {`Add ${labels.opportunity.lower}`}
       </button>
     );
   }
@@ -52,7 +54,7 @@ export function NewOpportunityButton({ variant, status }: Props) {
   return (
     <Button type="button" onClick={open} aria-expanded={composerOpen}>
       <PlusIcon />
-      New Opportunity
+      {`New ${labels.opportunity.singular}`}
     </Button>
   );
 }

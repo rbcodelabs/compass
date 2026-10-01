@@ -19,6 +19,16 @@ export const USERS = {
   bob: "user-bob",
   /** Signed in, but a member of neither workspace. */
   eve: "user-eve",
+  /** ADMIN of workspace A only. */
+  carol: "user-carol",
+  /** ADMIN of workspace B only. */
+  erin: "user-erin",
+  /** Org ADMIN of acme and a plain MEMBER of workspace A. */
+  dave: "user-dave",
+  /** Org member of acme (read-only access) but NOT a member of workspace A. */
+  frank: "user-frank",
+  /** Org ADMIN of acme who is NOT a member of workspace A (admin of the org, not of the workspace). */
+  gina: "user-gina",
 } as const;
 
 export const WS_A = { id: "ws-a", org: "acme", slug: "alpha" } as const;
@@ -48,12 +58,29 @@ type SquadRow = { id: string; workspaceId: string; name: string; color: string; 
 
 export function createTenantFakePrisma() {
   const workspaces = [
-    { ...WS_A, members: [USERS.alice] as string[] },
-    { ...WS_B, members: [USERS.bob] as string[] },
+    {
+      ...WS_A,
+      members: [USERS.alice, USERS.carol, USERS.dave] as string[],
+      memberRoles: { [USERS.carol]: "ADMIN" } as Record<string, string>,
+      thinkingModel: null as string | null,
+      thinkingModelLabels: null as string | null,
+    },
+    {
+      ...WS_B,
+      members: [USERS.bob, USERS.erin] as string[],
+      memberRoles: { [USERS.erin]: "ADMIN" } as Record<string, string>,
+      thinkingModel: null as string | null,
+      thinkingModelLabels: null as string | null,
+    },
   ];
   const orgMembers = [
     { org: WS_A.org, userId: USERS.alice, role: "MEMBER" },
     { org: WS_B.org, userId: USERS.bob, role: "MEMBER" },
+    { org: WS_A.org, userId: USERS.carol, role: "MEMBER" },
+    { org: WS_B.org, userId: USERS.erin, role: "MEMBER" },
+    { org: WS_A.org, userId: USERS.dave, role: "ADMIN" },
+    { org: WS_A.org, userId: USERS.frank, role: "MEMBER" },
+    { org: WS_A.org, userId: USERS.gina, role: "ADMIN" },
   ];
 
   const feedback: FeedbackRow[] = [
@@ -300,17 +327,33 @@ export function createTenantFakePrisma() {
     { id: "cmt-b", docId: "doc-b" },
   ];
 
+  /** The caller id inside a (possibly AND-composed) `members: { some: { userId } }` filter. */
+  const memberIdOf = (where: Where | undefined): string | undefined => {
+    if (!where) return undefined;
+    const direct = (where.members as { some?: { userId?: string } } | undefined)?.some?.userId;
+    if (direct) return direct;
+    const and = where.AND;
+    for (const part of Array.isArray(and) ? and : and ? [and] : []) {
+      const found = memberIdOf(part as Where);
+      if (found) return found;
+    }
+    return undefined;
+  };
+
   const client = {
     workspace: {
       /** The by-id shape handlers use to fetch a name and the slugs for a deep link. */
       findUnique: async ({ where }: { where: { id: string } }) => {
         const found = workspaces.find((w) => w.id === where.id);
-        return found ? { id: found.id, name: found.slug, slug: found.slug, organization: { slug: found.org } } : null;
+        return found
+          ? { id: found.id, name: found.slug, slug: found.slug, organization: { slug: found.org }, thinkingModel: found.thinkingModel, thinkingModelLabels: found.thinkingModelLabels }
+          : null;
       },
       findFirst: async ({ where }: { where: Where }) => {
         // Generic matcher so AND-composed membership filters (agentWorkspaceWhere) are honoured too.
         const found = workspaces.find((w) => matches("workspace", w as unknown as Graph, where));
         if (!found) return null;
+        const memberId = memberIdOf(where);
         return {
           id: found.id,
           name: found.slug,
@@ -324,7 +367,31 @@ export function createTenantFakePrisma() {
           brandingFontPresetId: null,
           brandingFontFamily: null,
           brandingLogoUrl: null,
+          thinkingModel: found.thinkingModel,
+          thinkingModelLabels: found.thinkingModelLabels,
+          // Shapes resolveWorkspaceAdmin selects: the caller's own workspace and org roles.
+          members:
+            memberId && found.members.includes(memberId)
+              ? [{ role: found.memberRoles[memberId] ?? "MEMBER" }]
+              : [],
+          organization: {
+            members: orgMembers
+              .filter((m) => m.org === found.org && m.userId === memberId)
+              .map((m) => ({ role: m.role })),
+          },
         };
+      },
+      update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+        const row = workspaces.find((w) => w.id === where.id);
+        if (!row) throw new Error("Record to update not found.");
+        for (const [key, value] of Object.entries(data)) {
+          if (key !== "thinkingModel" && key !== "thinkingModelLabels") {
+            throw new Error(`fake prisma: unsupported workspace.update field "${key}"`);
+          }
+          (row as Record<string, unknown>)[key] = value;
+        }
+        writes.push(`workspace.update:${row.id}`);
+        return { id: row.id };
       },
     },
     organizationMember: {
@@ -395,7 +462,7 @@ export function createTenantFakePrisma() {
       const workspace = workspaces.find((w) => w.id === workspaceId);
       if (workspace && !workspace.members.includes(userId)) workspace.members.push(userId);
     },
-    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks },
+    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks, workspaces },
     /** Snapshot of every feedback row, for before/after "nothing changed" assertions. */
     snapshotFeedback: () => JSON.parse(JSON.stringify(feedback)) as unknown,
   };

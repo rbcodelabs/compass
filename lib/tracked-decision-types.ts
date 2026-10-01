@@ -1,3 +1,5 @@
+import type { ResolvedLabels } from "@/lib/thinking-model/labels"
+
 // Pure constants/types for tracked decisions — deliberately free of any
 // server-only imports (Prisma, `@/lib/db`, node builtins). `lib/tracked-decisions.ts`
 // re-exports these for server code, but client components (e.g. the Decisions
@@ -6,7 +8,14 @@
 // and breaks compilation (`Can't resolve 'fs'/'net'/'tls'`).
 export const TRACKED_SUBJECT_TYPES = ["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"] as const
 export type TrackedSubjectType = (typeof TRACKED_SUBJECT_TYPES)[number]
+/** Canonical names: for server code, MCP and stored text. Screens use trackedSubjectLabels(labels). */
 export const TRACKED_SUBJECT_LABELS: Record<TrackedSubjectType, string> = { WORKSPACE: "Workspace", OPPORTUNITY: "Opportunity", SOLUTION: "Solution", ROADMAP_ITEM: "Roadmap Item", DOC: "Doc", EXPERIMENT: "Experiment", FEEDBACK: "Feedback" }
+/** The subject-type names a screen shows: the workspace's own words for the entities it renames. */
+export const trackedSubjectLabels = (labels: ResolvedLabels): Record<TrackedSubjectType, string> => ({
+  ...TRACKED_SUBJECT_LABELS,
+  OPPORTUNITY: labels.opportunity.singular,
+  SOLUTION: labels.solution.singular,
+})
 export const TRACKED_SOURCE_TYPES = ["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK", "EVIDENCE"] as const
 export type TrackedSourceType = (typeof TRACKED_SOURCE_TYPES)[number]
 

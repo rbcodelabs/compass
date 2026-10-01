@@ -26,6 +26,7 @@ import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-upda
 import { assertFollowsNotificationsMigration } from "@/lib/migrations/follows-notifications";
 import { assertMcpConnectorsMigration } from "@/lib/migrations/mcp-connectors";
 import { assertMetricsDashboardMigration } from "@/lib/migrations/metrics-dashboard";
+import { assertObjectiveCycleIdNullable, OBJECTIVE_OPTIONAL_CYCLE_MIGRATION } from "@/lib/migrations/objective-optional-cycle";
 import { assertWorkspaceIdOnSolutionObjective, backfillWorkspaceIdOnSolutionObjective, getWorkspaceIdBackfillStatus, WORKSPACE_ID_MIGRATION, WORKSPACE_ID_RESIDUAL_MIGRATION } from "@/lib/migrations/workspace-id-on-solution-objective";
 import { TYPED_LINK_RESIDUAL_MIGRATION, TYPED_LINK_TABLES_MIGRATION, assertTypedLinkPreconditions, assertTypedLinkTables, backfillOpportunityObjectiveLinks, getTypedLinkStatus } from "@/lib/migrations/typed-link-tables";
 import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-manifest";
@@ -461,6 +462,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // POST it only after the deploy that writes the column has fully rolled out.
     name: "069_workspace_id_residual_backfill",
     filePath: path.join(process.cwd(), "prisma/migrations/069_workspace_id_residual_backfill/migration.sql"),
+  },
+  {
+    // objectives.cycle_id DROP NOT NULL (ADR Phase 1). Single DDL, no data change;
+    // the runner hook asserts the column is really nullable before the receipt.
+    name: "070_objective_optional_cycle",
+    filePath: path.join(process.cwd(), "prisma/migrations/070_objective_optional_cycle/migration.sql"),
   },
   {
     // Typed link tables (ADR Phase 2, PR-1): opportunity_objective_links and
@@ -2009,6 +2016,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         await backfillOpportunityObjectiveLinks(client, schema, log, undefined, migration.name)
         await assertTypedLinkTables(client, schema, migration.name)
       }
+      if (migration.name === OBJECTIVE_OPTIONAL_CYCLE_MIGRATION) await assertObjectiveCycleIdNullable(client, schema)
 
       // Only this distinct attempt becomes a successful receipt. A failed
       // attempt remains unfinished as forensic evidence and is never relabeled.

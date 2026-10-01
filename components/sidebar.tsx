@@ -52,6 +52,7 @@ import { signOutAction } from "@/lib/actions/auth-actions"
 import { getWorkspaceSwitchPath } from "@/lib/workspace-nav"
 import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
 import { useAgentRailOptional } from "@/components/agent/agent-rail-context"
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 
 interface SidebarProps {
   orgSlug: string
@@ -67,8 +68,10 @@ interface SidebarProps {
   updatesEnabled?: boolean
 }
 
-const baseNavItems = [
-  { label: "OKRs", path: "okrs", Icon: Target },
+// A function, not a constant, because the OKRs entry's name comes from the
+// workspace's thinking model ("OKRs" by default, "Outcomes" under Torres).
+const buildBaseNavItems = (okrsLabel: string) => [
+  { label: okrsLabel, path: "okrs", Icon: Target },
   { label: "Discovery", path: "discovery", Icon: Lightbulb },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
@@ -151,6 +154,8 @@ export function Sidebar({
   const pathname = usePathname()
   const router = useRouter()
   const base = `/${orgSlug}/${workspaceSlug}`
+  const labels = useLabels()
+  const baseNavItems = buildBaseNavItems(labels.sections.okrs)
   const navItems = [
     ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
     ...baseNavItems.slice(0, 6),

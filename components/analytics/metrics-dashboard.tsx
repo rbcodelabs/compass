@@ -35,6 +35,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 
 const PANEL_TYPE_FOR_TARGET: Record<DashboardMetricDTO["bindings"][number]["targetType"], EntityPanelType> = {
   EXPERIMENT: "experiment",
@@ -76,6 +77,7 @@ export function MetricsDashboard({
   initialMetrics: DashboardMetricDTO[];
   vercelConnectionId: string | null;
 }) {
+  const labels = useLabels();
   const [metrics, setMetrics] = useState(initialMetrics);
   const [metricDialogOpen, setMetricDialogOpen] = useState(false);
   const [editingMetric, setEditingMetric] = useState<MetricDTO | null>(null);
@@ -286,7 +288,7 @@ export function MetricsDashboard({
       {visible.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border-default px-6 py-12 text-center">
           <p className="font-medium text-text-primary">No metrics on this dashboard yet</p>
-          <p className="max-w-md text-sm text-text-subtle">Create a metric to connect product usage from Vercel Web Analytics to an experiment, key result, or roadmap launch.</p>
+          <p className="max-w-md text-sm text-text-subtle">Create a metric to connect product usage from Vercel Web Analytics to an experiment, {labels.keyResult.lower}, or roadmap launch.</p>
           <Button onClick={openCreate} disabled={!vercelConnectionId}>
             <PlusIcon />
             Create your first metric
@@ -332,7 +334,7 @@ export function MetricsDashboard({
           <AlertDialogHeader>
             <AlertDialogTitle>Archive {archiving ? `"${archiving.metric.name}"` : "this metric"}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This metric will stop appearing in new bindings, but its historical observations and existing links to experiments, key results, and roadmap items are preserved — nothing is deleted, and a stale metric never becomes a silent zero.
+              This metric will stop appearing in new bindings, but its historical observations and existing links to experiments, {labels.keyResult.lowerPlural}, and roadmap items are preserved — nothing is deleted, and a stale metric never becomes a silent zero.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -406,14 +408,14 @@ function Sparkline({ points }: { points: (number | null)[] }) {
   );
 }
 
-const TARGET_LABEL: Record<DashboardMetricDTO["bindings"][number]["targetType"], string> = {
-  EXPERIMENT: "Experiment",
-  KEY_RESULT: "Key result",
-  ROADMAP_ITEM: "Roadmap item",
-};
-
 function BindingsRow({ bindings }: { bindings: DashboardMetricDTO["bindings"] }) {
   const { openPanel } = usePanelContext();
+  const labels = useLabels();
+  const TARGET_LABEL: Record<DashboardMetricDTO["bindings"][number]["targetType"], string> = {
+    EXPERIMENT: "Experiment",
+    KEY_RESULT: labels.keyResult.sentence,
+    ROADMAP_ITEM: "Roadmap item",
+  };
   if (bindings.length === 0) return <p className="text-xs text-text-subtle">Not linked yet</p>;
   const shown = bindings.slice(0, 2);
   const rest = bindings.length - shown.length;

@@ -21,6 +21,8 @@ import {
   parseCustomFieldFilterParams,
   resolveCustomFieldFilter,
 } from "@/lib/custom-field-filter";
+import { objectTypeLabels } from "@/components/custom-fields/object-type-labels";
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 
 export const metadata = {
   title: "Tasks",
@@ -68,7 +70,8 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       filter: parseCustomFieldFilterParams({ field: fieldParam, fieldValue: fieldValueParam }),
     }),
   ]);
-  const customFieldGroups = buildCustomFieldFilterGroups(taskFieldDefs);
+  const { labels } = resolveThinkingModel(workspace);
+  const customFieldGroups = buildCustomFieldFilterGroups(taskFieldDefs, objectTypeLabels(labels));
 
   const [rawSquads, rawTasks, rawMembers] = await Promise.all([
     prisma.squad.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "asc" } }),

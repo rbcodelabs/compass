@@ -7,11 +7,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 const m = vi.hoisted(() => {
   const db = {
-    workspace: { findFirst: vi.fn() },
+    workspace: { findFirst: vi.fn(), findUnique: vi.fn() },
     squad: { findFirst: vi.fn(), findMany: vi.fn() },
     keyResult: { findFirst: vi.fn(), findMany: vi.fn() },
+    objective: { findFirst: vi.fn(), findMany: vi.fn() },
     feedbackItem: { findMany: vi.fn(), updateMany: vi.fn() },
-    opportunity: { create: vi.fn() },
+    opportunity: { create: vi.fn(), findFirst: vi.fn() },
     opportunityObjectiveLink: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
     $transaction: vi.fn(),
   };
@@ -31,6 +32,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   m.auth.mockResolvedValue({ user: { id: "user-1" } });
   m.db.workspace.findFirst.mockResolvedValue({ id: "ws-1" });
+  m.db.workspace.findUnique.mockResolvedValue({ thinkingModel: null, thinkingModelLabels: null });
+  m.db.objective.findMany.mockResolvedValue([]);
+  m.db.objective.findFirst.mockImplementation(async ({ where }: { where: { id: string } }) => ({ id: where.id, workspaceId: "ws-1", title: where.id }));
+  m.db.opportunity.findFirst.mockResolvedValue({ id: "opp-new", workspaceId: "ws-1", title: "x", linkedKeyResultId: null });
   m.db.$transaction.mockImplementation(async (callback: (tx: typeof m.db) => Promise<unknown>) => callback(m.db));
   m.db.opportunity.create.mockImplementation(async ({ data }: { data: { title: string } }) => ({ id: "opp-new", ...data }));
   m.db.squad.findFirst.mockResolvedValue({ id: "sq-1" });
@@ -112,6 +117,24 @@ describe("createOpportunityFromComposer", () => {
     expect(m.db.opportunity.create).not.toHaveBeenCalled();
   });
 
+  it("says the Key Result message in the workspace's own words (Torres, or a rename)", async () => {
+    m.db.keyResult.findFirst.mockResolvedValue(null);
+    m.db.workspace.findUnique.mockResolvedValue({ thinkingModel: "TORRES_OST", thinkingModelLabels: null });
+    const torres = await createOpportunityFromComposer("acme", "core", { title: "x", linkedKeyResultId: "kr-foreign" });
+    expect(torres).toEqual({ ok: false, error: "That success metric is not in this workspace." });
+    m.db.workspace.findUnique.mockResolvedValue({ thinkingModel: "CLASSIC", thinkingModelLabels: JSON.stringify({ keyResult: { singular: "Signal" } }) });
+    const renamed = await createOpportunityFromComposer("acme", "core", { title: "x", linkedKeyResultId: "kr-foreign" });
+    expect(renamed).toEqual({ ok: false, error: "That signal is not in this workspace." });
+    expect(m.db.opportunity.create).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the canonical wording when the workspace's names cannot be read", async () => {
+    m.db.keyResult.findFirst.mockResolvedValue(null);
+    m.db.workspace.findUnique.mockRejectedValue(new Error("column thinking_model does not exist"));
+    const result = await createOpportunityFromComposer("acme", "core", { title: "x", linkedKeyResultId: "kr-foreign" });
+    expect(result).toEqual({ ok: false, error: "That key result is not in this workspace." });
+  });
+
   it("returns foreign feedback as an inline error and creates nothing", async () => {
     m.db.feedbackItem.findMany.mockResolvedValue([{ id: "fb-1" }]);
     const result = await createOpportunityFromComposer("acme", "core", { title: "x", feedbackIds: ["fb-1", "fb-foreign"] });
@@ -124,6 +147,50 @@ describe("createOpportunityFromComposer", () => {
     const result = await createOpportunityFromComposer("acme", "core", { title: "   " });
     expect(result).toEqual({ ok: false, error: expect.stringMatching(/Add a title/) });
     expect(m.db.$transaction).not.toHaveBeenCalled();
+  });
+
+  describe("chosen objectives (Phase 4B)", () => {
+    it("links them DIRECT in the same transaction, attributed to the signed-in user, with the workspace taken from the opportunity", async () => {
+      m.db.objective.findMany.mockResolvedValue([{ id: "obj-1" }, { id: "obj-2" }]);
+      const result = await createOpportunityFromComposer("acme", "core", { title: "Onboarding", objectiveIds: ["obj-1", "obj-2"] });
+      expect(result).toEqual({ ok: true, opportunity: { id: "opp-new", title: "Onboarding" } });
+      expect(m.db.$transaction).toHaveBeenCalledOnce();
+      expect(m.db.objective.findMany).toHaveBeenCalledWith({ where: { id: { in: ["obj-1", "obj-2"] }, workspaceId: "ws-1" }, select: { id: true } });
+      expect(m.db.opportunityObjectiveLink.create.mock.calls.map((c) => c[0].data)).toEqual([
+        { workspaceId: "ws-1", opportunityId: "opp-new", objectiveId: "obj-1", origin: "DIRECT", source: "UI", createdById: "user-1" },
+        { workspaceId: "ws-1", opportunityId: "opp-new", objectiveId: "obj-2", origin: "DIRECT", source: "UI", createdById: "user-1" },
+      ]);
+      expect(m.revalidatePath).toHaveBeenCalledWith("/acme/core/okrs");
+    });
+
+    it("creates nothing for an objective outside the workspace, and says so inline", async () => {
+      m.db.objective.findMany.mockResolvedValue([{ id: "obj-1" }]);
+      const result = await createOpportunityFromComposer("acme", "core", { title: "x", objectiveIds: ["obj-1", "obj-foreign"] });
+      expect(result).toEqual({ ok: false, error: expect.stringMatching(/not in this workspace/) });
+      expect(m.db.opportunity.create).not.toHaveBeenCalled();
+      expect(m.db.opportunityObjectiveLink.create).not.toHaveBeenCalled();
+    });
+
+    it("a missing link table FAILS the create with a generic message and logs only the error name and code", async () => {
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+      m.db.objective.findMany.mockResolvedValue([{ id: "obj-1" }]);
+      m.db.opportunityObjectiveLink.findFirst.mockRejectedValue(
+        Object.assign(new Error('relation "opportunity_objective_links" does not exist SECRET-ROW'), { name: "PrismaClientKnownRequestError", code: "42P01" }),
+      );
+      const result = await createOpportunityFromComposer("acme", "core", { title: "x", objectiveIds: ["obj-1"] });
+      expect(result).toEqual({ ok: false, error: "Something went wrong. Nothing was created. Please try again." });
+      const text = JSON.stringify(logged.mock.calls);
+      expect(text).toContain("42P01");
+      expect(text).toContain("PrismaClientKnownRequestError");
+      expect(text).not.toContain("SECRET-ROW");
+      logged.mockRestore();
+    });
+
+    it("without objectives it is the same create as before: no attribution lookup, no objective query, no okrs revalidation", async () => {
+      await createOpportunityFromComposer("acme", "core", { title: "Plain" });
+      expect(m.db.objective.findMany).not.toHaveBeenCalled();
+      expect(m.revalidatePath).not.toHaveBeenCalledWith("/acme/core/okrs");
+    });
   });
 
   it("lets an unexpected database failure surface to the caller", async () => {
@@ -157,5 +224,21 @@ describe("loadOpportunityComposerOptions", () => {
     });
     expect(m.db.keyResult.findMany.mock.calls[0][0].where).toEqual({ objective: { workspaceId: "ws-1" } });
     expect(m.db.feedbackItem.findMany.mock.calls[0][0].where).toEqual({ workspaceId: "ws-1" });
+    // CLASSIC: no objectives query and no new key in the payload.
+    expect(m.db.objective.findMany).not.toHaveBeenCalled();
+  });
+
+  it.each(["TORRES_OST", "OPPORTUNITY_FIRST_OKR"])("%s: also offers the workspace's objectives, filtered on the objective's own workspaceId", async (preset) => {
+    m.db.workspace.findUnique.mockResolvedValue({ thinkingModel: preset, thinkingModelLabels: null });
+    m.db.squad.findMany.mockResolvedValue([]);
+    m.db.keyResult.findMany.mockResolvedValue([]);
+    m.db.feedbackItem.findMany.mockResolvedValue([]);
+    m.db.objective.findMany.mockResolvedValue([{ id: "obj-1", title: "Grow", cycle: { title: "Q3" } }, { id: "obj-2", title: "Cut", cycle: null }]);
+    const result = await loadOpportunityComposerOptions("acme", "core");
+    expect(result.ok && result.options.objectives).toEqual([
+      { id: "obj-1", title: "Grow", cycleTitle: "Q3" },
+      { id: "obj-2", title: "Cut", cycleTitle: null },
+    ]);
+    expect(m.db.objective.findMany.mock.calls[0][0].where).toEqual({ workspaceId: "ws-1" });
   });
 });

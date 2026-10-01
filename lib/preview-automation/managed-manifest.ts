@@ -131,6 +131,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "068_workspace_id_on_solution_objective": "efc74d966e413e3cd5ad211f41ac96bbc6bcb6fa5cd230c9ac3e6a050ffbe9e1",
   // DDL-free residual backfill: the SQL file is comments only, the work is the pinned hook below.
   "069_workspace_id_residual_backfill": "9edcc2e6020df3065bde0bf0e2fd836f710adceef6f5ba0a018347ff8bdba74d",
+  // objectives.cycle_id DROP NOT NULL (ADR Phase 1): one DDL statement, no data writes.
+  // Digest recorded from the shipped SQL; please review that line.
+  "070_objective_optional_cycle": "4a6c14548f4cd58efe6509ad21976ac7728b364a619e644c208492fd12e56dfe",
   // Typed link tables (ADR Phase 2, PR-1). DDL only here; the precondition, backfill with orphan
   // quarantine and integrity postconditions are pinned in REVIEWED_MIGRATION_CODE_SHA256.
   "071_typed_link_tables": "ed2bbdf524c02436eceba30b20b73a32111ddec3a4dbf9011f389984be189606",
@@ -153,6 +156,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   "069_workspace_id_residual_backfill": {
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 070 postcondition (objectives.cycle_id must really be nullable before the receipt).
+  "070_objective_optional_cycle": {
+    "lib/migrations/objective-optional-cycle.ts": "a81fe680f7a4e1510df7fda78997760d9c1bcf4168eeb4691feff5a49e7f30dc",
   },
   // 071 pins only its own hook: it carries a private copy of withOccRetry rather than importing the 068 hook.
   // 071 and 072 run the very same hook file, so they carry the same digest: editing it re-reviews both.

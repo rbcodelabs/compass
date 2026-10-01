@@ -15,6 +15,9 @@ import {
 } from "./panel-parts";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
+import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
+import { LinkedSolutionsSection } from "./linked-solutions-section";
+import { cycleRouteSegment, noCycleLabel } from "@/lib/okr-cycle-scope";
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
 
 type KeyResultData = {
@@ -23,7 +26,7 @@ type KeyResultData = {
   current: number;
   target: number;
   unit: string | null;
-  objective: { id: string; title: string; cycleId: string } | null;
+  objective: { id: string; title: string; cycleId: string | null } | null;
   checkIns: Array<{ id: string; value: number; note: string | null; createdAt: string }>;
   roadmapItems: Array<{ id: string; title: string; horizon: string; status: string }>;
   opportunities: Array<{ id: string; title: string; status: string }>;
@@ -31,10 +34,12 @@ type KeyResultData = {
     id: string;
     title: string;
     status: string;
-    cycle: { id: string; title: string };
+    cycle: { id: string; title: string } | null;
     squad: { id: string; name: string; color: string } | null;
     keyResults: Array<{ current: number; target: number }>;
   }>;
+  /** Typed Solution<->Key Result links (Phase 4B). Only sent for presets that offer the link. */
+  linkedSolutions?: Array<{ id: string; title: string }>;
   deliveryTasks: LinkedTaskData[];
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
@@ -56,7 +61,12 @@ export function KeyResultPanel({
     workspaceSlug
   );
 
-  if (error) return <PanelError label="key result" />;
+  const labels = useLabels();
+  const thinkingModel = useThinkingModel();
+  const showLinkedSolutions = thinkingModel.links.solToKr !== "hidden";
+  const cyclesSubdued = thinkingModel.cycles === "subdued";
+
+  if (error) return <PanelError label={labels.keyResult.lower} />;
   if (!data) return <PanelSkeleton />;
 
   const edit: EditContext = {
@@ -84,6 +94,8 @@ export function KeyResultPanel({
     badge: { label: r.horizon, className: "bg-surface-inset text-text-secondary" },
   }));
   const supportingItems: RelationItem[] = data.supportingObjectives.map((objective) => {
+    // Subdued cycles (Torres): name the cycle where there is one, never a "no cycle" placeholder.
+    const cycleTitle = objective.cycle?.title ?? (cyclesSubdued ? null : noCycleLabel(labels.cycle));
     const progress = objective.keyResults.length
       ? Math.round(
           objective.keyResults.reduce(
@@ -97,7 +109,7 @@ export function KeyResultPanel({
       id: objective.id,
       title: objective.title,
       badge: {
-        label: `${objective.cycle.title} · ${progress}%`,
+        label: cycleTitle ? `${cycleTitle} · ${progress}%` : `${progress}%`,
         className: "bg-accent text-accent-foreground",
       },
     };
@@ -107,7 +119,7 @@ export function KeyResultPanel({
     <PanelContainer>
       {data.objective && (
         <FullPageLink
-          href={`/${orgSlug}/${workspaceSlug}/okrs/${data.objective.cycleId}`}
+          href={`/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.objective.cycleId)}`}
         />
       )}
 
@@ -131,17 +143,22 @@ export function KeyResultPanel({
         </div>
       </div>
 
-      <Section label="Objective">
-        <RelationList items={objectiveItems} empty="No parent objective." />
+      <Section label={labels.objective.singular}>
+        <RelationList items={objectiveItems} empty={`No parent ${labels.objective.lower}.`} />
       </Section>
 
-      <Section label="Supporting Objectives" count={data.supportingObjectives.length}>
-        <RelationList items={supportingItems} empty="No supporting Objectives linked." />
+      <Section label={`Supporting ${labels.objective.plural}`} count={data.supportingObjectives.length}>
+        <RelationList items={supportingItems} empty={`No supporting ${labels.objective.plural} linked.`} />
       </Section>
 
-      <Section label="Linked Opportunities" count={data.opportunities.length}>
-        <RelationList items={oppItems} empty="No opportunities linked." />
+      <Section label={`Linked ${labels.opportunity.plural}`} count={data.opportunities.length}>
+        <RelationList items={oppItems} empty={`No ${labels.opportunity.lowerPlural} linked.`} />
       </Section>
+
+      {/* Phase 4B: present only for presets that offer the Solution <-> Key Result link (the fetcher omits it for CLASSIC). */}
+      {showLinkedSolutions && (
+        <LinkedSolutionsSection solutions={data.linkedSolutions ?? []} />
+      )}
 
       <Section label="Roadmap" count={data.roadmapItems.length}>
         <RelationList items={roadmapItems} empty="Not on the roadmap." />
@@ -153,7 +170,7 @@ export function KeyResultPanel({
           linkedId={data.id}
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
-          revalidatePathStr={data.objective ? `/${orgSlug}/${workspaceSlug}/okrs/${data.objective.cycleId}` : `/${orgSlug}/${workspaceSlug}/okrs`}
+          revalidatePathStr={data.objective ? `/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.objective.cycleId)}` : `/${orgSlug}/${workspaceSlug}/okrs`}
           tasks={data.deliveryTasks}
           linkableTasks={data.linkableTasks}
           members={data.members}

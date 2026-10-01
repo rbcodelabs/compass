@@ -18,8 +18,10 @@
  */
 import type { AppPrismaClient } from "@/lib/db";
 import {
+  getCanvasLinkRows,
   getLinkedKeyResultsBySolution,
   getLinkedObjectivesByOpportunity,
+  type CanvasLinkRows,
   type LinkedKeyResult,
   type LinkedObjective,
 } from "@/lib/typed-links";
@@ -119,7 +121,21 @@ export interface CanvasOverview {
   assumptions: CanvasAssumption[];
   experiments: CanvasExperiment[];
   roadmapItems: CanvasRoadmapItem[];
+  /**
+   * Typed link rows (ADR Phase 4B) for the link-edge layer, ids only. Optional: absent (or empty) means "draw no link edges",
+   * which is also what a deployment without the link tables gets. Which of them are drawn is a presentation rule
+   * (see buildCanvasEdges); the data is the same for every thinking model.
+   */
+  links?: CanvasLinkRows;
 }
+
+export type CanvasOverviewOptions = {
+  /**
+   * "DIRECT" reads only user-made Opportunity<->Objective links (the CLASSIC canvas never draws the backfilled LEGACY ones, so
+   * they are not even sent to the browser). "ALL" (default) reads both. buildCanvasEdges enforces the same rule regardless.
+   */
+  linkOrigins?: "ALL" | "DIRECT";
+};
 
 /**
  * Loads the entire connected OST + Roadmap graph for a workspace, plus any
@@ -138,7 +154,8 @@ export interface CanvasOverview {
  */
 export async function getCanvasOverview(
   prisma: AppPrismaClient,
-  workspaceId: string
+  workspaceId: string,
+  options: CanvasOverviewOptions = {}
 ): Promise<CanvasOverview> {
   // ── Batch 1: workspace-scoped, no FK dependency on anything fetched below ──
   const [squadsRaw, objectivesRaw, opportunitiesRaw, experimentsRaw, roadmapItemsRaw] =
@@ -190,7 +207,7 @@ export async function getCanvasOverview(
 
   // ── Batch 3: depends on batch 2 ids ─────────────────────────────────────
   // The typed links ride along as additive payload (workspace-filtered batch reads); edges are unchanged.
-  const [assumptionsRaw, linkedObjectives, linkedKeyResults] = await Promise.all([
+  const [assumptionsRaw, linkedObjectives, linkedKeyResults, linkRows] = await Promise.all([
     solutionIds.length > 0
       ? prisma.assumption.findMany({
           where: { solutionId: { in: solutionIds } },
@@ -199,6 +216,8 @@ export async function getCanvasOverview(
       : Promise.resolve([]),
     getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunityIds, { preverified: true }),
     getLinkedKeyResultsBySolution(prisma, workspaceId, solutionIds, { preverified: true }),
+    // Link rows for the edge layer (ids only; endpoints are filtered against the workspace-scoped nodes above when edges are built).
+    getCanvasLinkRows(prisma, workspaceId, { opportunityIds, solutionIds, origins: options.linkOrigins ?? "ALL" }),
   ]);
 
   // ── Positions: one round-trip covering every fetched entity id ─────────
@@ -319,5 +338,6 @@ export async function getCanvasOverview(
     assumptions,
     experiments,
     roadmapItems,
+    links: linkRows,
   };
 }

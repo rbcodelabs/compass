@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Target, Lightbulb, FlaskConical, Map, MessageSquare, ListChecks, MessageSquareCheck, Clock3, BarChart3 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 
 interface BottomNavProps {
   orgSlug: string
@@ -12,8 +13,9 @@ interface BottomNavProps {
   updatesEnabled?: boolean
 }
 
-const baseNavItems = [
-  { label: "OKRs", path: "okrs", Icon: Target },
+// A function, not a constant: the OKRs entry's name comes from the workspace's thinking model.
+const buildBaseNavItems = (okrsLabel: string) => [
+  { label: okrsLabel, path: "okrs", Icon: Target },
   { label: "Discovery", path: "discovery", Icon: Lightbulb },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
@@ -25,6 +27,8 @@ const baseNavItems = [
 export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = true, updatesEnabled = false }: BottomNavProps) {
   const pathname = usePathname()
   const base = `/${orgSlug}/${workspaceSlug}`
+  const labels = useLabels()
+  const baseNavItems = buildBaseNavItems(labels.sections.okrs)
   const navItems = [
     ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
     ...baseNavItems,

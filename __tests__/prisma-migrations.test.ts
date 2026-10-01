@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
+import { REVIEWED_MIGRATION_CODE_SHA256, assertReviewedMigrationCode } from "@/lib/preview-automation/managed-manifest";
 
 /**
  * Guards the DDL that actually reaches Aurora DSQL.
@@ -663,6 +664,66 @@ describe("069_workspace_id_residual_backfill", () => {
   });
 });
 
+describe("070_objective_optional_cycle", () => {
+  const NAME = "070_objective_optional_cycle";
+  const statements = () =>
+    sqlFor(NAME)
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("--"))
+      .join("\n")
+      .split(";")
+      .map((statement) => statement.trim())
+      .filter(Boolean);
+
+  it("is registered exactly once, in order 068 < 069 < 070 < 071", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === NAME)).toHaveLength(1);
+    const at = (name: string) => names.indexOf(name);
+    expect(at("068_workspace_id_on_solution_objective")).toBeGreaterThan(-1);
+    expect(at("069_workspace_id_residual_backfill")).toBeGreaterThan(at("068_workspace_id_on_solution_objective"));
+    expect(at(NAME)).toBeGreaterThan(at("069_workspace_id_residual_backfill"));
+    expect(at("071_typed_link_tables")).toBeGreaterThan(at(NAME));
+  });
+
+  it("is exactly one DSQL-safe DDL statement: DROP NOT NULL on objectives.cycle_id, no data change", () => {
+    expect(statements()).toEqual(["ALTER TABLE objectives ALTER COLUMN cycle_id DROP NOT NULL"]);
+    expect(statements().join("\n")).not.toMatch(/\b(UPDATE|INSERT|DELETE|REFERENCES|FOREIGN KEY|SET NOT NULL)\b/i);
+  });
+
+  it("matches schema.prisma: Objective.cycleId and its relation are optional", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    const body = schema.match(/model Objective \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(body).toMatch(/cycleId\s+String\?\s+@map\("cycle_id"\)\s+@db\.Uuid/);
+    expect(body).toMatch(/cycle\s+OKRCycle\?\s+@relation\(fields: \[cycleId\]/);
+  });
+
+  it("pins onDelete/onUpdate: Restrict on Objective.cycle (an optional relation defaults to SetNull, which would silently turn a deleted cycle's Objectives into cycle-less ones)", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    const body = schema.match(/model Objective \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(body).toMatch(/cycle\s+OKRCycle\?\s+@relation\(fields: \[cycleId\], references: \[id\], onDelete: Restrict, onUpdate: Restrict\)/);
+  });
+
+  it("pins its postcondition hook in the reviewed code digests, so changing it needs review", () => {
+    const hook = "lib/migrations/objective-optional-cycle.ts";
+    expect(REVIEWED_MIGRATION_CODE_SHA256[NAME]?.[hook]).toMatch(/^[0-9a-f]{64}$/);
+    expect(() => assertReviewedMigrationCode(NAME)).not.toThrow();
+    expect(() => assertReviewedMigrationCode(NAME, () => Buffer.from("// tampered"))).toThrow(/code digest changed: 070_objective_optional_cycle/);
+  });
+
+  it("asserts the column is nullable in the runner before the receipt is recorded", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    const assertion = runner.indexOf("await assertObjectiveCycleIdNullable(");
+    const receipt = runner.indexOf("SET finished_at = CURRENT_TIMESTAMP WHERE id = $1");
+    expect(assertion).toBeGreaterThan(-1);
+    expect(receipt).toBeGreaterThan(assertion);
+  });
+
+  it("is applied by the functional e2e schema setup", () => {
+    const setup = readFileSync(path.join(ROOT, "e2e/functional/global-setup.ts"), "utf-8");
+    expect(setup).toContain(`prisma/migrations/${NAME}/migration.sql`);
+  });
+});
+
 describe("072_typed_links_residual_backfill", () => {
   const NAME = "072_typed_links_residual_backfill";
 
@@ -814,9 +875,12 @@ describe("073_workspace_thinking_model", () => {
     expect(manifest.match(new RegExp(`"${NAME}"`, "g"))).toHaveLength(1);
   });
 
-  it("does NOT yet declare the columns in schema.prisma (deploy ordering: migration first, code later)", () => {
+  // Inverted by the code PR (as PR #331 inverted PR-A's "schema unchanged" test):
+  // migration 073 has landed first, so schema.prisma now declares the columns.
+  it("declares both columns in schema.prisma now that the code PR reads them", () => {
     const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
     const model = schema.match(/model Workspace \{[\s\S]*?\n\}/)?.[0] ?? "";
-    expect(model).not.toMatch(/thinkingModel|thinking_model/);
+    expect(model).toMatch(/thinkingModel\s+String\?\s+@map\("thinking_model"\)\s+@db\.VarChar\(40\)/);
+    expect(model).toMatch(/thinkingModelLabels\s+String\?\s+@map\("thinking_model_labels"\)\s+@db\.Text/);
   });
 });

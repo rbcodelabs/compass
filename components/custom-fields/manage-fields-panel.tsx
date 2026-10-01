@@ -21,6 +21,8 @@ import {
 import { OptionListEditor } from "@/components/custom-fields/option-list-editor";
 import { hasOptionListIssues } from "@/lib/option-list";
 import { supportsSharedOptionSet, type SelectOptionInput } from "@/lib/shared-field-options";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { OBJECT_TYPES, objectTypeLabels } from "./object-type-labels";
 import type {
   CustomFieldDefinitionData,
   CustomFieldObjectType,
@@ -38,17 +40,6 @@ const FIELD_TYPE_LABELS: Record<CustomFieldType, string> = {
   BOOLEAN: "Yes / No",
 };
 
-const OBJECT_TYPE_LABELS: Record<CustomFieldObjectType, string> = {
-  OPPORTUNITY: "Opportunity",
-  SOLUTION: "Solution",
-  EXPERIMENT: "Experiment",
-  OBJECTIVE: "Objective",
-  KEY_RESULT: "Key Result",
-  ROADMAP_ITEM: "Roadmap Item",
-  TASK: "Task",
-};
-
-const OBJECT_TYPES = Object.keys(OBJECT_TYPE_LABELS) as CustomFieldObjectType[];
 
 /** Sentinel for "keep this field's own local options" in the shared-set picker. */
 const LOCAL_OPTIONS = "__local__";
@@ -77,6 +68,7 @@ function AddFieldForm({
   sharedOptionSets: SharedFieldOptionSetData[];
   onAdded: () => void;
 }) {
+  const OBJECT_TYPE_LABELS = objectTypeLabels(useLabels());
   const [open, setOpen] = useState(false);
   const [fieldType, setFieldType] = useState<CustomFieldType>("TEXT");
   const [selectOptions, setSelectOptions] = useState<SelectOptionInput[]>([]);
@@ -300,6 +292,7 @@ export function ManageFieldsPanel({
   sharedOptionSets,
 }: Props) {
   const router = useRouter();
+  const OBJECT_TYPE_LABELS = objectTypeLabels(useLabels());
   // Render the server's list (refreshed via router.refresh() after an add) and
   // only overlay optimistic deletes — copying initialFields into state froze
   // the list at mount, so a newly added field never appeared until a reload.

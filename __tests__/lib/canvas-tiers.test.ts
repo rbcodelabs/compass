@@ -2,10 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   getTierForZoom,
   isNodeTypeVisibleAtTier,
-  TIER_LABELS,
+  tierLabels,
   type CanvasTier,
 } from "@/lib/canvas/tiers";
 import type { CanvasNodeType } from "@/lib/canvas/layout";
+import { CLASSIC_THINKING_MODEL, resolveThinkingModel } from "@/lib/thinking-model/resolve";
 
 describe("getTierForZoom", () => {
   it("returns T0 well below the T0 threshold", () => {
@@ -91,10 +92,16 @@ describe("isNodeTypeVisibleAtTier", () => {
   }
 });
 
-describe("TIER_LABELS", () => {
-  it("has a human-readable label for every tier", () => {
-    expect(TIER_LABELS.T0).toBe("Portfolio");
-    expect(TIER_LABELS.T1).toBe("Cycle");
-    expect(TIER_LABELS.T2).toBe("Detail");
+describe("tierLabels", () => {
+  it("has a human-readable label for every tier (CLASSIC: today's text)", () => {
+    const labels = tierLabels(CLASSIC_THINKING_MODEL.labels);
+    expect(labels.T0).toBe("Portfolio");
+    expect(labels.T1).toBe("Cycle");
+    expect(labels.T2).toBe("Detail");
+  });
+
+  it("the middle tier takes the workspace's Cycle name", () => {
+    const sprint = resolveThinkingModel({ thinkingModelLabels: JSON.stringify({ cycle: { singular: "Sprint" } }) });
+    expect(tierLabels(sprint.labels).T1).toBe("Sprint");
   });
 });

@@ -22,6 +22,8 @@ import {
 import type { OpportunityStatus, SquadData } from "@/lib/types";
 import { MarkdownContent } from "@/components/markdown-content";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
+import { OpportunityObjectivePicker, type PickerObjective } from "@/components/discovery/opportunity-objective-picker";
 import { EditableText, patchEntityField, type EditContext } from "@/components/panels/panel-parts";
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
@@ -67,6 +69,12 @@ type Props = {
     linkedKeyResult: KR | null;
   };
   availableKeyResults: AvailableKR[];
+  /**
+   * Typed Opportunity<->Objective links and the Objectives that can be linked. Used only by presets that make
+   * this link primary (the picker); CLASSIC renders nothing extra whatever is passed.
+   */
+  linkedObjectives?: Array<{ id: string; title: string }>;
+  availableObjectives?: PickerObjective[];
   squads: SquadData[];
   revalidatePathStr: string;
   edit?: EditContext;
@@ -76,11 +84,15 @@ type Props = {
 export function OpportunityHeader({
   opportunity,
   availableKeyResults,
+  linkedObjectives = [],
+  availableObjectives,
   squads,
   revalidatePathStr,
   edit,
   onChanged,
 }: Props) {
+  const labels = useLabels();
+  const showObjectivePicker = useThinkingModel().links.oppToObjective === "primary" && availableObjectives !== undefined;
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const { openPanel } = usePanelContext();
@@ -110,7 +122,7 @@ export function OpportunityHeader({
         if (edit) { await saveField("linkedKeyResultId", value === "__none__" ? null : value); return; }
         await linkOpportunityToKeyResult(opportunity.id, value === "__none__" ? null : value, revalidatePathStr);
         onChanged?.();
-      } catch (err) { setError(err instanceof Error ? err.message : "Could not link key result."); }
+      } catch (err) { setError(err instanceof Error ? err.message : `Could not link ${labels.keyResult.lower}.`); }
     });
   }
 
@@ -176,10 +188,19 @@ export function OpportunityHeader({
         </p>
       )}
 
+      {showObjectivePicker && (
+        <OpportunityObjectivePicker
+          opportunityId={opportunity.id}
+          linked={linkedObjectives}
+          available={availableObjectives}
+          onChanged={onChanged}
+        />
+      )}
+
       {/* KR row */}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border-default bg-surface-inset p-3">
-        <p className="w-full text-xs font-medium text-text-subtle">Driving Key Result</p>
+        <p className="w-full text-xs font-medium text-text-subtle">Driving {labels.keyResult.singular}</p>
         {opportunity.linkedKeyResult ? (
           <div className="flex flex-wrap items-center gap-1.5 min-w-0">
             <TrendingUp className="size-3.5 shrink-0 text-indigo-500" />
@@ -195,7 +216,7 @@ export function OpportunityHeader({
               {opportunity.linkedKeyResult.title}
             </button>
           </div>
-        ) : <p className="text-xs text-muted-foreground">No key result linked.</p>}
+        ) : <p className="text-xs text-muted-foreground">No {labels.keyResult.lower} linked.</p>}
 
         {availableKeyResults.length > 0 && (
           <Combobox
@@ -206,7 +227,7 @@ export function OpportunityHeader({
           >
             <ComboboxTrigger size="sm" variant="inline">
               <span className="underline underline-offset-2 decoration-dashed">
-                {opportunity.linkedKeyResult ? "change KR" : "Link to key result"}
+                {opportunity.linkedKeyResult ? `change ${labels.keyResult.short}` : `Link to ${labels.keyResult.lower}`}
               </span>
             </ComboboxTrigger>
             <ComboboxContent />

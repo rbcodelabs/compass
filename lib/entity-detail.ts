@@ -29,13 +29,15 @@
  */
 import getPrisma from "@/lib/db";
 import { isPmInterviewEnabled } from "@/lib/research-feature";
-import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity } from "@/lib/typed-links";
+import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getLinkedSolutionsByKeyResult } from "@/lib/typed-links";
+import { loadThinkingModelSource, offersSolutionToKrSurfaces } from "@/lib/thinking-model/link-surfaces";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
 import { loadCustomFieldsForObject } from "@/lib/custom-field-definitions";
 import { toOpportunityScoreData, toScoreSummary, toSolutionScoreData } from "@/lib/score-summary";
 import type { ScoringModelData } from "@/lib/types";
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 
 /**
  * ADR-0012 step 6a — the three OST detail fetchers that carry Evidence resolve
@@ -157,7 +159,12 @@ async function fetchKeyResult(id: string, workspaceId: string) {
     },
   });
   if (!item) return null;
-  return { ...item, ...(await fetchLinkedTasksBundle(workspaceId, "KEY_RESULT", id)) };
+  const linkedTasks = await fetchLinkedTasksBundle(workspaceId, "KEY_RESULT", id);
+  // Phase 4B: the read-only "Linked solutions" list, only for presets that offer it (CLASSIC reads nothing extra and its payload is unchanged).
+  if (!offersSolutionToKrSurfaces(await loadThinkingModelSource(getPrisma(), workspaceId))) return { ...item, ...linkedTasks };
+  // The key result was just read under this workspace's filter, so the reader may skip re-verifying it.
+  const linkedSolutions = (await getLinkedSolutionsByKeyResult(getPrisma(), workspaceId, [id], { preverified: true })).get(id) ?? [];
+  return { ...item, ...linkedTasks, linkedSolutions };
 }
 
 async function pmInterviewHistory(workspaceId: string, targetType: string, targetId: string) {
@@ -211,6 +218,9 @@ async function fetchOpportunity(id: string, workspaceId: string) {
       // Solutions list below (independent slot, same workspace config row).
       workspace: {
         select: {
+          // Decide whether the Opportunity<->Objective picker needs its option list (presets only; CLASSIC reads none).
+          thinkingModel: true,
+          thinkingModelLabels: true,
           scoringConfig: {
             select: {
               opportunityScoringModel: { include: { metrics: { orderBy: { order: "asc" } } } },
@@ -228,7 +238,8 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     },
   });
   if (!item) return null;
-  const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields, linkedObjectivesByOpportunity] = await Promise.all([
+  const offersObjectivePicker = resolveThinkingModel(item.workspace ?? {}).links.oppToObjective === "primary";
+  const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields, linkedObjectivesByOpportunity, pickerObjectives] = await Promise.all([
     pmInterviewHistory(workspaceId, "OPPORTUNITY", id),
     fetchLinkedTasksBundle(workspaceId, "OPPORTUNITY", id),
     resolveEvidenceProvenance(item.evidence),
@@ -237,6 +248,14 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OPPORTUNITY", objectId: id }),
     // Additive typed Opportunity<->Objective links. linkedKeyResult above stays the legacy column only.
     getLinkedObjectivesByOpportunity(getPrisma(), workspaceId, [id], { preverified: true }),
+    // Options for the picker, filtered on the Objective's own workspaceId (a NULL / drifted row is not offered).
+    offersObjectivePicker
+      ? getPrisma().objective.findMany({
+          where: { workspaceId },
+          select: { id: true, title: true, cycle: { select: { title: true } } },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        })
+      : Promise.resolve(null),
   ]);
   const solutionScoringModel = item.workspace?.scoringConfig?.solutionScoringModel ?? null;
   // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
@@ -244,6 +263,9 @@ async function fetchOpportunity(id: string, workspaceId: string) {
   return {
     ...item, ...(item.linkedKeyResult ? { linkedKeyResult } : {}), evidence, ...linkedTasks, squads, customFields,
     linkedObjectives: linkedObjectivesByOpportunity.get(id) ?? [],
+    ...(pickerObjectives
+      ? { availableObjectives: pickerObjectives.map((o) => ({ id: o.id, title: o.title, cycleTitle: o.cycle?.title ?? null })) }
+      : {}),
     existingScore: toOpportunityScoreData(item.score, item.workspace?.scoringConfig?.opportunityScoringModel as ScoringModelData | null),
     // Threaded onto each nested solution row so the panel's SolutionsList can
     // render a ScoreBadge without a second workspace round trip.
@@ -307,10 +329,24 @@ async function fetchSolution(id: string, workspaceId: string) {
   ])
   const linkedIds = new Set(links.map((link) => link.artifactId))
   const solutionScoringModel = (scoringConfig?.solutionScoringModel as ScoringModelData | null) ?? null
+  // Phase 4B: options for the Solution <-> Key Result picker, only for presets that offer it (CLASSIC reads nothing extra).
+  // Filtered through the Key Result's Objective workspace, so a NULL / foreign row is never offered.
+  const offersKeyResultPicker = offersSolutionToKrSurfaces(await loadThinkingModelSource(prisma, workspaceId))
+  const pickerKeyResults = offersKeyResultPicker
+    ? await prisma.keyResult.findMany({
+        where: { objective: { workspaceId } },
+        select: { id: true, title: true, objective: { select: { title: true } } },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      })
+    : null
+  const linkedKeyResults = linkedKeyResultsBySolution.get(id) ?? []
   return {
     // workspaceId is the authorized parameter (findFirst above matched it on the Solution's own column).
     ...solution, workspaceId, evidence, ...linkedTasks,
-    linkedKeyResults: linkedKeyResultsBySolution.get(id) ?? [],
+    linkedKeyResults,
+    ...(pickerKeyResults
+      ? { availableKeyResults: pickerKeyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })) }
+      : {}),
     artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts,
     pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews, customFields,
     scoringModel: solutionScoringModel,

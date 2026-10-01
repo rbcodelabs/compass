@@ -1,64 +1,51 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 /**
- * Migration 073 adds workspaces.thinking_model and workspaces.thinking_model_labels
- * as a migration-only PR. The shared workspace select feeds every page, so any code
- * that selects either column before 073 is applied would 500 the whole app. Until
- * the follow-up code PR (which removes this guard) lands, nothing may reference the
- * columns and the Prisma Workspace model must not declare them.
+ * Migration 073 (PR #338) added workspaces.thinking_model and
+ * workspaces.thinking_model_labels as a migration-only change and, until the code
+ * PR, a guard forbade any reference to them. This is the code PR, so the guard is
+ * inverted (as PR #331 inverted PR-A's "schema unchanged" test): the Prisma
+ * Workspace model must now declare both columns, with the exact mapping that
+ * migration 073 created, or the shared workspace select would query a column that
+ * does not exist.
  */
 
 const ROOT = process.cwd();
-const SCANNED_DIRS = ["app", "lib", "components", "hooks", "scripts"];
-const SOURCE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs|sql)$/;
-const MIGRATION_NAME = "073_workspace_thinking_model";
-// snake_case (raw SQL / @map) and camelCase (Prisma field) spellings, either column.
-const FORBIDDEN = /thinking_model|thinkingModel/i;
-
-function walk(dir: string): string[] {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).flatMap((entry) => {
-    if (entry === "node_modules" || entry === ".next") return [];
-    const full = path.join(dir, entry);
-    return statSync(full).isDirectory() ? walk(full) : SOURCE_FILE.test(entry) ? [full] : [];
-  });
-}
-
-/** The migration's own registered name legitimately contains the substring. */
-function referencesColumns(source: string): boolean {
-  return FORBIDDEN.test(source.replaceAll(MIGRATION_NAME, ""));
-}
 
 function workspaceModelBody(schema: string): string {
   return schema.match(/model Workspace \{[\s\S]*?\n\}/)?.[0] ?? "";
 }
 
-describe("workspace thinking-model columns are not referenced by application code yet", () => {
-  it("scans a non-trivial set of source files", () => {
-    const files = SCANNED_DIRS.flatMap((dir) => walk(path.join(ROOT, dir)));
-    expect(files.length).toBeGreaterThan(200);
+describe("workspace thinking-model columns are declared to match migration 073", () => {
+  const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+  const body = workspaceModelBody(schema);
+
+  it("finds the Workspace model", () => {
+    expect(body.length).toBeGreaterThan(500);
   });
 
-  it("no source file under app/lib/components/hooks/scripts references thinking_model or thinkingModel", () => {
-    const offenders = SCANNED_DIRS.flatMap((dir) => walk(path.join(ROOT, dir)))
-      .filter((file) => referencesColumns(readFileSync(file, "utf-8")))
-      .map((file) => path.relative(ROOT, file));
-    expect(offenders).toEqual([]);
+  it("declares thinkingModel as a nullable VarChar(40) mapped to thinking_model", () => {
+    expect(body).toMatch(/\n\s+thinkingModel\s+String\?\s+@map\("thinking_model"\)\s+@db\.VarChar\(40\)/);
   });
 
-  it("schema.prisma Workspace declares neither column", () => {
-    const body = workspaceModelBody(readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8"));
-    expect(body.length).toBeGreaterThan(500); // the model was actually found
-    expect(body).not.toMatch(FORBIDDEN);
+  it("declares thinkingModelLabels as a nullable Text mapped to thinking_model_labels", () => {
+    expect(body).toMatch(/\n\s+thinkingModelLabels\s+String\?\s+@map\("thinking_model_labels"\)\s+@db\.Text/);
   });
 
-  it("canary: the detector flags known-bad fixtures and ignores the registered migration name", () => {
-    expect(referencesColumns("SELECT id, thinking_model FROM workspaces")).toBe(true);
-    expect(referencesColumns("select: { thinkingModel: true }")).toBe(true);
-    expect(referencesColumns("workspace.thinking_model_labels")).toBe(true);
-    expect(referencesColumns('name: "073_workspace_thinking_model"')).toBe(false);
-    expect(workspaceModelBody('model Workspace {\n  id String\n  thinkingModel String? @map("thinking_model")\n}\n')).toMatch(FORBIDDEN);
+  it("neither column has a default (migration 073 adds none)", () => {
+    const lines = body.split("\n").filter((l) => /thinkingModel/.test(l));
+    expect(lines).toHaveLength(2);
+    for (const line of lines) expect(line).not.toMatch(/@default/);
+  });
+
+  it("matches the column definitions in migration 073", () => {
+    const sql = readFileSync(
+      path.join(ROOT, "prisma/migrations/073_workspace_thinking_model/migration.sql"),
+      "utf-8",
+    );
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS thinking_model VARCHAR\(40\);/);
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS thinking_model_labels TEXT;/);
   });
 });

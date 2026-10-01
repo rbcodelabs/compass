@@ -2,6 +2,7 @@ import getPrisma from "@/lib/db"
 import type { AppPrismaClient } from "@/lib/db"
 import type { CommentTargetType } from "@/lib/comments"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
+import { cycleRouteSegment } from "@/lib/okr-cycle-scope"
 
 /**
  * The subject registry for Following and in-app notifications (ADR "Following
@@ -139,7 +140,7 @@ const definitions: Record<FollowableSubjectType, FollowableDefinition> = {
     resolveWorkspace: commentTarget("OBJECTIVE"),
     async resolveDisplay(workspaceId, ids, prisma) {
       const rows = await prisma.objective.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true, title: true, cycleId: true } })
-      return display(rows.map((r) => ({ id: r.id, title: r.title, path: `okrs/${r.cycleId}` })))
+      return display(rows.map((r) => ({ id: r.id, title: r.title, path: `okrs/${cycleRouteSegment(r.cycleId)}` })))
     },
   },
   // Key results have no status column (progress is a numeric check-in), so they
@@ -152,7 +153,7 @@ const definitions: Record<FollowableSubjectType, FollowableDefinition> = {
         where: { id: { in: ids }, objective: { workspaceId } },
         select: { id: true, title: true, objective: { select: { cycleId: true } } },
       })
-      return display(rows.map((r) => ({ id: r.id, title: r.title, path: `okrs/${r.objective.cycleId}` })))
+      return display(rows.map((r) => ({ id: r.id, title: r.title, path: `okrs/${cycleRouteSegment(r.objective.cycleId)}` })))
     },
   },
   FEEDBACK_ITEM: {

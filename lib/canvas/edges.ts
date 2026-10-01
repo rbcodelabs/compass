@@ -22,6 +22,16 @@ export interface CanvasEdge {
   source: string;
   target: string;
   dashed?: boolean;
+  /**
+   * Set only on typed-link edges (Objective -> Opportunity, Solution -> Key Result). They are drawn but never fed to the layout
+   * engine: a Solution -> Key Result edge closes a cycle (KR -> Opp -> Solution -> KR) and would move existing nodes.
+   */
+  link?: true;
+}
+
+/** The emphasis fields of the workspace's thinking model that decide which link edges are drawn (see buildCanvasEdges). */
+export interface CanvasEdgeOptions {
+  links?: { oppToObjective: "primary" | "secondary" | "hidden" };
 }
 
 /** solution > experiment > opportunity > keyResult, matching the plan's
@@ -34,7 +44,50 @@ const ROADMAP_PARENT_PRECEDENCE: readonly ["sol", "exp", "opp", "kr"] = [
   "kr",
 ];
 
-export function buildCanvasEdges(overview: CanvasOverview): CanvasEdge[] {
+/**
+ * Typed-link edges (ADR Phase 4B). Presentation rule, identical data for every preset:
+ *
+ *  - A preset that hides the Opportunity<->Objective link (CLASSIC) draws only user-made (DIRECT) ones, so a CLASSIC
+ *    workspace's canvas does not change just because migration 071 backfilled LEGACY links. Solution<->Key Result links are
+ *    always user-made, so they are always drawn.
+ *  - Any other preset draws every Opportunity<->Objective link.
+ *  - A LEGACY Opportunity -> Objective link whose Objective owns the opportunity's driving Key Result is already drawn as
+ *    Objective -> Key Result -> Opportunity; it is skipped so one relationship never draws two lines.
+ *
+ * Both ends must be nodes in this overview (the workspace-scoped loads), so a link to a hidden/foreign/NULL-workspace row
+ * simply draws nothing.
+ */
+function buildLinkEdges(overview: CanvasOverview, options: CanvasEdgeOptions, knownIds: Set<string>): CanvasEdge[] {
+  const links = overview.links;
+  if (!links) return [];
+  const oppToObjective = options.links?.oppToObjective ?? "hidden";
+
+  const krObjective = new Map(overview.keyResults.map((kr) => [kr.id, kr.objectiveId]));
+  const pointerObjective = new Map<string, string>();
+  for (const opp of overview.opportunities) {
+    const objectiveId = opp.linkedKeyResultId ? krObjective.get(opp.linkedKeyResultId) : undefined;
+    if (objectiveId) pointerObjective.set(opp.id, objectiveId);
+  }
+
+  const edges: CanvasEdge[] = [];
+  const seen = new Set<string>();
+  const add = (source: string, target: string) => {
+    const id = `l-${source}-${target}`;
+    if (seen.has(id) || !knownIds.has(source) || !knownIds.has(target)) return;
+    seen.add(id);
+    edges.push({ id, source, target, dashed: true, link: true });
+  };
+
+  for (const link of links.opportunityObjective) {
+    if (oppToObjective === "hidden" && link.origin !== "DIRECT") continue;
+    if (link.origin === "LEGACY" && pointerObjective.get(link.opportunityId) === link.objectiveId) continue;
+    add(link.objectiveId, link.opportunityId);
+  }
+  for (const link of links.solutionKeyResult) add(link.solutionId, link.keyResultId);
+  return edges;
+}
+
+export function buildCanvasEdges(overview: CanvasOverview, options: CanvasEdgeOptions = {}): CanvasEdge[] {
   const knownIds = new Set<string>([
     ...overview.objectives.map((o) => o.id),
     ...overview.keyResults.map((kr) => kr.id),
@@ -110,5 +163,6 @@ export function buildCanvasEdges(overview: CanvasOverview): CanvasEdge[] {
     // no edges added — handled naturally by the loop adding nothing.
   }
 
+  edges.push(...buildLinkEdges(overview, options, knownIds));
   return edges;
 }

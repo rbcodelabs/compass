@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useCallback, useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { EvidenceBadge } from "@/components/discovery/evidence-badge";
@@ -59,11 +60,12 @@ function StatusBadge({ label, className }: { label: string; className: string })
   return <span className={`inline-flex h-5 items-center rounded px-1.5 text-xs font-medium ${className}`}>{label}</span>;
 }
 
-function countLabel(count: number, singular: string) {
-  return `${count} ${count === 1 ? singular : `${singular}s`}`;
+function countLabel(count: number, singular: string, plural: string = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
 }
 
 export function DiscoveryTableView({ opportunities }: { opportunities: DiscoveryTableOpportunity[] }) {
+  const labels = useLabels();
   const { openPanel } = usePanelContext();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
 
@@ -232,7 +234,7 @@ export function DiscoveryTableView({ opportunities }: { opportunities: Discovery
             <Badge variant="secondary">
               {data.kind === "solution"
                 ? countLabel(data.solution.assumptionCount, "assumption")
-                : countLabel(data.opportunity.solutions.length, "solution")}
+                : countLabel(data.opportunity.solutions.length, labels.solution.lower, labels.solution.lowerPlural)}
             </Badge>
           );
         },
@@ -241,7 +243,7 @@ export function DiscoveryTableView({ opportunities }: { opportunities: Discovery
     // Both dependencies are stable across a toggle, so expanding a row updates
     // the affected cells in place instead of remounting every cell in the
     // table — see the note on `DiscoveryGridRow.isExpanded`.
-    [openPanel, toggleOpportunity],
+    [openPanel, toggleOpportunity, labels],
   );
 
   // The "no opportunities at all" case keeps its own dashed box instead of the
@@ -249,7 +251,7 @@ export function DiscoveryTableView({ opportunities }: { opportunities: Discovery
   if (opportunities.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-border-default px-4 py-12 text-center text-sm text-text-secondary">
-        No opportunities match the current filters.
+        {`No ${labels.opportunity.lowerPlural} match the current filters.`}
       </div>
     );
   }
@@ -267,7 +269,7 @@ export function DiscoveryTableView({ opportunities }: { opportunities: Discovery
       columns={columns}
       rows={rows}
       getRowId={(row) => row.rowKey}
-      caption="Discovery opportunities"
+      caption={`Discovery ${labels.opportunity.lowerPlural}`}
       height="fill"
       pagination={false}
       toolbar={false}

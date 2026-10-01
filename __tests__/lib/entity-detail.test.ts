@@ -31,6 +31,8 @@ const models = {
   customFieldValue: { findMany: vi.fn() },
   pMInterview: { findMany: vi.fn() },
   workspaceScoringConfig: { findUnique: vi.fn() },
+  // Phase 4B: the solution / key result fetchers read the workspace's thinking model (CLASSIC by default here).
+  workspace: { findUnique: vi.fn() },
 };
 
 vi.mock("@/lib/db", () => ({ default: () => models }));
@@ -64,6 +66,7 @@ const CASES: Array<{
     | "workspaceScoringConfig"
     | "opportunityObjectiveLink"
     | "solutionKeyResultLink"
+    | "workspace"
   >;
   where: Record<string, unknown>;
 }> = [
@@ -107,6 +110,7 @@ beforeEach(() => {
   // section gate and fetchOpportunity's nested SolutionsList ScoreBadge gate
   // both read this.
   models.workspaceScoringConfig.findUnique.mockResolvedValue(null);
+  models.workspace.findUnique.mockResolvedValue({ thinkingModel: null, thinkingModelLabels: null });
 });
 
 describe("getEntityDetail — nested solutions are scoped by their own workspaceId", () => {
@@ -311,6 +315,7 @@ describe("getEntityDetail — return shape", () => {
     | "workspaceScoringConfig"
     | "opportunityObjectiveLink"
     | "solutionKeyResultLink"
+    | "workspace"
   >;
       linkedType: string;
     }> = [

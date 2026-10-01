@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { getCanvasOverview } from "@/lib/canvas/data";
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { CanvasFlow } from "@/components/canvas/canvas-flow";
 import { PageHeader } from "@/components/patterns/page-header";
 
@@ -36,14 +37,19 @@ export default async function CanvasPage({ params }: CanvasPageProps) {
   // Canvas viewer's stated acceptance criterion is validating render/pan/
   // zoom at scale across a full portfolio; scoping to only the active cycle
   // would make that test meaningless.
-  const overview = await getCanvasOverview(prisma, workspace.id);
+  // A preset that hides the Opportunity<->Objective link (CLASSIC) draws only user-made links, so the backfilled LEGACY ones
+  // are not even read for it. The data is identical across presets; this only avoids sending rows nothing will draw.
+  const { links, labels } = resolveThinkingModel(workspace);
+  const overview = await getCanvasOverview(prisma, workspace.id, {
+    linkOrigins: links.oppToObjective === "hidden" ? "DIRECT" : "ALL",
+  });
 
   return (
     <main className="flex flex-col h-full">
       <div className="p-4 pb-4 sm:p-6 sm:pb-4 md:p-8 md:pb-4">
         <PageHeader
           title="Canvas"
-          description="Pan and zoom across your full OKR, discovery, and roadmap graph."
+          description={`Pan and zoom across your full ${labels.sections.okr}, discovery, and roadmap graph.`}
         />
       </div>
       <div className="flex-1 min-h-0">

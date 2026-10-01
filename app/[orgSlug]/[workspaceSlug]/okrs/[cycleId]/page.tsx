@@ -20,14 +20,24 @@ import type {
 } from "@/lib/types";
 import { PageHeader, StatusBadge } from "@/components/patterns";
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
-
-export const metadata = {
-  title: "OKR Cycle",
-};
+import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
+import {
+  PERSISTENT_CYCLE_SLUG,
+  cycleRefOrPersistent,
+  cycleRouteSegment,
+  noCycleLabel,
+} from "@/lib/okr-cycle-scope";
 
 interface CyclePageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string; cycleId: string }>;
   searchParams: Promise<{ squad?: string }>;
+}
+
+export async function generateMetadata({ params }: CyclePageProps) {
+  const { orgSlug, workspaceSlug } = await params;
+  const { labels } = await getThinkingModelForSlugs(orgSlug, workspaceSlug);
+  return { title: `OKR ${labels.cycle.singular}` };
 }
 
 const CYCLE_STATUS_TONE: Record<CycleStatus, "success" | "neutral"> = {
@@ -65,13 +75,20 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
 
   if (!workspace) notFound();
 
-  const cycle = await prisma.oKRCycle.findFirst({
-    where: { id: cycleId, workspaceId: workspace.id },
-  });
+  const { labels } = resolveThinkingModel(workspace);
+  const noCycleTitle = noCycleLabel(labels.cycle);
 
-  if (!cycle) notFound();
+  // "none" is the fixed route for Objectives that have no cycle (migration 070).
+  const isPersistent = cycleId === PERSISTENT_CYCLE_SLUG;
+  const cycle = isPersistent
+    ? null
+    : await prisma.oKRCycle.findFirst({
+        where: { id: cycleId, workspaceId: workspace.id },
+      });
 
-  const cycleStatus = cycle.status as CycleStatus;
+  if (!isPersistent && !cycle) notFound();
+
+  const cycleStatus = cycle ? (cycle.status as CycleStatus) : null;
 
   const [rawSquads, objectives, eligibleParentKRs, eligibleSupportingObjectives] = await Promise.all([
     prisma.squad.findMany({
@@ -80,14 +97,14 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
     }),
     prisma.objective.findMany({
       where: {
-        cycleId: cycle.id,
+        cycleId: cycle?.id ?? null,
         workspaceId: workspace.id,
         ...(squadFilter ? { squadId: squadFilter } : {}),
       },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     }),
-    getEligibleParentKeyResults(workspace.id, cycle.id),
-    getEligibleSupportingObjectives(workspace.id, cycle.id),
+    getEligibleParentKeyResults(workspace.id, cycle?.id ?? null),
+    getEligibleSupportingObjectives(workspace.id, cycle?.id ?? null),
   ]);
 
   const squads: SquadData[] = rawSquads.map((s) => ({
@@ -172,6 +189,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
         ...kr,
         supportingObjectives: kr.supportingObjectives.map((supporting) => ({
           ...supporting,
+          cycle: cycleRefOrPersistent(supporting.cycle, noCycleTitle),
           status: supporting.status as ObjectiveStatus,
         })),
       })),
@@ -206,6 +224,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       id: kr.id,
       title: kr.title,
       objectiveTitle: kr.objectiveTitle,
+      objectiveId: kr.objectiveId,
       cycleId: kr.cycleId,
       cycleTitle: kr.cycleTitle,
       cycleStatus: kr.cycleStatus,
@@ -214,9 +233,10 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
       id: kr.id,
       title: kr.title,
       objectiveTitle: kr.objective.title,
-      cycleId: kr.objective.cycle.id,
-      cycleTitle: kr.objective.cycle.title,
-      cycleStatus: kr.objective.cycle.status,
+      objectiveId: kr.objective.id,
+      cycleId: kr.objective.cycle?.id ?? null,
+      cycleTitle: kr.objective.cycle?.title ?? noCycleTitle,
+      cycleStatus: kr.objective.cycle?.status ?? null,
     })),
   ];
 
@@ -224,7 +244,11 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
 
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
-      <PageHeader title={<span className="flex items-center gap-2">{cycle.title}<StatusBadge status={CYCLE_STATUS_TONE[cycleStatus]}>{CYCLE_STATUS_LABELS[cycleStatus]}</StatusBadge></span>} description={`${formatDate(cycle.startDate)} – ${formatDate(cycle.endDate)}`} />
+      {cycle && cycleStatus ? (
+        <PageHeader title={<span className="flex items-center gap-2">{cycle.title}<StatusBadge status={CYCLE_STATUS_TONE[cycleStatus]}>{CYCLE_STATUS_LABELS[cycleStatus]}</StatusBadge></span>} description={`${formatDate(cycle.startDate)} – ${formatDate(cycle.endDate)}`} />
+      ) : (
+        <PageHeader title={noCycleTitle} description={`${labels.objective.plural} that are not tied to a planning period. They can support, and be supported by, ${labels.keyResult.plural} in any open ${labels.cycle.lower}.`} />
+      )}
 
       <Suspense>
         <SquadFilterBar squads={squads} />
@@ -247,13 +271,13 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
           supportingObjectiveOptions={eligibleSupportingObjectives.map((objective) => ({
             id: objective.id,
             title: objective.title,
-            cycleId: objective.cycleId,
+            cycleId: cycleRouteSegment(objective.cycleId),
             cycleTitle: objective.cycleTitle,
           }))}
         />
 
         <AddObjectiveForm
-          cycleId={cycle.id}
+          cycleId={cycle?.id ?? null}
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           squads={squads}

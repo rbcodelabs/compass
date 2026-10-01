@@ -14,6 +14,7 @@ vi.mock("@/components/panels/panel-parts", async (load) => ({
   useEntityDetail: () => ({ data: detail.data, mutate: vi.fn(), refresh }),
 }));
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({ updateOpportunityStatus: vi.fn(), linkOpportunityToKeyResult: vi.fn() }));
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/objective-link-actions", () => ({ linkOpportunityToObjectiveAction: vi.fn(), unlinkOpportunityFromObjectiveAction: vi.fn() }));
 vi.mock("@/components/comments/discussion", () => ({ Discussion: ({ targetId }: { targetId: string }) => <div>Discussion for {targetId}</div> }));
 vi.mock("@/components/squads/squad-picker", () => ({ SquadPicker: () => null }));
 vi.mock("@/components/discovery/evidence-list", () => ({ EvidenceList: () => null }));

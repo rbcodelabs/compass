@@ -1,24 +1,30 @@
 import getPrisma from "@/lib/db";
+import { NO_CYCLE_LABEL } from "@/lib/okr-cycle-scope";
 
+/**
+ * Cycle fields are null (title NO_CYCLE_LABEL) for an Objective with no cycle
+ * (migration 070). Such an Objective is "persistent": cycle date containment and
+ * the CLOSED-cycle rule do not apply to it, in either direction.
+ */
 export type ParentKeyResultOption = {
   id: string;
   title: string;
   objectiveId: string;
   objectiveTitle: string;
-  cycleId: string;
+  cycleId: string | null;
   cycleTitle: string;
-  cycleStatus: string;
-  cycleStartDate: Date;
-  cycleEndDate: Date;
+  cycleStatus: string | null;
+  cycleStartDate: Date | null;
+  cycleEndDate: Date | null;
 };
 
 export type SupportingObjectiveOption = {
   id: string;
   title: string;
-  cycleId: string;
+  cycleId: string | null;
   cycleTitle: string;
-  cycleStartDate: Date;
-  cycleEndDate: Date;
+  cycleStartDate: Date | null;
+  cycleEndDate: Date | null;
 };
 
 export class OKRHierarchyError extends Error {
@@ -37,22 +43,47 @@ export class OKRHierarchyError extends Error {
   }
 }
 
+type CycleDates = { startDate: Date; endDate: Date };
+
+function sameDates(a: CycleDates, b: CycleDates): boolean {
+  return a.startDate.getTime() === b.startDate.getTime() && a.endDate.getTime() === b.endDate.getTime();
+}
+
 /**
- * Return KRs from longer-horizon cycles that fully contain the child cycle.
- * Cycle dates, rather than title conventions, make this work for calendar
- * years, fiscal years, quarters, months, and custom planning periods.
+ * Return KRs that can be supported by Objectives in `childCycleId`.
+ *
+ * With a child cycle: KRs from longer-horizon open cycles that fully contain it,
+ * plus KRs of cycle-less Objectives (containment skipped). Cycle dates, rather
+ * than title conventions, make this work for calendar years, fiscal years,
+ * quarters, months, and custom planning periods.
+ *
+ * With `childCycleId === null` (the child Objective has no cycle): there are no
+ * dates to contain, so every KR of an open-cycle or cycle-less Objective in the
+ * workspace qualifies. Pass `excludeObjectiveId` to leave out the child's own KRs.
  */
 export async function getEligibleParentKeyResults(
   workspaceId: string,
-  childCycleId: string
+  childCycleId: string | null,
+  options: { excludeObjectiveId?: string } = {}
 ): Promise<ParentKeyResultOption[]> {
   const prisma = getPrisma();
-  const childCycle = await prisma.oKRCycle.findFirst({
-    where: { id: childCycleId, workspaceId },
-    select: { id: true, startDate: true, endDate: true },
-  });
+  const childCycle = childCycleId
+    ? await prisma.oKRCycle.findFirst({
+        where: { id: childCycleId, workspaceId },
+        select: { id: true, startDate: true, endDate: true },
+      })
+    : null;
 
-  if (!childCycle) return [];
+  if (childCycleId && !childCycle) return [];
+
+  const parentCycleFilter = childCycle
+    ? {
+        id: { not: childCycle.id },
+        status: { in: ["DRAFT", "ACTIVE"] },
+        startDate: { lte: childCycle.startDate },
+        endDate: { gte: childCycle.endDate },
+      }
+    : { status: { in: ["DRAFT", "ACTIVE"] } };
 
   const keyResults = await prisma.keyResult.findMany({
     where: {
@@ -60,12 +91,8 @@ export async function getEligibleParentKeyResults(
         // Tenant scope is the Objective's own workspaceId (migration 068); the
         // cycle filter below only selects the time window.
         workspaceId,
-        cycle: {
-          id: { not: childCycle.id },
-          status: { in: ["DRAFT", "ACTIVE"] },
-          startDate: { lte: childCycle.startDate },
-          endDate: { gte: childCycle.endDate },
-        },
+        ...(options.excludeObjectiveId ? { id: { not: options.excludeObjectiveId } } : {}),
+        OR: [{ cycleId: null }, { cycle: parentCycleFilter }],
       },
     },
     include: {
@@ -91,30 +118,30 @@ export async function getEligibleParentKeyResults(
 
   return keyResults
     .filter(
-      (kr) =>
-        kr.objective.cycle.startDate.getTime() !== childCycle.startDate.getTime() ||
-        kr.objective.cycle.endDate.getTime() !== childCycle.endDate.getTime()
+      (kr) => !childCycle || !kr.objective.cycle || !sameDates(kr.objective.cycle, childCycle)
     )
     .map((kr) => ({
       id: kr.id,
       title: kr.title,
       objectiveId: kr.objective.id,
       objectiveTitle: kr.objective.title,
-      cycleId: kr.objective.cycle.id,
-      cycleTitle: kr.objective.cycle.title,
-      cycleStatus: kr.objective.cycle.status,
-      cycleStartDate: kr.objective.cycle.startDate,
-      cycleEndDate: kr.objective.cycle.endDate,
+      cycleId: kr.objective.cycle?.id ?? null,
+      cycleTitle: kr.objective.cycle?.title ?? NO_CYCLE_LABEL,
+      cycleStatus: kr.objective.cycle?.status ?? null,
+      cycleStartDate: kr.objective.cycle?.startDate ?? null,
+      cycleEndDate: kr.objective.cycle?.endDate ?? null,
       objectiveSortOrder: kr.objective.sortOrder,
       keyResultSortOrder: kr.sortOrder,
     }))
     .sort((a, b) => {
-      const status = Number(b.cycleStatus === "ACTIVE") - Number(a.cycleStatus === "ACTIVE");
+      // Active cycles first, then other cycles, then cycle-less parents.
+      const rank = (status: string | null) => (status === "ACTIVE" ? 2 : status ? 1 : 0);
+      const status = rank(b.cycleStatus) - rank(a.cycleStatus);
       if (status !== 0) return status;
-      const aSpan = a.cycleEndDate.getTime() - a.cycleStartDate.getTime();
-      const bSpan = b.cycleEndDate.getTime() - b.cycleStartDate.getTime();
+      const span = (o: { cycleStartDate: Date | null; cycleEndDate: Date | null }) =>
+        o.cycleStartDate && o.cycleEndDate ? o.cycleEndDate.getTime() - o.cycleStartDate.getTime() : 0;
       return (
-        aSpan - bSpan ||
+        span(a) - span(b) ||
         a.objectiveSortOrder - b.objectiveSortOrder ||
         a.keyResultSortOrder - b.keyResultSortOrder
       );
@@ -132,28 +159,45 @@ export async function getEligibleParentKeyResults(
     }));
 }
 
-/** Return unlinked Objectives in strictly shorter cycles contained by a parent cycle. */
+/**
+ * Return unlinked Objectives that could support a KR of the parent cycle:
+ * those in strictly shorter cycles contained by it, plus cycle-less Objectives.
+ * With `parentCycleId === null` (the parent Objective has no cycle) every
+ * unlinked Objective in the workspace is a candidate; the caller removes the
+ * parent's own Objective.
+ */
 export async function getEligibleSupportingObjectives(
   workspaceId: string,
-  parentCycleId: string
+  parentCycleId: string | null
 ): Promise<SupportingObjectiveOption[]> {
   const prisma = getPrisma();
-  const parentCycle = await prisma.oKRCycle.findFirst({
-    where: { id: parentCycleId, workspaceId },
-    select: { id: true, status: true, startDate: true, endDate: true },
-  });
+  const parentCycle = parentCycleId
+    ? await prisma.oKRCycle.findFirst({
+        where: { id: parentCycleId, workspaceId },
+        select: { id: true, status: true, startDate: true, endDate: true },
+      })
+    : null;
 
-  if (!parentCycle || parentCycle.status === "CLOSED") return [];
+  if (parentCycleId && (!parentCycle || parentCycle.status === "CLOSED")) return [];
 
   const objectives = await prisma.objective.findMany({
     where: {
       parentKeyResultId: null,
       workspaceId,
-      cycle: {
-        id: { not: parentCycle.id },
-        startDate: { gte: parentCycle.startDate },
-        endDate: { lte: parentCycle.endDate },
-      },
+      ...(parentCycle
+        ? {
+            OR: [
+              { cycleId: null },
+              {
+                cycle: {
+                  id: { not: parentCycle.id },
+                  startDate: { gte: parentCycle.startDate },
+                  endDate: { lte: parentCycle.endDate },
+                },
+              },
+            ],
+          }
+        : {}),
     },
     include: {
       cycle: {
@@ -165,17 +209,15 @@ export async function getEligibleSupportingObjectives(
 
   return objectives
     .filter(
-      (objective) =>
-        objective.cycle.startDate.getTime() !== parentCycle.startDate.getTime() ||
-        objective.cycle.endDate.getTime() !== parentCycle.endDate.getTime()
+      (objective) => !parentCycle || !objective.cycle || !sameDates(objective.cycle, parentCycle)
     )
     .map((objective) => ({
       id: objective.id,
       title: objective.title,
-      cycleId: objective.cycle.id,
-      cycleTitle: objective.cycle.title,
-      cycleStartDate: objective.cycle.startDate,
-      cycleEndDate: objective.cycle.endDate,
+      cycleId: objective.cycle?.id ?? null,
+      cycleTitle: objective.cycle?.title ?? NO_CYCLE_LABEL,
+      cycleStartDate: objective.cycle?.startDate ?? null,
+      cycleEndDate: objective.cycle?.endDate ?? null,
     }));
 }
 
@@ -216,21 +258,25 @@ export async function setObjectiveParentKeyResult(input: {
   if (parent.objectiveId === child.id) {
     throw new OKRHierarchyError("SAME_OBJECTIVE", "An Objective cannot support one of its own Key Results.");
   }
-  if (parent.objective.cycle.status === "CLOSED") {
+  const parentCycle = parent.objective.cycle;
+  const childCycle = child.cycle;
+  if (parentCycle?.status === "CLOSED") {
     throw new OKRHierarchyError("CLOSED_PARENT_CYCLE", "A closed cycle cannot receive new supporting Objectives.");
   }
 
-  const containsChild =
-    parent.objective.cycle.startDate <= child.cycle.startDate &&
-    parent.objective.cycle.endDate >= child.cycle.endDate;
-  const isLongerHorizon =
-    parent.objective.cycle.startDate < child.cycle.startDate ||
-    parent.objective.cycle.endDate > child.cycle.endDate;
-  if (!containsChild || !isLongerHorizon) {
-    throw new OKRHierarchyError(
-      "INVALID_TIME_HORIZON",
-      "The parent KR must belong to a longer cycle that fully contains this Objective's cycle."
-    );
+  // Containment only applies when both Objectives have a cycle. A cycle-less
+  // Objective on either side has no dates to compare, so the check is skipped.
+  if (parentCycle && childCycle) {
+    const containsChild =
+      parentCycle.startDate <= childCycle.startDate && parentCycle.endDate >= childCycle.endDate;
+    const isLongerHorizon =
+      parentCycle.startDate < childCycle.startDate || parentCycle.endDate > childCycle.endDate;
+    if (!containsChild || !isLongerHorizon) {
+      throw new OKRHierarchyError(
+        "INVALID_TIME_HORIZON",
+        "The parent KR must belong to a longer cycle that fully contains this Objective's cycle."
+      );
+    }
   }
 
   // Walk the proposed parent's ancestry. The child appearing anywhere above

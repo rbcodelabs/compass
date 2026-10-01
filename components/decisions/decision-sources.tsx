@@ -1,6 +1,8 @@
 import Link from "next/link"
 import type { ReactNode } from "react"
 import type { TrackedDecisionSourceSnapshot, TrackedSourceType } from "@/lib/tracked-decisions"
+import type { ResolvedLabels } from "@/lib/thinking-model/labels"
+import { CLASSIC_THINKING_MODEL } from "@/lib/thinking-model/resolve"
 
 type TrackedDecisionPacket = {
   schemaVersion: "tracked-decision/v1" | "tracked-decision/v2"
@@ -47,7 +49,9 @@ export function parseTrackedDecisionPacket(raw: string): TrackedDecisionPacket |
   } catch { return null }
 }
 
-function typeLabel(type: TrackedSourceType) {
+function typeLabel(type: TrackedSourceType, labels: ResolvedLabels) {
+  if (type === "OPPORTUNITY") return labels.opportunity.singular
+  if (type === "SOLUTION") return labels.solution.singular
   return type === "ROADMAP_ITEM" ? "Roadmap item" : type.charAt(0) + type.slice(1).toLowerCase()
 }
 
@@ -66,7 +70,7 @@ function destination(source: TrackedDecisionPacket["entity"], orgSlug: string, w
   return null
 }
 
-function SourceRow({ source, orgSlug, workspaceSlug, primary = false }: { source: TrackedDecisionPacket["entity"]; orgSlug: string; workspaceSlug: string; primary?: boolean }) {
+function SourceRow({ source, orgSlug, workspaceSlug, labels, primary = false }: { source: TrackedDecisionPacket["entity"]; orgSlug: string; workspaceSlug: string; labels: ResolvedLabels; primary?: boolean }) {
   const href = destination(source, orgSlug, workspaceSlug)
   const content = <>
     <span className="min-w-0 flex-1">
@@ -74,27 +78,27 @@ function SourceRow({ source, orgSlug, workspaceSlug, primary = false }: { source
       {capturedLabel(source.updatedAt) && <span className="mt-0.5 block text-xs text-muted-foreground">{capturedLabel(source.updatedAt)}</span>}
     </span>
     <span className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
-      <span className="rounded-full border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{typeLabel(source.type)}</span>
+      <span className="rounded-full border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{typeLabel(source.type, labels)}</span>
       {!href && <span className="text-xs text-muted-foreground">Snapshot only</span>}
     </span>
   </>
   const className = "flex min-w-0 max-w-full flex-col items-start gap-2 rounded-md border bg-background px-3 py-2 text-left sm:flex-row sm:items-center sm:gap-3"
   return <li>{href
-    ? <Link aria-label={`${primary ? "Primary: " : ""}${source.title} (${typeLabel(source.type)})`} className={`${className} transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`} href={href}>{content}</Link>
+    ? <Link aria-label={`${primary ? "Primary: " : ""}${source.title} (${typeLabel(source.type, labels)})`} className={`${className} transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`} href={href}>{content}</Link>
     : <div className={className}>{content}</div>}
   </li>
 }
 
-export function DecisionSources({ orgSlug, workspaceSlug, entity, sources, supportingArtifacts }: { orgSlug: string; workspaceSlug: string; entity: TrackedDecisionPacket["entity"]; sources: TrackedDecisionSourceSnapshot[]; supportingArtifacts?: ReactNode }) {
+export function DecisionSources({ orgSlug, workspaceSlug, entity, sources, supportingArtifacts, labels = CLASSIC_THINKING_MODEL.labels }: { orgSlug: string; workspaceSlug: string; entity: TrackedDecisionPacket["entity"]; sources: TrackedDecisionSourceSnapshot[]; supportingArtifacts?: ReactNode; labels?: ResolvedLabels }) {
   return <div className="space-y-4">
     <div className="space-y-2">
       <h2 className="text-sm font-medium">Linked to</h2>
-      <ul><SourceRow source={entity} orgSlug={orgSlug} workspaceSlug={workspaceSlug} primary /></ul>
+      <ul><SourceRow source={entity} orgSlug={orgSlug} workspaceSlug={workspaceSlug} labels={labels} primary /></ul>
       {supportingArtifacts}
     </div>
     {sources.length > 0 && <div className="space-y-2">
       <h2 className="text-sm font-medium">Sources</h2>
-      <ul className="space-y-2">{sources.map((source) => <SourceRow key={`${source.type}:${source.id}`} source={source} orgSlug={orgSlug} workspaceSlug={workspaceSlug} />)}</ul>
+      <ul className="space-y-2">{sources.map((source) => <SourceRow key={`${source.type}:${source.id}`} source={source} orgSlug={orgSlug} workspaceSlug={workspaceSlug} labels={labels} />)}</ul>
     </div>}
   </div>
 }

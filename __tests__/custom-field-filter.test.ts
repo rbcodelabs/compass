@@ -6,6 +6,10 @@ import {
   type CustomFieldFilterDelegate,
 } from "@/lib/custom-field-filter";
 import type { CustomFieldDefinitionData } from "@/lib/types";
+import { objectTypeLabels } from "@/components/custom-fields/object-type-labels";
+import { CLASSIC_THINKING_MODEL, resolveThinkingModel } from "@/lib/thinking-model/resolve";
+
+const classicNames = objectTypeLabels(CLASSIC_THINKING_MODEL.labels);
 
 describe("parseCustomFieldFilterParams", () => {
   it("returns null when either half of the pair is missing", () => {
@@ -68,12 +72,12 @@ describe("buildCustomFieldFilterGroups", () => {
   ];
 
   it("only includes SELECT / MULTI_SELECT fields that actually have options", () => {
-    const groups = buildCustomFieldFilterGroups(fields);
+    const groups = buildCustomFieldFilterGroups(fields, classicNames);
     expect(groups.map((group) => group.fieldId)).toEqual(["f-area"]);
   });
 
   it("carries the field name, object type and option list onto the group", () => {
-    const [group] = buildCustomFieldFilterGroups(fields);
+    const [group] = buildCustomFieldFilterGroups(fields, classicNames);
     expect(group.label).toBe("Product Area");
     expect(group.objectType).toBe("OPPORTUNITY");
     expect(group.options).toEqual([
@@ -83,14 +87,28 @@ describe("buildCustomFieldFilterGroups", () => {
   });
 
   it("disambiguates two fields that share a name across object types", () => {
-    const groups = buildCustomFieldFilterGroups([
-      { ...fields[2], id: "a", objectType: "OPPORTUNITY" },
-      { ...fields[2], id: "b", objectType: "SOLUTION" },
-    ]);
-    expect(groups.map((group) => group.label)).toEqual([
+    const same = [
+      { ...fields[2], id: "a", objectType: "OPPORTUNITY" as const },
+      { ...fields[2], id: "b", objectType: "SOLUTION" as const },
+    ];
+    expect(buildCustomFieldFilterGroups(same, classicNames).map((group) => group.label)).toEqual([
       "Product Area (Opportunity)",
       "Product Area (Solution)",
     ]);
+  });
+
+  it("uses the workspace's own names for the suffix", () => {
+    const names = objectTypeLabels(
+      resolveThinkingModel({ thinkingModelLabels: JSON.stringify({ opportunity: { singular: "Problem" }, solution: { singular: "Bet" } }) }).labels,
+    );
+    const groups = buildCustomFieldFilterGroups(
+      [
+        { ...fields[2], id: "a", objectType: "OPPORTUNITY" },
+        { ...fields[2], id: "b", objectType: "SOLUTION" },
+      ],
+      names,
+    );
+    expect(groups.map((group) => group.label)).toEqual(["Product Area (Problem)", "Product Area (Bet)"]);
   });
 });
 

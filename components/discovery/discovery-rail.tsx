@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Search, TrendingUp, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Search, Target, TrendingUp, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { NewOpportunityButton } from "@/components/discovery/new-opportunity-button";
 import {
   ACTIVE_OPPORTUNITY_STATUS_ORDER,
@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
+import { linkedToLabel } from "@/lib/thinking-model/copy";
 
 export type DiscoveryRailOpportunity = {
   id: string;
@@ -21,7 +23,7 @@ export type DiscoveryRailOpportunity = {
   status: OpportunityStatus;
   squad: { id: string; name: string; color: string } | null;
   linkedKeyResultId: string | null;
-  /** Typed Opportunity<->Objective links (ADR Phase 2). Payload only; the rail does not render it yet. */
+  /** Typed Opportunity<->Objective links (ADR Phase 2). Rendered as an additive marker by presets that offer the link (Phase 4B). */
   linkedObjectives?: { id: string; title: string }[];
 };
 
@@ -52,6 +54,7 @@ export function DiscoveryRail({
   activeOpportunityId = null,
   onNavigate,
 }: DiscoveryRailProps) {
+  const labels = useLabels();
   const [query, setQuery] = React.useState("");
   const [collapsed, setCollapsed] = React.useState(false);
 
@@ -106,7 +109,7 @@ export function DiscoveryRail({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search opportunities…"
+            placeholder={`Search ${labels.opportunity.lowerPlural}…`}
             className="h-8 w-full bg-transparent pl-7 pr-2 text-xs"
           />
         </div>
@@ -171,7 +174,7 @@ export function DiscoveryRail({
 
         {filtered.length === 0 && (
           <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-            No opportunities match &ldquo;{query}&rdquo;.
+            No {labels.opportunity.lowerPlural} match &ldquo;{query}&rdquo;.
           </p>
         )}
       </div>
@@ -195,6 +198,8 @@ function RailRow({
   isActive: boolean;
   onNavigate?: () => void;
 }) {
+  const labels = useLabels();
+  const showObjectiveLinks = useThinkingModel().links.oppToObjective !== "hidden";
   return (
     <Link
       href={href}
@@ -223,7 +228,14 @@ function RailRow({
       {opportunity.linkedKeyResultId && (
         <TrendingUp
           className="mt-0.5 size-3 shrink-0 text-primary"
-          aria-label="Linked to a key result"
+          aria-label={linkedToLabel(labels.keyResult)}
+        />
+      )}
+      {/* Phase 4B, additive: typed Objective links, only for presets that offer the link (CLASSIC renders exactly what it did). */}
+      {showObjectiveLinks && opportunity.linkedObjectives && opportunity.linkedObjectives.length > 0 && (
+        <Target
+          className="mt-0.5 size-3 shrink-0 text-primary"
+          aria-label={linkedToLabel(labels.objective)}
         />
       )}
     </Link>

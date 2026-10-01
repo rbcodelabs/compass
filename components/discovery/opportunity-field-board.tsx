@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useMemo, useRef, useState, type ReactNode, useId } from "react";
 import {
   DndContext,
@@ -56,11 +57,12 @@ type Props = {
 
 const columnDroppableId = (column: FieldColumn) => `field-column-${column.id}`;
 
-function plural(count: number, noun: string) {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+function plural(count: number, label: { lower: string; lowerPlural: string }) {
+  return `${count} ${count === 1 ? label.lower : label.lowerPlural}`;
 }
 
 export function OpportunityFieldBoard({ field, opportunities, orgSlug, workspaceSlug, workspaceId }: Props) {
+  const labels = useLabels();
   const boardPath = `/${orgSlug}/${workspaceSlug}/discovery`;
   const columns = useMemo(() => fieldColumns(field.options), [field.options]);
 
@@ -155,7 +157,7 @@ export function OpportunityFieldBoard({ field, opportunities, orgSlug, workspace
         onDragCancel={() => setActiveId(null)}
       >
         <Board
-          label={`Opportunity board grouped by ${field.name}`}
+          label={`${labels.opportunity.singular} board grouped by ${field.name}`}
           className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
         >
           <div
@@ -202,12 +204,13 @@ function FieldBoardColumn({
   items: FieldBoardOpportunity[];
   renderCard: (opportunity: FieldBoardOpportunity) => ReactNode;
 }) {
+  const labels = useLabels();
   const { setNodeRef, isOver } = useDroppable({ id: columnDroppableId(column), data: { column } });
 
   return (
     <BoardColumn
       data-column-id={column.id}
-      aria-label={`${column.label}, ${items.length} ${items.length === 1 ? "opportunity" : "opportunities"}`}
+      aria-label={`${column.label}, ${items.length} ${items.length === 1 ? labels.opportunity.lower : labels.opportunity.lowerPlural}`}
       title={
         <span className="flex items-center gap-2">
           {column.color && (
@@ -225,7 +228,7 @@ function FieldBoardColumn({
         <EmptyState
           compact
           icon={<Lightbulb className="size-4" />}
-          title="No opportunities"
+          title={`No ${labels.opportunity.lowerPlural}`}
           className={isOver ? "border-border-interactive" : undefined}
         />
       ) : (
@@ -298,6 +301,7 @@ function FieldBoardCardBody({
   dragHandle?: ReactNode;
   actions?: ReactNode;
 }) {
+  const labels = useLabels();
   const { openPanel } = usePanelContext();
 
   return (
@@ -332,7 +336,7 @@ function FieldBoardCardBody({
       data-pending={pending ? true : undefined}
     >
       <p className="text-xs text-text-subtle">
-        {plural(opportunity._count.solutions, "solution")} · {opportunity._count.evidence} evidence
+        {plural(opportunity._count.solutions, labels.solution)} · {opportunity._count.evidence} evidence
       </p>
     </EntityCard>
   );

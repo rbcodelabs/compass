@@ -432,12 +432,14 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   // INSERT INTO ${ownerTable}: the managed-pilot ownership table (see DYNAMIC_INSERT_ALLOWED); counted so a second one is noticed.
   "lib/preview-automation/managed-migrations.ts": 1,
   "e2e/functional/fixtures/seed-e2e.ts": 2,
+  "e2e/functional/specs/link-authoring.spec.ts": 2, // one objective and one solution for the synthetic workspace, each listing workspace_id
   "e2e/functional/specs/kanban-mobile-scroll.spec.ts": 2, // 1 literal solutions insert + 1 allow-listed dynamic (board.table)
   "e2e/functional/specs/markdown-description.spec.ts": 1, // allow-listed dynamic (kind)
   "e2e/functional/specs/opportunity-composer.spec.ts": 1,
   "e2e/functional/specs/opportunity-detail.spec.ts": 1,
   "e2e/functional/specs/opportunity-relationships.spec.ts": 1,
   "e2e/functional/specs/typed-links.spec.ts": 1, // objectives for the typed-link fixture, listing workspace_id
+  "e2e/functional/specs/thinking-model-tree.spec.ts": 2, // one objective and one solution for the tree fixture, each listing workspace_id
   "scripts/seed-canvas-scale.ts": 2,
   "scripts/verify-managed-pilot-migrations.ts": 1, // allow-listed dynamic (sentinel table)
   "seed-screenshots.ts": 2,

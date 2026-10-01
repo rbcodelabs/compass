@@ -16,6 +16,8 @@ import {
   parseCustomFieldFilterParams,
   resolveCustomFieldFilter,
 } from "@/lib/custom-field-filter";
+import { objectTypeLabels } from "@/components/custom-fields/object-type-labels";
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { roadmapBoardFilterKey } from "@/lib/roadmap-filters";
 import { parseGroupByParam, resolveRoadmapGroupBy } from "@/lib/roadmap-group-by";
 import { loadCustomFieldValuesForObjects } from "@/lib/custom-field-values-batch";
@@ -64,7 +66,8 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       filter: parseCustomFieldFilterParams({ field: fieldParam, fieldValue: fieldValueParam }),
     }),
   ]);
-  const customFieldGroups = buildCustomFieldFilterGroups(roadmapFieldDefs);
+  const { labels } = resolveThinkingModel(workspace);
+  const customFieldGroups = buildCustomFieldFilterGroups(roadmapFieldDefs, objectTypeLabels(labels));
   // Only SELECT-type fields are groupable — MULTI_SELECT is out of scope
   // (an item could belong to more than one group, which breaks
   // one-row-per-item lane packing on the timeline).

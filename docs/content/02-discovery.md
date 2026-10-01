@@ -45,7 +45,7 @@ In Board view, use the **Group by** picker next to Filters to switch how cards a
 - **A custom field** — every Opportunity single-select custom field with at least one option is listed after the built-in groupings (for example a **MoSCoW** field with Must, Should, Could, and Won't). See [Card sorting by a custom field](#card-sorting-by-a-custom-field) below.
 - **Opportunity** — a swimlane board for Solutions, the middle tier of the OST that otherwise only appears in a flat list inside an Opportunity's detail panel. Each active Opportunity gets its own collapsible lane (click the chevron to collapse or expand it), with five columns for the Solution lifecycle: **Idea**, **Validated**, **In delivery**, **Shipped**, **Killed**. Drag a Solution card to a different column to change its status; drag it to reorder within a column. Use **+ Add Solution** at the bottom of a lane to create a new Solution directly on that Opportunity.
 
-Dragging a Solution card only ever changes its status within its own lane — dropping it on a different Opportunity's lane snaps it back with no change. Re-parenting a Solution to a different Opportunity is a deliberate action from its detail panel, not something a board drag can do by accident.
+Dragging a Solution card only ever changes its status within its own lane — dropping it on a different Opportunity's lane snaps it back with no change. A Solution belongs to the Opportunity it was created on for good: there is no action, in the board, the detail panel or the MCP API, that moves it to a different Opportunity. To aim an existing idea at another Opportunity, add a new Solution there. (A Solution can additionally be linked to Key Results; see [Linking an opportunity to Objectives, and the workspace tree](#linking-an-opportunity-to-objectives-and-the-workspace-tree).)
 
 ### Card sorting by a custom field
 
@@ -84,10 +84,11 @@ The composer opens in the right-hand panel. On wide screens it docks beside the 
 - **Status** starts as the status of the column you opened it from. From the rail it starts as **Exploring**. You can change it before you submit.
 - **Squad** and **Customer segment** are optional.
 - **Description** supports Markdown, with the same rich editor and Markdown source mode used elsewhere. **Insert opportunity outline** adds *Who's affected*, *Current pain*, *Evidence* and *Desired outcome* headings.
+- **Objectives** (**Outcomes** under Torres) is optional and appears only on Opportunity-first and Torres workspaces, above the Driving key result. Open the box, search, and tick every Objective this opportunity is being pursued for, up to 25. Each chosen Objective shows its cycle beside it when it has one; an Objective with no cycle is listed like any other. The links are created in the same save as the opportunity. Classic workspaces do not see this box.
 - **Driving key result** is optional. Search the workspace's Key Results and choose the one this opportunity should move.
 - **Seed from feedback** is optional. Search the workspace's feedback and select every item that points to this opportunity. Selected items appear as a list, and you can remove any of them. Linking works the same way as it does from the feedback board: the item's status doesn't change, and an item that is already linked to another opportunity moves to this one. The composer tells you when that will happen.
 
-Press **⌘/Ctrl + Enter** or select **Submit** to create the opportunity. The opportunity, its Key Result link and its feedback links are saved together. If any part is invalid, for example a Key Result from another workspace, nothing is created and the error appears in the composer. When it succeeds, the new card appears on the board and the composer turns into the new opportunity's panel. Browser Back doesn't return to an empty composer.
+Press **⌘/Ctrl + Enter** or select **Submit** to create the opportunity. The opportunity, its Objective links, its Key Result link and its feedback links are saved together. If any part is invalid, for example a Key Result from another workspace, nothing is created and the error appears in the composer. When it succeeds, the new card appears on the board and the composer turns into the new opportunity's panel. Browser Back doesn't return to an empty composer.
 
 Your draft is saved on this device for each workspace as you type. If you close the panel (with **Esc** or the close button), reload, or leave the page, the draft is kept and the composer says **Restored your unsent draft** the next time you open it. **Cancel** asks before discarding a draft.
 
@@ -168,6 +169,20 @@ Click **+ Add Evidence** from any opportunity, solution, or assumption to attach
 - **Evidence list** — Opportunity, solution, and assumption detail views show the full list of evidence attached directly to that node, each tagged with its source type and confidence.
 
 Because evidence doesn't roll up the tree, attach it to the specific node it actually supports — evidence for a particular solution belongs on that solution, not on the parent opportunity.
+
+## Linking an opportunity to Objectives, and the workspace tree
+
+Discovery connects to your OKRs through links:
+
+- **Opportunity ↔ Objective.** An opportunity can be linked to as many Objectives as you chose to pursue it for. Its **Driving Key Result** (above) also links it to that Key Result's Objective, so older data is not left unlinked.
+- **Solution ↔ Key Result.** A solution can be linked to the Key Results it is meant to move, in addition to its one parent opportunity. On Opportunity-first and Torres workspaces you make them yourself: open the solution and use its **Linked Key Results** box (**Linked Success metrics** under Torres) to tick or untick any Key Result in the workspace, each tick saving immediately. The Key Result's panel lists its **Linked Solutions**. Agents make the same links with the link tools in the [MCP API](/help/09-mcp-api#typed-links). The workspace tree below and the [Canvas](/help/12-canvas) show them.
+
+Workspaces that use the **Opportunity-first OKRs** or **Torres** thinking model (a workspace admin picks it in Settings) get two extra things in Discovery:
+
+- On an opportunity, a multi-select box (titled **Objectives**, or **Outcomes** under Torres) to link the opportunity to every Objective you chose to pursue it for. Once the workspace has at least one Objective, select **Change** (or **Link objectives** when there are none), then tick or untick; each tick saves immediately. If an Objective is linked only because of the opportunity's Driving Key Result, unticking it explains that and changes nothing: change the Key Result instead.
+- A tree button in the Discovery header (**Objective tree** / **Outcome tree**) that opens the workspace tree at `/discovery/tree`: Objectives, their linked opportunities and the solutions under them, with opportunities that are not linked to any Objective gathered in a pool. Solutions are shown against the Key Results they are linked to.
+
+Classic workspaces see neither: there is no box and `/discovery/tree` is not found. The board, the Tree view and the Solutions list work the same under every model. Details are on the [Thinking models](/help/27-thinking-models) page.
 
 ## The OST Tree View
 
