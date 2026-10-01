@@ -147,6 +147,19 @@ afterEach(() => {
 });
 
 describe("NativeTimeline", () => {
+  it("scrolls today into view on Go to today instead of only resetting the window", () => {
+    // localCalendarToday is mocked to 2026-09-04. Jul 1 -> Sep 4 is 65 days at
+    // 12px/day; jumping must scroll there (a third of the way across the
+    // 400px viewport), not just reset the window.
+    const windowStart = "2026-07-01";
+    harness.controller.jumpToday.mockReset().mockReturnValue(windowStart);
+    renderTimeline();
+    const scrollTo = vi.fn();
+    screen.getByTestId("native-timeline-scroll").scrollTo = scrollTo;
+    fireEvent.click(screen.getByRole("button", { name: "Go to today" }));
+    expect(harness.controller.jumpToday).toHaveBeenCalledTimes(1);
+    expect(scrollTo).toHaveBeenCalledWith({ left: 65 * 12 - 400 / 3 });
+  });
   it("offers visible reload recovery and prevents interrupting a pending save", () => {
     const { rerender } = renderTimeline();
     expect(screen.getByRole("button", { name: "Reload timeline" })).toBeEnabled();

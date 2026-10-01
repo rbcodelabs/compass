@@ -171,8 +171,11 @@ export function useTimelineController({
     setViewportStart((current) => addCalendarMonths(current, direction * (zoom === "month" ? 3 : 9)));
   }
 
-  function jumpToday() {
-    setViewportStart(monthStart(addCalendarMonths(localCalendarToday(), zoom === "month" ? -2 : -6)));
+  /** Resets the viewport window around today and returns its start so the view can scroll today into sight. */
+  function jumpToday(): CalendarDate {
+    const nextStart = monthStart(addCalendarMonths(localCalendarToday(), zoom === "month" ? -2 : -6));
+    setViewportStart(nextStart);
+    return nextStart;
   }
 
   async function reschedule(itemId: string, horizon: Horizon, start: CalendarDate, end: CalendarDate) {

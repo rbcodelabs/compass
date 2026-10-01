@@ -5,8 +5,11 @@ import type { Locator, Page } from "@playwright/test";
 
 const nativeId = "daf2cdb6-0c38-4c29-bc2b-090bfa391532";
 const nativeBase = "/e2e-test-org/native-dogfood";
-const start = new Date().toISOString().slice(0, 8) + "01";
-const end = new Date().toISOString().slice(0, 8) + "28";
+// The app positions "today" by the browser-local calendar date, so derive the
+// fixture month the same way (toISOString is UTC and drifts a day-month near midnight).
+const localMonth = (() => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-`; })();
+const start = localMonth + "01";
+const end = localMonth + "28";
 
 function shiftDate(value: string, days: number) {
   const date = new Date(`${value}T12:00:00Z`);
@@ -89,7 +92,7 @@ test.describe("Native timeline default", () => {
         FROM compass_dev.roadmap_items WHERE workspace_id = $1 AND id = ANY($2::uuid[]) ORDER BY id`, [nativeId, ids]);
       const before = (await readSchedules()).rows;
       await page.goto(`${nativeBase}/roadmap?view=timeline`);
-      await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+      await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
       await scrollToFixtureMonth(page);
       for (const item of cases) {
         await page.getByRole("button", { name: `Edit dates for ${item.title}`, exact: true }).click();
@@ -100,7 +103,7 @@ test.describe("Native timeline default", () => {
         await page.keyboard.press("Escape");
       }
       await page.reload();
-      await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+      await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
       expect((await readSchedules()).rows).toEqual(before);
       await scrollToFixtureMonth(page);
       await page.screenshot({ path: testInfo.outputPath("legacy-schedule-recovery.png"), fullPage: true, style: "nextjs-portal { display: none }" });
@@ -111,7 +114,7 @@ test.describe("Native timeline default", () => {
       await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
       await expect(dialog).not.toBeVisible();
       await page.reload();
-      await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+      await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
       const { rows: [repaired] } = await pool.query(`SELECT start_date::date::text AS start, end_date::date::text AS end
         FROM compass_dev.roadmap_items WHERE workspace_id = $1 AND id = $2`, [nativeId, ids[0]]);
       expect(repaired).toEqual({ start, end });
@@ -266,7 +269,9 @@ test.describe("Native timeline default", () => {
     await page.getByRole("button", { name: "Add Item", exact: true }).click();
     await expect(page.getByText("Native rollout scheduling", { exact: true })).toBeVisible();
     await page.getByRole("tab", { name: "Timeline", exact: true }).click();
-    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
+    // The new undated item sits at today; bring it into the rendered window like a user would.
+    await page.getByRole("button", { name: "Go to today", exact: true }).click();
     await page.getByRole("button", { name: "Edit dates for Native rollout scheduling", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Start", { exact: true }).fill(start);
@@ -285,11 +290,11 @@ test.describe("Native timeline default", () => {
     }
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`${nativeBase}/roadmap?view=timeline&timelineEngine=classic`);
-    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
     await page.getByRole("tab", { name: "Board", exact: true }).click();
     await expect(page.getByRole("button", { name: "Add item", exact: true }).first()).toBeVisible();
     await page.getByRole("tab", { name: "Timeline", exact: true }).click();
-    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Use classic timeline" })).toHaveCount(0);
   });
 
@@ -405,7 +410,7 @@ test.describe("Native timeline default", () => {
 
   test("another workspace gets native without an opt-in", async ({ page, base }) => {
     await page.goto(`${base}/roadmap?view=timeline`);
-    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Use classic timeline" })).toHaveCount(0);
   });
 
@@ -458,7 +463,7 @@ test.describe("Native timeline default", () => {
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Start", { exact: true }).fill(shiftDate(previousStart!, 1));
     await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
-    await expect(page.getByTestId("timeline-engine-native").getByRole("status")).toContainText("Changes rolled back; try again.");
+    await expect(page.getByTestId("timeline-engine-native").filter({ visible: true }).getByRole("status")).toContainText("Changes rolled back; try again.");
     expect(blocked).toBe(1);
     await expect(dialog).toBeVisible();
     await expect(card).toHaveAttribute("data-start", previousStart!);

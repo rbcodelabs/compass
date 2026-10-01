@@ -178,6 +178,18 @@ export function NativeTimeline(props: TimelineEngineProps & {
 
   useLayoutEffect(() => () => stopDragPointerTracking(), []);
 
+  // The window opens two months before today, so on a typical viewport today
+  // (and any undated item placed there) sits right of the first screenful and,
+  // late in a month, beyond the virtualized render window. "Go to today" must
+  // actually bring it into view rather than only resetting the window.
+  function goToToday() {
+    const windowStart = controller.jumpToday();
+    const container = scrollRef.current;
+    if (!windowStart || !container) return;
+    const todayLeft = (inclusiveDayCount(windowStart, localCalendarToday()) - 1) * dayWidth;
+    container.scrollTo({ left: Math.max(0, todayLeft - container.clientWidth / 3) });
+  }
+
   const renderWindow = calculateTimelineRenderWindow(scrollViewport.scrollLeft, scrollViewport.width, timelineWidth);
   const itemLayouts = useMemo<NativeItemLayout[]>(() => packedItems.flatMap((packed) => {
     const item = packed.item;
@@ -311,7 +323,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
 
   return (
     <div className="flex min-h-full min-w-0 flex-1 flex-col md:h-full md:min-h-0">
-      <RoadmapHeader squads={props.headerSquads ?? props.squads} customFieldGroups={props.customFieldGroups} activeCustomFieldId={props.activeCustomFieldId ?? null} groupByValue={groupByValue} groupByOptions={props.groupByOptions} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: controller.jumpToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0 }} />
+      <RoadmapHeader squads={props.headerSquads ?? props.squads} customFieldGroups={props.customFieldGroups} activeCustomFieldId={props.activeCustomFieldId ?? null} groupByValue={groupByValue} groupByOptions={props.groupByOptions} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: goToToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0 }} />
       <div data-slot="workspace-content" className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:px-4 md:py-3">
         <DndContext
           id={dndId}
