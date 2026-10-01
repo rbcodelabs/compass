@@ -494,7 +494,7 @@ The existing fields are kept, so current agents are unaffected:
 
 - `linkedKeyResult` (and `linkedKeyResultId` in the result of `link_opportunity_to_kr`) still names the one specific Key Result. It is read from that field only and is never inferred from links, because an Objective-level link cannot say *which* Key Result.
 - Each solution still has exactly one parent opportunity (its `opportunityId` does not change), and `add_solution` is unchanged.
-- The new fields are additive: `linkedObjectives` on `list_opportunities` items and `get_opportunity`, and `linkedKeyResults` on `list_solutions` items. Both are empty lists when there are no links.
+- The new fields are additive: `linkedObjectives` on `list_opportunities` items and `get_opportunity`, and `linkedKeyResults` on `list_solutions` items. Both are empty lists when there are no links. They are read from the link tables, so if the database does not have them yet (migration 071 not applied) these tools return the database error rather than an empty list: an empty list always means "no links".
 
 ### Typed links: authorization and errors
 

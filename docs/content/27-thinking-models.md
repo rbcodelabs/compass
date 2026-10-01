@@ -10,7 +10,9 @@ section: "Core Features"
 
 A **thinking model** is a workspace setting that decides how Compass *names* and *presents* the same four things: Opportunities, Objectives, Key Results and Solutions. It changes words and a few screens. It never changes your data, so you can switch models at any time and nothing is migrated or deleted.
 
-Only a workspace admin can change it: open **Settings**, find **Thinking model**, pick a model and select **Save**.
+Only a workspace admin can change it: open **Settings**, find **Thinking model**, pick a model and select **Save**. An organization admin who is not a member of the workspace cannot change it.
+
+Compass stores only the name of the model you pick (plus any renames of Objective and Key Result). A workspace that never chose one, or whose setting is blank, uses **Classic OKRs** forever, and Classic stays selectable at any time.
 
 ## The three models
 
