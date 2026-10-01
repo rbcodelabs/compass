@@ -128,7 +128,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Direct workspace_id on solutions and objectives (ADR Phase 0). The pinned SQL is DDL only;
   // the batched backfill and its postconditions run in the runner hook, which is pinned
   // separately in REVIEWED_MIGRATION_CODE_SHA256.
-  "068_workspace_id_on_solution_objective": "efc74d966e413e3cd5ad211f41ac96bbc6bcb6fa5cd230c9ac3e6a050ffbe9e1"
+  "068_workspace_id_on_solution_objective": "efc74d966e413e3cd5ad211f41ac96bbc6bcb6fa5cd230c9ac3e6a050ffbe9e1",
+  // DDL-free residual backfill: the SQL file is comments only, the work is the pinned hook below.
+  "069_workspace_id_residual_backfill": "9edcc2e6020df3065bde0bf0e2fd836f710adceef6f5ba0a018347ff8bdba74d"
 };
 
 /**
@@ -138,7 +140,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
  */
 export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "068_workspace_id_on_solution_objective": {
-    "lib/migrations/workspace-id-on-solution-objective.ts": "d13c5799d4cf7d95360c4e919dbbdae9e70e7af1523a41cf91a1de8945a73ece",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  "069_workspace_id_residual_backfill": {
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };
 

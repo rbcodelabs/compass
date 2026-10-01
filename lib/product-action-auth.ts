@@ -16,41 +16,42 @@ export async function requireProductWorkspace(workspaceId: string) {
 
 export type ProductEntityKind = "experiment" | "opportunity" | "solution" | "objective" | "keyResult" | "okrCycle" | "squad" | "roadmapItem" | "task";
 
+type Db = ReturnType<typeof getPrisma>;
+type Membership = { members: { some: { userId: string } } };
+type Found = { workspaceId: string | null; opportunityId?: string } | null;
+
+/**
+ * One typed lookup per kind. Membership is part of the query, so a foreign row
+ * is "not found". Each branch names its own Prisma model and relation, so a
+ * rename is a tsc error here instead of a silent miss behind an `as unknown`
+ * cast. `satisfies` makes adding a kind to ProductEntityKind without a lookup
+ * a compile error too.
+ *
+ * Solution and Objective carry their own workspace_id (migration 068) and a
+ * NULL column never reaches a caller: requireProductEntity rejects it below.
+ * Key Result scopes through its Objective.
+ */
+const LOOKUPS = {
+  experiment: (db: Db, id: string, workspace: Membership): Promise<Found> => db.experiment.findFirst({ where: { id, workspace }, select: { workspaceId: true } }),
+  opportunity: (db: Db, id: string, workspace: Membership): Promise<Found> => db.opportunity.findFirst({ where: { id, workspace }, select: { workspaceId: true } }),
+  solution: (db: Db, id: string, workspace: Membership): Promise<Found> => db.solution.findFirst({ where: { id, workspace }, select: { opportunityId: true, workspaceId: true } }),
+  objective: (db: Db, id: string, workspace: Membership): Promise<Found> => db.objective.findFirst({ where: { id, workspace }, select: { workspaceId: true } }),
+  keyResult: async (db: Db, id: string, workspace: Membership): Promise<Found> => {
+    const row = await db.keyResult.findFirst({ where: { id, objective: { workspace } }, select: { objective: { select: { workspaceId: true } } } });
+    return row && { workspaceId: row.objective.workspaceId };
+  },
+  okrCycle: (db: Db, id: string, workspace: Membership): Promise<Found> => db.oKRCycle.findFirst({ where: { id, workspace }, select: { workspaceId: true } }),
+  squad: (db: Db, id: string, workspace: Membership): Promise<Found> => db.squad.findFirst({ where: { id, workspace }, select: { workspaceId: true } }),
+  roadmapItem: (db: Db, id: string, workspace: Membership): Promise<Found> => db.roadmapItem.findFirst({ where: { id, workspace }, select: { workspaceId: true } }),
+  task: (db: Db, id: string, workspace: Membership): Promise<Found> => db.task.findFirst({ where: { id, workspace }, select: { workspaceId: true } }),
+} satisfies Record<ProductEntityKind, (db: Db, id: string, workspace: Membership) => Promise<Found>>;
+
 export async function requireProductEntity(kind: ProductEntityKind, entityId: string, expectedWorkspaceId?: string) {
   const id = await userId();
-  const db = getPrisma();
-  const workspace = { members: { some: { userId: id } } };
-  const deny = () => new Error("Entity not found or access denied");
-  // Objective and Key Result are scoped through their cycle's workspace. The
-  // membership filter is part of the lookup, so a foreign row is "not found".
-  if (kind === "objective") {
-    const row = await db.objective.findFirst({ where: { id: entityId, cycle: { workspace } }, select: { cycle: { select: { workspaceId: true } } } });
-    if (!row || (expectedWorkspaceId && row.cycle.workspaceId !== expectedWorkspaceId)) throw deny();
-    return { workspaceId: row.cycle.workspaceId, opportunityId: null };
-  }
-  if (kind === "keyResult") {
-    const row = await db.keyResult.findFirst({ where: { id: entityId, objective: { cycle: { workspace } } }, select: { objective: { select: { cycle: { select: { workspaceId: true } } } } } });
-    if (!row || (expectedWorkspaceId && row.objective.cycle.workspaceId !== expectedWorkspaceId)) throw deny();
-    return { workspaceId: row.objective.cycle.workspaceId, opportunityId: null };
-  }
-  if (kind === "okrCycle" || kind === "squad" || kind === "roadmapItem" || kind === "task") {
-    const delegate = { okrCycle: db.oKRCycle, squad: db.squad, roadmapItem: db.roadmapItem, task: db.task }[kind] as unknown as {
-      findFirst(args: { where: object; select: { workspaceId: true } }): Promise<{ workspaceId: string } | null>;
-    };
-    const row = await delegate.findFirst({ where: { id: entityId, workspace }, select: { workspaceId: true } });
-    if (!row || (expectedWorkspaceId && row.workspaceId !== expectedWorkspaceId)) throw deny();
-    return { workspaceId: row.workspaceId, opportunityId: null };
-  }
-  if (kind === "solution") {
-    const row = await db.solution.findFirst({ where: { id: entityId, opportunity: { workspace } }, select: { id: true, opportunityId: true, opportunity: { select: { workspaceId: true } } } });
-    if (!row || (expectedWorkspaceId && row.opportunity.workspaceId !== expectedWorkspaceId)) throw new Error("Entity not found or access denied");
-    return { workspaceId: row.opportunity.workspaceId, opportunityId: row.opportunityId };
-  }
-  const row = kind === "experiment"
-    ? await db.experiment.findFirst({ where: { id: entityId, workspace }, select: { workspaceId: true } })
-    : await db.opportunity.findFirst({ where: { id: entityId, workspace }, select: { workspaceId: true } });
-  if (!row || (expectedWorkspaceId && row.workspaceId !== expectedWorkspaceId)) throw new Error("Entity not found or access denied");
-  return { workspaceId: row.workspaceId, opportunityId: null };
+  const found = await LOOKUPS[kind](getPrisma(), entityId, { members: { some: { userId: id } } });
+  // A NULL workspaceId (row not yet backfilled) fails closed, never allowed.
+  if (!found || !found.workspaceId || (expectedWorkspaceId && found.workspaceId !== expectedWorkspaceId)) throw new Error("Entity not found or access denied");
+  return { workspaceId: found.workspaceId, opportunityId: found.opportunityId ?? null };
 }
 
 /**

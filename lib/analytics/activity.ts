@@ -54,13 +54,18 @@ function delegate(tx: AppTransactionClient, model: string): Delegate {
   return (tx as unknown as Record<string, Delegate>)[model]
 }
 async function workspaceFor(tx: AppTransactionClient, model: string, row: Record<string, unknown>): Promise<string> {
+  // Solution carries its own workspaceId (migration 068). There is deliberately
+  // no parent-chain fallback: this value feeds assertWorkspaceMember, so a row
+  // whose workspaceId is NULL must fail closed rather than be authorized via
+  // its Opportunity.
   if (typeof row.workspaceId === "string") return row.workspaceId
-  if (model === "solution") {
-    const parent = await tx.opportunity.findUniqueOrThrow({ where: { id: String(row.opportunityId) }, select: { workspaceId: true } })
-    return parent.workspaceId
-  }
   if (model === "experimentResult") return (await tx.experiment.findUniqueOrThrow({ where: { id: String(row.experimentId) }, select: { workspaceId: true } })).workspaceId
-  if (model === "checkIn") return (await tx.keyResult.findUniqueOrThrow({ where: { id: String(row.keyResultId) }, select: { objective: { select: { cycle: { select: { workspaceId: true } } } } } })).objective.cycle.workspaceId
+  if (model === "checkIn") {
+    // A Key Result scopes through its Objective's own workspaceId; NULL fails closed.
+    const workspaceId = (await tx.keyResult.findUniqueOrThrow({ where: { id: String(row.keyResultId) }, select: { objective: { select: { workspaceId: true } } } })).objective.workspaceId
+    if (!workspaceId) throw new Error("Activity workspace could not be resolved")
+    return workspaceId
+  }
   throw new Error("Activity workspace could not be resolved")
 }
 export async function recordActivation(tx: AppTransactionClient, workspaceId: string, layer: ActivityLayer, at: Date, epoch: Date) {

@@ -74,11 +74,12 @@ async function scope(
   row: Row,
 ): Promise<string> {
   if (row.workspaceId) return row.workspaceId;
+  // Solution carries its own workspaceId (migration 068) and deliberately has
+  // no parent-chain fallback: an event is never attributed to a workspace by
+  // way of an Opportunity. A NULL solution workspaceId fails closed below.
   const parent =
-    model === "solution"
-      ? (["opportunity", row.opportunityId] as const)
-      : model === "assumption"
-        ? (["solution", row.solutionId] as const)
+    model === "assumption"
+      ? (["solution", row.solutionId] as const)
         : model === "experimentResult"
           ? (["experiment", row.experimentId] as const)
           : null;

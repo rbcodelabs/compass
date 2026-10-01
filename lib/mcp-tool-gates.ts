@@ -332,8 +332,12 @@ export const TOOL_GATES: Record<string, Gate> = {
   assign_squad: async (a, x) => {
     const entity = ASSIGN_SQUAD_ENTITY[x.objectType]
     if (!entity) throw new McpAuthzError(`Unknown objectType: ${x.objectType}`)
-    await assertEntityAccess(a, entity, x.objectId)
-    if (x.squadId) await assertEntityAccess(a, "squad", x.squadId)
+    const object = await assertEntityAccess(a, entity, x.objectId)
+    if (x.squadId) {
+      const squad = await assertEntityAccess(a, "squad", x.squadId)
+      // Membership of both is not enough: a member of two workspaces must not attach A's squad to B's object.
+      if (squad.workspaceId !== object.workspaceId) throw new McpAuthzError("Squad does not belong to the same workspace as the object.")
+    }
   },
 
   // Custom Fields -------------------------------------------------------------

@@ -63,18 +63,18 @@ const CASES: Array<{
   >;
   where: Record<string, unknown>;
 }> = [
-  { type: "objective", model: "objective", where: { id: ID, cycle: { workspaceId: WS } } },
+  { type: "objective", model: "objective", where: { id: ID, workspaceId: WS } },
   {
     type: "keyResult",
     model: "keyResult",
-    where: { id: ID, objective: { cycle: { workspaceId: WS } } },
+    where: { id: ID, objective: { workspaceId: WS } },
   },
   { type: "opportunity", model: "opportunity", where: { id: ID, workspaceId: WS } },
-  { type: "solution", model: "solution", where: { id: ID, opportunity: { workspaceId: WS } } },
+  { type: "solution", model: "solution", where: { id: ID, workspaceId: WS } },
   {
     type: "assumption",
     model: "assumption",
-    where: { id: ID, solution: { opportunity: { workspaceId: WS } } },
+    where: { id: ID, solution: { workspaceId: WS } },
   },
   { type: "experiment", model: "experiment", where: { id: ID, workspaceId: WS } },
   { type: "roadmapItem", model: "roadmapItem", where: { id: ID, workspaceId: WS } },
@@ -97,6 +97,45 @@ beforeEach(() => {
   // section gate and fetchOpportunity's nested SolutionsList ScoreBadge gate
   // both read this.
   models.workspaceScoringConfig.findUnique.mockResolvedValue(null);
+});
+
+describe("getEntityDetail — nested solutions are scoped by their own workspaceId", () => {
+  it("filters the opportunity's nested solutions so a NULL or drifted row is hidden, not trusted via its parent", async () => {
+    models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [], solutions: [] });
+    await getEntityDetail("opportunity", ID, WS);
+    const include = (models.opportunity.findFirst.mock.calls[0][0] as { include: { solutions: { where: unknown } } }).include;
+    expect(include.solutions.where).toEqual({ workspaceId: WS });
+  });
+});
+
+describe("getEntityDetail — an opportunity's linked key result is scoped through its objective's workspaceId", () => {
+  const kr = (workspaceId: string | null) => ({ id: "kr-1", title: "KR", current: 1, target: 2, unit: null, objective: { id: "o", workspaceId, title: "Objective", cycleId: "c" } });
+  const run = async (workspaceId: string | null) => {
+    models.opportunity.findFirst.mockResolvedValue({ id: ID, evidence: [], solutions: [], linkedKeyResult: kr(workspaceId) });
+    return ((await getEntityDetail("opportunity", ID, WS)) as { data: { linkedKeyResult: unknown } }).data.linkedKeyResult;
+  };
+  it("shows the link when the objective is in this workspace", async () => { expect(await run(WS)).not.toBeNull(); });
+  it("hides it when the objective has no workspaceId", async () => { expect(await run(null)).toBeNull(); });
+  it("hides it when the objective belongs to another workspace", async () => { expect(await run("other-ws")).toBeNull(); });
+});
+
+describe("getEntityDetail — OKR nested reads are scoped by workspaceId", () => {
+  it("filters a key result's supporting objectives by the workspace's own workspaceId", async () => {
+    models.keyResult.findFirst.mockResolvedValue({ id: ID });
+    await getEntityDetail("keyResult", ID, WS);
+    const include = (models.keyResult.findFirst.mock.calls[0][0] as { include: { supportingObjectives: { where: unknown } } }).include;
+    expect(include.supportingObjectives.where).toEqual({ workspaceId: WS });
+  });
+
+  it("hides an objective's parent KR when that KR's objective is in another workspace or has no workspaceId", async () => {
+    const parent = (workspaceId: string | null) => ({ id: "pkr", title: "P", objective: { id: "po", workspaceId, title: "PO", cycle: { id: "c", title: "C", status: "ACTIVE" } } });
+    models.objective.findFirst.mockResolvedValueOnce({ id: ID, parentKeyResult: parent(WS) });
+    expect(((await getEntityDetail("objective", ID, WS)) as { data: { parentKeyResult: unknown } }).data.parentKeyResult).not.toBeNull();
+    models.objective.findFirst.mockResolvedValueOnce({ id: ID, parentKeyResult: parent("other-ws") });
+    expect(((await getEntityDetail("objective", ID, WS)) as { data: { parentKeyResult: unknown } }).data.parentKeyResult).toBeNull();
+    models.objective.findFirst.mockResolvedValueOnce({ id: ID, parentKeyResult: parent(null) });
+    expect(((await getEntityDetail("objective", ID, WS)) as { data: { parentKeyResult: unknown } }).data.parentKeyResult).toBeNull();
+  });
 });
 
 describe("isEntityType", () => {
@@ -157,7 +196,7 @@ describe("getEntityDetail — return shape", () => {
     const result = await getEntityDetail("opportunity", ID, WS);
     expect(result?.data).toMatchObject({ squads: [{ id: "squad" }], availableKeyResults: [{ id: "kr", objectiveTitle: "Objective" }], customFields: [] });
     expect(models.squad.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: WS } }));
-    expect(models.keyResult.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { objective: { cycle: { workspaceId: WS } } } }));
+    expect(models.keyResult.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { objective: { workspaceId: WS } } }));
     expect(models.opportunity.findFirst).toHaveBeenCalledWith(expect.objectContaining({ include: expect.objectContaining({ solutions: expect.objectContaining({ include: expect.objectContaining({ assumptions: expect.objectContaining({ include: expect.objectContaining({ experiments: expect.any(Object) }) }) }) }) }) }));
   });
   it("only loads linked feedback in the opportunity workspace, newest first with a stable tie break", async () => {

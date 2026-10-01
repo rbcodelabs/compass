@@ -300,28 +300,26 @@ const WORKSPACE_ENTITY_RESOLVERS: Record<
   opportunity: async (p, id) =>
     (await p.opportunity.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   solution: async (p, id) =>
-    (await p.solution.findUnique({ where: { id }, select: { opportunity: { select: { workspaceId: true } } } }))
-      ?.opportunity?.workspaceId ?? null,
+    (await p.solution.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   assumption: async (p, id) =>
     (await p.assumption.findUnique({
       where: { id },
-      select: { solution: { select: { opportunity: { select: { workspaceId: true } } } } },
-    }))?.solution?.opportunity?.workspaceId ?? null,
+      select: { solution: { select: { workspaceId: true } } },
+    }))?.solution?.workspaceId ?? null,
   solutionComment: async (p, id) =>
     (await p.solutionComment.findUnique({
       where: { id },
-      select: { solution: { select: { opportunity: { select: { workspaceId: true } } } } },
-    }))?.solution?.opportunity?.workspaceId ?? null,
+      select: { solution: { select: { workspaceId: true } } },
+    }))?.solution?.workspaceId ?? null,
   okrCycle: async (p, id) =>
     (await p.oKRCycle.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   objective: async (p, id) =>
-    (await p.objective.findUnique({ where: { id }, select: { cycle: { select: { workspaceId: true } } } }))
-      ?.cycle?.workspaceId ?? null,
+    (await p.objective.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   keyResult: async (p, id) =>
     (await p.keyResult.findUnique({
       where: { id },
-      select: { objective: { select: { cycle: { select: { workspaceId: true } } } } },
-    }))?.objective?.cycle?.workspaceId ?? null,
+      select: { objective: { select: { workspaceId: true } } },
+    }))?.objective?.workspaceId ?? null,
   experiment: async (p, id) =>
     (await p.experiment.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   roadmapItem: async (p, id) =>

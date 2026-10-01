@@ -10,8 +10,11 @@ import {
   backfillWorkspaceIdOnSolutionObjective,
   getWorkspaceIdBackfillStatus,
   isOccConflict,
+  repairWorkspaceIdResidual,
   withOccRetry,
 } from "@/lib/migrations/workspace-id-on-solution-objective";
+import { applyMigrations, selectMigrationsToRun, skippedExplicitOnly } from "@/lib/migrations/runner";
+import { WorkspaceIdBackfillRefusal } from "@/lib/migrations/workspace-id-on-solution-objective";
 import { REVIEWED_MIGRATION_CODE_SHA256, assertReviewedMigrationCode } from "@/lib/preview-automation/managed-manifest";
 
 const conflict = () => Object.assign(new Error("change conflicts with another transaction, please retry: (OC000)"), { code: "40001" });
@@ -104,8 +107,29 @@ describe("assertWorkspaceIdOnSolutionObjective", () => {
 
   it("counts orphans with a LEFT JOIN (no correlated NOT EXISTS) and names them in the error", async () => {
     const { client, query } = fakeClient((sql) => (sql.includes("LEFT JOIN") ? { rows: [{ total: "3", with_parent: "1" }] } : healthy(sql)));
-    await expect(assertWorkspaceIdOnSolutionObjective(client, "s")).rejects.toThrow(/3 solutions rows still have NULL workspace_id \(2 have no opportunities parent\)/);
+    await expect(assertWorkspaceIdOnSolutionObjective(client, "s")).rejects.toThrow(/3 solutions rows still have NULL workspace_id \(2 reference a missing opportunities row, 0 have no opportunity_id at all/);
     expect(query.mock.calls.some(([sql]) => /NOT EXISTS/i.test(sql as string))).toBe(false);
+  });
+
+  it("names the migration it is running as, so a 069 failure says 069 (not 068)", async () => {
+    const nulls = (sql: string) => (sql.includes("LEFT JOIN") ? { rows: [{ total: "1", with_parent: "0" }] } : healthy(sql));
+    const { client } = fakeClient(nulls);
+    await expect(assertWorkspaceIdOnSolutionObjective(client, "s", "069_workspace_id_residual_backfill")).rejects.toThrow(/^069_workspace_id_residual_backfill: backfill postcondition failed/);
+    await expect(assertWorkspaceIdOnSolutionObjective(client, "s")).rejects.toThrow(/^068_workspace_id_on_solution_objective: backfill postcondition failed/);
+    const missingColumn = fakeClient((sql) => (sql.includes("information_schema.columns") ? { rows: [] } : healthy(sql)));
+    await expect(assertWorkspaceIdOnSolutionObjective(missingColumn.client, "s", "069_workspace_id_residual_backfill")).rejects.toThrow(/^069_workspace_id_residual_backfill: column postcondition failed/);
+  });
+
+  it("reports a row with neither a workspace_id nor a parent key (e.g. a cycle-less Objective) separately, and still fails closed", async () => {
+    // Phase 1 makes objectives.cycle_id optional. A cycle-less Objective that somehow has no workspace_id has nothing to derive one from.
+    const { client } = fakeClient((sql) => {
+      if (sql.includes("LEFT JOIN") && sql.includes('"objectives"')) return { rows: [{ total: "2", with_parent: "0" }] };
+      if (sql.includes("child.cycle_id IS NULL")) return { rows: [{ n: "2" }] };
+      return healthy(sql);
+    });
+    await expect(assertWorkspaceIdOnSolutionObjective(client, "s", "069_workspace_id_residual_backfill")).rejects.toThrow(
+      /2 objectives rows still have NULL workspace_id \(0 reference a missing okr_cycles row, 2 have no cycle_id at all and nothing to derive a workspace from/,
+    );
   });
 
   it("fails on parent/child drift", async () => {
@@ -116,6 +140,126 @@ describe("assertWorkspaceIdOnSolutionObjective", () => {
   it("fails when an index is missing or invalid", async () => {
     const { client } = fakeClient((sql) => (sql.includes("pg_index") ? { rows: [] } : healthy(sql)));
     await expect(assertWorkspaceIdOnSolutionObjective(client, "s")).rejects.toThrow(/index postcondition failed: idx_solutions_workspace_id/);
+  });
+});
+
+describe("an unregistered script name is refused before any connection is made", () => {
+  it("returns 404 without calling pool.connect (ungated: no database needed)", async () => {
+    const connect = vi.fn().mockRejectedValue(new Error("must not connect"));
+    const response = await applyMigrations({ connect } as never, "compass_dev", "999_not_a_migration");
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining('Unknown migration "999_not_a_migration"'), schema: "compass_dev" });
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("a registered name still proceeds to connect (so the 404 is specifically about the name)", async () => {
+    const connect = vi.fn().mockRejectedValue(new Error("connect reached"));
+    await expect(applyMigrations({ connect } as never, "compass_dev", "068_workspace_id_on_solution_objective")).rejects.toThrow("connect reached");
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("069 is explicit-only and the residual repair is repeatable", () => {
+  it("an untargeted POST never runs 069; a targeted POST does", () => {
+    const pending = [{ name: "070_x" }, { name: "069_workspace_id_residual_backfill" }, { name: "071_y" }];
+    expect(selectMigrationsToRun(pending).map((m) => m.name)).toEqual(["070_x", "071_y"]);
+    expect(selectMigrationsToRun(pending, "069_workspace_id_residual_backfill").map((m) => m.name)).toEqual(["069_workspace_id_residual_backfill"]);
+    expect(selectMigrationsToRun(pending, "070_x").map((m) => m.name)).toEqual(["070_x"]);
+  });
+
+  it("a fresh-schema caller (the scoped preview worker) opts in and gets everything, 069 last; production callers do not", () => {
+    const pending = [{ name: "068_workspace_id_on_solution_objective" }, { name: "069_workspace_id_residual_backfill" }];
+    expect(selectMigrationsToRun(pending, undefined, true).map((m) => m.name)).toEqual(["068_workspace_id_on_solution_objective", "069_workspace_id_residual_backfill"]);
+    expect(selectMigrationsToRun(pending, undefined, false).map((m) => m.name)).toEqual(["068_workspace_id_on_solution_objective"]);
+    expect(selectMigrationsToRun(pending).map((m) => m.name)).toEqual(["068_workspace_id_on_solution_objective"]);
+  });
+
+  it("reports what an untargeted run skipped, and nothing when targeted or opted in", () => {
+    const pending = [{ name: "070_x" }, { name: "069_workspace_id_residual_backfill" }];
+    expect(skippedExplicitOnly(pending)).toEqual(["069_workspace_id_residual_backfill"]);
+    expect(skippedExplicitOnly(pending, "070_x")).toEqual([]);
+    expect(skippedExplicitOnly(pending, undefined, true)).toEqual([]);
+    expect(skippedExplicitOnly([{ name: "070_x" }])).toEqual([]);
+  });
+
+  it("the scoped preview worker opts in (source check), and no production-style caller does", () => {
+    const worker = readFileSync(path.join(process.cwd(), "scripts/preview-automation/migrate.ts"), "utf8");
+    expect(worker).toMatch(/applyMigrations\(pool, schema, undefined, \{[^}]*includeExplicitOnly: true/);
+    for (const file of ["app/api/admin/migrate/route.ts", "lib/preview-automation/managed-migrations.ts"]) {
+      expect(readFileSync(path.join(process.cwd(), file), "utf8"), file).not.toContain("includeExplicitOnly");
+    }
+  });
+
+  it("the vercel-managed request path is handled before the strict body parser, so its own body contract is untouched", () => {
+    const route = readFileSync(path.join(process.cwd(), "app/api/admin/migrate/route.ts"), "utf8");
+    const post = route.slice(route.indexOf("export async function POST"));
+    expect(post.indexOf('return managedRequest(req, true)')).toBeGreaterThan(-1);
+    expect(post.indexOf("managedRequest(req, true)")).toBeLessThan(post.indexOf("parseMigratePostBody("));
+  });
+
+  it("the managed (vercel-managed) path still advances only by an explicit script", async () => {
+    const managed = readFileSync(path.join(process.cwd(), "lib/preview-automation/managed-migrations.ts"), "utf8");
+    expect(managed).toMatch(/applyMigrations\(pool, context\.schema, script, \{ preProvisionedSchema: true, managedPilot: true \}\)/);
+    // applyMigrations itself refuses a managed invocation with no target.
+    const runner = readFileSync(path.join(process.cwd(), "lib/migrations/runner.ts"), "utf8");
+    expect(runner).toMatch(/options\.managedPilot && \(.*!targetScript\)\) throw new Error\("Invalid managed migration invocation"\)/);
+  });
+
+  function poolWith(handler: (sql: string, params: unknown[]) => { rows?: unknown[]; rowCount?: number }) {
+    const { client, query } = fakeClient(handler);
+    const release = vi.fn();
+    return { pool: { connect: async () => ({ ...(client as object), query, release }) } as never, query, release };
+  }
+  const columnsPresent = (sql: string) => (sql.includes("information_schema.columns") && sql.includes("ANY") ? { rows: [{ table_name: "solutions" }, { table_name: "objectives" }] } : null);
+
+  it("refuses before touching data when 068 has not been applied", async () => {
+    const { pool, release } = poolWith(() => ({ rows: [] }));
+    await expect(repairWorkspaceIdResidual(pool, "s", noSleep)).rejects.toBeInstanceOf(WorkspaceIdBackfillRefusal);
+    await expect(repairWorkspaceIdResidual(pool, "s", noSleep)).rejects.toThrow(/apply 068/);
+    expect(release).toHaveBeenCalled();
+  });
+
+  it("backfills NULL rows, runs the postconditions, and returns before/after counts; repeatable", async () => {
+    let remaining = 2;
+    const { pool, query } = poolWith((sql) => {
+      const present = columnsPresent(sql);
+      if (present) return present;
+      if (sql.startsWith("SELECT child.id")) {
+        if (!sql.includes('"solutions"') || remaining === 0) return { rows: [] };
+        const rows = Array.from({ length: remaining }, (_, i) => ({ id: `s${i}`, workspace_id: "wa" }));
+        remaining = 0;
+        return { rows };
+      }
+      if (sql.startsWith("UPDATE")) return { rowCount: 2 };
+      if (sql.includes("is_nullable")) return { rows: [{ is_nullable: "YES" }] };
+      if (sql.includes("pg_index")) return { rows: [{ indisvalid: true }] };
+      if (sql.includes("LEFT JOIN") && sql.includes("count(parent.id)")) return { rows: [{ total: "0", with_parent: "0" }] };
+      return { rows: [{ n: "0", count: "0" }] };
+    });
+    const first = await repairWorkspaceIdResidual(pool, "s", noSleep);
+    expect(first.log).toContain("  ✓ backfilled 2 solutions.workspace_id rows");
+    expect(first.after.nullWorkspaceId).toEqual({ solutions: 0, objectives: 0 });
+    const second = await repairWorkspaceIdResidual(pool, "s", noSleep);
+    expect(second.log).toContain("  ✓ backfilled 0 solutions.workspace_id rows");
+    expect(query.mock.calls.some(([sql]) => /CREATE|ALTER|INSERT INTO "s"\._prisma_migrations/i.test(sql as string))).toBe(false); // no DDL, no receipt
+  });
+
+  it("fails closed on an orphan and attaches the before-counts and log for the operator", async () => {
+    const { pool } = poolWith((sql) => {
+      const present = columnsPresent(sql);
+      if (present) return present;
+      if (sql.startsWith("SELECT child.id")) return { rows: [] };
+      if (sql.includes("is_nullable")) return { rows: [{ is_nullable: "YES" }] };
+      if (sql.includes("pg_index")) return { rows: [{ indisvalid: true }] };
+      if (sql.includes("LEFT JOIN") && sql.includes("count(parent.id)")) return { rows: [{ total: "1", with_parent: "0" }] };
+      return { rows: [{ n: "0", count: "0" }] };
+    });
+    await expect(repairWorkspaceIdResidual(pool, "s", noSleep)).rejects.toBeInstanceOf(WorkspaceIdBackfillRefusal);
+    await expect(repairWorkspaceIdResidual(pool, "s", noSleep)).rejects.toMatchObject({
+      message: expect.stringContaining("backfill-workspace-id: backfill postcondition failed"),
+      before: { columnsPresent: true },
+      log: expect.any(Array),
+    });
   });
 });
 

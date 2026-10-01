@@ -26,7 +26,7 @@ beforeEach(() => { vi.clearAllMocks(); capture.enabled = false })
 
 describe("shared comment target registry", () => {
   it("resolves a nested Solution to its workspace", async () => {
-    prisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: WS } })
+    prisma.solution.findUnique.mockResolvedValue({ workspaceId: WS })
     await expect(resolveCommentTarget("SOLUTION", TARGET)).resolves.toEqual({ workspaceId: WS })
   })
 
@@ -39,7 +39,7 @@ describe("shared comment target registry", () => {
 describe("createComment", () => {
   it("records only new roots and labels solution plans as proposals", async () => {
     capture.enabled = true
-    prisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: WS } })
+    prisma.solution.findUnique.mockResolvedValue({ workspaceId: WS })
     prisma.comment.create.mockResolvedValue({ id: ROOT })
     await createComment({ workspaceId: WS, targetType: "SOLUTION", targetId: TARGET, body: "Proposed plan", authorName: "Human", solutionPlan: {} })
     expect(capture.record).toHaveBeenCalledWith(prisma, expect.objectContaining({ kind: "PLAN_PROPOSED", entityId: ROOT, groupType: "SOLUTION", groupId: TARGET }))

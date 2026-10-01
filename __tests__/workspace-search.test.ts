@@ -50,7 +50,7 @@ describe("workspace search", () => {
       orderBy: [{ title: "asc" }, { id: "asc" }],
     }))
     expect(prisma.solution.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { opportunity: { workspaceId: "workspace-1" }, title: { contains: "plan", mode: "insensitive" } },
+      where: { workspaceId: "workspace-1", title: { contains: "plan", mode: "insensitive" } },
       take: 5,
       orderBy: [{ title: "asc" }, { id: "asc" }],
     }))

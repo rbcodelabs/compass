@@ -98,7 +98,7 @@ export async function resolveUpdateSources(
       }),
     tx.solution
       .findMany({
-        where: { id: { in: ids("SOLUTION") }, opportunity: { workspaceId } },
+        where: { id: { in: ids("SOLUTION") }, workspaceId },
         select: { id: true, title: true, opportunityId: true },
       })
       .then((rows) => {
@@ -114,7 +114,7 @@ export async function resolveUpdateSources(
       .findMany({
         where: {
           id: { in: ids("ASSUMPTION") },
-          solution: { opportunity: { workspaceId } },
+          solution: { workspaceId },
         },
         select: {
           id: true,

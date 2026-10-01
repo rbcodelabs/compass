@@ -118,7 +118,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       },
     }),
     prisma.keyResult.findMany({
-      where: { objective: { cycle: { workspaceId: workspace.id } } },
+      where: { objective: { workspaceId: workspace.id } },
       select: {
         id: true,
         title: true,
@@ -127,7 +127,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       orderBy: { createdAt: "asc" },
     }),
     prisma.solution.findMany({
-      where: { opportunity: { workspaceId: workspace.id } },
+      where: { workspaceId: workspace.id },
       select: {
         id: true,
         title: true,
@@ -150,7 +150,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     // own Promote-to-Roadmap button, just surfaced on the roadmap itself.
     prisma.solution.findMany({
       where: {
-        opportunity: { workspaceId: workspace.id },
+        workspaceId: workspace.id,
         status: { in: ["VALIDATED", "IN_DELIVERY"] },
         roadmapItems: { none: { status: "ACTIVE" } },
       },

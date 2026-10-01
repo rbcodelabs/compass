@@ -40,7 +40,7 @@ test("solution swimlane card content supports vertical and horizontal touch scro
     const workspace = (await pool.query("SELECT w.id FROM compass_dev.workspaces w JOIN compass_dev.organizations o ON w.organization_id=o.id WHERE w.slug='e2e-workspace' AND o.slug='e2e-test-org'")).rows[0];
     await pool.query("INSERT INTO compass_dev.opportunities (id,workspace_id,title,sort_order) VALUES ($1,$2,'Mobile solution lane',-100)", [opportunityId, workspace.id]);
     for (const [index, id] of ids.entries()) {
-      await pool.query("INSERT INTO compass_dev.solutions (id,opportunity_id,title,sort_order) VALUES ($1,$2,$3,$4)", [id, opportunityId, `Mobile solution ${index + 1}`, index]);
+      await pool.query("INSERT INTO compass_dev.solutions (id,workspace_id,opportunity_id,title,sort_order) VALUES ($1,$2,$3,$4,$5)", [id, workspace.id, opportunityId, `Mobile solution ${index + 1}`, index]);
     }
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/discovery?view=board&groupBy=opportunity`);

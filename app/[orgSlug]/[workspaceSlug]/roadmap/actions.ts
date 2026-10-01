@@ -39,8 +39,8 @@ async function validateRoadmapRelations(
   relations: { solutionId?: string; keyResultId?: string; opportunityId?: string; experimentId?: string; squadId?: string | null },
 ) {
   const checks: Array<Promise<unknown>> = [];
-  if (relations.solutionId) checks.push(prisma.solution.findFirst({ where: { id: relations.solutionId, opportunity: { workspaceId } }, select: { id: true } }));
-  if (relations.keyResultId) checks.push(prisma.keyResult.findFirst({ where: { id: relations.keyResultId, objective: { cycle: { workspaceId } } }, select: { id: true } }));
+  if (relations.solutionId) checks.push(prisma.solution.findFirst({ where: { id: relations.solutionId, workspaceId }, select: { id: true } }));
+  if (relations.keyResultId) checks.push(prisma.keyResult.findFirst({ where: { id: relations.keyResultId, objective: { workspaceId } }, select: { id: true } }));
   if (relations.opportunityId) checks.push(prisma.opportunity.findFirst({ where: { id: relations.opportunityId, workspaceId }, select: { id: true } }));
   if (relations.experimentId) checks.push(prisma.experiment.findFirst({ where: { id: relations.experimentId, workspaceId }, select: { id: true } }));
   if (relations.squadId) checks.push(prisma.squad.findFirst({ where: { id: relations.squadId, workspaceId }, select: { id: true } }));
@@ -244,7 +244,7 @@ export async function promoteToRoadmap(
   const prisma = getPrisma();
 
   const solution = await prisma.solution.findFirst({
-    where: { id: solutionId, opportunity: { workspaceId } },
+    where: { id: solutionId, workspaceId },
     select: { title: true, opportunityId: true, opportunity: { select: { id: true, squadId: true } } },
   });
   if (!solution) throw new Error("Solution not found");

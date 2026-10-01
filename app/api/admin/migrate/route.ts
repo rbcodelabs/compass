@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { Pool } from "pg";
 import { DsqlSigner } from "@aws-sdk/dsql-signer";
@@ -14,6 +15,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 import { getMigrationStatus, applyMigrations } from "@/lib/migrations/runner";
+import { repairWorkspaceIdResidual, WorkspaceIdBackfillRefusal } from "@/lib/migrations/workspace-id-on-solution-objective";
+import { parseMigratePostBody } from "@/lib/migrations/admin-request";
 export { normalizeConstraintDefinition } from "@/lib/migrations/runner";
 export { getDecisionGateExpectedCatalog, getDecisionGateInfrastructureHealth } from "@/lib/migrations/runner";
 
@@ -49,7 +52,9 @@ async function getPool(): Promise<Pool> {
 function checkAuth(req: NextRequest): boolean {
   const secret = process.env.MIGRATION_SECRET;
   if (!secret) return false;
-  return req.headers.get("x-migration-secret") === secret;
+  // Constant-time compare (over fixed-length digests, so length is not leaked either).
+  const given = createHash("sha256").update(req.headers.get("x-migration-secret") ?? "").digest();
+  return timingSafeEqual(given, createHash("sha256").update(secret).digest());
 }
 
 export async function GET(req: NextRequest) {
@@ -63,9 +68,38 @@ export async function POST(req: NextRequest) {
   if (process.env.PREVIEW_DATABASE_MODE === "vercel-managed") return managedRequest(req, true);
   if (process.env.VERCEL_ENV === "preview" && process.env.PREVIEW_AUTOMATION_ENABLED === "1") return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!checkAuth(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const body = await req.json().catch(() => ({}));
+  // Only a truly empty body ({} or none) is the untargeted apply-pending flow. Anything malformed, non-object, carrying an
+  // unknown key, a bad/empty/non-string script, or an unknown/ambiguous action is a 400 and never reaches the runner,
+  // because the runner treats a missing script as POST-all (see lib/migrations/admin-request.ts).
+  const parsed = parseMigratePostBody(await req.text());
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const pool = await getPool();
-  try { return await applyMigrations(pool, getActiveSchema(), body.script); } finally { await pool.end(); }
+  try {
+    // DELIBERATE EXCEPTION to "production data changes go through registered migrations": this is a repeatable, receiptless
+    // residual backfill for solutions/objectives that old instances inserted with a NULL workspace_id after a receipted
+    // migration. It only ever fills NULL workspace_id from the parent (idempotent, no DDL) and runs the same hook and
+    // postconditions as 068/069, but it is NOT digest-pinned here (the hook file it calls is, in the managed manifest).
+    // Because no receipt is written, every call logs one structured line (schema, counts, outcome; never a secret or row ids).
+    if (parsed.kind === "backfill-workspace-id") {
+      const schema = getActiveSchema();
+      try {
+        const result = await repairWorkspaceIdResidual(pool, schema);
+        console.log(JSON.stringify({ event: "workspace-id-backfill", outcome: "ok", schema, before: result.before, after: result.after }));
+        return NextResponse.json({ schema, ...result });
+      } catch (error) {
+        const detail = error as Error & { before?: unknown; log?: string[]; code?: string };
+        if (error instanceof WorkspaceIdBackfillRefusal) {
+          // Data-level refusal (postcondition failed / 068 not applied): the operator must act on the data.
+          console.log(JSON.stringify({ event: "workspace-id-backfill", outcome: "refused", schema, before: detail.before, reason: detail.message }));
+          return NextResponse.json({ schema, error: detail.message, before: detail.before, log: detail.log?.join("\n") }, { status: 409 });
+        }
+        // A server fault (connection, unexpected SQL error): not a postcondition, so 500 and no internals in the body.
+        console.error(JSON.stringify({ event: "workspace-id-backfill", outcome: "error", schema, before: detail.before, errorName: detail.name, ...(detail.code ? { code: detail.code } : {}) }));
+        return NextResponse.json({ schema, error: "Backfill failed unexpectedly; it is idempotent, so check the server logs and retry.", before: detail.before }, { status: 500 });
+      }
+    }
+    return await applyMigrations(pool, getActiveSchema(), parsed.script);
+  } finally { await pool.end(); }
 }
 
 async function managedRequest(req: NextRequest, write: boolean) {

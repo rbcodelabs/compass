@@ -258,6 +258,8 @@ model Workspace {
   members              WorkspaceMember[]
   okrCycles            OKRCycle[]
   opportunities        Opportunity[]
+  solutions            Solution[]
+  objectives           Objective[]
   experiments          Experiment[]
   roadmapItems         RoadmapItem[]
   customFieldDefs      CustomFieldDefinition[]
@@ -675,6 +677,11 @@ model OKRCycle {
 
 model Objective {
   id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Direct tenant scope (migration 068). Authorization reads this column, never
+  /// the cycle parent chain. Nullable in the database only because DSQL cannot
+  /// add a NOT NULL column to a populated table; every write path sets it and
+  /// every read path treats NULL as deny.
+  workspaceId       String?     @map("workspace_id") @db.Uuid
   cycleId           String      @map("cycle_id") @db.Uuid
   squadId           String?     @map("squad_id") @db.Uuid
   parentKeyResultId String?     @map("parent_key_result_id") @db.Uuid
@@ -685,6 +692,7 @@ model Objective {
   sortOrder         Int         @default(0) @map("sort_order")
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @default(now()) @map("updated_at")
+  workspace         Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   cycle             OKRCycle    @relation(fields: [cycleId], references: [id])
   squad             Squad?      @relation(fields: [squadId], references: [id])
   parentKeyResult   KeyResult?  @relation("SquadKRSupport", fields: [parentKeyResultId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -693,6 +701,7 @@ model Objective {
   updatedById       String?     @map("updated_by_id") @db.Uuid
   source            String      @default("UI") @map("source") @db.VarChar(20)
 
+  @@index([workspaceId], map: "idx_objectives_workspace_id")
   @@map("objectives")
 }
 
@@ -763,6 +772,11 @@ model Opportunity {
 
 model Solution {
   id            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Direct tenant scope (migration 068). Authorization reads this column, never
+  /// the opportunity parent chain. Nullable in the database only because DSQL
+  /// cannot add a NOT NULL column to a populated table; every write path sets
+  /// it and every read path treats NULL as deny.
+  workspaceId   String?           @map("workspace_id") @db.Uuid
   opportunityId String            @map("opportunity_id") @db.Uuid
   title         String            @db.VarChar(255)
   description   String?           @db.Text
@@ -770,6 +784,7 @@ model Solution {
   sortOrder     Int               @default(0) @map("sort_order")
   createdAt     DateTime          @default(now()) @map("created_at")
   updatedAt     DateTime          @default(now()) @map("updated_at")
+  workspace     Workspace?        @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   opportunity   Opportunity       @relation(fields: [opportunityId], references: [id])
   assumptions   Assumption[]
   roadmapItems  RoadmapItem[]
@@ -780,6 +795,7 @@ model Solution {
   comments      SolutionComment[]
   score         SolutionScore?
 
+  @@index([workspaceId], map: "idx_solutions_workspace_id")
   @@map("solutions")
 }
 

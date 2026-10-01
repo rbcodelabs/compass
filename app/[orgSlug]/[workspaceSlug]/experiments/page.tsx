@@ -61,7 +61,7 @@ export default async function ExperimentsPage({
       },
     }),
     prisma.assumption.findMany({
-      where: { solution: { opportunity: { workspaceId: workspace.id } } },
+      where: { solution: { workspaceId: workspace.id } },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,

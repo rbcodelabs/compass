@@ -26,7 +26,7 @@ import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-upda
 import { assertFollowsNotificationsMigration } from "@/lib/migrations/follows-notifications";
 import { assertMcpConnectorsMigration } from "@/lib/migrations/mcp-connectors";
 import { assertMetricsDashboardMigration } from "@/lib/migrations/metrics-dashboard";
-import { assertWorkspaceIdOnSolutionObjective, backfillWorkspaceIdOnSolutionObjective, getWorkspaceIdBackfillStatus, WORKSPACE_ID_MIGRATION } from "@/lib/migrations/workspace-id-on-solution-objective";
+import { assertWorkspaceIdOnSolutionObjective, backfillWorkspaceIdOnSolutionObjective, getWorkspaceIdBackfillStatus, WORKSPACE_ID_MIGRATION, WORKSPACE_ID_RESIDUAL_MIGRATION } from "@/lib/migrations/workspace-id-on-solution-objective";
 import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-manifest";
 
 
@@ -453,6 +453,13 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // receipt is recorded. Idempotent and resumable.
     name: "068_workspace_id_on_solution_objective",
     filePath: path.join(process.cwd(), "prisma/migrations/068_workspace_id_on_solution_objective/migration.sql"),
+  },
+  {
+    // No DDL. Re-runs 068's backfill + postconditions for rows the previous deploy's
+    // instances inserted with a NULL workspace_id after 068's receipt was written.
+    // POST it only after the deploy that writes the column has fully rolled out.
+    name: "069_workspace_id_residual_backfill",
+    filePath: path.join(process.cwd(), "prisma/migrations/069_workspace_id_residual_backfill/migration.sql"),
   },
 ];
 
@@ -1626,6 +1633,9 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       retriedMigrations,
       manifest: MIGRATIONS.map((m) => m.name),
       pending: pending.map((m) => m.name),
+      // Pending migrations that an untargeted POST deliberately never runs (they must be POSTed by name at the right
+      // moment). `pending` still lists them, so read THIS field before concluding a deploy did not finish.
+      explicitOnlyPending: pending.filter((m) => EXPLICIT_ONLY_MIGRATIONS.includes(m.name)).map((m) => m.name),
       notApplicable,
       researchCaptureHardening,
       researchGuidedUx,
@@ -1644,15 +1654,39 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
   }
 }
 
+/** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION];
+
+/**
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069).
+ * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
+ * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
+ * Production-style callers (the admin route, an untargeted POST) never set it.
+ */
+export function selectMigrationsToRun<T extends { name: string }>(pending: readonly T[], targetScript?: string, includeExplicitOnly = false): T[] {
+  if (targetScript) return pending.filter((m) => m.name === targetScript);
+  return includeExplicitOnly ? [...pending] : pending.filter((m) => !EXPLICIT_ONLY_MIGRATIONS.includes(m.name));
+}
+
+/** The explicit-only migrations an untargeted run left pending (so the response can say so instead of "up to date"). */
+export function skippedExplicitOnly<T extends { name: string }>(pending: readonly T[], targetScript?: string, includeExplicitOnly = false): string[] {
+  if (targetScript || includeExplicitOnly) return [];
+  return pending.filter((m) => EXPLICIT_ONLY_MIGRATIONS.includes(m.name)).map((m) => m.name);
+}
+
 // POST — apply a migration (or all pending)
 export function assertManagedMigrationManifest(schema: string): void {
   if (!/^compass_pr_276_[a-f0-9]{12}$/.test(schema)) throw new Error("Invalid managed migration schema");
   assertReviewedManagedManifest(partitionPendingMigrations(schema, new Set()).pending);
 }
 
-export async function applyMigrations(pool: Pool, schema: string, targetScript?: string, options: { preProvisionedSchema?: boolean; managedPilot?: boolean; legacyDecisionRepairManifest?: LegacyDecisionRepairManifest } = {}) {
+export async function applyMigrations(pool: Pool, schema: string, targetScript?: string, options: { preProvisionedSchema?: boolean; managedPilot?: boolean; legacyDecisionRepairManifest?: LegacyDecisionRepairManifest; includeExplicitOnly?: boolean } = {}) {
   if (options.managedPilot && (!options.preProvisionedSchema || !/^compass_pr_276_[a-f0-9]{12}$/.test(schema) || !targetScript)) throw new Error("Invalid managed migration invocation");
   if (options.managedPilot) assertManagedMigrationManifest(schema);
+  // A well-typed but unregistered name is a mistake (typo, wrong branch), not "all migrations up to date".
+  if (targetScript && !MIGRATIONS_BY_NAME.has(targetScript)) {
+    return NextResponse.json({ error: `Unknown migration "${targetScript}". Nothing was applied. GET this endpoint for the registered manifest.`, schema }, { status: 404 });
+  }
   const client = await pool.connect();
   const log: string[] = [`Using schema: ${schema}`];
   const researchCaptureAsyncIndexJobIds: string[] = [];
@@ -1704,7 +1738,16 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       }
     }
 
-    const toRun = targetScript ? pending.filter((m) => m.name === targetScript) : pending;
+    // 069 is a ONE-SHOT second pass that is only correct after the deploy that writes workspace_id has fully rolled out.
+    // A POST-all would run it at the wrong time and, because receipts are final, leave later NULL rows hidden, so it is
+    // only ever run when named explicitly. (Rows that appear afterwards are fixed by the repeatable
+    // {"action":"backfill-workspace-id"} repair, which records no receipt.)
+    const toRun = selectMigrationsToRun(pending, targetScript, options.includeExplicitOnly);
+    const skippedExplicit = skippedExplicitOnly(pending, targetScript, options.includeExplicitOnly);
+    const skipNote = skippedExplicit.length
+      ? `Skipped (explicit-only, still pending): ${skippedExplicit.join(", ")}. POST {"script":"${skippedExplicit[0]}"} after the workspace_id deploy has fully rolled out.`
+      : null;
+    if (skipNote) log.push(skipNote)
 
     if (toRun.length === 0) {
       const [researchCaptureHardening, researchGuidedUx, researchBlobCleanup, researchVoiceControlPlane] = await Promise.all([
@@ -1714,8 +1757,10 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         getResearchVoiceControlPlaneReport(client, schema),
       ]);
       return NextResponse.json({
-        message: "Nothing to apply. All migrations up to date.",
+        // Honest when something explicit-only is still pending: it is NOT "all up to date".
+        message: skipNote ? `Nothing to apply automatically. ${skipNote}` : "Nothing to apply. All migrations up to date.",
         schema,
+        ...(skippedExplicit.length ? { skippedExplicitOnly: skippedExplicit } : {}),
         researchCaptureHardening,
         researchGuidedUx,
         researchBlobCleanup,
@@ -1909,12 +1954,12 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "060_workspace_updates") await assertWorkspaceUpdatesMigration(client, schema)
       if (migration.name === "062_mcp_connectors") await assertMcpConnectorsMigration(client, schema)
       if (migration.name === "068_follows_notifications") await assertFollowsNotificationsMigration(client, schema)
-      if (migration.name === WORKSPACE_ID_MIGRATION) {
+      if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {
         // Data half: backfill from the parent in bounded batches, then prove it.
         // Both run before the receipt below, so a failure leaves an unfinished
         // attempt and the next POST resumes from the remaining NULL rows.
         await backfillWorkspaceIdOnSolutionObjective(client, schema, log)
-        await assertWorkspaceIdOnSolutionObjective(client, schema)
+        await assertWorkspaceIdOnSolutionObjective(client, schema, migration.name)
       }
 
       // Only this distinct attempt becomes a successful receipt. A failed
@@ -1935,7 +1980,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
     const researchGuidedUx = await getResearchGuidedUxReport(client, schema, researchGuidedUxAsyncIndexJobIds);
     const researchBlobCleanup = await getResearchBlobCleanupReport(client, schema, researchBlobCleanupAsyncIndexJobIds);
     const researchVoiceControlPlane = await getResearchVoiceControlPlaneReport(client, schema);
-    return NextResponse.json({ message: log.join("\n"), schema, researchCaptureHardening, researchGuidedUx, researchBlobCleanup, researchVoiceControlPlane });
+    return NextResponse.json({ message: log.join("\n"), schema, ...(skippedExplicit.length ? { skippedExplicitOnly: skippedExplicit } : {}), researchCaptureHardening, researchGuidedUx, researchBlobCleanup, researchVoiceControlPlane });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: msg, log: log.join("\n"), schema }, { status: 500 });

@@ -387,8 +387,13 @@ describe("deleteOrganization", () => {
     expect(mockPortfolioCapacityReservation.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockRoadmapItem.deleteMany.mock.invocationCallOrder[0]);
 
     // ── Per-workspace: null-out steps ──
+    // Objectives are selected by their own workspaceId (or cycle while that is NULL), then released by id chunk.
+    expect(mockObjective.findMany).toHaveBeenCalledWith({
+      where: { OR: [{ workspaceId: "ws-1" }, { workspaceId: null, cycleId: { in: ["cycle-1"] } }] },
+      select: { id: true },
+    });
     expect(mockObjective.updateMany).toHaveBeenCalledWith({
-      where: { cycle: { workspaceId: "ws-1" } },
+      where: { id: { in: ["obj-1"] } },
       data: { parentKeyResultId: null },
     });
     expect(mockExperiment.updateMany).toHaveBeenCalledWith({

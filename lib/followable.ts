@@ -85,7 +85,7 @@ const definitions: Record<FollowableSubjectType, FollowableDefinition> = {
     slice: 2, emitsStatus: true, emitsComments: true, emitsAssignment: false,
     resolveWorkspace: commentTarget("SOLUTION"),
     async resolveDisplay(workspaceId, ids, prisma) {
-      const rows = await prisma.solution.findMany({ where: { id: { in: ids }, opportunity: { workspaceId } }, select: { id: true, title: true, opportunityId: true } })
+      const rows = await prisma.solution.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true, title: true, opportunityId: true } })
       return display(rows.map((r) => ({ id: r.id, title: r.title, path: `discovery/${r.opportunityId}?detail=solution%3A${r.id}` })))
     },
   },
@@ -112,7 +112,7 @@ const definitions: Record<FollowableSubjectType, FollowableDefinition> = {
     resolveWorkspace: commentTarget("ASSUMPTION"),
     async resolveDisplay(workspaceId, ids, prisma) {
       const rows = await prisma.assumption.findMany({
-        where: { id: { in: ids }, solution: { opportunity: { workspaceId } } },
+        where: { id: { in: ids }, solution: { workspaceId } },
         select: { id: true, title: true, solution: { select: { opportunityId: true } } },
       })
       return display(rows.map((r) => ({ id: r.id, title: r.title, path: `discovery/${r.solution.opportunityId}?detail=assumption%3A${r.id}` })))
@@ -138,7 +138,7 @@ const definitions: Record<FollowableSubjectType, FollowableDefinition> = {
     slice: 3, emitsStatus: true, emitsComments: true, emitsAssignment: false,
     resolveWorkspace: commentTarget("OBJECTIVE"),
     async resolveDisplay(workspaceId, ids, prisma) {
-      const rows = await prisma.objective.findMany({ where: { id: { in: ids }, cycle: { workspaceId } }, select: { id: true, title: true, cycleId: true } })
+      const rows = await prisma.objective.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true, title: true, cycleId: true } })
       return display(rows.map((r) => ({ id: r.id, title: r.title, path: `okrs/${r.cycleId}` })))
     },
   },
@@ -149,7 +149,7 @@ const definitions: Record<FollowableSubjectType, FollowableDefinition> = {
     resolveWorkspace: commentTarget("KEY_RESULT"),
     async resolveDisplay(workspaceId, ids, prisma) {
       const rows = await prisma.keyResult.findMany({
-        where: { id: { in: ids }, objective: { cycle: { workspaceId } } },
+        where: { id: { in: ids }, objective: { workspaceId } },
         select: { id: true, title: true, objective: { select: { cycleId: true } } },
       })
       return display(rows.map((r) => ({ id: r.id, title: r.title, path: `okrs/${r.objective.cycleId}` })))
