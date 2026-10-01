@@ -66,6 +66,7 @@ const EMPTY_OVERVIEW = {
   assumptions: [],
   experiments: [],
   roadmapItems: [],
+  links: { opportunityObjective: [], solutionKeyResult: [] },
 };
 
 describe("getCanvasOverview", () => {
@@ -181,6 +182,67 @@ describe("getCanvasOverview", () => {
     expect(prisma.opportunityObjectiveLink.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ workspaceId: "ws-1" }) }),
     );
+  });
+
+  it("loads link rows for the edge layer: workspace-filtered, ids only, one query per link table", async () => {
+    const prisma = makeFakePrisma({
+      opportunities: [{ id: "opp-1", title: "Opp", status: "EXPLORING", squadId: null, linkedKeyResultId: null }],
+      solutions: [{ id: "sol-1", opportunityId: "opp-1", title: "Sol", status: "IDEA" }],
+      opportunityLinks: [{ id: "l1", opportunityId: "opp-1", objectiveId: "obj-1", origin: "DIRECT", createdAt: new Date(1) }],
+      solutionLinks: [{ id: "s1", solutionId: "sol-1", keyResultId: "kr-1", createdAt: new Date(1) }],
+    });
+    const result = await getCanvasOverview(prisma, "ws-1");
+    expect(result.links).toEqual({
+      opportunityObjective: [{ opportunityId: "opp-1", objectiveId: "obj-1", origin: "DIRECT" }],
+      solutionKeyResult: [{ solutionId: "sol-1", keyResultId: "kr-1" }],
+    });
+    // Two reads per table in total: the existing additive payload plus the edge rows, never one per entity.
+    expect(prisma.opportunityObjectiveLink.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.solutionKeyResultLink.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.opportunityObjectiveLink.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: { workspaceId: "ws-1", opportunityId: { in: ["opp-1"] } } }),
+    );
+  });
+
+  it("linkOrigins DIRECT asks the database for user-made Opportunity<->Objective links only", async () => {
+    const prisma = makeFakePrisma({
+      opportunities: [{ id: "opp-1", title: "Opp", status: "EXPLORING", squadId: null, linkedKeyResultId: null }],
+    });
+    await getCanvasOverview(prisma, "ws-1", { linkOrigins: "DIRECT" });
+    expect(prisma.opportunityObjectiveLink.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: { workspaceId: "ws-1", opportunityId: { in: ["opp-1"] }, origin: "DIRECT" } }),
+    );
+  });
+
+  it("chunks the link reads: 1,001 opportunities are read in three chunks, not one query per row", async () => {
+    const opportunities = Array.from({ length: 1001 }, (_, i) => ({ id: `opp-${i}`, title: "O", status: "EXPLORING", squadId: null, linkedKeyResultId: null }));
+    const prisma = makeFakePrisma({ opportunities });
+    await getCanvasOverview(prisma, "ws-1");
+    // 3 chunks for the edge rows + 3 for the additive payload.
+    expect(prisma.opportunityObjectiveLink.findMany).toHaveBeenCalledTimes(6);
+  });
+
+  it("a missing link table omits link edges: no throw, empty link rows", async () => {
+    const prisma = makeFakePrisma({
+      opportunities: [{ id: "opp-1", title: "Opp", status: "EXPLORING", squadId: null, linkedKeyResultId: null }],
+      solutions: [{ id: "sol-1", opportunityId: "opp-1", title: "Sol", status: "IDEA" }],
+    });
+    const missing = Object.assign(new Error('relation "opportunity_objective_links" does not exist'), { code: "42P01" });
+    (prisma.opportunityObjectiveLink.findMany as ReturnType<typeof vi.fn>).mockRejectedValue(missing);
+    (prisma.solutionKeyResultLink.findMany as ReturnType<typeof vi.fn>).mockRejectedValue({ ...missing, code: "P2021" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await getCanvasOverview(prisma, "ws-1");
+    expect(result.links).toEqual({ opportunityObjective: [], solutionKeyResult: [] });
+    expect(result.opportunities).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it("any other link read failure still throws (a permission error or outage is not 'no links')", async () => {
+    const prisma = makeFakePrisma({
+      opportunities: [{ id: "opp-1", title: "Opp", status: "EXPLORING", squadId: null, linkedKeyResultId: null }],
+    });
+    (prisma.opportunityObjectiveLink.findMany as ReturnType<typeof vi.fn>).mockRejectedValue(Object.assign(new Error("permission denied"), { code: "42501" }));
+    await expect(getCanvasOverview(prisma, "ws-1")).rejects.toThrow("permission denied");
   });
 
   it("maps solutions scoped by their own workspaceId", async () => {

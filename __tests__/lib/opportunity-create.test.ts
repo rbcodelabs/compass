@@ -22,6 +22,7 @@ type State = {
   feedback: Feedback[]
   squads: Array<{ id: string; workspaceId: string }>
   keyResults: Array<{ id: string; workspaceId: string; objectiveId: string }>
+  objectives: Array<{ id: string; workspaceId: string; title: string }>
   links: Array<Record<string, unknown> & { id: string; opportunityId: string; objectiveId: string; origin: string }>
 }
 
@@ -68,6 +69,16 @@ function makeDb(initial: State) {
         s.opportunities.push(row)
         return row
       },
+      findFirst: async ({ where }: { where: { id: string; workspaceId?: string } }) => {
+        const row = s.opportunities.find((o) => o.id === where.id && (!where.workspaceId || o.workspaceId === where.workspaceId))
+        return row ? { id: row.id, workspaceId: row.workspaceId, title: row.title, linkedKeyResultId: row.linkedKeyResultId ?? null } : null
+      },
+    },
+    objective: {
+      findMany: async ({ where }: { where: { id: { in: string[] }; workspaceId: string } }) =>
+        s.objectives.filter((o) => where.id.in.includes(o.id) && o.workspaceId === where.workspaceId),
+      findFirst: async ({ where }: { where: { id: string; workspaceId: string } }) =>
+        s.objectives.find((o) => o.id === where.id && o.workspaceId === where.workspaceId) ?? null,
     },
   })
   const db = {
@@ -96,6 +107,11 @@ const seed = (): State => ({
   ],
   squads: [{ id: "sq-1", workspaceId: WS }, { id: "sq-foreign", workspaceId: "ws-2" }],
   keyResults: [{ id: "kr-1", workspaceId: WS, objectiveId: "obj-1" }, { id: "kr-foreign", workspaceId: "ws-2", objectiveId: "obj-foreign" }],
+  objectives: [
+    { id: "obj-1", workspaceId: WS, title: "Objective one" },
+    { id: "obj-2", workspaceId: WS, title: "Objective two" },
+    { id: "obj-foreign", workspaceId: "ws-2", title: "Foreign objective" },
+  ],
   links: [],
 })
 
@@ -126,8 +142,16 @@ describe("normalizeNewOpportunityInput", () => {
         squadId: null,
         linkedKeyResultId: null,
         feedbackIds: ["fb-1", "fb-2"],
+        objectiveIds: [],
       },
     })
+  })
+
+  it("de-duplicates chosen objectives and caps how many one create may link", () => {
+    const ok = normalizeNewOpportunityInput({ title: "T", objectiveIds: ["obj-1", "obj-1", "obj-2"] })
+    expect(ok.ok && ok.data.objectiveIds).toEqual(["obj-1", "obj-2"])
+    const tooMany = normalizeNewOpportunityInput({ title: "T", objectiveIds: Array.from({ length: 26 }, (_, i) => `o-${i}`) })
+    expect(tooMany.ok).toBe(false)
   })
 
   it.each([
@@ -217,6 +241,65 @@ describe("createOpportunityWithLinks", () => {
     await expect(create({ title: "Should not exist", ...extra })).rejects.toThrow(OpportunityCreateError)
     await expect(create({ title: "Should not exist", ...extra })).rejects.toThrow(message)
     expect(db.state).toEqual(before)
+  })
+
+  describe("chosen objectives (Phase 4B)", () => {
+    it("links each chosen objective as DIRECT, stamped with the workspace and the author, in the same transaction", async () => {
+      const opportunity = await createOpportunityWithLinks(
+        db as unknown as AppPrismaClient,
+        WS,
+        { title: "Torres", objectiveIds: ["obj-1", "obj-2"] },
+        { createdById: "user-1" },
+      )
+      expect(db.$transaction).toHaveBeenCalledOnce()
+      expect(db.state.links).toEqual([
+        expect.objectContaining({ workspaceId: WS, opportunityId: opportunity.id, objectiveId: "obj-1", origin: "DIRECT", source: "UI", createdById: "user-1" }),
+        expect.objectContaining({ workspaceId: WS, opportunityId: opportunity.id, objectiveId: "obj-2", origin: "DIRECT" }),
+      ])
+      // The legacy pointer is not touched by objective links.
+      expect(db.state.opportunities[0]).toMatchObject({ linkedKeyResultId: null })
+    })
+
+    it("keeps the legacy keyResultId dual-write intact alongside chosen objectives", async () => {
+      const opportunity = await create({ title: "Both", linkedKeyResultId: "kr-1", objectiveIds: ["obj-2"] })
+      expect(db.state.opportunities[0]).toMatchObject({ linkedKeyResultId: "kr-1" })
+      expect(db.state.links.map((l) => [l.objectiveId, l.origin, l.opportunityId])).toEqual([
+        ["obj-1", "LEGACY", opportunity.id],
+        ["obj-2", "DIRECT", opportunity.id],
+      ])
+    })
+
+    it("writes no objective link when none is chosen (a plain create is unchanged)", async () => {
+      await create({ title: "Plain" })
+      expect(db.state.links).toEqual([])
+    })
+
+    it.each([
+      ["an objective from another workspace", ["obj-1", "obj-foreign"]],
+      ["an unknown objective", ["obj-missing"]],
+    ])("creates nothing and links nothing for %s", async (_label, objectiveIds) => {
+      const before = structuredClone(db.state)
+      await expect(create({ title: "Should not exist", objectiveIds })).rejects.toThrow(OpportunityCreateError)
+      expect(db.state).toEqual(before)
+    })
+
+    it("rolls the opportunity and the earlier links back when a later link write fails", async () => {
+      const before = structuredClone(db.state)
+      const originalTransaction = db.$transaction.getMockImplementation()!
+      db.$transaction.mockImplementationOnce(async (callback) =>
+        originalTransaction(async (tx) => {
+          const client = tx as { opportunityObjectiveLink: { create: (a: { data: { objectiveId: string } }) => Promise<unknown> } }
+          const realCreate = client.opportunityObjectiveLink.create
+          client.opportunityObjectiveLink.create = async (args) => {
+            if (args.data.objectiveId === "obj-2") throw new Error("write failed")
+            return realCreate(args)
+          }
+          return callback(tx)
+        }),
+      )
+      await expect(create({ title: "Half", objectiveIds: ["obj-1", "obj-2"] })).rejects.toThrow("write failed")
+      expect(db.state).toEqual(before)
+    })
   })
 
   it("rolls back the opportunity when linking feedback fails part-way", async () => {

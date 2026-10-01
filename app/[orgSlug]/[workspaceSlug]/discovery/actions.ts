@@ -6,7 +6,9 @@ import { auth } from "@/auth";
 import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
 import { OpportunityCreateError, createOpportunityWithLinks, type NewOpportunityInput } from "@/lib/opportunity-create";
 import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
-import { setOpportunityKeyResult } from "@/lib/typed-links";
+import { isMissingLinkTable, setOpportunityKeyResult } from "@/lib/typed-links";
+import { loadThinkingModelSource } from "@/lib/thinking-model/link-surfaces";
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { Prisma } from "@prisma/client";
 import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat";
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring";
@@ -63,12 +65,19 @@ export async function createOpportunityFromComposer(
     return { ok: false, error: "Workspace not found or you no longer have access to it." };
   }
   try {
-    const opportunity = await createOpportunityWithLinks(getPrisma(), workspaceId, data);
+    // Attribution for any Objective links chosen in the composer (null for an unattributed session).
+    const session = data.objectiveIds?.length ? await auth() : null;
+    const opportunity = await createOpportunityWithLinks(getPrisma(), workspaceId, data, { createdById: session?.user?.id ?? null });
     revalidatePath(`/[orgSlug]/[workspaceSlug]/discovery`, "layout");
     if (data.feedbackIds?.length) revalidatePath(`/${orgSlug}/${workspaceSlug}/feedback`);
+    if (data.objectiveIds?.length) revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`);
     return { ok: true, opportunity: { id: opportunity.id, title: opportunity.title } };
   } catch (error) {
     if (error instanceof OpportunityCreateError) return { ok: false, error: error.message };
+    // Chosen links need the link table (migration 071). The create was rolled back whole, so say so instead of throwing.
+    if (data.objectiveIds?.length && isMissingLinkTable(error)) {
+      return { ok: false, error: "Links are unavailable right now, so nothing was created. Remove the selected links, or try again later." };
+    }
     throw error;
   }
 }
@@ -83,6 +92,11 @@ export type OpportunityComposerOptions = {
     status: string;
     opportunity: { id: string; title: string } | null;
   }[];
+  /**
+   * Objectives the composer may link (Phase 4B). Present only for presets whose composer offers the Opportunity<->Objective
+   * link (links.oppToObjective "primary"); CLASSIC reads nothing extra and the field is omitted.
+   */
+  objectives?: { id: string; title: string; cycleTitle: string | null }[];
 };
 
 /** How many recent feedback items the composer's "Seed from feedback" picker searches. */
@@ -104,7 +118,9 @@ export async function loadOpportunityComposerOptions(
     return { ok: false, error: "Workspace not found or you no longer have access to it." };
   }
   const prisma = getPrisma();
-  const [squads, keyResults, feedback] = await Promise.all([
+  // Display decision only: whether the composer offers the Objective picker. Nothing else depends on the preset.
+  const offersObjectives = resolveThinkingModel(await loadThinkingModelSource(prisma, workspaceId)).links.oppToObjective === "primary";
+  const [squads, keyResults, feedback, objectives] = await Promise.all([
     prisma.squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
     prisma.keyResult.findMany({
       where: { objective: { workspaceId } },
@@ -117,6 +133,14 @@ export async function loadOpportunityComposerOptions(
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       take: COMPOSER_FEEDBACK_LIMIT,
     }),
+    // Filtered on the Objective's own workspaceId, so a NULL / drifted row is never offered.
+    offersObjectives
+      ? prisma.objective.findMany({
+          where: { workspaceId },
+          select: { id: true, title: true, cycle: { select: { title: true } } },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        })
+      : Promise.resolve(null),
   ]);
   return {
     ok: true,
@@ -124,6 +148,7 @@ export async function loadOpportunityComposerOptions(
       squads,
       keyResults: keyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })),
       feedback,
+      ...(objectives ? { objectives: objectives.map((o) => ({ id: o.id, title: o.title, cycleTitle: o.cycle?.title ?? null })) } : {}),
     },
   };
 }

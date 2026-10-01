@@ -47,4 +47,9 @@ export const CONVERTED_FILES = [
   "components/discovery/outcome-tree-view.tsx",
   "components/okrs/outcomes-index.tsx",
   "components/discovery/opportunity-objective-picker.tsx",
+  // Phase 4B: link authoring surfaces, label-driven from the start (they render nothing under CLASSIC, so there is no baseline).
+  "components/discovery/solution-key-result-picker.tsx",
+  "components/discovery/composer-objective-field.tsx",
+  "components/discovery/linked-objectives-strip.tsx",
+  "components/panels/linked-solutions-section.tsx",
 ] as const

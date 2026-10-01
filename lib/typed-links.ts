@@ -591,6 +591,91 @@ export async function getLinkedKeyResultsBySolution(
   return result
 }
 
+export type LinkedSolution = { id: string; title: string }
+
+/**
+ * The key-result-side batch read (Phase 4B, the "Linked solutions" list on the Key Result panel): keyResultIds -> the
+ * solutions linked to each, ordered by link created_at then id. A key result is in the workspace of its Objective; every
+ * key result id that is in `workspaceId` appears in the map (empty list when it has no links), ids outside it are absent.
+ * A link is included only when its Solution is itself in the workspace (the Solution's own workspaceId), so a NULL /
+ * drifted Solution is hidden. Tolerant of a missing link table, like the other batch reads.
+ */
+export async function getLinkedSolutionsByKeyResult(
+  db: Tx,
+  workspaceId: string,
+  keyResultIds: readonly string[],
+  options: LinkReadOptions = {},
+): Promise<Map<string, LinkedSolution[]>> {
+  const result = new Map<string, LinkedSolution[]>()
+  for (const ids of chunk([...new Set(keyResultIds)], LINK_WRITE_CHUNK)) {
+    const verified = options.preverified
+      ? new Set(ids)
+      : new Set((await db.keyResult.findMany({ where: { id: { in: ids }, objective: { workspaceId } }, select: { id: true } })).map((row) => row.id))
+    if (verified.size === 0) continue
+    const links = (await tolerantLinkRead("solution-key-result", () =>
+      db.solutionKeyResultLink.findMany({
+        where: { workspaceId, keyResultId: { in: [...verified] } },
+        select: { id: true, solutionId: true, keyResultId: true, createdAt: true },
+      }),
+    )) as { id: string; solutionId: string; keyResultId: string; createdAt: Date }[]
+    const solutionIds = [...new Set(links.map((link) => link.solutionId))]
+    const solutions = solutionIds.length
+      ? await db.solution.findMany({ where: { id: { in: solutionIds }, workspaceId }, select: { id: true, title: true } })
+      : []
+    const titles = new Map(solutions.map((solution) => [solution.id, solution.title]))
+    for (const id of verified) result.set(id, [])
+    for (const link of links.sort(byCreatedThenId)) {
+      const title = titles.get(link.solutionId)
+      if (title !== undefined) result.get(link.keyResultId)!.push({ id: link.solutionId, title })
+    }
+  }
+  return result
+}
+
+/** The link rows the canvas draws as edges. Ids only: titles and nodes come from the canvas's own workspace-filtered reads. */
+export type CanvasLinkRows = {
+  opportunityObjective: { opportunityId: string; objectiveId: string; origin: "DIRECT" | "LEGACY" }[]
+  solutionKeyResult: { solutionId: string; keyResultId: string }[]
+}
+
+/**
+ * Link rows for the canvas edge layer. The caller passes ids it read under its own workspace filter, so a link is returned only
+ * when its opportunity / solution is one of them; the canvas then drops a link whose other endpoint is not a node it loaded
+ * (a NULL / foreign Objective, Key Result), so nothing outside the workspace is ever drawn. `origins: "DIRECT"` narrows the
+ * Opportunity<->Objective read to user-made links (the CLASSIC canvas must not change just because migration 071 backfilled
+ * LEGACY rows). Chunked IN lists, one query per chunk, no per-row reads. A missing link table yields no rows (the canvas
+ * simply omits link edges); any other error keeps throwing.
+ */
+export async function getCanvasLinkRows(
+  db: Tx,
+  workspaceId: string,
+  input: { opportunityIds: readonly string[]; solutionIds: readonly string[]; origins: "ALL" | "DIRECT" },
+): Promise<CanvasLinkRows> {
+  const opportunityObjective: CanvasLinkRows["opportunityObjective"] = []
+  for (const ids of chunk([...new Set(input.opportunityIds)], LINK_WRITE_CHUNK)) {
+    const rows = (await tolerantLinkRead("canvas-opportunity-objective", () =>
+      db.opportunityObjectiveLink.findMany({
+        where: { workspaceId, opportunityId: { in: ids }, ...(input.origins === "DIRECT" ? { origin: "DIRECT" } : {}) },
+        select: { id: true, opportunityId: true, objectiveId: true, origin: true, createdAt: true },
+      }),
+    )) as { id: string; opportunityId: string; objectiveId: string; origin: string; createdAt: Date }[]
+    for (const row of rows.sort(byCreatedThenId)) {
+      opportunityObjective.push({ opportunityId: row.opportunityId, objectiveId: row.objectiveId, origin: row.origin === "DIRECT" ? "DIRECT" : "LEGACY" })
+    }
+  }
+  const solutionKeyResult: CanvasLinkRows["solutionKeyResult"] = []
+  for (const ids of chunk([...new Set(input.solutionIds)], LINK_WRITE_CHUNK)) {
+    const rows = (await tolerantLinkRead("canvas-solution-key-result", () =>
+      db.solutionKeyResultLink.findMany({
+        where: { workspaceId, solutionId: { in: ids } },
+        select: { id: true, solutionId: true, keyResultId: true, createdAt: true },
+      }),
+    )) as { id: string; solutionId: string; keyResultId: string; createdAt: Date }[]
+    for (const row of rows.sort(byCreatedThenId)) solutionKeyResult.push({ solutionId: row.solutionId, keyResultId: row.keyResultId })
+  }
+  return { opportunityObjective, solutionKeyResult }
+}
+
 export type ListLinksInput = {
   workspaceId: string
   opportunityId?: string

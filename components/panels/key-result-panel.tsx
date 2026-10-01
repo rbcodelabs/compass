@@ -15,7 +15,8 @@ import {
 } from "./panel-parts";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
-import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
+import { LinkedSolutionsSection } from "./linked-solutions-section";
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
 
 type KeyResultData = {
@@ -36,6 +37,9 @@ type KeyResultData = {
     squad: { id: string; name: string; color: string } | null;
     keyResults: Array<{ current: number; target: number }>;
   }>;
+  /** Typed Solution<->Key Result links (Phase 4B). Only sent for presets that offer the link. */
+  linkedSolutions?: Array<{ id: string; title: string }>;
+  linksUnavailable?: boolean;
   deliveryTasks: LinkedTaskData[];
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
@@ -58,6 +62,7 @@ export function KeyResultPanel({
   );
 
   const labels = useLabels();
+  const showLinkedSolutions = useThinkingModel().links.solToKr !== "hidden";
 
   if (error) return <PanelError label={labels.keyResult.lower} />;
   if (!data) return <PanelSkeleton />;
@@ -145,6 +150,11 @@ export function KeyResultPanel({
       <Section label={`Linked ${labels.opportunity.plural}`} count={data.opportunities.length}>
         <RelationList items={oppItems} empty={`No ${labels.opportunity.lowerPlural} linked.`} />
       </Section>
+
+      {/* Phase 4B: present only for presets that offer the Solution <-> Key Result link (the fetcher omits it for CLASSIC). */}
+      {showLinkedSolutions && (
+        <LinkedSolutionsSection solutions={data.linkedSolutions ?? []} linksUnavailable={data.linksUnavailable} />
+      )}
 
       <Section label="Roadmap" count={data.roadmapItems.length}>
         <RelationList items={roadmapItems} empty="Not on the roadmap." />

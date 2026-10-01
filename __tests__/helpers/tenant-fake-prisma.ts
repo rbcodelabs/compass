@@ -342,7 +342,9 @@ export function createTenantFakePrisma() {
       /** The by-id shape handlers use to fetch a name and the slugs for a deep link. */
       findUnique: async ({ where }: { where: { id: string } }) => {
         const found = workspaces.find((w) => w.id === where.id);
-        return found ? { id: found.id, name: found.slug, slug: found.slug, organization: { slug: found.org } } : null;
+        return found
+          ? { id: found.id, name: found.slug, slug: found.slug, organization: { slug: found.org }, thinkingModel: found.thinkingModel, thinkingModelLabels: found.thinkingModelLabels }
+          : null;
       },
       findFirst: async ({ where }: { where: Where }) => {
         // Generic matcher so AND-composed membership filters (agentWorkspaceWhere) are honoured too.

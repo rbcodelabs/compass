@@ -29,7 +29,8 @@
  */
 import getPrisma from "@/lib/db";
 import { isPmInterviewEnabled } from "@/lib/research-feature";
-import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity } from "@/lib/typed-links";
+import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getLinkedSolutionsByKeyResult } from "@/lib/typed-links";
+import { loadThinkingModelSource, offersSolutionToKrSurfaces, probeSolToKrUnavailable } from "@/lib/thinking-model/link-surfaces";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
 import { resolveTaskAssignees } from "@/lib/task-assignment";
@@ -159,7 +160,13 @@ async function fetchKeyResult(id: string, workspaceId: string) {
     },
   });
   if (!item) return null;
-  return { ...item, ...(await fetchLinkedTasksBundle(workspaceId, "KEY_RESULT", id)) };
+  const linkedTasks = await fetchLinkedTasksBundle(workspaceId, "KEY_RESULT", id);
+  // Phase 4B: the read-only "Linked solutions" list, only for presets that offer it (CLASSIC reads nothing extra and its payload is unchanged).
+  if (!offersSolutionToKrSurfaces(await loadThinkingModelSource(getPrisma(), workspaceId))) return { ...item, ...linkedTasks };
+  // The key result was just read under this workspace's filter, so the reader may skip re-verifying it.
+  const linkedSolutions = (await getLinkedSolutionsByKeyResult(getPrisma(), workspaceId, [id], { preverified: true })).get(id) ?? [];
+  const linksUnavailable = linkedSolutions.length === 0 && (await probeSolToKrUnavailable(getPrisma(), workspaceId, { keyResultId: id }));
+  return { ...item, ...linkedTasks, linkedSolutions, ...(linksUnavailable ? { linksUnavailable } : {}) };
 }
 
 async function pmInterviewHistory(workspaceId: string, targetType: string, targetId: string) {
@@ -330,10 +337,26 @@ async function fetchSolution(id: string, workspaceId: string) {
   ])
   const linkedIds = new Set(links.map((link) => link.artifactId))
   const solutionScoringModel = (scoringConfig?.solutionScoringModel as ScoringModelData | null) ?? null
+  // Phase 4B: options for the Solution <-> Key Result picker, only for presets that offer it (CLASSIC reads nothing extra).
+  // Filtered through the Key Result's Objective workspace, so a NULL / foreign row is never offered.
+  const offersKeyResultPicker = offersSolutionToKrSurfaces(await loadThinkingModelSource(prisma, workspaceId))
+  const pickerKeyResults = offersKeyResultPicker
+    ? await prisma.keyResult.findMany({
+        where: { objective: { workspaceId } },
+        select: { id: true, title: true, objective: { select: { title: true } } },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      })
+    : null
+  const linkedKeyResults = linkedKeyResultsBySolution.get(id) ?? []
+  const linksUnavailable = offersKeyResultPicker && linkedKeyResults.length === 0 && (await probeSolToKrUnavailable(prisma, workspaceId, { solutionId: id }))
   return {
     // workspaceId is the authorized parameter (findFirst above matched it on the Solution's own column).
     ...solution, workspaceId, evidence, ...linkedTasks,
-    linkedKeyResults: linkedKeyResultsBySolution.get(id) ?? [],
+    linkedKeyResults,
+    ...(pickerKeyResults
+      ? { availableKeyResults: pickerKeyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })) }
+      : {}),
+    ...(linksUnavailable ? { linksUnavailable } : {}),
     artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts,
     pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews, customFields,
     scoringModel: solutionScoringModel,

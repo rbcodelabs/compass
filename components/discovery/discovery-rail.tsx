@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Search, TrendingUp, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Search, Target, TrendingUp, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { NewOpportunityButton } from "@/components/discovery/new-opportunity-button";
 import {
   ACTIVE_OPPORTUNITY_STATUS_ORDER,
@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
 import { linkedToLabel } from "@/lib/thinking-model/copy";
 
 export type DiscoveryRailOpportunity = {
@@ -23,7 +23,7 @@ export type DiscoveryRailOpportunity = {
   status: OpportunityStatus;
   squad: { id: string; name: string; color: string } | null;
   linkedKeyResultId: string | null;
-  /** Typed Opportunity<->Objective links (ADR Phase 2). Payload only; the rail does not render it yet. */
+  /** Typed Opportunity<->Objective links (ADR Phase 2). Rendered as an additive marker by presets that offer the link (Phase 4B). */
   linkedObjectives?: { id: string; title: string }[];
 };
 
@@ -199,6 +199,7 @@ function RailRow({
   onNavigate?: () => void;
 }) {
   const labels = useLabels();
+  const showObjectiveLinks = useThinkingModel().links.oppToObjective !== "hidden";
   return (
     <Link
       href={href}
@@ -228,6 +229,13 @@ function RailRow({
         <TrendingUp
           className="mt-0.5 size-3 shrink-0 text-primary"
           aria-label={linkedToLabel(labels.keyResult)}
+        />
+      )}
+      {/* Phase 4B, additive: typed Objective links, only for presets that offer the link (CLASSIC renders exactly what it did). */}
+      {showObjectiveLinks && opportunity.linkedObjectives && opportunity.linkedObjectives.length > 0 && (
+        <Target
+          className="mt-0.5 size-3 shrink-0 text-primary"
+          aria-label={linkedToLabel(labels.objective)}
         />
       )}
     </Link>

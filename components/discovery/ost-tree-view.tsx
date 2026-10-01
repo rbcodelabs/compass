@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { LinkedObjectivesStrip } from "@/components/discovery/linked-objectives-strip";
 import {
   TrendingUp,
   Lightbulb,
@@ -60,6 +61,8 @@ export type OSTOpportunityNode = {
     title: string;
     objective: { title: string };
   } | null;
+  /** Typed Opportunity<->Objective links (Phase 4B); shown only by presets that offer them. */
+  linkedObjectives?: Array<{ id: string; title: string }>;
   solutions: OSTSolutionNode[];
 };
 
@@ -256,6 +259,8 @@ export function OSTTreeView({ opportunity, orgSlug, workspaceSlug }: Props) {
           </div>
         ))}
       </div>
+
+      <LinkedObjectivesStrip objectives={opportunity.linkedObjectives} />
 
       {/* KR / Outcome node */}
       {opportunity.linkedKeyResult && (

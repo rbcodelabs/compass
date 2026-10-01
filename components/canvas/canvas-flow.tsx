@@ -40,6 +40,7 @@ import { AssumptionNode, type AssumptionNodeType } from "@/components/canvas/ass
 import { ExperimentNode, type ExperimentNodeType } from "@/components/canvas/experiment-node";
 import { RoadmapItemNode, type RoadmapItemNodeType } from "@/components/canvas/roadmap-item-node";
 import type { CanvasOverview } from "@/lib/canvas/data";
+import { useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
 
 const nodeTypes = {
   objective: ObjectiveNode,
@@ -182,6 +183,8 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
 
   // Clicking a node opens that entity's detail panel (see components/panels).
   const { openPanel } = usePanelContext();
+  // Which link edges are drawn is a presentation rule of the workspace's thinking model (see buildCanvasEdges).
+  const { links: linkEmphasis } = useThinkingModel();
 
   const [nodes, setNodes] = useState<CanvasFlowNode[] | null>(null);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -243,9 +246,10 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
       ...overview.roadmapItems.map((r) => ({ id: r.id, type: "roadmapItem" as CanvasNodeType, position: r.position })),
     ];
 
-    const canvasEdges = buildCanvasEdges(overview);
+    const canvasEdges = buildCanvasEdges(overview, { links: linkEmphasis });
 
-    computeCanvasLayout(layoutInputs, canvasEdges)
+    // Typed-link edges are drawn but never laid out: a Solution -> Key Result edge closes a cycle and would move existing nodes.
+    computeCanvasLayout(layoutInputs, canvasEdges.filter((e) => !e.link))
       .then((laidOut) => {
         if (cancelled) return;
 
@@ -368,7 +372,11 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
           source: e.source,
           target: e.target,
           markerEnd: { type: MarkerType.ArrowClosed },
-          ...(e.dashed ? { style: { strokeDasharray: "5 5", opacity: 0.5 } } : {}),
+          ...(e.link
+            ? { style: { strokeDasharray: "2 4", opacity: 0.75 } }
+            : e.dashed
+              ? { style: { strokeDasharray: "5 5", opacity: 0.5 } }
+              : {}),
         }));
 
         // Capture the two position sets the transition machinery switches
@@ -408,7 +416,7 @@ export function CanvasFlow({ overview }: CanvasFlowProps) {
     return () => {
       cancelled = true;
     };
-  }, [overview]);
+  }, [overview, linkEmphasis]);
 
   // Animate Objective positions (and choreograph the camera) whenever the
   // tier crosses the T0<->detail boundary. T1<->T2 changes move nothing —

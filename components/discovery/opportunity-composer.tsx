@@ -32,7 +32,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FEEDBACK_STATUS_META, type FeedbackStatus } from "@/lib/feedback-meta";
-import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
+import { ComposerObjectiveField } from "@/components/discovery/composer-objective-field";
 import { linkPlaceholder } from "@/lib/thinking-model/copy";
 import {
   NEW_OPPORTUNITY_STATUSES,
@@ -122,6 +123,9 @@ function ComposerForm({
   const [squadId, setSquadId] = useState<string | null>(restored?.squadId ?? null);
   const [keyResultId, setKeyResultId] = useState<string | null>(restored?.keyResultId ?? null);
   const [feedbackIds, setFeedbackIds] = useState<string[]>(restored?.feedbackIds ?? []);
+  const [objectiveIds, setObjectiveIds] = useState<string[]>(restored?.objectiveIds ?? []);
+  // Presentation only: presets that make the Opportunity<->Objective link primary offer the picker (CLASSIC does not).
+  const offersObjectives = useThinkingModel().links.oppToObjective === "primary";
   const [error, setError] = useState<string | null>(null);
   const [titleInvalid, setTitleInvalid] = useState(false);
   const [optionsState, setOptionsState] = useState<OptionsState>({ status: "loading" });
@@ -153,6 +157,8 @@ function ComposerForm({
         setSquadId((id) => (id && options.squads.some((squad) => squad.id === id) ? id : null));
         setKeyResultId((id) => (id && options.keyResults.some((kr) => kr.id === id) ? id : null));
         setFeedbackIds((selected) => selected.filter((id) => options.feedback.some((item) => item.id === id)));
+        // Same for chosen Objectives: when the options carry none (the preset does not offer them), nothing stays chosen.
+        setObjectiveIds((selected) => selected.filter((id) => options.objectives?.some((o) => o.id === id)));
       })
       .catch(() => {
         if (!cancelled) setOptionsState({ status: "error" });
@@ -162,12 +168,12 @@ function ComposerForm({
     };
   }, [orgSlug, workspaceSlug]);
 
-  const draft: OpportunityDraft = { title, description, customerSegment, status, squadId, keyResultId, feedbackIds };
+  const draft: OpportunityDraft = { title, description, customerSegment, status, squadId, keyResultId, feedbackIds, objectiveIds };
   const draftEmpty = isOpportunityDraftEmpty(draft);
 
   useEffect(() => {
-    saveOpportunityDraft(draftKey, { title, description, customerSegment, status, squadId, keyResultId, feedbackIds });
-  }, [draftKey, title, description, customerSegment, status, squadId, keyResultId, feedbackIds]);
+    saveOpportunityDraft(draftKey, { title, description, customerSegment, status, squadId, keyResultId, feedbackIds, objectiveIds });
+  }, [draftKey, title, description, customerSegment, status, squadId, keyResultId, feedbackIds, objectiveIds]);
 
   useFocusOnOpen(titleRef);
 
@@ -180,6 +186,7 @@ function ComposerForm({
     setSquadId(null);
     setKeyResultId(null);
     setFeedbackIds([]);
+    setObjectiveIds([]);
   };
 
   const discardDraft = () => {
@@ -211,6 +218,7 @@ function ComposerForm({
           squadId,
           linkedKeyResultId: keyResultId,
           feedbackIds,
+          ...(offersObjectives ? { objectiveIds } : {}),
         });
         if (!result.ok) {
           setError(result.error);
@@ -322,6 +330,15 @@ function ComposerForm({
         )}
         {options && (
           <>
+            {offersObjectives && options.objectives && (
+              <ComposerObjectiveField
+                id={`${ids}-objectives`}
+                objectives={options.objectives}
+                value={objectiveIds}
+                onChange={setObjectiveIds}
+                disabled={isPending}
+              />
+            )}
             <KeyResultField
               id={`${ids}-kr`}
               keyResults={options.keyResults}

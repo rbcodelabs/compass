@@ -41,6 +41,11 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({
   saveSolutionScore: vi.fn(),
 }));
+// The Solution <-> Key Result picker (Phase 4B) imports its server actions, which import next-auth.
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/solution-link-actions", () => ({
+  linkSolutionToKeyResultAction: vi.fn(),
+  unlinkSolutionFromKeyResultAction: vi.fn(),
+}));
 // Roadmap item panel children
 vi.mock("@/components/panels/launch-checklist", () => ({ LaunchChecklist: () => null }));
 vi.mock("@/components/panels/launch-tier-picker", () => ({ LaunchTierPicker: () => null }));
