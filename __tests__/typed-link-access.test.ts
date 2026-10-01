@@ -48,10 +48,11 @@ const isMigrationOwned = (file: string) => relPosix(file).startsWith("lib/migrat
 /** The one module that may name the link models, and schema.prisma (which declares them). */
 const LINK_MODULE = "lib/typed-links.ts";
 /**
- * The one end-to-end spec that must delete its synthetic link rows by workspace id in afterAll (no foreign key reaches them, so
- * deleting the workspace would leave them behind in the shared e2e database). It verifies behaviour through the MCP tools.
+ * The end-to-end files that must delete synthetic link rows by workspace id (no foreign key reaches them, so deleting the workspace
+ * would leave them behind in the shared e2e database): the typed-links spec's afterAll and the suite's global teardown. The spec
+ * verifies behaviour through the MCP tools.
  */
-const E2E_CLEANUP_SPECS = new Set(["e2e/functional/specs/typed-links.spec.ts"]);
+const E2E_CLEANUP_SPECS = new Set(["e2e/functional/specs/typed-links.spec.ts", "e2e/functional/global-teardown.ts"]);
 const isLinkModuleOrSchema = (file: string) => relPosix(file) === LINK_MODULE || relPosix(file) === "prisma/schema.prisma" || E2E_CLEANUP_SPECS.has(relPosix(file));
 
 // Files that legitimately use non-literal Prisma delegates or model introspection today, each over a fixed
