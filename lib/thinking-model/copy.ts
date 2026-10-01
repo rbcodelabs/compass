@@ -17,3 +17,12 @@ export const linkPlaceholder = (label: ResolvedEntityLabel) => `Link ${label.ind
 
 /** "Linked to a key result" (rail row indicator). */
 export const linkedToLabel = (label: ResolvedEntityLabel) => `Linked to ${label.indefinite}`
+
+/**
+ * "an Objective" / "a Key Result": the preset's article before the label as written (not lower-cased), for
+ * sentence copy that capitalizes the entity today. An override has no article, so it is the bare label.
+ */
+export const indefiniteTitle = (label: ResolvedEntityLabel) => {
+  const article = /^(an?) /.exec(label.indefinite)
+  return article ? `${article[1]} ${label.singular}` : label.singular
+}

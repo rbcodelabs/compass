@@ -50,7 +50,8 @@ export async function loadCardSortCardMeta({
         status: true,
         squadId: true,
         score: { select: { normalizedScore: true, modelVersion: true } },
-        _count: { select: { solutions: true, evidence: true } },
+        // Count only solutions that carry this workspace's own workspaceId, so the card agrees with the scoped Solution lists.
+        _count: { select: { solutions: { where: { workspaceId } }, evidence: true } },
       },
     }),
     prisma.squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true } }),

@@ -32,6 +32,8 @@ interface KeyResultBarProps {
       keyResults: Array<{ current: number; target: number }>;
     }>;
   };
+  /** The Objective this KR belongs to; its own Objective is never offered as a supporter. */
+  objectiveId?: string;
   orgSlug: string;
   workspaceSlug: string;
   supportingObjectiveOptions?: SupportingObjectiveOption[];
@@ -44,7 +46,7 @@ export interface SupportingObjectiveOption {
   cycleTitle: string;
 }
 
-export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObjectiveOptions }: KeyResultBarProps) {
+export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, supportingObjectiveOptions }: KeyResultBarProps) {
   const router = useRouter();
   const labels = useLabels();
   const [, startTransition] = useTransition();
@@ -56,7 +58,7 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
     keyResult.supportingObjectives ?? []
   );
   const [localSupportingOptions, setLocalSupportingOptions] = useState(
-    supportingObjectiveOptions ?? []
+    (supportingObjectiveOptions ?? []).filter((option) => option.id !== objectiveId)
   );
   const { openPanel } = usePanelContext();
   const progress = clampProgress(keyResult.current, keyResult.target);

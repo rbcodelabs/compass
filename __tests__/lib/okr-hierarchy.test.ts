@@ -80,7 +80,8 @@ describe("getEligibleParentKeyResults", () => {
         where: expect.objectContaining({
           objective: expect.objectContaining({
             workspaceId: "ws-1",
-            cycle: expect.objectContaining({ id: { not: "q1" } }),
+            // Cycle-less parent Objectives are eligible too (containment skipped).
+            OR: [{ cycleId: null }, { cycle: expect.objectContaining({ id: { not: "q1" } }) }],
           }),
         }),
       })
@@ -141,7 +142,7 @@ describe("getEligibleSupportingObjectives", () => {
         where: expect.objectContaining({
           parentKeyResultId: null,
           workspaceId: "ws-1",
-          cycle: expect.objectContaining({ id: { not: "annual" } }),
+          OR: [{ cycleId: null }, { cycle: expect.objectContaining({ id: { not: "annual" } }) }],
         }),
       })
     );

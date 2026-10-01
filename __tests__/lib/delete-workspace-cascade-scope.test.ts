@@ -213,6 +213,23 @@ describe("deleteWorkspaceCascade Solution / Objective scope", () => {
     expect(calls.find((c) => c.model === "objective" && c.op === "updateMany")!.args).toMatchObject({ where: { id: { in: ["obj-1"] } } });
   });
 
+  it("still tears down cycle-less Objectives (070) when the workspace has no cycles at all", async () => {
+    const { client, calls } = recordingPrisma({
+      "oKRCycle.findMany": [[]],
+      "objective.findMany": [[{ id: "obj-nocycle" }]],
+      "keyResult.findMany": [[{ id: "kr-nocycle" }]],
+    });
+    await deleteWorkspaceCascade(client, WS, { skipBlobCleanup: true });
+    // Selected through the Objective's own workspaceId; the cycle list being empty must not skip them.
+    expect(calls.find((c) => c.model === "objective" && c.op === "findMany")!.args).toMatchObject({
+      where: { OR: [{ workspaceId: WS }, { workspaceId: null, cycleId: { in: [] } }] },
+    });
+    const has = (model: string, op: string, where: unknown) => calls.some((c) => c.model === model && c.op === op && JSON.stringify((c.args as { where: unknown }).where) === JSON.stringify(where));
+    expect(has("checkIn", "deleteMany", { keyResultId: { in: ["kr-nocycle"] } })).toBe(true);
+    expect(has("keyResult", "deleteMany", { id: { in: ["kr-nocycle"] } })).toBe(true);
+    expect(has("objective", "deleteMany", { id: { in: ["obj-nocycle"] } })).toBe(true);
+  });
+
   it("selects solutions by their own workspaceId, or by opportunity only while that is NULL", async () => {
     const { client, calls } = recordingPrisma({ "opportunity.findMany": [[{ id: "opp-1" }]] });
     await deleteWorkspaceCascade(client, WS, { skipBlobCleanup: true });

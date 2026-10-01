@@ -17,7 +17,8 @@ import {
 } from "./panel-parts";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import type { MemberData } from "@/lib/types";
-import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
+import { cycleRouteSegment, noCycleLabel } from "@/lib/okr-cycle-scope";
 
 type ObjectiveData = {
   id: string;
@@ -40,7 +41,7 @@ type ObjectiveData = {
     objective: {
       id: string;
       title: string;
-      cycle: { id: string; title: string; status: string };
+      cycle: { id: string; title: string; status: string } | null;
     };
   } | null;
   deliveryTasks: LinkedTaskData[];
@@ -74,6 +75,8 @@ export function ObjectivePanel({
   );
 
   const labels = useLabels();
+  // Cycles are subdued under Torres: shown where the Outcome has one, never as a "no cycle" placeholder.
+  const showCycleField = useThinkingModel().cycles !== "subdued";
 
   if (error) return <PanelError label={labels.objective.lower} />;
   if (!data) return <PanelSkeleton />;
@@ -101,7 +104,7 @@ export function ObjectivePanel({
         id: data.parentKeyResult.id,
         title: data.parentKeyResult.title,
         badge: {
-          label: data.parentKeyResult.objective.cycle.title,
+          label: data.parentKeyResult.objective.cycle?.title ?? noCycleLabel(labels.cycle),
           className: "bg-accent text-accent-foreground",
         },
       }]
@@ -109,9 +112,7 @@ export function ObjectivePanel({
 
   return (
     <PanelContainer>
-      {data.cycle && (
-        <FullPageLink href={`/${orgSlug}/${workspaceSlug}/okrs/${data.cycle.id}`} />
-      )}
+      <FullPageLink href={`/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.cycle?.id)}`} />
 
       <PanelTitle
         title={data.title}
@@ -129,13 +130,11 @@ export function ObjectivePanel({
         className="text-sm text-foreground/80 leading-relaxed"
       />
 
-      {(data.owner || data.squad || data.cycle) && (
-        <div className="flex flex-col gap-3">
-          {data.owner && <Field label="Owner">{data.owner}</Field>}
-          {data.squad && <Field label="Squad">{data.squad.name}</Field>}
-          {data.cycle && <Field label={labels.cycle.singular}>{data.cycle.title}</Field>}
-        </div>
-      )}
+      <div className="flex flex-col gap-3">
+        {data.owner && <Field label="Owner">{data.owner}</Field>}
+        {data.squad && <Field label="Squad">{data.squad.name}</Field>}
+        {(data.cycle || showCycleField) && <Field label={labels.cycle.singular}>{data.cycle?.title ?? noCycleLabel(labels.cycle)}</Field>}
+      </div>
 
       <Section label={labels.keyResult.plural} count={data.keyResults.length}>
         <RelationList items={krItems} empty={`No ${labels.keyResult.lowerPlural} yet.`} />
@@ -151,7 +150,7 @@ export function ObjectivePanel({
           linkedId={data.id}
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
-          revalidatePathStr={data.cycle ? `/${orgSlug}/${workspaceSlug}/okrs/${data.cycle.id}` : `/${orgSlug}/${workspaceSlug}/okrs`}
+          revalidatePathStr={`/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.cycle?.id)}`}
           tasks={data.deliveryTasks}
           linkableTasks={data.linkableTasks}
           members={data.members}

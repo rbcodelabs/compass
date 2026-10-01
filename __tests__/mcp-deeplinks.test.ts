@@ -20,9 +20,9 @@ const mockPrisma = {
   opportunity: { findUnique: vi.fn(), create: vi.fn() },
   solution: { findUnique: vi.fn(), create: vi.fn() },
   assumption: { findUnique: vi.fn(), create: vi.fn() },
-  objective: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
-  keyResult: { create: vi.fn() },
-  oKRCycle: { findFirst: vi.fn() },
+  objective: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+  keyResult: { create: vi.fn(), findMany: vi.fn() },
+  oKRCycle: { findFirst: vi.fn(), findMany: vi.fn() },
   experiment: { create: vi.fn() },
   roadmapItem: { findFirst: vi.fn(), create: vi.fn() },
   portfolioCapacityReservation: { findUnique: vi.fn() },
@@ -153,6 +153,38 @@ describe("create_objective deeplink", () => {
     mockPrisma.objective.create.mockResolvedValue({ id: "obj-1", title: "Grow activation", status: "ON_TRACK", description: null, owner: null, squadId: null, parentKeyResultId: null })
     const text = (await call("create_objective", { workspaceId: "ws-1", cycleId: "cycle-1", title: "Grow activation" })).content[0].text
     expect(text).toContain(`URL: ${BASE}/okrs?detail=objective%3Aobj-1`)
+  })
+
+  it("creates a cycle-less Objective when cycleId is omitted (migration 070) and still links to it", async () => {
+    mockPrisma.workspace.findUnique.mockResolvedValue({ id: "ws-1", ...SLUGGED })
+    mockPrisma.objective.create.mockResolvedValue({ id: "obj-2", title: "Always-on goal", status: "ON_TRACK", description: null, owner: null, squadId: null, parentKeyResultId: null })
+    const text = (await call("create_objective", { workspaceId: "ws-1", title: "Always-on goal" })).content[0].text
+    expect(mockPrisma.oKRCycle.findFirst).not.toHaveBeenCalled()
+    expect(mockPrisma.objective.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ workspaceId: "ws-1", cycleId: null, title: "Always-on goal" }),
+    })
+    expect(text).toContain("No cycle / Persistent")
+    expect(text).toContain(`URL: ${BASE}/okrs?detail=objective%3Aobj-2`)
+  })
+
+  it("still verifies a provided cycle belongs to the workspace", async () => {
+    mockPrisma.oKRCycle.findFirst.mockResolvedValue(null)
+    const result = await call("create_objective", { workspaceId: "ws-1", cycleId: "11111111-1111-4111-8111-111111111111", title: "x" })
+    expect(result.content[0].text).toContain("not found in workspace")
+    expect(mockPrisma.oKRCycle.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "11111111-1111-4111-8111-111111111111", workspaceId: "ws-1" } }))
+    expect(mockPrisma.objective.create).not.toHaveBeenCalled()
+  })
+})
+
+describe("list_okr_cycles with cycle-less Objectives", () => {
+  it("lists them under a labeled group so they never vanish, even when there are no cycles", async () => {
+    mockPrisma.oKRCycle.findMany.mockResolvedValue([])
+    mockPrisma.objective.findMany.mockResolvedValue([{ id: "obj-2", title: "Always-on goal", status: "ON_TRACK" }])
+    const result = await call("list_okr_cycles", { workspaceId: "ws-1" })
+    expect(mockPrisma.objective.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "ws-1", cycleId: null } }))
+    expect(result.content[0].text).toContain("No cycle / Persistent")
+    expect(result.content[0].text).toContain("Always-on goal")
+    expect(result.content[0].text).toContain("Objective ID: obj-2")
   })
 })
 

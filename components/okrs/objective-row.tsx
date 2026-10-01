@@ -53,9 +53,12 @@ export interface ParentKROption {
   id: string;
   title: string;
   objectiveTitle: string;
-  cycleId: string;
+  /** Owning Objective; lets a cycle-less Objective exclude its own KRs. */
+  objectiveId?: string;
+  cycleId: string | null;
+  /** NO_CYCLE_LABEL for a cycle-less parent Objective. */
   cycleTitle: string;
-  cycleStatus: string;
+  cycleStatus: string | null;
 }
 
 interface ObjectiveRowProps {
@@ -149,7 +152,10 @@ export function ObjectiveRow({
     });
   }
 
-  const canLinkParent = !!availableKRs && !localParentKRId && availableKRs.length > 0;
+  // A cycle-less Objective has no date window excluding its own KRs, so the
+  // picker drops them here (linking to one would be rejected as SAME_OBJECTIVE).
+  const selectableKRs = availableKRs?.filter((kr) => kr.objectiveId !== objective.id);
+  const canLinkParent = !!selectableKRs && !localParentKRId && selectableKRs.length > 0;
   const menuItems: CardMenuItem[] = [
     ...(canLinkParent
       ? [
@@ -246,6 +252,7 @@ export function ObjectiveRow({
             <KeyResultBar
               key={kr.id}
               keyResult={kr}
+              objectiveId={objective.id}
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
               supportingObjectiveOptions={supportingObjectiveOptions}
@@ -299,7 +306,7 @@ export function ObjectiveRow({
       {/* Parent-KR link picker — opened from the ⋯ menu, renders nothing until opened */}
       {canLinkParent && (
         <Combobox
-          items={availableKRs!.map((kr) => ({
+          items={selectableKRs!.map((kr) => ({
             value: kr.id,
             label: `${kr.cycleTitle} ${kr.objectiveTitle} ${kr.title}`,
             render: (
@@ -322,7 +329,7 @@ export function ObjectiveRow({
             anchor={actionsRef}
             align="end"
             inputPlaceholder={`Search ${labels.cycle.lowerPlural}, ${labels.objective.lowerPlural}, and ${labels.keyResult.shortPlural}…`}
-            emptyMessage={`No eligible parent ${labels.keyResult.shortPlural}. A longer ${labels.cycle.lower} must be Draft or Active and fully contain this ${labels.cycle.lower}'s dates.`}
+            emptyMessage={`No eligible parent ${labels.keyResult.shortPlural}. A ${labels.cycle.lower}-less ${labels.objective.singular} can support any ${labels.keyResult.singular} in a Draft or Active ${labels.cycle.lower}; otherwise the parent ${labels.cycle.lower} must be Draft or Active, longer, and fully contain this ${labels.cycle.lower}'s dates.`}
           />
         </Combobox>
       )}

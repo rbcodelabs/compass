@@ -1,8 +1,10 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { CycleCard } from "@/components/okrs/cycle-card";
+import { PersistentObjectivesCard } from "@/components/okrs/persistent-objectives-card";
 import { CreateCycleForm } from "@/components/okrs/create-cycle-form";
 import { Target } from "lucide-react";
 import type { CycleStatus } from "@/lib/types";
@@ -11,6 +13,8 @@ import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
 import { loadOutcomesIndex } from "@/lib/thinking-model/outcome-tree-data";
 import { OutcomesIndex } from "@/components/okrs/outcomes-index";
+import { PERSISTENT_CYCLE_SLUG, noCycleLabel } from "@/lib/okr-cycle-scope";
+import { indefiniteTitle } from "@/lib/thinking-model/copy";
 
 interface OKRsPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
@@ -44,7 +48,12 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
 
   // The cycles query and (TORRES_OST only) the lighter flat index of every Objective run together. The index is
   // reachable without picking a cycle; other presets run no extra query and are untouched.
-  const [cycles, outcomesIndex] = await Promise.all([
+  const isTorres = model.key === "TORRES_OST";
+
+  // Cycle-less Objectives (migration 070) are surfaced exactly once per preset: the Torres Outcomes index
+  // already lists every Objective (cycle chip only where one exists), so only the other presets get the
+  // "No cycle / Persistent" card and its count. Torres skips that count query entirely.
+  const [cycles, outcomesIndex, persistentObjectiveCount] = await Promise.all([
     prisma.oKRCycle.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { startDate: "desc" },
@@ -53,8 +62,12 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
         _count: { select: { objectives: { where: { workspaceId: workspace.id } } } },
       },
     }),
-    model.key === "TORRES_OST" ? loadOutcomesIndex(prisma, workspace.id) : Promise.resolve(null),
+    isTorres ? loadOutcomesIndex(prisma, workspace.id) : Promise.resolve(null),
+    isTorres ? Promise.resolve(0) : prisma.objective.count({ where: { workspaceId: workspace.id, cycleId: null } }),
   ]);
+
+  const nothingToShow = cycles.length === 0 && (isTorres ? (outcomesIndex?.rows.length ?? 0) === 0 : persistentObjectiveCount === 0);
+  const persistentLinkText = `Or add ${indefiniteTitle(labels.objective)} with no ${labels.cycle.lower} (${noCycleLabel(labels.cycle)})`;
 
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8">
@@ -66,12 +79,18 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
 
       {outcomesIndex && <OutcomesIndex rows={outcomesIndex.rows} />}
 
-      {cycles.length === 0 ? (
+      {nothingToShow ? (
         <EmptyState icon={<Target className="size-6" />} title={`No OKR ${labels.cycle.lowerPlural} yet`} description={`${labels.cycle.plural} group your ${labels.objective.lowerPlural} into time-boxed periods. Create one to start setting goals.`} primaryAction={<CreateCycleForm
             workspaceId={workspace.id}
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
-          />} />
+          />} secondaryAction={<Link
+            href={`/${orgSlug}/${workspaceSlug}/okrs/${PERSISTENT_CYCLE_SLUG}`}
+            data-testid="persistent-objectives-link"
+            className="inline-flex h-8 items-center rounded-lg border border-border px-3 text-sm text-text-subtle hover:text-text-primary"
+          >
+            {persistentLinkText}
+          </Link>} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {cycles.map((cycle) => (
@@ -82,7 +101,23 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
               workspaceSlug={workspaceSlug}
             />
           ))}
+          {!isTorres && (
+            <PersistentObjectivesCard
+              objectiveCount={persistentObjectiveCount}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+            />
+          )}
         </div>
+      )}
+      {isTorres && !nothingToShow && (
+        <Link
+          href={`/${orgSlug}/${workspaceSlug}/okrs/${PERSISTENT_CYCLE_SLUG}`}
+          data-testid="persistent-objectives-link"
+          className="inline-flex w-fit text-sm text-text-subtle hover:text-text-primary"
+        >
+          {persistentLinkText}
+        </Link>
       )}
     </main>
   );

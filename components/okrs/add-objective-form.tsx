@@ -17,7 +17,8 @@ import { createObjective } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import type { SquadData } from "@/lib/types";
 
 interface AddObjectiveFormProps {
-  cycleId: string;
+  /** null creates a cycle-less (persistent) Objective. */
+  cycleId: string | null;
   orgSlug: string;
   workspaceSlug: string;
   squads?: SquadData[];
