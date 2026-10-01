@@ -67,7 +67,7 @@ import { AddSolutionForm } from "@/components/discovery/add-solution-form"
 import { OpportunityCard } from "@/components/discovery/opportunity-card"
 import { OpportunityBoard } from "@/components/discovery/opportunity-board"
 import { OpportunityFieldBoard } from "@/components/discovery/opportunity-field-board"
-import { SolutionSwimlaneBoard } from "@/components/discovery/solution-swimlane-board"
+import { SolutionBacklogBoard } from "@/components/solutions/solution-backlog-board"
 import { DiscoveryTableView } from "@/components/discovery/discovery-table-view"
 import { ScoringPanel } from "@/components/discovery/scoring-panel"
 import { SolutionScoringPanel } from "@/components/discovery/solution-scoring-panel"
@@ -182,11 +182,11 @@ const SURFACES: Surface[] = [
     ),
     custom: ["Problem board grouped by Area", "2 bets", "1 problem"],
   },
-  { name: "swimlane empty", ui: () => <SolutionSwimlaneBoard opportunities={[]} workspaceId="w1" {...common} />, custom: ["No problems yet", "Create Problem to start adding Bets to it."] },
+  { name: "solution-backlog empty", ui: () => <SolutionBacklogBoard solutions={[]} workspaceId="w1" {...common} />, custom: ["No bets found", "Bets are added from problem pages in Discovery. Or adjust the filters."] },
   {
-    name: "swimlane lane",
-    ui: () => <SolutionSwimlaneBoard opportunities={[{ id: "o1", title: "Need", squad: null, solutions: [solCard] }]} workspaceId="w1" {...common} />,
-    custom: ["1 bet", "No bets", "Need bets", "Add Bet"],
+    name: "solution-backlog items",
+    ui: () => <SolutionBacklogBoard solutions={[{ ...solCard, opportunity: { id: "o1", title: "Need", squad: null } }]} workspaceId="w1" {...common} />,
+    custom: ["No bets", "Bet backlog"],
   },
   { name: "discovery-table empty", ui: () => <DiscoveryTableView opportunities={[]} />, custom: ["No problems match the current filters."] },
   {

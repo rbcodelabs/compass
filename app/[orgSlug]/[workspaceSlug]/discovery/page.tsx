@@ -9,7 +9,6 @@ import { DiscoveryViewToggle, type DiscoveryView } from "@/components/discovery/
 import { DiscoveryGroupByToggle } from "@/components/discovery/discovery-group-by-toggle";
 import { OpportunityFieldBoard, type FieldBoardOpportunity } from "@/components/discovery/opportunity-field-board";
 import { DiscoverySortToggle, type DiscoverySort } from "@/components/discovery/discovery-sort-toggle";
-import { SolutionSwimlaneBoard, type SwimlaneOpportunity } from "@/components/discovery/solution-swimlane-board";
 import { resolveWorkspaceScoringModel, toScoreSummary } from "@/lib/scoring-model";
 import type { OpportunityStatus, SolutionStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
@@ -26,7 +25,7 @@ import {
   resolveCustomFieldFilter,
 } from "@/lib/custom-field-filter";
 import { objectTypeLabels } from "@/components/custom-fields/object-type-labels";
-import { solutionSwimlaneKey } from "@/lib/discovery-filters";
+import { legacySwimlaneRedirectPath } from "@/lib/solution-backlog";
 import { loadCustomFieldValuesForObjects } from "@/lib/custom-field-values-batch";
 import {
   columnValueFor,
@@ -71,6 +70,15 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     field: fieldParam,
     fieldValue: fieldValueParam,
   } = await searchParams;
+  // The Solution swimlane ("Group by: Opportunity") moved to its own backlog;
+  // old bookmarks and shared links land there instead of on a silent Status board.
+  if (requestedGroupBy === "opportunity") {
+    redirect(legacySwimlaneRedirectPath(orgSlug, workspaceSlug, {
+      squad: squadFilter,
+      field: fieldParam,
+      fieldValue: fieldValueParam,
+    }));
+  }
   const view: DiscoveryView = requestedView === "table" ? "table" : "board";
   const sort: DiscoverySort = requestedSort === "score" ? "score" : "manual";
   const prisma = getPrisma();
@@ -89,8 +97,8 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
   const thinkingModel = await getThinkingModelForSlugs(orgSlug, workspaceSlug);
   const showWorkspaceTree = thinkingModel.tree !== "kr-rooted";
 
-  // Discovery renders Opportunities *and* their Solutions, so both object
-  // types contribute filter facets and either can own the active filter.
+  // The table view nests each Opportunity's Solutions, so both object types
+  // contribute filter facets and either can own the active filter.
   const [discoveryFieldDefs, customFieldFilter] = await Promise.all([
     loadCustomFieldDefinitions(prisma, {
       workspaceId: workspace.id,
@@ -114,9 +122,8 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     customFieldFilter?.objectType === "OPPORTUNITY"
       ? { id: { in: customFieldFilter.objectIds } }
       : {};
-  // A Solution-level tag narrows which solutions render inside each lane; the
-  // Opportunities themselves are untouched, matching how Solutions are nested
-  // rather than listed on their own route.
+  // A Solution-level tag narrows which solutions render nested under each
+  // Opportunity in the table; the Opportunities themselves are untouched.
   const solutionIdFilter =
     customFieldFilter?.objectType === "SOLUTION" ? new Set(customFieldFilter.objectIds) : null;
 
@@ -149,10 +156,8 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
           select: {
             id: true,
             title: true,
-            description: true,
             status: true,
             sortOrder: true,
-            score: { select: { normalizedScore: true, modelVersion: true } },
             _count: { select: { evidence: true, assumptions: true } },
           },
         },
@@ -186,10 +191,6 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     // score UI and no sort toggle at all, same gate as the detail page.
     resolveWorkspaceScoringModel(workspace.id, "OPPORTUNITY"),
   ]);
-
-  // Independent of the Opportunity model above — only used to gate the
-  // ScoreBadge on Solution cards (see SwimlaneOpportunity below).
-  const solutionScoringModel = await resolveWorkspaceScoringModel(workspace.id, "SOLUTION");
 
   const hasActiveScoringModel = scoringModel !== null;
 
@@ -277,28 +278,6 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       }))
   );
 
-  // Lanes are exactly the Opportunities shown on today's board — same
-  // ACTIVE_STATUSES + squad filter, same order — mapped into the shape
-  // SolutionSwimlaneBoard needs instead of bucketed by Opportunity status.
-  const swimlaneOpportunities: SwimlaneOpportunity[] = opportunities
-    // A Solution-level tag hides lanes with nothing left to show.
-    .filter((opportunity) => !solutionIdFilter || visibleSolutions(opportunity.solutions).length > 0)
-    .map((opportunity) => ({
-    id: opportunity.id,
-    title: opportunity.title,
-    squad: opportunity.squadId ? (squadMap.get(opportunity.squadId) ?? null) : null,
-    solutions: visibleSolutions(opportunity.solutions).map((solution) => ({
-      id: solution.id,
-      title: solution.title,
-      description: solution.description,
-      status: solution.status as SolutionStatus,
-      sortOrder: solution.sortOrder,
-      _count: solution._count,
-      // null whenever there is no score row *or* no active Solution model.
-      score: toScoreSummary(solution.score, solutionScoringModel),
-    })),
-  }));
-
   const fieldBoardOpportunities: FieldBoardOpportunity[] =
     groupField && groupFieldValues
       ? opportunities.map((opportunity) => ({
@@ -361,19 +340,6 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           workspaceId={workspace.id}
-        />
-      ) : groupBy === "opportunity" ? (
-        <SolutionSwimlaneBoard
-          // Keyed on what is rendered, not on the pre-filter query: a
-          // Solution-level tag leaves the opportunity rows untouched by design,
-          // so keying off `opportunities` never changed and surviving lanes went
-          // on showing their untagged solutions.
-          key={solutionSwimlaneKey(swimlaneOpportunities)}
-          opportunities={swimlaneOpportunities}
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-          workspaceId={workspace.id}
-          hasActiveScoringModel={solutionScoringModel !== null}
         />
       ) : (
         <OpportunityBoard

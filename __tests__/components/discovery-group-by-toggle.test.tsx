@@ -28,20 +28,22 @@ describe("DiscoveryGroupByToggle", () => {
     set.mockReset();
   });
 
-  it("represents Opportunity in the URL and Status by the absence of the groupBy parameter", () => {
-    const { rerender } = render(<DiscoveryGroupByToggle groupBy="status" />);
-    choose("Opportunity");
-    expect(set).toHaveBeenCalledWith({ groupBy: "opportunity" });
-
-    rerender(<DiscoveryGroupByToggle groupBy="opportunity" />);
+  it("represents Status by the absence of the groupBy parameter", () => {
+    render(<DiscoveryGroupByToggle groupBy="field:moscow" fieldOptions={[{ id: "moscow", label: "MoSCoW" }]} />);
     choose("Status");
     expect(set).toHaveBeenLastCalledWith({ groupBy: null });
+  });
+
+  it("no longer offers an Opportunity (solution swimlane) grouping", () => {
+    render(<DiscoveryGroupByToggle groupBy="status" />);
+    fireEvent.click(screen.getByLabelText("Group board by"));
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Status"]);
   });
 
   it("offers each groupable Opportunity field after the built-ins and encodes it as field:<id>", () => {
     render(<DiscoveryGroupByToggle groupBy="status" fieldOptions={[{ id: "moscow", label: "MoSCoW" }]} />);
     fireEvent.click(screen.getByLabelText("Group board by"));
-    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Status", "Opportunity", "MoSCoW"]);
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Status", "MoSCoW"]);
 
     const option = screen.getByRole("option", { name: "MoSCoW" });
     fireEvent.pointerDown(option, { pointerType: "mouse" });

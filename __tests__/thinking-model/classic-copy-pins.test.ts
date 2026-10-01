@@ -40,8 +40,6 @@ const mainCopy = JSON.parse(readFileSync(path.join(ROOT, "__tests__/thinking-mod
 /** Main's fragments that this branch builds differently; each is pinned by a rendered case instead. */
 const EXCEPTIONS: Record<string, string> = {
   "{} objective{}": "cycle-card.tsx pluralises with a ternary now; pinned by 'cycle-card 0/1/3' in classic-text.test.tsx",
-  "Create an Opportunity to start adding Solutions to it.":
-    "built with indefiniteTitle(); pinned by 'swimlane empty' in classic-text.test.tsx",
   // #332 (optional Objective cycle) deliberately reworded this CLASSIC text; main's baseline predates it. The new text is
   // pinned verbatim below ("#332 optional-cycle copy"). When #332 reaches main and the baselines are regenerated, this
   // entry goes stale and the "every EXCEPTION is real" test says to delete it.
@@ -93,6 +91,10 @@ const USES_NAME_MAP_HELPER = /panelTitles|linkedTypeLabels|linkedTypePluralLabel
 const FILE_EXCEPTIONS: Record<string, Record<string, string>> = {
   "components/panels/objective-panel.tsx": { "/{}/{}/okrs": "a route, not copy: #332 appends cycleRouteSegment(cycle?.id)" },
   "components/discovery/opportunity-field-board.tsx": { solution: "now plural(count, labels.solution); pinned by 'opportunity-field-board' in classic-text.test.tsx" },
+  "components/discovery/discovery-group-by-toggle.tsx": {
+    Opportunity: "the Group-by Opportunity swimlane option moved to the /solutions backlog",
+    opportunity: "the Group-by Opportunity swimlane option moved to the /solutions backlog",
+  },
   "components/discovery/ost-tree-view.tsx": { Outcome: "the legend root word comes from ostLegendRootLabel(); pinned by 'ost-tree linked' in classic-text.test.tsx and the helper test" },
 }
 
