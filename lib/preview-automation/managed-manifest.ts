@@ -142,7 +142,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Workspace thinking model (two nullable ADD COLUMNs on workspaces; no index, no
   // backfill, no hook). Last, matching its MIGRATIONS position. Migration only: no code
   // reads the columns yet.
-  "073_workspace_thinking_model": "8c412a4c999568bc8ea2e802a3214ae5710f0721506d36eb3636afdd8574b7c6"
+  "073_workspace_thinking_model": "8c412a4c999568bc8ea2e802a3214ae5710f0721506d36eb3636afdd8574b7c6",
+  // Portal Home widget layout: one new table plus one unique ASYNC index, IF NOT EXISTS throughout,
+  // no data writes. Digest recorded from the shipped SQL; please review it. The postcondition hook
+  // (lib/migrations/portal-home-layout.ts) is pinned in REVIEWED_MIGRATION_CODE_SHA256 below.
+  "074_portal_home_layout": "a55135642d04825fc221b2ae1992972bdd118d8cbf8dc4289db75b1af5e80b3b"
 };
 
 /**
@@ -168,6 +172,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   "072_typed_links_residual_backfill": {
     "lib/migrations/typed-link-tables.ts": "e5c230a29b094608fa3a2d0a5cc94f2b1e31c65307f1cb93e7d6a7afc41160df",
+  },
+  // The 074 postcondition (table shape plus a valid, ready, unique workspace index before the receipt).
+  "074_portal_home_layout": {
+    "lib/migrations/portal-home-layout.ts": "4ad0279c979c9e90971958e475e521c5eda0ef043c6bd1fb1461b9482f94700d",
   },
 };
 

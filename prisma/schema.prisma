@@ -3362,3 +3362,26 @@ model Notification {
   @@index([workspaceId, recipientUserId, createdAt], map: "idx_notifications_inbox")
   @@map("notifications")
 }
+
+/// One row per workspace holding the Portal Home widget board (migration 074).
+/// draftWidgets is the admin draft in progress; publishedWidgets is what
+/// customers see, NULL until the first publish (the code-defined default home
+/// renders meanwhile). Both are JSON arrays of widgets
+/// {id, type, size, order, config, visibility}, Zod-validated on every write and
+/// every read (lib/portal-home/schema.ts). No relation to Workspace: Aurora DSQL
+/// enforces no foreign keys, so workspaceId is validated in application code and
+/// delete-workspace-cascade removes the row explicitly. updatedAt is set by the
+/// application on every write.
+model PortalHomeLayout {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  draftWidgets     Json      @default("[]") @map("draft_widgets")
+  publishedWidgets Json?     @map("published_widgets")
+  publishedAt      DateTime? @map("published_at")
+  publishedById    String?   @map("published_by_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @map("updated_at")
+
+  @@unique([workspaceId], map: "idx_portal_home_layouts_workspace")
+  @@map("portal_home_layouts")
+}
