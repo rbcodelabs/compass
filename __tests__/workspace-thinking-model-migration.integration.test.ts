@@ -3,11 +3,11 @@
  * against a throwaway schema in the local compass_e2e database. Never touches
  * Aurora or any shared environment, and never deletes rows outside its own schema.
  *
- * The schema is built with `prisma db push` from the CURRENT schema.prisma, so it
- * is exactly the table shape today's code expects (no thinking_model columns).
- * That is the state production is in before 073 is applied, and it lets the test
- * prove two things: 073 is a pure additive no-op for existing rows, and today's
- * Prisma client keeps working against a schema that has the new columns.
+ * The schema is built with `prisma db push` from the CURRENT schema.prisma, which now
+ * declares the thinking_model columns (the code PR). The test then DROPS those two
+ * columns to recreate the state production is in before 073 is applied, and proves
+ * two things: 073 is a pure additive no-op for existing rows, and the current Prisma
+ * client reads and writes the columns once 073 has added them.
  *
  *   THINKING_MODEL_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
  *     npx vitest run __tests__/workspace-thinking-model-migration.integration.test.ts --maxWorkers=2
@@ -91,6 +91,8 @@ describe.skipIf(!databaseUrl)("073 workspace thinking_model columns (registered 
     orgId = org.id;
     await prisma.workspace.create({ data: { organizationId: orgId, slug: "tm-a", name: "Workspace A", description: "first", nowLimit: 3, roadmapPublic: true } });
     await prisma.workspace.create({ data: { organizationId: orgId, slug: "tm-b", name: "Workspace B", brandingPrimaryHex: "#112233" } });
+    // db push built the columns from the current schema.prisma; production has none until 073, so remove them.
+    await q(`ALTER TABLE {S}.workspaces DROP COLUMN thinking_model, DROP COLUMN thinking_model_labels`);
     beforeRows = await workspaceRows();
   });
 
@@ -178,9 +180,10 @@ describe.skipIf(!databaseUrl)("073 workspace thinking_model columns (registered 
     expect((await workspaceRows()).map(withoutNewColumns)).toEqual(beforeRows);
   });
 
-  it("today's Prisma client (no thinkingModel field) still does Workspace CRUD against the schema with the new columns", async () => {
+  it("the current Prisma client (with thinkingModel fields) does Workspace CRUD against the schema once 073 added the columns", async () => {
     const created = await prisma.workspace.create({ data: { organizationId: orgId, slug: "tm-c", name: "Workspace C" } });
-    expect(created).not.toHaveProperty("thinkingModel");
+    expect(created.thinkingModel).toBeNull();
+    expect(created.thinkingModelLabels).toBeNull();
     expect(created.slug).toBe("tm-c");
 
     const found = await prisma.workspace.findFirst({ where: { slug: "tm-a", organizationId: orgId }, include: { organization: true } });
