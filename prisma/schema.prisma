@@ -3129,9 +3129,8 @@ model WorkspaceActivationState {
 //
 // ONLY lib/typed-links.ts (plus the migration hook in lib/migrations and its SQL) reads or writes
 // these models; __tests__/typed-link-access.test.ts guards that. Code that uses them must not be
-// deployed before migration 071 has created the tables: the batch READ helpers degrade to "no
-// links" if a table is missing, everything else (writes, deletes, the workspace cascade, the
-// link tools, list_links) fails.
+// deployed before migration 071 has created the tables: every read and write fails with the
+// database error until it has (reads included, on purpose: there is no "no links" fallback).
 //
 // Deliberately scalar ids only, no Prisma relation fields: under relationMode = "prisma"
 // a relation makes Prisma query the child table whenever a parent row is deleted or
