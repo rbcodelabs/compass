@@ -75,8 +75,6 @@ type Props = {
    */
   linkedObjectives?: Array<{ id: string; title: string }>;
   availableObjectives?: PickerObjective[];
-  /** The link table could not be read (migration 071 missing); the picker says so and offers no changes. */
-  linksUnavailable?: boolean;
   squads: SquadData[];
   revalidatePathStr: string;
   edit?: EditContext;
@@ -88,7 +86,6 @@ export function OpportunityHeader({
   availableKeyResults,
   linkedObjectives = [],
   availableObjectives,
-  linksUnavailable = false,
   squads,
   revalidatePathStr,
   edit,
@@ -196,7 +193,6 @@ export function OpportunityHeader({
           opportunityId={opportunity.id}
           linked={linkedObjectives}
           available={availableObjectives}
-          linksUnavailable={linksUnavailable}
           onChanged={onChanged}
         />
       )}

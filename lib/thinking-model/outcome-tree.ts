@@ -74,8 +74,6 @@ export type BuildOutcomeTreeInput = {
   legacyPointers: readonly LegacyPointerInput[]
   /** Defaults to "outcome-rooted". */
   shape?: OutcomeTreeShape
-  /** The loader could not read link data (link table missing), so placement and counts may be incomplete. */
-  linksUnavailable?: boolean
 }
 
 export type KeyResultStripItem = {
@@ -150,8 +148,6 @@ export type OpportunityNode = {
 
 export type OutcomeTree = {
   shape: OutcomeTreeShape
-  /** True when link data could not be read; the view says so instead of presenting empty links as fact. */
-  linksUnavailable: boolean
   roots: OutcomeRoot[]
   pool: string[]
   opportunities: Record<string, OpportunityNode>
@@ -336,7 +332,6 @@ export function buildOutcomeTree(input: BuildOutcomeTreeInput): OutcomeTree {
 
   return {
     shape,
-    linksUnavailable: input.linksUnavailable === true,
     roots,
     pool,
     opportunities: opportunityNodes,

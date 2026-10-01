@@ -32,12 +32,10 @@ type Props = {
   opportunityId: string
   linked: Array<{ id: string; title: string }>
   available: PickerObjective[]
-  /** The link table could not be read: the list above may be incomplete and writes would fail, so none are offered. */
-  linksUnavailable?: boolean
   onChanged?: () => void
 }
 
-export function OpportunityObjectivePicker({ opportunityId, linked, available, linksUnavailable = false, onChanged }: Props) {
+export function OpportunityObjectivePicker({ opportunityId, linked, available, onChanged }: Props) {
   const labels = useLabels()
   const [isPending, startTransition] = useTransition()
   const [linkedIds, setLinkedIds] = useState<string[]>(() => linked.map((o) => o.id))
@@ -95,13 +93,7 @@ export function OpportunityObjectivePicker({ opportunityId, linked, available, l
         <p className="text-xs text-muted-foreground">No {labels.objective.lowerPlural} linked.</p>
       )}
 
-      {linksUnavailable && (
-        <p role="status" data-testid="picker-links-unavailable" className="w-full text-xs text-muted-foreground">
-          Link data is unavailable right now, so this list may be incomplete and changes are off.
-        </p>
-      )}
-
-      {available.length > 0 && !linksUnavailable && (
+      {available.length > 0 && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button type="button" variant="ghost" size="sm" disabled={isPending} aria-label={`Choose ${labels.objective.lowerPlural}`} />}
