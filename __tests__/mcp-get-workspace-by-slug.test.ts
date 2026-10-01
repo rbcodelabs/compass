@@ -108,8 +108,41 @@ describe("get_workspace_by_slug MCP tool", () => {
     })
     expect(mockPrisma.workspace.findFirst).toHaveBeenCalledWith({
       where: { organizationId: "org-uuid-1", slug: "compass" },
-      select: { id: true, name: true, slug: true, description: true },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        thinkingModel: true,
+        thinkingModelLabels: true,
+      },
     })
+  })
+
+  it("adds the thinking-model vocabulary line only when the workspace renames entities", async () => {
+    mockPrisma.organization.findUnique.mockResolvedValue({ id: "org-uuid-1", name: "RB Code Labs" })
+    mockPrisma.workspace.findFirst.mockResolvedValue({
+      id: "ws-uuid-1",
+      name: "Compass",
+      slug: "compass",
+      description: null,
+      thinkingModel: "TORRES_OST",
+      thinkingModelLabels: null,
+    })
+    const handler = getHandler("get_workspace_by_slug")
+    const text = textOf(await handler({ orgSlug: "rbcodelabs", workspaceSlug: "compass" }))
+    expect(text).toContain('This workspace calls Objectives "Outcomes"')
+    expect(text).toContain("API and tool names are unchanged")
+
+    mockPrisma.workspace.findFirst.mockResolvedValue({
+      id: "ws-uuid-1",
+      name: "Compass",
+      slug: "compass",
+      description: null,
+      thinkingModel: null,
+      thinkingModelLabels: null,
+    })
+    expect(textOf(await handler({ orgSlug: "rbcodelabs", workspaceSlug: "compass" }))).not.toContain("This workspace calls")
   })
 
   it("omits the description line when the workspace has none", async () => {

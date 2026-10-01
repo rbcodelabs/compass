@@ -154,6 +154,7 @@ import {
 import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
+import { thinkingModelForMcp } from "@/lib/thinking-model/mcp"
 import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
 import {
   listCustomFieldDefinitions,
@@ -305,7 +306,10 @@ const _handler = createMcpHandler(
         const prisma = getPrisma()
         const [workspace, okrCycleCount, opportunityCount, experimentCount, roadmapItemCount, activeExperiments, activeOKRCycle, squads] =
           await Promise.all([
-            prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } }),
+            prisma.workspace.findUnique({
+              where: { id: workspaceId },
+              select: { name: true, thinkingModel: true, thinkingModelLabels: true },
+            }),
             prisma.oKRCycle.count({ where: { workspaceId } }),
             prisma.opportunity.count({ where: { workspaceId, NOT: { status: "ARCHIVED" } } }),
             prisma.experiment.count({ where: { workspaceId } }),
@@ -327,6 +331,8 @@ const _handler = createMcpHandler(
           : "None"
         const squadText = squads.length ? squads.map(s => `${s.name} (${s.id})`).join(", ") : "None"
 
+        const vocabulary = thinkingModelForMcp(workspace)
+
         return ok(
           `**Workspace:** ${workspace.name}\n\n` +
             `**Active OKR Cycle:** ${cycleText}\n` +
@@ -334,9 +340,11 @@ const _handler = createMcpHandler(
             `**Experiments:** ${experimentCount} (${activeExperiments} running)\n` +
             `**Roadmap Items (active):** ${roadmapItemCount}\n` +
             `**OKR Cycles total:** ${okrCycleCount}\n` +
-            `**Squads:** ${squadText}`,
+            `**Squads:** ${squadText}` +
+            (vocabulary.line ? `\n\n${vocabulary.line}` : ""),
           {
             name: workspace.name,
+            thinkingModel: vocabulary.structured,
             activeOkrCycle: activeOKRCycle,
             opportunityCount,
             experimentCount,
@@ -457,18 +465,28 @@ const _handler = createMcpHandler(
         }
         const workspace = await prisma.workspace.findFirst({
           where: { organizationId: org.id, slug: workspaceSlug },
-          select: { id: true, name: true, slug: true, description: true },
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            description: true,
+            thinkingModel: true,
+            thinkingModelLabels: true,
+          },
         })
         if (!workspace) {
           return fail(`No workspace found with slug "${workspaceSlug}" in organization "${org.name}".`)
         }
+        const vocabulary = thinkingModelForMcp(workspace)
         return ok(
           `**Workspace:** ${workspace.name}\n` +
             `ID: ${workspace.id}\n` +
             `Slug: ${workspace.slug}\n` +
             (workspace.description ? `${workspace.description}\n` : "") +
-            `URL: /${orgSlug}/${workspace.slug}`,
+            `URL: /${orgSlug}/${workspace.slug}` +
+            (vocabulary.line ? `\n${vocabulary.line}` : ""),
           {
+            thinkingModel: vocabulary.structured,
             id: workspace.id,
             name: workspace.name,
             slug: workspace.slug,
