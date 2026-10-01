@@ -3,9 +3,11 @@
 import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { FileText, Plus, ChevronRight } from "lucide-react";
+import { FileText, Plus, ChevronRight, Shapes, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { createDoc } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
+import { createDoc, createCanvasDoc } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
+import { parseJsonCanvas, MAX_CANVAS_BYTES } from "@/lib/json-canvas";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 export type DocTreeItem = {
   id: string;
@@ -14,6 +16,7 @@ export type DocTreeItem = {
   parentId: string | null;
   children: DocTreeItem[];
   sortOrder: number;
+  docType?: string;
 };
 
 interface DocTreeSidebarProps {
@@ -37,6 +40,30 @@ export function DocTreeSidebar({
   const [isPending, startTransition] = useTransition();
   const operation = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const importInput = useRef<HTMLInputElement>(null);
+
+  function handleNewCanvas(content?: string, title?: string) {
+    startTransition(async () => {
+      operation.current ??= crypto.randomUUID();
+      try {
+        const doc = await createCanvasDoc(workspaceId, null, revalidatePathStr, { title, content }, { operationId: operation.current });
+        operation.current = null;
+        setError(null);
+        router.push(`${basePath}/${doc.id}`);
+      } catch { setError("Could not create this canvas. Try again."); }
+    });
+  }
+
+  async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > MAX_CANVAS_BYTES) { setError(`That file is too large to import (limit ${Math.round(MAX_CANVAS_BYTES / 1000)} KB).`); return; }
+    const text = await file.text();
+    const parsed = parseJsonCanvas(text);
+    if (!parsed.ok) { setError(`Not a valid .canvas file: ${parsed.errors.slice(0, 3).join("; ")}`); return; }
+    handleNewCanvas(text, file.name.replace(/\.canvas$/i, "") || undefined);
+  }
 
   function handleNewPage() {
     startTransition(async () => {
@@ -66,6 +93,34 @@ export function DocTreeSidebar({
           <Plus className="w-3.5 h-3.5" />
           New
         </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            disabled={isPending}
+            data-testid="new-canvas-menu"
+            className="flex items-center gap-1 text-xs text-text-subtle hover:text-text-primary transition-colors px-1 py-0.5 rounded hover:bg-surface-inset disabled:opacity-50"
+          >
+            <Shapes className="w-3.5 h-3.5" />
+            Canvas
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem onClick={() => handleNewCanvas()}>
+              <Shapes className="w-3.5 h-3.5" />
+              Blank canvas
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => importInput.current?.click()}>
+              <Upload className="w-3.5 h-3.5" />
+              Import .canvas file
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <input
+          ref={importInput}
+          type="file"
+          accept=".canvas,application/json"
+          className="hidden"
+          data-testid="import-canvas-input"
+          onChange={handleImportFile}
+        />
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0">
@@ -198,6 +253,13 @@ function DocTreeNode({
         <Link href={href} className="flex items-center gap-1.5 flex-1 min-w-0">
           {doc.icon ? (
             <span className="shrink-0 text-sm leading-none">{doc.icon}</span>
+          ) : doc.docType === "CANVAS" ? (
+            <Shapes
+              className={cn(
+                "w-3.5 h-3.5 shrink-0",
+                isActive ? "text-primary" : "text-text-subtle"
+              )}
+            />
           ) : (
             <FileText
               className={cn(

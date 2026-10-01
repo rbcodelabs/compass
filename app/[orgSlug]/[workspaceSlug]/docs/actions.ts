@@ -162,6 +162,28 @@ export async function createDoc(
 }
 
 /**
+ * Create a JSON Canvas doc: blank, or from an imported .canvas file's text.
+ * Content is validated by the document service (invalid canvases are rejected
+ * before anything is stored).
+ */
+export async function createCanvasDoc(
+  workspaceId: string,
+  parentId: string | null,
+  revalidatePathStr: string,
+  input: { title?: string; content?: string } = {},
+  mutation: Mutation = {}
+) {
+  const user = await requireWorkspaceMember(workspaceId);
+  if ((input.title !== undefined && typeof input.title !== "string") || (input.content !== undefined && typeof input.content !== "string")) throw new Error("Invalid canvas");
+  const doc = await createDocument(
+    { workspaceId, parentId, title: input.title?.trim() || "Untitled canvas", docType: "CANVAS", content: input.content ?? "" },
+    { ...mutationToken(mutation), authorId: user.id, authorName: user.name ?? user.email ?? "Unknown" }
+  );
+  revalidatePath(revalidatePathStr);
+  return { id: doc.id, title: doc.title, revision: doc.revision };
+}
+
+/**
  * Empty-state "Create your first page". Pilot (Geode) workspaces require an
  * operation ID for every create; a fresh one per submission is correct here
  * because each click is a new create, not a transport retry.

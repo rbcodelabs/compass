@@ -6,6 +6,7 @@ import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin";
 import { redirect, notFound } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { DocEditor } from "@/components/docs/doc-editor";
+import { CanvasDocEditor } from "@/components/docs/canvas/canvas-doc-editor";
 import { DocDecisionAction } from "@/components/docs/doc-decision-action";
 import { listDocDecisions } from "@/lib/tracked-decisions";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
@@ -45,7 +46,7 @@ export default async function DocPage({ params }: Props) {
 
   const storedDoc = await prisma.doc.findFirst({
     where: { id: docId, workspaceId: workspace.id },
-    select: { id: true, title: true, content: true, icon: true, metadata: true, storageProvider: true, contentRef: true, revision: true },
+    select: { id: true, title: true, content: true, icon: true, metadata: true, storageProvider: true, contentRef: true, revision: true, docType: true },
   });
 
   if (!storedDoc) notFound();
@@ -71,6 +72,19 @@ export default async function DocPage({ params }: Props) {
 
   const linkedTasks = await fetchLinkedTasksBundle(workspace.id, "DOC", doc.id);
   const cookieStore = await cookies();
+
+  if (doc.docType === "CANVAS") {
+    return (
+      <CanvasDocEditor
+        key={doc.id}
+        doc={{ id: doc.id, title: doc.title, content: doc.content, icon: doc.icon, revision: doc.revision }}
+        versions={versions}
+        revalidatePathStr={revalidatePathStr}
+        initialHistoryPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsHistory"))?.value)}
+        decisionAction={<DocDecisionAction orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
+      />
+    );
+  }
 
   return (
     <DocEditor

@@ -342,6 +342,79 @@ describe("getDoc — roadmapItemId / docType exposure", () => {
   })
 })
 
+// ─── CANVAS (JSON Canvas) docs ───────────────────────────────────────────────
+
+describe("CANVAS docs", () => {
+  const validCanvas = JSON.stringify({
+    nodes: [{ id: "a", type: "text", x: 0, y: 0, width: 100, height: 50, text: "---\nnot: frontmatter\n---", future: 1 }],
+    edges: [],
+    metadata: { keep: "me" },
+  })
+
+  it("createDoc stores validated canvas JSON verbatim (no frontmatter parsing) and keeps unknown fields", async () => {
+    const result = await createDoc({ workspaceId: WORKSPACE_ID, title: "Board", docType: "CANVAS", content: validCanvas })
+    expect(result.structuredContent.ok).toBe(true)
+    const data = mockDoc.create.mock.calls[0][0].data
+    expect(data.docType).toBe("CANVAS")
+    expect(data.metadata).toBeUndefined()
+    expect(JSON.parse(data.content)).toEqual(JSON.parse(validCanvas))
+  })
+
+  it("createDoc without content creates a blank canvas", async () => {
+    await createDoc({ workspaceId: WORKSPACE_ID, title: "Board", docType: "CANVAS" })
+    expect(JSON.parse(mockDoc.create.mock.calls[0][0].data.content)).toEqual({ nodes: [], edges: [] })
+  })
+
+  it("createDoc rejects invalid canvas JSON with a clear error and writes nothing", async () => {
+    const result = await createDoc({
+      workspaceId: WORKSPACE_ID,
+      title: "Board",
+      docType: "CANVAS",
+      content: JSON.stringify({ nodes: [{ id: "a", type: "sticky", x: 0, y: 0, width: 1, height: 1 }] }),
+    })
+    expect(result.structuredContent.ok).toBe(false)
+    expect(result.content[0].text).toMatch(/Invalid JSON Canvas.*type/)
+    expect(mockDoc.create).not.toHaveBeenCalled()
+
+    const notJson = await createDoc({ workspaceId: WORKSPACE_ID, title: "Board", docType: "CANVAS", content: "# markdown" })
+    expect(notJson.structuredContent.ok).toBe(false)
+    expect(mockDoc.create).not.toHaveBeenCalled()
+  })
+
+  it("updateDoc validates content for CANVAS docs and rejects invalid payloads", async () => {
+    mockDoc.findUnique.mockResolvedValue({ title: "Board", storageProvider: "DATABASE", docType: "CANVAS" })
+    const bad = await updateDoc({ docId: DOC_ID, content: JSON.stringify({ nodes: [], edges: [{ id: "e", fromNode: "x", toNode: "y" }] }) })
+    expect(bad.structuredContent.ok).toBe(false)
+    expect(bad.content[0].text).toContain("unknown node")
+    expect(mockDoc.update).not.toHaveBeenCalled()
+
+    const good = await updateDoc({ docId: DOC_ID, content: validCanvas })
+    expect(good.structuredContent.ok).toBe(true)
+    const data = mockDoc.update.mock.calls[0][0].data
+    expect(JSON.parse(data.content)).toEqual(JSON.parse(validCanvas))
+    expect(data.metadata).toBeUndefined()
+  })
+
+  it("updateDoc leaves non-canvas docs on the markdown path", async () => {
+    mockDoc.findUnique.mockResolvedValue({ title: "Doc", storageProvider: "DATABASE", docType: "STANDARD" })
+    const result = await updateDoc({ docId: DOC_ID, content: "# Hello" })
+    expect(result.structuredContent.ok).toBe(true)
+    expect(mockDoc.update.mock.calls[0][0].data.content).toBe("# Hello")
+  })
+
+  it("getDoc returns the canvas JSON and docType", async () => {
+    mockDoc.findUnique.mockResolvedValueOnce({
+      id: DOC_ID, title: "Board", icon: null, content: validCanvas, metadata: null,
+      updatedAt: new Date("2026-07-01T00:00:00Z"), parent: null, children: [], docType: "CANVAS", roadmapItemId: null, workspaceId: WORKSPACE_ID,
+    })
+    const result = await getDoc({ docId: DOC_ID })
+    expect(result.content[0].text).toContain("Doc Type: CANVAS")
+    const data = result.structuredContent.data as { docType: string; content: string }
+    expect(data.docType).toBe("CANVAS")
+    expect(JSON.parse(data.content)).toEqual(JSON.parse(validCanvas))
+  })
+})
+
 // ─── listDocs recency filtering, sorting, and tree integrity ─────────────────
 
 describe("listDocs recency filtering and sorting", () => {

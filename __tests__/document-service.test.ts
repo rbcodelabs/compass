@@ -94,6 +94,22 @@ describe("immutable document service", () => {
     expect(mocks.db.doc.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ content: "new" }) }))
   })
 
+  it("rejects invalid canvas content before any write on legacy and pilot documents, and canonicalizes valid content", async () => {
+    const { updateDocument, createDocument } = await import("@/lib/document-service")
+    mocks.db.doc.findUnique.mockResolvedValue({ ...current, docType: "CANVAS", storageProvider: null, contentRef: null, content: "{}", revision: null })
+    await expect(updateDocument("doc-a", { content: "not json" }, { authorName: "Alice" })).rejects.toThrow("invalid-canvas")
+    expect(mocks.db.doc.update).not.toHaveBeenCalled()
+    mocks.db.doc.update.mockResolvedValue(current)
+    await updateDocument("doc-a", { content: '{"nodes":[],"edges":[],"x":1}' }, { authorName: "Alice" })
+    expect(mocks.db.doc.update.mock.calls[0][0].data.content).toBe('{\n\t"nodes": [],\n\t"edges": [],\n\t"x": 1\n}')
+    // Non-canvas content is untouched by the canvas gate.
+    mocks.db.doc.findUnique.mockResolvedValue({ ...current, docType: "STANDARD", storageProvider: null, contentRef: null, revision: null })
+    await updateDocument("doc-a", { content: "not json" }, { authorName: "Alice" })
+    expect(mocks.db.doc.update.mock.calls[1][0].data.content).toBe("not json")
+    await expect(createDocument({ workspaceId: "ws-legacy", title: "c", docType: "CANVAS", content: "[]" }, { authorName: "Alice" })).rejects.toThrow("invalid-canvas")
+    expect(mocks.db.doc.create).not.toHaveBeenCalled()
+  })
+
   it("replays create despite sibling reordering and refuses changed payload or actor", async () => {
     const { createDocument } = await import("@/lib/document-service")
     mocks.db.doc.create.mockResolvedValue(current)
