@@ -66,6 +66,7 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
   const widgetsRef = useRef(widgets)
   const dirtySinceSave = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const inFlightSave = useRef<Promise<unknown> | null>(null)
 
   const unpublished = hasUnpublishedChanges(widgets, baseline)
   const selected = widgets.find((widget) => widget.id === selectedId) ?? null
@@ -90,6 +91,8 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
 
   const saveNow = useCallback(async (): Promise<boolean> => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
+    // Saves are serialized: wait for one already on the wire so two PUTs never race.
+    if (inFlightSave.current) await inFlightSave.current.catch(() => undefined)
     if (!dirtySinceSave.current) return true
     const snapshot = widgetsRef.current
     if (!layoutSchema.safeParse(snapshot).success) {
@@ -98,7 +101,9 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
     }
     setSaveState("saving")
     try {
-      await api(endpoint, { method: "PUT", body: JSON.stringify({ widgets: snapshot }) })
+      const request = api(endpoint, { method: "PUT", body: JSON.stringify({ widgets: snapshot }) })
+      inFlightSave.current = request
+      await request
       if (widgetsRef.current === snapshot) {
         dirtySinceSave.current = false
         setSaveState("saved")

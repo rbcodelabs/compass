@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client"
+import { Prisma } from "@prisma/client"
 import type { AppPrismaClient } from "@/lib/db"
 import { layoutSchema, normalizeOrder, parseStoredWidgets, type PortalHomeWidget } from "./schema"
 
@@ -42,11 +42,19 @@ export async function loadPublishedWidgets(prisma: AppPrismaClient, workspaceId:
 export async function saveDraft(prisma: AppPrismaClient, workspaceId: string, input: unknown): Promise<PortalHomeWidget[]> {
   const widgets = normalizeOrder(layoutSchema.parse(input))
   const now = new Date()
-  await prisma.portalHomeLayout.upsert({
-    where: { workspaceId },
-    create: { workspaceId, draftWidgets: toJson(widgets), createdAt: now, updatedAt: now },
-    update: { draftWidgets: toJson(widgets), updatedAt: now },
-  })
+  try {
+    await prisma.portalHomeLayout.upsert({
+      where: { workspaceId },
+      create: { workspaceId, draftWidgets: toJson(widgets), createdAt: now, updatedAt: now },
+      update: { draftWidgets: toJson(widgets), updatedAt: now },
+    })
+  } catch (error) {
+    // Prisma upsert is not atomic: two first saves racing (an autosave and a flush
+    // before publish) can both miss the row, and the unique workspace index rejects
+    // the loser. The row exists now, so the loser is simply an update.
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error
+    await prisma.portalHomeLayout.update({ where: { workspaceId }, data: { draftWidgets: toJson(widgets), updatedAt: new Date() } })
+  }
   return widgets
 }
 
