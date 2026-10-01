@@ -19,9 +19,9 @@ export function LinkedObjectivesStrip({ objectives }: { objectives?: Array<{ id:
         {objectives.map((objective) => (
           <li
             key={objective.id}
-            className="inline-flex max-w-full items-center gap-1 rounded-full border border-indigo-100 bg-indigo-50/60 px-2 py-0.5 text-xs text-indigo-800"
+            className="inline-flex max-w-full items-center gap-1 rounded-full border border-border-default bg-surface-panel px-2 py-0.5 text-xs text-text-primary"
           >
-            <Target aria-hidden className="size-3 shrink-0 text-indigo-500" />
+            <Target aria-hidden className="size-3 shrink-0 text-text-subtle" />
             <span className="break-words">{objective.title}</span>
           </li>
         ))}
