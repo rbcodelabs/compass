@@ -27,6 +27,7 @@ const mockPrisma = {
   workspaceMember: mockWorkspaceMember,
   agent: mockAgent,
   agentOrgAdminGrant: mockAgentOrgAdminGrant,
+  $transaction: vi.fn(),
 };
 
 vi.mock("@/lib/db", () => ({
@@ -67,6 +68,7 @@ function uniqueConstraintError() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma));
   mockAuth.mockResolvedValue({ user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T>
     ? T
     : never);
