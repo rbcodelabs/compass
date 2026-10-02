@@ -330,7 +330,7 @@ async function mappedOrderedListPage<T extends { id: string; objectType: string;
   const last = selected.at(-1)
   return {
     items: await map(selected),
-    nextCursor: rows.length > limit && last ? encodeOrderedCursor({ id: last.id, objectType: last.objectType, order: last.order, context }) : null,
+    nextCursor: rows.length > limit && last ? encodeOrderedCursor({ id: last.id, objectType: last.objectType as OrderedCursorPayload["objectType"], order: last.order, context }) : null,
   }
 }
 

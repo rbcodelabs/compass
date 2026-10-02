@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 
 type CursorPayload = { id: string; createdAt: string; context: string }
-export type OrderedCursorPayload = { id: string; objectType: string; order: number; context: string }
+const ORDERED_CURSOR_OBJECT_TYPES = new Set(["OPPORTUNITY", "SOLUTION", "EXPERIMENT", "OBJECTIVE", "KEY_RESULT", "ROADMAP_ITEM", "TASK"])
+export type OrderedCursorPayload = { id: string; objectType: "OPPORTUNITY" | "SOLUTION" | "EXPERIMENT" | "OBJECTIVE" | "KEY_RESULT" | "ROADMAP_ITEM" | "TASK"; order: number; context: string }
 
 function secret(): string {
   const value = process.env.REST_CURSOR_SECRET || process.env.MCP_API_KEY
@@ -32,7 +33,7 @@ export function decodeCursor(cursor: string, context: string): CursorPayload | n
 
 export function decodeOrderedCursor(cursor: string, context: string): OrderedCursorPayload | null {
   const payload = decodeSignedCursor(cursor)
-  if (!payload || payload.context !== context || typeof payload.id !== "string" || !payload.id || typeof payload.objectType !== "string" || !payload.objectType || typeof payload.order !== "number" || !Number.isFinite(payload.order)) return null
+  if (!payload || payload.context !== context || typeof payload.id !== "string" || !payload.id || typeof payload.objectType !== "string" || !ORDERED_CURSOR_OBJECT_TYPES.has(payload.objectType) || typeof payload.order !== "number" || !Number.isInteger(payload.order)) return null
   return payload as OrderedCursorPayload
 }
 

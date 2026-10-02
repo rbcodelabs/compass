@@ -327,15 +327,15 @@ describe("REST domain execution", () => {
     expect(mocks.prisma.customFieldValue.findMany).not.toHaveBeenCalled()
   })
 
-  it("continues custom-field value pagination without dropping unset definitions", async () => {
+  it("recovers the second custom-field page by ID when display orders are equal", async () => {
     const row = (id: string, name: string, order: number) => ({
       id, name, fieldType: "TEXT", objectType: "OPPORTUNITY", options: null,
       sharedOptionSetId: null, required: false, order, sharedOptionSet: null,
     })
     mocks.prisma.opportunity.findFirst.mockResolvedValue({ id: THIRD })
     mocks.prisma.customFieldDefinition.findMany
-      .mockResolvedValueOnce([row(UUID, "Tier", 1), row(FOREIGN, "Area", 2)])
-      .mockResolvedValueOnce([row(FOREIGN, "Area", 2)])
+      .mockResolvedValueOnce([row(UUID, "Tier", 1), row(FOREIGN, "Area", 1)])
+      .mockResolvedValueOnce([row(FOREIGN, "Area", 1)])
     mocks.prisma.customFieldValue.findMany
       .mockResolvedValueOnce([{ fieldId: UUID, value: "Enterprise" }])
       .mockResolvedValueOnce([])

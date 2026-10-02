@@ -21,6 +21,13 @@ describe("REST cursors", () => {
     expect(decodeOrderedCursor(cursor, "custom-fields:other-workspace")).toBeNull()
   })
 
+  it("rejects invalid configured-order cursor shapes", () => {
+    const fractional = encodeOrderedCursor({ id: "field-1", objectType: "OPPORTUNITY", order: 1.5, context: "custom-fields:workspace" })
+    const unknownType = encodeOrderedCursor({ id: "field-1", objectType: "WORKSPACE" as never, order: 1, context: "custom-fields:workspace" })
+    expect(decodeOrderedCursor(fractional, "custom-fields:workspace")).toBeNull()
+    expect(decodeOrderedCursor(unknownType, "custom-fields:workspace")).toBeNull()
+  })
+
   it("fails closed in production without a configured secret", () => {
     vi.stubEnv("NODE_ENV", "production")
     vi.stubEnv("REST_CURSOR_SECRET", "")
