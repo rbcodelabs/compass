@@ -13,12 +13,15 @@ const mocks = vi.hoisted(() => ({
     task: { findFirst: vi.fn() },
     roadmapItem: { findFirst: vi.fn() },
     feedbackItem: { findFirst: vi.fn() },
+    objective: { findFirst: vi.fn() },
+    experiment: { findFirst: vi.fn() },
   },
   createOpportunity: vi.fn(),
   createTask: vi.fn(),
   updateRoadmapItem: vi.fn(),
   createRoadmapItem: vi.fn(),
   assertWorkspaceMember: vi.fn(),
+  updateExperiment: vi.fn(),
 }))
 
 vi.mock("@/lib/db", () => ({ default: () => mocks.prisma }))
@@ -36,8 +39,9 @@ vi.mock("@/lib/task-tool-handlers", () => ({
   moveTaskStatus: vi.fn(), updateTask: vi.fn(), linkTask: vi.fn(), unlinkTask: vi.fn(),
 }))
 vi.mock("@/lib/roadmap-tool-handlers", () => ({ updateRoadmapItem: mocks.updateRoadmapItem, createRoadmapItem: mocks.createRoadmapItem }))
+vi.mock("@/lib/experiment-update-tool", () => ({ updateExperiment: mocks.updateExperiment }))
 
-import { executeRestRoute, RestNotFoundError } from "@/lib/rest/execute"
+import { executeRestRoute, RestConflictError, RestNotFoundError } from "@/lib/rest/execute"
 import { REST_ROUTES } from "@/lib/rest/registry"
 
 const route = (operationId: string) => {
@@ -164,5 +168,31 @@ describe("REST domain execution", () => {
     })
     expect(mocks.createRoadmapItem).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: UUID, title: "Ship REST", horizon: "NOW", source: "API" }))
     expect(mocks.assertWorkspaceMember).toHaveBeenCalledWith(expect.objectContaining({ purpose: "USER" }), UUID)
+  })
+
+  it("scopes objective reads through the objective workspace column", async () => {
+    mocks.prisma.objective.findFirst.mockResolvedValue(null)
+    await expect(executeRestRoute(route("getObjective"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.prisma.objective.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: FOREIGN, workspaceId: UUID } }))
+  })
+
+  it("checks experiment tenant scope before using the shared optimistic update service", async () => {
+    mocks.prisma.experiment.findFirst.mockResolvedValue(null)
+    await expect(executeRestRoute(route("updateExperiment"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {},
+      body: { expectedUpdatedAt: "2026-10-02T12:00:00.000Z", title: "Changed" },
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.updateExperiment).not.toHaveBeenCalled()
+  })
+
+  it("reports a stale experiment update as a conflict", async () => {
+    mocks.prisma.experiment.findFirst.mockResolvedValue({ id: FOREIGN })
+    mocks.updateExperiment.mockRejectedValue(Object.assign(new Error("stale"), { code: "P2025" }))
+    await expect(executeRestRoute(route("updateExperiment"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {},
+      body: { expectedUpdatedAt: "2026-10-02T12:00:00.000Z", title: "Changed" },
+    })).rejects.toBeInstanceOf(RestConflictError)
   })
 })

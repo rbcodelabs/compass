@@ -156,8 +156,8 @@ export const metricBindingSchema = z.object({
   metric: metricSchema, createdAt: z.string(), updatedAt: z.string(), replacesBindingId: uuid.optional(),
 })
 export const metricObservationSchema = z.object({
-  id: uuid, workspaceId: uuid, bindingId: uuid, kind: z.string(), windowSince: z.string(), windowUntil: z.string(),
-  snapshot: z.record(z.string(), z.unknown()), data: z.record(z.string(), z.unknown()), retrievedAt: z.string(), createdAt: z.string(),
+  id: uuid, workspaceId: uuid, bindingId: uuid, revisionId: uuid, windowKind: z.string(),
+  snapshot: z.record(z.string(), z.unknown()), data: z.record(z.string(), z.unknown()), retrievedAt: z.string(),
 })
 export const scoringMetricSchema = z.object({ key: z.string(), label: z.string(), description: z.string().nullable().optional(), minValue: z.number(), maxValue: z.number(), weight: z.number(), direction: z.enum(["POSITIVE", "NEGATIVE"]), order: z.number().int().optional() })
 export const scoringModelSchema = resourceSchema.extend({
@@ -168,14 +168,12 @@ export const scoreSchema = resourceSchema.extend({
   scoringModelId: uuid, modelVersion: z.number().int().positive(), formulaSnapshot: z.unknown(), rawValues: z.record(z.string(), z.number()),
   rawScore: z.number(), normalizedScore: z.number(), scoredAt: z.string(),
 }).and(z.union([z.object({ opportunityId: uuid }), z.object({ solutionId: uuid })]))
-export const squadSchema = resourceSchema.extend({ workspaceId: uuid, name: z.string(), description: z.string().nullable(), color: z.string().nullable() })
-export const customFieldDefinitionSchema = resourceSchema.extend({
-  workspaceId: uuid, objectType: z.string(), name: z.string(), fieldType: z.string(), description: z.string().nullable(),
-  options: z.array(z.unknown()), required: z.boolean(), sortOrder: z.number().int(),
+export const squadSchema = z.object({ id: uuid, workspaceId: uuid, name: z.string(), color: z.string(), createdAt: z.string() })
+export const customFieldDefinitionSchema = z.object({
+  id: uuid, objectType: z.string(), name: z.string(), fieldType: z.string(), options: z.array(z.unknown()).nullable(),
+  sharedOptionSetId: uuid.nullable(), sharedOptionSetName: z.string().nullable(), required: z.boolean(), order: z.number().int(),
 })
-export const customFieldValueSchema = z.object({
-  id: uuid, fieldId: uuid, objectType: z.string(), objectId: uuid, value: z.unknown().nullable(), createdAt: z.string(), updatedAt: z.string(),
-})
+export const customFieldValueSchema = customFieldDefinitionSchema.extend({ currentValue: z.unknown().nullable() })
 
 export const taskLinkSchema = z.object({
   id: uuid,

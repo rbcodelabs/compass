@@ -108,8 +108,9 @@ const scoringMetricInput = scoringMetricSchema.omit({ order: true })
 const scoringModelCreate = z.object({ name: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), formulaType: z.enum(["WEIGHTED_SUM", "MULTIPLICATIVE"]), metrics: z.array(scoringMetricInput).min(1) }).strict()
 const scoringModelPatch = z.object({ name: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), formulaType: z.enum(["WEIGHTED_SUM", "MULTIPLICATIVE"]).optional(), metrics: z.array(scoringMetricInput).min(1).optional() }).strict()
 const scoreCreate = z.object({ values: z.record(z.string(), z.number().finite()) }).strict()
-const squadCreate = z.object({ name: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), color: z.string().trim().max(50).nullable().optional() }).strict()
-const customValuePath = z.object({ workspaceId: uuid, objectType: z.string().min(1).max(50), objectId: uuid })
+const squadCreate = z.object({ name: z.string().trim().min(1).max(255), color: z.string().trim().max(50).optional() }).strict()
+const customObjectType = z.enum(["OPPORTUNITY", "SOLUTION", "EXPERIMENT", "OBJECTIVE", "KEY_RESULT", "ROADMAP_ITEM", "TASK"])
+const customValuePath = z.object({ workspaceId: uuid, objectType: customObjectType, objectId: uuid })
 const customFieldValueCreate = z.object({ fieldId: uuid, value: z.unknown().nullable() }).strict()
 const entityLinksQuery = cursorQuery.extend({ opportunityId: uuid.optional(), objectiveId: uuid.optional(), solutionId: uuid.optional(), keyResultId: uuid.optional() }).strict().refine((value) => [value.opportunityId, value.objectiveId, value.solutionId, value.keyResultId].filter(Boolean).length === 1, { message: "Provide exactly one entity id." })
 
@@ -202,7 +203,7 @@ export const REST_ROUTES: readonly RestRoute[] = [
   write("POST", "createSquad", "/api/v1/workspaces/{workspaceId}/squads", "Create a squad", squadSchema, workspacePath, squadCreate, 201),
   read("getSquad", "/api/v1/workspaces/{workspaceId}/squads/{id}", "Get a squad", squadSchema, itemPath),
   write("PATCH", "updateSquad", "/api/v1/workspaces/{workspaceId}/squads/{id}", "Update a squad", squadSchema, itemPath, squadCreate.partial().strict()),
-  read("listCustomFieldDefinitions", "/api/v1/workspaces/{workspaceId}/custom-field-definitions", "List custom-field definitions", z.array(customFieldDefinitionSchema), workspacePath, z.object({ objectType: z.string().min(1).max(50).optional() }).strict()),
+  read("listCustomFieldDefinitions", "/api/v1/workspaces/{workspaceId}/custom-field-definitions", "List custom-field definitions", z.array(customFieldDefinitionSchema), workspacePath, z.object({ objectType: customObjectType.optional() }).strict()),
   read("listCustomFieldValues", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "List custom-field values", z.array(customFieldValueSchema), customValuePath),
   write("POST", "setCustomFieldValue", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "Set a custom-field value", customFieldValueSchema, customValuePath, customFieldValueCreate),
   read("listEntityLinks", "/api/v1/workspaces/{workspaceId}/entity-links", "List typed entity links", collectionOf(typedLinkSchema), workspacePath, entityLinksQuery),
