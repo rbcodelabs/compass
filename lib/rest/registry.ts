@@ -42,27 +42,27 @@ const write = (method: "POST" | "PATCH" | "DELETE", operationId: string, path: s
 })
 const opportunityCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), customerSegment: z.string().trim().max(255).nullable().optional(), status: opportunitySchema.shape.status.exclude(["ARCHIVED"]).optional(), squadId: uuid.nullable().optional(), linkedKeyResultId: uuid.nullable().optional() }).strict()
 const opportunityPatch = z.union([
-  z.object({ title: opportunityCreate.shape.title.optional(), description: opportunityCreate.shape.description, customerSegment: opportunityCreate.shape.customerSegment }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one editable field."),
+  z.object({ title: opportunityCreate.shape.title.optional(), description: opportunityCreate.shape.description, customerSegment: opportunityCreate.shape.customerSegment }).strict(),
   z.object({ status: opportunitySchema.shape.status }).strict(),
   z.object({ linkedKeyResultId: uuid.nullable() }).strict(),
 ])
 const solutionCreate = z.object({ opportunityId: uuid, title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional() }).strict()
 const solutionPatch = z.union([
-  z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one editable field."),
+  z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional() }).strict(),
   z.object({ status: solutionSchema.shape.status }).strict(),
 ])
 const assumptionCreate = z.object({ solutionId: uuid, title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), riskLevel: assumptionSchema.shape.riskLevel.optional() }).strict()
-const assumptionPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), riskLevel: assumptionSchema.shape.riskLevel.optional(), status: assumptionSchema.shape.status.optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
+const assumptionPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), riskLevel: assumptionSchema.shape.riskLevel.optional(), status: assumptionSchema.shape.status.optional() }).strict()
 const feedbackCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), type: z.enum(["BUG", "IDEA"]).optional(), submitterName: z.string().trim().max(255).nullable().optional(), submitterEmail: z.string().email().nullable().optional() }).strict()
 const feedbackPatch = z.union([
-  z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one editable field."),
+  z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional() }).strict(),
   z.object({ type: z.enum(["BUG", "IDEA"]) }).strict(),
   z.object({ status: z.enum([...FEEDBACK_STATUSES, "CLOSED"]) }).strict(),
   z.object({ opportunityId: uuid }).strict(),
 ])
 const taskCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), status: z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "IN_REVIEW", "DONE", "CANCELLED"]).optional(), priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).optional(), squadId: uuid.nullable().optional(), parentTaskId: uuid.nullable().optional(), assigneeUserId: uuid.nullable().optional(), ownerName: z.string().trim().max(255).nullable().optional(), storyPoints: z.number().nonnegative().nullable().optional(), dueDate: z.string().datetime().nullable().optional(), iteration: z.string().trim().max(100).nullable().optional() }).strict()
 const taskPatch = z.union([
-  taskCreate.omit({ parentTaskId: true, status: true }).partial().strict().refine((value) => Object.keys(value).length > 0, "Provide at least one editable field."),
+  taskCreate.omit({ parentTaskId: true, status: true }).partial().strict(),
   z.object({ status: taskCreate.shape.status.unwrap() }).strict(),
 ])
 const roadmapCreate = z.object({
@@ -72,7 +72,7 @@ const roadmapCreate = z.object({
   solutionId: uuid.nullable().optional(), keyResultId: uuid.nullable().optional(), opportunityId: uuid.nullable().optional(), squadId: uuid.nullable().optional(),
   startDate: z.string().date().nullable().optional(), endDate: z.string().date().nullable().optional(), isPrivate: z.boolean().optional(),
 }).strict()
-const roadmapPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), horizon: z.enum(["LATER", "NEXT", "NOW", "LAUNCHING", "LAUNCHED", "SHIPPED"]).optional(), status: z.enum(["ACTIVE", "ARCHIVED"]).optional(), isPrivate: z.boolean().optional(), startDate: z.string().datetime().nullable().optional(), endDate: z.string().datetime().nullable().optional(), solutionId: uuid.nullable().optional(), keyResultId: uuid.nullable().optional(), opportunityId: uuid.nullable().optional(), squadId: uuid.nullable().optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
+const roadmapPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), horizon: z.enum(["LATER", "NEXT", "NOW", "LAUNCHING", "LAUNCHED", "SHIPPED"]).optional(), status: z.enum(["ACTIVE", "ARCHIVED"]).optional(), isPrivate: z.boolean().optional(), startDate: z.string().datetime().nullable().optional(), endDate: z.string().datetime().nullable().optional(), solutionId: uuid.nullable().optional(), keyResultId: uuid.nullable().optional(), opportunityId: uuid.nullable().optional(), squadId: uuid.nullable().optional() }).strict()
 const taskLinkCreate = z.object({ linkedType: taskLinkPath.shape.linkedType, linkedId: uuid }).strict()
 const uploadPreparationCreate = z.object({
   filename: z.string().trim().min(1).max(255),

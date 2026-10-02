@@ -16,6 +16,15 @@ import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 
+export function roadmapCreateData(input: Parameters<typeof createRoadmapItem>[0], sortOrder: number) {
+  return {
+    workspaceId: input.workspaceId, title: input.title.trim(), horizon: input.horizon, description: input.description?.trim() || null,
+    sortOrder, solutionId: input.solutionId ?? null, keyResultId: input.keyResultId ?? null, opportunityId: input.opportunityId ?? null,
+    squadId: input.squadId ?? null, startDate: input.startDate ? new Date(input.startDate) : undefined,
+    endDate: input.endDate ? new Date(input.endDate) : undefined, isPrivate: input.isPrivate ?? false, source: input.source ?? "MCP",
+  }
+}
+
 export async function createRoadmapItem(input: {
   workspaceId: string; title: string; horizon: "NOW" | "NEXT" | "LATER" | "SHIPPED"; description?: string | null
   solutionId?: string | null; keyResultId?: string | null; opportunityId?: string | null; squadId?: string | null
@@ -25,12 +34,7 @@ export async function createRoadmapItem(input: {
   const workspace = await prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { name: true, slug: true, organization: { select: { slug: true } } } })
   if (!workspace) return fail(`Workspace "${input.workspaceId}" not found.`)
   const lastItem = await prisma.roadmapItem.findFirst({ where: { workspaceId: input.workspaceId, horizon: input.horizon, status: "ACTIVE" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
-  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, tx => tx.roadmapItem.create({ data: {
-    workspaceId: input.workspaceId, title: input.title.trim(), horizon: input.horizon, description: input.description?.trim() || null,
-    sortOrder: lastItem ? lastItem.sortOrder + 1 : 0, solutionId: input.solutionId ?? null, keyResultId: input.keyResultId ?? null,
-    opportunityId: input.opportunityId ?? null, squadId: input.squadId ?? null, startDate: input.startDate ? new Date(input.startDate) : undefined,
-    endDate: input.endDate ? new Date(input.endDate) : undefined, isPrivate: input.isPrivate ?? false,
-  } }))
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, tx => tx.roadmapItem.create({ data: roadmapCreateData(input, lastItem ? lastItem.sortOrder + 1 : 0) }))
   const format = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
   return ok(withUrlLine(
     `**Roadmap item created** (${input.horizon})\nID: ${item.id}\nTitle: ${item.title}` +

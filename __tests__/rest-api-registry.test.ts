@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { REST_ROUTES, matchRestRoute } from "@/lib/rest/registry"
 import { buildOpenApiDocument } from "@/lib/rest/openapi"
+import { roadmapCreateData } from "@/lib/roadmap-tool-handlers"
 
 describe("REST API registry", () => {
   it("defines every route with a unique operation id, scope, policy and schemas", () => {
@@ -47,11 +48,20 @@ describe("REST API registry", () => {
     }
     const schema = operation.requestBody.content["application/json"].schema
     expect(schema.anyOf ?? schema.oneOf).toHaveLength(3)
+    const route = REST_ROUTES.find((entry) => entry.operationId === "updateOpportunity")!
+    expect(route.bodySchema?.safeParse({}).success).toBe(true)
+    expect(route.bodySchema?.safeParse({ title: "Changed", status: "ACTIVE" }).success).toBe(false)
   })
 
   it("registers roadmap creation as a write-scoped workspace policy", () => {
     const create = REST_ROUTES.find((route) => route.operationId === "createRoadmapItem")
     expect(create).toMatchObject({ method: "POST", scope: "api:write", authorizationPolicy: "workspace-writer", status: 201 })
+  })
+
+  it("persists roadmap provenance for MCP and REST creation", () => {
+    const base = { workspaceId: "11111111-1111-4111-8111-111111111111", title: "Ship", horizon: "NOW" as const }
+    expect(roadmapCreateData(base, 0).source).toBe("MCP")
+    expect(roadmapCreateData({ ...base, source: "API" }, 0).source).toBe("API")
   })
 
   it("generates one OpenAPI operation for every registry route", () => {
