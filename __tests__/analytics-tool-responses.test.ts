@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({ link: vi.fn(), create: vi.fn(), list: vi.fn(), refresh: vi.fn(), update: vi.fn(), updateBinding: vi.fn(), getObservation: vi.fn() }))
-vi.mock("@/lib/analytics/service", () => ({ linkMetric: mocks.link, createMetric: mocks.create, listMetrics: mocks.list, refreshBinding: mocks.refresh, updateMetric: mocks.update, updateBinding: mocks.updateBinding, getObservation: mocks.getObservation }))
+vi.mock("@/lib/analytics/service", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/analytics/service")>(),
+  linkMetric: mocks.link,
+  createMetric: mocks.create,
+  listMetrics: mocks.list,
+  refreshBinding: mocks.refresh,
+  updateMetric: mocks.update,
+  updateBinding: mocks.updateBinding,
+  getObservation: mocks.getObservation,
+}))
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ userId: "user", purpose: "USER" }) }))
 import { handleAnalyticsTool } from "@/lib/analytics/tool-handlers"
 import { AnalyticsError } from "@/lib/analytics/providers"
