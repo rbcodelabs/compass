@@ -262,6 +262,8 @@ export async function acceptCardSortNewEntry({
 
     let suggestionRecorded = false
     if (entry.suggestedValue && round.state === "OPEN") {
+      const stillOpen = await tx.cardSortRound.updateMany({ where: { id: roundId, workspaceId, state: "OPEN" }, data: { updatedAt: new Date() } })
+      if (stillOpen.count !== 1) return { entryId, opportunityId: opportunity.id, suggestionRecorded }
       const factor = await loadFactor(tx, { workspaceId, fieldDefinitionId: round.fieldDefinitionId })
       if (factor.options.some((option) => option.value === entry.suggestedValue)) {
         await tx.cardSortProposal.upsert({

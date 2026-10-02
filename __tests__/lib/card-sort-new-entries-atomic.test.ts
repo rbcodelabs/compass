@@ -10,6 +10,7 @@ const prisma = vi.hoisted(() => ({
     updateMany: vi.fn(),
     update: vi.fn(),
   },
+  cardSortRound: { updateMany: vi.fn() },
   cardSortProposal: { upsert: vi.fn() },
   $transaction: vi.fn(),
 }))
@@ -47,6 +48,7 @@ describe("acceptCardSortNewEntry atomicity", () => {
       return { count: 1 }
     })
     prisma.cardSortNewEntry.update.mockRejectedValue(new Error("injected finalization failure"))
+    prisma.cardSortRound.updateMany.mockResolvedValue({ count: 1 })
     prisma.cardSortProposal.upsert.mockImplementation(async () => { state.committed.proposals.push("proposal") })
     prisma.$transaction.mockImplementation(async (callback: (tx: typeof prisma) => Promise<unknown>) => {
       const snapshot = structuredClone(state.committed)
@@ -65,5 +67,18 @@ describe("acceptCardSortNewEntry atomicity", () => {
       opportunities: [],
       proposals: [],
     })
+  })
+
+  it("accepts after reveal wins the race without recording the stale suggestion", async () => {
+    prisma.cardSortNewEntry.update.mockImplementation(async () => {
+      state.committed.entry.acceptedObjectId = "opportunity"
+    })
+    prisma.cardSortRound.updateMany.mockResolvedValue({ count: 0 })
+
+    await expect(acceptCardSortNewEntry({ workspaceId: "workspace", roundId: "round", userId: "facilitator", entryId: "entry" }))
+      .resolves.toEqual({ entryId: "entry", opportunityId: "opportunity", suggestionRecorded: false })
+
+    expect(state.committed.entry).toMatchObject({ status: "ACCEPTED", acceptedObjectId: "opportunity" })
+    expect(prisma.cardSortProposal.upsert).not.toHaveBeenCalled()
   })
 })
