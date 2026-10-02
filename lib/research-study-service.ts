@@ -8,6 +8,7 @@ import { readSessionAnalysis, readStudySynthesis } from "@/lib/research-analysis
 import { decodeCursor, encodeCursor } from "@/lib/rest/cursor"
 
 export class ResearchStudyError extends Error {}
+export class ResearchCursorError extends ResearchStudyError {}
 
 /** Lifecycle states a ResearchSession row can hold (schema: VarChar(20)). */
 export const RESEARCH_SESSION_STATUSES = ["PENDING", "IN_PROGRESS", "COMPLETED", "ABANDONED", "EXPIRED"] as const
@@ -411,6 +412,11 @@ const PAGE_SIZE = 20
 function assertOffset(offset: number) {
   if (!Number.isInteger(offset) || offset < 0 || offset > 1_000_000) throw new ResearchStudyError("Offset must be a whole number between 0 and 1,000,000")
 }
+function pageSize(limit: number | undefined) {
+  const value = limit ?? PAGE_SIZE
+  if (!Number.isInteger(value) || value < 1 || value > 100) throw new ResearchStudyError("Limit must be between 1 and 100")
+  return value
+}
 
 /**
  * Sessions page in creation order so that a session starting mid-read appends
@@ -420,7 +426,7 @@ export async function listResearchSessions(
   scope: ResearchWorkspaceScope,
   actor: ResearchStudyActor,
   studyId: string,
-  { status, offset = 0 }: { status?: ResearchSessionStatus; offset?: number } = {},
+  { status, offset = 0, limit }: { status?: ResearchSessionStatus; offset?: number; limit?: number } = {},
 ) {
   if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   // findMemberStudy enforces workspace membership AND excludes PM_INTERVIEW
@@ -429,14 +435,15 @@ export async function listResearchSessions(
   // tools becoming a PM-interview transcript backdoor.
   const { prisma, study } = await findMemberStudy(scope, actor, studyId)
   assertOffset(offset)
+  const take = pageSize(limit)
   const sessions = await prisma.researchSession.findMany({
     where: { studyId: study.id, ...(status ? { status } : {}) },
     select: sessionSelect,
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    skip: offset, take: PAGE_SIZE + 1,
+    skip: offset, take: take + 1,
   })
-  const page = sessions.slice(0, PAGE_SIZE)
-  return { studyId: study.id, items: page.map(publicSession), count: page.length, nextOffset: sessions.length > PAGE_SIZE ? offset + PAGE_SIZE : null }
+  const page = sessions.slice(0, take)
+  return { studyId: study.id, items: page.map(publicSession), count: page.length, nextOffset: sessions.length > take ? offset + take : null }
 }
 
 export async function getResearchSession(
@@ -444,21 +451,22 @@ export async function getResearchSession(
   actor: ResearchStudyActor,
   studyId: string,
   sessionId: string,
-  { offset = 0 }: { offset?: number } = {},
+  { offset = 0, limit }: { offset?: number; limit?: number } = {},
 ) {
   if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, study } = await findMemberStudy(scope, actor, studyId)
   assertOffset(offset)
+  const take = pageSize(limit)
   // Scoped to the already-authorized study, so a session id from another study
   // (including a PM interview's) resolves to nothing rather than to its turns.
   const session = await prisma.researchSession.findFirst({ where: { id: sessionId, studyId: study.id }, select: sessionSelect })
   if (!session) throw new ResearchStudyError("Session not found")
   const turns = await prisma.researchTurn.findMany({
     where: { sessionId: session.id }, select: turnSelect,
-    orderBy: { sequence: "asc" }, skip: offset, take: PAGE_SIZE + 1,
+    orderBy: { sequence: "asc" }, skip: offset, take: take + 1,
   })
   // Spreads the allowlisted projection's own return value, never the database row.
-  return { ...publicSession(session), turns: turns.slice(0, PAGE_SIZE), nextOffset: turns.length > PAGE_SIZE ? offset + PAGE_SIZE : null }
+  return { ...publicSession(session), turns: turns.slice(0, take), nextOffset: turns.length > take ? offset + take : null }
 }
 
 /**
@@ -489,23 +497,24 @@ export async function listResearchSyntheses(
   scope: ResearchWorkspaceScope,
   actor: ResearchStudyActor,
   studyId: string,
-  { offset = 0 }: { offset?: number } = {},
+  { offset = 0, limit }: { offset?: number; limit?: number } = {},
 ) {
   if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, study } = await findMemberStudy(scope, actor, studyId)
   assertOffset(offset)
+  const take = pageSize(limit)
   const rows = await prisma.researchSynthesis.findMany({
     where: { studyId: study.id, kind: "CROSS_SESSION" },
     select: { id: true, content: true, sessionCount: true, model: true, promptVersion: true, createdAt: true },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    skip: offset, take: PAGE_SIZE + 1,
+    skip: offset, take: take + 1,
   })
-  const page = rows.slice(0, PAGE_SIZE)
+  const page = rows.slice(0, take)
   return {
     studyId: study.id,
     items: page.map(row => ({ id: row.id, sessionCount: row.sessionCount, model: row.model, promptVersion: row.promptVersion, createdAt: row.createdAt, content: readStudySynthesis(row.content) })),
     count: page.length,
-    nextOffset: rows.length > PAGE_SIZE ? offset + PAGE_SIZE : null,
+    nextOffset: rows.length > take ? offset + take : null,
   }
 }
 
@@ -519,7 +528,7 @@ export async function listResearchStudies(scope: ResearchWorkspaceScope, actor: 
   let after: { createdAt: string; id: string } | undefined
   if (cursor !== undefined) {
     const decoded = cursor.length <= 1_024 ? decodeCursor(cursor, cursorContext) : null
-    if (!decoded) throw new ResearchStudyError("Invalid research cursor for this workspace or status")
+    if (!decoded) throw new ResearchCursorError("Invalid research cursor for this workspace or status")
     after = decoded
   }
   const studies = await prisma.researchStudy.findMany({

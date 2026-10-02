@@ -44,7 +44,7 @@ import { addSolutionComment, addSolutionPlan, deleteSolutionComment, getSolution
 import * as researchStudies from "@/lib/research-study-service"
 import { ResearchAnalysisError, storeAgentStudySynthesis } from "@/lib/research-analysis-service"
 import { promoteResearchFindingToEvidence, ResearchPromotionError } from "@/lib/research-evidence-promotion"
-import { CompassUrlNotConfiguredError, researchParticipantUrl } from "@/lib/compass-url"
+import { researchParticipantUrl } from "@/lib/compass-url"
 import { PmInterviewError, readOwnedPmInterview } from "@/lib/pm-interview-service"
 import { createCardSortRound, getCardSortTally, listCardSortFactors, listCardSortRounds, listMyCardSortProposals, loadCardSortBoard, proposeCardSortMoves, setCardSortRoundState, withdrawCardSortProposal, CardSortError, CARD_SORT_ERROR_STATUS } from "@/lib/card-sort"
 import { acceptCardSortNewEntry, listCardSortNewEntries, proposeCardSortNewEntry, rejectCardSortNewEntry, withdrawCardSortNewEntry } from "@/lib/card-sort-new-entries"
@@ -387,16 +387,16 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "createResearchStudy": return researchCall(async () => { const created = await researchStudies.createResearchStudy({ workspaceId }, researchActor(actor), { ...body, status: "DRAFT" } as never); return serialize(await researchStudies.getResearchStudy({ workspaceId }, researchActor(actor), created.id)) })
     case "getResearchStudy": return researchCall(async () => serialize(await researchStudies.getResearchStudy({ workspaceId }, researchActor(actor), id)))
     case "updateResearchStudy": return researchCall(async () => { await researchStudies.updateResearchStudy({ workspaceId }, researchActor(actor), id, body as never); return serialize(await researchStudies.getResearchStudy({ workspaceId }, researchActor(actor), id)) })
-    case "activateResearchStudy": return researchCall(async () => participantLinkResult(await researchStudies.activateResearchStudy({ workspaceId }, researchActor(actor), id)))
+    case "activateResearchStudy": return researchCall(async () => participantCredentialAction(() => researchStudies.activateResearchStudy({ workspaceId }, researchActor(actor), id)))
     case "closeResearchStudy": return researchCall(async () => participantLinkResult(await researchStudies.closeResearchStudy({ workspaceId }, researchActor(actor), id)))
     case "archiveResearchStudy": return researchCall(async () => participantLinkResult(await researchStudies.archiveResearchStudy({ workspaceId }, researchActor(actor), id)))
-    case "issueResearchParticipantLink": return researchCall(async () => participantLinkResult(await researchStudies.issueResearchLink({ workspaceId }, researchActor(actor), id)))
-    case "rotateResearchParticipantLink": return researchCall(async () => participantLinkResult(await researchStudies.regenerateResearchLink({ workspaceId }, researchActor(actor), id)))
+    case "issueResearchParticipantLink": return researchCall(async () => participantCredentialAction(() => researchStudies.issueResearchLink({ workspaceId }, researchActor(actor), id)))
+    case "rotateResearchParticipantLink": return researchCall(async () => participantCredentialAction(() => researchStudies.regenerateResearchLink({ workspaceId }, researchActor(actor), id)))
     case "revokeResearchParticipantLinks": return researchCall(async () => participantLinkResult(await researchStudies.revokeResearchLinks({ workspaceId }, researchActor(actor), id)))
-    case "listResearchSessions": return researchOffsetPage(`research-sessions:${workspaceId}:${id}:${input.query.status ?? "all"}`, input.query, offset => researchStudies.listResearchSessions({ workspaceId }, researchActor(actor), id, { status: input.query.status as researchStudies.ResearchSessionStatus | undefined, offset }))
-    case "getResearchSession": return researchCall(async () => { const context = `research-session:${workspaceId}:${id}:${input.params.relatedId}`; const offset = restOffset(input.query.cursor, context); const result = await researchStudies.getResearchSession({ workspaceId }, researchActor(actor), id, input.params.relatedId, { offset }); const { nextOffset, ...safe } = result; return { ...serialize(safe) as Record<string, unknown>, nextCursor: nextOffset === null ? null : signedOffset(nextOffset, context) } })
-    case "listResearchSyntheses": return researchSynthesisPage(`research-syntheses:${workspaceId}:${id}`, input.query, offset => researchStudies.listResearchSyntheses({ workspaceId }, researchActor(actor), id, { offset }))
-    case "createResearchSynthesis": { if (!actor.userId) throw new RestNotFoundError(); return researchCall(async () => publicSynthesis(await storeAgentStudySynthesis(id, actor.userId!, body))) }
+    case "listResearchSessions": { const limit = Number(input.query.limit ?? 50); return researchOffsetPage(`research-sessions:${workspaceId}:${id}:${input.query.status ?? "all"}:limit:${limit}`, input.query, offset => researchStudies.listResearchSessions({ workspaceId }, researchActor(actor), id, { status: input.query.status as researchStudies.ResearchSessionStatus | undefined, offset, limit })) }
+    case "getResearchSession": return researchCall(async () => { const limit = Number(input.query.limit ?? 50); const context = `research-session:${workspaceId}:${id}:${input.params.relatedId}:limit:${limit}`; const offset = restOffset(input.query.cursor, context); const result = await researchStudies.getResearchSession({ workspaceId }, researchActor(actor), id, input.params.relatedId, { offset, limit }); const { nextOffset, ...safe } = result; return { ...serialize(safe) as Record<string, unknown>, nextCursor: nextOffset === null ? null : signedOffset(nextOffset, context) } })
+    case "listResearchSyntheses": { const limit = Number(input.query.limit ?? 50); return researchSynthesisPage(`research-syntheses:${workspaceId}:${id}:limit:${limit}`, input.query, offset => researchStudies.listResearchSyntheses({ workspaceId }, researchActor(actor), id, { offset, limit })) }
+    case "createResearchSynthesis": { if (!actor.userId) throw new RestNotFoundError(); return researchCall(async () => { await researchStudies.getResearchStudy({ workspaceId }, researchActor(actor), id); return publicSynthesis(await storeAgentStudySynthesis(id, actor.userId!, body)) }) }
     case "promoteResearchEvidence": return researchCall(async () => { const result = await promoteResearchFindingToEvidence({ workspaceId, researchSynthesisId: id, ...body } as never); return serialize({ id: result.evidence.id, findingKey: result.findingKey, researchSynthesisId: result.evidence.researchSynthesisId, sourceTurnIds: result.sourceTurnIds, opportunityId: result.evidence.opportunityId, solutionId: result.evidence.solutionId, assumptionId: result.evidence.assumptionId, replayed: result.replayed }) })
     case "getPmInterview": { if (actor.purpose !== "USER" || !actor.userId) throw new RestNotFoundError(); try { return serialize(await readOwnedPmInterview(await workspaceSlugScope(prisma, workspaceId), { userId: actor.userId }, id)) } catch (error) { if (error instanceof PmInterviewError) { if (error.status === 404) throw new RestNotFoundError(); if (error.status === 409) throw new RestConflictError(error.message); throw new RestValidationError(error.message) } throw error } }
     case "listAnalyticsConnections": return arrayPage(`analytics-connections:${workspaceId}`, input.query, await analyticsService.listConnections(actor, workspaceId))
@@ -450,6 +450,7 @@ function researchActor(actor: ReturnType<typeof getMcpActor>): researchStudies.R
 
 async function researchCall<T>(run: () => Promise<T>): Promise<T> {
   try { return await run() } catch (error) {
+    if (error instanceof researchStudies.ResearchCursorError) throw new RestCursorError(error.message)
     if (error instanceof ResearchAnalysisError || error instanceof ResearchPromotionError) {
       if (error.status === 404) throw new RestNotFoundError()
       if (error.status === 409) throw new RestConflictError(error.message)
@@ -465,12 +466,16 @@ async function researchCall<T>(run: () => Promise<T>): Promise<T> {
 }
 
 function participantLinkResult(result: { id: string; status?: string; token?: string }) {
-  let participantUrl: string | null = null
-  if (result.token) {
-    try { participantUrl = researchParticipantUrl(result.token) }
-    catch (error) { if (!(error instanceof CompassUrlNotConfiguredError)) throw error }
-  }
+  const participantUrl = result.token ? researchParticipantUrl(result.token) : null
   return { id: result.id, ...(result.status ? { status: result.status } : {}), participantUrl }
+}
+
+async function participantCredentialAction(run: () => Promise<{ id: string; status?: string; token?: string }>) {
+  // Validate the disclosure channel before minting a one-time credential. A
+  // missing/unsafe deployment origin must not consume a token the caller can
+  // never retrieve again.
+  researchParticipantUrl("configuration-check")
+  return participantLinkResult(await run())
 }
 
 function restOffset(value: unknown, context: string): number {

@@ -3,12 +3,14 @@ import { synthesisSchema } from "@/lib/research-analysis"
 import { PM_INTERVIEW_TARGET_TYPES, pmInterviewContextSchema } from "@/lib/pm-interview-contracts"
 import { CARD_SORT_NEW_ENTRY_STATUSES } from "@/lib/card-sort-new-entries"
 import { CARD_SORT_ROUND_STATES } from "@/lib/card-sort"
+import { RESEARCH_SESSION_STATUSES } from "@/lib/research-study-service"
 import { collectionOf, cursorQuery, uuid } from "@/lib/rest/schemas"
 
 const timestamp = z.string().datetime()
 const nullableTimestamp = timestamp.nullable()
 const option = z.object({ label: z.string(), value: z.string() }).strict()
 const cardSortObjectType = z.enum(["OPPORTUNITY", "SOLUTION", "EXPERIMENT", "OBJECTIVE", "KEY_RESULT", "ROADMAP_ITEM", "TASK"])
+export const REST_RESEARCH_SESSION_STATUSES = RESEARCH_SESSION_STATUSES
 
 const researchGuide = z.array(z.union([z.string(), z.object({ id: z.string(), text: z.string() }).strict()])).max(20)
 export const researchStudyInput = z.object({
@@ -81,7 +83,7 @@ export const analyticsConnectionInput = z.object({ provider: z.literal("vercel")
 export const cardSortFactor = z.object({ id: uuid, name: z.string(), objectType: cardSortObjectType, options: z.array(option), sharedOptionSetName: z.string().nullable() }).strict()
 export const cardSortRound = z.object({ id: uuid, name: z.string(), objectType: cardSortObjectType, fieldDefinitionId: uuid, factorName: z.string(), state: z.enum(CARD_SORT_ROUND_STATES), createdById: uuid, createdAt: timestamp, revealedAt: nullableTimestamp, closedAt: nullableTimestamp, proposalCount: z.number().int().nonnegative().nullable(), myProposalCount: z.number().int().nonnegative() }).strict()
 export const cardSortProposal = z.object({ objectId: uuid, objectTitle: z.string(), proposedValue: z.string(), fromValue: z.string().nullable(), rationale: z.string().nullable(), updatedAt: timestamp }).strict()
-export const cardSortProposalResult = z.object({ applied: z.array(uuid), skipped: z.array(z.object({ objectId: uuid, code: z.enum(["NOT_FOUND", "INVALID_FACTOR", "WRONG_STATE", "INVALID_VALUE", "NO_OP", "HIDDEN_UNTIL_REVEAL", "FORBIDDEN"]), reason: z.string() }).strict()) }).strict()
+export const cardSortProposalResult = z.object({ applied: z.array(uuid), skipped: z.array(z.object({ objectId: uuid, code: z.enum(["NOT_FOUND", "INVALID_FACTOR", "WRONG_STATE", "INVALID_VALUE", "NO_OP", "HIDDEN_UNTIL_REVEALED", "FORBIDDEN"]), reason: z.string() }).strict()) }).strict()
 const boardProposal = z.object({ objectId: uuid, userId: uuid, userName: z.string(), proposedValue: z.string(), fromValue: z.string().nullable(), rationale: z.string().nullable(), isMine: z.boolean() }).strict()
 export const cardSortBoard = z.object({ round: cardSortRound, factor: z.object({ id: uuid, name: z.string(), options: z.array(option) }).strict(), rows: z.array(z.object({ objectId: uuid, title: z.string(), currentValue: z.string().nullable(), myProposedValue: z.string().nullable(), myRationale: z.string().nullable() }).strict()), proposals: z.array(boardProposal), isFacilitator: z.boolean(), canSeeTally: z.boolean() }).strict()
 const tallyObject = z.object({

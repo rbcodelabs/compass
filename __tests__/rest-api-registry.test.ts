@@ -63,6 +63,9 @@ describe("REST API registry", () => {
     for (const operationId of ["activateResearchStudy", "issueResearchParticipantLink", "rotateResearchParticipantLink", "revokeResearchParticipantLinks", "createCardSortRound", "revealCardSortRound", "proposeCardSortMoves", "acceptCardSortNewEntry"]) {
       expect(REST_ROUTES.find(route => route.operationId === operationId)?.authorizationPolicy, operationId).toBe("human-member")
     }
+    for (const route of REST_ROUTES.filter(route => route.path.includes("card-sort"))) {
+      expect(route.authorizationPolicy, route.operationId).toBe("human-member")
+    }
     for (const operationId of ["saveAnalyticsConnection", "disconnectAnalyticsConnection"]) {
       expect(REST_ROUTES.find(route => route.operationId === operationId)?.authorizationPolicy, operationId).toBe("human-admin")
     }

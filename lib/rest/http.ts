@@ -51,7 +51,7 @@ export async function handleRestRequest(request: Request, method: RestMethod): P
   } catch (error) {
     if (error instanceof ZodError) return problem(request, 422, "validation_failed", "Unprocessable Content", "The request did not satisfy the endpoint schema.", error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })))
     if (error instanceof RestNotFoundError || error instanceof McpAuthzError) return problem(request, 404, "not_found", "Not Found", "The requested resource was not found or is not accessible.")
-    if (error instanceof RestForbiddenError) return problem(request, 403, "forbidden", "Forbidden", "A human workspace member with the required role must perform this operation.")
+    if (error instanceof RestForbiddenError) return problem(request, 403, "forbidden", "Forbidden", error.message || "A human workspace member with the required role must perform this operation.")
     if (error instanceof AnalyticsError && ["NOT_FOUND_OR_ACCESS_DENIED", "ACCESS_DENIED"].includes(error.code)) return problem(request, 404, "not_found", "Not Found", "The requested resource was not found or is not accessible.")
     if (error instanceof AnalyticsError) return problem(request, 409, "conflict", "Conflict", "The analytics operation could not be completed.")
     if (error instanceof DocumentError) {
