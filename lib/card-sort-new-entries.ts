@@ -215,6 +215,13 @@ export async function acceptCardSortNewEntry({
       throw new CardSortError("WRONG_STATE", "This round is closed, so pending entries can no longer be resolved.")
     }
     assertOpportunityRound(round)
+    const eligible = await tx.cardSortRound.updateMany({
+      where: { id: roundId, workspaceId, createdById: userId, state: { in: ["OPEN", "REVEALED"] } },
+      data: { updatedAt: new Date() },
+    })
+    if (eligible.count !== 1) {
+      throw new CardSortError("WRONG_STATE", "This round closed before the entry could be accepted.")
+    }
 
     const entry = await tx.cardSortNewEntry.findFirst({ where: { id: entryId, roundId } })
     if (!entry) throw new CardSortError("NOT_FOUND", `New entry not found: ${entryId}`)

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const state = vi.hoisted(() => ({
   committed: { entry: { id: "entry", status: "PENDING", acceptedObjectId: null as string | null, resolvedById: null as string | null }, opportunities: [] as string[], proposals: [] as string[] },
+  roundState: "OPEN",
 }))
 
 const prisma = vi.hoisted(() => ({
@@ -21,7 +22,7 @@ vi.mock("@/lib/db", () => ({ default: () => prisma }))
 vi.mock("@/lib/card-sort", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/card-sort")>(),
   loadRound: vi.fn(async () => ({
-    id: "round", workspaceId: "workspace", objectType: "OPPORTUNITY", state: "OPEN",
+    id: "round", workspaceId: "workspace", objectType: "OPPORTUNITY", state: state.roundState,
     createdById: "facilitator", fieldDefinitionId: "field",
   })),
   loadFactor: vi.fn(async () => ({ name: "Timing", options: [{ value: "now", label: "Now" }] })),
@@ -40,6 +41,7 @@ describe("acceptCardSortNewEntry atomicity", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     state.committed = { entry: { id: "entry", status: "PENDING", acceptedObjectId: null, resolvedById: null }, opportunities: [], proposals: [] }
+    state.roundState = "OPEN"
     prisma.cardSortNewEntry.findFirst.mockImplementation(async () => ({
       ...state.committed.entry, roundId: "round", userId: "participant", title: "New idea",
       description: null, suggestedValue: "now",
@@ -71,17 +73,27 @@ describe("acceptCardSortNewEntry atomicity", () => {
     })
   })
 
-  it("accepts after reveal wins the race without recording the stale suggestion", async () => {
+  it("accepts an entry from an already revealed round without recording its suggestion", async () => {
+    state.roundState = "REVEALED"
     prisma.cardSortNewEntry.update.mockImplementation(async () => {
       state.committed.entry.acceptedObjectId = "opportunity"
     })
-    prisma.cardSortRound.updateMany.mockResolvedValue({ count: 0 })
 
     await expect(acceptCardSortNewEntry({ workspaceId: "workspace", roundId: "round", userId: "facilitator", entryId: "entry" }))
       .resolves.toEqual({ entryId: "entry", opportunityId: "opportunity", suggestionRecorded: false })
 
     expect(state.committed.entry).toMatchObject({ status: "ACCEPTED", acceptedObjectId: "opportunity" })
     expect(prisma.cardSortProposal.upsert).not.toHaveBeenCalled()
+  })
+
+  it("does not claim or create when close wins the acceptance race", async () => {
+    prisma.cardSortRound.updateMany.mockResolvedValue({ count: 0 })
+
+    await expect(acceptCardSortNewEntry({ workspaceId: "workspace", roundId: "round", userId: "facilitator", entryId: "entry" }))
+      .rejects.toMatchObject({ code: "WRONG_STATE" })
+
+    expect(prisma.cardSortNewEntry.updateMany).not.toHaveBeenCalled()
+    expect(state.committed.opportunities).toEqual([])
   })
 
   it("does not create or withdraw entries after reveal wins the state race", async () => {
