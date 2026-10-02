@@ -22,7 +22,9 @@ import { deleteKeyResult, deleteObjective, updateKeyResult, updateObjective } fr
 import { updateExperiment } from "@/lib/experiment-update-tool"
 import { handleAnalyticsTool } from "@/lib/analytics/tool-handlers"
 import * as analyticsService from "@/lib/analytics/service"
-import { getCustomFieldValues, listCustomFieldDefinitions, setCustomFieldValue } from "@/lib/custom-field-tool-handlers"
+import { getCustomFieldValues, setCustomFieldValue } from "@/lib/custom-field-tool-handlers"
+import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions"
+import type { CustomFieldValue } from "@/lib/types"
 import { listLinksTool } from "@/lib/typed-link-tool-handlers"
 import { getEligibleParentKeyResults } from "@/lib/okr-hierarchy"
 import { archiveScoringModel, createScoringModel, getOpportunityScore, getSolutionScore, listScoringModels, scoreOpportunity, scoreSolution, updateScoringModel } from "@/lib/scoring-tool-handlers"
@@ -259,8 +261,29 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "getSquad": return serialize(found(await prisma.squad.findFirst({ where: { id, workspaceId }, select: select.squad })))
     case "createSquad": return serialize(await prisma.squad.create({ data: { workspaceId, name: String(body.name), color: String(body.color ?? "#6366f1"), source: "API" }, select: select.squad }))
     case "updateSquad": { const updated = await prisma.squad.updateMany({ where: { id, workspaceId }, data: { ...pick(body, ["name", "color"]), source: "API" } }); if (!updated.count) throw new RestNotFoundError(); return serialize(found(await prisma.squad.findFirst({ where: { id, workspaceId }, select: select.squad }))) }
-    case "listCustomFieldDefinitions": return toolItems(await listCustomFieldDefinitions({ workspaceId, objectType: input.query.objectType as never }))
-    case "listCustomFieldValues": { await assertCustomObjectWorkspace(prisma, workspaceId, input.params.objectType, input.params.objectId); return toolItems(await getCustomFieldValues({ objectType: input.params.objectType as never, objectId: input.params.objectId })) }
+    case "listCustomFieldDefinitions": return mappedListPage(`custom-field-definitions:${workspaceId}:${filters(input.query, ["objectType"])}`, input.query,
+      (cursor, take) => prisma.customFieldDefinition.findMany({
+        where: { workspaceId, ...pick(input.query, ["objectType"]), ...cursorWhere(cursor) },
+        include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }], take,
+      }),
+      async rows => rows.map(toCustomFieldDefinitionData))
+    case "listCustomFieldValues": {
+      const objectType = input.params.objectType, objectId = input.params.objectId
+      await assertCustomObjectWorkspace(prisma, workspaceId, objectType, objectId)
+      return mappedListPage(`custom-field-values:${workspaceId}:${objectType}:${objectId}`, input.query,
+        (cursor, take) => prisma.customFieldDefinition.findMany({
+          where: { workspaceId, objectType, ...cursorWhere(cursor) },
+          include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }], take,
+        }),
+        async rows => {
+          if (!rows.length) return []
+          const values = await prisma.customFieldValue.findMany({ where: { fieldId: { in: rows.map(row => row.id) }, objectId } })
+          const byField = new Map(values.map(value => [value.fieldId, value.value as CustomFieldValue]))
+          return rows.map(row => ({ ...toCustomFieldDefinitionData(row), currentValue: byField.get(row.id) ?? null }))
+        })
+    }
     case "setCustomFieldValue": { await assertCustomObjectWorkspace(prisma, workspaceId, input.params.objectType, input.params.objectId); await assertCustomField(prisma, workspaceId, input.params.objectType, String(body.fieldId)); ensureTool(await setCustomFieldValue({ objectType: input.params.objectType as never, objectId: input.params.objectId, fieldId: String(body.fieldId), value: body.value as never })); const values = toolItems(await getCustomFieldValues({ objectType: input.params.objectType as never, objectId: input.params.objectId })); return found(values.find((value) => value.id === body.fieldId)) }
     case "listEntityLinks": return normalizeLinks(ensureTool(await listLinksTool({ workspaceId, ...(input.query as { opportunityId?: string; objectiveId?: string; solutionId?: string; keyResultId?: string; limit?: number; cursor?: string }) })) as Record<string, unknown>)
   }
@@ -291,6 +314,24 @@ async function listPage(context: string, query: Record<string, unknown>, load: (
   const items = rows.slice(0, limit).map(serialize) as Array<Record<string, unknown>>
   const last = items.at(-1)
   return { items, nextCursor: hasMore && last ? encodeCursor({ id: String(last.id), createdAt: String(last.createdAt), context }) : null }
+}
+
+async function mappedListPage<T extends { id: string; createdAt: Date }>(
+  context: string,
+  query: Record<string, unknown>,
+  load: (cursor: { id: string; createdAt: string } | null, take: number) => Promise<T[]>,
+  map: (rows: T[]) => Promise<unknown[]>,
+): Promise<{ items: unknown[]; nextCursor: string | null }> {
+  const limit = Number(query.limit ?? 50)
+  const cursor = typeof query.cursor === "string" ? decodeCursor(query.cursor, context) : null
+  if (query.cursor && !cursor) throw new RestCursorError("The cursor is invalid for this collection or filter set.")
+  const rows = await load(cursor, limit + 1)
+  const selected = rows.slice(0, limit)
+  const last = selected.at(-1)
+  return {
+    items: await map(selected),
+    nextCursor: rows.length > limit && last ? encodeCursor({ id: last.id, createdAt: last.createdAt.toISOString(), context }) : null,
+  }
 }
 
 function cursorWhere(cursor: { id: string; createdAt: string } | null): Record<string, unknown> {

@@ -74,12 +74,52 @@ describe("REST API registry", () => {
   })
 
   it("uses cursor collection envelopes for every Phase 2 list", () => {
-    for (const operationId of ["listMetrics", "listMetricBindings", "listMetricObservations", "listScoringModels"]) {
+    for (const operationId of [
+      "listOkrCycles", "listObjectives", "listKeyResults", "listCheckIns",
+      "listExperiments", "listExperimentResults", "listMetrics", "listMetricBindings",
+      "listMetricObservations", "listScoringModels", "listSquads",
+      "listCustomFieldDefinitions", "listCustomFieldValues", "listEntityLinks",
+    ]) {
       const route = REST_ROUTES.find((entry) => entry.operationId === operationId)!
       expect(route.querySchema).toBeDefined()
       expect(route.responseSchema.safeParse({ items: [], nextCursor: null }).success, operationId).toBe(true)
       expect(route.responseSchema.safeParse([]).success, operationId).toBe(false)
     }
+  })
+
+  it("publishes scoring and binding patch invariants in OpenAPI", () => {
+    const document = buildOpenApiDocument()
+    const scoringOperation = document.paths["/api/v1/workspaces/{workspaceId}/scoring-models/{id}"].patch as unknown as {
+      requestBody: { content: { "application/json": { schema: unknown } } }
+    }
+    const scoring = scoringOperation.requestBody.content["application/json"].schema as {
+      anyOf: Array<{ properties?: Record<string, unknown>; required?: string[] }>
+    }
+    expect(scoring.anyOf.length).toBeGreaterThan(1)
+    for (const branch of scoring.anyOf.filter((candidate) => candidate.properties?.formulaType)) {
+      expect(branch.required).toEqual(expect.arrayContaining(["formulaType", "metrics"]))
+    }
+
+    const bindingOperation = document.paths["/api/v1/workspaces/{workspaceId}/metric-bindings/{id}"].patch as unknown as {
+      requestBody: { content: { "application/json": { schema: unknown } } }
+    }
+    const binding = bindingOperation.requestBody.content["application/json"].schema as {
+      anyOf: Array<{ required?: string[] }>
+    }
+    expect(binding.anyOf).toHaveLength(3)
+    expect(binding.anyOf.every((branch) => (branch.required?.length ?? 0) >= 1)).toBe(true)
+  })
+
+  it("publishes valid ISO dates and bounded ordered analytics windows in OpenAPI", () => {
+    const document = buildOpenApiDocument()
+    const operation = document.paths["/api/v1/workspaces/{workspaceId}/metric-bindings/{id}"].patch as unknown as {
+      requestBody: { content: { "application/json": { schema: unknown } } }
+    }
+    const binding = operation.requestBody.content["application/json"].schema
+    const published = JSON.stringify(binding)
+    expect(published).toContain('"format":"date"')
+    expect(published).toContain("since must be on or before until")
+    expect(published).toContain("1 to 90 inclusive calendar days")
   })
 
   it("matches concrete paths and extracts parameters", () => {

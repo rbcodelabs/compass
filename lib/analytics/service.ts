@@ -18,8 +18,16 @@ export const targetSchema = z.object({ targetType: z.enum(["EXPERIMENT", "ROADMA
 export type MetricTarget = z.infer<typeof targetSchema>
 export const linkMetricSchema = targetSchema.extend({ metricId: z.string().uuid(), baseline: windowSchema.nullable().optional(), followup: followupPolicySchema.optional(), target: z.number().finite().optional() }).strict()
 export type LinkMetricInput = z.infer<typeof linkMetricSchema>
-export const updateMetricBindingSchema = z.object({ baseline: windowSchema.nullable().optional(), followup: followupPolicySchema.optional(), target: z.number().finite().nullable().optional() }).strict()
-  .refine(input => input.baseline !== undefined || input.followup !== undefined || input.target !== undefined, "At least one binding field is required.")
+const optionalBindingFields = {
+  baseline: windowSchema.nullable().optional(),
+  followup: followupPolicySchema.optional(),
+  target: z.number().finite().nullable().optional(),
+}
+export const updateMetricBindingSchema = z.union([
+  z.object({ ...optionalBindingFields, baseline: windowSchema.nullable() }).strict(),
+  z.object({ ...optionalBindingFields, followup: followupPolicySchema }).strict(),
+  z.object({ ...optionalBindingFields, target: z.number().finite().nullable() }).strict(),
+])
 export type UpdateMetricBindingInput = z.infer<typeof updateMetricBindingSchema>
 export type MetricDTO = { id: string; workspaceId: string; revisionId: string; revision: number; name: string; unit: string; provider: ProviderId; connectionId: string | null; query: MetricQuery; archived: boolean }
 export type ConnectionDTO = Pick<AnalyticsConnection, "id" | "provider" | "projectId" | "teamId" | "enabled" | "health" | "generation">

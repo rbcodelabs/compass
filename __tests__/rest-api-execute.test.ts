@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const UUID = "11111111-1111-4111-8111-111111111111"
 const FOREIGN = "22222222-2222-4222-8222-222222222222"
+const THIRD = "33333333-3333-4333-8333-333333333333"
 
 const mocks = vi.hoisted(() => ({
   prisma: {
@@ -16,7 +17,10 @@ const mocks = vi.hoisted(() => ({
     feedbackItem: { findFirst: vi.fn() },
     objective: { findFirst: vi.fn() },
     experiment: { findFirst: vi.fn(), updateMany: vi.fn() },
-    customFieldDefinition: { findFirst: vi.fn() },
+    customFieldDefinition: { findFirst: vi.fn(), findMany: vi.fn() },
+    customFieldValue: { findMany: vi.fn() },
+    workspace: { findFirst: vi.fn() },
+    scoringModel: { findMany: vi.fn() },
   },
   createOpportunity: vi.fn(),
   createTask: vi.fn(),
@@ -25,6 +29,9 @@ const mocks = vi.hoisted(() => ({
   assertWorkspaceMember: vi.fn(),
   updateExperiment: vi.fn(),
   captureWorkspaceMutation: vi.fn(),
+  listBindingsPage: vi.fn(),
+  listObservationsPage: vi.fn(),
+  listScoringModels: vi.fn(),
 }))
 
 vi.mock("@/lib/db", () => ({ default: () => mocks.prisma }))
@@ -44,6 +51,15 @@ vi.mock("@/lib/task-tool-handlers", () => ({
 vi.mock("@/lib/roadmap-tool-handlers", () => ({ updateRoadmapItem: mocks.updateRoadmapItem, createRoadmapItem: mocks.createRoadmapItem }))
 vi.mock("@/lib/experiment-update-tool", () => ({ updateExperiment: mocks.updateExperiment }))
 vi.mock("@/lib/workspace-update-mutations", () => ({ captureWorkspaceMutation: mocks.captureWorkspaceMutation }))
+vi.mock("@/lib/analytics/service", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/analytics/service")>(),
+  listBindingsPage: mocks.listBindingsPage,
+  listObservationsPage: mocks.listObservationsPage,
+}))
+vi.mock("@/lib/scoring-tool-handlers", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/scoring-tool-handlers")>(),
+  listScoringModels: mocks.listScoringModels,
+}))
 
 import { executeRestRoute, RestConflictError, RestNotFoundError } from "@/lib/rest/execute"
 import { REST_ROUTES } from "@/lib/rest/registry"
@@ -246,5 +262,98 @@ describe("REST domain execution", () => {
     expect(mocks.prisma.customFieldDefinition.findFirst).toHaveBeenCalledWith({
       where: { id: FOREIGN, workspaceId: UUID, objectType: "OPPORTUNITY" }, select: { id: true },
     })
+  })
+
+  it("continues metric-binding pagination exactly after the cursor boundary", async () => {
+    const firstAt = new Date("2026-10-02T12:00:00.000Z")
+    mocks.listBindingsPage
+      .mockResolvedValueOnce({ items: [{ id: UUID, createdAt: firstAt }], next: { id: UUID, at: firstAt } })
+      .mockResolvedValueOnce({ items: [{ id: FOREIGN, createdAt: new Date("2026-10-02T11:00:00.000Z") }], next: null })
+    const query = { targetType: "EXPERIMENT", targetId: FOREIGN, limit: 1 }
+    const first = await executeRestRoute(route("listMetricBindings"), { params: { workspaceId: UUID }, query, body: undefined }) as { nextCursor: string }
+    await executeRestRoute(route("listMetricBindings"), { params: { workspaceId: UUID }, query: { ...query, cursor: first.nextCursor }, body: undefined })
+    expect(mocks.listBindingsPage).toHaveBeenLastCalledWith(expect.anything(), UUID, { targetType: "EXPERIMENT", targetId: FOREIGN }, {
+      limit: 1, cursor: { id: UUID, at: firstAt },
+    })
+  })
+
+  it("continues metric-observation pagination exactly after the cursor boundary", async () => {
+    const firstAt = new Date("2026-10-02T12:00:00.000Z")
+    mocks.listObservationsPage
+      .mockResolvedValueOnce({ items: [{ id: UUID, retrievedAt: firstAt }], next: { id: UUID, at: firstAt } })
+      .mockResolvedValueOnce({ items: [{ id: FOREIGN, retrievedAt: new Date("2026-10-02T11:00:00.000Z") }], next: null })
+    const first = await executeRestRoute(route("listMetricObservations"), { params: { workspaceId: UUID, id: FOREIGN }, query: { limit: 1 }, body: undefined }) as { nextCursor: string }
+    await executeRestRoute(route("listMetricObservations"), { params: { workspaceId: UUID, id: FOREIGN }, query: { limit: 1, cursor: first.nextCursor }, body: undefined })
+    expect(mocks.listObservationsPage).toHaveBeenLastCalledWith(expect.anything(), UUID, FOREIGN, {
+      limit: 1, cursor: { id: UUID, at: firstAt },
+    })
+  })
+
+  it("paginates custom-field definitions and returns an empty value collection", async () => {
+    const firstAt = new Date("2026-10-02T12:00:00.000Z")
+    mocks.prisma.customFieldDefinition.findMany
+      .mockResolvedValueOnce([
+        { id: UUID, name: "Tier", fieldType: "TEXT", objectType: "OPPORTUNITY", options: null, sharedOptionSetId: null, required: false, order: 1, sharedOptionSet: null, createdAt: firstAt },
+        { id: FOREIGN, name: "Area", fieldType: "TEXT", objectType: "OPPORTUNITY", options: null, sharedOptionSetId: null, required: false, order: 2, sharedOptionSet: null, createdAt: new Date("2026-10-02T11:00:00.000Z") },
+      ])
+      .mockResolvedValueOnce([
+        { id: FOREIGN, name: "Area", fieldType: "TEXT", objectType: "OPPORTUNITY", options: null, sharedOptionSetId: null, required: false, order: 2, sharedOptionSet: null, createdAt: new Date("2026-10-02T11:00:00.000Z") },
+      ])
+      .mockResolvedValueOnce([])
+    const definitions = await executeRestRoute(route("listCustomFieldDefinitions"), {
+      params: { workspaceId: UUID }, query: { objectType: "OPPORTUNITY", limit: 1 }, body: undefined,
+    }) as { items: unknown[]; nextCursor: string | null }
+    expect(definitions.items).toHaveLength(1)
+    expect(definitions.nextCursor).toEqual(expect.any(String))
+    expect(mocks.prisma.customFieldDefinition.findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({ take: 2 }))
+    const continued = await executeRestRoute(route("listCustomFieldDefinitions"), {
+      params: { workspaceId: UUID }, query: { objectType: "OPPORTUNITY", limit: 1, cursor: definitions.nextCursor }, body: undefined,
+    }) as { items: Array<{ id: string }>; nextCursor: string | null }
+    expect(continued).toMatchObject({ items: [{ id: FOREIGN }], nextCursor: null })
+    expect(mocks.prisma.customFieldDefinition.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.objectContaining({ workspaceId: UUID, objectType: "OPPORTUNITY", OR: expect.any(Array) }), take: 2,
+    }))
+
+    mocks.prisma.opportunity.findFirst.mockResolvedValue({ id: FOREIGN })
+    const values = await executeRestRoute(route("listCustomFieldValues"), {
+      params: { workspaceId: UUID, objectType: "OPPORTUNITY", objectId: FOREIGN }, query: { limit: 1 }, body: undefined,
+    })
+    expect(values).toEqual({ items: [], nextCursor: null })
+    expect(mocks.prisma.customFieldValue.findMany).not.toHaveBeenCalled()
+  })
+
+  it("continues custom-field value pagination without dropping unset definitions", async () => {
+    const firstAt = new Date("2026-10-02T12:00:00.000Z")
+    const secondAt = new Date("2026-10-02T11:00:00.000Z")
+    const row = (id: string, name: string, createdAt: Date) => ({
+      id, name, fieldType: "TEXT", objectType: "OPPORTUNITY", options: null,
+      sharedOptionSetId: null, required: false, order: 1, sharedOptionSet: null, createdAt,
+    })
+    mocks.prisma.opportunity.findFirst.mockResolvedValue({ id: THIRD })
+    mocks.prisma.customFieldDefinition.findMany
+      .mockResolvedValueOnce([row(UUID, "Tier", firstAt), row(FOREIGN, "Area", secondAt)])
+      .mockResolvedValueOnce([row(FOREIGN, "Area", secondAt)])
+    mocks.prisma.customFieldValue.findMany
+      .mockResolvedValueOnce([{ fieldId: UUID, value: "Enterprise" }])
+      .mockResolvedValueOnce([])
+
+    const first = await executeRestRoute(route("listCustomFieldValues"), {
+      params: { workspaceId: UUID, objectType: "OPPORTUNITY", objectId: THIRD }, query: { limit: 1 }, body: undefined,
+    }) as { items: Array<{ id: string; currentValue: unknown }>; nextCursor: string }
+    expect(first.items).toEqual([expect.objectContaining({ id: UUID, currentValue: "Enterprise" })])
+    const second = await executeRestRoute(route("listCustomFieldValues"), {
+      params: { workspaceId: UUID, objectType: "OPPORTUNITY", objectId: THIRD }, query: { limit: 1, cursor: first.nextCursor }, body: undefined,
+    })
+    expect(second).toEqual({ items: [expect.objectContaining({ id: FOREIGN, currentValue: null })], nextCursor: null })
+  })
+
+  it("returns an empty scoring-model REST collection with the default 200 status", async () => {
+    mocks.prisma.workspace.findFirst.mockResolvedValue({ organization: { id: UUID, slug: "acme" } })
+    mocks.listScoringModels.mockResolvedValue(success({ items: [], count: 0 }))
+    mocks.prisma.scoringModel.findMany.mockResolvedValue([])
+    const scoringRoute = route("listScoringModels")
+    const result = await executeRestRoute(scoringRoute, { params: { workspaceId: UUID }, query: {}, body: undefined })
+    expect(scoringRoute.status ?? 200).toBe(200)
+    expect(result).toEqual({ items: [], nextCursor: null })
   })
 })

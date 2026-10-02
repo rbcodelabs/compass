@@ -50,7 +50,7 @@ export async function handleAnalyticsTool(name: AnalyticsTool, input: unknown) {
       case "list_metric_bindings": { const { workspaceId, includeInactive, ...x } = parse(name); data = await service.listBindings(actor, workspaceId, x, { includeInactive }); break }
       case "get_metric_binding": { const x = parse(name); data = await service.getBinding(actor, x.workspaceId, x.bindingId); break }
       case "link_metric": { const { workspaceId, ...x } = parse(name); data = await service.linkMetric(actor, workspaceId, x); break }
-      case "update_metric_binding": { const { workspaceId, bindingId, ...x } = parse(name); data = await service.updateBinding(actor, workspaceId, bindingId, x); break }
+      case "update_metric_binding": { const { workspaceId, bindingId, ...x } = parse(name); data = await service.updateBinding(actor, workspaceId, bindingId, service.updateMetricBindingSchema.parse(x)); break }
       case "unlink_metric": { const x = parse(name); data = await service.unlinkMetric(actor, x.workspaceId, x.bindingId); id = x.bindingId; break }
       case "refresh_metric_binding": { const x = parse(name); data = await service.refreshBinding(actor, x.workspaceId, x.bindingId, x.requestId); id = x.bindingId; break }
       case "list_metric_observations": { const x = parse(name); data = await service.listObservations(actor, x.workspaceId, x.bindingId); break }
