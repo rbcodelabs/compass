@@ -31,6 +31,15 @@ describe("REST API registry", () => {
     expect(matchRestRoute("PUT", "/api/v1/workspaces/11111111-1111-4111-8111-111111111111/opportunities")).toBeNull()
   })
 
+  it("rejects mixed lifecycle mutations so a PATCH cannot partially commit", () => {
+    const opportunity = REST_ROUTES.find((route) => route.operationId === "updateOpportunity")!
+    expect(opportunity.bodySchema?.safeParse({ title: "Changed", status: "ACTIVE" }).success).toBe(false)
+    expect(opportunity.bodySchema?.safeParse({ title: "Changed", description: "Together" }).success).toBe(true)
+
+    const feedback = REST_ROUTES.find((route) => route.operationId === "updateFeedback")!
+    expect(feedback.bodySchema?.safeParse({ title: "Changed", opportunityId: "11111111-1111-4111-8111-111111111111" }).success).toBe(false)
+  })
+
   it("generates one OpenAPI operation for every registry route", () => {
     const document = buildOpenApiDocument()
     const operations = Object.values(document.paths).flatMap((path) => Object.values(path))

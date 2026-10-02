@@ -2,7 +2,7 @@ import getPrisma from "@/lib/db"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { assertWorkspaceMember, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { decodeCursor, encodeCursor } from "@/lib/rest/cursor"
-import type { RestRoute } from "@/lib/rest/registry"
+import type { RestAuthorizationPolicy, RestRoute } from "@/lib/rest/registry"
 import { createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
 import { createSolution, updateSolution } from "@/lib/solution-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
@@ -39,7 +39,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
   const prisma = getPrisma()
   const actor = getMcpActor()
   const workspaceId = input.params.workspaceId
-  if (workspaceId) await assertWorkspaceMember(actor, workspaceId)
+  await enforcePolicy(route.authorizationPolicy, actor, workspaceId)
   const body = input.body ?? {}
   const id = input.params.id
 
@@ -52,22 +52,22 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
       const where = isServiceActor(actor) ? {} : await agentWorkspaceWhere(actor)
       return listPage("workspaces", input.query, (cursor, take) => prisma.workspace.findMany({ where: { AND: [where, cursorWhere(cursor)] }, select: select.workspace, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
     }
-    case "getWorkspace": return found(await prisma.workspace.findFirst({ where: { id: workspaceId, ...(isServiceActor(actor) ? {} : await agentWorkspaceWhere(actor)) }, select: select.workspace }))
+    case "getWorkspace": return serialize(found(await prisma.workspace.findFirst({ where: { id: workspaceId, ...(isServiceActor(actor) ? {} : await agentWorkspaceWhere(actor)) }, select: select.workspace })))
 
     case "listOpportunities": return listPage(`opportunities:${workspaceId}:${filters(input.query, ["status", "squadId"])}`, input.query, (cursor, take) => prisma.opportunity.findMany({ where: { workspaceId, ...pick(input.query, ["status", "squadId"]), ...cursorWhere(cursor) }, select: select.opportunity, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
-    case "getOpportunity": return found(await prisma.opportunity.findFirst({ where: { id, workspaceId }, select: select.opportunity }))
-    case "createOpportunity": { await validateOpportunityRefs(prisma, workspaceId, body); const result = ensureTool(await createOpportunity({ workspaceId, title: String(body.title), description: nullable(body.description), customerSegment: nullable(body.customerSegment), status: body.status as "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | undefined, squadId: nullable(body.squadId), keyResultId: nullable(body.linkedKeyResultId) })); return serialize(found(await prisma.opportunity.findFirst({ where: { workspaceId, id: String((result as { id: string }).id) }, select: select.opportunity }))) }
+    case "getOpportunity": return serialize(found(await prisma.opportunity.findFirst({ where: { id, workspaceId }, select: select.opportunity })))
+    case "createOpportunity": { await validateOpportunityRefs(prisma, workspaceId, body); const result = ensureTool(await createOpportunity({ workspaceId, title: String(body.title), description: nullable(body.description), customerSegment: nullable(body.customerSegment), status: body.status as "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | undefined, squadId: nullable(body.squadId), keyResultId: nullable(body.linkedKeyResultId), source: "API" })); return serialize(found(await prisma.opportunity.findFirst({ where: { workspaceId, id: String((result as { id: string }).id) }, select: select.opportunity }))) }
     case "updateOpportunity": {
       await validateOpportunityRefs(prisma, workspaceId, body)
       const existing = await prisma.opportunity.findFirst({ where: { id, workspaceId }, select: { id: true } }); if (!existing) throw new RestNotFoundError()
       const editable = pick(body, ["title", "description", "customerSegment"])
       if (Object.keys(editable).length) ensureTool(await updateOpportunity({ opportunityId: id, ...editable }))
-      if (body.status) ensureTool(await updateOpportunityStatus({ opportunityId: id, status: body.status as "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | "ARCHIVED" }))
-      if (body.linkedKeyResultId !== undefined) ensureTool(await updateOpportunityKeyResult({ opportunityId: id, keyResultId: nullable(body.linkedKeyResultId) ?? null, workspaceId }))
+      if (body.status) ensureTool(await updateOpportunityStatus({ opportunityId: id, status: body.status as "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | "ARCHIVED", source: "API" }))
+      if (body.linkedKeyResultId !== undefined) ensureTool(await updateOpportunityKeyResult({ opportunityId: id, keyResultId: nullable(body.linkedKeyResultId) ?? null, workspaceId, source: "API" }))
       return serialize(found(await prisma.opportunity.findFirst({ where: { id, workspaceId }, select: select.opportunity })))
     }
     case "linkOpportunityObjective": {
-      const data = ensureTool(await linkOpportunityToObjectiveTool({ workspaceId, opportunityId: id, objectiveId: String(body.objectiveId) })) as { link: unknown }
+      const data = ensureTool(await linkOpportunityToObjectiveTool({ workspaceId, opportunityId: id, objectiveId: String(body.objectiveId), source: "API" })) as { link: unknown }
       return serialize(data.link)
     }
     case "unlinkOpportunityObjective": {
@@ -76,15 +76,15 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     }
 
     case "listSolutions": return listPage(`solutions:${workspaceId}:${filters(input.query, ["status", "opportunityId"])}`, input.query, (cursor, take) => prisma.solution.findMany({ where: { workspaceId, ...pick(input.query, ["status", "opportunityId"]), ...cursorWhere(cursor) }, select: select.solution, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
-    case "getSolution": return found(await prisma.solution.findFirst({ where: { id, workspaceId }, select: select.solution }))
+    case "getSolution": return serialize(found(await prisma.solution.findFirst({ where: { id, workspaceId }, select: select.solution })))
     case "createSolution": {
       const opportunity = await prisma.opportunity.findFirst({ where: { id: String(body.opportunityId), workspaceId }, select: { id: true } })
       if (!opportunity) throw new RestNotFoundError()
-      const result = ensureTool(await createSolution({ opportunityId: opportunity.id, title: String(body.title), description: nullable(body.description) })); return serialize(found(await prisma.solution.findFirst({ where: { id: String((result as { id: string }).id), workspaceId }, select: select.solution })))
+      const result = ensureTool(await createSolution({ opportunityId: opportunity.id, title: String(body.title), description: nullable(body.description), source: "API" })); return serialize(found(await prisma.solution.findFirst({ where: { id: String((result as { id: string }).id), workspaceId }, select: select.solution })))
     }
-    case "updateSolution": { const existing = await prisma.solution.findFirst({ where: { id, workspaceId }, select: { id: true } }); if (!existing) throw new RestNotFoundError(); const editable = pick(body, ["title", "description"]); if (editable.description === null) editable.description = ""; if (Object.keys(editable).length) ensureTool(await updateSolution({ solutionId: id, ...editable })); if (body.status) ensureTool(await updateSolutionStatus({ solutionId: id, status: body.status as never })); return serialize(found(await prisma.solution.findFirst({ where: { id, workspaceId }, select: select.solution }))) }
+    case "updateSolution": { const existing = await prisma.solution.findFirst({ where: { id, workspaceId }, select: { id: true } }); if (!existing) throw new RestNotFoundError(); const editable = pick(body, ["title", "description"]); if (editable.description === null) editable.description = ""; if (Object.keys(editable).length) ensureTool(await updateSolution({ solutionId: id, ...editable })); if (body.status) ensureTool(await updateSolutionStatus({ solutionId: id, status: body.status as never, source: "API" })); return serialize(found(await prisma.solution.findFirst({ where: { id, workspaceId }, select: select.solution }))) }
     case "linkSolutionKeyResult": {
-      const data = ensureTool(await linkSolutionToKeyResultTool({ workspaceId, solutionId: id, keyResultId: String(body.keyResultId) })) as { link: unknown }
+      const data = ensureTool(await linkSolutionToKeyResultTool({ workspaceId, solutionId: id, keyResultId: String(body.keyResultId), source: "API" })) as { link: unknown }
       return serialize(data.link)
     }
     case "unlinkSolutionKeyResult": {
@@ -93,13 +93,13 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     }
 
     case "listAssumptions": return listPage(`assumptions:${workspaceId}:${filters(input.query, ["status", "riskLevel", "solutionId"])}`, input.query, (cursor, take) => prisma.assumption.findMany({ where: { solution: { workspaceId }, ...pick(input.query, ["status", "riskLevel", "solutionId"]), ...cursorWhere(cursor) }, select: select.assumption, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
-    case "getAssumption": return found(await prisma.assumption.findFirst({ where: { id, solution: { workspaceId } }, select: select.assumption }))
+    case "getAssumption": return serialize(found(await prisma.assumption.findFirst({ where: { id, solution: { workspaceId } }, select: select.assumption })))
     case "createAssumption": {
       const solution = await prisma.solution.findFirst({ where: { id: String(body.solutionId), workspaceId }, select: { id: true } })
       if (!solution) throw new RestNotFoundError()
-      const result = ensureTool(await createAssumption({ solutionId: solution.id, title: String(body.title), description: nullable(body.description), riskLevel: body.riskLevel as "HIGH" | "MEDIUM" | "LOW" | undefined })); return serialize(found(await prisma.assumption.findFirst({ where: { id: String((result as { id: string }).id), solution: { workspaceId } }, select: select.assumption })))
+      const result = ensureTool(await createAssumption({ solutionId: solution.id, title: String(body.title), description: nullable(body.description), riskLevel: body.riskLevel as "HIGH" | "MEDIUM" | "LOW" | undefined, source: "API" })); return serialize(found(await prisma.assumption.findFirst({ where: { id: String((result as { id: string }).id), solution: { workspaceId } }, select: select.assumption })))
     }
-    case "updateAssumption": { const existing = await prisma.assumption.findFirst({ where: { id, solution: { workspaceId } }, select: { id: true } }); if (!existing) throw new RestNotFoundError(); ensureTool(await updateAssumption({ assumptionId: id, ...body })); return serialize(found(await prisma.assumption.findFirst({ where: { id, solution: { workspaceId } }, select: select.assumption }))) }
+    case "updateAssumption": { const existing = await prisma.assumption.findFirst({ where: { id, solution: { workspaceId } }, select: { id: true } }); if (!existing) throw new RestNotFoundError(); ensureTool(await updateAssumption({ assumptionId: id, ...body, source: "API" })); return serialize(found(await prisma.assumption.findFirst({ where: { id, solution: { workspaceId } }, select: select.assumption }))) }
     case "deleteAssumption": {
       const existing = await prisma.assumption.findFirst({ where: { id, solution: { workspaceId } }, select: { id: true } })
       if (!existing) throw new RestNotFoundError()
@@ -108,15 +108,15 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     }
 
     case "listFeedback": return listPage(`feedback:${workspaceId}:${filters(input.query, ["status", "type", "opportunityId"])}`, input.query, (cursor, take) => prisma.feedbackItem.findMany({ where: { workspaceId, ...pick(input.query, ["status", "type", "opportunityId"]), ...cursorWhere(cursor) }, select: select.feedback, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
-    case "getFeedback": return found(await prisma.feedbackItem.findFirst({ where: { id, workspaceId }, select: select.feedback }))
-    case "createFeedback": { await validateFeedbackRefs(prisma, workspaceId, body); const result = ensureTool(await createFeedback({ workspaceId, title: String(body.title), description: nullable(body.description) ?? undefined, type: body.type as "BUG" | "IDEA" | undefined, submitterName: nullable(body.submitterName) ?? undefined, submitterEmail: nullable(body.submitterEmail) ?? undefined })); const createdId = String((result as { id: string }).id); if (body.opportunityId) ensureTool(await linkFeedbackToOpportunity({ feedbackId: createdId, opportunityId: String(body.opportunityId) })); return serialize(found(await prisma.feedbackItem.findFirst({ where: { id: createdId, workspaceId }, select: select.feedback }))) }
+    case "getFeedback": return serialize(found(await prisma.feedbackItem.findFirst({ where: { id, workspaceId }, select: select.feedback })))
+    case "createFeedback": { const result = ensureTool(await createFeedback({ workspaceId, title: String(body.title), description: nullable(body.description) ?? undefined, type: body.type as "BUG" | "IDEA" | undefined, submitterName: nullable(body.submitterName) ?? undefined, submitterEmail: nullable(body.submitterEmail) ?? undefined, source: "API" })); const createdId = String((result as { id: string }).id); return serialize(found(await prisma.feedbackItem.findFirst({ where: { id: createdId, workspaceId }, select: select.feedback }))) }
     case "updateFeedback": { await validateFeedbackRefs(prisma, workspaceId, body); const existing = await prisma.feedbackItem.findFirst({ where: { id, workspaceId }, select: { id: true } }); if (!existing) throw new RestNotFoundError(); const text = pick(body, ["title", "description"]); if (Object.keys(text).length) ensureTool(await updateFeedback({ feedbackId: id, ...text })); if (body.status) ensureTool(await updateFeedbackStatus({ feedbackId: id, status: body.status as never })); if (body.type) ensureTool(await updateFeedbackType({ feedbackId: id, type: body.type as "BUG" | "IDEA" })); if (typeof body.opportunityId === "string") ensureTool(await linkFeedbackToOpportunity({ feedbackId: id, opportunityId: body.opportunityId })); return serialize(found(await prisma.feedbackItem.findFirst({ where: { id, workspaceId }, select: select.feedback }))) }
     case "prepareFeedbackAttachmentUpload": return serialize(ensureTool(await prepareFeedbackAttachmentUploadTool({ workspaceId, filename: String(body.filename), fileType: String(body.fileType), fileSize: Number(body.fileSize) })))
 
     case "listTasks": return listPage(`tasks:${workspaceId}:${filters(input.query, ["status", "priority", "squadId", "parentTaskId"])}`, input.query, (cursor, take) => prisma.task.findMany({ where: { workspaceId, ...pick(input.query, ["status", "priority", "squadId", "parentTaskId"]), ...cursorWhere(cursor) }, select: select.task, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
-    case "getTask": return found(await prisma.task.findFirst({ where: { id, workspaceId }, select: select.task }))
-    case "createTask": { await validateTaskRefs(prisma, workspaceId, body); const input = body as unknown as Omit<Parameters<typeof createTask>[0], "workspaceId">; const result = ensureTool(await createTask({ workspaceId, ...input })); return serialize(found(await prisma.task.findFirst({ where: { id: String((result as { id: string }).id), workspaceId }, select: select.task }))) }
-    case "updateTask": { await validateTaskRefs(prisma, workspaceId, body); const existing = await prisma.task.findFirst({ where: { id, workspaceId }, select: { id: true } }); if (!existing) throw new RestNotFoundError(); const editable = { ...body }; delete editable.status; if (Object.keys(editable).length) ensureTool(await updateTask({ taskId: id, ...(editable as Omit<Parameters<typeof updateTask>[0], "taskId">) })); if (body.status) ensureTool(await moveTaskStatus({ taskId: id, status: body.status as never })); return serialize(found(await prisma.task.findFirst({ where: { id, workspaceId }, select: select.task }))) }
+    case "getTask": return serialize(found(await prisma.task.findFirst({ where: { id, workspaceId }, select: select.task })))
+    case "createTask": { await validateTaskRefs(prisma, workspaceId, body); const input = body as unknown as Omit<Parameters<typeof createTask>[0], "workspaceId">; const result = ensureTool(await createTask({ workspaceId, ...input, source: "API" })); return serialize(found(await prisma.task.findFirst({ where: { id: String((result as { id: string }).id), workspaceId }, select: select.task }))) }
+    case "updateTask": { await validateTaskRefs(prisma, workspaceId, body); const existing = await prisma.task.findFirst({ where: { id, workspaceId }, select: { id: true } }); if (!existing) throw new RestNotFoundError(); const editable = { ...body }; delete editable.status; if (Object.keys(editable).length) ensureTool(await updateTask({ taskId: id, ...(editable as Omit<Parameters<typeof updateTask>[0], "taskId">), source: "API" })); if (body.status) ensureTool(await moveTaskStatus({ taskId: id, status: body.status as never, source: "API" })); return serialize(found(await prisma.task.findFirst({ where: { id, workspaceId }, select: select.task }))) }
     case "linkTaskResource": {
       if (!(await prisma.task.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError()
       return serialize(ensureTool(await linkTask({ taskId: id, linkedType: body.linkedType as Parameters<typeof linkTask>[0]["linkedType"], linkedId: String(body.linkedId) })))
@@ -128,16 +128,31 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     }
 
     case "listRoadmapItems": return listPage(`roadmap:${workspaceId}:${filters(input.query, ["horizon", "status", "squadId"])}`, input.query, (cursor, take) => prisma.roadmapItem.findMany({ where: { workspaceId, ...pick(input.query, ["horizon", "status", "squadId"]), ...cursorWhere(cursor) }, select: select.roadmap, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
-    case "getRoadmapItem": return found(await prisma.roadmapItem.findFirst({ where: { id, workspaceId }, select: select.roadmap }))
+    case "getRoadmapItem": return serialize(found(await prisma.roadmapItem.findFirst({ where: { id, workspaceId }, select: select.roadmap })))
     case "updateRoadmapItem": {
       if (body.horizon === "LAUNCHING" || body.horizon === "LAUNCHED") throw new RestConflictError("Use the launch workflow resource for this transition.")
       await validateRoadmapRefs(prisma, workspaceId, body)
       const existing = await prisma.roadmapItem.findFirst({ where: { id, workspaceId }, select: { id: true } }); if (!existing) throw new RestNotFoundError()
-      ensureTool(await updateRoadmapItem({ itemId: id, ...(body as Omit<Parameters<typeof updateRoadmapItem>[0], "itemId">) }))
+      ensureTool(await updateRoadmapItem({ itemId: id, ...(body as Omit<Parameters<typeof updateRoadmapItem>[0], "itemId">), source: "API" }))
       return serialize(found(await prisma.roadmapItem.findFirst({ where: { id, workspaceId }, select: select.roadmap })))
     }
   }
   throw new RestNotFoundError()
+}
+
+async function enforcePolicy(policy: RestAuthorizationPolicy, actor: ReturnType<typeof getMcpActor>, workspaceId?: string) {
+  switch (policy) {
+    case "authenticated-actor":
+    case "accessible-workspaces":
+      return
+    case "workspace-member":
+    case "workspace-writer":
+      if (!workspaceId) throw new RestNotFoundError()
+      await assertWorkspaceMember(actor, workspaceId)
+      return
+    default:
+      throw new RestNotFoundError()
+  }
 }
 
 async function listPage(context: string, query: Record<string, unknown>, load: (cursor: { id: string; createdAt: string } | null, take: number) => Promise<unknown[]>): Promise<{ items: unknown[]; nextCursor: string | null }> {

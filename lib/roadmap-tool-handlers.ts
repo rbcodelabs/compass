@@ -13,11 +13,13 @@ import { setLaunchTierCore, updateChecklistItemCore } from "@/lib/launch-checkli
 import { ok, fail } from "@/lib/mcp-output"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
+import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 
 export async function updateRoadmapItem(input: {
   itemId: string; keyResultId?: string | null; opportunityId?: string | null; solutionId?: string | null; squadId?: string | null
   horizon?: "NOW" | "NEXT" | "LATER" | "LAUNCHING" | "LAUNCHED" | "SHIPPED"; status?: "ACTIVE" | "ARCHIVED"
   title?: string; description?: string | null; startDate?: string | null; endDate?: string | null; isPrivate?: boolean
+  source?: ProgrammaticSource
 }) {
   const prisma = getPrisma()
   const item = await prisma.roadmapItem.findUnique({ where: { id: input.itemId }, select: { id: true, workspaceId: true } })
@@ -40,7 +42,7 @@ export async function updateRoadmapItem(input: {
   if (input.description !== undefined) data.description = input.description?.trim() || null
   if (input.startDate !== undefined) data.startDate = input.startDate ? new Date(input.startDate) : null
   if (input.endDate !== undefined) data.endDate = input.endDate ? new Date(input.endDate) : null
-  const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", "MCP", input.itemId, (tx) => tx.roadmapItem.update({ where: { id: input.itemId }, data }))
+  const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", workspaceMutationSource(input.source), input.itemId, (tx) => tx.roadmapItem.update({ where: { id: input.itemId }, data }))
   const formatUtcDate = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
   return ok(
     `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +

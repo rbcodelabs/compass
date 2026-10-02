@@ -9,6 +9,7 @@ import { FEEDBACK_STATUSES } from "@/lib/feedback-meta"
 
 export type ApiScope = "api:read" | "api:write"
 export type RestMethod = "GET" | "POST" | "PATCH" | "DELETE"
+export type RestAuthorizationPolicy = "authenticated-actor" | "accessible-workspaces" | "workspace-member" | "workspace-writer"
 
 export type RestRoute = {
   method: RestMethod
@@ -16,7 +17,7 @@ export type RestRoute = {
   operationId: string
   summary: string
   scope: ApiScope
-  authorizationPolicy: string
+  authorizationPolicy: RestAuthorizationPolicy
   pathSchema: z.ZodType
   querySchema?: z.ZodType
   bodySchema?: z.ZodType
@@ -33,23 +34,27 @@ const taskLinkPath = z.object({
   linkedType: z.enum(["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM", "DECISION"]),
   relatedId: uuid,
 })
-const read = (operationId: string, path: string, summary: string, responseSchema: z.ZodType, pathSchema: z.ZodType = z.object({}), querySchema?: z.ZodType, authorizationPolicy = "workspace-member"): RestRoute => ({
+const read = (operationId: string, path: string, summary: string, responseSchema: z.ZodType, pathSchema: z.ZodType = z.object({}), querySchema?: z.ZodType, authorizationPolicy: RestAuthorizationPolicy = "workspace-member"): RestRoute => ({
   method: "GET", path, operationId, summary, scope: "api:read", authorizationPolicy, pathSchema, querySchema, responseSchema,
 })
 const write = (method: "POST" | "PATCH" | "DELETE", operationId: string, path: string, summary: string, responseSchema: z.ZodType, pathSchema: z.ZodType, bodySchema?: z.ZodType, status?: number): RestRoute => ({
   method, path, operationId, summary, scope: "api:write", authorizationPolicy: "workspace-writer", pathSchema, bodySchema, responseSchema, status,
 })
+const oneMutationGroup = (groups: readonly (readonly string[])[]) => (value: Record<string, unknown>, ctx: z.RefinementCtx) => {
+  const populated = groups.filter((group) => group.some((key) => value[key] !== undefined))
+  if (populated.length > 1) ctx.addIssue({ code: "custom", message: "Fields from separate lifecycle operations must be sent in separate PATCH requests." })
+}
 
 const opportunityCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), customerSegment: z.string().trim().max(255).nullable().optional(), status: opportunitySchema.shape.status.exclude(["ARCHIVED"]).optional(), squadId: uuid.nullable().optional(), linkedKeyResultId: uuid.nullable().optional() }).strict()
-const opportunityPatch = opportunityCreate.omit({ squadId: true }).partial().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
+const opportunityPatch = opportunityCreate.omit({ squadId: true }).partial().refine((value) => Object.keys(value).length > 0, "Provide at least one field.").superRefine(oneMutationGroup([["title", "description", "customerSegment"], ["status"], ["linkedKeyResultId"]]))
 const solutionCreate = z.object({ opportunityId: uuid, title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional() }).strict()
-const solutionPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), status: solutionSchema.shape.status.optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
+const solutionPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), status: solutionSchema.shape.status.optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.").superRefine(oneMutationGroup([["title", "description"], ["status"]]))
 const assumptionCreate = z.object({ solutionId: uuid, title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), riskLevel: assumptionSchema.shape.riskLevel.optional() }).strict()
 const assumptionPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), riskLevel: assumptionSchema.shape.riskLevel.optional(), status: assumptionSchema.shape.status.optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
-const feedbackCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), type: z.enum(["BUG", "IDEA"]).optional(), submitterName: z.string().trim().max(255).nullable().optional(), submitterEmail: z.string().email().nullable().optional(), opportunityId: uuid.optional() }).strict()
-const feedbackPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), type: z.enum(["BUG", "IDEA"]).optional(), status: z.enum([...FEEDBACK_STATUSES, "CLOSED"]).optional(), opportunityId: uuid.optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
+const feedbackCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), type: z.enum(["BUG", "IDEA"]).optional(), submitterName: z.string().trim().max(255).nullable().optional(), submitterEmail: z.string().email().nullable().optional() }).strict()
+const feedbackPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), type: z.enum(["BUG", "IDEA"]).optional(), status: z.enum([...FEEDBACK_STATUSES, "CLOSED"]).optional(), opportunityId: uuid.optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.").superRefine(oneMutationGroup([["title", "description"], ["type"], ["status"], ["opportunityId"]]))
 const taskCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), status: z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "IN_REVIEW", "DONE", "CANCELLED"]).optional(), priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).optional(), squadId: uuid.nullable().optional(), parentTaskId: uuid.nullable().optional(), assigneeUserId: uuid.nullable().optional(), ownerName: z.string().trim().max(255).nullable().optional(), storyPoints: z.number().nonnegative().nullable().optional(), dueDate: z.string().datetime().nullable().optional(), iteration: z.string().trim().max(100).nullable().optional() }).strict()
-const taskPatch = taskCreate.omit({ parentTaskId: true }).partial().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
+const taskPatch = taskCreate.omit({ parentTaskId: true }).partial().refine((value) => Object.keys(value).length > 0, "Provide at least one field.").superRefine(oneMutationGroup([["title", "description", "priority", "squadId", "assigneeUserId", "ownerName", "storyPoints", "dueDate", "iteration"], ["status"]]))
 const roadmapPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), horizon: z.enum(["LATER", "NEXT", "NOW", "LAUNCHING", "LAUNCHED", "SHIPPED"]).optional(), status: z.enum(["ACTIVE", "ARCHIVED"]).optional(), isPrivate: z.boolean().optional(), startDate: z.string().datetime().nullable().optional(), endDate: z.string().datetime().nullable().optional(), solutionId: uuid.nullable().optional(), keyResultId: uuid.nullable().optional(), opportunityId: uuid.nullable().optional(), squadId: uuid.nullable().optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
 const taskLinkCreate = z.object({ linkedType: taskLinkPath.shape.linkedType, linkedId: uuid }).strict()
 const uploadPreparationCreate = z.object({

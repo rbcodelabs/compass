@@ -8,12 +8,13 @@ import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import { getToolExpectedWhere } from "@/lib/mcp-tool-db"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
+import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 
-export async function createSolution({ opportunityId, title, description }: { opportunityId: string; title: string; description?: string | null }) {
+export async function createSolution({ opportunityId, title, description, source = "MCP" }: { opportunityId: string; title: string; description?: string | null; source?: ProgrammaticSource }) {
   const prisma = getPrisma()
   const opportunity = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { id: true, title: true, workspaceId: true, workspace: { select: { slug: true, organization: { select: { slug: true } } } } } })
   if (!opportunity) return fail(`Opportunity "${opportunityId}" not found.`)
-  const solution = await captureWorkspaceMutation(prisma, "solution", "create", "MCP", undefined, (tx) => tx.solution.create({ data: { workspaceId: opportunity.workspaceId, opportunityId, title: title.trim(), description: description?.trim() || null } }))
+  const solution = await captureWorkspaceMutation(prisma, "solution", "create", workspaceMutationSource(source), undefined, (tx) => tx.solution.create({ data: { workspaceId: opportunity.workspaceId, opportunityId, title: title.trim(), description: description?.trim() || null, source } }))
   return ok(withUrlLine(
     `**Solution created** for "${opportunity.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
     safeEntityUrl({ orgSlug: opportunity.workspace?.organization?.slug, workspaceSlug: opportunity.workspace?.slug, type: "solution", id: solution.id, opportunityId }),

@@ -12,7 +12,12 @@ export async function handleRestRequest(request: Request, method: RestMethod): P
   const url = new URL(request.url)
   const auth = await validateProgrammaticAuth(request, { resource: apiResourceUri() })
   if (!auth.valid) return problem(request, 401, "invalid_token", "Unauthorized", "A valid Compass bearer token is required.", undefined, challenge(request, "api:read", "invalid_token"))
-  const matched = matchRestRoute(method, url.pathname)
+  let matched
+  try {
+    matched = matchRestRoute(method, url.pathname)
+  } catch {
+    return problem(request, 400, "malformed_path", "Bad Request", "The request path contains invalid percent encoding.")
+  }
   if (!matched) return problem(request, 404, "not_found", "Not Found", "The requested resource was not found or is not accessible.")
   if (auth.scopes && !scopesSatisfy(auth.scopes, matched.route.scope)) {
     return problem(request, 403, "insufficient_scope", "Forbidden", `This operation requires ${matched.route.scope}.`, undefined, challenge(request, matched.route.scope, "insufficient_scope"))

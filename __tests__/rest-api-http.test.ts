@@ -63,6 +63,13 @@ describe("REST HTTP adapter", () => {
     expect(await response.json()).toMatchObject({ code: "malformed_json" })
   })
 
+  it("returns Problem Details for malformed path encoding", async () => {
+    const response = await handleRestRequest(new Request(`http://localhost/api/v1/workspaces/${UUID}/opportunities/%E0%A4%A`), "GET")
+    expect(response.status).toBe(400)
+    expect(response.headers.get("content-type")).toContain("application/problem+json")
+    expect(await response.json()).toMatchObject({ code: "malformed_path" })
+  })
+
   it("makes absent and inaccessible resources byte-equivalent", async () => {
     executeRestRoute.mockRejectedValueOnce(new RestNotFoundError())
     const absent = await handleRestRequest(new Request(`http://localhost/api/v1/workspaces/${UUID}/opportunities/${UUID}`), "GET")

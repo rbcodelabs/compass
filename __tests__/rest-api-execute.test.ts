@@ -17,12 +17,13 @@ const mocks = vi.hoisted(() => ({
   createOpportunity: vi.fn(),
   createTask: vi.fn(),
   updateRoadmapItem: vi.fn(),
+  assertWorkspaceMember: vi.fn(),
 }))
 
 vi.mock("@/lib/db", () => ({ default: () => mocks.prisma }))
 vi.mock("@/lib/mcp-authz", () => ({
   getMcpActor: () => ({ userId: "user-1", purpose: "USER" }),
-  assertWorkspaceMember: vi.fn(),
+  assertWorkspaceMember: mocks.assertWorkspaceMember,
   isServiceActor: () => false,
 }))
 vi.mock("@/lib/opportunity-tool-handlers", () => ({
@@ -64,6 +65,32 @@ describe("REST domain execution", () => {
     expect(mocks.createOpportunity).not.toHaveBeenCalled()
   })
 
+  it("serializes item read timestamps before response validation", async () => {
+    mocks.prisma.opportunity.findFirst.mockResolvedValue({
+      id: FOREIGN, workspaceId: UUID, title: "Discovery", description: null,
+      customerSegment: null, status: "EXPLORING", squadId: null,
+      linkedKeyResultId: null, createdAt: new Date("2026-10-02T00:00:00.000Z"),
+      updatedAt: new Date("2026-10-02T01:00:00.000Z"),
+    })
+    const result = await executeRestRoute(route("getOpportunity"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
+    }) as { createdAt: string; updatedAt: string }
+    expect(result.createdAt).toBe("2026-10-02T00:00:00.000Z")
+    expect(result.updatedAt).toBe("2026-10-02T01:00:00.000Z")
+  })
+
+  it("dispatches workspace policies and fails closed for an unknown policy", async () => {
+    mocks.prisma.opportunity.findFirst.mockResolvedValue(null)
+    await expect(executeRestRoute(route("getOpportunity"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.assertWorkspaceMember).toHaveBeenCalledWith(expect.anything(), UUID)
+
+    await expect(executeRestRoute({ ...route("getOpportunity"), authorizationPolicy: "unknown" as never }, {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+  })
+
   it("calls the same extracted opportunity service used by MCP after tenant validation", async () => {
     const created = { id: FOREIGN }
     mocks.createOpportunity.mockResolvedValue(success(created))
@@ -77,7 +104,7 @@ describe("REST domain execution", () => {
       params: { workspaceId: UUID }, query: {}, body: { title: "Discovery" },
     })
 
-    expect(mocks.createOpportunity).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: UUID, title: "Discovery" }))
+    expect(mocks.createOpportunity).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: UUID, title: "Discovery", source: "API" }))
     expect(result).toMatchObject({ id: FOREIGN, workspaceId: UUID })
   })
 

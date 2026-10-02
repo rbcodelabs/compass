@@ -2,10 +2,12 @@ import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import { fail, ok } from "@/lib/mcp-output"
 import type { SolutionStatus } from "@/lib/types"
+import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 
-export async function updateSolutionStatus({ solutionId, status }: {
+export async function updateSolutionStatus({ solutionId, status, source }: {
   solutionId: string
   status: SolutionStatus
+  source?: ProgrammaticSource
 }) {
   const prisma = getPrisma()
   const solution = await prisma.solution.findUnique({
@@ -28,7 +30,7 @@ export async function updateSolutionStatus({ solutionId, status }: {
     return ok(`**"${solution.title}"** is already at ${status}.\nID: ${solution.id}`, data)
   }
 
-  await captureWorkspaceMutation(prisma, "solution", "update", "MCP", solutionId, tx => tx.solution.update({
+  await captureWorkspaceMutation(prisma, "solution", "update", workspaceMutationSource(source), solutionId, tx => tx.solution.update({
     where: { id: solutionId },
     data: { status, updatedAt: new Date() },
   }))
