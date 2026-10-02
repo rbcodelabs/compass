@@ -1,7 +1,10 @@
 import { test as base, expect, type BrowserContext } from "@playwright/test";
 import { originHeaders } from "../../scripts/preview-automation/contracts";
 
-export type PreviewFixture = { orgSlug: string; workspaceSlug: string; isolatedWorkspaceSlug: string; runId: string; expiresAt: string };
+export type PreviewFixture = {
+  orgSlug: string; workspaceSlug: string; isolatedWorkspaceSlug: string; runId: string; expiresAt: string;
+  workspaceId: string; isolatedWorkspaceId: string; apiKey: string; oauthReadToken: string;
+};
 export function fixture(): PreviewFixture {
   if (!process.env.PREVIEW_FIXTURE) throw new Error("Preview fixture metadata is required");
   return JSON.parse(process.env.PREVIEW_FIXTURE) as PreviewFixture;
