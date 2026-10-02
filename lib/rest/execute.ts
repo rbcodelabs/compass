@@ -46,11 +46,12 @@ import { ResearchAnalysisError, storeAgentStudySynthesis } from "@/lib/research-
 import { promoteResearchFindingToEvidence, ResearchPromotionError } from "@/lib/research-evidence-promotion"
 import { CompassUrlNotConfiguredError, researchParticipantUrl } from "@/lib/compass-url"
 import { PmInterviewError, readOwnedPmInterview } from "@/lib/pm-interview-service"
-import { createCardSortRound, getCardSortTally, listCardSortFactors, listCardSortRounds, listMyCardSortProposals, loadCardSortBoard, proposeCardSortMoves, setCardSortRoundState, withdrawCardSortProposal, CardSortError } from "@/lib/card-sort"
+import { createCardSortRound, getCardSortTally, listCardSortFactors, listCardSortRounds, listMyCardSortProposals, loadCardSortBoard, proposeCardSortMoves, setCardSortRoundState, withdrawCardSortProposal, CardSortError, CARD_SORT_ERROR_STATUS } from "@/lib/card-sort"
 import { acceptCardSortNewEntry, listCardSortNewEntries, proposeCardSortNewEntry, rejectCardSortNewEntry, withdrawCardSortNewEntry } from "@/lib/card-sort-new-entries"
 
 export class RestNotFoundError extends Error {}
 export class RestForbiddenError extends Error {}
+export class RestBadRequestError extends Error {}
 export class RestConflictError extends Error {}
 export class RestCursorError extends Error {}
 export class RestValidationError extends Error {}
@@ -513,10 +514,11 @@ async function workspaceSlugScope(prisma: Prisma, workspaceId: string) {
 async function cardSortCall<T>(run: () => Promise<T>): Promise<T> {
   try { return await run() } catch (error) {
     if (!(error instanceof CardSortError)) throw error
-    if (error.code === "NOT_FOUND") throw new RestNotFoundError()
-    if (error.code === "FORBIDDEN") throw new RestForbiddenError(error.message)
-    if (["WRONG_STATE", "HIDDEN_UNTIL_REVEAL"].includes(error.code)) throw new RestConflictError(error.message)
-    throw new RestValidationError(error.message)
+    const status = CARD_SORT_ERROR_STATUS[error.code]
+    if (status === 404) throw new RestNotFoundError()
+    if (status === 403) throw new RestForbiddenError(error.message)
+    if (status === 409) throw new RestConflictError(error.message)
+    throw new RestBadRequestError(error.message)
   }
 }
 

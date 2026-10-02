@@ -13,7 +13,7 @@ vi.mock("@/lib/rest/execute", async (importOriginal) => {
 
 import { handleRestRequest } from "@/lib/rest/http"
 import { McpAuthzError } from "@/lib/mcp-authz"
-import { RestNotFoundError } from "@/lib/rest/execute"
+import { RestBadRequestError, RestForbiddenError, RestNotFoundError } from "@/lib/rest/execute"
 import { AnalyticsError } from "@/lib/analytics/providers"
 import { DocumentError } from "@/lib/document-service"
 import { CommentHttpError } from "@/lib/comment-http-error"
@@ -137,6 +137,17 @@ describe("REST HTTP adapter", () => {
     const response = await handleRestRequest(new Request(`http://localhost/api/v1/workspaces/${UUID}/metrics/${UUID}`), "GET")
     expect(response.status).toBe(404)
     expect(await response.json()).toMatchObject({ code: "not_found" })
+  })
+
+  it.each([
+    [new RestForbiddenError("hidden tally"), 403, "forbidden"],
+    [new RestBadRequestError("invalid card-sort option"), 400, "invalid_request"],
+  ])("maps typed Phase 4 domain failures to RFC 9457", async (error, status, code) => {
+    executeRestRoute.mockRejectedValueOnce(error)
+    const response = await handleRestRequest(new Request(`http://localhost/api/v1/workspaces/${UUID}/card-sort-rounds/${UUID}/tally`), "GET")
+    expect(response.status).toBe(status)
+    expect(response.headers.get("content-type")).toContain("application/problem+json")
+    expect(await response.json()).toMatchObject({ status, code })
   })
 
   it.each([

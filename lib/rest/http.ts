@@ -2,7 +2,7 @@ import { ZodError } from "zod"
 import { apiResourceUri, scopesSatisfy } from "@/lib/oauth/constants"
 import { validateProgrammaticAuth } from "@/lib/programmatic-auth"
 import { McpAuthzError, runWithMcpActor, type McpActor } from "@/lib/mcp-authz"
-import { executeRestRoute, RestConflictError, RestCursorError, RestForbiddenError, RestNotFoundError, RestValidationError } from "@/lib/rest/execute"
+import { executeRestRoute, RestBadRequestError, RestConflictError, RestCursorError, RestForbiddenError, RestNotFoundError, RestValidationError } from "@/lib/rest/execute"
 import { matchRestRoute, type RestMethod } from "@/lib/rest/registry"
 import { AnalyticsError } from "@/lib/analytics/providers"
 import { DocumentError } from "@/lib/document-service"
@@ -65,6 +65,7 @@ export async function handleRestRequest(request: Request, method: RestMethod): P
       return problem(request, 422, "validation_failed", "Unprocessable Content", "The comment operation did not satisfy the endpoint contract.")
     }
     if (error instanceof RestCursorError) return problem(request, 400, "invalid_cursor", "Bad Request", error.message)
+    if (error instanceof RestBadRequestError) return problem(request, 400, "invalid_request", "Bad Request", error.message)
     if (error instanceof RestValidationError) return problem(request, 422, "validation_failed", "Unprocessable Content", error.message)
     if (error instanceof RestConflictError) return problem(request, 409, "conflict", "Conflict", error.message)
     if (error instanceof RestResponseValidationError) return problem(request, 500, "internal_error", "Internal Server Error", "The request could not be completed.")
