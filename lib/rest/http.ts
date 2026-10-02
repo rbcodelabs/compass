@@ -2,7 +2,7 @@ import { ZodError } from "zod"
 import { apiResourceUri, scopesSatisfy } from "@/lib/oauth/constants"
 import { validateProgrammaticAuth } from "@/lib/programmatic-auth"
 import { McpAuthzError, runWithMcpActor, type McpActor } from "@/lib/mcp-authz"
-import { executeRestRoute, RestConflictError, RestCursorError, RestNotFoundError } from "@/lib/rest/execute"
+import { executeRestRoute, RestConflictError, RestCursorError, RestNotFoundError, RestValidationError } from "@/lib/rest/execute"
 import { matchRestRoute, type RestMethod } from "@/lib/rest/registry"
 import { AnalyticsError } from "@/lib/analytics/providers"
 
@@ -52,6 +52,7 @@ export async function handleRestRequest(request: Request, method: RestMethod): P
     if (error instanceof AnalyticsError && ["NOT_FOUND_OR_ACCESS_DENIED", "ACCESS_DENIED"].includes(error.code)) return problem(request, 404, "not_found", "Not Found", "The requested resource was not found or is not accessible.")
     if (error instanceof AnalyticsError) return problem(request, 409, "conflict", "Conflict", "The analytics operation could not be completed.")
     if (error instanceof RestCursorError) return problem(request, 400, "invalid_cursor", "Bad Request", error.message)
+    if (error instanceof RestValidationError) return problem(request, 422, "validation_failed", "Unprocessable Content", error.message)
     if (error instanceof RestConflictError) return problem(request, 409, "conflict", "Conflict", error.message)
     if (error instanceof RestResponseValidationError) return problem(request, 500, "internal_error", "Internal Server Error", "The request could not be completed.")
     console.error("REST API request failed", { operationId: matched.route.operationId, error })

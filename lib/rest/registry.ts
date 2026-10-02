@@ -119,8 +119,25 @@ const customObjectType = z.enum(["OPPORTUNITY", "SOLUTION", "EXPERIMENT", "OBJEC
 const customValuePath = z.object({ workspaceId: uuid, objectType: customObjectType, objectId: uuid })
 const customFieldValueCreate = z.object({ fieldId: uuid, value: z.unknown().nullable() }).strict()
 const entityLinksQuery = cursorQuery.extend({ opportunityId: uuid.optional(), objectiveId: uuid.optional(), solutionId: uuid.optional(), keyResultId: uuid.optional() }).strict().refine((value) => [value.opportunityId, value.objectiveId, value.solutionId, value.keyResultId].filter(Boolean).length === 1, { message: "Provide exactly one entity id." })
-const phase3Entity = z.record(z.string(), z.unknown())
+const phase3Entity = z.object({
+  id: uuid.optional(), workspaceId: uuid.optional(), docId: uuid.optional(), artifactId: uuid.optional(), solutionId: uuid.optional(), requestId: uuid.optional(), releaseRunId: uuid.optional(),
+  targetType: z.string().optional(), targetId: uuid.optional(), subjectType: z.string().optional(), subjectId: uuid.optional(), parentId: uuid.nullable().optional(),
+  title: z.string().optional(), name: z.string().optional(), label: z.string().nullable().optional(), description: z.string().nullable().optional(), body: z.string().optional(),
+  status: z.string().optional(), state: z.string().optional(), kind: z.string().optional(), type: z.string().optional(), sourceType: z.string().optional(), gateType: z.string().optional(), commentType: z.string().optional(), planStatus: z.string().optional(),
+  authorId: uuid.nullable().optional(), authorName: z.string().optional(), authorType: z.string().optional(), source: z.string().optional(),
+  content: z.string().nullable().optional(), properties: z.record(z.string(), z.unknown()).nullable().optional(), revision: z.union([z.string(), z.number()]).optional(), storageProvider: z.string().optional(),
+  docType: z.string().optional(), icon: z.string().nullable().optional(), roadmapItemId: uuid.nullable().optional(),
+  anchorText: z.string().nullable().optional(), anchorPrefix: z.string().nullable().optional(), anchorSuffix: z.string().nullable().optional(), anchorStart: z.number().int().nullable().optional(), anchorEnd: z.number().int().nullable().optional(),
+  read: z.boolean().optional(), readAt: z.string().datetime().nullable().optional(), actor: z.object({ type: z.string(), id: uuid.nullable().optional(), name: z.string() }).optional(), payload: z.record(z.string(), z.string()).optional(), subject: z.object({ title: z.string(), path: z.string() }).nullable().optional(),
+  repositoryOwner: z.string().optional(), repositoryName: z.string().optional(), pullRequestNumber: z.number().int().optional(), pullRequestUrl: z.string().url().optional(), baseRef: z.string().optional(), headSha: z.string().optional(), targetEnvironment: z.string().optional(), releasePolicyId: z.string().optional(), sourceFingerprint: z.string().optional(), authorizationDecisionRecordId: uuid.nullable().optional(), taskIds: z.array(uuid).optional(), dispatches: z.array(z.object({ id: uuid, status: z.string(), updatedAt: z.string().datetime() })).optional(), lastErrorCode: z.string().nullable().optional(),
+  currentRevisionId: uuid.nullable().optional(), currentRevision: z.record(z.string(), z.unknown()).nullable().optional(), revisions: z.array(z.record(z.string(), z.unknown())).optional(), solutions: z.array(z.record(z.string(), z.unknown())).optional(), decisions: z.array(z.record(z.string(), z.unknown())).optional(), artifacts: z.array(z.record(z.string(), z.unknown())).optional(),
+  reviewUrl: z.string().url().nullable().optional(), requestedBy: z.record(z.string(), z.unknown()).nullable().optional(), followUpTasks: z.array(z.record(z.string(), z.unknown())).optional(), noAction: z.record(z.string(), z.unknown()).nullable().optional(), options: z.array(z.record(z.string(), z.unknown())).optional(), chosenOption: z.record(z.string(), z.unknown()).nullable().optional(), questions: z.array(z.record(z.string(), z.unknown())).optional(), answers: z.array(z.record(z.string(), z.unknown())).optional(),
+  marked: z.number().int().nonnegative().optional(), created: z.boolean().optional(), deleted: z.boolean().optional(), linkId: uuid.optional(), revisionId: uuid.optional(), reviewFingerprint: z.string().optional(), count: z.number().int().nonnegative().optional(), items: z.array(z.record(z.string(), z.unknown())).optional(),
+  item: z.record(z.string(), z.unknown()).optional(), checklist: z.record(z.string(), z.unknown()).optional(),
+  createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(),
+})
 const phase3Collection = collectionOf(phase3Entity)
+const docImagePreparation = z.object({ imageId: uuid, imageName: z.string(), pathname: z.string(), url: z.string().url(), filename: z.string(), fileType: z.enum(DOC_IMAGE_ALLOWED_MIME_TYPES), fileSize: z.number().int().positive(), clientToken: z.string().min(1), expiresAt: z.union([z.string(), z.number()]), access: z.literal("private"), markdown: z.string() })
 const commentTarget = z.enum(COMMENT_TARGET_TYPES)
 const commentTargetPath = z.object({ workspaceId: uuid, targetType: commentTarget, targetId: uuid })
 const commentCreate = z.object({ body: z.string().trim().min(1), parentId: uuid.optional() }).strict()
@@ -138,12 +155,13 @@ const artifactCreate = z.union([
 ])
 const artifactPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().nullable().optional(), html: z.string().min(1).optional(), filename: z.string().max(255).optional(), url: z.string().url().optional() }).strict()
 const decisionSubject = z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"])
-const decisionRequest = z.object({ subjectType: decisionSubject, subjectId: uuid, question: z.string().trim().min(1).max(255), context: z.string().trim().min(1).max(20_000), sources: z.array(z.object({ type: decisionSubject, id: uuid }).strict()).max(12).optional(), options: decisionOptionsInputSchema, questions: decisionQuestionsInputSchema, idempotencyKey: uuid.optional() }).strict().refine(value => !(value.options && value.questions), { message: "options and questions are mutually exclusive" })
+const decisionSource = z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK", "EVIDENCE"])
+const decisionRequest = z.object({ subjectType: decisionSubject, subjectId: uuid, question: z.string().trim().min(1).max(255), context: z.string().trim().min(1).max(20_000), sources: z.array(z.object({ type: decisionSource, id: uuid }).strict()).max(12).optional(), options: decisionOptionsInputSchema, questions: decisionQuestionsInputSchema, idempotencyKey: uuid.optional() }).strict().refine(value => !(value.options && value.questions), { message: "options and questions are mutually exclusive" })
 const solutionPlanCreate = z.object({ body: z.string().trim().min(1) }).strict()
 const solutionPlanCommentCreate = z.object({ body: z.string().trim().min(1), parentId: uuid.optional() }).strict()
-const launchTierCreate = z.object({ tier: z.enum(["LIGHT", "STANDARD", "HIGH_RISK"]) }).strict()
-const checklistPatch = z.object({ checked: z.boolean(), note: z.string().nullable().optional() }).strict()
-const releaseAuthorizationRequest = z.object({ provider: z.literal("GITHUB"), repoOwner: z.string().trim().min(1).max(255), repoName: z.string().trim().min(1).max(255), pullRequestNumber: z.number().int().positive(), baseRef: z.string().trim().min(1).max(255), headSha: z.string().regex(/^[a-f0-9]{40}$/i), targetEnvironment: z.literal("PRODUCTION"), releasePolicyId: uuid, taskIds: z.array(uuid).min(1) }).strict()
+const launchTierCreate = z.object({ tier: z.enum(["TIER_1", "TIER_2", "TIER_3"]) }).strict()
+const checklistPatch = z.object({ status: z.enum(["PENDING", "DONE", "SKIPPED"]) }).strict()
+const releaseAuthorizationRequest = z.object({ provider: z.literal("GITHUB"), repositoryOwner: z.string().trim().min(1).max(255), repositoryName: z.string().trim().min(1).max(255), pullRequestNumber: z.number().int().positive(), baseRef: z.string().trim().min(1).max(255), headSha: z.string().regex(/^[a-f0-9]{40}$/i), targetEnvironment: z.literal("PRODUCTION"), releasePolicyId: z.string().trim().min(1).max(255), taskIds: z.array(uuid).min(1) }).strict()
 
 export const REST_ROUTES: readonly RestRoute[] = [
   read("getCurrentIdentity", "/api/v1/me", "Get the current programmatic identity", identitySchema, z.object({}), undefined, "authenticated-actor"),
@@ -255,7 +273,7 @@ export const REST_ROUTES: readonly RestRoute[] = [
   write("POST", "createDoc", "/api/v1/workspaces/{workspaceId}/docs", "Create a document", phase3Entity, workspacePath, docCreate, 201),
   read("getDoc", "/api/v1/workspaces/{workspaceId}/docs/{id}", "Get a document", phase3Entity, itemPath),
   write("PATCH", "updateDoc", "/api/v1/workspaces/{workspaceId}/docs/{id}", "Update a document with optional optimistic concurrency", phase3Entity, itemPath, docPatch),
-  write("POST", "prepareDocImageUpload", "/api/v1/workspaces/{workspaceId}/docs/{id}/image-uploads", "Prepare a private document image upload", phase3Entity, itemPath, docUpload, 201),
+  write("POST", "prepareDocImageUpload", "/api/v1/workspaces/{workspaceId}/docs/{id}/image-uploads", "Prepare a private document image upload", docImagePreparation, itemPath, docUpload, 201),
   read("listDocVersions", "/api/v1/workspaces/{workspaceId}/docs/{id}/versions", "List document versions", phase3Collection, itemPath, cursorQuery.strict()),
   write("POST", "createDocVersion", "/api/v1/workspaces/{workspaceId}/docs/{id}/versions", "Create a named document version", phase3Entity, itemPath, versionCreate, 201),
   read("getDocVersion", "/api/v1/workspaces/{workspaceId}/doc-versions/{id}", "Get a document version", phase3Entity, itemPath),
@@ -294,7 +312,7 @@ export const REST_ROUTES: readonly RestRoute[] = [
   read("getLaunchChecklist", "/api/v1/workspaces/{workspaceId}/roadmap-items/{id}/launch-checklist", "Get a roadmap item's launch checklist", phase3Entity, itemPath),
   write("PATCH", "updateLaunchChecklistItem", "/api/v1/workspaces/{workspaceId}/launch-checklist-items/{id}", "Update a launch checklist item", phase3Entity, itemPath, checklistPatch),
   write("POST", "requestReleaseAuthorization", "/api/v1/workspaces/{workspaceId}/release-authorizations", "Request human release authorization without dispatching", phase3Entity, workspacePath, releaseAuthorizationRequest, 201),
-  read("listReleaseRuns", "/api/v1/workspaces/{workspaceId}/release-runs", "List release runs", phase3Collection, workspacePath, cursorQuery.strict()),
+  read("listReleaseRuns", "/api/v1/workspaces/{workspaceId}/release-runs", "List release runs", phase3Collection, workspacePath, cursorQuery.extend({ state: z.enum(["PREPARING", "READY_FOR_APPROVAL", "DECISION_RECORDING", "DISPATCH_QUEUED", "BLOCKED", "SUPERSEDED", "CANCELLED"]).optional(), taskId: uuid.optional(), updatedSince: z.string().datetime().optional() }).strict()),
 ] as const
 
 function routePattern(path: string): { regexp: RegExp; names: string[] } {

@@ -65,6 +65,18 @@ describe("REST API registry", () => {
     for (const operationId of ["prepareDocImageUpload", "requestReleaseAuthorization"]) {
       expect(REST_ROUTES.find((route) => route.operationId === operationId)).toMatchObject({ method: "POST", scope: "api:write" })
     }
+    const release = REST_ROUTES.find((route) => route.operationId === "requestReleaseAuthorization")!
+    expect(release.bodySchema?.safeParse({ provider: "GITHUB", repositoryOwner: "acme", repositoryName: "app", pullRequestNumber: 1, baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION", releasePolicyId: "policy", taskIds: ["11111111-1111-4111-8111-111111111111"] }).success).toBe(true)
+    expect(release.bodySchema?.safeParse({ provider: "GITHUB", repoOwner: "acme", repoName: "app", pullRequestNumber: 1, baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION", releasePolicyId: "policy", taskIds: ["11111111-1111-4111-8111-111111111111"] }).success).toBe(false)
+  })
+
+  it("uses the shared launch-checklist status vocabulary", () => {
+    const route = REST_ROUTES.find((entry) => entry.operationId === "updateLaunchChecklistItem")!
+    expect(route.bodySchema?.safeParse({ status: "DONE" }).success).toBe(true)
+    expect(route.bodySchema?.safeParse({ checked: true }).success).toBe(false)
+    const tier = REST_ROUTES.find((entry) => entry.operationId === "setLaunchTier")!
+    expect(tier.bodySchema?.safeParse({ tier: "TIER_1" }).success).toBe(true)
+    expect(tier.bodySchema?.safeParse({ tier: "LIGHT" }).success).toBe(false)
   })
 
   it("documents custom-field collections in configured display order", () => {
