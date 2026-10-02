@@ -23,6 +23,7 @@ import {
   Target,
   Waypoints,
   Clock3,
+  House,
 } from "lucide-react"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -165,6 +166,7 @@ export function Sidebar({
   const labels = useLabels()
   const baseNavItems = buildBaseNavItems(labels.sections.okrs, labels.solution.plural)
   const navItems = [
+    { label: "Home", path: "home", Icon: House },
     ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
     ...baseNavItems.slice(0, 6),
     researchCaptureEnabled

@@ -11,6 +11,8 @@
  *   5. Leakage: the admin API pins the PRIVATE item in a spotlight and
  *      publishes; the anonymous home shows the public item and never the
  *      private title.
+ *   5b. A "Team only" widget shows on the team home (/<org>/<ws>/home) and never
+ *       on the public page; a signed-out visitor cannot open the team home.
  *   6. On a phone-width viewport the board is a single column.
  */
 import { test, expect } from "../fixtures/index";
@@ -158,6 +160,33 @@ test.describe("Portal Home", () => {
       await expect(anonPage.getByText(publicTitle)).toBeVisible();
       await expect(anonPage.getByText(privateTitle)).toHaveCount(0);
       expect(await anonPage.content()).not.toContain(privateTitle);
+
+      // ── 5b. Team view: a "Team only" widget shows on /home, never to customers ──
+      const teamNote = `E2E Team Only Note ${ts}`;
+      const beforeTeam = await (await page.request.get(api)).json();
+      const teamWidget = {
+        id: "e2e-team-note",
+        type: "rich_text",
+        size: "M",
+        order: beforeTeam.draft.length,
+        visibility: "team",
+        config: { title: teamNote, body: "Visible to the team only." },
+      };
+      expect((await page.request.put(api, { data: { widgets: [...beforeTeam.draft, teamWidget] } })).ok()).toBe(true);
+      expect((await page.request.post(`${api}/publish`)).ok()).toBe(true);
+
+      await page.goto(`${base}/home`);
+      await page.waitForLoadState("networkidle");
+      await expect(page.getByText(teamNote)).toBeVisible();
+      await expect(page.getByText(everyoneNote)).toBeVisible();
+      // The same widget is absent from the public page, markup included.
+      await anonPage.goto(`${baseURL}${homeUrl}`);
+      await anonPage.waitForLoadState("networkidle");
+      await expect(anonPage.getByText(teamNote)).toHaveCount(0);
+      expect(await anonPage.content()).not.toContain(teamNote);
+      // And a signed-out visitor cannot open the team home.
+      await anonPage.goto(`${baseURL}${base}/home`);
+      await expect(anonPage.getByText(teamNote)).toHaveCount(0);
 
       // ── 6. Mobile: single column ──────────────────────────────────────────
       await anonPage.setViewportSize({ width: 390, height: 800 });

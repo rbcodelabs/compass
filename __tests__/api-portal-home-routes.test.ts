@@ -128,4 +128,16 @@ describe("resolve", () => {
     const body = (await response.json()) as { widgets: { id: string }[] }
     expect(body.widgets.map((w) => w.id)).toEqual([visible.id])
   })
+
+  it("customer audience never returns a team-only widget, signed in or not", async () => {
+    const { POST } = await import("@/app/api/portal-home/[orgSlug]/[workspaceSlug]/resolve/route")
+    const visible = createWidget("announcement", 0)
+    const team = { ...createWidget("rich_text", 1), visibility: "team" as const, config: { title: "TEAMONLY", body: "TEAMONLY" } }
+    for (const signedIn of [false, true]) {
+      const response = await POST(json({ widgets: [visible, team], audience: "customer", signedIn }), route)
+      const text = await response.text()
+      expect(text).not.toContain("TEAMONLY")
+      expect(text).not.toContain(team.id)
+    }
+  })
 })

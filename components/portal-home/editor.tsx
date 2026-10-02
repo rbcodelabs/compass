@@ -36,7 +36,7 @@ interface Props {
   initialResolved: Record<string, WidgetResolution>
 }
 
-const VISIBILITY_LABEL = { everyone: "Everyone", signed_in: "Signed-in customers", segments: "Segments" } as const
+const VISIBILITY_LABEL = { everyone: "Everyone", signed_in: "Signed-in customers", segments: "Segments", team: "Team only" } as const
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } })
@@ -269,7 +269,7 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
       {mode === "preview" ? (
         <div className="flex flex-col gap-3">
           <p role="status" className="rounded-lg bg-status-info-surface px-3 py-2 text-sm text-status-info">
-            Previewing as a signed-out customer. Widgets limited to signed-in customers or segments, and anything not public, are hidden here exactly as they will be live.
+            Previewing as a signed-out customer. Widgets limited to signed-in customers, the team or segments, and anything not public, are hidden here exactly as they will be live.
           </p>
           {preview ? (preview.widgets.length > 0 ? <PortalHomeBoard widgets={preview.widgets} resolved={preview.resolved} /> : <EmptyHome>Customers would see an empty home.</EmptyHome>) : <EmptyHome>Building preview…</EmptyHome>}
         </div>
@@ -321,7 +321,7 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
                 {renderWidgetForm(selected, updateWidget, options)}
                 <fieldset className="flex flex-col gap-2">
                   <legend className="mb-1 text-sm font-medium text-text-primary">Visible to</legend>
-                  {(["everyone", "signed_in", "segments"] as const).map((value) => (
+                  {(["everyone", "signed_in", "team", "segments"] as const).map((value) => (
                     <label key={value} className={cn("flex items-center gap-2 text-sm", value === "segments" && "text-text-disabled")}>
                       <input
                         type="radio"
@@ -339,7 +339,7 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
                   {selected.visibility === "segments" ? (
                     <p className="text-xs leading-5 text-status-warning">Segments are not available yet, so no customer sees this widget. Pick Everyone or Signed-in customers.</p>
                   ) : null}
-                  <p className="text-xs leading-5 text-text-subtle">Enforced on the server. Items you have not made public never appear to customers, even if pinned here.</p>
+                  <p className="text-xs leading-5 text-text-subtle">Team only widgets show on the team Home tab and are never sent to customers. Enforced on the server. Items you have not made public never appear to customers, even if pinned here.</p>
                 </fieldset>
                 <Button type="button" variant="destructive" onClick={() => removeWidget(selected.id)}>
                   <Trash2 /> Remove widget

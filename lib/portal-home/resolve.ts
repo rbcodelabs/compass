@@ -1,5 +1,5 @@
 import { sortWidgets, type PortalHomeWidget } from "./schema"
-import { isWidgetVisibleToCustomer, type HomeViewer } from "./visibility"
+import { isWidgetVisibleToCustomer, isWidgetVisibleToTeam, type HomeViewer } from "./visibility"
 import type { WidgetResolution } from "./data"
 import type { ResolveContext } from "./resolvers/context"
 import { resolveKeyLinks } from "./resolvers/key-links"
@@ -47,6 +47,32 @@ export async function resolveHomeForCustomer(
   const customerCtx: ResolveContext = { ...ctx, isWorkspaceMember: false }
   const visible = sortWidgets(widgets).filter((widget) => isWidgetVisibleToCustomer(widget, viewer))
   const resolutions = await Promise.all(visible.map((widget) => resolveWidget(customerCtx, widget)))
+  const shown: PortalHomeWidget[] = []
+  const resolved: Record<string, WidgetResolution> = {}
+  visible.forEach((widget, index) => {
+    if (!resolutions[index].available) return
+    shown.push(widget)
+    resolved[widget.id] = resolutions[index]
+  })
+  return { widgets: shown, resolved }
+}
+
+/**
+ * Team audience (the Compass team home, /[org]/[ws]/home). Callers MUST have
+ * authorized the viewer as a workspace member first: this runs with
+ * isWorkspaceMember: true, which unlocks Doc links. Shows every widget the team
+ * may see (everyone, signed_in, team); segments stays hidden. Widgets whose
+ * surface is off or empty are dropped, as on the customer page. Kept separate
+ * from resolveHomeForCustomer so the customer path never has a "team" branch to
+ * get wrong.
+ */
+export async function resolveHomeForTeam(
+  ctx: Omit<ResolveContext, "isWorkspaceMember">,
+  widgets: readonly PortalHomeWidget[],
+): Promise<ResolvedHome> {
+  const teamCtx: ResolveContext = { ...ctx, isWorkspaceMember: true }
+  const visible = sortWidgets(widgets).filter(isWidgetVisibleToTeam)
+  const resolutions = await Promise.all(visible.map((widget) => resolveWidget(teamCtx, widget)))
   const shown: PortalHomeWidget[] = []
   const resolved: Record<string, WidgetResolution> = {}
   visible.forEach((widget, index) => {

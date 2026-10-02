@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
-import { resolveHomeForCustomer, resolveHomeForMember } from "@/lib/portal-home/resolve"
+import { resolveHomeForCustomer, resolveHomeForMember, resolveHomeForTeam } from "@/lib/portal-home/resolve"
 import { createWidget, type PortalHomeWidget } from "@/lib/portal-home/schema"
 
 /**
@@ -233,5 +233,48 @@ describe("member audience", () => {
     const widget = createWidget("recent_updates", 0)
     const resolved = await resolveHomeForMember(ctx({ roadmapPublic: false }), [widget])
     expect(resolved[widget.id]).toEqual({ available: false, reason: expect.stringContaining("roadmap") })
+  })
+})
+
+describe("team-only widgets never reach a customer", () => {
+  const teamNote = w(createWidget("rich_text", 0), { visibility: "team", config: { title: "TEAMONLY title", body: "TEAMONLY body" } })
+  const teamLinks = w(createWidget("key_links", 1), {
+    visibility: "team",
+    config: { title: "TEAMONLY links", links: [{ kind: "doc", docId: id(201), label: "" }] },
+  })
+  const publicNote = w(createWidget("announcement", 2), { visibility: "everyone" })
+  const layout = [teamNote, teamLinks, publicNote]
+
+  it.each([
+    ["signed-out customer", false],
+    ["portal-signed-in customer", true],
+  ])("a %s gets no team widget, no query runs for it and nothing is serialized", async (_name, signedIn) => {
+    const queries: string[] = []
+    const out = await resolveHomeForCustomer(ctx({}, queries), layout, { signedIn })
+    expect(out.widgets.map((x) => x.id)).toEqual([publicNote.id])
+    expect(Object.keys(out.resolved)).toEqual([publicNote.id])
+    expect(queries).toEqual([])
+    // This object is exactly what the page and the customer resolve route send to the browser.
+    const wire = JSON.stringify(out)
+    expect(wire).not.toContain("TEAMONLY")
+    expect(wire).not.toContain(teamNote.id)
+    expect(wire).not.toContain(teamLinks.id)
+    expect(wire).not.toContain("Internal runbook")
+  })
+
+  it("the team sees team widgets and Doc links, but segments stays hidden", async () => {
+    const segment = w(createWidget("rich_text", 3), { visibility: "segments", config: { title: "SEG", body: "SEG" } })
+    const out = await resolveHomeForTeam(ctx(), [...layout, segment])
+    expect(out.widgets.map((x) => x.id)).toEqual([teamNote.id, teamLinks.id, publicNote.id])
+    expect(JSON.stringify(out.resolved)).toContain("Internal runbook")
+    expect(out.resolved[segment.id]).toBeUndefined()
+  })
+
+  it("the team view still applies the surface rules: no roadmap query when the roadmap is off", async () => {
+    const queries: string[] = []
+    const spotlight = createWidget("roadmap_spotlight", 0)
+    const out = await resolveHomeForTeam(ctx({ roadmapPublic: false }, queries), [spotlight])
+    expect(out.widgets).toEqual([])
+    expect(queries).toEqual([])
   })
 })

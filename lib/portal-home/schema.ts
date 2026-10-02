@@ -18,8 +18,13 @@ export type WidgetSize = (typeof WIDGET_SIZES)[number]
  * "segments" is stored so layouts authored today survive when segments ship, but
  * v1 treats it as disabled: no customer is in any segment, so such a widget is
  * never shown to customers (see visibility.ts).
+ *
+ * "team" is for workspace members only: it renders on the Compass team home
+ * (/[org]/[ws]/home) and is NEVER resolved, sent or serialized on the customer
+ * path. Adding a value is backward compatible: stored layouts that predate it
+ * only contain the older values and still parse.
  */
-export const WIDGET_VISIBILITIES = ["everyone", "signed_in", "segments"] as const
+export const WIDGET_VISIBILITIES = ["everyone", "signed_in", "segments", "team"] as const
 export type WidgetVisibility = (typeof WIDGET_VISIBILITIES)[number]
 
 export const MAX_WIDGETS = 24

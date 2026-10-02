@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { isSafeLinkUrl } from "@/lib/portal-home/fields"
 import { createWidget, layoutSchema, normalizeOrder, parseStoredWidgets, WIDGET_TYPES, widgetSchema } from "@/lib/portal-home/schema"
-import { isWidgetVisibleToCustomer } from "@/lib/portal-home/visibility"
+import { isWidgetVisibleToCustomer, isWidgetVisibleToTeam } from "@/lib/portal-home/visibility"
 import { buildDefaultWidgets } from "@/lib/portal-home/defaults"
 import { hasUnpublishedChanges } from "@/lib/portal-home/schema"
 
@@ -64,6 +64,34 @@ describe("isWidgetVisibleToCustomer", () => {
     expect(isWidgetVisibleToCustomer({ visibility: "signed_in" }, { signedIn: true })).toBe(true)
     expect(isWidgetVisibleToCustomer({ visibility: "segments" }, { signedIn: true })).toBe(false)
     expect(isWidgetVisibleToCustomer({ visibility: "segments" }, { signedIn: false })).toBe(false)
+  })
+})
+
+describe("team visibility", () => {
+  it("is never visible to a customer, signed in or not, but is to the team", () => {
+    expect(isWidgetVisibleToCustomer({ visibility: "team" }, { signedIn: false })).toBe(false)
+    expect(isWidgetVisibleToCustomer({ visibility: "team" }, { signedIn: true })).toBe(false)
+    expect(isWidgetVisibleToTeam({ visibility: "team" })).toBe(true)
+    expect(isWidgetVisibleToTeam({ visibility: "everyone" })).toBe(true)
+    expect(isWidgetVisibleToTeam({ visibility: "signed_in" })).toBe(true)
+    expect(isWidgetVisibleToTeam({ visibility: "segments" })).toBe(false)
+  })
+
+  it("fails closed for an unknown visibility value on the customer path", () => {
+    const unknown = { visibility: "future_value" } as unknown as { visibility: "team" }
+    expect(isWidgetVisibleToCustomer(unknown, { signedIn: true })).toBe(false)
+    expect(isWidgetVisibleToTeam(unknown)).toBe(false)
+  })
+
+  it("is backward compatible: a layout stored before 'team' existed still parses unchanged", () => {
+    const old = [
+      { ...createWidget("announcement", 0), id: "a", visibility: "everyone" },
+      { ...createWidget("rich_text", 1), id: "b", visibility: "signed_in" },
+      { ...createWidget("rich_text", 2), id: "c", visibility: "segments" },
+    ]
+    expect(layoutSchema.parse(old).map((w) => w.visibility)).toEqual(["everyone", "signed_in", "segments"])
+    expect(parseStoredWidgets(old)).toHaveLength(3)
+    expect(layoutSchema.parse([{ ...createWidget("rich_text", 0), visibility: "team" }])[0].visibility).toBe("team")
   })
 })
 
