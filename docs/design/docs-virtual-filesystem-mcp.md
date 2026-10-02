@@ -34,7 +34,7 @@ export type DocFsNode = {
   title: string
   parentId: string | null
   roadmapItemId: string | null
-  docType: "STANDARD" | "GTM_POSITIONING_BRIEF"
+  docType: "STANDARD" | "GTM_POSITIONING_BRIEF" | "CANVAS"
   hasChildren: boolean
   updatedAt: Date
 }

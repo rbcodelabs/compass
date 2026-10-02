@@ -778,10 +778,10 @@ Promotion is a reviewed, human-directed step. While a synthesis is being generat
 | Tool | Description |
 |---|---|
 | `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc`; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`). A doc whose parent is excluded by a recency filter is rendered at the top level so it stays reachable |
-| `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body, and `docType`/`roadmapItemId` when set |
+| `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body (for `docType: CANVAS`, the JSON Canvas 1.0 document as a JSON string), and `docType`/`roadmapItemId` when set |
 | `prepare_doc_image_upload` | Prepare a signed, short-lived upload for a PNG, JPEG, GIF, or WebP image up to 10 MiB in workspace-private Docs storage; returns the upload pathname/token plus the relative Compass image URL and Markdown |
-| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on |
-| `update_doc` | Update an existing doc's title, content, and/or icon |
+| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on. Pass `docType: CANVAS` to create a JSON Canvas doc: `content` must be a valid JSON Canvas 1.0 JSON string (blank canvas if omitted); invalid payloads are rejected with the validation errors. A Compass object card is a standard `link` node with `url: "compass://<kind>/<id>"` and `compass: {"kind","id","title"?}`; `kind` is one of `opportunity`, `solution`, `metric`, `doc`, `task`, `experiment`, `objective`, `keyResult` and `id` a UUID. Invalid card references are rejected (the card is rendered live and re-authorized for each viewer, so only the reference is stored) |
+| `update_doc` | Update an existing doc's title, content, and/or icon. For a `CANVAS` doc, `content` replaces the whole canvas and must be valid JSON Canvas 1.0 (unknown fields are preserved) |
 | `create_doc_version` | Save a manual, named snapshot of a doc's current content. Params: `docId`, `label` (optional), `authorName`. Always writes a new version, even if one was just saved seconds ago — named snapshots are never coalesced away |
 | `list_doc_versions` | List a doc's saved versions (id, label, author, created date), newest first, alongside the doc's own current title and last-updated time as a reference point. Param: `docId`. Does not include full content — call `get_doc_version` for that |
 | `get_doc_version` | Return the full title/content/metadata/icon snapshot of a single saved doc version. Param: `versionId` |
@@ -794,6 +794,52 @@ In the explicitly enabled Geode preview workspace, `get_doc` also returns `revis
 To add a local screenshot, call `prepare_doc_image_upload` with its exact filename, MIME type, and byte size. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: fileType })` from `@vercel/blob/client`, then place the returned `markdown` in `create_doc` or `update_doc`. The token expires after ten minutes and is bound to one random workspace-prefixed pathname, MIME type, and maximum size; it cannot overwrite an existing blob. The saved Markdown contains only a relative Compass read URL, never the storage pathname or token. Image reads require a signed-in member of the owning workspace.
 
 This private flow applies to new uploads. Existing documents may contain older absolute `*.public.blob.vercel-storage.com` image URLs; they remain public and continue rendering. Compass does not migrate, delete, or rewrite those legacy blobs automatically.
+
+### Authoring Canvas docs (agents)
+
+A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one with `create_doc` and `docType: CANVAS`, passing the JSON as the `content` string. `update_doc` **replaces the whole canvas**, so call `get_doc` first, change the JSON, and send the complete result back.
+
+**Workflow**
+1. Look up real object ids with the `list_*` tools (`list_opportunities`, `list_solutions`, `list_metrics`, `list_tasks`, `list_experiments`, `list_docs`, objectives and key results via the OKR tools). Never invent a UUID: an unknown, foreign-workspace or inaccessible id is shown as "Unavailable" to viewers.
+2. Build the `nodes` and `edges` arrays.
+3. Call `create_doc`. Invalid JSON or invalid Compass card references are rejected with the reasons; fix and retry.
+
+**Nodes** (`nodes[]`). Every node needs a unique string `id`, a `type`, and numeric `x`, `y`, `width`, `height` (pixels; `x` grows right, `y` grows down; the top-left corner is the anchor).
+- `text`: `text` is markdown.
+- `link`: `url` is a web URL. A **Compass object card** is a `link` node with `url: "compass://<kind>/<id>"` and `compass: {"kind", "id", "title"?}`. `kind` is `opportunity`, `solution`, `metric`, `doc`, `task`, `experiment`, `objective` or `keyResult`; `id` is the object's UUID. Keep `url` and `compass` identical. Only the reference and an optional cached `title` are stored; status, score, progress and metric values are read live for each viewer.
+- `group`: a labelled box (`label`). A group contains the nodes whose rectangles sit inside it.
+- `file`: refers to a vault file path; not useful for Compass-hosted canvases.
+- Optional `color` on any node or edge: `"1"` red, `"2"` orange, `"3"` yellow, `"4"` green, `"5"` cyan, `"6"` purple, or a `#rrggbb` hex.
+
+**Edges** (`edges[]`): unique `id`, `fromNode`, `toNode` (existing node ids), and optionally `fromSide` / `toSide` (`top`, `right`, `bottom`, `left`), `toEnd` / `fromEnd` (`arrow` or `none`), `label`, `color`.
+
+**Layout rules of thumb**
+- Compass cards render at about 280 x 120; use that size.
+- Lay out left to right in columns (opportunity -> solutions -> metrics): about 240 px between columns and 40 px between rows, so nodes never overlap.
+- Connect `right` of the source to `left` of the target for left-to-right flows.
+- Size a group so it fully encloses its members with about 40 px padding.
+- Stay well under the 800 KB limit; a few hundred nodes is the practical ceiling for readability.
+- Fields Compass does not recognize are preserved, so other tools' extras are safe to keep when editing.
+
+**Example**: one opportunity, two candidate solutions, and the metric one of them moves (replace the UUIDs with real ids):
+
+```json
+{
+  "nodes": [
+    {"id": "grp-opp", "type": "group", "label": "Opportunity", "x": 0, "y": 0, "width": 360, "height": 240, "color": "6"},
+    {"id": "opp", "type": "link", "url": "compass://opportunity/11111111-1111-4111-8111-111111111111", "compass": {"kind": "opportunity", "id": "11111111-1111-4111-8111-111111111111", "title": "Onboarding drop-off"}, "x": 40, "y": 60, "width": 280, "height": 120},
+    {"id": "sol-a", "type": "link", "url": "compass://solution/22222222-2222-4222-8222-222222222222", "compass": {"kind": "solution", "id": "22222222-2222-4222-8222-222222222222", "title": "Guided setup"}, "x": 520, "y": 0, "width": 280, "height": 120},
+    {"id": "sol-b", "type": "link", "url": "compass://solution/33333333-3333-4333-8333-333333333333", "compass": {"kind": "solution", "id": "33333333-3333-4333-8333-333333333333", "title": "Checklist"}, "x": 520, "y": 160, "width": 280, "height": 120},
+    {"id": "met", "type": "link", "url": "compass://metric/44444444-4444-4444-8444-444444444444", "compass": {"kind": "metric", "id": "44444444-4444-4444-8444-444444444444", "title": "Activation rate"}, "x": 1000, "y": 80, "width": 280, "height": 120},
+    {"id": "note", "type": "text", "text": "**Hypothesis:** guided setup lifts activation.", "x": 520, "y": 340, "width": 280, "height": 100}
+  ],
+  "edges": [
+    {"id": "e1", "fromNode": "opp", "toNode": "sol-a", "fromSide": "right", "toSide": "left", "toEnd": "arrow", "label": "addressed by"},
+    {"id": "e2", "fromNode": "opp", "toNode": "sol-b", "fromSide": "right", "toSide": "left", "toEnd": "arrow"},
+    {"id": "e3", "fromNode": "sol-a", "toNode": "met", "fromSide": "right", "toSide": "left", "toEnd": "arrow", "label": "moves"}
+  ]
+}
+```
 
 ### Artifacts
 

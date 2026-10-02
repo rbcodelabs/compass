@@ -51,6 +51,7 @@ import {
   createDoc,
   updateDoc,
 } from "@/lib/doc-tool-handlers"
+import { DOC_TYPES } from "@/lib/doc-types"
 import { prepareDocImageUploadTool } from "@/lib/doc-image-tool-handlers"
 import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
 import {
@@ -3357,7 +3358,7 @@ const _handler = createMcpHandler(
         title: "Get Doc",
         description:
           "Returns the full content of a single doc, including its parent, " +
-          "children list, and the complete markdown body.",
+          "children list, and the complete markdown body (for docType CANVAS, the JSON Canvas 1.0 document as a JSON string).",
         inputSchema: {
           docId: z.string().uuid().describe("UUID of the doc"),
         },
@@ -3388,14 +3389,16 @@ const _handler = createMcpHandler(
         title: "Create Doc",
         description:
           "Creates a new doc in a workspace. Optionally nest it under a parent doc. " +
-          "Content should be markdown. Returns the new doc ID and the docs URL. " +
+          "Content should be markdown (or, for docType CANVAS, a JSON Canvas 1.0 document as a JSON string). Returns the new doc ID and the docs URL. " +
           "Pass roadmapItemId and docType: GTM_POSITIONING_BRIEF to create a Positioning & Messaging Brief " +
-          "linked 1:1 to a roadmap item -- if content is omitted, a starter template is used.",
+          "linked 1:1 to a roadmap item -- if content is omitted, a starter template is used. " +
+          "Pass docType: CANVAS to create a JSON Canvas (infinite-canvas) doc; content is validated and a blank canvas is created when omitted. " +
+          "A Compass object card is a JSON Canvas link node with url \"compass://<kind>/<id>\" and a compass field {kind, id, title?}; kind must be one of opportunity, solution, metric, doc, task, experiment, objective, keyResult and id a UUID (invalid references are rejected).",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Doc title"),
           operationId: z.string().uuid().optional().describe("Stable retry ID; required for Geode pilot documents"),
-          content: z.string().optional().describe("Doc body in markdown"),
+          content: z.string().optional().describe("Doc body in markdown; for docType CANVAS a JSON Canvas 1.0 JSON string ({\"nodes\":[...],\"edges\":[...]})"),
           parentId: z
             .string()
             .uuid()
@@ -3410,9 +3413,9 @@ const _handler = createMcpHandler(
             .optional()
             .describe("UUID of a roadmap item to link this doc to as its Positioning & Messaging Brief (1:1 -- fails if that item already has a linked doc)"),
           docType: z
-            .enum(["STANDARD", "GTM_POSITIONING_BRIEF"])
+            .enum(DOC_TYPES)
             .optional()
-            .describe("Doc type. GTM_POSITIONING_BRIEF auto-fills a starter template when content is omitted. Defaults to STANDARD."),
+            .describe("Doc type. GTM_POSITIONING_BRIEF auto-fills a starter template when content is omitted. CANVAS is a JSON Canvas 1.0 document (content must be valid JSON Canvas; blank canvas if omitted). Defaults to STANDARD."),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -3425,13 +3428,13 @@ const _handler = createMcpHandler(
         title: "Update Doc",
         description:
           "Updates an existing doc's title, content, and/or icon. " +
-          "Only the fields you provide are changed.",
+          "Only the fields you provide are changed. For a CANVAS doc, content must be a complete, valid JSON Canvas 1.0 JSON string (it replaces the whole canvas; invalid payloads are rejected).",
         inputSchema: {
           docId: z.string().uuid().describe("UUID of the doc to update"),
           expectedRevision: z.string().uuid().optional().describe("Revision from get_doc; required for Geode pilot documents"),
           operationId: z.string().uuid().optional().describe("Stable retry ID; reuse only for the identical request"),
           title: z.string().min(1).optional().describe("New title"),
-          content: z.string().optional().describe("New markdown content (replaces existing)"),
+          content: z.string().optional().describe("New markdown content (replaces existing); for CANVAS docs the full JSON Canvas JSON string"),
           icon: z.string().optional().describe("New emoji or icon string"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,

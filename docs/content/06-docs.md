@@ -138,6 +138,22 @@ Leave Google-Docs-style comments anchored to a specific span of a page, so discu
 
 Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api) for `add_doc_comment`, `list_doc_comments`, `get_doc_comment`, `update_doc_comment`, `delete_doc_comment`, `resolve_doc_comment`, and `reopen_doc_comment`. These Doc-specific tools remain domain-friendly compatibility aliases over shared Comment IDs and preserve inline anchor creation and updates. The generic shared-comment tools can also operate on `DOC` targets by Comment ID, but generic `add_comment` creates an unanchored Doc comment; use `add_doc_comment` when creating an inline anchor.
 
+## Canvas docs
+
+A Canvas doc is an infinite, pannable whiteboard that follows the open [JSON Canvas](https://jsoncanvas.org) 1.0 format, so canvases move freely between Compass and tools like Obsidian. (This is separate from the read-only [Canvas](/help/12-canvas) viewer of your OST and roadmap.)
+
+- **Create one** from the **Canvas** menu above the page tree: **Blank canvas**, or **Import .canvas file** to bring in an existing file. Files that are not valid JSON Canvas are rejected with the reason.
+- **Edit**: pan by dragging the background, zoom with the scroll wheel, pinch, or the zoom controls. Add **Text**, **Link**, **File** and **Group** cards from the toolbar; drag cards to move them, drag the handles on a selected card to resize it. Double-click a card to edit it; text cards are markdown. Drag from a dot on one card's side to a dot on another to draw a connection (the chosen sides are saved). With a card or connection selected, pick a color (the six presets or any custom color), and for connections set a label and arrowheads. Press Delete or use the toolbar to remove the selection.
+- **Compass cards**: use **Compass** in the toolbar to search and add a live card for an opportunity, solution, metric, doc, task, experiment, objective or key result, or drag a page from the page tree onto the canvas. The canvas stores only a reference (plus a cached title); the card shows the object's current status, score, progress, or metric value and trend each time you open the canvas, and links to it. Cards are checked against your access every time: if the object was deleted, lives in another workspace, or you cannot see it, the card shows "Unavailable" and reveals nothing about it. In other tools such as Obsidian, a Compass card is an ordinary link card (`compass://<kind>/<id>`) and is preserved when the file goes back to Compass.
+- **Undo / redo** with the toolbar or Cmd/Ctrl+Z and Shift+Cmd/Ctrl+Z.
+- **Autosave and history** work exactly like regular pages, including named versions and restore. Inline comments are not available on canvases.
+- **Export** downloads a `.canvas` file. Fields Compass does not understand are kept as-is on import and export.
+- **File cards** show the referenced file path as a labeled card; they are not linked to Compass docs. Moving a group does not move the cards inside it.
+- **On phones** a canvas opens locked for viewing (pan and zoom); use the lock button to edit.
+- Canvases are limited to roughly 800 KB of JSON.
+
+Agents can create and edit canvases through the MCP `create_doc` / `update_doc` tools with `docType: CANVAS`; see [MCP API](/help/09-mcp-api).
+
 ## Positioning & Messaging Briefs
 
 A Positioning & Messaging Brief is a Doc linked one-to-one to a Roadmap Item, used to nail down the story before a launch: problem statement, target audience, core message, proof points, and competitive differentiation. Part of the marketing-launch workflow — see [Roadmap](/help/04-roadmap) — so it's only available once a workspace admin turns on **Settings → Marketing launch** (off by default). With it on, create one from the roadmap item's panel Launch section, or via the MCP API's create_doc tool with docType set to GTM_POSITIONING_BRIEF and roadmapItemId set to the roadmap item it belongs to; if you do not pass explicit content, Compass fills in a five-section starter template you can edit like any other doc. Attempting to link a second brief to the same roadmap item is rejected, since the relationship is one-to-one.

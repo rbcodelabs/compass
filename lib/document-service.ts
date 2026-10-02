@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { Prisma, type Doc } from "@prisma/client"
 import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { getDocumentStore, isDocumentPilotWorkspace } from "@/lib/document-storage"
+import { normalizeCanvasContent } from "@/lib/json-canvas"
 
 export type DocumentMutationOptions = {
   expectedRevision?: string
@@ -19,7 +20,14 @@ type BodyRow = { content: string | null; storageProvider?: string | null; conten
 type DocumentChange = { title?: string; content?: string | null; icon?: string | null; metadata?: Prisma.InputJsonValue | typeof Prisma.JsonNull }
 
 export class DocumentError extends Error {
-  constructor(public readonly code: string) { super(`Document ${code}`); this.name = "DocumentError" }
+  constructor(public readonly code: string, detail?: string) { super(detail ? `Document ${code}: ${detail}` : `Document ${code}`); this.name = "DocumentError" }
+}
+
+/** CANVAS docs store a JSON Canvas document; reject anything that is not one before it reaches storage. */
+function canonicalCanvasContent(content: string | null | undefined): string {
+  const result = normalizeCanvasContent(content ?? "")
+  if (!result.ok) throw new DocumentError("invalid-canvas", result.error)
+  return result.content
 }
 
 function canonical(value: unknown): string {
@@ -85,8 +93,9 @@ async function snapshot(tx: AppTransactionClient, doc: Doc, opts: DocumentMutati
   } })
 }
 
-export async function createDocument(data: Prisma.DocUncheckedCreateInput, opts: DocumentMutationOptions) {
+export async function createDocument(input: Prisma.DocUncheckedCreateInput, opts: DocumentMutationOptions) {
   const db = getPrisma()
+  const data = input.docType === "CANVAS" ? { ...input, content: canonicalCanvasContent(input.content) } : input
   const pilot = isDocumentPilotWorkspace(data.workspaceId)
   const requestData = { ...data, sortOrder: undefined }
   const hash = payload("create", data.workspaceId, requestData, opts)
@@ -113,10 +122,11 @@ export async function createDocument(data: Prisma.DocUncheckedCreateInput, opts:
   }
 }
 
-export async function updateDocument(docId: string, data: DocumentChange, opts: DocumentMutationOptions): Promise<Doc> {
+export async function updateDocument(docId: string, change: DocumentChange, opts: DocumentMutationOptions): Promise<Doc> {
   const db = getPrisma()
   const doc = await db.doc.findUnique({ where: { id: docId } })
   if (!doc) throw new DocumentError("not-found")
+  const data = doc.docType === "CANVAS" && typeof change.content === "string" ? { ...change, content: canonicalCanvasContent(change.content) } : change
   if (doc.storageProvider !== "GEODE") {
     return db.$transaction(async tx => {
       if (Object.keys(data).length) await snapshot(tx, doc, opts)

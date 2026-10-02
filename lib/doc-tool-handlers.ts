@@ -22,6 +22,8 @@ import { createDocument, hydrateDocument, updateDocument } from "@/lib/document-
 import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
 import { isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { documentMcpActor } from "@/lib/document-mcp-actor"
+import { normalizeCanvasContent } from "@/lib/json-canvas"
+import type { DocType } from "@/lib/doc-types"
 
 // Keep the legacy history display label. Pilot receipts additionally bind the
 // trusted request actor carried by mcp-authz's AsyncLocalStorage.
@@ -203,7 +205,7 @@ export async function getDoc({ docId }: { docId: string }) {
       ? `Parent: ${doc.parent.title} (${doc.parent.id})`
       : "Parent: (root)",
     `Updated: ${doc.updatedAt.toISOString()}`,
-    doc.docType !== "STANDARD" ? `Doc Type: ${doc.docType}` : null,
+    doc.docType !== "STANDARD" ? `Doc Type: ${doc.docType}${doc.docType === "CANVAS" ? " (content is a JSON Canvas 1.0 document)" : ""}` : null,
     doc.roadmapItemId ? `Linked Roadmap Item: ${doc.roadmapItemId}` : null,
     "",
   ].filter((line): line is string => line !== null)
@@ -226,6 +228,7 @@ export async function getDoc({ docId }: { docId: string }) {
   return ok(lines.join("\n"), {
     id: doc.id,
     title: doc.title,
+    docType: doc.docType,
     content: fullContent,
     properties: metadata,
     revision: doc.revision,
@@ -251,7 +254,7 @@ export async function createDoc({
   parentId?: string | null
   icon?: string
   roadmapItemId?: string | null
-  docType?: "STANDARD" | "GTM_POSITIONING_BRIEF"
+  docType?: DocType
   operationId?: string
 }) {
   const prisma = getPrisma()
@@ -310,8 +313,21 @@ export async function createDoc({
   const effectiveContent =
     content ?? (effectiveDocType === "GTM_POSITIONING_BRIEF" ? GTM_POSITIONING_BRIEF_TEMPLATE : undefined)
 
+  // CANVAS content is a JSON Canvas document, not markdown: validate it (blank
+  // canvas when omitted) instead of running it through frontmatter parsing.
+  let canvasBody: string | null = null
+  if (effectiveDocType === "CANVAS") {
+    const canvas = normalizeCanvasContent(effectiveContent ?? "", { strictCards: true })
+    if (!canvas.ok) return fail(canvas.error)
+    canvasBody = canvas.content
+  }
+
   const { body, metadata } =
-    effectiveContent != null ? parseContent(effectiveContent, pilot) : { body: null, metadata: null }
+    canvasBody !== null
+      ? { body: canvasBody, metadata: null }
+      : effectiveContent != null
+        ? parseContent(effectiveContent, pilot)
+        : { body: null, metadata: null }
 
   const data = {
       workspaceId,
@@ -382,14 +398,25 @@ export async function updateDoc({
 
   const existing = await prisma.doc.findUnique({
     where: { id: docId },
-    select: { title: true, storageProvider: true },
+    select: { title: true, storageProvider: true, docType: true },
   })
   if (!existing) {
     return fail(`Doc "${docId}" not found.`)
   }
 
+  let canvasBody: string | undefined
+  if (existing.docType === "CANVAS" && content !== undefined) {
+    const canvas = normalizeCanvasContent(content, { strictCards: true })
+    if (!canvas.ok) return fail(canvas.error)
+    canvasBody = canvas.content
+  }
+
   const { body, metadata } =
-    content !== undefined ? parseContent(content, existing.storageProvider === "GEODE") : { body: undefined, metadata: undefined }
+    canvasBody !== undefined
+      ? { body: canvasBody, metadata: undefined }
+      : content !== undefined
+        ? parseContent(content, existing.storageProvider === "GEODE")
+        : { body: undefined, metadata: undefined }
 
   // Snapshot the doc's pre-change state before applying the new values —
   // but only when this call actually changes something, so a no-op call

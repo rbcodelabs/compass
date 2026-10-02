@@ -16,6 +16,7 @@ export function buildDocTree(
     icon: string | null;
     parentId: string | null;
     sortOrder: number;
+    docType?: string;
   }>
 ): DocTreeItem[] {
   const sorted = [...docs].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -57,6 +58,7 @@ export default async function DocsLayout({
       icon: true,
       parentId: true,
       sortOrder: true,
+      docType: true,
     },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
   }), prisma.artifact.findMany({
