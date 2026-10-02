@@ -152,6 +152,12 @@ export async function isFollowing(userId: string, subjectType: string, subjectId
   return row?.state === "FOLLOWING"
 }
 
+/** The caller's own state for a subject: FOLLOWING, MUTED (an explicit unfollow), or null (never followed). */
+export async function getFollowState(userId: string, subjectType: string, subjectId: string, prisma: AppPrismaClient = getPrisma()): Promise<FollowState | null> {
+  const row = await prisma.follow.findUnique({ where: { userId_subjectType_subjectId: { userId, subjectType, subjectId } }, select: { state: true } })
+  return row ? (row.state as FollowState) : null
+}
+
 /** User ids currently following the subject (FOLLOWING only; tombstones excluded). */
 export async function listFollowers(
   subjectType: string,

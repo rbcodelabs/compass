@@ -8,6 +8,7 @@ import getPrisma from "@/lib/db";
 import { DocEditor } from "@/components/docs/doc-editor";
 import { CanvasDocEditor } from "@/components/docs/canvas/canvas-doc-editor";
 import { DocDecisionAction } from "@/components/docs/doc-decision-action";
+import { FollowButton } from "@/components/following/follow-button";
 import { listDocDecisions } from "@/lib/tracked-decisions";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { hydrateDocument } from "@/lib/document-service";
@@ -99,6 +100,7 @@ export default async function DocPage({ params }: Props) {
       workspaceSlug={workspaceSlug}
       workspaceId={workspace.id}
       linkedTasks={linkedTasks}
+      followAction={<FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="DOC" subjectId={doc.id} />}
       decisionAction={<DocDecisionAction orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
     />
   );

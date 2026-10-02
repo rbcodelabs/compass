@@ -1,6 +1,5 @@
 "use client";
 
-import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useUrlState } from "@/hooks/use-url-state";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fieldGroupByValue, type DiscoveryGroupBy } from "@/lib/opportunity-field-board";
@@ -11,7 +10,7 @@ export type DiscoveryGroupByFieldOption = { id: string; label: string };
 
 /**
  * The Discovery board's grouping picker: Status (default, omitted from the
- * URL), Opportunity (solution swimlanes), plus one entry per groupable
+ * URL) plus one entry per groupable
  * Opportunity single-select field (`groupBy=field:<id>`). A compact `Select`
  * rather than tabs because the field count is workspace-defined — the same
  * reasoning as components/roadmap/roadmap-group-by-toggle.tsx.
@@ -24,7 +23,6 @@ export function DiscoveryGroupByToggle({
   fieldOptions?: DiscoveryGroupByFieldOption[];
 }) {
   const { set } = useUrlState();
-  const labels = useLabels();
 
   return (
     <Select
@@ -37,7 +35,6 @@ export function DiscoveryGroupByToggle({
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="status">Status</SelectItem>
-        <SelectItem value="opportunity">{labels.opportunity.singular}</SelectItem>
         {fieldOptions.map((option) => (
           <SelectItem key={option.id} value={fieldGroupByValue(option.id)}>
             {option.label}

@@ -113,7 +113,7 @@ export default async function globalTeardown() {
       // ── Delete in strict dependency order (no DB-level cascades) ──────────
       // The typed link tables have no foreign keys, so nothing removes their rows with the opportunities, solutions and
       // objectives deleted below; the dual-writing UI actions create LEGACY links for opportunities the specs create.
-      for (const table of ["opportunity_objective_links", "solution_key_result_links", "metric_observations", "metric_bindings", "metric_revisions", "metric_definitions", "analytics_connections", "workspace_activation_states"]) {
+      for (const table of ["notifications", "follows", "opportunity_objective_links", "solution_key_result_links", "metric_observations", "metric_bindings", "metric_revisions", "metric_definitions", "analytics_connections", "workspace_activation_states"]) {
         await pool.query(`DELETE FROM "${S}"."${table}" WHERE workspace_id = $1`, [wsId]);
       }
       await pool.query(`DELETE FROM "${S}".research_participant_voice_events WHERE workspace_id = $1`, [wsId]);

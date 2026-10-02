@@ -3342,7 +3342,7 @@ model Follow {
 /// never updated after insert except `readAt`. `payload` holds machine facts
 /// only (no titles or comment excerpts); display data is resolved at read time
 /// behind an access check. `dedupeKey` + recipient is unique so a replayed emit
-/// is harmless. kind: STATUS_CHANGED | COMMENT_ADDED | COMMENT_REPLIED.
+/// is harmless. kind: STATUS_CHANGED | COMMENT_ADDED | COMMENT_REPLIED | ASSIGNED.
 /// actorType: USER | AGENT | EXTERNAL | SYSTEM.
 model Notification {
   id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid

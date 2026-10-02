@@ -2,6 +2,10 @@ import getPrisma from "@/lib/db"
 import { resolveCommentAuthors } from "@/lib/comment-authors"
 import { withWorkspaceUpdates, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture"
 import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
+import { followingAvailable, followingEnabled } from "@/lib/following-flag"
+import { runAfterCommit } from "@/lib/following-commit"
+import { applyFollowingEffects, buildCommentEffects, resolveCommentFollowActor } from "@/lib/following-hooks"
+import { isSubjectTypeActive } from "@/lib/followable"
 
 export const COMMENT_TARGET_TYPES = [
   "OBJECTIVE", "KEY_RESULT", "OPPORTUNITY", "SOLUTION", "ASSUMPTION",
@@ -201,7 +205,29 @@ export async function createComment(input: CreateCommentInput) {
   }
   return comment
   })
+  await followAfterComment(input, comment.id)
   return getComment(comment.id)
+}
+
+/**
+ * Following hook (ADR "Following and in-app notifications", section 2.5). This is
+ * the single comment choke point, so UI, MCP, embed and the legacy Solution and
+ * Doc mirrors are all covered here and nowhere else. It runs after the comment
+ * has committed, never throws, and is queued until the outer transaction commits
+ * when an MCP tool is inside the PM receipt transaction.
+ */
+async function followAfterComment(input: CreateCommentInput, commentId: string) {
+  try {
+    if (input.source === "MIGRATION" || !followingEnabled() || !isSubjectTypeActive(input.targetType)) return
+    if (!(await followingAvailable(getPrisma()))) return
+    const effects = buildCommentEffects({
+      workspaceId: input.workspaceId, targetType: input.targetType, targetId: input.targetId, commentId,
+      parentId: input.parentId, source: input.source, actor: resolveCommentFollowActor(input),
+    })
+    if (effects.length > 0) await runAfterCommit(() => applyFollowingEffects(effects))
+  } catch (error) {
+    console.error("[following] comment hook failed", error)
+  }
 }
 
 export async function listComments(workspaceId: string, targetType: CommentTargetType, targetId: string, status?: CommentStatus) {

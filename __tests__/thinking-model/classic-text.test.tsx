@@ -83,8 +83,11 @@ import { AddSolutionForm } from "@/components/discovery/add-solution-form"
 import { OpportunityCard } from "@/components/discovery/opportunity-card"
 import { OpportunityBoard } from "@/components/discovery/opportunity-board"
 import { OpportunityFieldBoard } from "@/components/discovery/opportunity-field-board"
-import { SolutionSwimlaneBoard } from "@/components/discovery/solution-swimlane-board"
+import { SolutionBacklogBoard } from "@/components/solutions/solution-backlog-board"
 import { DiscoveryTableView } from "@/components/discovery/discovery-table-view"
+import { SolutionTableView } from "@/components/solutions/solution-table-view"
+import { NewSolutionDialog } from "@/components/solutions/new-solution-dialog"
+import { SolutionGroupByToggle } from "@/components/solutions/solution-group-by-toggle"
 import { ScoringPanel } from "@/components/discovery/scoring-panel"
 import { SolutionScoringPanel } from "@/components/discovery/solution-scoring-panel"
 import { SolutionsList } from "@/components/discovery/solutions-list"
@@ -272,7 +275,7 @@ describe("CLASSIC text is identical to main (Phase 4C-2 surfaces)", () => {
   } as never
   const oppCard = (solutions: number) => ({ id: "o1", title: "Need", customerSegment: null, status: "EXPLORING" as const, sortOrder: 0, _count: { solutions, evidence: 0 } })
   const solCard = { id: "s1", title: "Fix", description: null, status: "IDEA" as const, sortOrder: 0, _count: { assumptions: 1, evidence: 0 } }
-  const lane = { id: "o1", title: "Need", squad: null, solutions: [solCard] }
+  const backlogItem = { ...solCard, opportunity: { id: "o1", title: "Need", squad: null } }
 
   check("new-opportunity-button column", <NewOpportunityButton variant="column" status={"EXPLORING" as never} />)
   check("new-opportunity-button rail", <NewOpportunityButton variant="rail" />)
@@ -293,8 +296,17 @@ describe("CLASSIC text is identical to main (Phase 4C-2 surfaces)", () => {
       {...common}
     />,
   )
-  check("swimlane empty", <SolutionSwimlaneBoard opportunities={[]} workspaceId="w1" {...common} />)
-  check("swimlane lane", <SolutionSwimlaneBoard opportunities={[lane]} workspaceId="w1" {...common} />)
+  check("solution-backlog empty", <SolutionBacklogBoard solutions={[]} workspaceId="w1" {...common} />)
+  check("solution-backlog items", <SolutionBacklogBoard solutions={[backlogItem]} workspaceId="w1" {...common} />)
+  check("solution-backlog grouped by opportunity", <SolutionBacklogBoard solutions={[backlogItem]} workspaceId="w1" groupBy="opportunity" {...common} />)
+  check("solution-backlog grouped by squad", <SolutionBacklogBoard solutions={[backlogItem]} workspaceId="w1" groupBy="squad" {...common} />)
+  check("solution-backlog grouped empty", <SolutionBacklogBoard solutions={[]} workspaceId="w1" groupBy="squad" {...common} />)
+  check("solution-table empty", <SolutionTableView solutions={[]} {...common} />)
+  check("solution-table rows", <SolutionTableView solutions={[backlogItem]} hasActiveScoringModel {...common} />)
+  check("new-solution-dialog closed", <NewSolutionDialog opportunities={[{ id: "o1", title: "Need" }]} {...common} />)
+  check("new-solution-dialog open", <NewSolutionDialog opportunities={[{ id: "o1", title: "Need" }]} {...common} />, click(/new /i))
+  check("new-solution-dialog open no opportunities", <NewSolutionDialog opportunities={[]} {...common} />, click(/new /i))
+  check("solution-group-by-toggle", <SolutionGroupByToggle groupBy="opportunity" fieldOptions={[{ id: "f1", label: "Effort" }]} />)
   check("discovery-table empty", <DiscoveryTableView opportunities={[]} />)
   check(
     "discovery-table rows",

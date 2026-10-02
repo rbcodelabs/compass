@@ -12,13 +12,14 @@
 
 import getPrisma from "@/lib/db"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
-import matter from "gray-matter"
+import { safeMatter, stringifyFrontMatter } from "@/lib/safe-matter"
 import { Prisma } from "@prisma/client"
 import { ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates"
 import { maybeSnapshotDocVersion } from "@/lib/doc-versions"
 import { createDocument, hydrateDocument, updateDocument } from "@/lib/document-service"
+import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
 import { isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { documentMcpActor } from "@/lib/document-mcp-actor"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
@@ -43,7 +44,7 @@ function toJsonInput(data: DocMetadata): Prisma.InputJsonValue {
  * and metadata is the parsed frontmatter key-value pairs (or null if none).
  */
 function parseContent(raw: string, preserveWhitespace = false): { body: string; metadata: DocMetadata | null } {
-  const parsed = matter(raw)
+  const parsed = safeMatter(raw)
   const body = preserveWhitespace ? (parsed.matter ? parsed.content : raw) : parsed.content.trimStart()
   const metadata =
     parsed.data && Object.keys(parsed.data).length > 0
@@ -58,7 +59,7 @@ function parseContent(raw: string, preserveWhitespace = false): { body: string; 
  */
 function serializeWithFrontmatter(body: string | null, metadata: DocMetadata | null): string {
   if (!metadata || Object.keys(metadata).length === 0) return body ?? ""
-  return matter.stringify(body ?? "", metadata)
+  return stringifyFrontMatter(body ?? "", metadata)
 }
 
 // ── list_docs ────────────────────────────────────────────────────────────────
@@ -342,6 +343,7 @@ export async function createDoc({
   const doc = pilot
     ? await createDocument(data, { operationId, ...documentMcpActor() })
     : await prisma.doc.create({ data })
+  await followAfterCreate({ model: "doc", workspaceId, row: { id: doc.id }, actor: async () => mcpFollowActor() ?? { type: "SYSTEM", id: null } })
 
   // This used to emit a *relative* `/{org}/{ws}/docs` — the docs index, not the
   // doc just created, and with no origin for an MCP client to resolve it

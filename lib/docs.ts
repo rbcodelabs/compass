@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import matter from "gray-matter";
+import { safeMatter } from "@/lib/safe-matter"
 import { remark } from "remark";
 import remarkGfm from "remark-gfm";
 import remarkRehype from "remark-rehype";
@@ -41,7 +41,7 @@ export function getAllDocs(): DocMeta[] {
     .map((file) => {
       const slug = file.replace(/\.md$/, "");
       const raw = fs.readFileSync(path.join(DOCS_DIR, file), "utf-8");
-      const { data } = matter(raw);
+      const { data } = safeMatter(raw);
       return {
         slug,
         title: data.title as string,
@@ -58,7 +58,7 @@ export async function getDoc(slug: string): Promise<DocPage | null> {
   const file = path.join(DOCS_DIR, `${slug}.md`);
   if (!fs.existsSync(file)) return null;
   const raw = fs.readFileSync(file, "utf-8");
-  const { data, content } = matter(raw);
+  const { data, content } = safeMatter(raw);
   const result = await remark()
     .use(remarkGfm)
     .use(remarkRehype, { allowDangerousHtml: true })
@@ -85,7 +85,7 @@ export function getDocRaw(slug: string): DocRaw | null {
   const file = path.join(DOCS_DIR, `${slug}.md`);
   if (!fs.existsSync(file)) return null;
   const raw = fs.readFileSync(file, "utf-8");
-  const { data, content } = matter(raw);
+  const { data, content } = safeMatter(raw);
   return {
     slug,
     title: data.title as string,
@@ -239,7 +239,7 @@ export function searchHelp(query: string, limit = 5): HelpSearchResult[] {
   for (const meta of getAllDocs()) {
     const file = path.join(DOCS_DIR, `${meta.slug}.md`);
     const raw = fs.readFileSync(file, "utf-8");
-    const { content } = matter(raw);
+    const { content } = safeMatter(raw);
 
     let best: HelpSearchResult | null = null;
 
