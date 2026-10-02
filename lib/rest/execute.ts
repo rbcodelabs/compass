@@ -24,7 +24,8 @@ import { handleAnalyticsTool } from "@/lib/analytics/tool-handlers"
 import { getCustomFieldValues, listCustomFieldDefinitions, setCustomFieldValue } from "@/lib/custom-field-tool-handlers"
 import { listLinksTool } from "@/lib/typed-link-tool-handlers"
 import { getEligibleParentKeyResults } from "@/lib/okr-hierarchy"
-import { archiveScoringModel, createScoringModel, getOpportunityScore, getScoringModel, getSolutionScore, listScoringModels, scoreOpportunity, scoreSolution, updateScoringModel } from "@/lib/scoring-tool-handlers"
+import { archiveScoringModel, createScoringModel, getOpportunityScore, getSolutionScore, listScoringModels, scoreOpportunity, scoreSolution, updateScoringModel } from "@/lib/scoring-tool-handlers"
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 
 export class RestNotFoundError extends Error {}
 export class RestConflictError extends Error {}
@@ -55,6 +56,9 @@ const select = {
 export async function executeRestRoute(route: RestRoute, input: Input): Promise<unknown> {
   const prisma = getPrisma()
   const actor = getMcpActor()
+  const mutationActor = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"
+    ? { actorType: "AGENT" as const, actorId: actor.agentId ?? null }
+    : actor.userId ? { actorType: "USER" as const, actorId: actor.userId } : { actorType: "SYSTEM" as const, actorId: null }
   const workspaceId = input.params.workspaceId
   await enforcePolicy(route.authorizationPolicy, actor, workspaceId)
   const body = input.body ?? {}
@@ -166,7 +170,8 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "getObjective": return serialize(found(await prisma.objective.findFirst({ where: { id, workspaceId }, select: select.objective })))
     case "createObjective": {
       await validateObjectiveRefs(prisma, workspaceId, body)
-      return serialize(await prisma.objective.create({ data: { workspaceId, cycleId: nullable(body.cycleId) ?? null, squadId: nullable(body.squadId) ?? null, parentKeyResultId: nullable(body.parentKeyResultId) ?? null, title: String(body.title), description: nullable(body.description), owner: nullable(body.owner), source: "API" }, select: select.objective }))
+      const scope = found(await prisma.workspace.findFirst({ where: { id: workspaceId }, select: { id: true } }))
+      return serialize(await prisma.objective.create({ data: { workspaceId: scope.id, cycleId: nullable(body.cycleId) ?? null, squadId: nullable(body.squadId) ?? null, parentKeyResultId: nullable(body.parentKeyResultId) ?? null, title: String(body.title), description: nullable(body.description), owner: nullable(body.owner), source: "API" }, select: select.objective }))
     }
     case "updateObjective": { if (!(await prisma.objective.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError(); ensureTool(await updateObjective({ objectiveId: id, ...body })); return serialize(found(await prisma.objective.findFirst({ where: { id, workspaceId }, select: select.objective }))) }
     case "deleteObjective": { if (!(await prisma.objective.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError(); ensureTool(await deleteObjective({ objectiveId: id })); return undefined }
@@ -198,24 +203,19 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     }
     case "listExperimentResults": { await requireExperiment(prisma, workspaceId, id); return listPage(`experiment-results:${workspaceId}:${id}`, input.query, (cursor, take) => prisma.experimentResult.findMany({ where: { experimentId: id, experiment: { workspaceId }, ...cursorWhere(cursor) }, select: select.experimentResult, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
     case "createExperimentResult": {
-      return serialize(await prisma.$transaction(async (tx) => {
-        const fenced = await tx.experiment.updateMany({ where: { id, workspaceId, status: { in: ["DESIGNING", "RUNNING"] } }, data: { status: "RUNNING", startDate: new Date(), updatedAt: new Date(), source: "API" } })
-        if (!fenced.count) throw new RestConflictError("Only active experiments can accept results.")
-        return tx.experimentResult.create({ data: { experimentId: id, note: String(body.note), metric: nullable(body.metric), value: body.value == null ? null : Number(body.value), source: "API" }, select: select.experimentResult })
-      }))
+      await requireExperiment(prisma, workspaceId, id)
+      return serialize(await captureWorkspaceMutation(prisma, "experimentResult", "create", mutationActor, undefined, tx => tx.experimentResult.create({ data: { experimentId: id, note: String(body.note), metric: nullable(body.metric), value: body.value == null ? null : Number(body.value), source: "API" }, select: select.experimentResult })))
     }
     case "concludeExperiment": {
       const conclusion = String(body.conclusion), reason = nullable(body.reason)?.trim() ?? ""
       if (conclusion === "NOT_PURSUED" && !reason) throw new RestConflictError("NOT_PURSUED requires a reason.")
-      return serialize(await prisma.$transaction(async (tx) => {
-        const experiment = await tx.experiment.findFirst({ where: { id, workspaceId }, select: { ...select.experiment, assumptionId: true } })
-        if (!experiment) throw new RestNotFoundError()
-        if (["COMPLETE", "KILLED", "NOT_PURSUED"].includes(experiment.status)) throw new RestConflictError("The experiment is already concluded.")
-        const status = conclusion === "KILL" ? "KILLED" : conclusion === "NOT_PURSUED" ? "NOT_PURSUED" : "COMPLETE"
-        const updated = await tx.experiment.update({ where: { id }, data: { status, conclusion, conclusionReason: reason || null, endDate: new Date(), updatedAt: new Date(), source: "API" }, select: select.experiment })
-        if (experiment.assumptionId) await tx.assumption.updateMany({ where: { id: experiment.assumptionId, solution: { workspaceId } }, data: { status: conclusion === "PROCEED" ? "VALIDATED" : conclusion === "KILL" ? "INVALIDATED" : "UNTESTED", updatedAt: new Date(), source: "API" } })
-        return updated
-      }))
+      const experiment = await prisma.experiment.findFirst({ where: { id, workspaceId }, select: { id: true, status: true, assumptionId: true } })
+      if (!experiment) throw new RestNotFoundError()
+      if (["COMPLETE", "KILLED", "NOT_PURSUED"].includes(experiment.status)) throw new RestConflictError("The experiment is already concluded.")
+      const status = conclusion === "KILL" ? "KILLED" : conclusion === "NOT_PURSUED" ? "NOT_PURSUED" : "COMPLETE"
+      const updated = await captureWorkspaceMutation(prisma, "experiment", "update", mutationActor, id, tx => tx.experiment.update({ where: { id }, data: { status, conclusion, conclusionReason: reason || null, endDate: new Date(), updatedAt: new Date(), source: "API" }, select: select.experiment }))
+      if (experiment.assumptionId) await captureWorkspaceMutation(prisma, "assumption", "update", mutationActor, experiment.assumptionId, tx => tx.assumption.update({ where: { id: experiment.assumptionId! }, data: { status: conclusion === "PROCEED" ? "VALIDATED" : conclusion === "KILL" ? "INVALIDATED" : "UNTESTED", updatedAt: new Date(), source: "API" } }))
+      return serialize(updated)
     }
 
     case "listMetrics": return analyticsData(await handleAnalyticsTool("list_metrics", { workspaceId }))
@@ -249,7 +249,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "listCustomFieldDefinitions": return toolItems(await listCustomFieldDefinitions({ workspaceId, objectType: input.query.objectType as never }))
     case "listCustomFieldValues": { await assertCustomObjectWorkspace(prisma, workspaceId, input.params.objectType, input.params.objectId); return toolItems(await getCustomFieldValues({ objectType: input.params.objectType as never, objectId: input.params.objectId })) }
     case "setCustomFieldValue": { await assertCustomObjectWorkspace(prisma, workspaceId, input.params.objectType, input.params.objectId); ensureTool(await setCustomFieldValue({ objectType: input.params.objectType as never, objectId: input.params.objectId, fieldId: String(body.fieldId), value: body.value as never })); const values = toolItems(await getCustomFieldValues({ objectType: input.params.objectType as never, objectId: input.params.objectId })); return found(values.find((value) => value.id === body.fieldId)) }
-    case "listEntityLinks": return normalizeLinks(ensureTool(await listLinksTool({ workspaceId, ...(input.query as { opportunityId?: string; objectiveId?: string; solutionId?: string; keyResultId?: string; limit?: number; cursor?: string }) })) as Record<string, unknown>, input.query)
+    case "listEntityLinks": return normalizeLinks(ensureTool(await listLinksTool({ workspaceId, ...(input.query as { opportunityId?: string; objectiveId?: string; solutionId?: string; keyResultId?: string; limit?: number; cursor?: string }) })) as Record<string, unknown>)
   }
   throw new RestNotFoundError()
 }
@@ -315,7 +315,7 @@ function analyticsData(result: ToolResult): unknown {
   return data
 }
 
-function normalizeLinks(data: Record<string, unknown>, _query: Record<string, unknown>) {
+function normalizeLinks(data: Record<string, unknown>) {
   return { items: Array.isArray(data.items) ? data.items.map(serialize) : [], nextCursor: typeof data.nextCursor === "string" ? data.nextCursor : null }
 }
 
