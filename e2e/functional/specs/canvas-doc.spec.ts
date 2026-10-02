@@ -39,9 +39,9 @@ test.describe("JSON Canvas doc", () => {
     await page.goto(`${base}/docs`);
     await page.waitForLoadState("networkidle");
 
-    // ── Create a blank canvas from the Canvas menu ────────────────────────────
-    await page.getByTestId("new-canvas-menu").click();
-    await page.getByRole("menuitem", { name: "Blank canvas" }).click();
+    // Create a blank diagram from the unified Library menu.
+    await page.getByTestId("library-create-menu").click();
+    await page.getByRole("menuitem", { name: "New diagram" }).click();
     await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
     const editor = page.getByTestId("canvas-doc-editor");
     await expect(editor).toBeVisible({ timeout: 15_000 });
@@ -177,8 +177,8 @@ test.describe("JSON Canvas doc", () => {
 
     await page.goto(`${base}/docs`);
     await page.waitForLoadState("networkidle");
-    await page.getByTestId("new-canvas-menu").click();
-    await page.getByRole("menuitem", { name: "Blank canvas" }).click();
+    await page.getByTestId("library-create-menu").click();
+    await page.getByRole("menuitem", { name: "New diagram" }).click();
     await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
     await expect(page.getByTestId("canvas-doc-editor")).toBeVisible({ timeout: 15_000 });
     const docId = page.url().split("/").pop()!;
