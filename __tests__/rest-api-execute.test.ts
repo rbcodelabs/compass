@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     workspaceMember: { findFirst: vi.fn() },
     task: { findFirst: vi.fn(), count: vi.fn() },
     roadmapItem: { findFirst: vi.fn() },
+    evidence: { findFirst: vi.fn() },
     feedbackItem: { findFirst: vi.fn() },
     objective: { findFirst: vi.fn() },
     experiment: { findFirst: vi.fn(), updateMany: vi.fn() },
@@ -22,6 +23,7 @@ const mocks = vi.hoisted(() => ({
     customFieldValue: { findMany: vi.fn() },
     workspace: { findFirst: vi.fn() },
     scoringModel: { findMany: vi.fn() },
+    workspaceScoringConfig: { findUnique: vi.fn() },
     doc: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
     docVersion: { findFirst: vi.fn(), findMany: vi.fn() },
     comment: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -43,9 +45,15 @@ const mocks = vi.hoisted(() => ({
   listBindingsPage: vi.fn(),
   listObservationsPage: vi.fn(),
   listScoringModels: vi.fn(),
+  setWorkspaceScoringModel: vi.fn(),
   getDoc: vi.fn(),
   updateLaunchChecklistItem: vi.fn(),
   assertWorkspaceAdmin: vi.fn(),
+  assertOrgAdminBySlug: vi.fn(),
+  assertOrgMemberBySlug: vi.fn(),
+  addEvidence: vi.fn(),
+  promoteFeedbackToRoadmap: vi.fn(),
+  promoteSolutionToRoadmap: vi.fn(),
   requestReleaseAuthorization: vi.fn(),
   listNotifications: vi.fn(),
   unreadCount: vi.fn(),
@@ -74,6 +82,8 @@ vi.mock("@/lib/mcp-authz", () => ({
   getMcpActor: () => mocks.actor.current,
   assertWorkspaceMember: mocks.assertWorkspaceMember,
   assertWorkspaceAdmin: mocks.assertWorkspaceAdmin,
+  assertOrgAdminBySlug: mocks.assertOrgAdminBySlug,
+  assertOrgMemberBySlug: mocks.assertOrgMemberBySlug,
   isServiceActor: () => false,
 }))
 vi.mock("@/lib/opportunity-tool-handlers", () => ({
@@ -84,7 +94,9 @@ vi.mock("@/lib/task-tool-handlers", () => ({
   createTask: mocks.createTask,
   moveTaskStatus: vi.fn(), updateTask: vi.fn(), linkTask: vi.fn(), unlinkTask: vi.fn(),
 }))
-vi.mock("@/lib/roadmap-tool-handlers", () => ({ updateRoadmapItem: mocks.updateRoadmapItem, createRoadmapItem: mocks.createRoadmapItem, updateLaunchChecklistItem: mocks.updateLaunchChecklistItem, setLaunchTier: vi.fn(), getLaunchChecklist: vi.fn() }))
+vi.mock("@/lib/roadmap-tool-handlers", () => ({ updateRoadmapItem: mocks.updateRoadmapItem, createRoadmapItem: mocks.createRoadmapItem, promoteSolutionToRoadmap: mocks.promoteSolutionToRoadmap, createChecklistTemplate: vi.fn(), updateLaunchChecklistItem: mocks.updateLaunchChecklistItem, setLaunchTier: vi.fn(), getLaunchChecklist: vi.fn() }))
+vi.mock("@/lib/feedback-tool-handlers", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/feedback-tool-handlers")>(), promoteFeedbackToRoadmap: mocks.promoteFeedbackToRoadmap }))
+vi.mock("@/lib/evidence-tool-handlers", () => ({ addEvidence: mocks.addEvidence, linkEvidence: vi.fn(), listEvidence: vi.fn() }))
 vi.mock("@/lib/doc-tool-handlers", () => ({ getDoc: mocks.getDoc, listDocs: vi.fn(), createDoc: vi.fn(), updateDoc: vi.fn() }))
 vi.mock("@/lib/decision-tool-handlers", () => ({ requestReleaseAuthorization: mocks.requestReleaseAuthorization, requestDecision: vi.fn(), listDecisions: mocks.listDecisions, getDecision: vi.fn(), getReviewRequest: vi.fn(), listReviewRequests: vi.fn() }))
 vi.mock("@/lib/comments", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/comments")>(), createComment: mocks.createComment, updateCommentBody: mocks.updateCommentBody, setCommentStatus: mocks.setCommentStatus }))
@@ -102,6 +114,7 @@ vi.mock("@/lib/analytics/service", async (importOriginal) => ({
 vi.mock("@/lib/scoring-tool-handlers", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/scoring-tool-handlers")>(),
   listScoringModels: mocks.listScoringModels,
+  setWorkspaceScoringModel: mocks.setWorkspaceScoringModel,
 }))
 vi.mock("@/lib/research-study-service", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/research-study-service")>(),
@@ -150,6 +163,44 @@ describe("REST domain execution", () => {
       params: { workspaceId: UUID }, query: {}, body: { name: "Priorities", fieldDefinitionId: FOREIGN },
     })).rejects.toBeInstanceOf(RestForbiddenError)
     expect(mocks.assertWorkspaceMember).not.toHaveBeenCalled()
+  })
+
+  it("requires a human organization admin before workspace creation", async () => {
+    mocks.actor.current = { userId: "user-1", purpose: "AGENT" }
+    await expect(executeRestRoute(route("createWorkspace"), {
+      params: { orgSlug: "acme" }, query: {}, body: { name: "New", slug: "new" },
+    })).rejects.toBeInstanceOf(RestForbiddenError)
+    expect(mocks.assertOrgAdminBySlug).not.toHaveBeenCalled()
+  })
+
+  it("preserves delegated scoring-admin authorization", async () => {
+    await executeRestRoute(route("getWorkspaceScoringModel"), {
+      params: { workspaceId: UUID, entityType: "OPPORTUNITY" }, query: {}, body: undefined,
+    })
+    mocks.setWorkspaceScoringModel.mockResolvedValue(success({}))
+    await executeRestRoute(route("updateWorkspaceScoringModel"), {
+      params: { workspaceId: UUID, entityType: "OPPORTUNITY" }, query: {}, body: { scoringModelId: null },
+    })
+    expect(mocks.assertWorkspaceAdmin).toHaveBeenCalledWith(mocks.actor.current, UUID, { agentCapability: "SCORING_MODEL_ADMIN" })
+  })
+
+  it("rejects cross-workspace evidence targets before writing", async () => {
+    mocks.prisma.opportunity.findFirst.mockResolvedValue(null)
+    await expect(executeRestRoute(route("createEvidence"), {
+      params: { workspaceId: UUID }, query: {}, body: { sourceType: "feedback", excerpt: "Observed", opportunityId: FOREIGN },
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.addEvidence).not.toHaveBeenCalled()
+  })
+
+  it("passes API provenance and operation id to feedback promotion", async () => {
+    const operationId = THIRD
+    mocks.prisma.feedbackItem.findFirst.mockResolvedValue({ id: FOREIGN })
+    mocks.promoteFeedbackToRoadmap.mockResolvedValue(success({ id: operationId }))
+    mocks.prisma.roadmapItem.findFirst.mockResolvedValue({ id: operationId })
+    await executeRestRoute(route("promoteFeedbackToRoadmap"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: { operationId, horizon: "NEXT" },
+    })
+    expect(mocks.promoteFeedbackToRoadmap).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: UUID, feedbackId: FOREIGN, operationId, source: "API" }))
   })
 
   it.each([
