@@ -127,6 +127,44 @@ patching or unreveal, model-generated research guides, and provider secrets.
 
 ## MCP parity and transport exclusions
 
+Phase 5 closes the remaining stable MCP resource capabilities with REST
+resources for help topics, organization-scoped workspace discovery and
+creation, workspace summaries, evidence, completed feedback attachments,
+roadmap promotions, scoring-model assignments, launch-checklist templates,
+eligible objective parents, task assignees and links, embedded feedback
+sources, and opportunity rankings. Exact paths, methods, request fields, and
+response fields are published in OpenAPI; responses are strict projections and
+never serialize raw ORM rows.
+
+Help requires an authenticated actor. Workspace and organization reads require
+membership in the exact path ancestor. Workspace creation requires a human
+organization administrator. Embedded feedback-source create/update requires a
+human workspace administrator; create returns the raw bearer token exactly
+once, while update and every read omit it. Scoring-model assignment preserves
+the existing organization-admin or delegated `SCORING_MODEL_ADMIN` gate.
+Relationship writes such as evidence re-parenting, squad assignment, and
+objective-parent assignment verify both ends belong to the path workspace and
+return an opaque `404` without writing when they do not.
+
+Feedback attachment completion accepts only the URL and signed upload receipt
+from the prepare/upload workflow. The receipt is bound to the feedback item,
+workspace, metadata, expiry, and single completion; inline/base64 upload stays
+an MCP convenience. Feedback-source origin and artifact checks happen before
+credential creation, and the source plus its hashed initial token commit as one
+transaction.
+
+Roadmap promotion actions require a UUID `operationId`. Retrying the same
+operation with the same target and payload returns the same roadmap item,
+including under a concurrent insert race. Reusing that ID for another target,
+horizon, privacy value, or inherited relationship returns `409`. A distinct
+operation ID intentionally permits a later or independent promotion.
+
+Task-assignee, task-link, template, evidence, workspace, and ranking lists use
+bounded signed cursors. Cursor signatures bind tenant scope, filters, ordering,
+and page size; changing the workspace, organization, filter, or `limit` returns
+`400 invalid_cursor`. Opportunity rankings order equal scores by a stable ID
+tiebreaker.
+
 The checked-in parity manifest accounts for every MCP capability as one direct
 REST operation, a documented resource composition, or an explicit exclusion.
 It is an audit ledger only; the central REST registry remains the executable
