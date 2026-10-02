@@ -40,6 +40,20 @@ describe("REST API registry", () => {
     expect(feedback.bodySchema?.safeParse({ title: "Changed", opportunityId: "11111111-1111-4111-8111-111111111111" }).success).toBe(false)
   })
 
+  it("publishes lifecycle PATCH alternatives as JSON Schema unions", () => {
+    const document = buildOpenApiDocument()
+    const operation = document.paths["/api/v1/workspaces/{workspaceId}/opportunities/{id}"].patch as unknown as {
+      requestBody: { content: { "application/json": { schema: { anyOf?: unknown[]; oneOf?: unknown[] } } } }
+    }
+    const schema = operation.requestBody.content["application/json"].schema
+    expect(schema.anyOf ?? schema.oneOf).toHaveLength(3)
+  })
+
+  it("registers roadmap creation as a write-scoped workspace policy", () => {
+    const create = REST_ROUTES.find((route) => route.operationId === "createRoadmapItem")
+    expect(create).toMatchObject({ method: "POST", scope: "api:write", authorizationPolicy: "workspace-writer", status: 201 })
+  })
+
   it("generates one OpenAPI operation for every registry route", () => {
     const document = buildOpenApiDocument()
     const operations = Object.values(document.paths).flatMap((path) => Object.values(path))

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   createOpportunity: vi.fn(),
   createTask: vi.fn(),
   updateRoadmapItem: vi.fn(),
+  createRoadmapItem: vi.fn(),
   assertWorkspaceMember: vi.fn(),
 }))
 
@@ -34,7 +35,7 @@ vi.mock("@/lib/task-tool-handlers", () => ({
   createTask: mocks.createTask,
   moveTaskStatus: vi.fn(), updateTask: vi.fn(), linkTask: vi.fn(), unlinkTask: vi.fn(),
 }))
-vi.mock("@/lib/roadmap-tool-handlers", () => ({ updateRoadmapItem: mocks.updateRoadmapItem }))
+vi.mock("@/lib/roadmap-tool-handlers", () => ({ updateRoadmapItem: mocks.updateRoadmapItem, createRoadmapItem: mocks.createRoadmapItem }))
 
 import { executeRestRoute, RestNotFoundError } from "@/lib/rest/execute"
 import { REST_ROUTES } from "@/lib/rest/registry"
@@ -77,6 +78,28 @@ describe("REST domain execution", () => {
     }) as { createdAt: string; updatedAt: string }
     expect(result.createdAt).toBe("2026-10-02T00:00:00.000Z")
     expect(result.updatedAt).toBe("2026-10-02T01:00:00.000Z")
+  })
+
+  it("normalizes nullable and non-string feedback tags", async () => {
+    mocks.prisma.feedbackItem.findFirst.mockResolvedValue({
+      id: FOREIGN, workspaceId: UUID, opportunityId: null, title: "Feedback", description: null,
+      type: "IDEA", status: "OPEN", voteCount: 0, tags: ["useful", 42, null], submitterName: null,
+      submitterEmail: null, createdAt: new Date(), updatedAt: new Date(),
+    })
+    const result = await executeRestRoute(route("getFeedback"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
+    }) as { tags: string[] }
+    expect(result.tags).toEqual(["useful"])
+
+    mocks.prisma.feedbackItem.findFirst.mockResolvedValueOnce({
+      id: FOREIGN, workspaceId: UUID, opportunityId: null, title: "Feedback", description: null,
+      type: "IDEA", status: "OPEN", voteCount: 0, tags: null, submitterName: null,
+      submitterEmail: null, createdAt: new Date(), updatedAt: new Date(),
+    })
+    const nullable = await executeRestRoute(route("getFeedback"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
+    }) as { tags: string[] }
+    expect(nullable.tags).toEqual([])
   })
 
   it("dispatches workspace policies and fails closed for an unknown policy", async () => {
@@ -126,5 +149,20 @@ describe("REST domain execution", () => {
     })).rejects.toBeInstanceOf(RestNotFoundError)
 
     expect(mocks.updateRoadmapItem).not.toHaveBeenCalled()
+  })
+
+  it("uses the shared roadmap creation service with API provenance", async () => {
+    mocks.createRoadmapItem.mockResolvedValue(success({ id: FOREIGN }))
+    mocks.prisma.roadmapItem.findFirst.mockResolvedValue({
+      id: FOREIGN, workspaceId: UUID, squadId: null, title: "Ship REST", description: null,
+      horizon: "NOW", status: "ACTIVE", isPrivate: false, startDate: null, endDate: null,
+      solutionId: null, keyResultId: null, opportunityId: null, experimentId: null, feedbackId: null,
+      createdAt: new Date(), updatedAt: new Date(),
+    })
+    await executeRestRoute(route("createRoadmapItem"), {
+      params: { workspaceId: UUID }, query: {}, body: { title: "Ship REST", horizon: "NOW" },
+    })
+    expect(mocks.createRoadmapItem).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: UUID, title: "Ship REST", horizon: "NOW", source: "API" }))
+    expect(mocks.assertWorkspaceMember).toHaveBeenCalledWith(expect.objectContaining({ purpose: "USER" }), UUID)
   })
 })

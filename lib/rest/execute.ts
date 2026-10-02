@@ -10,7 +10,7 @@ import { createAssumption, deleteAssumption, updateAssumption } from "@/lib/assu
 import { createFeedback, linkFeedbackToOpportunity, prepareFeedbackAttachmentUploadTool, updateFeedback, updateFeedbackStatus, updateFeedbackType } from "@/lib/feedback-tool-handlers"
 import { createTask, moveTaskStatus, updateTask } from "@/lib/task-tool-handlers"
 import { linkTask, unlinkTask } from "@/lib/task-tool-handlers"
-import { updateRoadmapItem } from "@/lib/roadmap-tool-handlers"
+import { createRoadmapItem, updateRoadmapItem } from "@/lib/roadmap-tool-handlers"
 import {
   linkOpportunityToObjectiveTool,
   linkSolutionToKeyResultTool,
@@ -128,6 +128,11 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     }
 
     case "listRoadmapItems": return listPage(`roadmap:${workspaceId}:${filters(input.query, ["horizon", "status", "squadId"])}`, input.query, (cursor, take) => prisma.roadmapItem.findMany({ where: { workspaceId, ...pick(input.query, ["horizon", "status", "squadId"]), ...cursorWhere(cursor) }, select: select.roadmap, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
+    case "createRoadmapItem": {
+      await validateRoadmapRefs(prisma, workspaceId, body)
+      const result = ensureTool(await createRoadmapItem({ workspaceId, ...(body as Omit<Parameters<typeof createRoadmapItem>[0], "workspaceId">), source: "API" })) as { id: string }
+      return serialize(found(await prisma.roadmapItem.findFirst({ where: { id: result.id, workspaceId }, select: select.roadmap })))
+    }
     case "getRoadmapItem": return serialize(found(await prisma.roadmapItem.findFirst({ where: { id, workspaceId }, select: select.roadmap })))
     case "updateRoadmapItem": {
       if (body.horizon === "LAUNCHING" || body.horizon === "LAUNCHED") throw new RestConflictError("Use the launch workflow resource for this transition.")
@@ -175,7 +180,14 @@ function found<T>(value: T | null | undefined): T { if (value == null) throw new
 function nullable(value: unknown): string | null | undefined { return value === null ? null : typeof value === "string" ? value : undefined }
 function pick(source: Record<string, unknown>, keys: string[]): Record<string, unknown> { return Object.fromEntries(keys.flatMap((key) => source[key] === undefined ? [] : [[key, source[key]]])) }
 function filters(query: Record<string, unknown>, keys: string[]): string { return JSON.stringify(pick(query, keys)) }
-function serialize(value: unknown): unknown { return JSON.parse(JSON.stringify(value)) }
+function serialize(value: unknown): unknown {
+  const serialized = JSON.parse(JSON.stringify(value)) as unknown
+  if (serialized && typeof serialized === "object" && "tags" in serialized) {
+    const row = serialized as Record<string, unknown>
+    row.tags = Array.isArray(row.tags) ? row.tags.filter((tag): tag is string => typeof tag === "string") : []
+  }
+  return serialized
+}
 
 function ensureTool(result: ToolResult): unknown {
   if (!result.structuredContent.ok) throw new RestConflictError(result.structuredContent.message)

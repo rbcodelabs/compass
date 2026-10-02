@@ -14,6 +14,31 @@ import { ok, fail } from "@/lib/mcp-output"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
+import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
+
+export async function createRoadmapItem(input: {
+  workspaceId: string; title: string; horizon: "NOW" | "NEXT" | "LATER" | "SHIPPED"; description?: string | null
+  solutionId?: string | null; keyResultId?: string | null; opportunityId?: string | null; squadId?: string | null
+  startDate?: string | null; endDate?: string | null; isPrivate?: boolean; source?: ProgrammaticSource
+}) {
+  const prisma = getPrisma()
+  const workspace = await prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { name: true, slug: true, organization: { select: { slug: true } } } })
+  if (!workspace) return fail(`Workspace "${input.workspaceId}" not found.`)
+  const lastItem = await prisma.roadmapItem.findFirst({ where: { workspaceId: input.workspaceId, horizon: input.horizon, status: "ACTIVE" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, tx => tx.roadmapItem.create({ data: {
+    workspaceId: input.workspaceId, title: input.title.trim(), horizon: input.horizon, description: input.description?.trim() || null,
+    sortOrder: lastItem ? lastItem.sortOrder + 1 : 0, solutionId: input.solutionId ?? null, keyResultId: input.keyResultId ?? null,
+    opportunityId: input.opportunityId ?? null, squadId: input.squadId ?? null, startDate: input.startDate ? new Date(input.startDate) : undefined,
+    endDate: input.endDate ? new Date(input.endDate) : undefined, isPrivate: input.isPrivate ?? false,
+  } }))
+  const format = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
+  return ok(withUrlLine(
+    `**Roadmap item created** (${input.horizon})\nID: ${item.id}\nTitle: ${item.title}` +
+      (item.isPrivate ? "\nPrivate: yes (hidden from public portal)" : "") +
+      (item.startDate || item.endDate ? `\nDates: ${item.startDate ? format(item.startDate) : "?"} – ${item.endDate ? format(item.endDate) : "?"}` : ""),
+    safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "roadmapItem", id: item.id }),
+  ), { id: item.id, title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate })
+}
 
 export async function updateRoadmapItem(input: {
   itemId: string; keyResultId?: string | null; opportunityId?: string | null; solutionId?: string | null; squadId?: string | null

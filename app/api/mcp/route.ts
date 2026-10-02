@@ -121,6 +121,7 @@ import {
   getLaunchChecklist,
   updateLaunchChecklistItem,
   updateRoadmapItem,
+  createRoadmapItem,
 } from "@/lib/roadmap-tool-handlers"
 import {
   createTask,
@@ -2209,57 +2210,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, title, horizon, description, solutionId, keyResultId, opportunityId, squadId, startDate, endDate, isPrivate }) => {
-        const prisma = getPrisma()
-        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, ...WORKSPACE_LINK_SELECT } })
-        if (!workspace) {
-          return fail(`Workspace "${workspaceId}" not found.`)
-        }
-        const lastItem = await prisma.roadmapItem.findFirst({
-          where: { workspaceId, horizon, status: "ACTIVE" },
-          orderBy: { sortOrder: "desc" },
-          select: { sortOrder: true },
-        })
-        const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "MCP", undefined, tx => tx.roadmapItem.create({ data: {
-            workspaceId,
-            title: title.trim(),
-            horizon,
-            description: description?.trim(),
-            sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
-            solutionId: solutionId ?? null,
-            keyResultId: keyResultId ?? null,
-            opportunityId: opportunityId ?? null,
-            squadId: squadId ?? null,
-            startDate: startDate ? new Date(startDate) : undefined,
-            endDate: endDate ? new Date(endDate) : undefined,
-            isPrivate: isPrivate ?? false,
-          } }))
-        return ok(
-          withUrlLine(
-            `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
-              (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
-              (solutionId ? `\nLinked Solution: ${solutionId}` : "") +
-              (keyResultId ? `\nLinked KR: ${keyResultId}` : "") +
-              (opportunityId ? `\nLinked Opportunity: ${opportunityId}` : "") +
-              (item.startDate || item.endDate
-                ? `\nDates: ${item.startDate ? formatUtcDate(item.startDate) : "?"} – ${item.endDate ? formatUtcDate(item.endDate) : "?"}`
-                : ""),
-            workspaceEntityUrl(workspace, { type: "roadmapItem", id: item.id }),
-          ),
-          {
-            id: item.id,
-            title: item.title,
-            horizon,
-            isPrivate: item.isPrivate,
-            solutionId: item.solutionId,
-            keyResultId: item.keyResultId,
-            opportunityId: item.opportunityId,
-            squadId: item.squadId,
-            startDate: item.startDate,
-            endDate: item.endDate,
-          },
-        )
-      }
+      createRoadmapItem,
     )
 
     register(
