@@ -9,6 +9,8 @@ const prisma = vi.hoisted(() => ({
     findFirst: vi.fn(),
     updateMany: vi.fn(),
     update: vi.fn(),
+    create: vi.fn(),
+    deleteMany: vi.fn(),
   },
   cardSortRound: { updateMany: vi.fn() },
   cardSortProposal: { upsert: vi.fn() },
@@ -32,7 +34,7 @@ vi.mock("@/lib/opportunity-create", async (importOriginal) => ({
   }),
 }))
 
-import { acceptCardSortNewEntry } from "@/lib/card-sort-new-entries"
+import { acceptCardSortNewEntry, proposeCardSortNewEntry, withdrawCardSortNewEntry } from "@/lib/card-sort-new-entries"
 
 describe("acceptCardSortNewEntry atomicity", () => {
   beforeEach(() => {
@@ -80,5 +82,17 @@ describe("acceptCardSortNewEntry atomicity", () => {
 
     expect(state.committed.entry).toMatchObject({ status: "ACCEPTED", acceptedObjectId: "opportunity" })
     expect(prisma.cardSortProposal.upsert).not.toHaveBeenCalled()
+  })
+
+  it("does not create or withdraw entries after reveal wins the state race", async () => {
+    prisma.cardSortRound.updateMany.mockResolvedValue({ count: 0 })
+
+    await expect(proposeCardSortNewEntry({ workspaceId: "workspace", roundId: "round", userId: "participant", title: "Idea" }))
+      .rejects.toMatchObject({ code: "WRONG_STATE" })
+    await expect(withdrawCardSortNewEntry({ workspaceId: "workspace", roundId: "round", userId: "participant", entryId: "entry" }))
+      .rejects.toMatchObject({ code: "WRONG_STATE" })
+
+    expect(prisma.cardSortNewEntry.create).not.toHaveBeenCalled()
+    expect(prisma.cardSortNewEntry.deleteMany).not.toHaveBeenCalled()
   })
 })

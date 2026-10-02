@@ -97,7 +97,10 @@ export async function proposeCardSortNewEntry({
   suggestedValue?: string | null
 }) {
   const prisma = getPrisma()
-  const round = await loadRound(prisma, roundId, workspaceId)
+  return prisma.$transaction(async tx => {
+  const fenced = await tx.cardSortRound.updateMany({ where: { id: roundId, workspaceId, state: "OPEN" }, data: { updatedAt: new Date() } })
+  if (fenced.count !== 1) throw new CardSortError("WRONG_STATE", "New entries can only be proposed while a round is OPEN.")
+  const round = await loadRound(tx, roundId, workspaceId)
   assertOpportunityRound(round)
   if (round.state !== "OPEN") {
     throw new CardSortError(
@@ -124,7 +127,7 @@ export async function proposeCardSortNewEntry({
 
   const cleanSuggested = trimToNull(suggestedValue)
   if (cleanSuggested) {
-    const factor = await loadFactor(prisma, {
+    const factor = await loadFactor(tx, {
       workspaceId,
       fieldDefinitionId: round.fieldDefinitionId,
     })
@@ -138,7 +141,7 @@ export async function proposeCardSortNewEntry({
     }
   }
 
-  return prisma.cardSortNewEntry.create({
+  return tx.cardSortNewEntry.create({
     data: {
       roundId,
       userId,
@@ -147,6 +150,7 @@ export async function proposeCardSortNewEntry({
       suggestedValue: cleanSuggested,
       status: "PENDING",
     },
+  })
   })
 }
 
@@ -169,37 +173,13 @@ export async function withdrawCardSortNewEntry({
   entryId: string
 }) {
   const prisma = getPrisma()
-  const round = await loadRound(prisma, roundId, workspaceId)
-  if (round.state !== "OPEN") {
-    throw new CardSortError(
-      "WRONG_STATE",
-      `This round is ${round.state}. New entries can only be withdrawn while a round is OPEN.`
-    )
-  }
-  const deleted = await prisma.cardSortNewEntry.deleteMany({
-    where: { id: entryId, roundId, userId, status: "PENDING" },
+  return prisma.$transaction(async tx => {
+    const fenced = await tx.cardSortRound.updateMany({ where: { id: roundId, workspaceId, state: "OPEN" }, data: { updatedAt: new Date() } })
+    if (fenced.count !== 1) throw new CardSortError("WRONG_STATE", "New entries can only be withdrawn while a round is OPEN.")
+    const deleted = await tx.cardSortNewEntry.deleteMany({ where: { id: entryId, roundId, userId, status: "PENDING" } })
+    if (deleted.count === 0) throw new CardSortError("NOT_FOUND", "You have no pending new entry with that id to withdraw.")
+    return { withdrawn: deleted.count }
   })
-  if (deleted.count === 0) {
-    throw new CardSortError("NOT_FOUND", "You have no pending new entry with that id to withdraw.")
-  }
-  return { withdrawn: deleted.count }
-}
-
-async function loadFacilitatedRound(
-  roundId: string,
-  workspaceId: string,
-  userId: string,
-  verb: string
-) {
-  const prisma = getPrisma()
-  const round = await loadRound(prisma, roundId, workspaceId)
-  if (round.createdById !== userId) {
-    throw new CardSortError("FORBIDDEN", `Only the person who created this round can ${verb} new entries.`)
-  }
-  if (round.state === "CLOSED") {
-    throw new CardSortError("WRONG_STATE", "This round is closed, so pending entries can no longer be resolved.")
-  }
-  return { prisma, round }
 }
 
 /**
@@ -293,7 +273,7 @@ export async function rejectCardSortNewEntry({
   entryId: string
   note?: string | null
 }) {
-  const { prisma } = await loadFacilitatedRound(roundId, workspaceId, userId, "reject")
+  const prisma = getPrisma()
   const cleanNote = trimToNull(note)
   if (cleanNote && cleanNote.length > CARD_SORT_NEW_ENTRY_NOTE_MAX) {
     throw new CardSortError(
@@ -301,10 +281,15 @@ export async function rejectCardSortNewEntry({
       `Note must be ${CARD_SORT_NEW_ENTRY_NOTE_MAX} characters or fewer.`
     )
   }
-  const entry = await prisma.cardSortNewEntry.findFirst({ where: { id: entryId, roundId } })
+  return prisma.$transaction(async tx => {
+  const round = await loadRound(tx, roundId, workspaceId)
+  if (round.createdById !== userId) throw new CardSortError("FORBIDDEN", "Only the person who created this round can reject new entries.")
+  const fenced = await tx.cardSortRound.updateMany({ where: { id: roundId, workspaceId, createdById: userId, state: { in: ["OPEN", "REVEALED"] } }, data: { updatedAt: new Date() } })
+  if (fenced.count !== 1) throw new CardSortError("WRONG_STATE", "This round is closed, so pending entries can no longer be resolved.")
+  const entry = await tx.cardSortNewEntry.findFirst({ where: { id: entryId, roundId } })
   if (!entry) throw new CardSortError("NOT_FOUND", `New entry not found: ${entryId}`)
 
-  const claim = await prisma.cardSortNewEntry.updateMany({
+  const claim = await tx.cardSortNewEntry.updateMany({
     where: { id: entryId, roundId, status: "PENDING" },
     data: {
       status: "REJECTED",
@@ -317,6 +302,7 @@ export async function rejectCardSortNewEntry({
     throw new CardSortError("WRONG_STATE", `That entry is already ${entry.status.toLowerCase()}.`)
   }
   return { entryId }
+  })
 }
 
 /**
