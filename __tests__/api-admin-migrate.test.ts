@@ -43,7 +43,8 @@ vi.mock("@/lib/schema", () => ({
   getActiveSchema: () => "compass_preview",
 }))
 
-import { GET, POST, getDecisionGateExpectedCatalog, normalizeConstraintDefinition } from "@/app/api/admin/migrate/route"
+import { GET, POST } from "@/app/api/admin/migrate/route"
+import { getDecisionGateExpectedCatalog, normalizeConstraintDefinition } from "@/lib/migrations/runner"
 import { applyMigrations } from "@/lib/migrations/runner"
 
 const ORIGINAL_ENV = { ...process.env }

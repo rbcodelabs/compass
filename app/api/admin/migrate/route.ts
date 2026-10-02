@@ -17,8 +17,6 @@ export const maxDuration = 300;
 import { getMigrationStatus, applyMigrations } from "@/lib/migrations/runner";
 import { repairWorkspaceIdResidual, WorkspaceIdBackfillRefusal } from "@/lib/migrations/workspace-id-on-solution-objective";
 import { parseMigratePostBody } from "@/lib/migrations/admin-request";
-export { normalizeConstraintDefinition } from "@/lib/migrations/runner";
-export { getDecisionGateExpectedCatalog, getDecisionGateInfrastructureHealth } from "@/lib/migrations/runner";
 
 async function getPool(): Promise<Pool> {
   // worktree-bootstrap provides a local Postgres URL. Keep local verification
