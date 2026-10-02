@@ -18,7 +18,7 @@
 import getPrisma from "@/lib/db"
 import { resolveCommentAuthors } from "@/lib/comment-authors"
 import type { DocComment } from "@prisma/client"
-import { deleteMirroredComment, mirrorLegacyDocComment, updateMirroredComment, updateMirroredDocStatus } from "@/lib/comment-compat"
+import { mirrorLegacyDocComment } from "@/lib/comment-compat"
 
 export type CommentStatus = "OPEN" | "RESOLVED"
 export type CommentAuthorType = "AGENT" | "HUMAN"
@@ -130,13 +130,15 @@ export async function updateDocCommentBodyCore(
   body: string
 ): Promise<DocComment | null> {
   const prisma = getPrisma()
-  const existing = await prisma.docComment.findUnique({ where: { id: commentId }, select: { id: true } })
-  if (!existing) return null
-  const updated = await prisma.docComment.update({
-    where: { id: commentId },
-    data: { body: body.trim(), updatedAt: new Date() },
+  const updated = await prisma.$transaction(async tx => {
+    const existing = await tx.docComment.findUnique({ where: { id: commentId }, select: { id: true } })
+    if (!existing) return null
+    const now = new Date(), trimmed = body.trim()
+    const row = await tx.docComment.update({ where: { id: commentId }, data: { body: trimmed, updatedAt: now } })
+    await tx.comment.updateMany({ where: { id: commentId }, data: { body: trimmed, updatedAt: now } })
+    return row
   })
-  await updateMirroredComment(commentId, updated.body)
+  if (!updated) return null
   return (await resolveCommentAuthors([updated]))[0]
 }
 
@@ -149,13 +151,15 @@ export async function setDocCommentStatusCore(
   status: CommentStatus
 ): Promise<DocComment | null> {
   const prisma = getPrisma()
-  const existing = await prisma.docComment.findUnique({ where: { id: commentId }, select: { id: true } })
-  if (!existing) return null
-  const updated = await prisma.docComment.update({
-    where: { id: commentId },
-    data: { status, updatedAt: new Date() },
+  const updated = await prisma.$transaction(async tx => {
+    const existing = await tx.docComment.findUnique({ where: { id: commentId }, select: { id: true } })
+    if (!existing) return null
+    const now = new Date()
+    const row = await tx.docComment.update({ where: { id: commentId }, data: { status, updatedAt: now } })
+    await tx.comment.updateMany({ where: { id: commentId }, data: { status, updatedAt: now } })
+    return row
   })
-  await updateMirroredDocStatus(commentId, status)
+  if (!updated) return null
   return (await resolveCommentAuthors([updated]))[0]
 }
 
@@ -168,20 +172,21 @@ export async function deleteDocCommentCore(
   commentId: string
 ): Promise<{ id: string; wasRoot: boolean; deletedReplies: number } | null> {
   const prisma = getPrisma()
-  const existing = await prisma.docComment.findUnique({
-    where: { id: commentId },
-    select: { id: true, parentId: true },
+  return prisma.$transaction(async tx => {
+    const existing = await tx.docComment.findUnique({ where: { id: commentId }, select: { id: true, parentId: true } })
+    if (!existing) return null
+    const wasRoot = existing.parentId === null
+    const replies = wasRoot ? await tx.docComment.findMany({ where: { parentId: commentId }, select: { id: true } }) : []
+    const sharedReplies = wasRoot ? await tx.comment.findMany({ where: { parentId: commentId }, select: { id: true } }) : []
+    const ids = [...new Set([commentId, ...replies.map(row => row.id), ...sharedReplies.map(row => row.id)])]
+    await tx.docCommentAnchor.deleteMany({ where: { commentId: { in: ids } } })
+    await tx.solutionPlanProposal.deleteMany({ where: { commentId: { in: ids } } })
+    await tx.commentElementAnchor.deleteMany({ where: { commentId: { in: ids } } })
+    await tx.commentExternalAuthor.deleteMany({ where: { commentId: { in: ids } } })
+    if (wasRoot) await tx.comment.deleteMany({ where: { parentId: commentId } })
+    await tx.comment.deleteMany({ where: { id: commentId } })
+    if (wasRoot) await tx.docComment.deleteMany({ where: { parentId: commentId } })
+    await tx.docComment.delete({ where: { id: commentId } })
+    return { id: existing.id, wasRoot, deletedReplies: replies.length }
   })
-  if (!existing) return null
-
-  const wasRoot = existing.parentId === null
-  let deletedReplies = 0
-  if (wasRoot) {
-    const { count } = await prisma.docComment.deleteMany({ where: { parentId: commentId } })
-    deletedReplies = count
-  }
-  await prisma.docComment.delete({ where: { id: commentId } })
-  await deleteMirroredComment(commentId)
-
-  return { id: existing.id, wasRoot, deletedReplies }
 }

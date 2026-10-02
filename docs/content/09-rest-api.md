@@ -48,13 +48,14 @@ Protected-resource metadata is published at
 ## Conventions
 
 - Resource paths use plural kebab-case under `/api/v1/workspaces/{workspaceId}`.
-- Collections return `{ "items": [], "nextCursor": null }` and accept an
-  opaque `cursor` plus `limit` (default 50, maximum 100).
+- General collections return `{ "items": [], "nextCursor": null }` and accept
+  an opaque `cursor` plus `limit` (default 50, maximum 100). Decision-request
+  collections are the explicit exception and cap `limit` at 50 to match their
+  bounded shared service.
 - Boolean query parameters use the exact URL strings `true` and `false`; other
   spellings are rejected. A cursor is bound to its collection, filters, and
-  page size, so clients must keep the same `limit` while paging. Decision
-  requests use a maximum `limit` of 50 because their shared service is
-  page-number based.
+  page size, so clients must keep the same `limit` while paging; a cursor from
+  a general collection cannot be reused for a differently sized decision page.
 - Reads and updates return `200`, creation returns `201`, and supported deletion
   returns `204`.
 - Errors use RFC 9457 `application/problem+json`, including a stable `code` and

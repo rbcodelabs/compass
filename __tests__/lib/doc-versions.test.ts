@@ -225,6 +225,7 @@ describe("restoreDocVersionCore", () => {
         content: OLD_VERSION.content,
         metadata: expect.anything(),
         icon: OLD_VERSION.icon,
+        revision: expect.any(String),
         updatedAt: expect.any(Date),
       },
     })

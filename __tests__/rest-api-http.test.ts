@@ -19,6 +19,9 @@ import { DocumentError } from "@/lib/document-service"
 import { CommentHttpError } from "@/lib/comment-http-error"
 
 const UUID = "11111111-1111-4111-8111-111111111111"
+const UUID_2 = "22222222-2222-4222-8222-222222222222"
+const UUID_3 = "33333333-3333-4333-8333-333333333333"
+const NOW = "2026-10-02T00:00:00.000Z"
 
 describe("REST HTTP adapter", () => {
   beforeEach(() => {
@@ -68,7 +71,7 @@ describe("REST HTTP adapter", () => {
     ["POST", `/api/v1/workspaces/${UUID}/docs`, { id: UUID, title: "Plan", url: "https://compass.rbcodelabs.com/acme/ws/docs/plan", revision: "r1", storageProvider: "DATABASE" }, { title: "Plan", operationId: UUID }, "url"],
     ["POST", `/api/v1/workspaces/${UUID}/doc-versions/${UUID}/restore`, { id: UUID, docId: UUID, title: "Plan", restoredFrom: "2026-10-02T00:00:00.000Z", revision: "r2" }, { expectedRevision: "r1", operationId: UUID }, "restoredFrom"],
     ["POST", `/api/v1/workspaces/${UUID}/artifacts`, { id: UUID, title: "Prototype", sourceType: "EXTERNAL_LINK" }, { title: "Prototype", sourceType: "EXTERNAL_LINK", url: "https://example.com" }, "sourceType"],
-    ["POST", `/api/v1/workspaces/${UUID}/release-authorizations`, { id: UUID, requestId: UUID, releaseRunId: UUID, revisionId: UUID, reviewFingerprint: "fp", reviewUrl: "https://compass.rbcodelabs.com/reviews/1" }, { provider: "GITHUB", repositoryOwner: "acme", repositoryName: "app", pullRequestNumber: 1, baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION", releasePolicyId: "policy", taskIds: [UUID] }, "releaseRunId"],
+    ["POST", `/api/v1/workspaces/${UUID}/release-authorizations`, { status: "READY", requestId: UUID, releaseRunId: UUID, revisionId: UUID, sourceFingerprint: "source", reviewFingerprint: "fp", reviewUrl: "https://compass.rbcodelabs.com/reviews/1" }, { provider: "GITHUB", repositoryOwner: "acme", repositoryName: "app", pullRequestNumber: 1, baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION", releasePolicyId: "policy", taskIds: [UUID] }, "releaseRunId"],
   ] as const)("preserves Phase 3 response field %s %s", async (method, path, result, body, field) => {
     executeRestRoute.mockResolvedValueOnce(result)
     const response = await handleRestRequest(new Request(`http://localhost${path}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), method)
@@ -85,6 +88,21 @@ describe("REST HTTP adapter", () => {
     const comment = await handleRestRequest(new Request(`http://localhost/api/v1/workspaces/${UUID}/comments/TASK/${UUID}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ body: "Ready" }) }), "POST")
     expect(comment.status).toBe(201)
     expect(await comment.json()).toMatchObject({ targetType: "TASK", body: "Ready" })
+  })
+
+  it.each([
+    ["POST", `/api/v1/workspaces/${UUID}/follows/DOC/${UUID_2}`, { subjectType: "DOC", subjectId: UUID_2, status: "followed" }, undefined, "status"],
+    ["POST", `/api/v1/workspaces/${UUID}/artifacts/${UUID_2}/decisions`, { workspaceId: UUID, artifactId: UUID_2, requestId: UUID_3, linkId: UUID, created: true }, { requestId: UUID_3 }, "artifactId"],
+    ["POST", `/api/v1/workspaces/${UUID}/decision-requests`, { id: UUID_2, requestId: UUID_3, revisionNumber: 1, sourceFingerprint: null, fingerprint: "f".repeat(64), title: "Choose", summary: "Context", packetJson: "{}", requiredRole: "ADMIN", expiresAt: null, supersededAt: null, createdAt: NOW, reviewUrl: "https://compass.rbcodelabs.com/reviews/1" }, { subjectType: "DOC", subjectId: UUID_2, question: "Choose?", context: "Context", idempotencyKey: UUID_3 }, "sourceFingerprint"],
+    ["GET", `/api/v1/workspaces/${UUID}/decision-requests/${UUID_2}`, { id: UUID_2, workspaceId: UUID, gateType: "TRACKED_DECISION", subjectType: "DOC", subjectId: UUID_3, state: "PENDING", currentRevisionId: UUID, revisionCount: 1, decisionCycle: 1, reopenReason: null, reopenedById: null, reconsidersDecisionId: null, requestedById: UUID, requestedByAgentId: null, assignedToId: null, dueAt: null, expiresAt: null, noActionAt: null, noActionById: null, noActionReason: null, createdAt: NOW, updatedAt: NOW, currentRevision: { id: UUID, requestId: UUID_2, revisionNumber: 1, sourceFingerprint: null, fingerprint: "f".repeat(64), title: "Choose", summary: null, packetJson: "{}", requiredRole: "ADMIN", expiresAt: null, supersededAt: null, createdAt: NOW, options: [], decisions: [] }, revisions: [], artifacts: [], reviewUrl: null, requestedBy: { type: "HUMAN", id: UUID, name: "Alice" }, followUpTasks: [], noAction: null, options: [], chosenOption: null, questions: [], answers: [] }, undefined, "dueAt"],
+    ["GET", `/api/v1/workspaces/${UUID}/review-requests/${UUID_2}`, { id: UUID_2, workspaceId: UUID, gateType: "RELEASE_AUTHORIZATION", subjectType: "RELEASE_RUN", subjectId: UUID_3, state: "PENDING", currentRevisionId: UUID, revisionCount: 1, decisionCycle: 1, reopenReason: null, reopenedById: null, reconsidersDecisionId: null, requestedById: UUID, requestedByAgentId: null, assignedToId: null, dueAt: null, expiresAt: null, noActionAt: null, noActionById: null, noActionReason: null, createdAt: NOW, updatedAt: NOW, currentRevision: { id: UUID, requestId: UUID_2, revisionNumber: 1, sourceFingerprint: "s".repeat(64), fingerprint: "f".repeat(64), title: "Release", summary: null, packetJson: "{}", requiredRole: "ADMIN", expiresAt: null, supersededAt: null, createdAt: NOW, options: [], decisions: [] }, artifacts: [], reviewUrl: null, options: [], chosenOption: null, questions: [], answers: [] }, undefined, "currentRevision"],
+    ["POST", `/api/v1/workspaces/${UUID}/release-authorizations`, { status: "READY", requestId: UUID, releaseRunId: UUID_2, revisionId: UUID_3, sourceFingerprint: "s".repeat(64), reviewFingerprint: "r".repeat(64), reviewUrl: "https://compass.rbcodelabs.com/reviews/1" }, { provider: "GITHUB", repositoryOwner: "acme", repositoryName: "app", pullRequestNumber: 1, baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION", releasePolicyId: "policy", taskIds: [UUID] }, "status"],
+    ["GET", `/api/v1/workspaces/${UUID}/docs/${UUID_2}/versions`, { items: [{ id: UUID_3, docId: UUID_2, label: null, createdByName: null, createdAt: NOW }], nextCursor: null }, undefined, "items"],
+  ] as const)("accepts the complete shared-handler payload for %s %s", async (method, path, result, body, field) => {
+    executeRestRoute.mockResolvedValueOnce(result)
+    const response = await handleRestRequest(new Request(`http://localhost${path}`, { method, headers: body ? { "content-type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined }), method)
+    expect(response.status).toBe(method === "POST" ? 201 : 200)
+    expect(await response.json()).toHaveProperty(field)
   })
 
   it("returns 400 for malformed JSON", async () => {

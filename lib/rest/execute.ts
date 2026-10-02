@@ -37,6 +37,7 @@ import { createDocVersion, getDocVersion, restoreDocVersion } from "@/lib/doc-ve
 import { deleteDocComment, getDocComment, reopenDocComment, resolveDocComment, updateDocComment } from "@/lib/doc-comment-tool-handlers"
 import { createDocCommentCore } from "@/lib/doc-comments"
 import { prepareDocImageUploadTool } from "@/lib/doc-image-tool-handlers"
+import { documentRevision } from "@/lib/document-service"
 import { archiveArtifact, createArtifact, getArtifact, linkArtifact, linkArtifactDecision, unlinkArtifact, unlinkArtifactDecision, updateArtifact } from "@/lib/artifact-tool-handlers"
 import { getDecision, getReviewRequest, listDecisions, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { addSolutionComment, addSolutionPlan, deleteSolutionComment, getSolutionComment, updateSolutionComment } from "@/lib/solution-comment-tool-handlers"
@@ -330,7 +331,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "listNotifications": { if (!actor.userId || actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN" || isServiceActor(actor)) throw new RestNotFoundError(); return notificationPage(actor.userId, workspaceId, input.query) }
     case "markNotificationsRead": return serialize(ensureTool(await markReadTool({ workspaceId, notificationIds: body.notificationIds as string[] | undefined, all: body.all as boolean | undefined })))
 
-    case "listDocs": return listPage(`docs:${workspaceId}`, input.query, (cursor, take) => prisma.doc.findMany({ where: { workspaceId, ...cursorWhere(cursor) }, select: { id: true, workspaceId: true, title: true, parentId: true, icon: true, docType: true, roadmapItemId: true, revision: true, createdAt: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
+    case "listDocs": return listPage(`docs:${workspaceId}`, input.query, async (cursor, take) => (await prisma.doc.findMany({ where: { workspaceId, ...cursorWhere(cursor) }, select: { id: true, workspaceId: true, title: true, parentId: true, icon: true, docType: true, roadmapItemId: true, revision: true, createdAt: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })).map(doc => ({ ...doc, revision: documentRevision(doc) })))
     case "getDoc": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getDoc({ docId: id }))) }
     case "createDoc": { await assertDocReferences(prisma, workspaceId, body); return serialize(ensureTool(await createDoc({ workspaceId, ...(body as unknown as Omit<Parameters<typeof createDoc>[0], "workspaceId">) }))) }
     case "updateDoc": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await updateDoc({ docId: id, ...(body as unknown as Omit<Parameters<typeof updateDoc>[0], "docId">) }))) }
