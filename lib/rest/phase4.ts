@@ -38,6 +38,12 @@ export const evidencePromotion = z.object({ id: uuid, findingKey: z.string(), re
 
 const pmTurn = researchTurn.extend({ createdAt: timestamp }).strict()
 const pmProposalField = z.object({ value: z.string().nullable(), transcriptTurnIds: z.array(uuid).max(50) }).strict()
+const opportunityFields = z.object({ title: z.string(), description: z.string().nullable(), customerSegment: z.string().nullable() }).strict()
+const solutionFields = z.object({ title: z.string(), description: z.string().nullable() }).strict()
+const experimentFields = z.object({ title: z.string(), hypothesis: z.string(), method: z.string(), killCondition: z.string() }).strict()
+const opportunityFieldPatch = opportunityFields.partial().strict()
+const solutionFieldPatch = solutionFields.partial().strict()
+const experimentFieldPatch = experimentFields.partial().strict()
 const pmProposalBase = {
   version: z.literal(1), brief: z.string(), openQuestions: z.array(z.string()), suggestedNextSteps: z.array(z.string()), unknowns: z.array(z.string()),
 }
@@ -48,12 +54,23 @@ const pmProposal = z.union([
 ])
 const pmReceipt = z.union([
   z.object({ version: z.literal(1), kind: z.literal("DISMISSED"), at: timestamp }).strict(),
-  z.object({ version: z.literal(1), kind: z.literal("APPLIED"), selectedFields: z.array(z.string()), before: z.record(z.string(), z.string().nullable()), after: z.record(z.string(), z.string().nullable()), at: timestamp }).strict(),
+  z.object({ version: z.literal(1), kind: z.literal("APPLIED"), selectedFields: z.array(z.enum(["title", "description", "customerSegment"])), before: opportunityFieldPatch, after: opportunityFieldPatch, at: timestamp }).strict(),
+  z.object({ version: z.literal(1), kind: z.literal("APPLIED"), selectedFields: z.array(z.enum(["title", "description"])), before: solutionFieldPatch, after: solutionFieldPatch, at: timestamp }).strict(),
+  z.object({ version: z.literal(1), kind: z.literal("APPLIED"), selectedFields: z.array(z.enum(["title", "hypothesis", "method", "killCondition"])), before: experimentFieldPatch, after: experimentFieldPatch, at: timestamp }).strict(),
 ])
+const pmContext = pmInterviewContextSchema.extend({
+  target: z.union([
+    z.object({ type: z.literal("OPPORTUNITY"), id: uuid, fields: opportunityFields.extend({ status: z.string() }).strict() }).strict(),
+    z.object({ type: z.literal("SOLUTION"), id: uuid, fields: solutionFields.extend({ status: z.string() }).strict() }).strict(),
+    z.object({ type: z.literal("ASSUMPTION"), id: uuid, fields: solutionFields.extend({ riskLevel: z.string(), status: z.string() }).strict() }).strict(),
+    z.object({ type: z.literal("EXPERIMENT"), id: uuid, fields: experimentFields.extend({ status: z.string() }).strict() }).strict(),
+  ]),
+}).strict()
+const pmBaseline = z.object({ version: z.literal(1), fields: z.union([opportunityFields, solutionFields, experimentFields]) }).strict()
 export const pmInterview = z.object({
   version: z.literal(1), id: uuid, agentConversationId: uuid.nullable(), targetType: z.enum(PM_INTERVIEW_TARGET_TYPES), targetId: uuid,
   generationState: z.string(), generationFailureCode: z.string().nullable(), disposition: z.string(), createdAt: timestamp, updatedAt: timestamp,
-  owner: z.boolean(), context: pmInterviewContextSchema, reviewBaseline: z.object({ version: z.literal(1), fields: z.record(z.string(), z.string().nullable()) }).strict(),
+  owner: z.boolean(), context: pmContext, reviewBaseline: pmBaseline,
   proposal: pmProposal.nullable(), receipt: pmReceipt.nullable(), session: z.object({ id: uuid, status: z.string(), modality: z.string(), turns: z.array(pmTurn) }).strict(),
   applicationDisabledReason: z.string().nullable(),
 }).strict()
