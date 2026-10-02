@@ -168,25 +168,27 @@ export async function createScoringModel({
     return fail(issues[0].message)
   }
 
-  const model = await prisma.scoringModel.create({
-    data: { organizationId: org.id, name, description, formulaType },
-  })
-
-  if (metrics.length > 0) {
-    await prisma.scoringModelMetric.createMany({
-      data: metrics.map((m, i) => ({
-        scoringModelId: model.id,
-        key: m.key,
-        label: m.label,
-        description: m.description,
-        minValue: m.minValue,
-        maxValue: m.maxValue,
-        weight: m.weight,
-        direction: m.direction,
-        order: i,
-      })),
+  const model = await prisma.$transaction(async (tx) => {
+    const created = await tx.scoringModel.create({
+      data: { organizationId: org.id, name, description, formulaType },
     })
-  }
+    if (metrics.length > 0) {
+      await tx.scoringModelMetric.createMany({
+        data: metrics.map((m, i) => ({
+          scoringModelId: created.id,
+          key: m.key,
+          label: m.label,
+          description: m.description,
+          minValue: m.minValue,
+          maxValue: m.maxValue,
+          weight: m.weight,
+          direction: m.direction,
+          order: i,
+        })),
+      })
+    }
+    return created
+  })
 
   return ok(
     `**Scoring model created:** ${name}\n` +
@@ -216,6 +218,9 @@ export async function updateScoringModel({
   const existing = await prisma.scoringModel.findUnique({ where: { id: scoringModelId } })
   if (!existing) {
     return fail(`Scoring model "${scoringModelId}" not found.`)
+  }
+  if (formulaType !== undefined && metrics === undefined) {
+    return fail("Changing formulaType requires the complete replacement metrics array.")
   }
 
   const data: Prisma.ScoringModelUpdateInput = {}

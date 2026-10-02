@@ -107,6 +107,7 @@ const metricBindingPatch = z.object({ baseline: z.unknown().nullable().optional(
 const scoringMetricInput = scoringMetricSchema.omit({ order: true })
 const scoringModelCreate = z.object({ name: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), formulaType: z.enum(["WEIGHTED_SUM", "MULTIPLICATIVE"]), metrics: z.array(scoringMetricInput).min(1) }).strict()
 const scoringModelPatch = z.object({ name: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), formulaType: z.enum(["WEIGHTED_SUM", "MULTIPLICATIVE"]).optional(), metrics: z.array(scoringMetricInput).min(1).optional() }).strict()
+  .refine((input) => input.formulaType === undefined || input.metrics !== undefined, { message: "Changing formulaType requires replacement metrics.", path: ["metrics"] })
 const scoreCreate = z.object({ values: z.record(z.string(), z.number().finite()) }).strict()
 const squadCreate = z.object({ name: z.string().trim().min(1).max(255), color: z.string().trim().max(50).optional() }).strict()
 const customObjectType = z.enum(["OPPORTUNITY", "SOLUTION", "EXPERIMENT", "OBJECTIVE", "KEY_RESULT", "ROADMAP_ITEM", "TASK"])

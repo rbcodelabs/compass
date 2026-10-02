@@ -50,6 +50,15 @@ describe("REST API registry", () => {
     }).success).toBe(true)
   })
 
+  it("does not accept a scoring formula change without replacement metrics", () => {
+    const route = REST_ROUTES.find((entry) => entry.operationId === "updateScoringModel")!
+    expect(route.bodySchema?.safeParse({ formulaType: "MULTIPLICATIVE" }).success).toBe(false)
+    expect(route.bodySchema?.safeParse({
+      formulaType: "MULTIPLICATIVE",
+      metrics: [{ key: "reach", label: "Reach", minValue: 1, maxValue: 10, weight: 1, direction: "POSITIVE" }],
+    }).success).toBe(true)
+  })
+
   it("matches concrete paths and extracts parameters", () => {
     const matched = matchRestRoute("GET", "/api/v1/workspaces/11111111-1111-4111-8111-111111111111/opportunities")
     expect(matched?.route.operationId).toBe("listOpportunities")

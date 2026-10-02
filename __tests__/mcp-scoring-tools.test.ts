@@ -164,6 +164,28 @@ describe("createScoringModel", () => {
     })
     expect(mockScoringModelMetric.createMany).toHaveBeenCalledOnce()
     expect(result.content[0].text).toContain(`ID: ${MODEL_ID}`)
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce()
+  })
+
+  it("rolls back the model when metric creation fails", async () => {
+    mockOrganization.findUnique.mockResolvedValueOnce({ id: ORG_ID })
+    const stored: string[] = []
+    mockPrisma.$transaction.mockImplementationOnce(async (callback) => {
+      const before = [...stored]
+      const tx = {
+        ...mockPrisma,
+        scoringModel: { ...mockScoringModel, create: vi.fn(async () => { stored.push(MODEL_ID); return { id: MODEL_ID, version: 1 } }) },
+        scoringModelMetric: { ...mockScoringModelMetric, createMany: vi.fn(async () => { throw new Error("injected create failure") }) },
+      }
+      try { return await callback(tx as typeof mockPrisma) }
+      catch (error) { stored.splice(0, stored.length, ...before); throw error }
+    })
+
+    await expect(createScoringModel({
+      orgSlug: "acme", name: "RICE", formulaType: "WEIGHTED_SUM",
+      metrics: [{ key: "reach", label: "Reach", minValue: 0, maxValue: 10, weight: 1, direction: "POSITIVE" }],
+    })).rejects.toThrow("injected create failure")
+    expect(stored).toEqual([])
   })
 
   it("rejects MULTIPLICATIVE models with a metric minValue <= 0 without creating", async () => {
@@ -191,6 +213,12 @@ describe("createScoringModel", () => {
 // ─── updateScoringModel ───────────────────────────────────────────────────
 
 describe("updateScoringModel", () => {
+  it("rejects formula-only updates instead of silently ignoring them", async () => {
+    mockScoringModel.findUnique.mockResolvedValueOnce({ id: MODEL_ID, formulaType: "WEIGHTED_SUM", version: 1 })
+    const result = await updateScoringModel({ scoringModelId: MODEL_ID, formulaType: "MULTIPLICATIVE" })
+    expect(result.structuredContent.ok).toBe(false)
+    expect(mockScoringModel.update).not.toHaveBeenCalled()
+  })
   it("updates name/description only without bumping version", async () => {
     mockScoringModel.findUnique.mockResolvedValueOnce({ id: MODEL_ID, formulaType: "WEIGHTED_SUM", version: 1 })
 
