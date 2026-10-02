@@ -25,6 +25,31 @@ describe("REST API registry", () => {
     expect(paths.has("/api/v1/workspaces")).toBe(true)
   })
 
+  it("covers the approved Phase 2 learning and configuration resources", () => {
+    const paths = new Set(REST_ROUTES.map((route) => route.path))
+    for (const resource of [
+      "okr-cycles", "objectives", "key-results", "check-ins", "experiments",
+      "results", "metrics", "metric-bindings", "metric-observations",
+      "scoring-models", "opportunity-scores", "solution-scores", "squads",
+      "custom-field-definitions", "custom-field-values", "entity-links",
+    ]) {
+      expect([...paths].some((path) => path.includes(`/${resource}`)), `missing ${resource}`).toBe(true)
+    }
+  })
+
+  it("requires optimistic concurrency tokens on experiment and metric updates", () => {
+    const experiment = REST_ROUTES.find((route) => route.operationId === "updateExperiment")!
+    expect(experiment.bodySchema?.safeParse({ title: "Changed" }).success).toBe(false)
+    expect(experiment.bodySchema?.safeParse({ expectedUpdatedAt: "2026-10-02T12:00:00.000Z", title: "Changed" }).success).toBe(true)
+
+    const metric = REST_ROUTES.find((route) => route.operationId === "updateMetric")!
+    expect(metric.bodySchema?.safeParse({ name: "Activation" }).success).toBe(false)
+    expect(metric.bodySchema?.safeParse({
+      expectedRevision: 1, name: "Activation", unit: "teams", provider: "vercel",
+      connectionId: "11111111-1111-4111-8111-111111111111", query: { metric: "pageviews" },
+    }).success).toBe(true)
+  })
+
   it("matches concrete paths and extracts parameters", () => {
     const matched = matchRestRoute("GET", "/api/v1/workspaces/11111111-1111-4111-8111-111111111111/opportunities")
     expect(matched?.route.operationId).toBe("listOpportunities")
