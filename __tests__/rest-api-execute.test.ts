@@ -152,6 +152,25 @@ describe("REST domain execution", () => {
     expect(mocks.assertWorkspaceMember).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ["AGENT", "updateComment"],
+    ["AGENT_TURN", "updateComment"],
+    ["AGENT", "updateDocComment"],
+    ["AGENT_TURN", "updateDocComment"],
+  ] as const)("denies %s callers before %s can rewrite human-attributed bodies", async (purpose, operationId) => {
+    mocks.actor.current = { userId: "user-1", purpose }
+    mocks.prisma.comment.findFirst.mockResolvedValue({ id: FOREIGN, authorId: "user-1", targetType: "OPPORTUNITY" })
+    mocks.prisma.docComment.findFirst.mockResolvedValue({ id: FOREIGN, authorId: "user-1" })
+
+    await expect(executeRestRoute(route(operationId), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: { body: "Forged human edit" },
+    })).rejects.toBeInstanceOf(RestForbiddenError)
+
+    expect(mocks.updateCommentBody).not.toHaveBeenCalled()
+    expect(mocks.updateDocComment).not.toHaveBeenCalled()
+    expect(mocks.assertWorkspaceAdmin).not.toHaveBeenCalled()
+  })
+
   it("rejects synthesis creation when the study is not under the path workspace", async () => {
     mocks.getResearchStudy.mockRejectedValue(new ResearchStudyError("Study not found"))
 

@@ -331,7 +331,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
       return serialize(found(await createComment({ workspaceId, targetType: input.params.targetType as never, targetId: input.params.targetId, parentId: nullable(body.parentId), body: String(body.body), ...author })))
     }
     case "getComment": { await assertCommentWorkspace(prisma, id, workspaceId); return serialize(found(await getComment(id))) }
-    case "updateComment": { const access = await assertCommentMutation(prisma, actor, id, workspaceId); return access.targetType === "DOC" ? serialize(ensureTool(await updateDocComment({ commentId: id, body: String(body.body) }))) : serialize(found(await updateCommentBody(id, String(body.body)))) }
+    case "updateComment": { assertHumanCommentBodyEditor(actor); const access = await assertCommentMutation(prisma, actor, id, workspaceId); return access.targetType === "DOC" ? serialize(ensureTool(await updateDocComment({ commentId: id, body: String(body.body) }))) : serialize(found(await updateCommentBody(id, String(body.body)))) }
     case "deleteComment": { const access = await assertCommentMutation(prisma, actor, id, workspaceId); if (access.targetType === "DOC") ensureTool(await deleteDocComment({ commentId: id })); else { const { deleteBrowserComment } = await import("@/lib/comment-browser"); await deleteBrowserComment(id, { userId: access.userId, admin: access.admin }, access.admin) } return undefined }
     case "resolveComment": { const access = await assertCommentMutation(prisma, actor, id, workspaceId); return access.targetType === "DOC" ? serialize(ensureTool(await resolveDocComment({ commentId: id }))) : serialize(found(await setCommentStatus(id, "RESOLVED"))) }
     case "reopenComment": { const access = await assertCommentMutation(prisma, actor, id, workspaceId); return access.targetType === "DOC" ? serialize(ensureTool(await reopenDocComment({ commentId: id }))) : serialize(found(await setCommentStatus(id, "OPEN"))) }
@@ -352,7 +352,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "listDocComments": { await assertDocWorkspace(prisma, id, workspaceId); return listPage(`doc-comments:${workspaceId}:${id}:${input.query.status ?? ""}`, input.query, (cursor, take) => prisma.docComment.findMany({ where: { docId: id, ...pick(input.query, ["status"]), ...cursorWhere(cursor) }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
     case "createDocComment": { await assertDocWorkspace(prisma, id, workspaceId); const author = await restCommentAuthor(prisma, actor, workspaceId); const result = await createDocCommentCore({ docId: id, body: String(body.body), ...author, parentId: body.parentId as string | undefined, anchorText: body.anchorText as string | undefined, anchorPrefix: body.anchorPrefix as string | undefined, anchorSuffix: body.anchorSuffix as string | undefined, anchorStart: body.anchorStart as number | undefined, anchorEnd: body.anchorEnd as number | undefined }); if (!result.ok) throw new RestValidationError(result.error); return serialize(result.comment) }
     case "getDocComment": { await assertDocCommentWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getDocComment({ commentId: id }))) }
-    case "updateDocComment": { await assertDocCommentMutation(prisma, actor, id, workspaceId); return serialize(ensureTool(await updateDocComment({ commentId: id, body: String(body.body) }))) }
+    case "updateDocComment": { assertHumanCommentBodyEditor(actor); await assertDocCommentMutation(prisma, actor, id, workspaceId); return serialize(ensureTool(await updateDocComment({ commentId: id, body: String(body.body) }))) }
     case "deleteDocComment": { await assertDocCommentMutation(prisma, actor, id, workspaceId); ensureTool(await deleteDocComment({ commentId: id })); return undefined }
     case "resolveDocComment": { await assertDocCommentMutation(prisma, actor, id, workspaceId); return serialize(ensureTool(await resolveDocComment({ commentId: id }))) }
     case "reopenDocComment": { await assertDocCommentMutation(prisma, actor, id, workspaceId); return serialize(ensureTool(await reopenDocComment({ commentId: id }))) }
@@ -680,6 +680,9 @@ function normalizeLinks(data: Record<string, unknown>) {
 }
 
 type Prisma = ReturnType<typeof getPrisma>
+function assertHumanCommentBodyEditor(actor: ReturnType<typeof getMcpActor>) {
+  if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") throw new RestForbiddenError("An agent cannot edit comment bodies.")
+}
 async function restActorName(prisma: Prisma, actor: ReturnType<typeof getMcpActor>): Promise<string> {
   if ((actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") && actor.agentId) {
     const agent = await prisma.agent.findFirst({ where: { id: actor.agentId, ...(actor.userId ? { ownerUserId: actor.userId } : {}) }, select: { name: true } })
