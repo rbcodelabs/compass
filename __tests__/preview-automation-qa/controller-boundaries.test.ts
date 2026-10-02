@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { originHeaders, schemaFor, validateDeployment } from "../../scripts/preview-automation/contracts";
+import { previewRequestOptions } from "../../e2e/preview/fixtures";
 
 const sha = "a".repeat(40);
 const deployment = {
@@ -44,6 +45,12 @@ describe("independent QA: deployment identity boundaries", () => {
 });
 
 describe("independent QA: protection header origin confinement", () => {
+  it("configures API request contexts with the same-origin protection bypass", () => {
+    expect(previewRequestOptions("https://safe.vercel.app", "never-leak-this")).toEqual({
+      baseURL: "https://safe.vercel.app",
+      extraHTTPHeaders: { "x-vercel-protection-bypass": "never-leak-this" },
+    });
+  });
   it.each([
     "http://safe.vercel.app/", "https://safe.vercel.app:444/", "https://safe.vercel.app.evil.example/",
     "https://safe.vercel.app@evil.example/", "https://other.vercel.app/", "data:text/plain,hello",

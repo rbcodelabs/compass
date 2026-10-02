@@ -9,6 +9,9 @@ export function fixture(): PreviewFixture {
   if (!process.env.PREVIEW_FIXTURE) throw new Error("Preview fixture metadata is required");
   return JSON.parse(process.env.PREVIEW_FIXTURE) as PreviewFixture;
 }
+export function previewRequestOptions(origin: string, bypass: string) {
+  return { baseURL: origin, extraHTTPHeaders: originHeaders(origin, origin, bypass) };
+}
 export async function confinePreviewRequests(context: BrowserContext) {
   const origin = process.env.PREVIEW_ORIGIN;
   if (!origin) throw new Error("Validated preview origin is required");
@@ -28,6 +31,13 @@ export const test = base.extend({
   context: async ({ context }, use) => {
     await confinePreviewRequests(context);
     await use(context);
+  },
+  request: async ({ playwright }, use) => {
+    const origin = process.env.PREVIEW_ORIGIN;
+    if (!origin) throw new Error("Validated preview origin is required");
+    const request = await playwright.request.newContext(previewRequestOptions(origin, process.env.PREVIEW_PROTECTION_BYPASS ?? ""));
+    try { await use(request); }
+    finally { await request.dispose(); }
   },
 });
 export { expect };

@@ -36,6 +36,10 @@ describe("independent QA: exact cleanup ownership and recoverable revocation", (
     vi.mocked(db.docStorageObject.findFirst).mockResolvedValueOnce({ id: "object" } as never);
     await expect(cleanupPreviewRun(db, run.id, run.deploymentId)).rejects.toThrow("explicit cleanup review");
     expect(db.session.deleteMany).toHaveBeenCalled();
+    expect(db.apiKey.deleteMany).toHaveBeenCalledWith({ where: { userId: { in: [run.ownerUserId, run.viewerUserId] } } });
+    const revoke = calls.findIndex(call => call.model === "previewAutomationRun" && call.operation === "update");
+    const apiKeys = calls.findIndex(call => call.model === "apiKey" && call.operation === "deleteMany");
+    expect(apiKeys).toBeGreaterThan(revoke);
     expect(cascade).not.toHaveBeenCalled();
     expect(calls.some(call => call.model === "previewAutomationRun" && JSON.stringify(call.args).includes("cleanedAt"))).toBe(false);
   });

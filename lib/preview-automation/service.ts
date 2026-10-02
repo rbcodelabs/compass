@@ -8,8 +8,8 @@ import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { getManagedPilotContext } from "./managed-context";
-import { issueTokenPair } from "@/lib/oauth/grants";
 import { apiResourceUri } from "@/lib/oauth/constants";
+import { mintOAuthToken } from "@/lib/oauth/tokens";
 
 function managedGrant(grant: PreviewGrant) {
   const context = getManagedPilotContext();
@@ -31,6 +31,7 @@ export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, 
   await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.previewAutomationSession.deleteMany({ where: { runId } });
   await prisma.oAuthToken.deleteMany({ where: { userId: { in: userIds } } });
+  await prisma.apiKey.deleteMany({ where: { userId: { in: userIds } } });
   // Revoke access first; preserve both workspaces if either has pilot evidence.
   await assertDocumentPilotCleanupReviewed(prisma, run.workspaceId);
   await assertDocumentPilotCleanupReviewed(prisma, run.isolatedWorkspaceId);
@@ -121,19 +122,23 @@ function requireActive(run: PreviewAutomationRun | null, deploymentId: string, n
   if (!run || run.deploymentId !== deploymentId || run.revokedAt || run.expiresAt <= now) throw new Error("Preview run unavailable");
 }
 async function describeRun(tx: AppTransactionClient, run: PreviewAutomationRun) {
-  const apiKey = `cmp_${randomBytes(16).toString("hex")}`;
+  // API bearer tokens are 128-bit random values, not human passwords. Their
+  // deterministic digest intentionally matches the lookup in mcp-auth.ts.
+  const token = `cmp_${randomBytes(16).toString("hex")}`;
   await tx.apiKey.create({ data: {
-    userId: run.ownerUserId, name: `Preview REST ${run.id}`, keyHash: createHash("sha256").update(apiKey).digest("hex"),
-    keyPrefix: apiKey.slice(4, 12), purpose: "USER", scopeWorkspaceId: run.workspaceId, expiresAt: run.expiresAt,
+    userId: run.ownerUserId, name: `Preview REST ${run.id}`, keyHash: createHash("sha256").update(token).digest("hex"),
+    keyPrefix: token.slice(4, 12), purpose: "USER", scopeWorkspaceId: run.workspaceId, expiresAt: run.expiresAt,
   } });
-  const oauth = await issueTokenPair({
+  const oauth = mintOAuthToken("ACCESS");
+  await tx.oAuthToken.create({ data: {
     clientId: `preview-${run.id}`, userId: run.ownerUserId, scope: "api:read", resource: apiResourceUri(),
-    familyId: randomUUID(), authorizationMode: "USER", agentId: null, scopeWorkspaceId: null,
-  }, new Date(), tx);
+    familyId: randomUUID(), parentTokenId: null, authorizationMode: "USER", agentId: null, scopeWorkspaceId: null,
+    tokenHash: oauth.tokenHash, type: "ACCESS", expiresAt: run.expiresAt,
+  } });
   return {
     runId: run.id, orgSlug: `preview-${run.id}`, workspaceSlug: "workspace", isolatedWorkspaceSlug: "isolated",
     workspaceId: run.workspaceId, isolatedWorkspaceId: run.isolatedWorkspaceId, expiresAt: run.expiresAt.toISOString(),
-    apiKey, oauthReadToken: oauth.access_token,
+    apiKey: token, oauthReadToken: oauth.token,
   };
 }
 
