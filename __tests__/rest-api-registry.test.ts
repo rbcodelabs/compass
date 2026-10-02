@@ -64,6 +64,17 @@ describe("REST API registry", () => {
     expect(body.safeParse({ squadId: UUID, parentKeyResultId: UUID }).success).toBe(false)
     expect(body.safeParse({ title: "Retitled", squadId: UUID }).success).toBe(false)
   })
+
+  it("validates workspace slugs and feedback-source origins before execution", () => {
+    const workspace = REST_ROUTES.find(route => route.operationId === "createWorkspace")!.bodySchema!
+    expect(workspace.safeParse({ name: "Product", slug: "product-1" }).success).toBe(true)
+    expect(workspace.safeParse({ name: "Product", slug: "Product Team" }).success).toBe(false)
+    const source = REST_ROUTES.find(route => route.operationId === "createFeedbackSource")!.bodySchema!
+    const base = { artifactId: UUID, name: "Prototype" }
+    for (const invalid of [[""], ["https://*.example.com"], ["https://example.com/path"], ["https://u:p@example.com"], Array.from({ length: 21 }, (_, index) => `https://${index}.example.com`)]) {
+      expect(source.safeParse({ ...base, allowedOrigins: invalid }).success).toBe(false)
+    }
+  })
   it("enumerates the complete authorized Phase 4 route and method surface", () => {
     const expected = [
       ["GET", "/api/v1/workspaces/{workspaceId}/research-studies"], ["POST", "/api/v1/workspaces/{workspaceId}/research-studies"],

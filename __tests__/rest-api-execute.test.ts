@@ -46,6 +46,7 @@ const mocks = vi.hoisted(() => ({
   listObservationsPage: vi.fn(),
   listScoringModels: vi.fn(),
   setWorkspaceScoringModel: vi.fn(),
+  listTopOpportunities: vi.fn(),
   getDoc: vi.fn(),
   updateLaunchChecklistItem: vi.fn(),
   assertWorkspaceAdmin: vi.fn(),
@@ -115,6 +116,7 @@ vi.mock("@/lib/scoring-tool-handlers", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/scoring-tool-handlers")>(),
   listScoringModels: mocks.listScoringModels,
   setWorkspaceScoringModel: mocks.setWorkspaceScoringModel,
+  listTopOpportunities: mocks.listTopOpportunities,
 }))
 vi.mock("@/lib/research-study-service", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/research-study-service")>(),
@@ -668,6 +670,15 @@ describe("REST domain execution", () => {
     expect(mocks.listDecisions).toHaveBeenCalledTimes(1)
   })
 
+  it("pages opportunity rankings beyond the first hundred rows", async () => {
+    const items = Array.from({ length: 101 }, (_, index) => ({ opportunityId: `opp-${index}` }))
+    mocks.listTopOpportunities.mockResolvedValueOnce(success({ items, count: items.length })).mockResolvedValueOnce(success({ items: [{ opportunityId: "opp-100" }], count: 1 }))
+    const first = await executeRestRoute(route("listWorkspaceOpportunityRankings"), { params: { workspaceId: UUID }, query: { limit: 100 }, body: undefined }) as { nextCursor: string }
+    expect(first.nextCursor).toBeTruthy()
+    await executeRestRoute(route("listWorkspaceOpportunityRankings"), { params: { workspaceId: UUID }, query: { limit: 100, cursor: first.nextCursor }, body: undefined })
+    expect(mocks.listTopOpportunities).toHaveBeenLastCalledWith({ workspaceId: UUID, offset: 100, limit: 101 })
+  })
+
   it("routes generic DOC comment mutations through the mirrored legacy services", async () => {
     const comment = { id: FOREIGN, workspaceId: UUID, targetType: "DOC", targetId: THIRD, parentId: null, body: "Body", status: "OPEN", authorId: "user-1", authorName: "User", authorType: "HUMAN", source: "UI", createdAt: new Date(), updatedAt: new Date() }
     mocks.prisma.doc.findUnique.mockResolvedValue({ workspaceId: UUID })
@@ -728,6 +739,7 @@ describe("REST domain execution", () => {
     expect(first.items[0]).not.toHaveProperty("tasks")
     expect(route("listReleaseRuns").responseSchema.safeParse(first).success).toBe(true)
     await executeRestRoute(route("listReleaseRuns"), { params: { workspaceId: UUID }, query: { limit: 1, cursor: first.nextCursor }, body: undefined })
+    await expect(executeRestRoute(route("listReleaseRuns"), { params: { workspaceId: UUID }, query: { limit: 2, cursor: first.nextCursor }, body: undefined })).rejects.toBeInstanceOf(RestCursorError)
     expect(mocks.prisma.releaseRun.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: UUID, OR: [{ updatedAt: { lt: firstAt } }, { updatedAt: firstAt, id: { lt: UUID } }] }), take: 2 }))
   })
 })

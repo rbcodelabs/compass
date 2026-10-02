@@ -147,9 +147,10 @@ objective-parent assignment verify both ends belong to the path workspace and
 return an opaque `404` without writing when they do not.
 
 Feedback attachment completion accepts only the URL and signed upload receipt
-from the prepare/upload workflow. The receipt is bound to the feedback item,
-workspace, metadata, expiry, and single completion; inline/base64 upload stays
-an MCP convenience. Feedback-source origin and artifact checks happen before
+from the prepare/upload workflow. The receipt binds the prepared upload
+metadata and expiry; completion additionally checks the path workspace and
+feedback item before attaching it. Inline/base64 upload stays an MCP
+convenience. Feedback-source origin and artifact checks happen before
 credential creation, and the source plus its hashed initial token commit as one
 transaction.
 

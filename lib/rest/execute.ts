@@ -19,7 +19,7 @@ import {
 } from "@/lib/typed-link-tool-handlers"
 import type { ToolResult } from "@/lib/mcp-output"
 import { deleteKeyResult, deleteObjective, updateKeyResult, updateObjective } from "@/lib/okr-tool-handlers"
-import { setObjectiveParentKeyResult } from "@/lib/okr-hierarchy"
+import { OKRHierarchyError, setObjectiveParentKeyResult } from "@/lib/okr-hierarchy"
 import { updateExperiment } from "@/lib/experiment-update-tool"
 import { handleAnalyticsTool } from "@/lib/analytics/tool-handlers"
 import * as analyticsService from "@/lib/analytics/service"
@@ -217,7 +217,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "listEligibleParentKeyResults": {
       const objective = await prisma.objective.findFirst({ where: { id, workspaceId }, select: { cycleId: true } })
       if (!objective) throw new RestNotFoundError()
-      return arrayPage(`eligible-parent-krs:${workspaceId}:${id}`, input.query, await getEligibleParentKeyResults(workspaceId, objective.cycleId))
+      return arrayPage(`eligible-parent-krs:${workspaceId}:${id}`, input.query, await getEligibleParentKeyResults(workspaceId, objective.cycleId, { excludeObjectiveId: id }))
     }
     case "listTaskAssignees": {
       const offset = restOffset(input.query.cursor, `task-assignees:${workspaceId}:${input.query.search ?? ""}:${input.query.limit}`)
@@ -230,15 +230,19 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
       const result = ensureTool(await listTaskLinks({ taskId: id })) as { items: unknown[] }
       return arrayPage(`task-links:${workspaceId}:${id}`, input.query, result.items)
     }
-    case "createFeedbackSource": return serialize(ensureTool(await createFeedbackSourceTool({ workspaceId, ...(body as Omit<Parameters<typeof createFeedbackSourceTool>[0], "workspaceId">) })))
-    case "updateFeedbackSource": return serialize(ensureTool(await updateFeedbackSourceTool({ workspaceId, sourceId: id, ...body })))
+    case "createFeedbackSource": {
+      if (!(await prisma.artifact.findFirst({ where: { id: String(body.artifactId), workspaceId, status: "ACTIVE" }, select: { id: true } }))) throw new RestNotFoundError()
+      return serialize(ensureTool(await createFeedbackSourceTool({ workspaceId, ...(body as Omit<Parameters<typeof createFeedbackSourceTool>[0], "workspaceId">) })))
+    }
+    case "updateFeedbackSource": {
+      if (!(await prisma.feedbackSource.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError()
+      return serialize(ensureTool(await updateFeedbackSourceTool({ workspaceId, sourceId: id, ...body })))
+    }
     case "listWorkspaceOpportunityRankings": {
-      const result = ensureTool(await listTopOpportunities({ workspaceId, limit: 100 })) as { items: unknown[] }
-      return arrayPage(`opportunity-rankings:workspace:${workspaceId}:${input.query.limit}`, input.query, result.items)
+      return rankingPage(`opportunity-rankings:workspace:${workspaceId}`, input.query, (offset, limit) => listTopOpportunities({ workspaceId, offset, limit }))
     }
     case "listOrganizationOpportunityRankings": {
-      const result = ensureTool(await listTopOpportunities({ orgSlug: input.params.orgSlug, limit: 100 })) as { items: unknown[] }
-      return arrayPage(`opportunity-rankings:organization:${input.params.orgSlug}:${input.query.limit}`, input.query, result.items)
+      return rankingPage(`opportunity-rankings:organization:${input.params.orgSlug}`, input.query, (offset, limit) => listTopOpportunities({ orgSlug: input.params.orgSlug, offset, limit }))
     }
     case "getCurrentIdentity": {
       const workspaces = await prisma.workspace.findMany({ where: await agentWorkspaceWhere(actor), select: { id: true, name: true, slug: true }, orderBy: [{ name: "asc" }, { id: "asc" }] })
@@ -353,7 +357,15 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
       if (typeof body.squadId === "string" && !(await prisma.squad.findFirst({ where: { id: body.squadId, workspaceId }, select: { id: true } }))) throw new RestNotFoundError()
       ensureTool(await updateObjective({ objectiveId: id, ...pick(body, ["title", "description", "status"]) }))
       if (body.squadId !== undefined) await prisma.objective.update({ where: { id }, data: { squadId: nullable(body.squadId), updatedAt: new Date() } })
-      if (body.parentKeyResultId !== undefined) await setObjectiveParentKeyResult({ workspaceId, objectiveId: id, keyResultId: nullable(body.parentKeyResultId) ?? null })
+      if (body.parentKeyResultId !== undefined) {
+        try { await setObjectiveParentKeyResult({ workspaceId, objectiveId: id, keyResultId: nullable(body.parentKeyResultId) ?? null }) }
+        catch (error) {
+          if (!(error instanceof OKRHierarchyError)) throw error
+          if (error.code === "OBJECTIVE_NOT_FOUND" || error.code === "KEY_RESULT_NOT_FOUND") throw new RestNotFoundError()
+          if (error.code === "CIRCULAR_HIERARCHY" || error.code === "SAME_OBJECTIVE") throw new RestConflictError(error.message)
+          throw new RestValidationError(error.message)
+        }
+      }
       return serialize(found(await prisma.objective.findFirst({ where: { id, workspaceId }, select: select.objective })))
     }
     case "deleteObjective": { if (!(await prisma.objective.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError(); ensureTool(await deleteObjective({ objectiveId: id })); return undefined }
@@ -667,9 +679,19 @@ function signedOffset(offset: number, context: string) {
 }
 
 function arrayPage<T>(context: string, query: Record<string, unknown>, rows: T[]) {
-  const offset = restOffset(query.cursor, context)
   const limit = Number(query.limit ?? 50)
-  return { items: rows.slice(offset, offset + limit).map(serialize), nextCursor: rows.length > offset + limit ? signedOffset(offset + limit, context) : null }
+  const boundedContext = `${context}:limit:${limit}`
+  const offset = restOffset(query.cursor, boundedContext)
+  return { items: rows.slice(offset, offset + limit).map(serialize), nextCursor: rows.length > offset + limit ? signedOffset(offset + limit, boundedContext) : null }
+}
+
+async function rankingPage(context: string, query: Record<string, unknown>, load: (offset: number, limit: number) => Promise<ToolResult>) {
+  const limit = Number(query.limit ?? 50)
+  const boundedContext = `${context}:limit:${limit}`
+  const offset = restOffset(query.cursor, boundedContext)
+  const result = ensureTool(await load(offset, limit + 1)) as { items: unknown[] }
+  const items = result.items.slice(0, limit).map(serialize)
+  return { items, nextCursor: result.items.length > limit ? signedOffset(offset + limit, boundedContext) : null }
 }
 
 async function evidenceByTarget(evidenceId: string, target: Record<string, unknown>) {
@@ -717,23 +739,25 @@ function humanUser(actor: ReturnType<typeof getMcpActor>): string {
 
 async function listPage(context: string, query: Record<string, unknown>, load: (cursor: { id: string; createdAt: string } | null, take: number) => Promise<unknown[]>): Promise<{ items: unknown[]; nextCursor: string | null }> {
   const limit = Number(query.limit ?? 50)
-  const cursor = typeof query.cursor === "string" ? decodeCursor(query.cursor, context) : null
+  const boundedContext = `${context}:limit:${limit}`
+  const cursor = typeof query.cursor === "string" ? decodeCursor(query.cursor, boundedContext) : null
   if (query.cursor && !cursor) throw new RestCursorError("The cursor is invalid for this collection or filter set.")
   const rows = await load(cursor, limit + 1) as Array<Record<string, unknown>>
   const hasMore = rows.length > limit
   const items = rows.slice(0, limit).map(serialize) as Array<Record<string, unknown>>
   const last = items.at(-1)
-  return { items, nextCursor: hasMore && last ? encodeCursor({ id: String(last.id), createdAt: String(last.createdAt), context }) : null }
+  return { items, nextCursor: hasMore && last ? encodeCursor({ id: String(last.id), createdAt: String(last.createdAt), context: boundedContext }) : null }
 }
 
 async function listUpdatedPage(context: string, query: Record<string, unknown>, load: (cursor: { id: string; createdAt: string } | null, take: number) => Promise<unknown[]>): Promise<{ items: unknown[]; nextCursor: string | null }> {
   const limit = Number(query.limit ?? 50)
-  const cursor = typeof query.cursor === "string" ? decodeCursor(query.cursor, context) : null
+  const boundedContext = `${context}:limit:${limit}`
+  const cursor = typeof query.cursor === "string" ? decodeCursor(query.cursor, boundedContext) : null
   if (query.cursor && !cursor) throw new RestCursorError("The cursor is invalid for this collection or filter set.")
   const rows = await load(cursor, limit + 1) as Array<Record<string, unknown>>
   const items = rows.slice(0, limit).map(serialize) as Array<Record<string, unknown>>
   const last = items.at(-1)
-  return { items, nextCursor: rows.length > limit && last ? encodeCursor({ id: String(last.id), createdAt: String(last.updatedAt), context }) : null }
+  return { items, nextCursor: rows.length > limit && last ? encodeCursor({ id: String(last.id), createdAt: String(last.updatedAt), context: boundedContext }) : null }
 }
 
 async function pagedToolCollection(context: string, query: Record<string, unknown>, load: (page: number, pageSize: number) => Promise<{ items: unknown[]; total: number }>) {
@@ -749,8 +773,8 @@ async function pagedToolCollection(context: string, query: Record<string, unknow
 }
 
 async function notificationPage(userId: string, workspaceId: string, query: Record<string, unknown>) {
-  const context = `notifications:${workspaceId}:${userId}:${Boolean(query.unreadOnly)}`
   const limit = Number(query.limit ?? 50)
+  const context = `notifications:${workspaceId}:${userId}:${Boolean(query.unreadOnly)}:limit:${limit}`
   const decoded = typeof query.cursor === "string" ? decodeCursor(query.cursor, context) : null
   if (query.cursor && !decoded) throw new RestCursorError("The cursor is invalid for this inbox or filter set.")
   let serviceCursor = decoded ? Buffer.from(`${decoded.createdAt}|${decoded.id}`).toString("base64url") : undefined

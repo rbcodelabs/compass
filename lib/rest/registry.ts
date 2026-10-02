@@ -17,6 +17,7 @@ import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/
 import * as phase4 from "@/lib/rest/phase4"
 import * as phase5 from "@/lib/rest/phase5"
 import { synthesisSchema } from "@/lib/research-analysis"
+import { normalizeAllowedOrigins } from "@/lib/embed-sources"
 
 export type ApiScope = "api:read" | "api:write"
 export type RestMethod = "GET" | "POST" | "PATCH" | "DELETE"
@@ -191,7 +192,7 @@ const checklistPatch = z.object({ status: z.enum(["PENDING", "DONE", "SKIPPED"])
 const releaseAuthorizationRequest = z.object({ provider: z.literal("GITHUB"), repositoryOwner: z.string().trim().min(1).max(255), repositoryName: z.string().trim().min(1).max(255), pullRequestNumber: z.number().int().positive(), baseRef: z.string().trim().min(1).max(255), headSha: z.string().regex(/^[a-f0-9]{40}$/i), targetEnvironment: z.literal("PRODUCTION"), releasePolicyId: z.string().trim().min(1).max(255), taskIds: z.array(uuid).min(1) }).strict()
 const helpQuery = z.object({ query: z.string().trim().min(1).max(500), limit: z.coerce.number().int().min(1).max(20).default(5) }).strict()
 const helpPath = z.object({ topic: z.string().trim().min(1).max(255) })
-const workspaceCreate = z.object({ name: z.string().trim().min(1).max(255), slug: z.string().trim().min(1).max(255), description: z.string().trim().max(2_000).optional() }).strict()
+const workspaceCreate = z.object({ name: z.string().trim().min(1).max(255), slug: z.string().trim().min(1).max(255).regex(/^[a-z0-9-]+$/), description: z.string().trim().max(2_000).optional() }).strict()
 const evidenceTarget = z.union([
   z.object({ opportunityId: uuid, solutionId: z.never().optional(), assumptionId: z.never().optional() }).strict(),
   z.object({ opportunityId: z.never().optional(), solutionId: uuid, assumptionId: z.never().optional() }).strict(),
@@ -206,8 +207,11 @@ const scoringAssignmentPath = z.object({ workspaceId: uuid, entityType: z.enum([
 const scoringAssignmentPatch = z.object({ scoringModelId: uuid.nullable() }).strict()
 const checklistItemInput = z.object({ label: z.string().trim().min(1).max(255), description: z.string().trim().max(2_000).optional() }).strict()
 const checklistTemplateCreate = z.object({ tier: z.enum(["TIER_1", "TIER_2", "TIER_3"]), name: z.string().trim().min(1).max(255), description: z.string().trim().max(2_000).optional(), items: z.array(checklistItemInput).max(100) }).strict()
-const feedbackSourceCreate = z.object({ artifactId: uuid, name: z.string().trim().min(1).max(255), allowedOrigins: z.array(z.string().url()).max(50), authMode: z.enum(["INTERNAL_SSO", "PORTAL"]).optional() }).strict()
-const feedbackSourcePatch = z.object({ allowedOrigins: z.array(z.string().url()).max(50).optional(), enabled: z.boolean().optional(), name: z.string().trim().min(1).max(255).optional(), authMode: z.enum(["INTERNAL_SSO", "PORTAL"]).optional() }).strict().refine(value => Object.keys(value).length > 0, { message: "Provide at least one change." })
+const allowedOrigins = z.array(z.string().url()).max(20).superRefine((value, context) => {
+  try { normalizeAllowedOrigins(value) } catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid origin." }) }
+})
+const feedbackSourceCreate = z.object({ artifactId: uuid, name: z.string().trim().min(1).max(255), allowedOrigins, authMode: z.enum(["INTERNAL_SSO", "PORTAL"]).optional() }).strict()
+const feedbackSourcePatch = z.object({ allowedOrigins: allowedOrigins.optional(), enabled: z.boolean().optional(), name: z.string().trim().min(1).max(255).optional(), authMode: z.enum(["INTERNAL_SSO", "PORTAL"]).optional() }).strict().refine(value => Object.keys(value).length > 0, { message: "Provide at least one change." })
 const rankingQuery = cursorQuery.strict()
 
 export const REST_ROUTES: readonly RestRoute[] = [
