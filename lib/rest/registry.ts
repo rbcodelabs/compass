@@ -137,7 +137,7 @@ const phase3Entity = z.object({
   createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(),
 })
 const phase3Collection = collectionOf(phase3Entity)
-const docImagePreparation = z.object({ imageId: uuid, imageName: z.string(), pathname: z.string(), url: z.string().url(), filename: z.string(), fileType: z.enum(DOC_IMAGE_ALLOWED_MIME_TYPES), fileSize: z.number().int().positive(), clientToken: z.string().min(1), expiresAt: z.union([z.string(), z.number()]), access: z.literal("private"), markdown: z.string() })
+const docImagePreparation = z.object({ imageId: uuid, imageName: z.string(), pathname: z.string(), url: z.string().regex(/^\/api\/docs\/images\//), filename: z.string(), fileType: z.enum(DOC_IMAGE_ALLOWED_MIME_TYPES), fileSize: z.number().int().positive(), clientToken: z.string().min(1), expiresAt: z.union([z.string(), z.number()]), access: z.literal("private"), markdown: z.string() })
 const commentTarget = z.enum(COMMENT_TARGET_TYPES)
 const commentTargetPath = z.object({ workspaceId: uuid, targetType: commentTarget, targetId: uuid })
 const commentCreate = z.object({ body: z.string().trim().min(1), parentId: uuid.optional() }).strict()

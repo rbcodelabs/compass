@@ -5,6 +5,7 @@ const FOREIGN = "22222222-2222-4222-8222-222222222222"
 const THIRD = "33333333-3333-4333-8333-333333333333"
 
 const mocks = vi.hoisted(() => ({
+  actor: { current: { userId: "user-1", purpose: "USER" as const } as { userId: string | null; purpose: "USER" | "SERVICE" | "AGENT" | "AGENT_TURN" } },
   prisma: {
     squad: { findFirst: vi.fn() },
     keyResult: { findFirst: vi.fn() },
@@ -52,7 +53,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({ default: () => mocks.prisma }))
 vi.mock("@/lib/mcp-authz", () => ({
-  getMcpActor: () => ({ userId: "user-1", purpose: "USER" }),
+  getMcpActor: () => mocks.actor.current,
   assertWorkspaceMember: mocks.assertWorkspaceMember,
   assertWorkspaceAdmin: mocks.assertWorkspaceAdmin,
   isServiceActor: () => false,
@@ -99,6 +100,7 @@ const success = (data: unknown) => ({
 describe("REST domain execution", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.actor.current = { userId: "user-1", purpose: "USER" }
     mocks.captureWorkspaceMutation.mockImplementation(async (prisma, _model, _operation, _actor, _id, mutate) => mutate(prisma))
   })
 
@@ -441,6 +443,19 @@ describe("REST domain execution", () => {
     expect(mocks.requestReleaseAuthorization).not.toHaveBeenCalled()
   })
 
+  it("does not let a service identity request a human release authorization", async () => {
+    mocks.actor.current = { userId: null, purpose: "SERVICE" }
+    await expect(executeRestRoute(route("requestReleaseAuthorization"), {
+      params: { workspaceId: UUID }, query: {}, body: {
+        provider: "GITHUB", repositoryOwner: "acme", repositoryName: "app", pullRequestNumber: 7,
+        baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION",
+        releasePolicyId: "policy", taskIds: [THIRD],
+      },
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.assertWorkspaceAdmin).not.toHaveBeenCalled()
+    expect(mocks.requestReleaseAuthorization).not.toHaveBeenCalled()
+  })
+
   it("rejects unsigned notification cursors instead of restarting the inbox", async () => {
     await expect(executeRestRoute(route("listNotifications"), {
       params: { workspaceId: UUID }, query: { cursor: "unsigned" }, body: undefined,
@@ -459,6 +474,7 @@ describe("REST domain execution", () => {
     }) as { items: Array<{ id: string }>; nextCursor: string | null }
     expect(result.items).toEqual([{ id: FOREIGN, createdAt: "2026-01-01T00:01:00.000Z" }])
     expect(result.nextCursor).toBeNull()
+    expect(route("listNotifications").responseSchema.safeParse(result).success).toBe(true)
     expect(mocks.listNotifications).toHaveBeenCalledTimes(2)
   })
 
@@ -476,6 +492,7 @@ describe("REST domain execution", () => {
     const first = await executeRestRoute(route("listReleaseRuns"), { params: { workspaceId: UUID }, query: { limit: 1 }, body: undefined }) as { items: Array<Record<string, unknown>>; nextCursor: string }
     expect(first.items[0]).toMatchObject({ id: UUID, taskIds: [THIRD], pullRequestUrl: "https://github.com/acme/app/pull/7" })
     expect(first.items[0]).not.toHaveProperty("tasks")
+    expect(route("listReleaseRuns").responseSchema.safeParse(first).success).toBe(true)
     await executeRestRoute(route("listReleaseRuns"), { params: { workspaceId: UUID }, query: { limit: 1, cursor: first.nextCursor }, body: undefined })
     expect(mocks.prisma.releaseRun.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: UUID, OR: [{ updatedAt: { lt: firstAt } }, { updatedAt: firstAt, id: { lt: UUID } }] }), take: 2 }))
   })

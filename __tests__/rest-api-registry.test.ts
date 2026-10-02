@@ -68,6 +68,8 @@ describe("REST API registry", () => {
     const release = REST_ROUTES.find((route) => route.operationId === "requestReleaseAuthorization")!
     expect(release.bodySchema?.safeParse({ provider: "GITHUB", repositoryOwner: "acme", repositoryName: "app", pullRequestNumber: 1, baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION", releasePolicyId: "policy", taskIds: ["11111111-1111-4111-8111-111111111111"] }).success).toBe(true)
     expect(release.bodySchema?.safeParse({ provider: "GITHUB", repoOwner: "acme", repoName: "app", pullRequestNumber: 1, baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION", releasePolicyId: "policy", taskIds: ["11111111-1111-4111-8111-111111111111"] }).success).toBe(false)
+    const upload = REST_ROUTES.find((route) => route.operationId === "prepareDocImageUpload")!
+    expect(upload.responseSchema.safeParse({ imageId: "11111111-1111-4111-8111-111111111111", imageName: "image.png", pathname: "docs/ws/images/image.png", url: "/api/docs/images/ws/image.png", filename: "image.png", fileType: "image/png", fileSize: 123, clientToken: "token", expiresAt: Date.now(), access: "private", markdown: "![image](/api/docs/images/ws/image.png)" }).success).toBe(true)
   })
 
   it("uses the shared launch-checklist status vocabulary", () => {
