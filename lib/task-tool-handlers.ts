@@ -603,7 +603,7 @@ export async function listTaskLinks({ taskId }: { taskId: string }) {
 
   const rawLinks = await prisma.taskLink.findMany({ where: { taskId }, orderBy: { createdAt: "asc" } })
   if (!rawLinks.length) {
-    return fail(`Task "${task.title}" has no links.`)
+    return ok(`Task "${task.title}" has no links.`, { items: [], count: 0 })
   }
 
   const links = await formatLinks(prisma, rawLinks, task.workspaceId)

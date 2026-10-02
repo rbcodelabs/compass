@@ -597,7 +597,7 @@ describe("listTopOpportunities", () => {
     expect(mockOpportunityScore.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { opportunity: { workspaceId: WS_ID } },
-        orderBy: { normalizedScore: "desc" },
+        orderBy: [{ normalizedScore: "desc" }, { opportunityId: "asc" }],
       })
     )
     expect(text.indexOf("A")).toBeLessThan(text.indexOf("B"))

@@ -710,7 +710,7 @@ export async function listTopOpportunities({
         },
       },
     },
-    orderBy: { normalizedScore: "desc" },
+    orderBy: [{ normalizedScore: "desc" }, { opportunityId: "asc" }],
     take,
   })
 
