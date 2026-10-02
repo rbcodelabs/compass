@@ -211,6 +211,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
       if (conclusion === "NOT_PURSUED" && !reason) throw new RestConflictError("NOT_PURSUED requires a reason.")
       const experiment = await prisma.experiment.findFirst({ where: { id, workspaceId }, select: { id: true, status: true, assumptionId: true } })
       if (!experiment) throw new RestNotFoundError()
+      if (experiment.assumptionId && !(await prisma.assumption.findFirst({ where: { id: experiment.assumptionId, solution: { workspaceId } }, select: { id: true } }))) throw new RestNotFoundError()
       if (["COMPLETE", "KILLED", "NOT_PURSUED"].includes(experiment.status)) throw new RestConflictError("The experiment is already concluded.")
       const status = conclusion === "KILL" ? "KILLED" : conclusion === "NOT_PURSUED" ? "NOT_PURSUED" : "COMPLETE"
       const updated = await captureWorkspaceMutation(prisma, "experiment", "update", mutationActor, id, tx => tx.experiment.update({ where: { id }, data: { status, conclusion, conclusionReason: reason || null, endDate: new Date(), updatedAt: new Date(), source: "API" }, select: select.experiment }))

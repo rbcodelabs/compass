@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     keyResult: { findFirst: vi.fn() },
     opportunity: { findFirst: vi.fn() },
     solution: { findFirst: vi.fn() },
+    assumption: { findFirst: vi.fn() },
     workspaceMember: { findFirst: vi.fn() },
     task: { findFirst: vi.fn() },
     roadmapItem: { findFirst: vi.fn() },
@@ -194,5 +195,13 @@ describe("REST domain execution", () => {
       params: { workspaceId: UUID, id: FOREIGN }, query: {},
       body: { expectedUpdatedAt: "2026-10-02T12:00:00.000Z", title: "Changed" },
     })).rejects.toBeInstanceOf(RestConflictError)
+  })
+
+  it("refuses to conclude an experiment whose assumption parent is outside the workspace", async () => {
+    mocks.prisma.experiment.findFirst.mockResolvedValue({ id: FOREIGN, status: "RUNNING", assumptionId: FOREIGN })
+    mocks.prisma.assumption.findFirst.mockResolvedValue(null)
+    await expect(executeRestRoute(route("concludeExperiment"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: { conclusion: "PROCEED" },
+    })).rejects.toBeInstanceOf(RestNotFoundError)
   })
 })
