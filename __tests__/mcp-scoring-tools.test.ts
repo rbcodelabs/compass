@@ -629,5 +629,6 @@ describe("listTopOpportunities", () => {
     mockOpportunityScore.findMany.mockResolvedValueOnce([])
     const result = await runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => listTopOpportunities({ workspaceId: WS_ID }))
     expect(result.content[0].text).toContain("No scored opportunities found")
+    expect(result.structuredContent.data).toEqual({ items: [], count: 0 })
   })
 })
