@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { runWithMcpActor } from "@/lib/mcp-authz"
 
 // --- Prisma mock setup -------------------------------------------------------
 // We mock the entire @/lib/db module so getPrisma() returns a controlled mock.
@@ -1176,12 +1177,21 @@ describe("promoteFeedbackToRoadmap", () => {
     mockFeedbackItem.findUnique.mockResolvedValue({ id: FEED_ID, title: "Login button broken", type: "BUG" })
     mockRoadmapItem.findFirst.mockResolvedValue(null)
     mockRoadmapItem.create.mockRejectedValue(Object.assign(new Error("duplicate"), { code: "P2002" }))
-    mockRoadmapItem.findUnique.mockResolvedValue({ id: operationId, title: "Login button broken", workspaceId: WS_ID, feedbackId: FEED_ID, horizon: "NEXT", isPrivate: false })
+    mockRoadmapItem.findUnique.mockResolvedValue({ id: operationId, title: "Login button broken", workspaceId: WS_ID, feedbackId: FEED_ID, horizon: "NEXT", isPrivate: false, source: "MCP" })
 
     const result = await promoteFeedbackToRoadmap({ feedbackId: FEED_ID, workspaceId: WS_ID, horizon: "NEXT", operationId })
 
     expect(result.structuredContent.data).toMatchObject({ id: operationId })
     expect(mockRoadmapItem.findUnique).toHaveBeenCalledWith({ where: { id: operationId } })
+  })
+
+  it("rejects operation id reuse with changed promotion provenance", async () => {
+    const operationId = "44444444-4444-4444-8444-444444444444"
+    mockFeedbackItem.findUnique.mockResolvedValue({ id: FEED_ID, title: "Login button broken", type: "BUG" })
+    mockRoadmapItem.findFirst.mockResolvedValue(null)
+    mockRoadmapItem.create.mockRejectedValue(Object.assign(new Error("duplicate"), { code: "P2002" }))
+    mockRoadmapItem.findUnique.mockResolvedValue({ id: operationId, workspaceId: WS_ID, feedbackId: FEED_ID, horizon: "NEXT", isPrivate: false, source: "MCP" })
+    await expect(runWithMcpActor({ userId: "user-1", purpose: "USER" }, () => promoteFeedbackToRoadmap({ feedbackId: FEED_ID, workspaceId: WS_ID, horizon: "NEXT", operationId, source: "API" }))).rejects.toThrow("different roadmap promotion")
   })
 
   it("passes through isPrivate: true (e.g. a security-flagged bug) and surfaces it in the response text", async () => {

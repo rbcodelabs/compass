@@ -143,7 +143,8 @@ export async function getEligibleParentKeyResults(
       return (
         span(a) - span(b) ||
         a.objectiveSortOrder - b.objectiveSortOrder ||
-        a.keyResultSortOrder - b.keyResultSortOrder
+        a.keyResultSortOrder - b.keyResultSortOrder ||
+        a.id.localeCompare(b.id)
       );
     })
     .map((kr) => ({

@@ -12,6 +12,7 @@ import type { LaunchTier } from "@/lib/types"
 import { setLaunchTierCore, updateChecklistItemCore } from "@/lib/launch-checklist"
 import { ok, fail } from "@/lib/mcp-output"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import { withWorkspaceUpdates } from "@/lib/workspace-updates-capture"
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
@@ -73,12 +74,13 @@ export async function promoteSolutionToRoadmap(input: {
         opportunityId: solution.opportunity.id,
         squadId: solution.opportunity.squadId,
         isPrivate: input.isPrivate,
+        source: input.source,
       }, lastItem ? lastItem.sortOrder + 1 : 0) } })
     }, { atomic: true })
   } catch (error) {
     if (!input.operationId || !isUniqueConflict(error)) throw error
     item = await prisma.roadmapItem.findUnique({ where: { id: promotionId } })
-    if (!item || item.workspaceId !== input.workspaceId || item.solutionId !== input.solutionId || item.opportunityId !== solution.opportunity.id || item.squadId !== solution.opportunity.squadId || item.horizon !== input.horizon || item.isPrivate !== (input.isPrivate ?? false)) {
+    if (!item || item.workspaceId !== input.workspaceId || item.solutionId !== input.solutionId || item.opportunityId !== solution.opportunity.id || item.squadId !== solution.opportunity.squadId || item.horizon !== input.horizon || item.isPrivate !== (input.isPrivate ?? false) || item.source !== (input.source ?? "MCP")) {
       throw new RoadmapPromotionConflict("The operationId was already used for a different roadmap promotion.")
     }
   }
@@ -152,20 +154,15 @@ export async function createChecklistTemplate({
     return fail(`Workspace "${workspaceId}" not found.`)
   }
 
-  const template = await prisma.checklistTemplate.create({
-    data: { workspaceId, tier, name: name.trim(), description },
-  })
-
-  if (items.length > 0) {
-    await prisma.checklistTemplateItem.createMany({
-      data: items.map((item, i) => ({
-        checklistTemplateId: template.id,
-        label: item.label,
-        description: item.description,
-        order: i,
-      })),
-    })
-  }
+  const template = await withWorkspaceUpdates(prisma, async tx => {
+    const created = await tx.checklistTemplate.create({ data: { workspaceId, tier, name: name.trim(), description } })
+    if (items.length > 0) {
+      await tx.checklistTemplateItem.createMany({
+        data: items.map((item, i) => ({ checklistTemplateId: created.id, label: item.label, description: item.description, order: i })),
+      })
+    }
+    return created
+  }, { atomic: true })
 
   return ok(
     `**Checklist template created:** ${template.name}\n` +

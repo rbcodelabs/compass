@@ -676,10 +676,12 @@ export async function listTopOpportunities({
   workspaceId,
   orgSlug,
   limit,
+  offset,
 }: {
   workspaceId?: string
   orgSlug?: string
   limit?: number
+  offset?: number
 }) {
   if (!workspaceId && !orgSlug) {
     return fail("Provide either workspaceId or orgSlug.")
@@ -711,6 +713,7 @@ export async function listTopOpportunities({
       },
     },
     orderBy: [{ normalizedScore: "desc" }, { opportunityId: "asc" }],
+    skip: offset,
     take,
   })
 

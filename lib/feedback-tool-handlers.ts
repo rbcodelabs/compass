@@ -723,7 +723,7 @@ export async function promoteFeedbackToRoadmap({
   } catch (error) {
     if (!operationId || !isUniqueConflict(error)) throw error
     item = await prisma.roadmapItem.findUnique({ where: { id: promotionId } })
-    if (!item || item.workspaceId !== workspaceId || item.feedbackId !== feedbackId || item.horizon !== horizon || item.isPrivate !== (isPrivate ?? false)) {
+    if (!item || item.workspaceId !== workspaceId || item.feedbackId !== feedbackId || item.horizon !== horizon || item.isPrivate !== (isPrivate ?? false) || item.source !== (source ?? "MCP")) {
       throw new RoadmapPromotionConflict("The operationId was already used for a different roadmap promotion.")
     }
   }
