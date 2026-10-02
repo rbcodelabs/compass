@@ -26,6 +26,7 @@ const mockOpportunity = {
 
 const mockRoadmapItem = {
   findFirst: vi.fn(),
+  findUnique: vi.fn(),
   create: vi.fn(),
 }
 
@@ -1102,12 +1103,14 @@ describe("promoteFeedbackToRoadmap", () => {
     expect(text).toContain("Login button broken")
     expect(mockRoadmapItem.create).toHaveBeenCalledWith({
       data: {
+        id: expect.stringMatching(/^[0-9a-f-]{36}$/),
         workspaceId: WS_ID,
         title: "Login button broken",
         horizon: "NEXT",
         sortOrder: 0,
         feedbackId: FEED_ID,
         isPrivate: false,
+        source: "MCP",
       },
     })
   })
@@ -1147,12 +1150,14 @@ describe("promoteFeedbackToRoadmap", () => {
 
     expect(mockRoadmapItem.create).toHaveBeenCalledWith({
       data: {
+        id: expect.stringMatching(/^[0-9a-f-]{36}$/),
         workspaceId: WS_ID,
         title: "Crash on save",
         horizon: "NEXT",
         sortOrder: 5,
         feedbackId: FEED_ID,
         isPrivate: false,
+        source: "MCP",
       },
     })
   })
@@ -1164,6 +1169,19 @@ describe("promoteFeedbackToRoadmap", () => {
 
     expect(result.content[0].text).toContain(`"${FEED_ID}" not found`)
     expect(mockRoadmapItem.create).not.toHaveBeenCalled()
+  })
+
+  it("converges concurrent retries that use the same operation id", async () => {
+    const operationId = "44444444-4444-4444-8444-444444444444"
+    mockFeedbackItem.findUnique.mockResolvedValue({ id: FEED_ID, title: "Login button broken", type: "BUG" })
+    mockRoadmapItem.findFirst.mockResolvedValue(null)
+    mockRoadmapItem.create.mockRejectedValue(Object.assign(new Error("duplicate"), { code: "P2002" }))
+    mockRoadmapItem.findUnique.mockResolvedValue({ id: operationId, title: "Login button broken", workspaceId: WS_ID, feedbackId: FEED_ID, horizon: "NEXT", isPrivate: false })
+
+    const result = await promoteFeedbackToRoadmap({ feedbackId: FEED_ID, workspaceId: WS_ID, horizon: "NEXT", operationId })
+
+    expect(result.structuredContent.data).toMatchObject({ id: operationId })
+    expect(mockRoadmapItem.findUnique).toHaveBeenCalledWith({ where: { id: operationId } })
   })
 
   it("passes through isPrivate: true (e.g. a security-flagged bug) and surfaces it in the response text", async () => {
