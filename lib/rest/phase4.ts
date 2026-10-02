@@ -26,7 +26,8 @@ export const researchStudy = z.object({
 }).strict()
 export const researchStudyCollection = collectionOf(researchStudy)
 export const researchStudyQuery = cursorQuery.extend({ status: researchStudy.shape.status.optional() }).strict()
-export const participantLink = z.object({ id: uuid, status: researchStudy.shape.status.optional(), participantUrl: z.string().url().nullable() }).strict()
+export const participantCredential = z.object({ id: uuid, status: researchStudy.shape.status.optional(), participantUrl: z.string().url() }).strict()
+export const participantLinkRevocation = z.object({ id: uuid, status: researchStudy.shape.status.optional(), participantUrl: z.null() }).strict()
 export const researchSession = z.object({
   id: uuid, studyId: uuid, modality: z.enum(["CHAT", "VOICE"]), status: z.string(), startedAt: nullableTimestamp, completedAt: nullableTimestamp,
   lastActiveAt: nullableTimestamp, endedReason: z.string().nullable(), createdAt: timestamp, turnCount: z.number().int().nonnegative(), hasSummary: z.boolean(),

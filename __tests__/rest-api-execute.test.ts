@@ -192,6 +192,8 @@ describe("REST domain execution", () => {
     const params = { workspaceId: UUID, id: FOREIGN }
 
     const first = await executeRestRoute(route(operationId), { params, query: { limit: 1 }, body: undefined }) as { nextCursor: string }
+    await expect(executeRestRoute(route(operationId), { params, query: { limit: 2, cursor: first.nextCursor }, body: undefined }))
+      .rejects.toBeInstanceOf(RestCursorError)
     await executeRestRoute(route(operationId), { params, query: { limit: 1, cursor: first.nextCursor }, body: undefined })
 
     expect(service).toHaveBeenNthCalledWith(1, { workspaceId: UUID }, expect.anything(), FOREIGN, expect.objectContaining({ offset: 0, limit: 1 }))

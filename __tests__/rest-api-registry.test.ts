@@ -76,7 +76,15 @@ describe("REST API registry", () => {
     expect(create.bodySchema?.safeParse({ name: "Study", goal: "Learn", guide: ["Question"], status: "ACTIVE" }).success).toBe(false)
     expect(create.summary).toContain("without issuing participant credentials")
     for (const operationId of ["activateResearchStudy", "issueResearchParticipantLink", "rotateResearchParticipantLink"]) {
-      expect(REST_ROUTES.find(route => route.operationId === operationId)?.responseSchema.safeParse({ id: UUID, participantUrl: "https://compass.example/research/one-time" }).success).toBe(true)
+      const schema = REST_ROUTES.find(route => route.operationId === operationId)!.responseSchema
+      expect(schema.safeParse({ id: UUID, participantUrl: "https://compass.example/research/one-time" }).success).toBe(true)
+      expect(schema.safeParse({ id: UUID, participantUrl: null }).success).toBe(false)
+      expect(schema.safeParse({ id: UUID }).success).toBe(false)
+    }
+    for (const operationId of ["closeResearchStudy", "archiveResearchStudy", "revokeResearchParticipantLinks"]) {
+      const schema = REST_ROUTES.find(route => route.operationId === operationId)!.responseSchema
+      expect(schema.safeParse({ id: UUID, participantUrl: null }).success).toBe(true)
+      expect(schema.safeParse({ id: UUID, participantUrl: "https://compass.example/research/should-not-leak" }).success).toBe(false)
     }
   })
   it("defines every route with a unique operation id, scope, policy and schemas", () => {
