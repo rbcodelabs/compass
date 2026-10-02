@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   feedbackSourceToken: { create: vi.fn() },
   embedVisitorSession: { updateMany: vi.fn() },
   artifact: { findFirst: vi.fn() },
+  $transaction: vi.fn(),
 }))
 vi.mock("@/lib/db", () => ({ default: () => mocks }))
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ userId: "user-1", purpose: "USER" }) }))
@@ -36,6 +37,7 @@ beforeEach(() => {
   })
   mocks.feedbackSource.update.mockResolvedValue({})
   mocks.embedVisitorSession.updateMany.mockResolvedValue({ count: 2 })
+  mocks.$transaction.mockImplementation(async (callback: (tx: typeof mocks) => unknown) => callback(mocks))
 })
 afterEach(() => vi.unstubAllEnvs())
 
@@ -61,6 +63,22 @@ describe("create_feedback_source", () => {
   it("honours authMode PORTAL", async () => {
     await createFeedbackSourceTool({ ...createInput, authMode: "PORTAL" })
     expect(mocks.feedbackSource.create.mock.calls[0][0].data.authMode).toBe("PORTAL")
+  })
+
+  it("creates the source and one-time credential in one transaction", async () => {
+    await createFeedbackSourceTool(createInput)
+
+    expect(mocks.$transaction).toHaveBeenCalledOnce()
+    expect(mocks.feedbackSource.create).toHaveBeenCalledOnce()
+    expect(mocks.feedbackSourceToken.create).toHaveBeenCalledOnce()
+  })
+
+  it("does not return a credential when token persistence aborts creation", async () => {
+    mocks.feedbackSourceToken.create.mockRejectedValue(new Error("token write failed"))
+
+    await expect(createFeedbackSourceTool(createInput)).rejects.toThrow("token write failed")
+
+    expect(mocks.$transaction).toHaveBeenCalledOnce()
   })
 
   it("returns token and script path separately, with a note, when the Compass URL is not configured", async () => {

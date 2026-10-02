@@ -83,11 +83,11 @@ export async function mintEmbedToken(input: {
   label?: string | null
   expiresAt?: Date | null
   createdById?: string | null
-}): Promise<MintedEmbedToken> {
+}, prisma: Pick<ReturnType<typeof getPrisma>, "feedbackSourceToken"> = getPrisma()): Promise<MintedEmbedToken> {
   const randomPart = randomBytes(16).toString("hex")
   const token = `${EMBED_TOKEN_PREFIX}${randomPart}`
   const tokenPrefix = randomPart.slice(0, 8)
-  const row = await getPrisma().feedbackSourceToken.create({
+  const row = await prisma.feedbackSourceToken.create({
     data: {
       feedbackSourceId: input.feedbackSourceId,
       tokenHash: hashEmbedToken(token),

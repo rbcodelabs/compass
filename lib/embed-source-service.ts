@@ -99,20 +99,23 @@ export async function createEmbedSource(
   const authMode = requireAuthMode(input.authMode)
   const artifactId = await requireArtifact(prisma, workspaceId, input.artifactId)
 
-  const source = await prisma.feedbackSource.create({
-    // `authMode` is written explicitly even though NULL would read as
-    // INTERNAL_SSO: the column has no database default (DSQL cannot add one to an
-    // existing column), so an operator who chose the default deserves a row that
-    // records the choice.
-    data: { workspaceId, artifactId, name, allowedOrigins, enabled: true, authMode, createdById: userId },
-    select: { id: true },
-  })
-  // Minted in the same call: a source with no token cannot be embedded, and two
-  // steps is how half-configured sources happen.
-  const minted = await mintEmbedToken({
-    feedbackSourceId: source.id,
-    label: "Initial token",
-    createdById: userId,
+  const { source, minted } = await prisma.$transaction(async (tx) => {
+    const source = await tx.feedbackSource.create({
+      // `authMode` is written explicitly even though NULL would read as
+      // INTERNAL_SSO: the column has no database default (DSQL cannot add one to an
+      // existing column), so an operator who chose the default deserves a row that
+      // records the choice.
+      data: { workspaceId, artifactId, name, allowedOrigins, enabled: true, authMode, createdById: userId },
+      select: { id: true },
+    })
+    // Persisting the hash and creating the source are one unit: callers must
+    // never receive an unusable one-time credential or leave an orphan source.
+    const minted = await mintEmbedToken({
+      feedbackSourceId: source.id,
+      label: "Initial token",
+      createdById: userId,
+    }, tx)
+    return { source, minted }
   })
   return {
     id: source.id,
