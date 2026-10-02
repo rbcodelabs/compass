@@ -1,5 +1,5 @@
 import getPrisma from "@/lib/db"
-import type { AppPrismaClient } from "@/lib/db"
+import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
 import { loadCustomFieldDefinitions } from "@/lib/custom-field-definitions"
 import { resolveEffectiveOptions } from "@/lib/shared-field-options"
 import type { CustomFieldObjectType, SelectOption } from "@/lib/types"
@@ -127,7 +127,7 @@ export function assertCanSeeOtherProposals(
  */
 const OBJECT_LOADERS: Record<
   CustomFieldObjectType,
-  (prisma: AppPrismaClient, workspaceId: string) => Promise<{ id: string; title: string }[]>
+  (prisma: AppTransactionClient, workspaceId: string) => Promise<{ id: string; title: string }[]>
 > = {
   OPPORTUNITY: (p, workspaceId) =>
     p.opportunity.findMany({ where: { workspaceId }, select: { id: true, title: true } }),
@@ -203,7 +203,7 @@ export async function listCardSortFactors({
  * checks cannot be skipped by one caller.
  */
 export async function loadFactor(
-  prisma: AppPrismaClient,
+  prisma: AppTransactionClient,
   { workspaceId, fieldDefinitionId }: { workspaceId: string; fieldDefinitionId: string }
 ): Promise<{ id: string; name: string; objectType: CustomFieldObjectType; options: SelectOption[] }> {
   const field = await prisma.customFieldDefinition.findUnique({
@@ -395,7 +395,7 @@ export async function listCardSortRounds({
   }))
 }
 
-export async function loadRound(prisma: AppPrismaClient, roundId: string, workspaceId?: string) {
+export async function loadRound(prisma: AppTransactionClient, roundId: string, workspaceId?: string) {
   const round = await prisma.cardSortRound.findUnique({
     where: { id: roundId },
     include: { fieldDefinition: { select: { name: true } } },
@@ -439,13 +439,20 @@ export async function setCardSortRoundState({
   if (state === "REVEALED" && round.state === "REVEALED") {
     throw new CardSortError("WRONG_STATE", "This round is already revealed.")
   }
-  return prisma.cardSortRound.update({
-    where: { id: roundId },
+  const changed = await prisma.cardSortRound.updateMany({
+    where: {
+      id: roundId,
+      workspaceId,
+      createdById: userId,
+      state: state === "REVEALED" ? "OPEN" : { in: ["OPEN", "REVEALED"] },
+    },
     data: {
       state,
       ...(state === "REVEALED" ? { revealedAt: new Date() } : { closedAt: new Date() }),
     },
   })
+  if (changed.count !== 1) throw new CardSortError("WRONG_STATE", "This round changed before the transition could be saved.")
+  return loadRound(prisma, roundId, workspaceId)
 }
 
 // ── Proposals ───────────────────────────────────────────────────────────────
@@ -466,7 +473,7 @@ export async function setCardSortRoundState({
  *     clicking the bucket an object is already in has expressed no opinion, and
  *     storing it would put a phantom self-loop in the flow graph.
  */
-export async function proposeCardSortMove({
+async function proposeCardSortMoveInTransaction(prisma: AppTransactionClient, {
   workspaceId,
   roundId,
   userId,
@@ -481,7 +488,6 @@ export async function proposeCardSortMove({
   proposedValue: string
   rationale?: string | null
 }) {
-  const prisma = getPrisma()
   const round = await loadRound(prisma, roundId, workspaceId)
   if (round.state !== "OPEN") {
     throw new CardSortError(
@@ -552,6 +558,22 @@ export async function proposeCardSortMove({
   })
 }
 
+export async function proposeCardSortMove(input: {
+  workspaceId: string
+  roundId: string
+  userId: string
+  objectId: string
+  proposedValue: string
+  rationale?: string | null
+}) {
+  const prisma = getPrisma()
+  return prisma.$transaction(async tx => {
+    const fenced = await tx.cardSortRound.updateMany({ where: { id: input.roundId, workspaceId: input.workspaceId, state: "OPEN" }, data: { updatedAt: new Date() } })
+    if (fenced.count !== 1) throw new CardSortError("WRONG_STATE", "Proposals can only be made while a round is OPEN.")
+    return proposeCardSortMoveInTransaction(tx, input)
+  })
+}
+
 export type BulkProposalResult = {
   applied: string[]
   skipped: { objectId: string; code: CardSortErrorCode; reason: string }[]
@@ -586,6 +608,10 @@ export async function proposeCardSortMoves({
   proposedValue: string
   rationale?: string | null
 }): Promise<BulkProposalResult> {
+  const prisma = getPrisma()
+  return prisma.$transaction(async tx => {
+  const fenced = await tx.cardSortRound.updateMany({ where: { id: roundId, workspaceId, state: "OPEN" }, data: { updatedAt: new Date() } })
+  if (fenced.count !== 1) throw new CardSortError("WRONG_STATE", "Proposals can only be made while a round is OPEN.")
   const applied: string[] = []
   const skipped: BulkProposalResult["skipped"] = []
   // One object means the caller pointed at one row and asked for one thing, so
@@ -596,7 +622,7 @@ export async function proposeCardSortMoves({
   const strict = objectIds.length === 1
   for (const objectId of objectIds) {
     try {
-      await proposeCardSortMove({
+      await proposeCardSortMoveInTransaction(tx, {
         workspaceId,
         roundId,
         userId,
@@ -618,11 +644,12 @@ export async function proposeCardSortMoves({
     }
   }
   return { applied, skipped }
+  })
 }
 
 /** Reads the official SELECT value for one object, or null when unset. */
 async function readOfficialValue(
-  prisma: AppPrismaClient,
+  prisma: AppTransactionClient,
   fieldId: string,
   objectId: string
 ): Promise<string | null> {
@@ -654,20 +681,13 @@ export async function withdrawCardSortProposal({
   objectId: string
 }) {
   const prisma = getPrisma()
-  const round = await loadRound(prisma, roundId, workspaceId)
-  if (round.state !== "OPEN") {
-    throw new CardSortError(
-      "WRONG_STATE",
-      `This round is ${round.state}. Proposals can only be withdrawn while a round is OPEN.`
-    )
-  }
-  const deleted = await prisma.cardSortProposal.deleteMany({
-    where: { roundId, userId, objectId },
+  return prisma.$transaction(async tx => {
+    const fenced = await tx.cardSortRound.updateMany({ where: { id: roundId, workspaceId, state: "OPEN" }, data: { updatedAt: new Date() } })
+    if (fenced.count !== 1) throw new CardSortError("WRONG_STATE", "Proposals can only be withdrawn while a round is OPEN.")
+    const deleted = await tx.cardSortProposal.deleteMany({ where: { roundId, userId, objectId } })
+    if (deleted.count === 0) throw new CardSortError("NOT_FOUND", "You have no proposal on that object to withdraw.")
+    return { withdrawn: deleted.count }
   })
-  if (deleted.count === 0) {
-    throw new CardSortError("NOT_FOUND", "You have no proposal on that object to withdraw.")
-  }
-  return { withdrawn: deleted.count }
 }
 
 export type MyProposal = {
