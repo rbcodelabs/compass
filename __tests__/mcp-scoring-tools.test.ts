@@ -44,6 +44,7 @@ const mockPrisma = {
   opportunityScore: mockOpportunityScore,
   solution: mockSolution,
   solutionScore: mockSolutionScore,
+  $transaction: vi.fn(async (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma)),
 }
 
 vi.mock("@/lib/db", () => ({
@@ -215,6 +216,31 @@ describe("updateScoringModel", () => {
     const data = mockScoringModel.update.mock.calls[0][0].data
     expect(data.version).toBe(2)
     expect(result.content[0].text).toContain("Version bumped to 2")
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce()
+  })
+
+  it("rolls back metric replacement when createMany fails", async () => {
+    const stored = [{ scoringModelId: MODEL_ID, key: "original" }]
+    mockScoringModel.findUnique.mockResolvedValueOnce({ id: MODEL_ID, formulaType: "WEIGHTED_SUM", version: 1 })
+    mockPrisma.$transaction.mockImplementationOnce(async (callback) => {
+      const before = [...stored]
+      const tx = {
+        ...mockPrisma,
+        scoringModelMetric: {
+          deleteMany: vi.fn(async () => { stored.splice(0) }),
+          createMany: vi.fn(async () => { throw new Error("injected create failure") }),
+        },
+      }
+      try { return await callback(tx as typeof mockPrisma) }
+      catch (error) { stored.splice(0, stored.length, ...before); throw error }
+    })
+
+    await expect(updateScoringModel({
+      scoringModelId: MODEL_ID,
+      metrics: [{ key: "replacement", label: "Replacement", minValue: 0, maxValue: 10, weight: 1, direction: "POSITIVE" }],
+    })).rejects.toThrow("injected create failure")
+    expect(stored).toEqual([{ scoringModelId: MODEL_ID, key: "original" }])
+    expect(mockScoringModel.update).not.toHaveBeenCalled()
   })
 
   it("rejects switching to MULTIPLICATIVE if a metric has minValue <= 0", async () => {
