@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/sheet"
 import { DocTreeSidebar, type DocTreeItem } from "./doc-tree-sidebar"
 import { Button } from "@/components/ui/button"
-import { ArtifactNav, type ArtifactNavItem } from "./artifact-nav"
+import type { ArtifactNavItem } from "./artifact-nav"
 
 interface DocsMobileDrawerProps {
   docs: DocTreeItem[]
@@ -52,14 +52,14 @@ export function DocsMobileDrawer({
               Docs
             </SheetTitle>
           </SheetHeader>
-          <div className="flex-1 overflow-y-auto p-2">
+          <div className="flex min-h-0 flex-1 flex-col p-2">
             <DocTreeSidebar
               docs={docs}
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
               workspaceId={workspaceId}
+              artifacts={artifacts}
             />
-            <ArtifactNav artifacts={artifacts} basePath={`/${orgSlug}/${workspaceSlug}/docs`} />
           </div>
         </SheetContent>
       </Sheet>
