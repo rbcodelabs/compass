@@ -56,6 +56,14 @@ describe("REST API registry", () => {
     expect(lifecycle.safeParse(source).success).toBe(true)
     expect(lifecycle.safeParse({ ...source, token: "cmpfb_must_not_leak" }).success).toBe(false)
   })
+
+  it("requires objective relationship changes to be separate atomic requests", () => {
+    const body = REST_ROUTES.find(route => route.operationId === "updateObjective")!.bodySchema!
+    expect(body.safeParse({ squadId: UUID }).success).toBe(true)
+    expect(body.safeParse({ parentKeyResultId: UUID }).success).toBe(true)
+    expect(body.safeParse({ squadId: UUID, parentKeyResultId: UUID }).success).toBe(false)
+    expect(body.safeParse({ title: "Retitled", squadId: UUID }).success).toBe(false)
+  })
   it("enumerates the complete authorized Phase 4 route and method surface", () => {
     const expected = [
       ["GET", "/api/v1/workspaces/{workspaceId}/research-studies"], ["POST", "/api/v1/workspaces/{workspaceId}/research-studies"],
