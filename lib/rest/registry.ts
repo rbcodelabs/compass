@@ -9,6 +9,11 @@ import {
 import { FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES, FEEDBACK_ATTACHMENT_MAX_FILE_BYTES } from "@/lib/feedback-attachment-rules"
 import { FEEDBACK_STATUSES } from "@/lib/feedback-meta"
 import { linkMetricSchema, metricInputSchema, targetSchema, updateMetricBindingSchema } from "@/lib/analytics/service"
+import { COMMENT_TARGET_TYPES } from "@/lib/comments"
+import { FOLLOWABLE_SUBJECT_TYPES } from "@/lib/followable"
+import { DOC_TYPES } from "@/lib/doc-types"
+import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
+import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
 
 export type ApiScope = "api:read" | "api:write"
 export type RestMethod = "GET" | "POST" | "PATCH" | "DELETE"
@@ -114,6 +119,31 @@ const customObjectType = z.enum(["OPPORTUNITY", "SOLUTION", "EXPERIMENT", "OBJEC
 const customValuePath = z.object({ workspaceId: uuid, objectType: customObjectType, objectId: uuid })
 const customFieldValueCreate = z.object({ fieldId: uuid, value: z.unknown().nullable() }).strict()
 const entityLinksQuery = cursorQuery.extend({ opportunityId: uuid.optional(), objectiveId: uuid.optional(), solutionId: uuid.optional(), keyResultId: uuid.optional() }).strict().refine((value) => [value.opportunityId, value.objectiveId, value.solutionId, value.keyResultId].filter(Boolean).length === 1, { message: "Provide exactly one entity id." })
+const phase3Entity = z.record(z.string(), z.unknown())
+const phase3Collection = collectionOf(phase3Entity)
+const commentTarget = z.enum(COMMENT_TARGET_TYPES)
+const commentTargetPath = z.object({ workspaceId: uuid, targetType: commentTarget, targetId: uuid })
+const commentCreate = z.object({ body: z.string().trim().min(1), parentId: uuid.optional() }).strict()
+const commentPatch = z.object({ body: z.string().trim().min(1) }).strict()
+const followPath = z.object({ workspaceId: uuid, subjectType: z.enum(FOLLOWABLE_SUBJECT_TYPES), subjectId: uuid })
+const docCreate = z.object({ title: z.string().trim().min(1).max(255), content: z.string().optional(), parentId: uuid.nullable().optional(), icon: z.string().max(32).optional(), roadmapItemId: uuid.nullable().optional(), docType: z.enum(DOC_TYPES).optional(), operationId: uuid.optional() }).strict()
+const docPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), content: z.string().optional(), icon: z.string().max(32).optional(), expectedRevision: z.string().min(1).optional(), operationId: uuid.optional() }).strict()
+const docUpload = z.object({ filename: z.string().trim().min(1).max(255), fileType: z.enum(DOC_IMAGE_ALLOWED_MIME_TYPES), fileSize: z.number().int().min(1).max(DOC_IMAGE_MAX_BYTES) }).strict()
+const versionCreate = z.object({ label: z.string().trim().max(255).optional(), expectedRevision: z.string().min(1).optional(), operationId: uuid.optional() }).strict()
+const restoreVersion = z.object({ expectedRevision: z.string().min(1).optional(), operationId: uuid.optional() }).strict()
+const docCommentCreate = commentCreate.extend({ anchorText: z.string().optional(), anchorPrefix: z.string().optional(), anchorSuffix: z.string().optional(), anchorStart: z.number().int().nonnegative().optional(), anchorEnd: z.number().int().nonnegative().optional() }).strict()
+const artifactCreate = z.union([
+  z.object({ title: z.string().trim().min(1).max(255), description: z.string().optional(), sourceType: z.literal("HTML_UPLOAD"), html: z.string().min(1), filename: z.string().max(255).optional() }).strict(),
+  z.object({ title: z.string().trim().min(1).max(255), description: z.string().optional(), sourceType: z.literal("EXTERNAL_LINK"), url: z.string().url() }).strict(),
+])
+const artifactPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().nullable().optional(), html: z.string().min(1).optional(), filename: z.string().max(255).optional(), url: z.string().url().optional() }).strict()
+const decisionSubject = z.enum(["WORKSPACE", "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC", "EXPERIMENT", "FEEDBACK"])
+const decisionRequest = z.object({ subjectType: decisionSubject, subjectId: uuid, question: z.string().trim().min(1).max(255), context: z.string().trim().min(1).max(20_000), sources: z.array(z.object({ type: decisionSubject, id: uuid }).strict()).max(12).optional(), options: decisionOptionsInputSchema, questions: decisionQuestionsInputSchema, idempotencyKey: uuid.optional() }).strict().refine(value => !(value.options && value.questions), { message: "options and questions are mutually exclusive" })
+const solutionPlanCreate = z.object({ body: z.string().trim().min(1) }).strict()
+const solutionPlanCommentCreate = z.object({ body: z.string().trim().min(1), parentId: uuid.optional() }).strict()
+const launchTierCreate = z.object({ tier: z.enum(["LIGHT", "STANDARD", "HIGH_RISK"]) }).strict()
+const checklistPatch = z.object({ checked: z.boolean(), note: z.string().nullable().optional() }).strict()
+const releaseAuthorizationRequest = z.object({ provider: z.literal("GITHUB"), repoOwner: z.string().trim().min(1).max(255), repoName: z.string().trim().min(1).max(255), pullRequestNumber: z.number().int().positive(), baseRef: z.string().trim().min(1).max(255), headSha: z.string().regex(/^[a-f0-9]{40}$/i), targetEnvironment: z.literal("PRODUCTION"), releasePolicyId: uuid, taskIds: z.array(uuid).min(1) }).strict()
 
 export const REST_ROUTES: readonly RestRoute[] = [
   read("getCurrentIdentity", "/api/v1/me", "Get the current programmatic identity", identitySchema, z.object({}), undefined, "authenticated-actor"),
@@ -208,6 +238,63 @@ export const REST_ROUTES: readonly RestRoute[] = [
   read("listCustomFieldValues", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "List custom-field values in configured display order", collectionOf(customFieldValueSchema), customValuePath, cursorQuery.strict()),
   write("POST", "setCustomFieldValue", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "Set a custom-field value", customFieldValueSchema, customValuePath, customFieldValueCreate),
   read("listEntityLinks", "/api/v1/workspaces/{workspaceId}/entity-links", "List typed entity links", collectionOf(typedLinkSchema), workspacePath, entityLinksQuery),
+
+  read("listComments", "/api/v1/workspaces/{workspaceId}/comments/{targetType}/{targetId}", "List comments and replies", phase3Collection, commentTargetPath, cursorQuery.extend({ status: z.enum(["OPEN", "RESOLVED"]).optional() }).strict()),
+  write("POST", "createComment", "/api/v1/workspaces/{workspaceId}/comments/{targetType}/{targetId}", "Create a comment or reply", phase3Entity, commentTargetPath, commentCreate, 201),
+  read("getComment", "/api/v1/workspaces/{workspaceId}/comments/{id}", "Get a comment", phase3Entity, itemPath),
+  write("PATCH", "updateComment", "/api/v1/workspaces/{workspaceId}/comments/{id}", "Update a comment", phase3Entity, itemPath, commentPatch),
+  write("DELETE", "deleteComment", "/api/v1/workspaces/{workspaceId}/comments/{id}", "Delete a comment and its replies", z.undefined(), itemPath, undefined, 204),
+  write("POST", "resolveComment", "/api/v1/workspaces/{workspaceId}/comments/{id}/resolution", "Resolve a comment", phase3Entity, itemPath),
+  write("DELETE", "reopenComment", "/api/v1/workspaces/{workspaceId}/comments/{id}/resolution", "Reopen a comment", phase3Entity, itemPath),
+  write("POST", "followResource", "/api/v1/workspaces/{workspaceId}/follows/{subjectType}/{subjectId}", "Follow a resource", phase3Entity, followPath, undefined, 201),
+  write("DELETE", "unfollowResource", "/api/v1/workspaces/{workspaceId}/follows/{subjectType}/{subjectId}", "Unfollow a resource", z.undefined(), followPath, undefined, 204),
+  read("listNotifications", "/api/v1/workspaces/{workspaceId}/notifications", "List the current human user's notifications", phase3Collection, workspacePath, cursorQuery.extend({ unreadOnly: z.coerce.boolean().optional() }).strict()),
+  write("POST", "markNotificationsRead", "/api/v1/workspaces/{workspaceId}/notifications/read", "Mark owned notifications read", phase3Entity, workspacePath, z.union([z.object({ notificationIds: z.array(uuid).min(1) }).strict(), z.object({ all: z.literal(true) }).strict()])),
+
+  read("listDocs", "/api/v1/workspaces/{workspaceId}/docs", "List documents", phase3Collection, workspacePath, cursorQuery.strict()),
+  write("POST", "createDoc", "/api/v1/workspaces/{workspaceId}/docs", "Create a document", phase3Entity, workspacePath, docCreate, 201),
+  read("getDoc", "/api/v1/workspaces/{workspaceId}/docs/{id}", "Get a document", phase3Entity, itemPath),
+  write("PATCH", "updateDoc", "/api/v1/workspaces/{workspaceId}/docs/{id}", "Update a document with optional optimistic concurrency", phase3Entity, itemPath, docPatch),
+  write("POST", "prepareDocImageUpload", "/api/v1/workspaces/{workspaceId}/docs/{id}/image-uploads", "Prepare a private document image upload", phase3Entity, itemPath, docUpload, 201),
+  read("listDocVersions", "/api/v1/workspaces/{workspaceId}/docs/{id}/versions", "List document versions", phase3Collection, itemPath, cursorQuery.strict()),
+  write("POST", "createDocVersion", "/api/v1/workspaces/{workspaceId}/docs/{id}/versions", "Create a named document version", phase3Entity, itemPath, versionCreate, 201),
+  read("getDocVersion", "/api/v1/workspaces/{workspaceId}/doc-versions/{id}", "Get a document version", phase3Entity, itemPath),
+  write("POST", "restoreDocVersion", "/api/v1/workspaces/{workspaceId}/doc-versions/{id}/restore", "Restore a document version", phase3Entity, itemPath, restoreVersion),
+  read("listDocComments", "/api/v1/workspaces/{workspaceId}/docs/{id}/comments", "List document comments and replies", phase3Collection, itemPath, cursorQuery.extend({ status: z.enum(["OPEN", "RESOLVED"]).optional() }).strict()),
+  write("POST", "createDocComment", "/api/v1/workspaces/{workspaceId}/docs/{id}/comments", "Create a document comment or reply", phase3Entity, itemPath, docCommentCreate, 201),
+  read("getDocComment", "/api/v1/workspaces/{workspaceId}/doc-comments/{id}", "Get a document comment", phase3Entity, itemPath),
+  write("PATCH", "updateDocComment", "/api/v1/workspaces/{workspaceId}/doc-comments/{id}", "Update a document comment", phase3Entity, itemPath, commentPatch),
+  write("DELETE", "deleteDocComment", "/api/v1/workspaces/{workspaceId}/doc-comments/{id}", "Delete a document comment and replies", z.undefined(), itemPath, undefined, 204),
+  write("POST", "resolveDocComment", "/api/v1/workspaces/{workspaceId}/doc-comments/{id}/resolution", "Resolve a document comment", phase3Entity, itemPath),
+  write("DELETE", "reopenDocComment", "/api/v1/workspaces/{workspaceId}/doc-comments/{id}/resolution", "Reopen a document comment", phase3Entity, itemPath),
+
+  read("listArtifacts", "/api/v1/workspaces/{workspaceId}/artifacts", "List artifacts", phase3Collection, workspacePath, cursorQuery.extend({ includeArchived: z.coerce.boolean().optional() }).strict()),
+  write("POST", "createArtifact", "/api/v1/workspaces/{workspaceId}/artifacts", "Create an artifact", phase3Entity, workspacePath, artifactCreate, 201),
+  read("getArtifact", "/api/v1/workspaces/{workspaceId}/artifacts/{id}", "Get an artifact without private storage keys", phase3Entity, itemPath),
+  write("PATCH", "updateArtifact", "/api/v1/workspaces/{workspaceId}/artifacts/{id}", "Update an artifact", phase3Entity, itemPath, artifactPatch),
+  write("DELETE", "archiveArtifact", "/api/v1/workspaces/{workspaceId}/artifacts/{id}", "Archive an artifact", z.undefined(), itemPath, undefined, 204),
+  write("POST", "linkArtifactSolution", "/api/v1/workspaces/{workspaceId}/artifacts/{id}/solutions", "Link an artifact to a solution", phase3Entity, itemPath, z.object({ solutionId: uuid }).strict(), 201),
+  write("DELETE", "unlinkArtifactSolution", "/api/v1/workspaces/{workspaceId}/artifacts/{id}/solutions/{relatedId}", "Unlink an artifact from a solution", z.undefined(), relatedItemPath, undefined, 204),
+  write("POST", "linkArtifactDecision", "/api/v1/workspaces/{workspaceId}/artifacts/{id}/decisions", "Link an artifact to a decision request", phase3Entity, itemPath, z.object({ requestId: uuid }).strict(), 201),
+  write("DELETE", "unlinkArtifactDecision", "/api/v1/workspaces/{workspaceId}/artifacts/{id}/decisions/{relatedId}", "Unlink an artifact from a decision request", z.undefined(), relatedItemPath, undefined, 204),
+
+  write("POST", "requestDecision", "/api/v1/workspaces/{workspaceId}/decision-requests", "Request an immutable human decision", phase3Entity, workspacePath, decisionRequest, 201),
+  read("listDecisions", "/api/v1/workspaces/{workspaceId}/decision-requests", "List decision requests", phase3Collection, workspacePath, cursorQuery.extend({ status: z.string().max(50).optional() }).strict()),
+  read("getDecision", "/api/v1/workspaces/{workspaceId}/decision-requests/{id}", "Get a decision request", phase3Entity, itemPath),
+  read("listReviewRequests", "/api/v1/workspaces/{workspaceId}/review-requests", "List human review requests", phase3Collection, workspacePath, cursorQuery.extend({ state: z.string().max(50).optional() }).strict()),
+  read("getReviewRequest", "/api/v1/workspaces/{workspaceId}/review-requests/{id}", "Get a human review request", phase3Entity, itemPath),
+  read("listSolutionPlanEntries", "/api/v1/workspaces/{workspaceId}/solutions/{id}/plan-entries", "List proposed solution plan entries and discussion", phase3Collection, itemPath, cursorQuery.strict()),
+  write("POST", "createSolutionPlan", "/api/v1/workspaces/{workspaceId}/solutions/{id}/plan-entries", "Create a proposed solution plan", phase3Entity, itemPath, solutionPlanCreate, 201),
+  read("getSolutionPlanEntry", "/api/v1/workspaces/{workspaceId}/solution-plan-entries/{id}", "Get a solution plan entry", phase3Entity, itemPath),
+  write("POST", "createSolutionPlanComment", "/api/v1/workspaces/{workspaceId}/solutions/{id}/plan-comments", "Comment on a proposed solution plan", phase3Entity, itemPath, solutionPlanCommentCreate, 201),
+  write("PATCH", "updateSolutionPlanEntry", "/api/v1/workspaces/{workspaceId}/solution-plan-entries/{id}", "Update a proposed solution plan entry", phase3Entity, itemPath, commentPatch),
+  write("DELETE", "deleteSolutionPlanEntry", "/api/v1/workspaces/{workspaceId}/solution-plan-entries/{id}", "Delete a proposed solution plan entry", z.undefined(), itemPath, undefined, 204),
+
+  write("POST", "setLaunchTier", "/api/v1/workspaces/{workspaceId}/roadmap-items/{id}/launch-checklist", "Set a roadmap item's launch tier atomically", phase3Entity, itemPath, launchTierCreate),
+  read("getLaunchChecklist", "/api/v1/workspaces/{workspaceId}/roadmap-items/{id}/launch-checklist", "Get a roadmap item's launch checklist", phase3Entity, itemPath),
+  write("PATCH", "updateLaunchChecklistItem", "/api/v1/workspaces/{workspaceId}/launch-checklist-items/{id}", "Update a launch checklist item", phase3Entity, itemPath, checklistPatch),
+  write("POST", "requestReleaseAuthorization", "/api/v1/workspaces/{workspaceId}/release-authorizations", "Request human release authorization without dispatching", phase3Entity, workspacePath, releaseAuthorizationRequest, 201),
+  read("listReleaseRuns", "/api/v1/workspaces/{workspaceId}/release-runs", "List release runs", phase3Collection, workspacePath, cursorQuery.strict()),
 ] as const
 
 function routePattern(path: string): { regexp: RegExp; names: string[] } {

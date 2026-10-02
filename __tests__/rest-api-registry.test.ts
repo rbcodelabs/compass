@@ -37,6 +37,36 @@ describe("REST API registry", () => {
     }
   })
 
+  it("covers the approved Phase 3 collaboration, documents and governance resources", () => {
+    const operations = new Set(REST_ROUTES.map((route) => route.operationId))
+    for (const operationId of [
+      "listComments", "createComment", "getComment", "updateComment", "deleteComment", "resolveComment", "reopenComment",
+      "followResource", "unfollowResource", "listNotifications", "markNotificationsRead",
+      "listDocs", "getDoc", "createDoc", "updateDoc", "prepareDocImageUpload",
+      "listDocVersions", "createDocVersion", "getDocVersion", "restoreDocVersion",
+      "listDocComments", "createDocComment", "getDocComment", "updateDocComment", "deleteDocComment", "resolveDocComment", "reopenDocComment",
+      "listArtifacts", "getArtifact", "createArtifact", "updateArtifact", "archiveArtifact",
+      "linkArtifactSolution", "unlinkArtifactSolution", "linkArtifactDecision", "unlinkArtifactDecision",
+      "requestDecision", "listDecisions", "getDecision", "listReviewRequests", "getReviewRequest",
+      "listSolutionPlanEntries", "getSolutionPlanEntry", "createSolutionPlan", "createSolutionPlanComment", "updateSolutionPlanEntry", "deleteSolutionPlanEntry",
+      "setLaunchTier", "getLaunchChecklist", "updateLaunchChecklistItem",
+      "requestReleaseAuthorization", "listReleaseRuns",
+    ]) expect(operations.has(operationId), operationId).toBe(true)
+  })
+
+  it("does not expose human decisions, plan approval, decision application or release dispatch", () => {
+    const operations = new Set(REST_ROUTES.map((route) => route.operationId))
+    for (const operationId of ["recordDecision", "closeDecisionNoAction", "applyRecordedDecision", "approveSolutionPlan", "rejectSolutionPlan", "dispatchRelease"]) {
+      expect(operations.has(operationId), operationId).toBe(false)
+    }
+  })
+
+  it("keeps one-time credentials and authorization requests write-scoped", () => {
+    for (const operationId of ["prepareDocImageUpload", "requestReleaseAuthorization"]) {
+      expect(REST_ROUTES.find((route) => route.operationId === operationId)).toMatchObject({ method: "POST", scope: "api:write" })
+    }
+  })
+
   it("documents custom-field collections in configured display order", () => {
     expect(REST_ROUTES.find((route) => route.operationId === "listCustomFieldDefinitions")?.summary).toContain("configured display order")
     expect(REST_ROUTES.find((route) => route.operationId === "listCustomFieldValues")?.summary).toContain("configured display order")
