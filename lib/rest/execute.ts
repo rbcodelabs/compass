@@ -1,7 +1,7 @@
 import getPrisma from "@/lib/db"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { assertOrgAdminBySlug, assertScoringModelAccess, assertWorkspaceMember, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
-import { decodeCursor, encodeCursor } from "@/lib/rest/cursor"
+import { decodeCursor, decodeOrderedCursor, encodeCursor, encodeOrderedCursor, type OrderedCursorPayload } from "@/lib/rest/cursor"
 import type { RestAuthorizationPolicy, RestRoute } from "@/lib/rest/registry"
 import { createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
 import { createSolution, updateSolution } from "@/lib/solution-tool-handlers"
@@ -261,21 +261,21 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "getSquad": return serialize(found(await prisma.squad.findFirst({ where: { id, workspaceId }, select: select.squad })))
     case "createSquad": return serialize(await prisma.squad.create({ data: { workspaceId, name: String(body.name), color: String(body.color ?? "#6366f1"), source: "API" }, select: select.squad }))
     case "updateSquad": { const updated = await prisma.squad.updateMany({ where: { id, workspaceId }, data: { ...pick(body, ["name", "color"]), source: "API" } }); if (!updated.count) throw new RestNotFoundError(); return serialize(found(await prisma.squad.findFirst({ where: { id, workspaceId }, select: select.squad }))) }
-    case "listCustomFieldDefinitions": return mappedListPage(`custom-field-definitions:${workspaceId}:${filters(input.query, ["objectType"])}`, input.query,
+    case "listCustomFieldDefinitions": return mappedOrderedListPage(`custom-field-definitions:${workspaceId}:${filters(input.query, ["objectType"])}`, input.query,
       (cursor, take) => prisma.customFieldDefinition.findMany({
-        where: { workspaceId, ...pick(input.query, ["objectType"]), ...cursorWhere(cursor) },
+        where: { workspaceId, ...pick(input.query, ["objectType"]), ...customFieldCursorWhere(cursor, true) },
         include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }], take,
+        orderBy: [{ objectType: "asc" }, { order: "asc" }, { id: "asc" }], take,
       }),
       async rows => rows.map(toCustomFieldDefinitionData))
     case "listCustomFieldValues": {
       const objectType = input.params.objectType, objectId = input.params.objectId
       await assertCustomObjectWorkspace(prisma, workspaceId, objectType, objectId)
-      return mappedListPage(`custom-field-values:${workspaceId}:${objectType}:${objectId}`, input.query,
+      return mappedOrderedListPage(`custom-field-values:${workspaceId}:${objectType}:${objectId}`, input.query,
         (cursor, take) => prisma.customFieldDefinition.findMany({
-          where: { workspaceId, objectType, ...cursorWhere(cursor) },
+          where: { workspaceId, objectType, ...customFieldCursorWhere(cursor, false) },
           include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }], take,
+          orderBy: [{ order: "asc" }, { id: "asc" }], take,
         }),
         async rows => {
           if (!rows.length) return []
@@ -316,22 +316,34 @@ async function listPage(context: string, query: Record<string, unknown>, load: (
   return { items, nextCursor: hasMore && last ? encodeCursor({ id: String(last.id), createdAt: String(last.createdAt), context }) : null }
 }
 
-async function mappedListPage<T extends { id: string; createdAt: Date }>(
+async function mappedOrderedListPage<T extends { id: string; objectType: string; order: number }>(
   context: string,
   query: Record<string, unknown>,
-  load: (cursor: { id: string; createdAt: string } | null, take: number) => Promise<T[]>,
+  load: (cursor: OrderedCursorPayload | null, take: number) => Promise<T[]>,
   map: (rows: T[]) => Promise<unknown[]>,
 ): Promise<{ items: unknown[]; nextCursor: string | null }> {
   const limit = Number(query.limit ?? 50)
-  const cursor = typeof query.cursor === "string" ? decodeCursor(query.cursor, context) : null
+  const cursor = typeof query.cursor === "string" ? decodeOrderedCursor(query.cursor, context) : null
   if (query.cursor && !cursor) throw new RestCursorError("The cursor is invalid for this collection or filter set.")
   const rows = await load(cursor, limit + 1)
   const selected = rows.slice(0, limit)
   const last = selected.at(-1)
   return {
     items: await map(selected),
-    nextCursor: rows.length > limit && last ? encodeCursor({ id: last.id, createdAt: last.createdAt.toISOString(), context }) : null,
+    nextCursor: rows.length > limit && last ? encodeOrderedCursor({ id: last.id, objectType: last.objectType, order: last.order, context }) : null,
   }
+}
+
+function customFieldCursorWhere(cursor: OrderedCursorPayload | null, includeObjectType: boolean): Record<string, unknown> {
+  if (!cursor) return {}
+  if (includeObjectType) {
+    return { OR: [
+      { objectType: { gt: cursor.objectType } },
+      { objectType: cursor.objectType, order: { gt: cursor.order } },
+      { objectType: cursor.objectType, order: cursor.order, id: { gt: cursor.id } },
+    ] }
+  }
+  return { OR: [{ order: { gt: cursor.order } }, { order: cursor.order, id: { gt: cursor.id } }] }
 }
 
 function cursorWhere(cursor: { id: string; createdAt: string } | null): Record<string, unknown> {

@@ -37,6 +37,11 @@ describe("REST API registry", () => {
     }
   })
 
+  it("documents custom-field collections in configured display order", () => {
+    expect(REST_ROUTES.find((route) => route.operationId === "listCustomFieldDefinitions")?.summary).toContain("configured display order")
+    expect(REST_ROUTES.find((route) => route.operationId === "listCustomFieldValues")?.summary).toContain("configured display order")
+  })
+
   it("requires optimistic concurrency tokens on experiment and metric updates", () => {
     const experiment = REST_ROUTES.find((route) => route.operationId === "updateExperiment")!
     expect(experiment.bodySchema?.safeParse({ title: "Changed" }).success).toBe(false)

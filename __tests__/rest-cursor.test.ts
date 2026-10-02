@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { decodeCursor, encodeCursor } from "@/lib/rest/cursor"
+import { decodeCursor, decodeOrderedCursor, encodeCursor, encodeOrderedCursor } from "@/lib/rest/cursor"
 
 describe("REST cursors", () => {
   afterEach(() => vi.unstubAllEnvs())
@@ -13,6 +13,12 @@ describe("REST cursors", () => {
   it("rejects tampering", () => {
     const cursor = encodeCursor({ id: "row-1", createdAt: "2026-10-02T00:00:00.000Z", context: "tasks" })
     expect(decodeCursor(`${cursor.slice(0, -1)}x`, "tasks")).toBeNull()
+  })
+
+  it("signs configured-order cursors and binds them to their collection", () => {
+    const cursor = encodeOrderedCursor({ id: "field-1", objectType: "OPPORTUNITY", order: 2, context: "custom-fields:workspace" })
+    expect(decodeOrderedCursor(cursor, "custom-fields:workspace")).toEqual({ id: "field-1", objectType: "OPPORTUNITY", order: 2, context: "custom-fields:workspace" })
+    expect(decodeOrderedCursor(cursor, "custom-fields:other-workspace")).toBeNull()
   })
 
   it("fails closed in production without a configured secret", () => {

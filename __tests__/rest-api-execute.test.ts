@@ -289,15 +289,14 @@ describe("REST domain execution", () => {
     })
   })
 
-  it("paginates custom-field definitions and returns an empty value collection", async () => {
-    const firstAt = new Date("2026-10-02T12:00:00.000Z")
+  it("paginates custom-field definitions in configured display order and returns an empty value collection", async () => {
     mocks.prisma.customFieldDefinition.findMany
       .mockResolvedValueOnce([
-        { id: UUID, name: "Tier", fieldType: "TEXT", objectType: "OPPORTUNITY", options: null, sharedOptionSetId: null, required: false, order: 1, sharedOptionSet: null, createdAt: firstAt },
-        { id: FOREIGN, name: "Area", fieldType: "TEXT", objectType: "OPPORTUNITY", options: null, sharedOptionSetId: null, required: false, order: 2, sharedOptionSet: null, createdAt: new Date("2026-10-02T11:00:00.000Z") },
+        { id: UUID, name: "Tier", fieldType: "TEXT", objectType: "OPPORTUNITY", options: null, sharedOptionSetId: null, required: false, order: 1, sharedOptionSet: null },
+        { id: FOREIGN, name: "Area", fieldType: "TEXT", objectType: "OPPORTUNITY", options: null, sharedOptionSetId: null, required: false, order: 2, sharedOptionSet: null },
       ])
       .mockResolvedValueOnce([
-        { id: FOREIGN, name: "Area", fieldType: "TEXT", objectType: "OPPORTUNITY", options: null, sharedOptionSetId: null, required: false, order: 2, sharedOptionSet: null, createdAt: new Date("2026-10-02T11:00:00.000Z") },
+        { id: FOREIGN, name: "Area", fieldType: "TEXT", objectType: "OPPORTUNITY", options: null, sharedOptionSetId: null, required: false, order: 2, sharedOptionSet: null },
       ])
       .mockResolvedValueOnce([])
     const definitions = await executeRestRoute(route("listCustomFieldDefinitions"), {
@@ -305,13 +304,19 @@ describe("REST domain execution", () => {
     }) as { items: unknown[]; nextCursor: string | null }
     expect(definitions.items).toHaveLength(1)
     expect(definitions.nextCursor).toEqual(expect.any(String))
-    expect(mocks.prisma.customFieldDefinition.findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({ take: 2 }))
+    expect(mocks.prisma.customFieldDefinition.findMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      orderBy: [{ objectType: "asc" }, { order: "asc" }, { id: "asc" }], take: 2,
+    }))
     const continued = await executeRestRoute(route("listCustomFieldDefinitions"), {
       params: { workspaceId: UUID }, query: { objectType: "OPPORTUNITY", limit: 1, cursor: definitions.nextCursor }, body: undefined,
     }) as { items: Array<{ id: string }>; nextCursor: string | null }
     expect(continued).toMatchObject({ items: [{ id: FOREIGN }], nextCursor: null })
     expect(mocks.prisma.customFieldDefinition.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      where: expect.objectContaining({ workspaceId: UUID, objectType: "OPPORTUNITY", OR: expect.any(Array) }), take: 2,
+      where: expect.objectContaining({ workspaceId: UUID, objectType: "OPPORTUNITY", OR: [
+        { objectType: { gt: "OPPORTUNITY" } },
+        { objectType: "OPPORTUNITY", order: { gt: 1 } },
+        { objectType: "OPPORTUNITY", order: 1, id: { gt: UUID } },
+      ] }), take: 2,
     }))
 
     mocks.prisma.opportunity.findFirst.mockResolvedValue({ id: FOREIGN })
@@ -323,16 +328,14 @@ describe("REST domain execution", () => {
   })
 
   it("continues custom-field value pagination without dropping unset definitions", async () => {
-    const firstAt = new Date("2026-10-02T12:00:00.000Z")
-    const secondAt = new Date("2026-10-02T11:00:00.000Z")
-    const row = (id: string, name: string, createdAt: Date) => ({
+    const row = (id: string, name: string, order: number) => ({
       id, name, fieldType: "TEXT", objectType: "OPPORTUNITY", options: null,
-      sharedOptionSetId: null, required: false, order: 1, sharedOptionSet: null, createdAt,
+      sharedOptionSetId: null, required: false, order, sharedOptionSet: null,
     })
     mocks.prisma.opportunity.findFirst.mockResolvedValue({ id: THIRD })
     mocks.prisma.customFieldDefinition.findMany
-      .mockResolvedValueOnce([row(UUID, "Tier", firstAt), row(FOREIGN, "Area", secondAt)])
-      .mockResolvedValueOnce([row(FOREIGN, "Area", secondAt)])
+      .mockResolvedValueOnce([row(UUID, "Tier", 1), row(FOREIGN, "Area", 2)])
+      .mockResolvedValueOnce([row(FOREIGN, "Area", 2)])
     mocks.prisma.customFieldValue.findMany
       .mockResolvedValueOnce([{ fieldId: UUID, value: "Enterprise" }])
       .mockResolvedValueOnce([])
@@ -345,6 +348,12 @@ describe("REST domain execution", () => {
       params: { workspaceId: UUID, objectType: "OPPORTUNITY", objectId: THIRD }, query: { limit: 1, cursor: first.nextCursor }, body: undefined,
     })
     expect(second).toEqual({ items: [expect.objectContaining({ id: FOREIGN, currentValue: null })], nextCursor: null })
+    expect(mocks.prisma.customFieldDefinition.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.objectContaining({ workspaceId: UUID, objectType: "OPPORTUNITY", OR: [
+        { order: { gt: 1 } }, { order: 1, id: { gt: UUID } },
+      ] }),
+      orderBy: [{ order: "asc" }, { id: "asc" }], take: 2,
+    }))
   })
 
   it("returns an empty scoring-model REST collection with the default 200 status", async () => {

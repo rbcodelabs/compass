@@ -204,8 +204,8 @@ export const REST_ROUTES: readonly RestRoute[] = [
   write("POST", "createSquad", "/api/v1/workspaces/{workspaceId}/squads", "Create a squad", squadSchema, workspacePath, squadCreate, 201),
   read("getSquad", "/api/v1/workspaces/{workspaceId}/squads/{id}", "Get a squad", squadSchema, itemPath),
   write("PATCH", "updateSquad", "/api/v1/workspaces/{workspaceId}/squads/{id}", "Update a squad", squadSchema, itemPath, squadCreate.partial().strict()),
-  read("listCustomFieldDefinitions", "/api/v1/workspaces/{workspaceId}/custom-field-definitions", "List custom-field definitions", collectionOf(customFieldDefinitionSchema), workspacePath, cursorQuery.extend({ objectType: customObjectType.optional() }).strict()),
-  read("listCustomFieldValues", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "List custom-field values", collectionOf(customFieldValueSchema), customValuePath, cursorQuery.strict()),
+  read("listCustomFieldDefinitions", "/api/v1/workspaces/{workspaceId}/custom-field-definitions", "List custom-field definitions in configured display order", collectionOf(customFieldDefinitionSchema), workspacePath, cursorQuery.extend({ objectType: customObjectType.optional() }).strict()),
+  read("listCustomFieldValues", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "List custom-field values in configured display order", collectionOf(customFieldValueSchema), customValuePath, cursorQuery.strict()),
   write("POST", "setCustomFieldValue", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "Set a custom-field value", customFieldValueSchema, customValuePath, customFieldValueCreate),
   read("listEntityLinks", "/api/v1/workspaces/{workspaceId}/entity-links", "List typed entity links", collectionOf(typedLinkSchema), workspacePath, entityLinksQuery),
 ] as const
