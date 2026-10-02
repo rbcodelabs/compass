@@ -4,7 +4,7 @@ import {
   experimentResultSchema, experimentSchema, feedbackSchema, identitySchema, keyResultSchema, metricBindingSchema, metricObservationSchema, metricSchema,
   objectiveSchema, okrCycleSchema, scoreSchema, scoringMetricSchema, scoringModelSchema, squadSchema, typedLinkSchema,
   opportunityObjectiveRelationshipSchema, opportunitySchema, roadmapItemSchema, solutionKeyResultRelationshipSchema,
-  solutionSchema, taskSchema, uploadPreparationSchema, uuid, workspaceSchema,
+  solutionSchema, taskLinkSchema, taskSchema, uploadPreparationSchema, uuid, workspaceSchema,
 } from "@/lib/rest/schemas"
 import { FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES, FEEDBACK_ATTACHMENT_MAX_FILE_BYTES } from "@/lib/feedback-attachment-rules"
 import { FEEDBACK_STATUSES } from "@/lib/feedback-meta"
@@ -15,11 +15,12 @@ import { DOC_TYPES } from "@/lib/doc-types"
 import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
 import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
 import * as phase4 from "@/lib/rest/phase4"
+import * as phase5 from "@/lib/rest/phase5"
 import { synthesisSchema } from "@/lib/research-analysis"
 
 export type ApiScope = "api:read" | "api:write"
 export type RestMethod = "GET" | "POST" | "PATCH" | "DELETE"
-export type RestAuthorizationPolicy = "authenticated-actor" | "accessible-workspaces" | "workspace-member" | "workspace-writer" | "human-member" | "human-admin"
+export type RestAuthorizationPolicy = "authenticated-actor" | "accessible-workspaces" | "org-member" | "workspace-member" | "workspace-writer" | "human-member" | "human-admin" | "human-org-admin" | "scoring-admin"
 
 export type RestRoute = {
   method: RestMethod
@@ -36,6 +37,8 @@ export type RestRoute = {
 }
 
 const workspacePath = z.object({ workspaceId: uuid })
+const organizationPath = z.object({ orgSlug: z.string().trim().min(1).max(255) })
+const organizationWorkspacePath = organizationPath.extend({ workspaceSlug: z.string().trim().min(1).max(255) })
 const itemPath = z.object({ workspaceId: uuid, id: uuid })
 const relatedItemPath = z.object({ workspaceId: uuid, id: uuid, relatedId: uuid })
 const taskLinkPath = z.object({
@@ -52,7 +55,7 @@ const write = (method: "POST" | "PATCH" | "DELETE", operationId: string, path: s
 })
 const opportunityCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), customerSegment: z.string().trim().max(255).nullable().optional(), status: opportunitySchema.shape.status.exclude(["ARCHIVED"]).optional(), squadId: uuid.nullable().optional(), linkedKeyResultId: uuid.nullable().optional() }).strict()
 const opportunityPatch = z.union([
-  z.object({ title: opportunityCreate.shape.title.optional(), description: opportunityCreate.shape.description, customerSegment: opportunityCreate.shape.customerSegment }).strict(),
+  z.object({ title: opportunityCreate.shape.title.optional(), description: opportunityCreate.shape.description, customerSegment: opportunityCreate.shape.customerSegment, squadId: uuid.nullable().optional() }).strict(),
   z.object({ status: opportunitySchema.shape.status }).strict(),
   z.object({ linkedKeyResultId: uuid.nullable() }).strict(),
 ])
@@ -79,7 +82,7 @@ const roadmapCreate = z.object({
   title: z.string().trim().min(1).max(255),
   horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]),
   description: z.string().trim().nullable().optional(),
-  solutionId: uuid.nullable().optional(), keyResultId: uuid.nullable().optional(), opportunityId: uuid.nullable().optional(), squadId: uuid.nullable().optional(),
+  solutionId: uuid.nullable().optional(), keyResultId: uuid.nullable().optional(), opportunityId: uuid.nullable().optional(), feedbackId: uuid.nullable().optional(), squadId: uuid.nullable().optional(),
   startDate: z.string().date().nullable().optional(), endDate: z.string().date().nullable().optional(), isPrivate: z.boolean().optional(),
 }).strict()
 const roadmapPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), horizon: z.enum(["LATER", "NEXT", "NOW", "LAUNCHING", "LAUNCHED", "SHIPPED"]).optional(), status: z.enum(["ACTIVE", "ARCHIVED"]).optional(), isPrivate: z.boolean().optional(), startDate: z.string().datetime().nullable().optional(), endDate: z.string().datetime().nullable().optional(), solutionId: uuid.nullable().optional(), keyResultId: uuid.nullable().optional(), opportunityId: uuid.nullable().optional(), squadId: uuid.nullable().optional() }).strict()
@@ -99,12 +102,15 @@ const roadmapQuery = cursorQuery.extend({ horizon: roadmapItemSchema.shape.horiz
 const expectedUpdatedAt = z.string().datetime()
 const cycleCreate = z.object({ title: z.string().trim().min(1).max(255), startDate: z.string().date(), endDate: z.string().date(), status: z.enum(["DRAFT", "ACTIVE", "COMPLETED"]).optional() }).strict()
 const objectiveCreate = z.object({ cycleId: uuid.nullable().optional(), title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), owner: z.string().trim().max(255).nullable().optional(), squadId: uuid.nullable().optional(), parentKeyResultId: uuid.nullable().optional() }).strict()
-const objectivePatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), status: objectiveSchema.shape.status.optional() }).strict()
+const objectivePatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), status: objectiveSchema.shape.status.optional(), squadId: uuid.nullable().optional(), parentKeyResultId: uuid.nullable().optional() }).strict()
 const keyResultCreate = z.object({ title: z.string().trim().min(1).max(255), target: z.number().finite(), unit: z.string().trim().max(50).nullable().optional() }).strict()
 const keyResultPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), target: z.number().finite().optional(), current: z.number().finite().optional(), unit: z.string().trim().max(50).nullable().optional() }).strict()
 const checkInCreate = z.object({ value: z.number().finite(), note: z.string().trim().nullable().optional() }).strict()
 const experimentCreate = z.object({ title: z.string().trim().min(1).max(255), hypothesis: z.string().trim().min(1), method: z.string().trim().min(1), killCondition: z.string().trim().min(1), assumptionId: uuid.nullable().optional(), squadId: uuid.nullable().optional() }).strict()
-const experimentPatch = z.object({ expectedUpdatedAt, title: z.string().trim().min(1).max(255).optional(), hypothesis: z.string().trim().min(1).optional(), method: z.string().trim().min(1).optional(), killCondition: z.string().trim().min(1).optional() }).strict()
+const experimentPatch = z.union([
+  z.object({ expectedUpdatedAt, title: z.string().trim().min(1).max(255).optional(), hypothesis: z.string().trim().min(1).optional(), method: z.string().trim().min(1).optional(), killCondition: z.string().trim().min(1).optional() }).strict(),
+  z.object({ expectedUpdatedAt, squadId: uuid.nullable() }).strict(),
+])
 const experimentResultCreate = z.object({ note: z.string().trim().min(1), metric: z.string().trim().max(255).nullable().optional(), value: z.number().finite().nullable().optional() }).strict()
 const experimentConclusion = z.object({ expectedUpdatedAt, conclusion: z.enum(["PROCEED", "KILL", "ITERATE", "NOT_PURSUED"]), reason: z.string().trim().nullable().optional() }).strict()
 const metricPatch = metricInputSchema.extend({ expectedRevision: z.number().int().positive() }).strict()
@@ -179,8 +185,51 @@ const solutionPlanCommentCreate = z.object({ body: z.string().trim().min(1) }).s
 const launchTierCreate = z.object({ tier: z.enum(["TIER_1", "TIER_2", "TIER_3"]) }).strict()
 const checklistPatch = z.object({ status: z.enum(["PENDING", "DONE", "SKIPPED"]) }).strict()
 const releaseAuthorizationRequest = z.object({ provider: z.literal("GITHUB"), repositoryOwner: z.string().trim().min(1).max(255), repositoryName: z.string().trim().min(1).max(255), pullRequestNumber: z.number().int().positive(), baseRef: z.string().trim().min(1).max(255), headSha: z.string().regex(/^[a-f0-9]{40}$/i), targetEnvironment: z.literal("PRODUCTION"), releasePolicyId: z.string().trim().min(1).max(255), taskIds: z.array(uuid).min(1) }).strict()
+const helpQuery = z.object({ query: z.string().trim().min(1).max(500), limit: z.coerce.number().int().min(1).max(20).default(5) }).strict()
+const helpPath = z.object({ topic: z.string().trim().min(1).max(255) })
+const workspaceCreate = z.object({ name: z.string().trim().min(1).max(255), slug: z.string().trim().min(1).max(255), description: z.string().trim().max(2_000).optional() }).strict()
+const evidenceTarget = z.union([
+  z.object({ opportunityId: uuid, solutionId: z.never().optional(), assumptionId: z.never().optional() }).strict(),
+  z.object({ opportunityId: z.never().optional(), solutionId: uuid, assumptionId: z.never().optional() }).strict(),
+  z.object({ opportunityId: z.never().optional(), solutionId: z.never().optional(), assumptionId: uuid }).strict(),
+])
+const evidenceCreate = z.object({ sourceType: z.enum(["interview", "feedback", "support_ticket", "experiment_result", "analytics"]), excerpt: z.string().trim().min(1).max(20_000), confidence: z.enum(["high", "medium", "low"]).optional(), sourceUrl: z.string().url().optional() }).and(evidenceTarget)
+const evidencePatch = evidenceTarget
+const evidenceQuery = cursorQuery.extend({ nodeType: z.enum(["opportunity", "solution", "assumption"]), nodeId: uuid }).strict()
+const attachmentComplete = z.object({ url: z.string().url(), receipt: z.string().min(1).max(8_192) }).strict()
+const promotionCreate = z.object({ operationId: uuid, horizon: z.enum(["NOW", "NEXT", "LATER", "SHIPPED"]), isPrivate: z.boolean().optional() }).strict()
+const scoringAssignmentPath = z.object({ workspaceId: uuid, entityType: z.enum(["OPPORTUNITY", "SOLUTION"]) })
+const scoringAssignmentPatch = z.object({ scoringModelId: uuid.nullable() }).strict()
+const checklistItemInput = z.object({ label: z.string().trim().min(1).max(255), description: z.string().trim().max(2_000).optional() }).strict()
+const checklistTemplateCreate = z.object({ tier: z.enum(["TIER_1", "TIER_2", "TIER_3"]), name: z.string().trim().min(1).max(255), description: z.string().trim().max(2_000).optional(), items: z.array(checklistItemInput).max(100) }).strict()
+const feedbackSourceCreate = z.object({ artifactId: uuid, name: z.string().trim().min(1).max(255), allowedOrigins: z.array(z.string().url()).max(50), authMode: z.enum(["INTERNAL_SSO", "PORTAL"]).optional() }).strict()
+const feedbackSourcePatch = z.object({ allowedOrigins: z.array(z.string().url()).max(50).optional(), enabled: z.boolean().optional(), name: z.string().trim().min(1).max(255).optional(), authMode: z.enum(["INTERNAL_SSO", "PORTAL"]).optional() }).strict().refine(value => Object.keys(value).length > 0, { message: "Provide at least one change." })
+const rankingQuery = cursorQuery.strict()
 
 export const REST_ROUTES: readonly RestRoute[] = [
+  read("searchHelp", "/api/v1/help-topics", "Search the Compass user guide", phase5.helpSearchResults, z.object({}), helpQuery, "authenticated-actor"),
+  read("getHelp", "/api/v1/help-topics/{topic}", "Get a Compass user-guide topic", phase5.helpTopic, helpPath, undefined, "authenticated-actor"),
+  read("listOrganizationWorkspaces", "/api/v1/organizations/{orgSlug}/workspaces", "List accessible workspaces in an organization with summary counts", phase5.organizationWorkspaceCollection, organizationPath, cursorQuery.strict(), "org-member"),
+  write("POST", "createWorkspace", "/api/v1/organizations/{orgSlug}/workspaces", "Create a workspace as a human organization administrator", workspaceSchema, organizationPath, workspaceCreate, 201, "human-org-admin"),
+  read("getWorkspaceBySlug", "/api/v1/organizations/{orgSlug}/workspaces/{workspaceSlug}", "Resolve an accessible workspace by organization and workspace slug", phase5.workspaceBySlug, organizationWorkspacePath, undefined, "org-member"),
+  read("getWorkspaceSummary", "/api/v1/workspaces/{workspaceId}/summary", "Get privacy-minimal workspace activity counts", phase5.workspaceSummary, workspacePath),
+  read("listEvidence", "/api/v1/workspaces/{workspaceId}/evidence", "List evidence for one discovery node", phase5.evidenceCollection, workspacePath, evidenceQuery),
+  write("POST", "createEvidence", "/api/v1/workspaces/{workspaceId}/evidence", "Create evidence attached to exactly one discovery node", phase5.evidence, workspacePath, evidenceCreate, 201),
+  write("PATCH", "updateEvidenceTarget", "/api/v1/workspaces/{workspaceId}/evidence/{id}", "Move evidence to exactly one discovery node", phase5.evidence, itemPath, evidencePatch),
+  write("POST", "completeFeedbackAttachmentUpload", "/api/v1/workspaces/{workspaceId}/feedback/{id}/attachments", "Attach a completed receipt-verified direct upload", phase5.feedbackAttachment, itemPath, attachmentComplete, 201),
+  write("POST", "promoteFeedbackToRoadmap", "/api/v1/workspaces/{workspaceId}/feedback/{id}/roadmap-promotions", "Idempotently promote feedback to the roadmap", roadmapItemSchema, itemPath, promotionCreate, 201),
+  write("POST", "promoteSolutionToRoadmap", "/api/v1/workspaces/{workspaceId}/solutions/{id}/roadmap-promotions", "Idempotently promote a solution with inherited discovery links", roadmapItemSchema, itemPath, promotionCreate, 201),
+  read("getWorkspaceScoringModel", "/api/v1/workspaces/{workspaceId}/scoring-model-assignments/{entityType}", "Get the active scoring-model assignment", phase5.scoringAssignment, scoringAssignmentPath),
+  write("PATCH", "updateWorkspaceScoringModel", "/api/v1/workspaces/{workspaceId}/scoring-model-assignments/{entityType}", "Set or clear a scoring-model assignment", phase5.scoringAssignment, scoringAssignmentPath, scoringAssignmentPatch, 200, "scoring-admin"),
+  read("listChecklistTemplates", "/api/v1/workspaces/{workspaceId}/launch-checklist-templates", "List launch checklist templates", phase5.checklistTemplateCollection, workspacePath, cursorQuery.extend({ tier: z.enum(["TIER_1", "TIER_2", "TIER_3"]).optional() }).strict()),
+  write("POST", "createChecklistTemplate", "/api/v1/workspaces/{workspaceId}/launch-checklist-templates", "Create a launch checklist template", phase5.checklistTemplate, workspacePath, checklistTemplateCreate, 201),
+  read("listEligibleParentKeyResults", "/api/v1/workspaces/{workspaceId}/objectives/{id}/eligible-parent-key-results", "List eligible parent key results for an objective", phase5.eligibleParentKeyResultCollection, itemPath, cursorQuery.strict()),
+  read("listTaskAssignees", "/api/v1/workspaces/{workspaceId}/task-assignees", "List eligible task assignees", phase5.taskAssigneeCollection, workspacePath, cursorQuery.extend({ search: z.string().trim().max(255).optional() }).strict()),
+  read("listTaskLinks", "/api/v1/workspaces/{workspaceId}/tasks/{id}/links", "List task links", collectionOf(taskLinkSchema), itemPath, cursorQuery.strict()),
+  write("POST", "createFeedbackSource", "/api/v1/workspaces/{workspaceId}/feedback-sources", "Create an embedded feedback source and disclose its token once", phase5.feedbackSourceCredential, workspacePath, feedbackSourceCreate, 201, "human-admin"),
+  write("PATCH", "updateFeedbackSource", "/api/v1/workspaces/{workspaceId}/feedback-sources/{id}", "Update an embedded feedback source without returning credentials", phase5.feedbackSource, itemPath, feedbackSourcePatch, 200, "human-admin"),
+  read("listWorkspaceOpportunityRankings", "/api/v1/workspaces/{workspaceId}/opportunity-rankings", "List scored opportunities in one workspace", phase5.opportunityRankingCollection, workspacePath, rankingQuery),
+  read("listOrganizationOpportunityRankings", "/api/v1/organizations/{orgSlug}/opportunity-rankings", "List scored opportunities across accessible organization workspaces", phase5.opportunityRankingCollection, organizationPath, rankingQuery, "org-member"),
   read("getCurrentIdentity", "/api/v1/me", "Get the current programmatic identity", identitySchema, z.object({}), undefined, "authenticated-actor"),
   read("listWorkspaces", "/api/v1/workspaces", "List accessible workspaces", collectionOf(workspaceSchema), z.object({}), cursorQuery.strict(), "accessible-workspaces"),
   read("getWorkspace", "/api/v1/workspaces/{workspaceId}", "Get a workspace", workspaceSchema, workspacePath),

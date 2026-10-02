@@ -124,3 +124,26 @@ The REST surface intentionally excludes participant response/voice/attachment
 protocols, transcript editing, raw pending synthesis state, participant-token
 retrieval, PM interview creation/update/application, generic card-sort state
 patching or unreveal, model-generated research guides, and provider secrets.
+
+## MCP parity and transport exclusions
+
+The checked-in parity manifest accounts for every MCP capability as one direct
+REST operation, a documented resource composition, or an explicit exclusion.
+It is an audit ledger only; the central REST registry remains the executable
+source of routes, authorization policies, and schemas.
+
+The only client compositions are bounded resource workflows: creating an
+ACTIVE research study means creating its recoverable draft and then calling
+the human activation action; changing card-sort state means choosing the
+explicit irreversible reveal or close action. Feedback attachments use the
+prepare/upload/complete workflow; inline base64 is an MCP transport
+convenience, not a REST request format. Polymorphic squad assignment dispatches
+to the corresponding resource PATCH.
+
+Human decision receipt application, no-action closure, and solution-plan
+approval or rejection remain outside REST because they cross human-governance
+or execution-authority boundaries. Model-generated research-guide orchestration
+is also excluded because prompts and model workflow state are not stable public
+resources. The manifest records a category, rationale, and REST alternative for
+each exclusion, and CI fails if the MCP catalog or referenced REST operations
+drift.
