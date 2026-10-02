@@ -5,6 +5,7 @@ import {
   solutionSchema, taskSchema, uploadPreparationSchema, uuid, workspaceSchema,
 } from "@/lib/rest/schemas"
 import { FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES, FEEDBACK_ATTACHMENT_MAX_FILE_BYTES } from "@/lib/feedback-attachment-rules"
+import { FEEDBACK_STATUSES } from "@/lib/feedback-meta"
 
 export type ApiScope = "api:read" | "api:write"
 export type RestMethod = "GET" | "POST" | "PATCH" | "DELETE"
@@ -40,13 +41,13 @@ const write = (method: "POST" | "PATCH" | "DELETE", operationId: string, path: s
 })
 
 const opportunityCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), customerSegment: z.string().trim().max(255).nullable().optional(), status: opportunitySchema.shape.status.exclude(["ARCHIVED"]).optional(), squadId: uuid.nullable().optional(), linkedKeyResultId: uuid.nullable().optional() }).strict()
-const opportunityPatch = opportunityCreate.partial().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
+const opportunityPatch = opportunityCreate.omit({ squadId: true }).partial().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
 const solutionCreate = z.object({ opportunityId: uuid, title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional() }).strict()
 const solutionPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), status: solutionSchema.shape.status.optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
 const assumptionCreate = z.object({ solutionId: uuid, title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), riskLevel: assumptionSchema.shape.riskLevel.optional() }).strict()
 const assumptionPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), riskLevel: assumptionSchema.shape.riskLevel.optional(), status: assumptionSchema.shape.status.optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
 const feedbackCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), type: z.enum(["BUG", "IDEA"]).optional(), submitterName: z.string().trim().max(255).nullable().optional(), submitterEmail: z.string().email().nullable().optional(), opportunityId: uuid.optional() }).strict()
-const feedbackPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), type: z.enum(["BUG", "IDEA"]).optional(), status: z.string().trim().min(1).max(50).optional(), opportunityId: uuid.optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
+const feedbackPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), type: z.enum(["BUG", "IDEA"]).optional(), status: z.enum([...FEEDBACK_STATUSES, "CLOSED"]).optional(), opportunityId: uuid.optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
 const taskCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), status: z.enum(["BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "IN_REVIEW", "DONE", "CANCELLED"]).optional(), priority: z.enum(["URGENT", "HIGH", "MEDIUM", "LOW"]).optional(), squadId: uuid.nullable().optional(), parentTaskId: uuid.nullable().optional(), assigneeUserId: uuid.nullable().optional(), ownerName: z.string().trim().max(255).nullable().optional(), storyPoints: z.number().nonnegative().nullable().optional(), dueDate: z.string().datetime().nullable().optional(), iteration: z.string().trim().max(100).nullable().optional() }).strict()
 const taskPatch = taskCreate.omit({ parentTaskId: true }).partial().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
 const roadmapPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), horizon: z.enum(["LATER", "NEXT", "NOW", "LAUNCHING", "LAUNCHED", "SHIPPED"]).optional(), status: z.enum(["ACTIVE", "ARCHIVED"]).optional(), isPrivate: z.boolean().optional(), startDate: z.string().datetime().nullable().optional(), endDate: z.string().datetime().nullable().optional(), solutionId: uuid.nullable().optional(), keyResultId: uuid.nullable().optional(), opportunityId: uuid.nullable().optional(), squadId: uuid.nullable().optional() }).strict().refine((value) => Object.keys(value).length > 0, "Provide at least one field.")
@@ -60,7 +61,7 @@ const taskLinkResult = z.object({ taskId: uuid, linkedType: taskLinkPath.shape.l
 const opportunityQuery = cursorQuery.extend({ status: opportunitySchema.shape.status.optional(), squadId: uuid.optional() }).strict()
 const solutionQuery = cursorQuery.extend({ status: solutionSchema.shape.status.optional(), opportunityId: uuid.optional() }).strict()
 const assumptionQuery = cursorQuery.extend({ status: assumptionSchema.shape.status.optional(), riskLevel: assumptionSchema.shape.riskLevel.optional(), solutionId: uuid.optional() }).strict()
-const feedbackQuery = cursorQuery.extend({ status: z.string().max(50).optional(), type: z.string().max(50).optional(), opportunityId: uuid.optional() }).strict()
+const feedbackQuery = cursorQuery.extend({ status: z.enum([...FEEDBACK_STATUSES, "CLOSED"]).optional(), type: z.enum(["BUG", "IDEA"]).optional(), opportunityId: uuid.optional() }).strict()
 const taskQuery = cursorQuery.extend({ status: taskCreate.shape.status, priority: taskCreate.shape.priority, squadId: uuid.optional(), parentTaskId: uuid.optional() }).strict()
 const roadmapQuery = cursorQuery.extend({ horizon: roadmapItemSchema.shape.horizon.optional(), status: z.string().max(50).optional(), squadId: uuid.optional() }).strict()
 
