@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto"
-import { z } from "zod"
 import type { Prisma } from "@prisma/client"
 import getPrisma from "@/lib/db"
 import { createResearchToken, normalizeResearchAppUrl, parseResearchGuide, type ResearchStudyType } from "@/lib/research"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { runResearchInterviewAgent } from "@/lib/research-agent"
 import { readSessionAnalysis, readStudySynthesis } from "@/lib/research-analysis"
+import { decodeCursor, encodeCursor } from "@/lib/rest/cursor"
 
 export class ResearchStudyError extends Error {}
 
@@ -13,7 +13,7 @@ export class ResearchStudyError extends Error {}
 export const RESEARCH_SESSION_STATUSES = ["PENDING", "IN_PROGRESS", "COMPLETED", "ABANDONED", "EXPIRED"] as const
 export type ResearchSessionStatus = (typeof RESEARCH_SESSION_STATUSES)[number]
 
-export type ResearchStudyActor = { userId: string | null; service?: boolean; source?: "UI" | "MCP" }
+export type ResearchStudyActor = { userId: string | null; service?: boolean; source?: "UI" | "MCP" | "API" }
 export type ResearchWorkspaceScope = { workspaceId: string } | { orgSlug: string; workspaceSlug: string }
 export type ResearchStudyInput = { name: string; goal?: string; studyType?: string; targetMinutes?: number; appUrl?: string; artifactId?: string; guide?: string[]; status?: "DRAFT" | "ACTIVE" }
 
@@ -509,26 +509,24 @@ export async function listResearchSyntheses(
   }
 }
 
-const cursorSchema = z.object({ version: z.literal(1), workspaceId: z.string().uuid(), status: z.enum(["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]).nullable(), createdAt: z.string().datetime(), id: z.string().uuid() }).strict()
 export async function listResearchStudies(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, { limit = 20, status, cursor }: { limit?: number; status?: "DRAFT" | "ACTIVE" | "CLOSED" | "ARCHIVED"; cursor?: string }) {
   if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findFirst({ where: workspaceWhere(scope, actor), select: { id: true } })
   if (!workspace) throw new ResearchStudyError("Workspace not found")
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new ResearchStudyError("Limit must be between 1 and 100")
-  let after: z.infer<typeof cursorSchema> | undefined
+  const cursorContext = `research-studies:${workspace.id}:${status ?? "active"}`
+  let after: { createdAt: string; id: string } | undefined
   if (cursor !== undefined) {
-    try {
-      if (cursor.length > 1_024) throw new ResearchStudyError()
-      after = cursorSchema.parse(JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")))
-      if (after.workspaceId !== workspace.id || after.status !== (status ?? null)) throw new ResearchStudyError()
-    } catch { throw new ResearchStudyError("Invalid research cursor for this workspace or status") }
+    const decoded = cursor.length <= 1_024 ? decodeCursor(cursor, cursorContext) : null
+    if (!decoded) throw new ResearchStudyError("Invalid research cursor for this workspace or status")
+    after = decoded
   }
   const studies = await prisma.researchStudy.findMany({
-    where: { workspaceId: workspace.id, status: status ?? { not: "ARCHIVED" }, ...(after ? { OR: [{ createdAt: { lt: new Date(after.createdAt) } }, { createdAt: new Date(after.createdAt), id: { lt: after.id } }] } : {}) },
+    where: { workspaceId: workspace.id, studyType: { not: "PM_INTERVIEW" }, status: status ?? { not: "ARCHIVED" }, ...(after ? { OR: [{ createdAt: { lt: new Date(after.createdAt) } }, { createdAt: new Date(after.createdAt), id: { lt: after.id } }] } : {}) },
     select: metadataSelect, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit + 1,
   })
   const page = studies.slice(0, limit)
   const last = page.at(-1)
-  return { items: page.map(publicMetadata), count: page.length, nextCursor: studies.length > limit && last ? Buffer.from(JSON.stringify({ version: 1, workspaceId: workspace.id, status: status ?? null, createdAt: last.createdAt.toISOString(), id: last.id })).toString("base64url") : null }
+  return { items: page.map(publicMetadata), count: page.length, nextCursor: studies.length > limit && last ? encodeCursor({ createdAt: last.createdAt.toISOString(), id: last.id, context: cursorContext }) : null }
 }

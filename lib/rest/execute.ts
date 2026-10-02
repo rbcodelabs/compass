@@ -41,8 +41,16 @@ import { documentRevision } from "@/lib/document-service"
 import { archiveArtifact, createArtifact, getArtifact, linkArtifact, linkArtifactDecision, unlinkArtifact, unlinkArtifactDecision, updateArtifact } from "@/lib/artifact-tool-handlers"
 import { getDecision, getReviewRequest, listDecisions, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { addSolutionComment, addSolutionPlan, deleteSolutionComment, getSolutionComment, updateSolutionComment } from "@/lib/solution-comment-tool-handlers"
+import * as researchStudies from "@/lib/research-study-service"
+import { ResearchAnalysisError, storeAgentStudySynthesis } from "@/lib/research-analysis-service"
+import { promoteResearchFindingToEvidence, ResearchPromotionError } from "@/lib/research-evidence-promotion"
+import { CompassUrlNotConfiguredError, researchParticipantUrl } from "@/lib/compass-url"
+import { PmInterviewError, readOwnedPmInterview } from "@/lib/pm-interview-service"
+import { createCardSortRound, getCardSortTally, listCardSortFactors, listCardSortRounds, listMyCardSortProposals, loadCardSortBoard, proposeCardSortMoves, setCardSortRoundState, withdrawCardSortProposal, CardSortError } from "@/lib/card-sort"
+import { acceptCardSortNewEntry, listCardSortNewEntries, proposeCardSortNewEntry, rejectCardSortNewEntry, withdrawCardSortNewEntry } from "@/lib/card-sort-new-entries"
 
 export class RestNotFoundError extends Error {}
+export class RestForbiddenError extends Error {}
 export class RestConflictError extends Error {}
 export class RestCursorError extends Error {}
 export class RestValidationError extends Error {}
@@ -374,6 +382,40 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "updateLaunchChecklistItem": { if (!(await prisma.launchChecklistItem.findFirst({ where: { id, launchChecklist: { roadmapItem: { workspaceId } } }, select: { id: true } }))) throw new RestNotFoundError(); return serialize(ensureTool(await updateLaunchChecklistItem({ itemId: id, status: body.status as never }))) }
     case "requestReleaseAuthorization": { if (actor.purpose !== "USER" || !actor.userId) throw new RestNotFoundError(); await assertWorkspaceAdmin(actor, workspaceId); const taskIds = body.taskIds as string[]; if (await prisma.task.count({ where: { workspaceId, id: { in: taskIds } } }) !== new Set(taskIds).size) throw new RestNotFoundError(); return serialize(ensureTool(await requestReleaseAuthorization({ workspaceId, ...(body as unknown as Omit<Parameters<typeof requestReleaseAuthorization>[0], "workspaceId">) }))) }
     case "listReleaseRuns": { const releaseFilters = filters(input.query, ["state", "taskId", "updatedSince"]); const page = await listUpdatedPage(`release-runs:${workspaceId}:${releaseFilters}`, input.query, (cursor, take) => prisma.releaseRun.findMany({ where: { workspaceId, ...(input.query.state ? { state: String(input.query.state) } : {}), ...(input.query.taskId ? { tasks: { some: { taskId: String(input.query.taskId) } } } : {}), ...(input.query.updatedSince ? { updatedAt: { gte: new Date(String(input.query.updatedSince)) } } : {}), ...updatedCursorWhere(cursor) }, select: { id: true, state: true, provider: true, repositoryOwner: true, repositoryName: true, pullRequestNumber: true, baseRef: true, headSha: true, targetEnvironment: true, releasePolicyId: true, sourceFingerprint: true, authorizationDecisionRecordId: true, lastErrorCode: true, createdAt: true, updatedAt: true, tasks: { select: { taskId: true }, orderBy: { taskId: "asc" } }, dispatches: { select: { id: true, status: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] } }, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take })); return { ...page, items: page.items.map((value) => { const row = value as Record<string, unknown> & { tasks?: Array<{ taskId: string }> }; const { tasks, ...safe } = row; return { ...safe, taskIds: (tasks ?? []).map(task => task.taskId), pullRequestUrl: `https://github.com/${row.repositoryOwner}/${row.repositoryName}/pull/${row.pullRequestNumber}` } }) } }
+    case "listResearchStudies": return researchCall(async () => { const page = await researchStudies.listResearchStudies({ workspaceId }, researchActor(actor), input.query as never); return { items: page.items.map(serialize), nextCursor: page.nextCursor } })
+    case "createResearchStudy": return researchCall(async () => { const created = await researchStudies.createResearchStudy({ workspaceId }, researchActor(actor), { ...body, status: "DRAFT" } as never); return serialize(await researchStudies.getResearchStudy({ workspaceId }, researchActor(actor), created.id)) })
+    case "getResearchStudy": return researchCall(async () => serialize(await researchStudies.getResearchStudy({ workspaceId }, researchActor(actor), id)))
+    case "updateResearchStudy": return researchCall(async () => { await researchStudies.updateResearchStudy({ workspaceId }, researchActor(actor), id, body as never); return serialize(await researchStudies.getResearchStudy({ workspaceId }, researchActor(actor), id)) })
+    case "activateResearchStudy": return researchCall(async () => participantLinkResult(await researchStudies.activateResearchStudy({ workspaceId }, researchActor(actor), id)))
+    case "closeResearchStudy": return researchCall(async () => participantLinkResult(await researchStudies.closeResearchStudy({ workspaceId }, researchActor(actor), id)))
+    case "archiveResearchStudy": return researchCall(async () => participantLinkResult(await researchStudies.archiveResearchStudy({ workspaceId }, researchActor(actor), id)))
+    case "issueResearchParticipantLink": return researchCall(async () => participantLinkResult(await researchStudies.issueResearchLink({ workspaceId }, researchActor(actor), id)))
+    case "rotateResearchParticipantLink": return researchCall(async () => participantLinkResult(await researchStudies.regenerateResearchLink({ workspaceId }, researchActor(actor), id)))
+    case "revokeResearchParticipantLinks": return researchCall(async () => participantLinkResult(await researchStudies.revokeResearchLinks({ workspaceId }, researchActor(actor), id)))
+    case "listResearchSessions": return researchOffsetPage(`research-sessions:${workspaceId}:${id}:${input.query.status ?? "all"}`, input.query, offset => researchStudies.listResearchSessions({ workspaceId }, researchActor(actor), id, { status: input.query.status as researchStudies.ResearchSessionStatus | undefined, offset }))
+    case "getResearchSession": return researchCall(async () => { const context = `research-session:${workspaceId}:${id}:${input.params.relatedId}`; const offset = restOffset(input.query.cursor, context); const result = await researchStudies.getResearchSession({ workspaceId }, researchActor(actor), id, input.params.relatedId, { offset }); const { nextOffset, ...safe } = result; return { ...serialize(safe) as Record<string, unknown>, nextCursor: nextOffset === null ? null : signedOffset(nextOffset, context) } })
+    case "listResearchSyntheses": return researchSynthesisPage(`research-syntheses:${workspaceId}:${id}`, input.query, offset => researchStudies.listResearchSyntheses({ workspaceId }, researchActor(actor), id, { offset }))
+    case "createResearchSynthesis": { if (!actor.userId) throw new RestNotFoundError(); return researchCall(async () => publicSynthesis(await storeAgentStudySynthesis(id, actor.userId!, body))) }
+    case "promoteResearchEvidence": return researchCall(async () => { const result = await promoteResearchFindingToEvidence({ workspaceId, researchSynthesisId: id, ...body } as never); return serialize({ id: result.evidence.id, findingKey: result.findingKey, researchSynthesisId: result.evidence.researchSynthesisId, sourceTurnIds: result.sourceTurnIds, opportunityId: result.evidence.opportunityId, solutionId: result.evidence.solutionId, assumptionId: result.evidence.assumptionId, replayed: result.replayed }) })
+    case "getPmInterview": { if (actor.purpose !== "USER" || !actor.userId) throw new RestNotFoundError(); try { return serialize(await readOwnedPmInterview(await workspaceSlugScope(prisma, workspaceId), { userId: actor.userId }, id)) } catch (error) { if (error instanceof PmInterviewError) { if (error.status === 404) throw new RestNotFoundError(); if (error.status === 409) throw new RestConflictError(error.message); throw new RestValidationError(error.message) } throw error } }
+    case "listAnalyticsConnections": return arrayPage(`analytics-connections:${workspaceId}`, input.query, await analyticsService.listConnections(actor, workspaceId))
+    case "saveAnalyticsConnection": return serialize(await analyticsService.saveVercelConnection(actor, workspaceId, { projectId: String(body.projectId), teamId: body.teamId as string | undefined, token: String(body.token) }))
+    case "disconnectAnalyticsConnection": { await analyticsService.disconnectConnection(actor, workspaceId, id); return undefined }
+    case "listCardSortFactors": return arrayPage(`card-sort-factors:${workspaceId}:${input.query.objectType}`, input.query, await cardSortCall(() => listCardSortFactors({ workspaceId, objectType: String(input.query.objectType) as never })))
+    case "listCardSortRounds": return arrayPage(`card-sort-rounds:${workspaceId}:${input.query.state ?? "all"}`, input.query, await cardSortCall(() => listCardSortRounds({ workspaceId, userId: humanUser(actor), state: input.query.state as never })))
+    case "createCardSortRound": return serialize(await cardSortCall(() => createCardSortRound({ workspaceId, userId: humanUser(actor), name: String(body.name), fieldDefinitionId: String(body.fieldDefinitionId) })))
+    case "revealCardSortRound": { const userId = humanUser(actor); await cardSortCall(() => setCardSortRoundState({ workspaceId, roundId: id, userId, state: "REVEALED" })); return serialize(found((await listCardSortRounds({ workspaceId, userId })).find(round => round.id === id))) }
+    case "closeCardSortRound": { const userId = humanUser(actor); await cardSortCall(() => setCardSortRoundState({ workspaceId, roundId: id, userId, state: "CLOSED" })); return serialize(found((await listCardSortRounds({ workspaceId, userId })).find(round => round.id === id))) }
+    case "getCardSortBoard": return serialize(await cardSortCall(() => loadCardSortBoard({ workspaceId, roundId: id, userId: humanUser(actor) })))
+    case "listCardSortProposals": return arrayPage(`card-sort-proposals:${workspaceId}:${id}:${humanUser(actor)}`, input.query, await cardSortCall(() => listMyCardSortProposals({ workspaceId, roundId: id, userId: humanUser(actor) })))
+    case "proposeCardSortMoves": return serialize(await cardSortCall(() => proposeCardSortMoves({ workspaceId, roundId: id, userId: humanUser(actor), objectIds: body.objectIds as string[], proposedValue: String(body.proposedValue), rationale: nullable(body.rationale) })))
+    case "withdrawCardSortProposal": { await cardSortCall(() => withdrawCardSortProposal({ workspaceId, roundId: id, userId: humanUser(actor), objectId: input.params.relatedId })); return undefined }
+    case "getCardSortTally": return serialize(await cardSortCall(() => getCardSortTally({ workspaceId, roundId: id, userId: humanUser(actor) })))
+    case "listCardSortNewEntries": return arrayPage(`card-sort-new-entries:${workspaceId}:${id}:${humanUser(actor)}`, input.query, await cardSortCall(() => listCardSortNewEntries({ workspaceId, roundId: id, userId: humanUser(actor) })))
+    case "proposeCardSortNewEntry": { const userId = humanUser(actor); const created = await cardSortCall(() => proposeCardSortNewEntry({ workspaceId, roundId: id, userId, title: String(body.title), description: nullable(body.description), suggestedValue: nullable(body.suggestedValue) })); return serialize(found((await listCardSortNewEntries({ workspaceId, roundId: id, userId })).find(entry => entry.id === created.id))) }
+    case "withdrawCardSortNewEntry": { await cardSortCall(() => withdrawCardSortNewEntry({ workspaceId, roundId: id, userId: humanUser(actor), entryId: input.params.relatedId })); return undefined }
+    case "acceptCardSortNewEntry": return serialize(await cardSortCall(() => acceptCardSortNewEntry({ workspaceId, roundId: id, userId: humanUser(actor), entryId: input.params.relatedId })))
+    case "rejectCardSortNewEntry": return serialize(await cardSortCall(() => rejectCardSortNewEntry({ workspaceId, roundId: id, userId: humanUser(actor), entryId: input.params.relatedId, note: nullable(body.note) })))
   }
   throw new RestNotFoundError()
 }
@@ -388,9 +430,99 @@ async function enforcePolicy(policy: RestAuthorizationPolicy, actor: ReturnType<
       if (!workspaceId) throw new RestNotFoundError()
       await assertWorkspaceMember(actor, workspaceId)
       return
+    case "human-member":
+      if (!workspaceId || actor.purpose !== "USER" || !actor.userId) throw new RestForbiddenError()
+      await assertWorkspaceMember(actor, workspaceId)
+      return
+    case "human-admin":
+      if (!workspaceId || actor.purpose !== "USER" || !actor.userId) throw new RestForbiddenError()
+      await assertWorkspaceAdmin(actor, workspaceId)
+      return
     default:
       throw new RestNotFoundError()
   }
+}
+
+function researchActor(actor: ReturnType<typeof getMcpActor>): researchStudies.ResearchStudyActor {
+  return { userId: actor.userId, service: isServiceActor(actor), source: "API" }
+}
+
+async function researchCall<T>(run: () => Promise<T>): Promise<T> {
+  try { return await run() } catch (error) {
+    if (error instanceof ResearchAnalysisError || error instanceof ResearchPromotionError) {
+      if (error.status === 404) throw new RestNotFoundError()
+      if (error.status === 409) throw new RestConflictError(error.message)
+      throw new RestValidationError(error.message)
+    }
+    if (error instanceof researchStudies.ResearchStudyError) {
+      if (/not found|workspace|unauthorized/i.test(error.message)) throw new RestNotFoundError()
+      if (/changed|already|archived|active study|draft or closed|lifecycle/i.test(error.message)) throw new RestConflictError(error.message)
+      throw new RestValidationError(error.message)
+    }
+    throw error
+  }
+}
+
+function participantLinkResult(result: { id: string; status?: string; token?: string }) {
+  let participantUrl: string | null = null
+  if (result.token) {
+    try { participantUrl = researchParticipantUrl(result.token) }
+    catch (error) { if (!(error instanceof CompassUrlNotConfiguredError)) throw error }
+  }
+  return { id: result.id, ...(result.status ? { status: result.status } : {}), participantUrl }
+}
+
+function restOffset(value: unknown, context: string): number {
+  if (value === undefined) return 0
+  const cursor = typeof value === "string" ? decodeCursor(value, context) : null
+  const offset = cursor ? Number(cursor.id.replace(/^offset:/, "")) : Number.NaN
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new RestCursorError("The cursor is invalid for this collection or filter set.")
+  return offset
+}
+
+function signedOffset(offset: number, context: string) {
+  return encodeCursor({ id: `offset:${offset}`, createdAt: new Date(0).toISOString(), context })
+}
+
+function arrayPage<T>(context: string, query: Record<string, unknown>, rows: T[]) {
+  const offset = restOffset(query.cursor, context)
+  const limit = Number(query.limit ?? 50)
+  return { items: rows.slice(offset, offset + limit).map(serialize), nextCursor: rows.length > offset + limit ? signedOffset(offset + limit, context) : null }
+}
+
+async function researchOffsetPage<T extends { items: unknown[]; nextOffset: number | null }>(context: string, query: Record<string, unknown>, load: (offset: number) => Promise<T>) {
+  return researchCall(async () => { const page = await load(restOffset(query.cursor, context)); return { items: page.items.map(serialize), nextCursor: page.nextOffset === null ? null : signedOffset(page.nextOffset, context) } })
+}
+
+function publicSynthesis(value: unknown) {
+  if (!value || typeof value !== "object") throw new RestValidationError("The synthesis result was invalid.")
+  const row = value as Record<string, unknown>
+  return serialize({ summary: row.summary, themes: row.themes, patterns: row.patterns, jobs: row.jobs, recommendations: row.recommendations })
+}
+
+async function researchSynthesisPage<T extends { items: Array<Record<string, unknown>>; nextOffset: number | null }>(context: string, query: Record<string, unknown>, load: (offset: number) => Promise<T>) {
+  return researchCall(async () => { const page = await load(restOffset(query.cursor, context)); return { items: page.items.map(item => serialize({ id: item.id, sessionCount: item.sessionCount, createdAt: item.createdAt, content: item.content ? publicSynthesis(item.content) : null })), nextCursor: page.nextOffset === null ? null : signedOffset(page.nextOffset, context) } })
+}
+
+async function workspaceSlugScope(prisma: Prisma, workspaceId: string) {
+  const workspace = await prisma.workspace.findFirst({ where: { id: workspaceId }, select: { slug: true, organization: { select: { slug: true } } } })
+  if (!workspace) throw new RestNotFoundError()
+  return { orgSlug: workspace.organization.slug, workspaceSlug: workspace.slug }
+}
+
+async function cardSortCall<T>(run: () => Promise<T>): Promise<T> {
+  try { return await run() } catch (error) {
+    if (!(error instanceof CardSortError)) throw error
+    if (error.code === "NOT_FOUND") throw new RestNotFoundError()
+    if (error.code === "FORBIDDEN") throw new RestForbiddenError(error.message)
+    if (["WRONG_STATE", "HIDDEN_UNTIL_REVEAL"].includes(error.code)) throw new RestConflictError(error.message)
+    throw new RestValidationError(error.message)
+  }
+}
+
+function humanUser(actor: ReturnType<typeof getMcpActor>): string {
+  if (actor.purpose !== "USER" || !actor.userId) throw new RestForbiddenError()
+  return actor.userId
 }
 
 async function listPage(context: string, query: Record<string, unknown>, load: (cursor: { id: string; createdAt: string } | null, take: number) => Promise<unknown[]>): Promise<{ items: unknown[]; nextCursor: string | null }> {

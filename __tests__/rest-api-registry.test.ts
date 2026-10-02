@@ -6,6 +6,76 @@ import { roadmapCreateData } from "@/lib/roadmap-tool-handlers"
 const UUID = "11111111-1111-4111-8111-111111111111"
 
 describe("REST API registry", () => {
+  it("enumerates the complete authorized Phase 4 route and method surface", () => {
+    const expected = [
+      ["GET", "/api/v1/workspaces/{workspaceId}/research-studies"], ["POST", "/api/v1/workspaces/{workspaceId}/research-studies"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/research-studies/{id}"], ["PATCH", "/api/v1/workspaces/{workspaceId}/research-studies/{id}"],
+      ["POST", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/activation"], ["POST", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/closure"], ["POST", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/archival"],
+      ["POST", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/participant-links"], ["POST", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/participant-link-rotations"], ["POST", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/participant-link-revocations"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/sessions"], ["GET", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/sessions/{relatedId}"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/syntheses"], ["POST", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/syntheses"],
+      ["POST", "/api/v1/workspaces/{workspaceId}/research-syntheses/{id}/evidence-promotions"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/pm-interviews/{id}"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/analytics-connections"], ["POST", "/api/v1/workspaces/{workspaceId}/analytics-connections"], ["DELETE", "/api/v1/workspaces/{workspaceId}/analytics-connections/{id}"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/card-sort-factors"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/card-sort-rounds"], ["POST", "/api/v1/workspaces/{workspaceId}/card-sort-rounds"],
+      ["POST", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/reveal"], ["POST", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/closure"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/board"], ["GET", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/proposals"], ["POST", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/proposals"],
+      ["DELETE", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/proposals/{relatedId}"], ["GET", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/tally"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/new-entries"], ["POST", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/new-entries"], ["DELETE", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/new-entries/{relatedId}"],
+      ["POST", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/new-entries/{relatedId}/acceptance"], ["POST", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/new-entries/{relatedId}/rejection"],
+    ]
+    const actual = REST_ROUTES.filter(route => /research|pm-interview|analytics-connection|card-sort/.test(route.path)).map(route => [route.method, route.path])
+    expect(actual).toEqual(expected)
+  })
+
+  it("keeps Phase 4 private protocols and fields out of the contract", () => {
+    const serialized = JSON.stringify(buildOpenApiDocument())
+    for (const field of ["shareTokenHash", "tokenHash", "resumeTokenHash", "participantTokenId", "participantName", "participantEmail", "audioUrl", "secretEncrypted", "leaseId", "prompt"]) {
+      expect(serialized).not.toContain(`\"${field}\"`)
+    }
+    const phase4Paths = REST_ROUTES.filter(route => /research|pm-interview|analytics-connection|card-sort/.test(route.path))
+    expect(phase4Paths.some(route => /voice|respond|complete|attachment|unreveal/.test(route.path))).toBe(false)
+    expect(REST_ROUTES.some(route => route.path.includes("pm-interviews") && route.method !== "GET")).toBe(false)
+    for (const fragment of ["research-guides", "/voice", "/attachments", "/respond", "/unreveal"]) {
+      expect(phase4Paths.some(route => route.path.includes(fragment)), fragment).toBe(false)
+    }
+  })
+
+  it("uses strict privacy-minimal Phase 4 response DTOs", () => {
+    const response = (operationId: string) => REST_ROUTES.find(route => route.operationId === operationId)!.responseSchema
+    const synthesis = { summary: "Summary", themes: [], patterns: [], jobs: [], recommendations: [] }
+    expect(response("createResearchSynthesis").safeParse(synthesis).success).toBe(true)
+    for (const privateField of ["sourceFingerprint", "guideFingerprint", "model", "promptVersion", "claimId", "leaseId"]) {
+      expect(response("createResearchSynthesis").safeParse({ ...synthesis, [privateField]: "private" }).success, privateField).toBe(false)
+    }
+    const connection = { id: UUID, provider: "vercel", projectId: "project", teamId: null, enabled: true, health: "CONNECTED", generation: 1 }
+    expect(response("saveAnalyticsConnection").safeParse(connection).success).toBe(true)
+    expect(response("saveAnalyticsConnection").safeParse({ ...connection, secretEncrypted: "ciphertext" }).success).toBe(false)
+    const session = { id: UUID, studyId: UUID, modality: "CHAT", status: "COMPLETED", startedAt: null, completedAt: null, lastActiveAt: null, endedReason: null, createdAt: "2026-10-02T00:00:00.000Z", turnCount: 1, hasSummary: true }
+    expect(response("listResearchSessions").safeParse({ items: [session], nextCursor: null }).success).toBe(true)
+    for (const privateField of ["participantName", "participantEmail", "resumeTokenHash", "audioUrl", "participantTokenId"]) {
+      expect(response("listResearchSessions").safeParse({ items: [{ ...session, [privateField]: "private" }], nextCursor: null }).success, privateField).toBe(false)
+    }
+  })
+
+  it("requires human callers for participant links and card-sort mutations and admins for analytics secrets", () => {
+    for (const operationId of ["activateResearchStudy", "issueResearchParticipantLink", "rotateResearchParticipantLink", "revokeResearchParticipantLinks", "createCardSortRound", "revealCardSortRound", "proposeCardSortMoves", "acceptCardSortNewEntry"]) {
+      expect(REST_ROUTES.find(route => route.operationId === operationId)?.authorizationPolicy, operationId).toBe("human-member")
+    }
+    for (const operationId of ["saveAnalyticsConnection", "disconnectAnalyticsConnection"]) {
+      expect(REST_ROUTES.find(route => route.operationId === operationId)?.authorizationPolicy, operationId).toBe("human-admin")
+    }
+  })
+
+  it("creates studies as drafts and reserves credential disclosure for explicit actions", () => {
+    const create = REST_ROUTES.find(route => route.operationId === "createResearchStudy")!
+    expect(create.bodySchema?.safeParse({ name: "Study", goal: "Learn", guide: ["Question"], status: "ACTIVE" }).success).toBe(false)
+    expect(create.summary).toContain("without issuing participant credentials")
+    for (const operationId of ["activateResearchStudy", "issueResearchParticipantLink", "rotateResearchParticipantLink"]) {
+      expect(REST_ROUTES.find(route => route.operationId === operationId)?.responseSchema.safeParse({ id: UUID, participantUrl: "https://compass.example/research/one-time" }).success).toBe(true)
+    }
+  })
   it("defines every route with a unique operation id, scope, policy and schemas", () => {
     const operationIds = REST_ROUTES.map((route) => route.operationId)
     expect(new Set(operationIds).size).toBe(operationIds.length)

@@ -96,7 +96,7 @@ vi.mock("@/lib/scoring-tool-handlers", async (importOriginal) => ({
   listScoringModels: mocks.listScoringModels,
 }))
 
-import { executeRestRoute, RestConflictError, RestNotFoundError, RestValidationError } from "@/lib/rest/execute"
+import { executeRestRoute, RestConflictError, RestForbiddenError, RestNotFoundError, RestValidationError } from "@/lib/rest/execute"
 import { REST_ROUTES } from "@/lib/rest/registry"
 
 const route = (operationId: string) => {
@@ -115,6 +115,14 @@ describe("REST domain execution", () => {
     vi.clearAllMocks()
     mocks.actor.current = { userId: "user-1", purpose: "USER" }
     mocks.captureWorkspaceMutation.mockImplementation(async (prisma, _model, _operation, _actor, _id, mutate) => mutate(prisma))
+  })
+
+  it("denies non-human callers before Phase 4 privileged mutations execute", async () => {
+    mocks.actor.current = { userId: "user-1", purpose: "AGENT" }
+    await expect(executeRestRoute(route("createCardSortRound"), {
+      params: { workspaceId: UUID }, query: {}, body: { name: "Priorities", fieldDefinitionId: FOREIGN },
+    })).rejects.toBeInstanceOf(RestForbiddenError)
+    expect(mocks.assertWorkspaceMember).not.toHaveBeenCalled()
   })
 
   it("rejects a foreign opportunity squad before the shared create service runs", async () => {
