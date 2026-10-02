@@ -1,5 +1,5 @@
 import getPrisma from "@/lib/db"
-import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
+import type { AppTransactionClient } from "@/lib/db"
 import { loadCustomFieldDefinitions } from "@/lib/custom-field-definitions"
 import { resolveEffectiveOptions } from "@/lib/shared-field-options"
 import type { CustomFieldObjectType, SelectOption } from "@/lib/types"
