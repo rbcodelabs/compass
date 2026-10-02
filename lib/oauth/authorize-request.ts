@@ -24,7 +24,7 @@
  * a client that trusts the flag will reject a response that lacks the parameter.
  */
 import { oauthIssuer } from "@/lib/oauth/constants"
-import { filterSupportedScopes, formatScope, parseScope } from "@/lib/oauth/constants"
+import { filterScopesForResource, formatScope, mcpResourceUri, parseScope } from "@/lib/oauth/constants"
 import type { OAuthErrorCode } from "@/lib/oauth/errors"
 import { findOAuthClient, type RegisteredClient } from "@/lib/oauth/clients"
 import { firstDuplicateParameter, singleParam as single } from "@/lib/oauth/params"
@@ -151,7 +151,7 @@ export async function validateAuthorizationRequest(
   const resource = resolveResource(single(params, "resource"))
   if (!resource.ok) return fail(resource.error, resource.description)
 
-  const scope = resolveScope(single(params, "scope"), client.scope)
+  const scope = resolveScope(single(params, "scope"), client.scope, resource.resource)
   if (!scope.ok) return fail("invalid_scope", scope.description)
 
   return {
@@ -179,8 +179,8 @@ type ScopeResolution = { ok: true; value: string } | { ok: false; description: s
  * §3.3's default-scope allowance — the registration response already told the
  * client what that is, so nothing is granted the client did not see.
  */
-export function resolveScope(requested: string | null, registeredScope: string): ScopeResolution {
-  const registered = new Set(filterSupportedScopes(registeredScope))
+export function resolveScope(requested: string | null, registeredScope: string, resource: string = mcpResourceUri()): ScopeResolution {
+  const registered = new Set(filterScopesForResource(registeredScope, resource))
   if (registered.size === 0) {
     return { ok: false, description: "This client is not registered for any supported scope." }
   }

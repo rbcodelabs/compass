@@ -20,13 +20,14 @@ import {
   unlinkOpportunityFromObjective,
   unlinkSolutionFromKeyResult,
   type LinkContext,
+  type LinkSource,
 } from "@/lib/typed-links"
 
 /** Who made the link. A delegated agent carries its owner's userId but is not that user, so it is recorded as unattributed. */
-export function mcpLinkContext(): LinkContext {
+export function mcpLinkContext(source: LinkSource = "MCP"): LinkContext {
   const actor = getMcpActor()
   const isAgent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"
-  return { source: "MCP", createdById: isAgent ? null : actor.userId }
+  return { source, createdById: isAgent ? null : actor.userId }
 }
 
 /** A TypedLinkError is an expected, user-safe outcome: report it as a failed result, never a thrown error. */
@@ -39,9 +40,9 @@ async function reportingLinkErrors<T>(work: () => Promise<T>): Promise<T | Retur
   }
 }
 
-export const linkOpportunityToObjectiveTool = (args: { workspaceId: string; opportunityId: string; objectiveId: string }) =>
+export const linkOpportunityToObjectiveTool = (args: { workspaceId: string; opportunityId: string; objectiveId: string; source?: LinkSource }) =>
   reportingLinkErrors(async () => {
-    const ctx = mcpLinkContext()
+    const ctx = mcpLinkContext(args.source)
     const result = await runTypedLinkTransaction(getPrisma(), (tx) =>
       linkOpportunityToObjective(tx, { opportunityId: args.opportunityId, objectiveId: args.objectiveId, expectedWorkspaceId: args.workspaceId, ctx }),
     )
@@ -70,9 +71,9 @@ export const unlinkOpportunityFromObjectiveTool = (args: { workspaceId: string; 
     return ok(text, { removed: result.removed, ...(result.stillLinkedViaKeyResult ? { stillLinkedViaKeyResult: true } : {}), opportunityId: args.opportunityId, objectiveId: args.objectiveId })
   })
 
-export const linkSolutionToKeyResultTool = (args: { workspaceId: string; solutionId: string; keyResultId: string }) =>
+export const linkSolutionToKeyResultTool = (args: { workspaceId: string; solutionId: string; keyResultId: string; source?: LinkSource }) =>
   reportingLinkErrors(async () => {
-    const ctx = mcpLinkContext()
+    const ctx = mcpLinkContext(args.source)
     const result = await runTypedLinkTransaction(getPrisma(), (tx) =>
       linkSolutionToKeyResult(tx, { solutionId: args.solutionId, keyResultId: args.keyResultId, expectedWorkspaceId: args.workspaceId, ctx }),
     )

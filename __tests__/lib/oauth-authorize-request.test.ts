@@ -247,6 +247,59 @@ describe("resource, at the authorize endpoint", () => {
     expect(result.error).toBe("invalid_target")
     expect(result.kind).toBe("redirect")
   })
+
+  it("accepts API scopes only for the /api/v1 audience", async () => {
+    store.reset()
+    await registerClient({ scope: "mcp:read mcp:write api:read api:write offline_access" })
+
+    const result = await validateAuthorizationRequest(
+      query({ resource: `${ORIGIN}/api/v1`, scope: "api:read api:write" }),
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.request.resource).toBe(`${ORIGIN}/api/v1`)
+    expect(result.request.scope).toBe("api:read api:write")
+  })
+
+  it("rejects MCP scopes for the /api/v1 audience", async () => {
+    const result = await validateAuthorizationRequest(
+      query({ resource: `${ORIGIN}/api/v1`, scope: "mcp:read mcp:write" }),
+    )
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toBe("invalid_scope")
+    expect(result.kind).toBe("redirect")
+  })
+
+  it("rejects API scopes for the /api/mcp audience", async () => {
+    store.reset()
+    await registerClient({ scope: "mcp:read mcp:write api:read api:write offline_access" })
+
+    const result = await validateAuthorizationRequest(
+      query({ resource: `${ORIGIN}/api/mcp`, scope: "api:read api:write" }),
+    )
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toBe("invalid_scope")
+    expect(result.kind).toBe("redirect")
+  })
+
+  it("keeps omitted resource bound to MCP rather than inferring API from scopes", async () => {
+    store.reset()
+    await registerClient({ scope: "mcp:read mcp:write api:read api:write offline_access" })
+
+    const result = await validateAuthorizationRequest(
+      query({ resource: null, scope: "api:read" }),
+    )
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toBe("invalid_scope")
+    expect(result.kind).toBe("redirect")
+  })
 })
 
 describe("scope", () => {

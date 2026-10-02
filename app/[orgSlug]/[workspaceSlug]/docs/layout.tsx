@@ -8,7 +8,7 @@ interface DocsLayoutProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
 }
 
-export function buildDocTree(
+function buildDocTree(
   docs: Array<{
     id: string;
     title: string;

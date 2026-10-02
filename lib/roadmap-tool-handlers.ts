@@ -11,6 +11,79 @@ import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import type { LaunchTier } from "@/lib/types"
 import { setLaunchTierCore, updateChecklistItemCore } from "@/lib/launch-checklist"
 import { ok, fail } from "@/lib/mcp-output"
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
+import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
+import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
+
+export function roadmapCreateData(input: Parameters<typeof createRoadmapItem>[0], sortOrder: number) {
+  return {
+    workspaceId: input.workspaceId, title: input.title.trim(), horizon: input.horizon, description: input.description?.trim() || null,
+    sortOrder, solutionId: input.solutionId ?? null, keyResultId: input.keyResultId ?? null, opportunityId: input.opportunityId ?? null,
+    squadId: input.squadId ?? null, startDate: input.startDate ? new Date(input.startDate) : undefined,
+    endDate: input.endDate ? new Date(input.endDate) : undefined, isPrivate: input.isPrivate ?? false, source: input.source ?? "MCP",
+  }
+}
+
+export async function createRoadmapItem(input: {
+  workspaceId: string; title: string; horizon: "NOW" | "NEXT" | "LATER" | "SHIPPED"; description?: string | null
+  solutionId?: string | null; keyResultId?: string | null; opportunityId?: string | null; squadId?: string | null
+  startDate?: string | null; endDate?: string | null; isPrivate?: boolean; source?: ProgrammaticSource
+}) {
+  const prisma = getPrisma()
+  const workspace = await prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { name: true, slug: true, organization: { select: { slug: true } } } })
+  if (!workspace) return fail(`Workspace "${input.workspaceId}" not found.`)
+  const lastItem = await prisma.roadmapItem.findFirst({ where: { workspaceId: input.workspaceId, horizon: input.horizon, status: "ACTIVE" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, tx => tx.roadmapItem.create({ data: roadmapCreateData(input, lastItem ? lastItem.sortOrder + 1 : 0) }))
+  const format = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
+  return ok(withUrlLine(
+    `**Roadmap item created** (${input.horizon})\nID: ${item.id}\nTitle: ${item.title}` +
+      (item.isPrivate ? "\nPrivate: yes (hidden from public portal)" : "") +
+      (item.startDate || item.endDate ? `\nDates: ${item.startDate ? format(item.startDate) : "?"} – ${item.endDate ? format(item.endDate) : "?"}` : ""),
+    safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "roadmapItem", id: item.id }),
+  ), { id: item.id, title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate })
+}
+
+export async function updateRoadmapItem(input: {
+  itemId: string; keyResultId?: string | null; opportunityId?: string | null; solutionId?: string | null; squadId?: string | null
+  horizon?: "NOW" | "NEXT" | "LATER" | "LAUNCHING" | "LAUNCHED" | "SHIPPED"; status?: "ACTIVE" | "ARCHIVED"
+  title?: string; description?: string | null; startDate?: string | null; endDate?: string | null; isPrivate?: boolean
+  source?: ProgrammaticSource
+}) {
+  const prisma = getPrisma()
+  const item = await prisma.roadmapItem.findUnique({ where: { id: input.itemId }, select: { id: true, workspaceId: true } })
+  if (!item) return fail(`Roadmap item "${input.itemId}" not found.`)
+  if (input.horizon === "LAUNCHING" || input.horizon === "LAUNCHED") {
+    const workspace = await prisma.workspace.findUnique({ where: { id: item.workspaceId }, select: { launchWorkflowEnabled: true } })
+    if (!workspace?.launchWorkflowEnabled) return fail(LAUNCH_WORKFLOW_DISABLED_MESSAGE)
+    if (input.horizon === "LAUNCHING") return fail("Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.")
+    return fail("Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.")
+  }
+  const checks: Promise<unknown>[] = []
+  if (input.squadId) checks.push(prisma.squad.findFirst({ where: { id: input.squadId, workspaceId: item.workspaceId }, select: { id: true } }))
+  if (input.solutionId) checks.push(prisma.solution.findFirst({ where: { id: input.solutionId, workspaceId: item.workspaceId }, select: { id: true } }))
+  if (input.opportunityId) checks.push(prisma.opportunity.findFirst({ where: { id: input.opportunityId, workspaceId: item.workspaceId }, select: { id: true } }))
+  if (input.keyResultId) checks.push(prisma.keyResult.findFirst({ where: { id: input.keyResultId, objective: { workspaceId: item.workspaceId } }, select: { id: true } }))
+  if ((await Promise.all(checks)).some((row) => !row)) return fail("A linked resource was not found in this workspace.")
+  const data: Record<string, unknown> = { updatedAt: new Date() }
+  for (const key of ["keyResultId", "opportunityId", "solutionId", "squadId", "horizon", "status", "isPrivate"] as const) if (input[key] !== undefined) data[key] = input[key]
+  if (input.title !== undefined) data.title = input.title.trim()
+  if (input.description !== undefined) data.description = input.description?.trim() || null
+  if (input.startDate !== undefined) data.startDate = input.startDate ? new Date(input.startDate) : null
+  if (input.endDate !== undefined) data.endDate = input.endDate ? new Date(input.endDate) : null
+  const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", workspaceMutationSource(input.source), input.itemId, (tx) => tx.roadmapItem.update({ where: { id: input.itemId }, data }))
+  const formatUtcDate = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
+  return ok(
+    `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
+      `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
+      (updated.isPrivate ? "\nPrivate: yes (hidden from public portal)" : "") +
+      (updated.solutionId ? `\nLinked Solution: ${updated.solutionId}` : "") +
+      (updated.startDate || updated.endDate
+        ? `\nDates: ${updated.startDate ? formatUtcDate(updated.startDate) : "?"} – ${updated.endDate ? formatUtcDate(updated.endDate) : "?"}`
+        : ""),
+    { id: updated.id, title: updated.title, horizon: updated.horizon, status: updated.status, isPrivate: updated.isPrivate, solutionId: updated.solutionId, startDate: updated.startDate, endDate: updated.endDate },
+  )
+}
 
 interface ChecklistItemInput {
   label: string

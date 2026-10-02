@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { PreviewAutomationRun } from "@prisma/client";
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db";
 import type { PreviewGrant } from "./grants";
@@ -8,6 +8,8 @@ import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { getManagedPilotContext } from "./managed-context";
+import { apiResourceUri } from "@/lib/oauth/constants";
+import { mintOAuthToken } from "@/lib/oauth/tokens";
 
 function managedGrant(grant: PreviewGrant) {
   const context = getManagedPilotContext();
@@ -24,8 +26,10 @@ export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, 
   if (!run) return result;
   if (run.deploymentId !== deploymentId) throw new Error("Preview run deployment mismatch");
   if (run.cleanedAt) return result;
-  await prisma.previewAutomationRun.update({ where: { id: runId }, data: { revokedAt: run.revokedAt ?? new Date() } });
   const userIds = [run.ownerUserId, run.viewerUserId];
+  await prisma.previewAutomationRun.update({ where: { id: runId }, data: { revokedAt: run.revokedAt ?? new Date() } });
+  await prisma.apiKey.deleteMany({ where: { userId: { in: userIds } } });
+  await prisma.oAuthToken.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.previewAutomationSession.deleteMany({ where: { runId } });
   // Revoke access first; preserve both workspaces if either has pilot evidence.
@@ -90,6 +94,8 @@ export async function teardownPreviewRun(prisma: AppPrismaClient, grant: Preview
       if (managed) {
         await tx.session.deleteMany({ where: { userId: { in: [run.ownerUserId, run.viewerUserId] } } });
         await tx.previewAutomationSession.deleteMany({ where: { runId: run.id } });
+        await tx.oAuthToken.deleteMany({ where: { userId: { in: [run.ownerUserId, run.viewerUserId] } } });
+        await tx.apiKey.deleteMany({ where: { userId: { in: [run.ownerUserId, run.viewerUserId] } } });
       }
     }
     else {
@@ -115,8 +121,25 @@ function requireActive(run: PreviewAutomationRun | null, deploymentId: string, n
   if (managed && (run?.id !== managed.runId || run.workspaceId !== managed.workspaceId)) throw new Error("Managed pilot run mismatch");
   if (!run || run.deploymentId !== deploymentId || run.revokedAt || run.expiresAt <= now) throw new Error("Preview run unavailable");
 }
-function describeRun(run: PreviewAutomationRun) {
-  return { runId: run.id, orgSlug: `preview-${run.id}`, workspaceSlug: "workspace", isolatedWorkspaceSlug: "isolated", expiresAt: run.expiresAt.toISOString() };
+async function describeRun(tx: AppTransactionClient, run: PreviewAutomationRun) {
+  // API bearer tokens are 128-bit random values, not human passwords. Their
+  // deterministic digest intentionally matches the lookup in mcp-auth.ts.
+  const token = `cmp_${randomBytes(16).toString("hex")}`;
+  await tx.apiKey.create({ data: {
+    userId: run.ownerUserId, name: `Preview REST ${run.id}`, keyHash: createHash("sha256").update(token).digest("hex"),
+    keyPrefix: token.slice(4, 12), purpose: "USER", scopeWorkspaceId: run.workspaceId, expiresAt: run.expiresAt,
+  } });
+  const oauth = mintOAuthToken("ACCESS");
+  await tx.oAuthToken.create({ data: {
+    clientId: `preview-${run.id}`, userId: run.ownerUserId, scope: "api:read", resource: apiResourceUri(),
+    familyId: randomUUID(), parentTokenId: null, authorizationMode: "USER", agentId: null, scopeWorkspaceId: null,
+    tokenHash: oauth.tokenHash, type: "ACCESS", expiresAt: run.expiresAt,
+  } });
+  return {
+    runId: run.id, orgSlug: `preview-${run.id}`, workspaceSlug: "workspace", isolatedWorkspaceSlug: "isolated",
+    workspaceId: run.workspaceId, isolatedWorkspaceId: run.isolatedWorkspaceId, expiresAt: run.expiresAt.toISOString(),
+    apiKey: token, oauthReadToken: oauth.token,
+  };
 }
 
 /** Nonce + registry + all fixtures commit together; a lost response can retry with a fresh grant. */
@@ -129,7 +152,7 @@ export async function bootstrapPreviewRun(prisma: AppPrismaClient, grant: Previe
   return prisma.$transaction(async (tx) => {
     await consume(tx, grant);
     const existing = await tx.previewAutomationRun.findUnique({ where: { id: grant.runId } });
-    if (existing) { requireActive(existing, grant.deploymentId, now); return describeRun(existing); }
+    if (existing) { requireActive(existing, grant.deploymentId, now); return describeRun(tx, existing); }
     const run = await tx.previewAutomationRun.create({ data: {
       id: grant.runId, deploymentId: grant.deploymentId, orgId: randomUUID(), workspaceId: managed?.workspaceId ?? randomUUID(),
       isolatedWorkspaceId: randomUUID(), ownerUserId: randomUUID(), viewerUserId: randomUUID(),
@@ -161,7 +184,7 @@ export async function bootstrapPreviewRun(prisma: AppPrismaClient, grant: Previe
     if (scenario !== DEFAULT_PREVIEW_SCENARIO) {
       await applyPreviewScenario(tx, { schema: getActiveSchema(), workspaceId: run.workspaceId, scenario });
     }
-    return describeRun(run);
+    return describeRun(tx, run);
   });
 }
 

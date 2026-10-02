@@ -22,6 +22,7 @@ function database(run: unknown = active) {
     previewAutomationSession: { create: vi.fn().mockResolvedValue({}) },
     session: { create: vi.fn().mockResolvedValue({}) },
     user: { createMany: vi.fn() },
+    apiKey: { create: vi.fn(), deleteMany: vi.fn() }, oAuthToken: { create: vi.fn(), deleteMany: vi.fn() },
   };
   const prisma = { $transaction: vi.fn((callback: (transaction: typeof tx) => unknown) => callback(tx)) };
   return { tx, prisma: prisma as unknown as AppPrismaClient };

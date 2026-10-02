@@ -19,6 +19,7 @@ import {
 } from "@/lib/feedback-attachments"
 import { CompassUrlNotConfiguredError, feedbackItemUrl, safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { FEEDBACK_STATUSES, type FeedbackStatus } from "@/lib/feedback-meta"
+import type { ProgrammaticSource } from "@/lib/programmatic-source"
 
 const feedbackCursorSchema = z.object({
   v: z.literal(1),
@@ -94,6 +95,7 @@ export async function createFeedback({
   submitterName,
   submitterEmail,
   attachments,
+  source = "MCP",
 }: {
   workspaceId: string
   title: string
@@ -102,6 +104,7 @@ export async function createFeedback({
   submitterName?: string
   submitterEmail?: string
   attachments?: InlineFeedbackAttachment[]
+  source?: ProgrammaticSource
 }) {
   const prisma = getPrisma()
 
@@ -138,7 +141,7 @@ export async function createFeedback({
         type: type ?? "IDEA",
         submitterName: submitterName?.trim() || null,
         submitterEmail: submitterEmail?.trim() || null,
-        source: "MCP",
+        source,
         ...(attachmentRows.length ? { attachments: { create: attachmentRows } } : {}),
       },
     })

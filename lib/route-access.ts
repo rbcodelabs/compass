@@ -34,6 +34,9 @@ export function isPublicPath(pathname: string): boolean {
     // MCP route uses Bearer token auth — let it through so the route
     // handler can validate the API key and return 401 (not 302) on failure.
     pathname.startsWith("/api/mcp") ||
+    // Versioned programmatic API authenticates bearer credentials in-route.
+    // Segment-safe matching keeps /api/v10 and /api/v1evil behind session auth.
+    (pathname === "/api/v1" || pathname.startsWith("/api/v1/")) ||
     // OAuth discovery documents (RFC 8414 / RFC 9728 / OIDC Discovery). An MCP
     // client fetches these before any user exists, so a 302 to /login would
     // make the server look like it has no authorization server at all.

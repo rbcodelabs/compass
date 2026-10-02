@@ -19,11 +19,11 @@ const mockPrisma = {
   organizationMember: { findFirst: vi.fn() },
   scoringModel: { findUnique: vi.fn() },
   agentOrgAdminGrant: { findFirst: vi.fn() },
-  opportunity: { findUnique: vi.fn(), update: vi.fn(), findMany: vi.fn() },
+  opportunity: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), findMany: vi.fn() },
   objective: { findUnique: vi.fn(), findMany: vi.fn() },
   opportunityObjectiveLink: { findMany: vi.fn() },
   solutionKeyResultLink: { findMany: vi.fn() },
-  solution: { findUnique: vi.fn(), update: vi.fn() },
+  solution: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   roadmapItem: { findUnique: vi.fn(), update: vi.fn() },
   artifact: { findUnique: vi.fn() },
   feedbackItem: { findUnique: vi.fn() },
@@ -35,8 +35,8 @@ const mockPrisma = {
   agentWorkspaceGrant: { findMany: vi.fn() },
   agentToolCall: { create: vi.fn(), update: vi.fn() },
   task: { findUnique: vi.fn() },
-  keyResult: { findUnique: vi.fn() },
-  squad: { findUnique: vi.fn() },
+  keyResult: { findUnique: vi.fn(), findFirst: vi.fn() },
+  squad: { findUnique: vi.fn(), findFirst: vi.fn() },
   customFieldDefinition: { findMany: vi.fn(), findUnique: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
@@ -488,6 +488,7 @@ describe("applyToolGate", () => {
 
   it("update_solution_status preserves the solution workspace boundary", async () => {
     mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
+    mockPrisma.solution.findFirst.mockResolvedValue({ id: "solution-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
 
     await expect(

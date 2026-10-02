@@ -28,7 +28,7 @@
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
 import { withWorkspaceUpdates } from "@/lib/workspace-updates-capture"
 
-export type LinkSource = "UI" | "MCP"
+export type LinkSource = "UI" | "MCP" | "API"
 export type LinkContext = { source: LinkSource; createdById?: string | null }
 
 export type TypedLinkErrorCode = "NOT_FOUND" | "WORKSPACE_MISMATCH" | "INVALID"
