@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { originHeaders, schemaFor, validateDeployment } from "../../scripts/preview-automation/contracts";
-import { previewRequestOptions } from "../../e2e/preview/fixtures";
+import { previewRequestCallOptions, previewRequestOptions } from "../../e2e/preview/fixtures";
 
 const sha = "a".repeat(40);
 const deployment = {
@@ -49,6 +49,12 @@ describe("independent QA: protection header origin confinement", () => {
     expect(previewRequestOptions("https://safe.vercel.app", "never-leak-this")).toEqual({
       baseURL: "https://safe.vercel.app",
       extraHTTPHeaders: { "x-vercel-protection-bypass": "never-leak-this" },
+    });
+  });
+  it("disables automatic redirects for every protected API request", () => {
+    expect(previewRequestCallOptions({ headers: { authorization: "Bearer test" }, maxRedirects: 9 })).toEqual({
+      headers: { authorization: "Bearer test" },
+      maxRedirects: 0,
     });
   });
   it.each([

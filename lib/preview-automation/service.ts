@@ -26,12 +26,12 @@ export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, 
   if (!run) return result;
   if (run.deploymentId !== deploymentId) throw new Error("Preview run deployment mismatch");
   if (run.cleanedAt) return result;
-  await prisma.previewAutomationRun.update({ where: { id: runId }, data: { revokedAt: run.revokedAt ?? new Date() } });
   const userIds = [run.ownerUserId, run.viewerUserId];
+  await prisma.previewAutomationRun.update({ where: { id: runId }, data: { revokedAt: run.revokedAt ?? new Date() } });
+  await prisma.apiKey.deleteMany({ where: { userId: { in: userIds } } });
+  await prisma.oAuthToken.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.previewAutomationSession.deleteMany({ where: { runId } });
-  await prisma.oAuthToken.deleteMany({ where: { userId: { in: userIds } } });
-  await prisma.apiKey.deleteMany({ where: { userId: { in: userIds } } });
   // Revoke access first; preserve both workspaces if either has pilot evidence.
   await assertDocumentPilotCleanupReviewed(prisma, run.workspaceId);
   await assertDocumentPilotCleanupReviewed(prisma, run.isolatedWorkspaceId);

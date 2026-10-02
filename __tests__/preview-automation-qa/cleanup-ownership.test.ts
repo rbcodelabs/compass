@@ -78,6 +78,8 @@ describe("independent QA: exact cleanup ownership and recoverable revocation", (
     const { db } = fixture();
     vi.mocked(db.session.deleteMany).mockRejectedValueOnce(new Error("session deletion failed"));
     await expect(cleanupPreviewRun(db, run.id, run.deploymentId)).rejects.toThrow();
+    expect(db.apiKey.deleteMany).toHaveBeenCalledWith({ where: { userId: { in: [run.ownerUserId, run.viewerUserId] } } });
+    expect(db.oAuthToken.deleteMany).toHaveBeenCalledWith({ where: { userId: { in: [run.ownerUserId, run.viewerUserId] } } });
     expect(db.previewAutomationSession.deleteMany).not.toHaveBeenCalled();
     expect(cascade).not.toHaveBeenCalled();
   });
