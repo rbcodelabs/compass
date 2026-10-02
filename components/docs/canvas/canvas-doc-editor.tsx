@@ -88,6 +88,7 @@ import {
   type FlowEdge,
   type FlowNode,
 } from "@/lib/json-canvas-flow"
+import { Checkbox } from "@/components/ui/checkbox"
 import { createHistory } from "@/lib/json-canvas-history"
 import { canvasNodeTypes, CanvasUiContext, type CanvasUi } from "@/components/docs/canvas/canvas-nodes"
 
@@ -687,18 +688,16 @@ function CanvasEditorBody({
                 onCommit={(label) => patchEdge(selectedEdge.id, { label: label || undefined })}
               />
               <label className="flex shrink-0 items-center gap-1 whitespace-nowrap">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={(selectedEdge.data.raw.toEnd ?? "arrow") === "arrow"}
-                  onChange={(e) => patchEdge(selectedEdge.id, { toEnd: e.target.checked ? "arrow" : "none" })}
+                  onCheckedChange={(checked) => patchEdge(selectedEdge.id, { toEnd: checked ? "arrow" : "none" })}
                 />
                 Arrow at end
               </label>
               <label className="flex shrink-0 items-center gap-1 whitespace-nowrap">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={selectedEdge.data.raw.fromEnd === "arrow"}
-                  onChange={(e) => patchEdge(selectedEdge.id, { fromEnd: e.target.checked ? "arrow" : "none" })}
+                  onCheckedChange={(checked) => patchEdge(selectedEdge.id, { fromEnd: checked ? "arrow" : "none" })}
                 />
                 Arrow at start
               </label>
