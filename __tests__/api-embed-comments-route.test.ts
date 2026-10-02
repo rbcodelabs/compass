@@ -33,7 +33,7 @@ vi.mock("@/lib/embed-sources", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/embed-visitor", () => ({ resolveEmbedVisitorToken: vi.fn() }));
+vi.mock("@/lib/embed-visitor", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/embed-visitor")>()), resolveEmbedVisitorToken: vi.fn() }));
 
 vi.mock("@/lib/workspace", () => ({ isWorkspaceMember: vi.fn() }));
 
@@ -335,6 +335,17 @@ describe("POST /api/embed/comments — submission", () => {
     // The fingerprint is rebuilt field by field, so the JSON column cannot be
     // used by an embedding page as arbitrary storage.
     expect(input.elementAnchor?.elementFingerprint).not.toHaveProperty("bogus");
+  });
+
+  it("fences a stale portal visitor against the source's current mode inside the comment transaction", async () => {
+    const response = await POST(post({ body: "hi", pageUrl: `${ORIGIN}/p`, pagePath: "/p" }));
+    expect(response.status).toBe(201);
+    const guard = mockCreateComment.mock.calls[0][1]?.beforeCreate;
+    expect(guard).toBeTypeOf("function");
+    await expect(guard!({
+      feedbackSource: { findFirst: vi.fn().mockResolvedValue({ authMode: "INTERNAL_SSO" }) },
+      embedVisitorSession: { findFirst: vi.fn().mockResolvedValue({ id: "visitor-1" }) },
+    } as never)).rejects.toMatchObject({ status: 401 });
   });
 
   it("keeps a screenshot URL that is a blob object under the embed prefix", async () => {

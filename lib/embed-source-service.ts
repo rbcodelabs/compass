@@ -163,22 +163,22 @@ export async function updateEmbedSource(
   const previousMode = resolveEmbedAuthMode(existing.authMode)
   const authMode = input.authMode === undefined ? previousMode : requireAuthMode(input.authMode)
 
-  await prisma.feedbackSource.update({
-    where: { id: existing.id },
-    data: { name, allowedOrigins, enabled, authMode, updatedAt: new Date() },
-  })
-
-  // A visitor session minted under the OLD mode keeps working under it for up to
-  // its remaining 12-hour TTL otherwise: the write routes only re-check
-  // workspace membership for an INTERNAL-kind visitor, they never re-check
-  // `source.authMode` against `visitor.kind` on every write. Revoking on an
-  // actual mode change forces every existing visitor to sign in again.
-  if (authMode !== previousMode) {
-    await prisma.embedVisitorSession.updateMany({
-      where: { feedbackSourceId: existing.id, revokedAt: null },
-      data: { revokedAt: new Date() },
+  await prisma.$transaction(async tx => {
+    await tx.feedbackSource.update({
+      where: { id: existing.id },
+      data: { name, allowedOrigins, enabled, authMode, updatedAt: new Date() },
     })
-  }
+
+    // The mode and its visitor-session kill switch are one security change.
+    // A failed revocation must roll back the mode update so retry still sees
+    // the old mode and attempts revocation again.
+    if (authMode !== previousMode) {
+      await tx.embedVisitorSession.updateMany({
+        where: { feedbackSourceId: existing.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      })
+    }
+  })
   return { name, allowedOrigins, enabled, authMode }
 }
 
