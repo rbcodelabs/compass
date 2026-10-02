@@ -1,0 +1,61 @@
+import { ZodError } from "zod"
+import { apiResourceUri, scopesSatisfy } from "@/lib/oauth/constants"
+import { validateProgrammaticAuth } from "@/lib/programmatic-auth"
+import { McpAuthzError, runWithMcpActor, type McpActor } from "@/lib/mcp-authz"
+import { executeRestRoute, RestConflictError, RestCursorError, RestNotFoundError } from "@/lib/rest/execute"
+import { matchRestRoute, type RestMethod } from "@/lib/rest/registry"
+
+const NO_STORE = { "Cache-Control": "no-store" }
+class RestResponseValidationError extends Error {}
+
+export async function handleRestRequest(request: Request, method: RestMethod): Promise<Response> {
+  const url = new URL(request.url)
+  const auth = await validateProgrammaticAuth(request, { resource: apiResourceUri() })
+  if (!auth.valid) return problem(request, 401, "invalid_token", "Unauthorized", "A valid Compass bearer token is required.", undefined, challenge(request, "api:read", "invalid_token"))
+  const matched = matchRestRoute(method, url.pathname)
+  if (!matched) return problem(request, 404, "not_found", "Not Found", "The requested resource was not found or is not accessible.")
+  if (auth.scopes && !scopesSatisfy(auth.scopes, matched.route.scope)) {
+    return problem(request, 403, "insufficient_scope", "Forbidden", `This operation requires ${matched.route.scope}.`, undefined, challenge(request, matched.route.scope, "insufficient_scope"))
+  }
+  if (auth.purpose === "RESEARCH") return problem(request, 403, "forbidden", "Forbidden", "This credential cannot access this resource.")
+
+  let rawBody: unknown = undefined
+  if (matched.route.bodySchema) {
+    try { rawBody = await request.json() } catch { return problem(request, 400, "malformed_json", "Bad Request", "The request body must be valid JSON.") }
+  }
+  try {
+    const params = matched.route.pathSchema.parse(matched.params) as Record<string, string>
+    const queryObject = Object.fromEntries(url.searchParams)
+    const query = (matched.route.querySchema?.parse(queryObject) ?? {}) as Record<string, unknown>
+    const body = matched.route.bodySchema?.parse(rawBody) as Record<string, unknown> | undefined
+    const actor: McpActor = { ...auth, requiredAgentAccess: matched.route.scope === "api:write" ? "WRITE" : "READ" }
+    const rawResult = await runWithMcpActor(actor, () => executeRestRoute(matched.route, { params, query, body }))
+    let result: unknown = undefined
+    if ((matched.route.status ?? 200) !== 204) {
+      const parsed = matched.route.responseSchema.safeParse(rawResult)
+      if (!parsed.success) throw new RestResponseValidationError()
+      result = parsed.data
+    }
+    if ((matched.route.status ?? 200) === 204) return new Response(null, { status: 204, headers: NO_STORE })
+    const status = matched.route.status ?? 200
+    const headers: Record<string, string> = { ...NO_STORE, "Content-Type": "application/json" }
+    return Response.json(result, { status, headers })
+  } catch (error) {
+    if (error instanceof ZodError) return problem(request, 422, "validation_failed", "Unprocessable Content", "The request did not satisfy the endpoint schema.", error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })))
+    if (error instanceof RestNotFoundError || error instanceof McpAuthzError) return problem(request, 404, "not_found", "Not Found", "The requested resource was not found or is not accessible.")
+    if (error instanceof RestCursorError) return problem(request, 400, "invalid_cursor", "Bad Request", error.message)
+    if (error instanceof RestConflictError) return problem(request, 409, "conflict", "Conflict", error.message)
+    if (error instanceof RestResponseValidationError) return problem(request, 500, "internal_error", "Internal Server Error", "The request could not be completed.")
+    console.error("REST API request failed", { operationId: matched.route.operationId, error })
+    return problem(request, 500, "internal_error", "Internal Server Error", "The request could not be completed.")
+  }
+}
+
+function challenge(request: Request, scope: string, error?: string): Record<string, string> {
+  const metadata = new URL("/.well-known/oauth-protected-resource/api/v1", request.url).toString()
+  return { "WWW-Authenticate": `Bearer resource_metadata="${metadata}", scope="${scope}"${error ? `, error="${error}"` : ""}` }
+}
+
+function problem(request: Request, status: number, code: string, title: string, detail: string, issues?: { path: string; message: string }[], extraHeaders: Record<string, string> = {}): Response {
+  return Response.json({ type: `https://compass.rbcodelabs.com/problems/${code}`, title, status, detail, instance: new URL(request.url).pathname, code, ...(issues ? { issues } : {}) }, { status, headers: { ...NO_STORE, "Content-Type": "application/problem+json", ...extraHeaders } })
+}

@@ -4,6 +4,59 @@ import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import { getToolExpectedWhere } from "@/lib/mcp-tool-db"
 import { fail, ok } from "@/lib/mcp-output"
 import { z } from "zod"
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import { getMcpActor } from "@/lib/mcp-authz"
+import { assertKeyResultInWorkspace, setOpportunityKeyResult, syncLegacyLink, TypedLinkError } from "@/lib/typed-links"
+import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
+
+function linkContext() {
+  const actor = getMcpActor()
+  return { source: "MCP" as const, createdById: actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN" ? null : actor.userId }
+}
+
+export async function createOpportunity(input: {
+  workspaceId: string; title: string; description?: string | null; customerSegment?: string | null
+  status?: "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE"; keyResultId?: string | null; squadId?: string | null
+}) {
+  const prisma = getPrisma()
+  const workspace = await prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { id: true, name: true, slug: true, organization: { select: { slug: true } } } })
+  if (!workspace) return fail(`Workspace "${input.workspaceId}" not found.`)
+  if (input.squadId && !(await prisma.squad.findFirst({ where: { id: input.squadId, workspaceId: input.workspaceId }, select: { id: true } }))) return fail(`Squad "${input.squadId}" not found in workspace.`)
+  try {
+    const opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", "MCP", undefined, async (tx) => {
+      if (input.keyResultId) await assertKeyResultInWorkspace(tx, input.keyResultId, input.workspaceId)
+      const created = await tx.opportunity.create({ data: { workspaceId: input.workspaceId, title: input.title.trim(), description: input.description?.trim() || null, customerSegment: input.customerSegment?.trim() || null, status: input.status ?? "EXPLORING", linkedKeyResultId: input.keyResultId ?? null, squadId: input.squadId ?? null } })
+      if (input.keyResultId) await syncLegacyLink(tx, { opportunityId: created.id, workspaceId: input.workspaceId, keyResultId: input.keyResultId, ctx: linkContext() })
+      return created
+    }, { atomic: true })
+    return ok(withUrlLine(
+      `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
+      safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "opportunity", id: opportunity.id }),
+    ), {
+      id: opportunity.id, title: opportunity.title, status: opportunity.status, workspaceId: input.workspaceId,
+      customerSegment: opportunity.customerSegment, linkedKeyResultId: opportunity.linkedKeyResultId, squadId: opportunity.squadId,
+    })
+  } catch (error) {
+    if (error instanceof TypedLinkError) return fail(error.message)
+    throw error
+  }
+}
+
+export async function updateOpportunityStatus(input: { opportunityId: string; status: "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | "ARCHIVED" }) {
+  const prisma = getPrisma()
+  const current = await prisma.opportunity.findUnique({ where: { id: input.opportunityId }, select: { id: true, title: true, status: true } })
+  if (!current) return fail(`Opportunity "${input.opportunityId}" not found.`)
+  const updated = await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", input.opportunityId, (tx) => tx.opportunity.update({ where: { id: input.opportunityId }, data: { status: input.status, updatedAt: new Date() } }))
+  return ok(`**"${current.title}"** moved from ${current.status} → ${input.status}`, { id: updated.id, title: current.title, status: input.status, previousStatus: current.status })
+}
+
+export async function updateOpportunityKeyResult(input: { opportunityId: string; keyResultId: string | null; workspaceId?: string }) {
+  const prisma = getPrisma()
+  try {
+    const updated = await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", input.opportunityId, (tx) => setOpportunityKeyResult(tx, { opportunityId: input.opportunityId, keyResultId: input.keyResultId, expectedWorkspaceId: input.workspaceId, ctx: linkContext() }), { atomic: true })
+    return ok(input.keyResultId ? `Linked opportunity "${updated.title}" to KR ${input.keyResultId}.` : `Cleared KR link from opportunity "${updated.title}".`, { id: updated.id, title: updated.title, linkedKeyResultId: input.keyResultId })
+  } catch (error) { return fail(error instanceof Error ? error.message : "Unable to update Key Result link.") }
+}
 
 type UpdateOpportunityInput = {
   opportunityId: string

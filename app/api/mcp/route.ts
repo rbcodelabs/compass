@@ -82,10 +82,11 @@ import {
   reopenDocComment,
 } from "@/lib/doc-comment-tool-handlers"
 import {
+  createAssumption,
   updateAssumption,
   deleteAssumption,
 } from "@/lib/assumption-tool-handlers"
-import { updateSolution } from "@/lib/solution-tool-handlers"
+import { createSolution, updateSolution } from "@/lib/solution-tool-handlers"
 import {
   addSolutionPlan,
   addSolutionComment,
@@ -97,7 +98,7 @@ import {
   rejectSolutionPlan,
 } from "@/lib/solution-comment-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
-import { updateOpportunity } from "@/lib/opportunity-tool-handlers"
+import { createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
 import { listAssumptions, listSolutions } from "@/lib/discovery-query-tool-handlers"
 import {
   listScoringModels,
@@ -119,8 +120,8 @@ import {
   setLaunchTier,
   getLaunchChecklist,
   updateLaunchChecklistItem,
+  updateRoadmapItem,
 } from "@/lib/roadmap-tool-handlers"
-import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
 import {
   createTask,
   getTask,
@@ -154,17 +155,12 @@ import {
   updateObjective,
 } from "@/lib/okr-tool-handlers"
 import {
-  TypedLinkError,
-  assertKeyResultInWorkspace,
   getLinkedObjectivesByOpportunity,
-  setOpportunityKeyResult,
-  syncLegacyLink,
 } from "@/lib/typed-links"
 import {
   linkOpportunityToObjectiveTool,
   linkSolutionToKeyResultTool,
   listLinksTool,
-  mcpLinkContext,
   unlinkOpportunityFromObjectiveTool,
   unlinkSolutionFromKeyResultTool,
 } from "@/lib/typed-link-tool-handlers"
@@ -1241,51 +1237,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, title, description, customerSegment, status, keyResultId, squadId }) => {
-        const prisma = getPrisma()
-        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, ...WORKSPACE_LINK_SELECT } })
-        if (!workspace) {
-          return fail(`Workspace "${workspaceId}" not found.`)
-        }
-        // The legacy pointer and its LEGACY Opportunity<->Objective link are written together, in one transaction.
-        let opportunity
-        try {
-          opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", "MCP", undefined, async tx => {
-            if (keyResultId) await assertKeyResultInWorkspace(tx, keyResultId, workspaceId)
-            const created = await tx.opportunity.create({
-              data: {
-                workspaceId,
-                title: title.trim(),
-                description: description?.trim(),
-                customerSegment: customerSegment?.trim(),
-                status: status ?? "EXPLORING",
-                linkedKeyResultId: keyResultId ?? null,
-                squadId: squadId ?? null,
-              },
-            })
-            if (keyResultId) await syncLegacyLink(tx, { opportunityId: created.id, workspaceId, keyResultId, ctx: mcpLinkContext() })
-            return created
-          }, { atomic: true })
-        } catch (error) {
-          if (error instanceof TypedLinkError) return fail(error.message)
-          throw error
-        }
-        return ok(
-          withUrlLine(
-            `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
-            workspaceEntityUrl(workspace, { type: "opportunity", id: opportunity.id }),
-          ),
-          {
-            id: opportunity.id,
-            title: opportunity.title,
-            status: opportunity.status,
-            workspaceId,
-            customerSegment: opportunity.customerSegment,
-            linkedKeyResultId: opportunity.linkedKeyResultId,
-            squadId: opportunity.squadId,
-          },
-        )
-      }
+      createOpportunity,
     )
 
     register(
@@ -1320,18 +1272,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ opportunityId, status }) => {
-        const prisma = getPrisma()
-        const opp = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { title: true, status: true } })
-        if (!opp) {
-          return fail(`Opportunity "${opportunityId}" not found.`)
-        }
-        await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", opportunityId, tx => tx.opportunity.update({ where: { id: opportunityId }, data: { status } }))
-        return ok(
-          `**"${opp.title}"** moved from ${opp.status} → ${status}`,
-          { id: opportunityId, title: opp.title, status, previousStatus: opp.status },
-        )
-      }
+      updateOpportunityStatus,
     )
 
     register(
@@ -1345,27 +1286,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ opportunityId, keyResultId }) => {
-        const prisma = getPrisma()
-        const opp = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { title: true } })
-        if (!opp) {
-          return fail(`Opportunity "${opportunityId}" not found.`)
-        }
-        // Dual-write, one transaction: the legacy column and its LEGACY link to the key result's objective (which
-        // must be in the opportunity's workspace). A DIRECT link is never touched by a clear or a change.
-        try {
-          await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", opportunityId, tx => setOpportunityKeyResult(tx, { opportunityId, keyResultId, ctx: mcpLinkContext() }), { atomic: true })
-        } catch (error) {
-          if (error instanceof TypedLinkError) return fail(error.message)
-          throw error
-        }
-        return ok(
-          keyResultId
-            ? `Linked opportunity "${opp.title}" to KR ${keyResultId}.`
-            : `Cleared KR link from opportunity "${opp.title}".`,
-          { id: opportunityId, title: opp.title, linkedKeyResultId: keyResultId },
-        )
-      }
+      updateOpportunityKeyResult,
     )
 
     const typedLinkEnds = { workspaceId: z.string().uuid().describe("UUID of the workspace that owns both ends") }
@@ -1449,30 +1370,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ opportunityId, title, description }) => {
-        const prisma = getPrisma()
-        const opp = await prisma.opportunity.findUnique({
-          where: { id: opportunityId },
-          select: { id: true, title: true, workspaceId: true, workspace: { select: WORKSPACE_LINK_SELECT } },
-        })
-        if (!opp) {
-          return fail(`Opportunity "${opportunityId}" not found.`)
-        }
-        // workspaceId is the authorized parent Opportunity's, never caller input.
-        const solution = await captureWorkspaceMutation(prisma, "solution", "create", "MCP", undefined, tx => tx.solution.create({ data: { workspaceId: opp.workspaceId, opportunityId, title: title.trim(), description: description?.trim() } }))
-        return ok(
-          withUrlLine(
-            `**Solution created** for "${opp.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
-            workspaceEntityUrl(opp.workspace, { type: "solution", id: solution.id, opportunityId }),
-          ),
-          {
-            id: solution.id,
-            title: solution.title,
-            status: solution.status,
-            opportunityId,
-          },
-        )
-      }
+      createSolution,
     )
 
     register(
@@ -1519,42 +1417,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ solutionId, title, description, riskLevel }) => {
-        const prisma = getPrisma()
-        // The link's slugs come from the Solution's own workspace; only the discovery page id
-        // (the opportunity it opens under) is read off the Solution's opportunityId.
-        const solution = await prisma.solution.findUnique({
-          where: { id: solutionId },
-          select: {
-            id: true,
-            title: true,
-            opportunityId: true,
-            workspace: { select: WORKSPACE_LINK_SELECT },
-          },
-        })
-        if (!solution) {
-          return fail(`Solution "${solutionId}" not found.`)
-        }
-        const assumption = await captureWorkspaceMutation(prisma, "assumption", "create", "MCP", undefined, tx => tx.assumption.create({ data: { solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED" } }))
-        return ok(
-          withUrlLine(
-            `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
-            workspaceEntityUrl(solution.workspace, {
-              type: "assumption",
-              id: assumption.id,
-              opportunityId: solution.opportunityId,
-            }),
-          ),
-          {
-            id: assumption.id,
-            title: assumption.title,
-            description: assumption.description,
-            riskLevel: assumption.riskLevel,
-            status: assumption.status,
-            solutionId,
-          },
-        )
-      }
+      createAssumption,
     )
 
     register(
@@ -2323,60 +2186,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ itemId, keyResultId, opportunityId, solutionId, squadId, horizon, status, title, description, startDate, endDate, isPrivate }) => {
-        const prisma = getPrisma()
-        const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, workspaceId: true, title: true, horizon: true, status: true } })
-        if (!item) {
-          return fail(`Roadmap item "${itemId}" not found.`)
-        }
-        if (horizon === "LAUNCHING" || horizon === "LAUNCHED") {
-          // The whole marketing-launch surface is opt-in per workspace. When
-          // it's off, say so instead of a message that presumes the feature
-          // is available.
-          const workspace = await prisma.workspace.findUnique({ where: { id: item.workspaceId }, select: { launchWorkflowEnabled: true } })
-          if (!workspace?.launchWorkflowEnabled) {
-            return fail(LAUNCH_WORKFLOW_DISABLED_MESSAGE)
-          }
-          if (horizon === "LAUNCHING") {
-            return fail(`Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.`)
-          }
-          return fail(`Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`)
-        }
-        const updateData = {
-            ...(keyResultId !== undefined ? { keyResultId } : {}),
-            ...(opportunityId !== undefined ? { opportunityId } : {}),
-            ...(solutionId !== undefined ? { solutionId } : {}),
-            ...(squadId !== undefined ? { squadId } : {}),
-            ...(horizon ? { horizon } : {}),
-            ...(status ? { status } : {}),
-            ...(title ? { title: title.trim() } : {}),
-            ...(description !== undefined ? { description: description.trim() } : {}),
-            ...(startDate !== undefined ? { startDate: new Date(startDate) } : {}),
-            ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
-            ...(isPrivate !== undefined ? { isPrivate } : {}),
-            updatedAt: new Date(),
-        }
-        const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", "MCP", itemId, tx => tx.roadmapItem.update({ where: { id: itemId }, data: updateData }))
-        return ok(
-          `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
-            `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
-            (updated.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
-            (updated.solutionId ? `\nLinked Solution: ${updated.solutionId}` : "") +
-            (updated.startDate || updated.endDate
-              ? `\nDates: ${updated.startDate ? formatUtcDate(updated.startDate) : "?"} – ${updated.endDate ? formatUtcDate(updated.endDate) : "?"}`
-              : ""),
-          {
-            id: updated.id,
-            title: updated.title,
-            horizon: updated.horizon,
-            status: updated.status,
-            isPrivate: updated.isPrivate,
-            solutionId: updated.solutionId,
-            startDate: updated.startDate,
-            endDate: updated.endDate,
-          },
-        )
-      }
+      updateRoadmapItem,
     )
 
     register(

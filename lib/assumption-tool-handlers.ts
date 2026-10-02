@@ -8,6 +8,18 @@ import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import getDatabase, { type AppTransactionClient } from "@/lib/db"
 import { getToolPrisma as getPrisma, getToolExpectedWhere } from "@/lib/mcp-tool-db"
 import { ok, fail } from "@/lib/mcp-output"
+import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
+
+export async function createAssumption({ solutionId, title, description, riskLevel = "MEDIUM" }: { solutionId: string; title: string; description?: string | null; riskLevel?: "HIGH" | "MEDIUM" | "LOW" }) {
+  const prisma = getPrisma()
+  const solution = await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, title: true, opportunityId: true, workspace: { select: { slug: true, organization: { select: { slug: true } } } } } })
+  if (!solution) return fail(`Solution "${solutionId}" not found.`)
+  const assumption = await captureWorkspaceMutation(getDatabase(), "assumption", "create", "MCP", undefined, (tx) => tx.assumption.create({ data: { solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED" } }))
+  return ok(withUrlLine(
+    `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
+    safeEntityUrl({ orgSlug: solution.workspace?.organization.slug, workspaceSlug: solution.workspace?.slug, type: "assumption", id: assumption.id, opportunityId: solution.opportunityId }),
+  ), { id: assumption.id, title: assumption.title, description: assumption.description, riskLevel: assumption.riskLevel, status: assumption.status, solutionId })
+}
 
 // ── update_assumption ───────────────────────────────────────────────────────
 

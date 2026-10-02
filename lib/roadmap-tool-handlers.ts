@@ -11,6 +11,48 @@ import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import type { LaunchTier } from "@/lib/types"
 import { setLaunchTierCore, updateChecklistItemCore } from "@/lib/launch-checklist"
 import { ok, fail } from "@/lib/mcp-output"
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
+
+export async function updateRoadmapItem(input: {
+  itemId: string; keyResultId?: string | null; opportunityId?: string | null; solutionId?: string | null; squadId?: string | null
+  horizon?: "NOW" | "NEXT" | "LATER" | "LAUNCHING" | "LAUNCHED" | "SHIPPED"; status?: "ACTIVE" | "ARCHIVED"
+  title?: string; description?: string | null; startDate?: string | null; endDate?: string | null; isPrivate?: boolean
+}) {
+  const prisma = getPrisma()
+  const item = await prisma.roadmapItem.findUnique({ where: { id: input.itemId }, select: { id: true, workspaceId: true } })
+  if (!item) return fail(`Roadmap item "${input.itemId}" not found.`)
+  if (input.horizon === "LAUNCHING" || input.horizon === "LAUNCHED") {
+    const workspace = await prisma.workspace.findUnique({ where: { id: item.workspaceId }, select: { launchWorkflowEnabled: true } })
+    if (!workspace?.launchWorkflowEnabled) return fail(LAUNCH_WORKFLOW_DISABLED_MESSAGE)
+    if (input.horizon === "LAUNCHING") return fail("Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.")
+    return fail("Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.")
+  }
+  const checks: Promise<unknown>[] = []
+  if (input.squadId) checks.push(prisma.squad.findFirst({ where: { id: input.squadId, workspaceId: item.workspaceId }, select: { id: true } }))
+  if (input.solutionId) checks.push(prisma.solution.findFirst({ where: { id: input.solutionId, workspaceId: item.workspaceId }, select: { id: true } }))
+  if (input.opportunityId) checks.push(prisma.opportunity.findFirst({ where: { id: input.opportunityId, workspaceId: item.workspaceId }, select: { id: true } }))
+  if (input.keyResultId) checks.push(prisma.keyResult.findFirst({ where: { id: input.keyResultId, objective: { workspaceId: item.workspaceId } }, select: { id: true } }))
+  if ((await Promise.all(checks)).some((row) => !row)) return fail("A linked resource was not found in this workspace.")
+  const data: Record<string, unknown> = { updatedAt: new Date() }
+  for (const key of ["keyResultId", "opportunityId", "solutionId", "squadId", "horizon", "status", "isPrivate"] as const) if (input[key] !== undefined) data[key] = input[key]
+  if (input.title !== undefined) data.title = input.title.trim()
+  if (input.description !== undefined) data.description = input.description?.trim() || null
+  if (input.startDate !== undefined) data.startDate = input.startDate ? new Date(input.startDate) : null
+  if (input.endDate !== undefined) data.endDate = input.endDate ? new Date(input.endDate) : null
+  const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", "MCP", input.itemId, (tx) => tx.roadmapItem.update({ where: { id: input.itemId }, data }))
+  const formatUtcDate = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
+  return ok(
+    `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
+      `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
+      (updated.isPrivate ? "\nPrivate: yes (hidden from public portal)" : "") +
+      (updated.solutionId ? `\nLinked Solution: ${updated.solutionId}` : "") +
+      (updated.startDate || updated.endDate
+        ? `\nDates: ${updated.startDate ? formatUtcDate(updated.startDate) : "?"} – ${updated.endDate ? formatUtcDate(updated.endDate) : "?"}`
+        : ""),
+    { id: updated.id, title: updated.title, horizon: updated.horizon, status: updated.status, isPrivate: updated.isPrivate, solutionId: updated.solutionId, startDate: updated.startDate, endDate: updated.endDate },
+  )
+}
 
 interface ChecklistItemInput {
   label: string
