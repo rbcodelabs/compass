@@ -9,13 +9,14 @@ const mocks = vi.hoisted(() => ({
     keyResult: { findFirst: vi.fn() },
     opportunity: { findFirst: vi.fn() },
     solution: { findFirst: vi.fn() },
-    assumption: { findFirst: vi.fn() },
+    assumption: { findFirst: vi.fn(), updateMany: vi.fn() },
     workspaceMember: { findFirst: vi.fn() },
     task: { findFirst: vi.fn() },
     roadmapItem: { findFirst: vi.fn() },
     feedbackItem: { findFirst: vi.fn() },
     objective: { findFirst: vi.fn() },
-    experiment: { findFirst: vi.fn() },
+    experiment: { findFirst: vi.fn(), updateMany: vi.fn() },
+    customFieldDefinition: { findFirst: vi.fn() },
   },
   createOpportunity: vi.fn(),
   createTask: vi.fn(),
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   createRoadmapItem: vi.fn(),
   assertWorkspaceMember: vi.fn(),
   updateExperiment: vi.fn(),
+  captureWorkspaceMutation: vi.fn(),
 }))
 
 vi.mock("@/lib/db", () => ({ default: () => mocks.prisma }))
@@ -41,6 +43,7 @@ vi.mock("@/lib/task-tool-handlers", () => ({
 }))
 vi.mock("@/lib/roadmap-tool-handlers", () => ({ updateRoadmapItem: mocks.updateRoadmapItem, createRoadmapItem: mocks.createRoadmapItem }))
 vi.mock("@/lib/experiment-update-tool", () => ({ updateExperiment: mocks.updateExperiment }))
+vi.mock("@/lib/workspace-update-mutations", () => ({ captureWorkspaceMutation: mocks.captureWorkspaceMutation }))
 
 import { executeRestRoute, RestConflictError, RestNotFoundError } from "@/lib/rest/execute"
 import { REST_ROUTES } from "@/lib/rest/registry"
@@ -59,6 +62,7 @@ const success = (data: unknown) => ({
 describe("REST domain execution", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.captureWorkspaceMutation.mockImplementation(async (prisma, _model, _operation, _actor, _id, mutate) => mutate(prisma))
   })
 
   it("rejects a foreign opportunity squad before the shared create service runs", async () => {
@@ -201,7 +205,46 @@ describe("REST domain execution", () => {
     mocks.prisma.experiment.findFirst.mockResolvedValue({ id: FOREIGN, status: "RUNNING", assumptionId: FOREIGN })
     mocks.prisma.assumption.findFirst.mockResolvedValue(null)
     await expect(executeRestRoute(route("concludeExperiment"), {
-      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: { conclusion: "PROCEED" },
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: { conclusion: "PROCEED", expectedUpdatedAt: "2026-10-02T12:00:00.000Z" },
     })).rejects.toBeInstanceOf(RestNotFoundError)
+  })
+
+  it("rejects a stale experiment conclusion before changing its linked assumption", async () => {
+    mocks.prisma.experiment.findFirst.mockResolvedValue({ id: FOREIGN, status: "RUNNING", assumptionId: null })
+    mocks.prisma.experiment.updateMany.mockResolvedValue({ count: 0 })
+    await expect(executeRestRoute(route("concludeExperiment"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {},
+      body: { conclusion: "PROCEED", expectedUpdatedAt: "2026-10-02T12:00:00.000Z" },
+    })).rejects.toBeInstanceOf(RestConflictError)
+    expect(mocks.prisma.assumption.findFirst).not.toHaveBeenCalled()
+  })
+
+  it("rolls back the experiment conclusion when the linked assumption update fails", async () => {
+    let status = "RUNNING"
+    mocks.prisma.experiment.findFirst.mockImplementation(async () => ({ id: FOREIGN, workspaceId: UUID, status, assumptionId: FOREIGN }))
+    mocks.prisma.experiment.updateMany.mockImplementation(async () => { status = "COMPLETE"; return { count: 1 } })
+    mocks.prisma.assumption.findFirst.mockResolvedValue({ id: FOREIGN })
+    mocks.prisma.assumption.updateMany.mockRejectedValue(new Error("injected assumption failure"))
+    mocks.captureWorkspaceMutation.mockImplementationOnce(async (prisma, _model, _operation, _actor, _id, mutate) => {
+      const before = status
+      try { return await mutate(prisma) } catch (error) { status = before; throw error }
+    })
+    await expect(executeRestRoute(route("concludeExperiment"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {},
+      body: { conclusion: "PROCEED", expectedUpdatedAt: "2026-10-02T12:00:00.000Z" },
+    })).rejects.toThrow("injected assumption failure")
+    expect(status).toBe("RUNNING")
+  })
+
+  it("hides a foreign custom-field definition before the shared value writer runs", async () => {
+    mocks.prisma.opportunity.findFirst.mockResolvedValue({ id: FOREIGN })
+    mocks.prisma.customFieldDefinition.findFirst.mockResolvedValue(null)
+    await expect(executeRestRoute(route("setCustomFieldValue"), {
+      params: { workspaceId: UUID, objectType: "OPPORTUNITY", objectId: FOREIGN }, query: {},
+      body: { fieldId: FOREIGN, value: "secret" },
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.prisma.customFieldDefinition.findFirst).toHaveBeenCalledWith({
+      where: { id: FOREIGN, workspaceId: UUID, objectType: "OPPORTUNITY" }, select: { id: true },
+    })
   })
 })

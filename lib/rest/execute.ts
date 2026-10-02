@@ -21,6 +21,7 @@ import type { ToolResult } from "@/lib/mcp-output"
 import { deleteKeyResult, deleteObjective, updateKeyResult, updateObjective } from "@/lib/okr-tool-handlers"
 import { updateExperiment } from "@/lib/experiment-update-tool"
 import { handleAnalyticsTool } from "@/lib/analytics/tool-handlers"
+import * as analyticsService from "@/lib/analytics/service"
 import { getCustomFieldValues, listCustomFieldDefinitions, setCustomFieldValue } from "@/lib/custom-field-tool-handlers"
 import { listLinksTool } from "@/lib/typed-link-tool-handlers"
 import { getEligibleParentKeyResults } from "@/lib/okr-hierarchy"
@@ -207,33 +208,44 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
       return serialize(await captureWorkspaceMutation(prisma, "experimentResult", "create", mutationActor, undefined, tx => tx.experimentResult.create({ data: { experimentId: id, note: String(body.note), metric: nullable(body.metric), value: body.value == null ? null : Number(body.value), source: "API" }, select: select.experimentResult })))
     }
     case "concludeExperiment": {
-      const conclusion = String(body.conclusion), reason = nullable(body.reason)?.trim() ?? ""
+      const conclusion = String(body.conclusion), reason = nullable(body.reason)?.trim() ?? "", expectedUpdatedAt = new Date(String(body.expectedUpdatedAt))
       if (conclusion === "NOT_PURSUED" && !reason) throw new RestConflictError("NOT_PURSUED requires a reason.")
-      const experiment = await prisma.experiment.findFirst({ where: { id, workspaceId }, select: { id: true, status: true, assumptionId: true } })
-      if (!experiment) throw new RestNotFoundError()
-      if (experiment.assumptionId && !(await prisma.assumption.findFirst({ where: { id: experiment.assumptionId, solution: { workspaceId } }, select: { id: true } }))) throw new RestNotFoundError()
-      if (["COMPLETE", "KILLED", "NOT_PURSUED"].includes(experiment.status)) throw new RestConflictError("The experiment is already concluded.")
       const status = conclusion === "KILL" ? "KILLED" : conclusion === "NOT_PURSUED" ? "NOT_PURSUED" : "COMPLETE"
-      const updated = await captureWorkspaceMutation(prisma, "experiment", "update", mutationActor, id, tx => tx.experiment.update({ where: { id }, data: { status, conclusion, conclusionReason: reason || null, endDate: new Date(), updatedAt: new Date(), source: "API" }, select: select.experiment }))
-      if (experiment.assumptionId) await captureWorkspaceMutation(prisma, "assumption", "update", mutationActor, experiment.assumptionId, tx => tx.assumption.update({ where: { id: experiment.assumptionId! }, data: { status: conclusion === "PROCEED" ? "VALIDATED" : conclusion === "KILL" ? "INVALIDATED" : "UNTESTED", updatedAt: new Date(), source: "API" } }))
-      return serialize(updated)
+      return serialize(await captureWorkspaceMutation(prisma, "experiment", "update", mutationActor, id, async tx => {
+        const experiment = await tx.experiment.findFirst({ where: { id, workspaceId }, select: { id: true, status: true, assumptionId: true } })
+        if (!experiment) throw new RestNotFoundError()
+        if (["COMPLETE", "KILLED", "NOT_PURSUED"].includes(experiment.status)) throw new RestConflictError("The experiment is already concluded.")
+        if (experiment.assumptionId && !(await tx.assumption.findFirst({ where: { id: experiment.assumptionId, solution: { workspaceId } }, select: { id: true } }))) throw new RestNotFoundError()
+        const updated = await tx.experiment.updateMany({ where: { id, workspaceId, updatedAt: expectedUpdatedAt, status: { in: ["DESIGNING", "RUNNING"] } }, data: { status, conclusion, conclusionReason: reason || null, endDate: new Date(), updatedAt: new Date(Math.max(Date.now(), expectedUpdatedAt.getTime() + 1)), source: "API" } })
+        if (!updated.count) throw new RestConflictError("The experiment changed since it was read.")
+        if (experiment.assumptionId) {
+          const assumption = await tx.assumption.updateMany({ where: { id: experiment.assumptionId, solution: { workspaceId } }, data: { status: conclusion === "PROCEED" ? "VALIDATED" : conclusion === "KILL" ? "INVALIDATED" : "UNTESTED", updatedAt: new Date(), source: "API" } })
+          if (!assumption.count) throw new RestNotFoundError()
+        }
+        return found(await tx.experiment.findFirst({ where: { id, workspaceId }, select: select.experiment }))
+      }))
     }
 
-    case "listMetrics": return analyticsData(await handleAnalyticsTool("list_metrics", { workspaceId }))
+    case "listMetrics": return analyticsCollectionPage(`metrics:${workspaceId}`, input.query, (cursor, limit) => analyticsService.listMetricsPage(actor, workspaceId, { limit, cursor }))
     case "getMetric": return analyticsData(await handleAnalyticsTool("get_metric", { workspaceId, metricId: id }))
     case "createMetric": return analyticsData(await handleAnalyticsTool("create_metric", { workspaceId, ...body }))
     case "updateMetric": return analyticsData(await handleAnalyticsTool("update_metric", { workspaceId, metricId: id, ...body }))
     case "archiveMetric": { await analyticsData(await handleAnalyticsTool("archive_metric", { workspaceId, metricId: id })); return undefined }
-    case "listMetricBindings": return analyticsData(await handleAnalyticsTool("list_metric_bindings", { workspaceId, ...input.query }))
+    case "listMetricBindings": return analyticsCollectionPage(`metric-bindings:${workspaceId}:${filters(input.query, ["targetType", "targetId"])}`, input.query, (cursor, limit) => analyticsService.listBindingsPage(actor, workspaceId, { targetType: String(input.query.targetType) as "EXPERIMENT" | "ROADMAP_ITEM" | "KEY_RESULT", targetId: String(input.query.targetId) }, { limit, cursor }))
     case "getMetricBinding": return analyticsData(await handleAnalyticsTool("get_metric_binding", { workspaceId, bindingId: id }))
     case "createMetricBinding": return analyticsData(await handleAnalyticsTool("link_metric", { workspaceId, ...body }))
     case "updateMetricBinding": return analyticsData(await handleAnalyticsTool("update_metric_binding", { workspaceId, bindingId: id, ...body }))
     case "deleteMetricBinding": { await analyticsData(await handleAnalyticsTool("unlink_metric", { workspaceId, bindingId: id })); return undefined }
     case "refreshMetricBinding": return analyticsData(await handleAnalyticsTool("refresh_metric_binding", { workspaceId, bindingId: id, requestId: body.requestId }))
-    case "listMetricObservations": return analyticsData(await handleAnalyticsTool("list_metric_observations", { workspaceId, bindingId: id }))
+    case "listMetricObservations": return analyticsCollectionPage(`metric-observations:${workspaceId}:${id}`, input.query, (cursor, limit) => analyticsService.listObservationsPage(actor, workspaceId, id, { limit, cursor }))
     case "getMetricObservation": return analyticsData(await handleAnalyticsTool("get_metric_observation", { workspaceId, observationId: id }))
 
-    case "listScoringModels": { const org = await workspaceOrganization(prisma, workspaceId); const data = ensureTool(await listScoringModels({ orgSlug: org.slug })) as { items: Array<{ id: string }> }; return Promise.all(data.items.map((item) => prisma.scoringModel.findFirst({ where: { id: item.id, organizationId: org.id }, select: select.scoringModel }))).then((items) => items.filter(Boolean).map(serialize)) }
+    case "listScoringModels": {
+      const org = await workspaceOrganization(prisma, workspaceId)
+      const data = ensureTool(await listScoringModels({ orgSlug: org.slug })) as { items: Array<{ id: string }> }
+      const allowedIds = data.items.map((item) => item.id)
+      return listPage(`scoring-models:${workspaceId}`, input.query, (cursor, take) => prisma.scoringModel.findMany({ where: { id: { in: allowedIds }, organizationId: org.id, ...cursorWhere(cursor) }, select: select.scoringModel, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
+    }
     case "getScoringModel": { await assertScoringModelAccess(actor, id); const model = await prisma.scoringModel.findFirst({ where: { id, organization: { workspaces: { some: { id: workspaceId } } } }, select: select.scoringModel }); return serialize(found(model)) }
     case "createScoringModel": { const org = await workspaceOrganization(prisma, workspaceId); await assertOrgAdminBySlug(actor, org.slug, { agentCapability: "SCORING_MODEL_ADMIN" }); const result = ensureTool(await createScoringModel({ orgSlug: org.slug, ...(body as unknown as Omit<Parameters<typeof createScoringModel>[0], "orgSlug">) })) as { id: string }; return serialize(found(await prisma.scoringModel.findFirst({ where: { id: result.id, organizationId: org.id }, select: select.scoringModel }))) }
     case "updateScoringModel": { const org = await workspaceOrganization(prisma, workspaceId); const access = await assertScoringModelAccess(actor, id, { admin: true, agentCapability: "SCORING_MODEL_ADMIN" }); if (access.organizationId !== org.id) throw new RestNotFoundError(); ensureTool(await updateScoringModel({ scoringModelId: id, ...(body as unknown as Omit<Parameters<typeof updateScoringModel>[0], "scoringModelId">) })); return serialize(found(await prisma.scoringModel.findFirst({ where: { id, organizationId: org.id }, select: select.scoringModel }))) }
@@ -249,7 +261,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "updateSquad": { const updated = await prisma.squad.updateMany({ where: { id, workspaceId }, data: { ...pick(body, ["name", "color"]), source: "API" } }); if (!updated.count) throw new RestNotFoundError(); return serialize(found(await prisma.squad.findFirst({ where: { id, workspaceId }, select: select.squad }))) }
     case "listCustomFieldDefinitions": return toolItems(await listCustomFieldDefinitions({ workspaceId, objectType: input.query.objectType as never }))
     case "listCustomFieldValues": { await assertCustomObjectWorkspace(prisma, workspaceId, input.params.objectType, input.params.objectId); return toolItems(await getCustomFieldValues({ objectType: input.params.objectType as never, objectId: input.params.objectId })) }
-    case "setCustomFieldValue": { await assertCustomObjectWorkspace(prisma, workspaceId, input.params.objectType, input.params.objectId); ensureTool(await setCustomFieldValue({ objectType: input.params.objectType as never, objectId: input.params.objectId, fieldId: String(body.fieldId), value: body.value as never })); const values = toolItems(await getCustomFieldValues({ objectType: input.params.objectType as never, objectId: input.params.objectId })); return found(values.find((value) => value.id === body.fieldId)) }
+    case "setCustomFieldValue": { await assertCustomObjectWorkspace(prisma, workspaceId, input.params.objectType, input.params.objectId); await assertCustomField(prisma, workspaceId, input.params.objectType, String(body.fieldId)); ensureTool(await setCustomFieldValue({ objectType: input.params.objectType as never, objectId: input.params.objectId, fieldId: String(body.fieldId), value: body.value as never })); const values = toolItems(await getCustomFieldValues({ objectType: input.params.objectType as never, objectId: input.params.objectId })); return found(values.find((value) => value.id === body.fieldId)) }
     case "listEntityLinks": return normalizeLinks(ensureTool(await listLinksTool({ workspaceId, ...(input.query as { opportunityId?: string; objectiveId?: string; solutionId?: string; keyResultId?: string; limit?: number; cursor?: string }) })) as Record<string, unknown>)
   }
   throw new RestNotFoundError()
@@ -311,9 +323,21 @@ function toolItems(result: ToolResult): Array<Record<string, unknown>> {
 }
 
 function analyticsData(result: ToolResult): unknown {
-  const data = ensureTool(result)
+  if (!result.structuredContent.ok) {
+    if (["NOT_FOUND_OR_ACCESS_DENIED", "ACCESS_DENIED"].includes(result.structuredContent.message)) throw new RestNotFoundError()
+    throw new RestConflictError("The analytics operation could not be completed.")
+  }
+  const data = result.structuredContent.data
   if (data && typeof data === "object" && "items" in data) return (data as { items: unknown[] }).items
   return data
+}
+
+async function analyticsCollectionPage<T>(context: string, query: Record<string, unknown>, load: (cursor: { id: string; at: Date } | null, limit: number) => Promise<analyticsService.AnalyticsPage<T>>) {
+  const limit = Number(query.limit ?? 50)
+  const decoded = typeof query.cursor === "string" ? decodeCursor(query.cursor, context) : null
+  if (query.cursor && !decoded) throw new RestCursorError("The cursor is invalid for this collection or filter set.")
+  const page = await load(decoded ? { id: decoded.id, at: new Date(decoded.createdAt) } : null, limit)
+  return { items: page.items.map(serialize), nextCursor: page.next ? encodeCursor({ id: page.next.id, createdAt: page.next.at.toISOString(), context }) : null }
 }
 
 function normalizeLinks(data: Record<string, unknown>) {
@@ -377,6 +401,9 @@ async function assertCustomObjectWorkspace(prisma: Prisma, workspaceId: string, 
               : objectType === "TASK" ? await prisma.task.findFirst({ where: { id: objectId, workspaceId }, select: { id: true } })
                 : null
   if (!found) throw new RestNotFoundError()
+}
+async function assertCustomField(prisma: Prisma, workspaceId: string, objectType: string, fieldId: string) {
+  if (!(await prisma.customFieldDefinition.findFirst({ where: { id: fieldId, workspaceId, objectType }, select: { id: true } }))) throw new RestNotFoundError()
 }
 async function workspaceOrganization(prisma: Prisma, workspaceId: string) {
   const workspace = await prisma.workspace.findFirst({ where: { id: workspaceId }, select: { organization: { select: { id: true, slug: true } } } })

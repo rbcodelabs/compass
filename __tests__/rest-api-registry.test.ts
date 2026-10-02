@@ -48,6 +48,10 @@ describe("REST API registry", () => {
       expectedRevision: 1, name: "Activation", unit: "teams", provider: "vercel",
       connectionId: "11111111-1111-4111-8111-111111111111", query: { metric: "pageviews" },
     }).success).toBe(true)
+
+    const conclusion = REST_ROUTES.find((route) => route.operationId === "concludeExperiment")!
+    expect(conclusion.bodySchema?.safeParse({ conclusion: "PROCEED" }).success).toBe(false)
+    expect(conclusion.bodySchema?.safeParse({ conclusion: "PROCEED", expectedUpdatedAt: "2026-10-02T12:00:00.000Z" }).success).toBe(true)
   })
 
   it("does not accept a scoring formula change without replacement metrics", () => {
@@ -57,6 +61,25 @@ describe("REST API registry", () => {
       formulaType: "MULTIPLICATIVE",
       metrics: [{ key: "reach", label: "Reach", minValue: 1, maxValue: 10, weight: 1, direction: "POSITIVE" }],
     }).success).toBe(true)
+  })
+
+  it("reuses strict analytics request contracts", () => {
+    const createMetric = REST_ROUTES.find((entry) => entry.operationId === "createMetric")!
+    expect(createMetric.bodySchema?.safeParse({ name: "Views", unit: "views", provider: "vercel", query: {} }).success).toBe(false)
+    expect(createMetric.bodySchema?.safeParse({ name: "Views", unit: "views", provider: "vercel", query: { metric: "pageviews" } }).success).toBe(true)
+    const updateBinding = REST_ROUTES.find((entry) => entry.operationId === "updateMetricBinding")!
+    expect(updateBinding.bodySchema?.safeParse({}).success).toBe(false)
+    expect(updateBinding.bodySchema?.safeParse({ baseline: { since: "not-a-date", until: "2026-10-02" } }).success).toBe(false)
+    expect(updateBinding.bodySchema?.safeParse({ followup: { version: 1, mode: "rolling", days: 30 } }).success).toBe(true)
+  })
+
+  it("uses cursor collection envelopes for every Phase 2 list", () => {
+    for (const operationId of ["listMetrics", "listMetricBindings", "listMetricObservations", "listScoringModels"]) {
+      const route = REST_ROUTES.find((entry) => entry.operationId === operationId)!
+      expect(route.querySchema).toBeDefined()
+      expect(route.responseSchema.safeParse({ items: [], nextCursor: null }).success, operationId).toBe(true)
+      expect(route.responseSchema.safeParse([]).success, operationId).toBe(false)
+    }
   })
 
   it("matches concrete paths and extracts parameters", () => {

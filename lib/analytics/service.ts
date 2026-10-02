@@ -25,6 +25,9 @@ export type MetricDTO = { id: string; workspaceId: string; revisionId: string; r
 export type ConnectionDTO = Pick<AnalyticsConnection, "id" | "provider" | "projectId" | "teamId" | "enabled" | "health" | "generation">
 export type BindingDTO = Omit<MetricBinding, "baselineJson" | "followupJson"> & BindingWindows & { metric: MetricDTO; replacesBindingId?: string }
 export type ObservationDTO = Omit<MetricObservation, "snapshotJson" | "dataJson"> & { snapshot: Record<string, unknown>; data: ObservationData }
+export type AnalyticsPage<T> = { items: T[]; next: { id: string; at: Date } | null }
+type PageOptions = { limit: number; cursor: { id: string; at: Date } | null }
+const pageWhere = (cursor: PageOptions["cursor"], field: "createdAt" | "retrievedAt" = "createdAt") => cursor ? { OR: [{ [field]: { lt: cursor.at } }, { [field]: cursor.at, id: { lt: cursor.id } }] } : {}
 const denied = () => new AnalyticsError("NOT_FOUND_OR_ACCESS_DENIED")
 const connectionDTO = (row: AnalyticsConnection): ConnectionDTO => ({ id: row.id, provider: row.provider, projectId: row.projectId, teamId: row.teamId, enabled: row.enabled, health: row.health, generation: row.generation })
 const observationDTO = (row: MetricObservation): ObservationDTO => {
@@ -104,11 +107,17 @@ async function validateMetricConnection(db: AppTransactionClient, workspaceId: s
   } else if (input.connectionId) throw new AnalyticsError("UNSUPPORTED_CONNECTION")
 }
 export async function listMetrics(actor: McpActor, workspaceId: string): Promise<MetricDTO[]> {
+  return (await listMetricsPage(actor, workspaceId, { limit: 200, cursor: null })).items
+}
+export async function listMetricsPage(actor: McpActor, workspaceId: string, options: PageOptions): Promise<AnalyticsPage<MetricDTO>> {
   await authorize(actor, workspaceId)
   const db = getToolPrisma()
-  const definitions = await db.metricDefinition.findMany({ where: { workspaceId }, orderBy: { createdAt: "desc" }, take: 200 })
+  const rows = await db.metricDefinition.findMany({ where: { workspaceId, ...pageWhere(options.cursor) }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: options.limit + 1 })
+  const definitions = rows.slice(0, options.limit)
   const revisions = await db.metricRevision.findMany({ where: { workspaceId, id: { in: definitions.map(d => d.currentRevisionId) } } })
-  return definitions.flatMap(d => { const r = revisions.find(r => r.id === d.currentRevisionId); return r ? [metricDTO(d, r)] : [] })
+  const items = definitions.flatMap(d => { const r = revisions.find(r => r.id === d.currentRevisionId); return r ? [metricDTO(d, r)] : [] })
+  const last = definitions.at(-1)
+  return { items, next: rows.length > options.limit && last ? { id: last.id, at: last.createdAt } : null }
 }
 export async function getMetric(actor: McpActor, workspaceId: string, metricId: string) {
   await authorize(actor, workspaceId)
@@ -178,11 +187,16 @@ export async function getBinding(actor: McpActor, workspaceId: string, bindingId
   return loadBinding(getToolPrisma(), workspaceId, bindingId)
 }
 export async function listBindings(actor: McpActor, workspaceId: string, target: MetricTarget, options: { includeInactive?: boolean } = {}): Promise<BindingDTO[]> {
+  return (await listBindingsPage(actor, workspaceId, target, { limit: 100, cursor: null }, options)).items
+}
+export async function listBindingsPage(actor: McpActor, workspaceId: string, target: MetricTarget, page: PageOptions, options: { includeInactive?: boolean } = {}): Promise<AnalyticsPage<BindingDTO>> {
   await authorize(actor, workspaceId)
   const db = getToolPrisma()
   await assertTarget(db, workspaceId, target)
-  const rows = await db.metricBinding.findMany({ where: { workspaceId, ...target, ...(options.includeInactive ? {} : { active: true }) }, take: 100, orderBy: { createdAt: "asc" } })
-  return Promise.all(rows.map(row => bindingDTO(db, row)))
+  const rows = await db.metricBinding.findMany({ where: { workspaceId, ...target, ...(options.includeInactive ? {} : { active: true }), ...pageWhere(page.cursor) }, take: page.limit + 1, orderBy: [{ createdAt: "desc" }, { id: "desc" }] })
+  const selected = rows.slice(0, page.limit)
+  const last = selected.at(-1)
+  return { items: await Promise.all(selected.map(row => bindingDTO(db, row))), next: rows.length > page.limit && last ? { id: last.id, at: last.createdAt } : null }
 }
 export async function linkMetric(actor: McpActor, workspaceId: string, raw: LinkMetricInput): Promise<BindingDTO> {
   await authorize(actor, workspaceId, true)
@@ -225,9 +239,15 @@ export async function updateBinding(actor: McpActor, workspaceId: string, bindin
   })
 }
 export async function listObservations(actor: McpActor, workspaceId: string, bindingId: string): Promise<ObservationDTO[]> {
+  return (await listObservationsPage(actor, workspaceId, bindingId, { limit: 100, cursor: null })).items
+}
+export async function listObservationsPage(actor: McpActor, workspaceId: string, bindingId: string, page: PageOptions): Promise<AnalyticsPage<ObservationDTO>> {
   await authorize(actor, workspaceId)
   await loadBinding(getToolPrisma(), workspaceId, bindingId)
-  return (await getToolPrisma().metricObservation.findMany({ where: { workspaceId, bindingId }, orderBy: { retrievedAt: "desc" }, take: 100 })).map(observationDTO)
+  const rows = await getToolPrisma().metricObservation.findMany({ where: { workspaceId, bindingId, ...pageWhere(page.cursor, "retrievedAt") }, orderBy: [{ retrievedAt: "desc" }, { id: "desc" }], take: page.limit + 1 })
+  const selected = rows.slice(0, page.limit)
+  const last = selected.at(-1)
+  return { items: selected.map(observationDTO), next: rows.length > page.limit && last ? { id: last.id, at: last.retrievedAt } : null }
 }
 export async function getObservation(actor: McpActor, workspaceId: string, observationId: string): Promise<ObservationDTO> {
   await authorize(actor, workspaceId)

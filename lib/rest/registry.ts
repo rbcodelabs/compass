@@ -8,6 +8,7 @@ import {
 } from "@/lib/rest/schemas"
 import { FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES, FEEDBACK_ATTACHMENT_MAX_FILE_BYTES } from "@/lib/feedback-attachment-rules"
 import { FEEDBACK_STATUSES } from "@/lib/feedback-meta"
+import { linkMetricSchema, metricInputSchema, targetSchema, updateMetricBindingSchema } from "@/lib/analytics/service"
 
 export type ApiScope = "api:read" | "api:write"
 export type RestMethod = "GET" | "POST" | "PATCH" | "DELETE"
@@ -98,12 +99,8 @@ const checkInCreate = z.object({ value: z.number().finite(), note: z.string().tr
 const experimentCreate = z.object({ title: z.string().trim().min(1).max(255), hypothesis: z.string().trim().min(1), method: z.string().trim().min(1), killCondition: z.string().trim().min(1), assumptionId: uuid.nullable().optional(), squadId: uuid.nullable().optional() }).strict()
 const experimentPatch = z.object({ expectedUpdatedAt, title: z.string().trim().min(1).max(255).optional(), hypothesis: z.string().trim().min(1).optional(), method: z.string().trim().min(1).optional(), killCondition: z.string().trim().min(1).optional() }).strict()
 const experimentResultCreate = z.object({ note: z.string().trim().min(1), metric: z.string().trim().max(255).nullable().optional(), value: z.number().finite().nullable().optional() }).strict()
-const experimentConclusion = z.object({ conclusion: z.enum(["PROCEED", "KILL", "ITERATE", "NOT_PURSUED"]), reason: z.string().trim().nullable().optional() }).strict()
-const metricInput = z.object({ name: z.string().trim().min(1).max(255), unit: z.string().trim().min(1).max(80), provider: z.enum(["vercel", "compass_activation"]), connectionId: uuid.optional(), query: z.record(z.string(), z.unknown()) }).strict()
-const metricPatch = metricInput.extend({ expectedRevision: z.number().int().positive() }).strict()
-const metricTarget = z.object({ targetType: z.enum(["EXPERIMENT", "ROADMAP_ITEM", "KEY_RESULT"]), targetId: uuid })
-const metricBindingCreate = metricTarget.extend({ metricId: uuid, baseline: z.unknown().nullable().optional(), followup: z.unknown().optional(), target: z.number().finite().optional() }).strict()
-const metricBindingPatch = z.object({ baseline: z.unknown().nullable().optional(), followup: z.unknown().optional(), target: z.number().finite().nullable().optional() }).strict()
+const experimentConclusion = z.object({ expectedUpdatedAt, conclusion: z.enum(["PROCEED", "KILL", "ITERATE", "NOT_PURSUED"]), reason: z.string().trim().nullable().optional() }).strict()
+const metricPatch = metricInputSchema.extend({ expectedRevision: z.number().int().positive() }).strict()
 const scoringMetricInput = scoringMetricSchema.omit({ order: true })
 const scoringModelCreate = z.object({ name: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), formulaType: z.enum(["WEIGHTED_SUM", "MULTIPLICATIVE"]), metrics: z.array(scoringMetricInput).min(1) }).strict()
 const scoringModelPatch = z.object({ name: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), formulaType: z.enum(["WEIGHTED_SUM", "MULTIPLICATIVE"]).optional(), metrics: z.array(scoringMetricInput).min(1).optional() }).strict()
@@ -176,21 +173,21 @@ export const REST_ROUTES: readonly RestRoute[] = [
   write("POST", "createExperimentResult", "/api/v1/workspaces/{workspaceId}/experiments/{id}/results", "Record an experiment result", experimentResultSchema, itemPath, experimentResultCreate, 201),
   write("POST", "concludeExperiment", "/api/v1/workspaces/{workspaceId}/experiments/{id}/conclusion", "Conclude an experiment", experimentSchema, itemPath, experimentConclusion),
 
-  read("listMetrics", "/api/v1/workspaces/{workspaceId}/metrics", "List metric definitions", z.array(metricSchema), workspacePath),
-  write("POST", "createMetric", "/api/v1/workspaces/{workspaceId}/metrics", "Create a metric definition", metricSchema, workspacePath, metricInput, 201),
+  read("listMetrics", "/api/v1/workspaces/{workspaceId}/metrics", "List metric definitions", collectionOf(metricSchema), workspacePath, cursorQuery.strict()),
+  write("POST", "createMetric", "/api/v1/workspaces/{workspaceId}/metrics", "Create a metric definition", metricSchema, workspacePath, metricInputSchema, 201),
   read("getMetric", "/api/v1/workspaces/{workspaceId}/metrics/{id}", "Get a metric definition", metricSchema, itemPath),
   write("PATCH", "updateMetric", "/api/v1/workspaces/{workspaceId}/metrics/{id}", "Create a metric revision", metricSchema, itemPath, metricPatch),
   write("DELETE", "archiveMetric", "/api/v1/workspaces/{workspaceId}/metrics/{id}", "Archive a metric definition", z.undefined(), itemPath, undefined, 204),
-  read("listMetricBindings", "/api/v1/workspaces/{workspaceId}/metric-bindings", "List metric bindings", z.array(metricBindingSchema), workspacePath, metricTarget.strict()),
-  write("POST", "createMetricBinding", "/api/v1/workspaces/{workspaceId}/metric-bindings", "Bind a metric", metricBindingSchema, workspacePath, metricBindingCreate, 201),
+  read("listMetricBindings", "/api/v1/workspaces/{workspaceId}/metric-bindings", "List metric bindings", collectionOf(metricBindingSchema), workspacePath, cursorQuery.merge(targetSchema).strict()),
+  write("POST", "createMetricBinding", "/api/v1/workspaces/{workspaceId}/metric-bindings", "Bind a metric", metricBindingSchema, workspacePath, linkMetricSchema, 201),
   read("getMetricBinding", "/api/v1/workspaces/{workspaceId}/metric-bindings/{id}", "Get a metric binding", metricBindingSchema, itemPath),
-  write("PATCH", "updateMetricBinding", "/api/v1/workspaces/{workspaceId}/metric-bindings/{id}", "Replace a metric binding revision", metricBindingSchema, itemPath, metricBindingPatch),
+  write("PATCH", "updateMetricBinding", "/api/v1/workspaces/{workspaceId}/metric-bindings/{id}", "Replace a metric binding revision", metricBindingSchema, itemPath, updateMetricBindingSchema),
   write("DELETE", "deleteMetricBinding", "/api/v1/workspaces/{workspaceId}/metric-bindings/{id}", "Deactivate a metric binding", z.undefined(), itemPath, undefined, 204),
   write("POST", "refreshMetricBinding", "/api/v1/workspaces/{workspaceId}/metric-bindings/{id}/refresh", "Refresh metric observations idempotently", z.array(metricObservationSchema), itemPath, z.object({ requestId: uuid }).strict()),
-  read("listMetricObservations", "/api/v1/workspaces/{workspaceId}/metric-bindings/{id}/metric-observations", "List metric observations", z.array(metricObservationSchema), itemPath),
+  read("listMetricObservations", "/api/v1/workspaces/{workspaceId}/metric-bindings/{id}/metric-observations", "List metric observations", collectionOf(metricObservationSchema), itemPath, cursorQuery.strict()),
   read("getMetricObservation", "/api/v1/workspaces/{workspaceId}/metric-observations/{id}", "Get a metric observation", metricObservationSchema, itemPath),
 
-  read("listScoringModels", "/api/v1/workspaces/{workspaceId}/scoring-models", "List scoring models available to a workspace", z.array(scoringModelSchema), workspacePath),
+  read("listScoringModels", "/api/v1/workspaces/{workspaceId}/scoring-models", "List scoring models available to a workspace", collectionOf(scoringModelSchema), workspacePath, cursorQuery.strict()),
   write("POST", "createScoringModel", "/api/v1/workspaces/{workspaceId}/scoring-models", "Create an organization scoring model", scoringModelSchema, workspacePath, scoringModelCreate, 201),
   read("getScoringModel", "/api/v1/workspaces/{workspaceId}/scoring-models/{id}", "Get a scoring model", scoringModelSchema, itemPath),
   write("PATCH", "updateScoringModel", "/api/v1/workspaces/{workspaceId}/scoring-models/{id}", "Update a scoring model atomically", scoringModelSchema, itemPath, scoringModelPatch),

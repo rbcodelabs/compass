@@ -74,7 +74,7 @@ export async function listScoringModels({ orgSlug }: { orgSlug: string }) {
   })
 
   if (!models.length) {
-    return fail("No scoring models in this organization.")
+    return ok("No scoring models in this organization.", { items: [], count: 0 })
   }
 
   const lines = models.map((m) =>

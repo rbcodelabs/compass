@@ -14,6 +14,7 @@ vi.mock("@/lib/rest/execute", async (importOriginal) => {
 import { handleRestRequest } from "@/lib/rest/http"
 import { McpAuthzError } from "@/lib/mcp-authz"
 import { RestNotFoundError } from "@/lib/rest/execute"
+import { AnalyticsError } from "@/lib/analytics/providers"
 
 const UUID = "11111111-1111-4111-8111-111111111111"
 
@@ -78,5 +79,12 @@ describe("REST HTTP adapter", () => {
     expect(inaccessible.status).toBe(404)
     expect(await inaccessible.text()).toBe(await absent.text())
     expect(inaccessible.headers.get("cache-control")).toBe("no-store")
+  })
+
+  it("normalizes analytics access denial as the same opaque 404", async () => {
+    executeRestRoute.mockRejectedValueOnce(new AnalyticsError("NOT_FOUND_OR_ACCESS_DENIED"))
+    const response = await handleRestRequest(new Request(`http://localhost/api/v1/workspaces/${UUID}/metrics/${UUID}`), "GET")
+    expect(response.status).toBe(404)
+    expect(await response.json()).toMatchObject({ code: "not_found" })
   })
 })

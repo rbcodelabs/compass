@@ -4,6 +4,7 @@ import { validateProgrammaticAuth } from "@/lib/programmatic-auth"
 import { McpAuthzError, runWithMcpActor, type McpActor } from "@/lib/mcp-authz"
 import { executeRestRoute, RestConflictError, RestCursorError, RestNotFoundError } from "@/lib/rest/execute"
 import { matchRestRoute, type RestMethod } from "@/lib/rest/registry"
+import { AnalyticsError } from "@/lib/analytics/providers"
 
 const NO_STORE = { "Cache-Control": "no-store" }
 class RestResponseValidationError extends Error {}
@@ -48,6 +49,8 @@ export async function handleRestRequest(request: Request, method: RestMethod): P
   } catch (error) {
     if (error instanceof ZodError) return problem(request, 422, "validation_failed", "Unprocessable Content", "The request did not satisfy the endpoint schema.", error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })))
     if (error instanceof RestNotFoundError || error instanceof McpAuthzError) return problem(request, 404, "not_found", "Not Found", "The requested resource was not found or is not accessible.")
+    if (error instanceof AnalyticsError && ["NOT_FOUND_OR_ACCESS_DENIED", "ACCESS_DENIED"].includes(error.code)) return problem(request, 404, "not_found", "Not Found", "The requested resource was not found or is not accessible.")
+    if (error instanceof AnalyticsError) return problem(request, 409, "conflict", "Conflict", "The analytics operation could not be completed.")
     if (error instanceof RestCursorError) return problem(request, 400, "invalid_cursor", "Bad Request", error.message)
     if (error instanceof RestConflictError) return problem(request, 409, "conflict", "Conflict", error.message)
     if (error instanceof RestResponseValidationError) return problem(request, 500, "internal_error", "Internal Server Error", "The request could not be completed.")
