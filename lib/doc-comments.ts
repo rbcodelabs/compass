@@ -18,7 +18,7 @@
 import getPrisma from "@/lib/db"
 import { resolveCommentAuthors } from "@/lib/comment-authors"
 import type { DocComment } from "@prisma/client"
-import { mirrorLegacyDocComment } from "@/lib/comment-compat"
+import { createCommentRows, followAfterComment, type CommentSource } from "@/lib/comments"
 
 export type CommentStatus = "OPEN" | "RESOLVED"
 export type CommentAuthorType = "AGENT" | "HUMAN"
@@ -37,7 +37,7 @@ export interface CreateDocCommentInput extends CommentAnchorFields {
   authorName: string
   authorId?: string | null
   authorType?: CommentAuthorType
-  source?: string
+  source?: CommentSource
   parentId?: string | null
 }
 
@@ -57,22 +57,16 @@ export async function createDocCommentCore(
   const body = input.body.trim()
   if (!body) return { ok: false, error: "EMPTY_BODY" }
 
-  const doc = await prisma.doc.findUnique({ where: { id: input.docId }, select: { id: true } })
-  if (!doc) return { ok: false, error: "DOC_NOT_FOUND" }
-
-  const isReply = Boolean(input.parentId)
-  if (isReply) {
-    const parent = await prisma.docComment.findUnique({
-      where: { id: input.parentId! },
-      select: { id: true, parentId: true, docId: true },
-    })
-    if (!parent || parent.docId !== input.docId) return { ok: false, error: "PARENT_NOT_FOUND" }
-    // One level deep: you can't reply to a reply.
-    if (parent.parentId) return { ok: false, error: "PARENT_IS_REPLY" }
-  }
-
-  const comment = await prisma.docComment.create({
-    data: {
+  const result = await prisma.$transaction(async tx => {
+    const doc = await tx.doc.findUnique({ where: { id: input.docId }, select: { id: true, workspaceId: true } })
+    if (!doc) return { ok: false as const, error: "DOC_NOT_FOUND" as const }
+    const isReply = Boolean(input.parentId)
+    if (isReply) {
+      const parent = await tx.docComment.findUnique({ where: { id: input.parentId! }, select: { id: true, parentId: true, docId: true } })
+      if (!parent || parent.docId !== input.docId) return { ok: false as const, error: "PARENT_NOT_FOUND" as const }
+      if (parent.parentId) return { ok: false as const, error: "PARENT_IS_REPLY" as const }
+    }
+    const comment = await tx.docComment.create({ data: {
       docId: input.docId,
       parentId: input.parentId ?? null,
       body,
@@ -87,15 +81,20 @@ export async function createDocCommentCore(
       authorId: input.authorId ?? null,
       authorType: input.authorType ?? "HUMAN",
       source: input.source ?? "UI",
-    },
+    } })
+    await createCommentRows(tx, {
+      id: comment.id, workspaceId: doc.workspaceId, targetType: "DOC", targetId: input.docId,
+      parentId: comment.parentId, body: comment.body, status: comment.status as CommentStatus,
+      authorId: comment.authorId, authorName: comment.authorName,
+      authorType: comment.authorType as CommentAuthorType, source: comment.source as CommentSource,
+      createdAt: comment.createdAt, updatedAt: comment.updatedAt,
+      ...(comment.anchorText ? { docAnchor: { anchorText: comment.anchorText, anchorPrefix: comment.anchorPrefix, anchorSuffix: comment.anchorSuffix, anchorStart: comment.anchorStart, anchorEnd: comment.anchorEnd } } : {}),
+    })
+    return { ok: true as const, comment, workspaceId: doc.workspaceId }
   })
-
-  try { await mirrorLegacyDocComment(comment) } catch (error) {
-    await prisma.docComment.delete({ where: { id: comment.id } })
-    throw error
-  }
-
-  return { ok: true, comment: (await resolveCommentAuthors([comment]))[0] }
+  if (!result.ok) return result
+  await followAfterComment({ id: result.comment.id, workspaceId: result.workspaceId, targetType: "DOC", targetId: input.docId, parentId: result.comment.parentId, body: result.comment.body, status: "OPEN", authorId: result.comment.authorId, authorName: result.comment.authorName, authorType: result.comment.authorType as CommentAuthorType, source: result.comment.source as CommentSource }, result.comment.id)
+  return { ok: true, comment: (await resolveCommentAuthors([result.comment]))[0] }
 }
 
 /**
@@ -135,7 +134,8 @@ export async function updateDocCommentBodyCore(
     if (!existing) return null
     const now = new Date(), trimmed = body.trim()
     const row = await tx.docComment.update({ where: { id: commentId }, data: { body: trimmed, updatedAt: now } })
-    await tx.comment.updateMany({ where: { id: commentId }, data: { body: trimmed, updatedAt: now } })
+    const mirror = await tx.comment.updateMany({ where: { id: commentId }, data: { body: trimmed, updatedAt: now } })
+    if (mirror.count !== 1) throw new Error("Doc comment shared mirror is missing.")
     return row
   })
   if (!updated) return null
@@ -156,7 +156,8 @@ export async function setDocCommentStatusCore(
     if (!existing) return null
     const now = new Date()
     const row = await tx.docComment.update({ where: { id: commentId }, data: { status, updatedAt: now } })
-    await tx.comment.updateMany({ where: { id: commentId }, data: { status, updatedAt: now } })
+    const mirror = await tx.comment.updateMany({ where: { id: commentId }, data: { status, updatedAt: now } })
+    if (mirror.count !== 1) throw new Error("Doc comment shared mirror is missing.")
     return row
   })
   if (!updated) return null
