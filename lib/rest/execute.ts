@@ -308,14 +308,23 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     }
     case "createComment": {
       await assertCommentTargetWorkspace(input.params.targetType, input.params.targetId, workspaceId)
+      if (typeof body.parentId === "string") {
+        const parent = await prisma.comment.findFirst({ where: { id: body.parentId, workspaceId, targetType: input.params.targetType, targetId: input.params.targetId }, select: { id: true } })
+        if (!parent) throw new RestNotFoundError()
+      }
       const author = await restCommentAuthor(prisma, actor, workspaceId)
+      if (input.params.targetType === "DOC") {
+        const result = await createDocCommentCore({ docId: input.params.targetId, parentId: nullable(body.parentId), body: String(body.body), ...author })
+        if (!result.ok) throw new RestValidationError(result.error)
+        return serialize(result.comment)
+      }
       return serialize(found(await createComment({ workspaceId, targetType: input.params.targetType as never, targetId: input.params.targetId, parentId: nullable(body.parentId), body: String(body.body), ...author })))
     }
     case "getComment": { await assertCommentWorkspace(prisma, id, workspaceId); return serialize(found(await getComment(id))) }
-    case "updateComment": { await assertCommentMutation(prisma, actor, id, workspaceId); return serialize(found(await updateCommentBody(id, String(body.body)))) }
-    case "deleteComment": { const access = await assertCommentMutation(prisma, actor, id, workspaceId); const { deleteBrowserComment } = await import("@/lib/comment-browser"); await deleteBrowserComment(id, { userId: access.userId, admin: access.admin }, access.admin); return undefined }
-    case "resolveComment": { await assertCommentMutation(prisma, actor, id, workspaceId); return serialize(found(await setCommentStatus(id, "RESOLVED"))) }
-    case "reopenComment": { await assertCommentMutation(prisma, actor, id, workspaceId); return serialize(found(await setCommentStatus(id, "OPEN"))) }
+    case "updateComment": { const access = await assertCommentMutation(prisma, actor, id, workspaceId); return access.targetType === "DOC" ? serialize(ensureTool(await updateDocComment({ commentId: id, body: String(body.body) }))) : serialize(found(await updateCommentBody(id, String(body.body)))) }
+    case "deleteComment": { const access = await assertCommentMutation(prisma, actor, id, workspaceId); if (access.targetType === "DOC") ensureTool(await deleteDocComment({ commentId: id })); else { const { deleteBrowserComment } = await import("@/lib/comment-browser"); await deleteBrowserComment(id, { userId: access.userId, admin: access.admin }, access.admin) } return undefined }
+    case "resolveComment": { const access = await assertCommentMutation(prisma, actor, id, workspaceId); return access.targetType === "DOC" ? serialize(ensureTool(await resolveDocComment({ commentId: id }))) : serialize(found(await setCommentStatus(id, "RESOLVED"))) }
+    case "reopenComment": { const access = await assertCommentMutation(prisma, actor, id, workspaceId); return access.targetType === "DOC" ? serialize(ensureTool(await reopenDocComment({ commentId: id }))) : serialize(found(await setCommentStatus(id, "OPEN"))) }
     case "followResource": return serialize(ensureTool(await followTool({ workspaceId, subjectType: input.params.subjectType, subjectId: input.params.subjectId })))
     case "unfollowResource": { ensureTool(await unfollowTool({ workspaceId, subjectType: input.params.subjectType, subjectId: input.params.subjectId })); return undefined }
     case "listNotifications": { if (!actor.userId || actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN" || isServiceActor(actor)) throw new RestNotFoundError(); return notificationPage(actor.userId, workspaceId, input.query) }
@@ -362,7 +371,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "setLaunchTier": { await assertRoadmapWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await setLaunchTier({ itemId: id, tier: body.tier as never }))) }
     case "getLaunchChecklist": { await assertRoadmapWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getLaunchChecklist({ roadmapItemId: id }))) }
     case "updateLaunchChecklistItem": { if (!(await prisma.launchChecklistItem.findFirst({ where: { id, launchChecklist: { roadmapItem: { workspaceId } } }, select: { id: true } }))) throw new RestNotFoundError(); return serialize(ensureTool(await updateLaunchChecklistItem({ itemId: id, status: body.status as never }))) }
-    case "requestReleaseAuthorization": { if (actor.purpose !== "USER" || !actor.userId) throw new RestNotFoundError(); await assertWorkspaceAdmin(actor, workspaceId); return serialize(ensureTool(await requestReleaseAuthorization({ workspaceId, ...(body as unknown as Omit<Parameters<typeof requestReleaseAuthorization>[0], "workspaceId">) }))) }
+    case "requestReleaseAuthorization": { if (actor.purpose !== "USER" || !actor.userId) throw new RestNotFoundError(); await assertWorkspaceAdmin(actor, workspaceId); const taskIds = body.taskIds as string[]; if (await prisma.task.count({ where: { workspaceId, id: { in: taskIds } } }) !== new Set(taskIds).size) throw new RestNotFoundError(); return serialize(ensureTool(await requestReleaseAuthorization({ workspaceId, ...(body as unknown as Omit<Parameters<typeof requestReleaseAuthorization>[0], "workspaceId">) }))) }
     case "listReleaseRuns": { const releaseFilters = filters(input.query, ["state", "taskId", "updatedSince"]); const page = await listUpdatedPage(`release-runs:${workspaceId}:${releaseFilters}`, input.query, (cursor, take) => prisma.releaseRun.findMany({ where: { workspaceId, ...(input.query.state ? { state: String(input.query.state) } : {}), ...(input.query.taskId ? { tasks: { some: { taskId: String(input.query.taskId) } } } : {}), ...(input.query.updatedSince ? { updatedAt: { gte: new Date(String(input.query.updatedSince)) } } : {}), ...updatedCursorWhere(cursor) }, select: { id: true, state: true, provider: true, repositoryOwner: true, repositoryName: true, pullRequestNumber: true, baseRef: true, headSha: true, targetEnvironment: true, releasePolicyId: true, sourceFingerprint: true, authorizationDecisionRecordId: true, lastErrorCode: true, createdAt: true, updatedAt: true, tasks: { select: { taskId: true }, orderBy: { taskId: "asc" } }, dispatches: { select: { id: true, status: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] } }, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take })); return { ...page, items: page.items.map((value) => { const row = value as Record<string, unknown> & { tasks?: Array<{ taskId: string }> }; const { tasks, ...safe } = row; return { ...safe, taskIds: (tasks ?? []).map(task => task.taskId), pullRequestUrl: `https://github.com/${row.repositoryOwner}/${row.repositoryName}/pull/${row.pullRequestNumber}` } }) } }
   }
   throw new RestNotFoundError()
@@ -406,13 +415,14 @@ async function listUpdatedPage(context: string, query: Record<string, unknown>, 
 
 async function pagedToolCollection(context: string, query: Record<string, unknown>, load: (page: number, pageSize: number) => Promise<{ items: unknown[]; total: number }>) {
   const limit = Number(query.limit ?? 50)
-  const cursor = typeof query.cursor === "string" ? decodeCursor(query.cursor, context) : null
+  const cursorContext = `${context}:limit:${limit}`
+  const cursor = typeof query.cursor === "string" ? decodeCursor(query.cursor, cursorContext) : null
   if (query.cursor && !cursor) throw new RestCursorError("The cursor is invalid for this collection or filter set.")
   const page = cursor ? Number(cursor.id.replace(/^page:/, "")) : 1
   if (!Number.isInteger(page) || page < 1) throw new RestCursorError("The cursor is invalid for this collection or filter set.")
   const result = await load(page, limit)
   const hasMore = page * limit < result.total
-  return { items: result.items.map(serialize), nextCursor: hasMore ? encodeCursor({ id: `page:${page + 1}`, createdAt: new Date(0).toISOString(), context }) : null }
+  return { items: result.items.map(serialize), nextCursor: hasMore ? encodeCursor({ id: `page:${page + 1}`, createdAt: new Date(0).toISOString(), context: cursorContext }) : null }
 }
 
 async function notificationPage(userId: string, workspaceId: string, query: Record<string, unknown>) {
@@ -551,14 +561,14 @@ async function assertCommentTargetWorkspace(targetType: string, targetId: string
   if (!target || target.workspaceId !== workspaceId) throw new RestNotFoundError()
 }
 async function assertCommentWorkspace(prisma: Prisma, commentId: string, workspaceId: string) {
-  const comment = await prisma.comment.findFirst({ where: { id: commentId, workspaceId }, select: { id: true, authorId: true } })
+  const comment = await prisma.comment.findFirst({ where: { id: commentId, workspaceId }, select: { id: true, authorId: true, targetType: true } })
   if (!comment) throw new RestNotFoundError()
   return comment
 }
 async function assertCommentMutation(prisma: Prisma, actor: ReturnType<typeof getMcpActor>, commentId: string, workspaceId: string) {
   const comment = await assertCommentWorkspace(prisma, commentId, workspaceId)
-  if (actor.userId && comment.authorId === actor.userId) return { userId: actor.userId, admin: false }
-  try { await assertWorkspaceAdmin(actor, workspaceId); return { userId: actor.userId ?? "", admin: true } } catch { throw new RestNotFoundError() }
+  if (actor.userId && comment.authorId === actor.userId) return { userId: actor.userId, admin: false, targetType: comment.targetType }
+  try { await assertWorkspaceAdmin(actor, workspaceId); return { userId: actor.userId ?? "", admin: true, targetType: comment.targetType } } catch { throw new RestNotFoundError() }
 }
 async function assertDocWorkspace(prisma: Prisma, docId: string, workspaceId: string) {
   if (!(await prisma.doc.findFirst({ where: { id: docId, workspaceId }, select: { id: true } }))) throw new RestNotFoundError()

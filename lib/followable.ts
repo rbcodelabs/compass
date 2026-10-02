@@ -24,6 +24,7 @@ export const FOLLOWABLE_SUBJECT_TYPES = [
   "EXPERIMENT", "ROADMAP_ITEM", "FEEDBACK_ITEM", "TASK", "DOC", "ARTIFACT",
   "RESEARCH_STUDY", "REVIEW_REQUEST", "METRIC",
 ] as const
+export const ACTIVE_FOLLOWABLE_SUBJECT_TYPES = ["OPPORTUNITY", "SOLUTION", "TASK", "DOC"] as const
 export type FollowableSubjectType = (typeof FOLLOWABLE_SUBJECT_TYPES)[number]
 
 export type SubjectDisplay = {

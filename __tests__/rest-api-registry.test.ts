@@ -3,6 +3,8 @@ import { REST_ROUTES, matchRestRoute } from "@/lib/rest/registry"
 import { buildOpenApiDocument } from "@/lib/rest/openapi"
 import { roadmapCreateData } from "@/lib/roadmap-tool-handlers"
 
+const UUID = "11111111-1111-4111-8111-111111111111"
+
 describe("REST API registry", () => {
   it("defines every route with a unique operation id, scope, policy and schemas", () => {
     const operationIds = REST_ROUTES.map((route) => route.operationId)
@@ -59,6 +61,12 @@ describe("REST API registry", () => {
     for (const operationId of ["recordDecision", "closeDecisionNoAction", "applyRecordedDecision", "approveSolutionPlan", "rejectSolutionPlan", "dispatchRelease"]) {
       expect(operations.has(operationId), operationId).toBe(false)
     }
+    for (const [method, path] of [
+      ["POST", `/api/v1/workspaces/${UUID}/decision-requests/${UUID}/decision`],
+      ["POST", `/api/v1/workspaces/${UUID}/decision-requests/${UUID}/apply`],
+      ["POST", `/api/v1/workspaces/${UUID}/solution-plan-entries/${UUID}/approval`],
+      ["POST", `/api/v1/workspaces/${UUID}/release-runs/${UUID}/dispatch`],
+    ]) expect(matchRestRoute(method, path), `${method} ${path}`).toBeNull()
   })
 
   it("keeps one-time credentials and authorization requests write-scoped", () => {
@@ -79,6 +87,61 @@ describe("REST API registry", () => {
     const tier = REST_ROUTES.find((entry) => entry.operationId === "setLaunchTier")!
     expect(tier.bodySchema?.safeParse({ tier: "TIER_1" }).success).toBe(true)
     expect(tier.bodySchema?.safeParse({ tier: "LIGHT" }).success).toBe(false)
+  })
+
+  it("parses URL booleans strictly instead of treating false as truthy", () => {
+    for (const [operationId, key] of [["listNotifications", "unreadOnly"], ["listArtifacts", "includeArchived"]] as const) {
+      const schema = REST_ROUTES.find((route) => route.operationId === operationId)!.querySchema!
+      expect(schema.parse({ [key]: "true" })).toMatchObject({ [key]: true })
+      expect(schema.parse({ [key]: "false" })).toMatchObject({ [key]: false })
+      expect(schema.safeParse({ [key]: "1" }).success).toBe(false)
+      expect(schema.safeParse({ [key]: "yes" }).success).toBe(false)
+    }
+  })
+
+  it("publishes required Phase 3 response contracts without stripping legitimate fields", () => {
+    const parse = (operationId: string, value: unknown) => REST_ROUTES.find((route) => route.operationId === operationId)!.responseSchema.parse(value)
+    expect(parse("createDoc", { id: UUID, title: "Plan", url: "https://compass.example/acme/ws/docs/1", revision: "r1", storageProvider: "DATABASE" })).toHaveProperty("url")
+    expect(parse("restoreDocVersion", { id: UUID, title: "Plan", restoredFrom: "2026-10-02T00:00:00.000Z", revision: "r2" })).toHaveProperty("restoredFrom")
+    expect(parse("listNotifications", { items: [], nextCursor: null, unreadCount: 3, unreadOverflow: false })).toMatchObject({ unreadCount: 3, unreadOverflow: false })
+    expect(REST_ROUTES.find((route) => route.operationId === "createComment")!.responseSchema.safeParse({}).success).toBe(false)
+    expect(REST_ROUTES.find((route) => route.operationId === "createArtifact")!.responseSchema.safeParse({}).success).toBe(false)
+    expect(REST_ROUTES.find((route) => route.operationId === "requestReleaseAuthorization")!.responseSchema.safeParse({}).success).toBe(false)
+
+    const openapi = JSON.stringify(buildOpenApiDocument())
+    expect(openapi).toContain('"required":["id","title"')
+    expect(openapi).toContain('"unreadCount"')
+    expect(openapi).toContain('"restoredFrom"')
+  })
+
+  it("requires document operation tokens consistently at the public REST boundary", () => {
+    const create = REST_ROUTES.find((route) => route.operationId === "createDoc")!
+    expect(create.bodySchema?.safeParse({ title: "Plan" }).success).toBe(false)
+    expect(create.bodySchema?.safeParse({ title: "Plan", operationId: UUID }).success).toBe(true)
+    for (const operationId of ["updateDoc", "createDocVersion", "restoreDocVersion"]) {
+      const schema = REST_ROUTES.find((route) => route.operationId === operationId)!.bodySchema!
+      expect(schema.safeParse({}).success).toBe(false)
+      expect(schema.safeParse({ operationId: UUID, expectedRevision: "r1" }).success).toBe(true)
+    }
+  })
+
+  it("does not advertise threaded solution-plan comments when execution is top-level", () => {
+    const route = REST_ROUTES.find((entry) => entry.operationId === "createSolutionPlanComment")!
+    expect(route.bodySchema?.safeParse({ body: "A concern" }).success).toBe(true)
+    expect(route.bodySchema?.safeParse({ body: "A concern", parentId: UUID }).success).toBe(false)
+    expect(route.summary).toContain("top-level")
+  })
+
+  it("advertises only follow subjects active in shipped slice 2", () => {
+    const schema = REST_ROUTES.find((route) => route.operationId === "followResource")!.pathSchema
+    for (const subjectType of ["OPPORTUNITY", "SOLUTION", "TASK", "DOC"]) expect(schema.safeParse({ workspaceId: UUID, subjectType, subjectId: UUID }).success).toBe(true)
+    for (const subjectType of ["ARTIFACT", "ASSUMPTION", "EXPERIMENT", "REVIEW_REQUEST"]) expect(schema.safeParse({ workspaceId: UUID, subjectType, subjectId: UUID }).success).toBe(false)
+  })
+
+  it("caps page-number decision pagination at the shared service maximum", () => {
+    const schema = REST_ROUTES.find((route) => route.operationId === "listDecisions")!.querySchema!
+    expect(schema.parse({ limit: "50" })).toMatchObject({ limit: 50 })
+    expect(schema.safeParse({ limit: "100" }).success).toBe(false)
   })
 
   it("documents custom-field collections in configured display order", () => {
