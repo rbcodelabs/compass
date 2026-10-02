@@ -5,7 +5,7 @@ import { EmptyState } from "@/components/patterns/empty-state";
 import { EmptyHome, PortalHomeBoard } from "@/components/portal-home/board";
 import { PortalHomeEditor } from "@/components/portal-home/editor";
 import { buildDefaultWidgets } from "@/lib/portal-home/defaults";
-import { resolveHomeForCustomer, resolveHomeForMember } from "@/lib/portal-home/resolve";
+import { resolveCustomerAvailability, resolveHomeForCustomer, resolveHomeForMember } from "@/lib/portal-home/resolve";
 import { loadHomeLayout, loadPublishedWidgets } from "@/lib/portal-home/service";
 
 type Props = {
@@ -73,7 +73,10 @@ export default async function PortalHomePage({ params }: Props) {
 
   const layout = await loadHomeLayout(prisma, workspace.id);
   const draft = layout.hasRow ? layout.draft : defaults;
-  const initialResolved = await resolveHomeForMember(resolveContext, draft);
+  const [initialResolved, initialCustomerAvailability] = await Promise.all([
+    resolveHomeForMember(resolveContext, draft),
+    resolveCustomerAvailability(resolveContext, draft),
+  ]);
 
   return (
     <PortalHomeEditor
@@ -83,6 +86,7 @@ export default async function PortalHomePage({ params }: Props) {
       initialBaseline={baseline}
       publishedAt={layout.publishedAt?.toISOString() ?? null}
       initialResolved={initialResolved}
+      initialCustomerAvailability={initialCustomerAvailability}
     >
       {board}
     </PortalHomeEditor>

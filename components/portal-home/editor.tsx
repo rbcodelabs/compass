@@ -13,6 +13,7 @@ import {
   type PortalHomeWidget, type WidgetSize, type WidgetType,
 } from "@/lib/portal-home/schema"
 import type { WidgetResolution } from "@/lib/portal-home/data"
+import type { CustomerAvailability } from "@/lib/portal-home/resolve"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { StatusBadge } from "@/components/patterns/status-badge"
@@ -34,6 +35,8 @@ interface Props {
   initialBaseline: PortalHomeWidget[]
   publishedAt: string | null
   initialResolved: Record<string, WidgetResolution>
+  /** Separate from initialResolved (team data): would each draft widget reach customers? */
+  initialCustomerAvailability: Record<string, CustomerAvailability>
 }
 
 const VISIBILITY_LABEL = { everyone: "Everyone", signed_in: "Signed-in customers", segments: "Segments", team: "Team only" } as const
@@ -45,7 +48,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return body
 }
 
-export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraft, initialBaseline, publishedAt: initialPublishedAt, initialResolved }: Props) {
+export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraft, initialBaseline, publishedAt: initialPublishedAt, initialResolved, initialCustomerAvailability }: Props) {
   const router = useRouter()
   const dndId = useId()
   const endpoint = `/api/portal-home/${orgSlug}/${workspaceSlug}`
@@ -55,6 +58,7 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
   const [baseline, setBaseline] = useState<PortalHomeWidget[]>(initialBaseline)
   const [publishedAt, setPublishedAt] = useState<string | null>(initialPublishedAt)
   const [resolved, setResolved] = useState<Record<string, WidgetResolution>>(initialResolved)
+  const [customerAvailability, setCustomerAvailability] = useState<Record<string, CustomerAvailability>>(initialCustomerAvailability)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [saveState, setSaveState] = useState<SaveState>("saved")
@@ -139,7 +143,10 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
         signal: controller.signal,
       })
         .then((response) => (response.ok ? response.json() : null))
-        .then((body: { resolved?: Record<string, WidgetResolution> } | null) => body?.resolved && setResolved(body.resolved))
+        .then((body: { resolved?: Record<string, WidgetResolution>; customerAvailability?: Record<string, CustomerAvailability> } | null) => {
+          if (body?.resolved) setResolved(body.resolved)
+          if (body?.customerAvailability) setCustomerAvailability(body.customerAvailability)
+        })
         .catch(() => undefined)
     }, 350)
     return () => {
@@ -289,6 +296,7 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
                       key={widget.id}
                       widget={widget}
                       resolution={resolved[widget.id]}
+                      customerAvailability={customerAvailability[widget.id]}
                       selected={widget.id === selectedId}
                       onSelect={() => setSelectedId(widget.id)}
                       onSize={(size) => updateWidget({ ...widget, size })}
@@ -379,8 +387,8 @@ export function PortalHomeEditor({ orgSlug, workspaceSlug, children, initialDraf
 }
 
 function EditableWidget({
-  widget, resolution, selected, onSelect, onSize,
-}: { widget: PortalHomeWidget; resolution: WidgetResolution | undefined; selected: boolean; onSelect: () => void; onSize: (size: WidgetSize) => void }) {
+  widget, resolution, customerAvailability, selected, onSelect, onSize,
+}: { widget: PortalHomeWidget; resolution: WidgetResolution | undefined; customerAvailability: CustomerAvailability | undefined; selected: boolean; onSelect: () => void; onSize: (size: WidgetSize) => void }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: widget.id })
   const body = resolution?.available ? renderWidgetBody(widget, resolution) : null
   return (
@@ -406,6 +414,9 @@ function EditableWidget({
           {WIDGET_DEFINITIONS[widget.type].label}
         </button>
         {widget.visibility !== "everyone" ? <StatusBadge status={widget.visibility === "segments" ? "warning" : "info"}>{VISIBILITY_LABEL[widget.visibility]}</StatusBadge> : null}
+        {customerAvailability && !customerAvailability.shown ? (
+          <StatusBadge status="warning">Not shown to customers: {customerAvailability.reason}</StatusBadge>
+        ) : null}
         <div role="group" aria-label="Size" className="inline-flex overflow-hidden rounded-md border border-border-default">
           {WIDGET_SIZES.map((size) => (
             <button
@@ -424,7 +435,7 @@ function EditableWidget({
       <div onClick={onSelect} className="cursor-pointer [&>div]:rounded-t-none">
         {body ?? (
           <div className="flex h-full min-h-24 flex-col justify-center gap-1 rounded-b-xl border border-dashed border-border-strong bg-surface-inset p-4 text-sm text-text-subtle">
-            <strong className="text-text-secondary">Hidden from customers</strong>
+            <strong className="text-text-secondary">Nothing to show</strong>
             <span>{resolution && !resolution.available ? resolution.reason : "Loading…"}</span>
           </div>
         )}

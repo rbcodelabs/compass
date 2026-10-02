@@ -3,7 +3,7 @@ import { auth } from "@/auth"
 import { ZodError } from "zod"
 import getPrisma, { type AppPrismaClient } from "@/lib/db"
 import { isPermissionError, resolveWorkspaceAdmin } from "@/lib/permissions"
-import type { ResolveContext } from "./resolvers/context"
+import type { ResolveInput } from "./resolvers/context"
 
 export type HomeRouteParams = { params: Promise<{ orgSlug: string; workspaceSlug: string }> }
 
@@ -11,7 +11,7 @@ export interface HomeAdminContext {
   prisma: AppPrismaClient
   workspaceId: string
   userId: string
-  resolveContext: Omit<ResolveContext, "isWorkspaceMember">
+  resolveContext: ResolveInput
 }
 
 /**

@@ -16,7 +16,9 @@ Your team sees the same home, in the same layout, from the **Home** tab in the s
 
 The team home shows every widget that is **Everyone**, **Signed-in customers** or **Team only**, so members see a superset of what customers see. Doc links in a Key links widget appear here too. Widgets set to **Specific segments** stay hidden. Like the customer page, it shows the **published** layout. Admins also get the **Edit home** bar on this page, and the draft is only visible there until published. Editing on either page changes the one shared layout.
 
-The team home uses the same data rules as the customer page, for example a roadmap widget needs **Public roadmap** switched on, and a widget with nothing to show is left out.
+The team home shows **internal data**, not just what is public. Roadmap widgets include **private** roadmap items (anything not archived), Recent updates lists everything Shipped or Launched, and the Feedback widget shows the top ideas (everything except declined ideas). None of this depends on **Public roadmap** or **Feedback** being switched on. Links on the team home go to the in-app Roadmap and Feedback pages, not the customer portal. A widget with nothing to show is left out. **Customers never see any of this**: the customer home keeps the public rules described under "What customers can never see".
+
+In the editor, each widget shows the team's data and a separate **Not shown to customers: reason** badge whenever customers will not get it (the portal surface is off, nothing public to show, or the widget is **Team only**). That verdict comes from the real customer rules. You can pin private items in a Roadmap spotlight; they are labeled **Private** in the picker, and customers will not see them.
 
 ## Editing the home
 
@@ -49,7 +51,7 @@ Visibility is enforced on the server, never by hiding things in the page.
 - The feedback widget follows the same rules as the public feedback page and is hidden when feedback is off.
 - **Compass Docs are not public.** A Doc link is shown only to workspace members; customers do not receive it, even if you added it.
 - Each widget has a **Visible to** setting: **Everyone**, **Signed-in customers** or **Team only**. A widget limited to signed-in customers is not sent to a signed-out visitor at all. A **Team only** widget is shown on the team home and is never sent to any customer, signed in or not: it is removed on the server before anything is looked up for it. **Specific segments** is stored but not available yet, so a widget set to it is shown to nobody.
-- A widget whose surface is switched off or has nothing to show is left out for customers. In the editor it appears as hidden, with the reason.
+- A widget whose surface is switched off or has nothing to show is left out for customers. In the editor it carries the **Not shown to customers** badge, with the reason.
 
 ## Known limits
 

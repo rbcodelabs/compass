@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
-import { resolveHomeForCustomer, resolveHomeForMember, resolveHomeForTeam } from "@/lib/portal-home/resolve"
+import { resolveCustomerAvailability, resolveHomeForCustomer, resolveHomeForMember, resolveHomeForTeam } from "@/lib/portal-home/resolve"
 import { createWidget, type PortalHomeWidget } from "@/lib/portal-home/schema"
 
 /**
@@ -229,10 +229,30 @@ describe("per-widget visibility is enforced before resolution", () => {
 })
 
 describe("member audience", () => {
-  it("reports why a widget is unavailable instead of dropping it", async () => {
+  it("resolves internal data even when the public roadmap is off, and reports emptiness without blaming the public switch", async () => {
     const widget = createWidget("recent_updates", 0)
     const resolved = await resolveHomeForMember(ctx({ roadmapPublic: false }), [widget])
-    expect(resolved[widget.id]).toEqual({ available: false, reason: expect.stringContaining("roadmap") })
+    expect(resolved[widget.id].available).toBe(true)
+    const empty = await resolveHomeForMember(
+      { ...ctx({ roadmapPublic: false }), prisma: { roadmapItem: { findMany: async () => [] } } as unknown as AppPrismaClient },
+      [widget],
+    )
+    expect(empty[widget.id]).toEqual({ available: false, reason: "Nothing has shipped yet." })
+  })
+
+  it("customer availability reports the real customer verdict, with reasons, and returns no data", async () => {
+    const roadmap = createWidget("recent_updates", 0)
+    const feedback = createWidget("feedback_cta", 1)
+    const teamOnly = w(createWidget("rich_text", 2), { visibility: "team" })
+    const open = createWidget("announcement", 3)
+    const off = await resolveCustomerAvailability(ctx({ roadmapPublic: false, feedbackEnabled: false }), [roadmap, feedback, teamOnly, open])
+    expect(off[roadmap.id]).toEqual({ shown: false, reason: "The public roadmap is not enabled." })
+    expect(off[feedback.id]).toEqual({ shown: false, reason: "The feedback portal is not enabled." })
+    expect(off[teamOnly.id]).toEqual({ shown: false, reason: expect.stringContaining("Team only") })
+    expect(off[open.id]).toEqual({ shown: true })
+    const on = await resolveCustomerAvailability(ctx(), [roadmap, feedback])
+    expect(on).toEqual({ [roadmap.id]: { shown: true }, [feedback.id]: { shown: true } })
+    expect(JSON.stringify(on)).not.toContain("SECRET")
   })
 })
 
@@ -270,11 +290,87 @@ describe("team-only widgets never reach a customer", () => {
     expect(out.resolved[segment.id]).toBeUndefined()
   })
 
-  it("the team view still applies the surface rules: no roadmap query when the roadmap is off", async () => {
-    const queries: string[] = []
+})
+
+describe("team home shows everything internal", () => {
+  const flagsOff = { roadmapPublic: false, feedbackEnabled: false }
+
+  it("with both public flags off, returns real private items, shipped items and top ideas, linked in-app", async () => {
     const spotlight = createWidget("roadmap_spotlight", 0)
-    const out = await resolveHomeForTeam(ctx({ roadmapPublic: false }, queries), [spotlight])
+    const recent = createWidget("recent_updates", 1)
+    const feedback = createWidget("feedback_cta", 2)
+    const out = await resolveHomeForTeam(ctx(flagsOff), [spotlight, recent, feedback])
+    expect(out.widgets.map((x) => x.type)).toEqual(["roadmap_spotlight", "recent_updates", "feedback_cta"])
+
+    const spot = out.resolved[spotlight.id]
+    expect(spot.available && spot.data.type === "roadmap_spotlight" && spot.data.items.map((i) => i.id)).toEqual([id(1), id(2)])
+    expect(spot.available && spot.data.type === "roadmap_spotlight" && spot.data.roadmapHref).toBe("/acme/main/roadmap")
+
+    const upd = out.resolved[recent.id]
+    expect(upd.available && upd.data.type === "recent_updates" && upd.data.items.map((i) => i.id)).toEqual([id(6), id(7), id(5)])
+    expect(upd.available && upd.data.type === "recent_updates" && upd.data.roadmapHref).toBe("/acme/main/roadmap")
+
+    const fb = out.resolved[feedback.id]
+    expect(fb.available && fb.data.type === "feedback_cta" && fb.data.topIdeas.map((i) => i.id)).toEqual([id(101)])
+    expect(fb.available && fb.data.type === "feedback_cta" && fb.data.feedbackHref).toBe("/acme/main/feedback")
+
+    // Archived and other-workspace rows are still excluded, and declined ideas too.
+    const json = JSON.stringify(out)
+    expect(json).not.toContain("SECRET archived")
+    expect(json).not.toContain("SECRET other")
+    expect(json).not.toContain("SECRET declined")
+  })
+
+  it("lets the team pin a private item", async () => {
+    const widget = w(createWidget("roadmap_spotlight", 0), { config: { title: "Spot", show: "status", itemIds: [id(2)] } })
+    const out = await resolveHomeForTeam(ctx(flagsOff), [widget])
+    const data = out.resolved[widget.id]
+    expect(data.available && data.data.type === "roadmap_spotlight" && data.data.items.map((i) => i.id)).toEqual([id(2)])
+  })
+})
+
+describe("customer boundary holds with the team change", () => {
+  const privatePinned = w(createWidget("roadmap_spotlight", 0), {
+    config: { title: "Spot", show: "status", itemIds: [id(2), id(6), id(1)] },
+  })
+
+  it("(a) roadmapPublic true + private item pinned in a published widget: it never appears, only the public one does", async () => {
+    const out = await resolveHomeForCustomer(ctx({ roadmapPublic: true }), [privatePinned], { signedIn: true })
+    const wire = JSON.stringify(out)
+    expect(wire).not.toContain("SECRET private")
+    expect(wire).not.toContain(id(2))
+    expect(wire).not.toContain(id(6))
+    const data = out.resolved[privatePinned.id]
+    expect(data.available && data.data.type === "roadmap_spotlight" && data.data.items.map((i) => i.id)).toEqual([id(1)])
+    // Links stay on the public portal.
+    expect(wire).toContain("/portal/acme/main/roadmap")
+    expect(wire).not.toContain('"/acme/main/roadmap"')
+  })
+
+  it("(a) the editor's customer-availability verdict never carries item data", async () => {
+    const verdict = await resolveCustomerAvailability(ctx({ roadmapPublic: true }), [privatePinned])
+    expect(JSON.stringify(verdict)).not.toMatch(/SECRET|00000000-0000-4000/)
+  })
+
+  it("(b) roadmapPublic false: roadmap widgets are dropped and no roadmapItem query is made", async () => {
+    const queries: string[] = []
+    const widgets = [privatePinned, createWidget("recent_updates", 1)]
+    const out = await resolveHomeForCustomer(ctx({ roadmapPublic: false }, queries), widgets, { signedIn: true })
     expect(out.widgets).toEqual([])
+    expect(queries).not.toContain("roadmapItem")
+    expect(queries).toEqual([])
+  })
+
+  it("(c) feedback disabled: no feedbackItem query is made for customers", async () => {
+    const queries: string[] = []
+    const out = await resolveHomeForCustomer(ctx({ feedbackEnabled: false }, queries), [createWidget("feedback_cta", 0)], { signedIn: true })
+    expect(out.widgets).toEqual([])
+    expect(queries).not.toContain("feedbackItem")
+  })
+
+  it("the customer availability check makes no roadmap or feedback query when those surfaces are off", async () => {
+    const queries: string[] = []
+    await resolveCustomerAvailability(ctx({ roadmapPublic: false, feedbackEnabled: false }, queries), [privatePinned, createWidget("feedback_cta", 1)])
     expect(queries).toEqual([])
   })
 })

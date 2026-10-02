@@ -4,7 +4,7 @@ import { isPermissionError, resolveWorkspaceAdmin } from "@/lib/permissions"
 import { EmptyHome, PortalHomeBoard } from "@/components/portal-home/board"
 import { PortalHomeEditor } from "@/components/portal-home/editor"
 import { buildDefaultWidgets } from "@/lib/portal-home/defaults"
-import { resolveHomeForMember, resolveHomeForTeam } from "@/lib/portal-home/resolve"
+import { resolveCustomerAvailability, resolveHomeForMember, resolveHomeForTeam } from "@/lib/portal-home/resolve"
 import { loadHomeLayout, loadPublishedWidgets } from "@/lib/portal-home/service"
 
 export const metadata = {
@@ -66,7 +66,10 @@ export default async function TeamHomePage({ params }: TeamHomePageProps) {
 
   const layout = await loadHomeLayout(prisma, workspace.id)
   const draft = layout.hasRow ? layout.draft : defaults
-  const initialResolved = await resolveHomeForMember(resolveContext, draft)
+  const [initialResolved, initialCustomerAvailability] = await Promise.all([
+    resolveHomeForMember(resolveContext, draft),
+    resolveCustomerAvailability(resolveContext, draft),
+  ])
 
   return (
     <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
@@ -77,6 +80,7 @@ export default async function TeamHomePage({ params }: TeamHomePageProps) {
         initialBaseline={baseline}
         publishedAt={layout.publishedAt?.toISOString() ?? null}
         initialResolved={initialResolved}
+        initialCustomerAvailability={initialCustomerAvailability}
       >
         {board}
       </PortalHomeEditor>

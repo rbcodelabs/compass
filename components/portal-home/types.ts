@@ -1,5 +1,5 @@
 export interface HomeOptions {
-  roadmapItems: { id: string; title: string; horizon: string }[]
+  roadmapItems: { id: string; title: string; horizon: string; isPrivate: boolean }[]
   docs: { id: string; title: string }[]
 }
 

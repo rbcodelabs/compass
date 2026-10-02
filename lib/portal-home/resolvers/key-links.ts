@@ -12,7 +12,7 @@ import type { ResolveContext } from "./context"
 export async function resolveKeyLinks(ctx: ResolveContext, config: KeyLinksConfig): Promise<WidgetResolution> {
   const docIds = config.links.flatMap((link) => (link.kind === "doc" ? [link.docId] : []))
   const docs =
-    ctx.isWorkspaceMember && docIds.length > 0
+    ctx.audience === "team" && docIds.length > 0
       ? await ctx.prisma.doc.findMany({
           where: { workspaceId: ctx.workspace.id, id: { in: docIds } },
           select: { id: true, title: true },
@@ -24,7 +24,7 @@ export async function resolveKeyLinks(ctx: ResolveContext, config: KeyLinksConfi
   for (const link of config.links) {
     if (link.kind === "url") {
       links.push({ kind: "url", label: link.label, href: link.url, external: !link.url.startsWith("/") })
-    } else if (ctx.isWorkspaceMember) {
+    } else if (ctx.audience === "team") {
       const title = docTitles.get(link.docId)
       if (!title) continue
       links.push({
@@ -35,6 +35,6 @@ export async function resolveKeyLinks(ctx: ResolveContext, config: KeyLinksConfi
       })
     }
   }
-  if (links.length === 0) return { available: false, reason: "No links to show customers yet." }
+  if (links.length === 0) return { available: false, reason: ctx.audience === "team" ? "No links yet." : "No links to show customers yet." }
   return { available: true, data: { type: "key_links", links } }
 }

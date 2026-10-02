@@ -144,9 +144,10 @@ test.describe("Portal Home", () => {
       await expect(anonPage.getByRole("heading", { name: "E2E Spotlight" })).toHaveCount(0);
       expect(await anonPage.content()).not.toContain(privateTitle);
 
-      // The pickers only offer PUBLIC items; pin the public one next to the private id.
+      // The admin pickers offer private items too (the team home shows them), flagged
+      // isPrivate; customers still never receive one. Pin the public one next to the private id.
       const options = await (await page.request.get(`${api}/options`)).json();
-      expect(JSON.stringify(options)).not.toContain(privateTitle);
+      expect(options.roadmapItems.find((i: { title: string }) => i.title === privateTitle)?.isPrivate).toBe(true);
       const publicItem = options.roadmapItems.find((i: { title: string }) => i.title === publicTitle);
       expect(publicItem).toBeTruthy();
       const refreshed = await (await page.request.get(api)).json();

@@ -43,7 +43,11 @@ export function RoadmapSpotlightRenderer({ config, data }: RendererProps<Roadmap
 
 export function RoadmapSpotlightForm({ config, onChange, options }: ConfigFormProps<RoadmapSpotlightConfig>) {
   const items = options?.roadmapItems ?? []
-  const titleOf = (id: string) => items.find((item) => item.id === id)?.title ?? "Unavailable item"
+  const labelOf = (item: (typeof items)[number]) => (item.isPrivate ? `${item.title} (Private)` : item.title)
+  const titleOf = (id: string) => {
+    const item = items.find((candidate) => candidate.id === id)
+    return item ? labelOf(item) : "Unavailable item"
+  }
   const unpinned = items.filter((item) => !config.itemIds.includes(item.id))
   return (
     <div className="flex flex-col gap-3">
@@ -69,7 +73,7 @@ export function RoadmapSpotlightForm({ config, onChange, options }: ConfigFormPr
               </SelectTrigger>
               <SelectContent>
                 {unpinned.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>{item.title}</SelectItem>
+                  <SelectItem key={item.id} value={item.id}>{labelOf(item)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -84,7 +88,7 @@ export function RoadmapSpotlightForm({ config, onChange, options }: ConfigFormPr
         onChange={(show) => onChange({ ...config, show: show as RoadmapSpotlightConfig["show"] })}
         options={[{ value: "status", label: "Status and dates" }, { value: "titles", label: "Titles only" }]}
       />
-      <p className="text-xs leading-5 text-text-subtle">Items you have not made public never appear to customers, even if pinned here.</p>
+      <p className="text-xs leading-5 text-text-subtle">Private items show on the team home but customers will not see them, even if pinned here.</p>
     </div>
   )
 }
