@@ -12,6 +12,7 @@ import { CardMenu } from "@/components/ui/card-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { archiveItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { setPanelSeed } from "@/lib/panel-seed";
 import { EditItemDialog } from "./edit-item-dialog";
 import { DeliveryStatusBadge } from "./delivery-status-badge";
 
@@ -87,7 +88,12 @@ type Props = {
 export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, onUpdate, orgSlug, workspaceSlug, availableOpportunities, launchWorkflowEnabled = true }: Props) {
   const [isArchiving, startArchiveTransition] = useTransition();
   const [editOpen, setEditOpen] = useState(false);
-  const { openPanel } = usePanelContext();
+  const { openPanel: openPanelRaw } = usePanelContext();
+  // Hand the card's own data to the panel so it paints before its fetch lands.
+  const openPanel: typeof openPanelRaw = (type, id, options) => {
+    if (type === "roadmapItem" && id === item.id) setPanelSeed(type, id, item);
+    openPanelRaw(type, id, options);
+  };
 
   const {
     attributes,

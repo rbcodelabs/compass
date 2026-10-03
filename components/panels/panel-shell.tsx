@@ -239,7 +239,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
       {panel?.type === "experiment" && (
         <ExperimentPanel experimentId={panel.id} {...common} />
       )}
-      {panel?.type === "roadmapItem" && <RoadmapItemPanel id={panel.id} {...common} />}
+      {panel?.type === "roadmapItem" && <RoadmapItemPanel key={panel.id} id={panel.id} {...common} />}
       {panel?.type === "feedback" && <FeedbackPanel id={panel.id} {...common} />}
       {panel?.type === "feedback-new" && <FeedbackComposer {...common} />}
       {panel?.type === "opportunity-new" && <OpportunityComposer composerId={panel.id} {...common} />}
