@@ -59,6 +59,14 @@ const mocks = vi.hoisted(() => ({
   resolveDocComment: vi.fn(),
   reopenDocComment: vi.fn(),
   deleteBrowserComment: vi.fn(),
+  getResearchStudy: vi.fn(),
+  listResearchStudies: vi.fn(),
+  listResearchSessions: vi.fn(),
+  getResearchSession: vi.fn(),
+  listResearchSyntheses: vi.fn(),
+  activateResearchStudy: vi.fn(),
+  storeAgentStudySynthesis: vi.fn(),
+  researchParticipantUrl: vi.fn(),
 }))
 
 vi.mock("@/lib/db", () => ({ default: () => mocks.prisma }))
@@ -95,9 +103,27 @@ vi.mock("@/lib/scoring-tool-handlers", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/scoring-tool-handlers")>(),
   listScoringModels: mocks.listScoringModels,
 }))
+vi.mock("@/lib/research-study-service", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/research-study-service")>(),
+  getResearchStudy: mocks.getResearchStudy,
+  listResearchStudies: mocks.listResearchStudies,
+  listResearchSessions: mocks.listResearchSessions,
+  getResearchSession: mocks.getResearchSession,
+  listResearchSyntheses: mocks.listResearchSyntheses,
+  activateResearchStudy: mocks.activateResearchStudy,
+}))
+vi.mock("@/lib/research-analysis-service", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/research-analysis-service")>(),
+  storeAgentStudySynthesis: mocks.storeAgentStudySynthesis,
+}))
+vi.mock("@/lib/compass-url", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/compass-url")>(),
+  researchParticipantUrl: mocks.researchParticipantUrl,
+}))
 
-import { executeRestRoute, RestConflictError, RestNotFoundError, RestValidationError } from "@/lib/rest/execute"
+import { executeRestRoute, RestConflictError, RestCursorError, RestForbiddenError, RestNotFoundError, RestValidationError } from "@/lib/rest/execute"
 import { REST_ROUTES } from "@/lib/rest/registry"
+import { ResearchCursorError, ResearchStudyError } from "@/lib/research-study-service"
 
 const route = (operationId: string) => {
   const match = REST_ROUTES.find((entry) => entry.operationId === operationId)
@@ -115,6 +141,75 @@ describe("REST domain execution", () => {
     vi.clearAllMocks()
     mocks.actor.current = { userId: "user-1", purpose: "USER" }
     mocks.captureWorkspaceMutation.mockImplementation(async (prisma, _model, _operation, _actor, _id, mutate) => mutate(prisma))
+    mocks.researchParticipantUrl.mockImplementation((token: string) => `https://compass.example/research/${token}`)
+  })
+
+  it("denies non-human callers before Phase 4 privileged mutations execute", async () => {
+    mocks.actor.current = { userId: "user-1", purpose: "AGENT" }
+    await expect(executeRestRoute(route("createCardSortRound"), {
+      params: { workspaceId: UUID }, query: {}, body: { name: "Priorities", fieldDefinitionId: FOREIGN },
+    })).rejects.toBeInstanceOf(RestForbiddenError)
+    expect(mocks.assertWorkspaceMember).not.toHaveBeenCalled()
+  })
+
+  it("rejects synthesis creation when the study is not under the path workspace", async () => {
+    mocks.getResearchStudy.mockRejectedValue(new ResearchStudyError("Study not found"))
+
+    await expect(executeRestRoute(route("createResearchSynthesis"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: { summary: "Summary", themes: [], patterns: [], jobs: [], recommendations: [] },
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+
+    expect(mocks.getResearchStudy).toHaveBeenCalledWith({ workspaceId: UUID }, expect.objectContaining({ userId: "user-1" }), FOREIGN)
+    expect(mocks.storeAgentStudySynthesis).not.toHaveBeenCalled()
+  })
+
+  it("does not mint a participant credential when its disclosure URL is unavailable", async () => {
+    mocks.researchParticipantUrl.mockImplementation(() => { throw new Error("Compass app URL is not configured.") })
+
+    await expect(executeRestRoute(route("activateResearchStudy"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
+    })).rejects.toThrow("not configured")
+
+    expect(mocks.activateResearchStudy).not.toHaveBeenCalled()
+  })
+
+  it("maps typed research cursor failures to invalid-cursor errors", async () => {
+    mocks.listResearchStudies.mockRejectedValue(new ResearchCursorError("Invalid research cursor"))
+
+    await expect(executeRestRoute(route("listResearchStudies"), {
+      params: { workspaceId: UUID }, query: { cursor: "tampered" }, body: undefined,
+    })).rejects.toBeInstanceOf(RestCursorError)
+  })
+
+  it.each([
+    ["listResearchSessions", "listResearchSessions"],
+    ["listResearchSyntheses", "listResearchSyntheses"],
+  ] as const)("honors limit=1 and continues the %s collection with a signed cursor", async (operationId, mockName) => {
+    const service = mocks[mockName]
+    service
+      .mockResolvedValueOnce({ items: [{ id: UUID }], nextOffset: 1 })
+      .mockResolvedValueOnce({ items: [], nextOffset: null })
+    const params = { workspaceId: UUID, id: FOREIGN }
+
+    const first = await executeRestRoute(route(operationId), { params, query: { limit: 1 }, body: undefined }) as { nextCursor: string }
+    await expect(executeRestRoute(route(operationId), { params, query: { limit: 2, cursor: first.nextCursor }, body: undefined }))
+      .rejects.toBeInstanceOf(RestCursorError)
+    await executeRestRoute(route(operationId), { params, query: { limit: 1, cursor: first.nextCursor }, body: undefined })
+
+    expect(service).toHaveBeenNthCalledWith(1, { workspaceId: UUID }, expect.anything(), FOREIGN, expect.objectContaining({ offset: 0, limit: 1 }))
+    expect(service).toHaveBeenNthCalledWith(2, { workspaceId: UUID }, expect.anything(), FOREIGN, expect.objectContaining({ offset: 1, limit: 1 }))
+  })
+
+  it("honors limit=1 for transcript turns and binds continuation to that limit", async () => {
+    mocks.getResearchSession
+      .mockResolvedValueOnce({ id: THIRD, turns: [{ id: UUID }], nextOffset: 1 })
+      .mockResolvedValueOnce({ id: THIRD, turns: [], nextOffset: null })
+    const params = { workspaceId: UUID, id: FOREIGN, relatedId: THIRD }
+
+    const first = await executeRestRoute(route("getResearchSession"), { params, query: { limit: 1 }, body: undefined }) as { nextCursor: string }
+    await executeRestRoute(route("getResearchSession"), { params, query: { limit: 1, cursor: first.nextCursor }, body: undefined })
+
+    expect(mocks.getResearchSession).toHaveBeenNthCalledWith(2, { workspaceId: UUID }, expect.anything(), FOREIGN, THIRD, { offset: 1, limit: 1 })
   })
 
   it("rejects a foreign opportunity squad before the shared create service runs", async () => {

@@ -37,6 +37,7 @@ describe("shared research study service", () => {
     const ids = ["00000000-0000-4000-8000-000000000002", "00000000-0000-4000-8000-000000000003"]
     m.list.mockResolvedValue(ids.map(id => ({ id, guide: "[]", createdAt: new Date("2026-01-01"), _count: { sessions: 0 } })))
     const first = await listResearchStudies(scope, actor, { limit: 1 })
+    expect(m.list).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ studyType: { not: "PM_INTERVIEW" } }) }))
     expect(first.items).toHaveLength(1)
     expect(first.nextCursor).toEqual(expect.any(String))
     await listResearchStudies(scope, actor, { limit: 1, cursor: first.nextCursor! })

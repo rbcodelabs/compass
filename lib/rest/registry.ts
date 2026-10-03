@@ -14,10 +14,12 @@ import { ACTIVE_FOLLOWABLE_SUBJECT_TYPES } from "@/lib/followable"
 import { DOC_TYPES } from "@/lib/doc-types"
 import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
 import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
+import * as phase4 from "@/lib/rest/phase4"
+import { synthesisSchema } from "@/lib/research-analysis"
 
 export type ApiScope = "api:read" | "api:write"
 export type RestMethod = "GET" | "POST" | "PATCH" | "DELETE"
-export type RestAuthorizationPolicy = "authenticated-actor" | "accessible-workspaces" | "workspace-member" | "workspace-writer"
+export type RestAuthorizationPolicy = "authenticated-actor" | "accessible-workspaces" | "workspace-member" | "workspace-writer" | "human-member" | "human-admin"
 
 export type RestRoute = {
   method: RestMethod
@@ -45,8 +47,8 @@ const taskLinkPath = z.object({
 const read = (operationId: string, path: string, summary: string, responseSchema: z.ZodType, pathSchema: z.ZodType = z.object({}), querySchema?: z.ZodType, authorizationPolicy: RestAuthorizationPolicy = "workspace-member"): RestRoute => ({
   method: "GET", path, operationId, summary, scope: "api:read", authorizationPolicy, pathSchema, querySchema, responseSchema,
 })
-const write = (method: "POST" | "PATCH" | "DELETE", operationId: string, path: string, summary: string, responseSchema: z.ZodType, pathSchema: z.ZodType, bodySchema?: z.ZodType, status?: number): RestRoute => ({
-  method, path, operationId, summary, scope: "api:write", authorizationPolicy: "workspace-writer", pathSchema, bodySchema, responseSchema, status,
+const write = (method: "POST" | "PATCH" | "DELETE", operationId: string, path: string, summary: string, responseSchema: z.ZodType, pathSchema: z.ZodType, bodySchema?: z.ZodType, status?: number, authorizationPolicy: RestAuthorizationPolicy = "workspace-writer"): RestRoute => ({
+  method, path, operationId, summary, scope: "api:write", authorizationPolicy, pathSchema, bodySchema, responseSchema, status,
 })
 const opportunityCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), customerSegment: z.string().trim().max(255).nullable().optional(), status: opportunitySchema.shape.status.exclude(["ARCHIVED"]).optional(), squadId: uuid.nullable().optional(), linkedKeyResultId: uuid.nullable().optional() }).strict()
 const opportunityPatch = z.union([
@@ -328,6 +330,41 @@ export const REST_ROUTES: readonly RestRoute[] = [
   write("PATCH", "updateLaunchChecklistItem", "/api/v1/workspaces/{workspaceId}/launch-checklist-items/{id}", "Update a launch checklist item", launchItemResponse.pick({ id: true, status: true }).strict(), itemPath, checklistPatch),
   write("POST", "requestReleaseAuthorization", "/api/v1/workspaces/{workspaceId}/release-authorizations", "Request human release authorization without dispatching", releaseAuthorizationResponse, workspacePath, releaseAuthorizationRequest, 201),
   read("listReleaseRuns", "/api/v1/workspaces/{workspaceId}/release-runs", "List release runs", collectionOf(releaseRunResponse), workspacePath, cursorQuery.extend({ state: z.enum(["PREPARING", "READY_FOR_APPROVAL", "DECISION_RECORDING", "DISPATCH_QUEUED", "BLOCKED", "SUPERSEDED", "CANCELLED"]).optional(), taskId: uuid.optional(), updatedSince: z.string().datetime().optional() }).strict()),
+
+  read("listResearchStudies", "/api/v1/workspaces/{workspaceId}/research-studies", "List non-PM research studies", phase4.researchStudyCollection, workspacePath, phase4.researchStudyQuery),
+  write("POST", "createResearchStudy", "/api/v1/workspaces/{workspaceId}/research-studies", "Create a draft research study without issuing participant credentials", phase4.researchStudy, workspacePath, phase4.researchStudyInput, 201),
+  read("getResearchStudy", "/api/v1/workspaces/{workspaceId}/research-studies/{id}", "Get research study metadata without participant identities or credentials", phase4.researchStudy, itemPath),
+  write("PATCH", "updateResearchStudy", "/api/v1/workspaces/{workspaceId}/research-studies/{id}", "Update editable research study metadata", phase4.researchStudy, itemPath, phase4.researchStudyPatch),
+  write("POST", "activateResearchStudy", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/activation", "Activate a study and return its participant link once", phase4.participantCredential, itemPath, undefined, 200, "human-member"),
+  write("POST", "closeResearchStudy", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/closure", "Close a study and revoke participant links", phase4.participantLinkRevocation, itemPath, undefined, 200, "human-member"),
+  write("POST", "archiveResearchStudy", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/archival", "Archive a study while retaining research", phase4.participantLinkRevocation, itemPath, undefined, 200, "human-member"),
+  write("POST", "issueResearchParticipantLink", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/participant-links", "Issue a participant link and disclose it once", phase4.participantCredential, itemPath, undefined, 201, "human-member"),
+  write("POST", "rotateResearchParticipantLink", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/participant-link-rotations", "Rotate participant links and disclose the replacement once", phase4.participantCredential, itemPath, undefined, 201, "human-member"),
+  write("POST", "revokeResearchParticipantLinks", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/participant-link-revocations", "Revoke participant links without replacement", phase4.participantLinkRevocation, itemPath, undefined, 200, "human-member"),
+  read("listResearchSessions", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/sessions", "List privacy-minimal research session metadata", collectionOf(phase4.researchSession), itemPath, cursorQuery.extend({ status: z.enum(phase4.REST_RESEARCH_SESSION_STATUSES).optional() }).strict()),
+  read("getResearchSession", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/sessions/{relatedId}", "Read saved transcript turns as untrusted participant material", phase4.researchSessionDetail, relatedItemPath, cursorQuery.strict()),
+  read("listResearchSyntheses", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/syntheses", "List completed synthesis snapshots only", collectionOf(phase4.researchSynthesis), itemPath, cursorQuery.strict()),
+  write("POST", "createResearchSynthesis", "/api/v1/workspaces/{workspaceId}/research-studies/{id}/syntheses", "Store a transcript-grounded synthesis", phase4.synthesisContent, itemPath, synthesisSchema, 201),
+  write("POST", "promoteResearchEvidence", "/api/v1/workspaces/{workspaceId}/research-syntheses/{id}/evidence-promotions", "Promote one stored grounded finding to evidence", phase4.evidencePromotion, itemPath, phase4.evidencePromotionInput, 201, "human-member"),
+  read("getPmInterview", "/api/v1/workspaces/{workspaceId}/pm-interviews/{id}", "Read an initiating-owner PM interview", phase4.pmInterview, itemPath),
+  read("listAnalyticsConnections", "/api/v1/workspaces/{workspaceId}/analytics-connections", "List analytics connections without provider credentials", collectionOf(phase4.analyticsConnection), workspacePath, cursorQuery.strict()),
+  write("POST", "saveAnalyticsConnection", "/api/v1/workspaces/{workspaceId}/analytics-connections", "Create or rotate a Vercel analytics credential without returning it", phase4.analyticsConnection, workspacePath, phase4.analyticsConnectionInput, 201, "human-admin"),
+  write("DELETE", "disconnectAnalyticsConnection", "/api/v1/workspaces/{workspaceId}/analytics-connections/{id}", "Disconnect analytics and clear the stored credential", z.undefined(), itemPath, undefined, 204, "human-admin"),
+  read("listCardSortFactors", "/api/v1/workspaces/{workspaceId}/card-sort-factors", "List eligible SELECT card-sort factors", collectionOf(phase4.cardSortFactor), workspacePath, cursorQuery.extend({ objectType: z.enum(["OPPORTUNITY", "SOLUTION", "EXPERIMENT", "OBJECTIVE", "KEY_RESULT", "ROADMAP_ITEM", "TASK"]) }).strict(), "human-member"),
+  read("listCardSortRounds", "/api/v1/workspaces/{workspaceId}/card-sort-rounds", "List card-sort rounds with blind proposal counts", collectionOf(phase4.cardSortRound), workspacePath, cursorQuery.extend({ state: z.enum(["OPEN", "REVEALED", "CLOSED"]).optional() }).strict(), "human-member"),
+  write("POST", "createCardSortRound", "/api/v1/workspaces/{workspaceId}/card-sort-rounds", "Create an open card-sort round", phase4.cardSortRound, workspacePath, z.object({ name: z.string().trim().min(1).max(255), fieldDefinitionId: uuid }).strict(), 201, "human-member"),
+  write("POST", "revealCardSortRound", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/reveal", "Irreversibly reveal a card-sort round", phase4.cardSortRound, itemPath, undefined, 200, "human-member"),
+  write("POST", "closeCardSortRound", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/closure", "Close a card-sort round", phase4.cardSortRound, itemPath, undefined, 200, "human-member"),
+  read("getCardSortBoard", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/board", "Get a board filtered by the caller's blind-vote visibility", phase4.cardSortBoard, itemPath, undefined, "human-member"),
+  read("listCardSortProposals", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/proposals", "List only the caller's proposals", collectionOf(phase4.cardSortProposal), itemPath, cursorQuery.strict(), "human-member"),
+  write("POST", "proposeCardSortMoves", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/proposals", "Propose moves without changing official field values", phase4.cardSortProposalResult, itemPath, z.object({ objectIds: z.array(uuid).min(1).max(100), proposedValue: z.string().min(1), rationale: z.string().max(2_000).optional() }).strict(), 201, "human-member"),
+  write("DELETE", "withdrawCardSortProposal", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/proposals/{relatedId}", "Withdraw the caller's proposal", z.undefined(), relatedItemPath, undefined, 204, "human-member"),
+  read("getCardSortTally", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/tally", "Get tally only when reveal policy permits", phase4.cardSortTally, itemPath, undefined, "human-member"),
+  read("listCardSortNewEntries", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/new-entries", "List new-entry proposals under blind-vote visibility", collectionOf(phase4.cardSortNewEntry), itemPath, cursorQuery.strict(), "human-member"),
+  write("POST", "proposeCardSortNewEntry", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/new-entries", "Propose a new opportunity without creating it", phase4.cardSortNewEntry, itemPath, z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().max(2_000).nullable().optional(), suggestedValue: z.string().trim().max(255).nullable().optional() }).strict(), 201, "human-member"),
+  write("DELETE", "withdrawCardSortNewEntry", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/new-entries/{relatedId}", "Withdraw the caller's pending new-entry proposal", z.undefined(), relatedItemPath, undefined, 204, "human-member"),
+  write("POST", "acceptCardSortNewEntry", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/new-entries/{relatedId}/acceptance", "Atomically accept a new entry as an opportunity", phase4.cardSortAcceptance, relatedItemPath, undefined, 201, "human-member"),
+  write("POST", "rejectCardSortNewEntry", "/api/v1/workspaces/{workspaceId}/card-sort-rounds/{id}/new-entries/{relatedId}/rejection", "Reject a pending new-entry proposal", z.object({ entryId: uuid }).strict(), relatedItemPath, z.object({ note: z.string().trim().max(2_000).nullable().optional() }).strict(), 200, "human-member"),
 ] as const
 
 function routePattern(path: string): { regexp: RegExp; names: string[] } {

@@ -237,6 +237,19 @@ export async function readPmInterview(scope: PmInterviewScope, actor: PmIntervie
   return { ...buildPmInterviewReadDto(interview, actor.userId), applicationDisabledReason }
 }
 
+/** Programmatic reads are owner-scoped; workspace membership alone is not enough. */
+export async function readOwnedPmInterview(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string) {
+  const { prisma, interview } = await loadInterview(scope, actor, interviewId, true)
+  const targetType = parsePmInterviewTargetType(interview.targetType)
+  const target = await liveTarget(prisma, interview.workspaceId, targetType, interview.targetId)
+  const applicationDisabledReason = !target
+    ? "The source item was deleted; interview history remains readable."
+    : targetType === "EXPERIMENT" && "status" in target && target.status !== "DESIGNING"
+      ? "Experiment protocol can only change while designing."
+      : null
+  return { ...buildPmInterviewReadDto(interview, actor.userId), applicationDisabledReason }
+}
+
 export async function respondToPmInterview(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string, input: { answer: unknown; idempotencyKey: unknown }) {
   const { prisma, interview } = await loadInterview(scope, actor, interviewId, true)
   if (!interview.session.participantTokenId) throw new PmInterviewError("Interview session is unavailable", 409)

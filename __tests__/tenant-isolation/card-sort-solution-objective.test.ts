@@ -48,7 +48,12 @@ function installCardSort() {
   );
   fake.extra = {
     customFieldDefinition: { findUnique: async ({ where }: { where: { id: string } }) => fields.find((f) => f.id === where.id) ?? null },
-    cardSortRound: { findUnique: async ({ where }: { where: { id: string } }) => rounds.find((r) => r.id === where.id) ?? null },
+    cardSortRound: {
+      findUnique: async ({ where }: { where: { id: string } }) => rounds.find((r) => r.id === where.id) ?? null,
+      updateMany: async ({ where }: { where: { id: string; workspaceId: string; state: string } }) => ({
+        count: rounds.some((r) => r.id === where.id && r.workspaceId === where.workspaceId && r.state === where.state) ? 1 : 0,
+      }),
+    },
     customFieldValue: { findUnique: async () => null, findMany: async () => [] },
     user: { findMany: async () => [] },
     cardSortProposal: {
@@ -57,6 +62,8 @@ function installCardSort() {
       upsert: async ({ create }: { create: Row }) => { upserts.push(create); proposals.push(create); return create; },
     },
   };
+  fake.extra.$transaction = async (callback: (tx: Record<string, unknown>) => Promise<unknown>) =>
+    callback({ ...fake.current!.client, ...fake.extra });
 }
 
 beforeEach(() => {
