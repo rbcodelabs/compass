@@ -35,6 +35,7 @@ vi.mock("@/components/panels/solution-plan-discussion", () => ({
 vi.mock("@/components/panels/solution-artifacts", () => ({ SolutionArtifacts: () => null }));
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({
   promoteToRoadmap: vi.fn(),
+  archiveItem: vi.fn(),
 }));
 // The Solution panel embeds SolutionScoringPanel, which writes through the
 // discovery server actions module (imports next-auth) — same boundary as above.
@@ -52,6 +53,7 @@ vi.mock("@/components/panels/launch-tier-picker", () => ({ LaunchTierPicker: () 
 vi.mock("@/components/panels/positioning-brief-row", () => ({
   PositioningBriefRow: () => null,
 }));
+vi.mock("@/components/following/follow-button", () => ({ FollowButton: () => null }));
 vi.mock("@/components/tasks/linked-tasks-section", () => ({
   LinkedTasksSection: () => null,
 }));
@@ -156,13 +158,16 @@ describe("per-panel-type section defaults", () => {
     await expectSectionState(/Artifacts/, "false");
   });
 
-  it("opens Launch and Delivery tasks and closes Linked to on a roadmap item panel", async () => {
+  it("shows Launch, Delivery tasks and Linked to as plain sections and folds secondary fields on a roadmap item panel", async () => {
     mockFetch("roadmapItem", roadmapItemData);
     render(<RoadmapItemPanel id="ri-1" orgSlug="acme" workspaceSlug="product" />);
 
-    await expectSectionState(/Launch/, "true");
-    await expectSectionState(/Delivery tasks/, "true");
-    await expectSectionState(/Linked to/, "false");
+    await screen.findByText("Delivery tasks");
+    expect(screen.getByText("Launch")).toBeInTheDocument();
+    expect(screen.getByText("Linked to")).toBeInTheDocument();
+    // Only the secondary-properties disclosure is collapsible, and it starts closed.
+    expect(screen.queryByRole("button", { name: /Launch|Delivery tasks|Linked to/ })).toBeNull();
+    await expectSectionState(/More properties/, "false");
   });
 
   it("leaves untouched panels non-collapsible", async () => {

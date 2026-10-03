@@ -426,11 +426,19 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
   });
   if (!item) return null;
 
-  const [linkedTasks, customFields] = await Promise.all([
+  const [linkedTasks, customFields, squads, availableOpportunities] = await Promise.all([
     fetchLinkedTasksBundle(workspaceId, "ROADMAP_ITEM", id),
-    // A RoadmapItem has no detail route — its panel is the only place its tags
-    // can be set, which is what the shipped ROADMAP_ITEM tag filter reads.
+    // The detail view (panel and full page) is the only place a roadmap item's
+    // tags get set, which is what the ROADMAP_ITEM tag filter reads.
     loadCustomFieldsForObject(prisma, { workspaceId, objectType: "ROADMAP_ITEM", objectId: id }),
+    // Pickers for the squad and linked-opportunity fields. The current link is
+    // always offered even when archived, so it never vanishes from the picker.
+    prisma.squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
+    prisma.opportunity.findMany({
+      where: { workspaceId, OR: [{ status: { not: "ARCHIVED" } }, ...(item.opportunityId ? [{ id: item.opportunityId }] : [])] },
+      select: { id: true, title: true },
+      orderBy: { createdAt: "asc" },
+    }),
   ]);
 
   const { workspace, ...rest } = item;
@@ -438,6 +446,8 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
     ...rest,
     ...linkedTasks,
     customFields,
+    squads,
+    availableOpportunities,
     // Flattened onto the panel payload so the client doesn't need a second
     // fetch just to know whether to render the Launch section.
     launchWorkflowEnabled: workspace.launchWorkflowEnabled ?? false,

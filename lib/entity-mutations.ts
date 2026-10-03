@@ -71,6 +71,58 @@ export const EDIT_CONFIG: Record<LegacyEntityType, EntityEditConfig> = {
 
 export const TITLE_MAX_LENGTH = 255;
 
+/**
+ * Roadmap-item fields beyond title/description/horizon. They exist so the
+ * detail view is the one edit surface (it replaced the card's Edit dialog).
+ * `schedule` is a pair because a roadmap date range is inclusive and
+ * all-or-nothing — a lone start or end date is never a valid state.
+ */
+export const ROADMAP_ITEM_FIELDS = ["squadId", "opportunityId", "isPrivate", "schedule"] as const;
+
+function parseDateOnly(value: unknown): Date | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}/.test(value)) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+async function parseRoadmapItemField(
+  field: (typeof ROADMAP_ITEM_FIELDS)[number],
+  value: unknown,
+  workspaceId: string,
+): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; status: 400 | 404; error: string }> {
+  switch (field) {
+    case "isPrivate":
+      if (typeof value !== "boolean") return { ok: false, status: 400, error: "isPrivate must be true or false" };
+      return { ok: true, data: { isPrivate: value } };
+    case "squadId":
+    case "opportunityId": {
+      if (value !== null && (typeof value !== "string" || !value.trim())) {
+        return { ok: false, status: 400, error: `${field} must be a nonempty string or null` };
+      }
+      if (typeof value === "string") {
+        const prisma = getPrisma();
+        const target = field === "squadId"
+          ? await prisma.squad.findFirst({ where: { id: value, workspaceId }, select: { id: true } })
+          : await prisma.opportunity.findFirst({ where: { id: value, workspaceId, status: { not: "ARCHIVED" } }, select: { id: true } });
+        if (!target) return { ok: false, status: 404, error: "Not found" };
+      }
+      return { ok: true, data: { [field]: value } };
+    }
+    case "schedule": {
+      const range = value as { startDate?: unknown; endDate?: unknown } | null;
+      if (!range || typeof range !== "object") return { ok: false, status: 400, error: "schedule must be { startDate, endDate }" };
+      const startDate = parseDateOnly(range.startDate);
+      const endDate = parseDateOnly(range.endDate);
+      if (startDate === undefined || endDate === undefined) return { ok: false, status: 400, error: "Invalid date" };
+      if ((startDate === null) !== (endDate === null) || (startDate && endDate && startDate > endDate)) {
+        return { ok: false, status: 400, error: "Roadmap dates must be an inclusive range with start on or before end" };
+      }
+      return { ok: true, data: { startDate, endDate } };
+    }
+  }
+}
+
 export type UpdateResult =
   | { ok: true }
   | { ok: false; status: 400 | 404; error: string };
@@ -126,6 +178,10 @@ export async function updateEntityField(
       if (!target) return { ok: false, status: 404, error: "Not found" };
     }
     data = { [field]: value };
+  } else if (type === "roadmapItem" && (ROADMAP_ITEM_FIELDS as readonly string[]).includes(field)) {
+    const parsed = await parseRoadmapItemField(field as (typeof ROADMAP_ITEM_FIELDS)[number], value, workspaceId);
+    if (!parsed.ok) return parsed;
+    data = parsed.data;
   } else if (config.enum && field === config.enum.field) {
     // The whole marketing-launch surface (including the LAUNCHING/LAUNCHED
     // horizons) is opt-in per workspace. When it's off, a direct attempt to
