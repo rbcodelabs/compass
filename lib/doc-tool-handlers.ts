@@ -18,7 +18,8 @@ import { ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates"
 import { maybeSnapshotDocVersion } from "@/lib/doc-versions"
-import { createDocument, hydrateDocument, updateDocument } from "@/lib/document-service"
+import { randomUUID } from "node:crypto"
+import { createDocument, documentRevision, hydrateDocument, updateDocument } from "@/lib/document-service"
 import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
 import { isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { documentMcpActor } from "@/lib/document-mcp-actor"
@@ -231,7 +232,7 @@ export async function getDoc({ docId }: { docId: string }) {
     docType: doc.docType,
     content: fullContent,
     properties: metadata,
-    revision: doc.revision,
+    revision: documentRevision(doc),
     storageProvider: doc.storageProvider ?? "DATABASE",
   })
 }
@@ -340,9 +341,9 @@ export async function createDoc({
       roadmapItemId: roadmapItemId ?? null,
       docType: effectiveDocType,
     }
-  const doc = pilot
+  const doc = pilot || operationId
     ? await createDocument(data, { operationId, ...documentMcpActor() })
-    : await prisma.doc.create({ data })
+    : await prisma.doc.create({ data: { ...data, revision: randomUUID() } })
   await followAfterCreate({ model: "doc", workspaceId, row: { id: doc.id }, actor: async () => mcpFollowActor() ?? { type: "SYSTEM", id: null } })
 
   // This used to emit a *relative* `/{org}/{ws}/docs` — the docs index, not the
@@ -371,7 +372,7 @@ export async function createDoc({
       id: doc.id,
       title: doc.title,
       url,
-      revision: doc.revision,
+      revision: documentRevision(doc),
       storageProvider: doc.storageProvider ?? "DATABASE",
     }
   )
@@ -421,7 +422,7 @@ export async function updateDoc({
   // Snapshot the doc's pre-change state before applying the new values —
   // but only when this call actually changes something, so a no-op call
   // never creates a version.
-  if (existing.storageProvider !== "GEODE" && (title !== undefined || content !== undefined || icon !== undefined)) {
+  if (existing.storageProvider !== "GEODE" && !operationId && (title !== undefined || content !== undefined || icon !== undefined)) {
     await maybeSnapshotDocVersion(docId, { authorName: MCP_AUTHOR_NAME })
   }
 
@@ -433,14 +434,14 @@ export async function updateDoc({
   if (metadata !== undefined) updateData.metadata = metadata != null ? toJsonInput(metadata) : null
   if (icon !== undefined) updateData.icon = icon.trim()
 
-  const updated = existing.storageProvider === "GEODE" ? await updateDocument(docId, {
+  const updated = existing.storageProvider === "GEODE" || operationId ? await updateDocument(docId, {
     ...(title !== undefined ? { title: title.trim() } : {}),
     ...(body !== undefined ? { content: body } : {}),
     ...(metadata !== undefined ? { metadata: metadata === null ? Prisma.JsonNull : toJsonInput(metadata) } : {}),
     ...(icon !== undefined ? { icon: icon.trim() } : {}),
   }, { expectedRevision, operationId, ...documentMcpActor() }) : await prisma.doc.update({
     where: { id: docId },
-    data: updateData,
+    data: { ...updateData, revision: randomUUID() },
   })
 
   return ok(
@@ -454,7 +455,7 @@ export async function updateDoc({
       title: updated.title,
       icon: updated.icon,
       updatedAt: updated.updatedAt.toISOString(),
-      revision: updated.revision,
+      revision: documentRevision(updated),
     }
   )
 }
@@ -486,7 +487,7 @@ export async function updateDocMetadata({
     ? await updateDocument(docId, { metadata: toJsonInput(metadata) }, { expectedRevision, operationId, ...documentMcpActor() })
     : await prisma.doc.update({
     where: { id: docId },
-    data: { metadata: toJsonInput(metadata), updatedAt: new Date() },
+    data: { metadata: toJsonInput(metadata), revision: randomUUID(), updatedAt: new Date() },
   })
 
   return ok(
@@ -496,7 +497,7 @@ export async function updateDocMetadata({
     {
       id: updated.id,
       properties: Object.keys(metadata),
-      revision: updated.revision,
+      revision: documentRevision(updated),
     }
   )
 }

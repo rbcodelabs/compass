@@ -15,6 +15,7 @@
 
 import getPrisma from "@/lib/db"
 import { Prisma } from "@prisma/client"
+import { randomUUID } from "node:crypto"
 
 const COALESCE_WINDOW_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -112,6 +113,7 @@ export async function restoreDocVersionCore(
       // rather than leaving it untouched.
       metadata: version.metadata === null ? Prisma.JsonNull : (version.metadata as Prisma.InputJsonValue),
       icon: version.icon,
+      revision: randomUUID(),
       updatedAt: new Date(),
     },
   })

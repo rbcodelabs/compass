@@ -153,6 +153,11 @@ describe("addSolutionPlan", () => {
     })
   })
 
+  it("accepts server-derived human attribution for the REST adapter", async () => {
+    await addSolutionPlan({ solutionId: SOLUTION_ID, body: "Ship", authorName: "Dev User", authorType: "HUMAN", source: "UI" })
+    expect(mockSolutionComment.create).toHaveBeenCalledWith({ data: expect.objectContaining({ authorName: "Dev User", authorType: "HUMAN", source: "UI" }) })
+  })
+
   it("returns a plain ID line (no markdown bold)", async () => {
     const result = await addSolutionPlan({
       solutionId: SOLUTION_ID,

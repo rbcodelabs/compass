@@ -15,10 +15,18 @@ OpenAPI 3.1 description is public at:
 GET /api/v1/openapi.json
 ```
 
-PR 1 covers identity, workspaces, opportunities, solutions, assumptions,
-feedback, tasks, and roadmap items. Later API program phases add strategy,
-learning, collaboration, governance, and research resources. The MCP endpoint
-remains supported and unchanged.
+API v1 currently covers identity and workspaces; discovery and delivery;
+strategy, learning, metrics, scoring, squads, custom fields, and typed links;
+and the Phase 3 collaboration surface for comments, notifications, Docs,
+artifacts, decision/review requests, solution plans, launch checklists, and
+release-authorization requests. The MCP endpoint remains supported and
+unchanged.
+
+Human judgment and execution boundaries are deliberate. REST clients may
+request a decision or release authorization and read its state, but cannot
+record a human decision, apply a recorded decision, approve or reject a
+solution plan, or dispatch a release. Those operations remain human-only or
+inside the separately authorized release workflow.
 
 ## Authentication
 
@@ -40,8 +48,14 @@ Protected-resource metadata is published at
 ## Conventions
 
 - Resource paths use plural kebab-case under `/api/v1/workspaces/{workspaceId}`.
-- Collections return `{ "items": [], "nextCursor": null }` and accept an
-  opaque `cursor` plus `limit` (default 50, maximum 100).
+- General collections return `{ "items": [], "nextCursor": null }` and accept
+  an opaque `cursor` plus `limit` (default 50, maximum 100). Decision-request
+  collections are the explicit exception and cap `limit` at 50 to match their
+  bounded shared service.
+- Boolean query parameters use the exact URL strings `true` and `false`; other
+  spellings are rejected. A cursor is bound to its collection, filters, and
+  page size, so clients must keep the same `limit` while paging; a cursor from
+  a general collection cannot be reused for a differently sized decision page.
 - Reads and updates return `200`, creation returns `201`, and supported deletion
   returns `204`.
 - Errors use RFC 9457 `application/problem+json`, including a stable `code` and
@@ -53,3 +67,21 @@ Protected-resource metadata is published at
 The OpenAPI document is the authoritative list of operations and request and
 response schemas. Resource names, operation IDs, field casing, pagination, and
 problem codes are compatibility contracts for API v1.
+
+## Docs concurrency and idempotency
+
+Doc creation requires a UUID `operationId`. Doc update, version creation, and
+version restore require both `operationId` and the current `expectedRevision`.
+These fields make retries idempotent and prevent stale writers from overwriting
+newer content, including workspaces backed by the GEODE document store. Reusing
+an operation ID for a different payload or sending a stale revision returns
+`409`; missing/invalid operation tokens return `422`.
+
+## Release authorization
+
+`POST /api/v1/workspaces/{workspaceId}/release-authorizations` prepares an
+immutable human review request for an exact repository, commit, environment,
+policy, and same-workspace task set. It does not merge, deploy, mutate tasks, or
+dispatch a release. Clients can inspect the resulting request and release run;
+actual dispatch remains outside the REST API and requires separately recorded
+human authorization plus the release workflow's revalidation.

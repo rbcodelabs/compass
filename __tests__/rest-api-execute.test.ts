@@ -5,6 +5,7 @@ const FOREIGN = "22222222-2222-4222-8222-222222222222"
 const THIRD = "33333333-3333-4333-8333-333333333333"
 
 const mocks = vi.hoisted(() => ({
+  actor: { current: { userId: "user-1", purpose: "USER" as const } as { userId: string | null; purpose: "USER" | "SERVICE" | "AGENT" | "AGENT_TURN" } },
   prisma: {
     squad: { findFirst: vi.fn() },
     keyResult: { findFirst: vi.fn() },
@@ -12,7 +13,7 @@ const mocks = vi.hoisted(() => ({
     solution: { findFirst: vi.fn() },
     assumption: { findFirst: vi.fn(), updateMany: vi.fn() },
     workspaceMember: { findFirst: vi.fn() },
-    task: { findFirst: vi.fn() },
+    task: { findFirst: vi.fn(), count: vi.fn() },
     roadmapItem: { findFirst: vi.fn() },
     feedbackItem: { findFirst: vi.fn() },
     objective: { findFirst: vi.fn() },
@@ -21,6 +22,16 @@ const mocks = vi.hoisted(() => ({
     customFieldValue: { findMany: vi.fn() },
     workspace: { findFirst: vi.fn() },
     scoringModel: { findMany: vi.fn() },
+    doc: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
+    docVersion: { findFirst: vi.fn(), findMany: vi.fn() },
+    comment: { findFirst: vi.fn(), findMany: vi.fn() },
+    docComment: { findFirst: vi.fn() },
+    artifact: { findFirst: vi.fn() },
+    reviewRequest: { findFirst: vi.fn(), findMany: vi.fn() },
+    solutionComment: { findFirst: vi.fn() },
+    launchChecklistItem: { findFirst: vi.fn() },
+    releaseRun: { findMany: vi.fn() },
+    user: { findFirst: vi.fn() },
   },
   createOpportunity: vi.fn(),
   createTask: vi.fn(),
@@ -32,12 +43,29 @@ const mocks = vi.hoisted(() => ({
   listBindingsPage: vi.fn(),
   listObservationsPage: vi.fn(),
   listScoringModels: vi.fn(),
+  getDoc: vi.fn(),
+  updateLaunchChecklistItem: vi.fn(),
+  assertWorkspaceAdmin: vi.fn(),
+  requestReleaseAuthorization: vi.fn(),
+  listNotifications: vi.fn(),
+  unreadCount: vi.fn(),
+  listDecisions: vi.fn(),
+  createComment: vi.fn(),
+  updateCommentBody: vi.fn(),
+  setCommentStatus: vi.fn(),
+  createDocCommentCore: vi.fn(),
+  updateDocComment: vi.fn(),
+  deleteDocComment: vi.fn(),
+  resolveDocComment: vi.fn(),
+  reopenDocComment: vi.fn(),
+  deleteBrowserComment: vi.fn(),
 }))
 
 vi.mock("@/lib/db", () => ({ default: () => mocks.prisma }))
 vi.mock("@/lib/mcp-authz", () => ({
-  getMcpActor: () => ({ userId: "user-1", purpose: "USER" }),
+  getMcpActor: () => mocks.actor.current,
   assertWorkspaceMember: mocks.assertWorkspaceMember,
+  assertWorkspaceAdmin: mocks.assertWorkspaceAdmin,
   isServiceActor: () => false,
 }))
 vi.mock("@/lib/opportunity-tool-handlers", () => ({
@@ -48,7 +76,14 @@ vi.mock("@/lib/task-tool-handlers", () => ({
   createTask: mocks.createTask,
   moveTaskStatus: vi.fn(), updateTask: vi.fn(), linkTask: vi.fn(), unlinkTask: vi.fn(),
 }))
-vi.mock("@/lib/roadmap-tool-handlers", () => ({ updateRoadmapItem: mocks.updateRoadmapItem, createRoadmapItem: mocks.createRoadmapItem }))
+vi.mock("@/lib/roadmap-tool-handlers", () => ({ updateRoadmapItem: mocks.updateRoadmapItem, createRoadmapItem: mocks.createRoadmapItem, updateLaunchChecklistItem: mocks.updateLaunchChecklistItem, setLaunchTier: vi.fn(), getLaunchChecklist: vi.fn() }))
+vi.mock("@/lib/doc-tool-handlers", () => ({ getDoc: mocks.getDoc, listDocs: vi.fn(), createDoc: vi.fn(), updateDoc: vi.fn() }))
+vi.mock("@/lib/decision-tool-handlers", () => ({ requestReleaseAuthorization: mocks.requestReleaseAuthorization, requestDecision: vi.fn(), listDecisions: mocks.listDecisions, getDecision: vi.fn(), getReviewRequest: vi.fn(), listReviewRequests: vi.fn() }))
+vi.mock("@/lib/comments", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/comments")>(), createComment: mocks.createComment, updateCommentBody: mocks.updateCommentBody, setCommentStatus: mocks.setCommentStatus }))
+vi.mock("@/lib/doc-comments", () => ({ createDocCommentCore: mocks.createDocCommentCore }))
+vi.mock("@/lib/doc-comment-tool-handlers", () => ({ getDocComment: vi.fn(), updateDocComment: mocks.updateDocComment, deleteDocComment: mocks.deleteDocComment, resolveDocComment: mocks.resolveDocComment, reopenDocComment: mocks.reopenDocComment }))
+vi.mock("@/lib/comment-browser", () => ({ deleteBrowserComment: mocks.deleteBrowserComment }))
+vi.mock("@/lib/notifications", () => ({ listNotifications: mocks.listNotifications, unreadCount: mocks.unreadCount }))
 vi.mock("@/lib/experiment-update-tool", () => ({ updateExperiment: mocks.updateExperiment }))
 vi.mock("@/lib/workspace-update-mutations", () => ({ captureWorkspaceMutation: mocks.captureWorkspaceMutation }))
 vi.mock("@/lib/analytics/service", async (importOriginal) => ({
@@ -61,7 +96,7 @@ vi.mock("@/lib/scoring-tool-handlers", async (importOriginal) => ({
   listScoringModels: mocks.listScoringModels,
 }))
 
-import { executeRestRoute, RestConflictError, RestNotFoundError } from "@/lib/rest/execute"
+import { executeRestRoute, RestConflictError, RestNotFoundError, RestValidationError } from "@/lib/rest/execute"
 import { REST_ROUTES } from "@/lib/rest/registry"
 
 const route = (operationId: string) => {
@@ -78,6 +113,7 @@ const success = (data: unknown) => ({
 describe("REST domain execution", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.actor.current = { userId: "user-1", purpose: "USER" }
     mocks.captureWorkspaceMutation.mockImplementation(async (prisma, _model, _operation, _actor, _id, mutate) => mutate(prisma))
   })
 
@@ -364,5 +400,169 @@ describe("REST domain execution", () => {
     const result = await executeRestRoute(scoringRoute, { params: { workspaceId: UUID }, query: {}, body: undefined })
     expect(scoringRoute.status ?? 200).toBe(200)
     expect(result).toEqual({ items: [], nextCursor: null })
+  })
+
+  it("pre-fences a document by workspace before calling the shared document service", async () => {
+    mocks.prisma.doc.findFirst.mockResolvedValue(null)
+    await expect(executeRestRoute(route("getDoc"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.getDoc).not.toHaveBeenCalled()
+  })
+
+  it("pre-fences document versions and shared comments through their workspace ancestry", async () => {
+    mocks.prisma.docVersion.findFirst.mockResolvedValue(null)
+    await expect(executeRestRoute(route("getDocVersion"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.prisma.docVersion.findFirst).toHaveBeenCalledWith({ where: { id: FOREIGN, doc: { workspaceId: UUID } }, select: { id: true } })
+
+    mocks.prisma.comment.findFirst.mockResolvedValue(null)
+    await expect(executeRestRoute(route("getComment"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.prisma.comment.findFirst).toHaveBeenCalledWith({ where: { id: FOREIGN, workspaceId: UUID }, select: { id: true, authorId: true, targetType: true } })
+  })
+
+  it("normalizes reused service not-found and validation failures", async () => {
+    mocks.prisma.doc.findFirst.mockResolvedValue({ id: FOREIGN })
+    mocks.getDoc.mockResolvedValue({ content: [{ type: "text", text: "missing" }], structuredContent: { ok: false, message: `Doc "${FOREIGN}" not found.`, data: null } })
+    await expect(executeRestRoute(route("getDoc"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined,
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(() => { throw new RestValidationError("invalid") }).toThrow(RestValidationError)
+  })
+
+  it("pre-fences a checklist item through checklist and roadmap workspace ancestry", async () => {
+    mocks.prisma.launchChecklistItem.findFirst.mockResolvedValue(null)
+    await expect(executeRestRoute(route("updateLaunchChecklistItem"), {
+      params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: { status: "DONE" },
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.prisma.launchChecklistItem.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: FOREIGN, launchChecklist: { roadmapItem: { workspaceId: UUID } } },
+    }))
+    expect(mocks.updateLaunchChecklistItem).not.toHaveBeenCalled()
+  })
+
+  it("requires workspace administration before preparing release authorization", async () => {
+    mocks.assertWorkspaceAdmin.mockRejectedValue(new Error("forbidden"))
+    await expect(executeRestRoute(route("requestReleaseAuthorization"), {
+      params: { workspaceId: UUID }, query: {}, body: {
+        provider: "GITHUB", repositoryOwner: "acme", repositoryName: "app", pullRequestNumber: 7,
+        baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION",
+        releasePolicyId: FOREIGN, taskIds: [THIRD],
+      },
+    })).rejects.toThrow("forbidden")
+    expect(mocks.requestReleaseAuthorization).not.toHaveBeenCalled()
+  })
+
+  it("does not let a service identity request a human release authorization", async () => {
+    mocks.actor.current = { userId: null, purpose: "SERVICE" }
+    await expect(executeRestRoute(route("requestReleaseAuthorization"), {
+      params: { workspaceId: UUID }, query: {}, body: {
+        provider: "GITHUB", repositoryOwner: "acme", repositoryName: "app", pullRequestNumber: 7,
+        baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION",
+        releasePolicyId: "policy", taskIds: [THIRD],
+      },
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.assertWorkspaceAdmin).not.toHaveBeenCalled()
+    expect(mocks.requestReleaseAuthorization).not.toHaveBeenCalled()
+  })
+
+  it("rejects unsigned notification cursors instead of restarting the inbox", async () => {
+    await expect(executeRestRoute(route("listNotifications"), {
+      params: { workspaceId: UUID }, query: { cursor: "unsigned" }, body: undefined,
+    })).rejects.toMatchObject({ message: "The cursor is invalid for this inbox or filter set." })
+    expect(mocks.listNotifications).not.toHaveBeenCalled()
+  })
+
+  it("fills a notification page after inaccessible rows are filtered", async () => {
+    const rawCursor = (minute: number, id: string) => Buffer.from(`${new Date(Date.UTC(2026, 0, 1, 0, minute)).toISOString()}|${id}`).toString("base64url")
+    mocks.listNotifications
+      .mockResolvedValueOnce({ items: [], groups: [], nextCursor: rawCursor(2, UUID) })
+      .mockResolvedValueOnce({ items: [{ id: FOREIGN, kind: "COMMENT_ADDED", subjectType: "DOC", subjectId: THIRD, actor: { type: "USER", id: null, name: "A teammate" }, payload: {}, read: false, readAt: null, subject: { title: "Plan", path: `docs/${THIRD}` }, createdAt: new Date(Date.UTC(2026, 0, 1, 0, 1)) }], groups: [], nextCursor: null })
+    mocks.unreadCount.mockResolvedValue({ count: 1, overflow: false })
+    const result = await executeRestRoute(route("listNotifications"), {
+      params: { workspaceId: UUID }, query: { limit: 1 }, body: undefined,
+    }) as { items: Array<{ id: string }>; nextCursor: string | null }
+    expect(result.items).toEqual([expect.objectContaining({ id: FOREIGN, createdAt: "2026-01-01T00:01:00.000Z" })])
+    expect(result.nextCursor).toBeNull()
+    expect(route("listNotifications").responseSchema.safeParse(result).success).toBe(true)
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(2)
+  })
+
+  it("binds decision cursors to the requested page size", async () => {
+    mocks.listDecisions.mockResolvedValue(success({ requests: [{ id: UUID }], total: 3 }))
+    const first = await executeRestRoute(route("listDecisions"), {
+      params: { workspaceId: UUID }, query: { limit: 1 }, body: undefined,
+    }) as { nextCursor: string }
+    expect(first.nextCursor).toBeTruthy()
+    await expect(executeRestRoute(route("listDecisions"), {
+      params: { workspaceId: UUID }, query: { limit: 2, cursor: first.nextCursor }, body: undefined,
+    })).rejects.toMatchObject({ message: "The cursor is invalid for this collection or filter set." })
+    expect(mocks.listDecisions).toHaveBeenCalledTimes(1)
+  })
+
+  it("routes generic DOC comment mutations through the mirrored legacy services", async () => {
+    const comment = { id: FOREIGN, workspaceId: UUID, targetType: "DOC", targetId: THIRD, parentId: null, body: "Body", status: "OPEN", authorId: "user-1", authorName: "User", authorType: "HUMAN", source: "UI", createdAt: new Date(), updatedAt: new Date() }
+    mocks.prisma.doc.findUnique.mockResolvedValue({ workspaceId: UUID })
+    mocks.prisma.user.findFirst.mockResolvedValue({ name: "User", email: "user@example.com" })
+    mocks.createDocCommentCore.mockResolvedValue({ ok: true, comment })
+    await executeRestRoute(route("createComment"), { params: { workspaceId: UUID, targetType: "DOC", targetId: THIRD }, query: {}, body: { body: "Body" } })
+    expect(mocks.createDocCommentCore).toHaveBeenCalledWith(expect.objectContaining({ docId: THIRD, body: "Body" }))
+    expect(mocks.createComment).not.toHaveBeenCalled()
+
+    mocks.prisma.comment.findFirst.mockResolvedValue({ id: FOREIGN, authorId: "user-1", targetType: "DOC" })
+    mocks.updateDocComment.mockResolvedValue(success(comment))
+    mocks.resolveDocComment.mockResolvedValue(success({ ...comment, status: "RESOLVED" }))
+    mocks.reopenDocComment.mockResolvedValue(success(comment))
+    mocks.deleteDocComment.mockResolvedValue(success({ id: FOREIGN }))
+    await executeRestRoute(route("updateComment"), { params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: { body: "Changed" } })
+    await executeRestRoute(route("resolveComment"), { params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined })
+    await executeRestRoute(route("reopenComment"), { params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined })
+    await executeRestRoute(route("deleteComment"), { params: { workspaceId: UUID, id: FOREIGN }, query: {}, body: undefined })
+    expect(mocks.updateDocComment).toHaveBeenCalledWith({ commentId: FOREIGN, body: "Changed" })
+    expect(mocks.resolveDocComment).toHaveBeenCalledWith({ commentId: FOREIGN })
+    expect(mocks.reopenDocComment).toHaveBeenCalledWith({ commentId: FOREIGN })
+    expect(mocks.deleteDocComment).toHaveBeenCalledWith({ commentId: FOREIGN })
+    expect(mocks.deleteBrowserComment).not.toHaveBeenCalled()
+  })
+
+  it("rejects a generic comment parent outside the exact workspace and target", async () => {
+    mocks.prisma.doc.findUnique.mockResolvedValue({ workspaceId: UUID })
+    mocks.prisma.comment.findFirst.mockResolvedValue(null)
+    await expect(executeRestRoute(route("createComment"), {
+      params: { workspaceId: UUID, targetType: "DOC", targetId: THIRD }, query: {}, body: { body: "Reply", parentId: FOREIGN },
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.createDocCommentCore).not.toHaveBeenCalled()
+    expect(mocks.createComment).not.toHaveBeenCalled()
+  })
+
+  it("rejects foreign release tasks before requesting authorization", async () => {
+    mocks.assertWorkspaceAdmin.mockResolvedValue(undefined)
+    mocks.prisma.task.count.mockResolvedValue(1)
+    await expect(executeRestRoute(route("requestReleaseAuthorization"), {
+      params: { workspaceId: UUID }, query: {}, body: { provider: "GITHUB", repositoryOwner: "acme", repositoryName: "app", pullRequestNumber: 7, baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION", releasePolicyId: "policy", taskIds: [FOREIGN, THIRD] },
+    })).rejects.toBeInstanceOf(RestNotFoundError)
+    expect(mocks.requestReleaseAuthorization).not.toHaveBeenCalled()
+  })
+
+  it("paginates release runs by updatedAt and id without exposing raw task rows", async () => {
+    const row = (id: string, updatedAt: Date) => ({
+      id, state: "READY_FOR_APPROVAL", provider: "GITHUB", repositoryOwner: "acme", repositoryName: "app",
+      pullRequestNumber: 7, baseRef: "main", headSha: "a".repeat(40), targetEnvironment: "PRODUCTION",
+      releasePolicyId: "policy", sourceFingerprint: "fingerprint", authorizationDecisionRecordId: null,
+      lastErrorCode: null, createdAt: updatedAt, updatedAt, tasks: [{ taskId: THIRD }], dispatches: [],
+    })
+    const firstAt = new Date("2026-10-02T12:00:00.000Z")
+    mocks.prisma.releaseRun.findMany
+      .mockResolvedValueOnce([row(UUID, firstAt), row(FOREIGN, new Date("2026-10-02T11:00:00.000Z"))])
+      .mockResolvedValueOnce([row(FOREIGN, new Date("2026-10-02T11:00:00.000Z"))])
+    const first = await executeRestRoute(route("listReleaseRuns"), { params: { workspaceId: UUID }, query: { limit: 1 }, body: undefined }) as { items: Array<Record<string, unknown>>; nextCursor: string }
+    expect(first.items[0]).toMatchObject({ id: UUID, taskIds: [THIRD], pullRequestUrl: "https://github.com/acme/app/pull/7" })
+    expect(first.items[0]).not.toHaveProperty("tasks")
+    expect(route("listReleaseRuns").responseSchema.safeParse(first).success).toBe(true)
+    await executeRestRoute(route("listReleaseRuns"), { params: { workspaceId: UUID }, query: { limit: 1, cursor: first.nextCursor }, body: undefined })
+    expect(mocks.prisma.releaseRun.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: UUID, OR: [{ updatedAt: { lt: firstAt } }, { updatedAt: firstAt, id: { lt: UUID } }] }), take: 2 }))
   })
 })
