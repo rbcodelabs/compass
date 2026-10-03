@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Target, Lightbulb, Puzzle, FlaskConical, Map, MessageSquare, ListChecks, MessageSquareCheck, Clock3, BarChart3 } from "lucide-react"
+import { Target, Lightbulb, Puzzle, FlaskConical, Map, MessageSquare, ListChecks, MessageSquareCheck, Clock3, BarChart3, House } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 
@@ -31,6 +31,7 @@ export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = tru
   const labels = useLabels()
   const baseNavItems = buildBaseNavItems(labels.sections.okrs, labels.solution.plural)
   const navItems = [
+    { label: "Home", path: "home", Icon: House },
     ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
     ...baseNavItems,
     researchCaptureEnabled

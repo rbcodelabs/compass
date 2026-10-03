@@ -43,6 +43,7 @@ async function ensureFunctionalSchema(pool: pg.Pool) {
     "prisma/migrations/068_follows_notifications/migration.sql",
     "prisma/migrations/068_workspace_id_on_solution_objective/migration.sql",
     "prisma/migrations/070_objective_optional_cycle/migration.sql",
+    "prisma/migrations/074_portal_home_layout/migration.sql",
   ];
 
   const client = await pool.connect();

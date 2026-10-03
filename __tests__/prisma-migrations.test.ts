@@ -852,10 +852,10 @@ describe("073_workspace_thinking_model", () => {
       .map((statement) => statement.trim())
       .filter(Boolean);
 
-  it("is registered exactly once and is the last registered migration", () => {
+  it("is registered exactly once, after 067/068, and immediately before 074 (the next migration)", () => {
     const names = registeredMigrations();
     expect(names.filter((name) => name === NAME)).toHaveLength(1);
-    expect(names[names.length - 1]).toBe(NAME);
+    expect(names[names.indexOf(NAME) + 1]).toBe("074_portal_home_layout");
     expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("067_decision_answers"));
     expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("068_card_sort_new_entries"));
   });
