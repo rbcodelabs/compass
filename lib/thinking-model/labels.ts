@@ -25,6 +25,8 @@ export type ResolvedLabels = Record<ThinkingModelEntity, ResolvedEntityLabel> & 
     okrs: string
     /** The framework word in the singular where copy uses it ("OKR"); the Objective singular when the section is derived. */
     okr: string
+    /** True when the Opportunities nav entry precedes the OKRs entry. */
+    discoveryFirst: boolean
   }
 }
 
@@ -75,6 +77,7 @@ export function buildResolvedLabel(label: EntityLabel): ResolvedEntityLabel {
 export function buildResolvedLabels(
   labels: Record<ThinkingModelEntity, EntityLabel>,
   okrsSection: string | null,
+  discoveryFirst = false,
 ): ResolvedLabels {
   const entries = THINKING_MODEL_ENTITIES.map(
     (entity) => [entity, buildResolvedLabel(labels[entity])] as const,
@@ -85,6 +88,7 @@ export function buildResolvedLabels(
     sections: {
       okrs: okrsSection ?? resolved.objective.plural,
       okr: okrsSection === "OKRs" ? "OKR" : resolved.objective.singular,
+      discoveryFirst,
     },
   }
 }

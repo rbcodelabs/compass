@@ -55,6 +55,7 @@ import { getWorkspaceSwitchPath } from "@/lib/workspace-nav"
 import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
 import { useAgentRailOptional } from "@/components/agent/agent-rail-context"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
+import { orderPrimaryNav } from "@/lib/workspace-nav"
 import { NotificationBellNavItem } from "@/components/notifications/notification-bell"
 
 interface SidebarProps {
@@ -76,9 +77,9 @@ interface SidebarProps {
 
 // A function, not a constant, because the OKRs entry's name comes from the
 // workspace's thinking model ("OKRs" by default, "Outcomes" under Torres).
-const buildBaseNavItems = (okrsLabel: string, solutionsLabel: string) => [
+const buildBaseNavItems = (okrsLabel: string, discoveryLabel: string, solutionsLabel: string, discoveryFirst: boolean) => orderPrimaryNav([
   { label: okrsLabel, path: "okrs", Icon: Target },
-  { label: "Discovery", path: "discovery", Icon: Lightbulb },
+  { label: discoveryLabel, path: "discovery", Icon: Lightbulb },
   { label: solutionsLabel, path: "solutions", Icon: Puzzle },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
@@ -88,7 +89,7 @@ const buildBaseNavItems = (okrsLabel: string, solutionsLabel: string) => [
   { label: "Docs", path: "docs", Icon: BookOpen },
   { label: "Canvas", path: "canvas", Icon: Waypoints },
   { label: "Agent", path: "agent", Icon: Sparkles },
-]
+], discoveryFirst)
 
 /**
  * Opens/closes the agent rail.
@@ -164,7 +165,7 @@ export function Sidebar({
   const router = useRouter()
   const base = `/${orgSlug}/${workspaceSlug}`
   const labels = useLabels()
-  const baseNavItems = buildBaseNavItems(labels.sections.okrs, labels.solution.plural)
+  const baseNavItems = buildBaseNavItems(labels.sections.okrs, labels.opportunity.plural, labels.solution.plural, labels.sections.discoveryFirst)
   const navItems = [
     { label: "Home", path: "home", Icon: House },
     ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),

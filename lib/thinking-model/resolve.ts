@@ -95,7 +95,7 @@ export function resolveThinkingModel(source: ThinkingModelSource = {}): Resolved
   return {
     key,
     name: preset.name,
-    labels: buildResolvedLabels(labels, preset.sections.okrs),
+    labels: buildResolvedLabels(labels, preset.sections.okrs, preset.sections.discoveryFirst),
     links: preset.links,
     tree: preset.tree,
     cycles: preset.cycles,
