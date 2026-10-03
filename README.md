@@ -31,6 +31,14 @@ Portal** with voting, hierarchical **Docs**, **Squads**, **Custom Fields**,
 per-workspace **Branding**, and an **MCP API** that lets AI agents read and write
 discovery data programmatically.
 
+The **[REST API](docs/content/09-rest-api.md)** runs in the same Compass app
+deployment at `/api/v1`, with a public
+[OpenAPI 3.1 document](https://compass.rbcodelabs.com/api/v1/openapi.json).
+Authenticate with a Compass API key (including service keys) or an OAuth bearer
+token for the `/api/v1` resource with `api:read` or `api:write` scope. The guide
+documents authorization boundaries, including excluded human decision recording,
+solution-plan approval, decision application, and release dispatch operations.
+
 The opt-in **[Updates](docs/content/22-updates.md)** landing page groups recent
 workspace activity into inspectable stories, with personal catch-up state and
 explicit Mark caught up / Undo controls. It requires the registered
