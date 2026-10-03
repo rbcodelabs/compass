@@ -75,6 +75,64 @@ async function setup(second = jsonResponse({ id: "synthetic" })) {
   return fetcher;
 }
 describe("custom API explorer", () => {
+  it.each(["token", "parameter", "pagehide"])(
+    "suppresses pending response after %s changes",
+    async (change) => {
+      let resolve!: (response: Response) => void;
+      const value = {
+        ...document,
+        paths: {
+          "/api/v1/me": {
+            get: {
+              ...document.paths["/api/v1/me"].get,
+              parameters: [
+                { in: "query", name: "limit", schema: { type: "integer" } },
+              ],
+            },
+          },
+        },
+      };
+      const fetcher = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(value))
+        .mockImplementationOnce(
+          () =>
+            new Promise<Response>((done) => {
+              resolve = done;
+            }),
+        );
+      vi.stubGlobal("fetch", fetcher);
+      render(<ApiExplorer />);
+      await screen.findByRole("heading", { name: "Your identity" });
+      const token = screen.getByLabelText("API key or OAuth bearer token");
+      fireEvent.change(token, { target: { value: "synthetic" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send GET request" }));
+      const signal = fetcher.mock.calls[1][1].signal;
+      fireEvent.click(screen.getByRole("tab", { name: "Request" }));
+      if (change === "token")
+        fireEvent.change(
+          screen.getByLabelText("API key or OAuth bearer token"),
+          { target: { value: "replacement" } },
+        );
+      else if (change === "parameter")
+        fireEvent.change(screen.getByLabelText(/limit/), {
+          target: { value: "2" },
+        });
+      else fireEvent(window, new Event("pagehide"));
+      expect(signal.aborted).toBe(true);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        resolve(jsonResponse({ result: "stale-sentinel" }));
+      });
+      expect(screen.queryByText(/stale-sentinel/)).not.toBeInTheDocument();
+      if (change === "pagehide") {
+        expect(
+          screen.getByLabelText("API key or OAuth bearer token"),
+        ).toHaveValue("");
+        expect(screen.getByLabelText(/limit/)).toHaveValue("");
+      }
+    },
+  );
   it("prevents duplicate sends and suppresses an old response after switching operations", async () => {
     let oldResponse!: (response: Response) => void;
     const value = {

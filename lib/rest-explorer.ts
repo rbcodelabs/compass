@@ -182,7 +182,15 @@ export function schemaSummary(value: unknown, depth = 0): string {
 }
 
 function syntheticValue(schema: JsonObject): string {
+  if (schema.const !== undefined) return String(schema.const);
+  if (Array.isArray(schema.enum) && schema.enum.length)
+    return String(schema.enum[0]);
   if (schema.format === "uuid") return "00000000-0000-4000-8000-000000000001";
+  if (schema.format === "date") return "2000-01-01";
+  if (schema.format === "date-time") return "2000-01-01T00:00:00Z";
+  if (schema.format === "email") return "developer@example.test";
+  if (schema.format === "uri" || schema.format === "uri-reference")
+    return "https://example.test/";
   if (schema.type === "boolean") return "false";
   if (schema.type === "integer" || schema.type === "number")
     return String(typeof schema.minimum === "number" ? schema.minimum : 1);
@@ -192,6 +200,8 @@ function syntheticValue(schema: JsonObject): string {
 function syntheticBody(value: unknown, document: unknown, depth = 0): unknown {
   if (depth > 5 || value === false) return null;
   const schema = resolveSchema(value, document);
+  if (schema.const !== undefined) return schema.const;
+  if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
   const union = schema.anyOf ?? schema.oneOf;
   if (Array.isArray(union))
     return syntheticBody(

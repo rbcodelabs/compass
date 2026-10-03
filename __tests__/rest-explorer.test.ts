@@ -224,6 +224,47 @@ describe("explorer contract catalog", () => {
     expect(() => new AsyncFunction(sample.javascript)).not.toThrow();
     expect(sample.javascript).not.toContain("private");
   });
+  it("uses schema-valid enum const and format values without private defaults", () => {
+    const properties = {
+      horizon: { type: "string", enum: ["NOW", "NEXT", "LATER", "SHIPPED"] },
+      flag: { type: "boolean", const: false },
+      count: { type: "integer", enum: [0, 2] },
+      date: { type: "string", format: "date", default: "private" },
+      time: { type: "string", format: "date-time", example: "private" },
+      email: { type: "string", format: "email" },
+      uri: { type: "string", format: "uri" },
+    };
+    const value = {
+      ...document,
+      paths: {
+        "/api/v1/roadmap": {
+          post: {
+            operationId: "roadmapCreate",
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: Object.keys(properties),
+                    properties,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const sample = examples(indexOperations(value)[0], value, origin);
+    expect(sample.curl).toContain('"horizon":"NOW"');
+    expect(sample.curl).toContain('"flag":false');
+    expect(sample.curl).toContain('"count":0');
+    expect(sample.curl).toContain('"date":"2000-01-01"');
+    expect(sample.curl).toContain('"time":"2000-01-01T00:00:00Z"');
+    expect(sample.curl).toContain('"email":"developer@example.test"');
+    expect(sample.curl).toContain('"uri":"https://example.test/"');
+    expect(sample.curl).not.toContain("private");
+  });
 });
 describe("explorer request boundary", () => {
   it.each(["post", "patch", "delete", "head", "put", "options"])(
