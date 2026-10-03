@@ -84,6 +84,11 @@ export type ThinkingModelPreset = {
      * model that calls Objectives "Outcomes" does not leave an "OKRs" entry beside them.
      */
     okrs: string | null
+    /**
+     * Whether the Opportunities entry (/discovery) sits ahead of the OKRs entry in the nav.
+     * Models that start from opportunities put them first; Classic keeps OKRs on top.
+     */
+    discoveryFirst: boolean
   }
   links: {
     oppToKr: LinkEmphasis
@@ -113,7 +118,7 @@ export const THINKING_MODEL_PRESETS: Readonly<Record<ThinkingModelKey, ThinkingM
     key: "CLASSIC",
     name: "Classic OKRs",
     labels: CLASSIC_LABELS,
-    sections: { okrs: "OKRs" },
+    sections: { okrs: "OKRs", discoveryFirst: false },
     links: { oppToKr: "primary", oppToObjective: "hidden", solToKr: "hidden" },
     tree: "kr-rooted",
     cycles: "standard",
@@ -122,7 +127,7 @@ export const THINKING_MODEL_PRESETS: Readonly<Record<ThinkingModelKey, ThinkingM
     key: "OPPORTUNITY_FIRST_OKR",
     name: "Opportunity-first OKRs",
     labels: CLASSIC_LABELS,
-    sections: { okrs: "OKRs" },
+    sections: { okrs: "OKRs", discoveryFirst: true },
     links: { oppToKr: "secondary", oppToObjective: "primary", solToKr: "secondary" },
     tree: "objective-rooted-pool",
     cycles: "optional",
@@ -135,7 +140,7 @@ export const THINKING_MODEL_PRESETS: Readonly<Record<ThinkingModelKey, ThinkingM
       objective: { singular: "Outcome", plural: "Outcomes", article: "an" },
       keyResult: { singular: "Success metric", plural: "Success metrics", article: "a" },
     },
-    sections: { okrs: null },
+    sections: { okrs: null, discoveryFirst: true },
     links: { oppToKr: "hidden", oppToObjective: "primary", solToKr: "secondary" },
     tree: "outcome-rooted",
     cycles: "subdued",
