@@ -123,7 +123,7 @@ type Props = {
    * proposer suggested; they never touch a column's official count.
    */
   newEntries?: NewEntryItem[]
-  /** OPPORTUNITY round that is still OPEN: show the propose button and Withdraw. */
+  /** OPPORTUNITY or ROADMAP_ITEM round that is still OPEN: show the propose button and Withdraw. */
   canProposeNewEntries?: boolean
   /** The facilitator, while the round is not CLOSED: show Accept / Reject. */
   canResolveNewEntries?: boolean
@@ -762,6 +762,7 @@ export function CardSortKanban({
             workspaceSlug={workspaceSlug}
             roundId={round.id}
             options={factor.options}
+            objectType={objectType}
           />
         )}
         </div>

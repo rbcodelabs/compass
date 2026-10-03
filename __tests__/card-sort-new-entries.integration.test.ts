@@ -58,6 +58,7 @@ describe.skipIf(!databaseUrl)("card sort: proposed new entries", () => {
   let samId: string
   let oppFieldId: string
   let taskFieldId: string
+  let roadmapFieldId: string
 
   beforeAll(async () => {
     const url = new URL(databaseUrl!)
@@ -124,6 +125,17 @@ describe.skipIf(!databaseUrl)("card sort: proposed new entries", () => {
         order: 1,
       },
     })
+    const roadmapField = await prisma.customFieldDefinition.create({
+      data: {
+        workspaceId: workspace.id,
+        objectType: "ROADMAP_ITEM",
+        name: "Roadmap timing",
+        fieldType: "SELECT",
+        options: BUCKETS,
+        order: 2,
+      },
+    })
+    roadmapFieldId = roadmapField.id
     oppFieldId = oppField.id
     taskFieldId = taskField.id
   }, 120_000)
@@ -238,7 +250,7 @@ describe.skipIf(!databaseUrl)("card sort: proposed new entries", () => {
     ])
   })
 
-  it("is only available in OPPORTUNITY rounds", async () => {
+  it("is only available in OPPORTUNITY and ROADMAP_ITEM rounds", async () => {
     const roundId = await createRound("Task round", taskFieldId)
     const response = await propose(danaId, roundId, { title: "Nope" })
     expect(response.status).toBe(400)
@@ -310,6 +322,46 @@ describe.skipIf(!databaseUrl)("card sort: proposed new entries", () => {
     const again = await resolve(facilitatorId, roundId, entryId, "accept")
     expect(again.status).toBe(409)
     expect(await opportunityCount("Accepted idea")).toBe(1)
+  })
+
+  it("in a ROADMAP_ITEM round, accept creates one Roadmap Item in Later and never an Opportunity", async () => {
+    const roundId = await createRound("Roadmap accept", roadmapFieldId)
+    const existing = await prisma.roadmapItem.create({
+      data: { workspaceId, title: "Already later", horizon: "LATER", sortOrder: 4 },
+    })
+    const entryId = (await json(
+      await propose(danaId, roundId, {
+        title: "Roadmap idea",
+        description: "Customers keep asking",
+        suggestedValue: "later",
+      })
+    )).id as string
+    // Pending until accepted: nothing on the roadmap yet.
+    expect(await prisma.roadmapItem.count({ where: { workspaceId, title: "Roadmap idea" } })).toBe(0)
+
+    const accepted = await resolve(facilitatorId, roundId, entryId, "accept")
+    expect(accepted.status).toBe(200)
+    const payload = await json(accepted)
+    const itemId = payload.objectId as string
+    expect(payload.opportunityId).toBeNull()
+    expect(payload.suggestionRecorded).toBe(true)
+
+    const item = await prisma.roadmapItem.findUnique({ where: { id: itemId } })
+    expect(item).toMatchObject({
+      workspaceId,
+      title: "Roadmap idea",
+      description: "Customers keep asking",
+      horizon: "LATER",
+      status: "ACTIVE",
+      sortOrder: existing.sortOrder + 1,
+    })
+    expect(await opportunityCount("Roadmap idea")).toBe(0)
+    expect((await prisma.cardSortNewEntry.findUnique({ where: { id: entryId } }))?.acceptedObjectId).toBe(itemId)
+    expect(await prisma.cardSortProposal.count({ where: { roundId, objectId: itemId, userId: danaId } })).toBe(1)
+
+    const again = await resolve(facilitatorId, roundId, entryId, "accept")
+    expect(again.status).toBe(409)
+    expect(await prisma.roadmapItem.count({ where: { workspaceId, title: "Roadmap idea" } })).toBe(1)
   })
 
   it("reject keeps the entry for the record and creates nothing", async () => {

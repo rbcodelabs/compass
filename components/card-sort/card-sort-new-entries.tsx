@@ -20,17 +20,18 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import type { CustomFieldObjectType } from "@/lib/types"
 import { useCardSortProposals } from "./use-card-sort-proposals"
 
 /**
- * "Propose new entry" for OPPORTUNITY rounds.
+ * "Propose new entry" for OPPORTUNITY and ROADMAP_ITEM rounds.
  *
  * Nothing here decides visibility. `entries` arrives already filtered by the
  * server (listCardSortNewEntries): on an OPEN round a participant receives only
  * their own, the facilitator receives everyone's. Filtering in this component
  * would put the blind-vote rule in the browser.
  *
- * A request is not an Opportunity. It becomes one only when the facilitator
+ * A request is not the object. It becomes one only when the facilitator
  * accepts it, which is why the copy below says "requested" and never "added".
  *
  * Three pieces:
@@ -58,6 +59,13 @@ type RoundRef = { orgSlug: string; workspaceSlug: string; roundId: string }
 
 const STATUS_LABEL = { PENDING: "Pending", ACCEPTED: "Accepted", REJECTED: "Rejected" } as const
 
+/**
+ * Roadmap Item has no thinking-model label, so it reads the same everywhere;
+ * Opportunity copy stays inline below, written against `labels.opportunity`.
+ */
+const roadmapItemHref = (orgSlug: string, workspaceSlug: string, objectId: string) =>
+  `/${orgSlug}/${workspaceSlug}/roadmap?detail=roadmapItem:${objectId}`
+
 const labelFor = (options: Option[], value: string | null) =>
   value ? (options.find((option) => option.value === value)?.label ?? value) : null
 
@@ -68,8 +76,10 @@ export function ProposeNewEntryButton({
   workspaceSlug,
   roundId,
   options,
-}: RoundRef & { options: Option[] }) {
+  objectType,
+}: RoundRef & { options: Option[]; objectType?: CustomFieldObjectType }) {
   const labels = useLabels()
+  const isRoadmap = objectType === "ROADMAP_ITEM"
   const { proposeEntry, error, setError, working } = useCardSortProposals({
     orgSlug,
     workspaceSlug,
@@ -110,9 +120,11 @@ export function ProposeNewEntryButton({
       <DialogContent>
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
-            <DialogTitle>{`Propose a new ${labels.opportunity.lower}`}</DialogTitle>
+            <DialogTitle>{isRoadmap ? "Propose a new roadmap item" : `Propose a new ${labels.opportunity.lower}`}</DialogTitle>
             <DialogDescription>
-              {`This is a request, not ${labels.opportunity.indefinite} yet. It is only created if the person running this round accepts it. Until the round is revealed, only you and they can see it.`}
+              {isRoadmap
+                ? "This is a request, not a roadmap item yet. It is only created if the person running this round accepts it. Until the round is revealed, only you and they can see it."
+                : `This is a request, not ${labels.opportunity.indefinite} yet. It is only created if the person running this round accepts it. Until the round is revealed, only you and they can see it.`}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-1">
@@ -260,8 +272,10 @@ export function CardSortNewEntries({
   canResolve,
   options,
   entries,
+  objectType,
 }: RoundRef & {
-  /** OPPORTUNITY round that is still OPEN. */
+  objectType?: CustomFieldObjectType
+  /** OPPORTUNITY or ROADMAP_ITEM round that is still OPEN. */
   canPropose: boolean
   /** The facilitator, while the round is not CLOSED. */
   canResolve: boolean
@@ -290,6 +304,7 @@ export function CardSortNewEntries({
             workspaceSlug={workspaceSlug}
             roundId={roundId}
             options={options}
+            objectType={objectType}
           />
         )}
       </div>
@@ -319,9 +334,15 @@ export function CardSortNewEntries({
                 {entry.status === "ACCEPTED" && entry.acceptedObjectId && (
                   <Link
                     className="text-xs underline"
-                    href={`/${orgSlug}/${workspaceSlug}/discovery/${entry.acceptedObjectId}`}
+                    href={
+                      objectType === "ROADMAP_ITEM"
+                        ? roadmapItemHref(orgSlug, workspaceSlug, entry.acceptedObjectId)
+                        : `/${orgSlug}/${workspaceSlug}/discovery/${entry.acceptedObjectId}`
+                    }
                   >
-                    {`Open the new ${labels.opportunity.lower}`}
+                    {objectType === "ROADMAP_ITEM"
+                      ? "Open the new roadmap item"
+                      : `Open the new ${labels.opportunity.lower}`}
                   </Link>
                 )}
               </div>

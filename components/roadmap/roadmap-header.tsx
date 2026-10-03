@@ -1,8 +1,9 @@
 "use client";
 
 import { useId, useState, type ReactNode } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, RotateCw, SlidersHorizontal } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { CalendarDays, ChevronLeft, ChevronRight, RotateCw, Shuffle, SlidersHorizontal } from "lucide-react";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useUrlState } from "@/hooks/use-url-state";
@@ -38,7 +39,7 @@ function IconAction({ label, children, onClick, disabled = false }: { label: str
   );
 }
 
-export function RoadmapHeader({ squads, timeline, customFieldGroups = [], activeCustomFieldId = null, groupByValue, groupByOptions = [] }: {
+export function RoadmapHeader({ squads, timeline, customFieldGroups = [], activeCustomFieldId = null, groupByValue, groupByOptions = [], cardSortHref }: {
   squads: SquadData[];
   timeline?: TimelineControls;
   /** Picklist fields on Roadmap Item that have options to filter by. */
@@ -49,6 +50,8 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
   groupByValue?: string;
   /** Groupable (SELECT-type ROADMAP_ITEM) custom fields, for the grouping toggle. */
   groupByOptions?: RoadmapGroupByFieldOption[];
+  /** Where the Card sort entry point goes (a round over Roadmap Items). Omitted = no link. */
+  cardSortHref?: string;
 }) {
   const { params, set } = useUrlState();
   const squad = params.get("squad");
@@ -72,6 +75,14 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
             <IconAction label="Next period" onClick={() => timeline.onShift(1)}><ChevronRight /></IconAction>
           </div>}
           {timeline && <RoadmapGroupByToggle value={groupByValue ?? "phase"} customFieldOptions={groupByOptions} />}
+          {cardSortHref && (
+            <Link
+              href={cardSortHref}
+              className={buttonVariants({ variant: "outline", size: "sm", className: "min-h-11 md:min-h-0" })}
+            >
+              <Shuffle className="size-4" /> Card sort
+            </Link>
+          )}
           <DropdownMenu>
             <Tooltip onOpenChange={setOptionsTooltipOpen}>
               <TooltipTrigger aria-describedby={optionsTooltipOpen ? optionsTooltipId : undefined} render={<DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="View options" className="relative ml-auto size-11 md:ml-0 md:size-9" />} />}>
