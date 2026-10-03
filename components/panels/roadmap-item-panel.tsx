@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 import {
   useEntityDetail,
   PanelSkeleton,
@@ -27,6 +29,8 @@ import type { CustomFieldWithValue } from "@/lib/custom-field-definitions";
 import { usePanelContext } from "./panel-context";
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { peekPanelSeed, clearPanelSeed } from "@/lib/panel-seed";
+import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 
 const ITEM_STATUS_LABELS: Record<ItemStatus, string> = {
   ACTIVE: "Active",
@@ -95,9 +99,34 @@ export function RoadmapItemPanel({
     workspaceSlug
   );
 
-  if (error) return <PanelError label="roadmap item" />;
-  if (!data) return <PanelSkeleton />;
+  // The seed has done its job once the fetch settles. Cleared in an effect,
+  // not during render, so Strict Mode / concurrent renders can't lose it early.
+  const settled = !!data || !!error;
+  useEffect(() => {
+    if (settled) clearPanelSeed("roadmapItem", id);
+  }, [settled, id]);
 
+  if (error) return <PanelError label="roadmap item" />;
+  if (!data) {
+    // Paint what the board card already knew, read-only, while the full
+    // payload loads. Sections that need the fetch stay a skeleton.
+    const seed = peekPanelSeed<RoadmapCardData>("roadmapItem", id);
+    if (!seed) return <PanelSkeleton />;
+    return (
+      <PanelContainer>
+        <FullPageLink href={`/${orgSlug}/${workspaceSlug}/roadmap`} />
+        <PanelTitle
+          title={seed.title}
+          status={{ value: seed.horizon, ...(HORIZON[seed.horizon] ?? { label: seed.horizon }) }}
+        />
+        {seed.description && (
+          <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">{seed.description}</p>
+        )}
+        {seed.squad && <Field label="Squad">{seed.squad.name}</Field>}
+        <PanelSkeleton />
+      </PanelContainer>
+    );
+  }
   const roadmapPath = `/${orgSlug}/${workspaceSlug}/roadmap`;
 
   const edit: EditContext = {
