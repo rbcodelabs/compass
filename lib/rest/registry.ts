@@ -1,11 +1,14 @@
 import { z } from "zod"
 import {
-  assumptionSchema, collectionOf, cursorQuery, feedbackSchema, identitySchema,
+  assumptionSchema, checkInSchema, collectionOf, cursorQuery, customFieldDefinitionSchema, customFieldValueSchema,
+  experimentResultSchema, experimentSchema, feedbackSchema, identitySchema, keyResultSchema, metricBindingSchema, metricObservationSchema, metricSchema,
+  objectiveSchema, okrCycleSchema, scoreSchema, scoringMetricSchema, scoringModelSchema, squadSchema, typedLinkSchema,
   opportunityObjectiveRelationshipSchema, opportunitySchema, roadmapItemSchema, solutionKeyResultRelationshipSchema,
   solutionSchema, taskSchema, uploadPreparationSchema, uuid, workspaceSchema,
 } from "@/lib/rest/schemas"
 import { FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES, FEEDBACK_ATTACHMENT_MAX_FILE_BYTES } from "@/lib/feedback-attachment-rules"
 import { FEEDBACK_STATUSES } from "@/lib/feedback-meta"
+import { linkMetricSchema, metricInputSchema, targetSchema, updateMetricBindingSchema } from "@/lib/analytics/service"
 
 export type ApiScope = "api:read" | "api:write"
 export type RestMethod = "GET" | "POST" | "PATCH" | "DELETE"
@@ -86,6 +89,31 @@ const assumptionQuery = cursorQuery.extend({ status: assumptionSchema.shape.stat
 const feedbackQuery = cursorQuery.extend({ status: z.enum([...FEEDBACK_STATUSES, "CLOSED"]).optional(), type: z.enum(["BUG", "IDEA"]).optional(), opportunityId: uuid.optional() }).strict()
 const taskQuery = cursorQuery.extend({ status: taskCreate.shape.status, priority: taskCreate.shape.priority, squadId: uuid.optional(), parentTaskId: uuid.optional() }).strict()
 const roadmapQuery = cursorQuery.extend({ horizon: roadmapItemSchema.shape.horizon.optional(), status: z.string().max(50).optional(), squadId: uuid.optional() }).strict()
+const expectedUpdatedAt = z.string().datetime()
+const cycleCreate = z.object({ title: z.string().trim().min(1).max(255), startDate: z.string().date(), endDate: z.string().date(), status: z.enum(["DRAFT", "ACTIVE", "COMPLETED"]).optional() }).strict()
+const objectiveCreate = z.object({ cycleId: uuid.nullable().optional(), title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), owner: z.string().trim().max(255).nullable().optional(), squadId: uuid.nullable().optional(), parentKeyResultId: uuid.nullable().optional() }).strict()
+const objectivePatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), status: objectiveSchema.shape.status.optional() }).strict()
+const keyResultCreate = z.object({ title: z.string().trim().min(1).max(255), target: z.number().finite(), unit: z.string().trim().max(50).nullable().optional() }).strict()
+const keyResultPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), target: z.number().finite().optional(), current: z.number().finite().optional(), unit: z.string().trim().max(50).nullable().optional() }).strict()
+const checkInCreate = z.object({ value: z.number().finite(), note: z.string().trim().nullable().optional() }).strict()
+const experimentCreate = z.object({ title: z.string().trim().min(1).max(255), hypothesis: z.string().trim().min(1), method: z.string().trim().min(1), killCondition: z.string().trim().min(1), assumptionId: uuid.nullable().optional(), squadId: uuid.nullable().optional() }).strict()
+const experimentPatch = z.object({ expectedUpdatedAt, title: z.string().trim().min(1).max(255).optional(), hypothesis: z.string().trim().min(1).optional(), method: z.string().trim().min(1).optional(), killCondition: z.string().trim().min(1).optional() }).strict()
+const experimentResultCreate = z.object({ note: z.string().trim().min(1), metric: z.string().trim().max(255).nullable().optional(), value: z.number().finite().nullable().optional() }).strict()
+const experimentConclusion = z.object({ expectedUpdatedAt, conclusion: z.enum(["PROCEED", "KILL", "ITERATE", "NOT_PURSUED"]), reason: z.string().trim().nullable().optional() }).strict()
+const metricPatch = metricInputSchema.extend({ expectedRevision: z.number().int().positive() }).strict()
+const scoringMetricInput = scoringMetricSchema.omit({ order: true })
+const scoringModelCreate = z.object({ name: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), formulaType: z.enum(["WEIGHTED_SUM", "MULTIPLICATIVE"]), metrics: z.array(scoringMetricInput).min(1) }).strict()
+const optionalScoringModelFields = { name: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional() }
+const scoringModelPatch = z.union([
+  z.object({ ...optionalScoringModelFields, metrics: z.array(scoringMetricInput).min(1).optional() }).strict(),
+  z.object({ ...optionalScoringModelFields, formulaType: z.enum(["WEIGHTED_SUM", "MULTIPLICATIVE"]), metrics: z.array(scoringMetricInput).min(1) }).strict(),
+])
+const scoreCreate = z.object({ values: z.record(z.string(), z.number().finite()) }).strict()
+const squadCreate = z.object({ name: z.string().trim().min(1).max(255), color: z.string().trim().max(50).optional() }).strict()
+const customObjectType = z.enum(["OPPORTUNITY", "SOLUTION", "EXPERIMENT", "OBJECTIVE", "KEY_RESULT", "ROADMAP_ITEM", "TASK"])
+const customValuePath = z.object({ workspaceId: uuid, objectType: customObjectType, objectId: uuid })
+const customFieldValueCreate = z.object({ fieldId: uuid, value: z.unknown().nullable() }).strict()
+const entityLinksQuery = cursorQuery.extend({ opportunityId: uuid.optional(), objectiveId: uuid.optional(), solutionId: uuid.optional(), keyResultId: uuid.optional() }).strict().refine((value) => [value.opportunityId, value.objectiveId, value.solutionId, value.keyResultId].filter(Boolean).length === 1, { message: "Provide exactly one entity id." })
 
 export const REST_ROUTES: readonly RestRoute[] = [
   read("getCurrentIdentity", "/api/v1/me", "Get the current programmatic identity", identitySchema, z.object({}), undefined, "authenticated-actor"),
@@ -123,6 +151,63 @@ export const REST_ROUTES: readonly RestRoute[] = [
   write("POST", "createRoadmapItem", "/api/v1/workspaces/{workspaceId}/roadmap-items", "Create a roadmap item", roadmapItemSchema, workspacePath, roadmapCreate, 201),
   read("getRoadmapItem", "/api/v1/workspaces/{workspaceId}/roadmap-items/{id}", "Get a roadmap item", roadmapItemSchema, itemPath),
   write("PATCH", "updateRoadmapItem", "/api/v1/workspaces/{workspaceId}/roadmap-items/{id}", "Update a roadmap item", roadmapItemSchema, itemPath, roadmapPatch),
+
+  read("listOkrCycles", "/api/v1/workspaces/{workspaceId}/okr-cycles", "List OKR cycles", collectionOf(okrCycleSchema), workspacePath, cursorQuery.strict()),
+  write("POST", "createOkrCycle", "/api/v1/workspaces/{workspaceId}/okr-cycles", "Create an OKR cycle", okrCycleSchema, workspacePath, cycleCreate, 201),
+  read("getOkrCycle", "/api/v1/workspaces/{workspaceId}/okr-cycles/{id}", "Get an OKR cycle", okrCycleSchema, itemPath),
+  read("listObjectives", "/api/v1/workspaces/{workspaceId}/objectives", "List objectives", collectionOf(objectiveSchema), workspacePath, cursorQuery.extend({ cycleId: uuid.nullable().optional(), status: objectiveSchema.shape.status.optional() }).strict()),
+  write("POST", "createObjective", "/api/v1/workspaces/{workspaceId}/objectives", "Create an objective", objectiveSchema, workspacePath, objectiveCreate, 201),
+  read("getObjective", "/api/v1/workspaces/{workspaceId}/objectives/{id}", "Get an objective", objectiveSchema, itemPath),
+  write("PATCH", "updateObjective", "/api/v1/workspaces/{workspaceId}/objectives/{id}", "Update an objective", objectiveSchema, itemPath, objectivePatch),
+  write("DELETE", "deleteObjective", "/api/v1/workspaces/{workspaceId}/objectives/{id}", "Delete a childless objective", z.undefined(), itemPath, undefined, 204),
+  read("listKeyResults", "/api/v1/workspaces/{workspaceId}/objectives/{id}/key-results", "List objective key results", collectionOf(keyResultSchema), itemPath, cursorQuery.strict()),
+  write("POST", "createKeyResult", "/api/v1/workspaces/{workspaceId}/objectives/{id}/key-results", "Create a key result", keyResultSchema, itemPath, keyResultCreate, 201),
+  read("getKeyResult", "/api/v1/workspaces/{workspaceId}/key-results/{id}", "Get a key result", keyResultSchema, itemPath),
+  write("PATCH", "updateKeyResult", "/api/v1/workspaces/{workspaceId}/key-results/{id}", "Update a key result", keyResultSchema, itemPath, keyResultPatch),
+  write("DELETE", "deleteKeyResult", "/api/v1/workspaces/{workspaceId}/key-results/{id}", "Delete a key result atomically", z.undefined(), itemPath, undefined, 204),
+  read("listCheckIns", "/api/v1/workspaces/{workspaceId}/key-results/{id}/check-ins", "List key-result check-ins", collectionOf(checkInSchema), itemPath, cursorQuery.strict()),
+  write("POST", "createCheckIn", "/api/v1/workspaces/{workspaceId}/key-results/{id}/check-ins", "Record a key-result check-in", checkInSchema, itemPath, checkInCreate, 201),
+
+  read("listExperiments", "/api/v1/workspaces/{workspaceId}/experiments", "List experiments", collectionOf(experimentSchema), workspacePath, cursorQuery.extend({ status: experimentSchema.shape.status.optional(), squadId: uuid.optional(), assumptionId: uuid.optional() }).strict()),
+  write("POST", "createExperiment", "/api/v1/workspaces/{workspaceId}/experiments", "Create an experiment", experimentSchema, workspacePath, experimentCreate, 201),
+  read("getExperiment", "/api/v1/workspaces/{workspaceId}/experiments/{id}", "Get an experiment", experimentSchema, itemPath),
+  write("PATCH", "updateExperiment", "/api/v1/workspaces/{workspaceId}/experiments/{id}", "Update an experiment with optimistic concurrency", experimentSchema, itemPath, experimentPatch),
+  read("listExperimentResults", "/api/v1/workspaces/{workspaceId}/experiments/{id}/results", "List experiment results", collectionOf(experimentResultSchema), itemPath, cursorQuery.strict()),
+  write("POST", "createExperimentResult", "/api/v1/workspaces/{workspaceId}/experiments/{id}/results", "Record an experiment result", experimentResultSchema, itemPath, experimentResultCreate, 201),
+  write("POST", "concludeExperiment", "/api/v1/workspaces/{workspaceId}/experiments/{id}/conclusion", "Conclude an experiment", experimentSchema, itemPath, experimentConclusion),
+
+  read("listMetrics", "/api/v1/workspaces/{workspaceId}/metrics", "List metric definitions", collectionOf(metricSchema), workspacePath, cursorQuery.strict()),
+  write("POST", "createMetric", "/api/v1/workspaces/{workspaceId}/metrics", "Create a metric definition", metricSchema, workspacePath, metricInputSchema, 201),
+  read("getMetric", "/api/v1/workspaces/{workspaceId}/metrics/{id}", "Get a metric definition", metricSchema, itemPath),
+  write("PATCH", "updateMetric", "/api/v1/workspaces/{workspaceId}/metrics/{id}", "Create a metric revision", metricSchema, itemPath, metricPatch),
+  write("DELETE", "archiveMetric", "/api/v1/workspaces/{workspaceId}/metrics/{id}", "Archive a metric definition", z.undefined(), itemPath, undefined, 204),
+  read("listMetricBindings", "/api/v1/workspaces/{workspaceId}/metric-bindings", "List metric bindings", collectionOf(metricBindingSchema), workspacePath, cursorQuery.merge(targetSchema).strict()),
+  write("POST", "createMetricBinding", "/api/v1/workspaces/{workspaceId}/metric-bindings", "Bind a metric", metricBindingSchema, workspacePath, linkMetricSchema, 201),
+  read("getMetricBinding", "/api/v1/workspaces/{workspaceId}/metric-bindings/{id}", "Get a metric binding", metricBindingSchema, itemPath),
+  write("PATCH", "updateMetricBinding", "/api/v1/workspaces/{workspaceId}/metric-bindings/{id}", "Replace a metric binding revision", metricBindingSchema, itemPath, updateMetricBindingSchema),
+  write("DELETE", "deleteMetricBinding", "/api/v1/workspaces/{workspaceId}/metric-bindings/{id}", "Deactivate a metric binding", z.undefined(), itemPath, undefined, 204),
+  write("POST", "refreshMetricBinding", "/api/v1/workspaces/{workspaceId}/metric-bindings/{id}/refresh", "Refresh metric observations idempotently", z.array(metricObservationSchema), itemPath, z.object({ requestId: uuid }).strict()),
+  read("listMetricObservations", "/api/v1/workspaces/{workspaceId}/metric-bindings/{id}/metric-observations", "List metric observations", collectionOf(metricObservationSchema), itemPath, cursorQuery.strict()),
+  read("getMetricObservation", "/api/v1/workspaces/{workspaceId}/metric-observations/{id}", "Get a metric observation", metricObservationSchema, itemPath),
+
+  read("listScoringModels", "/api/v1/workspaces/{workspaceId}/scoring-models", "List scoring models available to a workspace", collectionOf(scoringModelSchema), workspacePath, cursorQuery.strict()),
+  write("POST", "createScoringModel", "/api/v1/workspaces/{workspaceId}/scoring-models", "Create an organization scoring model", scoringModelSchema, workspacePath, scoringModelCreate, 201),
+  read("getScoringModel", "/api/v1/workspaces/{workspaceId}/scoring-models/{id}", "Get a scoring model", scoringModelSchema, itemPath),
+  write("PATCH", "updateScoringModel", "/api/v1/workspaces/{workspaceId}/scoring-models/{id}", "Update a scoring model atomically", scoringModelSchema, itemPath, scoringModelPatch),
+  write("DELETE", "archiveScoringModel", "/api/v1/workspaces/{workspaceId}/scoring-models/{id}", "Archive a scoring model", z.undefined(), itemPath, undefined, 204),
+  write("POST", "scoreOpportunity", "/api/v1/workspaces/{workspaceId}/opportunities/{id}/opportunity-scores", "Score an opportunity", scoreSchema, itemPath, scoreCreate, 201),
+  read("getOpportunityScore", "/api/v1/workspaces/{workspaceId}/opportunities/{id}/opportunity-scores", "Get an opportunity score", scoreSchema, itemPath),
+  write("POST", "scoreSolution", "/api/v1/workspaces/{workspaceId}/solutions/{id}/solution-scores", "Score a solution", scoreSchema, itemPath, scoreCreate, 201),
+  read("getSolutionScore", "/api/v1/workspaces/{workspaceId}/solutions/{id}/solution-scores", "Get a solution score", scoreSchema, itemPath),
+
+  read("listSquads", "/api/v1/workspaces/{workspaceId}/squads", "List squads", collectionOf(squadSchema), workspacePath, cursorQuery.strict()),
+  write("POST", "createSquad", "/api/v1/workspaces/{workspaceId}/squads", "Create a squad", squadSchema, workspacePath, squadCreate, 201),
+  read("getSquad", "/api/v1/workspaces/{workspaceId}/squads/{id}", "Get a squad", squadSchema, itemPath),
+  write("PATCH", "updateSquad", "/api/v1/workspaces/{workspaceId}/squads/{id}", "Update a squad", squadSchema, itemPath, squadCreate.partial().strict()),
+  read("listCustomFieldDefinitions", "/api/v1/workspaces/{workspaceId}/custom-field-definitions", "List custom-field definitions in configured display order", collectionOf(customFieldDefinitionSchema), workspacePath, cursorQuery.extend({ objectType: customObjectType.optional() }).strict()),
+  read("listCustomFieldValues", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "List custom-field values in configured display order", collectionOf(customFieldValueSchema), customValuePath, cursorQuery.strict()),
+  write("POST", "setCustomFieldValue", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "Set a custom-field value", customFieldValueSchema, customValuePath, customFieldValueCreate),
+  read("listEntityLinks", "/api/v1/workspaces/{workspaceId}/entity-links", "List typed entity links", collectionOf(typedLinkSchema), workspacePath, entityLinksQuery),
 ] as const
 
 function routePattern(path: string): { regexp: RegExp; names: string[] } {

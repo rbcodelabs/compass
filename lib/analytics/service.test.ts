@@ -8,7 +8,7 @@ vi.mock("@/lib/mcp-tool-db", () => ({ getToolPrisma: () => db, hasToolTransactio
 vi.mock("@/lib/mcp-authz", () => ({ assertWorkspaceMember: member, assertWorkspaceAdmin: admin }))
 vi.mock("./transport", () => ({ analyticsFetch: vi.fn(), validateVercelProject: projectValidate }))
 vi.mock("./providers", async (importOriginal) => ({ ...await importOriginal<typeof import("./providers")>(), fetchVercelObservation: providerFetch }))
-import { archiveMetric, createMetric, disconnectConnection, getBinding, getMetric, getObservation, linkMetric, listBindings, listConnections, listObservations, updateBinding, updateMetric, refreshBinding, saveVercelConnection, deleteWorkspaceAnalytics, listDashboardMetrics, getDashboardMetric, updateMetricDashboardLayout, setMetricDashboardVisible, reorderDashboardMetric } from "./service"
+import { archiveMetric, createMetric, disconnectConnection, getBinding, getMetric, getObservation, linkMetric, listBindings, listConnections, listMetricsPage, listObservations, updateBinding, updateMetric, refreshBinding, saveVercelConnection, deleteWorkspaceAnalytics, listDashboardMetrics, getDashboardMetric, updateMetricDashboardLayout, setMetricDashboardVisible, reorderDashboardMetric } from "./service"
 import { encrypt } from "@/lib/crypto-secrets"
 import { AnalyticsError } from "./providers"
 const actor = { userId: "user", purpose: "USER" as const }
@@ -16,6 +16,16 @@ const workspace = "ab630faf-1d90-4725-bff9-488cc6c4b721"
 const input = { name: "Views", unit: "pageviews", provider: "vercel" as const, connectionId: "72babb15-32b3-4eeb-9ce2-eedff1758971", query: { metric: "pageviews" as const } }
 beforeEach(() => { vi.clearAllMocks(); db.workspace.findFirst.mockResolvedValue({ id: workspace }); db.workspace.updateMany.mockResolvedValue({ count: 1 }); db.metricDefinition.findFirst.mockResolvedValue(null); db.metricObservation.findMany.mockResolvedValue([]) })
 describe("analytics service boundaries", () => {
+  it("returns a continuation when more metric definitions exist than the requested page", async () => {
+    const dates = [new Date("2026-10-03"), new Date("2026-10-02"), new Date("2026-10-01")]
+    const definitions = dates.map((createdAt, index) => ({ id: `metric-${index}`, workspaceId: workspace, currentRevisionId: `rev-${index}`, revision: 1, archived: false, createdAt, updatedAt: createdAt }))
+    db.metricDefinition.findMany.mockResolvedValue(definitions)
+    db.metricRevision.findMany.mockResolvedValue(definitions.slice(0, 2).map((definition, index) => ({ ...input, id: definition.currentRevisionId, metricId: definition.id, workspaceId: workspace, revision: 1, connectionId: input.connectionId, queryJson: JSON.stringify(input.query), createdAt: dates[index] })))
+    const page = await listMetricsPage(actor, workspace, { limit: 2, cursor: null })
+    expect(page.items).toHaveLength(2)
+    expect(page.next).toEqual({ id: "metric-1", at: dates[1] })
+    expect(db.metricDefinition.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 3 }))
+  })
   it("links rolling 30-day tracking without baseline or date entry", async () => {
     const metricId = "dbe8c029-f793-4544-b7a9-bfc01a853cc9"
     const targetId = "9bc31432-917f-4ab3-95db-6a66509fe336"
