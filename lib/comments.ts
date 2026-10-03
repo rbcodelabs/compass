@@ -2,6 +2,11 @@ import getPrisma from "@/lib/db"
 import { resolveCommentAuthors } from "@/lib/comment-authors"
 import { withWorkspaceUpdates, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture"
 import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
+import { followingAvailable, followingEnabled } from "@/lib/following-flag"
+import { runAfterCommit } from "@/lib/following-commit"
+import { applyFollowingEffects, buildCommentEffects, resolveCommentFollowActor } from "@/lib/following-hooks"
+import { isSubjectTypeActive } from "@/lib/followable"
+import type { AppTransactionClient } from "@/lib/db"
 
 export const COMMENT_TARGET_TYPES = [
   "OBJECTIVE", "KEY_RESULT", "OPPORTUNITY", "SOLUTION", "ASSUMPTION",
@@ -65,7 +70,7 @@ export type ExternalAuthorInput = {
   embedTokenId?: string | null
 }
 
-type CreateCommentInput = {
+export type CreateCommentInput = {
   id?: string
   workspaceId: string
   targetType: CommentTargetType
@@ -83,6 +88,30 @@ type CreateCommentInput = {
   solutionPlan?: SolutionPlanInput
   elementAnchor?: ElementAnchorInput
   externalAuthor?: ExternalAuthorInput
+}
+
+export async function createCommentRows(
+  tx: AppTransactionClient,
+  input: CreateCommentInput,
+  onCreated?: (id: string) => void,
+) {
+  const body = input.body.trim()
+  if (!body) throw new Error("Comment body must not be empty.")
+  validateExtensions(input)
+  const comment = await tx.comment.create({ data: {
+    ...(input.id ? { id: input.id } : {}), workspaceId: input.workspaceId,
+    targetType: input.targetType, targetId: input.targetId, parentId: input.parentId ?? null,
+    body, status: input.status ?? "OPEN", authorId: input.authorId ?? null,
+    authorName: input.authorName, authorType: input.authorType ?? "HUMAN",
+    source: input.source ?? "UI", ...(input.createdAt ? { createdAt: input.createdAt } : {}),
+    ...(input.updatedAt ? { updatedAt: input.updatedAt } : {}),
+  } })
+  onCreated?.(comment.id)
+  if (input.docAnchor) await tx.docCommentAnchor.create({ data: { commentId: comment.id, ...input.docAnchor } })
+  if (input.solutionPlan) await tx.solutionPlanProposal.create({ data: { commentId: comment.id, trackedDecisionRequestId: input.solutionPlan.trackedDecisionRequestId ?? null, legacyPlanStatus: input.solutionPlan.legacyPlanStatus ?? null } })
+  if (input.elementAnchor) await tx.commentElementAnchor.create({ data: { commentId: comment.id, artifactId: input.targetId, artifactRevisionId: input.elementAnchor.artifactRevisionId ?? null, pageUrl: input.elementAnchor.pageUrl, pagePath: input.elementAnchor.pagePath, elementSelector: input.elementAnchor.elementSelector ?? null, elementFingerprint: input.elementAnchor.elementFingerprint ?? undefined, screenshotUrl: input.elementAnchor.screenshotUrl ?? null } })
+  if (input.externalAuthor) await tx.commentExternalAuthor.create({ data: { commentId: comment.id, submitterEmail: input.externalAuthor.submitterEmail ?? null, portalAccountId: input.externalAuthor.portalAccountId ?? null, embedTokenId: input.externalAuthor.embedTokenId ?? null } })
+  return comment
 }
 
 export async function resolveCommentTarget(targetType: CommentTargetType, targetId: string) {
@@ -143,7 +172,7 @@ function validateExtensions(input: CreateCommentInput) {
   }
 }
 
-export async function createComment(input: CreateCommentInput) {
+export async function createComment(input: CreateCommentInput, options: { beforeCreate?: (tx: AppTransactionClient) => Promise<void> } = {}) {
   const prisma = getPrisma()
   const body = input.body.trim()
   if (!body) throw new Error("Comment body must not be empty.")
@@ -162,36 +191,24 @@ export async function createComment(input: CreateCommentInput) {
   }
 
   const comment = await withWorkspaceUpdates(prisma, async (tx, capture) => {
-  const comment = await tx.comment.create({
-    data: {
-      ...(input.id ? { id: input.id } : {}), workspaceId: input.workspaceId,
-      targetType: input.targetType, targetId: input.targetId, parentId: input.parentId ?? null,
-      body, status: input.status ?? "OPEN", authorId: input.authorId ?? null,
-      authorName: input.authorName, authorType: input.authorType ?? "HUMAN",
-      source: input.source ?? "UI", ...(input.createdAt ? { createdAt: input.createdAt } : {}),
-      ...(input.updatedAt ? { updatedAt: input.updatedAt } : {}),
-    },
-  })
+  let createdId: string | undefined
+  let comment
   try {
-    if (input.docAnchor) await tx.docCommentAnchor.create({ data: { commentId: comment.id, ...input.docAnchor } })
-    if (input.solutionPlan) await tx.solutionPlanProposal.create({ data: { commentId: comment.id, trackedDecisionRequestId: input.solutionPlan.trackedDecisionRequestId ?? null, legacyPlanStatus: input.solutionPlan.legacyPlanStatus ?? null } })
-    // artifactId is the comment's own targetId, never a caller-supplied value —
-    // validateExtensions has already established targetType === "ARTIFACT".
-    if (input.elementAnchor) await tx.commentElementAnchor.create({ data: { commentId: comment.id, artifactId: input.targetId, artifactRevisionId: input.elementAnchor.artifactRevisionId ?? null, pageUrl: input.elementAnchor.pageUrl, pagePath: input.elementAnchor.pagePath, elementSelector: input.elementAnchor.elementSelector ?? null, elementFingerprint: input.elementAnchor.elementFingerprint ?? undefined, screenshotUrl: input.elementAnchor.screenshotUrl ?? null } })
-    if (input.externalAuthor) await tx.commentExternalAuthor.create({ data: { commentId: comment.id, submitterEmail: input.externalAuthor.submitterEmail ?? null, portalAccountId: input.externalAuthor.portalAccountId ?? null, embedTokenId: input.externalAuthor.embedTokenId ?? null } })
+    await options.beforeCreate?.(tx)
+    comment = await createCommentRows(tx, input, id => { createdId = id })
   } catch (error) {
-    if (!capture) {
+    if (!capture && createdId) {
       // `capture === false` can mean `tx` is the plain client, so this delete is
       // the only rollback there is. A comment can now carry TWO extensions at
       // once (element anchor + external author), so the successful one has to be
       // removed first: relationMode="prisma" emulates `onDelete: Restrict`, and
       // leaving an extension row behind would make the compensating delete throw
       // a second error that masks the real one.
-      await tx.commentElementAnchor.deleteMany({ where: { commentId: comment.id } })
-      await tx.commentExternalAuthor.deleteMany({ where: { commentId: comment.id } })
-      await tx.docCommentAnchor.deleteMany({ where: { commentId: comment.id } })
-      await tx.solutionPlanProposal.deleteMany({ where: { commentId: comment.id } })
-      await tx.comment.delete({ where: { id: comment.id } })
+      await tx.commentElementAnchor.deleteMany({ where: { commentId: createdId } })
+      await tx.commentExternalAuthor.deleteMany({ where: { commentId: createdId } })
+      await tx.docCommentAnchor.deleteMany({ where: { commentId: createdId } })
+      await tx.solutionPlanProposal.deleteMany({ where: { commentId: createdId } })
+      await tx.comment.delete({ where: { id: createdId } })
     }
     throw error
   }
@@ -200,8 +217,30 @@ export async function createComment(input: CreateCommentInput) {
     await recordWorkspaceUpdate(tx, { workspaceId: input.workspaceId, entityType: "COMMENT", entityId: comment.id, groupType: input.targetType === "REVIEW_REQUEST" ? "DECISION" : input.targetType, groupId: input.targetId, kind: input.solutionPlan ? "PLAN_PROPOSED" : "COMMENT_ADDED", ...actor })
   }
   return comment
-  })
+  }, { atomic: Boolean(options.beforeCreate) })
+  await followAfterComment(input, comment.id)
   return getComment(comment.id)
+}
+
+/**
+ * Following hook (ADR "Following and in-app notifications", section 2.5). This is
+ * the single comment choke point, so UI, MCP, embed and the legacy Solution and
+ * Doc mirrors are all covered here and nowhere else. It runs after the comment
+ * has committed, never throws, and is queued until the outer transaction commits
+ * when an MCP tool is inside the PM receipt transaction.
+ */
+export async function followAfterComment(input: CreateCommentInput, commentId: string) {
+  try {
+    if (input.source === "MIGRATION" || !followingEnabled() || !isSubjectTypeActive(input.targetType)) return
+    if (!(await followingAvailable(getPrisma()))) return
+    const effects = buildCommentEffects({
+      workspaceId: input.workspaceId, targetType: input.targetType, targetId: input.targetId, commentId,
+      parentId: input.parentId, source: input.source, actor: resolveCommentFollowActor(input),
+    })
+    if (effects.length > 0) await runAfterCommit(() => applyFollowingEffects(effects))
+  } catch (error) {
+    console.error("[following] comment hook failed", error)
+  }
 }
 
 export async function listComments(workspaceId: string, targetType: CommentTargetType, targetId: string, status?: CommentStatus) {

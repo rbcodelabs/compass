@@ -99,20 +99,23 @@ export async function createEmbedSource(
   const authMode = requireAuthMode(input.authMode)
   const artifactId = await requireArtifact(prisma, workspaceId, input.artifactId)
 
-  const source = await prisma.feedbackSource.create({
-    // `authMode` is written explicitly even though NULL would read as
-    // INTERNAL_SSO: the column has no database default (DSQL cannot add one to an
-    // existing column), so an operator who chose the default deserves a row that
-    // records the choice.
-    data: { workspaceId, artifactId, name, allowedOrigins, enabled: true, authMode, createdById: userId },
-    select: { id: true },
-  })
-  // Minted in the same call: a source with no token cannot be embedded, and two
-  // steps is how half-configured sources happen.
-  const minted = await mintEmbedToken({
-    feedbackSourceId: source.id,
-    label: "Initial token",
-    createdById: userId,
+  const { source, minted } = await prisma.$transaction(async (tx) => {
+    const source = await tx.feedbackSource.create({
+      // `authMode` is written explicitly even though NULL would read as
+      // INTERNAL_SSO: the column has no database default (DSQL cannot add one to an
+      // existing column), so an operator who chose the default deserves a row that
+      // records the choice.
+      data: { workspaceId, artifactId, name, allowedOrigins, enabled: true, authMode, createdById: userId },
+      select: { id: true },
+    })
+    // Persisting the hash and creating the source are one unit: callers must
+    // never receive an unusable one-time credential or leave an orphan source.
+    const minted = await mintEmbedToken({
+      feedbackSourceId: source.id,
+      label: "Initial token",
+      createdById: userId,
+    }, tx)
+    return { source, minted }
   })
   return {
     id: source.id,
@@ -160,22 +163,22 @@ export async function updateEmbedSource(
   const previousMode = resolveEmbedAuthMode(existing.authMode)
   const authMode = input.authMode === undefined ? previousMode : requireAuthMode(input.authMode)
 
-  await prisma.feedbackSource.update({
-    where: { id: existing.id },
-    data: { name, allowedOrigins, enabled, authMode, updatedAt: new Date() },
-  })
-
-  // A visitor session minted under the OLD mode keeps working under it for up to
-  // its remaining 12-hour TTL otherwise: the write routes only re-check
-  // workspace membership for an INTERNAL-kind visitor, they never re-check
-  // `source.authMode` against `visitor.kind` on every write. Revoking on an
-  // actual mode change forces every existing visitor to sign in again.
-  if (authMode !== previousMode) {
-    await prisma.embedVisitorSession.updateMany({
-      where: { feedbackSourceId: existing.id, revokedAt: null },
-      data: { revokedAt: new Date() },
+  await prisma.$transaction(async tx => {
+    await tx.feedbackSource.update({
+      where: { id: existing.id },
+      data: { name, allowedOrigins, enabled, authMode, updatedAt: new Date() },
     })
-  }
+
+    // The mode and its visitor-session kill switch are one security change.
+    // A failed revocation must roll back the mode update so retry still sees
+    // the old mode and attempts revocation again.
+    if (authMode !== previousMode) {
+      await tx.embedVisitorSession.updateMany({
+        where: { feedbackSourceId: existing.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      })
+    }
+  })
   return { name, allowedOrigins, enabled, authMode }
 }
 

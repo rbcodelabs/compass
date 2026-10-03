@@ -16,6 +16,7 @@
 import getPrisma from "@/lib/db"
 import { workspaceUpdatesAvailable, recordWorkspaceUpdate, retryUpdatesTransaction } from "@/lib/workspace-updates-capture"
 import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
+import { followAfterCreate, sessionFollowActor } from "@/lib/following-hooks"
 import { eligibleTaskAssignees, type TaskAssignee } from "@/lib/task-assignment"
 
 /** Matches Task.title's column width. */
@@ -103,7 +104,7 @@ export async function createDecisionFollowUpTask(input: {
   const capture = await workspaceUpdatesAvailable(prisma)
   const actor = capture ? await workspaceMutationActor("UI") : null
 
-  return retryUpdatesTransaction(prisma, async (tx) => {
+  const created = await retryUpdatesTransaction(prisma, async (tx) => {
     const task = await tx.task.create({
       data: {
         workspaceId: input.workspaceId,
@@ -121,4 +122,12 @@ export async function createDecisionFollowUpTask(input: {
     if (capture && actor) await recordWorkspaceUpdate(tx, { workspaceId: input.workspaceId, entityType: "TASK", entityId: task.id, kind: "CREATED", ...actor })
     return { taskId: task.id, linkId: link.id }
   })
+  // This write bypasses captureWorkspaceMutation (it needs the link in the same
+  // transaction), so follow the creator and the assignee here, after the commit.
+  await followAfterCreate({
+    model: "task", workspaceId: input.workspaceId,
+    row: { id: created.taskId, assigneeUserId: assignment.assigneeUserId, updatedAt: new Date() },
+    actor: sessionFollowActor,
+  })
+  return created
 }

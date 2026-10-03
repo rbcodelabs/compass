@@ -22,6 +22,7 @@ vi.mock("@/lib/db", () => ({ default: initialize }))
 
 import { GET as protectedResourceRoot, OPTIONS as protectedResourceOptions } from "@/app/.well-known/oauth-protected-resource/route"
 import { GET as protectedResourceInserted } from "@/app/.well-known/oauth-protected-resource/api/mcp/route"
+import { GET as apiProtectedResource } from "@/app/.well-known/oauth-protected-resource/api/v1/route"
 import { GET as authorizationServer } from "@/app/.well-known/oauth-authorization-server/route"
 import { GET as openidConfiguration } from "@/app/.well-known/openid-configuration/route"
 import { CONFIGURATION_ERROR_DESCRIPTION } from "@/lib/oauth/errors"
@@ -38,6 +39,7 @@ afterEach(() => vi.unstubAllEnvs())
 const ALL = [
   ["protected resource (root)", protectedResourceRoot],
   ["protected resource (path-inserted)", protectedResourceInserted],
+  ["REST protected resource", apiProtectedResource],
   ["authorization server", authorizationServer],
   ["openid-configuration", openidConfiguration],
 ] as const
@@ -102,6 +104,13 @@ describe("the two protected-resource locations", () => {
 
   it("name the canonical MCP resource", async () => {
     expect((await (await protectedResourceInserted()).json()).resource).toBe(`${ORIGIN}/api/mcp`)
+  })
+
+  it("publishes a distinct REST audience and scope family", async () => {
+    expect(await (await apiProtectedResource()).json()).toMatchObject({
+      resource: `${ORIGIN}/api/v1`,
+      scopes_supported: ["api:read", "api:write"],
+    })
   })
 })
 

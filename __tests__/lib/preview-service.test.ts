@@ -13,6 +13,7 @@ function fixture() {
     user: { createMany: vi.fn() }, organizationMember: { createMany: vi.fn() }, workspaceMember: { createMany: vi.fn() },
     session: { create: vi.fn().mockImplementation(({ data }) => data), deleteMany: vi.fn() },
     previewAutomationSession: { create: vi.fn() },
+    apiKey: { create: vi.fn(), deleteMany: vi.fn() }, oAuthToken: { create: vi.fn(), deleteMany: vi.fn() },
   };
   return { tx, client: { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as AppPrismaClient };
 }
@@ -62,6 +63,8 @@ describe("preview run lifecycle", () => {
     const result = await teardownPreviewRun(client, { ...approved, operation: "teardown" });
     expect(result).toEqual({ runId: approved.runId, revoked: true, retained: true });
     expect(tx.session.deleteMany).toHaveBeenCalled();
+    expect(tx.apiKey.deleteMany).toHaveBeenCalled();
+    expect(tx.oAuthToken.deleteMany).toHaveBeenCalled();
     expect(tx.organization.create).not.toHaveBeenCalled();
   });
   it("creates only synthetic registered identities with a hard one-hour deadline", async () => {
@@ -72,6 +75,29 @@ describe("preview run lifecycle", () => {
     expect(tx.previewAutomationRun.create.mock.calls[0][0].data.expiresAt).toEqual(new Date(+now + 3600000));
     expect(tx.user.createMany.mock.calls[0][0].data.every((user: { email: string }) => user.email.endsWith("@preview.invalid"))).toBe(true);
     expect(result.orgSlug).toBe("preview-run");
+    expect(result.apiKey).toMatch(/^cmp_[a-f0-9]{32}$/);
+    expect(result.oauthReadToken).toMatch(/^cmp_oat_[a-f0-9]{32}$/);
+    expect(tx.apiKey.create).toHaveBeenCalledWith({ data: expect.objectContaining({ userId: expect.any(String), purpose: "USER", scopeWorkspaceId: expect.any(String), expiresAt: expect.any(Date) }) });
+    expect(tx.oAuthToken.create).toHaveBeenCalledTimes(1);
+    expect(tx.oAuthToken.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      type: "ACCESS", scope: "api:read", resource: expect.stringMatching(/\/api\/v1$/),
+      expiresAt: new Date(+now + 3600000),
+    }) });
+  });
+  it("caps credentials to the remaining lifetime when an active run is bootstrapped again", async () => {
+    const { tx, client } = fixture();
+    const now = new Date("2026-10-02T12:00:00.000Z");
+    const expiresAt = new Date("2026-10-02T12:05:00.000Z");
+    tx.previewAutomationRun.findUnique.mockResolvedValue({
+      id: "run", deploymentId: "deployment", workspaceId: "workspace", ownerUserId: "owner",
+      expiresAt, revokedAt: null,
+    });
+
+    await bootstrapPreviewRun(client, grant, now);
+
+    expect(tx.apiKey.create).toHaveBeenCalledWith({ data: expect.objectContaining({ expiresAt }) });
+    expect(tx.oAuthToken.create).toHaveBeenCalledTimes(1);
+    expect(tx.oAuthToken.create).toHaveBeenCalledWith({ data: expect.objectContaining({ type: "ACCESS", expiresAt }) });
   });
   it("rolls no mutation forward after a duplicate nonce", async () => {
     const { tx, client } = fixture();

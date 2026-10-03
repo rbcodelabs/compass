@@ -62,6 +62,13 @@ export type SubjectEvent = {
    * credential an agent acted through, because they asked for the change.
    */
   excludeUserIds?: string[]
+  /**
+   * When set, only these users can receive the event (still intersected with
+   * FOLLOWING followers, so a MUTED tombstone is respected, and still minus the
+   * actor). ASSIGNED uses it so the assignee hears about the assignment without
+   * every other follower of the Task being told who it went to.
+   */
+  recipientUserIds?: string[]
 }
 
 export type EmitResult =
@@ -127,7 +134,8 @@ export async function emitSubjectEvent(event: SubjectEvent, prisma: AppPrismaCli
 
     const excluded = new Set(event.excludeUserIds ?? [])
     if (event.actor.type === "USER" && event.actor.id) excluded.add(event.actor.id)
-    const candidates = followers.slice(0, MAX_RECIPIENTS_PER_EVENT).filter((id) => !excluded.has(id))
+    const only = event.recipientUserIds ? new Set(event.recipientUserIds) : null
+    const candidates = followers.slice(0, MAX_RECIPIENTS_PER_EVENT).filter((id) => !excluded.has(id) && (!only || only.has(id)))
     const recipients = await viewerIdsFor(event.subjectType, event.workspaceId, candidates, prisma)
     if (recipients.length === 0) return { status: "skipped", reason: "no_recipients" }
 
@@ -213,7 +221,7 @@ const fallbackActorName = (type: string) =>
 export async function listNotifications(
   userId: string,
   workspaceId: string,
-  options: { limit?: number; cursor?: string; prisma?: AppPrismaClient } = {},
+  options: { limit?: number; cursor?: string; unreadOnly?: boolean; prisma?: AppPrismaClient } = {},
 ): Promise<NotificationPage> {
   const prisma = options.prisma ?? getPrisma()
   if (!(await followingAvailable(prisma))) return EMPTY_PAGE
@@ -225,6 +233,7 @@ export async function listNotifications(
     where: {
       recipientUserId: userId,
       workspaceId,
+      ...(options.unreadOnly ? { readAt: null } : {}),
       ...(cursor ? { OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }] } : {}),
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],

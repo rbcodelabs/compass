@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   feedbackSourceToken: { create: vi.fn() },
   embedVisitorSession: { updateMany: vi.fn() },
   artifact: { findFirst: vi.fn() },
+  $transaction: vi.fn(),
 }))
 vi.mock("@/lib/db", () => ({ default: () => mocks }))
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ userId: "user-1", purpose: "USER" }) }))
@@ -36,6 +37,7 @@ beforeEach(() => {
   })
   mocks.feedbackSource.update.mockResolvedValue({})
   mocks.embedVisitorSession.updateMany.mockResolvedValue({ count: 2 })
+  mocks.$transaction.mockImplementation(async (callback: (tx: typeof mocks) => unknown) => callback(mocks))
 })
 afterEach(() => vi.unstubAllEnvs())
 
@@ -63,6 +65,22 @@ describe("create_feedback_source", () => {
     expect(mocks.feedbackSource.create.mock.calls[0][0].data.authMode).toBe("PORTAL")
   })
 
+  it("creates the source and one-time credential in one transaction", async () => {
+    await createFeedbackSourceTool(createInput)
+
+    expect(mocks.$transaction).toHaveBeenCalledOnce()
+    expect(mocks.feedbackSource.create).toHaveBeenCalledOnce()
+    expect(mocks.feedbackSourceToken.create).toHaveBeenCalledOnce()
+  })
+
+  it("does not return a credential when token persistence aborts creation", async () => {
+    mocks.feedbackSourceToken.create.mockRejectedValue(new Error("token write failed"))
+
+    await expect(createFeedbackSourceTool(createInput)).rejects.toThrow("token write failed")
+
+    expect(mocks.$transaction).toHaveBeenCalledOnce()
+  })
+
   it("returns token and script path separately, with a note, when the Compass URL is not configured", async () => {
     vi.stubEnv("VERCEL_ENV", "production")
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "")
@@ -75,6 +93,13 @@ describe("create_feedback_source", () => {
     expect(data.token).toMatch(/^cmpfb_/)
     expect(String(data.note)).toContain("NEXT_PUBLIC_APP_URL")
     expect(result.content[0].text).toContain("Snippet unavailable")
+  })
+
+  it("rejects an unsafe configured Compass URL before consuming the one-time credential", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://user:secret@compass.example.com")
+    await expect(createFeedbackSourceTool(createInput)).rejects.toThrow()
+    expect(mocks.feedbackSource.create).not.toHaveBeenCalled()
+    expect(mocks.feedbackSourceToken.create).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -151,6 +176,12 @@ describe("update_feedback_source", () => {
       where: { feedbackSourceId: SRC, revokedAt: null },
       data: { revokedAt: expect.any(Date) },
     })
+  })
+
+  it("fails the atomic mode change when visitor revocation fails", async () => {
+    mocks.embedVisitorSession.updateMany.mockRejectedValueOnce(new Error("revoke failed"))
+    await expect(updateFeedbackSourceTool({ workspaceId: WS, sourceId: SRC, authMode: "PORTAL" })).rejects.toThrow("revoke failed")
+    expect(mocks.$transaction).toHaveBeenCalledOnce()
   })
 
   it("does not revoke sessions when the submitted authMode equals the stored one, or when it is omitted", async () => {

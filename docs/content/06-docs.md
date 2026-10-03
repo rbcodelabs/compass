@@ -8,7 +8,17 @@ section: "Core Features"
 
 # Docs
 
-The Docs section holds two durable kinds of knowledge: hierarchical Markdown **Pages** and executable or externally hosted **Artifacts**. Use Pages for PRDs and research notes; use Artifacts for prototypes and other solution deliverables.
+The Docs section brings Markdown **Docs**, **Diagrams**, and **Artifacts** together in one Library. Use Docs for PRDs and research notes, Diagrams for visual thinking, and Artifacts for prototypes and other solution deliverables.
+
+The Library mixes root items alphabetically, keeping child pages beneath their parents. Search **Find in library** across titles, or use **All**, **Docs**, **Diagrams**, and **Artifacts** to narrow the list. Matching nested items keep their parent context visible. Search, filters, and **New** stay above a single scrolling list, including in the mobile Docs drawer.
+
+Use **New** to create a doc, create a diagram, import a `.canvas` file, or add an artifact.
+
+![Library component on desktop with mixed documents, diagrams, and artifacts](/screenshots/docs/docs-library-desktop.png)
+
+![Library component in the mobile Docs drawer](/screenshots/docs/docs-library-mobile.png)
+
+These Library illustrations use synthetic content in an isolated component harness. They show the shared navigation component; full workspace behavior is covered separately by functional tests.
 
 ![Docs editor](/screenshots/docs/docs-editor.png)
 
@@ -18,7 +28,7 @@ The Docs section holds two durable kinds of knowledge: hierarchical Markdown **P
 
 Documents are organised as a tree. Each page can have child pages nested beneath it. The left sidebar in the Docs section shows your full tree. Click any page title to open it, or click the **+** icon next to a parent page to create a child page.
 
-Pages can be dragged to reorder them within their level of the hierarchy.
+Drag a page from the Library onto a diagram to add a live Compass card.
 
 ## Artifacts
 
@@ -26,7 +36,7 @@ Deployed HTML Artifacts require `ARTIFACT_BLOB_READ_WRITE_TOKEN` for a **private
 
 When upgrading an existing installation, point this credential at the private store that already contains its Artifact revisions, or migrate those files before switching stores. Revisions retain storage paths, so changing the credential alone does not move existing files.
 
-Artifacts have stable identities and a separate section in the Docs navigator. They are not nested into the Page hierarchy. An Artifact can be linked to multiple Solutions, and a Solution can link to multiple Artifacts.
+Artifacts have stable identities and appear alongside Docs and Diagrams in the Library. They are not nested into the Page hierarchy. An Artifact can be linked to multiple Solutions, and a Solution can link to multiple Artifacts.
 
 Artifacts can also be linked to ordinary **Decisions**. Open a Decision and use **Artifact to link** under **Linked to** to choose an active Artifact in the same workspace. The row opens its current preview and shows its current revision and archived status. The Artifact detail page lists reciprocal **Linked decisions**, where a workspace member can remove a link. Existing archived links stay visible and removable, but archived Artifacts cannot be newly linked.
 
@@ -137,6 +147,22 @@ Leave Google-Docs-style comments anchored to a specific span of a page, so discu
 **Doc-level comments.** A comment doesn't have to be anchored — over MCP you can add a general, page-level comment with no anchored text (see below). In the sidebar these are labelled **general**.
 
 Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api) for `add_doc_comment`, `list_doc_comments`, `get_doc_comment`, `update_doc_comment`, `delete_doc_comment`, `resolve_doc_comment`, and `reopen_doc_comment`. These Doc-specific tools remain domain-friendly compatibility aliases over shared Comment IDs and preserve inline anchor creation and updates. The generic shared-comment tools can also operate on `DOC` targets by Comment ID, but generic `add_comment` creates an unanchored Doc comment; use `add_doc_comment` when creating an inline anchor.
+
+## Canvas docs
+
+A Canvas doc is an infinite, pannable whiteboard that follows the open [JSON Canvas](https://jsoncanvas.org) 1.0 format, so canvases move freely between Compass and tools like Obsidian. (This is separate from the read-only [Canvas](/help/12-canvas) viewer of your OST and roadmap.)
+
+- **Create one** from the Library's **New** menu: **New diagram**, or **Import .canvas file** to bring in an existing file. Diagrams are Canvas docs underneath, using the JSON Canvas format. Files that are not valid JSON Canvas are rejected with the reason.
+- **Edit**: pan by dragging the background, zoom with the scroll wheel, pinch, or the zoom controls. Add **Text**, **Link**, **File** and **Group** cards from the toolbar; drag cards to move them, drag the handles on a selected card to resize it. Double-click a card to edit it; text cards are markdown. Drag from a dot on one card's side to a dot on another to draw a connection (the chosen sides are saved). With a card or connection selected, pick a color (the six presets or any custom color), and for connections set a label and arrowheads. Press Delete or use the toolbar to remove the selection.
+- **Compass cards**: use **Compass** in the toolbar to search and add a live card for an opportunity, solution, metric, doc, task, experiment, objective or key result, or drag a page from the page tree onto the canvas. The canvas stores only a reference (plus a cached title); the card shows the object's current status, score, progress, or metric value and trend each time you open the canvas, and links to it. Cards are checked against your access every time: if the object was deleted, lives in another workspace, or you cannot see it, the card shows "Unavailable" and reveals nothing about it. In other tools such as Obsidian, a Compass card is an ordinary link card (`compass://<kind>/<id>`) and is preserved when the file goes back to Compass.
+- **Undo / redo** with the toolbar or Cmd/Ctrl+Z and Shift+Cmd/Ctrl+Z.
+- **Autosave and history** work exactly like regular pages, including named versions and restore. Inline comments are not available on canvases.
+- **Export** downloads a `.canvas` file. Fields Compass does not understand are kept as-is on import and export.
+- **File cards** show the referenced file path as a labeled card; they are not linked to Compass docs. Moving a group does not move the cards inside it.
+- **On phones** a canvas opens locked for viewing (pan and zoom); use the lock button to edit.
+- Canvases are limited to roughly 800 KB of JSON.
+
+Agents can create and edit canvases through the MCP `create_doc` / `update_doc` tools with `docType: CANVAS`; see [MCP API](/help/09-mcp-api).
 
 ## Positioning & Messaging Briefs
 

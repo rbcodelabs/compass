@@ -24,6 +24,7 @@ export const FOLLOWABLE_SUBJECT_TYPES = [
   "EXPERIMENT", "ROADMAP_ITEM", "FEEDBACK_ITEM", "TASK", "DOC", "ARTIFACT",
   "RESEARCH_STUDY", "REVIEW_REQUEST", "METRIC",
 ] as const
+export const ACTIVE_FOLLOWABLE_SUBJECT_TYPES = ["OPPORTUNITY", "SOLUTION", "TASK", "DOC"] as const
 export type FollowableSubjectType = (typeof FOLLOWABLE_SUBJECT_TYPES)[number]
 
 export type SubjectDisplay = {
@@ -58,11 +59,13 @@ export type FollowableDefinition = {
 }
 
 /**
- * Slice 1 ships the infrastructure only, so nothing is active yet. Slice 2 sets
- * this to 2 and slice 3 to 3. A mutable holder rather than a constant so tests
- * can exercise later slices without a build-time switch.
+ * The highest rollout slice that has shipped. Slice 2 activates Task,
+ * Opportunity, Solution and Doc (follow creation, emission and listing alike);
+ * slice 3 sets this to 3 and activates the rest. Nothing is user-visible while
+ * FOLLOWING_ENABLED is off. A mutable holder rather than a constant so tests can
+ * exercise other slices without a build-time switch.
  */
-export const followableConfig: { shippedSlice: 1 | 2 | 3 } = { shippedSlice: 1 }
+export const followableConfig: { shippedSlice: 1 | 2 | 3 } = { shippedSlice: 2 }
 
 const commentTarget = (type: CommentTargetType) => async (id: string) => {
   // Lazy: lib/comments.ts imports the notification emitter in slice 2.

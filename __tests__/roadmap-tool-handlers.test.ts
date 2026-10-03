@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { runWithMcpActor } from "@/lib/mcp-authz"
 
 // --- Prisma mock setup -------------------------------------------------------
 
@@ -14,8 +15,11 @@ const mockWorkspace = {
 
 const mockRoadmapItem = {
   findUnique: vi.fn(),
+  findFirst: vi.fn(),
+  create: vi.fn(),
   update: vi.fn(),
 }
+const mockSolution = { findFirst: vi.fn() }
 
 const mockChecklistTemplate = {
   create: vi.fn(),
@@ -42,6 +46,7 @@ const mockLaunchChecklistItem = {
 const mockPrisma = {
   workspace: mockWorkspace,
   roadmapItem: mockRoadmapItem,
+  solution: mockSolution,
   checklistTemplate: mockChecklistTemplate,
   checklistTemplateItem: mockChecklistTemplateItem,
   launchChecklist: mockLaunchChecklist,
@@ -60,6 +65,7 @@ vi.mock("@/lib/db", () => ({
 // Import handlers AFTER the mock is in place
 import {
   createChecklistTemplate,
+  promoteSolutionToRoadmap,
   listChecklistTemplates,
   setLaunchTier,
   getLaunchChecklist,
@@ -171,11 +177,39 @@ describe("createChecklistTemplate", () => {
     const text = textOf(result)
     expect(text).toContain(`ID: ${TEMPLATE_ID}`)
     expect(text).not.toContain("**ID:**")
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce()
+  })
+
+  it("aborts template creation when the item batch fails", async () => {
+    mockChecklistTemplateItem.createMany.mockRejectedValueOnce(new Error("item write failed"))
+    await expect(createChecklistTemplate({ workspaceId: WORKSPACE_ID, tier: "TIER_1", name: "Atomic", items: [{ label: "One" }] })).rejects.toThrow("item write failed")
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce()
   })
 
   it("skips createMany when no items are provided", async () => {
     await createChecklistTemplate({ workspaceId: WORKSPACE_ID, tier: "TIER_3", name: "Silent", items: [] })
     expect(mockChecklistTemplateItem.createMany).not.toHaveBeenCalled()
+  })
+})
+
+describe("promoteSolutionToRoadmap", () => {
+  it("persists API provenance with inherited opportunity and squad links", async () => {
+    mockSolution.findFirst.mockResolvedValue({ id: "solution-1", title: "Ship", opportunity: { id: "opportunity-1", squadId: "squad-1" } })
+    mockRoadmapItem.findFirst.mockResolvedValue(null)
+    mockRoadmapItem.create.mockImplementation(({ data }) => Promise.resolve(data))
+    await runWithMcpActor({ userId: "user-1", purpose: "USER" }, () => promoteSolutionToRoadmap({ workspaceId: WORKSPACE_ID, solutionId: "solution-1", horizon: "NEXT", source: "API", operationId: "44444444-4444-4444-8444-444444444444" }))
+    expect(mockRoadmapItem.create).toHaveBeenCalledWith({ data: expect.objectContaining({ source: "API", opportunityId: "opportunity-1", squadId: "squad-1" }) })
+  })
+
+  it("converges a same-operation insert race and rejects changed reuse", async () => {
+    const operationId = "44444444-4444-4444-8444-444444444444"
+    mockSolution.findFirst.mockResolvedValue({ id: "solution-1", title: "Ship", opportunity: { id: "opportunity-1", squadId: "squad-1" } })
+    mockRoadmapItem.findFirst.mockResolvedValue(null)
+    mockRoadmapItem.create.mockRejectedValue(Object.assign(new Error("duplicate"), { code: "P2002" }))
+    mockRoadmapItem.findUnique.mockResolvedValue({ id: operationId, workspaceId: WORKSPACE_ID, solutionId: "solution-1", opportunityId: "opportunity-1", squadId: "squad-1", horizon: "NEXT", isPrivate: false, source: "API" })
+    await expect(runWithMcpActor({ userId: "user-1", purpose: "USER" }, () => promoteSolutionToRoadmap({ workspaceId: WORKSPACE_ID, solutionId: "solution-1", horizon: "NEXT", source: "API", operationId }))).resolves.toMatchObject({ structuredContent: { ok: true } })
+    mockRoadmapItem.findUnique.mockResolvedValue({ id: operationId, workspaceId: WORKSPACE_ID, solutionId: "solution-1", opportunityId: "opportunity-1", squadId: "squad-1", horizon: "NOW", isPrivate: false, source: "MCP" })
+    await expect(runWithMcpActor({ userId: "user-1", purpose: "USER" }, () => promoteSolutionToRoadmap({ workspaceId: WORKSPACE_ID, solutionId: "solution-1", horizon: "NEXT", source: "API", operationId }))).rejects.toThrow("different roadmap promotion")
   })
 })
 

@@ -5,6 +5,7 @@ import { assertInterviewToolInput, assertPmInterviewKind, handoffKind, parseProc
 import { assertResearchSynthesisToolInput } from "@/lib/research-handoff-scope"
 import { PM_INTERVIEW_ALLOWED_FIELDS, parsePmInterviewTargetType } from "@/lib/pm-interview-contracts"
 import { withToolTransaction } from "@/lib/mcp-tool-db"
+import { withFollowingCommit } from "@/lib/following-commit"
 import { ok } from "@/lib/mcp-output"
 import { researchFailureDiagnostic } from "@/lib/research-failure-diagnostics"
 
@@ -162,7 +163,9 @@ export async function withInterviewMutation<T>(tool: string, args: Record<string
   // PM receipt machinery must not run — the handler executes untouched.
   if (kind === "RESEARCH_SYNTHESIS") return handler()
   assertExhaustiveKind(kind)
-  return getPrisma().$transaction(async tx => {
+  // Following effects (notifications, auto-follow) queued by the handler run
+  // only after this transaction commits, and are dropped if it rolls back.
+  return withFollowingCommit(() => getPrisma().$transaction(async tx => {
     const { conversation, state, interview } = await scopedInterview(actor, tx)
     assertInterviewToolInput(interview.targetType, interview.targetId, tool, args)
     const payloadHash = createHash("sha256").update(JSON.stringify(Object.entries(args).sort(([a], [b]) => a.localeCompare(b)))).digest("hex")
@@ -185,5 +188,5 @@ export async function withInterviewMutation<T>(tool: string, args: Record<string
     const saved = await tx.agentConversation.updateMany({ where: { id: conversation.id, interviewProcessingJson: conversation.interviewProcessingJson }, data: { interviewProcessingJson: JSON.stringify({ ...state, status: "SUCCEEDED", receipt }), updatedAt: new Date() } })
     if (saved.count !== 1) throw new Error("Interview attempt was superseded")
     return result
-  })
+  }))
 }

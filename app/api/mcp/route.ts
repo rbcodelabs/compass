@@ -51,6 +51,7 @@ import {
   createDoc,
   updateDoc,
 } from "@/lib/doc-tool-handlers"
+import { DOC_TYPES } from "@/lib/doc-types"
 import { prepareDocImageUploadTool } from "@/lib/doc-image-tool-handlers"
 import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
 import {
@@ -81,10 +82,11 @@ import {
   reopenDocComment,
 } from "@/lib/doc-comment-tool-handlers"
 import {
+  createAssumption,
   updateAssumption,
   deleteAssumption,
 } from "@/lib/assumption-tool-handlers"
-import { updateSolution } from "@/lib/solution-tool-handlers"
+import { createSolution, updateSolution } from "@/lib/solution-tool-handlers"
 import {
   addSolutionPlan,
   addSolutionComment,
@@ -96,7 +98,7 @@ import {
   rejectSolutionPlan,
 } from "@/lib/solution-comment-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
-import { updateOpportunity } from "@/lib/opportunity-tool-handlers"
+import { createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
 import { listAssumptions, listSolutions } from "@/lib/discovery-query-tool-handlers"
 import {
   listScoringModels,
@@ -118,8 +120,9 @@ import {
   setLaunchTier,
   getLaunchChecklist,
   updateLaunchChecklistItem,
+  updateRoadmapItem,
+  createRoadmapItem,
 } from "@/lib/roadmap-tool-handlers"
-import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
 import {
   createTask,
   getTask,
@@ -153,17 +156,12 @@ import {
   updateObjective,
 } from "@/lib/okr-tool-handlers"
 import {
-  TypedLinkError,
-  assertKeyResultInWorkspace,
   getLinkedObjectivesByOpportunity,
-  setOpportunityKeyResult,
-  syncLegacyLink,
 } from "@/lib/typed-links"
 import {
   linkOpportunityToObjectiveTool,
   linkSolutionToKeyResultTool,
   listLinksTool,
-  mcpLinkContext,
   unlinkOpportunityFromObjectiveTool,
   unlinkSolutionFromKeyResultTool,
 } from "@/lib/typed-link-tool-handlers"
@@ -172,6 +170,8 @@ import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewReq
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
 import { thinkingModelForMcp } from "@/lib/thinking-model/mcp"
 import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
+import { followTool, listNotificationsTool, markReadTool, unfollowTool } from "@/lib/follow-tool-handlers"
+import { FOLLOWABLE_SUBJECT_TYPES } from "@/lib/followable"
 import {
   listCustomFieldDefinitions,
   getCustomFieldValues,
@@ -301,6 +301,14 @@ const _handler = createMcpHandler(
     register("delete_comment", { title: "Delete Comment", description: "Deletes a comment and its one-level replies when it is a root.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, deleteCommentTool)
     register("resolve_comment", { title: "Resolve Comment", description: "Marks a discussion comment resolved.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, resolveComment)
     register("reopen_comment", { title: "Reopen Comment", description: "Reopens a resolved discussion comment.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, reopenComment)
+
+    // Following and the in-app notifications inbox. These act on the calling
+    // PERSON's own follows and inbox, so agent-scoped tokens are refused.
+    const followSubjectSchema = { workspaceId: z.string().uuid(), subjectType: z.enum(FOLLOWABLE_SUBJECT_TYPES).describe("Opportunity, Solution, Task and Doc are followable today; other types are rejected until their rollout slice ships"), subjectId: z.string().uuid() }
+    register("follow", { title: "Follow", description: "Follows an object so its status changes and comments appear in your notifications inbox. Acts on the calling user's own follows; agent-scoped tokens are refused. Clears a previous unfollow.", inputSchema: followSubjectSchema, outputSchema: TOOL_OUTPUT_SCHEMA }, followTool)
+    register("unfollow", { title: "Unfollow", description: "Stops notifications for an object. The unfollow is remembered, so commenting on or being assigned the object later does not silently re-follow it. Agent-scoped tokens are refused.", inputSchema: followSubjectSchema, outputSchema: TOOL_OUTPUT_SCHEMA }, unfollowTool)
+    register("list_notifications", { title: "List Notifications", description: "Lists the calling user's notifications in one workspace, newest first, with an unread count. Pass the returned nextCursor to page. Agent-scoped tokens are refused.", inputSchema: { workspaceId: z.string().uuid(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional(), unreadOnly: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listNotificationsTool)
+    register("mark_read", { title: "Mark Notifications Read", description: "Marks the calling user's notifications read: pass notificationIds (up to 100) or all: true, not both. Agent-scoped tokens are refused.", inputSchema: { workspaceId: z.string().uuid(), notificationIds: z.array(z.string().uuid()).min(1).max(100).optional(), all: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, markReadTool)
 
     // ════════════════════════════════════════════════════════════════
     // WORKSPACE
@@ -1230,51 +1238,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, title, description, customerSegment, status, keyResultId, squadId }) => {
-        const prisma = getPrisma()
-        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, ...WORKSPACE_LINK_SELECT } })
-        if (!workspace) {
-          return fail(`Workspace "${workspaceId}" not found.`)
-        }
-        // The legacy pointer and its LEGACY Opportunity<->Objective link are written together, in one transaction.
-        let opportunity
-        try {
-          opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", "MCP", undefined, async tx => {
-            if (keyResultId) await assertKeyResultInWorkspace(tx, keyResultId, workspaceId)
-            const created = await tx.opportunity.create({
-              data: {
-                workspaceId,
-                title: title.trim(),
-                description: description?.trim(),
-                customerSegment: customerSegment?.trim(),
-                status: status ?? "EXPLORING",
-                linkedKeyResultId: keyResultId ?? null,
-                squadId: squadId ?? null,
-              },
-            })
-            if (keyResultId) await syncLegacyLink(tx, { opportunityId: created.id, workspaceId, keyResultId, ctx: mcpLinkContext() })
-            return created
-          }, { atomic: true })
-        } catch (error) {
-          if (error instanceof TypedLinkError) return fail(error.message)
-          throw error
-        }
-        return ok(
-          withUrlLine(
-            `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
-            workspaceEntityUrl(workspace, { type: "opportunity", id: opportunity.id }),
-          ),
-          {
-            id: opportunity.id,
-            title: opportunity.title,
-            status: opportunity.status,
-            workspaceId,
-            customerSegment: opportunity.customerSegment,
-            linkedKeyResultId: opportunity.linkedKeyResultId,
-            squadId: opportunity.squadId,
-          },
-        )
-      }
+      createOpportunity,
     )
 
     register(
@@ -1309,18 +1273,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ opportunityId, status }) => {
-        const prisma = getPrisma()
-        const opp = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { title: true, status: true } })
-        if (!opp) {
-          return fail(`Opportunity "${opportunityId}" not found.`)
-        }
-        await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", opportunityId, tx => tx.opportunity.update({ where: { id: opportunityId }, data: { status } }))
-        return ok(
-          `**"${opp.title}"** moved from ${opp.status} → ${status}`,
-          { id: opportunityId, title: opp.title, status, previousStatus: opp.status },
-        )
-      }
+      updateOpportunityStatus,
     )
 
     register(
@@ -1334,27 +1287,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ opportunityId, keyResultId }) => {
-        const prisma = getPrisma()
-        const opp = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { title: true } })
-        if (!opp) {
-          return fail(`Opportunity "${opportunityId}" not found.`)
-        }
-        // Dual-write, one transaction: the legacy column and its LEGACY link to the key result's objective (which
-        // must be in the opportunity's workspace). A DIRECT link is never touched by a clear or a change.
-        try {
-          await captureWorkspaceMutation(prisma, "opportunity", "update", "MCP", opportunityId, tx => setOpportunityKeyResult(tx, { opportunityId, keyResultId, ctx: mcpLinkContext() }), { atomic: true })
-        } catch (error) {
-          if (error instanceof TypedLinkError) return fail(error.message)
-          throw error
-        }
-        return ok(
-          keyResultId
-            ? `Linked opportunity "${opp.title}" to KR ${keyResultId}.`
-            : `Cleared KR link from opportunity "${opp.title}".`,
-          { id: opportunityId, title: opp.title, linkedKeyResultId: keyResultId },
-        )
-      }
+      updateOpportunityKeyResult,
     )
 
     const typedLinkEnds = { workspaceId: z.string().uuid().describe("UUID of the workspace that owns both ends") }
@@ -1438,30 +1371,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ opportunityId, title, description }) => {
-        const prisma = getPrisma()
-        const opp = await prisma.opportunity.findUnique({
-          where: { id: opportunityId },
-          select: { id: true, title: true, workspaceId: true, workspace: { select: WORKSPACE_LINK_SELECT } },
-        })
-        if (!opp) {
-          return fail(`Opportunity "${opportunityId}" not found.`)
-        }
-        // workspaceId is the authorized parent Opportunity's, never caller input.
-        const solution = await captureWorkspaceMutation(prisma, "solution", "create", "MCP", undefined, tx => tx.solution.create({ data: { workspaceId: opp.workspaceId, opportunityId, title: title.trim(), description: description?.trim() } }))
-        return ok(
-          withUrlLine(
-            `**Solution created** for "${opp.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
-            workspaceEntityUrl(opp.workspace, { type: "solution", id: solution.id, opportunityId }),
-          ),
-          {
-            id: solution.id,
-            title: solution.title,
-            status: solution.status,
-            opportunityId,
-          },
-        )
-      }
+      createSolution,
     )
 
     register(
@@ -1508,42 +1418,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ solutionId, title, description, riskLevel }) => {
-        const prisma = getPrisma()
-        // The link's slugs come from the Solution's own workspace; only the discovery page id
-        // (the opportunity it opens under) is read off the Solution's opportunityId.
-        const solution = await prisma.solution.findUnique({
-          where: { id: solutionId },
-          select: {
-            id: true,
-            title: true,
-            opportunityId: true,
-            workspace: { select: WORKSPACE_LINK_SELECT },
-          },
-        })
-        if (!solution) {
-          return fail(`Solution "${solutionId}" not found.`)
-        }
-        const assumption = await captureWorkspaceMutation(prisma, "assumption", "create", "MCP", undefined, tx => tx.assumption.create({ data: { solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED" } }))
-        return ok(
-          withUrlLine(
-            `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
-            workspaceEntityUrl(solution.workspace, {
-              type: "assumption",
-              id: assumption.id,
-              opportunityId: solution.opportunityId,
-            }),
-          ),
-          {
-            id: assumption.id,
-            title: assumption.title,
-            description: assumption.description,
-            riskLevel: assumption.riskLevel,
-            status: assumption.status,
-            solutionId,
-          },
-        )
-      }
+      createAssumption,
     )
 
     register(
@@ -2312,60 +2187,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ itemId, keyResultId, opportunityId, solutionId, squadId, horizon, status, title, description, startDate, endDate, isPrivate }) => {
-        const prisma = getPrisma()
-        const item = await prisma.roadmapItem.findUnique({ where: { id: itemId }, select: { id: true, workspaceId: true, title: true, horizon: true, status: true } })
-        if (!item) {
-          return fail(`Roadmap item "${itemId}" not found.`)
-        }
-        if (horizon === "LAUNCHING" || horizon === "LAUNCHED") {
-          // The whole marketing-launch surface is opt-in per workspace. When
-          // it's off, say so instead of a message that presumes the feature
-          // is available.
-          const workspace = await prisma.workspace.findUnique({ where: { id: item.workspaceId }, select: { launchWorkflowEnabled: true } })
-          if (!workspace?.launchWorkflowEnabled) {
-            return fail(LAUNCH_WORKFLOW_DISABLED_MESSAGE)
-          }
-          if (horizon === "LAUNCHING") {
-            return fail(`Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.`)
-          }
-          return fail(`Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.`)
-        }
-        const updateData = {
-            ...(keyResultId !== undefined ? { keyResultId } : {}),
-            ...(opportunityId !== undefined ? { opportunityId } : {}),
-            ...(solutionId !== undefined ? { solutionId } : {}),
-            ...(squadId !== undefined ? { squadId } : {}),
-            ...(horizon ? { horizon } : {}),
-            ...(status ? { status } : {}),
-            ...(title ? { title: title.trim() } : {}),
-            ...(description !== undefined ? { description: description.trim() } : {}),
-            ...(startDate !== undefined ? { startDate: new Date(startDate) } : {}),
-            ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
-            ...(isPrivate !== undefined ? { isPrivate } : {}),
-            updatedAt: new Date(),
-        }
-        const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", "MCP", itemId, tx => tx.roadmapItem.update({ where: { id: itemId }, data: updateData }))
-        return ok(
-          `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
-            `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
-            (updated.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
-            (updated.solutionId ? `\nLinked Solution: ${updated.solutionId}` : "") +
-            (updated.startDate || updated.endDate
-              ? `\nDates: ${updated.startDate ? formatUtcDate(updated.startDate) : "?"} – ${updated.endDate ? formatUtcDate(updated.endDate) : "?"}`
-              : ""),
-          {
-            id: updated.id,
-            title: updated.title,
-            horizon: updated.horizon,
-            status: updated.status,
-            isPrivate: updated.isPrivate,
-            solutionId: updated.solutionId,
-            startDate: updated.startDate,
-            endDate: updated.endDate,
-          },
-        )
-      }
+      updateRoadmapItem,
     )
 
     register(
@@ -2388,57 +2210,7 @@ const _handler = createMcpHandler(
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, title, horizon, description, solutionId, keyResultId, opportunityId, squadId, startDate, endDate, isPrivate }) => {
-        const prisma = getPrisma()
-        const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true, ...WORKSPACE_LINK_SELECT } })
-        if (!workspace) {
-          return fail(`Workspace "${workspaceId}" not found.`)
-        }
-        const lastItem = await prisma.roadmapItem.findFirst({
-          where: { workspaceId, horizon, status: "ACTIVE" },
-          orderBy: { sortOrder: "desc" },
-          select: { sortOrder: true },
-        })
-        const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "MCP", undefined, tx => tx.roadmapItem.create({ data: {
-            workspaceId,
-            title: title.trim(),
-            horizon,
-            description: description?.trim(),
-            sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
-            solutionId: solutionId ?? null,
-            keyResultId: keyResultId ?? null,
-            opportunityId: opportunityId ?? null,
-            squadId: squadId ?? null,
-            startDate: startDate ? new Date(startDate) : undefined,
-            endDate: endDate ? new Date(endDate) : undefined,
-            isPrivate: isPrivate ?? false,
-          } }))
-        return ok(
-          withUrlLine(
-            `**Roadmap item created** (${horizon})\nID: ${item.id}\nTitle: ${item.title}` +
-              (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
-              (solutionId ? `\nLinked Solution: ${solutionId}` : "") +
-              (keyResultId ? `\nLinked KR: ${keyResultId}` : "") +
-              (opportunityId ? `\nLinked Opportunity: ${opportunityId}` : "") +
-              (item.startDate || item.endDate
-                ? `\nDates: ${item.startDate ? formatUtcDate(item.startDate) : "?"} – ${item.endDate ? formatUtcDate(item.endDate) : "?"}`
-                : ""),
-            workspaceEntityUrl(workspace, { type: "roadmapItem", id: item.id }),
-          ),
-          {
-            id: item.id,
-            title: item.title,
-            horizon,
-            isPrivate: item.isPrivate,
-            solutionId: item.solutionId,
-            keyResultId: item.keyResultId,
-            opportunityId: item.opportunityId,
-            squadId: item.squadId,
-            startDate: item.startDate,
-            endDate: item.endDate,
-          },
-        )
-      }
+      createRoadmapItem,
     )
 
     register(
@@ -3347,7 +3119,7 @@ const _handler = createMcpHandler(
         title: "Get Doc",
         description:
           "Returns the full content of a single doc, including its parent, " +
-          "children list, and the complete markdown body.",
+          "children list, and the complete markdown body (for docType CANVAS, the JSON Canvas 1.0 document as a JSON string).",
         inputSchema: {
           docId: z.string().uuid().describe("UUID of the doc"),
         },
@@ -3378,14 +3150,16 @@ const _handler = createMcpHandler(
         title: "Create Doc",
         description:
           "Creates a new doc in a workspace. Optionally nest it under a parent doc. " +
-          "Content should be markdown. Returns the new doc ID and the docs URL. " +
+          "Content should be markdown (or, for docType CANVAS, a JSON Canvas 1.0 document as a JSON string). Returns the new doc ID and the docs URL. " +
           "Pass roadmapItemId and docType: GTM_POSITIONING_BRIEF to create a Positioning & Messaging Brief " +
-          "linked 1:1 to a roadmap item -- if content is omitted, a starter template is used.",
+          "linked 1:1 to a roadmap item -- if content is omitted, a starter template is used. " +
+          "Pass docType: CANVAS to create a JSON Canvas (infinite-canvas) doc; content is validated and a blank canvas is created when omitted. " +
+          "A Compass object card is a JSON Canvas link node with url \"compass://<kind>/<id>\" and a compass field {kind, id, title?}; kind must be one of opportunity, solution, metric, doc, task, experiment, objective, keyResult and id a UUID (invalid references are rejected).",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Doc title"),
           operationId: z.string().uuid().optional().describe("Stable retry ID; required for Geode pilot documents"),
-          content: z.string().optional().describe("Doc body in markdown"),
+          content: z.string().optional().describe("Doc body in markdown; for docType CANVAS a JSON Canvas 1.0 JSON string ({\"nodes\":[...],\"edges\":[...]})"),
           parentId: z
             .string()
             .uuid()
@@ -3400,9 +3174,9 @@ const _handler = createMcpHandler(
             .optional()
             .describe("UUID of a roadmap item to link this doc to as its Positioning & Messaging Brief (1:1 -- fails if that item already has a linked doc)"),
           docType: z
-            .enum(["STANDARD", "GTM_POSITIONING_BRIEF"])
+            .enum(DOC_TYPES)
             .optional()
-            .describe("Doc type. GTM_POSITIONING_BRIEF auto-fills a starter template when content is omitted. Defaults to STANDARD."),
+            .describe("Doc type. GTM_POSITIONING_BRIEF auto-fills a starter template when content is omitted. CANVAS is a JSON Canvas 1.0 document (content must be valid JSON Canvas; blank canvas if omitted). Defaults to STANDARD."),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
@@ -3415,13 +3189,13 @@ const _handler = createMcpHandler(
         title: "Update Doc",
         description:
           "Updates an existing doc's title, content, and/or icon. " +
-          "Only the fields you provide are changed.",
+          "Only the fields you provide are changed. For a CANVAS doc, content must be a complete, valid JSON Canvas 1.0 JSON string (it replaces the whole canvas; invalid payloads are rejected).",
         inputSchema: {
           docId: z.string().uuid().describe("UUID of the doc to update"),
           expectedRevision: z.string().uuid().optional().describe("Revision from get_doc; required for Geode pilot documents"),
           operationId: z.string().uuid().optional().describe("Stable retry ID; reuse only for the identical request"),
           title: z.string().min(1).optional().describe("New title"),
-          content: z.string().optional().describe("New markdown content (replaces existing)"),
+          content: z.string().optional().describe("New markdown content (replaces existing); for CANVAS docs the full JSON Canvas JSON string"),
           icon: z.string().optional().describe("New emoji or icon string"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,

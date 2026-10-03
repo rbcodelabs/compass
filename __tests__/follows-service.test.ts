@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { followableConfig, getFollowable } from "@/lib/followable"
 import { resetFollowingAvailabilityCache } from "@/lib/following-flag"
-import { autoFollow, FollowError, followSubject, isFollowing, listFollowers, unfollowSubject } from "@/lib/follows"
+import { autoFollow, FollowError, followSubject, getFollowState, isFollowing, listFollowers, unfollowSubject } from "@/lib/follows"
 import { createFakeFollowDb } from "./helpers/fake-follow-db"
 
 const WS = "00000000-0000-4000-8000-000000000001"
@@ -185,6 +185,14 @@ describe("isFollowing and listFollowers", () => {
     expect(await isFollowing(USER, "TASK", TASK, fake.db)).toBe(true)
     await unfollowSubject({ userId: USER, ...subject }, fake.db)
     expect(await isFollowing(USER, "TASK", TASK, fake.db)).toBe(false)
+  })
+
+  it("getFollowState distinguishes never followed, following and an explicit unfollow", async () => {
+    expect(await getFollowState(USER, "TASK", TASK, fake.db)).toBeNull()
+    await followSubject({ userId: USER, ...subject }, fake.db)
+    expect(await getFollowState(USER, "TASK", TASK, fake.db)).toBe("FOLLOWING")
+    await unfollowSubject({ userId: USER, ...subject }, fake.db)
+    expect(await getFollowState(USER, "TASK", TASK, fake.db)).toBe("MUTED")
   })
 
   it("lists FOLLOWING users of the subject and omits tombstones", async () => {

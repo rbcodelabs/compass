@@ -15,6 +15,14 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/mcp")).toBe(true);
   });
 
+  it("allows only the versioned REST segment through to bearer auth", () => {
+    expect(isPublicPath("/api/v1")).toBe(true);
+    expect(isPublicPath("/api/v1/openapi.json")).toBe(true);
+    expect(isPublicPath("/api/v1/workspaces/example")).toBe(true);
+    expect(isPublicPath("/api/v10")).toBe(false);
+    expect(isPublicPath("/api/v1evil")).toBe(false);
+  });
+
   it("allows admin routes (x-migration-secret auth handled by the route itself)", () => {
     expect(isPublicPath("/api/admin/migrate")).toBe(true);
   });
@@ -122,6 +130,7 @@ describe("isPublicPath", () => {
     // make Compass look like it has no authorization server at all.
     expect(isPublicPath("/.well-known/oauth-protected-resource")).toBe(true);
     expect(isPublicPath("/.well-known/oauth-protected-resource/api/mcp")).toBe(true);
+    expect(isPublicPath("/.well-known/oauth-protected-resource/api/v1")).toBe(true);
     expect(isPublicPath("/.well-known/oauth-authorization-server")).toBe(true);
     expect(isPublicPath("/.well-known/openid-configuration")).toBe(true);
   });

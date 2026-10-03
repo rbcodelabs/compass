@@ -44,6 +44,7 @@ const mockWorkspaceCapabilityPack = { deleteMany: vi.fn() };
 const mockCapabilityPack = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockCapabilityPackVersion = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockCanvasNodePosition = { deleteMany: vi.fn() };
+const mockPortalHomeLayout = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
 const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) };
@@ -130,6 +131,7 @@ const mockPrisma = {
   capabilityPack: mockCapabilityPack,
   capabilityPackVersion: mockCapabilityPackVersion,
   canvasNodePosition: mockCanvasNodePosition,
+  portalHomeLayout: mockPortalHomeLayout,
   workspaceMember: mockWorkspaceMember,
   squad: mockSquad,
   doc: mockDoc,
@@ -289,6 +291,7 @@ beforeEach(() => {
     mockCapabilityPack.deleteMany,
     mockCapabilityPackVersion.deleteMany,
     mockCanvasNodePosition.deleteMany,
+    mockPortalHomeLayout.deleteMany,
     mockWorkspaceMember.deleteMany,
     mockSquad.deleteMany,
     mockDoc.deleteMany,
@@ -550,6 +553,7 @@ describe("deleteOrganization", () => {
     // ── Workspace singletons ──
     expect(mockWorkspaceScoringConfig.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockCanvasNodePosition.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockPortalHomeLayout.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
 
     // ── Members / squads / docs / workspace ──
     expect(mockWorkspaceMember.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });

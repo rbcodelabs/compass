@@ -11,6 +11,122 @@ import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import type { LaunchTier } from "@/lib/types"
 import { setLaunchTierCore, updateChecklistItemCore } from "@/lib/launch-checklist"
 import { ok, fail } from "@/lib/mcp-output"
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import { withWorkspaceUpdates } from "@/lib/workspace-updates-capture"
+import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
+import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
+import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
+import { randomUUID } from "node:crypto"
+import { isUniqueConflict, RoadmapPromotionConflict } from "@/lib/roadmap-promotion"
+
+export function roadmapCreateData(input: Parameters<typeof createRoadmapItem>[0], sortOrder: number) {
+  return {
+    workspaceId: input.workspaceId, title: input.title.trim(), horizon: input.horizon, description: input.description?.trim() || null,
+    sortOrder, solutionId: input.solutionId ?? null, keyResultId: input.keyResultId ?? null, opportunityId: input.opportunityId ?? null,
+    squadId: input.squadId ?? null, startDate: input.startDate ? new Date(input.startDate) : undefined,
+    endDate: input.endDate ? new Date(input.endDate) : undefined, isPrivate: input.isPrivate ?? false, source: input.source ?? "MCP",
+  }
+}
+
+export async function createRoadmapItem(input: {
+  workspaceId: string; title: string; horizon: "NOW" | "NEXT" | "LATER" | "SHIPPED"; description?: string | null
+  solutionId?: string | null; keyResultId?: string | null; opportunityId?: string | null; squadId?: string | null
+  startDate?: string | null; endDate?: string | null; isPrivate?: boolean; source?: ProgrammaticSource
+}) {
+  const prisma = getPrisma()
+  const workspace = await prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { name: true, slug: true, organization: { select: { slug: true } } } })
+  if (!workspace) return fail(`Workspace "${input.workspaceId}" not found.`)
+  const lastItem = await prisma.roadmapItem.findFirst({ where: { workspaceId: input.workspaceId, horizon: input.horizon, status: "ACTIVE" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, tx => tx.roadmapItem.create({ data: roadmapCreateData(input, lastItem ? lastItem.sortOrder + 1 : 0) }))
+  const format = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
+  return ok(withUrlLine(
+    `**Roadmap item created** (${input.horizon})\nID: ${item.id}\nTitle: ${item.title}` +
+      (item.isPrivate ? "\nPrivate: yes (hidden from public portal)" : "") +
+      (item.startDate || item.endDate ? `\nDates: ${item.startDate ? format(item.startDate) : "?"} – ${item.endDate ? format(item.endDate) : "?"}` : ""),
+    safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "roadmapItem", id: item.id }),
+  ), { id: item.id, title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate })
+}
+
+export async function promoteSolutionToRoadmap(input: {
+  workspaceId: string
+  solutionId: string
+  horizon: "NOW" | "NEXT" | "LATER" | "SHIPPED"
+  isPrivate?: boolean
+  source?: ProgrammaticSource
+  operationId?: string
+}) {
+  const prisma = getPrisma()
+  const solution = await prisma.solution.findFirst({
+    where: { id: input.solutionId, workspaceId: input.workspaceId },
+    select: { id: true, title: true, opportunity: { select: { id: true, squadId: true } } },
+  })
+  if (!solution) return fail("Solution not found.")
+  const promotionId = input.operationId ?? randomUUID()
+  let item
+  try {
+    item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, async tx => {
+      const lastItem = await tx.roadmapItem.findFirst({ where: { workspaceId: input.workspaceId, horizon: input.horizon, status: "ACTIVE" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
+      return tx.roadmapItem.create({ data: { id: promotionId, ...roadmapCreateData({
+        workspaceId: input.workspaceId,
+        title: solution.title,
+        horizon: input.horizon,
+        solutionId: solution.id,
+        opportunityId: solution.opportunity.id,
+        squadId: solution.opportunity.squadId,
+        isPrivate: input.isPrivate,
+        source: input.source,
+      }, lastItem ? lastItem.sortOrder + 1 : 0) } })
+    }, { atomic: true })
+  } catch (error) {
+    if (!input.operationId || !isUniqueConflict(error)) throw error
+    item = await prisma.roadmapItem.findUnique({ where: { id: promotionId } })
+    if (!item || item.workspaceId !== input.workspaceId || item.solutionId !== input.solutionId || item.opportunityId !== solution.opportunity.id || item.squadId !== solution.opportunity.squadId || item.horizon !== input.horizon || item.isPrivate !== (input.isPrivate ?? false) || item.source !== (input.source ?? "MCP")) {
+      throw new RoadmapPromotionConflict("The operationId was already used for a different roadmap promotion.")
+    }
+  }
+  return ok("Solution promoted to roadmap.", { id: item.id })
+}
+
+export async function updateRoadmapItem(input: {
+  itemId: string; keyResultId?: string | null; opportunityId?: string | null; solutionId?: string | null; squadId?: string | null
+  horizon?: "NOW" | "NEXT" | "LATER" | "LAUNCHING" | "LAUNCHED" | "SHIPPED"; status?: "ACTIVE" | "ARCHIVED"
+  title?: string; description?: string | null; startDate?: string | null; endDate?: string | null; isPrivate?: boolean
+  source?: ProgrammaticSource
+}) {
+  const prisma = getPrisma()
+  const item = await prisma.roadmapItem.findUnique({ where: { id: input.itemId }, select: { id: true, workspaceId: true } })
+  if (!item) return fail(`Roadmap item "${input.itemId}" not found.`)
+  if (input.horizon === "LAUNCHING" || input.horizon === "LAUNCHED") {
+    const workspace = await prisma.workspace.findUnique({ where: { id: item.workspaceId }, select: { launchWorkflowEnabled: true } })
+    if (!workspace?.launchWorkflowEnabled) return fail(LAUNCH_WORKFLOW_DISABLED_MESSAGE)
+    if (input.horizon === "LAUNCHING") return fail("Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.")
+    return fail("Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.")
+  }
+  const checks: Promise<unknown>[] = []
+  if (input.squadId) checks.push(prisma.squad.findFirst({ where: { id: input.squadId, workspaceId: item.workspaceId }, select: { id: true } }))
+  if (input.solutionId) checks.push(prisma.solution.findFirst({ where: { id: input.solutionId, workspaceId: item.workspaceId }, select: { id: true } }))
+  if (input.opportunityId) checks.push(prisma.opportunity.findFirst({ where: { id: input.opportunityId, workspaceId: item.workspaceId }, select: { id: true } }))
+  if (input.keyResultId) checks.push(prisma.keyResult.findFirst({ where: { id: input.keyResultId, objective: { workspaceId: item.workspaceId } }, select: { id: true } }))
+  if ((await Promise.all(checks)).some((row) => !row)) return fail("A linked resource was not found in this workspace.")
+  const data: Record<string, unknown> = { updatedAt: new Date() }
+  for (const key of ["keyResultId", "opportunityId", "solutionId", "squadId", "horizon", "status", "isPrivate"] as const) if (input[key] !== undefined) data[key] = input[key]
+  if (input.title !== undefined) data.title = input.title.trim()
+  if (input.description !== undefined) data.description = input.description?.trim() || null
+  if (input.startDate !== undefined) data.startDate = input.startDate ? new Date(input.startDate) : null
+  if (input.endDate !== undefined) data.endDate = input.endDate ? new Date(input.endDate) : null
+  const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", workspaceMutationSource(input.source), input.itemId, (tx) => tx.roadmapItem.update({ where: { id: input.itemId }, data }))
+  const formatUtcDate = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
+  return ok(
+    `**Roadmap item updated**\nID: ${updated.id}\nTitle: ${updated.title}\n` +
+      `Horizon: ${updated.horizon}\nStatus: ${updated.status}` +
+      (updated.isPrivate ? "\nPrivate: yes (hidden from public portal)" : "") +
+      (updated.solutionId ? `\nLinked Solution: ${updated.solutionId}` : "") +
+      (updated.startDate || updated.endDate
+        ? `\nDates: ${updated.startDate ? formatUtcDate(updated.startDate) : "?"} – ${updated.endDate ? formatUtcDate(updated.endDate) : "?"}`
+        : ""),
+    { id: updated.id, title: updated.title, horizon: updated.horizon, status: updated.status, isPrivate: updated.isPrivate, solutionId: updated.solutionId, startDate: updated.startDate, endDate: updated.endDate },
+  )
+}
 
 interface ChecklistItemInput {
   label: string
@@ -38,20 +154,15 @@ export async function createChecklistTemplate({
     return fail(`Workspace "${workspaceId}" not found.`)
   }
 
-  const template = await prisma.checklistTemplate.create({
-    data: { workspaceId, tier, name: name.trim(), description },
-  })
-
-  if (items.length > 0) {
-    await prisma.checklistTemplateItem.createMany({
-      data: items.map((item, i) => ({
-        checklistTemplateId: template.id,
-        label: item.label,
-        description: item.description,
-        order: i,
-      })),
-    })
-  }
+  const template = await withWorkspaceUpdates(prisma, async tx => {
+    const created = await tx.checklistTemplate.create({ data: { workspaceId, tier, name: name.trim(), description } })
+    if (items.length > 0) {
+      await tx.checklistTemplateItem.createMany({
+        data: items.map((item, i) => ({ checklistTemplateId: created.id, label: item.label, description: item.description, order: i })),
+      })
+    }
+    return created
+  }, { atomic: true })
 
   return ok(
     `**Checklist template created:** ${template.name}\n` +

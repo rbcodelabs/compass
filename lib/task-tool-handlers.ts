@@ -19,6 +19,7 @@ import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types"
 import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, taskLinkScope, validateTaskLink, validateTaskReferences, type ResolvedTaskAssignee, type TaskAssignee } from "@/lib/task-assignment"
 import { getMcpActor } from "@/lib/mcp-authz"
+import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 
 // Maps each TaskLinkedType to its Prisma model delegate name. Every target
 // table exposes a plain `title` column, so a single resolver works for all
@@ -107,6 +108,7 @@ export async function createTask({
   storyPoints,
   dueDate,
   iteration,
+  source = "MCP",
 }: {
   workspaceId: string
   title: string
@@ -121,6 +123,7 @@ export async function createTask({
   storyPoints?: number
   dueDate?: string
   iteration?: string
+  source?: ProgrammaticSource
 }) {
   const prisma = getPrisma()
 
@@ -160,7 +163,7 @@ export async function createTask({
   })
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0
 
-  const task = await captureWorkspaceMutation(prisma, "task", "create", "MCP", undefined, tx => tx.task.create({
+  const task = await captureWorkspaceMutation(prisma, "task", "create", workspaceMutationSource(source), undefined, tx => tx.task.create({
     data: {
       workspaceId,
       title: title.trim(),
@@ -175,6 +178,7 @@ export async function createTask({
       dueDate: dueDate ? new Date(dueDate) : undefined,
       iteration,
       sortOrder,
+      source,
     },
   }))
 
@@ -427,6 +431,7 @@ export async function updateTask({
   storyPoints,
   dueDate,
   iteration,
+  source,
 }: {
   taskId: string
   title?: string
@@ -439,6 +444,7 @@ export async function updateTask({
   storyPoints?: number | null
   dueDate?: string | null
   iteration?: string | null
+  source?: ProgrammaticSource
 }) {
   const prisma = getPrisma()
 
@@ -461,7 +467,7 @@ export async function updateTask({
   if (dueDate !== undefined) data.dueDate = dueDate ? new Date(dueDate) : null
   if (iteration !== undefined) data.iteration = iteration
 
-  const updated = await captureWorkspaceMutation(prisma, "task", "update", "MCP", taskId, tx => tx.task.update({ where: { id: taskId }, data }))
+  const updated = await captureWorkspaceMutation(prisma, "task", "update", workspaceMutationSource(source), taskId, tx => tx.task.update({ where: { id: taskId }, data }))
 
   return ok(
     `**Task updated:** ${updated.title}\n` +
@@ -474,7 +480,7 @@ export async function updateTask({
 
 // ─── move_task_status ─────────────────────────────────────────────────────────
 
-export async function moveTaskStatus({ taskId, status }: { taskId: string; status: TaskStatus }) {
+export async function moveTaskStatus({ taskId, status, source }: { taskId: string; status: TaskStatus; source?: ProgrammaticSource }) {
   const prisma = getPrisma()
 
   const existing = await prisma.task.findUnique({
@@ -494,7 +500,7 @@ export async function moveTaskStatus({ taskId, status }: { taskId: string; statu
   })
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0
 
-  const updated = await captureWorkspaceMutation(prisma, "task", "update", "MCP", taskId, tx => tx.task.update({
+  const updated = await captureWorkspaceMutation(prisma, "task", "update", workspaceMutationSource(source), taskId, tx => tx.task.update({
     where: { id: taskId },
     data: { status, sortOrder, updatedAt: new Date() },
   }))
@@ -595,9 +601,9 @@ export async function listTaskLinks({ taskId }: { taskId: string }) {
     return fail(`Task "${taskId}" not found.`)
   }
 
-  const rawLinks = await prisma.taskLink.findMany({ where: { taskId }, orderBy: { createdAt: "asc" } })
+  const rawLinks = await prisma.taskLink.findMany({ where: { taskId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] })
   if (!rawLinks.length) {
-    return fail(`Task "${task.title}" has no links.`)
+    return ok(`Task "${task.title}" has no links.`, { items: [], count: 0 })
   }
 
   const links = await formatLinks(prisma, rawLinks, task.workspaceId)

@@ -94,6 +94,22 @@ describe("emitSubjectEvent fan-out", () => {
     expect(recipients()).toEqual([U1])
   })
 
+  it("restricts recipients to the named users when only some followers should hear (ASSIGNED goes to the assignee)", async () => {
+    follow(U1)
+    follow(U2)
+    const result = await emitSubjectEvent(statusEvent({ kind: "ASSIGNED", payload: { to: U1 }, dedupeKey: "assigned:1", recipientUserIds: [U1, ACTOR] }), fake.db)
+    expect(result).toMatchObject({ status: "emitted", recipients: 1 })
+    expect(recipients()).toEqual([U1])
+  })
+
+  it("still honours MUTED and the actor exclusion when recipients are restricted", async () => {
+    follow(U1, "MUTED")
+    const result = await emitSubjectEvent(statusEvent({ kind: "ASSIGNED", dedupeKey: "assigned:2", recipientUserIds: [U1] }), fake.db)
+    expect(result).toEqual({ status: "skipped", reason: "no_followers" })
+    follow(ACTOR)
+    expect(await emitSubjectEvent(statusEvent({ kind: "ASSIGNED", dedupeKey: "assigned:3", recipientUserIds: [ACTOR] }), fake.db)).toEqual({ status: "skipped", reason: "no_recipients" })
+  })
+
   it("skips MUTED tombstones", async () => {
     follow(U1, "MUTED")
     follow(U2)
@@ -243,6 +259,15 @@ describe("listNotifications", () => {
     expect((await listNotifications("ex-member", WS, { prisma: fake.db })).items).toEqual([])
     vi.stubEnv("FOLLOWING_ENABLED", "0")
     expect((await listNotifications(U1, WS, { prisma: fake.db })).items).toEqual([])
+  })
+
+  it("can restrict the page to unread rows", async () => {
+    await seed(U1, 1, { readAt: new Date() })
+    await seed(U1, 2)
+    const all = await listNotifications(U1, WS, { prisma: fake.db })
+    const unread = await listNotifications(U1, WS, { prisma: fake.db, unreadOnly: true })
+    expect(all.items).toHaveLength(2)
+    expect(unread.items.map((i) => i.createdAt.getMinutes())).toEqual([2])
   })
 
   it("only ever returns the caller's own rows, newest first, with display resolved at read time", async () => {

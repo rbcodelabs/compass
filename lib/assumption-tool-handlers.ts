@@ -8,6 +8,19 @@ import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import getDatabase, { type AppTransactionClient } from "@/lib/db"
 import { getToolPrisma as getPrisma, getToolExpectedWhere } from "@/lib/mcp-tool-db"
 import { ok, fail } from "@/lib/mcp-output"
+import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
+import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
+
+export async function createAssumption({ solutionId, title, description, riskLevel = "MEDIUM", source = "MCP" }: { solutionId: string; title: string; description?: string | null; riskLevel?: "HIGH" | "MEDIUM" | "LOW"; source?: ProgrammaticSource }) {
+  const prisma = getPrisma()
+  const solution = await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, title: true, opportunityId: true, workspace: { select: { slug: true, organization: { select: { slug: true } } } } } })
+  if (!solution) return fail(`Solution "${solutionId}" not found.`)
+  const assumption = await captureWorkspaceMutation(getDatabase(), "assumption", "create", workspaceMutationSource(source), undefined, (tx) => tx.assumption.create({ data: { solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED", source } }))
+  return ok(withUrlLine(
+    `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
+    safeEntityUrl({ orgSlug: solution.workspace?.organization.slug, workspaceSlug: solution.workspace?.slug, type: "assumption", id: assumption.id, opportunityId: solution.opportunityId }),
+  ), { id: assumption.id, title: assumption.title, description: assumption.description, riskLevel: assumption.riskLevel, status: assumption.status, solutionId })
+}
 
 // ── update_assumption ───────────────────────────────────────────────────────
 
@@ -18,6 +31,7 @@ export async function updateAssumption({
   riskLevel,
   status,
   expectedUpdatedAt,
+  source,
 }: {
   assumptionId: string
   title?: string
@@ -25,6 +39,7 @@ export async function updateAssumption({
   riskLevel?: "HIGH" | "MEDIUM" | "LOW"
   status?: "UNTESTED" | "TESTING" | "VALIDATED" | "INVALIDATED"
   expectedUpdatedAt?: string
+  source?: ProgrammaticSource
 }) {
   const prisma = getPrisma()
 
@@ -49,7 +64,7 @@ export async function updateAssumption({
     data: updateData,
   })
   // Interview edits do not accept status, and must retain their owning transaction.
-  const updated = status === undefined ? await mutate(prisma) : await captureWorkspaceMutation(getDatabase(), "assumption", "update", "MCP", assumptionId, mutate)
+  const updated = status === undefined ? await mutate(prisma) : await captureWorkspaceMutation(getDatabase(), "assumption", "update", workspaceMutationSource(source), assumptionId, mutate)
 
   return ok(
     `**Assumption updated**\n` +

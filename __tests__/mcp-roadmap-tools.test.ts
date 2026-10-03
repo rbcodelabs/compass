@@ -17,6 +17,10 @@ const mockPrisma = {
   workspace: {
     findUnique: vi.fn(),
   },
+  squad: { findFirst: vi.fn() },
+  solution: { findFirst: vi.fn() },
+  opportunity: { findFirst: vi.fn() },
+  keyResult: { findFirst: vi.fn() },
   roadmapItem: {
     findFirst: vi.fn(),
     findUnique: vi.fn(),
@@ -93,6 +97,10 @@ function textOf(result: { content: Array<{ type: string; text: string }> }): str
 }
 
 beforeEach(() => {
+  mockPrisma.squad.findFirst.mockResolvedValue({ id: "linked" })
+  mockPrisma.solution.findFirst.mockResolvedValue({ id: "linked" })
+  mockPrisma.opportunity.findFirst.mockResolvedValue({ id: "linked" })
+  mockPrisma.keyResult.findFirst.mockResolvedValue({ id: "linked" })
   mockPrisma.portfolioCapacityReservation.findUnique.mockResolvedValue(null)
   mockPrisma.$transaction.mockImplementation((operation: Promise<unknown>[] | ((database: typeof mockPrisma) => unknown)) => Array.isArray(operation) ? Promise.all(operation) : operation(mockPrisma))
 })

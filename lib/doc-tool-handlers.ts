@@ -18,9 +18,13 @@ import { ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, type RecencySort } from "@/lib/mcp-recency"
 import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates"
 import { maybeSnapshotDocVersion } from "@/lib/doc-versions"
-import { createDocument, hydrateDocument, updateDocument } from "@/lib/document-service"
+import { randomUUID } from "node:crypto"
+import { createDocument, documentRevision, hydrateDocument, updateDocument } from "@/lib/document-service"
+import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
 import { isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { documentMcpActor } from "@/lib/document-mcp-actor"
+import { normalizeCanvasContent } from "@/lib/json-canvas"
+import type { DocType } from "@/lib/doc-types"
 
 // Keep the legacy history display label. Pilot receipts additionally bind the
 // trusted request actor carried by mcp-authz's AsyncLocalStorage.
@@ -202,7 +206,7 @@ export async function getDoc({ docId }: { docId: string }) {
       ? `Parent: ${doc.parent.title} (${doc.parent.id})`
       : "Parent: (root)",
     `Updated: ${doc.updatedAt.toISOString()}`,
-    doc.docType !== "STANDARD" ? `Doc Type: ${doc.docType}` : null,
+    doc.docType !== "STANDARD" ? `Doc Type: ${doc.docType}${doc.docType === "CANVAS" ? " (content is a JSON Canvas 1.0 document)" : ""}` : null,
     doc.roadmapItemId ? `Linked Roadmap Item: ${doc.roadmapItemId}` : null,
     "",
   ].filter((line): line is string => line !== null)
@@ -225,9 +229,10 @@ export async function getDoc({ docId }: { docId: string }) {
   return ok(lines.join("\n"), {
     id: doc.id,
     title: doc.title,
+    docType: doc.docType,
     content: fullContent,
     properties: metadata,
-    revision: doc.revision,
+    revision: documentRevision(doc),
     storageProvider: doc.storageProvider ?? "DATABASE",
   })
 }
@@ -250,7 +255,7 @@ export async function createDoc({
   parentId?: string | null
   icon?: string
   roadmapItemId?: string | null
-  docType?: "STANDARD" | "GTM_POSITIONING_BRIEF"
+  docType?: DocType
   operationId?: string
 }) {
   const prisma = getPrisma()
@@ -309,8 +314,21 @@ export async function createDoc({
   const effectiveContent =
     content ?? (effectiveDocType === "GTM_POSITIONING_BRIEF" ? GTM_POSITIONING_BRIEF_TEMPLATE : undefined)
 
+  // CANVAS content is a JSON Canvas document, not markdown: validate it (blank
+  // canvas when omitted) instead of running it through frontmatter parsing.
+  let canvasBody: string | null = null
+  if (effectiveDocType === "CANVAS") {
+    const canvas = normalizeCanvasContent(effectiveContent ?? "", { strictCards: true })
+    if (!canvas.ok) return fail(canvas.error)
+    canvasBody = canvas.content
+  }
+
   const { body, metadata } =
-    effectiveContent != null ? parseContent(effectiveContent, pilot) : { body: null, metadata: null }
+    canvasBody !== null
+      ? { body: canvasBody, metadata: null }
+      : effectiveContent != null
+        ? parseContent(effectiveContent, pilot)
+        : { body: null, metadata: null }
 
   const data = {
       workspaceId,
@@ -323,9 +341,10 @@ export async function createDoc({
       roadmapItemId: roadmapItemId ?? null,
       docType: effectiveDocType,
     }
-  const doc = pilot
+  const doc = pilot || operationId
     ? await createDocument(data, { operationId, ...documentMcpActor() })
-    : await prisma.doc.create({ data })
+    : await prisma.doc.create({ data: { ...data, revision: randomUUID() } })
+  await followAfterCreate({ model: "doc", workspaceId, row: { id: doc.id }, actor: async () => mcpFollowActor() ?? { type: "SYSTEM", id: null } })
 
   // This used to emit a *relative* `/{org}/{ws}/docs` — the docs index, not the
   // doc just created, and with no origin for an MCP client to resolve it
@@ -353,7 +372,7 @@ export async function createDoc({
       id: doc.id,
       title: doc.title,
       url,
-      revision: doc.revision,
+      revision: documentRevision(doc),
       storageProvider: doc.storageProvider ?? "DATABASE",
     }
   )
@@ -380,19 +399,30 @@ export async function updateDoc({
 
   const existing = await prisma.doc.findUnique({
     where: { id: docId },
-    select: { title: true, storageProvider: true },
+    select: { title: true, storageProvider: true, docType: true },
   })
   if (!existing) {
     return fail(`Doc "${docId}" not found.`)
   }
 
+  let canvasBody: string | undefined
+  if (existing.docType === "CANVAS" && content !== undefined) {
+    const canvas = normalizeCanvasContent(content, { strictCards: true })
+    if (!canvas.ok) return fail(canvas.error)
+    canvasBody = canvas.content
+  }
+
   const { body, metadata } =
-    content !== undefined ? parseContent(content, existing.storageProvider === "GEODE") : { body: undefined, metadata: undefined }
+    canvasBody !== undefined
+      ? { body: canvasBody, metadata: undefined }
+      : content !== undefined
+        ? parseContent(content, existing.storageProvider === "GEODE")
+        : { body: undefined, metadata: undefined }
 
   // Snapshot the doc's pre-change state before applying the new values —
   // but only when this call actually changes something, so a no-op call
   // never creates a version.
-  if (existing.storageProvider !== "GEODE" && (title !== undefined || content !== undefined || icon !== undefined)) {
+  if (existing.storageProvider !== "GEODE" && !operationId && (title !== undefined || content !== undefined || icon !== undefined)) {
     await maybeSnapshotDocVersion(docId, { authorName: MCP_AUTHOR_NAME })
   }
 
@@ -404,14 +434,14 @@ export async function updateDoc({
   if (metadata !== undefined) updateData.metadata = metadata != null ? toJsonInput(metadata) : null
   if (icon !== undefined) updateData.icon = icon.trim()
 
-  const updated = existing.storageProvider === "GEODE" ? await updateDocument(docId, {
+  const updated = existing.storageProvider === "GEODE" || operationId ? await updateDocument(docId, {
     ...(title !== undefined ? { title: title.trim() } : {}),
     ...(body !== undefined ? { content: body } : {}),
     ...(metadata !== undefined ? { metadata: metadata === null ? Prisma.JsonNull : toJsonInput(metadata) } : {}),
     ...(icon !== undefined ? { icon: icon.trim() } : {}),
   }, { expectedRevision, operationId, ...documentMcpActor() }) : await prisma.doc.update({
     where: { id: docId },
-    data: updateData,
+    data: { ...updateData, revision: randomUUID() },
   })
 
   return ok(
@@ -425,7 +455,7 @@ export async function updateDoc({
       title: updated.title,
       icon: updated.icon,
       updatedAt: updated.updatedAt.toISOString(),
-      revision: updated.revision,
+      revision: documentRevision(updated),
     }
   )
 }
@@ -457,7 +487,7 @@ export async function updateDocMetadata({
     ? await updateDocument(docId, { metadata: toJsonInput(metadata) }, { expectedRevision, operationId, ...documentMcpActor() })
     : await prisma.doc.update({
     where: { id: docId },
-    data: { metadata: toJsonInput(metadata), updatedAt: new Date() },
+    data: { metadata: toJsonInput(metadata), revision: randomUUID(), updatedAt: new Date() },
   })
 
   return ok(
@@ -467,7 +497,7 @@ export async function updateDocMetadata({
     {
       id: updated.id,
       properties: Object.keys(metadata),
-      revision: updated.revision,
+      revision: documentRevision(updated),
     }
   )
 }

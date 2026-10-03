@@ -7,11 +7,32 @@ files to `docs/decisions/`.
 
 ## Status
 
-Slice 1 (data model and infrastructure) is implemented and **dark**: nothing is
-user-visible and nothing is wired to a mutation yet. Everything is gated by
-`FOLLOWING_ENABLED=1` and by the registry slice gate
-(`followableConfig.shippedSlice` in `lib/followable.ts`, currently 1, so no
-subject type is active).
+Slice 1 (data model and infrastructure) is merged. Slice 2 (Opportunities,
+Solutions, Tasks, Docs) wires it up: `followableConfig.shippedSlice` is 2, so
+those four types are active wherever `FOLLOWING_ENABLED=1` and the tables exist.
+Slice 3 flips it to 3 and must delete the `PENDING_SLICE_3` entries from
+`__tests__/following-status-bypass-guard.test.ts` (the test forces this).
+
+Slice 2 pieces:
+
+| Piece | Where |
+| --- | --- |
+| Status, creation and assignment hook | `captureWorkspaceMutation` in `lib/workspace-update-mutations.ts`, planning in `lib/following-hooks.ts` (`buildFollowingEffects`), independent of `WORKSPACE_UPDATES_ENABLED`. Dedupe key is a hash of subject, from, to and `updatedAt` |
+| Comment hook (roots and replies) | `followAfterComment` at the tail of `createComment` in `lib/comments.ts` |
+| Creation outside the adapter | `followAfterCreate` for Docs (UI action, `create_doc`) and the decision follow-up Task |
+| Commit-scoped queue | `lib/following-commit.ts`; `withInterviewMutation` wraps the PM receipt transaction so MCP effects flush only after commit |
+| Bypass guard | `__tests__/following-status-bypass-guard.test.ts` (AST scan in `__tests__/helpers/status-write-scan.ts`) |
+| MCP tools | `lib/follow-tool-handlers.ts`; `follow`, `unfollow`, `list_notifications`, `mark_read`, DENY for agent identities |
+| UI | `components/following/follow-button.tsx`, `components/notifications/*`, `app/[orgSlug]/[workspaceSlug]/notifications/page.tsx`, `app/api/following`, `app/api/notifications/*` |
+
+Decisions made in slice 2 that the ADR left open: ASSIGNED (Tasks only) goes to
+the assignee alone and respects a MUTED tombstone; an agent-purpose actor
+follows no one (the human owner is not auto-followed); a user's own MCP key is
+that user, so they follow what they create and are not notified of their own
+change.
+
+Everything is gated by `FOLLOWING_ENABLED=1` and by the registry slice gate
+(`followableConfig.shippedSlice` in `lib/followable.ts`).
 
 | Piece | Where |
 | --- | --- |

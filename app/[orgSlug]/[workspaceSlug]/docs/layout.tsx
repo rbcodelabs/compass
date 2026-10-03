@@ -2,20 +2,20 @@ import getPrisma from "@/lib/db";
 import { requireWorkspaceContext } from "@/lib/workspace-context";
 import { DocTreeSidebar, type DocTreeItem } from "@/components/docs/doc-tree-sidebar";
 import { DocsMobileDrawer } from "@/components/docs/docs-mobile-drawer";
-import { ArtifactNav } from "@/components/docs/artifact-nav";
 
 interface DocsLayoutProps {
   children: React.ReactNode;
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
 }
 
-export function buildDocTree(
+function buildDocTree(
   docs: Array<{
     id: string;
     title: string;
     icon: string | null;
     parentId: string | null;
     sortOrder: number;
+    docType?: string;
   }>
 ): DocTreeItem[] {
   const sorted = [...docs].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -57,6 +57,7 @@ export default async function DocsLayout({
       icon: true,
       parentId: true,
       sortOrder: true,
+      docType: true,
     },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
   }), prisma.artifact.findMany({
@@ -82,14 +83,14 @@ export default async function DocsLayout({
 
       <div className="flex flex-1 overflow-hidden">
         {/* Doc tree sidebar — hidden on mobile, visible on md+ */}
-        <div className="hidden md:flex w-60 shrink-0 flex-col border-r border-border-default overflow-y-auto bg-surface-panel p-2">
+        <div className="hidden md:flex w-60 min-h-0 shrink-0 flex-col border-r border-border-default bg-surface-panel p-2">
           <DocTreeSidebar
             docs={tree}
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
             workspaceId={workspace.id}
+            artifacts={artifacts}
           />
-          <ArtifactNav artifacts={artifacts} basePath={`/${orgSlug}/${workspaceSlug}/docs`} />
         </div>
         <div className="flex-1 overflow-y-auto min-w-0">{children}</div>
       </div>

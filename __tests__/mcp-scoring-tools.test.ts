@@ -44,6 +44,7 @@ const mockPrisma = {
   opportunityScore: mockOpportunityScore,
   solution: mockSolution,
   solutionScore: mockSolutionScore,
+  $transaction: vi.fn(async (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma)),
 }
 
 vi.mock("@/lib/db", () => ({
@@ -163,6 +164,28 @@ describe("createScoringModel", () => {
     })
     expect(mockScoringModelMetric.createMany).toHaveBeenCalledOnce()
     expect(result.content[0].text).toContain(`ID: ${MODEL_ID}`)
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce()
+  })
+
+  it("rolls back the model when metric creation fails", async () => {
+    mockOrganization.findUnique.mockResolvedValueOnce({ id: ORG_ID })
+    const stored: string[] = []
+    mockPrisma.$transaction.mockImplementationOnce(async (callback) => {
+      const before = [...stored]
+      const tx = {
+        ...mockPrisma,
+        scoringModel: { ...mockScoringModel, create: vi.fn(async () => { stored.push(MODEL_ID); return { id: MODEL_ID, version: 1 } }) },
+        scoringModelMetric: { ...mockScoringModelMetric, createMany: vi.fn(async () => { throw new Error("injected create failure") }) },
+      }
+      try { return await callback(tx as typeof mockPrisma) }
+      catch (error) { stored.splice(0, stored.length, ...before); throw error }
+    })
+
+    await expect(createScoringModel({
+      orgSlug: "acme", name: "RICE", formulaType: "WEIGHTED_SUM",
+      metrics: [{ key: "reach", label: "Reach", minValue: 0, maxValue: 10, weight: 1, direction: "POSITIVE" }],
+    })).rejects.toThrow("injected create failure")
+    expect(stored).toEqual([])
   })
 
   it("rejects MULTIPLICATIVE models with a metric minValue <= 0 without creating", async () => {
@@ -190,6 +213,12 @@ describe("createScoringModel", () => {
 // ─── updateScoringModel ───────────────────────────────────────────────────
 
 describe("updateScoringModel", () => {
+  it("rejects formula-only updates instead of silently ignoring them", async () => {
+    mockScoringModel.findUnique.mockResolvedValueOnce({ id: MODEL_ID, formulaType: "WEIGHTED_SUM", version: 1 })
+    const result = await updateScoringModel({ scoringModelId: MODEL_ID, formulaType: "MULTIPLICATIVE" })
+    expect(result.structuredContent.ok).toBe(false)
+    expect(mockScoringModel.update).not.toHaveBeenCalled()
+  })
   it("updates name/description only without bumping version", async () => {
     mockScoringModel.findUnique.mockResolvedValueOnce({ id: MODEL_ID, formulaType: "WEIGHTED_SUM", version: 1 })
 
@@ -215,6 +244,31 @@ describe("updateScoringModel", () => {
     const data = mockScoringModel.update.mock.calls[0][0].data
     expect(data.version).toBe(2)
     expect(result.content[0].text).toContain("Version bumped to 2")
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce()
+  })
+
+  it("rolls back metric replacement when createMany fails", async () => {
+    const stored = [{ scoringModelId: MODEL_ID, key: "original" }]
+    mockScoringModel.findUnique.mockResolvedValueOnce({ id: MODEL_ID, formulaType: "WEIGHTED_SUM", version: 1 })
+    mockPrisma.$transaction.mockImplementationOnce(async (callback) => {
+      const before = [...stored]
+      const tx = {
+        ...mockPrisma,
+        scoringModelMetric: {
+          deleteMany: vi.fn(async () => { stored.splice(0) }),
+          createMany: vi.fn(async () => { throw new Error("injected create failure") }),
+        },
+      }
+      try { return await callback(tx as typeof mockPrisma) }
+      catch (error) { stored.splice(0, stored.length, ...before); throw error }
+    })
+
+    await expect(updateScoringModel({
+      scoringModelId: MODEL_ID,
+      metrics: [{ key: "replacement", label: "Replacement", minValue: 0, maxValue: 10, weight: 1, direction: "POSITIVE" }],
+    })).rejects.toThrow("injected create failure")
+    expect(stored).toEqual([{ scoringModelId: MODEL_ID, key: "original" }])
+    expect(mockScoringModel.update).not.toHaveBeenCalled()
   })
 
   it("rejects switching to MULTIPLICATIVE if a metric has minValue <= 0", async () => {
@@ -543,7 +597,7 @@ describe("listTopOpportunities", () => {
     expect(mockOpportunityScore.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { opportunity: { workspaceId: WS_ID } },
-        orderBy: { normalizedScore: "desc" },
+        orderBy: [{ normalizedScore: "desc" }, { opportunityId: "asc" }],
       })
     )
     expect(text.indexOf("A")).toBeLessThan(text.indexOf("B"))
@@ -575,5 +629,6 @@ describe("listTopOpportunities", () => {
     mockOpportunityScore.findMany.mockResolvedValueOnce([])
     const result = await runWithMcpActor({ userId: null, purpose: "SERVICE" }, () => listTopOpportunities({ workspaceId: WS_ID }))
     expect(result.content[0].text).toContain("No scored opportunities found")
+    expect(result.structuredContent.data).toEqual({ items: [], count: 0 })
   })
 })

@@ -130,6 +130,7 @@ export function createFakeFollowDb() {
     workspaceMember: [] as Row[],
     user: [] as Row[],
     agent: [] as Row[],
+    workspace: [] as Row[],
   }
   const now = () => new Date()
   const db = {
@@ -144,6 +145,7 @@ export function createFakeFollowDb() {
     workspaceMember: delegate(tables.workspaceMember, { defaults: () => ({ id: randomUUID() }) }),
     user: delegate(tables.user),
     agent: delegate(tables.agent),
+    workspace: delegate(tables.workspace),
   }
   return { db: db as unknown as AppPrismaClient, tables, member: (workspaceId: string, userId: string) => tables.workspaceMember.push({ id: randomUUID(), workspaceId, userId }) }
 }

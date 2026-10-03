@@ -418,9 +418,12 @@ const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "__tests__/typed-link-tables-migration.integration.test.ts": 2, // objective + solution in the old-client CRUD check; both set a workspaceId derived from the created rows
   "app/[orgSlug]/[workspaceSlug]/discovery/actions.ts": 1,
   "app/[orgSlug]/[workspaceSlug]/okrs/actions.ts": 1,
-  "app/api/mcp/route.ts": 2,
+  "app/api/mcp/route.ts": 1,
+  "e2e/functional/specs/canvas-doc.spec.ts": 1, // one solution fixture, created with the e2e workspace's workspaceId
   "e2e/functional/specs/decisions.spec.ts": 1,
   "e2e/functional/specs/pm-interview.spec.ts": 1,
+  "lib/solution-tool-handlers.ts": 1,
+  "lib/rest/execute.ts": 1,
 };
 const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   // 071 migration integration test: three objective inserts, each listing workspace_id (seeded after 068 is applied).

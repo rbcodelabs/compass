@@ -85,13 +85,84 @@ describe("immutable document service", () => {
     expect(result).not.toHaveProperty("contentRef")
   })
 
-  it("keeps legacy documents database-backed and compatible without revision inputs", async () => {
+  it("enforces revisions and records replay receipts for database-backed documents", async () => {
     const { updateDocument } = await import("@/lib/document-service")
-    mocks.db.doc.findUnique.mockResolvedValue({ ...current, storageProvider: null, contentRef: null, content: "old", revision: null })
-    mocks.db.doc.update.mockResolvedValue({ ...current, content: "new" })
-    await updateDocument("doc-a", { content: "new" }, { authorName: "Alice" })
+    const databaseDoc = { ...current, storageProvider: null, contentRef: null, content: "old", revision: "rev-a" }
+    mocks.db.doc.findUnique.mockResolvedValue(databaseDoc)
+    await updateDocument("doc-a", { content: "new" }, opts)
     expect(mocks.putContent).not.toHaveBeenCalled()
-    expect(mocks.db.doc.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ content: "new" }) }))
+    expect(mocks.db.doc.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "doc-a", workspaceId: "workspace-a", revision: "rev-a" }, data: expect.objectContaining({ content: "new", revision: expect.any(String) }) }))
+    expect(mocks.db.docOperation.create).toHaveBeenCalledOnce()
+    mocks.db.docOperation.findUnique.mockResolvedValue(mocks.db.docOperation.create.mock.calls[0][0].data)
+    mocks.db.$transaction.mockClear()
+    await updateDocument("doc-a", { content: "new" }, opts)
+    expect(mocks.db.$transaction).not.toHaveBeenCalled()
+  })
+
+  it("rejects stale database-backed revisions before writing", async () => {
+    const { updateDocument } = await import("@/lib/document-service")
+    mocks.db.doc.findUnique.mockResolvedValue({ ...current, storageProvider: null, contentRef: null, content: "old", revision: "rev-new" })
+    await expect(updateDocument("doc-a", { content: "new" }, opts)).rejects.toThrow("revision-conflict")
+    expect(mocks.db.$transaction).not.toHaveBeenCalled()
+  })
+
+  it("keeps browser compatibility writes working while rotating the public revision", async () => {
+    const { updateDocument } = await import("@/lib/document-service")
+    mocks.db.doc.findUnique.mockResolvedValue({ ...current, storageProvider: null, contentRef: null, content: "old", revision: "rev-a" })
+    mocks.db.doc.update.mockResolvedValue({ ...current, storageProvider: null, content: "new", revision: "rev-b" })
+    await updateDocument("doc-a", { content: "new" }, { authorName: "Alice" })
+    expect(mocks.db.doc.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ content: "new", revision: expect.any(String) }) }))
+    expect(mocks.db.docOperation.create).not.toHaveBeenCalled()
+  })
+
+  it("accepts the deterministic legacy token once and promotes a null revision", async () => {
+    const { documentRevision, updateDocument } = await import("@/lib/document-service")
+    const legacy = { ...current, storageProvider: null, contentRef: null, content: "old", revision: null, updatedAt: new Date("2026-01-01T00:00:00.000Z") }
+    mocks.db.doc.findUnique.mockResolvedValue(legacy)
+    const legacyOpts = { ...opts, expectedRevision: documentRevision(legacy) }
+    await updateDocument("doc-a", { title: "new" }, legacyOpts)
+    expect(mocks.db.doc.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ revision: null, updatedAt: legacy.updatedAt }),
+      data: expect.objectContaining({ revision: expect.any(String) }),
+    }))
+  })
+
+  it("creates database-backed documents with a revision and durable replay receipt", async () => {
+    const { createDocument } = await import("@/lib/document-service")
+    mocks.db.doc.create.mockImplementation(async ({ data }) => ({ ...current, ...data, storageProvider: null }))
+    await createDocument({ workspaceId: "workspace-b", title: "Database" }, { ...opts, expectedRevision: undefined })
+    expect(mocks.putContent).not.toHaveBeenCalled()
+    expect(mocks.db.doc.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ revision: expect.any(String) }) }))
+    expect(mocks.db.docOperation.create).toHaveBeenCalledOnce()
+  })
+
+  it("guards and replays database-backed named snapshots", async () => {
+    const { snapshotDocument } = await import("@/lib/document-service")
+    mocks.db.doc.findUnique.mockResolvedValue({ ...current, storageProvider: null, contentRef: null })
+    await snapshotDocument("doc-a", { ...opts, label: "Named" })
+    expect(mocks.db.doc.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ revision: "rev-a" }) }))
+    expect(mocks.db.docVersion.create).toHaveBeenCalledOnce()
+    expect(mocks.db.docOperation.create).toHaveBeenCalledOnce()
+    mocks.db.docOperation.findUnique.mockResolvedValue(mocks.db.docOperation.create.mock.calls[0][0].data)
+    mocks.db.$transaction.mockClear()
+    await snapshotDocument("doc-a", { ...opts, label: "Named" })
+    expect(mocks.db.$transaction).not.toHaveBeenCalled()
+  })
+
+  it("rejects invalid canvas content before any write on legacy and pilot documents, and canonicalizes valid content", async () => {
+    const { updateDocument, createDocument } = await import("@/lib/document-service")
+    mocks.db.doc.findUnique.mockResolvedValue({ ...current, docType: "CANVAS", storageProvider: null, contentRef: null, content: "{}", revision: "rev-a" })
+    await expect(updateDocument("doc-a", { content: "not json" }, opts)).rejects.toThrow("invalid-canvas")
+    expect(mocks.db.doc.update).not.toHaveBeenCalled()
+    mocks.db.doc.update.mockResolvedValue(current)
+    await updateDocument("doc-a", { content: '{"nodes":[],"edges":[],"x":1}' }, opts)
+    expect(mocks.db.doc.updateMany.mock.calls[0][0].data.content).toBe('{\n\t"nodes": [],\n\t"edges": [],\n\t"x": 1\n}')
+    // Non-canvas content is untouched by the canvas gate.
+    mocks.db.doc.findUnique.mockResolvedValue({ ...current, docType: "STANDARD", storageProvider: null, contentRef: null, revision: "rev-a" })
+    await updateDocument("doc-a", { content: "not json" }, opts)
+    expect(mocks.db.doc.updateMany.mock.calls[1][0].data.content).toBe("not json")
+    await expect(createDocument({ workspaceId: "ws-legacy", title: "c", docType: "CANVAS", content: "[]" }, opts)).rejects.toThrow("invalid-canvas")
+    expect(mocks.db.doc.create).not.toHaveBeenCalled()
   })
 
   it("replays create despite sibling reordering and refuses changed payload or actor", async () => {
