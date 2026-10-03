@@ -119,7 +119,7 @@ Linked Feedback and Evidence are separate records. Linking a feedback item does 
 
 ## The Solutions backlog
 
-Discovery is the Opportunity backlog. To see every Solution against each other, open **Solutions** in the sidebar (next to Discovery). It is a flat board of all the Solutions in the workspace, with one column per status: **Idea**, **Validated**, **In delivery**, **Shipped**, **Killed**.
+Discovery is the Opportunity backlog. To see every Solution against each other, open **Solutions** in the sidebar (next to Opportunities). It is a flat board of all the Solutions in the workspace, with one column per status: **Idea**, **Validated**, **In delivery**, **Shipped**, **Killed**.
 
 - Each card shows the Solution title, its parent Opportunity (click it to open that Opportunity), a score badge when the workspace has an active Solution scoring model, and its assumption and evidence counts. Click the title to open the Solution panel.
 - Drag a card to another column to change its status. Order within a column is not draggable here, because a column mixes Solutions from many Opportunities; use **Sort by score** (shown when a Solution scoring model is active) to rank them instead.
