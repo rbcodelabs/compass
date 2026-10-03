@@ -622,10 +622,11 @@ describe("listTaskLinks", () => {
     expect(textOf(result)).toContain("not found")
   })
 
-  it("returns a message when the task has no links", async () => {
+  it("returns an empty collection when the task has no links", async () => {
     mockTaskLink.findMany.mockResolvedValueOnce([])
     const result = await listTaskLinks({ taskId: TASK_ID })
     expect(textOf(result)).toContain("no links")
+    expect(result.structuredContent.data).toEqual({ items: [], count: 0 })
   })
 
   it("groups resolved links by linkedType", async () => {

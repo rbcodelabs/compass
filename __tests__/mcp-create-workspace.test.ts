@@ -25,6 +25,7 @@ const mockPrisma = {
   workspaceMember: {
     createMany: vi.fn(),
   },
+  $transaction: vi.fn(),
 }
 
 vi.mock("@/lib/db", () => ({
@@ -85,6 +86,7 @@ function textOf(result: { content: Array<{ type: string; text: string }> }): str
 describe("create_workspace MCP tool", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma))
   })
 
   it("happy path: creates workspace and returns id, name, slug, and URL path", async () => {

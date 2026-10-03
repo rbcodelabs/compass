@@ -28,6 +28,7 @@ const mockPrisma = {
   embedVisitorSession: mocks.embedVisitorSession,
   artifact: mocks.artifact,
   workspace: mocks.workspace,
+  $transaction: vi.fn(),
 };
 
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
@@ -50,6 +51,7 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma));
   mocks.auth.mockResolvedValue({ user: { id: "admin-user" } });
   mocks.resolveWorkspaceAdmin.mockResolvedValue({
     prisma: mockPrisma,

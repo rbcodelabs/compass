@@ -137,43 +137,41 @@ export async function createWorkspaceInOrg({
 
   let workspace
   try {
-    workspace = await prisma.workspace.create({
-      data: {
-        organizationId: org.id,
-        name: name.trim(),
-        slug,
-        description: description?.trim(),
-      },
+    workspace = await prisma.$transaction(async (tx) => {
+      const created = await tx.workspace.create({
+        data: {
+          organizationId: org.id,
+          name: name.trim(),
+          slug,
+          description: description?.trim(),
+        },
+      })
+
+      // Membership inheritance is part of workspace creation. Keeping both
+      // writes in one transaction prevents an inaccessible orphan workspace
+      // when membership seeding fails.
+      const orgMembers = await tx.organizationMember.findMany({
+        where: { organizationId: org.id },
+        select: { userId: true, role: true },
+      })
+      if (orgMembers.length > 0) {
+        await tx.workspaceMember.createMany({
+          data: orgMembers.map((m) => ({
+            workspaceId: created.id,
+            userId: m.userId,
+            role: normalizeWorkspaceRole(m.role),
+          })),
+          skipDuplicates: true,
+        })
+      }
+
+      return created
     })
   } catch (error) {
     if (isWorkspaceSlugConflict(error)) {
       return { ok: false, code: "SLUG_TAKEN", error: slugTakenMessage(slug, org.name) }
     }
     throw error
-  }
-
-  // Add all org members as workspace members so the workspace is
-  // immediately accessible in the UI. Without this, getWorkspace()
-  // filters by membership and returns null → 404.
-  const orgMembers = await prisma.organizationMember.findMany({
-    where: { organizationId: org.id },
-    select: { userId: true, role: true },
-  })
-  if (orgMembers.length > 0) {
-    await prisma.workspaceMember.createMany({
-      data: orgMembers.map((m) => ({
-        workspaceId: workspace.id,
-        userId: m.userId,
-        // Org and workspace roles are different domains: OrgRole has an
-        // OWNER, WorkspaceRole does not. Copying m.role straight across
-        // wrote "OWNER" into WorkspaceMember.role, a value outside
-        // WorkspaceRole, which then failed resolveWorkspaceAdmin's strict
-        // ADMIN check and locked the org owner out of the workspace they
-        // had just created.
-        role: normalizeWorkspaceRole(m.role),
-      })),
-      skipDuplicates: true,
-    })
   }
 
   // The MCP caller reaches this through a route handler (a plain Prisma

@@ -172,7 +172,7 @@ function validateExtensions(input: CreateCommentInput) {
   }
 }
 
-export async function createComment(input: CreateCommentInput) {
+export async function createComment(input: CreateCommentInput, options: { beforeCreate?: (tx: AppTransactionClient) => Promise<void> } = {}) {
   const prisma = getPrisma()
   const body = input.body.trim()
   if (!body) throw new Error("Comment body must not be empty.")
@@ -194,6 +194,7 @@ export async function createComment(input: CreateCommentInput) {
   let createdId: string | undefined
   let comment
   try {
+    await options.beforeCreate?.(tx)
     comment = await createCommentRows(tx, input, id => { createdId = id })
   } catch (error) {
     if (!capture && createdId) {
@@ -216,7 +217,7 @@ export async function createComment(input: CreateCommentInput) {
     await recordWorkspaceUpdate(tx, { workspaceId: input.workspaceId, entityType: "COMMENT", entityId: comment.id, groupType: input.targetType === "REVIEW_REQUEST" ? "DECISION" : input.targetType, groupId: input.targetId, kind: input.solutionPlan ? "PLAN_PROPOSED" : "COMMENT_ADDED", ...actor })
   }
   return comment
-  })
+  }, { atomic: Boolean(options.beforeCreate) })
   await followAfterComment(input, comment.id)
   return getComment(comment.id)
 }

@@ -12,9 +12,12 @@ import type { LaunchTier } from "@/lib/types"
 import { setLaunchTierCore, updateChecklistItemCore } from "@/lib/launch-checklist"
 import { ok, fail } from "@/lib/mcp-output"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import { withWorkspaceUpdates } from "@/lib/workspace-updates-capture"
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
+import { randomUUID } from "node:crypto"
+import { isUniqueConflict, RoadmapPromotionConflict } from "@/lib/roadmap-promotion"
 
 export function roadmapCreateData(input: Parameters<typeof createRoadmapItem>[0], sortOrder: number) {
   return {
@@ -42,6 +45,46 @@ export async function createRoadmapItem(input: {
       (item.startDate || item.endDate ? `\nDates: ${item.startDate ? format(item.startDate) : "?"} – ${item.endDate ? format(item.endDate) : "?"}` : ""),
     safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "roadmapItem", id: item.id }),
   ), { id: item.id, title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate })
+}
+
+export async function promoteSolutionToRoadmap(input: {
+  workspaceId: string
+  solutionId: string
+  horizon: "NOW" | "NEXT" | "LATER" | "SHIPPED"
+  isPrivate?: boolean
+  source?: ProgrammaticSource
+  operationId?: string
+}) {
+  const prisma = getPrisma()
+  const solution = await prisma.solution.findFirst({
+    where: { id: input.solutionId, workspaceId: input.workspaceId },
+    select: { id: true, title: true, opportunity: { select: { id: true, squadId: true } } },
+  })
+  if (!solution) return fail("Solution not found.")
+  const promotionId = input.operationId ?? randomUUID()
+  let item
+  try {
+    item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, async tx => {
+      const lastItem = await tx.roadmapItem.findFirst({ where: { workspaceId: input.workspaceId, horizon: input.horizon, status: "ACTIVE" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
+      return tx.roadmapItem.create({ data: { id: promotionId, ...roadmapCreateData({
+        workspaceId: input.workspaceId,
+        title: solution.title,
+        horizon: input.horizon,
+        solutionId: solution.id,
+        opportunityId: solution.opportunity.id,
+        squadId: solution.opportunity.squadId,
+        isPrivate: input.isPrivate,
+        source: input.source,
+      }, lastItem ? lastItem.sortOrder + 1 : 0) } })
+    }, { atomic: true })
+  } catch (error) {
+    if (!input.operationId || !isUniqueConflict(error)) throw error
+    item = await prisma.roadmapItem.findUnique({ where: { id: promotionId } })
+    if (!item || item.workspaceId !== input.workspaceId || item.solutionId !== input.solutionId || item.opportunityId !== solution.opportunity.id || item.squadId !== solution.opportunity.squadId || item.horizon !== input.horizon || item.isPrivate !== (input.isPrivate ?? false) || item.source !== (input.source ?? "MCP")) {
+      throw new RoadmapPromotionConflict("The operationId was already used for a different roadmap promotion.")
+    }
+  }
+  return ok("Solution promoted to roadmap.", { id: item.id })
 }
 
 export async function updateRoadmapItem(input: {
@@ -111,20 +154,15 @@ export async function createChecklistTemplate({
     return fail(`Workspace "${workspaceId}" not found.`)
   }
 
-  const template = await prisma.checklistTemplate.create({
-    data: { workspaceId, tier, name: name.trim(), description },
-  })
-
-  if (items.length > 0) {
-    await prisma.checklistTemplateItem.createMany({
-      data: items.map((item, i) => ({
-        checklistTemplateId: template.id,
-        label: item.label,
-        description: item.description,
-        order: i,
-      })),
-    })
-  }
+  const template = await withWorkspaceUpdates(prisma, async tx => {
+    const created = await tx.checklistTemplate.create({ data: { workspaceId, tier, name: name.trim(), description } })
+    if (items.length > 0) {
+      await tx.checklistTemplateItem.createMany({
+        data: items.map((item, i) => ({ checklistTemplateId: created.id, label: item.label, description: item.description, order: i })),
+      })
+    }
+    return created
+  }, { atomic: true })
 
   return ok(
     `**Checklist template created:** ${template.name}\n` +

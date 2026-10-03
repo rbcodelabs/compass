@@ -40,11 +40,11 @@ export async function createFeedbackSourceTool(input: {
   authMode?: "INTERNAL_SSO" | "PORTAL"
 }) {
   try {
+    const base = optionalCompassUrl(() => trustedCompassBaseUrl().origin)
     const created = await createEmbedSource(
       { prisma: getPrisma(), workspaceId: input.workspaceId, userId: getMcpActor().userId },
       input
     )
-    const base = optionalCompassUrl(() => trustedCompassBaseUrl().origin)
     const embed = buildEmbedSnippet(base, created.token)
     const lines = [
       "Feedback source created. The token is shown ONCE — it is stored only as a hash and cannot be retrieved again.",
