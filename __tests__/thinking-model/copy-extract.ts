@@ -20,7 +20,7 @@ import ts from "typescript"
 export const ENTITY_WORD =
   /\b(objectives?|key[ -]results?|krs?|okrs?|outcomes?|opportunit(?:y|ies)|solutions?|cycles?|success metrics?)\b/i
 
-type LabelValues = Record<string, Record<string, string>>
+type LabelValues = Record<string, Record<string, string | boolean>>
 
 const OPEN = "⟦"
 const CLOSE = "⟧"
@@ -128,7 +128,7 @@ export function labelAccesses(source: string, fileName = "file.tsx"): string[] {
 /** Replace label tokens with concrete values (CLASSIC, in the tests). */
 export function substitute(fragment: string, labels: LabelValues): string {
   return norm(
-    fragment.replace(new RegExp(`${OPEN}(\\w+)\\.(\\w+)${CLOSE}`, "g"), (_, a: string, b: string) => labels[a]?.[b] ?? `${OPEN}${a}.${b}${CLOSE}`),
+    fragment.replace(new RegExp(`${OPEN}(\\w+)\\.(\\w+)${CLOSE}`, "g"), (_, a: string, b: string) => (typeof labels[a]?.[b] === "string" ? (labels[a][b] as string) : undefined) ?? `${OPEN}${a}.${b}${CLOSE}`),
   )
 }
 

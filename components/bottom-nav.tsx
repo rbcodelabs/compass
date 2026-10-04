@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import { Target, Lightbulb, Puzzle, FlaskConical, Map, MessageSquare, ListChecks, MessageSquareCheck, Clock3, BarChart3, House } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
+import { orderPrimaryNav } from "@/lib/workspace-nav"
 
 interface BottomNavProps {
   orgSlug: string
@@ -14,22 +15,22 @@ interface BottomNavProps {
 }
 
 // A function, not a constant: the OKRs entry's name comes from the workspace's thinking model.
-const buildBaseNavItems = (okrsLabel: string, solutionsLabel: string) => [
+const buildBaseNavItems = (okrsLabel: string, discoveryLabel: string, solutionsLabel: string, discoveryFirst: boolean) => orderPrimaryNav([
   { label: okrsLabel, path: "okrs", Icon: Target },
-  { label: "Discovery", path: "discovery", Icon: Lightbulb },
+  { label: discoveryLabel, path: "discovery", Icon: Lightbulb },
   { label: solutionsLabel, path: "solutions", Icon: Puzzle },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
   { label: "Metrics", path: "metrics", Icon: BarChart3 },
   { label: "Tasks", path: "tasks", Icon: ListChecks },
   { label: "Decisions", path: "decisions", Icon: MessageSquareCheck },
-]
+], discoveryFirst)
 
 export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = true, updatesEnabled = false }: BottomNavProps) {
   const pathname = usePathname()
   const base = `/${orgSlug}/${workspaceSlug}`
   const labels = useLabels()
-  const baseNavItems = buildBaseNavItems(labels.sections.okrs, labels.solution.plural)
+  const baseNavItems = buildBaseNavItems(labels.sections.okrs, labels.opportunity.plural, labels.solution.plural, labels.sections.discoveryFirst)
   const navItems = [
     { label: "Home", path: "home", Icon: House },
     ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),

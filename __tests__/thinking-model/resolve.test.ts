@@ -43,7 +43,8 @@ describe("resolveThinkingModel", () => {
   it("OPPORTUNITY_FIRST_OKR resolves with CLASSIC labels and the pool tree", () => {
     const r = resolveThinkingModel({ thinkingModel: "OPPORTUNITY_FIRST_OKR" })
     expect(r.key).toBe("OPPORTUNITY_FIRST_OKR")
-    expect(r.labels).toEqual(classic.labels)
+    expect({ ...r.labels, sections: undefined }).toEqual({ ...classic.labels, sections: undefined })
+    expect(r.labels.sections).toEqual({ ...classic.labels.sections, discoveryFirst: true })
     expect(r.tree).toBe("objective-rooted-pool")
   })
 

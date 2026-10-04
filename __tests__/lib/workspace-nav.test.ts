@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { getWorkspaceSwitchPath, TOP_LEVEL_SECTIONS } from "@/lib/workspace-nav";
+import { getWorkspaceSwitchPath, orderPrimaryNav, TOP_LEVEL_SECTIONS } from "@/lib/workspace-nav";
 
 describe("getWorkspaceSwitchPath", () => {
   it("drops a workspace-scoped entity ID when switching workspaces (the reported bug)", () => {
@@ -143,3 +143,13 @@ describe("TOP_LEVEL_SECTIONS drift guard", () => {
     expect([...TOP_LEVEL_SECTIONS].sort()).toEqual(routeSections);
   });
 });
+
+describe("orderPrimaryNav", () => {
+  const items = [{ path: "okrs" }, { path: "discovery" }, { path: "solutions" }]
+  it("keeps order when discovery is not first", () => {
+    expect(orderPrimaryNav(items, false).map((i) => i.path)).toEqual(["okrs", "discovery", "solutions"])
+  })
+  it("moves discovery ahead of okrs", () => {
+    expect(orderPrimaryNav(items, true).map((i) => i.path)).toEqual(["discovery", "okrs", "solutions"])
+  })
+})

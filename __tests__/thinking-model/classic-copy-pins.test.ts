@@ -49,7 +49,7 @@ const EXCEPTIONS: Record<string, string> = {
 
 // A bare `{labels.keyResult.sentence}` cannot be traced by text, so every form of
 // every label counts as producible. Where it matters, the rendered cases pin it.
-const labelValues = (): string[] => Object.values(CLASSIC).flatMap((entry) => Object.values(entry))
+const labelValues = (): string[] => Object.values(CLASSIC).flatMap((entry) => Object.values(entry).filter((v): v is string => typeof v === "string"))
 
 const helperOutputs = (): string[] => [
   ...labelValues(),
