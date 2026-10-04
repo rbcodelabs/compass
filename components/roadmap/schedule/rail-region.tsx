@@ -72,7 +72,7 @@ export function RailRegion({ id, mode, open, regionRef, children }: {
       <div
         // `inert` also covers the window between the logical state flipping and the CSS settling.
         inert={!open}
-        className={cn("min-h-0 min-w-0 overflow-hidden transition-[visibility]", CLIP_CLASS[mode])}
+        className={cn("min-h-0 min-w-0 overflow-hidden transition-[visibility] motion-reduce:transition-none", CLIP_CLASS[mode])}
       >
         <div className="pb-3 min-[1320px]:w-[calc(20rem+0.75rem)] min-[1320px]:pb-0 min-[1320px]:pr-3">{children}</div>
       </div>
