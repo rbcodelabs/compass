@@ -140,6 +140,13 @@ test.describe("Detail panel reads do not reopen a panel after navigation", () =>
     }, new RegExp(`${base}/tasks/${id}$`));
   });
 
+  test("roadmap item panel → Open full page stays on the full page", async ({ page, base, workspaceSlug }) => {
+    const id = await idOf(workspaceSlug, "roadmapItem", "E2E Baseline Roadmap");
+    await leaveAndExpectToStay(page, `${base}/roadmap?detail=roadmapItem:${id}`, async () => {
+      await page.locator('[data-slot="sheet-content"]').getByRole("link", { name: "Open full page" }).click();
+    }, new RegExp(`${base}/roadmap/${id}$`));
+  });
+
   test("roadmap item panel closed with Escape stays closed", async ({ page, base, workspaceSlug }) => {
     const id = await idOf(workspaceSlug, "roadmapItem", "E2E Baseline Roadmap");
     await leaveAndExpectToStay(page, `${base}/roadmap?detail=roadmapItem:${id}`, async () => {

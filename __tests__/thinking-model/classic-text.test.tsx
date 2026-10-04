@@ -69,7 +69,6 @@ import { AddKeyResultForm } from "@/components/okrs/add-key-result-form"
 import { CreateCycleForm } from "@/components/okrs/create-cycle-form"
 import { CycleCard } from "@/components/okrs/cycle-card"
 import { AddItemForm } from "@/components/roadmap/add-item-form"
-import { EditItemDialog } from "@/components/roadmap/edit-item-dialog"
 import { LinkTaskDialog } from "@/components/tasks/link-task-dialog"
 import { TaskLinksPanel } from "@/components/tasks/task-links-panel"
 import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-panel"
@@ -170,18 +169,6 @@ describe("CLASSIC text is identical to main", () => {
       availableExperiments={[{ id: "e", title: "Exp", status: "RUNNING" }]}
     />,
     click(/add/i),
-  )
-  check(
-    "roadmap edit-item",
-    <EditItemDialog
-      item={{ id: "r1", title: "Item", description: null, startDate: null, endDate: null, isPrivate: false, opportunityId: null, opportunity: null } as never}
-      workspaceId="w1"
-      open
-      onOpenChange={noop}
-      revalidatePathStr="/x"
-      onSaved={noop}
-      availableOpportunities={[{ id: "o", title: "Opp" }]}
-    />,
   )
   const empty = { OPPORTUNITY: [], SOLUTION: [], ROADMAP_ITEM: [], OBJECTIVE: [], KEY_RESULT: [], DOC: [], EXPERIMENT: [], FEEDBACK_ITEM: [], DECISION: [] }
   const one = { ...empty, OBJECTIVE: [{ id: "o1", title: "Grow" }], KEY_RESULT: [{ id: "k1", title: "Reach" }], OPPORTUNITY: [{ id: "p1", title: "Need" }] }

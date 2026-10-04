@@ -12,6 +12,7 @@ vi.mock("@/components/panels/panel-context", () => ({
   }),
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("@/components/following/follow-button", () => ({ FollowButton: () => null }));
 vi.mock("@/components/comments/discussion", () => ({ Discussion: () => null }));
 vi.mock("@/components/decisions/request-decision-link", () => ({ RequestDecisionLink: () => null }));
 vi.mock("@/components/panels/launch-checklist", () => ({ LaunchChecklist: () => null }));
@@ -19,6 +20,7 @@ vi.mock("@/components/panels/launch-tier-picker", () => ({ LaunchTierPicker: () 
 vi.mock("@/components/panels/positioning-brief-row", () => ({ PositioningBriefRow: () => null }));
 vi.mock("@/components/tasks/linked-tasks-section", () => ({ LinkedTasksSection: () => null }));
 vi.mock("@/components/analytics/measurements-panel", () => ({ MeasurementsPanel: () => null }));
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({ archiveItem: vi.fn() }));
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/actions", () => ({ upsertFieldValue: vi.fn() }));
 
 import { RoadmapItemPanel } from "@/components/panels/roadmap-item-panel";

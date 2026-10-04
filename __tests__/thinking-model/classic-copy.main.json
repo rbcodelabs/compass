@@ -100,13 +100,6 @@
       "objective",
       "solution"
     ],
-    "components/panels/roadmap-item-panel.tsx": [
-      "opportunity",
-      "Opportunity",
-      "solution",
-      "Solution",
-      "Key Result"
-    ],
     "components/discovery/opportunity-composer.tsx": [
       "## Who's affected ## Current pain ## Evidence ## Desired outcome",
       "opportunity",
@@ -175,9 +168,12 @@
       "item-solution-{}",
       "Link to a solution…"
     ],
-    "components/roadmap/edit-item-dialog.tsx": [
+    "components/roadmap/roadmap-item-detail.tsx": [
+      "opportunity",
       "Opportunity",
-      "edit-opportunity-{}",
+      "solution",
+      "Solution",
+      "Key Result",
       "Link to an opportunity…"
     ],
     "components/discovery/discovery-rail.tsx": [

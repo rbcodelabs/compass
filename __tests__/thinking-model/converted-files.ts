@@ -43,7 +43,7 @@ export const CONVERTED_FILES = [
   "components/tasks/link-task-dialog.tsx",
   "components/tasks/linked-type-labels.ts",
   "components/roadmap/add-item-form.tsx",
-  "components/roadmap/edit-item-dialog.tsx",
+  "components/roadmap/roadmap-item-detail.tsx",
   "components/discovery/discovery-rail.tsx",
   "app/[orgSlug]/[workspaceSlug]/metrics/page.tsx",
   "components/custom-fields/manage-fields-panel.tsx",

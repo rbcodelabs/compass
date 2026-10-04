@@ -24,6 +24,7 @@ const database = {
   ...models,
   opportunityObjectiveLink: links,
   squad: { findFirst: vi.fn() },
+  opportunity: models.opportunity,
   workspace: { findUnique: vi.fn() },
   portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
   portfolioCapacityPlan: { updateMany: vi.fn() },
@@ -396,5 +397,59 @@ describe("updateEntityField — workspace scoping (write-side IDOR guard)", () =
       expect.objectContaining({ where: { id: "sol-1", workspaceId: WS } })
     );
     expect(models.solution.update).toHaveBeenCalled();
+  });
+});
+
+describe("roadmap item detail fields", () => {
+  const user = { kind: "USER" as const, id: "user-1" };
+
+  it("sets a squad only when it belongs to the workspace", async () => {
+    database.squad.findFirst.mockResolvedValueOnce({ id: "sq-1" });
+    expect(await updateEntityField("roadmapItem", "e1", WS, "squadId", "sq-1", user)).toEqual({ ok: true });
+    expect(database.squad.findFirst).toHaveBeenCalledWith({ where: { id: "sq-1", workspaceId: WS }, select: { id: true } });
+    expect(models.roadmapItem.update.mock.calls[0][0].data).toMatchObject({ squadId: "sq-1" });
+
+    models.roadmapItem.update.mockClear();
+    database.squad.findFirst.mockResolvedValueOnce(null);
+    expect(await updateEntityField("roadmapItem", "e1", WS, "squadId", "foreign", user)).toEqual({ ok: false, status: 404, error: "Not found" });
+    expect(models.roadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("links an active opportunity from the same workspace and can clear it", async () => {
+    models.opportunity.findFirst.mockResolvedValueOnce({ id: "opp-1" });
+    expect(await updateEntityField("roadmapItem", "e1", WS, "opportunityId", "opp-1", user)).toEqual({ ok: true });
+    expect(models.opportunity.findFirst).toHaveBeenCalledWith({ where: { id: "opp-1", workspaceId: WS, status: { not: "ARCHIVED" } }, select: { id: true } });
+    expect(await updateEntityField("roadmapItem", "e1", WS, "opportunityId", null, user)).toEqual({ ok: true });
+    expect(models.roadmapItem.update.mock.calls.at(-1)![0].data).toMatchObject({ opportunityId: null });
+  });
+
+  it("rejects an opportunity outside the workspace", async () => {
+    models.opportunity.findFirst.mockResolvedValueOnce(null);
+    expect(await updateEntityField("roadmapItem", "e1", WS, "opportunityId", "foreign", user)).toEqual({ ok: false, status: 404, error: "Not found" });
+    expect(models.roadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("toggles privacy and rejects a non-boolean", async () => {
+    expect(await updateEntityField("roadmapItem", "e1", WS, "isPrivate", true, user)).toEqual({ ok: true });
+    expect(models.roadmapItem.update.mock.calls[0][0].data).toMatchObject({ isPrivate: true });
+    expect(await updateEntityField("roadmapItem", "e1", WS, "isPrivate", "yes", user)).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("saves an inclusive schedule as a pair and rejects partial or inverted ranges", async () => {
+    expect(await updateEntityField("roadmapItem", "e1", WS, "schedule", { startDate: "2026-07-01", endDate: "2026-07-31" }, user)).toEqual({ ok: true });
+    expect(models.roadmapItem.update.mock.calls[0][0].data).toMatchObject({ startDate: new Date("2026-07-01"), endDate: new Date("2026-07-31") });
+    models.roadmapItem.update.mockClear();
+
+    for (const bad of [{ startDate: "2026-07-01", endDate: null }, { startDate: null, endDate: "2026-07-01" }, { startDate: "2026-08-01", endDate: "2026-07-01" }, { startDate: "nope", endDate: "nope" }, null]) {
+      expect(await updateEntityField("roadmapItem", "e1", WS, "schedule", bad, user)).toMatchObject({ ok: false, status: 400 });
+    }
+    expect(models.roadmapItem.update).not.toHaveBeenCalled();
+
+    expect(await updateEntityField("roadmapItem", "e1", WS, "schedule", { startDate: null, endDate: null }, user)).toEqual({ ok: true });
+    expect(models.roadmapItem.update.mock.calls[0][0].data).toMatchObject({ startDate: null, endDate: null });
+  });
+
+  it("does not offer these fields on other entity types", async () => {
+    expect(await updateEntityField("feedback", "e1", WS, "isPrivate", true, user)).toMatchObject({ ok: false, status: 400 });
   });
 });

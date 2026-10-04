@@ -47,10 +47,28 @@ Click **+ Add Item** in any horizon column. A roadmap item has:
 - **Linked Key Result** — The outcome it contributes to
 - **Linked Experiment** — The experiment that validated the approach
 - **Squad** — Team assignment
-- **Start date / End date** — Optional. Leave these blank for items whose timing isn't settled yet — the item still appears on the Timeline as a dashed placeholder bar you can drag to schedule; fill them in (here, via Edit, or by dragging the bar) once you know when the work will happen.
+- **Start date / End date** — Optional. Leave these blank for items whose timing isn't settled yet — the item still appears on the Timeline as a dashed placeholder bar you can drag to schedule; fill them in (in the item detail, or by dragging the bar) once you know when the work will happen.
 - **Private** — Optional checkbox. Hides the item from the public portal roadmap and blocks voting on it, while still showing it (with a 🔒 Private badge) on the internal Board and Timeline. Use it for items you don't want visible to customers — security fixes, sensitive internal work, anything you'd rather not telegraph externally.
 
-The linked metadata appears as small icon badges on each card, giving stakeholders a quick way to trace the evidence behind each item. Use a card's **Edit** menu action at any time to add or change its title, description, dates, linked opportunity, or private status. Choose **None** in the Opportunity picker to remove an existing opportunity link.
+The linked metadata appears as small icon badges on each card, giving stakeholders a quick way to trace the evidence behind each item. A card's **Edit** menu action (or clicking its title) opens the item's detail, where you can change its title, description, horizon, squad, dates, linked opportunity, or private status. Choose **None** in the Opportunity picker to remove an existing opportunity link.
+
+## Roadmap item detail
+
+The item detail is one responsive view that appears as a side panel from the board or timeline and as a full page at `/roadmap/<item>` (use **Open full page**). Edits save as you make them.
+
+- **Summary row** — the horizon dropdown, squad, dates, and a vote count sit beside the **Discussion** shortcut, **Follow**, and **Request decision**. A **Private** chip shows when the item is hidden from the public roadmap, and an **Archived** chip when it has been archived.
+- **Dates** are an inclusive range: set both a start and an end, or clear both with **Clear dates**.
+- **Main sections** — Launch (when the marketing-launch workflow is on), Delivery tasks, Linked to, custom fields, and Measurements. **Linked to** lists the Opportunity, Solution, Experiment, Key Result, and Feedback the item came from; each row opens its panel.
+- **More properties** (collapsed by default) holds the linked Opportunity picker, the **Private** toggle, and **Archive item**.
+- **Discussion** sits beside the content on a wide surface and below it on a narrow panel or phone. Layouts scroll rather than squash, so nothing is clipped on a phone.
+
+Private items are visible to workspace members here and on the board; only the public portal hides them. **Follow** appears once Following is enabled for roadmap items.
+
+![Roadmap item full page on desktop](/screenshots/docs/roadmap-item-fullpage-desktop.png)
+
+![Roadmap item panel with properties](/screenshots/docs/roadmap-item-properties-desktop.png)
+
+![Roadmap item on a phone](/screenshots/docs/roadmap-item-overlay-mobile.png)
 
 ## Timeline View
 

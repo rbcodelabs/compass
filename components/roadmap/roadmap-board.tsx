@@ -181,6 +181,28 @@ export function moveCardToHorizon(
   };
 }
 
+/**
+ * Apply an edit made in the roadmap item detail to the board's local columns:
+ * merge the card-shaped fields, drop the card when it was archived, and move it
+ * when its horizon changed. Returns the same reference when nothing applies.
+ */
+export function applyRoadmapItemPatch(
+  columns: ColumnMap,
+  itemId: string,
+  patch: { horizon?: Horizon; roadmapItem?: Partial<RoadmapCardData>; archived?: boolean }
+): ColumnMap {
+  const source = findHorizon(columns, itemId);
+  if (!source) return columns;
+  if (patch.archived) return { ...columns, [source]: columns[source].filter((i) => i.id !== itemId) };
+  let next = columns;
+  if (patch.roadmapItem) {
+    const { horizon: _horizon, ...fields } = patch.roadmapItem;
+    void _horizon;
+    next = { ...next, [source]: next[source].map((i) => (i.id === itemId ? { ...i, ...fields } : i)) };
+  }
+  return patch.horizon ? moveCardToHorizon(next, itemId, patch.horizon) : next;
+}
+
 export function RoadmapBoard({
   initialItems,
   workspaceId,
@@ -241,8 +263,8 @@ export function RoadmapBoard({
   // it optimistically reverted on drop.
   useEffect(() => {
     return subscribeEntityMutated("roadmapItem", (id, patch) => {
-      if (!patch?.horizon) return;
-      setColumns((prev) => moveCardToHorizon(prev, id, patch.horizon!));
+      if (!patch) return;
+      setColumns((prev) => applyRoadmapItemPatch(prev, id, patch));
     });
   }, [subscribeEntityMutated]);
 
@@ -429,15 +451,6 @@ export function RoadmapBoard({
     }));
   }
 
-  const handleUpdate = useCallback((updated: RoadmapCardData) => {
-    setColumns((prev) => ({
-      ...prev,
-      [updated.horizon]: prev[updated.horizon].map((i) =>
-        i.id === updated.id ? updated : i
-      ),
-    }));
-  }, []);
-
   return (
     <DndContext
       id={dndId}
@@ -467,7 +480,6 @@ export function RoadmapBoard({
                 revalidatePathStr={revalidatePathStr}
                 onItemAdded={handleItemAdded}
                 onArchive={handleArchive}
-                onUpdate={handleUpdate}
                 availableKRs={availableKRs}
                 availableSolutions={availableSolutions}
                 availableOpportunities={availableOpportunities}
@@ -492,7 +504,6 @@ export function RoadmapBoard({
               onArchive={() => {}}
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
-              availableOpportunities={availableOpportunities}
               launchWorkflowEnabled={launchWorkflowEnabled}
             />
           </div>

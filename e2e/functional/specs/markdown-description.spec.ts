@@ -109,20 +109,20 @@ test("full-page Task keeps image and HTML source intact", async ({ page, base })
   await expect(source).toHaveValue(original + "\n\nFollow up this week.");
 });
 
-test("Roadmap dialog saves description in its existing transaction", async ({ page, base }) => {
+test("Roadmap item detail saves description with the shared editor", async ({ page, base }) => {
   const item = await seed("roadmap_items");
   await page.goto(`${base}/roadmap`);
   const card = page.locator('[data-slot="card"]').filter({ has: page.getByRole("button", { name: item.title, exact: true }) });
   await card.hover();
   await card.getByRole("button", { name: "Card actions" }).click();
   await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("button", { name: "Markdown", exact: true }).click();
-  await dialog.getByRole("textbox", { name: "Description Markdown source", exact: true }).fill("## Shared learning\n\n**One experiment** this week.");
+  const panel = page.locator('[data-slot="sheet-content"]');
+  await panel.getByRole("button", { name: "Edit description", exact: true }).click();
+  await panel.getByRole("button", { name: "Markdown", exact: true }).click();
+  await panel.getByRole("textbox", { name: "Description Markdown source", exact: true }).fill("## Shared learning\n\n**One experiment** this week.");
   await capture(page, "roadmap");
-  await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(dialog).toHaveCount(0);
+  await panel.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(panel.getByRole("heading", { name: "Shared learning", exact: true })).toBeVisible();
   await page.reload();
-  await page.getByRole("button", { name: item.title, exact: true }).click();
   await expect(page.getByRole("heading", { name: "Shared learning", exact: true })).toBeVisible();
 });
