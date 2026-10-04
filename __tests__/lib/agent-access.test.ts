@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest"
-const prisma = { agent: { findFirst: vi.fn() }, agentWorkspaceGrant: { findMany: vi.fn() }, workspace: { findFirst: vi.fn() }, solutionComment: { findUnique: vi.fn() }, comment: { findUnique: vi.fn() }, docComment: { findUnique: vi.fn() }, decisionRecord: { findUnique: vi.fn() } }
+const prisma = { agent: { findFirst: vi.fn() }, agentWorkspaceGrant: { findMany: vi.fn() }, workspace: { findFirst: vi.fn() }, solutionComment: { findUnique: vi.fn() }, comment: { findUnique: vi.fn() }, docComment: { findUnique: vi.fn() }, decisionRecord: { findUnique: vi.fn() }, organizationMember: { findFirst: vi.fn() } }
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
-import { agentWorkspaceWhere } from "@/lib/agent-access"
+import { agentWorkspaceWhere, hasOwnerOrgAdminRights } from "@/lib/agent-access"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
 const actor = { purpose: "AGENT" as const, userId: "owner", agentId: "agent" }
 beforeEach(() => { vi.clearAllMocks(); vi.stubEnv("COMPASS_AGENTS_ENABLED", "1"); prisma.agent.findFirst.mockResolvedValue({ id: "agent" }); prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "one" }, { workspaceId: "two" }]) })
@@ -21,7 +21,7 @@ it("requires write grants for mutation gates", async () => {
   await applyToolGate("create_task", { ...actor }, { workspaceId: "one" })
   expect(prisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ access: "WRITE" }) }))
 })
-it.each(["approve_solution_plan", "reject_solution_plan", "create_workspace", "unknown_tool"])("denies human-only and unclassified operation %s", async tool => {
+it.each(["approve_solution_plan", "reject_solution_plan", "request_release_authorization", "unknown_tool"])("denies human-only and unclassified operation %s", async tool => {
   await expect(applyToolGate(tool, { ...actor }, {})).rejects.toThrow(/human identity/)
   expect(prisma.workspace.findFirst).not.toHaveBeenCalled()
 })
@@ -46,4 +46,20 @@ it.each(["AGENT", "AGENT_TURN"] as const)("prevents %s from editing existing hum
   for (const tool of ["update_solution_comment", "update_comment", "update_doc_comment"]) {
     await expect(applyToolGate(tool, { ...actor, purpose, scopeWorkspaceId: "one" }, { commentId: "comment", body: "Forged replacement" })).rejects.toThrow(/human identity/)
   }
+})
+
+// Agents inherit their owner's CURRENT org admin rights (no per-agent grant).
+it("hasOwnerOrgAdminRights follows the owner's live role and the agent's ACTIVE status", async () => {
+  prisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "ADMIN" })
+  expect(await hasOwnerOrgAdminRights(actor, "org-1")).toBe(true)
+  prisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "MEMBER" })
+  expect(await hasOwnerOrgAdminRights(actor, "org-1")).toBe(false)
+  prisma.organizationMember.findFirst.mockResolvedValueOnce(null)
+  expect(await hasOwnerOrgAdminRights(actor, "org-1")).toBe(false)
+  prisma.agent.findFirst.mockResolvedValueOnce(null)
+  prisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "OWNER" })
+  expect(await hasOwnerOrgAdminRights(actor, "org-1")).toBe(false)
+  vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+  prisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "OWNER" })
+  expect(await hasOwnerOrgAdminRights(actor, "org-1")).toBe(false)
 })

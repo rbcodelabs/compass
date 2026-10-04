@@ -57,7 +57,7 @@ to none of them:
 > **Correction to the brief.** The framing task said "4 `DENY` entries". The
 > actual count is **17**: six research-lifecycle tools
 > (`lib/mcp-tool-gates.ts:615`) and eleven others — comment-body edits,
-> `create_workspace`, plan approval/rejection, release authorization, and the
+> `create_workspace` (since moved out of DENY: agents now inherit their owner's live org admin rights), plan approval/rejection, release authorization, and the
 > four scoring-model administration tools (`:624`). The gap is four times wider
 > than stated. Nothing else in the brief's evidence was overstated; the live
 > `get_current_identity` result reproduced exactly.
@@ -781,7 +781,7 @@ narrowing of per-user `cmp_…` keys.
 harness — it already walks the real chain. Add: authorize with an agent binding
 → exchange → `get_current_identity` asserts `purpose: "AGENT"` and the expected
 agent → call a granted-workspace read (succeeds) → call an ungranted-workspace
-read (denied) → call an `AGENT_TOOL_POLICY` DENY tool such as `create_workspace`
+read (denied) → call an `AGENT_TOOL_POLICY` DENY tool such as `approve_solution_plan`
 (denied as "Tool requires a human identity") → call an admin tool (denied as
 "Human administrator required") → suspend the agent out of band and assert the
 next call 401s.

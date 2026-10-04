@@ -35,7 +35,7 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import getPrisma from "@/lib/db"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
-import { agentWorkspaceWhere, hasValidAgentOrgAdminGrant, type AgentAdminCapability } from "@/lib/agent-access"
+import { agentWorkspaceWhere, hasOwnerOrgAdminRights, hasValidAgentOrgAdminGrant, type AgentAdminCapability } from "@/lib/agent-access"
 import { getManagedPilotContext } from "@/lib/preview-automation/managed-context"
 
 export type McpActor = {
@@ -224,18 +224,26 @@ export async function assertOrgMemberBySlug(
  * See assertWorkspaceAdmin's doc comment for `opts.agentCapability` — same
  * ADR 0020 escape hatch, resolved against the org this slug names instead of
  * a workspace's parent org.
+ *
+ * `opts.inheritOwnerAdmin` lets an AGENT/AGENT_TURN identity act with its
+ * owner's current org OWNER/ADMIN rights (hasOwnerOrgAdminRights), with no
+ * AgentOrgAdminGrant. It is opt-in per call site; only `create_workspace`
+ * passes it.
  */
 export async function assertOrgAdminBySlug(
   actor: McpActor,
   orgSlug: string,
-  opts: { agentCapability?: AgentAdminCapability } = {}
+  opts: { agentCapability?: AgentAdminCapability; inheritOwnerAdmin?: boolean } = {}
 ): Promise<{ organizationId: string }> {
   if (getManagedPilotContext()) throw new McpAuthzError("Organization-wide mutations are unavailable in the managed pilot.")
   const prisma = getPrisma()
   if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") {
-    if (opts.agentCapability) {
+    if (opts.agentCapability || opts.inheritOwnerAdmin) {
       const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
-      if (org && (await hasValidAgentOrgAdminGrant(actor, org.id, opts.agentCapability))) return { organizationId: org.id }
+      if (org && opts.agentCapability && (await hasValidAgentOrgAdminGrant(actor, org.id, opts.agentCapability))) return { organizationId: org.id }
+      // Opt-in only (see hasOwnerOrgAdminRights): the agent exercises its
+      // owner's CURRENT org admin role, no per-agent grant needed.
+      if (org && opts.inheritOwnerAdmin && (await hasOwnerOrgAdminRights(actor, org.id))) return { organizationId: org.id }
     }
     throw new McpAuthzError("Human administrator required.")
   }

@@ -205,7 +205,9 @@ export const TOOL_GATES: Record<string, Gate> = {
   // memberships in the handler; org membership is the gate.
   list_workspaces: async (a, x) => void (await assertOrgMemberBySlug(a, x.orgSlug)),
   get_workspace_by_slug: async (a, x) => void (await assertWorkspaceBySlug(a, x.orgSlug, x.workspaceSlug)),
-  create_workspace: async (a, x) => void (await assertOrgAdminBySlug(a, x.orgSlug)),
+  // An agent inherits its owner's CURRENT org OWNER/ADMIN rights here (no
+  // AgentOrgAdminGrant needed); everyone else is gated exactly as before.
+  create_workspace: async (a, x) => void (await assertOrgAdminBySlug(a, x.orgSlug, { inheritOwnerAdmin: true })),
 
   // OKRs --------------------------------------------------------------------
   list_okr_cycles: (a, x) => assertWorkspaceMember(a, x.workspaceId),
@@ -755,10 +757,16 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   // people's in-progress positions, which is a facilitator's judgment call.
   ...["create_card_sort_round", "set_card_sort_round_state", "propose_card_sort_move", "withdraw_card_sort_proposal"].map(name => [name, "DENY"]),
   // Legacy comments lack a durable agent author ID; body edits could retain a human label or approval badge.
-  // create_workspace, approve_solution_plan, reject_solution_plan, and
-  // request_release_authorization remain unconditionally human-only per ADR
-  // 0020 — explicitly out of scope for AgentOrgAdminGrant delegation.
-  ...["update_comment", "update_solution_comment", "update_doc_comment", "create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization"].map(name => [name, "DENY"]),
+  // approve_solution_plan, reject_solution_plan, and request_release_authorization
+  // remain unconditionally human-only per ADR 0020: they are approval /
+  // attestation acts that would be recorded as the delegating human's own.
+  ...["update_comment", "update_solution_comment", "update_doc_comment", "approve_solution_plan", "reject_solution_plan", "request_release_authorization"].map(name => [name, "DENY"]),
+  // create_workspace was DENY under ADR 0020. It is now a WRITE: an agent
+  // inherits its owner's live org admin rights (see hasOwnerOrgAdminRights),
+  // enforced inside its TOOL_GATES entry. Creating a workspace is pure
+  // administration, not an attestation, and createWorkspaceInOrg records the
+  // creating agent's WRITE grant so it can keep working in what it created.
+  ["create_workspace", "WRITE"],
   // Follows and the inbox belong to a person (ADR "Following and in-app
   // notifications", 2.7). An agent-scoped token acts as an Agent, so it must not
   // follow on, read, or clear the inbox of the human who owns it.

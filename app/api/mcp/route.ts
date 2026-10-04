@@ -545,12 +545,21 @@ const _handler = createMcpHandler(
         // lib/workspace-service.ts so the org-settings "Create workspace" form
         // performs exactly the same write. Authorization is unchanged and
         // stays outside: lib/mcp-tool-gates.ts gates this tool with
-        // assertOrgAdminBySlug and denies it to agent identities.
-        const result = await createWorkspaceInOrg({ orgSlug, name, slug, description })
+        // assertOrgAdminBySlug (agents inherit their owner's live org admin
+        // rights). An agent creator also gets a WRITE workspace grant,
+        // attributed to its owner, so it can keep working in the new workspace.
+        const actor = getMcpActor()
+        const isAgent = (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") && actor.agentId && actor.userId
+        const result = await createWorkspaceInOrg({
+          orgSlug, name, slug, description,
+          agentGrant: isAgent ? { agentId: actor.agentId!, grantedByUserId: actor.userId! } : undefined,
+        })
         if (!result.ok) {
           return fail(result.error)
         }
         const { workspace } = result
+        // Attribute the AgentToolCall audit row to the workspace just created.
+        if (isAgent) actor.authorizedWorkspaceId = workspace.id
 
         return ok(
           `**Workspace created**\n` +

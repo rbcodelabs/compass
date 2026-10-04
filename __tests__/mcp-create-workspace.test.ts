@@ -6,7 +6,7 @@
  * passed to server.registerTool.  We call the callback directly with
  * controlled inputs and assert on the returned text.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { runWithMcpActor } from "@/lib/mcp-authz"
 
 // ── Prisma mock ─────────────────────────────────────────────────────────────
@@ -21,9 +21,15 @@ const mockPrisma = {
   },
   organizationMember: {
     findMany: vi.fn(),
+    findFirst: vi.fn(),
   },
+  agent: { findFirst: vi.fn() },
+  agentToolCall: { create: vi.fn(), update: vi.fn() },
   workspaceMember: {
     createMany: vi.fn(),
+  },
+  agentWorkspaceGrant: {
+    create: vi.fn(),
   },
   $transaction: vi.fn(),
 }
@@ -215,5 +221,53 @@ describe("create_workspace MCP tool", () => {
 
     expect(text).toContain('slug "my-product" already exists')
     expect(mockPrisma.workspace.create).not.toHaveBeenCalled()
+  })
+})
+
+describe("create_workspace called by an owner-delegated agent", () => {
+  function agentHandler(actor: Record<string, unknown>): ToolCallback {
+    const h = registeredTools["create_workspace"]
+    return ((args: Record<string, unknown>) => runWithMcpActor(actor as never, () => h(args))) as ToolCallback
+  }
+
+  const AGENT_ACTOR = { userId: "owner-1", purpose: "AGENT", agentId: "agent-1", credentialId: "cred-1" }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1" })
+    mockPrisma.agentToolCall.create.mockResolvedValue({ id: "call-1" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "OWNER", organizationId: "org-uuid-1" })
+    mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma))
+    mockPrisma.organization.findUnique.mockResolvedValue({ id: "org-uuid-1", name: "RB Code Labs" })
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    mockPrisma.workspace.create.mockResolvedValue({ id: "ws-new", name: "Agent WS", slug: "agent-ws" })
+    mockPrisma.organizationMember.findMany.mockResolvedValue([{ userId: "owner-1", role: "OWNER" }])
+  })
+
+  afterEach(() => vi.unstubAllEnvs())
+
+  it("records an auditable WRITE grant for the creating agent, granted by its owner, in the same transaction", async () => {
+    const result = await agentHandler(AGENT_ACTOR)({ orgSlug: "rbcodelabs", name: "Agent WS", slug: "agent-ws" })
+    expect(textOf(result)).toContain("Workspace created")
+    expect(mockPrisma.agentWorkspaceGrant.create).toHaveBeenCalledWith({
+      data: { agentId: "agent-1", workspaceId: "ws-new", access: "WRITE", grantedByUserId: "owner-1" },
+    })
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
+    // The audit row is attributed to the agent, with no admin grant, and to the new workspace.
+    expect(mockPrisma.agentToolCall.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ agentId: "agent-1", userId: "owner-1", toolName: "create_workspace" }) }))
+    expect(mockPrisma.agentToolCall.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "SUCCEEDED", workspaceId: "ws-new", agentAdminGrantId: null }) }))
+  })
+
+  it("does not grant anything when a human or the service key creates the workspace", async () => {
+    await agentHandler({ userId: "owner-1", purpose: "USER" })({ orgSlug: "rbcodelabs", name: "Agent WS", slug: "agent-ws" })
+    await getHandler("create_workspace")({ orgSlug: "rbcodelabs", name: "Agent WS", slug: "agent-ws" })
+    expect(mockPrisma.agentWorkspaceGrant.create).not.toHaveBeenCalled()
+  })
+
+  it("does not grant when creation fails (slug taken)", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "existing" })
+    await agentHandler(AGENT_ACTOR)({ orgSlug: "rbcodelabs", name: "Agent WS", slug: "agent-ws" })
+    expect(mockPrisma.agentWorkspaceGrant.create).not.toHaveBeenCalled()
   })
 })
