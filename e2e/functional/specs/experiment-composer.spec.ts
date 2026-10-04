@@ -33,9 +33,9 @@ async function seedAssumption(stamp: number) {
       [workspace.id, `E2E EC Opportunity ${stamp}`],
     );
     const { rows: [solution] } = await pool.query(
-      `INSERT INTO ${S}.solutions (id, opportunity_id, title, status, created_at, updated_at)
-       VALUES (gen_random_uuid(), $1, $2, 'IDEA', NOW(), NOW()) RETURNING id`,
-      [opportunity.id, `E2E EC Solution ${stamp}`],
+      `INSERT INTO ${S}.solutions (id, workspace_id, opportunity_id, title, status, created_at, updated_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, 'IDEA', NOW(), NOW()) RETURNING id`,
+      [workspace.id, opportunity.id, `E2E EC Solution ${stamp}`],
     );
     const title = `E2E EC Assumption ${stamp}`;
     const { rows: [assumption] } = await pool.query(
