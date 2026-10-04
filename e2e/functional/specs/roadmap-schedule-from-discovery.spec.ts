@@ -352,7 +352,10 @@ test.describe("Roadmap: schedule from discovery", () => {
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(rail).toBeVisible();
     await expect.poll(async () => (await scroll.boundingBox())!.width).toBeCloseTo(openWidth, 0);
-    await expect(bar).toBeVisible();
+    // The chart is virtualized: the bar was revealed in the wider (collapsed) viewport and, at the same
+    // scroll offset, can now legitimately sit past the narrower viewport's right edge, so it is not
+    // rendered. Scroll to it again rather than assuming it is still on screen.
+    await revealBar(page, title);
     await page.reload();
     await page.waitForLoadState("networkidle");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
