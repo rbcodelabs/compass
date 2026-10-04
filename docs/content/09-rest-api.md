@@ -15,6 +15,11 @@ OpenAPI 3.1 description is public at:
 GET /api/v1/openapi.json
 ```
 
+Use the [interactive API explorer](/help/api-explorer) to browse this generated
+contract and explicitly try authenticated GET requests. All methods are
+documented; writes cannot execute in the explorer. See the
+[explorer guide](/help/09-api-explorer) for credential privacy and usage.
+
 API v1 currently covers identity and workspaces; discovery and delivery;
 strategy, learning, metrics, scoring, squads, custom fields, and typed links;
 and the Phase 3 collaboration surface for comments, notifications, Docs,
