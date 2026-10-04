@@ -80,7 +80,7 @@ describe("acceptCardSortNewEntry atomicity", () => {
     })
 
     await expect(acceptCardSortNewEntry({ workspaceId: "workspace", roundId: "round", userId: "facilitator", entryId: "entry" }))
-      .resolves.toEqual({ entryId: "entry", opportunityId: "opportunity", suggestionRecorded: false })
+      .resolves.toEqual({ entryId: "entry", objectId: "opportunity", opportunityId: "opportunity", suggestionRecorded: false })
 
     expect(state.committed.entry).toMatchObject({ status: "ACCEPTED", acceptedObjectId: "opportunity" })
     expect(prisma.cardSortProposal.upsert).not.toHaveBeenCalled()

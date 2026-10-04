@@ -67,6 +67,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     }),
   ]);
   const { labels } = resolveThinkingModel(workspace);
+  const cardSortHref = `/${orgSlug}/${workspaceSlug}/card-sort?objectType=ROADMAP_ITEM`;
   const customFieldGroups = buildCustomFieldFilterGroups(roadmapFieldDefs, objectTypeLabels(labels));
   // Only SELECT-type fields are groupable — MULTI_SELECT is out of scope
   // (an item could belong to more than one group, which breaks
@@ -305,6 +306,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
             items={cardItems}
             squads={squadFilter ? squads.filter((squad) => squad.id === squadFilter) : squads}
             headerSquads={squads}
+            cardSortHref={cardSortHref}
             customFieldGroups={customFieldGroups}
             activeCustomFieldId={customFieldFilter?.fieldId ?? null}
             workspaceId={workspace.id}
@@ -323,6 +325,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
               squads={squads}
               customFieldGroups={customFieldGroups}
               activeCustomFieldId={customFieldFilter?.fieldId ?? null}
+              cardSortHref={cardSortHref}
             />
           </Suspense>
           <div data-slot="workspace-content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">

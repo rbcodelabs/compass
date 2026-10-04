@@ -19,7 +19,8 @@ import {
 } from "@/lib/feedback-attachments"
 import { CompassUrlNotConfiguredError, feedbackItemUrl, safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { FEEDBACK_STATUSES, type FeedbackStatus } from "@/lib/feedback-meta"
-import type { ProgrammaticSource } from "@/lib/programmatic-source"
+import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
+import { isUniqueConflict, RoadmapPromotionConflict } from "@/lib/roadmap-promotion"
 
 const feedbackCursorSchema = z.object({
   v: z.literal(1),
@@ -672,11 +673,15 @@ export async function promoteFeedbackToRoadmap({
   workspaceId,
   horizon,
   isPrivate,
+  operationId,
+  source,
 }: {
   feedbackId: string
   workspaceId: string
   horizon: "NOW" | "NEXT" | "LATER" | "SHIPPED"
   isPrivate?: boolean
+  operationId?: string
+  source?: ProgrammaticSource
 }) {
   const prisma = getPrisma()
   const feedback = await prisma.feedbackItem.findUnique({
@@ -695,21 +700,33 @@ export async function promoteFeedbackToRoadmap({
     return fail(`Feedback item "${feedbackId}" not found.`)
   }
 
-  const lastItem = await prisma.roadmapItem.findFirst({
-    where: { workspaceId, horizon, status: "ACTIVE" },
-    orderBy: { sortOrder: "desc" },
-    select: { sortOrder: true },
-  })
-  const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0
-
-  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "MCP", undefined, tx => tx.roadmapItem.create({ data: {
-      workspaceId,
-      title: feedback.title,
-      horizon,
-      sortOrder,
-      feedbackId,
-      isPrivate: isPrivate ?? false,
-    } }))
+  const promotionId = operationId ?? randomUUID()
+  let item
+  try {
+    item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(source), undefined, async tx => {
+      const lastItem = await tx.roadmapItem.findFirst({
+        where: { workspaceId, horizon, status: "ACTIVE" },
+        orderBy: { sortOrder: "desc" },
+        select: { sortOrder: true },
+      })
+      return tx.roadmapItem.create({ data: {
+        id: promotionId,
+        workspaceId,
+        title: feedback.title,
+        horizon,
+        sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
+        feedbackId,
+        isPrivate: isPrivate ?? false,
+        source: source ?? "MCP",
+      } })
+    }, { atomic: true })
+  } catch (error) {
+    if (!operationId || !isUniqueConflict(error)) throw error
+    item = await prisma.roadmapItem.findUnique({ where: { id: promotionId } })
+    if (!item || item.workspaceId !== workspaceId || item.feedbackId !== feedbackId || item.horizon !== horizon || item.isPrivate !== (isPrivate ?? false) || item.source !== (source ?? "MCP")) {
+      throw new RoadmapPromotionConflict("The operationId was already used for a different roadmap promotion.")
+    }
+  }
 
   const lines = [
     `**Promoted to roadmap (${horizon})**`,

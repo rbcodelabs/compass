@@ -6,6 +6,75 @@ import { roadmapCreateData } from "@/lib/roadmap-tool-handlers"
 const UUID = "11111111-1111-4111-8111-111111111111"
 
 describe("REST API registry", () => {
+  it("enumerates the approved Phase 5 closure surface", () => {
+    const expected = [
+      ["GET", "/api/v1/help-topics"], ["GET", "/api/v1/help-topics/{topic}"],
+      ["GET", "/api/v1/organizations/{orgSlug}/workspaces"], ["POST", "/api/v1/organizations/{orgSlug}/workspaces"],
+      ["GET", "/api/v1/organizations/{orgSlug}/workspaces/{workspaceSlug}"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/summary"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/evidence"], ["POST", "/api/v1/workspaces/{workspaceId}/evidence"], ["PATCH", "/api/v1/workspaces/{workspaceId}/evidence/{id}"],
+      ["POST", "/api/v1/workspaces/{workspaceId}/feedback/{id}/attachments"],
+      ["POST", "/api/v1/workspaces/{workspaceId}/feedback/{id}/roadmap-promotions"],
+      ["POST", "/api/v1/workspaces/{workspaceId}/solutions/{id}/roadmap-promotions"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/scoring-model-assignments/{entityType}"], ["PATCH", "/api/v1/workspaces/{workspaceId}/scoring-model-assignments/{entityType}"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/launch-checklist-templates"], ["POST", "/api/v1/workspaces/{workspaceId}/launch-checklist-templates"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/objectives/{id}/eligible-parent-key-results"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/task-assignees"], ["GET", "/api/v1/workspaces/{workspaceId}/tasks/{id}/links"],
+      ["POST", "/api/v1/workspaces/{workspaceId}/feedback-sources"], ["PATCH", "/api/v1/workspaces/{workspaceId}/feedback-sources/{id}"],
+      ["GET", "/api/v1/workspaces/{workspaceId}/opportunity-rankings"], ["GET", "/api/v1/organizations/{orgSlug}/opportunity-rankings"],
+    ]
+    const actual = REST_ROUTES
+      .filter(route => [
+        "searchHelp", "getHelp", "listOrganizationWorkspaces", "createWorkspace", "getWorkspaceBySlug", "getWorkspaceSummary",
+        "listEvidence", "createEvidence", "updateEvidenceTarget", "completeFeedbackAttachmentUpload", "promoteFeedbackToRoadmap",
+        "promoteSolutionToRoadmap", "getWorkspaceScoringModel", "updateWorkspaceScoringModel", "listChecklistTemplates",
+        "createChecklistTemplate", "listEligibleParentKeyResults", "listTaskAssignees", "listTaskLinks", "createFeedbackSource",
+        "updateFeedbackSource", "listWorkspaceOpportunityRankings", "listOrganizationOpportunityRankings",
+      ].includes(route.operationId))
+      .map(route => [route.method, route.path])
+    expect(actual).toEqual(expected)
+
+    expect(REST_ROUTES.find(route => route.operationId === "createWorkspace")?.authorizationPolicy).toBe("human-org-admin")
+    for (const operationId of ["createFeedbackSource", "updateFeedbackSource"]) {
+      expect(REST_ROUTES.find(route => route.operationId === operationId)?.authorizationPolicy).toBe("human-admin")
+    }
+    expect(REST_ROUTES.find(route => route.operationId === "updateWorkspaceScoringModel")?.authorizationPolicy).toBe("scoring-admin")
+  })
+
+  it("binds promotion retries and one-time feedback credentials in strict DTOs", () => {
+    for (const operationId of ["promoteFeedbackToRoadmap", "promoteSolutionToRoadmap"]) {
+      const body = REST_ROUTES.find(route => route.operationId === operationId)!.bodySchema!
+      expect(body.safeParse({ operationId: UUID, horizon: "NEXT" }).success).toBe(true)
+      expect(body.safeParse({ horizon: "NEXT" }).success).toBe(false)
+    }
+
+    const issued = REST_ROUTES.find(route => route.operationId === "createFeedbackSource")!.responseSchema
+    const lifecycle = REST_ROUTES.find(route => route.operationId === "updateFeedbackSource")!.responseSchema
+    const source = { sourceId: UUID, authMode: "INTERNAL_SSO", allowedOrigins: [] }
+    expect(issued.safeParse({ ...source, token: "cmpfb_once" }).success).toBe(true)
+    expect(issued.safeParse(source).success).toBe(false)
+    expect(lifecycle.safeParse(source).success).toBe(true)
+    expect(lifecycle.safeParse({ ...source, token: "cmpfb_must_not_leak" }).success).toBe(false)
+  })
+
+  it("requires objective relationship changes to be separate atomic requests", () => {
+    const body = REST_ROUTES.find(route => route.operationId === "updateObjective")!.bodySchema!
+    expect(body.safeParse({ squadId: UUID }).success).toBe(true)
+    expect(body.safeParse({ parentKeyResultId: UUID }).success).toBe(true)
+    expect(body.safeParse({ squadId: UUID, parentKeyResultId: UUID }).success).toBe(false)
+    expect(body.safeParse({ title: "Retitled", squadId: UUID }).success).toBe(false)
+  })
+
+  it("validates workspace slugs and feedback-source origins before execution", () => {
+    const workspace = REST_ROUTES.find(route => route.operationId === "createWorkspace")!.bodySchema!
+    expect(workspace.safeParse({ name: "Product", slug: "product-1" }).success).toBe(true)
+    expect(workspace.safeParse({ name: "Product", slug: "Product Team" }).success).toBe(false)
+    const source = REST_ROUTES.find(route => route.operationId === "createFeedbackSource")!.bodySchema!
+    const base = { artifactId: UUID, name: "Prototype" }
+    for (const invalid of [[""], ["https://*.example.com"], ["https://example.com/path"], ["https://u:p@example.com"], Array.from({ length: 21 }, (_, index) => `https://${index}.example.com`)]) {
+      expect(source.safeParse({ ...base, allowedOrigins: invalid }).success).toBe(false)
+    }
+  })
   it("enumerates the complete authorized Phase 4 route and method surface", () => {
     const expected = [
       ["GET", "/api/v1/workspaces/{workspaceId}/research-studies"], ["POST", "/api/v1/workspaces/{workspaceId}/research-studies"],

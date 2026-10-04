@@ -60,6 +60,20 @@ describe("REST HTTP adapter", () => {
     expect(executeRestRoute).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ["wildcard", ["https://*.example.com"]],
+    ["path", ["https://example.com/path"]],
+    ["credentials", ["https://u:p@example.com"]],
+    ["too many", Array.from({ length: 21 }, (_, index) => `https://${index}.example.com`)],
+  ])("returns RFC 9457 validation for invalid feedback-source origins: %s", async (_label, allowedOrigins) => {
+    const response = await handleRestRequest(new Request(`http://localhost/api/v1/workspaces/${UUID}/feedback-sources`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ artifactId: UUID_2, name: "Prototype", allowedOrigins }),
+    }), "POST")
+    expect(response.status).toBe(422)
+    expect(await response.json()).toMatchObject({ code: "validation_failed", issues: expect.any(Array) })
+    expect(executeRestRoute).not.toHaveBeenCalled()
+  })
+
   it("returns resources directly and disables caching", async () => {
     const response = await handleRestRequest(new Request(`http://localhost/api/v1/workspaces/${UUID}/opportunities/${UUID}`), "GET")
     expect(response.status).toBe(200)

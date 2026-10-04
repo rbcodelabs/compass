@@ -29,10 +29,13 @@ export function NewRoundForm({
   orgSlug,
   workspaceSlug,
   factors,
+  objectLabel,
 }: {
   orgSlug: string
   workspaceSlug: string
   factors: FactorOption[]
+  /** Lowercase plural name of the object type being sorted, for the empty state. */
+  objectLabel?: string
 }) {
   const router = useRouter()
   const labels = useLabels()
@@ -47,7 +50,7 @@ export function NewRoundForm({
   if (factors.length === 0) {
     return (
       <p className="text-sm text-text-secondary">
-        {`This workspace has no SELECT custom fields on ${labels.opportunity.lowerPlural}, so there is nothing to sort by.`}
+        {`This workspace has no SELECT custom fields on ${objectLabel ?? labels.opportunity.lowerPlural}, so there is nothing to sort by.`}
         {" "}A factor is a SELECT field &mdash; its options become the buckets.
       </p>
     )

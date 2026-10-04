@@ -676,10 +676,12 @@ export async function listTopOpportunities({
   workspaceId,
   orgSlug,
   limit,
+  offset,
 }: {
   workspaceId?: string
   orgSlug?: string
   limit?: number
+  offset?: number
 }) {
   if (!workspaceId && !orgSlug) {
     return fail("Provide either workspaceId or orgSlug.")
@@ -710,12 +712,13 @@ export async function listTopOpportunities({
         },
       },
     },
-    orderBy: { normalizedScore: "desc" },
+    orderBy: [{ normalizedScore: "desc" }, { opportunityId: "asc" }],
+    skip: offset,
     take,
   })
 
   if (!scores.length) {
-    return fail("No scored opportunities found.")
+    return ok("No scored opportunities found.", { items: [], count: 0 })
   }
 
   // Cross-workspace view (orgSlug, no workspaceId) shows which workspace each

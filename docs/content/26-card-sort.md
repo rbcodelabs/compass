@@ -10,7 +10,7 @@ section: "Core Features"
 
 A card sort is a repeatable "propose a move" exercise. Everyone in the workspace looks at the same list of items, each sitting in a bucket (for example **Must / Should / Could**), and proposes moving the ones they disagree with. Nothing they propose changes the official value. The facilitator later reveals a tally so the team can see where opinion differs before anyone edits anything.
 
-Open it from **Discovery → Card sort**, or go to `/<org>/<workspace>/card-sort`.
+Open it from **Discovery → Card sort** (to sort Opportunities) or **Roadmap → Card sort** (to sort Roadmap Items), or go to `/<org>/<workspace>/card-sort`. The page has a switch for which object type a new round is about, and the round list shows every round with its object type.
 
 ## Rounds
 
@@ -53,11 +53,11 @@ Rules that apply to both:
 
 ## Proposing a new entry
 
-In a round over **Opportunities**, a participant can also propose that a brand-new opportunity be added: a title, an optional description, and optionally the bucket they think it belongs in.
+In a round over **Opportunities** or **Roadmap Items**, a participant can also propose that a brand-new one be added: a title, an optional description, and optionally the bucket they think it belongs in.
 
-A proposed entry is **not** an Opportunity. It is a pending request held on the round, and nothing in your tree changes until the facilitator accepts it:
+A proposed entry is **not** an Opportunity or Roadmap Item. It is a pending request held on the round, and nothing in your tree or roadmap changes until the facilitator accepts it:
 
-- **Accept** creates the real Opportunity, and the proposer's suggested bucket becomes their ordinary proposal on it (never the official value).
+- **Accept** creates the real Opportunity — or, in a Roadmap Item round, a Roadmap Item in the **Later** horizon (never Now, so accepting can't bypass the Now-commitment review; move it from the Roadmap afterwards) — and the proposer's suggested bucket becomes their ordinary proposal on it (never the official value).
 - **Reject** keeps a note visible to the proposer.
 
 Like proposals, entries are blind while the round is open: only the proposer and the facilitator can see them.
