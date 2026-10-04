@@ -153,6 +153,7 @@ describe("PanelShell mode selection", () => {
   it.each([
     ["opportunity", "discovery", true], ["opportunity", "discovery", false],
     ["task", "tasks", true], ["task", "tasks", false],
+    ["roadmapItem", "roadmap", true], ["roadmapItem", "roadmap", false],
   ] as const)("keeps one compact %s full-page action beside pin and close (%s, pinned=%s)", async (type, route, pinned) => {
     panelState = { type, id: "entity-1" };
     render(<PanelShell initialPin={{ pinned, width: PANEL_WIDTH_DEFAULT }} />);

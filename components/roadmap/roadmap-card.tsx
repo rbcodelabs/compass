@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import Link from "next/link";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -13,7 +13,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { archiveItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { setPanelSeed } from "@/lib/panel-seed";
-import { EditItemDialog } from "./edit-item-dialog";
 import { DeliveryStatusBadge } from "./delivery-status-badge";
 
 import type { Horizon } from "@/lib/types";
@@ -74,10 +73,8 @@ type Props = {
   item: RoadmapCardData;
   revalidatePathStr: string;
   onArchive: (itemId: string) => void;
-  onUpdate?: (item: RoadmapCardData) => void;
   orgSlug: string;
   workspaceSlug: string;
-  availableOpportunities?: Array<{ id: string; title: string }>;
   // Gates the launch progress chip and the "Launch" card-menu item. Default
   // true so existing call sites (and tests) that don't pass it keep today's
   // behavior — the roadmap board/column always pass the workspace's actual
@@ -85,9 +82,8 @@ type Props = {
   launchWorkflowEnabled?: boolean;
 };
 
-export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, onUpdate, orgSlug, workspaceSlug, availableOpportunities, launchWorkflowEnabled = true }: Props) {
+export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, orgSlug, workspaceSlug, launchWorkflowEnabled = true }: Props) {
   const [isArchiving, startArchiveTransition] = useTransition();
-  const [editOpen, setEditOpen] = useState(false);
   const { openPanel: openPanelRaw } = usePanelContext();
   // Hand the card's own data to the panel so it paints before its fetch lands.
   const openPanel: typeof openPanelRaw = (type, id, options) => {
@@ -184,7 +180,7 @@ export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, o
             items={[
               {
                 label: "Edit",
-                onClick: () => setEditOpen(true),
+                onClick: () => openPanel("roadmapItem", item.id),
               },
               ...(launchWorkflowEnabled
                 ? [
@@ -322,15 +318,6 @@ export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, o
         )}
       </EntityCard>
 
-      <EditItemDialog
-        item={item}
-        workspaceId={workspaceId}
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        revalidatePathStr={revalidatePathStr}
-        onSaved={(updated) => onUpdate?.(updated)}
-        availableOpportunities={availableOpportunities}
-      />
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@/auth", () => ({ auth: vi.fn() }));
 
-import { moveCardToHorizon, buildColumnMap } from "@/components/roadmap/roadmap-board";
+import { moveCardToHorizon, applyRoadmapItemPatch, buildColumnMap } from "@/components/roadmap/roadmap-board";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 
 function card(id: string, horizon: RoadmapCardData["horizon"], sortOrder = 0): RoadmapCardData {
@@ -77,5 +77,32 @@ describe("moveCardToHorizon", () => {
     const next = moveCardToHorizon(columns, "a", "LAUNCHING");
 
     expect(next.LAUNCHING.map((i) => i.id)).toEqual(["existing", "a"]);
+  });
+});
+
+describe("applyRoadmapItemPatch", () => {
+  const columns = () => buildColumnMap([card("a", "NOW"), card("b", "NEXT")]);
+
+  it("merges edited card fields without moving the card", () => {
+    const next = applyRoadmapItemPatch(columns(), "a", { roadmapItem: { title: "Renamed", isPrivate: true, squad: { id: "s", name: "Growth", color: "#fff" } } });
+    expect(next.NOW[0]).toMatchObject({ id: "a", title: "Renamed", isPrivate: true, squad: { name: "Growth" } });
+    expect(next.NEXT).toHaveLength(1);
+  });
+
+  it("moves the card when the horizon changed, carrying the merged fields", () => {
+    const next = applyRoadmapItemPatch(columns(), "a", { horizon: "LATER", roadmapItem: { title: "Renamed", horizon: "LATER" } });
+    expect(next.NOW).toHaveLength(0);
+    expect(next.LATER[0]).toMatchObject({ id: "a", title: "Renamed", horizon: "LATER" });
+  });
+
+  it("drops an archived card", () => {
+    const next = applyRoadmapItemPatch(columns(), "b", { archived: true });
+    expect(next.NEXT).toHaveLength(0);
+    expect(next.NOW).toHaveLength(1);
+  });
+
+  it("is a no-op for a card the board does not hold", () => {
+    const before = columns();
+    expect(applyRoadmapItemPatch(before, "missing", { roadmapItem: { title: "x" } })).toBe(before);
   });
 });

@@ -160,7 +160,6 @@ describe("Roadmap dashboard workspace layout", () => {
         revalidatePathStr: "/rbcodelabs/compass/roadmap",
         onItemAdded: vi.fn(),
         onArchive: vi.fn(),
-        onUpdate: vi.fn(),
       }),
     );
 

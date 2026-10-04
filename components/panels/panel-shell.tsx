@@ -214,7 +214,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
   };
 
   const title = panel ? panelTitles(labels)[panel.type] ?? panel.type : "";
-  const fullPageRoute = panel?.type === "task" ? "tasks" : panel?.type === "opportunity" ? "discovery" : null;
+  const fullPageRoute = panel?.type === "task" ? "tasks" : panel?.type === "opportunity" ? "discovery" : panel?.type === "roadmapItem" ? "roadmap" : null;
   const hasCompactHeader = fullPageRoute !== null;
   const fullPageAction = fullPageRoute && panel ? (
     <Link

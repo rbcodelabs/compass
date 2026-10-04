@@ -6,9 +6,8 @@
  *      ordinary public item, via the inline Add Item form on the Board.
  *   2. Confirm the private item shows a "Private" badge on the internal
  *      Board and the public item does not.
- *   3. Open the private item's Edit dialog to read its UUID off the title
- *      input's `id` attribute (`edit-title-<uuid>`) — the app doesn't
- *      otherwise expose roadmap item IDs in the DOM.
+ *   3. Open the private item's detail panel (card Edit action) and read its
+ *      UUID off the `?detail=roadmapItem:<uuid>` URL.
  *   4. Enable Public Roadmap in Settings (if not already on).
  *   5. Load the public portal roadmap anonymously and confirm the public
  *      item is listed while the private item's title never appears.
@@ -51,21 +50,22 @@ test.describe("Roadmap — private items", () => {
       await expect(privateCard.getByText("Private", { exact: true })).toBeVisible();
       await expect(publicCard.getByText("Private", { exact: true })).not.toBeVisible();
 
-      // ── 3. Read the private item's UUID off the Edit dialog's title input ──
+      // ── 3. Read the private item's UUID off the detail panel URL ──────────
       await privateCard.hover();
       await privateCard.getByLabel("Card actions").click();
       await page.getByRole("menuitem", { name: "Edit" }).click();
 
-      const titleInput = page.locator('input[id^="edit-title-"]');
-      const inputId = await titleInput.getAttribute("id");
-      const privateItemId = inputId!.replace("edit-title-", "");
-      expect(privateItemId).toMatch(/^[0-9a-f-]{36}$/);
+      const panel = page.locator('[data-slot="sheet-content"]');
+      await expect(page).toHaveURL(/detail=roadmapItem(:|%3A)[0-9a-f-]{36}/);
+      const privateItemId = /roadmapItem(?::|%3A)([0-9a-f-]{36})/.exec(page.url())![1];
 
-      // The dialog's Private checkbox should reflect the saved state too.
-      await expect(page.getByRole("checkbox", { name: "Private (hidden from public roadmap)" })).toBeChecked();
+      // The panel reflects the saved state too: a read-only chip and the toggle.
+      await expect(panel.getByLabel("Roadmap item summary").getByText("Private", { exact: true })).toBeVisible();
+      await panel.getByRole("button", { name: "More properties" }).click();
+      await expect(panel.getByRole("checkbox")).toBeChecked();
 
       await page.keyboard.press("Escape");
-      await expect(titleInput).not.toBeVisible({ timeout: 5_000 });
+      await expect(panel).toHaveCount(0, { timeout: 5_000 });
 
       // ── 4. Enable Public Roadmap in Settings (restore afterward) ───────────
       await page.goto(`${base}/settings`);
