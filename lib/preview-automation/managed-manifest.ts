@@ -146,7 +146,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Portal Home widget layout: one new table plus one unique ASYNC index, IF NOT EXISTS throughout,
   // no data writes. Digest recorded from the shipped SQL; please review it. The postcondition hook
   // (lib/migrations/portal-home-layout.ts) is pinned in REVIEWED_MIGRATION_CODE_SHA256 below.
-  "074_portal_home_layout": "a55135642d04825fc221b2ae1992972bdd118d8cbf8dc4289db75b1af5e80b3b"
+  "074_portal_home_layout": "a55135642d04825fc221b2ae1992972bdd118d8cbf8dc4289db75b1af5e80b3b",
+  // Roadmap item provenance: two nullable ADD COLUMNs on roadmap_items (auto_created, schedule_edited_at); no
+  // index, no backfill, no data writes. The postcondition hook (lib/migrations/roadmap-item-provenance.ts) is
+  // pinned in REVIEWED_MIGRATION_CODE_SHA256 below. Digest recorded from the shipped SQL; please review it.
+  "075_roadmap_item_provenance": "2d4d390790ff8cb20c7918e0b56b2a37ccbc99eddc5216622668ba50602ed0e6"
 };
 
 /**
@@ -176,6 +180,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 074 postcondition (table shape plus a valid, ready, unique workspace index before the receipt).
   "074_portal_home_layout": {
     "lib/migrations/portal-home-layout.ts": "4ad0279c979c9e90971958e475e521c5eda0ef043c6bd1fb1461b9482f94700d",
+  },
+  // The 075 postcondition (both roadmap_items columns present, typed and nullable before the receipt).
+  "075_roadmap_item_provenance": {
+    "lib/migrations/roadmap-item-provenance.ts": "6f99f4829eccd6864d7dd476a01299bb3027246f4d6e6d2fdbd255980b88f4f5",
   },
 };
 

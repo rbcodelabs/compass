@@ -25,6 +25,7 @@ import { assertGeodeDocumentStorageMigration, getGeodeDocumentStorageHealth } fr
 import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-updates";
 import { assertFollowsNotificationsMigration } from "@/lib/migrations/follows-notifications";
 import { assertPortalHomeLayoutMigration } from "@/lib/migrations/portal-home-layout";
+import { assertRoadmapItemProvenanceMigration } from "@/lib/migrations/roadmap-item-provenance";
 import { assertMcpConnectorsMigration } from "@/lib/migrations/mcp-connectors";
 import { assertMetricsDashboardMigration } from "@/lib/migrations/metrics-dashboard";
 import { assertObjectiveCycleIdNullable, OBJECTIVE_OPTIONAL_CYCLE_MIGRATION } from "@/lib/migrations/objective-optional-cycle";
@@ -503,6 +504,14 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // unique index before the receipt is recorded. Nothing reads the table until the code ships.
     name: "074_portal_home_layout",
     filePath: path.join(process.cwd(), "prisma/migrations/074_portal_home_layout/migration.sql"),
+  },
+  {
+    // Two nullable columns on roadmap_items (auto_created, schedule_edited_at) for building the roadmap
+    // from Discovery. Plain ADD COLUMN IF NOT EXISTS (DSQL: no constraints, no index, no backfill: NULL is
+    // every existing row's correct state). The hook asserts both columns exist, are typed and are nullable
+    // before the receipt. Not explicit-only: no rollout dependency and idempotent.
+    name: "075_roadmap_item_provenance",
+    filePath: path.join(process.cwd(), "prisma/migrations/075_roadmap_item_provenance/migration.sql"),
   },
 ];
 
@@ -2009,6 +2018,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "062_mcp_connectors") await assertMcpConnectorsMigration(client, schema)
       if (migration.name === "068_follows_notifications") await assertFollowsNotificationsMigration(client, schema)
       if (migration.name === "074_portal_home_layout") await assertPortalHomeLayoutMigration(client, schema)
+      if (migration.name === "075_roadmap_item_provenance") await assertRoadmapItemProvenanceMigration(client, schema)
       if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {
         // Data half: backfill from the parent in bounded batches, then prove it.
         // Both run before the receipt below, so a failure leaves an unfinished
