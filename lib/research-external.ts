@@ -1,5 +1,14 @@
 import { createHash } from "node:crypto"
 import { normalizeResearchAppUrl } from "@/lib/research"
+import {
+  EXTERNAL_PROVIDERS, EXTERNAL_PROVIDER_LABELS, EXTERNAL_PROVENANCE, MAX_EXTERNAL_NOTES_CHARS, MAX_EXTERNAL_TRANSCRIPT_CHARS, MAX_EXTERNAL_TURNS,
+  type ExternalProvider,
+} from "@/lib/research-external-constants"
+
+// Re-exported so server callers keep one import site; client components import the constants module directly
+// (this file pulls in node:crypto, which must never reach a client bundle).
+export { EXTERNAL_PROVIDERS, EXTERNAL_PROVIDER_LABELS, EXTERNAL_PROVENANCE, MAX_EXTERNAL_NOTES_CHARS, MAX_EXTERNAL_TRANSCRIPT_CHARS, MAX_EXTERNAL_TURNS }
+export type { ExternalProvider }
 
 /**
  * Pure validation and parsing for external / manual research studies: research that
@@ -12,22 +21,10 @@ import { normalizeResearchAppUrl } from "@/lib/research"
  */
 export class ExternalResearchInputError extends Error {}
 
-export const EXTERNAL_PROVIDERS = ["USERTESTING", "MAZE", "OTHER"] as const
-export type ExternalProvider = (typeof EXTERNAL_PROVIDERS)[number]
-export const EXTERNAL_PROVIDER_LABELS: Record<ExternalProvider, string> = {
-  USERTESTING: "UserTesting",
-  MAZE: "Maze",
-  OTHER: "Other / manual",
-}
-
 export function externalProviderLabel(value: string | null | undefined): string {
   return isExternalProvider(value) ? EXTERNAL_PROVIDER_LABELS[value] : "Other / manual"
 }
 
-export const EXTERNAL_PROVENANCE ="EXTERNAL_IMPORT"
-export const MAX_EXTERNAL_TRANSCRIPT_CHARS = 60_000
-export const MAX_EXTERNAL_NOTES_CHARS = 20_000
-export const MAX_EXTERNAL_TURNS = 500
 const MAX_TURN_CHARS = 4_000
 const MAX_URL_CHARS = 2_000
 

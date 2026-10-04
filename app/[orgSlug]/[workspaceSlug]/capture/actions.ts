@@ -5,6 +5,8 @@ import { redirect } from "next/navigation"
 import * as studies from "@/lib/research-study-service"
 import type { ResearchStudyType } from "@/lib/research"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
+import { ExternalResearchInputError } from "@/lib/research-external"
+import type { ExternalFormState } from "@/lib/research-external-constants"
 
 async function actor() {
   if (!isResearchCaptureEnabled()) throw new Error("Research capture is not enabled")
@@ -62,18 +64,35 @@ export async function revokeResearchLinks(orgSlug: string, workspaceSlug: string
   const result = await studies.revokeResearchLinks({ orgSlug, workspaceSlug }, await actor(), studyId)
   redirect(studyUrl(orgSlug, workspaceSlug, result.id))
 }
-export async function createExternalResearchStudy(orgSlug: string, workspaceSlug: string, formData: FormData) {
-  const result = await studies.createExternalResearchStudy({ orgSlug, workspaceSlug }, await actor(), {
-    name: formData.get("name"), goal: formData.get("goal"),
-    externalProvider: formData.get("externalProvider"), externalUrl: formData.get("externalUrl"),
-  })
-  redirect(studyUrl(orgSlug, workspaceSlug, result.id))
+function formValues(formData: FormData, fields: string[]): Record<string, string> {
+  return Object.fromEntries(fields.map((field) => [field, String(formData.get(field) ?? "")]))
 }
-export async function addExternalResearchSession(orgSlug: string, workspaceSlug: string, studyId: string, formData: FormData) {
-  await studies.addExternalResearchSession({ orgSlug, workspaceSlug }, await actor(), studyId, {
-    idempotencyKey: formData.get("idempotencyKey"), participantName: formData.get("participantName"),
-    participantEmail: formData.get("participantEmail"), externalUrl: formData.get("externalUrl"),
-    transcript: formData.get("transcript"), notes: formData.get("notes"), sessionDate: formData.get("sessionDate"),
-  })
+/** Member-correctable rejections become inline messages; anything else is a real failure and still throws. */
+function rejection(error: unknown, values: Record<string, string>): ExternalFormState {
+  if (error instanceof ExternalResearchInputError || error instanceof studies.ResearchStudyError) return { error: error.message, values, attempt: Date.now() }
+  throw error
+}
+export async function createExternalResearchStudy(orgSlug: string, workspaceSlug: string, _previous: ExternalFormState, formData: FormData): Promise<ExternalFormState> {
+  let id: string
+  try {
+    ;({ id } = await studies.createExternalResearchStudy({ orgSlug, workspaceSlug }, await actor(), {
+      name: formData.get("name"), goal: formData.get("goal"),
+      externalProvider: formData.get("externalProvider"), externalUrl: formData.get("externalUrl"),
+    }))
+  } catch (error) {
+    return rejection(error, formValues(formData, ["name", "goal", "externalProvider", "externalUrl"]))
+  }
+  redirect(studyUrl(orgSlug, workspaceSlug, id))
+}
+export async function addExternalResearchSession(orgSlug: string, workspaceSlug: string, studyId: string, _previous: ExternalFormState, formData: FormData): Promise<ExternalFormState> {
+  try {
+    await studies.addExternalResearchSession({ orgSlug, workspaceSlug }, await actor(), studyId, {
+      idempotencyKey: formData.get("idempotencyKey"), participantName: formData.get("participantName"),
+      participantEmail: formData.get("participantEmail"), externalUrl: formData.get("externalUrl"),
+      transcript: formData.get("transcript"), notes: formData.get("notes"), sessionDate: formData.get("sessionDate"),
+    })
+  } catch (error) {
+    return rejection(error, formValues(formData, ["participantName", "participantEmail", "sessionDate", "externalUrl", "transcript", "notes"]))
+  }
   redirect(studyUrl(orgSlug, workspaceSlug, studyId))
 }

@@ -106,6 +106,8 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
   const guided = study.studyType === "USABILITY_TEST"
   const external = study.studyType === "EXTERNAL"
   const addExternalSession = addExternalResearchSession.bind(null, orgSlug, workspaceSlug, study.id)
+  // Fresh per render; also the form's React key so a successful save (redirect back here) remounts it and clears any earlier error.
+  const externalSessionKey = randomUUID()
   const linkedArtifact = study.artifactId
     ? await prisma.artifact.findFirst({ where: { id: study.artifactId }, select: { id: true, title: true } })
     : null
@@ -131,7 +133,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
       {study.status === "ARCHIVED"
         ? <p className="max-w-3xl rounded-xl border bg-surface-panel p-5 text-sm text-text-muted">This study is archived and retained for research review.</p>
         : external
-          ? <ExternalSessionForm action={addExternalSession} idempotencyKey={randomUUID()} />
+          ? <ExternalSessionForm key={externalSessionKey} action={addExternalSession} idempotencyKey={externalSessionKey} />
           : <StudySettings action={update} protocolLocked={study._count.sessions > 0} study={study} linkedArtifact={linkedArtifact} artifactHref={artifactHref} />}
       <StudyLifecycleControls activate={activate} archive={archive} close={close} status={study.status} external={external} />
       <SynthesisResults snapshots={study.syntheses.slice(0, 10)} studyId={study.id} studyUrl={studyUrl} completedSessionIds={completedSessions.map(item => item.id)} currentGuideFingerprint={guideFingerprint(study.goal, guide)} />
