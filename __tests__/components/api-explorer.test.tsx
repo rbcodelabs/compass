@@ -75,6 +75,38 @@ async function setup(second = jsonResponse({ id: "synthetic" })) {
   return fetcher;
 }
 describe("custom API explorer", () => {
+  it("uses one fixed method column for every operation title", async () => {
+    const value = {
+      ...document,
+      paths: {
+        "/api/v1/tasks": Object.fromEntries(
+          ["get", "post", "delete", "patch"].map((method) => [
+            method,
+            {
+              operationId: `${method}Task`,
+              summary: `${method} task`,
+              responses: {},
+            },
+          ]),
+        ),
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(value)));
+    render(<ApiExplorer />);
+    await screen.findByRole("heading", { name: "get task" });
+    for (const method of ["GET", "POST", "DELETE", "PATCH"]) {
+      const row = screen.getByRole("button", {
+        name: `${method} ${method.toLowerCase()} task`,
+      });
+      expect(row).toHaveClass(
+        "grid",
+        "grid-cols-[3rem_minmax(0,1fr)]",
+        "gap-3",
+        "items-start",
+      );
+      expect(row.children[1]).toHaveClass("min-w-0", "line-clamp-2");
+    }
+  });
   it("loads the public contract with deployment cookies but keeps API reads cookie-free", async () => {
     const fetcher = vi.fn(async (url: string, options: RequestInit) => {
       if (url === "/api/v1/openapi.json") {

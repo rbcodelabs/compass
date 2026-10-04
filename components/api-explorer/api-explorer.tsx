@@ -197,7 +197,7 @@ export function ApiExplorer() {
                 <Button
                   key={op.id}
                   variant={op.id === operationId ? "secondary" : "ghost"}
-                  className="w-full justify-start h-auto py-2 whitespace-normal text-left"
+                  className="grid grid-cols-[3rem_minmax(0,1fr)] gap-3 items-start w-full justify-start h-auto py-2 whitespace-normal text-left"
                   aria-label={`${op.method} ${op.summary}`}
                   onClick={() => choose(op)}
                   aria-current={op.id === operationId ? "true" : undefined}
@@ -205,15 +205,15 @@ export function ApiExplorer() {
                   <span
                     className={
                       op.method === "GET"
-                        ? "font-mono text-[10px] text-primary"
-                        : "font-mono text-[10px] text-text-subtle"
+                        ? "font-mono text-[10px] leading-5 text-primary"
+                        : "font-mono text-[10px] leading-5 text-text-subtle"
                     }
                   >
                     {op.method}
                   </span>
                   <span
                     title={op.summary}
-                    className="min-w-0 break-words text-xs line-clamp-2"
+                    className="min-w-0 break-words text-xs leading-5 line-clamp-2"
                   >
                     {op.summary}
                   </span>

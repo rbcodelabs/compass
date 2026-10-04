@@ -12,6 +12,62 @@ async function capture(page: Page, name: string) {
   });
 }
 const meLink = "/help/api-explorer#operation=getCurrentIdentity";
+test("method columns align operation titles on desktop and mobile", async ({
+  page,
+}, testInfo) => {
+  const methods = ["get", "post", "delete", "patch"];
+  await page.route("**/api/v1/openapi.json", (route) =>
+    route.fulfill({
+      status: 200,
+      json: {
+        openapi: "3.1.0",
+        info: { version: "1" },
+        paths: {
+          "/api/v1/tasks": Object.fromEntries(
+            methods.map((method) => [
+              method,
+              {
+                operationId: `${method}Task`,
+                summary: `${method} a synthetic task with a longer operation title`,
+                responses: {},
+              },
+            ]),
+          ),
+        },
+      },
+    }),
+  );
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto("/help/api-explorer#operation=getTask");
+    if (width === 390)
+      await page.getByRole("button", { name: "Browse operations" }).click();
+    const lefts: number[] = [];
+    for (const method of methods) {
+      const row = page.getByRole("button", {
+        name: `${method.toUpperCase()} ${method} a synthetic task with a longer operation title`,
+      });
+      await expect(row).toBeVisible();
+      const title = await row.locator("span").nth(1).boundingBox();
+      expect(title).not.toBeNull();
+      lefts.push(title!.x);
+    }
+    expect(Math.max(...lefts) - Math.min(...lefts)).toBeLessThanOrEqual(1);
+    await testInfo.attach(`method-alignment-${width}`, {
+      body: JSON.stringify({ viewportWidth: width, methods, titleLefts: lefts }),
+      contentType: "application/json",
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth,
+      ),
+    ).toBe(false);
+    await page.screenshot({
+      path: testInfo.outputPath(`api-explorer-method-alignment-${width}.png`),
+      fullPage: true,
+    });
+  }
+});
 test("deployment cookies load the contract without authorizing cookie-free API reads", async ({
   page,
   baseURL,
