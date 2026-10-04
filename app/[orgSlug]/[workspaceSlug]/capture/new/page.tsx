@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { PageHeader } from "@/components/patterns/page-header"
 import { StudyBuilder } from "@/components/research/study-builder"
 import { createResearchStudy, generateResearchGuide } from "../actions"
@@ -34,6 +35,10 @@ export default async function NewStudyPage({ params }: { params: Promise<{ orgSl
         title="New research study"
         description="Create a customer interview or guided usability test with chat and voice."
       />
+      <p className="text-sm text-text-muted">
+        Ran this research somewhere else?{" "}
+        <Link className="underline" href={`/${orgSlug}/${workspaceSlug}/capture/new/external`}>Add a manual / external study</Link> instead.
+      </p>
       <StudyBuilder action={action} generateGuide={guideAction} artifacts={artifacts} />
     </main>
   )

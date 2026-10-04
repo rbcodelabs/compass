@@ -3,7 +3,11 @@ import getPrisma from "@/lib/db"
 import { auth } from "@/auth"
 import { PageHeader } from "@/components/patterns/page-header"
 import { Input } from "@/components/ui/input"
-import { activateResearchStudy, archiveResearchStudy, closeResearchStudy, regenerateResearchLink, revokeResearchLinks, updateResearchStudy } from "../../actions"
+import { randomUUID } from "node:crypto"
+import { ExternalSessionForm } from "@/components/research/external-session-form"
+import { ExternalSessionMeta, isExternalSession } from "@/components/research/external-session-meta"
+import { externalProviderLabel } from "@/lib/research-external"
+import { addExternalResearchSession, activateResearchStudy, archiveResearchStudy, closeResearchStudy, regenerateResearchLink, revokeResearchLinks, updateResearchStudy } from "../../actions"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { hashResearchToken } from "@/lib/research"
 import { CompassUrlNotConfiguredError, researchParticipantUrl } from "@/lib/compass-url"
@@ -100,6 +104,8 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
   const close = closeResearchStudy.bind(null, orgSlug, workspaceSlug, study.id)
   const archive = archiveResearchStudy.bind(null, orgSlug, workspaceSlug, study.id)
   const guided = study.studyType === "USABILITY_TEST"
+  const external = study.studyType === "EXTERNAL"
+  const addExternalSession = addExternalResearchSession.bind(null, orgSlug, workspaceSlug, study.id)
   const linkedArtifact = study.artifactId
     ? await prisma.artifact.findFirst({ where: { id: study.artifactId }, select: { id: true, title: true } })
     : null
@@ -108,29 +114,35 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
     <main className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8">
       <PageHeader title={study.name} description={study.goal} />
       <section className="flex max-w-3xl flex-wrap gap-x-6 gap-y-2 rounded-xl border bg-surface-panel p-4 text-sm">
-        <div><span className="text-text-muted">Type</span><div className="font-medium">{guided ? "Guided usability test" : "Customer interview"}</div></div>
-        <div><span className="text-text-muted">Target</span><div className="font-medium">{study.targetMinutes} minutes</div></div>
+        <div><span className="text-text-muted">Type</span><div className="font-medium">{external ? "External study (imported)" : guided ? "Guided usability test" : "Customer interview"}</div></div>
+        {external
+          ? <div><span className="text-text-muted">Run in</span><div className="font-medium">{externalProviderLabel(study.externalProvider)}</div></div>
+          : <div><span className="text-text-muted">Target</span><div className="font-medium">{study.targetMinutes} minutes</div></div>}
+        {external && study.externalUrl && <div className="min-w-0"><span className="text-text-muted">Study link</span><div><a className="break-all font-medium underline" href={study.externalUrl} rel="noopener noreferrer" target="_blank">{study.externalUrl}</a></div></div>}
         <div><span className="text-text-muted">Status</span><div className="font-medium capitalize">{study.status.toLowerCase()}</div></div>
         {guided && study.appUrl && <div className="min-w-0"><span className="text-text-muted">Product</span><div><a className="break-all font-medium underline" href={study.appUrl} rel="noopener noreferrer" target="_blank">{study.appUrl}</a></div></div>}
         {guided && linkedArtifact && artifactHref && <div className="min-w-0"><span className="text-text-muted">Prototype artifact</span><div><Link className="break-all font-medium underline" href={artifactHref}>{linkedArtifact.title}</Link></div></div>}
       </section>
-      <section className="max-w-3xl rounded-xl border bg-surface-panel p-5">
+      {!external && <section className="max-w-3xl rounded-xl border bg-surface-panel p-5">
         <h2 className="font-semibold">Participant link</h2>
         {shareUrl ? <><Input aria-label="Participant link" className="mt-3" readOnly value={shareUrl} /><p className="mt-2 text-xs text-text-muted">Save this link now. Compass stores only its secure hash.</p></> : <p className="mt-2 text-sm text-text-subtle">For security, Compass cannot display an existing link again. {study.participantTokens.length ? `${study.participantTokens.length} active link${study.participantTokens.length === 1 ? " is" : "s are"} available.` : "There is no active participant link."}</p>}
         {study.status === "ACTIVE" && <div className="mt-3 flex gap-2"><form action={regenerate}><ResearchSubmitButton pendingLabel="Rotating…" variant="outline">{study.participantTokens.length ? "Rotate participant link" : "Generate participant link"}</ResearchSubmitButton></form>{study.participantTokens.length > 0 && <form action={revoke}><ResearchSubmitButton pendingLabel="Revoking…" variant="ghost">Revoke active links</ResearchSubmitButton></form>}</div>}
-      </section>
+      </section>}
       {study.status === "ARCHIVED"
         ? <p className="max-w-3xl rounded-xl border bg-surface-panel p-5 text-sm text-text-muted">This study is archived and retained for research review.</p>
-        : <StudySettings action={update} protocolLocked={study._count.sessions > 0} study={study} linkedArtifact={linkedArtifact} artifactHref={artifactHref} />}
-      <StudyLifecycleControls activate={activate} archive={archive} close={close} status={study.status} />
+        : external
+          ? <ExternalSessionForm action={addExternalSession} idempotencyKey={randomUUID()} />
+          : <StudySettings action={update} protocolLocked={study._count.sessions > 0} study={study} linkedArtifact={linkedArtifact} artifactHref={artifactHref} />}
+      <StudyLifecycleControls activate={activate} archive={archive} close={close} status={study.status} external={external} />
       <SynthesisResults snapshots={study.syntheses.slice(0, 10)} studyId={study.id} studyUrl={studyUrl} completedSessionIds={completedSessions.map(item => item.id)} currentGuideFingerprint={guideFingerprint(study.goal, guide)} />
       <nav aria-label="Synthesis history pages" className="flex gap-4 text-sm">{synthesisPage > 1 && <Link className="underline" href={`${studyUrl}?page=${page}&synthesisPage=${synthesisPage - 1}`}>Newer synthesis snapshots</Link>}{study.syntheses.length > 10 && <Link className="underline" href={`${studyUrl}?page=${page}&synthesisPage=${synthesisPage + 1}`}>Older synthesis snapshots</Link>}</nav>
       <section className="max-w-3xl">
         <h2 className="mb-3 font-semibold">Sessions</h2>
         {study.sessions.length ? <div className="space-y-3">{study.sessions.slice(0, 20).map((researchSession) => <article key={researchSession.id} className="rounded-lg border bg-surface-panel p-4 text-sm">
-          <div><span className="font-medium">{researchSession.modality === "VOICE" ? "Voice" : "Chat"} session</span><span className="ml-2 text-text-muted">{researchSession.status.toLowerCase()}</span></div>
-          <p className="mt-1 text-xs text-text-muted">{researchSession.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC · {researchSession._count.turns} saved turns</p>
-          {researchSession.modality === "VOICE" && <p className="mt-2 text-xs text-text-muted">Voice source is unverified in this view. Browser voice transcripts are participant-reported evidence.</p>}
+          <div><span className="font-medium">{isExternalSession(researchSession) ? "External session" : `${researchSession.modality === "VOICE" ? "Voice" : "Chat"} session`}</span><span className="ml-2 text-text-muted">{researchSession.status.toLowerCase()}</span></div>
+          <p className="mt-1 text-xs text-text-muted">{(isExternalSession(researchSession) ? researchSession.startedAt ?? researchSession.createdAt : researchSession.createdAt).toISOString().slice(0, 16).replace("T", " ")} UTC · {researchSession._count.turns} saved turns</p>
+          {isExternalSession(researchSession) && <ExternalSessionMeta session={researchSession} />}
+          {researchSession.modality === "VOICE" &&<p className="mt-2 text-xs text-text-muted">Voice source is unverified in this view. Browser voice transcripts are participant-reported evidence.</p>}
           <SessionAnalysisResults studyId={study.id} sessionId={researchSession.id} status={researchSession.status} summary={researchSession.summary} guide={guide} sessionUrl={`${studyUrl}/sessions/${researchSession.id}`} />
           {researchSession.turns.length > 0 && <ol className="mt-3 space-y-2 border-t pt-3">{researchSession.turns.map((turn) => <li key={turn.id}><span className="font-medium">{turn.role === "INTERVIEWER" ? "Interviewer" : "Participant"}:</span> <span className="text-text-subtle">{turn.content}</span></li>)}</ol>}
           {researchSession.attachments.length > 0 && <div className="mt-4 border-t pt-3"><h3 className="text-xs font-medium uppercase tracking-wide text-text-muted">Attachments</h3><div className="mt-2 flex flex-wrap gap-3">{researchSession.attachments.map((attachment) => {
@@ -138,7 +150,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
             return <div className="max-w-48 rounded-lg border p-2" key={attachment.id}><ResearchAttachmentLink url={href} originalName={attachment.originalName} mimeType={attachment.mimeType} /></div>
           })}</div></div>}
           <Link className="mt-3 inline-block underline" href={`${studyUrl}/sessions/${researchSession.id}`}>View full interview and attachments</Link>
-        </article>)}</div> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-text-subtle">No participant sessions yet.</p>}
+        </article>)}</div> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-text-subtle">{external ? "No sessions yet. Paste a transcript or notes above to add one." : "No participant sessions yet."}</p>}
       </section>
       <nav aria-label="Session pages" className="flex gap-4 text-sm">{page > 1 && <Link className="underline" href={`${studyUrl}?page=${page - 1}&synthesisPage=${synthesisPage}`}>Previous sessions</Link>}<span>Page {page} · {study._count.sessions} sessions</span>{study.sessions.length > 20 && <Link className="underline" href={`${studyUrl}?page=${page + 1}&synthesisPage=${synthesisPage}`}>Next sessions</Link>}</nav>
     </main>

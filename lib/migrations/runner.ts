@@ -513,6 +513,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "075_roadmap_item_provenance",
     filePath: path.join(process.cwd(), "prisma/migrations/075_roadmap_item_provenance/migration.sql"),
   },
+  {
+    // External / manual research studies: five nullable ADD COLUMNs on research_studies and
+    // research_sessions. Plain ADD COLUMN IF NOT EXISTS: no index, no backfill, no hook.
+    name: "076_research_external_studies",
+    filePath: path.join(process.cwd(), "prisma/migrations/076_research_external_studies/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));

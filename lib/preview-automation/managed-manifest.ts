@@ -150,7 +150,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Roadmap item provenance: two nullable ADD COLUMNs on roadmap_items (auto_created, schedule_edited_at); no
   // index, no backfill, no data writes. The postcondition hook (lib/migrations/roadmap-item-provenance.ts) is
   // pinned in REVIEWED_MIGRATION_CODE_SHA256 below. Digest recorded from the shipped SQL; please review it.
-  "075_roadmap_item_provenance": "2d4d390790ff8cb20c7918e0b56b2a37ccbc99eddc5216622668ba50602ed0e6"
+  "075_roadmap_item_provenance": "2d4d390790ff8cb20c7918e0b56b2a37ccbc99eddc5216622668ba50602ed0e6",
+  // External / manual research studies: five nullable ADD COLUMNs (research_studies and
+  // research_sessions), no index, no backfill, no hook. Digest recorded from the shipped SQL; please review it.
+  "076_research_external_studies": "01cc40f387b9171fc6761f598db0ce20e0dae1df9ca58f9755bdbe481bd97cb0"
 };
 
 /**

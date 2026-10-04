@@ -20,7 +20,7 @@ export const researchStudyInput = z.object({
 }).strict()
 export const researchStudyPatch = researchStudyInput.partial().extend({ name: researchStudyInput.shape.name }).strict()
 export const researchStudy = z.object({
-  id: uuid, workspaceId: uuid, name: z.string(), goal: z.string(), studyType: z.enum(["CUSTOMER_INTERVIEW", "USABILITY_TEST"]), guide: researchGuide,
+  id: uuid, workspaceId: uuid, name: z.string(), goal: z.string(), studyType: z.enum(["CUSTOMER_INTERVIEW", "USABILITY_TEST", "EXTERNAL"]), guide: researchGuide,
   targetMinutes: z.number().int(), appUrl: z.string().nullable(), artifactId: uuid.nullable(), status: z.enum(["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]),
   createdAt: timestamp, updatedAt: timestamp, sessionCount: z.number().int().nonnegative(),
 }).strict()

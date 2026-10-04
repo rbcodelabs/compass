@@ -62,3 +62,18 @@ export async function revokeResearchLinks(orgSlug: string, workspaceSlug: string
   const result = await studies.revokeResearchLinks({ orgSlug, workspaceSlug }, await actor(), studyId)
   redirect(studyUrl(orgSlug, workspaceSlug, result.id))
 }
+export async function createExternalResearchStudy(orgSlug: string, workspaceSlug: string, formData: FormData) {
+  const result = await studies.createExternalResearchStudy({ orgSlug, workspaceSlug }, await actor(), {
+    name: formData.get("name"), goal: formData.get("goal"),
+    externalProvider: formData.get("externalProvider"), externalUrl: formData.get("externalUrl"),
+  })
+  redirect(studyUrl(orgSlug, workspaceSlug, result.id))
+}
+export async function addExternalResearchSession(orgSlug: string, workspaceSlug: string, studyId: string, formData: FormData) {
+  await studies.addExternalResearchSession({ orgSlug, workspaceSlug }, await actor(), studyId, {
+    idempotencyKey: formData.get("idempotencyKey"), participantName: formData.get("participantName"),
+    participantEmail: formData.get("participantEmail"), externalUrl: formData.get("externalUrl"),
+    transcript: formData.get("transcript"), notes: formData.get("notes"), sessionDate: formData.get("sessionDate"),
+  })
+  redirect(studyUrl(orgSlug, workspaceSlug, studyId))
+}

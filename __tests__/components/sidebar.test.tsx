@@ -149,11 +149,22 @@ describe("Sidebar", () => {
     expect(sidebar).toHaveAttribute("data-state", "collapsed");
   });
 
-  it("keeps legacy Feedback navigation when research capture is gated off", () => {
+  it("shows Feedback without Research when research capture is gated off", () => {
     renderSidebar(true, false)
     const mainNav = screen.getByRole("navigation", { name: "Main navigation" })
     expect(within(mainNav).getByRole("link", { name: "Feedback" }))
       .toHaveAttribute("href", "/rbcodelabs/compass/feedback")
+    expect(within(mainNav).queryByRole("link", { name: "Research" })).not.toBeInTheDocument()
+    expect(within(mainNav).queryByRole("link", { name: "Capture" })).not.toBeInTheDocument()
+  })
+
+  it("splits Feedback and Research into separate items when research capture is enabled", () => {
+    renderSidebar(true, true)
+    const mainNav = screen.getByRole("navigation", { name: "Main navigation" })
+    expect(within(mainNav).getByRole("link", { name: "Feedback" }))
+      .toHaveAttribute("href", "/rbcodelabs/compass/feedback")
+    expect(within(mainNav).getByRole("link", { name: "Research" }))
+      .toHaveAttribute("href", "/rbcodelabs/compass/capture")
     expect(within(mainNav).queryByRole("link", { name: "Capture" })).not.toBeInTheDocument()
   })
 

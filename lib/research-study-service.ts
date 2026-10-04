@@ -6,6 +6,7 @@ import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { runResearchInterviewAgent } from "@/lib/research-agent"
 import { readSessionAnalysis, readStudySynthesis } from "@/lib/research-analysis"
 import { decodeCursor, encodeCursor } from "@/lib/rest/cursor"
+import { EXTERNAL_PROVENANCE, deterministicExternalSessionId, normalizeExternalSessionInput, normalizeExternalStudyInput } from "@/lib/research-external"
 
 export class ResearchStudyError extends Error {}
 export class ResearchCursorError extends ResearchStudyError {}
@@ -213,6 +214,11 @@ async function findMemberStudy(scope: ResearchWorkspaceScope, actor: ResearchStu
   return { prisma, userId: actor.userId, study }
 }
 
+/** External studies have no participant links, so every link-minting path refuses them. */
+function assertNativeStudy(study: { studyType: string }) {
+  if (study.studyType === "EXTERNAL") throw new ResearchStudyError("External studies do not have participant links")
+}
+
 export async function updateResearchStudy(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string, input: ResearchStudyInput) {
   if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, userId, study } = await findMemberStudy(scope, actor, studyId)
@@ -222,7 +228,8 @@ export async function updateResearchStudy(scope: ResearchWorkspaceScope, actor: 
   if (name.length > 255) throw new ResearchStudyError("Study name must be 255 characters or fewer")
 
   let protocol: Partial<{ studyType: string; goal: string; guide: string; targetMinutes: number; appUrl: string | null; artifactId: string | null }> = {}
-  if (study._count.sessions === 0) {
+  // An external study's protocol (provider, goal) is not editable through the native form.
+  if (study._count.sessions === 0 && study.studyType !== "EXTERNAL") {
     const studyType = String(input.studyType ?? study.studyType)
     assertStudyType(studyType)
     const goal = String(input.goal ?? study.goal).trim()
@@ -299,6 +306,7 @@ export async function archiveResearchStudy(scope: ResearchWorkspaceScope, actor:
 export async function activateResearchStudy(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string) {
   if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, userId, study } = await findMemberStudy(scope, actor, studyId)
+  assertNativeStudy(study)
   if (study.status !== "CLOSED" && study.status !== "DRAFT") throw new ResearchStudyError("Only draft or closed studies can be activated")
   const { token, tokenHash } = createResearchToken()
   const now = new Date()
@@ -314,6 +322,7 @@ export async function activateResearchStudy(scope: ResearchWorkspaceScope, actor
 export async function regenerateResearchLink(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string) {
   if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, userId, study } = await findMemberStudy(scope, actor, studyId)
+  assertNativeStudy(study)
   if (study.status !== "ACTIVE") throw new ResearchStudyError("Participant links can only be rotated for an active study")
   const { token, tokenHash } = createResearchToken()
   const now = new Date()
@@ -342,6 +351,7 @@ export async function revokeResearchLinks(scope: ResearchWorkspaceScope, actor: 
 export async function issueResearchLink(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string) {
   if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, userId, study } = await findMemberStudy(scope, actor, studyId)
+  assertNativeStudy(study)
   if (study.status !== "ACTIVE") throw new ResearchStudyError("Participant links require an active study")
   const { token, tokenHash } = createResearchToken()
   const now = new Date()
@@ -538,4 +548,74 @@ export async function listResearchStudies(scope: ResearchWorkspaceScope, actor: 
   const page = studies.slice(0, limit)
   const last = page.at(-1)
   return { items: page.map(publicMetadata), count: page.length, nextCursor: studies.length > limit && last ? encodeCursor({ createdAt: last.createdAt.toISOString(), id: last.id, context: cursorContext }) : null }
+}
+
+/**
+ * External / manual studies: research run outside Compass's AI interviewer and
+ * pasted in by a workspace member (lib/research-external.ts).
+ *
+ * An EXTERNAL study never has participant tokens, so none of the participant-link
+ * entry points apply to it (see assertNativeStudy); sessions are created already
+ * COMPLETED with `provenance = EXTERNAL_IMPORT` and ordinary ResearchTurn rows, so
+ * the existing analysis, synthesis and promote_research_finding_to_evidence paths
+ * work on them unchanged. The provenance is member-reported, not provider-verified.
+ */
+export async function createExternalResearchStudy(
+  scope: ResearchWorkspaceScope,
+  actor: ResearchStudyActor,
+  input: { name?: unknown; goal?: unknown; externalProvider?: unknown; externalUrl?: unknown },
+) {
+  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
+  const prisma = getPrisma()
+  const workspace = await prisma.workspace.findFirst({ where: workspaceWhere(scope, actor), select: { id: true } })
+  if (!workspace) throw new ResearchStudyError("Workspace not found")
+  const data = normalizeExternalStudyInput(input)
+  const id = randomUUID()
+  // ACTIVE with no participant token: the status only means "accepting imported sessions".
+  await prisma.researchStudy.create({
+    data: {
+      id, workspaceId: workspace.id, name: data.name, goal: data.goal, studyType: "EXTERNAL", guide: "[]",
+      status: "ACTIVE", source: actor.source ?? "UI", externalProvider: data.externalProvider, externalUrl: data.externalUrl,
+      createdById: actor.userId, updatedById: actor.userId,
+    },
+  })
+  return { id }
+}
+
+export async function addExternalResearchSession(
+  scope: ResearchWorkspaceScope,
+  actor: ResearchStudyActor,
+  studyId: string,
+  input: Parameters<typeof normalizeExternalSessionInput>[0],
+) {
+  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
+  const { prisma, study } = await findMemberStudy(scope, actor, studyId)
+  if (study.studyType !== "EXTERNAL") throw new ResearchStudyError("Sessions can only be added manually to an external study")
+  if (study.status === "ARCHIVED") throw new ResearchStudyError("Archived studies cannot be changed")
+  const data = normalizeExternalSessionInput(input)
+  const sessionId = deterministicExternalSessionId(study.id, data.idempotencyKey)
+  const existing = await prisma.researchSession.findFirst({ where: { id: sessionId, studyId: study.id }, select: { id: true } })
+  if (existing) return { id: existing.id, replayed: true as const }
+  try {
+    await prisma.$transaction([
+      prisma.researchSession.create({
+        data: {
+          id: sessionId, studyId: study.id, modality: "CHAT", status: "COMPLETED", provenance: EXTERNAL_PROVENANCE,
+          participantName: data.participantName, participantEmail: data.participantEmail, externalUrl: data.externalUrl,
+          sessionNotes: data.notes, startedAt: data.sessionDate, lastActiveAt: data.sessionDate, completedAt: data.sessionDate,
+          endedReason: EXTERNAL_PROVENANCE,
+        },
+      }),
+      ...(data.turns.length
+        ? [prisma.researchTurn.createMany({ data: data.turns.map((turn, sequence) => ({ sessionId, role: turn.role, content: turn.content, sequence })) })]
+        : []),
+    ])
+  } catch (error) {
+    // A concurrent double-submit raced past the lookup; the primary key is the fence.
+    if ((error as { code?: string }).code !== "P2002") throw error
+    const raced = await prisma.researchSession.findFirst({ where: { id: sessionId, studyId: study.id }, select: { id: true } })
+    if (!raced) throw error
+    return { id: raced.id, replayed: true as const }
+  }
+  return { id: sessionId, replayed: false as const }
 }
