@@ -49,17 +49,23 @@ async function main() {
     (await prisma.organization.findUnique({ where: { slug: ORG_SLUG } })) ??
     (await prisma.organization.create({ data: { slug: ORG_SLUG, name: "Demo Org (local)" } }))
 
+  // Explicit `select`s keep this script working on a schema that predates the
+  // newest Workspace columns (see __tests__/thinking-model/workspace-select-guard).
+  const WORKSPACE_SELECT = { id: true, roadmapPublic: true } as const
   let workspace = await prisma.workspace.findFirst({
     where: { organizationId: org.id, slug: WORKSPACE_SLUG },
+    select: WORKSPACE_SELECT,
   })
   if (!workspace) {
     workspace = await prisma.workspace.create({
       data: { organizationId: org.id, slug: WORKSPACE_SLUG, name: "Acme", roadmapPublic: true },
+      select: WORKSPACE_SELECT,
     })
   } else if (!workspace.roadmapPublic) {
     workspace = await prisma.workspace.update({
       where: { id: workspace.id },
       data: { roadmapPublic: true },
+      select: WORKSPACE_SELECT,
     })
   }
 
