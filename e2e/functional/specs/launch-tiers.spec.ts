@@ -182,7 +182,7 @@ test.describe("Launch tiers, checklist & positioning brief", () => {
       await expect(launchChip).toContainText("1/2");
 
       // ── 7. Public portal: enable the roadmap, then confirm the item shows
-      //       under the "Launching" column in an unauthenticated context ─────
+      //       under the "Now" column in an unauthenticated context ───────────
       await page.goto(`${base}/settings`);
       await page.waitForLoadState("networkidle");
       // The public-roadmap toggle has no accessible name (see portal.spec.ts),
@@ -201,9 +201,9 @@ test.describe("Launch tiers, checklist & positioning brief", () => {
       await anonPage.waitForLoadState("networkidle");
 
       await expect(anonPage.getByText("This roadmap is not public")).not.toBeVisible({ timeout: 5_000 });
-      // The public "Launching" column header (a <span>, not a heading role) and
-      // our item are both present.
-      await expect(anonPage.getByText("Launching", { exact: true })).toBeVisible({ timeout: 10_000 });
+      // The public portal folds LAUNCHING into its "Now" column (a <span>, not
+      // a heading role); the column header and our item are both present.
+      await expect(anonPage.getByText("Now", { exact: true })).toBeVisible({ timeout: 10_000 });
       await expect(anonPage.getByText(itemTitle)).toBeVisible({ timeout: 10_000 });
 
       await anonContext.close();
