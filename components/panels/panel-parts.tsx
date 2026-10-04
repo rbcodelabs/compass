@@ -6,6 +6,7 @@
  * handful of layout primitives (section, field, relation row) — each panel
  * body is then mostly a declarative arrangement of these.
  */
+import { announceRoadmapSync } from "@/lib/ui/roadmap-sync-toast";
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import Link from "next/link";
 import { ExternalLinkIcon, ChevronRightIcon } from "lucide-react";
@@ -118,7 +119,9 @@ export async function patchEntityField(
     }
   );
   if (!res.ok) throw new Error("save failed");
-  return res.json();
+  const json = await res.json();
+  announceRoadmapSync(json?.roadmapSync);
+  return json;
 }
 
 export function PanelSkeleton() {

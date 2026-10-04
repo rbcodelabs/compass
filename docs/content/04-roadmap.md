@@ -116,9 +116,30 @@ Use **Reload timeline** to fetch a fresh snapshot after changes made elsewhere. 
 Compass surfaces validated or in-delivery Solutions from Discovery, and Bug-type Feedback items, that don't have a roadmap item yet. These are the same items that already have a "Promote to roadmap" action on the Discovery solution card or the Feedback board; this is a second entry point that lets you schedule them without leaving the roadmap.
 
 - **On the Board** — these candidates live in an always-visible **Not scheduled** Kanban column after Shipped. Drag a card from it onto any roadmap horizon to schedule it there, or use its **⋯** menu to add it directly to Now/Next/Later without dragging. The column remains visible when empty so the board layout stays consistent.
-- **On the Timeline** — the same **Not yet on the roadmap** panel remains below the chart. Drop a card on a compatible Now, Next, or Later lane to schedule it at the drop date, or use the panel's quick-add menu without dragging. Squad-linked solutions must stay in their own squad's lane. Pending items cannot be submitted again while their save is in progress.
+- **On the Timeline** — the **Ready to schedule** rail beside (or, on narrower screens, above) the chart. See [Build the roadmap from Discovery](#build-the-roadmap-from-discovery) below.
 
-Ideas (as opposed to Bugs) aren't included in this panel — they're expected to go through Opportunity → Solution discovery first, same as everywhere else in Compass.
+Ideas (as opposed to Bugs) aren't included in the list — they're expected to go through Opportunity → Solution discovery first, same as everywhere else in Compass.
+
+## Build the roadmap from Discovery
+
+On the Timeline you rarely need to type a roadmap item. Start from the Solutions and Opportunities you already have, and Compass creates the roadmap item for you. Every item created this way is **linked** to its Solution (and Opportunity), takes its title, its squad (from the Opportunity) and its key result, and is placed at a suggested slot: the first free stretch in that squad's row on or after today, six weeks long unless the Solution has an effort estimate. Each Solution has at most one active roadmap item, so scheduling something that is already on the roadmap does nothing.
+
+- **Ready to schedule rail.** The left rail lists validated and in-delivery Solutions that have no roadmap item, grouped under their Opportunity, with status, score and squad chips. Search it, filter by **All / Validated / Scored 70+**, and click a card's title to open its details. Bug feedback with no roadmap item is listed here too.
+- **Drag to a row.** Drag a card onto a squad row. A ghost bar shows the dates under your pointer and **Release to create roadmap item**; dropping creates the item in that row's squad starting on that date.
+- **Schedule button.** Every card has a **Schedule →** button that creates the item at the suggested slot, so the whole flow works from the keyboard.
+- **Bulk.** Tick several cards, then choose **Now / Next / Later** to schedule them at the start of that horizon, or **Auto-fit** to place them highest score first in each squad's first free slot.
+- **Draw a range.** Click and drag across an empty part of a row (mouse or pen). Pick a Solution from the **Schedule from…** popover (the row's squad first, then by score) and it is created over exactly that range.
+- **Schedule from discovery… (`/`).** The header button, or the `/` key anywhere on the Timeline (ignored while you type in a field), opens a command palette over every Solution and Opportunity. **Enter** schedules the highlighted Solution at the suggested slot, **Tab** lets you choose a start date and length first, **Shift+Enter** schedules every unscheduled Solution under that Opportunity, and **Esc** closes it. Solutions already on the roadmap are shown as *scheduled* and can't be chosen.
+- **Empty roadmap.** A workspace with no roadmap items offers **Build from discovery**: choose **All validated**, **Top scored (70+)** or **Currently building** and **Create N roadmap items** to drop a first pass at proposed, non-overlapping slots (highest score first within each squad). **Add an item manually** shows the blank timeline instead.
+- **Undo.** Every create shows a toast with **Undo**. Undo archives the new roadmap items; the Solutions themselves are never changed and simply return to the rail.
+
+### Auto-sync
+
+Moving a Solution to **In delivery** (from the Discovery card, its detail panel, the Solutions board, MCP `update_solution_status` or the API) adds it to the roadmap automatically if it has no roadmap item yet. Validated does not: it stays in the rail as ready to schedule. The header shows **Auto-sync on**, the bar carries an **auto** badge, the rail lists it under **Auto-added** with an **Undo**, and a toast offers Undo when you made the change.
+
+- The item is added once. If you remove or undo an auto-added item, Compass never adds it back for that Solution, even if its status changes again.
+- Removing or archiving a roadmap item never changes its Solution.
+- While a linked item hasn't been edited by hand, its title follows the Solution's title, and moving the Solution to In delivery or Shipped moves the item to Now or Shipped (an unstarted item also starts today). Once you edit an item's dates or horizon, its schedule stops following the Solution. Rename the item and its title stops following too.
 
 ## Drag to Reorder
 

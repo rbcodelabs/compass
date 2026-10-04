@@ -11,6 +11,7 @@ const ROOT = process.cwd()
 const NAME = "075_roadmap_item_provenance"
 const read = (relative: string) => readFileSync(path.join(ROOT, relative), "utf-8")
 const runner = read("lib/migrations/runner.ts")
+const schema = read("prisma/schema.prisma")
 const sql = read(`prisma/migrations/${NAME}/migration.sql`).split("\n").map((line) => line.replace(/--.*$/, "")).join("\n")
 const statements = sql.split(";").map((statement) => statement.trim()).filter(Boolean)
 
@@ -27,6 +28,13 @@ describe(NAME, () => {
       "ALTER TABLE roadmap_items ADD COLUMN IF NOT EXISTS schedule_edited_at TIMESTAMP(3)",
     ])
     expect(sql).not.toMatch(/NOT NULL|DEFAULT|REFERENCES|FOREIGN KEY|CHECK|INDEX|UPDATE|INSERT|DROP/i)
+  })
+
+  it("declares both columns on RoadmapItem in schema.prisma, nullable and with no @updatedAt", () => {
+    const model = schema.match(/model RoadmapItem \{[\s\S]*?\n\}/)?.[0] ?? ""
+    expect(model).toMatch(/autoCreated\s+Boolean\?\s+@map\("auto_created"\)/)
+    expect(model).toMatch(/scheduleEditedAt\s+DateTime\?\s+@map\("schedule_edited_at"\)/)
+    expect(model).not.toMatch(/@updatedAt/)
   })
 
   it("runs its postcondition before the completion receipt", () => {

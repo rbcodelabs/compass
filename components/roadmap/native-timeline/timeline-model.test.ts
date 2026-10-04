@@ -9,6 +9,7 @@ import {
   NO_FIELD_VALUE_GROUP_ID,
   NO_SQUAD_GROUP_ID,
   PHASE_GROUPING,
+  solutionDropTarget,
 } from "./timeline-model";
 
 const squads = [
@@ -208,5 +209,27 @@ describe("grouping primaryOf resolvers", () => {
 
   it("None grouping has no primary groups, so callers must not consult primaryOf", () => {
     expect(NONE_GROUPING.primaryGroups).toBeNull();
+  });
+});
+
+describe("solutionDropTarget", () => {
+  const phaseRows = buildTimelineRows([{ id: "squad-a", name: "Alpha", color: "#222222" }]);
+  const squadRows = buildTimelineRows([{ id: "squad-a", name: "Alpha", color: "#222222" }], buildSquadGrouping([{ id: "squad-a", name: "Alpha", color: "#222222" }]));
+
+  it("takes the row's squad and its own planning horizon in Phase grouping", () => {
+    const lane = phaseRows.find((row) => row.id === "lane:NEXT:squad-a")!;
+    expect(solutionDropTarget(lane)).toEqual({ squadId: "squad-a", horizon: "NEXT" });
+    expect(solutionDropTarget(phaseRows.find((row) => row.id === "lane:LATER:unassigned")!)).toEqual({ squadId: null, horizon: "LATER" });
+  });
+
+  it("leaves the horizon to the dates in squad grouping", () => {
+    const lane = squadRows.find((row) => row.id === "lane:squad-a:__self__")!;
+    expect(solutionDropTarget(lane)).toEqual({ squadId: "squad-a", horizon: null });
+  });
+
+  it("refuses header rows and non-planning horizons", () => {
+    expect(solutionDropTarget(phaseRows.find((row) => row.kind === "horizon")!)).toBeNull();
+    expect(solutionDropTarget(phaseRows.find((row) => row.id === "lane:SHIPPED:squad-a")!)).toBeNull();
+    expect(solutionDropTarget(phaseRows.find((row) => row.id === "lane:LAUNCHING:squad-a")!)).toBeNull();
   });
 });

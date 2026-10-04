@@ -17,6 +17,7 @@ import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
 import { TypedLinkError, setOpportunityKeyResult } from "@/lib/typed-links";
 import { SETTABLE_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
+import { syncRoadmapOnSolutionChange, type SolutionSyncResult } from "@/lib/roadmap/solution-sync";
 import { assignmentUpdate, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -124,7 +125,7 @@ async function parseRoadmapItemField(
 }
 
 export type UpdateResult =
-  | { ok: true }
+  | { ok: true; /** Set when a solution status change reached the roadmap (auto-add or a followed item). */ roadmapSync?: SolutionSyncResult }
   | { ok: false; status: 400 | 404; error: string };
 
 /**
@@ -220,6 +221,8 @@ export async function updateEntityField(
 
   // DSQL has no @updatedAt trigger — every update must set it explicitly.
   data.updatedAt = new Date();
+  // A hand-edited horizon ends the item's "follows its solution" behaviour (migration 075).
+  if (type === "roadmapItem" && field === "horizon") data.scheduleEditedAt = new Date();
 
   // ── Scoped write: confirm the entity is in the workspace, then update ─────
   // updateMany's where doesn't support the relation filters the indirect
@@ -233,6 +236,11 @@ export async function updateEntityField(
     select: { id: true },
   });
   if (!exists) return { ok: false, status: 404, error: "Not found" };
+
+  // A solution's status or title change must reach the roadmap (Building auto-adds; linked items follow).
+  const solutionBefore = type === "solution" && (field === "status" || field === "title")
+    ? await model.findFirst({ where: { id }, select: { status: true, title: true } }) as { status: string; title: string } | null
+    : null;
 
   // The legacy pointer is dual-written: the column and its LEGACY Opportunity<->Objective link commit together.
   if (type === "opportunity" && field === "linkedKeyResultId") {
@@ -266,6 +274,17 @@ export async function updateEntityField(
       return delegate.update({ where: { id }, data });
     });
   } else await model.update({ where: { id }, data });
+  if (solutionBefore) {
+    const captureSource = { actorType: _actor.kind === "USER" ? "USER" : "SYSTEM", actorId: _actor.id } as const;
+    const roadmapSync = await syncRoadmapOnSolutionChange(
+      mutationClient,
+      { source: _actor.kind === "USER" ? "UI" : "API", captureSource, userId: _actor.kind === "USER" ? _actor.id : null },
+      field === "status"
+        ? { solutionId: id, workspaceId, previousStatus: solutionBefore.status, status: data.status as string }
+        : { solutionId: id, workspaceId, previousTitle: solutionBefore.title, title: data.title as string },
+    );
+    return { ok: true, roadmapSync };
+  }
   return { ok: true };
 }
 

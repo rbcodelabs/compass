@@ -35,6 +35,7 @@ import {
   type SolutionGroupColumn,
 } from "@/lib/solution-backlog-grouping";
 import type { SelectOption, SolutionStatus } from "@/lib/types";
+import { announceRoadmapSync } from "@/lib/ui/roadmap-sync-toast";
 
 export type SolutionBacklogItem = SolutionCardData & {
   opportunity: {
@@ -317,7 +318,8 @@ function StatusBacklogBoard({
 
     if (plan.kind === "move" && moved) {
       startTransition(async () => {
-        await moveSolutionStatus(activeId, plan.status, moved.opportunity.id, workspaceId, revalidatePathStr);
+        const result = await moveSolutionStatus(activeId, plan.status, moved.opportunity.id, workspaceId, revalidatePathStr);
+        announceRoadmapSync(result.roadmapSync);
       });
     } else if (dragSourceStatus && current && dragSourceStatus !== current) {
       // Dropped outside any column: snap back to where the drag began.

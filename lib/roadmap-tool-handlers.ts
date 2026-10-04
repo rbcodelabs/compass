@@ -17,7 +17,11 @@ import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { randomUUID } from "node:crypto"
-import { isUniqueConflict, RoadmapPromotionConflict } from "@/lib/roadmap-promotion"
+import { RoadmapPromotionConflict } from "@/lib/roadmap-promotion"
+import { getMcpActor } from "@/lib/mcp-authz"
+import { createRoadmapItemsFromSolutions } from "@/lib/roadmap/create-from-solution"
+import { addCalendarDays } from "@/lib/roadmap-timeline/calendar-geometry"
+import { durationDaysFor } from "@/lib/roadmap/scheduling"
 
 export function roadmapCreateData(input: Parameters<typeof createRoadmapItem>[0], sortOrder: number) {
   return {
@@ -36,6 +40,7 @@ export async function createRoadmapItem(input: {
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { name: true, slug: true, organization: { select: { slug: true } } } })
   if (!workspace) return fail(`Workspace "${input.workspaceId}" not found.`)
+  if (input.solutionId) return createFromSolution(prisma, workspace, input as typeof input & { solutionId: string })
   const lastItem = await prisma.roadmapItem.findFirst({ where: { workspaceId: input.workspaceId, horizon: input.horizon, status: "ACTIVE" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
   const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, tx => tx.roadmapItem.create({ data: roadmapCreateData(input, lastItem ? lastItem.sortOrder + 1 : 0) }))
   const format = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
@@ -45,6 +50,56 @@ export async function createRoadmapItem(input: {
       (item.startDate || item.endDate ? `\nDates: ${item.startDate ? format(item.startDate) : "?"} – ${item.endDate ? format(item.endDate) : "?"}` : ""),
     safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "roadmapItem", id: item.id }),
   ), { id: item.id, title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate })
+}
+
+function actingUserId(): string | null {
+  try { return getMcpActor().userId ?? null } catch { return null }
+}
+
+const calendarDay = (value: string) => new Date(value).toISOString().slice(0, 10)
+
+/**
+ * add_to_roadmap with a solutionId goes through the same shared creator as the UI and promote_to_roadmap, so
+ * it is idempotent (a solution already on the roadmap returns that item) and fills the same defaults
+ * (squad / key result inherited from the solution, a suggested slot when no dates are given).
+ */
+async function createFromSolution(
+  prisma: ReturnType<typeof getPrisma>,
+  workspace: { name: string; slug: string; organization: { slug: string } | null },
+  input: Parameters<typeof createRoadmapItem>[0] & { solutionId: string },
+) {
+  let startDate = input.startDate ? calendarDay(input.startDate) : undefined
+  const endDate = input.endDate ? calendarDay(input.endDate) : undefined
+  // An end date alone is a deadline: back the start off by the default duration.
+  if (!startDate && endDate) startDate = addCalendarDays(endDate, -(durationDaysFor(null) - 1))
+  const result = await createRoadmapItemsFromSolutions(
+    prisma,
+    { workspaceId: input.workspaceId, source: input.source ?? "MCP", captureSource: workspaceMutationSource(input.source), userId: actingUserId() },
+    [{
+      solutionId: input.solutionId,
+      horizon: input.horizon,
+      title: input.title.trim(),
+      description: input.description?.trim() || null,
+      squadId: input.squadId ?? undefined,
+      keyResultId: input.keyResultId ?? undefined,
+      opportunityId: input.opportunityId ?? undefined,
+      startDate,
+      endDate: startDate ? endDate : undefined,
+      isPrivate: input.isPrivate,
+    }],
+  )
+  if (result.missing.length > 0) return fail(`Solution "${input.solutionId}" not found.`)
+  const itemId = result.created[0]?.id ?? result.existing[0]?.itemId
+  const item = itemId ? await prisma.roadmapItem.findUnique({ where: { id: itemId } }) : null
+  if (!item) return fail("Roadmap item could not be created.")
+  const created = result.created.length > 0
+  const format = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
+  return ok(withUrlLine(
+    `**${created ? "Roadmap item created" : "Solution is already on the roadmap"}** (${item.horizon})\nID: ${item.id}\nTitle: ${item.title}` +
+      (item.isPrivate ? "\nPrivate: yes (hidden from public portal)" : "") +
+      (item.startDate || item.endDate ? `\nDates: ${item.startDate ? format(item.startDate) : "?"} – ${item.endDate ? format(item.endDate) : "?"}` : ""),
+    safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "roadmapItem", id: item.id }),
+  ), { id: item.id, title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate, created })
 }
 
 export async function promoteSolutionToRoadmap(input: {
@@ -58,33 +113,47 @@ export async function promoteSolutionToRoadmap(input: {
   const prisma = getPrisma()
   const solution = await prisma.solution.findFirst({
     where: { id: input.solutionId, workspaceId: input.workspaceId },
-    select: { id: true, title: true, opportunity: { select: { id: true, squadId: true } } },
+    select: { id: true, title: true, opportunity: { select: { id: true, title: true, squadId: true } } },
   })
   if (!solution) return fail("Solution not found.")
   const promotionId = input.operationId ?? randomUUID()
-  let item
-  try {
-    item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, async tx => {
-      const lastItem = await tx.roadmapItem.findFirst({ where: { workspaceId: input.workspaceId, horizon: input.horizon, status: "ACTIVE" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
-      return tx.roadmapItem.create({ data: { id: promotionId, ...roadmapCreateData({
-        workspaceId: input.workspaceId,
-        title: solution.title,
-        horizon: input.horizon,
-        solutionId: solution.id,
-        opportunityId: solution.opportunity.id,
-        squadId: solution.opportunity.squadId,
-        isPrivate: input.isPrivate,
-        source: input.source,
-      }, lastItem ? lastItem.sortOrder + 1 : 0) } })
-    }, { atomic: true })
-  } catch (error) {
-    if (!input.operationId || !isUniqueConflict(error)) throw error
-    item = await prisma.roadmapItem.findUnique({ where: { id: promotionId } })
-    if (!item || item.workspaceId !== input.workspaceId || item.solutionId !== input.solutionId || item.opportunityId !== solution.opportunity.id || item.squadId !== solution.opportunity.squadId || item.horizon !== input.horizon || item.isPrivate !== (input.isPrivate ?? false) || item.source !== (input.source ?? "MCP")) {
-      throw new RoadmapPromotionConflict("The operationId was already used for a different roadmap promotion.")
+  const sameOperation = (item: { workspaceId: string; solutionId: string | null; opportunityId: string | null; squadId: string | null; horizon: string; isPrivate: boolean; source: string }) =>
+    item.workspaceId === input.workspaceId && item.solutionId === input.solutionId && item.opportunityId === solution.opportunity.id &&
+    item.squadId === solution.opportunity.squadId && item.horizon === input.horizon && item.isPrivate === (input.isPrivate ?? false) && item.source === (input.source ?? "MCP")
+
+  // A retried operation converges on the item it already created; a reused id for a different promotion is rejected.
+  if (input.operationId) {
+    const prior = await prisma.roadmapItem.findUnique({ where: { id: promotionId } })
+    if (prior) {
+      if (!sameOperation(prior)) throw new RoadmapPromotionConflict("The operationId was already used for a different roadmap promotion.")
+      return ok("Solution promoted to roadmap.", promotionData(prior, solution.opportunity.title, false))
     }
   }
-  return ok("Solution promoted to roadmap.", { id: item.id })
+
+  const result = await createRoadmapItemsFromSolutions(
+    prisma,
+    { workspaceId: input.workspaceId, source: input.source ?? "MCP", captureSource: workspaceMutationSource(input.source), userId: actingUserId() },
+    [{ solutionId: solution.id, horizon: input.horizon, isPrivate: input.isPrivate, id: promotionId }],
+  )
+  if (result.existing[0]) {
+    // The solution already has an ACTIVE roadmap item: promoting it again is a no-op that returns that item.
+    const item = await prisma.roadmapItem.findUnique({ where: { id: result.existing[0].itemId } })
+    if (item) return ok("Solution is already on the roadmap.", promotionData(item, solution.opportunity.title, false))
+  }
+  if (result.conflicts[0]) {
+    // Lost an insert race for the same operationId: converge on the stored row.
+    const item = await prisma.roadmapItem.findUnique({ where: { id: promotionId } })
+    if (!item || !sameOperation(item)) throw new RoadmapPromotionConflict("The operationId was already used for a different roadmap promotion.")
+    return ok("Solution promoted to roadmap.", promotionData(item, solution.opportunity.title, false))
+  }
+  const created = result.created[0]
+  const item = created && (await prisma.roadmapItem.findUnique({ where: { id: created.id } }))
+  if (!item) return fail("Solution not found.")
+  return ok("Solution promoted to roadmap.", promotionData(item, solution.opportunity.title, true))
+}
+
+function promotionData(item: { id: string; title: string; horizon: string; isPrivate: boolean; solutionId: string | null; opportunityId: string | null; squadId: string | null; startDate: Date | null; endDate: Date | null }, opportunityTitle: string, created: boolean) {
+  return { id: item.id, title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, opportunityId: item.opportunityId, opportunityTitle, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate, created }
 }
 
 export async function updateRoadmapItem(input: {
@@ -114,6 +183,8 @@ export async function updateRoadmapItem(input: {
   if (input.description !== undefined) data.description = input.description?.trim() || null
   if (input.startDate !== undefined) data.startDate = input.startDate ? new Date(input.startDate) : null
   if (input.endDate !== undefined) data.endDate = input.endDate ? new Date(input.endDate) : null
+  // A hand-edited schedule stops the item following its solution (migration 075).
+  if (input.startDate !== undefined || input.endDate !== undefined || input.horizon !== undefined) data.scheduleEditedAt = new Date()
   const updated = await captureWorkspaceMutation(prisma, "roadmapItem", "update", workspaceMutationSource(input.source), input.itemId, (tx) => tx.roadmapItem.update({ where: { id: input.itemId }, data }))
   const formatUtcDate = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
   return ok(
