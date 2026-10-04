@@ -2,7 +2,7 @@
 
 import { useId, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { CalendarDays, ChevronLeft, ChevronRight, Plus, RefreshCw, RotateCw, Shuffle, SlidersHorizontal } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, RotateCw, Shuffle, SlidersHorizontal } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -14,6 +14,18 @@ import { CUSTOM_FIELD_FILTER_PARAMS } from "@/lib/custom-field-filter-menu";
 import type { CustomFieldFilterGroup } from "@/lib/custom-field-filter";
 import type { SquadData } from "@/lib/types";
 
+/** The collapsible "Ready to schedule" rail the header toggles. */
+type RailToggle = {
+  open: boolean;
+  onToggle: () => void;
+  /** Unscheduled items waiting in the rail: the same number the rail shows. */
+  count: number;
+  /** Items Building auto-sync added, so they are noticed while the rail is closed. */
+  autoAdded: number;
+  /** DOM id of the rail region this button controls. The button's own id is `${controlsId}-toggle`, so the page can return focus to it. */
+  controlsId: string;
+};
+
 type TimelineControls = {
   zoom: TimelineZoom;
   onZoom: (zoom: TimelineZoom) => void;
@@ -21,7 +33,7 @@ type TimelineControls = {
   onToday: () => void;
   saving: boolean;
   /** Schedule-from-discovery entry point and the Building auto-sync indicator. */
-  schedule?: { onOpen: () => void; autoSync: boolean };
+  schedule?: { onOpen: () => void; autoSync: boolean; rail?: RailToggle };
 };
 
 function IconAction({ label, children, onClick, disabled = false }: { label: string; children: ReactNode; onClick: () => void; disabled?: boolean }) {
@@ -37,6 +49,34 @@ function IconAction({ label, children, onClick, disabled = false }: { label: str
         <TooltipTrigger aria-describedby={tooltipOpen ? tooltipId : undefined} render={<Button type="button" variant="outline" size="icon" className="size-11 md:size-9" aria-label={label} onClick={onClick} />}>{children}</TooltipTrigger>
       )}
       <TooltipContent id={tooltipId} role="tooltip" side="bottom">{disabled ? "Wait for changes to save before reloading" : label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function RailToggleButton({ rail }: { rail: RailToggle }) {
+  const tooltipId = useId();
+  const summaryId = useId();
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const label = rail.open ? "Hide ready-to-schedule rail" : "Show ready-to-schedule rail";
+  const summary = rail.count === 0
+    ? "Nothing waiting to schedule"
+    : `${rail.count} ready to schedule${rail.autoAdded > 0 ? `, ${rail.autoAdded} auto-added` : ""}`;
+  const Icon = rail.open ? PanelLeftClose : PanelLeftOpen;
+  return (
+    <Tooltip onOpenChange={setTooltipOpen}>
+      <TooltipTrigger
+        aria-describedby={tooltipOpen ? `${summaryId} ${tooltipId}` : summaryId}
+        render={<Button id={`${rail.controlsId}-toggle`} type="button" variant="outline" size="icon" data-testid="rail-toggle" className="relative size-11 md:size-9" aria-label={label} aria-expanded={rail.open} aria-controls={rail.controlsId} aria-keyshortcuts="[" onClick={rail.onToggle} />}
+      >
+        <Icon aria-hidden="true" />
+        {rail.count > 0 && (
+          <span data-testid="rail-toggle-count" aria-hidden="true" className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold tabular-nums leading-none text-primary-foreground">
+            {rail.count > 99 ? "99+" : rail.count}
+          </span>
+        )}
+      </TooltipTrigger>
+      <span id={summaryId} className="sr-only">{summary}</span>
+      <TooltipContent id={tooltipId} role="tooltip" side="bottom">{label} <kbd className="ml-1 rounded border px-1 font-mono text-[10px]">[</kbd></TooltipContent>
     </Tooltip>
   );
 }
@@ -77,6 +117,7 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
             <IconAction label="Next period" onClick={() => timeline.onShift(1)}><ChevronRight /></IconAction>
           </div>}
           {timeline && <RoadmapGroupByToggle value={groupByValue ?? "phase"} customFieldOptions={groupByOptions} />}
+          {timeline?.schedule?.rail && <RailToggleButton rail={timeline.schedule.rail} />}
           {timeline?.schedule && (
             <Button type="button" variant="outline" size="sm" className="min-h-11 md:min-h-0" aria-label="Schedule from discovery" aria-haspopup="dialog" aria-keyshortcuts="/" onClick={timeline.schedule.onOpen}>
               <Plus className="size-4" aria-hidden="true" />
@@ -94,6 +135,7 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
               <RefreshCw className="size-3" aria-hidden="true" />
               <span className="hidden sm:inline">Auto-sync on</span>
               <span className="sr-only sm:hidden">Auto-sync on</span>
+              {(timeline.schedule.rail?.autoAdded ?? 0) > 0 && <span data-testid="auto-added-count" className="tabular-nums">· {timeline.schedule.rail!.autoAdded} added</span>}
             </span>
           )}
           {cardSortHref && (

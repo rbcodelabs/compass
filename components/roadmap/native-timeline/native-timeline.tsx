@@ -23,6 +23,8 @@ import { HORIZON_META, HORIZON_ORDER } from "@/lib/roadmap";
 import { parseUnscheduledDragId, type UnscheduledItem } from "../unscheduled-items-panel";
 import { ScheduleRail, type BulkPlacement, type SolutionRailItem } from "../schedule/schedule-rail";
 import { SchedulePalette, type PaletteDates } from "../schedule/schedule-palette";
+import { RailRegion, useRailState } from "../schedule/rail-region";
+import type { RailPreference } from "@/lib/roadmap/rail-state";
 import { RangeSchedulePopover } from "../schedule/range-schedule-popover";
 import { BuildFromDiscovery } from "../schedule/build-from-discovery";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
@@ -116,6 +118,8 @@ export function NativeTimeline(props: TimelineEngineProps & {
   scheduleCatalog?: ScheduleCatalog;
   /** The workspace has no ACTIVE roadmap items at all (not merely none matching the current filter). */
   roadmapEmpty?: boolean;
+  /** The user's explicit open/closed choice for the Ready to schedule rail (server-read cookie); null follows the viewport default. */
+  initialRailPreference?: RailPreference | null;
 }) {
   const labels = useLabels();
   const controller = useTimelineController({
@@ -127,6 +131,17 @@ export function NativeTimeline(props: TimelineEngineProps & {
   const catalog = props.scheduleCatalog ?? EMPTY_CATALOG;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [manualMode, setManualMode] = useState(false);
+  const showEmptyState = Boolean(props.roadmapEmpty) && controller.items.length === 0 && !manualMode;
+  const railId = useId();
+  const railRegionRef = useRef<HTMLDivElement>(null);
+  const rail = useRailState({ initialPreference: props.initialRailPreference ?? null, empty: showEmptyState });
+  const toggleRail = useCallback(() => {
+    // A closing rail turns inert, which would drop focus to <body>: keep it on the toggle instead.
+    if (rail.open && railRegionRef.current?.contains(document.activeElement)) document.getElementById(`${railId}-toggle`)?.focus();
+    rail.setOpen(!rail.open);
+  }, [rail, railId]);
+  const toggleRailRef = useRef(toggleRail);
+  useEffect(() => { toggleRailRef.current = toggleRail; });
   const [ghost, setGhost] = useState<DropGhost | null>(null);
   const [rangeDraft, setRangeDraft] = useState<RangeDraft | null>(null);
   const [rangePopover, setRangePopover] = useState<RangePopoverState | null>(null);
@@ -243,13 +258,14 @@ export function NativeTimeline(props: TimelineEngineProps & {
     void controller.scheduleSolutions(items.map((item) => ({ solutionId: item.id, horizon: placement }))).catch(() => undefined);
   }
 
-  // `/` opens the schedule palette from anywhere on the timeline except while typing.
+  // `/` opens the schedule palette and `[` toggles the rail, from anywhere on the timeline except while typing.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
+      if ((event.key !== "/" && event.key !== "[") || event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
       if (isTypingTarget(event.target) || (event.target instanceof HTMLElement && event.target.closest("[role=dialog]"))) return;
       event.preventDefault();
-      setPaletteOpen(true);
+      if (event.key === "[") toggleRailRef.current();
+      else setPaletteOpen(true);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -509,13 +525,12 @@ export function NativeTimeline(props: TimelineEngineProps & {
       .sort((a, b) => Number(b.squadId === popoverTarget.squadId) - Number(a.squadId === popoverTarget.squadId) || (b.score ?? -1) - (a.score ?? -1) || a.title.localeCompare(b.title));
   }, [controller.unscheduled, popoverTarget]);
 
-  const showEmptyState = Boolean(props.roadmapEmpty) && controller.items.length === 0 && !manualMode;
   const draftRow = rangeDraft ? rows.find((row) => row.id === rangeDraft.rowId) : undefined;
   const ghostRow = ghost ? rows.find((row) => row.id === ghost.rowId) : undefined;
 
   return (
     <div className="flex min-h-full min-w-0 flex-1 flex-col md:h-full md:min-h-0">
-      <RoadmapHeader squads={props.headerSquads ?? props.squads} customFieldGroups={props.customFieldGroups} activeCustomFieldId={props.activeCustomFieldId ?? null} groupByValue={groupByValue} groupByOptions={props.groupByOptions} cardSortHref={props.cardSortHref} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: goToToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0, schedule: { onOpen: () => setPaletteOpen(true), autoSync: true } }} />
+      <RoadmapHeader squads={props.headerSquads ?? props.squads} customFieldGroups={props.customFieldGroups} activeCustomFieldId={props.activeCustomFieldId ?? null} groupByValue={groupByValue} groupByOptions={props.groupByOptions} cardSortHref={props.cardSortHref} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: goToToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0, schedule: { onOpen: () => setPaletteOpen(true), autoSync: true, rail: { open: rail.open, onToggle: toggleRail, count: controller.unscheduled.length, autoAdded: autoAdded.length, controlsId: railId } } }} />
       <div data-slot="workspace-content" className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:px-4 md:py-3">
         <DndContext
           id={dndId}
@@ -537,9 +552,10 @@ export function NativeTimeline(props: TimelineEngineProps & {
             stopDragPointerTracking();
           }}
         >
-          <section data-testid="timeline-engine-native" className="flex min-w-0 flex-col gap-3 p-1 min-[1320px]:flex-row min-[1320px]:items-start">
+          <section data-testid="timeline-engine-native" className="flex min-w-0 flex-col p-1 min-[1320px]:flex-row min-[1320px]:items-start">
+            <RailRegion id={railId} mode={rail.mode} open={rail.open} regionRef={railRegionRef}>
             <ScheduleRail
-              className="max-h-80 min-[1320px]:sticky min-[1320px]:top-0 min-[1320px]:max-h-[calc(100dvh-9rem)] min-[1320px]:w-80 min-[1320px]:shrink-0"
+              className="max-h-80 min-[1320px]:max-h-[calc(100dvh-9rem)] min-[1320px]:w-80"
               items={controller.unscheduled}
               squads={props.headerSquads ?? props.squads}
               autoAdded={autoAdded}
@@ -549,6 +565,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
               onQuickAddFeedback={(item, horizon) => controller.quickAdd(item satisfies UnscheduledItem, horizon)}
               onUndoAuto={(item) => { void controller.undoCreated([item.id]).catch(() => undefined); }}
             />
+            </RailRegion>
             <div className="flex min-w-0 flex-1 flex-col gap-3">
             {controller.reconciliationRequiredIds.size > 0 && <p role="alert" className="text-sm text-muted-foreground">An item changed elsewhere. Reload the timeline before editing it again.</p>}
             {showEmptyState ? (
@@ -558,7 +575,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
                 onBuild={(preset) => controller.buildFromDiscovery(preset)}
                 onAddManually={() => {
                   setManualMode(true);
-                  pushUndoToast({ message: "Blank roadmap. Drag from the left, draw on a row, or press / to search." });
+                  pushUndoToast({ message: "Blank roadmap. Draw on a row, press / to search, or open the Ready to schedule rail to drag items." });
                 }}
               />
             ) : (

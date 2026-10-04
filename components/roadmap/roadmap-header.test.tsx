@@ -84,3 +84,51 @@ describe("Roadmap compact header", () => {
     expect(url.set).not.toHaveBeenCalled();
   });
 });
+
+describe("Ready-to-schedule rail toggle", () => {
+  const rail = (over: Record<string, unknown> = {}) => ({ open: true, onToggle: vi.fn(), count: 3, autoAdded: 0, controlsId: "rail-region", ...over });
+  const renderRail = (railProps = rail(), autoSync = true) => render(<RoadmapHeader squads={squads} timeline={{ zoom: "month", onZoom: vi.fn(), onShift: vi.fn(), onToday: vi.fn(), saving: false, schedule: { onOpen: vi.fn(), autoSync, rail: railProps } }} />);
+
+  it("names the action for the current state and wires aria-expanded and aria-controls", () => {
+    const { rerender } = renderRail();
+    const hide = screen.getByRole("button", { name: "Hide ready-to-schedule rail" });
+    expect(hide).toHaveAttribute("aria-expanded", "true");
+    expect(hide).toHaveAttribute("aria-controls", "rail-region");
+    expect(hide).toHaveAttribute("aria-keyshortcuts", "[");
+    rerender(<RoadmapHeader squads={squads} timeline={{ zoom: "month", onZoom: vi.fn(), onShift: vi.fn(), onToday: vi.fn(), saving: false, schedule: { onOpen: vi.fn(), autoSync: true, rail: rail({ open: false }) } }} />);
+    expect(screen.getByRole("button", { name: "Show ready-to-schedule rail" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("shows the unscheduled count on the button and describes it for screen readers", () => {
+    renderRail(rail({ open: false, count: 7, autoAdded: 2 }));
+    const button = screen.getByRole("button", { name: "Show ready-to-schedule rail" });
+    expect(screen.getByTestId("rail-toggle-count")).toHaveTextContent("7");
+    expect(button).toHaveAccessibleDescription("7 ready to schedule, 2 auto-added");
+  });
+
+  it("hides the badge when nothing is waiting", () => {
+    renderRail(rail({ count: 0 }));
+    expect(screen.queryByTestId("rail-toggle-count")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide ready-to-schedule rail" })).toHaveAccessibleDescription("Nothing waiting to schedule");
+  });
+
+  it("calls onToggle on click and shows a tooltip on focus", async () => {
+    const props = rail();
+    renderRail(props);
+    const button = screen.getByRole("button", { name: "Hide ready-to-schedule rail" });
+    act(() => button.focus());
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Hide ready-to-schedule rail");
+    fireEvent.click(button);
+    expect(props.onToggle).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces auto-added items next to Auto-sync so they are noticed while the rail is closed", () => {
+    renderRail(rail({ open: false, autoAdded: 2 }));
+    expect(screen.getByTestId("auto-sync-indicator")).toHaveTextContent("2 added");
+  });
+
+  it("renders no toggle when the timeline has no rail", () => {
+    renderRail(null as never);
+    expect(screen.queryByRole("button", { name: /ready-to-schedule rail/ })).not.toBeInTheDocument();
+  });
+});
