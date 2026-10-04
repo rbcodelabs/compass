@@ -34,6 +34,11 @@ or an already-issued OAuth bearer token, then choose **Send GET request**. Signi
 in to Compass in the browser does not authenticate API requests.
 
 Requests go directly to `/api/v1` on this deployment, without browser cookies.
+Loading the public OpenAPI contract can use same-origin deployment-access cookies;
+executed API reads never do. A protected preview may therefore allow browsing the
+contract but block an executed read before it reaches Compass. Use an API-accessible
+deployment to verify bearer-authenticated reads; the explorer does not bypass
+deployment protection or follow sign-in redirects.
 Redirects are rejected. Requests access real private data under the supplied
 token's permissions: do not use the explorer on an untrusted computer. No requests
 run automatically, including pagination; enter a returned cursor and explicitly

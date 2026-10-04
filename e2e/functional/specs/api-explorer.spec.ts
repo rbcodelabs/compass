@@ -12,6 +12,51 @@ async function capture(page: Page, name: string) {
   });
 }
 const meLink = "/help/api-explorer#operation=getCurrentIdentity";
+test("deployment cookies load the contract without authorizing cookie-free API reads", async ({
+  page,
+  baseURL,
+}) => {
+  const response = await page.request.get("/api/v1/openapi.json");
+  expect(response.ok()).toBeTruthy();
+  const contract = await response.json();
+  await page
+    .context()
+    .addCookies([
+      { name: "synthetic-deployment-access", value: "allowed", url: baseURL! },
+    ]);
+  await page.route("**/api/v1/openapi.json", async (route) => {
+    const headers = await route.request().allHeaders();
+    if (!headers.cookie?.includes("synthetic-deployment-access=allowed")) {
+      await route.fulfill({
+        status: 302,
+        headers: { Location: "/synthetic-protection-login" },
+      });
+      return;
+    }
+    expect(headers.authorization).toBeUndefined();
+    await route.fulfill({ status: 200, json: contract });
+  });
+  let calls = 0;
+  await page.route("**/api/v1/me", async (route) => {
+    calls++;
+    const headers = await route.request().allHeaders();
+    expect(headers.cookie).toBeUndefined();
+    expect(headers.authorization).toBe("Bearer synthetic");
+    await route.fulfill({
+      status: 302,
+      headers: { Location: "/synthetic-protection-login" },
+    });
+  });
+  await page.goto(meLink);
+  await expect(
+    page.getByRole("button", { name: "Send GET request" }),
+  ).toBeVisible();
+  await page.getByLabel("API key or OAuth bearer token").fill("synthetic");
+  await page.getByRole("button", { name: "Send GET request" }).click();
+  await expect(page.getByRole("status")).toContainText("Request failed.");
+  expect(calls).toBe(1);
+  expect(page.url()).not.toContain("synthetic-protection-login");
+});
 test("anonymous explorer uses the generated inventory, browses writes and never sends automatically", async ({
   page,
 }) => {

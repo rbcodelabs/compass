@@ -75,6 +75,32 @@ async function setup(second = jsonResponse({ id: "synthetic" })) {
   return fetcher;
 }
 describe("custom API explorer", () => {
+  it("loads the public contract with deployment cookies but keeps API reads cookie-free", async () => {
+    const fetcher = vi.fn(async (url: string, options: RequestInit) => {
+      if (url === "/api/v1/openapi.json") {
+        if (options.credentials !== "same-origin")
+          throw new TypeError("Deployment protection redirect");
+        expect(options.redirect).toBe("error");
+        expect(options.headers).toBeUndefined();
+        return jsonResponse(document);
+      }
+      expect(options.credentials).toBe("omit");
+      expect(options.redirect).toBe("error");
+      throw new TypeError("Deployment protection redirect");
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<ApiExplorer />);
+    await screen.findByRole("heading", { name: "Your identity" });
+    fireEvent.change(screen.getByLabelText("API key or OAuth bearer token"), {
+      target: { value: "synthetic" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send GET request" }));
+    await screen.findByText(/Request failed\. Check connectivity/);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByText(/Deployment protection redirect/),
+    ).not.toBeInTheDocument();
+  });
   it.each(["token", "parameter", "pagehide"])(
     "suppresses pending response after %s changes",
     async (change) => {

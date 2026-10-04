@@ -69,7 +69,10 @@ export function ApiExplorer() {
     let alive = true;
     const controller = new AbortController();
     fetch("/api/v1/openapi.json", {
-      credentials: "omit",
+      // The public contract may sit behind deployment access protection.
+      // Only this fixed same-origin metadata request uses its access cookie;
+      // bearer-authenticated API execution remains cookie-free in runRead.
+      credentials: "same-origin",
       cache: "no-store",
       redirect: "error",
       signal: controller.signal,
