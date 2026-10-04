@@ -81,7 +81,7 @@ export function LaunchChecklist({
     });
   }
 
-  const tierBadge = HORIZON_META[horizon as keyof typeof HORIZON_META]?.badgeClass ?? "bg-amber-100 text-amber-700";
+  const tierBadge = HORIZON_META[horizon as keyof typeof HORIZON_META]?.badgeClass ?? "bg-status-warning-surface text-status-warning";
 
   return (
     <div className="flex flex-col gap-3">

@@ -3,6 +3,21 @@ import pg from "pg";
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../fixtures/index";
 import { isolatedE2EConnectionString } from "../fixtures/isolated-database";
+import { HORIZON_META } from "../../../lib/roadmap";
+
+// Contrast of every horizon badge class against its own surface, resolved by the browser in the active theme.
+async function horizonContrasts(page: Page) {
+  return page.evaluate((classes) => {
+    const ctx = document.createElement("canvas").getContext("2d")!;
+    const rgb = (css: string) => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = "#000"; ctx.fillStyle = css; ctx.fillRect(0, 0, 1, 1); return Array.from(ctx.getImageData(0, 0, 1, 1).data.slice(0, 3)); };
+    const lum = ([r, g, b]: number[]) => { const f = (v: number) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+    return Object.entries(classes).map(([horizon, cls]) => {
+      const el = document.createElement("span"); el.className = cls; el.textContent = horizon; document.body.append(el);
+      const style = getComputedStyle(el); const [a, b] = [lum(rgb(style.color)), lum(rgb(style.backgroundColor))]; el.remove();
+      return { horizon, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) };
+    });
+  }, Object.fromEntries(Object.entries(HORIZON_META).map(([h, m]) => [h, m.badgeClass])));
+}
 
 async function fits(container: Locator) {
   // Inline editors intentionally extend their hover target 4px into page padding.
@@ -29,11 +44,12 @@ test("roadmap item detail edits every field and fits overlay, pinned, mobile and
   const fieldId = randomUUID();
   const title = "Guided setup for new workspaces — first-run checklist and sample data";
   const renamed = "Guided setup for new workspaces";
+  const squadName = "QA Squad Layout Check — long running onboarding and activation experiments";
   try {
     const { rows: [workspace] } = await pool.query(
       "SELECT w.id FROM compass_dev.workspaces w JOIN compass_dev.organizations o ON o.id=w.organization_id WHERE o.slug='e2e-test-org' AND w.slug='e2e-workspace'",
     );
-    await pool.query("INSERT INTO compass_dev.squads (id, workspace_id, name, color) VALUES ($1,$2,'Onboarding squad','#0ea5e9')", [squadId, workspace.id]);
+    await pool.query("INSERT INTO compass_dev.squads (id, workspace_id, name, color) VALUES ($1,$2,$3,'#0ea5e9')", [squadId, workspace.id, squadName]);
     await pool.query(
       "INSERT INTO compass_dev.roadmap_items (id, workspace_id, title, description, horizon, status) VALUES ($1,$2,$3,$4,'NEXT','ACTIVE')",
       [itemId, workspace.id, title, "Help new teams reach a useful workspace in their first session, with a short checklist and realistic sample data."],
@@ -65,8 +81,22 @@ test("roadmap item detail edits every field and fits overlay, pinned, mobile and
     await titleInput.press("Enter");
     await expect(sheet.getByRole("button", { name: renamed, exact: true })).toBeVisible();
     await summary.getByRole("combobox", { name: "Squad", exact: true }).click();
-    await page.getByRole("option", { name: "Onboarding squad" }).click();
-    await expect(summary.getByRole("combobox", { name: "Squad", exact: true })).toContainText("Onboarding squad");
+    await page.getByRole("option", { name: squadName }).click();
+    const squadTrigger = summary.getByRole("combobox", { name: "Squad", exact: true });
+    await expect(squadTrigger).toContainText(squadName);
+    // One colour dot, an ellipsis for the long name, and the full name on hover.
+    await expect(squadTrigger).toHaveAttribute("title", squadName);
+    await expect(squadTrigger.locator("span[style*=background-color]")).toHaveCount(1);
+    expect(await squadTrigger.evaluate((el) => { const t = el.querySelector(".truncate")!; return t.scrollWidth > t.clientWidth && getComputedStyle(t).textOverflow === "ellipsis"; })).toBe(true);
+    await fits(detail);
+
+    // A blank title is explained, not silently dropped.
+    await sheet.getByRole("button", { name: renamed, exact: true }).click();
+    const blank = sheet.getByRole("textbox", { name: "Edit title" });
+    await blank.fill("   ");
+    await blank.press("Enter");
+    await expect(sheet.getByRole("alert").filter({ hasText: "A title is required" })).toBeVisible();
+    await expect(sheet.getByRole("button", { name: renamed, exact: true })).toBeVisible();
     await summary.getByRole("button", { name: "Dates: not set" }).click();
     await sheet.getByLabel("Start date").fill("2026-07-01");
     await expect(sheet.getByRole("button", { name: "Save dates" })).toBeDisabled();
@@ -93,7 +123,7 @@ test("roadmap item detail edits every field and fits overlay, pinned, mobile and
     await page.context().addCookies([{ name: "compass_panel_detail", value: "1:320", domain: "localhost", path: "/" }]);
     await page.reload();
     await expect(pinned.getByRole("button", { name: renamed, exact: true })).toBeVisible();
-    await expect(pinned.getByRole("combobox", { name: "Squad", exact: true })).toContainText("Onboarding squad");
+    await expect(pinned.getByRole("combobox", { name: "Squad", exact: true })).toContainText(squadName);
     await expect(pinned.getByRole("button", { name: "Dates: Jul 1, 2026 – Jul 31, 2026" })).toBeVisible();
     await expect(pinned.getByText("Private", { exact: true })).toBeVisible();
     await fits(detail);
@@ -124,6 +154,18 @@ test("roadmap item detail edits every field and fits overlay, pinned, mobile and
     expect(discussionBox!.x).toBeGreaterThan(mainBox!.x + mainBox!.width - 1);
     await fits(detail);
     await capture(page, "fullpage-desktop");
+
+    // Horizon pills keep readable contrast in light and dark for every horizon.
+    for (const { horizon, ratio } of await horizonContrasts(page)) expect(ratio, `light ${horizon}`).toBeGreaterThanOrEqual(4.5);
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.evaluate(() => localStorage.setItem("compass-theme", "dark"));
+    await page.reload();
+    await expect(page.locator("html")).toHaveClass(/dark/);
+    for (const { horizon, ratio } of await horizonContrasts(page)) expect(ratio, `dark ${horizon}`).toBeGreaterThanOrEqual(4.5);
+    await capture(page, "fullpage-dark");
+    await page.evaluate(() => localStorage.removeItem("compass-theme"));
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.reload();
 
     // Archiving from the full page removes the card from the board.
     // The reader's disclosure choice is remembered, so open it only if it is shut.

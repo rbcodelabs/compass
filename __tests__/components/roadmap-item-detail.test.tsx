@@ -49,6 +49,8 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
+// The reader's disclosure choice is remembered between renders, so open it only if shut.
+const openMore = () => { const b = screen.getByRole("button", { name: "More properties" }); if (b.getAttribute("aria-expanded") !== "true") fireEvent.click(b); };
 const renderDetail = (variant: "panel" | "page" = "panel") => render(<RoadmapItemDetail itemId="ri-1" orgSlug="acme" workspaceSlug="product" variant={variant} />);
 
 describe.each(["panel", "page"] as const)("RoadmapItemDetail (%s)", (variant) => {
@@ -94,6 +96,28 @@ describe.each(["panel", "page"] as const)("RoadmapItemDetail (%s)", (variant) =>
   });
 });
 
+describe("RoadmapItemDetail squad field", () => {
+  it("renders one squad dot and keeps the full name reachable when it is long", () => {
+    const name = "QA Squad Layout Check With A Very Long Descriptive Name";
+    state.data = { ...base(), squadId: "sq-1", squads: [{ id: "sq-1", name, color: "#123456" }] };
+    renderDetail("panel");
+    const trigger = screen.getByRole("combobox", { name: "Squad" });
+    expect(trigger).toHaveAttribute("title", name);
+    expect(trigger.querySelectorAll("span[style*=\"background-color\"]")).toHaveLength(1);
+    expect(within(trigger).getByText(name)).toHaveClass("truncate");
+  });
+
+  it("gives the full page a wider squad limit than the panel", () => {
+    const wrapperClass = (variant: "panel" | "page") => {
+      cleanup();
+      renderDetail(variant);
+      return screen.getByRole("combobox", { name: "Squad" }).closest("div")!.className;
+    };
+    expect(wrapperClass("panel")).toContain("max-w-56");
+    expect(wrapperClass("page")).toContain("sm:max-w-80");
+  });
+});
+
 describe("RoadmapItemDetail content rules", () => {
   it("hides Launch when the workflow is off and Details when there are no custom fields", () => {
     state.data = { ...base(), launchWorkflowEnabled: false, customFields: [] };
@@ -108,7 +132,7 @@ describe("RoadmapItemDetail content rules", () => {
     const summary = screen.getByLabelText("Roadmap item summary");
     expect(within(summary).getByText("Private")).toBeVisible();
     expect(screen.getByText("Archived")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "More properties" }));
+    openMore();
     expect(screen.queryByRole("button", { name: "Archive item" })).toBeNull();
   });
 
@@ -123,7 +147,7 @@ describe("RoadmapItemDetail content rules", () => {
 describe("RoadmapItemDetail editing (covers everything the removed Edit dialog did)", () => {
   it("saves the privacy toggle through the entity patch path", async () => {
     renderDetail();
-    fireEvent.click(screen.getByRole("button", { name: "More properties" }));
+    openMore();
     fireEvent.click(screen.getByRole("checkbox"));
     await waitFor(() => expect(state.patch).toHaveBeenCalledWith("roadmapItem", "ri-1", "acme", "product", "isPrivate", true));
     await waitFor(() => expect(state.mutate).toHaveBeenCalled());
@@ -152,7 +176,7 @@ describe("RoadmapItemDetail editing (covers everything the removed Edit dialog d
   it("surfaces a rejected save instead of silently dropping it", async () => {
     state.patch.mockRejectedValueOnce(new Error("save failed"));
     renderDetail();
-    fireEvent.click(screen.getByRole("button", { name: "More properties" }));
+    openMore();
     fireEvent.click(screen.getByRole("checkbox"));
     expect(await screen.findByText("Could not save that change. Try again.")).toBeVisible();
     expect(state.mutate).not.toHaveBeenCalled();
@@ -161,7 +185,7 @@ describe("RoadmapItemDetail editing (covers everything the removed Edit dialog d
   it("archives and tells the board to drop the card", async () => {
     state.archive.mockResolvedValue(undefined);
     renderDetail();
-    fireEvent.click(screen.getByRole("button", { name: "More properties" }));
+    openMore();
     fireEvent.click(screen.getByRole("button", { name: "Archive item" }));
     await waitFor(() => expect(state.archive).toHaveBeenCalledWith("ri-1", "ws"));
     await waitFor(() => expect(state.notify).toHaveBeenCalledWith("roadmapItem", "ri-1", { archived: true }));
@@ -188,5 +212,28 @@ describe("RoadmapItemDetail load errors", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry refresh" }));
     expect(state.refresh).toHaveBeenCalled();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Ship guided setup");
+  });
+});
+
+describe("RoadmapItemDetail title edits", () => {
+  it("explains a blank title instead of failing silently, and keeps the old title", async () => {
+    renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Ship guided setup" }));
+    const input = screen.getByRole("textbox", { name: "Edit title" });
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("A title is required");
+    expect(state.patch).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Ship guided setup" })).toBeVisible();
+  });
+
+  it("surfaces a rejected title save", async () => {
+    state.patch.mockRejectedValueOnce(new Error("save failed"));
+    renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Ship guided setup" }));
+    const input = screen.getByRole("textbox", { name: "Edit title" });
+    fireEvent.change(input, { target: { value: "Renamed" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByText(/Could not save the title/)).toBeVisible();
   });
 });

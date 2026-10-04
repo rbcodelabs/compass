@@ -173,7 +173,7 @@ function ScheduleField({ data, edit }: { data: RoadmapItemData; edit: EditContex
   );
 }
 
-function SquadField({ data, edit }: { data: RoadmapItemData; edit: EditContext }) {
+function SquadField({ data, edit, variant }: { data: RoadmapItemData; edit: EditContext; variant: "panel" | "page" }) {
   const [error, setError] = useState<string | null>(null);
   if (!data.squads?.length) return null;
 
@@ -191,7 +191,8 @@ function SquadField({ data, edit }: { data: RoadmapItemData; edit: EditContext }
 
   const active = data.squads.find((s) => s.id === data.squadId);
   return (
-    <div className="min-w-0 max-w-44">
+    // Long names truncate with an ellipsis (full name in the title tooltip); the page has room for more.
+    <div className={`min-w-0 ${variant === "page" ? "max-w-full sm:max-w-80" : "max-w-56"}`}>
       <Combobox
         items={[
           { value: NONE, label: "No squad" },
@@ -199,9 +200,9 @@ function SquadField({ data, edit }: { data: RoadmapItemData; edit: EditContext }
             value: squad.id,
             label: squad.name,
             render: (
-              <span className="flex items-center gap-1.5">
+              <span className="flex min-w-0 items-center gap-1.5">
                 <span className="inline-block size-2 shrink-0 rounded-full" style={{ backgroundColor: squad.color }} />
-                {squad.name}
+                <span className="truncate">{squad.name}</span>
               </span>
             ),
           })),
@@ -209,15 +210,9 @@ function SquadField({ data, edit }: { data: RoadmapItemData; edit: EditContext }
         value={data.squadId ?? NONE}
         onValueChange={handleChange}
       >
-        <ComboboxTrigger aria-label="Squad" className="h-7 w-full min-w-0 justify-between text-xs">
-          {active ? (
-            <span className="flex min-w-0 items-center gap-1.5">
-              <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: active.color }} />
-              <ComboboxValue className="truncate" />
-            </span>
-          ) : (
-            <ComboboxValue placeholder="No squad" />
-          )}
+        {/* ComboboxValue already renders the squad's own dot + name, so nothing else goes in here. */}
+        <ComboboxTrigger aria-label="Squad" title={active?.name} className="h-7 w-full min-w-0 justify-between text-xs">
+          <ComboboxValue className="min-w-0" placeholder="No squad" />
         </ComboboxTrigger>
         <ComboboxContent />
       </Combobox>
@@ -350,7 +345,7 @@ function RoadmapItemDetailBody({ itemId, orgSlug, workspaceSlug, variant, onRetr
           <div aria-label="Roadmap item summary" className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
             <StatusSelect value={data.horizon} field="horizon" options={HORIZON_ORDER} map={HORIZON} edit={edit} label="Horizon" />
             {archived && <Badge className="bg-status-neutral-surface text-status-neutral">Archived</Badge>}
-            <SquadField data={data} edit={edit} />
+            <SquadField data={data} edit={edit} variant={variant} />
             <ScheduleField key={`${data.startDate}/${data.endDate}`} data={data} edit={edit} />
             <span className={CHIP} title="Votes from the public roadmap"><ThumbsUp className="size-3" aria-hidden />{data._count.votes} {data._count.votes === 1 ? "vote" : "votes"}</span>
             {data.isPrivate && <span className={CHIP} title="Hidden from the public portal roadmap"><Lock className="size-3" aria-hidden />Private</span>}
