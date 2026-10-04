@@ -67,6 +67,17 @@ For a targeted migration: deploy the registered migration, use authenticated `GE
 
 In the agent harness, retrieve the production migration credential as `COMPASS_PRODUCTION_MIGRATION_SECRET` and pass it only as the `x-migration-secret` header (for example by assigning it to `MIGRATION_SECRET` in the command environment). Never print it, persist it in a repository file, or substitute direct database credentials when it is unavailable.
 
+## Running the dev server on a remote box (homelab dev-builder)
+
+The generic recipe is the `proxmox-devbox` skill. These are the Compass-specific parts:
+
+- **Database:** set `DATABASE_URL` (plain `pg`; without it the app tries Aurora DSQL/OIDC). In development the app reads the **`compass_dev` schema, not `public`** (`lib/schema.ts`), so create the tables there: `DATABASE_URL="postgres://…/compass?schema=compass_dev" node node_modules/prisma/build/index.js db push --accept-data-loss`. Local-only; never for preview or production (those use the migration runner).
+- **Env:** `.env.local` also needs `AUTH_SECRET`, `AUTH_URL` (the box's origin) and `AUTH_TRUST_HOST=true`. The repo's own `.env.local` only holds a Vercel OIDC token.
+- **Node:** `engines` requires 22.x; the VM default is newer, so `fnm use 22` first.
+- **Sync size:** the checkout can hold ~50 GB in `.worktrees`, `.claude`, `.pnpm-store` and `.npm-cache`. Exclude all four (plus `node_modules`, `.next`, `.git`) from any rsync, or it hangs.
+- **Data:** run `npx tsx --env-file=.env.local scripts/seed-portal-demo.ts` to get a public roadmap at `/portal/demo/acme/roadmap`. It seeds no user, so authenticated pages won't work.
+- **Typecheck/E2E on the box:** `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit`. The functional E2E needs a local `compass_e2e` database; a throwaway `postgres:16` container on `localhost:5440` works (`pnpm test:e2e:functional -- <spec>`). `launch-tiers.spec.ts` currently fails there on a trailing console-error check (four 404s), identically on `main`.
+
 ## Portal SSO Identify — resyncing a drifted customer secret
 
 A customer's SSO Identify integration signs JWTs with a shared secret that
