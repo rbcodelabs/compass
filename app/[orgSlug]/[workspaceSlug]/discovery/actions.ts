@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
 import { OpportunityCreateError, createOpportunityWithLinks, opportunityCreateErrorMessage, type NewOpportunityInput } from "@/lib/opportunity-create";
 import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
+import { syncRoadmapOnSolutionChange } from "@/lib/roadmap/solution-sync";
 import { setOpportunityKeyResult } from "@/lib/typed-links";
 import { loadThinkingModelSource } from "@/lib/thinking-model/link-surfaces";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
@@ -203,19 +204,34 @@ export async function addSolution(
   return solution;
 }
 
+/**
+ * Runs after a UI status change commits: Building auto-adds the solution to the
+ * roadmap and linked items follow the new status (see lib/roadmap/solution-sync).
+ * Never throws; the status change itself has already succeeded.
+ */
+async function syncRoadmapAfterStatusChange(
+  prisma: ReturnType<typeof getPrisma>,
+  change: { solutionId: string; workspaceId: string; previousStatus: string; status: SolutionStatus },
+) {
+  const session = await auth();
+  return syncRoadmapOnSolutionChange(prisma, { source: "UI", captureSource: "UI", userId: session?.user?.id ?? null }, change);
+}
+
 export async function updateSolutionStatus(
   solutionId: string,
   status: SolutionStatus,
   revalidatePathStr: string
 ) {
-  await requireProductEntity("solution", solutionId);
+  const { workspaceId } = await requireProductEntity("solution", solutionId);
   const prisma = getPrisma();
+  const before = await prisma.solution.findUnique({ where: { id: solutionId }, select: { status: true } });
   const solution = await captureWorkspaceMutation(prisma, "solution", "update", "UI", solutionId, tx => tx.solution.update({
     where: { id: solutionId },
     data: { status },
   }));
+  const roadmapSync = await syncRoadmapAfterStatusChange(prisma, { solutionId, workspaceId, previousStatus: before?.status ?? "", status });
   revalidatePath(revalidatePathStr);
-  return solution;
+  return { ...solution, roadmapSync };
 }
 
 export async function addAssumption(
@@ -417,11 +433,14 @@ export async function moveSolutionStatus(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
+  const before = await prisma.solution.findUnique({ where: { id: solutionId }, select: { status: true } });
   await captureWorkspaceMutation(prisma, "solution", "update", "UI", solutionId, tx => tx.solution.update({
     where: { id: solutionId },
     data: { status, sortOrder },
   }));
+  const roadmapSync = await syncRoadmapAfterStatusChange(prisma, { solutionId, workspaceId: authorized.workspaceId, previousStatus: before?.status ?? "", status });
   revalidatePath(revalidatePathStr);
+  return { roadmapSync };
 }
 
 // ─── Reorder Solution ─────────────────────────────────────────────────────────

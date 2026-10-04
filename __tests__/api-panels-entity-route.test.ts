@@ -121,6 +121,24 @@ describe("PATCH /api/panels/entity/[type]/[id]", () => {
     expect(mockUpdateEntityField).not.toHaveBeenCalled();
   });
 
+  it("attaches the roadmap sync result so the panel can offer Undo for an auto-added item", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: false } as never);
+    const roadmapSync = { autoAdded: { itemId: "item-1", workspaceId: "ws-1", title: "Dash", start: null, end: null }, skipped: null, followed: 0, error: null };
+    mockUpdateEntityField.mockResolvedValue({ ok: true, roadmapSync } as never);
+    mockGetEntityDetail.mockResolvedValue({ type: "solution", data: { id: "sol-1" } } as never);
+    const body = await (await patch("solution", "sol-1", { field: "status", value: "IN_DELIVERY" })).json();
+    expect(body).toEqual({ type: "solution", data: { id: "sol-1" }, roadmapSync });
+  });
+
+  it("returns the plain detail when nothing reached the roadmap", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: false } as never);
+    mockUpdateEntityField.mockResolvedValue({ ok: true } as never);
+    mockGetEntityDetail.mockResolvedValue({ type: "solution", data: { id: "sol-1" } } as never);
+    expect(await (await patch("solution", "sol-1", { field: "title", value: "x" })).json()).toEqual({ type: "solution", data: { id: "sol-1" } });
+  });
+
   it("succeeds for a real member (isReadOnly: false)", async () => {
     signedIn();
     mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: false } as never);

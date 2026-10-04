@@ -237,9 +237,10 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await expect(page).toHaveURL(/view=timeline/);
       await page.waitForLoadState("networkidle");
 
-      const timelineUnscheduledPanel = page.locator("#unscheduled-items-panel");
+      // The "Ready to schedule" rail replaced the old bottom panel on the timeline.
+      const timelineUnscheduledPanel = page.getByTestId("schedule-rail");
       const sol2UnscheduledCard = timelineUnscheduledPanel
-        .locator('[data-slot="card"]')
+        .locator('[data-testid^="unscheduled-item-solution:"]')
         .filter({ hasText: sol2Title });
       await expect(sol2UnscheduledCard).toBeVisible({ timeout: 10_000 });
 

@@ -18,6 +18,7 @@ const mockSolution = {
   create: vi.fn(),
   update: vi.fn(),
   findFirst: vi.fn(),
+  findUnique: vi.fn(),
 };
 const mockAssumption = {
   create: vi.fn(),
@@ -50,6 +51,12 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+
+// The roadmap sync has its own suite (roadmap-solution-sync.test.ts); here we only pin that the status paths call it.
+const { mockSyncRoadmap } = vi.hoisted(() => ({
+  mockSyncRoadmap: vi.fn(async () => ({ autoAdded: null, skipped: null, followed: 0, error: null })),
+}));
+vi.mock("@/lib/roadmap/solution-sync", () => ({ syncRoadmapOnSolutionChange: mockSyncRoadmap }));
 
 vi.mock("@/auth", () => ({
   auth: vi.fn(),
@@ -87,6 +94,7 @@ beforeEach(() => {
   mockSolution.create.mockResolvedValue({ id: "sol-1", title: "Test Sol" });
   mockSolution.update.mockResolvedValue({ id: "sol-1" });
   mockSolution.findFirst.mockResolvedValue(null); // no last item by default
+  mockSolution.findUnique.mockResolvedValue({ status: "VALIDATED" });
   mockAssumption.create.mockResolvedValue({ id: "ass-1", title: "Test Assumption" });
   mockAssumption.update.mockResolvedValue({ id: "ass-1" });
   mockAssumption.delete.mockResolvedValue({ id: "ass-1" });
@@ -178,6 +186,18 @@ describe("updateSolutionStatus", () => {
       where: { id: "sol-1" },
       data: { status: "VALIDATED" },
     });
+  });
+
+  it("hands the transition to the roadmap sync so Building can auto-add the solution", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "user-1" } } as never);
+    mockSolution.findUnique.mockResolvedValue({ status: "VALIDATED" });
+    const result = await updateSolutionStatus("sol-1", "IN_DELIVERY", "/path");
+    expect(mockSyncRoadmap).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ source: "UI", userId: "user-1" }),
+      { solutionId: "sol-1", workspaceId: "ws-1", previousStatus: "VALIDATED", status: "IN_DELIVERY" },
+    );
+    expect(result.roadmapSync).toMatchObject({ autoAdded: null });
   });
 });
 

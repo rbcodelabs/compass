@@ -33,6 +33,10 @@ const database = {
 
 vi.mock("@/lib/db", () => ({ default: () => database }));
 
+// The roadmap sync has its own suite (roadmap-solution-sync.test.ts); here we only pin that solution edits call it.
+const { mockSync } = vi.hoisted(() => ({ mockSync: vi.fn() }));
+vi.mock("@/lib/roadmap/solution-sync", () => ({ syncRoadmapOnSolutionChange: mockSync }));
+
 // assignmentUpdate has its own dedicated unit tests in task-assignment.test.ts
 // (workspace-membership / agent-grant validation). Here we only need to know
 // updateTaskField's "assignee" case delegates to it and applies the result.
@@ -45,6 +49,7 @@ const WS = "ws-1";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockSync.mockResolvedValue({ autoAdded: null, skipped: null, followed: 0, error: null });
   // default: entity is in the workspace
   for (const m of Object.values(models)) m.findFirst.mockResolvedValue({ id: "e1" });
   models.roadmapItem.findUnique.mockResolvedValue({ id: "e1", horizon: "NEXT", status: "ACTIVE" });
@@ -194,6 +199,40 @@ describe("updateEntityField — validation", () => {
     const r = await updateEntityField("opportunity", "e1", WS, "workspaceId", "other-ws");
     expect(r).toEqual({ ok: false, status: 400, error: 'Field "workspaceId" is not editable' });
     expect(models.opportunity.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateEntityField: solution edits reach the roadmap", () => {
+  beforeEach(() => {
+    models.solution.findFirst.mockResolvedValue({ id: "e1", status: "VALIDATED", title: "Old title" });
+  });
+
+  it("a status change hands the transition to the roadmap sync and returns what it did", async () => {
+    mockSync.mockResolvedValue({ autoAdded: { itemId: "item-1", workspaceId: WS, title: "Old title", start: "2026-10-05", end: "2026-11-15" }, skipped: null, followed: 0, error: null });
+    const result = await updateEntityField("solution", "e1", WS, "status", "IN_DELIVERY", { kind: "USER", id: "user-1" });
+    expect(models.solution.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { status: "IN_DELIVERY", updatedAt: expect.any(Date) } });
+    expect(mockSync).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ source: "UI", userId: "user-1" }),
+      { solutionId: "e1", workspaceId: WS, previousStatus: "VALIDATED", status: "IN_DELIVERY" },
+    );
+    expect(result).toMatchObject({ ok: true, roadmapSync: { autoAdded: { itemId: "item-1" } } });
+  });
+
+  it("a title change lets linked items that still carry the old title follow it", async () => {
+    await updateEntityField("solution", "e1", WS, "title", "  New title ", { kind: "USER", id: "user-1" });
+    expect(mockSync).toHaveBeenCalledWith(expect.anything(), expect.anything(), { solutionId: "e1", workspaceId: WS, previousTitle: "Old title", title: "New title" });
+  });
+
+  it("a description edit and edits to other entities do not touch the roadmap", async () => {
+    await updateEntityField("solution", "e1", WS, "description", "More", { kind: "USER", id: "user-1" });
+    await updateEntityField("opportunity", "e1", WS, "status", "ACTIVE", { kind: "USER", id: "user-1" });
+    expect(mockSync).not.toHaveBeenCalled();
+  });
+
+  it("a hand-edited roadmap item horizon marks its schedule as edited so it stops following the solution", async () => {
+    await updateEntityField("roadmapItem", "e1", WS, "horizon", "LATER", { kind: "USER", id: "user-1" });
+    expect(models.roadmapItem.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { horizon: "LATER", updatedAt: expect.any(Date), scheduleEditedAt: expect.any(Date) } });
   });
 });
 

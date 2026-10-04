@@ -1180,6 +1180,11 @@ model RoadmapItem {
   feedbackId       String?          @map("feedback_id") @db.Uuid
   nowCommitmentProvenance String     @default("LEGACY_UNGATED") @map("now_commitment_provenance") @db.VarChar(30)
   nowDecisionRecordId String?        @map("now_decision_record_id") @db.Uuid
+  /// TRUE when auto-sync created this item because its solution reached Building (migration 075).
+  /// An ARCHIVED row with this flag is the suppression marker: auto-sync never re-adds it.
+  autoCreated      Boolean?         @map("auto_created")
+  /// Set when a human edits the dates or horizon (migration 075). While NULL, a linked item follows its solution.
+  scheduleEditedAt DateTime?        @map("schedule_edited_at")
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @default(now()) @map("updated_at")
   workspace        Workspace        @relation(fields: [workspaceId], references: [id])
