@@ -56,6 +56,7 @@ export const RESERVED_SECTION_NAMES: readonly string[] = [
   "Home",
   "Updates",
   "Capture",
+  "Research",
   "Feedback",
   "Settings",
   "Card sort",
