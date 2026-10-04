@@ -17,8 +17,12 @@
  *      shown in the rail's Auto-added section; Undo removes only the roadmap item
  *      (the solution keeps its status) and auto-sync never re-adds it.
  *   6. Empty roadmap: "Build from discovery" batch-creates linked items from a preset.
- *   7. Responsive: below 1320px the rail stacks above the timeline,
- *      which scrolls horizontally instead of squashing.
+ *   7. Responsive: below 1320px the rail is collapsed by default so the timeline
+ *      is visible at once; opening it stacks it above the timeline, which scrolls
+ *      horizontally instead of squashing.
+ *   8. Collapsible rail: the header button hides/shows the rail, the timeline
+ *      takes the freed width, the choice survives a reload, and `/` still
+ *      schedules while it is collapsed. An empty roadmap opens it by default.
  *
  * dnd-kit's PointerSensor needs real mouse movement, so drags are simulated with
  * page.mouse.move/down/up in several steps.
@@ -257,17 +261,121 @@ test.describe("Roadmap: schedule from discovery", () => {
     await expect(page.getByTestId("roadmap-empty-state")).toBeVisible();
   });
 
-  test("on a narrow screen the rail stacks above the timeline and the timeline scrolls horizontally", async ({ page, base }) => {
+  test("on a narrow screen the rail starts collapsed, opens stacked above the timeline, and the timeline scrolls horizontally", async ({ page, base }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await openTimeline(page, base);
+    await openTimeline(page, base, { rail: "as-is" });
     const rail = page.getByTestId("schedule-rail");
     const scroll = page.getByTestId("native-timeline-scroll");
-    await expect(rail).toBeVisible();
-    const railBox = (await rail.boundingBox())!;
-    const scrollBox = (await scroll.boundingBox())!;
-    expect(railBox.y + railBox.height, "rail sits above the timeline").toBeLessThanOrEqual(scrollBox.y + 1);
-    expect(railBox.width, "rail uses the full width").toBeGreaterThan(300);
+    const toggle = page.getByRole("button", { name: /ready-to-schedule rail/ });
+
+    // Default for a stacked layout: collapsed, timeline right at the top.
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(rail).toBeHidden();
+    await expect(scroll).toBeInViewport();
+    const collapsedTop = (await scroll.boundingBox())!.y;
     const { scrollWidth, clientWidth } = await scroll.evaluate((element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }));
     expect(scrollWidth, "timeline scrolls horizontally instead of squashing").toBeGreaterThan(clientWidth);
+    await page.screenshot({ path: testInfo.outputPath("rail-collapsed-390.png") });
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(rail).toBeVisible();
+    await expect.poll(async () => {
+      const railBox = await rail.boundingBox();
+      const scrollBox = await scroll.boundingBox();
+      return railBox && scrollBox ? scrollBox.y - (railBox.y + railBox.height) : null;
+    }, { message: "rail sits above the timeline" }).toBeGreaterThanOrEqual(-1);
+    expect((await rail.boundingBox())!.width, "rail uses the full width").toBeGreaterThan(300);
+    expect((await scroll.boundingBox())!.y, "opening the rail pushes the timeline down").toBeGreaterThan(collapsedTop);
+    await page.screenshot({ path: testInfo.outputPath("rail-open-390.png") });
+
+    // Closing leaves no gutter: the timeline is back where it started.
+    await toggle.click();
+    await expect(rail).toBeHidden();
+    await expect.poll(async () => (await scroll.boundingBox())!.y).toBeCloseTo(collapsedTop, 0);
+  });
+
+  test("the header button collapses the rail, the timeline takes the width, the choice persists, and / still schedules", async ({ page, base }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const title = `E2E Collapse Solution ${stamp()}`;
+    await createSolution(page, base, title);
+    await openTimeline(page, base, { rail: "as-is" });
+    const rail = page.getByTestId("schedule-rail");
+    const scroll = page.getByTestId("native-timeline-scroll");
+    const toggle = page.getByRole("button", { name: /ready-to-schedule rail/ });
+    await expect(railCard(page, title)).toBeVisible({ timeout: 10_000 });
+
+    // Wide default: open, and the badge carries the same number as the rail.
+    await expect(toggle).toHaveAccessibleName("Hide ready-to-schedule rail");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const railCount = (await page.getByTestId("schedule-rail-count").innerText()).trim();
+    await expect(page.getByTestId("rail-toggle-count")).toHaveText(railCount);
+    const openWidth = (await scroll.boundingBox())!.width;
+
+    // Collapse: no leftover gutter, focus stays on the toggle, nothing in the rail is reachable.
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toHaveAccessibleName("Show ready-to-schedule rail");
+    await expect(toggle).toBeFocused();
+    await expect(rail).toBeHidden();
+    await expect.poll(async () => (await scroll.boundingBox())!.width, { message: "timeline takes the freed width" }).toBeGreaterThan(openWidth + 300);
+    await expect(page.getByTestId("rail-toggle-count"), "badge stays visible while collapsed").toHaveText(railCount);
+    const chartCard = scroll.locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+    const cardBox = (await chartCard.boundingBox())!;
+    const sectionBox = (await page.getByTestId("timeline-engine-native").boundingBox())!;
+    expect(cardBox.x - sectionBox.x, "no gutter is left where the rail was").toBeLessThan(12);
+
+    // The choice survives a reload, with no flash of the open rail.
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(rail).toBeHidden();
+
+    // / (the command palette) still schedules while collapsed.
+    await page.locator("body").press("/");
+    const palette = page.getByRole("dialog", { name: "Schedule from discovery" });
+    await expect(palette).toBeVisible();
+    await palette.getByRole("combobox", { name: /^Search/ }).fill(title);
+    await expect(palette.getByRole("option").filter({ hasText: title }).first()).toHaveAttribute("aria-selected", "true");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("undo-toast").filter({ hasText: "Created roadmap item" })).toBeVisible({ timeout: 15_000 });
+    // The bar renders across the widened chart (the virtualized window follows the new width).
+    const bar = await revealBar(page, title);
+    await expect(bar).toBeVisible();
+    // The shared workspace may hold other unscheduled solutions, so the badge just drops by one.
+    const remaining = Number(railCount) - 1;
+    if (remaining > 0) await expect(page.getByTestId("rail-toggle-count")).toHaveText(String(remaining));
+    else await expect(page.getByTestId("rail-toggle-count")).toHaveCount(0);
+
+    // [ expands again (never while typing), restoring the original layout.
+    await page.locator("body").press("[");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(rail).toBeVisible();
+    await expect.poll(async () => (await scroll.boundingBox())!.width).toBeCloseTo(openWidth, 0);
+    await expect(bar).toBeVisible();
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(rail).toBeVisible();
+  });
+
+  test("an empty roadmap opens the rail by default, unless the user collapsed it", async ({ page, orgSlug }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const ts = stamp();
+    const workspaceBase = await createFreshWorkspace(page, orgSlug, `E2E Rail Empty ${ts}`);
+    await createSolution(page, workspaceBase, `E2E Rail Empty Solution ${ts}`);
+    await openTimeline(page, workspaceBase, { rail: "as-is" });
+    const toggle = page.getByRole("button", { name: /ready-to-schedule rail/ });
+    await expect(page.getByTestId("roadmap-empty-state")).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByTestId("schedule-rail")).toBeVisible();
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await page.reload();
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByTestId("roadmap-empty-state")).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("schedule-rail")).toBeHidden();
   });
 });

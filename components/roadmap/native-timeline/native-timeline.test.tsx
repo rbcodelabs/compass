@@ -67,7 +67,7 @@ vi.mock("@dnd-kit/core", () => ({
 
 vi.mock("../schedule/schedule-rail", () => ({
   ScheduleRail: (props: { items: unknown[]; autoAdded: unknown[]; className?: string }) => (
-    <aside aria-label="Ready to schedule" data-testid="schedule-rail" data-count={props.items.length} data-auto={props.autoAdded.length} className={props.className} />
+    <aside aria-label="Ready to schedule" data-testid="schedule-rail" data-count={props.items.length} data-auto={props.autoAdded.length} className={props.className}><button type="button">Rail action</button></aside>
   ),
 }));
 vi.mock("../schedule/schedule-palette", () => ({
@@ -354,7 +354,8 @@ describe("NativeTimeline", () => {
     const engine = screen.getByTestId("timeline-engine-native");
     expect(engine).toHaveClass("flex-col", "min-[1320px]:flex-row");
     // The rail comes first in the DOM so it stacks above the timeline below the wide-desktop breakpoint.
-    expect(engine.firstElementChild).toBe(screen.getByTestId("schedule-rail"));
+    expect(engine.firstElementChild).toBe(screen.getByTestId("schedule-rail-region"));
+    expect(screen.getByTestId("schedule-rail-region")).toContainElement(screen.getByTestId("schedule-rail"));
     expect(screen.getByTestId("schedule-rail")).toHaveClass("min-[1320px]:w-80");
   });
 
@@ -1034,5 +1035,119 @@ describe("NativeTimeline: scheduling from discovery", () => {
     ] as never;
     renderWithSquads();
     expect(screen.getByTestId("schedule-rail")).toHaveAttribute("data-auto", "1");
+  });
+});
+
+describe("NativeTimeline: collapsible Ready to schedule rail", () => {
+  const cookieWrites: string[] = [];
+  let wide = true;
+  const solution = (id: string) => ({ kind: "solution" as const, id, title: `Solution ${id}`, opportunityId: "o", opportunityTitle: "O", squadId: null, status: "VALIDATED", score: 50 });
+  const renderRail = (extra: Partial<React.ComponentProps<typeof NativeTimeline>> = {}) =>
+    render(<NativeTimeline items={[]} squads={[]} workspaceId="workspace-1" unscheduledItems={[]} {...extra} />);
+  const toggle = () => screen.getByTestId("rail-toggle");
+  const region = () => screen.getByTestId("schedule-rail-region");
+
+  beforeEach(() => {
+    wide = true;
+    cookieWrites.length = 0;
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("1320") ? wide : false, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    const cookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, "cookie");
+    Object.defineProperty(document, "cookie", { configurable: true, get: () => "", set: (value: string) => { cookieWrites.push(value); } });
+    return () => { if (cookieDescriptor) Object.defineProperty(document, "cookie", cookieDescriptor); else delete (document as unknown as Record<string, unknown>).cookie; };
+  });
+
+  it("is open by default on wide screens, wired to the header toggle, with the unscheduled count", () => {
+    harness.controller.unscheduled = [solution("a"), solution("b")];
+    renderRail();
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    expect(toggle()).toHaveAttribute("aria-controls", region().id);
+    expect(region()).toContainElement(screen.getByTestId("schedule-rail"));
+    expect(screen.getByTestId("rail-toggle-count")).toHaveTextContent("2");
+    expect(region()).not.toHaveAttribute("inert");
+  });
+
+  it("is collapsed by default where the rail would stack above the timeline, and inert", () => {
+    wide = false;
+    renderRail();
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    expect(toggle()).toHaveAccessibleName("Show ready-to-schedule rail");
+    expect(region().firstElementChild).toHaveAttribute("inert");
+    expect(screen.getByTestId("timeline-grid")).toBeInTheDocument();
+  });
+
+  it("keeps the count visible while collapsed and reports auto-added items", () => {
+    harness.controller.unscheduled = [solution("a")];
+    harness.controller.items = [{ id: "auto-1", title: "Auto one", horizon: "NOW", squad: null, viewStart: "2026-07-10", viewEnd: "2026-07-20", hasDates: true, autoCreated: true, updatedAt: "2026-07-01T00:00:00Z" }] as never;
+    renderRail({ initialRailPreference: "closed" });
+    expect(screen.getByTestId("rail-toggle-count")).toHaveTextContent("1");
+    expect(toggle()).toHaveAccessibleDescription("1 ready to schedule, 1 auto-added");
+    expect(screen.getByTestId("auto-added-count")).toHaveTextContent("1 added");
+  });
+
+  it("collapses and expands from the header, makes the closed rail inert, and remembers the choice in a cookie", () => {
+    renderRail();
+    fireEvent.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    expect(region()).toHaveAttribute("data-state", "closed");
+    expect(region().firstElementChild).toHaveAttribute("inert");
+    expect(cookieWrites.at(-1)).toMatch(/^compass_roadmap_rail=closed;/);
+    fireEvent.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    expect(region().firstElementChild).not.toHaveAttribute("inert");
+    expect(cookieWrites.at(-1)).toMatch(/^compass_roadmap_rail=open;/);
+  });
+
+  it("lets an explicit saved choice override the viewport default in both directions", () => {
+    wide = false;
+    const { unmount } = renderRail({ initialRailPreference: "open" });
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    unmount();
+    wide = true;
+    renderRail({ initialRailPreference: "closed" });
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("starts expanded on an empty roadmap unless the user explicitly collapsed it", () => {
+    wide = false;
+    const { unmount } = renderRail({ roadmapEmpty: true });
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    unmount();
+    renderRail({ roadmapEmpty: true, initialRailPreference: "closed" });
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("toggles on [ but never while typing, in a dialog, or with a modifier", () => {
+    renderRail();
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    fireEvent.keyDown(input, { key: "[" });
+    input.remove();
+    fireEvent.keyDown(document.body, { key: "[", ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: "[", metaKey: true });
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(document.body, { key: "[" });
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    fireEvent.keyDown(document.body, { key: "[" });
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("returns focus to the toggle when the rail closes while focus is inside it", () => {
+    renderRail();
+    const inside = screen.getByRole("button", { name: "Rail action" });
+    inside.focus();
+    fireEvent.keyDown(inside, { key: "[" });
+    expect(toggle()).toHaveFocus();
+  });
+
+  it("keeps the / palette working while the rail is collapsed", () => {
+    renderRail({ initialRailPreference: "closed" });
+    fireEvent.keyDown(document.body, { key: "/" });
+    expect(screen.getByRole("dialog", { name: "Schedule from discovery" })).toBeInTheDocument();
+  });
+
+  it("does not leave a gap: the rail region carries its own spacing and the section has no flex gap", () => {
+    renderRail();
+    expect(screen.getByTestId("timeline-engine-native").className).not.toMatch(/\bgap-/);
   });
 });

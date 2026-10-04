@@ -67,10 +67,21 @@ export function localToday(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
-export async function openTimeline(page: Page, base: string) {
+/**
+ * Open the timeline. The "Ready to schedule" rail is collapsed by default below 1320px, so by
+ * default this opens it when it is closed, for the many journeys that work from the rail.
+ * Pass `{ rail: "as-is" }` to observe the default state instead.
+ */
+export async function openTimeline(page: Page, base: string, options: { rail?: "open" | "as-is" } = {}) {
   await page.goto(`${base}/roadmap?view=timeline`);
   await page.waitForLoadState("networkidle");
   await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
+  if ((options.rail ?? "open") === "open") {
+    const toggle = page.getByRole("button", { name: /ready-to-schedule rail/ });
+    if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByTestId("schedule-rail")).toBeVisible();
+  }
 }
 
 /** Create a fresh, empty workspace through Organization Settings and return its base path. */

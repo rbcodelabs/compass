@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
@@ -22,6 +23,7 @@ import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { roadmapBoardFilterKey } from "@/lib/roadmap-filters";
 import { parseGroupByParam, resolveRoadmapGroupBy } from "@/lib/roadmap-group-by";
 import { loadCustomFieldValuesForObjects } from "@/lib/custom-field-values-batch";
+import { RAIL_COOKIE_NAME, parseRailPreference } from "@/lib/roadmap/rail-state";
 
 export const metadata = {
   title: "Roadmap",
@@ -45,6 +47,8 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     groupBy: groupByParam,
   } = await searchParams;
   const view = viewParam === "timeline" ? "timeline" : "board";
+  // Read on the server so a saved open/closed choice is in the first paint, not applied after hydration.
+  const initialRailPreference = parseRailPreference((await cookies()).get(RAIL_COOKIE_NAME)?.value);
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
@@ -274,6 +278,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
             unscheduledItems={unscheduledItems}
             scheduleCatalog={scheduleCatalog}
             roadmapEmpty={activeItemCount === 0}
+            initialRailPreference={initialRailPreference}
             groupBy={resolvedGroupBy.mode}
             groupByField={resolvedGroupBy.mode === "customField" ? { id: resolvedGroupBy.field.id, name: resolvedGroupBy.field.name, options: resolvedGroupBy.field.options ?? [] } : undefined}
             customFieldValuesByItemId={customFieldValuesByItemId}
