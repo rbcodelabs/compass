@@ -35,6 +35,8 @@ export type RoadmapCardData = {
   startDate: string | null;
   endDate: string | null;
   updatedAt: string;
+  /** Created by Building auto-sync rather than by a person (migration 075). */
+  autoCreated?: boolean;
   solution: { id: string; title: string } | null;
   keyResult: {
     id: string;

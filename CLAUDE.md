@@ -59,6 +59,35 @@ Vercel env values are **write-only**. `vercel env pull` and `vercel env ls` will
 
 Related: when checking whether a migration is applied, compare **exact names**, never substrings. `"051" in name` matches `051_pm_agent_handoff` as readily as `051_decision_task_bridge`. Note also that duplicate leading numbers are normal and accepted here (`main` carries two `049_*` migrations) because the runner keys on the exact name — a collision is not a bug to "fix", and branch previews share one `compass_preview` schema, so its applied list routinely contains migrations from branches other than yours.
 
+## Preview login — authenticated smoke tests on a preview
+
+Previews expose `/preview-login` (owner/viewer personas on the `preview-sample/workspace` sample workspace). In the agent harness the access code is `COMPASS_PREVIEW_LOGIN_ACCESS_CODE`; do not report the authenticated UI as unverifiable on a preview.
+
+```bash
+curl -s -c jar -b jar -X POST "$PREVIEW/api/preview-login/start" \
+  -H "x-vercel-protection-bypass: $COMPASS_VERCEL_BYPASS_SECRET" -H "Content-Type: application/json" \
+  -d "{\"code\":\"$COMPASS_PREVIEW_LOGIN_ACCESS_CODE\",\"persona\":\"owner\"}"
+```
+
+Then reuse the cookie jar (or a Playwright `request.post` + `newPage()` in the same context) for `/preview-sample/workspace/...`. Never print the code.
+
+## Preview login — authenticated smoke tests on a preview
+
+Previews expose `/preview-login` (owner/viewer personas on the
+`preview-sample/workspace` sample workspace). In the agent harness the access
+code is `COMPASS_PREVIEW_LOGIN_ACCESS_CODE`. Do not report the authenticated UI
+as unverifiable on a preview — sign in:
+
+```bash
+curl -s -c jar -b jar -X POST "$PREVIEW/api/preview-login/start" \
+  -H "x-vercel-protection-bypass: $COMPASS_VERCEL_BYPASS_SECRET" \
+  -H "Content-Type: application/json" \
+  -d "{\"code\":\"$COMPASS_PREVIEW_LOGIN_ACCESS_CODE\",\"persona\":\"owner\"}"
+```
+
+Then reuse the cookie jar (or a Playwright `request.post` + `newPage()` in the
+same context) for `/preview-sample/workspace/...`. Never print the code.
+
 ## Production data migrations
 
 Production schema and data maintenance runs through the registered migrations in `lib/migrations/runner.ts` and the authenticated `/api/admin/migrate` endpoint. Do not run local scripts directly against Aurora DSQL or use an AWS CLI login as an alternate production write path.

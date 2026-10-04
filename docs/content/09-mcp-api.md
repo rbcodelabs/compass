@@ -419,7 +419,7 @@ Typed links connect an Opportunity to Objectives and a Solution to Key Results (
 | `unlink_solution_from_key_result` | Remove a Solution–Key Result link; returns `removed: 0` when there is none |
 | `list_links` | List the typed links on one Opportunity, Objective, Solution or Key Result (pass exactly one id plus `workspaceId`), oldest first, with `limit` and `cursor` paging |
 | `add_solution` | Add a proposed Solution to an Opportunity |
-| `update_solution_status` | Update a Solution's lifecycle status (IDEA/VALIDATED/IN_DELIVERY/SHIPPED/KILLED); any valid status may transition directly to any other valid status |
+| `update_solution_status` | Update a Solution's lifecycle status (IDEA/VALIDATED/IN_DELIVERY/SHIPPED/KILLED); any valid status may transition directly to any other valid status. Moving a Solution to IN_DELIVERY also adds it to the roadmap once (flagged auto-created) unless a person already removed its auto-added item; the response then carries the new `Roadmap Item ID` |
 | `update_solution` | Update an existing Solution's title and/or description (pass an empty string to clear the description); at least one field must be provided |
 | `add_assumption` | Add a testable Assumption to a Solution, with a risk level (HIGH/MEDIUM/LOW); starts UNTESTED |
 | `update_assumption` | Update an Assumption's title, description, risk level, or status (UNTESTED/TESTING/VALIDATED/INVALIDATED) |
@@ -432,7 +432,7 @@ Typed links connect an Opportunity to Objectives and a Solution to Key Results (
 | `delete_solution_comment` | Permanently delete a Plan & Discussion entry |
 | `approve_solution_plan` | Mark a PLAN entry as APPROVED (only applies to PLAN entries, not COMMENT replies) |
 | `reject_solution_plan` | Mark a PLAN entry as REJECTED (only applies to PLAN entries, not COMMENT replies) |
-| `promote_to_roadmap` | Promote a validated Solution directly to the roadmap, creating a Roadmap Item linked back to the originating opportunity. Accepts an optional `isPrivate` flag |
+| `promote_to_roadmap` | Promote a validated Solution directly to the roadmap, creating a Roadmap Item linked back to the originating opportunity. Idempotent: a Solution already on the roadmap returns its existing item. The item inherits the Solution's title, squad and key result and takes the first free slot for its squad (six weeks). Accepts an optional `isPrivate` flag |
 
 `approve_solution_plan` and `reject_solution_plan` preserve the legacy, reversible plan-status marker only. They do not create a tracked Decision, authorize delivery, or establish authoritative approval semantics for new plans.
 
@@ -532,7 +532,7 @@ Deleting an Objective removes every link that names it, deleting a Key Result re
 | Tool | Description |
 |---|---|
 | `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
-| `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
+| `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag. With a `solutionId` it is idempotent (a Solution already on the roadmap returns its existing item) and unspecified squad, key result and dates are filled from the Solution and the first free slot |
 | `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, `isPrivate`, or links (`keyResultId`, `opportunityId`, `solutionId`, `squadId`). Omit a link to preserve it; pass a UUID to set it or `null` to clear it. USER/AGENT targets must belong to the item's workspace, even when the caller can access both workspaces. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow (rejected here — see below — and gated by the workspace's Marketing launch setting) |
 | `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources and optionally 2–4 single-choice `options`, or 1–4 `questions` each with its own single-choice options |
 | `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state (`PENDING`, `DECIDED`, or `AWAITING_FOLLOW_THROUGH`), linked item type, outcome, reviewer, or search text |

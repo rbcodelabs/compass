@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 vi.mock("@/auth", () => ({ auth: async () => ({ user: { id: "user" } }) }));
 const workspace = { id: "3eaf938a-782c-4073-a452-070d54156896" };
-vi.mock("@/lib/db", () => ({ default: () => new Proxy({}, { get: (_, name) => name === "workspace" ? { findFirst: async () => workspace } : { findMany: async () => [] } }) }));
+vi.mock("@/lib/db", () => ({ default: () => new Proxy({}, { get: (_, name) => name === "workspace" ? { findFirst: async () => workspace } : { findMany: async () => [], count: async () => 0 } }) }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn(), notFound: vi.fn() }));
 vi.mock("@/components/roadmap/roadmap-board", () => ({ RoadmapBoard: () => null }));
 vi.mock("@/components/roadmap/native-timeline/native-timeline", () => ({ NativeTimeline: () => null }));

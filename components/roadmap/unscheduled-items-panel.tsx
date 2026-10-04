@@ -25,6 +25,10 @@ export type UnscheduledItem =
       opportunityId: string;
       opportunityTitle: string;
       squadId: string | null;
+      /** Solution lifecycle status (VALIDATED / IN_DELIVERY). */
+      status?: string;
+      /** Normalized 0-100 score, when the solution has been scored. */
+      score?: number | null;
     }
   | {
       kind: "feedback";

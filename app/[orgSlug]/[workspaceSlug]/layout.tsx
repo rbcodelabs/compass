@@ -26,6 +26,7 @@ import { workspaceUpdatesAvailable } from "@/lib/workspace-updates-capture"
 import { followingAvailable } from "@/lib/following-flag"
 import { unreadCount } from "@/lib/notifications"
 import { ReadOnlyBanner } from "@/components/workspace/read-only-banner"
+import { UndoToastHost } from "@/components/ui/undo-toast-host"
 
 interface WorkspaceLayoutProps {
   children: React.ReactNode
@@ -109,6 +110,8 @@ export default async function WorkspaceLayout({
           followingEnabled={followingEnabled}
           unreadNotifications={unreadNotifications}
         />
+
+        <UndoToastHost />
 
         <TooltipProvider>
           <SidebarProvider

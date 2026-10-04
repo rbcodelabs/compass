@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState, useId } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useId } from "react";
 import {
   DndContext,
   PointerSensor,
@@ -20,7 +20,15 @@ import type { SelectOption } from "@/lib/types";
 import { GripVertical } from "lucide-react";
 import { createTimelineLaneKey, packTimelineIntervals } from "@/lib/roadmap-timeline/lane-packing";
 import { HORIZON_META, HORIZON_ORDER } from "@/lib/roadmap";
-import { UnscheduledItemsPanel, parseUnscheduledDragId } from "../unscheduled-items-panel";
+import { parseUnscheduledDragId, type UnscheduledItem } from "../unscheduled-items-panel";
+import { ScheduleRail, type BulkPlacement, type SolutionRailItem } from "../schedule/schedule-rail";
+import { SchedulePalette, type PaletteDates } from "../schedule/schedule-palette";
+import { RangeSchedulePopover } from "../schedule/range-schedule-popover";
+import { BuildFromDiscovery } from "../schedule/build-from-discovery";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { pushUndoToast } from "@/lib/ui/undo-toast";
+import { durationDaysFor, suggestSlot, type SlotRange } from "@/lib/roadmap/scheduling";
+import { type CatalogSolution, type ScheduleCatalog } from "@/lib/roadmap/rail";
 import {
   addCalendarDays,
   addCalendarMonths,
@@ -33,12 +41,12 @@ import {
   inclusiveDayCount,
   isBacklogCompatibleWithRow,
   isInternalTimelineDestination,
-  NATIVE_BACKLOG_HORIZONS,
   NONE_GROUPING,
   pointerClientToCanvasPosition,
   positionToInclusiveDate,
   resizeRange,
   selectTimelineIntervalsForRender,
+  solutionDropTarget,
   timelineLaneParts,
   timelinePixelDeltaToDays,
   type CalendarDate,
@@ -69,6 +77,28 @@ type NativeItemLayout = {
   overlapCount: number;
 };
 
+const EMPTY_CATALOG: ScheduleCatalog = { solutions: [], opportunities: [], scheduledSolutionIds: [] };
+/** Pointer travel below this is a click, not a drawn range. */
+const MIN_RANGE_DRAG_PX = 12;
+
+type DropGhost = { rowId: string; start: CalendarDate; end: CalendarDate; title: string };
+type RangeDraft = { rowId: string; startX: number; currentX: number };
+type RangePopoverState = { anchor: { x: number; y: number }; rowId: string; start: CalendarDate; end: CalendarDate };
+
+/** True while the user is typing: the `/` shortcut must never steal a keystroke. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  const role = target.getAttribute("role");
+  return role === "textbox" || role === "combobox" || role === "searchbox";
+}
+
+function formatShortDay(date: CalendarDate): string {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
+}
+
 export function NativeTimeline(props: TimelineEngineProps & {
   headerSquads?: TimelineEngineProps["squads"];
   cardSortHref?: string;
@@ -82,12 +112,24 @@ export function NativeTimeline(props: TimelineEngineProps & {
   customFieldValuesByItemId?: Record<string, unknown>;
   /** Every groupable (SELECT-type ROADMAP_ITEM) custom field, for the grouping toggle's option list — independent of which one (if any) is currently active. */
   groupByOptions?: { id: string; label: string }[];
+  /** Every live solution and opportunity, for the schedule palette, the empty-roadmap presets and Undo. */
+  scheduleCatalog?: ScheduleCatalog;
+  /** The workspace has no ACTIVE roadmap items at all (not merely none matching the current filter). */
+  roadmapEmpty?: boolean;
 }) {
+  const labels = useLabels();
   const controller = useTimelineController({
     initialItems: props.items,
     initialUnscheduled: props.unscheduledItems,
     workspaceId: props.workspaceId,
+    initialCatalog: props.scheduleCatalog,
   });
+  const catalog = props.scheduleCatalog ?? EMPTY_CATALOG;
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
+  const [ghost, setGhost] = useState<DropGhost | null>(null);
+  const [rangeDraft, setRangeDraft] = useState<RangeDraft | null>(null);
+  const [rangePopover, setRangePopover] = useState<RangePopoverState | null>(null);
   const launchWorkflowEnabled = props.launchWorkflowEnabled ?? true;
   const grouping: TimelineGrouping = useMemo(() => {
     if (props.groupBy === "squad") return buildSquadGrouping(props.squads);
@@ -131,6 +173,13 @@ export function NativeTimeline(props: TimelineEngineProps & {
   // aria-describedby ids from a global counter and hydration mismatches.
   const dndId = useId();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const gridRef = useRef<HTMLDivElement>(null);
+  const rangeDraftRef = useRef<RangeDraft | null>(null);
+
+  const autoAdded = useMemo(
+    () => controller.items.filter((item) => item.autoCreated).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    [controller.items],
+  );
 
   const packedItems = useMemo(() => packTimelineIntervals(controller.items.map((item) => {
     const { primaryId, secondaryId } = timelineLaneParts(grouping, item);
@@ -164,6 +213,48 @@ export function NativeTimeline(props: TimelineEngineProps & {
   }, [rowHeights, rows]);
   const bodyHeight = rows.reduce((height, row) => height + (rowHeights.get(row.id) ?? LANE_HEIGHT), 0);
 
+  // First free slot for a solution's squad at or after today: the same rule the server applies when no dates are sent.
+  const suggestSlotFor = useCallback((solution: CatalogSolution): SlotRange => suggestSlot({
+    occupied: controller.items
+      .filter((item) => item.hasDates && (item.squad?.id ?? null) === solution.squadId)
+      .map((item) => ({ start: item.viewStart, end: item.viewEnd })),
+    durationDays: durationDaysFor(null),
+    notBefore: localCalendarToday(),
+  }), [controller.items]);
+
+  async function scheduleFromPalette(solutions: CatalogSolution[], dates: PaletteDates | null) {
+    const ranged = dates && solutions.length === 1;
+    await controller.scheduleSolutions(solutions.map((solution) => ({
+      solutionId: solution.id,
+      ...(ranged ? { startDate: dates.startDate, endDate: addCalendarDays(dates.startDate, dates.weeks * 7 - 1) } : {}),
+    }))).catch(() => undefined);
+  }
+
+  function scheduleFromRail(items: SolutionRailItem[], placement: BulkPlacement) {
+    if (placement === "AUTO") {
+      // Highest score first, each into the first free slot of its squad: a greedy fit.
+      const ordered = [...items].sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.title.localeCompare(b.title));
+      void controller.scheduleSolutions(
+        ordered.map((item) => ({ solutionId: item.id })),
+        { message: `Auto-fit ${ordered.length} ${ordered.length === 1 ? "item" : "items"} by score and squad capacity` },
+      ).catch(() => undefined);
+      return;
+    }
+    void controller.scheduleSolutions(items.map((item) => ({ solutionId: item.id, horizon: placement }))).catch(() => undefined);
+  }
+
+  // `/` opens the schedule palette from anywhere on the timeline except while typing.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
+      if (isTypingTarget(event.target) || (event.target instanceof HTMLElement && event.target.closest("[role=dialog]"))) return;
+      event.preventDefault();
+      setPaletteOpen(true);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   useLayoutEffect(() => {
     const scrollContainer = scrollRef.current;
     if (!scrollContainer) return;
@@ -178,6 +269,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
   }, [timelineWidth]);
 
   useLayoutEffect(() => () => stopDragPointerTracking(), []);
+
 
   // The window opens two months before today, so on a typical viewport today
   // (and any undated item placed there) sits right of the first screenful and,
@@ -254,6 +346,14 @@ export function NativeTimeline(props: TimelineEngineProps & {
     dragPointerCurrentX.current = null;
   }
 
+  /** The calendar date under the drag pointer, or null when it cannot be measured. */
+  function dropDateUnderPointer(): CalendarDate | null {
+    const canvasRect = canvasRef.current?.getBoundingClientRect();
+    const pointerX = dragPointerCurrentX.current;
+    if (!canvasRect || pointerX === null) return null;
+    return positionToInclusiveDate(pointerClientToCanvasPosition(pointerX, canvasRect.left), controller.viewportStart, controller.viewportEnd, timelineWidth);
+  }
+
   function handleDragEnd(event: DragEndEvent) {
     const dragId = String(event.active.id);
     if (dragId.startsWith("timeline:item:")) {
@@ -287,6 +387,24 @@ export function NativeTimeline(props: TimelineEngineProps & {
     const backlogItem = parsed
       ? controller.unscheduled.find((candidate) => candidate.id === parsed.id && candidate.kind === parsed.kind)
       : undefined;
+    if (backlogItem?.kind === "solution") {
+      // A rail card dropped on a row creates a linked roadmap item: the row's squad, the date under the pointer, the default length.
+      const target = row ? solutionDropTarget(row) : null;
+      const dropDate = dropDateUnderPointer();
+      if (!row || !target || !dropDate) {
+        controller.setAnnouncement(`${backlogItem.title} cannot be scheduled in that lane`);
+        return;
+      }
+      const end = addCalendarDays(dropDate, durationDaysFor(null) - 1);
+      void controller.scheduleSolutions([{
+        solutionId: backlogItem.id,
+        horizon: target.horizon ?? undefined,
+        squadId: target.squadId,
+        startDate: dropDate,
+        endDate: end,
+      }]).catch(() => undefined);
+      return;
+    }
     if (!row || !backlogItem || !isBacklogCompatibleWithRow(backlogItem, row)) {
       if (backlogItem) controller.setAnnouncement(`${backlogItem.title} cannot be scheduled in that lane`);
       return;
@@ -301,6 +419,19 @@ export function NativeTimeline(props: TimelineEngineProps & {
 
   function handleDragMove(event: DragMoveEvent) {
     const dragId = String(event.active.id);
+    const railDrag = parseUnscheduledDragId(dragId);
+    if (railDrag?.kind === "solution") {
+      const item = controller.unscheduled.find((candidate) => candidate.kind === "solution" && candidate.id === railDrag.id);
+      const row = rows.find((candidate) => candidate.id === event.over?.id);
+      const dropDate = row && solutionDropTarget(row) ? dropDateUnderPointer() : null;
+      if (!item || !row || !dropDate) {
+        setGhost((current) => (current === null ? current : null));
+        return;
+      }
+      const end = addCalendarDays(dropDate, durationDaysFor(null) - 1);
+      setGhost((current) => (current && current.rowId === row.id && current.start === dropDate ? current : { rowId: row.id, start: dropDate, end, title: item.title }));
+      return;
+    }
     if (!dragId.startsWith("timeline:item:")) return;
     const item = controller.items.find((candidate) => `timeline:item:${candidate.id}` === dragId);
     const destination = rows.find((candidate) => candidate.id === event.over?.id);
@@ -322,9 +453,69 @@ export function NativeTimeline(props: TimelineEngineProps & {
     );
   }
 
+  // ── Click-drag on an empty row: draw a range, then pick a solution to schedule into it ──
+  function laneRowAt(target: EventTarget | null): TimelineRow | null {
+    const element = target instanceof HTMLElement ? target.closest<HTMLElement>("[data-lane-row]") : null;
+    const row = element ? rows.find((candidate) => candidate.id === element.dataset.laneRow) : undefined;
+    return row && solutionDropTarget(row) ? row : null;
+  }
+  function canvasX(clientX: number): number | null {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    return rect ? pointerClientToCanvasPosition(clientX, rect.left) : null;
+  }
+  function beginRange(event: React.PointerEvent<HTMLDivElement>) {
+    // Mouse and pen only: on touch the same gesture scrolls the timeline.
+    if (event.button !== 0 || event.pointerType === "touch" || activeDragId) return;
+    const row = laneRowAt(event.target);
+    const x = canvasX(event.clientX);
+    if (!row || x === null) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    rangeDraftRef.current = { rowId: row.id, startX: x, currentX: x };
+    setRangeDraft(rangeDraftRef.current);
+    setRangePopover(null);
+  }
+  function moveRange(event: React.PointerEvent<HTMLDivElement>) {
+    const draft = rangeDraftRef.current;
+    const x = canvasX(event.clientX);
+    if (!draft || x === null) return;
+    rangeDraftRef.current = { ...draft, currentX: x };
+    setRangeDraft(rangeDraftRef.current);
+  }
+  function endRange(event: React.PointerEvent<HTMLDivElement>) {
+    const draft = rangeDraftRef.current;
+    rangeDraftRef.current = null;
+    setRangeDraft(null);
+    if (!draft || Math.abs(draft.currentX - draft.startX) < MIN_RANGE_DRAG_PX) return;
+    const left = Math.min(draft.startX, draft.currentX);
+    const right = Math.max(draft.startX, draft.currentX);
+    setRangePopover({
+      anchor: { x: event.clientX, y: event.clientY },
+      rowId: draft.rowId,
+      start: positionToInclusiveDate(left, controller.viewportStart, controller.viewportEnd, timelineWidth),
+      end: positionToInclusiveDate(right, controller.viewportStart, controller.viewportEnd, timelineWidth),
+    });
+  }
+  function cancelRange() {
+    rangeDraftRef.current = null;
+    setRangeDraft(null);
+  }
+  const popoverRow = rangePopover ? rows.find((row) => row.id === rangePopover.rowId) ?? null : null;
+  const popoverTarget = popoverRow ? solutionDropTarget(popoverRow) : null;
+  const popoverCandidates = useMemo<SolutionRailItem[]>(() => {
+    if (!popoverTarget) return [];
+    return controller.unscheduled
+      .filter((item): item is SolutionRailItem => item.kind === "solution")
+      .sort((a, b) => Number(b.squadId === popoverTarget.squadId) - Number(a.squadId === popoverTarget.squadId) || (b.score ?? -1) - (a.score ?? -1) || a.title.localeCompare(b.title));
+  }, [controller.unscheduled, popoverTarget]);
+
+  const showEmptyState = Boolean(props.roadmapEmpty) && controller.items.length === 0 && !manualMode;
+  const draftRow = rangeDraft ? rows.find((row) => row.id === rangeDraft.rowId) : undefined;
+  const ghostRow = ghost ? rows.find((row) => row.id === ghost.rowId) : undefined;
+
   return (
     <div className="flex min-h-full min-w-0 flex-1 flex-col md:h-full md:min-h-0">
-      <RoadmapHeader squads={props.headerSquads ?? props.squads} customFieldGroups={props.customFieldGroups} activeCustomFieldId={props.activeCustomFieldId ?? null} groupByValue={groupByValue} groupByOptions={props.groupByOptions} cardSortHref={props.cardSortHref} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: goToToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0 }} />
+      <RoadmapHeader squads={props.headerSquads ?? props.squads} customFieldGroups={props.customFieldGroups} activeCustomFieldId={props.activeCustomFieldId ?? null} groupByValue={groupByValue} groupByOptions={props.groupByOptions} cardSortHref={props.cardSortHref} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: goToToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0, schedule: { onOpen: () => setPaletteOpen(true), autoSync: true } }} />
       <div data-slot="workspace-content" className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:px-4 md:py-3">
         <DndContext
           id={dndId}
@@ -336,16 +527,41 @@ export function NativeTimeline(props: TimelineEngineProps & {
             stopDragPointerTracking();
             setActiveItemId(null);
             setActiveDragId(null);
+            setGhost(null);
           }}
           onDragEnd={(event) => {
             setActiveItemId(null);
             setActiveDragId(null);
+            setGhost(null);
             handleDragEnd(event);
             stopDragPointerTracking();
           }}
         >
-          <section data-testid="timeline-engine-native" className="flex min-w-0 flex-col gap-3 p-1 motion-reduce:[&_#unscheduled-items-panel_[data-slot=card]]:transition-none [&_#unscheduled-items-panel_.text-muted-foreground]:text-foreground [&_#unscheduled-items-panel_[data-slot=badge]]:border-border-interactive [&_#unscheduled-items-panel_[data-slot=badge]]:bg-card [&_#unscheduled-items-panel_[data-slot=badge]]:text-foreground">
+          <section data-testid="timeline-engine-native" className="flex min-w-0 flex-col gap-3 p-1 min-[1320px]:flex-row min-[1320px]:items-start">
+            <ScheduleRail
+              className="max-h-80 min-[1320px]:sticky min-[1320px]:top-0 min-[1320px]:max-h-[calc(100dvh-9rem)] min-[1320px]:w-80 min-[1320px]:shrink-0"
+              items={controller.unscheduled}
+              squads={props.headerSquads ?? props.squads}
+              autoAdded={autoAdded}
+              pendingItemKeys={controller.pendingBacklogIds}
+              onScheduleOne={(item) => { void controller.scheduleSolutions([{ solutionId: item.id }]).catch(() => undefined); }}
+              onBulkSchedule={scheduleFromRail}
+              onQuickAddFeedback={(item, horizon) => controller.quickAdd(item satisfies UnscheduledItem, horizon)}
+              onUndoAuto={(item) => { void controller.undoCreated([item.id]).catch(() => undefined); }}
+            />
+            <div className="flex min-w-0 flex-1 flex-col gap-3">
             {controller.reconciliationRequiredIds.size > 0 && <p role="alert" className="text-sm text-muted-foreground">An item changed elsewhere. Reload the timeline before editing it again.</p>}
+            {showEmptyState ? (
+              <BuildFromDiscovery
+                catalog={catalog}
+                scheduledIds={controller.scheduledSolutionIds}
+                onBuild={(preset) => controller.buildFromDiscovery(preset)}
+                onAddManually={() => {
+                  setManualMode(true);
+                  pushUndoToast({ message: "Blank roadmap. Drag from the left, draw on a row, or press / to search." });
+                }}
+              />
+            ) : (
             <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
               <div className="grid" style={{ gridTemplateColumns: `clamp(112px, 30vw, ${LABEL_WIDTH}px) minmax(0, 1fr)` }}>
                 <div className="border-r bg-card">
@@ -383,8 +599,13 @@ export function NativeTimeline(props: TimelineEngineProps & {
                   >
                     <NativeHeaders start={controller.viewportStart} end={controller.viewportEnd} width={timelineWidth} />
                     <div
+                      ref={gridRef}
                       className="relative overflow-hidden"
                       data-testid="timeline-grid"
+                      onPointerDown={beginRange}
+                      onPointerMove={moveRange}
+                      onPointerUp={endRange}
+                      onPointerCancel={cancelRange}
                       data-virtual-window-start-px={Math.round(renderWindow.start)}
                       data-virtual-window-end-px={Math.round(renderWindow.end)}
                       data-rendered-card-count={renderedItemLayouts.length}
@@ -404,6 +625,42 @@ export function NativeTimeline(props: TimelineEngineProps & {
                         />
                       ))}
                       <TodayLine start={controller.viewportStart} end={controller.viewportEnd} width={timelineWidth} />
+                      {draftRow && rangeDraft ? (
+                        <div
+                          aria-hidden="true"
+                          data-testid="timeline-range-draft"
+                          className="pointer-events-none absolute z-10 h-9 rounded-lg border border-dashed border-primary bg-primary/15"
+                          style={{ left: Math.min(rangeDraft.startX, rangeDraft.currentX), width: Math.abs(rangeDraft.currentX - rangeDraft.startX), top: (rowTops.get(draftRow.id) ?? 0) + 7 }}
+                        />
+                      ) : null}
+                      {ghost && ghostRow ? (() => {
+                        const left = dateToPosition(ghost.start, controller.viewportStart, controller.viewportEnd, timelineWidth);
+                        const width = inclusiveDayCount(ghost.start, ghost.end) * dayWidth;
+                        const top = (rowTops.get(ghostRow.id) ?? 0) + 7;
+                        const tipLeft = left + width + 8 > timelineWidth - 240 ? Math.max(0, left - 236) : left + width + 8;
+                        return (
+                          <>
+                            <div
+                              aria-hidden="true"
+                              data-testid="timeline-drop-ghost"
+                              className="pointer-events-none absolute z-10 flex h-9 flex-col justify-center overflow-hidden rounded-lg border-2 border-dashed border-primary bg-primary/15 px-2 text-xs leading-tight text-foreground"
+                              style={{ left, width, top }}
+                            >
+                              <span className="truncate font-semibold">{ghost.title}</span>
+                              <span className="truncate text-[10px] text-muted-foreground">{formatShortDay(ghost.start)} – {formatShortDay(ghost.end)} · {Math.round(inclusiveDayCount(ghost.start, ghost.end) / 7)} wks</span>
+                            </div>
+                            <div
+                              aria-hidden="true"
+                              data-testid="timeline-drop-tip"
+                              className="pointer-events-none absolute z-10 w-56 rounded-md bg-foreground px-2 py-1 text-[11px] font-medium leading-tight text-background shadow-md"
+                              style={{ left: tipLeft, top }}
+                            >
+                              Release to create roadmap item
+                              <span className="block text-[10px] font-normal opacity-80">Linked to {labels.solution.lower} · squad {ghostRow.label} · inherits {labels.keyResult.lower}</span>
+                            </div>
+                          </>
+                        );
+                      })() : null}
                       {renderedItemLayouts.map(({ item, left, width, interactionWidth, top, track, trackCount, overlapCount }) => {
                         return (
                           <NativeItem
@@ -445,13 +702,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
                 </div>
               </div>
             </div>
-            <UnscheduledItemsPanel
-              items={controller.unscheduled}
-              onQuickAdd={controller.quickAdd}
-              allowedHorizons={NATIVE_BACKLOG_HORIZONS}
-              pendingItemKeys={controller.pendingBacklogIds}
-              interactionMode="touch-safe"
-            />
+            )}
             <p className="sr-only" role="status" aria-live="polite">{controller.announcement}</p>
             <EditDatesDialog
               item={editing}
@@ -462,6 +713,34 @@ export function NativeTimeline(props: TimelineEngineProps & {
               onOpenChange={(open) => { if (!open) setEditing(null); }}
               onSave={(horizon, start, end) => controller.reschedule(editing!.id, horizon, start, end)}
             />
+            </div>
+            <SchedulePalette
+              open={paletteOpen}
+              onOpenChange={setPaletteOpen}
+              catalog={catalog}
+              scheduledIds={controller.scheduledSolutionIds}
+              suggestSlot={suggestSlotFor}
+              onSchedule={scheduleFromPalette}
+            />
+            {rangePopover && popoverTarget ? (
+              <RangeSchedulePopover
+                anchor={rangePopover.anchor}
+                range={{ start: rangePopover.start, end: rangePopover.end }}
+                candidates={popoverCandidates}
+                squadLabel={popoverRow?.label ?? ""}
+                onClose={() => setRangePopover(null)}
+                onPick={(item) => {
+                  setRangePopover(null);
+                  void controller.scheduleSolutions([{
+                    solutionId: item.id,
+                    horizon: popoverTarget.horizon ?? undefined,
+                    squadId: popoverTarget.squadId,
+                    startDate: rangePopover.start,
+                    endDate: rangePopover.end,
+                  }]).catch(() => undefined);
+                }}
+              />
+            ) : null}
           </section>
         </DndContext>
       </div>
@@ -515,7 +794,7 @@ function NativeHeaders({ start, end, width }: { start: CalendarDate; end: Calend
 
 function NativeLane({ row, top, height, disabled }: { row: TimelineRow; top: number; height: number; disabled: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: row.id, disabled, data: { row } });
-  return <div ref={setNodeRef} data-testid={row.kind === "lane" ? `timeline-drop-${row.id}` : undefined} className={`absolute inset-x-0 border-b ${row.kind === "horizon" ? "bg-muted/70" : isOver ? "bg-primary/5" : "bg-transparent"}`} style={{ top, height }} />;
+  return <div ref={setNodeRef} data-testid={row.kind === "lane" ? `timeline-drop-${row.id}` : undefined} data-lane-row={row.kind === "lane" ? row.id : undefined} title={row.kind === "lane" ? "Click and drag to schedule" : undefined} className={`absolute inset-x-0 border-b ${row.kind === "horizon" ? "bg-muted/70" : isOver ? "bg-primary/5" : "bg-transparent"}`} style={{ top, height }} />;
 }
 
 function isRowValidForActiveDrag(
@@ -534,6 +813,7 @@ function isRowValidForActiveDrag(
   }
   const parsed = parseUnscheduledDragId(activeDragId);
   const item = parsed ? unscheduled.find((candidate) => candidate.kind === parsed.kind && candidate.id === parsed.id) : undefined;
+  if (item?.kind === "solution") return solutionDropTarget(row) !== null;
   return Boolean(item && isBacklogCompatibleWithRow(item, row));
 }
 

@@ -260,6 +260,8 @@ describe("update_roadmap_item MCP tool — optional links", () => {
     expect(data).toEqual({
       keyResultId: targetId, solutionId: null, title: "Updated", horizon: "NEXT",
       status: "ACTIVE", isPrivate: false, startDate: new Date("2026-09-01"), updatedAt: expect.any(Date),
+      // A hand-set schedule ends the item following its solution (migration 075).
+      scheduleEditedAt: expect.any(Date),
     })
     expect(data).not.toHaveProperty("opportunityId")
     expect(data).not.toHaveProperty("squadId")

@@ -9,6 +9,8 @@ import { getToolExpectedWhere } from "@/lib/mcp-tool-db"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
+import { getMcpActor } from "@/lib/mcp-authz"
+import { syncRoadmapOnSolutionChange } from "@/lib/roadmap/solution-sync"
 
 export async function createSolution({ opportunityId, title, description, source = "MCP" }: { opportunityId: string; title: string; description?: string | null; source?: ProgrammaticSource }) {
   const prisma = getPrisma()
@@ -39,7 +41,7 @@ export async function updateSolution({
 
   const existing = await prisma.solution.findUnique({
     where: { id: solutionId },
-    select: { id: true, title: true, description: true, updatedAt: true },
+    select: { id: true, title: true, description: true, updatedAt: true, workspaceId: true },
   })
   if (!existing) {
     return fail(`Solution "${solutionId}" not found.`)
@@ -61,6 +63,17 @@ export async function updateSolution({
     where: { id: solutionId, ...(expectedUpdatedAt ? { updatedAt: new Date(expectedUpdatedAt) } : {}), ...getToolExpectedWhere() },
     data: updateData,
   })
+
+  // Linked roadmap items that still carry the old title follow the rename. Best-effort and never throws.
+  if (title !== undefined && existing.workspaceId && updated.title !== existing.title) {
+    let userId: string | null = null
+    try { userId = getMcpActor().userId ?? null } catch { userId = null }
+    await syncRoadmapOnSolutionChange(
+      prisma,
+      { source: "MCP", captureSource: workspaceMutationSource("MCP"), userId },
+      { solutionId, workspaceId: existing.workspaceId, previousTitle: existing.title, title: updated.title },
+    )
+  }
 
   return ok(
     `**Solution updated**\n` +

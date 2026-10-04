@@ -4,10 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUrlState } from "@/hooks/use-url-state";
 import {
+  buildRoadmapFromDiscovery,
   promoteFeedbackToRoadmap,
-  promoteToRoadmap,
   rescheduleRoadmapItem,
+  scheduleSolutionsToRoadmap,
+  undoRoadmapCreate,
+  type RoadmapBuildPreset,
+  type ScheduleSolutionRequest,
+  type ScheduleSolutionsResult,
 } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import { pushUndoToast } from "@/lib/ui/undo-toast";
+import { READY_STATUSES, type ScheduleCatalog } from "@/lib/roadmap/rail";
 import type { RoadmapCardData } from "../roadmap-card";
 import { unscheduledDragId, type UnscheduledItem } from "../unscheduled-items-panel";
 import type { Horizon } from "@/lib/types";
@@ -49,14 +56,26 @@ function projectTimelineItem(item: RoadmapCardData, placeholderStart: CalendarDa
   return { ...item, hasDates: false, viewStart: placeholderStart, viewEnd: addCalendarDays(placeholderStart, 13) };
 }
 
+const solutionKey = (solutionId: string) => `unscheduled:solution:${solutionId}`;
+
+export type CreateFromDiscoveryOptions = {
+  /** Toast copy override; the default describes how many items were created. */
+  message?: string;
+  /** Suppress the Undo toast (the caller shows its own). */
+  silent?: boolean;
+};
+
 export function useTimelineController({
   initialItems,
   initialUnscheduled,
   workspaceId,
+  initialCatalog,
 }: {
   initialItems: RoadmapCardData[];
   initialUnscheduled: UnscheduledItem[];
   workspaceId: string;
+  /** Every live solution and whether it is already scheduled, for the palette and for restoring the rail after Undo. */
+  initialCatalog?: ScheduleCatalog;
 }) {
   const router = useRouter();
   const { subscribeEntityMutated } = usePanelContext();
@@ -74,6 +93,12 @@ export function useTimelineController({
   const authoritativeUnscheduledRef = useRef(initialUnscheduled);
   const lastInitialItemsRef = useRef(initialItems);
   const lastInitialUnscheduledRef = useRef(initialUnscheduled);
+  const catalogRef = useRef(initialCatalog);
+  const lastInitialCatalogRef = useRef(initialCatalog);
+  const scheduledIdsRef = useRef(new Set(initialCatalog?.scheduledSolutionIds ?? []));
+  const [scheduledSolutionIds, setScheduledSolutionIds] = useState<ReadonlySet<string>>(() => new Set(scheduledIdsRef.current));
+  // Rail entries removed by a create, so Undo can put the exact card back.
+  const removedRailRef = useRef(new Map<string, UnscheduledItem>());
   // Keep presentation state across squad-key remounts without resetting save fences.
   const { params: viewParams, set: setViewParams } = useUrlState();
   const zoom: TimelineZoom = viewParams.get("timelineScale") === "quarter" ? "quarter" : "month";
@@ -141,6 +166,18 @@ export function useTimelineController({
       return unscheduledItemsEqual(current, next) ? current : next;
     });
   }, [initialUnscheduled]);
+
+  useEffect(() => {
+    if (lastInitialCatalogRef.current === initialCatalog) return;
+    lastInitialCatalogRef.current = initialCatalog;
+    catalogRef.current = initialCatalog;
+    // A refresh landing mid-create must not make a solution look unscheduled again.
+    if (pendingBacklogIdsRef.current.size > 0 || !initialCatalog) return;
+    const incoming = new Set(initialCatalog.scheduledSolutionIds);
+    if (incoming.size === scheduledIdsRef.current.size && [...incoming].every((id) => scheduledIdsRef.current.has(id))) return;
+    scheduledIdsRef.current = incoming;
+    setScheduledSolutionIds(new Set(incoming));
+  }, [initialCatalog]);
 
   useEffect(() => subscribeEntityMutated("roadmapItem", (id, patch) => {
     const confirmed = confirmedItemsRef.current.get(id);
@@ -249,13 +286,11 @@ export function useTimelineController({
     setAnnouncement(`Scheduling ${item.title} from ${start} through ${end}`);
     try {
       if (item.kind === "solution") {
-        await promoteToRoadmap(
-          item.id,
+        // Solutions are created through the shared, idempotent Discovery path.
+        await scheduleSolutionsToRoadmap(
           workspaceId,
-          horizon,
-          item.squadId,
-          item.opportunityId,
-          { startDate: utcDate(start), endDate: utcDate(end) },
+          [{ solutionId: item.id, horizon: horizon as ScheduleSolutionRequest["horizon"], squadId: item.squadId, startDate: start, endDate: end }],
+          localCalendarToday(),
         );
       } else {
         await promoteFeedbackToRoadmap(
@@ -285,6 +320,153 @@ export function useTimelineController({
     }
   }
 
+  /** Rebuilds the rail card for a solution returned to the rail by an Undo. */
+  function railItemFor(solutionId: string): UnscheduledItem | null {
+    const removed = removedRailRef.current.get(solutionId);
+    if (removed) return removed;
+    const solution = catalogRef.current?.solutions.find((candidate) => candidate.id === solutionId);
+    if (!solution || !READY_STATUSES.includes(solution.status)) return null;
+    return {
+      kind: "solution",
+      id: solution.id,
+      title: solution.title,
+      opportunityId: solution.opportunityId,
+      opportunityTitle: solution.opportunityTitle,
+      squadId: solution.squadId,
+      status: solution.status,
+      score: solution.score,
+    };
+  }
+
+  const squadFilterId = viewParams.get("squad");
+
+  /**
+   * Folds a server result into local state: the new bars appear, their solutions
+   * leave the rail and count as scheduled. The follow-up refresh then confirms it.
+   */
+  function applyCreated(result: ScheduleSolutionsResult) {
+    const createdSolutionIds = new Set<string>();
+    const additions: RoadmapCardData[] = [];
+    for (const card of result.created) {
+      if (card.solutionId) createdSolutionIds.add(card.solutionId);
+      confirmedItemsRef.current.set(card.id, card);
+      // A squad filter hides other squads' bars; the item is still created, it just is not drawn here.
+      if (!squadFilterId || card.squad?.id === squadFilterId) additions.push(card);
+    }
+    if (additions.length > 0) {
+      const known = new Set(itemsRef.current.map((item) => item.id));
+      const next = [...itemsRef.current, ...additions.filter((card) => !known.has(card.id))];
+      itemsRef.current = next;
+      setItems(next);
+    }
+    const leaving = new Set([...createdSolutionIds, ...result.existing.map((entry) => entry.solutionId)]);
+    if (leaving.size > 0) {
+      for (const entry of authoritativeUnscheduledRef.current) {
+        if (entry.kind === "solution" && leaving.has(entry.id)) removedRailRef.current.set(entry.id, entry);
+      }
+      authoritativeUnscheduledRef.current = authoritativeUnscheduledRef.current.filter((entry) => !(entry.kind === "solution" && leaving.has(entry.id)));
+      setUnscheduled((current) => current.filter((entry) => !(entry.kind === "solution" && leaving.has(entry.id))));
+      for (const id of leaving) scheduledIdsRef.current.add(id);
+      setScheduledSolutionIds(new Set(scheduledIdsRef.current));
+    }
+  }
+
+  /**
+   * Create linked roadmap items for solutions: from the rail, the palette, a
+   * dropped card or a drawn range. Resolves with the created bars. Every create
+   * gets an Undo toast unless `silent`.
+   */
+  async function scheduleSolutions(requests: ScheduleSolutionRequest[], options: CreateFromDiscoveryOptions = {}): Promise<RoadmapCardData[]> {
+    const fresh = requests.filter((request) => !pendingBacklogIdsRef.current.has(solutionKey(request.solutionId)));
+    if (fresh.length === 0) {
+      setAnnouncement("Already being scheduled");
+      return [];
+    }
+    for (const request of fresh) pendingBacklogIdsRef.current.add(solutionKey(request.solutionId));
+    setPendingBacklogIds(new Set(pendingBacklogIdsRef.current));
+    setAnnouncement(fresh.length === 1 ? "Creating roadmap item" : `Creating ${fresh.length} roadmap items`);
+    try {
+      const result = await scheduleSolutionsToRoadmap(workspaceId, fresh, localCalendarToday());
+      applyCreated(result);
+      announceCreated(result, options);
+      router.refresh();
+      return result.created;
+    } catch (error) {
+      setAnnouncement("Could not create the roadmap item. Try again.");
+      throw error;
+    } finally {
+      for (const request of fresh) pendingBacklogIdsRef.current.delete(solutionKey(request.solutionId));
+      setPendingBacklogIds(new Set(pendingBacklogIdsRef.current));
+    }
+  }
+
+  /** The empty-roadmap flow: batch-create from a preset at proposed slots. */
+  async function buildFromDiscovery(preset: RoadmapBuildPreset, options: CreateFromDiscoveryOptions = {}): Promise<RoadmapCardData[]> {
+    setAnnouncement("Building the roadmap from discovery");
+    try {
+      const result = await buildRoadmapFromDiscovery(workspaceId, preset, localCalendarToday());
+      applyCreated(result);
+      announceCreated(result, { message: `Created ${result.created.length} roadmap ${result.created.length === 1 ? "item" : "items"} from discovery. Review and drag to adjust.`, ...options });
+      router.refresh();
+      return result.created;
+    } catch (error) {
+      setAnnouncement("Could not build the roadmap. Try again.");
+      throw error;
+    }
+  }
+
+  function announceCreated(result: ScheduleSolutionsResult, options: CreateFromDiscoveryOptions) {
+    const count = result.created.length;
+    if (count === 0) {
+      setAnnouncement(result.existing.length > 0 ? "Already on the roadmap" : "Nothing to create");
+      return;
+    }
+    const message = options.message ?? (count === 1 ? `Created roadmap item \u201c${result.created[0].title}\u201d` : `Created ${count} roadmap items`);
+    setAnnouncement(message);
+    if (options.silent) return;
+    const ids = result.created.map((card) => card.id);
+    pushUndoToast({ message, actionLabel: "Undo", onAction: () => undoCreated(ids) });
+  }
+
+  /**
+   * Undo a create. The items are archived, never deleted, and their solutions
+   * are not touched: each simply returns to the rail. An archived auto-created
+   * item stays behind so Building auto-sync will not add it again.
+   */
+  async function undoCreated(itemIds: string[]) {
+    const removing = new Set(itemIds);
+    const gone = itemsRef.current.filter((item) => removing.has(item.id));
+    try {
+      await undoRoadmapCreate(workspaceId, itemIds);
+    } catch (error) {
+      setAnnouncement("Could not undo. Try again.");
+      throw error;
+    }
+    const next = itemsRef.current.filter((item) => !removing.has(item.id));
+    itemsRef.current = next;
+    setItems(next);
+    for (const id of itemIds) confirmedItemsRef.current.delete(id);
+    const restored: UnscheduledItem[] = [];
+    for (const item of gone) {
+      if (!item.solutionId) continue;
+      scheduledIdsRef.current.delete(item.solutionId);
+      const entry = railItemFor(item.solutionId);
+      if (entry) restored.push(entry);
+    }
+    setScheduledSolutionIds(new Set(scheduledIdsRef.current));
+    if (restored.length > 0) {
+      const present = new Set(authoritativeUnscheduledRef.current.map(backlogKey));
+      const additions = restored.filter((entry) => !present.has(backlogKey(entry)));
+      authoritativeUnscheduledRef.current = [...authoritativeUnscheduledRef.current, ...additions];
+      setUnscheduled((current) => {
+        const have = new Set(current.map(backlogKey));
+        return [...current, ...additions.filter((entry) => !have.has(backlogKey(entry)))];
+      });
+    }
+    setAnnouncement(itemIds.length === 1 ? "Removed from the roadmap" : `Removed ${itemIds.length} items from the roadmap`);
+    router.refresh();
+  }
+
   function quickAdd(item: UnscheduledItem, horizon: Horizon) {
     void scheduleBacklog(item, horizon, localCalendarToday()).catch(() => undefined);
   }
@@ -303,6 +485,10 @@ export function useTimelineController({
     pendingBacklogIds,
     reconciliationRequiredIds,
     scheduleBacklog,
+    scheduleSolutions,
+    buildFromDiscovery,
+    undoCreated,
+    scheduledSolutionIds,
     quickAdd,
     announcement,
     setAnnouncement,

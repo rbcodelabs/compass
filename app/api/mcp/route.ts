@@ -122,6 +122,7 @@ import {
   updateLaunchChecklistItem,
   updateRoadmapItem,
   createRoadmapItem,
+  promoteSolutionToRoadmap,
 } from "@/lib/roadmap-tool-handlers"
 import {
   createTask,
@@ -1387,7 +1388,7 @@ const _handler = createMcpHandler(
       "update_solution_status",
       {
         title: "Update Solution Status",
-        description: "Updates a Solution's lifecycle status. Any valid status may transition directly to any other valid status.",
+        description: "Updates a Solution's lifecycle status. Any valid status may transition directly to any other valid status. Moving a Solution to IN_DELIVERY (Building) also adds it to the roadmap automatically, once, unless a person already removed its auto-added item.",
         inputSchema: {
           solutionId: z.string().uuid().describe("UUID of the solution"),
           status: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]).describe("New lifecycle status"),
@@ -1576,7 +1577,7 @@ const _handler = createMcpHandler(
       "promote_to_roadmap",
       {
         title: "Promote Solution to Roadmap",
-        description: "Promotes a validated Solution directly to the roadmap, creating a Roadmap Item with the solution's title and linking back to the originating opportunity.",
+        description: "Promotes a validated Solution directly to the roadmap, creating a Roadmap Item with the solution's title, squad and key result and linking back to the originating opportunity. Idempotent: a Solution that is already on the roadmap returns its existing item instead of creating a duplicate. The item is placed at the first free slot for its squad (six weeks by default).",
         inputSchema: {
           solutionId: z.string().uuid().describe("UUID of the solution to promote"),
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
@@ -1586,49 +1587,33 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       async ({ solutionId, workspaceId, horizon, isPrivate }) => {
-        const prisma = getPrisma()
-        const solution = await prisma.solution.findUnique({
-          where: { id: solutionId },
-          include: { workspace: { select: WORKSPACE_LINK_SELECT }, opportunity: { select: { id: true, title: true, squadId: true } } },
-        })
-        if (!solution) {
-          return fail(`Solution "${solutionId}" not found.`)
+        // Shared with the UI and add_to_roadmap: idempotent (a solution already on the roadmap returns that item)
+        // and filled with the same defaults (inherited squad / key result, a suggested slot).
+        const promoted = await promoteSolutionToRoadmap({ workspaceId, solutionId, horizon, isPrivate })
+        if (!promoted.structuredContent.ok) return fail(`Solution "${solutionId}" not found.`)
+        const data = promoted.structuredContent.data as {
+          id: string; title: string; isPrivate: boolean; opportunityId: string | null; opportunityTitle: string; squadId: string | null; created: boolean
+          horizon: string; startDate: Date | null; endDate: Date | null
         }
-        const lastItem = await prisma.roadmapItem.findFirst({
-          where: { workspaceId, horizon, status: "ACTIVE" },
-          orderBy: { sortOrder: "desc" },
-          select: { sortOrder: true },
-        })
-        const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "MCP", undefined, tx => tx.roadmapItem.create({ data: {
-            workspaceId,
-            title: solution.title,
-            horizon,
-            sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,
-            solutionId,
-            opportunityId: solution.opportunity.id,
-            squadId: solution.opportunity.squadId ?? null,
-            isPrivate: isPrivate ?? false,
-          } }))
+        const workspace = await getPrisma().workspace.findUnique({ where: { id: workspaceId }, select: WORKSPACE_LINK_SELECT })
         return ok(
           withUrlLine(
-            `**Promoted to roadmap (${horizon})**\nRoadmap Item ID: ${item.id}\nTitle: ${item.title}` +
-              (item.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
-              `\nLinked Solution: ${solutionId}\nLinked Opportunity: ${solution.opportunity.title}`,
-            // The item is created in `workspaceId`, which the solution's own
-            // workspace need not match — only link when they do, rather than
-            // pointing at a roadmap the item isn't on.
-            solution.workspaceId === workspaceId
-              ? workspaceEntityUrl(solution.workspace, { type: "roadmapItem", id: item.id })
-              : null,
+            `**${data.created ? "Promoted to roadmap" : "Already on the roadmap"} (${data.horizon})**\nRoadmap Item ID: ${data.id}\nTitle: ${data.title}` +
+              (data.isPrivate ? `\nPrivate: yes (hidden from public portal)` : "") +
+              `\nLinked Solution: ${solutionId}\nLinked Opportunity: ${data.opportunityTitle}`,
+            workspace ? workspaceEntityUrl(workspace, { type: "roadmapItem", id: data.id }) : null,
           ),
           {
-            id: item.id,
-            title: item.title,
-            horizon,
-            isPrivate: item.isPrivate,
+            id: data.id,
+            title: data.title,
+            horizon: data.horizon,
+            isPrivate: data.isPrivate,
             solutionId,
-            opportunityId: solution.opportunity.id,
-            squadId: item.squadId,
+            opportunityId: data.opportunityId,
+            squadId: data.squadId,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            created: data.created,
           },
         )
       }
@@ -2203,7 +2188,7 @@ const _handler = createMcpHandler(
       "add_to_roadmap",
       {
         title: "Add to Roadmap",
-        description: "Creates a Roadmap Item in any ordinary roadmap horizon, including NOW. Optionally links to a Solution, Key Result, Opportunity, and/or Squad.",
+        description: "Creates a Roadmap Item in any ordinary roadmap horizon, including NOW. Optionally links to a Solution, Key Result, Opportunity, and/or Squad. When solutionId is given it is idempotent (a Solution already on the roadmap returns its existing item) and unspecified squad, key result and dates are filled from the Solution's opportunity and the first free slot.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           title: z.string().min(1).describe("Title of the roadmap item"),
