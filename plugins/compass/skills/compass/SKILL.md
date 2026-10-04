@@ -159,7 +159,7 @@ The API key is stored in the Vercel project settings and in `.env.local` as `MCP
 | `add_assumption` | Add a testable assumption to a solution (HIGH/MEDIUM/LOW risk) |
 | `update_assumption` | Update an assumption's title, risk level, or status (UNTESTED/TESTING/VALIDATED/INVALIDATED) |
 | `delete_assumption` | Permanently delete an assumption; unlinks (does not delete) any Experiments or Evidence that referenced it |
-| `promote_to_roadmap` | Promote a validated solution directly to the roadmap. Accepts an optional `isPrivate` flag to hide it from the public portal roadmap |
+| `promote_to_roadmap` | Promote a validated solution directly to the roadmap (idempotent per solution; inherits squad and key result, first free slot). Accepts an optional `isPrivate` flag to hide it from the public portal roadmap |
 
 #### Evidence
 | Tool | Description |
@@ -256,7 +256,7 @@ requests a decision, persist its request ID, report `AWAITING_DECISION`, and sto
 | Tool | Description |
 |---|---|
 | `list_roadmap_items` | All active items grouped by horizon (NOW / NEXT / LATER / LAUNCHING / LAUNCHED). Private items are marked with a 🔒 PRIVATE tag; recency-filterable |
-| `add_to_roadmap` | Create a roadmap item with horizon + optional links. Accepts an optional `isPrivate` flag to hide it from the public portal roadmap and block voting (e.g. security work, sensitive internal items) |
+| `add_to_roadmap` | Create a roadmap item with horizon + optional links (with `solutionId` it is idempotent and fills squad, key result and a suggested slot). Accepts an optional `isPrivate` flag to hide it from the public portal roadmap and block voting (e.g. security work, sensitive internal items) |
 | `update_roadmap_item` | Move horizon, archive, rename, toggle `isPrivate`, or update `keyResultId`, `opportunityId`, `solutionId`, `squadId`. Link fields are optional nullable UUIDs: omit to preserve, UUID to set, `null` to clear. USER/AGENT targets must be in the source item's workspace, even with access to both. Rejects `horizon: LAUNCHING`/`LAUNCHED` — use `set_launch_tier` to move an item into LAUNCHING (both also require the workspace's Marketing launch setting to be on) |
 | `create_checklist_template` | Create a reusable launch checklist template for a workspace, scoped to a launch tier (TIER_1/TIER_2/TIER_3), with an ordered list of items. Requires the workspace's Marketing launch setting to be on (Settings → Marketing launch; off by default for every workspace) |
 | `list_checklist_templates` | List a workspace's checklist templates, optionally filtered by launch tier. Requires Marketing launch to be on |

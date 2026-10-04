@@ -246,7 +246,7 @@ test.describe("Native timeline default", () => {
         await expect(scroll.locator("../..")).toHaveCSS("background-color", cardColor);
         await expect(scroll.locator("../div").first()).toHaveCSS("background-color", cardColor);
         await expect(scroll.locator(":scope > div > div").first()).toHaveCSS("background-color", cardColor);
-        await expect(page.locator("#unscheduled-items-panel [data-slot=badge]").first()).toHaveCSS("background-color", cardColor);
+        await expect(page.getByTestId("schedule-rail")).toHaveCSS("background-color", cardColor);
         const grid = page.getByTestId("timeline-grid");
         expect(await grid.evaluate((element) => getComputedStyle(element).backgroundImage)).not.toContain("226, 232, 240");
         await scrollToFixtureMonth(page);

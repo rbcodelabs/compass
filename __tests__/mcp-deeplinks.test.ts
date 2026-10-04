@@ -18,13 +18,14 @@ import { runWithMcpActor } from "@/lib/mcp-authz"
 const mockPrisma = {
   workspace: { findUnique: vi.fn() },
   opportunity: { findUnique: vi.fn(), create: vi.fn() },
-  solution: { findUnique: vi.fn(), create: vi.fn() },
+  solution: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+  squad: { findMany: vi.fn() },
   assumption: { findUnique: vi.fn(), create: vi.fn() },
   objective: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
   keyResult: { create: vi.fn(), findMany: vi.fn() },
   oKRCycle: { findFirst: vi.fn(), findMany: vi.fn() },
   experiment: { create: vi.fn() },
-  roadmapItem: { findFirst: vi.fn(), create: vi.fn() },
+  roadmapItem: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
   portfolioCapacityReservation: { findUnique: vi.fn() },
   portfolioCapacityPlan: { updateMany: vi.fn() },
   $transaction: vi.fn(),
@@ -226,24 +227,37 @@ describe("add_to_roadmap deeplink", () => {
 })
 
 describe("promote_to_roadmap deeplink", () => {
+  const solution = { id: "sol-1", title: "Guided setup", opportunityId: "opp-1", opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null, linkedKeyResultId: null } }
+  const created = { id: "item-2", workspaceId: "ws-1", title: "Guided setup", horizon: "NOW", isPrivate: false, squadId: null, solutionId: "sol-1", opportunityId: "opp-1", startDate: null, endDate: null, keyResultId: null, autoCreated: null }
+
+  beforeEach(() => {
+    mockPrisma.workspace.findUnique.mockResolvedValue(SLUGGED)
+    mockPrisma.solution.findFirst.mockResolvedValue(solution)
+    mockPrisma.solution.findMany.mockResolvedValue([solution])
+    mockPrisma.squad.findMany.mockResolvedValue([])
+    mockPrisma.roadmapItem.findMany.mockResolvedValue([])
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue(created)
+    mockPrisma.roadmapItem.create.mockResolvedValue(created)
+  })
+
   it("opens the new roadmap item panel on the roadmap", async () => {
-    mockPrisma.solution.findUnique.mockResolvedValue({
-      id: "sol-1", title: "Guided setup", workspaceId: "ws-1", workspace: SLUGGED,
-      opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null },
-    })
-    mockPrisma.roadmapItem.create.mockResolvedValue({ id: "item-2", title: "Guided setup", isPrivate: false, squadId: null })
     const text = (await call("promote_to_roadmap", { solutionId: "sol-1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
     expect(text).toContain(`URL: ${BASE}/roadmap?detail=roadmapItem%3Aitem-2`)
   })
 
-  it("omits the URL line when the solution belongs to a different workspace", async () => {
-    mockPrisma.solution.findUnique.mockResolvedValue({
-      id: "sol-1", title: "Guided setup", workspaceId: "other-ws", workspace: SLUGGED,
-      opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null },
-    })
-    mockPrisma.roadmapItem.create.mockResolvedValue({ id: "item-2", title: "Guided setup", isPrivate: false, squadId: null })
+  it("is idempotent: a solution already on the roadmap returns its item and creates nothing", async () => {
+    mockPrisma.roadmapItem.findMany.mockImplementation(({ where }: { where: { solutionId?: unknown } }) => Promise.resolve(where.solutionId ? [{ id: "item-2", solutionId: "sol-1" }] : []))
     const text = (await call("promote_to_roadmap", { solutionId: "sol-1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
+    expect(text).toContain("Already on the roadmap")
     expect(text).toContain("Roadmap Item ID: item-2")
-    expect(text).not.toContain("URL:")
+    expect(mockPrisma.roadmapItem.create).not.toHaveBeenCalled()
   })
+
+  it("does not promote a solution that belongs to a different workspace", async () => {
+    mockPrisma.solution.findFirst.mockResolvedValue(null)
+    const text = (await call("promote_to_roadmap", { solutionId: "sol-1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
+    expect(text).toContain("not found")
+    expect(mockPrisma.roadmapItem.create).not.toHaveBeenCalled()
+  })
+
 })

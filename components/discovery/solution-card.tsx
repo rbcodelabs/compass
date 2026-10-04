@@ -13,6 +13,7 @@ import { ScoreBadge } from "@/components/discovery/score-badge";
 import { CardMenu } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { SOLUTION_STATUS } from "@/lib/solution-status";
+import { announceRoadmapSync } from "@/lib/ui/roadmap-sync-toast";
 import {
   updateSolutionStatus,
   archiveSolution,
@@ -108,7 +109,8 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, s
 
   function moveStatus(status: SolutionStatus) {
     startTransition(async () => {
-      await updateSolutionStatus(solution.id, status, revalidatePathStr);
+      const result = await updateSolutionStatus(solution.id, status, revalidatePathStr);
+      announceRoadmapSync(result.roadmapSync);
       onChanged?.();
     });
   }

@@ -2,7 +2,7 @@
 
 import { useId, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { CalendarDays, ChevronLeft, ChevronRight, RotateCw, Shuffle, SlidersHorizontal } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Plus, RefreshCw, RotateCw, Shuffle, SlidersHorizontal } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -20,6 +20,8 @@ type TimelineControls = {
   onShift: (direction: -1 | 1) => void;
   onToday: () => void;
   saving: boolean;
+  /** Schedule-from-discovery entry point and the Building auto-sync indicator. */
+  schedule?: { onOpen: () => void; autoSync: boolean };
 };
 
 function IconAction({ label, children, onClick, disabled = false }: { label: string; children: ReactNode; onClick: () => void; disabled?: boolean }) {
@@ -68,13 +70,32 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
       <header data-slot="workspace-header" className="sticky top-0 z-20 grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 border-b border-border-default bg-surface-app px-3 py-3 md:static md:grid-cols-[minmax(0,1fr)_auto_auto] md:gap-3 md:px-6">
         <h1 className="col-start-1 row-start-1 truncate text-lg font-semibold tracking-tight text-text-primary">Roadmap</h1>
         <div className="col-start-2 row-start-1 md:col-start-3"><RoadmapViewToggle view={timeline ? "timeline" : "board"} /></div>
-        <div aria-label="Roadmap controls" className="col-span-2 col-start-1 row-start-2 flex min-w-0 items-center gap-2 md:col-span-1 md:col-start-2 md:row-start-1">
+        <div aria-label="Roadmap controls" className="col-span-2 col-start-1 row-start-2 flex min-w-0 flex-wrap items-center gap-2 md:col-span-1 md:flex-nowrap md:col-start-2 md:row-start-1">
           {timeline && <div role="group" aria-label="Timeline navigation" className="mr-auto flex items-center gap-1 md:mr-0">
             <IconAction label="Previous period" onClick={() => timeline.onShift(-1)}><ChevronLeft /></IconAction>
             <IconAction label="Go to today" onClick={timeline.onToday}><CalendarDays /></IconAction>
             <IconAction label="Next period" onClick={() => timeline.onShift(1)}><ChevronRight /></IconAction>
           </div>}
           {timeline && <RoadmapGroupByToggle value={groupByValue ?? "phase"} customFieldOptions={groupByOptions} />}
+          {timeline?.schedule && (
+            <Button type="button" variant="outline" size="sm" className="min-h-11 md:min-h-0" aria-label="Schedule from discovery" aria-haspopup="dialog" aria-keyshortcuts="/" onClick={timeline.schedule.onOpen}>
+              <Plus className="size-4" aria-hidden="true" />
+              <span className="md:hidden" aria-hidden="true">Schedule</span>
+              <span className="hidden md:inline" aria-hidden="true">Schedule from discovery…</span>
+              <kbd aria-hidden="true" className="ml-1 hidden rounded border bg-muted px-1 font-mono text-[10px] text-muted-foreground md:inline">/</kbd>
+            </Button>
+          )}
+          {timeline?.schedule?.autoSync && (
+            <span
+              data-testid="auto-sync-indicator"
+              title="Work that reaches In delivery is added to the roadmap automatically"
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-2 py-1 text-xs font-medium text-primary"
+            >
+              <RefreshCw className="size-3" aria-hidden="true" />
+              <span className="hidden sm:inline">Auto-sync on</span>
+              <span className="sr-only sm:hidden">Auto-sync on</span>
+            </span>
+          )}
           {cardSortHref && (
             <Link
               href={cardSortHref}
