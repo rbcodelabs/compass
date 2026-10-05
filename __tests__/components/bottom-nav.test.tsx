@@ -25,4 +25,14 @@ describe("BottomNav research rollout", () => {
     expect(screen.getByRole("link", { name: "Research" })).toHaveAttribute("href", "/acme/product/capture")
     expect(screen.queryByRole("link", { name: "Capture" })).not.toBeInTheDocument()
   })
+
+  it("scrolls the active destination into view so off-screen items like Research are visible", () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    render(<BottomNav orgSlug="acme" workspaceSlug="product" researchCaptureEnabled />)
+
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByRole("link", { name: "Feedback" }))
+    expect(scrollIntoView).toHaveBeenCalledWith({ inline: "center", block: "nearest" })
+  })
 })
