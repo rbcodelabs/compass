@@ -5,13 +5,12 @@
  * getUserWorkspaces); this module holds the one write that more than one
  * surface needs. It was lifted verbatim out of the MCP `create_workspace`
  * handler (app/api/mcp/route.ts) when the org-settings page gained a
- * "Create workspace" form, because the MCP tool is denied to agent API keys
- * and the onboarding wizard is unreachable once you already have a membership
- * — leaving no browser path to add a workspace at all.
+ * "Create workspace" form, because the onboarding wizard is unreachable once you
+ * already have a membership — leaving no browser path to add a workspace at all.
  *
  * ── What this module deliberately does NOT do ────────────────────────────────
  * Authorization. The MCP tool is gated by the declarative table in
- * lib/mcp-tool-gates.ts (`assertOrgAdminBySlug` plus an agent-identity DENY);
+ * lib/mcp-tool-gates.ts (`assertOrgAdminBySlug`, where an agent inherits its owner's live org admin rights);
  * the server action is gated by `resolveOrgAdmin`. Those two gates are
  * different trust boundaries with different failure shapes, and folding either
  * into this function would either weaken one or silently double-check the
@@ -38,6 +37,13 @@ export interface CreateWorkspaceInput {
   slug: string
   /** Optional description. Trimmed before write. */
   description?: string
+  /**
+   * When an agent creates the workspace, give that agent a WRITE
+   * AgentWorkspaceGrant on it (granted by the agent's owner) in the same
+   * transaction. Without it the agent would create a workspace it cannot
+   * touch: agent reach is grant-based, not membership-based.
+   */
+  agentGrant?: { agentId: string; grantedByUserId: string }
 }
 
 export interface CreatedWorkspace {
@@ -104,6 +110,7 @@ export async function createWorkspaceInOrg({
   name,
   slug,
   description,
+  agentGrant,
 }: CreateWorkspaceInput): Promise<CreateWorkspaceResult> {
   const prisma = getPrisma()
 
@@ -162,6 +169,17 @@ export async function createWorkspaceInOrg({
             role: normalizeWorkspaceRole(m.role),
           })),
           skipDuplicates: true,
+        })
+      }
+
+      if (agentGrant) {
+        await tx.agentWorkspaceGrant.create({
+          data: {
+            agentId: agentGrant.agentId,
+            workspaceId: created.id,
+            access: "WRITE",
+            grantedByUserId: agentGrant.grantedByUserId,
+          },
         })
       }
 

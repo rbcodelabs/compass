@@ -242,13 +242,26 @@ describe("an agent-bound OAuth token engages the agent authorization model", () 
     )
   })
 
-  it.each(["create_workspace", "approve_solution_plan", "request_release_authorization"])(
+  it.each(["approve_solution_plan", "request_release_authorization"])(
     "is refused by the AGENT_TOOL_POLICY DENY entry for %s",
     async (tool) => {
       const actor = actorFromAuth(await validateMcpAuth(bearer()))
       await expect(applyToolGate(tool, actor, {})).rejects.toThrow(/human identity/)
     },
   )
+
+  // Agents inherit their owner's live org admin rights for create_workspace:
+  // through the real validateMcpAuth -> applyToolGate seam, an owner who is an
+  // org admin lets the OAuth-bound agent through; a plain member does not.
+  it("create_workspace follows the agent owner's current org role for an agent-bound OAuth token", async () => {
+    const actor = actorFromAuth(await validateMcpAuth(bearer()))
+    organization.findUnique.mockResolvedValue({ id: "org-1" })
+    agentOrgAdminGrant.findFirst.mockResolvedValue(null)
+    organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    await expect(applyToolGate("create_workspace", actor, { orgSlug: "rbcodelabs" })).resolves.toBeUndefined()
+    organizationMember.findFirst.mockResolvedValue({ role: "MEMBER" })
+    await expect(applyToolGate("create_workspace", actor, { orgSlug: "rbcodelabs" })).rejects.toThrow("Human administrator required.")
+  })
 
   it("is refused by the workspace and org admin assertions", async () => {
     const actor = actorFromAuth(await validateMcpAuth(bearer()))

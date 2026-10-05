@@ -287,17 +287,103 @@ describe("ADR 0020: AgentOrgAdminGrant for delegated scoring-model admin", () =>
     await expect(applyToolGate(tool, AGENT, argsFor(tool))).rejects.toThrow("Human administrator required.")
   })
 
-  // Proves the grant doesn't leak scope: these two stay unconditionally
-  // human-only per ADR 0020, even for an agent holding a live grant.
-  it.each(["create_workspace", "request_release_authorization"])(
-    "%s remains denied for an agent identity holding a valid SCORING_MODEL_ADMIN grant",
-    async (tool) => {
-      mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
-      mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
-      const args = tool === "create_workspace" ? { orgSlug: "acme" } : { workspaceId: "ws-1" }
-      await expect(applyToolGate(tool, AGENT, args)).rejects.toThrow(/human identity/)
-    },
-  )
+  // Proves the grant doesn't leak scope: release authorization stays
+  // unconditionally human-only per ADR 0020, even for an agent holding a live
+  // grant. (create_workspace left this list when agents began inheriting their
+  // owner's org admin rights; see the next describe block.)
+  it("request_release_authorization remains denied for an agent identity holding a valid SCORING_MODEL_ADMIN grant", async () => {
+    mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue({ id: "grant-1", grantedByUserId: "grantor-1" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    await expect(applyToolGate("request_release_authorization", AGENT, { workspaceId: "ws-1" })).rejects.toThrow(/human identity/)
+  })
+})
+
+describe("agents inherit their owner's live org admin rights (create_workspace)", () => {
+  const AGENT = { userId: "agent-owner", purpose: "AGENT" as const, agentId: "agent-1" }
+  const ARGS = { orgSlug: "acme" }
+
+  beforeEach(() => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1" })
+    mockPrisma.organization.findUnique.mockResolvedValue({ id: "org-1" })
+    // No per-agent AgentOrgAdminGrant exists: inheritance must not need one.
+    mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue(null)
+  })
+  afterEach(() => vi.unstubAllEnvs())
+
+  it("is classified as an agent write, not DENY", () => {
+    expect(AGENT_TOOL_POLICY.create_workspace).toBe("WRITE")
+  })
+
+  it.each(["OWNER", "ADMIN"])("allows an agent whose owner is currently an org %s, with no grant row", async (role) => {
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role })
+    await expect(applyToolGate("create_workspace", AGENT, ARGS)).resolves.toBeUndefined()
+    expect(mockPrisma.organizationMember.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { organizationId: "org-1", userId: "agent-owner" } }),
+    )
+  })
+
+  it("allows an AGENT_TURN identity for an admin owner too", async () => {
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    await expect(applyToolGate("create_workspace", { ...AGENT, purpose: "AGENT_TURN" as const }, ARGS)).resolves.toBeUndefined()
+  })
+
+  it("denies an agent whose owner is only an org MEMBER", async () => {
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "MEMBER" })
+    await expect(applyToolGate("create_workspace", AGENT, ARGS)).rejects.toThrow("Human administrator required.")
+  })
+
+  it("denies an agent whose owner is not in the org at all", async () => {
+    mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate("create_workspace", AGENT, ARGS)).rejects.toThrow("Human administrator required.")
+  })
+
+  it("re-checks the owner's role live: the same agent is denied after the owner is demoted", async () => {
+    mockPrisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "ADMIN" })
+    await expect(applyToolGate("create_workspace", AGENT, ARGS)).resolves.toBeUndefined()
+    mockPrisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "MEMBER" })
+    await expect(applyToolGate("create_workspace", AGENT, ARGS)).rejects.toThrow("Human administrator required.")
+  })
+
+  it("denies an inactive (suspended/missing) agent even when its owner is an admin", async () => {
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "OWNER" })
+    mockPrisma.agent.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate("create_workspace", AGENT, ARGS)).rejects.toThrow("Human administrator required.")
+    expect(mockPrisma.agent.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "agent-1", ownerUserId: "agent-owner", status: "ACTIVE" } }),
+    )
+  })
+
+  it("denies when agents are disabled by rollout flag", async () => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "OWNER" })
+    await expect(applyToolGate("create_workspace", AGENT, ARGS)).rejects.toThrow("Human administrator required.")
+  })
+
+  it("denies an agent identity that carries no agentId", async () => {
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "OWNER" })
+    await expect(applyToolGate("create_workspace", { userId: "agent-owner", purpose: "AGENT" as const }, ARGS)).rejects.toThrow("Human administrator required.")
+  })
+
+  it("denies a workspace-scoped agent identity: it must not mint new workspaces", async () => {
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "OWNER" })
+    await expect(applyToolGate("create_workspace", { ...AGENT, purpose: "AGENT_TURN" as const, scopeWorkspaceId: "ws-1" }, ARGS)).rejects.toThrow("Human administrator required.")
+  })
+
+  it("does not widen other admin tools: scoring-model admin still needs its own grant", async () => {
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "OWNER" })
+    await expect(applyToolGate("create_scoring_model", AGENT, ARGS)).rejects.toThrow("Human administrator required.")
+  })
+
+  // Attestation-like tools would be recorded as the human's own act.
+  it.each([
+    "update_comment", "update_solution_comment", "update_doc_comment",
+    "approve_solution_plan", "reject_solution_plan", "request_release_authorization",
+  ])("%s stays human-only even for an agent whose owner is an org owner", async (tool) => {
+    mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "OWNER" })
+    expect(AGENT_TOOL_POLICY[tool]).toBe("DENY")
+    await expect(applyToolGate(tool, AGENT, { workspaceId: "ws-1", commentId: "c-1" })).rejects.toThrow(/human identity/)
+  })
 })
 
 describe("following tools act on a person's own inbox", () => {

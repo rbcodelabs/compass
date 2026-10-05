@@ -354,7 +354,7 @@ Notification kinds are `STATUS_CHANGED`, `COMMENT_ADDED`, `COMMENT_REPLIED` and,
 | `get_workspace_summary` | Returns high-level counts and status for a workspace: OKR cycles, opportunities, experiments, roadmap items, active experiments, active OKR cycle, and squads. Also returns the workspace's `thinkingModel` (see below) |
 | `list_workspaces` | List all workspaces in an organization by org slug; use as the first call when you don't yet know a workspace ID |
 | `get_workspace_by_slug` | Look up a single workspace's ID, name, and description directly by org slug + workspace slug, without listing all workspaces. Also returns the workspace's `thinkingModel` (see below) |
-| `create_workspace` | Create a new workspace inside an organization |
+| `create_workspace` | Create a new workspace inside an organization. Requires an organization OWNER/ADMIN; an agent may call it when its owner currently holds that role (see Inherited admin rights below) |
 
 ### The workspace's thinking model
 
@@ -979,6 +979,8 @@ with no such grant is refused these tools exactly as before. Every call made
 under a grant is attributed to it in the agent's audit trail. See ADR 0020
 ("Explicit, Auditable Admin Grants for Delegated Agent Identities") in
 Compass Docs → Architecture Decisions.
+
+**Inherited admin rights (`create_workspace`).** An agent acts with the authority of the person who owns it. `create_workspace` therefore works for an agent whose owner is currently an org OWNER/ADMIN of that organization — no per-agent grant is needed. The owner's role is re-checked live on every call, so demoting or removing the owner stops the agent immediately; a suspended agent, a disabled agents rollout, and a workspace-scoped identity are all refused. The agent receives a WRITE workspace grant on the workspace it creates (recorded as granted by its owner) so it can keep working there, and the call appears in its audit trail against the new workspace. This applies only to `create_workspace`: comment edits, plan approval/rejection and release authorization remain human-only, and the scoring-model tools above still need their own delegation. The REST `createWorkspace` route is unchanged and remains human-only.
 
 Solution comments and plans created with agent credentials use the authenticated
 agent's name and `AGENT` author type, overriding caller-supplied attribution.
