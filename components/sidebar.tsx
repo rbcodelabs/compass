@@ -16,6 +16,7 @@ import {
   Map,
   MessageSquare,
   MessageSquareCheck,
+  Microscope,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -170,9 +171,8 @@ export function Sidebar({
     { label: "Home", path: "home", Icon: House },
     ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
     ...baseNavItems.slice(0, 6),
-    researchCaptureEnabled
-      ? { label: "Capture", path: "capture", Icon: MessageSquare }
-      : { label: "Feedback", path: "feedback", Icon: MessageSquare },
+    { label: "Feedback", path: "feedback", Icon: MessageSquare },
+    ...(researchCaptureEnabled ? [{ label: "Research", path: "capture", Icon: Microscope }] : []),
     ...baseNavItems.slice(6),
   ]
 

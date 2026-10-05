@@ -315,6 +315,9 @@ model ResearchStudy {
   createdById       String?                    @map("created_by_id") @db.Uuid
   updatedById       String?                    @map("updated_by_id") @db.Uuid
   source            String                     @default("UI") @db.VarChar(20)
+  /// EXTERNAL studies only: USERTESTING | MAZE | OTHER (app-validated; migration 075).
+  externalProvider  String?                    @map("external_provider") @db.VarChar(30)
+  externalUrl       String?                    @map("external_url") @db.Text
   workspace         Workspace                  @relation(fields: [workspaceId], references: [id])
   artifact          Artifact?                  @relation(fields: [artifactId], references: [id])
   sessions          ResearchSession[]
@@ -389,6 +392,11 @@ model ResearchSession {
   voiceAttemptCount      Int?                      @default(0) @map("voice_attempt_count")
   voiceTurnCount         Int?                      @default(0) @map("voice_turn_count")
   voiceTranscriptChars   Int?                      @default(0) @map("voice_transcript_chars")
+  /// NULL = native Compass session; EXTERNAL_IMPORT = pasted by a member (member-reported, not
+  /// provider-authenticated). Migration 075.
+  provenance             String?                   @db.VarChar(30)
+  externalUrl            String?                   @map("external_url") @db.Text
+  sessionNotes           String?                   @map("session_notes") @db.Text
   pmInterview            PMInterview?
 
   @@index([studyId, status])

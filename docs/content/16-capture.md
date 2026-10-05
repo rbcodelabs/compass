@@ -35,7 +35,7 @@ Capture is the starting point for customer feedback, ideas, and research. It kee
 ## Refinement
 
 Workspace members can start **Refine** from an opportunity, solution,
-assumption, or experiment, or choose **PM interview** in Capture and select an
+assumption, or experiment, or choose **PM interview** in Research and select an
 existing item. Compass uses only that item, its parent chain, linked outcome, and
 directly linked feedback or evidence. It discloses when bounded context was omitted.
 
@@ -75,7 +75,7 @@ next steps in this version.
 
 ## Studies
 
-Open **Capture** and choose **New study** to create either a customer interview or a guided usability test. Customer interviews use open-ended discussion questions. Guided usability tests add a test target, a 10, 15, 20, or 30 minute target, and five to eight editable participant tasks. Compass can draft realistic tasks from the research goal and test target; review, edit, add, or remove them before creating the study.
+Open **Research** and choose **New study** to create either a customer interview or a guided usability test. Customer interviews use open-ended discussion questions. Guided usability tests add a test target, a 10, 15, 20, or 30 minute target, and five to eight editable participant tasks. Compass can draft realistic tasks from the research goal and test target; review, edit, add, or remove them before creating the study.
 
 A guided usability test's target is either an **External URL** or a **Compass Artifact**. External URL takes an HTTPS product URL that Compass never fetches — participants open it beside the moderator or in a separate tab. Compass Artifact instead lets you pick an existing active HTML-upload artifact from this workspace (create one from Docs first); participants see it rendered in a sandboxed preview pane in place of the live-product iframe, with the same neutral moderator beside it. Only active HTML-upload artifacts appear in the picker.
 
@@ -83,7 +83,7 @@ Choose a target duration for either study type. Compass can generate an editable
 
 After creating the study, Compass shows a secure participant link. Share that link with participants so they can complete the interview without a Compass account. Links expire after 30 days and Compass stores only a secure hash, so save the displayed link when it is created. You can rotate the link, which immediately revokes the previous link, or revoke all active links without creating a replacement.
 
-Study settings remain editable until the first participant session starts. After that point Compass locks the research goal, study type, duration, test target (External URL or Compass Artifact), and guide so every session uses the same protocol; the study name can still be changed. Close a study to revoke its links while keeping it available for review, reactivate it to issue a fresh participant link, or archive it to remove it from the normal Capture list while retaining its research record.
+Study settings remain editable until the first participant session starts. After that point Compass locks the research goal, study type, duration, test target (External URL or Compass Artifact), and guide so every session uses the same protocol; the study name can still be changed. Close a study to revoke its links while keeping it available for review, reactivate it to issue a fresh participant link, or archive it to remove it from the normal Research list while retaining its research record.
 
 ![Guided usability study creation](/screenshots/docs/guided-study-create.png)
 
@@ -152,6 +152,14 @@ Compass saves each finalized participant and interviewer turn as the session pro
 
 Public sessions have bounded message size, duration, turn count, attachment size/count/rate, and request rate. A participant link grants no access to workspace feedback, documents, opportunities, or other internal tools. Both Chat and Voice use server-authored prompts and models with no Compass tools or workspace credentials.
 
+## Manual and external studies
+
+Use **Manual / external study** on the Research page to record research that was run outside Compass, such as a UserTesting or Maze study, so its findings live in the same place as native studies. Choose a provider (**UserTesting**, **Maze** or **Other**) and optionally add an HTTPS link back to the original project. Compass never fetches the link.
+
+Open the study and use **Add a session** to enter one session at a time: an optional participant name and email, the session date, an optional link to the session, a pasted transcript, and notes. Start speaker lines with a label such as `Interviewer:`, `Moderator:`, `Participant:`, `User:` or `P1:`; unlabeled text is treated as participant speech. Transcripts are limited to 60,000 characters and notes to 20,000.
+
+Imported sessions are saved as completed and marked as imported and member-reported, not verified against the provider. External studies have no participant link, AI interviewer or voice, and cannot be activated. Because the transcript is stored as saved participant turns, you can run analysis and synthesis and promote findings to Evidence as you would for a native study. A session with notes only is stored and shown but has no participant turns to cite, so it cannot support evidence on its own.
+
 ## Research results
 
 Open a study to review session status, dates, saved-turn counts, summaries and transcripts. **View full interview and attachments** opens a paginated transcript; evidence links jump to the page containing the referenced turn. Study lists, sessions, transcript turns, attachments and synthesis history are paginated, so older research remains accessible. **View archived studies** opens retained archived records.
@@ -172,11 +180,11 @@ Analysis is bounded to 500 completed sessions and 2,000 turns per session; per-s
 
 ![Research results on mobile](/screenshots/docs/capture-results-mobile.png)
 
-## Inbox
+## Agents and feedback
 
 Workspace agents can create and manage the same research studies through the [MCP API](/help/09-mcp-api), including editable guide generation, bounded study listing, settings, lifecycle and explicit link controls. The tools preserve the UI’s protocol lock and hashed participant-link behavior; they do not expose participant transcripts or enable voice. Existing participant research credentials cannot call these tools.
 
-The Capture **Inbox** opens the existing feedback workflow for ideas and bugs. Customer portal submissions, votes, attachments, opportunity links, and roadmap actions continue to work as before. While research studies remain behind the rollout gate, navigation continues to show **Feedback** and the existing `/feedback` route remains unchanged.
+Feedback and research are separate sections. **Feedback** (`/feedback`) is the log of ideas and bugs, including customer portal submissions, votes, attachments, opportunity links and roadmap actions. **Research** (`/capture`) lists studies and appears in navigation only while research studies are enabled for your deployment; the Studies/Inbox tab strip is gone. Existing `/feedback` and `/capture` links keep working.
 
 ## Privacy and review
 

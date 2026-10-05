@@ -1,8 +1,9 @@
 "use client"
 
+import { useEffect, useRef } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Target, Lightbulb, Puzzle, FlaskConical, Map, MessageSquare, ListChecks, MessageSquareCheck, Clock3, BarChart3, House } from "lucide-react"
+import { Target, Lightbulb, Puzzle, FlaskConical, Map, MessageSquare, ListChecks, MessageSquareCheck, Microscope, Clock3, BarChart3, House } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { orderPrimaryNav } from "@/lib/workspace-nav"
@@ -28,6 +29,7 @@ const buildBaseNavItems = (okrsLabel: string, discoveryLabel: string, solutionsL
 
 export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = true, updatesEnabled = false }: BottomNavProps) {
   const pathname = usePathname()
+  const activeRef = useRef<HTMLAnchorElement>(null)
   const base = `/${orgSlug}/${workspaceSlug}`
   const labels = useLabels()
   const baseNavItems = buildBaseNavItems(labels.sections.okrs, labels.opportunity.plural, labels.solution.plural, labels.sections.discoveryFirst)
@@ -35,10 +37,15 @@ export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = tru
     { label: "Home", path: "home", Icon: House },
     ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
     ...baseNavItems,
-    researchCaptureEnabled
-      ? { label: "Capture", path: "capture", Icon: MessageSquare }
-      : { label: "Feedback", path: "feedback", Icon: MessageSquare },
+    { label: "Feedback", path: "feedback", Icon: MessageSquare },
+    ...(researchCaptureEnabled ? [{ label: "Research", path: "capture", Icon: Microscope }] : []),
   ]
+
+  // The bar scrolls horizontally, so bring the current destination into view (Feedback and
+  // Research sit at the far right and would otherwise be off-screen when you are on them).
+  useEffect(() => {
+    activeRef.current?.scrollIntoView?.({ inline: "center", block: "nearest" })
+  }, [pathname])
 
   return (
     <nav
@@ -53,6 +60,7 @@ export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = tru
         return (
           <Link
             key={path}
+            ref={isActive ? activeRef : undefined}
             href={href}
             className={cn(
               "relative flex flex-1 flex-col items-center justify-center gap-1 py-2.5 min-w-[64px] min-h-[56px] transition-colors duration-150",

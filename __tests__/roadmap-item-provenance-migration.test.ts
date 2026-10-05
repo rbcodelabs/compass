@@ -16,10 +16,9 @@ const sql = read(`prisma/migrations/${NAME}/migration.sql`).split("\n").map((lin
 const statements = sql.split(";").map((statement) => statement.trim()).filter(Boolean)
 
 describe(NAME, () => {
-  it("is registered exactly once, after 074, as the last migration", () => {
+  it("is registered exactly once, directly after 074", () => {
     expect([...runner.matchAll(new RegExp(`name:\\s*"${NAME}"`, "g"))]).toHaveLength(1)
     const names = [...runner.matchAll(/name:\s*"(\d{3}_[a-z0-9_]+)"/g)].map((match) => match[1])
-    expect(names[names.length - 1]).toBe(NAME)
     expect(names[names.indexOf(NAME) - 1]).toBe("074_portal_home_layout")
   })
 
