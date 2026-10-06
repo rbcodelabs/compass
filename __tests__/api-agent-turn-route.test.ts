@@ -61,9 +61,9 @@ vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: (...args: un
 // Mocked at the store rather than at prisma because what matters here
 // is what the route does with the slugs, and `connectorDefinition` is left real
 // so the catalog itself is part of the assertion.
-const mockListConnectedSlugs = vi.fn()
+const mockListConnectedGrants = vi.fn()
 vi.mock("@/lib/mcp-connectors/store", () => ({
-  listConnectedSlugs: (...args: unknown[]) => mockListConnectedSlugs(...args),
+  listConnectedGrants: (...args: unknown[]) => mockListConnectedGrants(...args),
 }))
 
 // `agentRunsAvailable` defaults to false in beforeEach so the existing
@@ -105,7 +105,7 @@ beforeEach(() => {
   mockMintKey.mockResolvedValue({ token: "token", apiKeyId: "key-1" })
   mockPreparePacks.mockResolvedValue({ files: [], pluginPaths: [], skillIds: [], provenanceJson: "[]", systemPromptAppendices: [] })
   mockResolveAgentHandoffContext.mockResolvedValue(null)
-  mockListConnectedSlugs.mockResolvedValue([])
+  mockListConnectedGrants.mockResolvedValue([])
   runMocks.available.mockResolvedValue(false)
   runMocks.started.mockResolvedValue(undefined)
   runMocks.finalize.mockResolvedValue(undefined)
@@ -378,7 +378,7 @@ describe("agent turn route — guards", () => {
     })
 
     it("passes slugs and display metadata, and no provider credential", async () => {
-      mockListConnectedSlugs.mockResolvedValue(["v0"])
+      mockListConnectedGrants.mockResolvedValue([{ slug: "v0", scope: "mcp" }])
       const env = await turn(setupRun())
 
       const connectors = JSON.parse(env.AGENT_MCP_CONNECTORS) as { slug: string; displayName: string; guidance?: string }[]
@@ -390,10 +390,40 @@ describe("agent turn route — guards", () => {
       expect(env.AGENT_MCP_CONNECTORS).not.toMatch(/access_?token|refresh_?token|client_?secret|Bearer /i)
     })
 
+    it("tells the agent a read-only Drive grant cannot write, and a full one to be careful", async () => {
+      // The level is read back from the scope Google recorded, so the prompt can
+      // never describe a read-only grant as read-write.
+      mockListConnectedGrants.mockResolvedValue([
+        { slug: "google-drive", scope: "https://www.googleapis.com/auth/drive.readonly" },
+      ])
+      const readOnly = await turn(setupRun())
+      const [ro] = JSON.parse(readOnly.AGENT_MCP_CONNECTORS) as { guidance: string }[]
+      expect(ro.guidance).toContain("READ-ONLY")
+      expect(ro.guidance).not.toContain("full read and write")
+
+      mockListConnectedGrants.mockResolvedValue([{ slug: "google-drive", scope: "https://www.googleapis.com/auth/drive" }])
+      const full = await turn(setupRun())
+      const [rw] = JSON.parse(full.AGENT_MCP_CONNECTORS) as { guidance: string }[]
+      expect(rw.guidance).toContain("full read and write")
+      expect(rw.guidance).not.toContain("READ-ONLY")
+    })
+
+    it("falls back to the level-neutral guidance for a scope that matches no level", async () => {
+      mockListConnectedGrants.mockResolvedValue([{ slug: "google-drive", scope: "https://www.googleapis.com/auth/drive.file" }])
+      const env = await turn(setupRun())
+      const [entry] = JSON.parse(env.AGENT_MCP_CONNECTORS) as { guidance: string }[]
+      expect(entry.guidance).toContain("untrusted data")
+      expect(entry.guidance).not.toContain("READ-ONLY")
+      expect(entry.guidance).not.toContain("full read and write")
+    })
+
     it("drops a slug that is not in the reviewed catalog", async () => {
       // The catalog is the allowlist. A row that outlived its definition — or was
       // written by an older deploy — must not reach the sandbox as a live server.
-      mockListConnectedSlugs.mockResolvedValue(["v0", "not-a-real-connector"])
+      mockListConnectedGrants.mockResolvedValue([
+        { slug: "v0", scope: "mcp" },
+        { slug: "not-a-real-connector", scope: "" },
+      ])
       const env = await turn(setupRun())
       const connectors = JSON.parse(env.AGENT_MCP_CONNECTORS) as { slug: string }[]
       expect(connectors.map(connector => connector.slug)).toEqual(["v0"])
@@ -403,16 +433,16 @@ describe("agent turn route — guards", () => {
       // The gateway resolves the grant under `trustedCompassBaseUrl()`, so the turn
       // has to agree with it — otherwise a turn reached via some other hostname
       // would enable a connector the gateway then refuses to serve.
-      mockListConnectedSlugs.mockResolvedValue([])
+      mockListConnectedGrants.mockResolvedValue([])
       await turn(setupRun())
       const { trustedCompassBaseUrl } = await import("@/lib/compass-url")
-      expect(mockListConnectedSlugs).toHaveBeenCalledWith("user-1", trustedCompassBaseUrl().origin, expect.anything())
+      expect(mockListConnectedGrants).toHaveBeenCalledWith("user-1", trustedCompassBaseUrl().origin, expect.anything())
     })
 
     it("still runs the turn when the connector lookup throws", async () => {
       // Connectors are additive. A failure to enumerate them must not cost the
       // user their turn — the agent is perfectly useful with Compass's catalog.
-      mockListConnectedSlugs.mockRejectedValue(new Error("connector table is missing"))
+      mockListConnectedGrants.mockRejectedValue(new Error("connector table is missing"))
       vi.spyOn(console, "error").mockImplementation(() => {})
       const runCommand = setupRun()
       const env = await turn(runCommand)

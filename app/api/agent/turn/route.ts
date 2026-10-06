@@ -41,8 +41,8 @@ import { analysisStep } from "@/lib/research-analysis-deadline"
 import { handoffKind, parseProcessingState, processingStatus } from "@/lib/pm-agent-processing"
 import { HANDOFF_POLICIES } from "@/lib/agent-handoff-kinds"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
-import { connectorDefinition } from "@/lib/mcp-connectors/config"
-import { listConnectedSlugs } from "@/lib/mcp-connectors/store"
+import { connectorDefinition, connectorGuidance, type ConnectorDefinition } from "@/lib/mcp-connectors/config"
+import { listConnectedGrants } from "@/lib/mcp-connectors/store"
 import {
   AGENT_RUN_HEARTBEAT_MS,
   AgentRunError,
@@ -83,7 +83,13 @@ function readEntryScript(): string {
  */
 function buildAgentEnv(opts: {
   anthropicApiKey: string
-  connectors: { slug: string; displayName: string; agentGuidance?: string }[]
+  connectors: ConnectorDefinition[]
+  /**
+   * The scope each connected grant was issued with, by slug. It selects the
+   * access-level sentence in that connector's guidance, so a read-only Drive
+   * grant is never described to the model as read-write.
+   */
+  connectorScopes?: Record<string, string>
   mcpBaseUrl: string
   mcpToken: string
   prompt: string
@@ -114,11 +120,16 @@ function buildAgentEnv(opts: {
     ...(opts.connectors.length
       ? {
           AGENT_MCP_CONNECTORS: JSON.stringify(
-            opts.connectors.map(definition => ({
-              slug: definition.slug,
-              displayName: definition.displayName,
-              ...(definition.agentGuidance ? { guidance: definition.agentGuidance } : {}),
-            })),
+            opts.connectors.map(definition => {
+              // The access-level sentence comes from the scope the provider
+              // recorded on the grant.
+              const guidance = connectorGuidance(definition, opts.connectorScopes?.[definition.slug])
+              return {
+                slug: definition.slug,
+                displayName: definition.displayName,
+                ...(guidance ? { guidance } : {}),
+              }
+            }),
           ),
         }
       : {}),
@@ -364,10 +375,12 @@ export async function POST(request: NextRequest) {
   // Failure is non-fatal on purpose: a connector lookup that throws must not cost
   // the user their turn, so it degrades to "no connectors" and the turn proceeds
   // exactly as it did before this feature existed.
-  const connectorSlugs = await listConnectedSlugs(userId, trustedCompassBaseUrl().origin, prisma).catch(error => {
+  const connectedGrants = await listConnectedGrants(userId, trustedCompassBaseUrl().origin, prisma).catch(error => {
     console.error("[agent-turn] could not list connected MCP connectors", error)
-    return [] as string[]
+    return [] as Array<{ slug: string; scope: string }>
   })
+  const connectorSlugs = connectedGrants.map(grant => grant.slug)
+  const connectorScopes = Object.fromEntries(connectedGrants.map(grant => [grant.slug, grant.scope]))
   const connectors = connectorSlugs
     .map(slug => connectorDefinition(slug))
     .filter((definition): definition is NonNullable<typeof definition> => definition !== null)
@@ -448,6 +461,7 @@ export async function POST(request: NextRequest) {
         env: buildAgentEnv({
           anthropicApiKey,
           connectors,
+          connectorScopes,
           mcpBaseUrl,
           mcpToken: minted.token,
           prompt,
@@ -532,6 +546,7 @@ export async function POST(request: NextRequest) {
           env: buildAgentEnv({
             anthropicApiKey,
             connectors,
+            connectorScopes,
             mcpBaseUrl,
             mcpToken: token,
             prompt,
