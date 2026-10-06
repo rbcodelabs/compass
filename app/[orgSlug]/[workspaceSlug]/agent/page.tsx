@@ -1,8 +1,9 @@
+import { cookies } from "next/headers"
 import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
-import { PageHeader } from "@/components/patterns/page-header"
-import { AgentChat } from "@/components/agent/agent-chat"
+import { AGENT_LIST_COOKIE, parseAgentListOpen } from "@/lib/agent-list-pref"
+import { AgentPageShell } from "@/components/agent/agent-page-shell"
 import { listAgentConversations, getAgentConversationMessages } from "@/lib/agent-conversations"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { initialsOf } from "@/lib/user-initials"
@@ -61,22 +62,19 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
     }
   }
 
+  const listOpen = parseAgentListOpen((await cookies()).get(AGENT_LIST_COOKIE)?.value)
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 sm:p-6 md:p-8">
-      <PageHeader
-        title="Agent"
-        description="Chat with the Compass agent — it works with this workspace's data using the tools you have access to."
-      />
-      <AgentChat
-        workspaceId={workspace.id}
-        basePath={`/${orgSlug}/${workspaceSlug}`}
-        conversations={conversations.map((c) => ({ id: c.id, title: c.title }))}
-        activeConversationId={activeConversationId}
-        initialMessages={initialMessages}
-        userInitials={initialsOf(session.user.name ?? session.user.email)}
-        seedEntity={seedEntity}
-        suggestedInstruction={suggestedInstruction}
-      />
-    </div>
+    <AgentPageShell
+      workspaceId={workspace.id}
+      basePath={`/${orgSlug}/${workspaceSlug}`}
+      conversations={conversations.map((c) => ({ id: c.id, title: c.title }))}
+      activeConversationId={activeConversationId}
+      initialMessages={initialMessages}
+      userInitials={initialsOf(session.user.name ?? session.user.email)}
+      seedEntity={seedEntity}
+      suggestedInstruction={suggestedInstruction}
+      initialListOpen={listOpen}
+    />
   )
 }

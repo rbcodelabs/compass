@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Check, Loader2, Plus, Send, Sparkles, Square } from "lucide-react"
+import { Check, Loader2, Send, Sparkles, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -67,8 +67,8 @@ type Props = {
    * Which surface this chat is rendered on.
    *
    * `"page"` (the default, so every existing call site is unchanged) is the
-   * full-width agent screen: it owns its own card chrome and shows the
-   * conversation list as an inline left column.
+   * full-pane agent screen: it fills whatever its parent gives it and shows a
+   * collapsible conversation list as an inline left column.
    *
    * `"rail"` is the docked left rail. It drops both of those: the rail supplies
    * the surrounding chrome itself, and a 320–560px column has no room for a
@@ -77,6 +77,12 @@ type Props = {
    * renders the thread and composer only.
    */
   variant?: "page" | "rail"
+  /**
+   * Whether the page variant's conversation list is shown. Controlled by the
+   * page shell, which owns the toggle in its title bar (and the cookie behind
+   * it); ignored by the rail, which has no inline list.
+   */
+  listOpen?: boolean
   /**
    * Called when turn 1 of a brand-new chat comes back with the id the server
    * assigned to it.
@@ -122,6 +128,7 @@ export function AgentChat({
   composerSeed,
   onComposerSeedApplied,
   variant = "page",
+  listOpen = true,
   onConversationCreated,
   onStreamingChange,
 }: Props) {
@@ -653,24 +660,19 @@ export function AgentChat({
 
   return (
     <div
-      className={`flex min-h-0 flex-1 overflow-hidden bg-surface-panel ${
-        // The rail draws its own border and header, so a second rounded card
-        // inside it would read as a box in a box.
-        isRail ? "" : "rounded-xl border border-default"
-      }`}
+      // No card chrome in either variant: the page sits under WorkspacePage's
+      // header and fills the pane edge to edge, and the rail draws its own
+      // border and header.
+      className="flex min-h-0 flex-1 overflow-hidden bg-surface-panel"
     >
       {/* Conversation list — page only; in the rail these controls live in the
           rail header instead, because 256px of list plus a readable thread does
-          not fit in a 320–560px column. */}
-      {!isRail && (
+          not fit in a 320–560px column. Shown or removed entirely by the page
+          shell's title-bar toggle (no residual strip). Below md it is hidden
+          outright, as before. */}
+      {!isRail && listOpen && (
       <aside className="hidden w-64 shrink-0 flex-col border-r border-default bg-surface-inset md:flex">
-        <div className="p-3">
-          <Button variant="outline" size="sm" className="w-full justify-start gap-2" render={<Link href={`${basePath}/agent`} />}>
-            <Plus className="size-4" aria-hidden="true" />
-            New chat
-          </Button>
-        </div>
-        <ScrollArea className="min-h-0 flex-1 px-2 pb-2">
+        <ScrollArea className="min-h-0 flex-1 p-2">
           <ul className="flex flex-col gap-1">
             {conversations.length === 0 && (
               <li className="px-2 py-6 text-center text-sm text-text-subtle">No conversations yet</li>
