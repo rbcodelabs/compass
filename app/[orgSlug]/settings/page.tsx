@@ -6,6 +6,11 @@ import { CreateWorkspacePanel } from "@/components/settings/create-workspace-pan
 import type { ScoringModelData, ScoringModelStatus, ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
+import { AgentAccessPanel } from "@/components/settings/agent-access-panel";
+import { listAgentAccessRows } from "@/lib/agent-org-admin-access";
+import { agentsEnabled } from "@/lib/agent-access";
+import { getSessionUser } from "@/lib/session";
+import { isOrgAdminRole } from "@/lib/roles";
 
 export const metadata = { title: "Organization Settings" };
 
@@ -41,6 +46,18 @@ export default async function OrgSettingsPage({ params }: Props) {
     select: { id: true, name: true, slug: true },
     orderBy: { name: "asc" },
   });
+
+  // The layout already restricts this route to org admins; re-derived here so
+  // the Agent access section never depends on that gate staying in place.
+  const user = await getSessionUser();
+  const viewerMembership = user
+    ? await prisma.organizationMember.findFirst({
+        where: { organizationId: organization.id, userId: user.id },
+        select: { role: true },
+      })
+    : null;
+  const canManageAgents = isOrgAdminRole(viewerMembership?.role);
+  const agentRows = canManageAgents ? await listAgentAccessRows(prisma, organization.id) : [];
 
   const models: ScoringModelData[] = rawModels.map((m) => ({
     id: m.id,
@@ -79,6 +96,15 @@ export default async function OrgSettingsPage({ params }: Props) {
       >
         <ManageScoringModelsPanel orgSlug={orgSlug} initialModels={models} />
       </SettingsSection>
+
+      {canManageAgents && (
+        <SettingsSection
+          title="Agent access"
+          description="Delegate narrow organization-admin capabilities to a specific agent."
+        >
+          <AgentAccessPanel orgSlug={orgSlug} rows={agentRows} canManage={canManageAgents} agentsEnabled={agentsEnabled()} />
+        </SettingsSection>
+      )}
 
       <SettingsSection
         title="Danger Zone"
