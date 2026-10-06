@@ -26,6 +26,7 @@ import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-upda
 import { assertFollowsNotificationsMigration } from "@/lib/migrations/follows-notifications";
 import { assertPortalHomeLayoutMigration } from "@/lib/migrations/portal-home-layout";
 import { assertRoadmapViewsMigration } from "@/lib/migrations/roadmap-views";
+import { assertAgentSessionsMigration } from "@/lib/migrations/agent-sessions";
 import { assertRoadmapItemProvenanceMigration } from "@/lib/migrations/roadmap-item-provenance";
 import { assertMcpConnectorsMigration } from "@/lib/migrations/mcp-connectors";
 import { assertMetricsDashboardMigration } from "@/lib/migrations/metrics-dashboard";
@@ -548,6 +549,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // Background agent runs: durable agent_runs + append-only agent_run_events.
     name: "069_background_agent_runs",
     filePath: path.join(process.cwd(), "prisma/migrations/069_background_agent_runs/migration.sql"),
+  },
+  {
+    // Agent SDK session pointer (one row per conversation, PK conversation_id): no index,
+    // so no async-wait. The 080 postcondition verifies the columns and the primary key.
+    name: "080_agent_sessions",
+    filePath: path.join(process.cwd(), "prisma/migrations/080_agent_sessions/migration.sql"),
   },
 ];
 
@@ -2056,6 +2063,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "074_portal_home_layout") await assertPortalHomeLayoutMigration(client, schema)
       if (migration.name === "075_roadmap_item_provenance") await assertRoadmapItemProvenanceMigration(client, schema)
       if (migration.name === "079_roadmap_views") await assertRoadmapViewsMigration(client, schema)
+      if (migration.name === "080_agent_sessions") await assertAgentSessionsMigration(client, schema)
       if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {
         // Data half: backfill from the parent in bounded batches, then prove it.
         // Both run before the receipt below, so a failure leaves an unfinished

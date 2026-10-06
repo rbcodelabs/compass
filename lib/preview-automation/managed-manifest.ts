@@ -167,7 +167,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Durable background agent runs: two additive CREATE TABLEs (agent_runs, agent_run_events)
   // and six ASYNC indexes, two of them unique (worker-token lookup, (run_id, seq) idempotency).
   // No ALTER, no backfill, no foreign keys. Digest recorded from the shipped SQL; please review it.
-  "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301"
+  "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301",
+  // Agent SDK session pointer: one new table keyed by conversation_id, no index, no backfill.
+  // Digest recorded from the shipped SQL; please review it.
+  "080_agent_sessions": "f82aa43816ea5e1f5d393c2e244d4e2b0e41f3ce21e42494c99a587ce78f4475"
 };
 
 /**
@@ -209,6 +212,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 079 postcondition (table shape plus a valid, ready, non-unique org/workspace index before the receipt).
   "079_roadmap_views": {
     "lib/migrations/roadmap-views.ts": "6afd1be2429b929b643e3ab50de8b5fd9b94fe350a4e49f76987e1b80fa9e5eb",
+  },
+  // The 080 postcondition (column shape plus a primary key on conversation_id alone before the receipt).
+  "080_agent_sessions": {
+    "lib/migrations/agent-sessions.ts": "8d4fdc83ab62c345ca0fe00be983904c14495def605ed2e7fc42f4bdcfa6d404",
   },
 };
 

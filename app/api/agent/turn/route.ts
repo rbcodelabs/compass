@@ -53,6 +53,7 @@ import {
   markAgentRunStarted,
   type AgentRunKind,
 } from "@/lib/agent-runs"
+import { buildResumePrompt, commitAgentSession, isSessionUuid, planAgentSession } from "@/lib/agent-session"
 
 export const runtime = "nodejs"
 // Still 300 for the synchronous fallback path, which holds the request open for
@@ -93,6 +94,12 @@ function buildAgentEnv(opts: {
   skillIds: string[]
   bypassSecret?: string
   run?: { runId: string; workerToken: string }
+  /**
+   * Agent SDK session for this conversation. `mode: "resume"` means `prompt` is
+   * only the new message (the prior transcript rides in session-in.jsonl.gz);
+   * `"new"` means `prompt` is the complete text prompt. Omitted => stateless.
+   */
+  session?: { sessionId: string; mode: "new" | "resume" }
 }): Record<string, string> {
   return {
     ANTHROPIC_API_KEY: opts.anthropicApiKey,
@@ -123,6 +130,7 @@ function buildAgentEnv(opts: {
         }
       : {}),
     ...(opts.bypassSecret ? { MCP_BYPASS_SECRET: opts.bypassSecret } : {}),
+    ...(opts.session ? { AGENT_SESSION_ID: opts.session.sessionId, AGENT_SESSION_MODE: opts.session.mode } : {}),
     ...(opts.run
       ? {
           AGENT_RUN_ID: opts.run.runId,
@@ -338,6 +346,29 @@ export async function POST(request: NextRequest) {
     seedContextBlock
   )
 
+  // Session resume. Handoff/interview turns never use
+  // it: they are machine-driven, scoped to a claim, and must stay reproducible.
+  // Every failure inside planAgentSession degrades to `enabled: false`, i.e. the
+  // text prompt above — the turn is never worse off than before this feature.
+  const sessionPlan = interviewClaim?.claimed
+    ? ({ enabled: false } as const)
+    : await planAgentSession({ prisma, conversationId: conversationIdResolved, workspaceId, currentMessageId: savedMessage.id })
+  const sessionFiles: { path: string; content: Buffer }[] = []
+  let turnPrompt = prompt
+  let sessionEnv: { sessionId: string; mode: "new" | "resume" } | undefined
+  if (sessionPlan.enabled) {
+    if (sessionPlan.resume) {
+      turnPrompt = buildResumePrompt(sessionPlan.resume.gap, turnMessage)
+      sessionFiles.push(
+        { path: "session-in.jsonl.gz", content: Buffer.from(sessionPlan.resume.bytes) },
+        { path: "fallback-prompt.txt", content: Buffer.from(prompt, "utf8") },
+      )
+      sessionEnv = { sessionId: sessionPlan.sessionId, mode: "resume" }
+    } else {
+      sessionEnv = { sessionId: sessionPlan.sessionId, mode: "new" }
+    }
+  }
+
   const attachments = await prisma.workspaceCapabilityPack.findMany({
     where: { workspaceId, enabled: true },
     include: { capabilityPackVersion: { include: { capabilityPack: true } } },
@@ -439,7 +470,7 @@ export async function POST(request: NextRequest) {
         name: sandboxName,
         tags: { runId: run.id, workspaceId },
       })
-      await sandbox.writeFiles([{ path: "entry.ts", content: entryScript }, ...preparedPacks.files])
+      await sandbox.writeFiles([{ path: "entry.ts", content: entryScript }, ...sessionFiles, ...preparedPacks.files])
       // Never awaited, by design. `timeoutMs` is enforced sandbox-side, so the
       // command is bounded whether or not anyone is listening.
       await sandbox.runCommand({
@@ -450,7 +481,8 @@ export async function POST(request: NextRequest) {
           connectors,
           mcpBaseUrl,
           mcpToken: minted.token,
-          prompt,
+          prompt: turnPrompt,
+          session: sessionEnv,
           workspaceId: workspace.id,
           systemPromptAppendices: preparedPacks.systemPromptAppendices,
           pluginPaths: preparedPacks.pluginPaths,
@@ -505,6 +537,7 @@ export async function POST(request: NextRequest) {
       const step = <T>(fn: () => Promise<T>) => analysisStep(fn, deadline, abort)
       let sandbox: Awaited<ReturnType<typeof bootSandboxFromSnapshot>> | undefined
       let assistantText: string | undefined
+      let endedSessionId: string | undefined
       let successful = false
       let packProvenance = "[]"
       const auditRows: { toolName: string; argsSummary: string | null }[] = []
@@ -520,7 +553,7 @@ export async function POST(request: NextRequest) {
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
         sandbox = await analysisStep(() => bootSandboxFromSnapshot(snapshotId), deadline, abort, async late => { await analysisStep(() => late.stop(), Date.now() + 5_000, new AbortController()) })
 
-        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, ...preparedPacks.files]))
+        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, ...sessionFiles, ...preparedPacks.files]))
         sse("status", { phase: "running" })
 
         const run = await step(() => sandbox!.runCommand({
@@ -534,7 +567,8 @@ export async function POST(request: NextRequest) {
             connectors,
             mcpBaseUrl,
             mcpToken: token,
-            prompt,
+            prompt: turnPrompt,
+            session: sessionEnv,
             workspaceId: workspace.id,
             systemPromptAppendices: preparedPacks.systemPromptAppendices,
             pluginPaths: preparedPacks.pluginPaths,
@@ -589,6 +623,11 @@ export async function POST(request: NextRequest) {
               const parsed = JSON.parse(rest)
               assistantText = parsed.text
               usage = parsed.usage
+            } else if (kind === "AGENT_SESSION") {
+              try {
+                const parsed = JSON.parse(rest)
+                if (isSessionUuid(parsed?.sessionId)) endedSessionId = parsed.sessionId
+              } catch { /* a missing session id only costs the next turn its memory */ }
             } else if (kind === "AGENT_ERROR") {
               throw new Error(JSON.parse(rest).message ?? "agent error")
             }
@@ -618,6 +657,27 @@ export async function POST(request: NextRequest) {
           where: { id: conversationIdResolved },
           data: { updatedAt: new Date() },
         })
+
+        // Hand the finished transcript to the store BEFORE telling the browser the
+        // turn is over, so an immediate follow-up resumes it. Never fatal: the next
+        // turn simply falls back to text replay.
+        if (sessionEnv && endedSessionId) {
+          try {
+            const bytes = await step(() => sandbox!.readFileToBuffer({ path: "session-out.jsonl.gz" }))
+            if (bytes) {
+              await commitAgentSession({
+                prisma,
+                conversationId: conversationIdResolved,
+                workspaceId,
+                sessionId: endedSessionId,
+                throughMessageId: savedMessage.id,
+                bytes,
+              })
+            }
+          } catch (error) {
+            console.warn("[agent-turn] could not save the agent session", error instanceof Error ? error.message : error)
+          }
+        }
 
         sse("result", { text: assistantText ?? "", usage, conversationId: conversationIdResolved })
         successful = true

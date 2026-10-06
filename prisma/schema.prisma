@@ -2795,6 +2795,26 @@ model AgentConversation {
   @@map("agent_conversations")
 }
 
+/// Pointer to the current Agent SDK session transcript of a conversation (one row per
+/// conversation). The transcript is a private Vercel Blob object at `blobKey`; a new
+/// revision is a NEW blob key, swapped in with a compare-and-set on `revision`.
+/// `throughMessageId` is the user message of the turn that produced the transcript, so
+/// the next turn can tell which later messages the session has not seen.
+/// DSQL: no FKs, PK = conversation_id (no index to build), no @updatedAt trigger.
+model AgentSession {
+  conversationId   String   @id @map("conversation_id") @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  sessionId        String   @map("session_id") @db.VarChar(64)
+  blobKey          String   @map("blob_key") @db.VarChar(512)
+  throughMessageId String   @map("through_message_id") @db.Uuid
+  revision         Int      @default(1)
+  byteSize         Int      @default(0) @map("byte_size")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @map("updated_at")
+
+  @@map("agent_sessions")
+}
+
 /// One durable, detachable agent turn. The sandbox owns execution and
 /// reports back over an authenticated callback; this row owns the *lifecycle*
 /// (status, lease, deadline, cleanup handles) so a turn survives the browser
