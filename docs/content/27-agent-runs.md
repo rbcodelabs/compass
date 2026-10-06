@@ -42,6 +42,18 @@ Nothing is lost in between: the agent records each step as it happens rather tha
 only at the end, so a run you never watched has the same transcript as one you
 watched throughout.
 
+## Links to Compass items appear as cards
+
+When the agent links to something in your workspace — an opportunity, task, doc,
+key result and so on — the link shows as a card with the item's current title,
+status and a line of context, rather than a bare URL. Click the card to open the
+item.
+
+Cards are live: they refresh when you return to the tab, so a status changed
+elsewhere shows up without re-asking the agent. A link to another site, to a
+page rather than one item, or to something you don't have access to stays an
+ordinary link.
+
 ## Stopping a run
 
 **Stop** ends the run on the server and releases its resources. The conversation
