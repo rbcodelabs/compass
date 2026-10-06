@@ -24,16 +24,16 @@ test.describe("Experiments", () => {
       await page.getByLabel("Title").fill(expTitle);
       await page.getByLabel("Hypothesis").fill("We believe that this will work.");
       await page.getByLabel("Method").fill("A/B test with equal split.");
-      await page.getByLabel("Kill Condition").fill(
+      await page.getByLabel("Kill Condition", { exact: true }).fill(
         "Stop if fewer than 10% of users engage after 14 days."
       );
-      await page.getByRole("button", { name: "Create Experiment" }).click();
+      await page.getByRole("button", { name: "Submit" }).click();
 
       // Experiment card appears in DESIGNING column
-      await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByLabel("Experiment board").getByRole("button", { name: expTitle, exact: true })).toBeVisible({ timeout: 15_000 });
 
       // ── 3. Open the panel, then continue to the full detail page ──────────
-      await page.getByRole("button", { name: expTitle }).click();
+      await page.getByLabel("Experiment board").getByRole("button", { name: expTitle, exact: true }).click();
       await expect(page).toHaveURL(/detail=experiment/);
       await openFullPage(page);
 
@@ -97,13 +97,13 @@ test.describe("Experiments", () => {
       await page.getByLabel("Title").fill(expTitle);
       await page.getByLabel("Hypothesis").fill("We believe that this will work.");
       await page.getByLabel("Method").fill("A/B test with equal split.");
-      await page.getByLabel("Kill Condition").fill(
+      await page.getByLabel("Kill Condition", { exact: true }).fill(
         "Stop if fewer than 10% of users engage after 14 days."
       );
-      await page.getByRole("button", { name: "Create Experiment" }).click();
-      await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
+      await page.getByRole("button", { name: "Submit" }).click();
+      await expect(page.getByLabel("Experiment board").getByRole("button", { name: expTitle, exact: true })).toBeVisible({ timeout: 15_000 });
 
-      await page.getByRole("button", { name: expTitle }).click();
+      await page.getByLabel("Experiment board").getByRole("button", { name: expTitle, exact: true }).click();
       await expect(page).toHaveURL(/detail=experiment/);
       await openFullPage(page);
       await expect(page.getByRole("heading", { name: expTitle })).toBeVisible();
