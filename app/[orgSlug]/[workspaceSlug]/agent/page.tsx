@@ -36,7 +36,14 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
   // Load the selected conversation's messages (falls back to a new chat if the
   // id is invalid / not owned).
   let activeConversationId: string | null = null
-  let initialMessages: { id: string; role: "user" | "assistant"; content: string }[] = []
+  let initialMessages: {
+    id: string
+    role: "user" | "assistant"
+    content: string
+    createdAt: string
+    authorUserId: string | null
+    authorName: string | null
+  }[] = []
   if (conversationId) {
     const msgs = await getAgentConversationMessages(conversationId, workspace.id, userId)
     if (msgs) {
@@ -45,6 +52,9 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
         id: m.id,
         role: m.role === "assistant" ? "assistant" : "user",
         content: m.content,
+        createdAt: m.createdAt.toISOString(),
+        authorUserId: m.authorUserId,
+        authorName: m.authorName,
       }))
     }
   }
@@ -71,6 +81,7 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
       conversations={conversations.map((c) => ({ id: c.id, title: c.title }))}
       activeConversationId={activeConversationId}
       initialMessages={initialMessages}
+      userId={userId}
       userInitials={initialsOf(session.user.name ?? session.user.email)}
       seedEntity={seedEntity}
       suggestedInstruction={suggestedInstruction}

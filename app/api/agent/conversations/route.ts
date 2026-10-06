@@ -9,26 +9,20 @@
  * moves between screens, which means it is never re-rendered by a navigation
  * and so never receives fresh server props. It has to fetch.
  *
- * ## Why the membership check is repeated here and not delegated
+ * ## Why membership does not depend on the caller
  *
- * The helpers in lib/agent-conversations.ts scope by `(workspaceId, userId)`
- * and rely on the workspace layout having already established that the user is
- * a member of that workspace — their doc comment says so explicitly. A route
- * handler has no layout above it, so that assumption does not hold: a
- * `workspaceId` arrives here as an unvalidated query parameter from the client.
- *
- * Without the `workspace.members` predicate below, any authenticated user could
- * pass an arbitrary workspace id and read back the titles of their own
- * conversations in a workspace they were removed from — or, if they ever held a
- * row there, after losing access. Scoping by `userId` alone is not sufficient,
- * because the rows are keyed by user *and* workspace and only the latter
- * encodes the authorization boundary. This mirrors
- * `conversations/[conversationId]/processing/route.ts`, which makes the same
- * check for the same reason.
+ * A route handler has no workspace layout above it, so it cannot assume the
+ * user is a member of `workspaceId` — that arrives here as an unvalidated query
+ * parameter from the client. The access predicate in
+ * lib/agent-conversation-access.ts includes the live
+ * `workspace.members` check itself, and `listAgentConversations` builds on it,
+ * so this route and the agent page cannot disagree about who sees what. Scoping
+ * by `userId` alone would not be enough: a user removed from a workspace could
+ * still read back the titles of their old conversations there.
  */
 
 import { auth } from "@/auth"
-import getPrisma from "@/lib/db"
+import { listAgentConversations } from "@/lib/agent-conversations"
 
 export async function GET(request: Request) {
   const session = await auth()
@@ -37,20 +31,7 @@ export async function GET(request: Request) {
   const workspaceId = new URL(request.url).searchParams.get("workspaceId")
   if (!workspaceId) return new Response("Workspace required", { status: 400 })
 
-  const userId = session.user.id
-  const conversations = await getPrisma().agentConversation.findMany({
-    where: {
-      workspaceId,
-      userId,
-      // The authorization boundary — see the module doc.
-      workspace: { members: { some: { userId } } },
-    },
-    orderBy: { updatedAt: "desc" },
-    // Same cap as listAgentConversations, so the rail and the full page show
-    // the same set rather than disagreeing at the tail.
-    take: 50,
-    select: { id: true, title: true, updatedAt: true },
-  })
+  const conversations = await listAgentConversations(workspaceId, session.user.id)
 
   return Response.json({ conversations })
 }

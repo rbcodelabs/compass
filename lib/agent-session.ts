@@ -21,6 +21,8 @@
 import { randomUUID } from "node:crypto"
 import type { AppPrismaClient } from "@/lib/db"
 import { getAgentSessionStorage, type ArtifactStorage } from "@/lib/artifact-storage"
+import { labelUserTurn } from "@/lib/agent-author-label"
+import type { ConversationAttribution } from "@/lib/agent-attribution"
 
 /**
  * Compressed transcript ceiling. Vercel Functions cap a request body at 4.5 MB and the
@@ -79,7 +81,8 @@ export function looksLikeSessionBlob(bytes: Uint8Array): boolean {
   return bytes.byteLength > 18 && bytes.byteLength <= MAX_AGENT_SESSION_BYTES && bytes[0] === 0x1f && bytes[1] === 0x8b
 }
 
-type Turn = { role: string; content: string }
+/** `authorLabel` is set only in a shared conversation and only on user turns. */
+type Turn = { role: string; content: string; authorLabel?: string }
 
 export type AgentSessionPlan =
   | { enabled: false }
@@ -101,12 +104,15 @@ export async function planAgentSession({
   workspaceId,
   currentMessageId,
   storage,
+  attribution,
 }: {
   prisma: AppPrismaClient
   conversationId: string
   workspaceId: string
   currentMessageId: string
   storage?: () => ArtifactStorage
+  /** When shared, the gap is labelled by sender. Only then is `author_user_id` selected. */
+  attribution?: ConversationAttribution
 }): Promise<AgentSessionPlan> {
   try {
     if (!(await agentSessionsAvailable(prisma))) return { enabled: false }
@@ -128,7 +134,9 @@ export async function planAgentSession({
       where: { conversationId, createdAt: { gte: through.createdAt } },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: MAX_GAP_MESSAGES + 4,
-      select: { id: true, role: true, content: true },
+      select: attribution?.shared
+        ? { id: true, role: true, content: true, authorUserId: true }
+        : { id: true, role: true, content: true },
     })
     const afterThrough = later.filter((m) => m.id !== through.id && m.id !== currentMessageId)
     // The session already holds the assistant reply to its own turn; that reply is
@@ -141,7 +149,16 @@ export async function planAgentSession({
     return {
       enabled: true,
       sessionId: pointer.sessionId,
-      resume: { bytes, gap: gapRows.map((m) => ({ role: m.role, content: m.content })) },
+      resume: {
+        bytes,
+        gap: gapRows.map((m) => ({
+          role: m.role,
+          content: m.content,
+          ...(attribution?.shared && m.role === "user"
+            ? { authorLabel: attribution.labelFor((m as { authorUserId?: string | null }).authorUserId) }
+            : {}),
+        })),
+      },
     }
   } catch (error) {
     log("could not plan a session; using the text prompt", error)
@@ -153,14 +170,16 @@ export async function planAgentSession({
  * The prompt for a resumed turn. The session already holds the workspace framing and
  * everything it saw, so only what happened *outside* it needs restating.
  */
-export function buildResumePrompt(gap: Turn[], userMessage: string, pageContextBlock?: string): string {
+export function buildResumePrompt(gap: Turn[], userMessage: string, userLabel?: string, pageContextBlock?: string): string {
+  const turn = (m: Turn) =>
+    m.role === "assistant" ? `Assistant: ${m.content}` : m.authorLabel ? labelUserTurn(m.authorLabel, m.content) : `User: ${m.content}`
   const missed = gap.length
-    ? `Messages exchanged in this conversation since your last turn (you did not see them):\n` +
-      gap.map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`).join("\n")
+    ? `Messages exchanged in this conversation since your last turn (you did not see them):\n` + gap.map(turn).join("\n")
     : ""
   // The page block sits just before the message it describes. A resumed session holds the page
   // the user was on in *earlier* turns, so it is restated on every turn rather than remembered.
-  return [missed, pageContextBlock, `User: ${userMessage}`, "Assistant:"].filter(Boolean).join("\n\n")
+  const current = userLabel ? labelUserTurn(userLabel, userMessage) : `User: ${userMessage}`
+  return [missed, pageContextBlock, current, "Assistant:"].filter(Boolean).join("\n\n")
 }
 
 /**

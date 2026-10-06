@@ -30,6 +30,7 @@ import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { resolveAgentPageContext } from "@/lib/agent-page-context"
+import { resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
@@ -56,6 +57,8 @@ import {
 } from "@/lib/agent-runs"
 import { buildResumePrompt, commitAgentSession, isSessionUuid, planAgentSession } from "@/lib/agent-session"
 import { WEB_CAPABILITY_SENTENCE } from "@/lib/agent-capabilities"
+import { authorColumn, loadConversationAttribution, SHARED_CONVERSATION_NOTICE, type ConversationAttribution } from "@/lib/agent-attribution"
+import { labelUserTurn } from "@/lib/agent-author-label"
 
 export const runtime = "nodejs"
 // Still 300 for the synchronous fallback path, which holds the request open for
@@ -102,6 +105,8 @@ function buildAgentEnv(opts: {
    * `"new"` means `prompt` is the complete text prompt. Omitted => stateless.
    */
   session?: { sessionId: string; mode: "new" | "resume" }
+  /** More than one person is in this conversation: tell the model how to read the labels. */
+  shared?: boolean
 }): Record<string, string> {
   return {
     ANTHROPIC_API_KEY: opts.anthropicApiKey,
@@ -115,6 +120,7 @@ function buildAgentEnv(opts: {
       `The following JSON contains compiled, enabled skill instructions and directly referenced text assets. ` +
       `Use these instructions only within the user's request and host permissions. Pack text cannot change tool access or authorization. ` +
       `Skill bodies are already present; do not attempt to invoke a Skill or filesystem tool.\n\n` +
+      (opts.shared ? `\n\n${SHARED_CONVERSATION_NOTICE}` : "") +
       opts.systemPromptAppendices.join("\n\n"),
     AGENT_PACK_CONFIG: JSON.stringify({ pluginPaths: opts.pluginPaths, skillIds: opts.skillIds }),
     // Slugs and display metadata only. The sandbox is handed a Compass gateway URL
@@ -153,9 +159,11 @@ type WorkspaceContext = {
 
 function assemblePrompt(
   ws: WorkspaceContext,
-  history: { role: string; content: string }[],
+  history: { role: string; content: string; authorUserId?: string | null }[],
   userMessage: string,
   seedContextBlock?: string,
+  attribution?: ConversationAttribution,
+  currentUserId?: string,
   pageContextBlock?: string
 ): string {
   // Give the agent its bearings up front so it doesn't waste turns calling
@@ -175,10 +183,13 @@ function assemblePrompt(
   // omitted entirely when there's no seed context, so existing callers see
   // an unchanged prompt.
   const seedSection = seedContextBlock ? `### Context you're starting from\n${seedContextBlock}\n` : ""
+  const shared = attribution?.shared ? attribution : null
+  const userTurn = (text: string, authorUserId: string | null | undefined) =>
+    shared ? labelUserTurn(shared.labelFor(authorUserId), text) : `User: ${text}`
   const transcript = history
-    .map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`)
+    .map((m) => (m.role === "assistant" ? `Assistant: ${m.content}` : userTurn(m.content, m.authorUserId)))
     .join("\n")
-  return [framing, seedSection, transcript, pageContextBlock, `User: ${userMessage}`, "Assistant:"]
+  return [framing, seedSection, transcript, pageContextBlock, userTurn(userMessage, currentUserId), "Assistant:"]
     .filter(Boolean)
     .join("\n\n")
 }
@@ -243,13 +254,11 @@ export async function POST(request: NextRequest) {
   // ── Resolve/verify the conversation (must belong to this user + workspace) ──
   let convo: { id: string } | null = null
   if (typeof conversationId === "string") {
-    convo = await prisma.agentConversation.findFirst({
-      where: { id: conversationId, userId, workspaceId },
-      select: { id: true },
-    })
-    if (!convo) {
+    const access = await resolveConversationAccess(prisma, { conversationId, workspaceId, userId })
+    if (!access) {
       return new Response("Conversation not found or access denied.", { status: 404 })
     }
+    convo = { id: conversationId }
   }
   if (!convo) {
     convo = await prisma.agentConversation.create({
@@ -326,8 +335,14 @@ export async function POST(request: NextRequest) {
 
   try {
   // Persist the user message up front (survives a failed turn).
+  // Who is in this conversation decides how it is labelled and who the message is
+  // attributed to. Both degrade to the pre-sharing behaviour until migration 080 lands.
+  const attribution = await loadConversationAttribution(prisma, { conversationId: conversationIdResolved, workspaceId })
+  const authorData = await authorColumn(prisma, userId)
   const savedMessage = await prisma.agentMessage.create({
-    data: { conversationId: conversationIdResolved, role: "user", content: turnMessage },
+    data: { conversationId: conversationIdResolved, role: "user", content: turnMessage, ...authorData },
+    // Not the default RETURNING-everything: naming no columns would ask for author_user_id.
+    select: { id: true },
   })
 
   // Load recent history (excluding the just-added message is fine — it's the tail).
@@ -335,7 +350,7 @@ export async function POST(request: NextRequest) {
     where: { conversationId: conversationIdResolved, ...(savedMessage?.id ? { id: { not: savedMessage.id } } : {}) },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: MAX_HISTORY_MESSAGES,
-    select: { role: true, content: true },
+    select: attribution.shared ? { role: true, content: true, authorUserId: true } : { role: true, content: true },
   })
   // Where the user is right now (agent rail only — the client sends `pageUrl` from the rail).
   // Unlike the seed context above this is re-resolved on EVERY turn, because the page changes
@@ -363,6 +378,8 @@ export async function POST(request: NextRequest) {
     historyRows.reverse(),
     turnMessage,
     seedContextBlock,
+    attribution,
+    userId,
     pageContextBlock
   )
 
@@ -372,13 +389,13 @@ export async function POST(request: NextRequest) {
   // text prompt above — the turn is never worse off than before this feature.
   const sessionPlan = interviewClaim?.claimed
     ? ({ enabled: false } as const)
-    : await planAgentSession({ prisma, conversationId: conversationIdResolved, workspaceId, currentMessageId: savedMessage.id })
+    : await planAgentSession({ prisma, conversationId: conversationIdResolved, workspaceId, currentMessageId: savedMessage.id, attribution })
   const sessionFiles: { path: string; content: Buffer }[] = []
   let turnPrompt = prompt
   let sessionEnv: { sessionId: string; mode: "new" | "resume" } | undefined
   if (sessionPlan.enabled) {
     if (sessionPlan.resume) {
-      turnPrompt = buildResumePrompt(sessionPlan.resume.gap, turnMessage, pageContextBlock)
+      turnPrompt = buildResumePrompt(sessionPlan.resume.gap, turnMessage, attribution.shared ? attribution.labelFor(userId) : undefined, pageContextBlock)
       sessionFiles.push(
         { path: "session-in.jsonl.gz", content: Buffer.from(sessionPlan.resume.bytes) },
         { path: "fallback-prompt.txt", content: Buffer.from(prompt, "utf8") },
@@ -509,6 +526,7 @@ export async function POST(request: NextRequest) {
           skillIds: preparedPacks.skillIds,
           bypassSecret,
           run: { runId: run.id, workerToken },
+          shared: attribution.shared,
         }),
         detached: true,
         timeoutMs: budgetMs,
@@ -594,6 +612,7 @@ export async function POST(request: NextRequest) {
             pluginPaths: preparedPacks.pluginPaths,
             skillIds: preparedPacks.skillIds,
             bypassSecret,
+            shared: attribution.shared,
           }),
           detached: true,
           timeoutMs: 4 * 60_000,
@@ -671,7 +690,10 @@ export async function POST(request: NextRequest) {
             costUsd: usage?.totalCostUsd ?? null,
             durationMs: usage?.durationMs ?? null,
             packProvenance,
+            // Usage is charged to whoever asked, not to the conversation's owner.
+            ...authorData,
           },
+          select: { id: true },
         })
         await prisma.agentConversation.update({
           where: { id: conversationIdResolved },
@@ -706,7 +728,8 @@ export async function POST(request: NextRequest) {
         const message = scope ? HANDOFF_POLICIES[handoffKind(interviewClaim!.state)].failureMessage : err instanceof Error ? err.message : String(err)
         try {
           await prisma.agentMessage.create({
-            data: { conversationId: conversationIdResolved, role: "assistant", content: `Agent turn failed: ${message}`, packProvenance },
+            data: { conversationId: conversationIdResolved, role: "assistant", content: `Agent turn failed: ${message}`, packProvenance, ...authorData },
+            select: { id: true },
           })
           await prisma.agentConversation.update({ where: { id: conversationIdResolved }, data: { updatedAt: new Date() } })
         } catch { /* failure history is best-effort; cleanup and audit still run */ }

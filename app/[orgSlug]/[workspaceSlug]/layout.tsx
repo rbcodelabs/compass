@@ -157,6 +157,7 @@ export default async function WorkspaceLayout({
               workspaceId={workspace.id}
               basePath={`/${orgSlug}/${workspaceSlug}`}
               userInitials={initialsOf(user.name ?? user.email)}
+              userId={user.id}
             />
 
             {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}

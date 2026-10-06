@@ -2790,9 +2790,36 @@ model AgentConversation {
   user      User           @relation(fields: [userId], references: [id])
   messages  AgentMessage[]
   runs      AgentRun[]
+  participants AgentConversationParticipant[]
 
   @@index([workspaceId, userId])
   @@map("agent_conversations")
+}
+
+/// A user invited into someone else's agent conversation. The conversation
+/// OWNER is NOT a row here: it stays `AgentConversation.userId`, so a conversation with
+/// no rows behaves exactly as before. `removedAt` null = active; set = removed or left
+/// (re-inviting clears it, the unique index keeps one row per user). Any participant may
+/// invite; there is no cap. Access is re-checked against live workspace membership on
+/// every call, never cached from this row.
+/// DSQL: no FKs, no @updatedAt (set explicitly).
+model AgentConversationParticipant {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  /// Always PARTICIPANT today; the column leaves room for roles without a migration.
+  role          String    @default("PARTICIPANT") @db.VarChar(20)
+  addedByUserId String    @map("added_by_user_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @map("updated_at")
+  removedAt     DateTime? @map("removed_at")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id])
+
+  @@unique([conversationId, userId], map: "idx_agent_conversation_participants_conversation_user")
+  @@index([userId, workspaceId], map: "idx_agent_conversation_participants_user_workspace")
+  @@map("agent_conversation_participants")
 }
 
 /// Pointer to the current Agent SDK session transcript of a conversation (one row per
@@ -2942,6 +2969,9 @@ model AgentMessage {
   /// Exact JSON-encoded pack IDs, versions, source commits, digests and enabled
   /// skills used for this assistant turn. TEXT keeps the schema DSQL-safe.
   packProvenance String?  @map("pack_provenance") @db.Text
+  /// Who sent a user message, or who asked for an assistant one. Null for
+  /// every message that predates multi-user conversations, which are the owner's.
+  authorUserId   String?  @map("author_user_id") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at")
 
   conversation AgentConversation @relation(fields: [conversationId], references: [id])

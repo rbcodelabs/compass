@@ -14,6 +14,8 @@ export type SerializedAgentRun = {
   id: string
   conversationId: string
   workspaceId: string
+  /** Who started the run; in a shared conversation this is one participant, not the owner. */
+  startedByUserId: string | null
   status: AgentRunStatus
   kind: string
   lastSeq: number
@@ -38,6 +40,7 @@ type RunRow = {
   id: string
   conversationId: string
   workspaceId: string
+  userId?: string | null
   status: string
   kind: string
   lastSeq: number
@@ -62,6 +65,7 @@ export function serializeAgentRun(run: RunRow): SerializedAgentRun {
     id: run.id,
     conversationId: run.conversationId,
     workspaceId: run.workspaceId,
+    startedByUserId: run.userId ?? null,
     status: run.status as AgentRunStatus,
     kind: run.kind,
     lastSeq: run.lastSeq,

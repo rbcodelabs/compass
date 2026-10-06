@@ -7,6 +7,7 @@
  * (real sandbox boot + agent run) is verified end-to-end against a deploy.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { accessibleConversationsWhere } from "@/lib/agent-conversation-access"
 import { NextRequest } from "next/server"
 import { normalizeCapabilityPack } from "@/lib/capability-pack"
 
@@ -19,6 +20,8 @@ const mockPrisma = {
   agentMessage: { create: vi.fn(), findMany: vi.fn() },
   agentAuditLog: { createMany: vi.fn() },
   workspaceCapabilityPack: { findMany: vi.fn() },
+  agentConversationParticipant: { findFirst: vi.fn(), findMany: vi.fn() },
+  user: { findMany: vi.fn() },
 }
 
 // `claimInterviewProcessing` is the real implementation here, not a mock, and it
@@ -221,8 +224,8 @@ describe("agent turn route — guards", () => {
     const res = await POST(req({ workspaceId: "ws-1", message: "hi", conversationId: "c-999" }))
     expect(res.status).toBe(404)
     expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
-      where: { id: "c-999", userId: "user-1", workspaceId: "ws-1" },
-      select: { id: true },
+      where: { id: "c-999", ...accessibleConversationsWhere("ws-1", "user-1") },
+      select: { userId: true },
     })
   })
 
@@ -266,7 +269,10 @@ describe("agent turn route — guards", () => {
     mockBootSandbox.mockResolvedValue({ writeFiles: vi.fn(), runCommand: vi.fn().mockResolvedValue(run), stop })
     const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
     expect(await response.text()).toContain("timed out")
-    expect(mockPrisma.agentMessage.create).toHaveBeenCalledWith({ data: expect.objectContaining({ role: "assistant", packProvenance: provenance }) })
+    expect(mockPrisma.agentMessage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ role: "assistant", packProvenance: provenance }),
+      select: { id: true },
+    })
     expect(mockPrisma.agentAuditLog.createMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ toolName: "create_opportunity", packProvenance: provenance })] })
     expect(stop).toHaveBeenCalled()
     expect(mockRevokeKey).toHaveBeenCalledWith("key-1")
