@@ -153,12 +153,14 @@ export async function planAgentSession({
  * The prompt for a resumed turn. The session already holds the workspace framing and
  * everything it saw, so only what happened *outside* it needs restating.
  */
-export function buildResumePrompt(gap: Turn[], userMessage: string): string {
+export function buildResumePrompt(gap: Turn[], userMessage: string, pageContextBlock?: string): string {
   const missed = gap.length
     ? `Messages exchanged in this conversation since your last turn (you did not see them):\n` +
       gap.map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`).join("\n")
     : ""
-  return [missed, `User: ${userMessage}`, "Assistant:"].filter(Boolean).join("\n\n")
+  // The page block sits just before the message it describes. A resumed session holds the page
+  // the user was on in *earlier* turns, so it is restated on every turn rather than remembered.
+  return [missed, pageContextBlock, `User: ${userMessage}`, "Assistant:"].filter(Boolean).join("\n\n")
 }
 
 /**

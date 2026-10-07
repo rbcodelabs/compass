@@ -35,6 +35,7 @@ vi.mock("@/lib/capability-pack-runtime", () => ({
 vi.mock("@/lib/artifact-storage", () => ({ getCapabilityPackArtifactStorage: () => ({}) }))
 vi.mock("@/lib/agent-limits", () => ({ checkAgentUsageLimit: () => Promise.resolve({ allowed: true }) }))
 vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: vi.fn().mockResolvedValue(null) }))
+vi.mock("@/lib/entity-summary", () => ({ getEntitySummary: vi.fn().mockResolvedValue(null) }))
 vi.mock("@/lib/mcp-connectors/store", () => ({ listConnectedSlugs: vi.fn().mockResolvedValue([]) }))
 
 const runMocks = vi.hoisted(() => ({ available: vi.fn(), create: vi.fn(), started: vi.fn(), finalize: vi.fn() }))
@@ -207,6 +208,71 @@ describe("synchronous path", () => {
     expect(sessionMocks.plan).not.toHaveBeenCalled()
     expect(sessionMocks.commit).not.toHaveBeenCalled()
     expect(runCommand.mock.calls[0][0].env).not.toHaveProperty("AGENT_SESSION_ID")
+  })
+})
+
+describe("page context (agent rail)", () => {
+  const ok = [`AGENT_RESULT ${JSON.stringify({ text: "done" })}`]
+  function run() {
+    const runCommand = vi.fn().mockResolvedValue(stream(ok))
+    mockBootSandbox.mockResolvedValue({
+      writeFiles: vi.fn().mockResolvedValue(undefined),
+      runCommand,
+      readFileToBuffer: vi.fn().mockResolvedValue(null),
+      stop: vi.fn().mockResolvedValue(undefined),
+    })
+    return runCommand
+  }
+
+  it("folds the page the rail is on into a new-session prompt, before the user message", async () => {
+    sessionMocks.plan.mockResolvedValue({ enabled: false })
+    const runCommand = run()
+    await (await POST(req({ workspaceId: "ws-1", message: "what is this?", pageUrl: "/org/acme/roadmap" }))).text()
+
+    const prompt: string = runCommand.mock.calls[0][0].env.AGENT_PROMPT
+    expect(prompt).toContain("### Where the user is right now")
+    expect(prompt).toContain("Section: Roadmap")
+    expect(prompt.indexOf("Where the user is right now")).toBeLessThan(prompt.indexOf("User: what is this?"))
+  })
+
+  it("restates it on a resumed turn, and in the fallback prompt", async () => {
+    sessionMocks.plan.mockResolvedValue({
+      enabled: true as const,
+      sessionId: SESSION_ID,
+      resume: { bytes: new Uint8Array([0x1f, 0x8b, 1]), gap: [] },
+    })
+    const writeFiles = vi.fn().mockResolvedValue(undefined)
+    const runCommand = vi.fn().mockResolvedValue(stream(ok))
+    mockBootSandbox.mockResolvedValue({ writeFiles, runCommand, readFileToBuffer: vi.fn().mockResolvedValue(null), stop: vi.fn() })
+    await (await POST(req({ workspaceId: "ws-1", message: "and here?", pageUrl: "/org/acme/okrs" }))).text()
+
+    const env = runCommand.mock.calls[0][0].env
+    expect(env.AGENT_PROMPT).toContain("Section: OKRs")
+    expect(env.AGENT_PROMPT).toContain("User: and here?")
+    const files = writeFiles.mock.calls[0][0] as { path: string; content: Buffer }[]
+    const fallback = files.find((f) => f.path === "fallback-prompt.txt")!.content.toString("utf8")
+    expect(fallback).toContain("Section: OKRs")
+  })
+
+  it("adds nothing when the client sent no pageUrl (the full-page agent screen)", async () => {
+    sessionMocks.plan.mockResolvedValue({ enabled: false })
+    const runCommand = run()
+    await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+    expect(runCommand.mock.calls[0][0].env.AGENT_PROMPT).not.toContain("Where the user is right now")
+  })
+
+  it("ignores a pageUrl that names a different workspace", async () => {
+    sessionMocks.plan.mockResolvedValue({ enabled: false })
+    const runCommand = run()
+    await (await POST(req({ workspaceId: "ws-1", message: "hi", pageUrl: "/org/someone-elses/roadmap" }))).text()
+    expect(runCommand.mock.calls[0][0].env.AGENT_PROMPT).not.toContain("Where the user is right now")
+  })
+
+  it("never persists the block as a chat message", async () => {
+    sessionMocks.plan.mockResolvedValue({ enabled: false })
+    run()
+    await (await POST(req({ workspaceId: "ws-1", message: "hi", pageUrl: "/org/acme/roadmap" }))).text()
+    expect(mockPrisma.agentMessage.create.mock.calls[0][0].data.content).toBe("hi")
   })
 })
 

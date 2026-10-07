@@ -29,6 +29,7 @@ import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
+import { resolveAgentPageContext } from "@/lib/agent-page-context"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
@@ -154,7 +155,8 @@ function assemblePrompt(
   ws: WorkspaceContext,
   history: { role: string; content: string }[],
   userMessage: string,
-  seedContextBlock?: string
+  seedContextBlock?: string,
+  pageContextBlock?: string
 ): string {
   // Give the agent its bearings up front so it doesn't waste turns calling
   // list_workspaces / get_workspace_by_slug just to figure out where it is.
@@ -176,7 +178,7 @@ function assemblePrompt(
   const transcript = history
     .map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`)
     .join("\n")
-  return [framing, seedSection, transcript, `User: ${userMessage}`, "Assistant:"]
+  return [framing, seedSection, transcript, pageContextBlock, `User: ${userMessage}`, "Assistant:"]
     .filter(Boolean)
     .join("\n\n")
 }
@@ -222,7 +224,7 @@ export async function POST(request: NextRequest) {
   // ── Authorize: caller must be a member of the workspace ─────────────────────
   const workspace = await prisma.workspace.findFirst({
     where: { id: workspaceId, members: { some: { userId } } },
-    select: { id: true, name: true, slug: true, organization: { select: { slug: true } } },
+    select: { id: true, name: true, slug: true, thinkingModel: true, thinkingModelLabels: true, organization: { select: { slug: true } } },
   })
   if (!workspace) {
     return new Response("Workspace not found or access denied.", { status: 404 })
@@ -335,6 +337,22 @@ export async function POST(request: NextRequest) {
     take: MAX_HISTORY_MESSAGES,
     select: { role: true, content: true },
   })
+  // Where the user is right now (agent rail only — the client sends `pageUrl` from the rail).
+  // Unlike the seed context above this is re-resolved on EVERY turn, because the page changes
+  // between turns, and it is never saved as a message. Machine-driven interview/handoff turns
+  // are reproducible by design and ignore it. Resolution failure degrades to no block.
+  const pageContextBlock = interviewClaim?.claimed
+    ? undefined
+    : (await resolveAgentPageContext({
+        pageUrl: body.pageUrl,
+        workspace: {
+          id: workspace.id,
+          orgSlug: workspace.organization.slug,
+          workspaceSlug: workspace.slug,
+          thinkingModel: workspace.thinkingModel,
+          thinkingModelLabels: workspace.thinkingModelLabels,
+        },
+      }))?.promptBlock
   const prompt = assemblePrompt(
     {
       id: workspace.id,
@@ -344,7 +362,8 @@ export async function POST(request: NextRequest) {
     },
     historyRows.reverse(),
     turnMessage,
-    seedContextBlock
+    seedContextBlock,
+    pageContextBlock
   )
 
   // Session resume. Handoff/interview turns never use
@@ -359,7 +378,7 @@ export async function POST(request: NextRequest) {
   let sessionEnv: { sessionId: string; mode: "new" | "resume" } | undefined
   if (sessionPlan.enabled) {
     if (sessionPlan.resume) {
-      turnPrompt = buildResumePrompt(sessionPlan.resume.gap, turnMessage)
+      turnPrompt = buildResumePrompt(sessionPlan.resume.gap, turnMessage, pageContextBlock)
       sessionFiles.push(
         { path: "session-in.jsonl.gz", content: Buffer.from(sessionPlan.resume.bytes) },
         { path: "fallback-prompt.txt", content: Buffer.from(prompt, "utf8") },

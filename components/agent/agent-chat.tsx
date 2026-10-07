@@ -466,6 +466,10 @@ export function AgentChat({
           message: text,
           conversationId: activeConversationId ?? undefined,
           ...(seedContextForThisTurn ? { seedContext: seedContextForThisTurn } : {}),
+          // The rail floats over whatever page the user is on, so tell the server which one.
+          // Read at send time (not from render state) so it is the page NOW, not when the
+          // component last rendered. The full-page agent screen has no page behind it.
+          ...(isRail ? { pageUrl: window.location.pathname + window.location.search } : {}),
           ...(retry ? { retry: true } : {}),
           ...(!handoff && processing?.canContinue ? { continue: true } : {}),
         }),
