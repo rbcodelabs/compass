@@ -1,6 +1,13 @@
 import getPrisma from "@/lib/db";
 import { requireWorkspaceContext } from "@/lib/workspace-context";
-import { DocTreeSidebar, type DocTreeItem } from "@/components/docs/doc-tree-sidebar";
+import { cookies } from "next/headers";
+import type { DocTreeItem } from "@/components/docs/doc-tree-sidebar";
+import { DocsLibraryPane } from "@/components/docs/docs-library-pane";
+import { DocsLibraryProvider } from "@/components/docs/docs-library-context";
+import {
+  DOCS_LIBRARY_COOKIE_NAME,
+  parseDocsLibraryState,
+} from "@/lib/docs-library-pane";
 import { DocsMobileDrawer } from "@/components/docs/docs-mobile-drawer";
 
 interface DocsLayoutProps {
@@ -44,6 +51,7 @@ export default async function DocsLayout({
 }: DocsLayoutProps) {
   const { orgSlug, workspaceSlug } = await params;
   const prisma = getPrisma();
+  const cookieStore = await cookies();
 
   // Resolves from the request memo — the parent workspace layout already
   // asked for this exact context, so this costs no additional statements.
@@ -81,19 +89,23 @@ export default async function DocsLayout({
         />
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Doc tree sidebar — hidden on mobile, visible on md+ */}
-        <div className="hidden md:flex w-60 min-h-0 shrink-0 flex-col border-r border-border-default bg-surface-panel p-2">
-          <DocTreeSidebar
+      <DocsLibraryProvider
+        initialState={parseDocsLibraryState(cookieStore.get(DOCS_LIBRARY_COOKIE_NAME)?.value)}
+      >
+        <div className="flex flex-1 overflow-hidden">
+          {/* Library sidebar — hidden on mobile (drawer above), resizable and
+              collapsible on md+. State comes from a cookie so the first paint
+              is already the user's width. */}
+          <DocsLibraryPane
             docs={tree}
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
             workspaceId={workspace.id}
             artifacts={artifacts}
           />
+          <div className="flex-1 overflow-y-auto min-w-0">{children}</div>
         </div>
-        <div className="flex-1 overflow-y-auto min-w-0">{children}</div>
-      </div>
+      </DocsLibraryProvider>
     </div>
   );
 }

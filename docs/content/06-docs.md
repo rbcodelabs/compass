@@ -14,6 +14,8 @@ The Library mixes root items alphabetically, keeping child pages beneath their p
 
 Use **New** to create a doc, create a diagram, import a `.canvas` file, or add an artifact.
 
+On desktop, drag the Library's right edge to resize it (200–480px, and never so wide that the editor drops below 480px). Double-click the edge to reset it to the default width, or focus it and use the arrow keys (hold Shift for larger steps, Home/End for the limits). Use the collapse button next to **New** to hide the Library completely; an expand button then appears beside the page title to bring it back. Search text and filters are kept while it is collapsed. Your width and collapsed state are remembered in this browser.
+
 ![Library component on desktop with mixed documents, diagrams, and artifacts](/screenshots/docs/docs-library-desktop.png)
 
 ![Library component in the mobile Docs drawer](/screenshots/docs/docs-library-mobile.png)
