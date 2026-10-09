@@ -6,6 +6,19 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname),
   },
   devIndicators: false,
+  // Load these server-only SDKs via Node require at runtime instead of bundling
+  // them. In `next dev` this keeps their sources out of Turbopack's module
+  // graph, cutting next-server RssAnon by ~25% (cold) / ~12% (warm) on a
+  // fixed 15-route workspace walk. They are only used in route handlers and
+  // server modules, never imported by client code.
+  serverExternalPackages: [
+    "@modelcontextprotocol/sdk",
+    "mcp-handler",
+    "@vercel/sandbox",
+    "@aws-sdk/dsql-signer",
+    "jose",
+    "gray-matter",
+  ],
   async headers() {
     return [
       {
