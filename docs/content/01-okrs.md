@@ -39,6 +39,12 @@ Key Results are the measurable outcomes that tell you whether you've hit your Ob
 
 A well-formed Key Result is binary-testable at the end of the cycle: either you hit the target or you didn't.
 
+### Moving a Key Result to another Objective
+
+Open the Key Result's detail panel and, in its **Objective** section, click **Move to another objective…**. Pick the new Objective from the searchable list (Objectives in the same cycle come first). The Key Result lands at the end of the new Objective's list, and any Opportunities it drives follow it to the new Objective.
+
+The list only offers Objectives in the same workspace that are not in a closed cycle. Compass also leaves out an Objective that sits below the Key Result in the hierarchy (that would create a loop), and any Objective whose cycle is no longer longer than, and does not fully contain, the cycles of the Objectives supporting the Key Result. A Key Result that drives more than 400 Opportunities can't be moved in one step. If a move is refused, the reason appears under the link.
+
 ## Linking annual and quarterly OKRs
 
 Objectives in a shorter cycle can support a Key Result in a longer cycle. This creates a measurable hierarchy without duplicating annual goals inside every quarter:

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState, useTransition } from "react";
 import { Discussion } from "@/components/comments/discussion";
 
 import {
@@ -23,6 +23,9 @@ import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
 import { CheckInForm } from "@/components/okrs/check-in-form";
 import { CheckInHistory, KrHero, KrSparkline } from "@/components/okrs/kr-progress-history";
 import { cycleTiming } from "@/lib/okr-cycle-rollup";
+import { Combobox, ComboboxContent } from "@/components/ui/combobox";
+import { listKeyResultMoveTargets, moveKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
+import type { KeyResultMoveTarget } from "@/lib/okr-hierarchy";
 import "@/components/okrs/okrs-gallery.css";
 
 type KeyResultData = {
@@ -49,6 +52,99 @@ type KeyResultData = {
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
 };
+
+/**
+ * "Move to…" for a Key Result: loads the valid target Objectives when opened (the server filters out closed cycles,
+ * the Key Result's own subtree and cycles that no longer fit its supporters) and re-validates on the move itself.
+ */
+function MoveKeyResultControl({
+  keyResultId,
+  orgSlug,
+  workspaceSlug,
+  onMoved,
+}: {
+  keyResultId: string;
+  orgSlug: string;
+  workspaceSlug: string;
+  onMoved: () => void;
+}) {
+  const labels = useLabels();
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [targets, setTargets] = useState<KeyResultMoveTarget[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) return;
+    setError(null);
+    setTargets(null);
+    listKeyResultMoveTargets(keyResultId)
+      .then(setTargets)
+      .catch((e) => {
+        setTargets([]);
+        setError(e instanceof Error ? e.message : `Could not load ${labels.objective.lowerPlural}.`);
+      });
+  };
+
+  const handleSelect = (objectiveId: string | null) => {
+    if (!objectiveId) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        const result = await moveKeyResult(keyResultId, objectiveId, orgSlug, workspaceSlug);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setOpen(false);
+        // moveKeyResult revalidates the OKR and discovery layouts, which re-renders the open page.
+        onMoved();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : `Could not move the ${labels.keyResult.lower}.`);
+      }
+    });
+  };
+
+  return (
+    <div ref={anchorRef} className="mt-1.5">
+      <button
+        type="button"
+        onClick={() => handleOpenChange(!open)}
+        disabled={isPending}
+        className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+      >
+        {isPending ? "Moving…" : `Move to another ${labels.objective.lower}…`}
+      </button>
+      <Combobox
+        items={(targets ?? []).map((objective) => ({
+          value: objective.id,
+          label: `${objective.title} ${objective.cycleTitle}`,
+          render: (
+            <span className="flex min-w-0 flex-col text-left">
+              <span className="truncate text-xs font-medium">{objective.title}</span>
+              <span className="truncate text-[11px] text-muted-foreground">{objective.cycleTitle}</span>
+            </span>
+          ),
+        }))}
+        value={null}
+        onValueChange={handleSelect}
+        disabled={isPending}
+        open={open}
+        onOpenChange={handleOpenChange}
+      >
+        <ComboboxContent
+          anchor={anchorRef}
+          align="start"
+          inputPlaceholder={`Search ${labels.objective.lowerPlural}…`}
+          emptyMessage={targets === null ? "Loading…" : `No ${labels.objective.lowerPlural} this ${labels.keyResult.lower} can move to.`}
+        />
+      </Combobox>
+      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
 
 export function KeyResultPanel({
   id,
@@ -159,6 +255,7 @@ export function KeyResultPanel({
 
       <Section label={labels.objective.singular}>
         <RelationList items={objectiveItems} empty={`No parent ${labels.objective.lower}.`} />
+        <MoveKeyResultControl keyResultId={id} orgSlug={orgSlug} workspaceSlug={workspaceSlug} onMoved={refresh} />
       </Section>
 
       <Section label={`Supporting ${labels.objective.plural}`} count={data.supportingObjectives.length}>
