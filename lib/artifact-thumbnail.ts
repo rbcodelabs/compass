@@ -79,6 +79,9 @@ export async function captureAndStoreArtifactThumbnail(input: {
       // resolveProtectionBypassSecret for why the decision cannot be left to the
       // page-level origin check alone.
       protectionBypassSecret: resolveProtectionBypassSecret(revision.externalUrl),
+      // Otherwise, for a prototype on another project in our Vercel team, mint a
+      // one-capture key (no-op unless VERCEL_ACCESS_TOKEN is configured).
+      autoProtectionBypass: true,
     })
   }
 
