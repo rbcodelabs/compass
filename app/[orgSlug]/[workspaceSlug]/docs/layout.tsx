@@ -1,7 +1,7 @@
 import getPrisma from "@/lib/db";
 import { requireWorkspaceContext } from "@/lib/workspace-context";
 import { cookies } from "next/headers";
-import type { DocTreeItem } from "@/components/docs/doc-tree-sidebar";
+import { buildDocTree } from "@/lib/doc-tree";
 import { DocsLibraryPane } from "@/components/docs/docs-library-pane";
 import { DocsLibraryProvider } from "@/components/docs/docs-library-context";
 import {
@@ -13,36 +13,6 @@ import { DocsMobileDrawer } from "@/components/docs/docs-mobile-drawer";
 interface DocsLayoutProps {
   children: React.ReactNode;
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-}
-
-function buildDocTree(
-  docs: Array<{
-    id: string;
-    title: string;
-    icon: string | null;
-    parentId: string | null;
-    sortOrder: number;
-    docType?: string;
-  }>
-): DocTreeItem[] {
-  const sorted = [...docs].sort((a, b) => a.sortOrder - b.sortOrder);
-  const map = new Map<string, DocTreeItem>();
-
-  for (const doc of sorted) {
-    map.set(doc.id, { ...doc, children: [] });
-  }
-
-  const roots: DocTreeItem[] = [];
-  for (const doc of sorted) {
-    const node = map.get(doc.id)!;
-    if (doc.parentId && map.has(doc.parentId)) {
-      map.get(doc.parentId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-
-  return roots;
 }
 
 export default async function DocsLayout({

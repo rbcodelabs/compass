@@ -199,12 +199,12 @@ describe("Sidebar", () => {
       );
 
       const sidebar = document.querySelector('[data-slot="sidebar"][data-state]');
-      const toggle = screen.getByRole("button", { name: "Agent panel" });
+      const toggle = screen.getByRole("button", { name: "Agent" });
       expect(toggle).toHaveAttribute("aria-pressed", "false");
 
       fireEvent.click(toggle);
 
-      expect(screen.getByRole("button", { name: "Agent panel" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Agent" })).toHaveAttribute(
         "aria-pressed",
         "true",
       );
