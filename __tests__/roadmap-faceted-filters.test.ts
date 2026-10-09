@@ -63,7 +63,7 @@ describe("Roadmap faceted filters", () => {
 
     render(createElement(RoadmapHeader, { squads }));
 
-    fireEvent.click(screen.getByRole("button", { name: "View options" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Filters/ }));
     expect(await screen.findByText("Squad")).toBeInTheDocument();
 
     // Selecting a squad preserves the pre-existing "view" query parameter
