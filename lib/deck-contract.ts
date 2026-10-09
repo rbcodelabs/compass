@@ -1,8 +1,7 @@
 /**
  * The numbers that define how an uploaded HTML Artifact splits into slides.
  *
- * Ported from Commenter / Quick Share
- * (`bankrate-prototypes/v0-comment-service-for-prototypes`, `src/lib/deck-contract.ts`),
+ * Ported from the Commenter / Quick Share deck pipeline (same contributor),
  * keeping only the limits Compass enforces. Commenter's upload-size and
  * canvas-fit limits are not carried over: Compass Artifact uploads keep their
  * own size cap, and slides render in the standard sandboxed Artifact frame.

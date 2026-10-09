@@ -1,8 +1,8 @@
 /**
  * Splits an uploaded HTML document into individual slide documents.
  *
- * In Compass: ported verbatim (imports aside) from Commenter / Quick Share
- * (`bankrate-prototypes/v0-comment-service-for-prototypes`, `src/lib/slide-parser.ts`).
+ * In Compass: ported verbatim (imports aside) from the Commenter / Quick Share
+ * deck pipeline (same contributor).
  * Compass does not store slides separately: a SLIDE_DECK Artifact keeps the
  * whole uploaded document as its revision HTML, and this parser splits it at
  * read time. Each resulting slide document is rendered in the same sandboxed
