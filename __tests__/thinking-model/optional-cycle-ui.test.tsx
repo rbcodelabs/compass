@@ -112,7 +112,7 @@ describe("PersistentObjectivesCard per preset", () => {
 
 describe("/okrs index composes cycle-less Objectives once per preset", () => {
   const workspace = (source: Source) => ({ id: "w1", slug: "alpha", ...source })
-  const cycle = { id: "c1", title: "Q3", startDate: new Date("2026-07-01"), endDate: new Date("2026-09-30"), status: "ACTIVE", _count: { objectives: 1 } }
+  const cycle = { id: "c1", title: "Q3", startDate: new Date("2026-07-01"), endDate: new Date("2026-09-30"), status: "ACTIVE", objectives: [{ status: "ON_TRACK", keyResults: [] }] }
   const renderPage = async (source: Source) => {
     db.workspace = workspace(source)
     const ui = await OKRsPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "alpha" }) })
@@ -243,6 +243,7 @@ describe("panels: a Key Result's supporting cycle-less Objective", () => {
     target: 10,
     unit: "",
     objective: null,
+    checkIns: [],
     supportingObjectives: [{ id: "s1", title: "Supporter", status: "ACTIVE", cycle: null, owner: null, squad: null, keyResults: [{ current: 5, target: 10 }] }],
     opportunities: [],
     roadmapItems: [],

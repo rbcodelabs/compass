@@ -146,6 +146,13 @@ const click = (name: string | RegExp) => () => fireEvent.click(screen.getByRole(
 const cycle = { id: "c1", title: "Q3", startDate: new Date("2026-07-01T12:00:00Z"), endDate: new Date("2026-09-30T12:00:00Z"), status: "ACTIVE" as const }
 const common = { orgSlug: "acme", workspaceSlug: "alpha" }
 
+/** CycleCard takes a server-computed rollup, not a Prisma _count. A fixed timing keeps the render clock-independent. */
+const cycleWith = (row: typeof cycle, objectives: number) => ({
+  ...row,
+  rollup: { objectiveCount: objectives, keyResultCount: 0, progress: 0, statusMix: { ON_TRACK: objectives, AT_RISK: 0, OFF_TRACK: 0, COMPLETE: 0 } },
+  timing: { percentElapsed: 50, daysLeft: 45, daysUntilStart: 0, phase: "running" as const },
+})
+
 describe("CLASSIC text is identical to main", () => {
   check("bottom-nav", <BottomNav {...common} />)
   check("add-objective closed", <AddObjectiveForm cycleId="c1" {...common} />)
@@ -154,9 +161,9 @@ describe("CLASSIC text is identical to main", () => {
   check("add-key-result open", <AddKeyResultForm objectiveId="o1" objectiveTitle="Grow" {...common} />, click("Add key result"))
   check("create-cycle closed", <CreateCycleForm workspaceId="w1" {...common} />)
   check("create-cycle open", <CreateCycleForm workspaceId="w1" {...common} />, click("New Cycle"))
-  check("cycle-card 0", <CycleCard cycle={{ ...cycle, _count: { objectives: 0 } }} {...common} />)
-  check("cycle-card 1", <CycleCard cycle={{ ...cycle, _count: { objectives: 1 } }} {...common} />)
-  check("cycle-card 3", <CycleCard cycle={{ ...cycle, _count: { objectives: 3 } }} {...common} />)
+  check("cycle-card 0", <CycleCard cycle={cycleWith(cycle, 0)} {...common} />)
+  check("cycle-card 1", <CycleCard cycle={cycleWith(cycle, 1)} {...common} />)
+  check("cycle-card 3", <CycleCard cycle={cycleWith(cycle, 3)} {...common} />)
   check(
     "roadmap add-item open",
     <AddItemForm
@@ -240,6 +247,7 @@ describe("CLASSIC text is identical to main", () => {
   it("key-result-panel", () => {
     entityDetail.data = {
       id: "k1", title: "Reach", current: 1, target: 2, unit: null, objective: { id: "o1", title: "Grow", cycleId: "c1" },
+      checkIns: [],
       supportingObjectives: [{ id: "o2", title: "Support", cycle: { id: "c2", title: "Q4" }, keyResults: [], squad: null }],
       opportunities: [{ id: "p1", title: "Need" }], roadmapItems: [], deliveryTasks: [], linkableTasks: [], members: [],
     }

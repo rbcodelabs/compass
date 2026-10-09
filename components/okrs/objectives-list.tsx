@@ -64,6 +64,7 @@ type Props = {
   cyclePath: string;
   availableKRs?: ParentKROption[];
   supportingObjectiveOptions?: SupportingObjectiveOption[];
+  paceElapsed?: number | null;
 };
 
 export function ObjectivesList({
@@ -73,6 +74,7 @@ export function ObjectivesList({
   cyclePath,
   availableKRs = [],
   supportingObjectiveOptions,
+  paceElapsed,
 }: Props) {
   const [objectives, setObjectives] = useState(initialObjectives);
   const [, startTransition] = useTransition();
@@ -128,6 +130,7 @@ export function ObjectivesList({
             availableKRs={availableKRs}
             parentKeyResultId={obj.parentKeyResultId ?? null}
             supportingObjectiveOptions={supportingObjectiveOptions}
+            paceElapsed={paceElapsed}
           />
         ))}
       </SortableContext>
@@ -145,6 +148,7 @@ function ObjectiveRowWithKRSort({
   availableKRs,
   parentKeyResultId,
   supportingObjectiveOptions,
+  paceElapsed,
 }: {
   objective: ObjectiveData;
   orgSlug: string;
@@ -153,6 +157,7 @@ function ObjectiveRowWithKRSort({
   availableKRs?: ParentKROption[];
   parentKeyResultId?: string | null;
   supportingObjectiveOptions?: SupportingObjectiveOption[];
+  paceElapsed?: number | null;
 }) {
   const [keyResults, setKeyResults] = useState(objective.keyResults);
   const [, startTransition] = useTransition();
@@ -206,6 +211,7 @@ function ObjectiveRowWithKRSort({
           availableKRs={availableKRs}
           parentKeyResultId={parentKeyResultId}
           supportingObjectiveOptions={supportingObjectiveOptions}
+          paceElapsed={paceElapsed}
         />
       </SortableContext>
     </DndContext>

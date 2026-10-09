@@ -27,6 +27,9 @@ export const CONVERTED_FILES = [
   "components/okrs/check-in-form.tsx",
   "components/okrs/create-cycle-form.tsx",
   "components/okrs/cycle-card.tsx",
+  "components/okrs/cycle-summary.tsx",
+  "components/okrs/okr-visuals.tsx",
+  "components/okrs/kr-progress-history.tsx",
   "components/okrs/key-result-bar.tsx",
   "components/okrs/objective-row.tsx",
   "components/okrs/objectives-list.tsx",
@@ -206,6 +209,8 @@ export const ENTITY_SCREENS = {
   cycle: [
     "components/okrs/create-cycle-form.tsx",
     "components/okrs/cycle-card.tsx",
+    "components/okrs/cycle-summary.tsx",
+    "components/okrs/okr-visuals.tsx",
     "components/okrs/persistent-objectives-card.tsx",
     "components/panels/objective-panel.tsx",
     "lib/okr-cycle-scope.ts",

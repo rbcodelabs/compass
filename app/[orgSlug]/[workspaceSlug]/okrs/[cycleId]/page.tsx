@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { ObjectivesList } from "@/components/okrs/objectives-list";
 import { AddObjectiveForm } from "@/components/okrs/add-objective-form";
+import { CycleSummary } from "@/components/okrs/cycle-summary";
+import { cycleTiming, rollupObjectives } from "@/lib/okr-cycle-rollup";
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
 import {
   getEligibleParentKeyResults,
@@ -240,15 +242,22 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
     })),
   ];
 
+  // Rollup + timing are computed once, here, so the client does no date math (no hydration drift).
+  const rollup = rollupObjectives(objectivesWithData);
+  const timing = cycle ? cycleTiming(cycle.startDate, cycle.endDate, new Date()) : null;
+  const paceElapsed = timing?.phase === "running" && cycleStatus === "ACTIVE" ? timing.percentElapsed : null;
+
   const cyclePath = `/${orgSlug}/${workspaceSlug}/okrs/${cycleId}`;
 
   return (
-    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
+    <main className="okx flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
       {cycle && cycleStatus ? (
         <PageHeader title={<span className="flex items-center gap-2">{cycle.title}<StatusBadge status={CYCLE_STATUS_TONE[cycleStatus]}>{CYCLE_STATUS_LABELS[cycleStatus]}</StatusBadge></span>} description={`${formatDate(cycle.startDate)} – ${formatDate(cycle.endDate)}`} />
       ) : (
         <PageHeader title={noCycleTitle} description={`${labels.objective.plural} that are not tied to a planning period. They can support, and be supported by, ${labels.keyResult.plural} in any open ${labels.cycle.lower}.`} />
       )}
+
+      <CycleSummary rollup={rollup} timing={timing} />
 
       <Suspense>
         <SquadFilterBar squads={squads} />
@@ -267,6 +276,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           cyclePath={cyclePath}
+          paceElapsed={paceElapsed}
           availableKRs={parentKROptions}
           supportingObjectiveOptions={eligibleSupportingObjectives.map((objective) => ({
             id: objective.id,
