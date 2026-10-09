@@ -70,6 +70,7 @@ export function TasksFilters({
 
   return (
     <FacetedFilterMenu
+      iconOnly
       onClearAll={clearAll}
       groups={[
         {

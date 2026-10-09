@@ -70,10 +70,9 @@ export function DecisionsFilters({ reviewers }: { reviewers: { id: string; name:
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="outline" size="sm" aria-label="Search decisions" />}>
+        <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="Search decisions" className="relative size-11 md:size-8" />}>
           <Search />
-          <span className="hidden sm:inline">Search</span>
-          {q && <span className="size-1.5 rounded-full bg-primary" aria-label="Search active" />}
+          {q && <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" aria-label="Search active" />}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-72 p-2">
           <div className="relative">
@@ -105,10 +104,9 @@ export function DecisionsFilters({ reviewers }: { reviewers: { id: string; name:
       </DropdownMenu>
 
       <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="outline" size="sm" aria-label="Filter by date" />}>
+        <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="Filter by date" className="relative size-11 md:size-8" />}>
           <CalendarRange />
-          <span className="hidden sm:inline">Date</span>
-          {dateActive && <span className="size-1.5 rounded-full bg-primary" aria-label="Date filter active" />}
+          {dateActive && <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" aria-label="Date filter active" />}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64 space-y-2 p-3">
           <label className="flex flex-col gap-1 text-xs font-medium text-text-subtle">
@@ -149,6 +147,7 @@ export function DecisionsFilters({ reviewers }: { reviewers: { id: string; name:
       </DropdownMenu>
 
       <FacetedFilterMenu
+        iconOnly
         onClearAll={() => set({ type: null, outcome: null, reviewer: null, page: null })}
         groups={[
           {

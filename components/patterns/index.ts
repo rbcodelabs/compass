@@ -11,3 +11,5 @@ export * from "./page-section";
 export * from "./settings-section";
 export * from "./status-badge";
 export * from "./toolbar";
+export * from "./workspace-header-controls";
+export * from "./workspace-page";
