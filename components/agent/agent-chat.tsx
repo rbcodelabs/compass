@@ -37,6 +37,14 @@ type Props = {
   seedEntity?: SeedEntity
   suggestedInstruction?: string
   /**
+   * "Ask the agent about this" from the rail's Docs tab. Applied once per `id`:
+   * shows a display-only context chip and prefills the composer (appending to
+   * any draft). Never sent automatically, and never forwarded as `seedContext`
+   * — a docs article is not a Compass entity the server can resolve.
+   */
+  composerSeed?: { id: number; label: string; summary: string; sourceUrl: string; text: string } | null
+  onComposerSeedApplied?: () => void
+  /**
    * Which surface this chat is rendered on.
    *
    * `"page"` (the default, so every existing call site is unchanged) is the
@@ -92,6 +100,8 @@ export function AgentChat({
   userInitials,
   seedEntity,
   suggestedInstruction,
+  composerSeed,
+  onComposerSeedApplied,
   variant = "page",
   onConversationCreated,
   onStreamingChange,
@@ -108,6 +118,21 @@ export function AgentChat({
   // never resent — belt-and-suspenders alongside the server's own
   // conversationId-presence guard (app/api/agent/turn/route.ts).
   const [pendingSeedEntity, setPendingSeedEntity] = useState<SeedEntity | undefined>(seedEntity)
+  const [docChip, setDocChip] = useState<{ label: string; summary: string; sourceUrl: string } | null>(null)
+  const appliedSeedId = useRef<number | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const onComposerSeedAppliedRef = useRef(onComposerSeedApplied)
+  useEffect(() => {
+    onComposerSeedAppliedRef.current = onComposerSeedApplied
+  }, [onComposerSeedApplied])
+  useEffect(() => {
+    if (!composerSeed || appliedSeedId.current === composerSeed.id) return
+    appliedSeedId.current = composerSeed.id
+    setDocChip({ label: composerSeed.label, summary: composerSeed.summary, sourceUrl: composerSeed.sourceUrl })
+    setInput((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")}\n\n${composerSeed.text}` : composerSeed.text))
+    onComposerSeedAppliedRef.current?.()
+    requestAnimationFrame(() => composerRef.current?.focus())
+  }, [composerSeed])
   const [phase, setPhase] = useState<StreamPhase>("idle")
   const [streamingText, setStreamingText] = useState("")
   const [liveToolSteps, setLiveToolSteps] = useState<ToolStep[]>([])
@@ -209,6 +234,7 @@ export function AgentChat({
         ? { entityType: pendingSeedEntity.entityType, entityId: pendingSeedEntity.entityId }
         : undefined
     if (seedContextForThisTurn) setPendingSeedEntity(undefined)
+    setDocChip(null)
 
     let assembled = ""
     let steps: ToolStep[] = []
@@ -487,8 +513,19 @@ export function AgentChat({
               />
             </div>
           )}
+          {docChip && (
+            <div className="mb-2">
+              <SeedContextChip
+                label={docChip.label}
+                summary={docChip.summary}
+                sourceUrl={docChip.sourceUrl}
+                onDismiss={() => setDocChip(null)}
+              />
+            </div>
+          )}
           <div className="mx-auto flex w-full max-w-3xl items-end gap-2">
             <Textarea
+              ref={composerRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {

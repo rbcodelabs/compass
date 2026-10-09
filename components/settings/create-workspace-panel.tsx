@@ -30,9 +30,15 @@ export interface OrgWorkspaceSummary {
 export function CreateWorkspacePanel({
   orgSlug,
   workspaces,
+  orgMemberCount,
+  orgAdminCount,
 }: {
   orgSlug: string;
   workspaces: OrgWorkspaceSummary[];
+  /** Everyone in the org — what "all members" adds. */
+  orgMemberCount: number;
+  /** Org owners + admins — what "admins only" adds (always includes you). */
+  orgAdminCount: number;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -48,6 +54,9 @@ export function CreateWorkspacePanel({
   // next keystroke in Name.
   const [slugEdited, setSlugEdited] = useState(false);
   const [description, setDescription] = useState("");
+  const [memberSeeding, setMemberSeeding] = useState<"ALL_ORG_MEMBERS" | "ORG_ADMINS">(
+    "ALL_ORG_MEMBERS"
+  );
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -61,6 +70,7 @@ export function CreateWorkspacePanel({
     setSlug("");
     setSlugEdited(false);
     setDescription("");
+    setMemberSeeding("ALL_ORG_MEMBERS");
     setError(null);
   }
 
@@ -105,6 +115,7 @@ export function CreateWorkspacePanel({
         name: trimmedName,
         slug: trimmedSlug,
         description: description.trim() || undefined,
+        memberSeeding,
       });
 
       if (!result.ok) {
@@ -204,6 +215,39 @@ export function CreateWorkspacePanel({
               rows={2}
             />
           </div>
+
+          <fieldset className="flex flex-col gap-2" disabled={isPending}>
+            <legend className="text-sm font-medium mb-1">Who starts as a member?</legend>
+            {(
+              [
+                {
+                  value: "ALL_ORG_MEMBERS",
+                  label: `Everyone in the organization (${orgMemberCount})`,
+                  hint: "Admins become workspace admins; everyone else becomes a member.",
+                },
+                {
+                  value: "ORG_ADMINS",
+                  label: `Org admins only (${orgAdminCount}), including you`,
+                  hint: "Add other people later from the workspace's Settings → Members.",
+                },
+              ] as const
+            ).map((option) => (
+              <label key={option.value} className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="new-workspace-member-seeding"
+                  value={option.value}
+                  checked={memberSeeding === option.value}
+                  onChange={() => setMemberSeeding(option.value)}
+                  className="mt-1"
+                />
+                <span className="flex flex-col">
+                  <span>{option.label}</span>
+                  <span className="text-xs text-muted-foreground">{option.hint}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
 
           {error && <p className="text-xs text-destructive">{error}</p>}
 

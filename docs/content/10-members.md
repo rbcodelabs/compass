@@ -52,8 +52,11 @@ Open **Organization Settings → Workspaces** and click **Create workspace**. Th
 - **Name** — what the workspace is called, e.g. "Product Team".
 - **URL slug** — the part that appears in the address bar, as in `/your-org/product-team`. It fills in automatically as you type the name, and you can edit it. Slugs may contain lowercase letters, numbers, and hyphens only, and no two workspaces in the same organization can share one.
 - **Description** — optional.
+- **Who starts as a member?** — choose who is added to the workspace when it is created:
+  - **Everyone in the organization** (default) — every member of the organization is added. Organization Owners and Admins become workspace Admins; everyone else becomes a workspace Member.
+  - **Org admins only** — only the organization's Owners and Admins (including you) are added, as workspace Admins. Use this for a sensitive or small-team workspace, then add the people who should have access from that workspace's own **Settings → Members**.
 
-**Every member of the organization is automatically added to the new workspace.** There is no separate step to invite people into it, and nobody in the organization has to be added by hand afterwards. Organization Owners and Admins become workspace Admins; everyone else becomes a workspace Member. You can adjust individual roles afterwards from that workspace's own **Settings → Members**.
+Either way, there is no separate invite step for the people who are seeded, and you can adjust individual roles afterwards from that workspace's own **Settings → Members**. Agents that create a workspace with `create_workspace` always use the default (everyone in the organization).
 
 On success you land directly in the new workspace's OKRs page, and it appears in the workspace switcher at the top of the sidebar.
 

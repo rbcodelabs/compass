@@ -17,9 +17,10 @@ test("unified Library keeps search and filters reachable for long collections on
     for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport);
       await page.goto(`${base}/docs/${docs[0].id}`);
-      if (viewport.width < 768) await page.getByRole("button", { name: "Open docs navigation" }).click();
-      if (viewport.width < 768) await page.locator('[data-slot="sheet-content"]').evaluate(async element => { await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished)); });
-      const library = page.getByRole("navigation", { name: "Library" });
+      // The Library is the agent rail's Library view; the Docs header button opens it
+      // (docked on wide screens, an overlay drawer on narrow ones).
+      await page.getByRole("button", { name: "Show library" }).click();
+      const library = page.getByTestId("rail-library").getByRole("navigation", { name: "Library" });
       await expect(library.getByRole("link", { name: artifact.title, exact: true })).toBeVisible();
       const search = library.getByRole("textbox", { name: "Find in library" });
       const before = await search.boundingBox();

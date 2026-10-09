@@ -7,7 +7,7 @@ import { findMetricConfigIssues, type MetricConfigIssue } from "@/lib/scoring";
 import type { ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { SLUG_PATTERN } from "@/lib/slug";
-import { createWorkspaceInOrg } from "@/lib/workspace-service";
+import { createWorkspaceInOrg, type WorkspaceMemberSeeding } from "@/lib/workspace-service";
 import { agentsEnabled } from "@/lib/agent-access";
 
 export interface ScoringMetricInput {
@@ -141,7 +141,12 @@ const SCORING_METRIC_KEY_CONFLICT =
  */
 export async function createWorkspace(
   orgSlug: string,
-  input: { name: string; slug: string; description?: string }
+  input: {
+    name: string;
+    slug: string;
+    description?: string;
+    memberSeeding?: WorkspaceMemberSeeding;
+  }
 ): Promise<CreateWorkspaceResult> {
   try {
     await resolveOrgAdmin(orgSlug);
@@ -171,6 +176,9 @@ export async function createWorkspace(
       name,
       slug,
       description: input.description,
+      // Server Action arguments are attacker-controlled: anything other than
+      // the narrowing value falls back to the long-standing default.
+      memberSeeding: input.memberSeeding === "ORG_ADMINS" ? "ORG_ADMINS" : "ALL_ORG_MEMBERS",
     });
     if (!result.ok) {
       return { ok: false, error: result.error };

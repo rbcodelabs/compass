@@ -10,7 +10,7 @@ vi.mock("@/lib/artifact-storage", () => ({ getCapabilityPackArtifactStorage: () 
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }))
 vi.mock("@/lib/capability-pack-github", () => ({ resolveAgenticPmPackSource: mocks.resolveSource }))
 
-import { installAgenticPmCapabilityPack, installWorkspaceCapabilityPack, updateWorkspaceCapabilityPack } from "@/app/[orgSlug]/[workspaceSlug]/settings/capability-pack-actions"
+import { checkAgenticPmPackUpdate, installAgenticPmCapabilityPack, installWorkspaceCapabilityPack, updateAgenticPmCapabilityPack, updateWorkspaceCapabilityPack } from "@/app/[orgSlug]/[workspaceSlug]/settings/capability-pack-actions"
 
 describe("curated one-click installation", () => {
   beforeEach(() => {
@@ -90,5 +90,93 @@ describe("capability pack settings actions", () => {
     expect(mocks.revalidate).not.toHaveBeenCalled()
     expect(diagnostic).toHaveBeenCalledWith("Capability pack operation failed", { operation: "install", errorName: "Error" })
     expect(JSON.stringify(diagnostic.mock.calls)).not.toContain("secret-example")
+  })
+})
+
+describe("Agentic PM pack update", () => {
+  const OLD = "a".repeat(40), NEW = "b".repeat(40)
+  const attachment = (over: Record<string, unknown> = {}) => ({
+    enabled: true, enabledSkillIds: JSON.stringify(["keep"]),
+    capabilityPackVersion: { sourceCommit: OLD, manifestJson: JSON.stringify({ skills: [{ id: "keep" }, { id: "off" }] }) },
+    ...over,
+  })
+  beforeEach(() => {
+    vi.resetAllMocks()
+    mocks.auth.mockResolvedValue({ user: { id: "user-1" } })
+    mocks.resolveAdmin.mockResolvedValue({ prisma: { workspaceCapabilityPack: { findFirst: mocks.findExisting } }, workspaceId: "ws-1" })
+    mocks.findExisting.mockResolvedValue(attachment())
+    mocks.resolveSource.mockResolvedValue({ repositoryUrl: "https://github.com/rbcodelabs/agent-pm-playbook", packPath: "packs/compass", commitSha: NEW })
+    mocks.install.mockResolvedValue({ id: "v2", manifestJson: JSON.stringify({ skills: [{ id: "keep" }, { id: "off" }, { id: "fresh" }] }) })
+  })
+
+  it("check requires workspace admin before touching GitHub", async () => {
+    mocks.resolveAdmin.mockRejectedValue(new Error("Forbidden"))
+    await expect(checkAgenticPmPackUpdate("o", "w")).rejects.toThrow("Forbidden")
+    expect(mocks.resolveSource).not.toHaveBeenCalled()
+  })
+  it("check reports an available update without installing anything", async () => {
+    await expect(checkAgenticPmPackUpdate("o", "w")).resolves.toEqual({ installedCommit: OLD, latestCommit: NEW, updateAvailable: true })
+    expect(mocks.install).not.toHaveBeenCalled()
+    expect(mocks.configure).not.toHaveBeenCalled()
+  })
+  it("check reports up to date when the commits match", async () => {
+    mocks.resolveSource.mockResolvedValue({ commitSha: OLD })
+    await expect(checkAgenticPmPackUpdate("o", "w")).resolves.toMatchObject({ updateAvailable: false })
+  })
+  it("check returns a safe error when GitHub fails", async () => {
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(() => {})
+    mocks.resolveSource.mockRejectedValue(new Error("secret-provider-payload"))
+    const result = await checkAgenticPmPackUpdate("o", "w")
+    expect(result).toEqual({ error: expect.stringContaining("Unable to check") })
+    expect(JSON.stringify(result)).not.toContain("secret-provider-payload")
+    diagnostic.mockRestore()
+  })
+  it("check errors when the pack is not installed", async () => {
+    mocks.findExisting.mockResolvedValue(null)
+    await expect(checkAgenticPmPackUpdate("o", "w")).resolves.toEqual({ error: expect.stringContaining("not installed") })
+    expect(mocks.resolveSource).not.toHaveBeenCalled()
+  })
+
+  it("update requires authentication and admin before any work", async () => {
+    mocks.auth.mockResolvedValue(null)
+    await expect(updateAgenticPmCapabilityPack("o", "w")).rejects.toThrow("Unauthorized")
+    mocks.auth.mockResolvedValue({ user: { id: "user-1" } })
+    mocks.resolveAdmin.mockRejectedValue(new Error("Forbidden"))
+    await expect(updateAgenticPmCapabilityPack("o", "w")).rejects.toThrow("Forbidden")
+    expect(mocks.resolveSource).not.toHaveBeenCalled()
+    expect(mocks.install).not.toHaveBeenCalled()
+  })
+  it("installs the latest commit, selects it, and carries over enabled state and skill choices", async () => {
+    await expect(updateAgenticPmCapabilityPack("o", "w")).resolves.toEqual({ updated: true, commit: NEW })
+    expect(mocks.install).toHaveBeenCalledWith(expect.objectContaining({ commitSha: NEW, workspaceId: "ws-1", expectedPackId: "agentic-pm-compass" }), expect.anything())
+    // keep: chosen before -> stays. off: declined before -> stays off. fresh: new -> default on.
+    expect(mocks.configure).toHaveBeenCalledWith({ workspaceId: "ws-1", packVersionId: "v2", enabledSkillIds: ["fresh", "keep"], enabled: true }, expect.anything())
+    expect(mocks.revalidate).toHaveBeenCalledWith("/o/w/settings")
+  })
+  it("does not re-enable a pack the admin disabled", async () => {
+    mocks.findExisting.mockResolvedValue(attachment({ enabled: false }))
+    await updateAgenticPmCapabilityPack("o", "w")
+    expect(mocks.configure).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }), expect.anything())
+  })
+  it("is a no-op when already on the latest commit", async () => {
+    mocks.resolveSource.mockResolvedValue({ commitSha: OLD })
+    await expect(updateAgenticPmCapabilityPack("o", "w")).resolves.toEqual({ updated: false, commit: OLD })
+    expect(mocks.install).not.toHaveBeenCalled()
+    expect(mocks.configure).not.toHaveBeenCalled()
+  })
+  it("leaves the selected version untouched and hides provider details when installation fails", async () => {
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(() => {})
+    mocks.install.mockRejectedValue(new Error("provider failure token=secret-example"))
+    const result = await updateAgenticPmCapabilityPack("o", "w")
+    expect(result).toEqual({ error: expect.stringContaining("installed version is unchanged") })
+    expect(JSON.stringify(result)).not.toContain("secret-example")
+    expect(mocks.configure).not.toHaveBeenCalled()
+    expect(mocks.revalidate).not.toHaveBeenCalled()
+    diagnostic.mockRestore()
+  })
+  it("refuses to update a pack that was never installed", async () => {
+    mocks.findExisting.mockResolvedValue(null)
+    await expect(updateAgenticPmCapabilityPack("o", "w")).resolves.toEqual({ error: expect.stringContaining("Install") })
+    expect(mocks.resolveSource).not.toHaveBeenCalled()
   })
 })

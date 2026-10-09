@@ -83,3 +83,12 @@ The fastest path to value is:
 3. Attach Solutions to your most important Opportunity.
 4. Write Assumptions for each Solution and create an Experiment to test the riskiest one.
 5. Once an Experiment concludes, add a Roadmap item linking it all together.
+
+## Help and docs in the side panel
+
+The panel beside the navigation shows one view at a time: **Agent**, **Help** or **Library**. Open it with **Agent** beside your account menu (or **⌘J**), then use the menu on the panel's title to switch views, or press **?** anywhere outside a text field to land on Help directly.
+
+- **Library** is the same tree of Docs, diagrams and artifacts you see on the Docs screen, available from any page. Choosing an item opens it in the main area and leaves the panel where it is.
+- **Search** the whole user guide, or browse it by section. Guides that cover the screen you are on are suggested first under **For this page**.
+- **Read in place.** Opening a guide keeps you where you are; links between guides stay in the panel. **Open full page** takes you to the same guide at `/help`.
+- **Ask the agent.** **Ask the agent about this** (or **Ask the agent instead** after a search) switches to the Agent view with the guide attached as context and the start of your question filled in. Nothing is sent until you press send, and switching views never interrupts a reply that is still streaming.

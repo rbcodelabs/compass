@@ -26,7 +26,19 @@
 
 import { revalidatePath } from "next/cache"
 import getPrisma from "@/lib/db"
-import { normalizeWorkspaceRole } from "@/lib/roles"
+import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
+
+/**
+ * Who is seeded into a new workspace.
+ *
+ * - `ALL_ORG_MEMBERS` (default): every member of the organization. Preserves
+ *   the behavior every caller had before this option existed.
+ * - `ORG_ADMINS`: only org OWNERs/ADMINs. The creator is always one of them
+ *   (both callers are gated on org-admin), so the workspace is never
+ *   orphaned, and everyone else is added later from the workspace's
+ *   Settings → Members.
+ */
+export type WorkspaceMemberSeeding = "ALL_ORG_MEMBERS" | "ORG_ADMINS"
 
 export interface CreateWorkspaceInput {
   /** Slug of the organization the workspace belongs to. */
@@ -37,6 +49,8 @@ export interface CreateWorkspaceInput {
   slug: string
   /** Optional description. Trimmed before write. */
   description?: string
+  /** Who starts as a member. Defaults to `ALL_ORG_MEMBERS`. */
+  memberSeeding?: WorkspaceMemberSeeding
   /**
    * When an agent creates the workspace, give that agent a WRITE
    * AgentWorkspaceGrant on it (granted by the agent's owner) in the same
@@ -110,6 +124,7 @@ export async function createWorkspaceInOrg({
   name,
   slug,
   description,
+  memberSeeding = "ALL_ORG_MEMBERS",
   agentGrant,
 }: CreateWorkspaceInput): Promise<CreateWorkspaceResult> {
   const prisma = getPrisma()
@@ -157,10 +172,14 @@ export async function createWorkspaceInOrg({
       // Membership inheritance is part of workspace creation. Keeping both
       // writes in one transaction prevents an inaccessible orphan workspace
       // when membership seeding fails.
-      const orgMembers = await tx.organizationMember.findMany({
+      const allOrgMembers = await tx.organizationMember.findMany({
         where: { organizationId: org.id },
         select: { userId: true, role: true },
       })
+      const orgMembers =
+        memberSeeding === "ORG_ADMINS"
+          ? allOrgMembers.filter((m) => isOrgAdminRole(m.role))
+          : allOrgMembers
       if (orgMembers.length > 0) {
         await tx.workspaceMember.createMany({
           data: orgMembers.map((m) => ({
