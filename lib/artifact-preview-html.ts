@@ -194,6 +194,10 @@ function stopPicking(){
   document.documentElement.style.cursor="";
   hideHighlight();
 }
+/* What the last full resolve found, per comment, so a scroll can re-read only
+   geometry. Fingerprint ratios are document-relative, so they do not change
+   when the document scrolls; only each element's viewport rect does. */
+const resolved=new Map();
 function resolveOne(anchor){
   const commentId=anchor.commentId;
   const selector=anchor.elementSelector;
@@ -201,20 +205,33 @@ function resolveOne(anchor){
     try{
       const found=document.querySelector(selector);
       if(found&&found.nodeType===1&&found!==document.documentElement&&found!==document.body){
+        resolved.set(commentId,{el:found});
         return {commentId,matched:true,geometry:geometryOf(found)};
       }
     }catch(err){void err}
   }
   const fp=anchor.elementFingerprint;
   const tag=fp&&fp.tag;
-  if(!tag)return {commentId,matched:false,candidates:[]};
+  if(!tag){resolved.set(commentId,{cands:[]});return {commentId,matched:false,candidates:[]}}
   let found2;
   try{found2=document.getElementsByTagName(tag)}catch(err){void err;found2=[]}
-  const candidates=[];
-  for(let i=0;i<found2.length&&candidates.length<MAX_CANDIDATES;i++){
-    candidates.push({fingerprint:fingerprintOf(found2[i]),geometry:geometryOf(found2[i])});
+  const cands=[];
+  for(let i=0;i<found2.length&&cands.length<MAX_CANDIDATES;i++){
+    cands.push({el:found2[i],fingerprint:fingerprintOf(found2[i])});
   }
-  return {commentId,matched:false,candidates};
+  resolved.set(commentId,{cands});
+  return {commentId,matched:false,candidates:cands.map((c)=>({fingerprint:c.fingerprint,geometry:geometryOf(c.el)}))};
+}
+/* Cheap re-read after a scroll: new geometry for what resolveOne already
+   found. An element the page has since removed falls back to a full resolve. */
+function refreshOne(anchor){
+  const hit=resolved.get(anchor.commentId);
+  if(!hit)return resolveOne(anchor);
+  if(hit.el){
+    if(!hit.el.isConnected)return resolveOne(anchor);
+    return {commentId:anchor.commentId,matched:true,geometry:geometryOf(hit.el)};
+  }
+  return {commentId:anchor.commentId,matched:false,candidates:hit.cands.map((c)=>({fingerprint:c.fingerprint,geometry:geometryOf(c.el)}))};
 }
 function onParentMessage(event){
   if(event.source!==window.parent)return;
@@ -224,22 +241,34 @@ function onParentMessage(event){
   if(message.type===types.EXIT_PICK_MODE){stopPicking();return}
   if(message.type===types.RESOLVE_ANCHORS){
     lastAnchors=Array.isArray(message.anchors)?message.anchors:[];
+    resolved.clear();
     emitTyped({type:types.ANCHOR_RESULTS,results:lastAnchors.map(resolveOne)});
   }
 }
 window.addEventListener("message",onParentMessage);
 /* Pins are positioned from geometry snapshots, so re-report the last batch
-   whenever layout can have moved them: a resize (a scaled slide rescales) or
-   the slide fit settling after its entrance (lib/slide-fit.ts). One frame
-   later, so the fit's own resize handler has already run. */
-let lastAnchors=null;let reresolvePending=false;
-function scheduleReresolve(){
-  if(reresolvePending||!lastAnchors||lastAnchors.length===0)return;
+   whenever layout can have moved them: a resize (a scaled slide rescales), the
+   slide fit settling after its entrance (lib/slide-fit.ts), or a scroll of the
+   document or any scrollable element inside it. One frame later, so the fit's
+   own resize handler has already run. A scroll only moves things, so it just
+   re-reads geometry (refreshOne); the other two can change layout, so they
+   resolve from scratch. A full resolve queued in the same frame wins. */
+let lastAnchors=null;let reresolvePending=false;let pendingFull=false;
+function scheduleReresolve(full){
+  if(!lastAnchors||lastAnchors.length===0)return;
+  if(full)pendingFull=true;
+  if(reresolvePending)return;
   reresolvePending=true;
-  requestAnimationFrame(()=>{reresolvePending=false;emitTyped({type:types.ANCHOR_RESULTS,results:lastAnchors.map(resolveOne)})});
+  requestAnimationFrame(()=>{
+    reresolvePending=false;
+    const each=pendingFull?resolveOne:refreshOne;pendingFull=false;
+    emitTyped({type:types.ANCHOR_RESULTS,results:lastAnchors.map(each)});
+  });
 }
-window.addEventListener("resize",scheduleReresolve);
-window.addEventListener(${JSON.stringify(SLIDE_FIT_SETTLED_EVENT)},scheduleReresolve);
+window.addEventListener("resize",()=>scheduleReresolve(true));
+/* scroll does not bubble, so capture on window to hear nested scrollers too. */
+window.addEventListener("scroll",()=>scheduleReresolve(false),{capture:true,passive:true});
+window.addEventListener(${JSON.stringify(SLIDE_FIT_SETTLED_EVENT)},()=>scheduleReresolve(true));
 window.addEventListener(${JSON.stringify(SLIDE_FIT_SETTLED_EVENT)},()=>emitTyped({type:types.FIT_SETTLED}));
 })();</script>`
   return `${ARTIFACT_POLICY_PREFIX}${bootstrap}${protectedHtml.slice(ARTIFACT_POLICY_PREFIX.length)}`

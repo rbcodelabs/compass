@@ -235,14 +235,20 @@ export function ArtifactSandboxedFrame({
       referrerPolicy="no-referrer"
       className={`w-full ${transparent ? "bg-transparent" : "bg-surface-panel"} transition-opacity ${fill ? "h-full border-0" : "min-h-[520px] rounded-lg border border-border-default"} ${state === "ready" ? "opacity-100" : "pointer-events-none opacity-0"}`}
     />
-    {state === "ready" && renderPin && anchoredPins.map(([commentId, resolution]) => (
-      <div
-        key={commentId}
-        className="absolute z-10"
-        style={{ left: resolution.geometry.left, top: resolution.geometry.top }}
-      >
-        {renderPin(commentId, resolution)}
-      </div>
-    ))}
+    {/* The document scrolls inside the iframe, so a pin whose element has
+        scrolled out of view lands outside the frame's box. This layer is the
+        frame's exact size and clips it; it passes pointer events through to the
+        iframe everywhere except the pins themselves. */}
+    {state === "ready" && renderPin && anchoredPins.length > 0 && <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-lg">
+      {anchoredPins.map(([commentId, resolution]) => (
+        <div
+          key={commentId}
+          className="pointer-events-auto absolute"
+          style={{ left: resolution.geometry.left, top: resolution.geometry.top }}
+        >
+          {renderPin(commentId, resolution)}
+        </div>
+      ))}
+    </div>}
   </div>
 }

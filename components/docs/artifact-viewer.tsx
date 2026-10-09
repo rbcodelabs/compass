@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { createPortal } from "react-dom"
-import { ArrowLeft, ChevronLeft, ChevronRight, Maximize2, MessageSquarePlus, MessageSquareText } from "lucide-react"
+import { ArrowLeft, ChevronLeft, ChevronRight, Maximize2, MessageSquarePlus, MessageSquareText, X } from "lucide-react"
 import { ArtifactDeckControls, ArtifactSlidePicker } from "./artifact-deck-controls"
 import { ArtifactPreview, type AnchorRequest, type AnchorResolutionMap, type PickedElement } from "./artifact-preview"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -17,7 +17,126 @@ type AnchoredComment = {
   id: string
   authorName: string
   body: string
+  replies?: { id: string; authorName: string; body: string }[]
+  /** "OPEN" | "RESOLVED" — only root threads carry a meaningful status. */
+  status?: string
+  canModerate?: boolean
   elementAnchor?: { elementSelector: string | null; elementFingerprint: unknown; slideIndex?: number | null } | null
+}
+
+/**
+ * Reply box inside a pin's detail card. Keyed by the pinned comment's id by the
+ * caller, so its draft and error reset when a different pin is opened. It posts
+ * to the same /api/comments endpoint as the Comments panel, so the reply is an
+ * ordinary threaded reply that shows up there too.
+ */
+/**
+ * Resolve / Reopen for a pinned thread, using the same PATCH the Comments panel
+ * uses. Hidden when the API says the viewer can't moderate the comment.
+ */
+function PinStatusButton({ commentId, resolved, authorName, onChanged }: {
+  commentId: string
+  resolved: boolean
+  authorName: string
+  onChanged: (status: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+
+  const toggle = async () => {
+    if (busy) return
+    setBusy(true)
+    setError("")
+    try {
+      const response = await fetch(`/api/comments/${commentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: resolved ? "reopen" : "resolve" }),
+      })
+      if (!response.ok) {
+        const payload: unknown = await response.json().catch(() => null)
+        throw new Error(typeof payload === "object" && payload && "error" in payload && typeof payload.error === "string" ? payload.error : "The thread status could not be changed.")
+      }
+      const updated = (await response.json().catch(() => null)) as { status?: string } | null
+      onChanged(updated?.status ?? (resolved ? "OPEN" : "RESOLVED"))
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The thread status could not be changed.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={busy}
+        aria-label={`${resolved ? "Reopen" : "Resolve"} thread by ${authorName}`}
+        onClick={() => void toggle()}
+      >
+        {busy ? "Saving…" : resolved ? "Reopen" : "Resolve"}
+      </Button>
+      {error && <p role="alert" className="basis-full text-xs text-status-danger">{error}</p>}
+    </>
+  )
+}
+
+function PinReplyForm({ artifactId, parentId, authorName, onPosted }: {
+  artifactId: string
+  parentId: string
+  authorName: string
+  onPosted: (reply: { id: string; authorName: string; body: string }) => void
+}) {
+  const [draft, setDraft] = useState("")
+  const [posting, setPosting] = useState(false)
+  const [error, setError] = useState("")
+
+  const send = async () => {
+    if (!draft.trim() || posting) return
+    setPosting(true)
+    setError("")
+    try {
+      const response = await fetch("/api/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetType: "ARTIFACT", targetId: artifactId, parentId, body: draft }),
+      })
+      if (!response.ok) {
+        const payload: unknown = await response.json().catch(() => null)
+        throw new Error(typeof payload === "object" && payload && "error" in payload && typeof payload.error === "string" ? payload.error : "The reply could not be posted.")
+      }
+      const created = (await response.json()) as { id: string; authorName?: string; body?: string }
+      setDraft("")
+      onPosted({ id: created.id, authorName: created.authorName ?? "You", body: created.body ?? draft })
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The reply could not be posted.")
+    } finally {
+      setPosting(false)
+    }
+  }
+
+  return (
+    <form
+      className="mt-2 space-y-2"
+      onSubmit={(event) => {
+        event.preventDefault()
+        void send()
+      }}
+    >
+      <Textarea
+        aria-label={`Reply to ${authorName}`}
+        placeholder="Reply…"
+        rows={2}
+        value={draft}
+        disabled={posting}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      {error && <p role="alert" className="text-xs text-status-danger">{error}</p>}
+      <Button size="sm" type="submit" disabled={posting || !draft.trim()}>{posting ? "Posting…" : "Post reply"}</Button>
+    </form>
+  )
 }
 
 /**
@@ -91,6 +210,7 @@ export function ArtifactViewer({
   const [comments, setComments] = useState<AnchoredComment[] | null>(null)
   const [resolutions, setResolutions] = useState<AnchorResolutionMap>({})
   const [refreshKey, setRefreshKey] = useState(0)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -134,6 +254,7 @@ export function ArtifactViewer({
     setSlideIndex(clamped)
     // Resolutions are geometry inside the previous slide's frame.
     setResolutions({})
+    setSelectedId(null)
     setPicking(false)
     setPicked(null)
     setSlideWideDraft(false)
@@ -155,6 +276,7 @@ export function ArtifactViewer({
   }, [isDeck, pickerOpen, goToSlide, slideIndex])
 
   const startPicking = () => {
+    setSelectedId(null)
     setPicked(null)
     setSlideWideDraft(false)
     setPostError("")
@@ -227,19 +349,93 @@ export function ArtifactViewer({
       resolutions={resolutions}
       renderPin={(commentId, resolution) => {
         const comment = comments?.find((item) => item.id === commentId)
+        const selected = selectedId === commentId
         return (
-          <button
-            type="button"
-            aria-label={comment ? `Feedback from ${comment.authorName}: ${comment.body.slice(0, 80)}` : "Feedback pin"}
-            title={comment?.body}
-            className="flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white bg-primary text-[11px] font-semibold text-primary-foreground shadow-md"
-            style={{ opacity: resolution.confidence < 1 ? 0.85 : 1 }}
-          >
-            !
-          </button>
+          <>
+            {selected && (
+              <span
+                aria-hidden
+                className="pointer-events-none absolute rounded-sm border-2 border-primary bg-primary/10"
+                style={{ left: 0, top: 0, width: resolution.geometry.width, height: resolution.geometry.height }}
+              />
+            )}
+            <button
+              type="button"
+              aria-label={comment ? `Feedback from ${comment.authorName}${comment.status === "RESOLVED" ? " (resolved)" : ""}: ${comment.body.slice(0, 80)}` : "Feedback pin"}
+              aria-pressed={selected}
+              title={comment?.body}
+              onClick={() => setSelectedId((current) => (current === commentId ? null : commentId))}
+              className={`relative flex size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold shadow-md transition-transform hover:scale-110 ${comment?.status === "RESOLVED" ? "bg-muted text-muted-foreground" : "bg-primary text-primary-foreground"} ${selected ? "scale-125 ring-2 ring-primary/40" : ""}`}
+              style={{ opacity: (resolution.confidence < 1 || comment?.status === "RESOLVED") && !selected ? 0.7 : 1 }}
+            >
+              {comment?.status === "RESOLVED" ? "✓" : "!"}
+            </button>
+          </>
         )
       }}
     />
+  )
+
+  const selectedComment = selectedId ? comments?.find((item) => item.id === selectedId) : undefined
+  const selectedCard = selectedComment && !picked && !slideWideDraft && (
+    <div
+      role="dialog"
+      aria-label={`Feedback from ${selectedComment.authorName}`}
+      className={`absolute z-20 rounded-xl border border-border-default bg-surface-panel p-3 text-sm shadow-xl ${fill ? "bottom-20 left-1/2 w-[min(32rem,calc(100%-2rem))] -translate-x-1/2" : "inset-x-3 bottom-3"}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-medium text-text-primary">
+          {selectedComment.authorName}
+          {selectedComment.status === "RESOLVED" && <span className="ml-2 rounded bg-surface-inset px-1.5 py-0.5 text-[10px] font-normal text-text-subtle">Resolved</span>}
+        </p>
+        <button
+          type="button"
+          aria-label="Close feedback"
+          className="rounded p-0.5 text-text-subtle hover:bg-surface-inset hover:text-text-primary"
+          onClick={() => setSelectedId(null)}
+        >
+          <X className="size-4" aria-hidden />
+        </button>
+      </div>
+      <div className="mt-1 max-h-48 overflow-y-auto">
+        <p className="whitespace-pre-wrap break-words text-text-secondary">{selectedComment.body}</p>
+        {(selectedComment.replies ?? []).length > 0 && (
+          <ul aria-label="Replies" className="mt-2 space-y-2 border-l-2 border-border-default pl-3">
+            {(selectedComment.replies ?? []).map((reply) => (
+              <li key={reply.id} className="break-words">
+                <p className="text-xs font-medium text-text-primary">{reply.authorName}</p>
+                <p className="whitespace-pre-wrap text-text-secondary">{reply.body}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {selectedComment.canModerate && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <PinStatusButton
+            key={selectedComment.id}
+            commentId={selectedComment.id}
+            resolved={selectedComment.status === "RESOLVED"}
+            authorName={selectedComment.authorName}
+            onChanged={(status) => {
+              setComments((current) => (current ?? []).map((item) => item.id === selectedComment.id ? { ...item, status } : item))
+              onFeedbackPosted?.()
+            }}
+          />
+        </div>
+      )}
+      <PinReplyForm
+        key={selectedComment.id}
+        artifactId={artifactId}
+        parentId={selectedComment.id}
+        authorName={selectedComment.authorName}
+        onPosted={(reply) => {
+          // Append locally so the reply shows immediately without a refetch.
+          setComments((current) => (current ?? []).map((item) => item.id === selectedComment.id ? { ...item, replies: [...(item.replies ?? []), reply] } : item))
+          onFeedbackPosted?.()
+        }}
+      />
+    </div>
   )
 
   const commentsList = slideWideComments.length > 0 && (
@@ -324,6 +520,7 @@ export function ArtifactViewer({
     return (
       <div className="relative h-full w-full overflow-hidden bg-black">
         <div className="absolute inset-0">{previewEl}</div>
+        {selectedCard}
         {hasStatus && (
           <div className="absolute left-1/2 top-4 z-30 max-w-[calc(100%-2rem)] -translate-x-1/2 space-y-1 rounded-full bg-[rgba(0,20,61,0.88)] px-4 py-1.5 shadow-lg backdrop-blur-md [&_p]:text-white/90 [&_p]:text-xs">
             {statusEl}
@@ -424,7 +621,10 @@ export function ArtifactViewer({
         </nav>
       )}
       {statusEl}
-      {previewEl}
+      <div className="relative">
+        {previewEl}
+        {selectedCard}
+      </div>
       {commentsList}
       {formEl}
     </div>
