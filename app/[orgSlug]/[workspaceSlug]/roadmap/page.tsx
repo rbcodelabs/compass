@@ -33,6 +33,7 @@ import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { roadmapBoardFilterKey } from "@/lib/roadmap-filters";
 import { parseGroupByParam, resolveRoadmapGroupBy } from "@/lib/roadmap-group-by";
 import { loadCustomFieldValuesForObjects } from "@/lib/custom-field-values-batch";
+import type { SwimlaneSpec } from "@/lib/roadmap/swimlanes";
 import { RAIL_COOKIE_NAME, parseRailPreference } from "@/lib/roadmap/rail-state";
 
 export const metadata = {
@@ -250,6 +251,21 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     status: exp.status,
   }));
 
+  // Board swimlanes: the same ?groupBy= the timeline uses. Phase / None mean the
+  // classic lane-less board. A squad filter narrows the squad lanes to match.
+  const swimlaneSpec: SwimlaneSpec | null =
+    resolvedGroupBy.mode === "squad"
+      ? { mode: "squad", squads: squadFilter ? squads.filter((squad) => squad.id === squadFilter) : squads }
+      : resolvedGroupBy.mode === "customField"
+        ? {
+            mode: "customField",
+            fieldId: resolvedGroupBy.field.id,
+            fieldName: resolvedGroupBy.field.name,
+            options: resolvedGroupBy.field.options ?? [],
+            valuesByItemId: customFieldValuesByItemId ?? {},
+          }
+        : null;
+
   const cardItems: RoadmapCardData[] = items.map((item) => toRoadmapCardData(item, taskStatusesByRoadmapItem.get(item.id) ?? []));
 
   // A filter change is a new dataset; ordinary refreshes must preserve
@@ -262,6 +278,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     field: customFieldFilter?.fieldId ?? null,
     fieldValue: fieldValueParam,
   });
+  const boardKey = `${filterKey}|${swimlaneSpec ? (swimlaneSpec.mode === "squad" ? "squad" : swimlaneSpec.fieldId) : ""}`;
 
   const scheduleCatalog: ScheduleCatalog = {
     solutions: catalogSolutions.map((sol) => ({
@@ -335,11 +352,14 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
               activeCustomFieldId={customFieldFilter?.fieldId ?? null}
               cardSortHref={cardSortHref}
               savedViews={savedViewsProps}
+              groupByValue={resolvedGroupBy.mode === "customField" ? resolvedGroupBy.field.id : resolvedGroupBy.mode}
+              groupByOptions={groupByOptions}
             />
           </Suspense>
           <div data-slot="workspace-content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
             <RoadmapBoard
-              key={filterKey}
+              key={boardKey}
+              swimlaneSpec={swimlaneSpec}
               initialItems={cardItems}
               workspaceId={workspace.id}
               orgSlug={orgSlug}

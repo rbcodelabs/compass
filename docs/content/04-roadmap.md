@@ -18,6 +18,14 @@ Open a Roadmap item's detail panel to discuss it with the team. Shared Discussio
 
 On mobile, each column fills the available board width with small side gutters. Swipe sideways to reach the next column.
 
+### Board swimlanes
+
+Use **Group board by** in the header to split the Board into horizontal swimlanes — one row per **Squad**, or one row per option of any single-select custom field on roadmap items. Each lane keeps the same horizon columns, with a sticky header so Now/Next/Later stay visible as you scroll, and ends with a **No squad** / **No \<field\>** lane for items with no value (or a value that no longer exists). Click a lane's header to collapse or expand it; the count shows how many items it holds. Choose **No swimlanes** to return to the classic board. Multi-select fields aren't offered, since an item could belong to several lanes at once.
+
+Drag a card into another lane to **reassign** it: the card's squad (or custom-field value) becomes the lane's, and dropping into the *No …* lane clears it. Dragging also changes the horizon in the same move if you drop in a different column. If the change can't be saved, the card snaps back and a message explains. Dragging an item from **Not scheduled** into a lane schedules it and sets that lane's value. Launching and Launched remain workflow-managed: dropping there opens the item instead of moving it.
+
+The grouping is part of the page URL (`?groupBy=`) and of saved views, and the squad filter narrows the squad lanes.
+
 ![Roadmap on mobile](/screenshots/docs/roadmap-mobile.png)
 
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.

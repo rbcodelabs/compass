@@ -22,6 +22,7 @@ import {
   updateSortOrder,
   promoteToRoadmap,
   promoteFeedbackToRoadmap,
+  moveItemToLane,
 } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { RoadmapColumn } from "./roadmap-column";
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
@@ -35,6 +36,16 @@ import { usePanelContext } from "@/components/panels/panel-context";
 import { INTERNAL_BOARD_HORIZONS, getInternalBoardHorizons, isLaunchHorizon } from "@/lib/roadmap";
 import type { Horizon, SquadData } from "@/lib/types";
 import { Board } from "@/components/patterns/board";
+import { RoadmapSwimlanes } from "./roadmap-swimlanes";
+import { cn } from "@/lib/utils";
+import {
+  assignCardToLane,
+  buildLanes,
+  laneKeyForCard,
+  parseCellDroppableId,
+  type Lane,
+  type SwimlaneSpec,
+} from "@/lib/roadmap/swimlanes";
 
 type ColumnMap = Record<Horizon, RoadmapCardData[]>;
 
@@ -66,6 +77,9 @@ type Props = {
   // displays folded into SHIPPED (see internalBucketFor in lib/roadmap.ts)
   // rather than disappearing.
   launchWorkflowEnabled: boolean;
+  // When set, the board renders one swimlane row per squad / custom-field option
+  // (plus Unassigned) and a drop into another lane reassigns that value.
+  swimlaneSpec?: SwimlaneSpec | null;
 };
 
 // Builds a RoadmapCardData for a newly-created item from a promote action's
@@ -217,6 +231,7 @@ export function RoadmapBoard({
   nowLimit,
   nextLimit,
   launchWorkflowEnabled,
+  swimlaneSpec = null,
 }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/roadmap`;
   const { openPanel, subscribeEntityMutated } = usePanelContext();
@@ -240,6 +255,13 @@ export function RoadmapBoard({
   const [activeUnscheduledItem, setActiveUnscheduledItem] = useState<UnscheduledItem | null>(null);
   // Track the horizon the drag started from so handleDragEnd can detect cross-column moves.
   const [dragSourceHorizon, setDragSourceHorizon] = useState<Horizon | null>(null);
+  // Swimlanes. The spec lives in state because a lane drop updates it
+  // optimistically (custom-field values); dragSourceLane is the lane the active
+  // card started in, so handleDragEnd can tell a lane change from a plain move.
+  const [spec, setSpec] = useState<SwimlaneSpec | null>(swimlaneSpec);
+  const [dragSourceLane, setDragSourceLane] = useState<string | null>(null);
+  const [laneError, setLaneError] = useState<string | null>(null);
+  const lanes = spec ? buildLanes(spec) : null;
 
   const [, startTransition] = useTransition();
 
@@ -268,14 +290,63 @@ export function RoadmapBoard({
     });
   }, [subscribeEntityMutated]);
 
+  // Optimistic lane change: squad mode rewrites the card's squad, custom-field
+  // mode rewrites the spec's value map. Pure updaters, safe to call from a drag
+  // handler.
+  function applyLane(itemId: string, lane: Lane) {
+    if (!spec) return;
+    if (spec.mode === "customField") {
+      setSpec((prev) => (prev ? assignCardToLane(prev, { id: itemId, squad: null }, lane).spec : prev));
+      return;
+    }
+    setColumns((prev) => {
+      const source = findHorizon(prev, itemId);
+      if (!source) return prev;
+      return {
+        ...prev,
+        [source]: prev[source].map((i) => (i.id === itemId ? assignCardToLane(spec, i, lane).card : i)),
+      };
+    });
+  }
+
+  // Saves a lane change; on failure puts the card back in `previous` and says so.
+  async function persistLane(itemId: string, lane: Lane, previous: Lane) {
+    if (!spec) return;
+    try {
+      await moveItemToLane(
+        itemId,
+        workspaceId,
+        spec.mode === "squad"
+          ? { kind: "squad", squadId: lane.value }
+          : { kind: "customField", fieldId: spec.fieldId, value: lane.value },
+      );
+      setLaneError(null);
+    } catch {
+      applyLane(itemId, previous);
+      setLaneError(`Couldn't move the item to "${lane.label}". It was put back.`);
+    }
+  }
+
+  // Where a drop landed: the horizon, and the lane when it landed in (or on a
+  // card within) a swimlane cell. Column drops carry no lane.
+  function resolveDrop(overId: string): { horizon: Horizon | null; laneKey: string | null } {
+    const cell = parseCellDroppableId(overId);
+    if (cell) return { horizon: cell.horizon as Horizon, laneKey: cell.laneKey };
+    if (overId.startsWith("column-")) return { horizon: overId.replace("column-", "") as Horizon, laneKey: null };
+    const horizon = findHorizon(columns, overId);
+    if (!horizon || !spec) return { horizon, laneKey: null };
+    const card = columns[horizon].find((i) => i.id === overId);
+    return { horizon, laneKey: card ? laneKeyForCard(spec, card) : null };
+  }
+
   // Shared by both the drag-and-drop path and the quick-add menu fallback.
-  async function scheduleUnscheduledItem(item: UnscheduledItem, horizon: Horizon) {
+  async function scheduleUnscheduledItem(item: UnscheduledItem, horizon: Horizon, lane: Lane | null = null) {
     setUnscheduled((prev) => prev.filter((i) => i !== item));
     const created =
       item.kind === "solution"
         ? await promoteToRoadmap(item.id, workspaceId, horizon, item.squadId, item.opportunityId)
         : await promoteFeedbackToRoadmap(item.id, workspaceId, horizon);
-    handleItemAdded(cardDataFromPromotion(created, item, squads ?? []));
+    handleItemAdded(cardDataFromPromotion(created, item, squads ?? []), lane);
   }
 
   function handleQuickAdd(item: UnscheduledItem, horizon: Horizon) {
@@ -299,6 +370,8 @@ export function RoadmapBoard({
       if (found) {
         setActiveItem(found);
         setDragSourceHorizon(horizon);
+        setDragSourceLane(spec ? laneKeyForCard(spec, found) : null);
+        setLaneError(null);
         return;
       }
     }
@@ -314,22 +387,31 @@ export function RoadmapBoard({
     const sourceHorizon = findHorizon(columns, activeId);
     if (!sourceHorizon) return;
 
-    let destHorizon: Horizon;
-    if (overId.startsWith("column-")) {
-      destHorizon = overId.replace("column-", "") as Horizon;
-    } else {
-      destHorizon = findHorizon(columns, overId) ?? sourceHorizon;
-    }
+    const drop = resolveDrop(overId);
+    const destHorizon: Horizon = drop.horizon ?? sourceHorizon;
+
+    // Follow the pointer across lanes too, so the card (and its placeholder)
+    // shows up in the lane it will land in.
+    const activeCard = columns[sourceHorizon].find((i) => i.id === activeId);
+    const destLane = spec && drop.laneKey && lanes ? lanes.find((l) => l.key === drop.laneKey) : null;
+    const laneChanged = !!(spec && destLane && activeCard && laneKeyForCard(spec, activeCard) !== destLane.key);
+    if (laneChanged && destLane) applyLane(activeId, destLane);
 
     if (sourceHorizon === destHorizon) return;
 
     setColumns((prev) => {
       const item = prev[sourceHorizon].find((i) => i.id === activeId);
       if (!item) return prev;
-      const updatedItem = { ...item, horizon: destHorizon };
+      const updatedItem = {
+        ...item,
+        horizon: destHorizon,
+        // applyLane (above) targets the card by id from its source column; the
+        // squad it set is carried over here, since this updater re-reads `prev`.
+        ...(spec?.mode === "squad" && laneChanged && destLane ? assignCardToLane(spec, item, destLane).card : {}),
+      };
 
       let destItems = prev[destHorizon].filter((i) => i.id !== activeId);
-      if (!overId.startsWith("column-")) {
+      if (!overId.startsWith("column-") && !parseCellDroppableId(overId)) {
         const overIndex = destItems.findIndex((i) => i.id === overId);
         if (overIndex >= 0) {
           destItems = [
@@ -363,21 +445,29 @@ export function RoadmapBoard({
       if (!over) return;
 
       const overId = over.id as string;
-      const destHorizon = overId.startsWith("column-")
-        ? (overId.replace("column-", "") as Horizon)
-        : findHorizon(columns, overId);
+      const { horizon: destHorizon, laneKey } = resolveDrop(overId);
       if (!destHorizon) return; // dropped somewhere that isn't a horizon column/card
 
       const item = unscheduled.find((i) => i.id === parsed.id && i.kind === parsed.kind);
       if (!item) return;
 
+      // Dropping into a named lane assigns it. The Unassigned lane leaves the
+      // item alone (a solution may already inherit its opportunity's squad).
+      const destLane = laneKey && lanes ? (lanes.find((l) => l.key === laneKey) ?? null) : null;
       startTransition(() => {
-        scheduleUnscheduledItem(item, destHorizon);
+        scheduleUnscheduledItem(item, destHorizon, destLane && destLane.value !== null ? destLane : null);
       });
       return;
     }
 
+    const sourceLaneKey = dragSourceLane;
+    const sourceLane = sourceLaneKey && lanes ? (lanes.find((l) => l.key === sourceLaneKey) ?? null) : null;
+    setDragSourceLane(null);
+
     if (!over) {
+      // Cancelled mid-drag: undo any optimistic lane/horizon hop.
+      if (sourceLane) applyLane(activeId, sourceLane);
+      if (dragSourceHorizon) setColumns((prev) => moveCardToHorizon(prev, activeId, dragSourceHorizon));
       setDragSourceHorizon(null);
       return;
     }
@@ -389,6 +479,10 @@ export function RoadmapBoard({
       setDragSourceHorizon(null);
       return;
     }
+    const currentCard = columns[currentHorizon].find((i) => i.id === activeId);
+    const currentLane = spec && currentCard && lanes ? (lanes.find((l) => l.key === laneKeyForCard(spec, currentCard)) ?? null) : null;
+    const laneMoved = !!(sourceLane && currentLane && sourceLane.key !== currentLane.key);
+    const isCellOrColumnDrop = overId.startsWith("column-") || !!parseCellDroppableId(overId);
 
     if (dragSourceHorizon && dragSourceHorizon !== currentHorizon) {
       // Dropping onto a launch column can't be a plain move — LAUNCHING needs
@@ -406,14 +500,16 @@ export function RoadmapBoard({
             [source]: [...prev[source].filter((i) => i.id !== activeId), reverted],
           };
         });
+        if (laneMoved && sourceLane) applyLane(activeId, sourceLane);
         setDragSourceHorizon(null);
         openPanel("roadmapItem", activeId);
         return;
       }
       startTransition(async () => {
         await moveItem(activeId, currentHorizon, workspaceId);
+        if (laneMoved && sourceLane && currentLane) await persistLane(activeId, currentLane, sourceLane);
       });
-    } else if (!overId.startsWith("column-") && overId !== activeId) {
+    } else if (!isCellOrColumnDrop && overId !== activeId) {
       const columnItems = columns[currentHorizon];
       const oldIndex = columnItems.findIndex((i) => i.id === activeId);
       const newIndex = columnItems.findIndex((i) => i.id === overId);
@@ -427,8 +523,18 @@ export function RoadmapBoard({
 
         startTransition(async () => {
           await updateSortOrder(activeId, workspaceId, newIndex);
+          if (laneMoved && sourceLane && currentLane) await persistLane(activeId, currentLane, sourceLane);
+        });
+      } else if (laneMoved && sourceLane && currentLane) {
+        startTransition(async () => {
+          await persistLane(activeId, currentLane, sourceLane);
         });
       }
+    } else if (laneMoved && sourceLane && currentLane) {
+      // Same horizon, dropped on a lane's empty cell (or itself): lane change only.
+      startTransition(async () => {
+        await persistLane(activeId, currentLane, sourceLane);
+      });
     }
 
     setDragSourceHorizon(null);
@@ -444,11 +550,20 @@ export function RoadmapBoard({
     });
   }, []);
 
-  function handleItemAdded(item: RoadmapCardData) {
+  // `lane`, when given, is the swimlane the item was created in; a named lane
+  // is saved on the new item (the create/promote action doesn't know about it).
+  function handleItemAdded(item: RoadmapCardData, lane: Lane | null = null) {
+    const fallback = lanes?.find((l) => l.value === null) ?? null;
     setColumns((prev) => ({
       ...prev,
       [item.horizon]: [...prev[item.horizon], item],
     }));
+    if (lane && lane.value !== null && fallback) {
+      applyLane(item.id, lane);
+      startTransition(async () => {
+        await persistLane(item.id, lane, fallback);
+      });
+    }
   }
 
   return (
@@ -461,15 +576,47 @@ export function RoadmapBoard({
       onDragEnd={handleDragEnd}
     >
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto md:overflow-hidden">
+        {laneError ? (
+          <p
+            role="alert"
+            className="mx-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive sm:mx-4"
+          >
+            {laneError}
+          </p>
+        ) : null}
         <Board
           label="Roadmap board"
-          className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
+          className={cn(
+            "block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4",
+            // Lanes stack vertically, so the board scrolls both ways in lane mode.
+            spec ? "overflow-y-auto" : "md:overflow-y-hidden",
+          )}
         >
           <div
             data-slot="roadmap-board-track"
             className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
           >
-            {visibleHorizons.map((horizon) => (
+            {spec && lanes ? (
+              <RoadmapSwimlanes
+                spec={spec}
+                lanes={lanes}
+                horizons={visibleHorizons}
+                columns={displayColumns}
+                workspaceId={workspaceId}
+                orgSlug={orgSlug}
+                workspaceSlug={workspaceSlug}
+                revalidatePathStr={revalidatePathStr}
+                launchWorkflowEnabled={launchWorkflowEnabled}
+                limits={{ NOW: nowLimit, NEXT: nextLimit }}
+                onItemAdded={handleItemAdded}
+                onArchive={handleArchive}
+                availableKRs={availableKRs}
+                availableSolutions={availableSolutions}
+                availableOpportunities={availableOpportunities}
+                availableExperiments={availableExperiments}
+              />
+            ) : null}
+            {!spec && visibleHorizons.map((horizon) => (
               <RoadmapColumn
                 key={horizon}
                 horizon={horizon}

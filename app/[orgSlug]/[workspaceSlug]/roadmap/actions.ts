@@ -14,6 +14,7 @@ import { durationDaysFor, proposeBatch } from "@/lib/roadmap/scheduling";
 import { createRoadmapItemsFromSolutions, utcToday, type SolutionScheduleRequest } from "@/lib/roadmap/create-from-solution";
 import { ROADMAP_CARD_INCLUDE, toRoadmapCardData } from "@/lib/roadmap/card-data";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
+import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
 
 type Database = ReturnType<typeof getPrisma>;
 const ROADMAP_ITEM_NOT_FOUND = "Roadmap item not found";
@@ -360,6 +361,62 @@ export async function rescheduleRoadmapItem(
     endDate: item.endDate?.toISOString() ?? null,
     updatedAt: item.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Where a card lands when it is dragged to another swimlane on the Board.
+ * `squad` sets the card's squad (`null` clears it); `customField` sets one
+ * SELECT field's value to an option value (`null` clears it).
+ */
+export type LaneAssignment =
+  | { kind: "squad"; squadId: string | null }
+  | { kind: "customField"; fieldId: string; value: string | null };
+
+/**
+ * Reassign the field a swimlane is grouped by. Authenticated and
+ * workspace-scoped like every other roadmap write: the item, squad, and field
+ * must all belong to `workspaceId`, and a field value must be one of the
+ * field's current options. Does not touch horizon or ordering.
+ */
+export async function moveItemToLane(
+  itemId: string,
+  workspaceId: string,
+  assignment: LaneAssignment,
+): Promise<{ id: string; squadId: string | null; fieldId?: string; value?: string | null }> {
+  await requireWorkspaceMember(workspaceId);
+  const prisma = getPrisma();
+  const current = await requireRoadmapItem(prisma, itemId, workspaceId);
+  if (current.status !== "ACTIVE") throw new Error(ROADMAP_ITEM_NOT_FOUND);
+
+  if (assignment.kind === "squad") {
+    await validateRoadmapRelations(prisma, workspaceId, { squadId: assignment.squadId });
+    const item = await captureWorkspaceMutation(prisma, "roadmapItem", "update", "UI", itemId, tx =>
+      tx.roadmapItem.update({ where: { id: itemId }, data: { squadId: assignment.squadId, updatedAt: new Date() } }),
+    );
+    revalidateRoadmap();
+    return { id: item.id, squadId: item.squadId ?? null };
+  }
+
+  const fieldRow = await prisma.customFieldDefinition.findFirst({
+    where: { id: assignment.fieldId, workspaceId },
+    include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
+  });
+  if (!fieldRow || fieldRow.objectType !== "ROADMAP_ITEM") throw new Error("Related record not found");
+  const field = toCustomFieldDefinitionData(fieldRow);
+  if (field.fieldType !== "SELECT") throw new Error("Only single-select fields can be used as swimlanes");
+  if (assignment.value === null) {
+    await prisma.customFieldValue.deleteMany({ where: { fieldId: field.id, objectId: itemId } });
+  } else {
+    const value = assignment.value;
+    if (!(field.options ?? []).some(option => option.value === value)) throw new Error("Value is not an option of this field");
+    await prisma.customFieldValue.upsert({
+      where: { fieldId_objectId: { fieldId: field.id, objectId: itemId } },
+      create: { fieldId: field.id, objectId: itemId, value },
+      update: { value, updatedAt: new Date() },
+    });
+  }
+  revalidateRoadmap();
+  return { id: itemId, squadId: null, fieldId: field.id, value: assignment.value };
 }
 
 // ─── Build the roadmap from Discovery ────────────────────────────────────────

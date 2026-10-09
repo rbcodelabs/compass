@@ -89,7 +89,7 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
   customFieldGroups?: CustomFieldFilterGroup[];
   /** The field the active filter resolved to on this page, if any. */
   activeCustomFieldId?: string | null;
-  /** The timeline's resolved row-grouping mode ("phase" | "squad" | "none" | a CustomFieldDefinition id). Only rendered alongside `timeline`. */
+  /** The resolved grouping mode ("phase" | "squad" | "none" | a CustomFieldDefinition id): timeline rows, or board swimlanes. The picker shows on the timeline, and on the board when this is passed. */
   groupByValue?: string;
   /** Groupable (SELECT-type ROADMAP_ITEM) custom fields, for the grouping toggle. */
   groupByOptions?: RoadmapGroupByFieldOption[];
@@ -119,7 +119,9 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
             <IconAction label="Go to today" onClick={timeline.onToday}><CalendarDays /></IconAction>
             <IconAction label="Next period" onClick={() => timeline.onShift(1)}><ChevronRight /></IconAction>
           </div>}
-          {timeline && <RoadmapGroupByToggle value={groupByValue ?? "phase"} customFieldOptions={groupByOptions} />}
+          {(timeline || groupByValue !== undefined) && (
+            <RoadmapGroupByToggle variant={timeline ? "timeline" : "board"} value={groupByValue ?? "phase"} customFieldOptions={groupByOptions} />
+          )}
           {timeline?.schedule?.rail && <RailToggleButton rail={timeline.schedule.rail} />}
           {timeline?.schedule && (
             <Button type="button" variant="outline" size="sm" className="min-h-11 md:min-h-0" aria-label="Schedule from discovery" aria-haspopup="dialog" aria-keyshortcuts="/" onClick={timeline.schedule.onOpen}>
