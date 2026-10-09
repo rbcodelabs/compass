@@ -28,6 +28,7 @@ import { RoadmapColumn } from "./roadmap-column";
 import { RoadmapCard, type RoadmapCardData } from "./roadmap-card";
 import {
   UnscheduledItemsColumn,
+  UnscheduledItemsSidebar,
   UnscheduledItemPreview,
   parseUnscheduledDragId,
   type UnscheduledItem,
@@ -38,6 +39,7 @@ import type { Horizon, SquadData } from "@/lib/types";
 import { Board } from "@/components/patterns/board";
 import { RoadmapSwimlanes } from "./roadmap-swimlanes";
 import { cn } from "@/lib/utils";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import {
   assignCardToLane,
   buildLanes,
@@ -268,6 +270,7 @@ export function RoadmapBoard({
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
   const dndId = useId();
+  const isDesktop = useMediaQuery("(min-width: 768px)", false);
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
@@ -584,6 +587,7 @@ export function RoadmapBoard({
             {laneError}
           </p>
         ) : null}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
         <Board
           label="Roadmap board"
           className={cn(
@@ -637,9 +641,12 @@ export function RoadmapBoard({
                 launchWorkflowEnabled={launchWorkflowEnabled}
               />
             ))}
-            <UnscheduledItemsColumn items={unscheduled} onQuickAdd={handleQuickAdd} />
+            {/* Below md the pane is the last swipe column; from md up it docks beside the board instead. */}
+            {!isDesktop ? <UnscheduledItemsColumn items={unscheduled} onQuickAdd={handleQuickAdd} /> : null}
           </div>
         </Board>
+        {isDesktop ? <UnscheduledItemsSidebar items={unscheduled} onQuickAdd={handleQuickAdd} /> : null}
+        </div>
       </div>
 
       {/* DragOverlay renders the card being dragged at its cursor position */}

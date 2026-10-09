@@ -130,7 +130,9 @@ describe("Roadmap dashboard workspace layout", () => {
     );
 
     const boardRegion = screen.getByRole("region", { name: "Roadmap board" });
-    const boardWrapper = boardRegion.parentElement!;
+    // The board sits in a row with the docked "Not scheduled" sidebar (md+), inside the height-filling wrapper.
+    expect(boardRegion.parentElement!.className).toContain("md:flex-row");
+    const boardWrapper = boardRegion.parentElement!.parentElement!;
     expect(boardWrapper.className).toContain("flex min-h-0 flex-1 flex-col");
     expect(boardWrapper.className).toContain("md:overflow-hidden");
     expect(boardRegion.className).toContain("scroll-px-3");
