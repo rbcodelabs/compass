@@ -40,6 +40,13 @@ When neither is confident enough, Compass shows a banner ("N pinned
 comments could not be re-anchored precisely") instead of guessing — a pin is
 never positioned at an element it isn't confident is the right one.
 
+Pins stay attached to their element as you scroll the artifact. Click a pin to
+highlight the element and read the full comment in a card over the preview;
+click the pin again, or the close button, to dismiss it. The card also shows the
+thread's replies and has a reply box, so you can answer a pinned comment without
+opening the **Comments** panel; the reply is an ordinary threaded reply there too.
+If you are allowed to moderate the thread, the card also has **Resolve** / **Reopen**. A resolved pin turns grey with a check mark; it stays on the page, so you can still open it.
+
 ## Full-screen view
 
 Press **View full screen** to open the artifact edge to edge in its own page,
