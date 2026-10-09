@@ -2378,8 +2378,8 @@ model ArtifactRevision {
   source         String     @default("UI") @db.VarChar(20)
   createdAt      DateTime   @default(now()) @map("created_at")
 
-  /// Captured screenshot of whatever this revision points at (ADR-0019, migration
-  /// 064). These are SIBLINGS of blobPathname, not a replacement: an EXTERNAL_LINK
+  /// Captured screenshot of whatever this revision points at (migration
+  /// 077). These are SIBLINGS of blobPathname, not a replacement: an EXTERNAL_LINK
   /// revision has no blobPathname of its own but can have a thumbnail. All
   /// nullable — "no screenshot captured" is the normal state.
   thumbnailPathname   String?   @map("thumbnail_pathname") @db.Text

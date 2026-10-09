@@ -194,7 +194,7 @@ export function validateThumbnailPng(bytes: Uint8Array): { ok: true } | { ok: fa
 }
 
 /**
- * Attach a captured screenshot to one Artifact revision (ADR-0019).
+ * Attach a captured screenshot to one Artifact revision.
  *
  * Revisions are insert-only for *content*, but a thumbnail is derived data about
  * a revision, not content of it — so this updates the existing row rather than

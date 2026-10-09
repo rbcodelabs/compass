@@ -25,7 +25,7 @@
  * Secrets are NEVER written during the build — they are passed at runCommand
  * time on the warm path only, so no secret enters a snapshot's filesystem.
  *
- * BROWSER — the snapshot also bakes a headless Chromium (ADR-0019), used two
+ * BROWSER — the snapshot also bakes a headless Chromium, used two
  * ways: host-side capture in lib/capture-screenshot.ts, and directly by the
  * agent via Bash. Chromium arrives DECLARATIVELY, as the
  * `@playwright/browser-chromium` dependency whose install hook downloads only
@@ -142,7 +142,7 @@ function snapshotRecipe(): string {
  * Named `depsFingerprint` for history, not accuracy — it now covers the system
  * libraries and runtime as well, and the AgentRuntimeConfig column of the same
  * name is the persisted form. Renaming both is a mechanical change deliberately
- * deferred while several agent-runtime branches are in flight (ADR-0019).
+ * deferred while several agent-runtime branches are in flight.
  */
 export function computeDepsFingerprint(): string {
   return createHash("sha256").update(snapshotRecipe()).digest("hex")
@@ -362,9 +362,19 @@ function parseBrowserVersion(smokeOutput: string): string {
 /**
  * Boot a fresh sandbox FROM a golden snapshot (warm path). Dependencies are
  * already installed; the caller writes the per-turn entry script and runs it.
+ *
+ * `timeoutMs` shortens the sandbox lifetime for short-lived callers (the snapshot
+ * smoke check and screenshot capture); `tags` labels it for cost attribution.
  */
-export async function bootSandboxFromSnapshot(snapshotId: string): Promise<Sandbox> {
-  return Sandbox.create({ source: { type: "snapshot", snapshotId }, timeout: SANDBOX_TIMEOUT_MS })
+export async function bootSandboxFromSnapshot(
+  snapshotId: string,
+  opts?: { timeoutMs?: number; tags?: Record<string, string> }
+): Promise<Sandbox> {
+  return Sandbox.create({
+    source: { type: "snapshot", snapshotId },
+    timeout: opts?.timeoutMs ?? SANDBOX_TIMEOUT_MS,
+    ...(opts?.tags ? { tags: opts.tags } : {}),
+  })
 }
 
 /**
