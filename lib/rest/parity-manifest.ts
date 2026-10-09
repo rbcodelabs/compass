@@ -148,6 +148,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   log_experiment_result: direct("createExperimentResult"),
   mark_read: direct("markNotificationsRead"),
   move_task_status: direct("updateTask"),
+  prepare_artifact_upload: excluded("transport-convenience", "Send the HTML in the createArtifact or updateArtifact request body.", "Direct upload exists only to keep a large document out of a model's context window when an MCP tool call would otherwise embed it twice; a REST client posts the file bytes itself, so the staged-upload step adds nothing."),
   prepare_doc_image_upload: direct("prepareDocImageUpload"),
   prepare_feedback_attachment_upload: direct("prepareFeedbackAttachmentUpload"),
   promote_feedback_to_roadmap: direct("promoteFeedbackToRoadmap"),
