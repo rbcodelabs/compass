@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 190,
-  sortedToolNamesSha256: "1f3de9ed543c3ed778cdb6e521aea08d1e595cc7e08b1dd2edaa6ff0d3b9e7d4",
+  toolCount: 193,
+  sortedToolNamesSha256: "12b20c67a230424187be212db53d49a20efc2a19764200d673601318a4a9c764",
 } as const
 
 export type McpRestParityDisposition =
@@ -33,6 +33,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   archive_research_study: direct("archiveResearchStudy"),
   archive_scoring_model: direct("archiveScoringModel"),
   assign_squad: composition(["updateOpportunity", "updateExperiment", "updateRoadmapItem", "updateObjective", "updateTask"], "Assign through the PATCH operation for the selected resource type; no polymorphic RPC endpoint is needed."),
+  build_canvas_tree: composition(["getDoc", "updateDoc"], "Server-side OST-to-Canvas layout is an MCP convenience; over REST read the canvas, merge the tree client-side and write it back with updateDoc and expectedRevision."),
   close_decision_no_action: excluded("human-governance", "Read the decision request and leave it pending for an authorized reviewer.", "No-action closure is a human judgment boundary rather than resource administration."),
   close_research_study: direct("closeResearchStudy"),
   conclude_experiment: direct("concludeExperiment"),
@@ -59,6 +60,8 @@ export const MCP_REST_PARITY_MANIFEST = {
   delete_key_result: direct("deleteKeyResult"),
   delete_objective: direct("deleteObjective"),
   delete_solution_comment: direct("deleteSolutionPlanEntry"),
+  edit_canvas: composition(["getDoc", "updateDoc"], "REST clients read the canvas with getDoc, apply node/edge changes locally and write the full JSON Canvas with updateDoc and expectedRevision."),
+  edit_doc: composition(["getDoc", "updateDoc"], "REST clients read the body with getDoc, apply the text change locally and write it with updateDoc and expectedRevision."),
   follow: direct("followResource"),
   generate_research_guide: excluded("model-orchestration", "Create or update the study's public metadata, then conduct sessions through the participant protocol.", "Guide generation exposes prompt/model workflow internals rather than a stable public resource contract."),
   generate_research_synthesis: direct("createResearchSynthesis"),

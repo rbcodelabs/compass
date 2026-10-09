@@ -2,7 +2,7 @@
  * Shared, framework-free Discovery/OST + Roadmap badge styling.
  *
  * Extracted from components/discovery/ost-tree-view.tsx's local, unexported
- * consts so the Canvas viewer's node components (components/canvas/*.tsx)
+ * consts so other surfaces (e.g. canvas object cards)
  * can render identical status colors/labels without duplicating them.
  * Naming matches lib/okrs.ts's convention (`cls` -> `className`). Pure — no
  * Prisma, no React — trivial to unit test if ever needed.

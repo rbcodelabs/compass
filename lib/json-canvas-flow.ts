@@ -163,3 +163,72 @@ export function fromFlow(base: JsonCanvas, nodes: FlowNode[], edges: FlowEdge[])
     }))
   return { ...base, nodes: outNodes, edges: outEdges }
 }
+
+/**
+ * Nodes a group "frames": every other node whose box lies fully inside the
+ * group's box (the Obsidian rule). JSON Canvas has no parent/child link, so
+ * membership is purely geometric. Nested groups are included, which makes
+ * their contents follow transitively.
+ */
+export function groupMemberIds(nodes: FlowNode[], groupId: string): string[] {
+  const group = nodes.find((node) => node.id === groupId && node.type === "group")
+  if (!group) return []
+  const g = boxOf(group)
+  return nodes
+    .filter((node) => {
+      if (node.id === groupId) return false
+      const b = boxOf(node)
+      return b.x >= g.x && b.y >= g.y && b.x + b.width <= g.x + g.width && b.y + b.height <= g.y + g.height
+    })
+    .map((node) => node.id)
+}
+
+/**
+ * Snapshot taken when a drag starts: original positions of each dragged
+ * group's members, keyed by member id, plus the group's own start position.
+ */
+export type GroupDragSnapshot = {
+  members: Map<string, { origin: { x: number; y: number }; groupId: string }>
+  groupOrigins: Map<string, { x: number; y: number }>
+}
+
+export function snapshotGroupDrag(nodes: FlowNode[], draggedIds: string[]): GroupDragSnapshot {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const members: GroupDragSnapshot["members"] = new Map()
+  const groupOrigins: GroupDragSnapshot["groupOrigins"] = new Map()
+  for (const id of draggedIds) {
+    const node = byId.get(id)
+    if (!node || node.type !== "group") continue
+    groupOrigins.set(id, { ...node.position })
+    for (const memberId of groupMemberIds(nodes, id)) {
+      const member = byId.get(memberId)
+      if (member && !members.has(memberId)) members.set(memberId, { origin: { ...member.position }, groupId: id })
+    }
+  }
+  return { members, groupOrigins }
+}
+
+/**
+ * Move each snapshotted member by its group's displacement. Nodes React Flow
+ * is already dragging (`draggedIds`) are left alone so a selection containing
+ * both a group and its members doesn't move them twice.
+ */
+export function applyGroupDrag(nodes: FlowNode[], snapshot: GroupDragSnapshot, draggedIds: string[]): FlowNode[] {
+  if (snapshot.members.size === 0) return nodes
+  const dragged = new Set(draggedIds)
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  return nodes.map((node) => {
+    const entry = snapshot.members.get(node.id)
+    if (!entry || dragged.has(node.id)) return node
+    const group = byId.get(entry.groupId)
+    const groupOrigin = snapshot.groupOrigins.get(entry.groupId)
+    if (!group || !groupOrigin) return node
+    return {
+      ...node,
+      position: {
+        x: entry.origin.x + (group.position.x - groupOrigin.x),
+        y: entry.origin.y + (group.position.y - groupOrigin.y),
+      },
+    }
+  })
+}

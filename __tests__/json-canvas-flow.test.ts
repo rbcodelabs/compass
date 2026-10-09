@@ -145,3 +145,47 @@ describe("createHistory", () => {
     expect(seen).toEqual(["d", "c"])
   })
 })
+
+describe("group drag", () => {
+  const canvas: JsonCanvas = {
+    nodes: [
+      { id: "g", type: "group", x: 0, y: 0, width: 500, height: 300, label: "G" },
+      { id: "in", type: "text", x: 20, y: 20, width: 100, height: 50, text: "in" },
+      { id: "nested", type: "group", x: 150, y: 20, width: 200, height: 200, label: "N" },
+      { id: "deep", type: "text", x: 160, y: 30, width: 50, height: 50, text: "deep" },
+      { id: "straddle", type: "text", x: 450, y: 20, width: 100, height: 50, text: "s" },
+      { id: "out", type: "text", x: 900, y: 0, width: 100, height: 50, text: "out" },
+    ],
+    edges: [],
+  }
+
+  it("treats fully-contained nodes (including nested groups) as members", async () => {
+    const { groupMemberIds } = await import("@/lib/json-canvas-flow")
+    const { nodes } = toFlow(canvas)
+    expect(groupMemberIds(nodes, "g").sort()).toEqual(["deep", "in", "nested"])
+  })
+
+  it("moves members by the group's displacement, once", async () => {
+    const { snapshotGroupDrag, applyGroupDrag } = await import("@/lib/json-canvas-flow")
+    const { nodes } = toFlow(canvas)
+    const snap = snapshotGroupDrag(nodes, ["g"])
+    const moved = nodes.map((n) => (n.id === "g" ? { ...n, position: { x: 100, y: 40 } } : n))
+    const next = applyGroupDrag(moved, snap, ["g"])
+    const pos = (id: string) => next.find((n) => n.id === id)!.position
+    expect(pos("in")).toEqual({ x: 120, y: 60 })
+    expect(pos("deep")).toEqual({ x: 260, y: 70 })
+    expect(pos("straddle")).toEqual({ x: 450, y: 20 })
+    expect(pos("out")).toEqual({ x: 900, y: 0 })
+    // Idempotent against the same snapshot (no cumulative drift).
+    expect(applyGroupDrag(next, snap, ["g"]).find((n) => n.id === "in")!.position).toEqual({ x: 120, y: 60 })
+  })
+
+  it("skips members React Flow is already dragging", async () => {
+    const { snapshotGroupDrag, applyGroupDrag } = await import("@/lib/json-canvas-flow")
+    const { nodes } = toFlow(canvas)
+    const snap = snapshotGroupDrag(nodes, ["g", "in"])
+    const moved = nodes.map((n) => (n.id === "g" || n.id === "in" ? { ...n, position: { x: n.position.x + 10, y: n.position.y } } : n))
+    const next = applyGroupDrag(moved, snap, ["g", "in"])
+    expect(next.find((n) => n.id === "in")!.position).toEqual({ x: 30, y: 20 })
+  })
+})

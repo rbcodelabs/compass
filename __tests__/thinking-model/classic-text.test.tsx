@@ -102,7 +102,6 @@ import { ProposeNewEntryButton } from "@/components/card-sort/card-sort-new-entr
 import { FeedbackActionCell } from "@/components/feedback/feedback-action-cell"
 import { UnscheduledItemPreview } from "@/components/roadmap/unscheduled-items-panel"
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel"
-import { CanvasFlow } from "@/components/canvas/canvas-flow"
 import { SolutionPanel } from "@/components/panels/solution-panel"
 import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
 import { MobileHeader } from "@/components/mobile-header"
@@ -347,10 +346,6 @@ describe("CLASSIC text is identical to main (Phase 4C-2 surfaces)", () => {
   )
   check("unscheduled-solution", <UnscheduledItemPreview item={{ kind: "solution", id: "s1", title: "Fix", opportunityId: "o1", opportunityTitle: "Need", squadId: null }} />)
   check("measurements-panel", <MeasurementsPanel target={{ targetType: "KEY_RESULT", targetId: "k1" } as never} {...common} />)
-  check(
-    "canvas empty",
-    <CanvasFlow overview={{ objectives: [], keyResults: [], opportunities: [], solutions: [], assumptions: [], experiments: [], roadmapItems: [], links: { opportunityObjective: [], solutionKeyResult: [] } } as never} />,
-  )
   it("solution-panel", () => {
     entityDetail.data = {
       id: "s1", pmInterviews: [], title: "Fix", description: null, status: "IDEA", workspaceId: "w1",

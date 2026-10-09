@@ -10,11 +10,12 @@ const h = vi.hoisted(() => ({
   workspaceFor: vi.fn(),
   resolveCanvasCards: vi.fn(async () => ({ resolved: true })),
   searchCanvasCardTargets: vi.fn(async () => [{ kind: "doc", id: "x", title: "T" }]),
+  getCanvasOverview: vi.fn(),
 }));
 
 const prisma = {
   doc: { findUnique: vi.fn(async () => h.doc) },
-  workspace: { findFirst: vi.fn(async (args: unknown) => h.workspaceFor(args)) },
+  workspace: { findFirst: vi.fn(async (args: unknown) => h.workspaceFor(args)), findUnique: vi.fn(async () => ({ id: "ws-a", thinkingModel: null, thinkingModelLabels: null })) },
 };
 
 vi.mock("@/lib/db", () => ({ default: () => prisma }));
@@ -25,6 +26,7 @@ vi.mock("@/lib/canvas-card-data", () => ({
   resolveCanvasCards: h.resolveCanvasCards,
   searchCanvasCardTargets: h.searchCanvasCardTargets,
 }));
+vi.mock("@/lib/canvas/data", () => ({ getCanvasOverview: h.getCanvasOverview }));
 vi.mock("@/lib/document-service", () => ({}));
 vi.mock("@/lib/doc-comments", () => ({}));
 vi.mock("@/lib/positioning-brief", () => ({}));
@@ -34,7 +36,7 @@ vi.mock("@/lib/linked-tasks", () => ({}));
 vi.mock("@/lib/task-assignment", () => ({}));
 vi.mock("@/lib/launch-checklist", () => ({}));
 
-import { resolveCanvasCardRefs, searchCanvasCardItems } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
+import { buildCanvasTree, resolveCanvasCardRefs, searchCanvasCardItems } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
 
 const workspace = { id: "ws-a", slug: "ws", organization: { slug: "org" } };
 
@@ -86,5 +88,44 @@ describe("searchCanvasCardItems", () => {
     h.workspaceFor.mockReturnValue(null);
     await expect(searchCanvasCardItems("doc", "login")).rejects.toThrow(/denied/);
     expect(h.searchCanvasCardTargets).not.toHaveBeenCalled();
+  });
+});
+
+describe("buildCanvasTree", () => {
+  const O1 = "00000000-0000-4000-8000-000000000001";
+  const KR1 = "00000000-0000-4000-8000-000000000002";
+  const overview = () => ({
+    objectives: [{ id: O1, title: "Grow", status: "ON_TRACK", squad: null, position: null }],
+    keyResults: [{ id: KR1, objectiveId: O1, title: "KR", current: 0, target: 1, unit: null, position: null }],
+    opportunities: [], solutions: [], assumptions: [], experiments: [], roadmapItems: [],
+  });
+
+  it("rejects unauthenticated callers and non-members before reading the tree", async () => {
+    h.userId = null;
+    await expect(buildCanvasTree("doc", { kind: "workspace" })).rejects.toThrow("Unauthorized");
+    h.userId = "user-1";
+    h.workspaceFor.mockReturnValue(null);
+    await expect(buildCanvasTree("doc", { kind: "workspace" })).rejects.toThrow(/denied/);
+    expect(h.getCanvasOverview).not.toHaveBeenCalled();
+  });
+
+  it("reads the overview of the doc's workspace, never a client-supplied one", async () => {
+    h.getCanvasOverview.mockResolvedValue(overview());
+    const fragment = await buildCanvasTree("doc", { kind: "workspace", workspaceId: "ws-evil" });
+    expect(h.getCanvasOverview).toHaveBeenCalledWith(prisma, "ws-a", expect.any(Object));
+    expect(fragment.cards.map((c) => c.ref.id)).toEqual([O1, KR1]);
+    expect(fragment.edges).toHaveLength(1);
+  });
+
+  it("scopes to an item, and treats an id outside the workspace as an empty tree", async () => {
+    h.getCanvasOverview.mockResolvedValue(overview());
+    expect((await buildCanvasTree("doc", { kind: "keyResult", id: KR1.toUpperCase() })).cards.map((c) => c.ref.id)).toEqual([KR1]);
+    expect((await buildCanvasTree("doc", { kind: "objective", id: "00000000-0000-4000-8000-0000000000ff" })).cards).toEqual([]);
+  });
+
+  it("rejects a malformed scope", async () => {
+    h.getCanvasOverview.mockResolvedValue(overview());
+    await expect(buildCanvasTree("doc", { kind: "objective", id: "not-a-uuid" })).rejects.toThrow("Invalid tree scope");
+    await expect(buildCanvasTree("doc", { kind: "doc", id: O1 })).rejects.toThrow("Invalid tree scope");
   });
 });

@@ -12,7 +12,6 @@ const excludedPrefixes = [
   "app/(marketing)/",
   "app/help/",
   "components/branding/",
-  "components/canvas/",
   "components/ui-registry.tsx",
 ];
 
