@@ -51,6 +51,11 @@ import {
   createDoc,
   updateDoc,
 } from "@/lib/doc-tool-handlers"
+import { editDoc, editCanvas, buildCanvasTree, MAX_TEXT_EDITS } from "@/lib/doc-edit-tool-handlers"
+import { CANVAS_CARD_KINDS } from "@/lib/canvas-cards"
+import { CANVAS_SIDES, CANVAS_ENDS } from "@/lib/json-canvas"
+import { MAX_CANVAS_OPS, type CanvasOp } from "@/lib/canvas-edit"
+import { TREE_SCOPE_KINDS } from "@/lib/canvas-tree"
 import { DOC_TYPES } from "@/lib/doc-types"
 import { prepareDocImageUploadTool } from "@/lib/doc-image-tool-handlers"
 import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
@@ -3195,6 +3200,144 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       updateDoc
+    )
+
+    const editExpectedRevision = z.string().uuid().optional().describe("Revision from get_doc. When given, the edit is rejected if the doc has changed since (re-read and retry). When omitted, the edit is re-applied on top of the latest revision, so it never overwrites a concurrent change.")
+
+    register(
+      "edit_doc",
+      {
+        title: "Edit Doc",
+        description:
+          "Edits a doc's body by exact text replacement instead of re-sending the whole document. " +
+          "Give oldString + newString (oldString must match exactly once unless replaceAll), or an edits array to apply several replacements atomically in order. " +
+          "The server applies the change to the current body and saves it with a revision check. Only the body is edited: frontmatter properties belong to update_doc_metadata. " +
+          "Works on CANVAS docs too (the result must still be valid JSON Canvas), but prefer edit_canvas for canvases.",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the doc to edit"),
+          oldString: z.string().min(1).optional().describe("Exact text to replace. Must be unique in the body unless replaceAll is true"),
+          newString: z.string().optional().describe("Replacement text (may be empty to delete)"),
+          replaceAll: z.boolean().optional().describe("Replace every occurrence of oldString"),
+          edits: z
+            .array(z.object({ oldString: z.string().min(1), newString: z.string(), replaceAll: z.boolean().optional() }))
+            .min(1)
+            .max(MAX_TEXT_EDITS)
+            .optional()
+            .describe("Several replacements applied in order, all-or-nothing. Use instead of oldString/newString"),
+          expectedRevision: editExpectedRevision,
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      editDoc
+    )
+
+    const canvasColor = z.string().describe('Preset "1"-"6" or a hex color like "#aabbcc"')
+    const canvasPlacement = { x: z.number().optional().describe("Left edge; give with y, or omit both to auto-place"), y: z.number().optional().describe("Top edge; give with x, or omit both to auto-place") }
+    const canvasOp = z.discriminatedUnion("op", [
+      z.object({
+        op: z.literal("add_card"),
+        kind: z.enum(CANVAS_CARD_KINDS),
+        id: z.string().uuid().describe("UUID of the Compass object. Re-adding a card already on the canvas is a no-op"),
+        title: z.string().optional().describe("Display title shown on the card"),
+        nodeId: z.string().optional().describe("Optional canvas node id to use; generated when omitted"),
+        color: canvasColor.optional(),
+        ...canvasPlacement,
+      }),
+      z.object({
+        op: z.literal("add_text"),
+        text: z.string().min(1).describe("Markdown text"),
+        nodeId: z.string().optional(),
+        width: z.number().optional(),
+        height: z.number().optional(),
+        color: canvasColor.optional(),
+        ...canvasPlacement,
+      }),
+      z.object({
+        op: z.literal("add_group"),
+        label: z.string().optional(),
+        members: z.array(z.string()).optional().describe("Node ids (or kind:uuid card references) the group should surround; its bounds are computed from them"),
+        nodeId: z.string().optional(),
+        width: z.number().optional().describe("Only used for an empty group"),
+        height: z.number().optional().describe("Only used for an empty group"),
+        color: canvasColor.optional(),
+        ...canvasPlacement,
+      }),
+      z.object({
+        op: z.literal("add_edge"),
+        from: z.string().describe("Node id or kind:uuid card reference"),
+        to: z.string().describe("Node id or kind:uuid card reference"),
+        edgeId: z.string().optional(),
+        label: z.string().optional(),
+        fromSide: z.enum(CANVAS_SIDES as [string, ...string[]]).optional(),
+        toSide: z.enum(CANVAS_SIDES as [string, ...string[]]).optional(),
+        fromEnd: z.enum(CANVAS_ENDS as [string, ...string[]]).optional(),
+        toEnd: z.enum(CANVAS_ENDS as [string, ...string[]]).optional(),
+        color: canvasColor.optional(),
+      }),
+      z.object({ op: z.literal("move"), node: z.string(), x: z.number(), y: z.number() }),
+      z.object({
+        op: z.literal("update"),
+        node: z.string().optional().describe("Node to update (give exactly one of node or edge)"),
+        edge: z.string().optional().describe("Edge id to update"),
+        text: z.string().optional().describe("New text (text nodes)"),
+        label: z.string().optional().describe("New label (groups and edges; empty string clears)"),
+        title: z.string().optional().describe("New display title (Compass cards)"),
+        color: canvasColor.nullable().optional().describe("null clears the color"),
+        width: z.number().optional(),
+        height: z.number().optional(),
+        fromSide: z.enum(CANVAS_SIDES as [string, ...string[]]).optional(),
+        toSide: z.enum(CANVAS_SIDES as [string, ...string[]]).optional(),
+        fromEnd: z.enum(CANVAS_ENDS as [string, ...string[]]).optional(),
+        toEnd: z.enum(CANVAS_ENDS as [string, ...string[]]).optional(),
+      }),
+      z.object({ op: z.literal("remove"), node: z.string().optional().describe("Node to remove, with its edges (give exactly one of node or edge)"), edge: z.string().optional() }),
+    ])
+
+    register(
+      "edit_canvas",
+      {
+        title: "Edit Canvas",
+        description:
+          "Edits a CANVAS doc with small operations instead of re-sending the whole JSON Canvas. The server loads the canvas, applies the ops in order, validates and saves. " +
+          "Node ids and positions are automatic: omit x/y and new nodes are placed in a column to the right of existing content. " +
+          "Ops: add_card {kind, id, title?} (a Compass object card), add_text {text}, add_group {label?, members?}, add_edge {from, to, label?}, move {node, x, y}, update {node|edge, ...}, remove {node|edge}. " +
+          "Anywhere a node is expected you can pass a canvas node id or a card reference like \"opportunity:<uuid>\". " +
+          "The batch is all-or-nothing (the first invalid op rejects it and names its index). Re-adding a card or an edge that exists is a harmless no-op, so retries are safe. " +
+          "The response lists the node/edge id created for each add op.",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the CANVAS doc"),
+          ops: z.array(canvasOp).min(1).max(MAX_CANVAS_OPS).describe("Operations applied in order"),
+          expectedRevision: editExpectedRevision,
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      // The schema restricts sides/ends to the valid literals; the handler re-validates regardless.
+      (args) => editCanvas({ ...args, ops: args.ops as CanvasOp[] })
+    )
+
+    register(
+      "build_canvas_tree",
+      {
+        title: "Build Canvas Tree",
+        description:
+          "Draws the Opportunity Solution Tree onto a CANVAS doc, like the Canvas editor's \"Build tree\" button: objectives, key results, opportunities, solutions and their links, laid out automatically. " +
+          "Scope defaults to the whole workspace; pass { kind, id } to draw just the subtree under one objective, key result, opportunity or solution. " +
+          "It merges into the canvas: cards already on it are never duplicated, only new content is added (to the right of what is there, one group per root objective), so it is safe to run again as the tree grows. " +
+          "Trees larger than 400 cards are truncated; scope to a specific item to see the rest.",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the CANVAS doc to draw onto"),
+          scope: z
+            .union([
+              z.object({ kind: z.literal("workspace") }),
+              z.object({ kind: z.enum(TREE_SCOPE_KINDS), id: z.string().uuid() }),
+            ])
+            .optional()
+            .describe('{ "kind": "workspace" } (default) or { "kind": "objective" | "keyResult" | "opportunity" | "solution", "id": "<uuid>" }'),
+          expectedRevision: editExpectedRevision,
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      buildCanvasTree
     )
 
     register("list_artifacts", {

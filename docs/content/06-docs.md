@@ -163,7 +163,7 @@ A Canvas doc is an infinite, pannable whiteboard that follows the open [JSON Can
 - **On phones** a canvas opens locked for viewing (pan and zoom); use the lock button to edit.
 - Canvases are limited to roughly 800 KB of JSON.
 
-Agents can create and edit canvases through the MCP `create_doc` / `update_doc` tools with `docType: CANVAS`; see [MCP API](/help/09-mcp-api).
+Agents can create canvases with `create_doc` / `update_doc` (`docType: CANVAS`), edit them incrementally with `edit_canvas` (add/move/update/remove cards, text, groups and edges), and draw the Opportunity Solution Tree onto one with `build_canvas_tree`; see [MCP API](/help/09-mcp-api).
 
 ## Positioning & Messaging Briefs
 
