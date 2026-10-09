@@ -16,7 +16,8 @@ it uses your existing Compass sign-in.
 
 ## Leaving feedback
 
-Open an HTML Artifact and press **Leave feedback** above the preview. Click
+Open an HTML Artifact and press **Leave feedback** in the top bar of the page, next to **Comments**
+(on a narrow page the buttons show as icons — hover for the name). Click
 the element you want to comment on, then write your comment and post it. The
 comment is an ordinary comment on the artifact — it also shows up in the
 **Comments** panel, and can be replied to, edited, resolved, or deleted there
