@@ -326,7 +326,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional |
+| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional. For a root `ARTIFACT` comment on a `SLIDE_DECK` Artifact, optional `slideIndex` (zero-based, from `get_artifact` `slides[].index`) anchors it to that whole slide |
 | `list_comments` | List comments for an exact workspace and target, optionally filtered by `OPEN` or `RESOLVED` |
 | `get_comment` | Get one comment and any specialized Doc-anchor or Solution-plan metadata |
 | `update_comment` | Edit a comment body |
@@ -848,9 +848,9 @@ Artifacts are first-class solution deliverables, separate from Markdown Docs. HT
 | Tool | Description |
 |---|---|
 | `list_artifacts` | List active Artifacts in a workspace; pass `includeArchived: true` to include archived records |
-| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML |
-| `create_artifact` | Create `HTML_UPLOAD` from `html` plus an optional `.html` filename, or `EXTERNAL_LINK` from an `http`/`https` `url` |
-| `update_artifact` | Update title/description and optionally create a new immutable HTML or URL revision |
+| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML. Includes `kind` (`DOCUMENT` or `SLIDE_DECK`); a `SLIDE_DECK` also returns `slides` as `{ index, title, description }`, split from the current revision at read time |
+| `create_artifact` | Create `HTML_UPLOAD` from `html` plus an optional `.html` filename, or `EXTERNAL_LINK` from an `http`/`https` `url`. Optional `kind`: `DOCUMENT` (default) or `SLIDE_DECK`, which is allowed only for `HTML_UPLOAD` |
+| `update_artifact` | Update title/description and optionally create a new immutable HTML or URL revision. Optional `kind` switches an `HTML_UPLOAD` between `DOCUMENT` and `SLIDE_DECK` without a new revision |
 | `link_artifact_to_solution` | Idempotently link an Artifact and Solution in the same workspace |
 | `unlink_artifact_from_solution` | Remove an Artifact-to-Solution link |
 | `link_artifact_to_decision` | Idempotently link an active Artifact to an ordinary tracked Decision in the same workspace; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs, `linkId`, and `created` |

@@ -16,6 +16,7 @@ import {
   deleteDocCommentCore,
 } from "@/lib/doc-comments";
 import { getArtifactStorage } from "@/lib/artifact-storage";
+import { parseArtifactKind } from "@/lib/artifact-kind";
 import { resolveCanvasCards, searchCanvasCardTargets } from "@/lib/canvas-card-data";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { validateTaskLink } from "@/lib/task-assignment";
@@ -82,6 +83,7 @@ export async function createArtifact(workspaceId: string, formData: FormData, re
         if (file.size > MAX_ARTIFACT_HTML_BYTES) throw new Error("HTML file exceeds the 2 MB size limit");
         return createHtmlArtifact({
           ...common, filename: file.name, mimeType: file.type,
+          kind: parseArtifactKind(formData.get("kind")) ?? "DOCUMENT",
           bytes: new Uint8Array(await file.arrayBuffer()),
         }, getArtifactStorage());
       })();
@@ -95,7 +97,7 @@ export async function createArtifact(workspaceId: string, formData: FormData, re
 export async function updateArtifact(
   workspaceId: string,
   artifactId: string,
-  data: { title?: string; description?: string | null },
+  data: { title?: string; description?: string | null; kind?: "DOCUMENT" | "SLIDE_DECK" },
   revalidatePathStr: string
 ) {
   const user = await requireWorkspaceMember(workspaceId);

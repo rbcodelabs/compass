@@ -77,3 +77,43 @@ describe("Artifact MCP output redaction", () => {
     expect(JSON.stringify(result)).not.toContain("blobPathname")
   })
 })
+
+describe("Artifact MCP kind", () => {
+  it("switches an uploaded HTML Artifact to a slide deck without a new revision", async () => {
+    prisma.artifact.findFirst.mockResolvedValue({ id: "art-1", sourceType: "HTML_UPLOAD" })
+    prisma.artifact.update.mockResolvedValue({ id: "art-1" })
+    await updateArtifact({ artifactId: "art-1", workspaceId: "ws-1", kind: "SLIDE_DECK" })
+    expect(prisma.artifactRevision.create).not.toHaveBeenCalled()
+    expect(prisma.artifact.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ kind: "SLIDE_DECK" }) }))
+  })
+
+  it("stores DOCUMENT as NULL", async () => {
+    prisma.artifact.findFirst.mockResolvedValue({ id: "art-1", sourceType: "HTML_UPLOAD" })
+    prisma.artifact.update.mockResolvedValue({ id: "art-1" })
+    await updateArtifact({ artifactId: "art-1", workspaceId: "ws-1", kind: "DOCUMENT" })
+    expect(prisma.artifact.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ kind: null }) }))
+  })
+
+  it("rejects a slide deck on an external link, and an unknown kind, without writing", async () => {
+    prisma.artifact.findFirst.mockResolvedValue({ id: "art-1", sourceType: "EXTERNAL_LINK" })
+    const external = await updateArtifact({ artifactId: "art-1", workspaceId: "ws-1", kind: "SLIDE_DECK" })
+    expect(external.content[0].text).toMatch(/only html upload artifacts can be slide decks/i)
+    const unknown = await updateArtifact({ artifactId: "art-1", workspaceId: "ws-1", kind: "CAROUSEL" })
+    expect(unknown.content[0].text).toMatch(/kind must be DOCUMENT or SLIDE_DECK/)
+    expect(prisma.artifact.update).not.toHaveBeenCalled()
+  })
+
+  it("returns kind and addressable slides for a slide deck", async () => {
+    prisma.artifact.findUnique.mockResolvedValue({
+      id: "art-1", workspaceId: "ws-1", title: "Deck", sourceType: "HTML_UPLOAD", kind: "SLIDE_DECK", status: "ACTIVE",
+      currentRevision: { id: "rev-1", revisionNumber: 1, blobPathname: "private/current.html" },
+      revisions: [{ id: "rev-1", revisionNumber: 1, blobPathname: "private/current.html" }],
+      links: [],
+    })
+    storage.get.mockResolvedValue(new TextEncoder().encode('<html><body><section class="slide" data-slide-title="Intro">One</section><section class="slide">Two</section></body></html>'))
+    const result = await getArtifact({ artifactId: "art-1" })
+    expect(result.structuredContent).toMatchObject({ ok: true, data: { kind: "SLIDE_DECK", slides: [{ index: 0, title: "Intro" }, { index: 1 }] } })
+    expect(result.content[0].text).toContain("Kind: SLIDE_DECK")
+    expect(JSON.stringify(result)).not.toContain("private/")
+  })
+})

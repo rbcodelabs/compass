@@ -1,4 +1,6 @@
 import getPrisma from "@/lib/db"
+import { readArtifactKind } from "@/lib/artifact-kind"
+import { MAX_SLIDES } from "@/lib/deck-contract"
 import { resolveCommentAuthors } from "@/lib/comment-authors"
 import { withWorkspaceUpdates, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture"
 import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
@@ -60,6 +62,12 @@ export type ElementAnchorInput = {
    * would be a tracking pixel aimed at the org.
    */
   screenshotUrl?: string | null
+  /**
+   * Zero-based slide of a SLIDE_DECK Artifact the comment was left on, or null for
+   * a comment that is not slide-scoped. With no elementSelector it is a comment on
+   * the whole slide. Only accepted when the Artifact's kind is SLIDE_DECK.
+   */
+  slideIndex?: number | null
 }
 
 /// Identity for an author who is not a Compass User, so `authorId` can stay a
@@ -109,7 +117,9 @@ export async function createCommentRows(
   onCreated?.(comment.id)
   if (input.docAnchor) await tx.docCommentAnchor.create({ data: { commentId: comment.id, ...input.docAnchor } })
   if (input.solutionPlan) await tx.solutionPlanProposal.create({ data: { commentId: comment.id, trackedDecisionRequestId: input.solutionPlan.trackedDecisionRequestId ?? null, legacyPlanStatus: input.solutionPlan.legacyPlanStatus ?? null } })
-  if (input.elementAnchor) await tx.commentElementAnchor.create({ data: { commentId: comment.id, artifactId: input.targetId, artifactRevisionId: input.elementAnchor.artifactRevisionId ?? null, pageUrl: input.elementAnchor.pageUrl, pagePath: input.elementAnchor.pagePath, elementSelector: input.elementAnchor.elementSelector ?? null, elementFingerprint: input.elementAnchor.elementFingerprint ?? undefined, screenshotUrl: input.elementAnchor.screenshotUrl ?? null } })
+  // artifactId is the comment's own targetId, never a caller-supplied value —
+  // validateExtensions has already established targetType === "ARTIFACT".
+  if (input.elementAnchor) await tx.commentElementAnchor.create({ data: { commentId: comment.id, artifactId: input.targetId, artifactRevisionId: input.elementAnchor.artifactRevisionId ?? null, pageUrl: input.elementAnchor.pageUrl, pagePath: input.elementAnchor.pagePath, elementSelector: input.elementAnchor.elementSelector ?? null, elementFingerprint: input.elementAnchor.elementFingerprint ?? undefined, screenshotUrl: input.elementAnchor.screenshotUrl ?? null, slideIndex: input.elementAnchor.slideIndex ?? null } })
   if (input.externalAuthor) await tx.commentExternalAuthor.create({ data: { commentId: comment.id, submitterEmail: input.externalAuthor.submitterEmail ?? null, portalAccountId: input.externalAuthor.portalAccountId ?? null, embedTokenId: input.externalAuthor.embedTokenId ?? null } })
   return comment
 }
@@ -165,6 +175,11 @@ function validateExtensions(input: CreateCommentInput) {
   }
   if (input.elementAnchor && !input.elementAnchor.pageUrl.trim()) throw new Error("Element anchor page URL must not be empty.")
   if (input.elementAnchor && !input.elementAnchor.pagePath.trim()) throw new Error("Element anchor page path must not be empty.")
+  const slideIndex = input.elementAnchor?.slideIndex ?? null
+  if (slideIndex !== null) {
+    if (!input.elementAnchor) throw new Error("Slide index requires an element anchor.")
+    if (!Number.isInteger(slideIndex) || slideIndex < 0 || slideIndex >= MAX_SLIDES) throw new Error(`Slide index must be an integer from 0 to ${MAX_SLIDES - 1}.`)
+  }
   // An external author, unlike an anchor, is valid on a reply too: an outside
   // submitter answering a question on their own thread is the normal case.
   if (input.externalAuthor && input.authorId) {
@@ -181,6 +196,13 @@ export async function createComment(input: CreateCommentInput, options: { before
   const target = await resolveCommentTarget(input.targetType, input.targetId)
   if (!target) throw new Error(`${input.targetType} target not found or not commentable.`)
   if (target.workspaceId !== input.workspaceId) throw new Error("Comment target does not belong to the declared workspace.")
+  const slideIndex = input.elementAnchor?.slideIndex ?? null
+  if (slideIndex !== null) {
+    // Kind is a presentation choice that can change later; this only stops a
+    // slide anchor being written against an Artifact that is not a deck now.
+    const artifact = await prisma.artifact.findUnique({ where: { id: input.targetId }, select: { kind: true } })
+    if (readArtifactKind(artifact?.kind) !== "SLIDE_DECK") throw new Error("Slide index is allowed only on SLIDE_DECK Artifacts.")
+  }
 
   if (input.parentId) {
     const parent = await prisma.comment.findUnique({ where: { id: input.parentId }, select: { id: true, workspaceId: true, targetType: true, targetId: true, parentId: true } })

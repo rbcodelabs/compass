@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { archiveArtifact, captureArtifactThumbnail, linkArtifact, replaceArtifactRevision, unlinkArtifact, unlinkArtifactDecision, updateArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
 import { ArtifactViewer } from "./artifact-viewer"
+import type { ArtifactSlideDto } from "@/lib/artifact-slides"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -17,8 +18,12 @@ import type { PanelPin } from "@/lib/panel-pin"
 import type { ArtifactThumbnailDto } from "@/lib/artifacts"
 
 type ArtifactDetailProps = {
-  artifact: { id: string; title: string; description: string | null; sourceType: string; status: string; currentRevision: { externalUrl: string | null; thumbnail: ArtifactThumbnailDto | null } | null; revisions: Array<{ id: string; revisionNumber: number; filename: string | null; byteSize: number | null; externalUrl: string | null; createdAt: string }> }
+  artifact: { id: string; title: string; description: string | null; sourceType: string; kind?: "DOCUMENT" | "SLIDE_DECK"; status: string; currentRevision: { externalUrl: string | null; thumbnail: ArtifactThumbnailDto | null } | null; revisions: Array<{ id: string; revisionNumber: number; filename: string | null; byteSize: number | null; externalUrl: string | null; createdAt: string }> }
   html?: string
+  /** Present only for a SLIDE_DECK Artifact. */
+  slides?: ArtifactSlideDto[]
+  /** Zero-based slide to open on, from `?slide=`. */
+  initialSlideIndex?: number
   initialCommentsPin?: PanelPin
   workspaceId: string
   basePath: string
@@ -26,7 +31,7 @@ type ArtifactDetailProps = {
   decisions: Array<{ id: string; title: string; state: string }>
 }
 
-export function ArtifactDetail({ artifact, html, workspaceId, basePath, solutions, decisions, initialCommentsPin }: ArtifactDetailProps) {
+export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, workspaceId, basePath, solutions, decisions, initialCommentsPin }: ArtifactDetailProps) {
   const labels = useLabels()
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -47,14 +52,14 @@ export function ArtifactDetail({ artifact, html, workspaceId, basePath, solution
     <div data-slot="artifact-content-column" className="min-w-0 flex-1 overflow-y-auto">
     <div className="mx-auto max-w-5xl p-4 sm:p-8 space-y-6">
     <header className="flex flex-col items-start justify-between gap-4 sm:flex-row">
-      <div className="min-w-0"><div className="text-xs font-medium uppercase tracking-wide text-primary">Artifact · {artifact.sourceType === "EXTERNAL_LINK" ? "External" : "HTML prototype"}</div><h1 className="break-words [overflow-wrap:anywhere] text-2xl font-semibold text-text-primary">{artifact.title}</h1>{artifact.description && <MarkdownContent className="mt-1 text-text-secondary">{artifact.description}</MarkdownContent>}</div>
+      <div className="min-w-0"><div className="text-xs font-medium uppercase tracking-wide text-primary">Artifact · {artifact.sourceType === "EXTERNAL_LINK" ? "External" : artifact.kind === "SLIDE_DECK" ? "Slide deck" : "HTML prototype"}</div><h1 className="break-words [overflow-wrap:anywhere] text-2xl font-semibold text-text-primary">{artifact.title}</h1>{artifact.description && <MarkdownContent className="mt-1 text-text-secondary">{artifact.description}</MarkdownContent>}</div>
       <div className="flex shrink-0 flex-wrap gap-2">
         <Button ref={commentsTrigger} variant="outline" aria-expanded={commentsOpen} onClick={() => changeCommentsOpen(!commentsOpen)}><MessageSquare aria-hidden />Comments</Button>
         {artifact.status === "ACTIVE" && <Button variant="outline" disabled={pending} onClick={() => run(() => archiveArtifact(workspaceId, artifact.id, basePath))}>Archive</Button>}
       </div>
     </header>
     {artifact.status === "ARCHIVED" && <div className="rounded-md bg-status-warning-surface p-3 text-sm text-status-warning">This artifact is archived.</div>}
-    <ArtifactViewer title={artifact.title} html={html} externalUrl={artifact.currentRevision?.externalUrl} thumbnail={artifact.currentRevision?.thumbnail} artifactId={artifact.id} fullScreenHref={`${basePath}/artifacts/${artifact.id}/full-screen`} onFeedbackPosted={() => setCommentsVisits((visits) => visits + 1)} />
+    <ArtifactViewer title={artifact.title} html={html} slides={slides} initialSlideIndex={initialSlideIndex} externalUrl={artifact.currentRevision?.externalUrl} thumbnail={artifact.currentRevision?.thumbnail} artifactId={artifact.id} fullScreenHref={`${basePath}/artifacts/${artifact.id}/full-screen`} onFeedbackPosted={() => setCommentsVisits((visits) => visits + 1)} />
     {artifact.sourceType === "EXTERNAL_LINK" && artifact.status === "ACTIVE" && artifact.currentRevision?.externalUrl && <ArtifactScreenshotControls
       key={latestRevisionCreatedAt(artifact.revisions)}
       workspaceId={workspaceId}
@@ -64,8 +69,8 @@ export function ArtifactDetail({ artifact, html, workspaceId, basePath, solution
       revisionCreatedAt={latestRevisionCreatedAt(artifact.revisions)}
     />}
     <div className="grid gap-6 md:grid-cols-2">
-      <form className="space-y-3 rounded-lg border p-4" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); run(() => updateArtifact(workspaceId, artifact.id, { title: String(data.get("title")), description: String(data.get("description")) }, basePath)) }}>
-        <h2 className="font-semibold">Details</h2><Input name="title" defaultValue={artifact.title} required /><Textarea name="description" defaultValue={artifact.description ?? ""} /><Button type="submit" disabled={pending}>Save details</Button>
+      <form className="space-y-3 rounded-lg border p-4" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); run(() => updateArtifact(workspaceId, artifact.id, { title: String(data.get("title")), description: String(data.get("description")), ...(artifact.sourceType === "HTML_UPLOAD" ? { kind: data.get("kind") === "SLIDE_DECK" ? "SLIDE_DECK" as const : "DOCUMENT" as const } : {}) }, basePath)) }}>
+        <h2 className="font-semibold">Details</h2><Input name="title" defaultValue={artifact.title} required /><Textarea name="description" defaultValue={artifact.description ?? ""} />{artifact.sourceType === "HTML_UPLOAD" && <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="kind" value="SLIDE_DECK" defaultChecked={artifact.kind === "SLIDE_DECK"} />Show as a slide deck</label>}<Button type="submit" disabled={pending}>Save details</Button>
       </form>
       <form className="space-y-3 rounded-lg border p-4" onSubmit={(event) => { event.preventDefault(); run(() => replaceArtifactRevision(workspaceId, artifact.id, artifact.sourceType, new FormData(event.currentTarget), basePath)) }}>
         <h2 className="font-semibold">New revision</h2>{artifact.sourceType === "EXTERNAL_LINK" ? <Input name="url" type="url" required placeholder="https://…" /> : <Input name="file" type="file" accept=".html,text/html" required />}<Button type="submit" disabled={pending}>Replace current revision</Button>

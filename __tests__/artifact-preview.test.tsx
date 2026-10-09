@@ -188,6 +188,52 @@ describe("ArtifactPreview element picking and anchor pins", () => {
   })
 })
 
+describe("ArtifactPreview holdPrevious (slide decks)", () => {
+  const slide = (n: number) => `<html><body><section class="slide">Slide ${n}</section></body></html>`
+  const frames = (title: string) => screen.getAllByTitle(title) as HTMLIFrameElement[]
+
+  it("keeps the previous slide mounted and inert until the next one settles", () => {
+    const view = render(<ArtifactPreview title="Deck" html={slide(1)} holdPrevious />)
+    const [first] = frames("Deck preview")
+    const firstSrcdoc = first.srcdoc
+    post(first, handshake(first), "READY")
+
+    view.rerender(<ArtifactPreview title="Deck" html={slide(2)} holdPrevious />)
+    const stacked = frames("Deck preview")
+    expect(stacked).toHaveLength(2)
+    // The old document is not reloaded, and it cannot be interacted with.
+    expect(stacked[0]).toBe(first)
+    expect(stacked[0].srcdoc).toBe(firstSrcdoc)
+    expect(stacked[0].parentElement?.parentElement).toHaveAttribute("aria-hidden", "true")
+    expect(stacked[0].parentElement?.parentElement).toHaveClass("pointer-events-none")
+    // The new frame has no opaque cover, so the old slide shows through while it fits.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    expect(stacked[1].className).toContain("bg-transparent")
+
+    postTyped(stacked[1], handshake(stacked[1]), { type: "FIT_SETTLED" })
+    expect(frames("Deck preview")).toHaveLength(1)
+    expect(frames("Deck preview")[0].srcdoc).toContain("Slide 2")
+  })
+
+  it("drops the previous slide after a deadline if the next never settles", () => {
+    vi.useFakeTimers()
+    const view = render(<ArtifactPreview title="Deck" html={slide(1)} holdPrevious />)
+    post(frames("Deck preview")[0], handshake(frames("Deck preview")[0]), "READY")
+    view.rerender(<ArtifactPreview title="Deck" html={slide(2)} holdPrevious />)
+    expect(frames("Deck preview")).toHaveLength(2)
+    const next = frames("Deck preview")[1]
+    post(next, handshake(next), "READY")
+    act(() => { vi.advanceTimersByTime(ARTIFACT_PREVIEW_READY_TIMEOUT_MS + 2_600) })
+    expect(frames("Deck preview")).toHaveLength(1)
+  })
+
+  it("remounts without stacking when holdPrevious is off", () => {
+    const view = render(<ArtifactPreview title="Doc" html={slide(1)} />)
+    view.rerender(<ArtifactPreview title="Doc" html={slide(2)} />)
+    expect(frames("Doc preview")).toHaveLength(1)
+  })
+})
+
 describe("ArtifactPreview external thumbnail", () => {
   it("renders the captured screenshot from the authenticated route, linked to the URL", () => {
     render(<ArtifactPreview title="Live site" externalUrl="https://a.example/" thumbnail={{

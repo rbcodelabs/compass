@@ -916,13 +916,14 @@ describe("077_artifact_slide_decks", () => {
     expect(manifest.match(new RegExp(`"${NAME}"`, "g"))).toHaveLength(1);
   });
 
-  // Inverted by the code PR, as 073 was: until 077 is applied in production,
-  // declaring either column would make Prisma select a column that does not exist.
-  it("does not yet declare either column in schema.prisma", () => {
+  // Inverted by the code PR, as 073's was. The columns may be declared only once
+  // 077 is applied in production; before that Prisma would select a column that
+  // does not exist. Both stay nullable, matching the DDL.
+  it("declares both columns in schema.prisma as nullable", () => {
     const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
     const artifact = schema.match(/model Artifact \{[\s\S]*?\n\}/)?.[0] ?? "";
     const anchor = schema.match(/model CommentElementAnchor \{[\s\S]*?\n\}/)?.[0] ?? "";
-    expect(artifact).not.toMatch(/@map\("kind"\)/);
-    expect(anchor).not.toMatch(/@map\("slide_index"\)/);
+    expect(artifact).toMatch(/\bkind\s+String\?\s+@map\("kind"\)\s+@db\.VarChar\(30\)/);
+    expect(anchor).toMatch(/\bslideIndex\s+Int\?\s+@map\("slide_index"\)/);
   });
 });

@@ -18,6 +18,26 @@ describe("generic comment MCP handlers", () => {
     expect(result.content[0].text).toContain(`ID: ${comment.id}`)
   })
 
+  it("anchors an MCP comment to a whole slide when slideIndex is given", async () => {
+    core.createComment.mockResolvedValue({ ...comment, targetType: "ARTIFACT" })
+    await addComment({ workspaceId: comment.workspaceId, targetType: "ARTIFACT", targetId: comment.targetId, body: "Slide 2 copy", authorName: "Claude", slideIndex: 1 })
+    expect(core.createComment).toHaveBeenCalledWith(expect.objectContaining({
+      elementAnchor: { pageUrl: `artifact:${comment.targetId}`, pagePath: "/slides/2", elementSelector: null, slideIndex: 1 },
+    }))
+    expect(core.createComment.mock.calls[0][0]).not.toHaveProperty("slideIndex")
+  })
+
+  it("rejects slideIndex on a non-Artifact target or a reply, and surfaces core errors", async () => {
+    const onOpportunity = await addComment({ workspaceId: comment.workspaceId, targetType: "OPPORTUNITY", targetId: comment.targetId, body: "x", authorName: "Claude", slideIndex: 0 })
+    expect(onOpportunity.structuredContent).toMatchObject({ ok: false })
+    const reply = await addComment({ workspaceId: comment.workspaceId, targetType: "ARTIFACT", targetId: comment.targetId, parentId: comment.id, body: "x", authorName: "Claude", slideIndex: 0 })
+    expect(reply.structuredContent).toMatchObject({ ok: false })
+    expect(core.createComment).not.toHaveBeenCalled()
+    core.createComment.mockRejectedValue(new Error("Slide index is allowed only on SLIDE_DECK Artifacts."))
+    const notDeck = await addComment({ workspaceId: comment.workspaceId, targetType: "ARTIFACT", targetId: comment.targetId, body: "x", authorName: "Claude", slideIndex: 0 })
+    expect(notDeck.content[0].text).toContain("SLIDE_DECK")
+  })
+
   it("lists comments with count", async () => {
     core.listComments.mockResolvedValue([comment])
     const result = await listCommentsTool({ workspaceId: comment.workspaceId, targetType: "OPPORTUNITY", targetId: comment.targetId })
