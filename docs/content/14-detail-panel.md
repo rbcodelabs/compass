@@ -23,7 +23,7 @@ Each panel shows the essentials for that item — its status, key fields, and th
 | Item | Shows |
 |---|---|
 | **Objective** | Status, cycle, and its Key Results. An Objective with no cycle shows **No cycle / Persistent** as its cycle (on Torres workspaces a cycle is shown only when there is one) |
-| **Key Result** | Progress, its Objective, any supporting Objectives, and any linked Opportunities and Roadmap items. On Opportunity-first and Torres workspaces it also has a read-only **Linked Solutions** list (each row opens that solution) |
+| **Key Result** | Progress, its Objective (with a **Move to another objective…** picker, see [OKRs](/help/01-okrs#moving-a-key-result-to-another-objective)), any supporting Objectives, and any linked Opportunities and Roadmap items. On Opportunity-first and Torres workspaces it also has a read-only **Linked Solutions** list (each row opens that solution) |
 | **Opportunity** | The shared full-page detail: editable header, Key Result, Solutions, Evidence, OST Tree, configured scoring/custom fields, feedback, delivery tasks and Discussion. On Opportunity-first and Torres workspaces the header also has an **Objectives** (**Outcomes**) box listing the Objectives it is linked to, with a **Change** control to add or remove them |
 | **Solution** | Status, its Opportunity, assumptions, and roadmap links. On Opportunity-first and Torres workspaces it also has a **Linked Key Results** box (**Linked Success metrics** under Torres) where you tick or untick the Key Results the solution is meant to move; each tick saves immediately |
 | **Assumption** | Status, risk level, its Solution, and experiments |
