@@ -156,7 +156,7 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "076_research_external_studies": "01cc40f387b9171fc6761f598db0ce20e0dae1df9ca58f9755bdbe481bd97cb0",
   // Saved roadmap views: one new table plus one non-unique async index, no backfill.
   // Digest recorded from the shipped SQL; please review it.
-  "078_roadmap_views": "d6b2691e1ac0ce64c5c684826be4b08c98bda4cca75d1c06ec18ce3933791827"
+  "079_roadmap_views": "0575ee815ac4c66181d213a7b6f495c77bb62a05271b4fb25d3c92f98df64d5b"
 };
 
 /**
@@ -191,9 +191,9 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "075_roadmap_item_provenance": {
     "lib/migrations/roadmap-item-provenance.ts": "6f99f4829eccd6864d7dd476a01299bb3027246f4d6e6d2fdbd255980b88f4f5",
   },
-  // The 078 postcondition (table shape plus a valid, ready, non-unique org/workspace index before the receipt).
-  "078_roadmap_views": {
-    "lib/migrations/roadmap-views.ts": "4806f3fc13db8ef09638ade7e469f904a01a9659ded19ca8a821d0402f5009d6",
+  // The 079 postcondition (table shape plus a valid, ready, non-unique org/workspace index before the receipt).
+  "079_roadmap_views": {
+    "lib/migrations/roadmap-views.ts": "6afd1be2429b929b643e3ab50de8b5fd9b94fe350a4e49f76987e1b80fa9e5eb",
   },
 };
 

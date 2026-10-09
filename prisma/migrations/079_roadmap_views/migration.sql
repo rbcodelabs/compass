@@ -1,4 +1,4 @@
--- Migration 078: saved roadmap views.
+-- Migration 079: saved roadmap views.
 -- Additive: one new table and one non-unique async index. No existing table changes
 -- and no backfill (a user with no saved views simply sees the built-in default view).
 --

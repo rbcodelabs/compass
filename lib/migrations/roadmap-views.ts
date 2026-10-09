@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg"
 
-/** Columns 078_roadmap_views must leave behind, with their nullability. */
+/** Columns 079_roadmap_views must leave behind, with their nullability. */
 const EXPECTED_COLUMNS: { column: string; nullable: boolean }[] = [
   { column: "id", nullable: false },
   { column: "organization_id", nullable: false },
@@ -34,7 +34,7 @@ export async function assertRoadmapViewsMigration(client: PoolClient, schema: st
   const actual = new Map(result.rows.map((row) => [row.column_name, row.is_nullable === "YES"]))
   for (const { column, nullable } of EXPECTED_COLUMNS) {
     if (actual.get(column) !== nullable) {
-      throw new Error(`Migration 078 postcondition failed: roadmap_views.${column} is missing or has the wrong nullability`)
+      throw new Error(`Migration 079 postcondition failed: roadmap_views.${column} is missing or has the wrong nullability`)
     }
   }
   const { name, table, columns } = ROADMAP_VIEWS_INDEX

@@ -3,11 +3,11 @@ import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 
 /**
- * Static guards for 078_roadmap_views. The DDL that reaches Aurora DSQL is the SQL
+ * Static guards for 079_roadmap_views. The DDL that reaches Aurora DSQL is the SQL
  * file, not schema.prisma, so the two are pinned to each other here.
  */
 const ROOT = process.cwd()
-const NAME = "078_roadmap_views"
+const NAME = "079_roadmap_views"
 const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8")
 const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8")
 const sqlPath = path.join(ROOT, "prisma/migrations", NAME, "migration.sql")
@@ -53,9 +53,9 @@ describe(NAME, () => {
   })
 
   it("waits for its async index and verifies before the receipt", () => {
-    expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"078_roadmap_views"/)
-    expect(runner).toMatch(/\["049_agent_identity"[^\]]*"078_roadmap_views"[^\]]*\]\.includes\(migration\.name\)/)
-    const assertion = runner.indexOf('migration.name === "078_roadmap_views") await assertRoadmapViewsMigration')
+    expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"079_roadmap_views"/)
+    expect(runner).toMatch(/\["049_agent_identity"[^\]]*"079_roadmap_views"[^\]]*\]\.includes\(migration\.name\)/)
+    const assertion = runner.indexOf('migration.name === "079_roadmap_views") await assertRoadmapViewsMigration')
     expect(assertion).toBeGreaterThan(-1)
     expect(assertion).toBeLessThan(runner.indexOf('UPDATE "${schema}"._prisma_migrations SET finished_at = CURRENT_TIMESTAMP'))
   })
