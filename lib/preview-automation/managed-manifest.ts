@@ -157,7 +157,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Artifact screenshots: seven nullable ADD COLUMN IF NOT EXISTS statements on artifact_revisions, no DEFAULT, no
   // index, no backfill. The postcondition hook (lib/migrations/artifact-screenshots.ts) is pinned in
   // REVIEWED_MIGRATION_CODE_SHA256 below. Digest recorded from the shipped SQL; please review it.
-  "077_artifact_screenshots": "cf897fc83af5b5f42ebb23923717060e45e1c5757f833b36d588d7d38eb98067"
+  "077_artifact_screenshots": "cf897fc83af5b5f42ebb23923717060e45e1c5757f833b36d588d7d38eb98067",
+  // Slide-deck Artifacts (nullable artifacts.kind + comment_element_anchors.slide_index;
+  // no index, no backfill, no hook). Last, matching its MIGRATIONS position. Migration
+  // only: no code reads the columns until the follow-up code PR.
+  "077_artifact_slide_decks": "6f437b34fd93814a4226e52bac4da61482b5da020f1ab9f6aa03bf33ff58a806"
 };
 
 /**

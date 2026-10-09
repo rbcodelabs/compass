@@ -528,6 +528,14 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "077_artifact_screenshots",
     filePath: path.join(process.cwd(), "prisma/migrations/077_artifact_screenshots/migration.sql"),
   },
+  {
+    // Slide-deck Artifacts: nullable artifacts.kind (NULL = DOCUMENT) and nullable
+    // comment_element_anchors.slide_index. Plain ADD COLUMN IF NOT EXISTS (DSQL: no
+    // constraints, no index, no backfill), so no async-wait or postcondition hook.
+    // Ships ahead of the code PR that declares and reads the columns, like 073.
+    name: "077_artifact_slide_decks",
+    filePath: path.join(process.cwd(), "prisma/migrations/077_artifact_slide_decks/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));
