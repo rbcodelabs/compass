@@ -19,6 +19,8 @@ import {
   validateHtmlUpload,
 } from "@/lib/artifacts"
 import { captureAndStoreArtifactThumbnail, scheduleArtifactThumbnailCapture } from "@/lib/artifact-thumbnail"
+import { assertKindAllowedForSource, parseArtifactKind, readArtifactKind } from "@/lib/artifact-kind"
+import { listArtifactSlides } from "@/lib/artifact-slides"
 
 export async function listArtifacts({ workspaceId, includeArchived = false }: { workspaceId: string; includeArchived?: boolean }) {
   const artifacts = await getPrisma().artifact.findMany({
@@ -26,7 +28,8 @@ export async function listArtifacts({ workspaceId, includeArchived = false }: { 
     include: { currentRevision: { select: { revisionNumber: true, filename: true, externalUrl: true } }, _count: { select: { revisions: true, links: true } } },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
   })
-  return ok(`${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"} found.`, { items: artifacts, count: artifacts.length })
+  const items = artifacts.map((artifact) => ({ ...artifact, kind: readArtifactKind(artifact.kind) }))
+  return ok(`${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"} found.`, { items, count: artifacts.length })
 }
 
 export async function getArtifact({ artifactId }: { artifactId: string }) {
@@ -42,13 +45,21 @@ export async function getArtifact({ artifactId }: { artifactId: string }) {
   const safeRevisions = artifact.revisions.map(
     ({ blobPathname: _privatePath, thumbnailPathname: _privateThumbnail, ...revision }) => revision
   )
-  const text = [`# ${artifact.title}`, `ID: ${artifact.id}`, `Type: ${artifact.sourceType}`, `Status: ${artifact.status}`, `Current revision: ${artifact.currentRevision?.revisionNumber ?? "None"}`, `Linked solutions: ${solutions.map((solution) => `${solution.title} (${solution.id})`).join(", ") || "None"}`].join("\n")
-  return ok(`${text}\nLinked decisions: ${decisions.map((decision) => `${decision.title} (${decision.id})`).join(", ") || "None"}`, { ...artifact, currentRevision: artifact.currentRevision ? { ...artifact.currentRevision, blobPathname: undefined, thumbnailPathname: undefined } : null, revisions: safeRevisions, solutions, decisions, links: undefined })
+  const kind = readArtifactKind(artifact.kind)
+  // A slide deck lists its slides (index + title, never the HTML) so a caller can
+  // anchor a comment to one with add_comment's slideIndex. Split from the current
+  // revision at request time, exactly as the viewer splits it.
+  const slides = kind === "SLIDE_DECK" ? await listArtifactSlides(artifact.currentRevision?.blobPathname ?? null) : undefined
+  const slideLine = slides ? `\nSlides: ${slides.length}${slides.map((slide) => `\n  ${slide.index}: ${slide.title ?? "(untitled)"}`).join("")}` : ""
+  const text = [`# ${artifact.title}`, `ID: ${artifact.id}`, `Type: ${artifact.sourceType}`, `Kind: ${kind}`, `Status: ${artifact.status}`, `Current revision: ${artifact.currentRevision?.revisionNumber ?? "None"}`, `Linked solutions: ${solutions.map((solution) => `${solution.title} (${solution.id})`).join(", ") || "None"}`].join("\n")
+  return ok(`${text}\nLinked decisions: ${decisions.map((decision) => `${decision.title} (${decision.id})`).join(", ") || "None"}${slideLine}`, { ...artifact, kind, ...(slides ? { slides } : {}), currentRevision: artifact.currentRevision ? { ...artifact.currentRevision, blobPathname: undefined, thumbnailPathname: undefined } : null, revisions: safeRevisions, solutions, decisions, links: undefined })
 }
 
-export async function createArtifact(input: { workspaceId: string; title: string; description?: string; sourceType: "HTML_UPLOAD" | "EXTERNAL_LINK"; html?: string; filename?: string; url?: string }) {
+export async function createArtifact(input: { workspaceId: string; title: string; description?: string; sourceType: "HTML_UPLOAD" | "EXTERNAL_LINK"; kind?: string; html?: string; filename?: string; url?: string }) {
   try {
     validateArtifactTitle(input.title)
+    const kind = parseArtifactKind(input.kind) ?? "DOCUMENT"
+    assertKindAllowedForSource(kind, input.sourceType)
     if (input.sourceType === "HTML_UPLOAD" && (input.url !== undefined || input.html === undefined)) {
       return fail("HTML_UPLOAD requires html and does not accept url.")
     }
@@ -56,17 +67,18 @@ export async function createArtifact(input: { workspaceId: string; title: string
       return fail("EXTERNAL_LINK requires url and does not accept html or filename.")
     }
     const artifact = input.sourceType === "HTML_UPLOAD"
-      ? await createHtmlArtifact({ workspaceId: input.workspaceId, title: input.title, description: input.description, filename: input.filename ?? "prototype.html", mimeType: "text/html", bytes: new TextEncoder().encode(input.html ?? ""), source: "MCP" }, getArtifactStorage())
+      ? await createHtmlArtifact({ workspaceId: input.workspaceId, title: input.title, description: input.description, filename: input.filename ?? "prototype.html", mimeType: "text/html", bytes: new TextEncoder().encode(input.html ?? ""), kind, source: "MCP" }, getArtifactStorage())
       : await createExternalArtifact({ workspaceId: input.workspaceId, title: input.title, description: input.description, url: input.url ?? "", source: "MCP" })
     if (input.sourceType === "EXTERNAL_LINK" && artifact.currentRevisionId) {
       scheduleArtifactThumbnailCapture({ artifactId: artifact.id, workspaceId: input.workspaceId, revisionId: artifact.currentRevisionId })
     }
-    return ok(`Artifact created.\nID: ${artifact.id}`, { id: artifact.id, title: artifact.title, sourceType: input.sourceType })
+    return ok(`Artifact created.\nID: ${artifact.id}`, { id: artifact.id, title: artifact.title, sourceType: input.sourceType, kind })
   } catch (error) { return fail(error instanceof Error ? error.message : "Could not create artifact") }
 }
 
-export async function updateArtifact(input: { artifactId: string; workspaceId: string; title?: string; description?: string | null; html?: string; filename?: string; url?: string }) {
+export async function updateArtifact(input: { artifactId: string; workspaceId: string; title?: string; description?: string | null; kind?: string; html?: string; filename?: string; url?: string }) {
   try {
+    const kind = parseArtifactKind(input.kind)
     if (input.html !== undefined && input.url !== undefined) return fail("Provide either html or url, not both.")
     if (input.title !== undefined) validateArtifactTitle(input.title)
     const prisma = getPrisma()
@@ -75,18 +87,19 @@ export async function updateArtifact(input: { artifactId: string; workspaceId: s
     if (existing.sourceType === "HTML_UPLOAD" && input.url !== undefined) return fail("HTML_UPLOAD artifacts accept html revisions, not url.")
     if (existing.sourceType === "EXTERNAL_LINK" && (input.html !== undefined || input.filename !== undefined)) return fail("EXTERNAL_LINK artifacts accept url revisions, not html or filename.")
     if (input.filename !== undefined && input.html === undefined) return fail("filename requires html.")
+    if (kind !== undefined) assertKindAllowedForSource(kind, existing.sourceType)
     if (input.html !== undefined) {
       const validation = validateHtmlUpload({ filename: input.filename ?? "prototype.html", mimeType: "text/html", bytes: new TextEncoder().encode(input.html) })
       if (!validation.ok) return fail(validation.error)
     }
     if (input.url !== undefined) validateExternalUrl(input.url)
     let revisionId: string | undefined
-    if (input.html !== undefined) revisionId = (await replaceHtmlArtifactRevision({ artifactId: input.artifactId, workspaceId: input.workspaceId, filename: input.filename ?? "prototype.html", mimeType: "text/html", bytes: new TextEncoder().encode(input.html), title: input.title, description: input.description, source: "MCP" }, getArtifactStorage())).id
+    if (input.html !== undefined) revisionId = (await replaceHtmlArtifactRevision({ artifactId: input.artifactId, workspaceId: input.workspaceId, filename: input.filename ?? "prototype.html", mimeType: "text/html", bytes: new TextEncoder().encode(input.html), title: input.title, description: input.description, kind, source: "MCP" }, getArtifactStorage())).id
     else if (input.url !== undefined) {
       revisionId = (await replaceExternalArtifactRevision({ artifactId: input.artifactId, workspaceId: input.workspaceId, url: input.url, title: input.title, description: input.description, source: "MCP" })).id
       scheduleArtifactThumbnailCapture({ artifactId: input.artifactId, workspaceId: input.workspaceId, revisionId })
     }
-    else if (input.title !== undefined || input.description !== undefined) await updateArtifactMetadata(input)
+    else if (input.title !== undefined || input.description !== undefined || kind !== undefined) await updateArtifactMetadata({ artifactId: input.artifactId, workspaceId: input.workspaceId, title: input.title, description: input.description, kind })
     return ok(`Artifact updated.\nID: ${input.artifactId}`, { id: input.artifactId, revisionId })
   } catch (error) { return fail(error instanceof Error ? error.message : "Could not update artifact") }
 }

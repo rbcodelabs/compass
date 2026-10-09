@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto"
 import getPrisma from "@/lib/db"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
 export { ARTIFACT_CSP, buildSandboxedHtml } from "@/lib/artifact-preview-html"
+import { assertKindAllowedForSource, readArtifactKind, storedArtifactKind, type ArtifactKind } from "@/lib/artifact-kind"
 
 export const MAX_ARTIFACT_HTML_BYTES = 2 * 1024 * 1024
 
@@ -63,7 +64,7 @@ async function assertWorkspace(workspaceId: string) {
 
 export async function createHtmlArtifact(input: {
   workspaceId: string; title: string; description?: string | null; filename: string; mimeType: string;
-  bytes: Uint8Array; createdById?: string | null; source: Source
+  bytes: Uint8Array; createdById?: string | null; source: Source; kind?: ArtifactKind
 }, storage: ArtifactStorage) {
   const validation = validateHtmlUpload(input)
   if (!validation.ok) throw new Error(validation.error)
@@ -79,7 +80,8 @@ export async function createHtmlArtifact(input: {
     return await prisma.$transaction(async (tx) => {
       const artifact = await tx.artifact.create({ data: {
         id: artifactId, workspaceId: input.workspaceId, title, description: input.description?.trim() || null,
-        sourceType: "HTML_UPLOAD", createdById: input.createdById ?? null, updatedById: input.createdById ?? null, source: input.source,
+        sourceType: "HTML_UPLOAD", kind: storedArtifactKind(input.kind ?? "DOCUMENT"),
+        createdById: input.createdById ?? null, updatedById: input.createdById ?? null, source: input.source,
       } })
       const revision = await tx.artifactRevision.create({ data: {
         id: revisionId, artifactId: artifact.id, revisionNumber: 1, blobPathname: stored.pathname,
@@ -117,7 +119,7 @@ export async function createExternalArtifact(input: {
 
 export async function replaceHtmlArtifactRevision(input: {
   artifactId: string; workspaceId: string; filename: string; mimeType: string; bytes: Uint8Array;
-  createdById?: string | null; source: Source; title?: string; description?: string | null
+  createdById?: string | null; source: Source; title?: string; description?: string | null; kind?: ArtifactKind
 }, storage: ArtifactStorage) {
   const validation = validateHtmlUpload(input)
   if (!validation.ok) throw new Error(validation.error)
@@ -142,6 +144,7 @@ export async function replaceHtmlArtifactRevision(input: {
         currentRevisionId: revision.id,
         ...(title !== undefined ? { title } : {}),
         ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
+        ...(input.kind !== undefined ? { kind: storedArtifactKind(input.kind) } : {}),
         updatedById: input.createdById ?? null,
         updatedAt: new Date(),
       } })
@@ -387,11 +390,13 @@ export async function archiveArtifact(input: { artifactId: string; workspaceId: 
   return prisma.artifact.update({ where: { id: artifact.id }, data: { status: "ARCHIVED", updatedById: input.updatedById ?? null, updatedAt: new Date() } })
 }
 
-export async function updateArtifactMetadata(input: { artifactId: string; workspaceId: string; title?: string; description?: string | null; updatedById?: string | null }) {
+export async function updateArtifactMetadata(input: { artifactId: string; workspaceId: string; title?: string; description?: string | null; kind?: ArtifactKind; updatedById?: string | null }) {
   const prisma = getPrisma()
-  const artifact = await prisma.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true } })
+  const artifact = await prisma.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true, sourceType: true } })
   if (!artifact) throw new Error("Artifact not found")
+  if (input.kind !== undefined) assertKindAllowedForSource(input.kind, artifact.sourceType)
   return prisma.artifact.update({ where: { id: artifact.id }, data: {
+    ...(input.kind !== undefined ? { kind: storedArtifactKind(input.kind) } : {}),
     ...(input.title !== undefined ? { title: validateArtifactTitle(input.title) } : {}),
     ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
     updatedById: input.updatedById ?? null, updatedAt: new Date(),
@@ -475,6 +480,7 @@ export function toArtifactDetailDto(artifact: {
   title: string
   description: string | null
   sourceType: string
+  kind?: string | null
   status: string
   currentRevision: {
     id?: string
@@ -495,6 +501,7 @@ export function toArtifactDetailDto(artifact: {
     title: artifact.title,
     description: artifact.description,
     sourceType: artifact.sourceType,
+    kind: readArtifactKind(artifact.kind),
     status: artifact.status,
     currentRevision: artifact.currentRevision
       ? {

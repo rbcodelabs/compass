@@ -1,3 +1,5 @@
+import { SLIDE_FIT_SETTLED_EVENT } from "@/lib/slide-fit"
+
 export const ARTIFACT_CSP = [
   "default-src 'none'",
   "script-src 'unsafe-inline' blob:",
@@ -30,6 +32,8 @@ export const ARTIFACT_PICK_MESSAGE_TYPES = {
   ELEMENT_PICKED: "ELEMENT_PICKED",
   RESOLVE_ANCHORS: "RESOLVE_ANCHORS",
   ANCHOR_RESULTS: "ANCHOR_RESULTS",
+  /** The slide fit has finished (or given up): the slide is on screen in its final position. */
+  FIT_SETTLED: "FIT_SETTLED",
 } as const
 
 const ARTIFACT_POLICY_PREFIX = `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}"><meta name="referrer" content="no-referrer">`
@@ -219,12 +223,24 @@ function onParentMessage(event){
   if(message.type===types.ENTER_PICK_MODE){startPicking();return}
   if(message.type===types.EXIT_PICK_MODE){stopPicking();return}
   if(message.type===types.RESOLVE_ANCHORS){
-    const anchors=Array.isArray(message.anchors)?message.anchors:[];
-    const results=anchors.map(resolveOne);
-    emitTyped({type:types.ANCHOR_RESULTS,results});
+    lastAnchors=Array.isArray(message.anchors)?message.anchors:[];
+    emitTyped({type:types.ANCHOR_RESULTS,results:lastAnchors.map(resolveOne)});
   }
 }
 window.addEventListener("message",onParentMessage);
+/* Pins are positioned from geometry snapshots, so re-report the last batch
+   whenever layout can have moved them: a resize (a scaled slide rescales) or
+   the slide fit settling after its entrance (lib/slide-fit.ts). One frame
+   later, so the fit's own resize handler has already run. */
+let lastAnchors=null;let reresolvePending=false;
+function scheduleReresolve(){
+  if(reresolvePending||!lastAnchors||lastAnchors.length===0)return;
+  reresolvePending=true;
+  requestAnimationFrame(()=>{reresolvePending=false;emitTyped({type:types.ANCHOR_RESULTS,results:lastAnchors.map(resolveOne)})});
+}
+window.addEventListener("resize",scheduleReresolve);
+window.addEventListener(${JSON.stringify(SLIDE_FIT_SETTLED_EVENT)},scheduleReresolve);
+window.addEventListener(${JSON.stringify(SLIDE_FIT_SETTLED_EVENT)},()=>emitTyped({type:types.FIT_SETTLED}));
 })();</script>`
   return `${ARTIFACT_POLICY_PREFIX}${bootstrap}${protectedHtml.slice(ARTIFACT_POLICY_PREFIX.length)}`
 }
