@@ -36,11 +36,13 @@ import {
   Boxes,
   Download,
   FileText,
+  Hand,
   History,
   Link2,
   ListTree,
   Lock,
   LockOpen,
+  MousePointer2,
   Redo2,
   Square,
   StickyNote,
@@ -86,7 +88,10 @@ import {
 import {
   createCanvasNode,
   edgeToFlow,
+  applyGroupDrag,
   fromFlow,
+  snapshotGroupDrag,
+  type GroupDragSnapshot,
   newCanvasId,
   nodeToFlow,
   refreshAutoSides,
@@ -174,6 +179,9 @@ function CanvasEditorBody({
   const readOnly = lockOverride ?? isNarrow
   const locked = readOnly || isRestoring
   const [editingId, setEditingId] = useState<string | null>(null)
+  // "select": dragging empty canvas draws a selection box (pan with middle/right mouse, Space, or two-finger scroll).
+  // "pan": dragging empty canvas pans, as before (Shift-drag still selects).
+  const [tool, setTool] = useState<"select" | "pan">("select")
   const [pickerOpen, setPickerOpen] = useState(false)
   const labels = useLabels()
   const [treeOpen, setTreeOpen] = useState(false)
@@ -330,7 +338,35 @@ function CanvasEditorBody({
     [setGraph]
   )
 
-  const onNodeDragStop = useCallback(() => commit(nodesRef.current, edgesRef.current), [commit])
+  // JSON Canvas groups are purely spatial, so dragging one must carry the cards
+  // it frames: snapshot them at drag start, then shift them with the group.
+  const groupDragRef = useRef<GroupDragSnapshot | null>(null)
+  const onNodeDragStart = useCallback((_event: unknown, _node: Node, dragged: Node[]) => {
+    groupDragRef.current = snapshotGroupDrag(
+      nodesRef.current,
+      dragged.map((n) => n.id)
+    )
+  }, [])
+  const onNodeDrag = useCallback(
+    (_event: unknown, _node: Node, dragged: Node[]) => {
+      const snapshot = groupDragRef.current
+      if (!snapshot) return
+      setGraph(
+        applyGroupDrag(
+          nodesRef.current,
+          snapshot,
+          dragged.map((n) => n.id)
+        ),
+        edgesRef.current
+      )
+    },
+    [setGraph]
+  )
+
+  const onNodeDragStop = useCallback(() => {
+    groupDragRef.current = null
+    commit(nodesRef.current, edgesRef.current)
+  }, [commit])
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -360,11 +396,12 @@ function CanvasEditorBody({
   )
 
   // ── Editing operations ──────────────────────────────────────────────────────
-  const patchNode = useCallback(
-    (id: string, patch: Partial<JsonCanvasNode>) => {
+  const patchNodes = useCallback(
+    (ids: string[], patch: Partial<JsonCanvasNode>) => {
+      const targets = new Set(ids)
       commit(
         nodesRef.current.map((node) => {
-          if (node.id !== id) return node
+          if (!targets.has(node.id)) return node
           const raw: JsonCanvasNode = { ...node.data.raw, ...patch }
           for (const key of Object.keys(patch)) if (patch[key] === undefined) delete raw[key]
           return { ...node, data: { raw } }
@@ -374,6 +411,7 @@ function CanvasEditorBody({
     },
     [commit]
   )
+  const patchNode = useCallback((id: string, patch: Partial<JsonCanvasNode>) => patchNodes([id], patch), [patchNodes])
 
   const patchEdge = useCallback(
     (id: string, patch: Partial<JsonCanvasEdge>) => {
@@ -581,9 +619,18 @@ function CanvasEditorBody({
   }
 
   // ── Selection inspector ─────────────────────────────────────────────────────
-  const selectedNode = nodes.find((n) => n.selected)
+  const selectedNodes = nodes.filter((n) => n.selected)
+  const selectedNode = selectedNodes[0]
   const selectedEdge = !selectedNode ? edges.find((e) => e.selected) : undefined
-  const inspectorColor = selectedNode?.data.raw.color ?? selectedEdge?.data.raw.color
+  const selectedColors = new Set(selectedNodes.map((n) => n.data.raw.color))
+  const mixedColor = selectedColors.size > 1
+  const inspectorColor = mixedColor ? undefined : (selectedNode?.data.raw.color ?? selectedEdge?.data.raw.color)
+  const selectAll = useCallback(() => {
+    setGraph(
+      nodesRef.current.map((n) => ({ ...n, selected: true })),
+      edgesRef.current.map((e) => ({ ...e, selected: false }))
+    )
+  }, [setGraph])
   function onKeyDown(event: React.KeyboardEvent) {
     const target = event.target as HTMLElement
     if (target.closest("input, textarea, [contenteditable=true]")) return
@@ -595,6 +642,14 @@ function CanvasEditorBody({
     } else if (meta && event.key.toLowerCase() === "y") {
       event.preventDefault()
       redo()
+    } else if (meta && event.key.toLowerCase() === "a" && !locked && editingId === null) {
+      event.preventDefault()
+      selectAll()
+    } else if (event.key === "Escape" && editingId === null) {
+      setGraph(
+        nodesRef.current.map((n) => (n.selected ? { ...n, selected: false } : n)),
+        edgesRef.current.map((e) => (e.selected ? { ...e, selected: false } : e))
+      )
     }
   }
 
@@ -658,6 +713,13 @@ function CanvasEditorBody({
             <span className="hidden lg:inline">Group</span>
           </ToolButton>
           <Divider />
+          <ToolButton label="Select tool: drag to select several objects" pressed={tool === "select"} onClick={() => setTool("select")}>
+            <MousePointer2 className="size-4" />
+          </ToolButton>
+          <ToolButton label="Pan tool: drag to move around the canvas" pressed={tool === "pan"} onClick={() => setTool("pan")}>
+            <Hand className="size-4" />
+          </ToolButton>
+          <Divider />
           <ToolButton label="Undo" disabled={locked || !history.canUndo()} onClick={undo}>
             <Undo2 className="size-4" />
           </ToolButton>
@@ -665,7 +727,7 @@ function CanvasEditorBody({
             <Redo2 className="size-4" />
           </ToolButton>
           <ToolButton
-            label="Delete selection"
+            label={selectedNodes.length > 1 ? `Delete ${selectedNodes.length} selected` : "Delete selection"}
             disabled={locked || (!selectedNode && !selectedEdge)}
             onClick={deleteSelection}
           >
@@ -713,45 +775,6 @@ function CanvasEditorBody({
         {decisionAction && <div className="shrink-0 pl-1">{decisionAction}</div>}
       </div>
 
-      {/* Selection inspector: color for nodes/edges, label and arrowheads for edges. */}
-      {(selectedNode || selectedEdge) && !locked && (
-        <div
-          data-testid="canvas-inspector"
-          className="flex items-center gap-3 overflow-x-auto border-b border-border-default bg-surface-panel px-4 py-1.5 text-xs sm:px-8"
-        >
-          <ColorPicker
-            value={inspectorColor}
-            onChange={(color) =>
-              selectedNode ? patchNode(selectedNode.id, { color }) : selectedEdge && patchEdge(selectedEdge.id, { color })
-            }
-          />
-          {selectedEdge && (
-            <>
-              <Divider />
-              <EdgeLabelInput
-                key={selectedEdge.id}
-                value={selectedEdge.data.raw.label ?? ""}
-                onCommit={(label) => patchEdge(selectedEdge.id, { label: label || undefined })}
-              />
-              <label className="flex shrink-0 items-center gap-1 whitespace-nowrap">
-                <Checkbox
-                  checked={(selectedEdge.data.raw.toEnd ?? "arrow") === "arrow"}
-                  onCheckedChange={(checked) => patchEdge(selectedEdge.id, { toEnd: checked ? "arrow" : "none" })}
-                />
-                Arrow at end
-              </label>
-              <label className="flex shrink-0 items-center gap-1 whitespace-nowrap">
-                <Checkbox
-                  checked={selectedEdge.data.raw.fromEnd === "arrow"}
-                  onCheckedChange={(checked) => patchEdge(selectedEdge.id, { fromEnd: checked ? "arrow" : "none" })}
-                />
-                Arrow at start
-              </label>
-            </>
-          )}
-        </div>
-      )}
-
       <CanvasCardPicker
         docId={doc.id}
         open={pickerOpen}
@@ -777,6 +800,57 @@ function CanvasEditorBody({
         onDragOver={onCanvasDragOver}
         onDrop={onCanvasDrop}
       >
+        {/* Floating selection inspector: overlays the canvas so selecting never reflows the page. */}
+        {(selectedNode || selectedEdge) && !locked && (
+          <div className="pointer-events-none absolute bottom-3 left-3 right-14 z-10 flex md:right-56">
+            <div
+              data-testid="canvas-inspector"
+              className="pointer-events-auto flex max-w-full items-center gap-3 overflow-x-auto rounded-lg border border-border-default bg-surface-card/95 px-3 py-1.5 text-xs shadow-md backdrop-blur-sm"
+            >
+              {selectedNodes.length > 1 && (
+                <span data-testid="canvas-selection-count" className="shrink-0 whitespace-nowrap font-medium text-text-secondary">
+                  {selectedNodes.length} selected
+                </span>
+              )}
+              <ColorPicker
+                value={inspectorColor}
+                mixed={mixedColor}
+                onChange={(color) =>
+                  selectedNode
+                    ? patchNodes(
+                        selectedNodes.map((n) => n.id),
+                        { color }
+                      )
+                    : selectedEdge && patchEdge(selectedEdge.id, { color })
+                }
+              />
+              {selectedEdge && (
+                <>
+                  <Divider />
+                  <EdgeLabelInput
+                    key={selectedEdge.id}
+                    value={selectedEdge.data.raw.label ?? ""}
+                    onCommit={(label) => patchEdge(selectedEdge.id, { label: label || undefined })}
+                  />
+                  <label className="flex shrink-0 items-center gap-1 whitespace-nowrap">
+                    <Checkbox
+                      checked={(selectedEdge.data.raw.toEnd ?? "arrow") === "arrow"}
+                      onCheckedChange={(checked) => patchEdge(selectedEdge.id, { toEnd: checked ? "arrow" : "none" })}
+                    />
+                    Arrow at end
+                  </label>
+                  <label className="flex shrink-0 items-center gap-1 whitespace-nowrap">
+                    <Checkbox
+                      checked={selectedEdge.data.raw.fromEnd === "arrow"}
+                      onCheckedChange={(checked) => patchEdge(selectedEdge.id, { fromEnd: checked ? "arrow" : "none" })}
+                    />
+                    Arrow at start
+                  </label>
+                </>
+              )}
+            </div>
+          </div>
+        )}
         <CanvasUiContext.Provider value={ui}>
           <ReactFlow
             nodes={nodes as unknown as Node[]}
@@ -784,6 +858,8 @@ function CanvasEditorBody({
             nodeTypes={canvasNodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onNodeDragStart={onNodeDragStart}
+            onNodeDrag={onNodeDrag}
             onNodeDragStop={onNodeDragStop}
             onConnect={onConnect}
             onDelete={onDelete}
@@ -795,6 +871,11 @@ function CanvasEditorBody({
             // Selecting a group must not lift it over the cards it frames.
             elevateNodesOnSelect={false}
             deleteKeyCode={locked ? null : ["Backspace", "Delete"]}
+            selectionOnDrag={tool === "select" && !locked}
+            panOnDrag={tool === "select" && !locked ? [1, 2] : true}
+            panOnScroll={tool === "select" && !locked}
+            panActivationKeyCode="Space"
+            multiSelectionKeyCode={["Meta", "Control", "Shift"]}
             fitView
             fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
             minZoom={0.05}
@@ -873,16 +954,25 @@ function ToolButton({
 
 const PRESET_NAMES: Record<string, string> = { "1": "Red", "2": "Orange", "3": "Yellow", "4": "Green", "5": "Cyan", "6": "Purple" }
 
-function ColorPicker({ value, onChange }: { value: string | undefined; onChange: (color: string | undefined) => void }) {
+function ColorPicker({
+  value,
+  mixed,
+  onChange,
+}: {
+  value: string | undefined
+  /** Several objects with different colors are selected: show no option as active. */
+  mixed?: boolean
+  onChange: (color: string | undefined) => void
+}) {
   return (
     <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Color">
       <button
         type="button"
         data-testid="color-none"
         aria-label="No color"
-        aria-pressed={value === undefined}
+        aria-pressed={value === undefined && !mixed}
         onClick={() => onChange(undefined)}
-        className={cn("size-5 rounded-full border border-border-default bg-surface-card", value === undefined && "ring-2 ring-primary")}
+        className={cn("size-5 rounded-full border border-border-default bg-surface-card", value === undefined && !mixed && "ring-2 ring-primary")}
       />
       {Object.entries(CANVAS_PRESET_COLORS).map(([key, hex]) => (
         <button
