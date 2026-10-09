@@ -1,11 +1,11 @@
 "use client"
 
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
-import { useRef, useState, useTransition } from "react"
-import { MessageSquare } from "lucide-react"
+import { useEffect, useRef, useState, useTransition } from "react"
+import { Camera, MessageSquare } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { archiveArtifact, linkArtifact, replaceArtifactRevision, unlinkArtifact, unlinkArtifactDecision, updateArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
+import { archiveArtifact, captureArtifactThumbnail, linkArtifact, replaceArtifactRevision, unlinkArtifact, unlinkArtifactDecision, updateArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
 import { ArtifactViewer } from "./artifact-viewer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,9 +14,10 @@ import { MarkdownContent } from "@/components/markdown-content"
 import { Discussion } from "@/components/comments/discussion"
 import { DocPanelShell } from "./doc-panel-shell"
 import type { PanelPin } from "@/lib/panel-pin"
+import type { ArtifactThumbnailDto } from "@/lib/artifacts"
 
 type ArtifactDetailProps = {
-  artifact: { id: string; title: string; description: string | null; sourceType: string; status: string; currentRevision: { externalUrl: string | null } | null; revisions: Array<{ id: string; revisionNumber: number; filename: string | null; byteSize: number | null; externalUrl: string | null; createdAt: string }> }
+  artifact: { id: string; title: string; description: string | null; sourceType: string; status: string; currentRevision: { externalUrl: string | null; thumbnail: ArtifactThumbnailDto | null } | null; revisions: Array<{ id: string; revisionNumber: number; filename: string | null; byteSize: number | null; externalUrl: string | null; createdAt: string }> }
   html?: string
   initialCommentsPin?: PanelPin
   workspaceId: string
@@ -53,7 +54,15 @@ export function ArtifactDetail({ artifact, html, workspaceId, basePath, solution
       </div>
     </header>
     {artifact.status === "ARCHIVED" && <div className="rounded-md bg-status-warning-surface p-3 text-sm text-status-warning">This artifact is archived.</div>}
-    <ArtifactViewer title={artifact.title} html={html} externalUrl={artifact.currentRevision?.externalUrl} artifactId={artifact.id} fullScreenHref={`${basePath}/artifacts/${artifact.id}/full-screen`} onFeedbackPosted={() => setCommentsVisits((visits) => visits + 1)} />
+    <ArtifactViewer title={artifact.title} html={html} externalUrl={artifact.currentRevision?.externalUrl} thumbnail={artifact.currentRevision?.thumbnail} artifactId={artifact.id} fullScreenHref={`${basePath}/artifacts/${artifact.id}/full-screen`} onFeedbackPosted={() => setCommentsVisits((visits) => visits + 1)} />
+    {artifact.sourceType === "EXTERNAL_LINK" && artifact.status === "ACTIVE" && artifact.currentRevision?.externalUrl && <ArtifactScreenshotControls
+      key={latestRevisionCreatedAt(artifact.revisions)}
+      workspaceId={workspaceId}
+      artifactId={artifact.id}
+      basePath={basePath}
+      hasThumbnail={Boolean(artifact.currentRevision.thumbnail)}
+      revisionCreatedAt={latestRevisionCreatedAt(artifact.revisions)}
+    />}
     <div className="grid gap-6 md:grid-cols-2">
       <form className="space-y-3 rounded-lg border p-4" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); run(() => updateArtifact(workspaceId, artifact.id, { title: String(data.get("title")), description: String(data.get("description")) }, basePath)) }}>
         <h2 className="font-semibold">Details</h2><Input name="title" defaultValue={artifact.title} required /><Textarea name="description" defaultValue={artifact.description ?? ""} /><Button type="submit" disabled={pending}>Save details</Button>
@@ -87,5 +96,56 @@ export function ArtifactDetail({ artifact, html, workspaceId, basePath, solution
         </div>
       </DocPanelShell>
     )} />}
+  </div>
+}
+
+/** How long after a link is saved the page keeps checking for its background capture. */
+const BACKGROUND_CAPTURE_WINDOW_MS = 2 * 60_000
+const BACKGROUND_CAPTURE_POLL_MS = 5_000
+
+function latestRevisionCreatedAt(revisions: Array<{ revisionNumber: number; createdAt: string }>) {
+  return revisions.reduce<{ revisionNumber: number; createdAt: string } | null>((latest, revision) => !latest || revision.revisionNumber > latest.revisionNumber ? revision : latest, null)?.createdAt ?? ""
+}
+
+/**
+ * The "Capture screenshot" / "Refresh screenshot" button for an external link.
+ *
+ * Saving a link schedules a background capture (scheduleArtifactThumbnailCapture),
+ * which lands a few seconds after the page has already rendered without one. So
+ * for a just-saved revision with no thumbnail yet, the page refreshes itself on a
+ * short interval until the screenshot appears or the window closes — after that
+ * the background capture is assumed to have failed, and the button is the retry.
+ */
+function ArtifactScreenshotControls({ workspaceId, artifactId, basePath, hasThumbnail, revisionCreatedAt }: {
+  workspaceId: string; artifactId: string; basePath: string; hasThumbnail: boolean; revisionCreatedAt: string
+}) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+  const [waiting, setWaiting] = useState(() => !hasThumbnail && Date.now() - Date.parse(revisionCreatedAt) < BACKGROUND_CAPTURE_WINDOW_MS)
+  const showWaiting = waiting && !hasThumbnail
+
+  useEffect(() => {
+    if (!showWaiting) return
+    const remaining = BACKGROUND_CAPTURE_WINDOW_MS - (Date.now() - Date.parse(revisionCreatedAt))
+    const poll = setInterval(() => router.refresh(), BACKGROUND_CAPTURE_POLL_MS)
+    const stop = setTimeout(() => setWaiting(false), Math.max(remaining, 0))
+    return () => { clearInterval(poll); clearTimeout(stop) }
+  }, [showWaiting, revisionCreatedAt, router])
+
+  const capture = () => startTransition(async () => {
+    setError(null)
+    const result = await captureArtifactThumbnail(workspaceId, artifactId, `${basePath}/artifacts/${artifactId}`)
+    if (result.ok) { setWaiting(false); router.refresh() } else setError(result.error)
+  })
+
+  return <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
+    <Button variant="outline" size="sm" disabled={pending} onClick={capture}>
+      <Camera aria-hidden />{pending ? "Capturing…" : hasThumbnail ? "Refresh screenshot" : "Capture screenshot"}
+    </Button>
+    <p role="status" aria-live="polite" className="text-xs text-text-subtle">
+      {pending ? "Rendering the page in a sandboxed browser — this takes a few seconds." : showWaiting ? "Capturing a screenshot in the background…" : null}
+    </p>
+    {error && <p role="alert" className="text-xs text-status-danger">{error}</p>}
   </div>
 }

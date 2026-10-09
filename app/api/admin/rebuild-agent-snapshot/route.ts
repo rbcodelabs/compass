@@ -3,7 +3,8 @@
 // The agent runtime boots each turn from a "golden" snapshot that already has
 // the agent dependencies installed (see lib/agent-sandbox.ts and ADR 0001 §3).
 // This endpoint (re)builds that snapshot and persists its id to the
-// AgentRuntimeConfig singleton. Run it whenever SANDBOX_DEPENDENCIES change.
+// AgentRuntimeConfig singleton. Run it whenever the snapshot recipe changes —
+// dependencies, system packages, or runtime (see computeDepsFingerprint).
 //
 //   GET  → current status (stored snapshot id, fingerprint, staleness)
 //   POST → build a fresh snapshot, persist it, delete the snapshot it
@@ -21,6 +22,14 @@
 //
 // Auth: MIGRATION_SECRET via the `x-migration-secret` header — same trust
 // boundary as /api/admin/migrate. No user session; server-to-server only.
+//
+// DURATION — since ADR-0019 the build also installs Chromium's system libraries
+// and downloads the browser, so it is minutes rather than seconds. `maxDuration`
+// below is the ceiling: if a rebuild ever exceeds it, the POST returns a
+// platform timeout while the sandbox keeps going, which can leave a built
+// snapshot that was never persisted (harmless but wasted — just rerun). Check
+// `timings.totalMs` in the response against this ceiling after any change that
+// adds a build step.
 
 import { NextRequest } from "next/server"
 import { buildGoldenSnapshot, computeDepsFingerprint, deleteGoldenSnapshot } from "@/lib/agent-sandbox"

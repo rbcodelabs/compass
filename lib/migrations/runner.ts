@@ -32,6 +32,7 @@ import { assertObjectiveCycleIdNullable, OBJECTIVE_OPTIONAL_CYCLE_MIGRATION } fr
 import { assertWorkspaceIdOnSolutionObjective, backfillWorkspaceIdOnSolutionObjective, getWorkspaceIdBackfillStatus, WORKSPACE_ID_MIGRATION, WORKSPACE_ID_RESIDUAL_MIGRATION } from "@/lib/migrations/workspace-id-on-solution-objective";
 import { TYPED_LINK_RESIDUAL_MIGRATION, TYPED_LINK_TABLES_MIGRATION, assertTypedLinkPreconditions, assertTypedLinkTables, backfillOpportunityObjectiveLinks, getTypedLinkStatus } from "@/lib/migrations/typed-link-tables";
 import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-manifest";
+import { assertArtifactScreenshotsMigration } from "@/lib/migrations/artifact-screenshots";
 
 
 
@@ -448,6 +449,16 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // No backfill; empty tables. The feature stays off behind FOLLOWING_ENABLED.
     name: "068_follows_notifications",
     filePath: path.join(process.cwd(), "prisma/migrations/068_follows_notifications/migration.sql"),
+  },
+  {
+    // ADR-0019 artifact screenshots. Placed after the entries that were already on main
+    // when this branch last synced, and BEFORE 068_workspace_id_on_solution_objective,
+    // because main pins its newest migration as the last registered one
+    // (__tests__/prisma-migrations.test.ts). Array order is the apply order; this is
+    // additive nullable ADD COLUMN IF NOT EXISTS only, so its position relative to the
+    // other entries does not change what any of them see.
+    name: "064_artifact_screenshots",
+    filePath: path.join(process.cwd(), "prisma/migrations/064_artifact_screenshots/migration.sql"),
   },
   {
     // Direct workspace_id on solutions and objectives (ADR Phase 0). Schema half
@@ -2042,6 +2053,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         await assertTypedLinkTables(client, schema, migration.name)
       }
       if (migration.name === OBJECTIVE_OPTIONAL_CYCLE_MIGRATION) await assertObjectiveCycleIdNullable(client, schema)
+      if (migration.name === "064_artifact_screenshots") await assertArtifactScreenshotsMigration(client, schema)
 
       // Only this distinct attempt becomes a successful receipt. A failed
       // attempt remains unfinished as forensic evidence and is never relabeled.

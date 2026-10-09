@@ -7,6 +7,7 @@ import { ArtifactPreview, type AnchorRequest, type AnchorResolutionMap, type Pic
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import type { ElementFingerprint } from "@/lib/artifact-anchor-match"
+import type { ArtifactThumbnailDto } from "@/lib/artifacts"
 
 type AnchoredComment = {
   id: string
@@ -31,6 +32,7 @@ export function ArtifactViewer({
   title,
   html,
   externalUrl,
+  thumbnail,
   artifactId,
   fullScreenHref,
   backHref,
@@ -40,6 +42,7 @@ export function ArtifactViewer({
   title: string
   html?: string
   externalUrl?: string | null
+  thumbnail?: ArtifactThumbnailDto | null
   artifactId: string
   /** Present only in the docked view — links out to the full-screen route. */
   fullScreenHref?: string
@@ -174,6 +177,7 @@ export function ArtifactViewer({
           title={title}
           html={html}
           externalUrl={externalUrl}
+          thumbnail={thumbnail}
           fill={fill}
           pickMode={picking}
           onElementPicked={(element) => {
