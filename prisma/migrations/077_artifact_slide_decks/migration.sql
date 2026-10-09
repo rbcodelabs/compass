@@ -1,0 +1,36 @@
+-- Migration 074: slide-deck Artifacts and slide-anchored comments.
+--
+-- Adds two nullable columns:
+--   artifacts.kind                     VARCHAR(30)  presentation kind of the
+--                                                   artifact's content
+--   comment_element_anchors.slide_index INTEGER     zero-based slide a comment
+--                                                   was left on
+--
+-- artifacts.kind is ORTHOGONAL to source_type. source_type says where the bytes
+-- come from (HTML_UPLOAD | EXTERNAL_LINK); kind says how to present them. A
+-- slide deck is still an HTML_UPLOAD -- it is stored, revised, sandboxed and
+-- screenshotted exactly like any other uploaded HTML -- it is just rendered one
+-- slide at a time. NULL reads as DOCUMENT, which is the behavior of every row
+-- that exists today. The only other value is SLIDE_DECK; allowed values are
+-- enforced in application code (lib/artifact-kind.ts).
+--
+-- comment_element_anchors.slide_index sits on the existing element-anchor
+-- extension rather than a new table: a slide comment IS an element anchor on a
+-- rendered artifact, scoped to one slide. NULL means "not slide-scoped", which is
+-- correct for every anchor that exists today. elementSelector is already
+-- nullable, so a comment on a whole slide is slide_index with no selector.
+--
+-- Deploy order (same as 073_workspace_thinking_model): this migration ships on
+-- its own and schema.prisma deliberately does not declare either column yet.
+-- Prisma selects every declared scalar, so declaring them before the columns
+-- exist would 500 every artifact and comment read. Apply this migration, then
+-- deploy the code PR that declares and reads them.
+--
+-- DSQL rules followed (matching 067_decision_answers and 073):
+--   - Plain ALTER TABLE ADD COLUMN, one DDL per statement. No index, no foreign
+--     key, no CHECK, no backfill.
+--   - No DEFAULT and no NOT NULL on ADD COLUMN: DSQL rejects any constraint on it.
+--   - IF NOT EXISTS so a resumed or repeated run is a no-op.
+
+ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS kind VARCHAR(30);
+ALTER TABLE comment_element_anchors ADD COLUMN IF NOT EXISTS slide_index INTEGER;
