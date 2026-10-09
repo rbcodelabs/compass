@@ -63,6 +63,7 @@ import {
   unlinkArtifactDecision,
   linkArtifact,
   listArtifacts,
+  prepareArtifactUploadTool,
   unlinkArtifact,
   updateArtifact,
 } from "@/lib/artifact-tool-handlers"
@@ -3206,13 +3207,24 @@ const _handler = createMcpHandler(
       title: "Get Artifact", description: "Returns artifact metadata (including kind), immutable revision history, linked Solutions and Decisions without exposing private storage keys or HTML content. A SLIDE_DECK also returns its slides as { index, title, description } — index is the zero-based slideIndex add_comment accepts.",
       inputSchema: { artifactId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, getArtifact)
+    const artifactUploadReceipt = z.string().min(1).optional().describe("Signed receipt from prepare_artifact_upload after the file was uploaded. Use instead of html so the document never passes through the conversation.")
+    register("prepare_artifact_upload", {
+      title: "Prepare Artifact HTML Upload",
+      description: "Prepares a short-lived direct upload (up to 2 MiB) to private storage for an HTML artifact so the file never has to be pasted into a tool call. " +
+        "Upload the file from disk with the returned client token, then pass the returned receipt as uploadReceipt to create_artifact or update_artifact. Prefer this over inline html for anything beyond a few KB.",
+      inputSchema: {
+        workspaceId: z.string().uuid().describe("UUID of the workspace that will own the artifact"),
+        filename: z.string().min(1).max(255).describe("Filename ending in .html"),
+        fileSize: z.number().int().min(1).max(2 * 1024 * 1024).describe("Exact file size in bytes"),
+      }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, prepareArtifactUploadTool)
     register("create_artifact", {
-      title: "Create Artifact", description: "Creates a first-class Artifact from self-contained HTML or an external http/https URL.",
-      inputSchema: { workspaceId: z.string().uuid(), title: z.string().min(1), description: z.string().optional(), sourceType: z.enum(["HTML_UPLOAD", "EXTERNAL_LINK"]), kind: z.enum(["DOCUMENT", "SLIDE_DECK"]).optional().describe("Presentation kind. SLIDE_DECK (HTML_UPLOAD only) renders the HTML one slide at a time, split by Reveal.js sections, .slide elements, top-level <section>s or <hr> breaks; DOCUMENT (default) renders it as one page."), html: z.string().optional(), filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+      title: "Create Artifact", description: "Creates a first-class Artifact from self-contained HTML or an external http/https URL. For HTML, pass uploadReceipt (from prepare_artifact_upload) instead of html to avoid embedding the document in the call.",
+      inputSchema: { workspaceId: z.string().uuid(), title: z.string().min(1), description: z.string().optional(), sourceType: z.enum(["HTML_UPLOAD", "EXTERNAL_LINK"]), kind: z.enum(["DOCUMENT", "SLIDE_DECK"]).optional().describe("Presentation kind. SLIDE_DECK (HTML_UPLOAD only) renders the HTML one slide at a time, split by Reveal.js sections, .slide elements, top-level <section>s or <hr> breaks; DOCUMENT (default) renders it as one page."), html: z.string().optional(), uploadReceipt: artifactUploadReceipt, filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, createArtifact)
     register("update_artifact", {
-      title: "Update Artifact", description: "Updates Artifact metadata and optionally creates a new immutable HTML or URL revision.",
-      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid(), title: z.string().min(1).optional(), description: z.string().nullable().optional(), kind: z.enum(["DOCUMENT", "SLIDE_DECK"]).optional().describe("Presentation kind. SLIDE_DECK (HTML_UPLOAD only) renders the HTML one slide at a time, split by Reveal.js sections, .slide elements, top-level <section>s or <hr> breaks; DOCUMENT (default) renders it as one page."), html: z.string().optional(), filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+      title: "Update Artifact", description: "Updates Artifact metadata and optionally creates a new immutable HTML or URL revision. For HTML, pass uploadReceipt (from prepare_artifact_upload) instead of html to avoid embedding the document in the call.",
+      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid(), title: z.string().min(1).optional(), description: z.string().nullable().optional(), kind: z.enum(["DOCUMENT", "SLIDE_DECK"]).optional().describe("Presentation kind. SLIDE_DECK (HTML_UPLOAD only) renders the HTML one slide at a time, split by Reveal.js sections, .slide elements, top-level <section>s or <hr> breaks; DOCUMENT (default) renders it as one page."), html: z.string().optional(), uploadReceipt: artifactUploadReceipt, filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, updateArtifact)
     register("create_feedback_source", {
       title: "Create Feedback Source",

@@ -30,7 +30,7 @@ describe("Artifact MCP update validation", () => {
     const result = await updateArtifact({
       artifactId: "art-1", workspaceId: "ws-1", html: "<html></html>", url: "https://example.com",
     })
-    expect(result.content[0].text).toMatch(/either html or url/i)
+    expect(result.content[0].text).toMatch(/only one of html, uploadReceipt or url/i)
     expect(prisma.artifact.findFirst).not.toHaveBeenCalled()
     expect(prisma.artifact.update).not.toHaveBeenCalled()
   })

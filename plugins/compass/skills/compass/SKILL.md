@@ -402,6 +402,24 @@ If uploading or authenticated display verification is blocked, report
 claim the handoff complete, make images public, or bypass auth. A vault path
 may identify an optional archive, but is not evidence accessible to Compass readers.
 
+### Uploading HTML Artifacts without bloating context
+
+Passing `html` inline to `create_artifact` / `update_artifact` puts the whole
+document in your context twice (once writing the file, once in the call). For
+any non-trivial page, upload from disk instead:
+
+1. Write the HTML to a local file and note its exact byte size (max 2 MiB).
+2. Call `prepare_artifact_upload(workspaceId, filename, fileSize)`.
+3. Upload with `put(pathname, file, { access: "private", token: clientToken,
+   contentType: "text/html" })` from `@vercel/blob/client`, reading the file
+   from disk. Never paste the HTML into a tool call. Keep the token in memory.
+4. Call `create_artifact` (or `update_artifact`) with `uploadReceipt` and **no**
+   `html` or `filename`. Receipts expire after ten minutes and work once.
+
+If validation fails, fix the file and call `prepare_artifact_upload` again
+(the failed staging upload is left behind, not reused). Direct upload needs the private Artifact Blob store and is
+unavailable in local dev; fall back to inline `html` there.
+
 #### Feedback
 
 | Tool | Description |
