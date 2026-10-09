@@ -16,10 +16,12 @@ interface KrHeroProps {
   unit: string | null;
   /** Percent of the owning cycle elapsed; null when there is no running cycle to pace against. */
   elapsed: number | null;
+  /** Not-yet-started period: show the figures only, no percentage or progress track. */
+  hideProgress?: boolean;
 }
 
 /** Big current/target figure with a pace-aware progress track. */
-export function KrHero({ current, target, unit, elapsed }: KrHeroProps) {
+export function KrHero({ current, target, unit, elapsed, hideProgress }: KrHeroProps) {
   const pct = target > 0 ? Math.max(0, Math.min(100, Math.round((current / target) * 100))) : 0;
   const u = unit ? ` ${unit}` : "";
   return (
@@ -30,10 +32,10 @@ export function KrHero({ current, target, unit, elapsed }: KrHeroProps) {
           of {target}
           {u}
         </span>
-        <em>{target > 0 ? `${pct}%` : "–"}</em>
+        {!hideProgress && <em>{target > 0 ? `${pct}%` : "–"}</em>}
       </div>
-      <PaceTrack progress={pct} elapsed={elapsed} legend={elapsed != null} />
-      {elapsed != null && target > 0 && paceVerdict(pct, elapsed, 3) !== "on-pace" ? (
+      {!hideProgress && <PaceTrack progress={pct} elapsed={elapsed} legend={elapsed != null} />}
+      {!hideProgress && elapsed != null && target > 0 && paceVerdict(pct, elapsed, 3) !== "on-pace" ? (
         <PaceNote progress={pct} elapsed={elapsed} />
       ) : null}
     </div>

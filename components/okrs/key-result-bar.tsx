@@ -39,6 +39,8 @@ interface KeyResultBarProps {
   supportingObjectiveOptions?: SupportingObjectiveOption[];
   /** Percent of the cycle elapsed (server-computed), drawn as a "today" tick on the progress track. Null/absent: no tick. */
   paceElapsed?: number | null;
+  /** Hide the progress bar and percentage (e.g. for a not-yet-started period). */
+  hideProgress?: boolean;
 }
 
 export interface SupportingObjectiveOption {
@@ -48,7 +50,7 @@ export interface SupportingObjectiveOption {
   cycleTitle: string;
 }
 
-export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, supportingObjectiveOptions, paceElapsed }: KeyResultBarProps) {
+export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, supportingObjectiveOptions, paceElapsed, hideProgress }: KeyResultBarProps) {
   const router = useRouter();
   const labels = useLabels();
   const [, startTransition] = useTransition();
@@ -157,7 +159,7 @@ export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, s
 
   return (
     <div ref={setNodeRef} style={style} className="okx-krow flex flex-col gap-1.5 group touch-none">
-      <div className="okx-kr-row">
+      <div className="okx-kr-row" data-no-progress={hideProgress ? "true" : undefined}>
         <div className="okx-kr-main">
           {/* Drag handle */}
           <button
@@ -173,21 +175,21 @@ export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, s
             {keyResult.title}
           </button>
         </div>
-        <div className="okx-kr-bar">
-          <PaceTrack progress={progress} elapsed={paceElapsed} small />
-        </div>
+        {!hideProgress && (
+          <div className="okx-kr-bar">
+            <PaceTrack progress={progress} elapsed={paceElapsed} small />
+          </div>
+        )}
         <div className="okx-kr-value">
-          <b>
-            {keyResult.current}
-            {unit}
-          </b>
+          {/* The unit reads once, after the target: "0 / 500000 users". */}
+          <b>{keyResult.current}</b>
           <span>
             {" / "}
             {keyResult.target}
             {unit}
           </span>
         </div>
-        <div className="okx-kr-pct">{progress}%</div>
+        {!hideProgress && <div className="okx-kr-pct">{progress}%</div>}
         <div ref={actionsRef} className="okx-kr-actions">
           <CheckInForm
             keyResultId={keyResult.id}

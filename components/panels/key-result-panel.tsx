@@ -136,7 +136,8 @@ export function KeyResultPanel({
       <PanelTitle title={data.title} edit={edit} />
       <MeasurementsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ targetType: "KEY_RESULT", targetId: data.id }} compact />
 
-      <KrHero current={data.current} target={data.target} unit={data.unit} elapsed={elapsed} />
+      <KrHero current={data.current} target={data.target} unit={data.unit} elapsed={elapsed}
+            hideProgress={timing?.phase === "upcoming"} />
 
       <section className="okx-psec" aria-label="Check-ins">
         <h3 className="okx-psec-h">

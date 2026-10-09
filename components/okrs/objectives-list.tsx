@@ -19,7 +19,6 @@ import {
 import { ObjectiveRow } from "@/components/okrs/objective-row";
 import {
   reorderObjective,
-  reorderKeyResult,
 } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import type {
   ObjectiveStatus,
@@ -65,6 +64,8 @@ type Props = {
   availableKRs?: ParentKROption[];
   supportingObjectiveOptions?: SupportingObjectiveOption[];
   paceElapsed?: number | null;
+  /** Hide progress visuals for a not-yet-started period. */
+  hideProgress?: boolean;
 };
 
 export function ObjectivesList({
@@ -75,6 +76,7 @@ export function ObjectivesList({
   availableKRs = [],
   supportingObjectiveOptions,
   paceElapsed,
+  hideProgress,
 }: Props) {
   const [objectives, setObjectives] = useState(initialObjectives);
   const [, startTransition] = useTransition();
@@ -121,7 +123,7 @@ export function ObjectivesList({
     >
       <SortableContext items={objectiveIds} strategy={verticalListSortingStrategy}>
         {objectives.map((obj) => (
-          <ObjectiveRowWithKRSort
+          <ObjectiveRow
             key={obj.id}
             objective={obj}
             orgSlug={orgSlug}
@@ -131,88 +133,9 @@ export function ObjectivesList({
             parentKeyResultId={obj.parentKeyResultId ?? null}
             supportingObjectiveOptions={supportingObjectiveOptions}
             paceElapsed={paceElapsed}
+            hideProgress={hideProgress}
           />
         ))}
-      </SortableContext>
-    </DndContext>
-  );
-}
-
-// ─── ObjectiveRow with inner KR sort context ──────────────────────────────────
-
-function ObjectiveRowWithKRSort({
-  objective,
-  orgSlug,
-  workspaceSlug,
-  revalidatePathStr,
-  availableKRs,
-  parentKeyResultId,
-  supportingObjectiveOptions,
-  paceElapsed,
-}: {
-  objective: ObjectiveData;
-  orgSlug: string;
-  workspaceSlug: string;
-  revalidatePathStr: string;
-  availableKRs?: ParentKROption[];
-  parentKeyResultId?: string | null;
-  supportingObjectiveOptions?: SupportingObjectiveOption[];
-  paceElapsed?: number | null;
-}) {
-  const [keyResults, setKeyResults] = useState(objective.keyResults);
-  const [, startTransition] = useTransition();
-
-  // Stable across server and client; without it @dnd-kit numbers its
-  // aria-describedby ids from a global counter and hydration mismatches.
-  const dndId = useId();
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
-  function handleKRDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const activeId = active.id as string;
-    const overId = over.id as string;
-
-    const oldIndex = keyResults.findIndex((kr) => kr.id === activeId);
-    const newIndex = keyResults.findIndex((kr) => kr.id === overId);
-
-    if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-      const reordered = arrayMove(keyResults, oldIndex, newIndex);
-      setKeyResults(reordered);
-
-      startTransition(async () => {
-        await reorderKeyResult(activeId, newIndex, revalidatePathStr);
-      });
-    }
-  }
-
-  const krIds = keyResults.map((kr) => kr.id);
-
-  // Merge sorted KRs back into the objective for ObjectiveRow
-  const objectiveWithSortedKRs = { ...objective, keyResults };
-
-  return (
-    <DndContext
-      id={dndId}
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragEnd={handleKRDragEnd}
-    >
-      <SortableContext items={krIds} strategy={verticalListSortingStrategy}>
-        <ObjectiveRow
-          objective={objectiveWithSortedKRs}
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-          revalidatePathStr={revalidatePathStr}
-          availableKRs={availableKRs}
-          parentKeyResultId={parentKeyResultId}
-          supportingObjectiveOptions={supportingObjectiveOptions}
-          paceElapsed={paceElapsed}
-        />
       </SortableContext>
     </DndContext>
   );

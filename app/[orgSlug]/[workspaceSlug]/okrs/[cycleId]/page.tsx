@@ -247,6 +247,9 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
   const timing = cycle ? cycleTiming(cycle.startDate, cycle.endDate, new Date()) : null;
   const paceElapsed = timing?.phase === "running" && cycleStatus === "ACTIVE" ? timing.percentElapsed : null;
 
+  // A period that has not started has nothing to measure yet: no rings, bars or percentages.
+  const upcoming = timing?.phase === "upcoming";
+
   const cyclePath = `/${orgSlug}/${workspaceSlug}/okrs/${cycleId}`;
 
   return (
@@ -257,7 +260,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
         <PageHeader title={noCycleTitle} description={`${labels.objective.plural} that are not tied to a planning period. They can support, and be supported by, ${labels.keyResult.plural} in any open ${labels.cycle.lower}.`} />
       )}
 
-      <CycleSummary rollup={rollup} timing={timing} />
+      {!upcoming && <CycleSummary rollup={rollup} timing={timing} />}
 
       <Suspense>
         <SquadFilterBar squads={squads} />
@@ -277,6 +280,7 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
           workspaceSlug={workspaceSlug}
           cyclePath={cyclePath}
           paceElapsed={paceElapsed}
+          hideProgress={upcoming}
           availableKRs={parentKROptions}
           supportingObjectiveOptions={eligibleSupportingObjectives.map((objective) => ({
             id: objective.id,

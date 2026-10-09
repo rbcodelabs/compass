@@ -160,6 +160,8 @@
   display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(110px, 1fr) 150px 44px auto;
   gap: 8px 16px; align-items: center;
 }
+/* Not-yet-started period: no bar or percentage, so drop their grid tracks. */
+.okx-kr-row[data-no-progress="true"] { grid-template-columns: minmax(0, 1fr) auto auto; }
 .okx-kr-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .okx-kr-name {
   min-width: 0; background: none; border: 0; padding: 0; text-align: left; font-size: 14px; font-weight: 500;
@@ -175,7 +177,7 @@
 .okx-kr-actions:has(form) { grid-column: 1 / -1; justify-content: stretch; }
 .okx-kr-actions form { flex: 1; min-width: 0; }
 @container (max-width: 680px) {
-  .okx-kr-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .okx-kr-row, .okx-kr-row[data-no-progress="true"] { grid-template-columns: minmax(0, 1fr) auto auto; }
   .okx-kr-main { grid-column: 1 / -1; }
   .okx-kr-value { text-align: left; }
   .okx-kr-actions { grid-column: 1 / -1; justify-content: flex-start; }
