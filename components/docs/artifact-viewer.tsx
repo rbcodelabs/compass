@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { createPortal } from "react-dom"
 import { ArrowLeft, ChevronLeft, ChevronRight, Maximize2, MessageSquarePlus, MessageSquareText } from "lucide-react"
 import { ArtifactDeckControls, ArtifactSlidePicker } from "./artifact-deck-controls"
 import { ArtifactPreview, type AnchorRequest, type AnchorResolutionMap, type PickedElement } from "./artifact-preview"
@@ -48,6 +49,7 @@ export function ArtifactViewer({
   fill = false,
   slides,
   initialSlideIndex = 0,
+  toolbarSlot,
 }: {
   title: string
   html?: string
@@ -66,6 +68,13 @@ export function ArtifactViewer({
   slides?: ArtifactSlideDto[]
   /** Zero-based slide to open on (clamped). */
   initialSlideIndex?: number
+  /**
+   * Docked view only: render the action toolbar (Leave feedback, View full
+   * screen, …) into this element — the page header — instead of above the
+   * preview. `undefined` keeps it inline; `null` means the slot has not mounted
+   * yet, so nothing renders until it does.
+   */
+  toolbarSlot?: HTMLElement | null
 }) {
   const isDeck = Boolean(slides && slides.length > 0)
   const slideCount = slides?.length ?? 0
@@ -352,43 +361,54 @@ export function ArtifactViewer({
     )
   }
 
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
+  // Slotted into the page header, labels collapse to icons when the content
+  // column is narrow (aria-label keeps the accessible name). Inline, always show.
+  const label = (text: string) => toolbarSlot === undefined ? text : <span className="hidden @2xl:inline">{text}</span>
+  const toolbarButtons = (
+    <>
+      <Button
+        type="button"
+        variant={picking ? "default" : "outline"}
+        size="sm"
+        aria-pressed={picking}
+        aria-label={picking ? "Cancel picking" : "Leave feedback"}
+        title={picking ? "Cancel picking" : "Leave feedback"}
+        onClick={() => (picking ? cancelPicking() : startPicking())}
+      >
+        <MessageSquarePlus aria-hidden />
+        {label(picking ? "Cancel picking" : "Leave feedback")}
+      </Button>
+      {fullScreenHref && (
+        <Link href={isDeck ? `${fullScreenHref}?slide=${slideIndex + 1}` : fullScreenHref} aria-label="View full screen" title="View full screen" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <Maximize2 aria-hidden />
+          {label("View full screen")}
+        </Link>
+      )}
+      {isDeck && (
         <Button
           type="button"
-          variant={picking ? "default" : "outline"}
+          variant={slideWideDraft ? "default" : "outline"}
           size="sm"
-          aria-pressed={picking}
-          onClick={() => (picking ? cancelPicking() : startPicking())}
+          aria-label="Comment on slide"
+          title="Comment on slide"
+          onClick={() => { setPicking(false); setPicked(null); setPostError(""); setSlideWideDraft(true) }}
         >
-          <MessageSquarePlus aria-hidden />
-          {picking ? "Cancel picking" : "Leave feedback"}
+          <MessageSquareText aria-hidden />
+          {label("Comment on slide")}
         </Button>
-        {fullScreenHref && (
-          <Link href={isDeck ? `${fullScreenHref}?slide=${slideIndex + 1}` : fullScreenHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            <Maximize2 aria-hidden />
-            View full screen
-          </Link>
-        )}
-        {isDeck && (
-          <Button
-            type="button"
-            variant={slideWideDraft ? "default" : "outline"}
-            size="sm"
-            onClick={() => { setPicking(false); setPicked(null); setPostError(""); setSlideWideDraft(true) }}
-          >
-            <MessageSquareText aria-hidden />
-            Comment on slide
-          </Button>
-        )}
-        {backHref && (
-          <Link href={isDeck ? `${backHref}?slide=${slideIndex + 1}` : backHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            <ArrowLeft aria-hidden />
-            Back to artifact
-          </Link>
-        )}
-      </div>
+      )}
+      {backHref && (
+        <Link href={isDeck ? `${backHref}?slide=${slideIndex + 1}` : backHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <ArrowLeft aria-hidden />
+          Back to artifact
+        </Link>
+      )}
+    </>
+  )
+
+  return (
+    <div className="space-y-3">
+      {toolbarSlot === undefined ? <div className="flex flex-wrap items-center gap-2">{toolbarButtons}</div> : toolbarSlot && createPortal(toolbarButtons, toolbarSlot)}
       {isDeck && currentSlide && (
         <nav aria-label="Slides" className="flex items-center gap-2">
           <Button type="button" variant="outline" size="sm" aria-label="Previous slide" disabled={slideIndex === 0} onClick={() => goToSlide(slideIndex - 1)}>
