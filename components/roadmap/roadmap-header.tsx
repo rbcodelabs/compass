@@ -9,6 +9,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
 import { useUrlState } from "@/hooks/use-url-state";
 import { RoadmapViewToggle } from "./roadmap-view-toggle";
 import { RoadmapGroupByToggle, type RoadmapGroupByFieldOption } from "./roadmap-group-by-toggle";
+import { WorkspaceSavedViewsMenu, type WorkspaceSavedViews } from "./workspace-saved-views";
 import type { TimelineZoom } from "./native-timeline/timeline-model";
 import { CUSTOM_FIELD_FILTER_PARAMS } from "@/lib/custom-field-filter-menu";
 import type { CustomFieldFilterGroup } from "@/lib/custom-field-filter";
@@ -81,7 +82,7 @@ function RailToggleButton({ rail }: { rail: RailToggle }) {
   );
 }
 
-export function RoadmapHeader({ squads, timeline, customFieldGroups = [], activeCustomFieldId = null, groupByValue, groupByOptions = [], cardSortHref }: {
+export function RoadmapHeader({ squads, timeline, customFieldGroups = [], activeCustomFieldId = null, groupByValue, groupByOptions = [], cardSortHref, savedViews }: {
   squads: SquadData[];
   timeline?: TimelineControls;
   /** Picklist fields on Roadmap Item that have options to filter by. */
@@ -94,6 +95,8 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
   groupByOptions?: RoadmapGroupByFieldOption[];
   /** Where the Card sort entry point goes (a round over Roadmap Items). Omitted = no link. */
   cardSortHref?: string;
+  /** Saved roadmap views for this workspace. Omitted = no picker (e.g. in isolated tests). */
+  savedViews?: WorkspaceSavedViews;
 }) {
   const { params, set } = useUrlState();
   const squad = params.get("squad");
@@ -193,6 +196,8 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
           </DropdownMenu>
           {timeline && <IconAction label="Reload timeline" disabled={timeline.saving} onClick={() => window.location.reload()}><RotateCw /></IconAction>}
         </div>
+        {/* Own row: the title column is only as wide as the title at 1280px in Timeline mode, and the controls column is auto-sized, so neither can absorb this button. */}
+        {savedViews && <div className="col-span-2 col-start-1 row-start-3 min-w-0 md:col-span-3"><WorkspaceSavedViewsMenu savedViews={savedViews} /></div>}
       </header>
     </TooltipProvider>
   );

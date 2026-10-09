@@ -3398,3 +3398,29 @@ model PortalHomeLayout {
   @@unique([workspaceId], map: "idx_portal_home_layouts_workspace")
   @@map("portal_home_layouts")
 }
+
+/// A saved roadmap view (migration 077): a named, reusable filter + display
+/// configuration. workspaceId NULL = the org-level cross-workspace roadmap
+/// (/{org}/roadmap); workspaceId set = that workspace's own roadmap. visibility is
+/// PERSONAL (owner only) or SHARED (everyone who can reach that surface). `filters`
+/// and `display` are JSON documents Zod-validated on every write and every read
+/// (lib/roadmap-views/schema.ts); sharing never widens data access, because the items
+/// a view returns are re-scoped to the viewer's readable workspaces at query time.
+/// No relations: Aurora DSQL enforces no foreign keys, so ids are validated in
+/// application code and workspace/org deletion removes rows explicitly. updatedAt is
+/// set by the application on every write.
+model RoadmapView {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  workspaceId    String?  @map("workspace_id") @db.Uuid
+  ownerId        String   @map("owner_id") @db.Uuid
+  name           String   @db.VarChar(120)
+  visibility     String   @default("PERSONAL") @db.VarChar(20)
+  filters        Json     @default("{}")
+  display        Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+
+  @@index([organizationId, workspaceId], map: "idx_roadmap_views_org_surface")
+  @@map("roadmap_views")
+}

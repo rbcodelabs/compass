@@ -27,6 +27,7 @@
 import { revalidatePath } from "next/cache"
 import getPrisma from "@/lib/db"
 import { normalizeWorkspaceRole } from "@/lib/roles"
+import { isReservedWorkspaceSlug } from "@/lib/slug"
 
 export interface CreateWorkspaceInput {
   /** Slug of the organization the workspace belongs to. */
@@ -123,6 +124,15 @@ export async function createWorkspaceInOrg({
       ok: false,
       code: "ORG_NOT_FOUND",
       error: `No organization found with slug "${orgSlug}".`,
+    }
+  }
+
+  // A static route under /[orgSlug]/ would shadow this workspace (see lib/slug.ts).
+  if (isReservedWorkspaceSlug(slug)) {
+    return {
+      ok: false,
+      code: "SLUG_TAKEN",
+      error: `"${slug}" is reserved for a built-in page. Please choose another slug.`,
     }
   }
 

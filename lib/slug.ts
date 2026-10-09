@@ -31,3 +31,17 @@ export function deriveSlug(value: string, fallback = ""): string {
 
 /** The slug shape accepted by org/workspace routes and the MCP input schema. */
 export const SLUG_PATTERN = /^[a-z0-9-]+$/
+
+/**
+ * Workspace slugs that would be shadowed by a static route under `/[orgSlug]/`.
+ * `/{org}/roadmap` (the cross-workspace roadmap) and `/{org}/settings` (org
+ * settings) are static segments, and Next matches static segments ahead of the
+ * dynamic `[workspaceSlug]`, so a workspace with one of these slugs would be
+ * unreachable. Add a slug here whenever a new static child is added under
+ * `app/[orgSlug]/`.
+ */
+export const RESERVED_WORKSPACE_SLUGS: ReadonlySet<string> = new Set(["roadmap", "settings"])
+
+export function isReservedWorkspaceSlug(slug: string): boolean {
+  return RESERVED_WORKSPACE_SLUGS.has(slug)
+}

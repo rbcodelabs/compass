@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { deriveSlug, SLUG_PATTERN } from "@/lib/slug"
+import { deriveSlug, isReservedWorkspaceSlug, SLUG_PATTERN } from "@/lib/slug"
 
 describe("deriveSlug", () => {
   it("lowercases, collapses runs of non-alphanumerics, and trims hyphens", () => {
@@ -29,5 +29,17 @@ describe("deriveSlug", () => {
       const slug = deriveSlug(input, "workspace")
       expect(SLUG_PATTERN.test(slug)).toBe(true)
     }
+  })
+})
+
+describe("isReservedWorkspaceSlug", () => {
+  it("reserves slugs that static /[orgSlug]/ routes would shadow", () => {
+    expect(isReservedWorkspaceSlug("roadmap")).toBe(true)
+    expect(isReservedWorkspaceSlug("settings")).toBe(true)
+  })
+
+  it("allows ordinary slugs, including ones that merely contain a reserved word", () => {
+    expect(isReservedWorkspaceSlug("growth")).toBe(false)
+    expect(isReservedWorkspaceSlug("roadmap-workspace")).toBe(false)
   })
 })

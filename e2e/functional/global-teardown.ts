@@ -109,6 +109,9 @@ export default async function globalTeardown() {
       [orgId]
     );
 
+    // Saved roadmap views are org-scoped (workspace_id is nullable), so delete by org before the per-workspace loop.
+    await pool.query(`DELETE FROM "${S}".roadmap_views WHERE organization_id = $1`, [orgId]);
+
     for (const { id: wsId } of wsRows) {
       // ── Delete in strict dependency order (no DB-level cascades) ──────────
       // The typed link tables have no foreign keys, so nothing removes their rows with the opportunities, solutions and

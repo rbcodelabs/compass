@@ -158,6 +158,18 @@ Checklist templates are workspace-owned and reusable: define one per tier (for e
 
 Checklist templates themselves (create_checklist_template, list_checklist_templates) are managed via the MCP API — no dedicated template-management UI ships yet.
 
+## Saved Views
+
+Save the way you like to look at the roadmap and come back to it with one click. On a workspace roadmap, open the **Saved views** menu to save the current squad, custom-field filter, grouping and Board/Timeline choice. Opening a saved view applies those settings to the URL, so you can still change or clear any of them afterwards.
+
+Views are **personal** by default. The owner can share a view with the workspace or the whole organization. Only the owner can edit a view; the owner (or an admin, for shared views) can delete it. Sharing a view never widens access to the items themselves.
+
+## All Roadmaps (Cross-Workspace)
+
+**All roadmaps** in the sidebar opens a read-only roadmap at `/[org]/roadmap` that combines every workspace in the organization you can read. Filter by workspace, horizon, squad, status, date range, or linked key result or solution, then group and sort the results. Each item links back to its own workspace, where you edit it. The same saved views menu is available here.
+
+Because `roadmap` and `settings` are used by these organization pages, they cannot be used as workspace slugs.
+
 ## Keeping the Roadmap Honest
 
 A roadmap that isn't updated is worse than no roadmap — it creates false confidence. Compass is designed to make updates low-friction: drag to move between horizons, click to update details. The links to opportunities, KRs, and experiments mean the roadmap is always one click away from the evidence behind it.

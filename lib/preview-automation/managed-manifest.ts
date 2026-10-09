@@ -153,7 +153,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "075_roadmap_item_provenance": "2d4d390790ff8cb20c7918e0b56b2a37ccbc99eddc5216622668ba50602ed0e6",
   // External / manual research studies: five nullable ADD COLUMNs (research_studies and
   // research_sessions), no index, no backfill, no hook. Digest recorded from the shipped SQL; please review it.
-  "076_research_external_studies": "01cc40f387b9171fc6761f598db0ce20e0dae1df9ca58f9755bdbe481bd97cb0"
+  "076_research_external_studies": "01cc40f387b9171fc6761f598db0ce20e0dae1df9ca58f9755bdbe481bd97cb0",
+  // Saved roadmap views: one new table plus one non-unique async index, no backfill.
+  // Digest recorded from the shipped SQL; please review it.
+  "078_roadmap_views": "d6b2691e1ac0ce64c5c684826be4b08c98bda4cca75d1c06ec18ce3933791827"
 };
 
 /**
@@ -187,6 +190,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 075 postcondition (both roadmap_items columns present, typed and nullable before the receipt).
   "075_roadmap_item_provenance": {
     "lib/migrations/roadmap-item-provenance.ts": "6f99f4829eccd6864d7dd476a01299bb3027246f4d6e6d2fdbd255980b88f4f5",
+  },
+  // The 078 postcondition (table shape plus a valid, ready, non-unique org/workspace index before the receipt).
+  "078_roadmap_views": {
+    "lib/migrations/roadmap-views.ts": "4806f3fc13db8ef09638ade7e469f904a01a9659ded19ca8a821d0402f5009d6",
   },
 };
 

@@ -6,6 +6,8 @@ vi.mock("@/lib/db", () => ({ default: () => new Proxy({}, { get: (_, name) => na
 const railCookie = vi.hoisted(() => ({ value: undefined as string | undefined }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "compass_roadmap_rail" && railCookie.value ? { value: railCookie.value } : undefined) }) }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn(), notFound: vi.fn() }));
+// Saved views have their own tests (roadmap-views-*); this file is about timeline routing, so the viewer has no saved views.
+vi.mock("@/lib/roadmap-views/service", () => ({ resolveRoadmapViewActor: async () => null, listRoadmapViews: async () => [] }));
 vi.mock("@/components/roadmap/roadmap-board", () => ({ RoadmapBoard: () => null }));
 vi.mock("@/components/roadmap/native-timeline/native-timeline", () => ({ NativeTimeline: () => null }));
 vi.mock("@/components/roadmap/roadmap-filters", () => ({ RoadmapFilters: () => null }));

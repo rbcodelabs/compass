@@ -3,6 +3,16 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { canShareOnSurface } from "@/lib/roadmap-views/access";
+import { listRoadmapViews, resolveRoadmapViewActor } from "@/lib/roadmap-views/service";
+import { ROADMAP_URL_PARAMS, type RawSearchParams } from "@/lib/roadmap-views/schema";
+import {
+  isWorkspaceStateModified,
+  needsSavedViewExpansion,
+  resolveWorkspaceRoadmapState,
+  workspacePageParams,
+  workspaceRoadmapHref,
+} from "@/lib/roadmap-views/workspace";
 import getPrisma from "@/lib/db";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
 import { NativeTimeline } from "@/components/roadmap/native-timeline/native-timeline";
@@ -31,7 +41,7 @@ export const metadata = {
 
 interface RoadmapPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-  searchParams: Promise<{ squad?: string; view?: string; field?: string; fieldValue?: string; groupBy?: string }>;
+  searchParams: Promise<RawSearchParams>;
 }
 
 export default async function RoadmapPage({ params, searchParams }: RoadmapPageProps) {
@@ -39,14 +49,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const {
-    squad: squadFilter,
-    view: viewParam,
-    field: fieldParam,
-    fieldValue: fieldValueParam,
-    groupBy: groupByParam,
-  } = await searchParams;
-  const view = viewParam === "timeline" ? "timeline" : "board";
+  const query = await searchParams;
   // Read on the server so a saved open/closed choice is in the first paint, not applied after hydration.
   const initialRailPreference = parseRailPreference((await cookies()).get(RAIL_COOKIE_NAME)?.value);
   const prisma = getPrisma();
@@ -59,6 +62,42 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   });
 
   if (!workspace) notFound();
+
+  // Saved views: resolve the selected view (if any) into the same squad / field /
+  // groupBy / view params the page has always read, so everything below is unchanged.
+  const actor = await resolveRoadmapViewActor(session.user.id, orgSlug);
+  const savedViews = actor ? await listRoadmapViews(actor, workspace.id) : [];
+  const savedParam = query[ROADMAP_URL_PARAMS.savedView];
+  const savedId = Array.isArray(savedParam) ? savedParam[0] : savedParam;
+  // An id that was deleted, or that this viewer cannot see, just means "no saved view".
+  const savedView = savedViews.find((v) => v.id === savedId) ?? null;
+  const viewState = resolveWorkspaceRoadmapState(query, savedView);
+  const basePath = `/${orgSlug}/${workspaceSlug}/roadmap`;
+  // `?saved=<id>` alone expands to the full state so the header controls, which edit
+  // single URL params, can also clear something a saved view had set.
+  if (savedView && needsSavedViewExpansion(query)) redirect(workspaceRoadmapHref(basePath, viewState, savedView.id));
+  // Without a saved view the page reads its own params exactly as it always has (untouched,
+  // so a stale or hand-edited link behaves as before); with one, the resolved state drives them.
+  const pick = (key: string) => {
+    const raw = query[key];
+    return (Array.isArray(raw) ? raw[0] : raw) || undefined;
+  };
+  const resolved = workspacePageParams(viewState);
+  const squadFilter = savedView ? resolved.squad : pick("squad");
+  const fieldParam = savedView ? resolved.field : pick("field");
+  const fieldValueParam = savedView ? resolved.fieldValue : pick("fieldValue");
+  const groupByParam = savedView ? resolved.groupBy : pick("groupBy");
+  const view = savedView ? resolved.view : pick("view");
+  const savedViewsProps = actor
+    ? {
+        orgSlug,
+        workspaceId: workspace.id,
+        views: savedViews,
+        savedViewId: savedView?.id ?? null,
+        modified: isWorkspaceStateModified(viewState, savedView),
+        canShare: canShareOnSurface(actor, workspace.id),
+      }
+    : undefined;
 
   const [roadmapFieldDefs, customFieldFilter] = await Promise.all([
     loadCustomFieldDefinitions(prisma, {
@@ -284,6 +323,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
             customFieldValuesByItemId={customFieldValuesByItemId}
             groupByOptions={groupByOptions}
             launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
+            savedViews={savedViewsProps}
           />
         </Suspense>
       ) : (
@@ -294,6 +334,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
               customFieldGroups={customFieldGroups}
               activeCustomFieldId={customFieldFilter?.fieldId ?? null}
               cardSortHref={cardSortHref}
+              savedViews={savedViewsProps}
             />
           </Suspense>
           <div data-slot="workspace-content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
