@@ -20,7 +20,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
-  Sparkles,
   Target,
   Waypoints,
   Clock3,
@@ -89,17 +88,18 @@ const buildBaseNavItems = (okrsLabel: string, discoveryLabel: string, solutionsL
   { label: "Decisions", path: "decisions", Icon: MessageSquareCheck },
   { label: "Docs", path: "docs", Icon: BookOpen },
   { label: "Canvas", path: "canvas", Icon: Waypoints },
-  { label: "Agent", path: "agent", Icon: Sparkles },
 ], discoveryFirst)
 
 /**
  * Opens/closes the rail (Agent, Help and Library views, switched from the rail header). Lives in the footer beside the
  * account menu rather than in the main nav.
  *
- * The nav's Agent row has to stay a plain link to the full-page agent screen —
- * both surfaces are keepers, and the page is the one that survives a refresh and
- * a shared URL. A sibling menu row (not `SidebarMenuAction`, which hides when
- * the nav collapses to icons) keeps the control visible in both nav states.
+ * There is deliberately no "Agent" page row in the main nav: the full-page agent
+ * screen (`/agent`, still a real route that survives a refresh and a shared URL)
+ * is reached from the rail's own expand icon, which carries the current
+ * conversation with it. This toggle is therefore the only agent entry point in
+ * the sidebar. It is a menu row (not `SidebarMenuAction`, which hides when the
+ * nav collapses to icons) so it stays visible in both nav states.
  * Help is one view over, or "?" from anywhere.
  *
  * Returns `null` outside a workspace — this sidebar also renders in the settings
