@@ -1,81 +1,31 @@
-import getPrisma from "@/lib/db";
 import { requireWorkspaceContext } from "@/lib/workspace-context";
-import { cookies } from "next/headers";
-import { buildDocTree } from "@/lib/doc-tree";
-import { DocsLibraryPane } from "@/components/docs/docs-library-pane";
-import { DocsLibraryProvider } from "@/components/docs/docs-library-context";
-import {
-  DOCS_LIBRARY_COOKIE_NAME,
-  parseDocsLibraryState,
-} from "@/lib/docs-library-pane";
-import { DocsMobileDrawer } from "@/components/docs/docs-mobile-drawer";
 
 interface DocsLayoutProps {
   children: React.ReactNode;
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
 }
 
+/**
+ * The Docs tree no longer lives here. It is the "Library" view of the agent
+ * rail (components/agent/rail-library-pane.tsx), mounted once in the workspace
+ * layout; the Docs headers carry a DocsLibraryButton that opens it.
+ *
+ * What remains is the workspace gate (child pages rely on it) and the scroll
+ * container they render into.
+ */
 export default async function DocsLayout({
   children,
   params,
 }: DocsLayoutProps) {
   const { orgSlug, workspaceSlug } = await params;
-  const prisma = getPrisma();
-  const cookieStore = await cookies();
 
   // Resolves from the request memo — the parent workspace layout already
   // asked for this exact context, so this costs no additional statements.
-  const { workspace } = await requireWorkspaceContext(orgSlug, workspaceSlug);
-
-  const [rawDocs, artifacts] = await Promise.all([prisma.doc.findMany({
-    where: { workspaceId: workspace.id },
-    select: {
-      id: true,
-      title: true,
-      icon: true,
-      parentId: true,
-      sortOrder: true,
-      docType: true,
-    },
-    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-  }), prisma.artifact.findMany({
-    where: { workspaceId: workspace.id, status: "ACTIVE" },
-    select: { id: true, title: true, sourceType: true },
-    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-  })]);
-
-  const tree = buildDocTree(rawDocs);
+  await requireWorkspaceContext(orgSlug, workspaceSlug);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Mobile-only toolbar: Pages drawer trigger */}
-      <div className="flex md:hidden items-center px-3 py-2 border-b border-border-default bg-surface-panel shrink-0">
-        <DocsMobileDrawer
-          docs={tree}
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-          workspaceId={workspace.id}
-          artifacts={artifacts}
-        />
-      </div>
-
-      <DocsLibraryProvider
-        initialState={parseDocsLibraryState(cookieStore.get(DOCS_LIBRARY_COOKIE_NAME)?.value)}
-      >
-        <div className="flex flex-1 overflow-hidden">
-          {/* Library sidebar — hidden on mobile (drawer above), resizable and
-              collapsible on md+. State comes from a cookie so the first paint
-              is already the user's width. */}
-          <DocsLibraryPane
-            docs={tree}
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
-            workspaceId={workspace.id}
-            artifacts={artifacts}
-          />
-          <div className="flex-1 overflow-y-auto min-w-0">{children}</div>
-        </div>
-      </DocsLibraryProvider>
+      <div className="flex-1 overflow-y-auto min-w-0">{children}</div>
     </div>
   );
 }

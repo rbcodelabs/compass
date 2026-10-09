@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { Box, ExternalLink, FileText, PanelLeftClose, Plus, ChevronRight, Shapes, Upload } from "lucide-react";
+import { Box, ExternalLink, FileText, Plus, ChevronRight, Shapes, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createDoc, createCanvasDoc } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
 import { parseJsonCanvas, MAX_CANVAS_BYTES } from "@/lib/json-canvas";
@@ -42,11 +42,6 @@ interface DocTreeSidebarProps {
   workspaceSlug: string;
   workspaceId: string;
   artifacts: ArtifactNavItem[];
-  /**
-   * When provided, a collapse button is shown in the header. Only the desktop
-   * pane passes this; the mobile drawer closes via its own Sheet controls.
-   */
-  onCollapse?: () => void;
 }
 
 export function DocTreeSidebar({
@@ -55,7 +50,6 @@ export function DocTreeSidebar({
   workspaceSlug,
   workspaceId,
   artifacts,
-  onCollapse,
 }: DocTreeSidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -154,20 +148,6 @@ export function DocTreeSidebar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        {onCollapse && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={onCollapse}
-            aria-label="Collapse library"
-            title="Collapse library"
-            data-testid="library-collapse"
-            className="text-text-subtle hover:text-text-primary"
-          >
-            <PanelLeftClose className="w-3.5 h-3.5" />
-          </Button>
-        )}
         </div>
         <input
           ref={importInput}

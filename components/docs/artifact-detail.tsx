@@ -14,7 +14,7 @@ import { MarkdownContent } from "@/components/markdown-content"
 import { Discussion } from "@/components/comments/discussion"
 import { DocPanelShell } from "./doc-panel-shell"
 import type { PanelPin } from "@/lib/panel-pin"
-import { DocsLibraryExpandButton } from "@/components/docs/docs-library-context"
+import { DocsLibraryButton } from "@/components/docs/docs-library-button"
 
 type ArtifactDetailProps = {
   artifact: { id: string; title: string; description: string | null; sourceType: string; status: string; currentRevision: { externalUrl: string | null } | null; revisions: Array<{ id: string; revisionNumber: number; filename: string | null; byteSize: number | null; externalUrl: string | null; createdAt: string }> }
@@ -47,7 +47,7 @@ export function ArtifactDetail({ artifact, html, workspaceId, basePath, solution
     <div data-slot="artifact-content-column" className="min-w-0 flex-1 overflow-y-auto">
     <div className="mx-auto max-w-5xl p-4 sm:p-8 space-y-6">
     <header className="flex flex-col items-start justify-between gap-4 sm:flex-row">
-      <div className="min-w-0"><div className="text-xs font-medium uppercase tracking-wide text-primary">Artifact · {artifact.sourceType === "EXTERNAL_LINK" ? "External" : "HTML prototype"}</div><div className="flex items-start gap-2"><DocsLibraryExpandButton className="mt-1" /><h1 className="break-words [overflow-wrap:anywhere] text-2xl font-semibold text-text-primary">{artifact.title}</h1></div>{artifact.description && <MarkdownContent className="mt-1 text-text-secondary">{artifact.description}</MarkdownContent>}</div>
+      <div className="min-w-0"><div className="text-xs font-medium uppercase tracking-wide text-primary">Artifact · {artifact.sourceType === "EXTERNAL_LINK" ? "External" : "HTML prototype"}</div><div className="flex items-start gap-2"><DocsLibraryButton className="mt-1" /><h1 className="break-words [overflow-wrap:anywhere] text-2xl font-semibold text-text-primary">{artifact.title}</h1></div>{artifact.description && <MarkdownContent className="mt-1 text-text-secondary">{artifact.description}</MarkdownContent>}</div>
       <div className="flex shrink-0 flex-wrap gap-2">
         <Button ref={commentsTrigger} variant="outline" aria-expanded={commentsOpen} onClick={() => changeCommentsOpen(!commentsOpen)}><MessageSquare aria-hidden />Comments</Button>
         {artifact.status === "ACTIVE" && <Button variant="outline" disabled={pending} onClick={() => run(() => archiveArtifact(workspaceId, artifact.id, basePath))}>Archive</Button>}

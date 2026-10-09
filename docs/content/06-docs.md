@@ -10,15 +10,15 @@ section: "Core Features"
 
 The Docs section brings Markdown **Docs**, **Diagrams**, and **Artifacts** together in one Library. Use Docs for PRDs and research notes, Diagrams for visual thinking, and Artifacts for prototypes and other solution deliverables.
 
-The Library mixes root items alphabetically, keeping child pages beneath their parents. Search **Find in library** across titles, or use **All**, **Docs**, **Diagrams**, and **Artifacts** to narrow the list. Matching nested items keep their parent context visible. Search, filters, and **New** stay above a single scrolling list, including in the mobile Docs drawer.
+The Library mixes root items alphabetically, keeping child pages beneath their parents. Search **Find in library** across titles, or use **All**, **Docs**, **Diagrams**, and **Artifacts** to narrow the list. Matching nested items keep their parent context visible. Search, filters, and **New** stay above a single scrolling list, including on mobile.
 
 Use **New** to create a doc, create a diagram, import a `.canvas` file, or add an artifact.
 
-On desktop, drag the Library's right edge to resize it (200–480px, and never so wide that the editor drops below 480px). Double-click the edge to reset it to the default width, or focus it and use the arrow keys (hold Shift for larger steps, Home/End for the limits). Use the collapse button next to **New** to hide the Library completely; an expand button then appears beside the page title to bring it back. Search text and filters are kept while it is collapsed. Your width and collapsed state are remembered in this browser.
+The Library lives in the agent sidebar, not in a sidebar of its own. Click the **Show library** button (the library icon) beside the page title in any Docs page, diagram, or artifact to open the agent sidebar on its **Library** view; click it again to close the sidebar. You can also switch to **Library** from the sidebar's own view switcher at any time, from any screen. Opening an item loads it in the main area and leaves the sidebar where it is, and the sidebar keeps your agent conversation running while you browse. Its width, and whether it is open, are remembered in this browser. On narrow screens the sidebar opens as an overlay.
 
-![Library component on desktop with mixed documents, diagrams, and artifacts](/screenshots/docs/docs-library-desktop.png)
+![Library in the agent sidebar on desktop with mixed documents, diagrams, and artifacts](/screenshots/docs/docs-library-desktop.png)
 
-![Library component in the mobile Docs drawer](/screenshots/docs/docs-library-mobile.png)
+![Library in the agent sidebar on mobile](/screenshots/docs/docs-library-mobile.png)
 
 These Library illustrations use synthetic content in an isolated component harness. They show the shared navigation component; full workspace behavior is covered separately by functional tests.
 
@@ -28,7 +28,7 @@ These Library illustrations use synthetic content in an isolated component harne
 
 ## Page Hierarchy
 
-Documents are organised as a tree. Each page can have child pages nested beneath it. The left sidebar in the Docs section shows your full tree. Click any page title to open it, or click the **+** icon next to a parent page to create a child page.
+Documents are organised as a tree. Each page can have child pages nested beneath it. The Library (in the agent sidebar) shows your full tree. Click any page title to open it, or click the **+** icon next to a parent page to create a child page.
 
 Drag a page from the Library onto a diagram to add a live Compass card.
 

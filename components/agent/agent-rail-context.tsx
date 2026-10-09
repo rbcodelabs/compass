@@ -98,6 +98,8 @@ type AgentRailContextValue = {
   docsIntent: DocsIntent | null;
   /** Open the rail on the Help view, optionally straight to an article or a search. */
   openDocs: (options?: { slug?: string; anchor?: string; query?: string }) => void;
+  /** Open the rail on the Library view (the Docs tree). */
+  openLibrary: () => void;
   agentSeed: AgentSeed | null;
   /** Switch to the Agent view with a context chip and a prefilled, unsent composer. */
   askAgent: (seed: Omit<AgentSeed, "id">) => void;
@@ -211,6 +213,13 @@ export function AgentRailProvider({
     [available, persist, width],
   );
 
+  const openLibrary = useCallback(() => {
+    if (!available) return;
+    setView("library");
+    setOpen(true);
+    persist({ pinned: true, width });
+  }, [available, persist, width]);
+
   const askAgent = useCallback(
     (seed: Omit<AgentSeed, "id">) => {
       if (!available) return;
@@ -275,6 +284,7 @@ export function AgentRailProvider({
       setView,
       docsIntent,
       openDocs,
+      openLibrary,
       agentSeed,
       askAgent,
       clearAgentSeed,
@@ -292,6 +302,7 @@ export function AgentRailProvider({
       view,
       docsIntent,
       openDocs,
+      openLibrary,
       agentSeed,
       askAgent,
       clearAgentSeed,
