@@ -123,7 +123,7 @@ describe("DashboardPage", () => {
   });
 
   it("maps multiple real memberships into gallery workspaces, with member counts and the session user", async () => {
-    authState.user = { id: "user-1", name: "Ada Lovelace", email: "ada@bankrate.com" };
+    authState.user = { id: "user-1", name: "Ada Lovelace", email: "ada@example.com" };
     mockWorkspaceMember.findMany.mockResolvedValue([
       { workspace: { id: "ws-1", slug: "core", name: "Core", description: "Main", _count: { members: 7 }, organization: { slug: "acme", name: "Acme" } } },
       // No `_count` -- must not throw.
@@ -132,7 +132,7 @@ describe("DashboardPage", () => {
     const result = await gallery();
     expect(redirect).not.toHaveBeenCalled();
     expect(result.props.userName).toBe("Ada Lovelace");
-    expect(result.props.userEmail).toBe("ada@bankrate.com");
+    expect(result.props.userEmail).toBe("ada@example.com");
     expect(result.props.readOnlyNotice).toBeUndefined();
     expect(result.props.workspaces).toEqual([
       { id: "ws-1", name: "Core", slug: "core", orgSlug: "acme", orgName: "Acme", description: "Main", memberCount: 7 },
@@ -141,12 +141,12 @@ describe("DashboardPage", () => {
   });
 
   it("falls back to the email, then a neutral name, when the session has no display name", async () => {
-    authState.user = { id: "user-1", email: "ada@bankrate.com" };
+    authState.user = { id: "user-1", email: "ada@example.com" };
     mockWorkspaceMember.findMany.mockResolvedValue([
       { workspace: { id: "a", slug: "a", name: "A", description: null, organization: { slug: "o", name: "O" } } },
       { workspace: { id: "b", slug: "b", name: "B", description: null, organization: { slug: "o", name: "O" } } },
     ]);
-    expect((await gallery()).props.userName).toBe("ada@bankrate.com");
+    expect((await gallery()).props.userName).toBe("ada@example.com");
     authState.user = { id: "user-1" };
     expect((await gallery()).props.userName).toBe("there");
   });

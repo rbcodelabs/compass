@@ -21,8 +21,8 @@ function ws(over: Partial<SelectorWorkspace> & { name: string }): SelectorWorksp
   return {
     id: over.id ?? over.name,
     slug: over.name.toLowerCase().replace(/\W+/g, "-"),
-    orgSlug: "bankrate",
-    orgName: "Bankrate",
+    orgSlug: "acme",
+    orgName: "Acme",
     ...over,
   }
 }
@@ -58,8 +58,8 @@ describe("keys and hrefs", () => {
 describe("describeWorkspace", () => {
   it("composes the accessible name", () => {
     const w = ws({ name: "Home Equity", isReadOnly: true })
-    expect(describeWorkspace(w, false)).toBe("Home Equity, Bankrate, read-only")
-    expect(describeWorkspace(w, true)).toBe("Home Equity, Bankrate, current workspace, read-only")
+    expect(describeWorkspace(w, false)).toBe("Home Equity, Acme, read-only")
+    expect(describeWorkspace(w, true)).toBe("Home Equity, Acme, current workspace, read-only")
   })
 })
 
@@ -70,7 +70,7 @@ describe("matchesQuery", () => {
     expect(matchesQuery(w, "   ")).toBe(true)
   })
   it("requires every token across name, description and org", () => {
-    expect(matchesQuery(w, "mortgage bankrate")).toBe(true)
+    expect(matchesQuery(w, "mortgage acme")).toBe(true)
     expect(matchesQuery(w, "REFINANCE")).toBe(true)
     expect(matchesQuery(w, "mortgage insurance")).toBe(false)
   })
@@ -82,12 +82,12 @@ describe("matchesQuery", () => {
 describe("groupByOrg", () => {
   it("preserves first-seen org order and item order", () => {
     const list = [
-      ws({ name: "A", orgSlug: "rv", orgName: "RV" }),
+      ws({ name: "A", orgSlug: "globex", orgName: "Globex" }),
       ws({ name: "B" }),
-      ws({ name: "C", orgSlug: "rv", orgName: "RV" }),
+      ws({ name: "C", orgSlug: "globex", orgName: "Globex" }),
     ]
     const groups = groupByOrg(list)
-    expect(groups.map((g) => g.orgSlug)).toEqual(["rv", "bankrate"])
+    expect(groups.map((g) => g.orgSlug)).toEqual(["globex", "acme"])
     expect(groups[0].items.map((i) => i.name)).toEqual(["A", "C"])
   })
   it("returns no groups for an empty list", () => {

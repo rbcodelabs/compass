@@ -284,7 +284,7 @@ export function WorkspaceGallery({ workspaces, userName, userEmail, readOnlyNoti
                 <path d="m52 54 9 9" strokeLinecap="round" />
               </svg>
               <h2>No workspaces match “{trimmed}”</h2>
-              <p>Try a workspace name, or an organization like “{workspaces[0]?.orgName ?? "Bankrate"}”.</p>
+              <p>Try a workspace name, or an organization like “{workspaces[0]?.orgName ?? "Acme"}”.</p>
               <button type="button" className="wsx-btn" onClick={clearSearch}>
                 Clear search
               </button>
