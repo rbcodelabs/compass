@@ -10,6 +10,13 @@ export type UserWorkspace = {
   orgName: string
   /** True when access comes only from Organization.memberWorkspaceReadOnlyAccess, not a WorkspaceMember row. */
   isReadOnly: boolean
+  /**
+   * Shown on the workspace selector cards. Optional because several callers build
+   * `UserWorkspace` values from narrower queries that never needed it.
+   */
+  description?: string | null
+  /** Real `WorkspaceMember` rows. Optional for the same reason as `description`. */
+  memberCount?: number
 }
 
 /**
@@ -180,6 +187,8 @@ export const getUserWorkspaces = cache(
           id: true,
           name: true,
           slug: true,
+          description: true,
+          _count: { select: { members: true } },
           organization: { select: { slug: true, name: true } },
         },
         orderBy: { name: "asc" },
@@ -212,6 +221,8 @@ export const getUserWorkspaces = cache(
         orgSlug: workspace.organization.slug,
         orgName: workspace.organization.name,
         isReadOnly: false,
+        description: workspace.description,
+        memberCount: workspace._count.members,
       }]
     })
 
@@ -224,7 +235,14 @@ export const getUserWorkspaces = cache(
     )
     const readOnlyWorkspaces = await prisma.workspace.findMany({
       where: { organizationId: { in: [...orgMetaById.keys()] } },
-      select: { id: true, name: true, slug: true, organizationId: true },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        organizationId: true,
+        _count: { select: { members: true } },
+      },
       orderBy: { name: "asc" },
     })
     const readOnlyResults: UserWorkspace[] = readOnlyWorkspaces.flatMap((workspace): UserWorkspace[] => {
@@ -240,6 +258,8 @@ export const getUserWorkspaces = cache(
         orgSlug: org.slug,
         orgName: org.name,
         isReadOnly: true,
+        description: workspace.description,
+        memberCount: workspace._count.members,
       }]
     })
 

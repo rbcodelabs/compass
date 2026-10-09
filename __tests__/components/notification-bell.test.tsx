@@ -74,7 +74,7 @@ describe("NotificationBellHeaderLink (mobile)", () => {
 })
 
 describe("shell wiring", () => {
-  const shell = { orgSlug: "acme", workspaceSlug: "ws", workspaceName: "WS", userName: "Rick", userEmail: "r@x.com", workspaces: [{ id: "1", name: "WS", slug: "ws", orgSlug: "acme" }] }
+  const shell = { orgSlug: "acme", workspaceSlug: "ws", workspaceName: "WS", userName: "Rick", userEmail: "r@x.com", workspaces: [{ id: "1", name: "WS", slug: "ws", orgSlug: "acme", orgName: "Acme" }] }
 
   it("shows the bell in the sidebar only when following is enabled", () => {
     const renderSidebar = (followingEnabled: boolean) => render(<TooltipProvider><SidebarProvider><AgentRailProvider initialPin={{ pinned: false, width: 0 } as never}><Sidebar {...shell} followingEnabled={followingEnabled} unreadNotifications={{ count: 2, overflow: false }} /></AgentRailProvider></SidebarProvider></TooltipProvider>)

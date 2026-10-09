@@ -2,21 +2,23 @@ import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import getPrisma from "@/lib/db"
 import { getUserWorkspaces } from "@/lib/workspace"
-import Link from "next/link"
-import { EntityCard } from "@/components/patterns/entity-card"
-import { PageHeader } from "@/components/patterns/page-header"
+import { WorkspaceGallery } from "@/components/workspace-selector/workspace-gallery"
+import { ThemeProvider } from "@/components/theme/theme-provider"
+import { workspaceThemeInitScript } from "@/lib/theme"
+
+// The gallery lives outside the workspace layout, which is what normally
+// applies the stored light/dark preference. Do the same here, before paint.
+function Themed({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <script dangerouslySetInnerHTML={{ __html: workspaceThemeInitScript }} />
+      <ThemeProvider>{children}</ThemeProvider>
+    </>
+  )
+}
 
 export const metadata = {
   title: "Dashboard",
-}
-
-/** Matches the badge style in components/sidebar.tsx's workspace switcher. */
-function ReadOnlyChip() {
-  return (
-    <span className="rounded border border-border-default px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-subtle">
-      Read-only
-    </span>
-  )
 }
 
 export default async function DashboardPage() {
@@ -25,13 +27,16 @@ export default async function DashboardPage() {
     redirect("/login")
   }
 
+  const userEmail = session.user.email ?? undefined
+  const userName = session.user.name ?? userEmail ?? "there"
+
   const prisma = getPrisma()
 
   const membershipRows = await prisma.workspaceMember.findMany({
     where: { userId: session.user.id },
     include: {
       workspace: {
-        include: { organization: true },
+        include: { organization: true, _count: { select: { members: true } } },
       },
     },
   })
@@ -52,26 +57,22 @@ export default async function DashboardPage() {
 
   if (memberships.length > 1) {
     return (
-      <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 max-w-4xl mx-auto w-full">
-        <PageHeader title="Workspaces" description="Choose a workspace to continue." />
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {memberships.map(({ workspace }) => (
-            <Link
-              key={workspace.id}
-              href={`/${workspace.organization.slug}/${workspace.slug}/okrs`}
-            >
-              <EntityCard
-                title={workspace.name}
-                eyebrow={workspace.organization.name}
-                description={workspace.description}
-                interactive
-                className="h-full cursor-pointer"
-              />
-            </Link>
-          ))}
-        </div>
-      </main>
+      <Themed>
+      <WorkspaceGallery
+        userName={userName}
+        userEmail={userEmail}
+        workspaces={memberships.map(({ workspace }) => ({
+          id: workspace.id,
+          name: workspace.name,
+          slug: workspace.slug,
+          orgSlug: workspace.organization.slug,
+          orgName: workspace.organization.name,
+          description: workspace.description,
+          // Optional chaining: `_count` is only present on rows from the real query.
+          memberCount: workspace._count?.members,
+        }))}
+      />
+      </Themed>
     )
   }
 
@@ -94,25 +95,22 @@ export default async function DashboardPage() {
   }
 
   return (
-    <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6 max-w-4xl mx-auto w-full">
-      <PageHeader
-        title="Workspaces"
-        description="You have read-only access to these workspaces through your organization. Choose one to continue."
-      />
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {readOnlyWorkspaces.map((workspace) => (
-          <Link key={workspace.id} href={`/${workspace.orgSlug}/${workspace.slug}/okrs`}>
-            <EntityCard
-              title={workspace.name}
-              eyebrow={workspace.orgName}
-              status={<ReadOnlyChip />}
-              interactive
-              className="h-full cursor-pointer"
-            />
-          </Link>
-        ))}
-      </div>
-    </main>
+    <Themed>
+    <WorkspaceGallery
+      userName={userName}
+      userEmail={userEmail}
+      readOnlyNotice
+      workspaces={readOnlyWorkspaces.map((workspace) => ({
+        id: workspace.id,
+        name: workspace.name,
+        slug: workspace.slug,
+        orgSlug: workspace.orgSlug,
+        orgName: workspace.orgName,
+        description: workspace.description,
+        memberCount: workspace.memberCount,
+        isReadOnly: true,
+      }))}
+    />
+    </Themed>
   )
 }

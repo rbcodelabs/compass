@@ -29,7 +29,7 @@ const baseProps = {
   userName: "Rick Bowman",
   userEmail: "rick@rbcodelabs.com",
   workspaces: [
-    { id: "ws-1", name: "Compass", slug: "compass", orgSlug: "rbcodelabs" },
+    { id: "ws-1", name: "Compass", slug: "compass", orgSlug: "rbcodelabs", orgName: "RB Codelabs" },
   ],
 };
 
