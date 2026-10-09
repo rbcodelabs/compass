@@ -1,8 +1,23 @@
 "use client";
 
 import * as React from "react";
-import { useRef, useTransition, useState } from "react";
-import { useSortable } from "@dnd-kit/sortable";
+import { useId, useRef, useTransition, useState } from "react";
+import {
+  DndContext,
+  type DragEndEvent,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  arrayMove,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, X } from "lucide-react";
 import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
@@ -26,6 +41,7 @@ import {
   updateObjectiveStatus,
   setObjectiveParentKR,
   deleteObjective,
+  reorderKeyResult,
 } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import { CardMenu, type CardMenuItem } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
@@ -79,6 +95,8 @@ interface ObjectiveRowProps {
   supportingObjectiveOptions?: SupportingObjectiveOption[];
   /** Percent of the cycle elapsed, threaded to each key result's pace tick. */
   paceElapsed?: number | null;
+  /** Hide progress visuals (ring, bars, percentages) for a not-yet-started period. */
+  hideProgress?: boolean;
 }
 
 export function ObjectiveRow({
@@ -90,6 +108,7 @@ export function ObjectiveRow({
   parentKeyResultId,
   supportingObjectiveOptions,
   paceElapsed,
+  hideProgress,
 }: ObjectiveRowProps) {
   const labels = useLabels();
   const [isPending, startTransition] = useTransition();
@@ -217,7 +236,7 @@ export function ObjectiveRow({
       actions={
         <div ref={actionsRef} className="flex shrink-0 items-center gap-2">
           {/* Overall progress */}
-          {objective.keyResults.length > 0 && (
+          {objective.keyResults.length > 0 && !hideProgress && (
             <MiniRing progress={avgProgress} />
           )}
 
@@ -247,19 +266,16 @@ export function ObjectiveRow({
 
       {/* Key results */}
       {objective.keyResults.length > 0 && (
-        <div className="okx-krs">
-          {objective.keyResults.map((kr) => (
-            <KeyResultBar
-              key={kr.id}
-              keyResult={kr}
-              objectiveId={objective.id}
-              orgSlug={orgSlug}
-              workspaceSlug={workspaceSlug}
-              supportingObjectiveOptions={supportingObjectiveOptions}
-              paceElapsed={paceElapsed}
-            />
-          ))}
-        </div>
+        <SortableKeyResults
+          keyResults={objective.keyResults}
+          objectiveId={objective.id}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          revalidatePathStr={revalidatePathStr ?? okrsPath}
+          supportingObjectiveOptions={supportingObjectiveOptions}
+          paceElapsed={paceElapsed}
+          hideProgress={hideProgress}
+        />
       )}
 
       {/* Custom fields */}
@@ -345,5 +361,79 @@ export function ObjectiveRow({
         />
       </div>
     </EntityCard>
+  );
+}
+
+/**
+ * The key-result list owns its own DndContext, scoped to just the list. It must
+ * not wrap the whole ObjectiveRow: the row's useSortable (objective reorder)
+ * resolves the nearest SortableContext, so an enclosing key-result context
+ * would swallow the objective drag and reorder would silently do nothing.
+ */
+function SortableKeyResults({
+  keyResults: initialKeyResults,
+  objectiveId,
+  orgSlug,
+  workspaceSlug,
+  revalidatePathStr,
+  supportingObjectiveOptions,
+  paceElapsed,
+  hideProgress,
+}: {
+  keyResults: KeyResult[];
+  objectiveId: string;
+  orgSlug: string;
+  workspaceSlug: string;
+  revalidatePathStr: string;
+  supportingObjectiveOptions?: SupportingObjectiveOption[];
+  paceElapsed?: number | null;
+  hideProgress?: boolean;
+}) {
+  const [keyResults, setKeyResults] = useState(initialKeyResults);
+  const [, startTransition] = useTransition();
+
+  // Stable across server and client; without it @dnd-kit numbers its
+  // aria-describedby ids from a global counter and hydration mismatches.
+  const dndId = useId();
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const activeId = active.id as string;
+    const oldIndex = keyResults.findIndex((kr) => kr.id === activeId);
+    const newIndex = keyResults.findIndex((kr) => kr.id === (over.id as string));
+
+    if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+      setKeyResults(arrayMove(keyResults, oldIndex, newIndex));
+      startTransition(async () => {
+        await reorderKeyResult(activeId, newIndex, revalidatePathStr);
+      });
+    }
+  }
+
+  return (
+    <DndContext id={dndId} sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={keyResults.map((kr) => kr.id)} strategy={verticalListSortingStrategy}>
+        <div className="okx-krs">
+          {keyResults.map((kr) => (
+            <KeyResultBar
+              key={kr.id}
+              keyResult={kr}
+              objectiveId={objectiveId}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+              supportingObjectiveOptions={supportingObjectiveOptions}
+              paceElapsed={paceElapsed}
+              hideProgress={hideProgress}
+            />
+          ))}
+        </div>
+      </SortableContext>
+    </DndContext>
   );
 }

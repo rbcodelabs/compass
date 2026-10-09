@@ -63,6 +63,8 @@ export function CycleHero({ cycle, orgSlug, workspaceSlug }: CycleCardProps) {
   const { pill, kicker } = coverCopy(cycle);
   const running = timing.phase === "running";
   const empty = rollup.objectiveCount === 0;
+  // Not started yet: nothing to measure, so no ring or pace track.
+  const notStarted = timing.phase === "upcoming";
 
   return (
     <Link href={`/${orgSlug}/${workspaceSlug}/okrs/${cycle.id}`} className="wsx-tile okx-tile okx-hero" data-testid="cycle-hero">
@@ -76,6 +78,10 @@ export function CycleHero({ cycle, orgSlug, workspaceSlug }: CycleCardProps) {
           <p className="okx-tile-desc">
             No {labels.objective.lowerPlural} in this {labels.cycle.lower} yet. Open it to add the first one.
           </p>
+        </div>
+      ) : notStarted ? (
+        <div className="okx-hero-body" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <StatusMixBar mix={rollup.statusMix} title={`${plural(rollup.objectiveCount, labels.objective.lower, labels.objective.lowerPlural)} by status`} />
         </div>
       ) : (
         <div className="okx-hero-body">
@@ -119,6 +125,8 @@ export function CycleCard({ cycle, orgSlug, workspaceSlug }: CycleCardProps) {
   const closed = cycle.status === "CLOSED";
   const draft = cycle.status === "DRAFT";
   const running = cycle.status === "ACTIVE" && timing.phase === "running";
+  // Not started yet: show the plan, not a 0% progress bar.
+  const notStarted = timing.phase === "upcoming";
   const empty = rollup.objectiveCount === 0;
   const objectivesText = empty
     ? `No ${labels.objective.lowerPlural} yet`
@@ -132,15 +140,15 @@ export function CycleCard({ cycle, orgSlug, workspaceSlug }: CycleCardProps) {
       </WorkspaceCover>
 
       <div className="okx-tile-body">
-        {draft || empty ? (
+        {draft || empty || notStarted ? (
           <>
             <div className="okx-chips">
               <span className="okx-chip" data-tone="plain">
-                {empty ? `No ${labels.objective.lowerPlural} drafted yet` : "Draft plan"}
+                {empty ? `No ${labels.objective.lowerPlural} drafted yet` : draft ? "Draft plan" : "Not started"}
               </span>
               {!empty && (
                 <span className="okx-chip" data-tone="plain">
-                  <b>{rollup.objectiveCount}</b> {rollup.objectiveCount === 1 ? labels.objective.lower : labels.objective.lowerPlural} ready to review
+                  <b>{rollup.objectiveCount}</b> {rollup.objectiveCount === 1 ? labels.objective.lower : labels.objective.lowerPlural} {draft ? "ready to review" : "planned"}
                 </span>
               )}
             </div>
@@ -161,7 +169,7 @@ export function CycleCard({ cycle, orgSlug, workspaceSlug }: CycleCardProps) {
             <PaceTrack progress={rollup.progress} elapsed={running ? timing.percentElapsed : null} small />
           </div>
         )}
-        {!draft && !empty && <StatusChips mix={rollup.statusMix} />}
+        {!draft && !empty && !notStarted && <StatusChips mix={rollup.statusMix} />}
       </div>
 
       <div className="wsx-tile-meta">
