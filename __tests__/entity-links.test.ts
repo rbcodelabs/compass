@@ -32,6 +32,10 @@ describe("entityPath — entities with their own page", () => {
     expect(entityPath({ ...slugs, type: "task", id: "task-1" })).toBe("/rbcodelabs/compass/tasks/task-1")
   })
 
+  it("links an artifact to its own page under docs/artifacts", () => {
+    expect(entityPath({ ...slugs, type: "artifact", id: "art-1" })).toBe("/rbcodelabs/compass/docs/artifacts/art-1")
+  })
+
   it("links a doc to its own page", () => {
     expect(entityPath({ ...slugs, type: "doc", id: "doc-1" })).toBe("/rbcodelabs/compass/docs/doc-1")
   })

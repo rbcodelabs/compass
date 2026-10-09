@@ -843,7 +843,7 @@ A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one
 
 ### Artifacts
 
-Artifacts are first-class solution deliverables, separate from Markdown Docs. HTML content creates private immutable revisions; external URLs are stored but never server-fetched. Every mutation returns the stable Artifact identifier on a plain `ID: <uuid>` line.
+Artifacts are first-class solution deliverables, separate from Markdown Docs. HTML content creates private immutable revisions; external URLs are stored but never server-fetched. Every mutation returns the stable Artifact identifier on a plain `ID: <uuid>` line. `list_artifacts`, `get_artifact`, `create_artifact` and `update_artifact` also return the clickable Compass page (`<origin>/{org}/{workspace}/docs/artifacts/{id}`) on a `URL:` line and as `url` in the structured data — relay it to the user instead of the bare ID. `url` is `null` (and the line is omitted) when the public Compass URL is not configured; the write still succeeds.
 
 | Tool | Description |
 |---|---|
