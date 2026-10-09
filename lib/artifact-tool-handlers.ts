@@ -64,7 +64,7 @@ export async function getArtifact({ artifactId }: { artifactId: string }) {
   const decisions = await getArtifactDecisions(artifact.workspaceId, artifact.id)
   // Blob pathnames are private storage keys, not caller-facing data. thumbnailPathname
   // is stripped for exactly the same reason blobPathname always has been — it was added
-  // by migration 077 and would otherwise ride out through this spread unnoticed. The
+  // by migration 078 and would otherwise ride out through this spread unnoticed. The
   // remaining thumbnail_* metadata is safe and useful, so it stays.
   const safeRevisions = artifact.revisions.map(
     ({ blobPathname: _privatePath, thumbnailPathname: _privateThumbnail, ...revision }) => revision

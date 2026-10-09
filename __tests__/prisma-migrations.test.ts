@@ -885,8 +885,8 @@ describe("073_workspace_thinking_model", () => {
   });
 });
 
-describe("077_artifact_slide_decks", () => {
-  const NAME = "077_artifact_slide_decks";
+describe("078_artifact_slide_decks", () => {
+  const NAME = "078_artifact_slide_decks";
   const statements = () =>
     sqlFor(NAME)
       .split(";")
@@ -897,7 +897,7 @@ describe("077_artifact_slide_decks", () => {
     const names = registeredMigrations();
     expect(names.filter((name) => name === NAME)).toHaveLength(1);
     expect(names[names.length - 1]).toBe(NAME);
-    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("064_artifact_screenshots"));
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("077_artifact_screenshots"));
     expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("076_research_external_studies"));
   });
 
@@ -916,9 +916,9 @@ describe("077_artifact_slide_decks", () => {
     expect(manifest.match(new RegExp(`"${NAME}"`, "g"))).toHaveLength(1);
   });
 
-  // Inverted by the code PR, as 073's was. The columns may be declared only once
-  // 077 is applied in production; before that Prisma would select a column that
-  // does not exist. Both stay nullable, matching the DDL.
+  // As with 073: the columns are declared alongside the code that reads them, so the
+  // migration must be applied before that code is relied on (Prisma selects every
+  // declared scalar). Both stay nullable, matching the DDL.
   it("declares both columns in schema.prisma as nullable", () => {
     const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
     const artifact = schema.match(/model Artifact \{[\s\S]*?\n\}/)?.[0] ?? "";

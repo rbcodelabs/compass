@@ -13,7 +13,7 @@ export type BrowserSolutionPlanProposal = { commentId: string; trackedDecisionRe
 export type BrowserElementAnchor = {
   commentId: string; artifactId: string; artifactRevisionId: string | null; pageUrl: string; pagePath: string
   elementSelector: string | null; elementFingerprint: unknown; screenshotUrl: string | null
-  /** Zero-based slide of a SLIDE_DECK Artifact, or null when not slide-scoped (migration 077). */
+  /** Zero-based slide of a SLIDE_DECK Artifact, or null when not slide-scoped (migration 078). */
   slideIndex?: number | null
 }
 export type BrowserCommentRow = {

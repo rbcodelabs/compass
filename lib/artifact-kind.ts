@@ -1,5 +1,5 @@
 /**
- * Presentation kind of an Artifact's content (`artifacts.kind`, migration 077).
+ * Presentation kind of an Artifact's content (`artifacts.kind`, migration 078).
  *
  * Orthogonal to `sourceType`: sourceType says where the bytes come from, kind
  * says how to present them. A slide deck is still an HTML_UPLOAD, stored and
