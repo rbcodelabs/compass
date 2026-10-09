@@ -209,21 +209,6 @@
       "Solutions",
       "SOLUTION"
     ],
-    "lib/canvas/tiers.ts": [
-      "objective",
-      "opportunity",
-      "solution",
-      "Cycle"
-    ],
-    "components/canvas/canvas-flow.tsx": [
-      "objective",
-      "opportunity",
-      "solution",
-      "Add Objectives and Key Results from the OKRs page to see them here."
-    ],
-    "app/[orgSlug]/[workspaceSlug]/canvas/page.tsx": [
-      "Pan and zoom across your full OKR, discovery, and roadmap graph."
-    ],
     "app/[orgSlug]/[workspaceSlug]/discovery/page.tsx": [
       "OPPORTUNITY",
       "SOLUTION",
