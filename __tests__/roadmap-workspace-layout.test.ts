@@ -47,6 +47,14 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({
   promoteFeedbackToRoadmap: vi.fn(),
   rescheduleRoadmapItem: vi.fn(),
   addRoadmapItem: vi.fn(),
+  moveItemToLane: vi.fn(),
+}));
+
+// The header's saved-views menu calls the org-level saved-view actions, which import auth too.
+vi.mock("@/app/[orgSlug]/roadmap/actions", () => ({
+  createRoadmapViewAction: vi.fn(),
+  updateRoadmapViewAction: vi.fn(),
+  deleteRoadmapViewAction: vi.fn(),
 }));
 
 vi.mock("@/components/roadmap/unscheduled-items-panel", async () => {
