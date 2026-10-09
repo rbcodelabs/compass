@@ -1,5 +1,5 @@
 /**
- * Pure edge derivation for the Canvas viewer's OST + Roadmap graph.
+ * Pure edge derivation for the OST + Roadmap graph (canvas Doc "Build tree").
  *
  * No Prisma dependency — takes the already-fetched CanvasOverview and
  * returns a flat edge list, so it's fully unit-testable with plain object

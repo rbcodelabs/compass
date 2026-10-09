@@ -27,7 +27,7 @@ import {
 
 const DENIED = { ok: false, error: "Entity not found or access denied" }
 const BASE = `/${WS_A.org}/${WS_A.slug}`
-const SCREENS = [`${BASE}/discovery/opp-a`, `${BASE}/discovery/tree`, `${BASE}/okrs`, `${BASE}/canvas`]
+const SCREENS = [`${BASE}/discovery/opp-a`, `${BASE}/discovery/tree`, `${BASE}/okrs`]
 const state = () => fake.current!.state
 const links = () => state().solutionKeyResultLinks
 const linkWrites = () => state().writes.filter((w) => /Link\./.test(w))

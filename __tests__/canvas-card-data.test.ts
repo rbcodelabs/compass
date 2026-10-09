@@ -6,6 +6,7 @@ const m = vi.hoisted(() => {
     db: {
       opportunity: model(), solution: model(), experiment: model(), task: model(),
       doc: model(), objective: model(), keyResult: model(), metricRevision: model(), metricDefinition: model(),
+      assumption: model(), roadmapItem: model(),
     },
     listDashboardMetrics: vi.fn(),
   }
@@ -82,6 +83,23 @@ describe("resolveCanvasCards", () => {
   })
 })
 
+describe("resolveCanvasCards: assumptions and roadmap items", () => {
+  it("scopes assumptions through their solution and roadmap items by workspace", async () => {
+    m.db.assumption.findMany.mockResolvedValue([{ id: A, title: "Risky", status: "UNTESTED", riskLevel: "HIGH", solution: { opportunityId: "opp-1", title: "Fix" } }])
+    m.db.roadmapItem.findMany.mockResolvedValue([{ id: B, title: "Ship it", status: "ACTIVE", horizon: "NOW" }])
+    const result = await resolveCanvasCards({ ...WS, refs: [{ kind: "assumption", id: A }, { kind: "roadmapItem", id: B }] })
+    expect(m.db.assumption.findMany.mock.calls[0][0].where).toEqual({ id: { in: [A] }, solution: { workspaceId: "ws-1" } })
+    expect(m.db.roadmapItem.findMany.mock.calls[0][0].where).toEqual({ id: { in: [B] }, workspaceId: "ws-1" })
+    expect(result[`assumption:${A}`]).toMatchObject({ state: "ok", title: "Risky", facts: [{ label: "Risk", value: "HIGH" }, { label: "Solution", value: "Fix" }] })
+    expect(result[`roadmapItem:${B}`]).toMatchObject({ state: "ok", facts: [{ label: "Horizon", value: "NOW" }] })
+  })
+
+  it("reports foreign ids as unavailable", async () => {
+    const result = await resolveCanvasCards({ ...WS, refs: [{ kind: "assumption", id: A }] })
+    expect(result[`assumption:${A}`]).toEqual({ state: "unavailable", kind: "assumption", id: A })
+  })
+})
+
 describe("searchCanvasCardTargets", () => {
   it("scopes every kind to the workspace and orders by kind", async () => {
     m.db.task.findMany.mockResolvedValue([{ id: A, title: "Fix login", status: "TODO" }])
@@ -91,6 +109,18 @@ describe("searchCanvasCardTargets", () => {
     expect(m.db.opportunity.findMany.mock.calls[0][0].where.workspaceId).toBe("ws-1")
     expect(m.db.keyResult.findMany.mock.calls[0][0].where.objective).toEqual({ workspaceId: "ws-1" })
     expect(m.db.metricRevision.findMany.mock.calls[0][0].where.workspaceId).toBe("ws-1")
+    expect(m.db.assumption.findMany.mock.calls[0][0].where.solution).toEqual({ workspaceId: "ws-1" })
+    expect(m.db.roadmapItem.findMany.mock.calls[0][0].where.workspaceId).toBe("ws-1")
+  })
+
+  it("finds assumptions and roadmap items after the core kinds", async () => {
+    m.db.assumption.findMany.mockResolvedValue([{ id: A, title: "Users log in weekly", status: "UNTESTED" }])
+    m.db.roadmapItem.findMany.mockResolvedValue([{ id: B, title: "Login revamp", horizon: "NOW" }])
+    const items = await searchCanvasCardTargets({ workspaceId: "ws-1", query: "log" })
+    expect(items).toEqual([
+      { kind: "assumption", id: A, title: "Users log in weekly", context: "UNTESTED" },
+      { kind: "roadmapItem", id: B, title: "Login revamp", context: "NOW" },
+    ])
   })
 
   it("only offers metrics whose current revision matches", async () => {

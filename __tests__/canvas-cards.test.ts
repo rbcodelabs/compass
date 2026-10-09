@@ -22,7 +22,7 @@ const canvasOf = (...nodes: unknown[]) => JSON.stringify({ nodes, edges: [] })
 describe("kinds, urls and encoding", () => {
   it("allowlists exactly the supported kinds", () => {
     expect([...CANVAS_CARD_KINDS].sort()).toEqual(
-      ["doc", "experiment", "keyResult", "metric", "objective", "opportunity", "solution", "task"]
+      ["assumption", "doc", "experiment", "keyResult", "metric", "objective", "opportunity", "roadmapItem", "solution", "task"]
     )
   })
 

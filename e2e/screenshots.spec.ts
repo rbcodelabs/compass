@@ -45,7 +45,6 @@ const STANDARD_PAGES: StandardScreenshotCase[] = [
   { file: "login.png",           url: "/login" },
   { file: "dashboard.png",       url: "/dashboard" },
   { file: "okrs.png",            url: `${WORKSPACE_BASE}/okrs` },
-  { file: "canvas.png",          url: `${WORKSPACE_BASE}/canvas` },
   { file: "discovery-board.png", url: `${WORKSPACE_BASE}/discovery` },
   {
     file: "discovery-table.png",

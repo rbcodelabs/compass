@@ -110,6 +110,18 @@ export async function resolveCanvasCards(
       ok("keyResult", r.id, r.title, null, [{ label: "Progress", value: `${compact(r.current)} / ${compact(r.target)}${unit}` }], entityPath({ ...slugs, type: "keyResult", id: r.id }))
     }
   })
+  when("assumption", async (ids) => {
+    // Assumptions carry no workspace column of their own; scope through the owning solution.
+    const rows = await db.assumption.findMany({
+      where: { id: { in: ids }, solution: { workspaceId } },
+      select: { id: true, title: true, status: true, riskLevel: true, solution: { select: { opportunityId: true, title: true } } },
+    })
+    for (const r of rows) ok("assumption", r.id, r.title, r.status, [...fact("Risk", r.riskLevel), ...fact("Solution", r.solution?.title)], entityPath({ ...slugs, type: "assumption", id: r.id, opportunityId: r.solution?.opportunityId }))
+  })
+  when("roadmapItem", async (ids) => {
+    const rows = await db.roadmapItem.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true, title: true, status: true, horizon: true } })
+    for (const r of rows) ok("roadmapItem", r.id, r.title, r.status, [...fact("Horizon", r.horizon)], entityPath({ ...slugs, type: "roadmapItem", id: r.id }))
+  })
   when("metric", async (ids) => {
     // The analytics service authorizes the viewer itself (membership, operator-only
     // providers); any refusal means every metric card is simply unavailable.
@@ -142,7 +154,7 @@ export async function searchCanvasCardTargets(input: { workspaceId: string; quer
   const title = { contains: q, mode: "insensitive" as const }
   const take = 6
   const orderBy = [{ title: "asc" as const }, { id: "asc" as const }]
-  const [opps, sols, exps, tasks, docs, objs, krs, metrics] = await Promise.all([
+  const [opps, sols, exps, tasks, docs, objs, krs, metrics, assumptions, roadmapItems] = await Promise.all([
     db.opportunity.findMany({ where: { workspaceId, title }, take, orderBy, select: { id: true, title: true, status: true } }),
     db.solution.findMany({ where: { workspaceId, title }, take, orderBy, select: { id: true, title: true, status: true } }),
     db.experiment.findMany({ where: { workspaceId, title }, take, orderBy, select: { id: true, title: true, status: true } }),
@@ -156,6 +168,8 @@ export async function searchCanvasCardTargets(input: { workspaceId: string; quer
       orderBy: [{ name: "asc" }],
       select: { name: true, metricId: true, id: true },
     }),
+    db.assumption.findMany({ where: { solution: { workspaceId }, title }, take, orderBy, select: { id: true, title: true, status: true } }),
+    db.roadmapItem.findMany({ where: { workspaceId, title }, take, orderBy, select: { id: true, title: true, horizon: true } }),
   ])
   // Metric names live on revisions; only a definition's *current* revision counts.
   const currentRevisions = metrics.length
@@ -171,6 +185,8 @@ export async function searchCanvasCardTargets(input: { workspaceId: string; quer
     ...exps.map((r) => ({ kind: "experiment" as const, id: r.id, title: r.title, context: r.status })),
     ...objs.map((r) => ({ kind: "objective" as const, id: r.id, title: r.title, context: r.status })),
     ...krs.map((r) => ({ kind: "keyResult" as const, id: r.id, title: r.title })),
+    ...assumptions.map((r) => ({ kind: "assumption" as const, id: r.id, title: r.title, context: r.status })),
+    ...roadmapItems.map((r) => ({ kind: "roadmapItem" as const, id: r.id, title: r.title, context: r.horizon })),
   ]
   const order = new Map(CANVAS_CARD_KINDS.map((k, i) => [k, i]))
   return items.sort((a, b) => (order.get(a.kind)! - order.get(b.kind)!))

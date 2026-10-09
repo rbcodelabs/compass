@@ -85,7 +85,6 @@ async function revalidateLinkScreens(workspaceId: string, opportunityId: string 
     if (opportunityId) revalidatePath(`${base}/discovery/${opportunityId}`)
     revalidatePath(`${base}/discovery/tree`)
     revalidatePath(`${base}/okrs`)
-    revalidatePath(`${base}/canvas`)
   } catch (error) {
     // The link is already written; a failed cache refresh must not turn it into an error.
     logFailure("revalidate", error)

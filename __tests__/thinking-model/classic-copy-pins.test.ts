@@ -75,7 +75,6 @@ const HELPER_FILES = new Set([
   "components/panels/panel-titles.ts",
   "components/tasks/linked-type-labels.ts",
   "components/custom-fields/object-type-labels.ts",
-  "lib/canvas/tiers.ts",
 ])
 
 /** A file that builds phrases through the copy helpers (articles, titles, tiers) produces multi-word text with them. */

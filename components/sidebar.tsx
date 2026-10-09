@@ -22,7 +22,6 @@ import {
   Settings,
   Sparkles,
   Target,
-  Waypoints,
   Clock3,
   House,
 } from "lucide-react"
@@ -88,7 +87,6 @@ const buildBaseNavItems = (okrsLabel: string, discoveryLabel: string, solutionsL
   { label: "Tasks", path: "tasks", Icon: ListChecks },
   { label: "Decisions", path: "decisions", Icon: MessageSquareCheck },
   { label: "Docs", path: "docs", Icon: BookOpen },
-  { label: "Canvas", path: "canvas", Icon: Waypoints },
   { label: "Agent", path: "agent", Icon: Sparkles },
 ], discoveryFirst)
 

@@ -38,6 +38,7 @@ import {
   FileText,
   History,
   Link2,
+  ListTree,
   Lock,
   LockOpen,
   Redo2,
@@ -53,10 +54,15 @@ import {
   updateDoc,
 } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
 import { createDocumentSaveQueue } from "@/lib/document-save-queue"
-import { resolveCanvasCardRefs } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
+import { buildCanvasTree, resolveCanvasCardRefs } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
+import { CanvasTreeDialog, type TreeBuildOutcome } from "@/components/docs/canvas/canvas-tree-dialog"
+import { mergeTreeIntoCanvas, MAX_TREE_CARDS, type TreeScope } from "@/lib/canvas-tree"
+import { layoutTreeCards } from "@/lib/canvas-tree-layout"
 import { CanvasCardPicker } from "@/components/docs/canvas/canvas-card-picker"
 import {
   CANVAS_CARD_DRAG_TYPE,
+  MAX_CARD_REFS,
   canvasCardKey,
   createCanvasCardNode,
   decodeCanvasCard,
@@ -169,6 +175,9 @@ function CanvasEditorBody({
   const locked = readOnly || isRestoring
   const [editingId, setEditingId] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const labels = useLabels()
+  const [treeOpen, setTreeOpen] = useState(false)
+  const [treeNotice, setTreeNotice] = useState<string | null>(null)
   const [cardViews, setCardViews] = useState<Record<string, CanvasCardView>>({})
   const [historyOpen, setHistoryOpen] = useState(false)
   const [showSaveVersionInput, setShowSaveVersionInput] = useState(false)
@@ -476,17 +485,50 @@ function CanvasEditorBody({
       return { kind, id }
     })
     let cancelled = false
-    resolveCanvasCardRefs(doc.id, refs)
-      .then((views) => {
-        if (!cancelled) setCardViews((prev) => ({ ...prev, ...(views as Record<string, CanvasCardView>) }))
-      })
-      .catch(() => {
-        /* leave cards on their cached titles; the next change retries */
-      })
+    // The server resolves at most MAX_CARD_REFS per request, so a large canvas (e.g. a built tree) goes in batches.
+    for (let i = 0; i < refs.length; i += MAX_CARD_REFS) {
+      resolveCanvasCardRefs(doc.id, refs.slice(i, i + MAX_CARD_REFS))
+        .then((views) => {
+          if (!cancelled) setCardViews((prev) => ({ ...prev, ...(views as Record<string, CanvasCardView>) }))
+        })
+        .catch(() => {
+          /* leave cards on their cached titles; the next change retries */
+        })
+    }
     return () => {
       cancelled = true
     }
   }, [cardRefsKey, doc.id])
+
+  /** Build the OST tree on the server, lay it out here, merge it into the open canvas as one undoable step. */
+  const handleBuildTree = useCallback(
+    async (scope: TreeScope): Promise<TreeBuildOutcome> => {
+      const fragment = await buildCanvasTree(doc.id, scope)
+      if (fragment.cards.length === 0) {
+        return { ok: false, message: scope.kind === "workspace" ? "There is nothing in this workspace to draw yet." : "Nothing sits beneath that item yet." }
+      }
+      let positions: Awaited<ReturnType<typeof layoutTreeCards>>
+      try {
+        positions = await layoutTreeCards(fragment.cards, fragment.edges)
+      } catch {
+        positions = new Map() // merge falls back to a simple column, so a layout failure still yields a usable canvas
+      }
+      const current = fromFlow(baseRef.current, nodesRef.current, edgesRef.current)
+      const merged = mergeTreeIntoCanvas(current, fragment, positions, newCanvasId)
+      if (!merged.ok) return { ok: false, message: "This canvas is too large to add the tree. Build into a new canvas, or start from a smaller item." }
+      if (merged.addedCards === 0) return { ok: false, message: "Everything in that tree is already on this canvas." }
+      const next = toFlow(merged.canvas)
+      commit(next.nodes, next.edges)
+      const added = new Set(merged.canvas.nodes.slice(current.nodes.length).map((n) => n.id))
+      requestAnimationFrame(() => flow.fitView({ nodes: [...added].map((id) => ({ id })), padding: 0.15, duration: 300 }))
+      setTreeNotice(
+        `Added ${merged.addedCards} card${merged.addedCards === 1 ? "" : "s"}${merged.addedGroups ? ` in ${merged.addedGroups} group${merged.addedGroups === 1 ? "" : "s"}` : ""}` +
+          (fragment.truncated ? `. The tree is larger than ${MAX_TREE_CARDS} cards, so only the top of it was drawn. Build again from a specific item to see the rest.` : ".")
+      )
+      return { ok: true, message: "" }
+    },
+    [commit, doc.id, flow]
+  )
 
   const ui = useMemo<CanvasUi>(
     () => ({
@@ -607,6 +649,10 @@ function CanvasEditorBody({
             <Boxes className="size-4" />
             <span className="hidden lg:inline">Compass</span>
           </ToolButton>
+          <ToolButton label={`Build tree from Compass ${labels.objective.lowerPlural}`} disabled={locked} onClick={() => setTreeOpen(true)}>
+            <ListTree className="size-4" />
+            <span className="hidden lg:inline">Tree</span>
+          </ToolButton>
           <ToolButton label="Add group" disabled={locked} onClick={() => addNode("group")}>
             <Square className="size-4" />
             <span className="hidden lg:inline">Group</span>
@@ -712,6 +758,17 @@ function CanvasEditorBody({
         onOpenChange={setPickerOpen}
         onPick={(item) => addCard({ kind: item.kind, id: item.id }, item.title)}
       />
+
+      <CanvasTreeDialog docId={doc.id} open={treeOpen} onOpenChange={setTreeOpen} onBuild={handleBuildTree} />
+
+      {treeNotice && (
+        <div role="status" data-testid="tree-notice" className="flex items-center justify-between gap-3 border-b border-border-default bg-surface-inset px-4 py-1.5 text-xs text-text-secondary sm:px-8">
+          <span>{treeNotice}</span>
+          <button type="button" className="shrink-0 text-primary hover:underline" onClick={() => setTreeNotice(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div
         ref={wrapperRef}
