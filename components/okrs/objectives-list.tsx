@@ -17,6 +17,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { ObjectiveRow } from "@/components/okrs/objective-row";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import {
   reorderObjective,
 } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
@@ -79,6 +80,9 @@ export function ObjectivesList({
   hideProgress,
 }: Props) {
   const [objectives, setObjectives] = useState(initialObjectives);
+  const labels = useLabels();
+  // Collapsed ids are view state only (not persisted); everything starts expanded.
+  const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [, startTransition] = useTransition();
 
   // Stable across server and client; without it @dnd-kit numbers its
@@ -114,7 +118,31 @@ export function ObjectivesList({
 
   const objectiveIds = objectives.map((o) => o.id);
 
+  function setCollapsed(id: string, collapsed: boolean) {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (collapsed) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  const allCollapsed = objectives.length > 0 && objectives.every((o) => collapsedIds.has(o.id));
+  const toggleAllLabel = `${allCollapsed ? "Expand" : "Collapse"} all ${labels.objective.lowerPlural}`;
+
   return (
+    <>
+    {objectives.length > 1 && (
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setCollapsedIds(allCollapsed ? new Set() : new Set(objectiveIds))}
+          className="rounded text-xs text-text-subtle hover:text-text-default hover:underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
+        >
+          {toggleAllLabel}
+        </button>
+      </div>
+    )}
     <DndContext
       id={dndId}
       sensors={sensors}
@@ -134,9 +162,12 @@ export function ObjectivesList({
             supportingObjectiveOptions={supportingObjectiveOptions}
             paceElapsed={paceElapsed}
             hideProgress={hideProgress}
+            collapsed={collapsedIds.has(obj.id)}
+            onCollapsedChange={(c) => setCollapsed(obj.id, c)}
           />
         ))}
       </SortableContext>
     </DndContext>
+    </>
   );
 }
