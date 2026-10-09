@@ -22,6 +22,27 @@ import {
 import { captureAndStoreArtifactThumbnail, scheduleArtifactThumbnailCapture } from "@/lib/artifact-thumbnail"
 import { assertKindAllowedForSource, parseArtifactKind, readArtifactKind } from "@/lib/artifact-kind"
 import { listArtifactSlides } from "@/lib/artifact-slides"
+import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
+
+/**
+ * Resolves the absolute, human-clickable page URL of Artifacts in one workspace
+ * — the link an agent relays to a person (`<origin>/{org}/{ws}/docs/artifacts/{id}`).
+ *
+ * Looks the workspace slugs up once so a list doesn't cost one query per row.
+ * Never throws and never fails the tool call: by the time this runs the
+ * Artifact write has usually already committed, so an unresolvable workspace or
+ * an unconfigured/unsafe origin degrades to `null` (no link) rather than
+ * reporting a successful create as an error.
+ */
+async function artifactUrlResolver(workspaceId: string): Promise<(artifactId: string) => string | null> {
+  try {
+    const workspace = await getPrisma().workspace.findUnique({ where: { id: workspaceId }, select: { slug: true, organization: { select: { slug: true } } } })
+    return (artifactId) => {
+      try { return safeEntityUrl({ orgSlug: workspace?.organization?.slug, workspaceSlug: workspace?.slug, type: "artifact", id: artifactId }) }
+      catch { return null }
+    }
+  } catch { return () => null }
+}
 
 export async function listArtifacts({ workspaceId, includeArchived = false }: { workspaceId: string; includeArchived?: boolean }) {
   const artifacts = await getPrisma().artifact.findMany({
@@ -29,8 +50,10 @@ export async function listArtifacts({ workspaceId, includeArchived = false }: { 
     include: { currentRevision: { select: { revisionNumber: true, filename: true, externalUrl: true } }, _count: { select: { revisions: true, links: true } } },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
   })
-  const items = artifacts.map((artifact) => ({ ...artifact, kind: readArtifactKind(artifact.kind) }))
-  return ok(`${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"} found.`, { items, count: artifacts.length })
+  const urlFor = await artifactUrlResolver(workspaceId)
+  const items = artifacts.map((artifact) => ({ ...artifact, kind: readArtifactKind(artifact.kind), url: urlFor(artifact.id) }))
+  const lines = items.map((item) => `- ${item.title} (${item.id})${item.url ? `\n  URL: ${item.url}` : ""}`)
+  return ok(`${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"} found.${lines.length ? `\n${lines.join("\n")}` : ""}`, { items, count: artifacts.length })
 }
 
 export async function getArtifact({ artifactId }: { artifactId: string }) {
@@ -52,8 +75,9 @@ export async function getArtifact({ artifactId }: { artifactId: string }) {
   // revision at request time, exactly as the viewer splits it.
   const slides = kind === "SLIDE_DECK" ? await listArtifactSlides(artifact.currentRevision?.blobPathname ?? null) : undefined
   const slideLine = slides ? `\nSlides: ${slides.length}${slides.map((slide) => `\n  ${slide.index}: ${slide.title ?? "(untitled)"}`).join("")}` : ""
-  const text = [`# ${artifact.title}`, `ID: ${artifact.id}`, `Type: ${artifact.sourceType}`, `Kind: ${kind}`, `Status: ${artifact.status}`, `Current revision: ${artifact.currentRevision?.revisionNumber ?? "None"}`, `Linked solutions: ${solutions.map((solution) => `${solution.title} (${solution.id})`).join(", ") || "None"}`].join("\n")
-  return ok(`${text}\nLinked decisions: ${decisions.map((decision) => `${decision.title} (${decision.id})`).join(", ") || "None"}${slideLine}`, { ...artifact, kind, ...(slides ? { slides } : {}), currentRevision: artifact.currentRevision ? { ...artifact.currentRevision, blobPathname: undefined, thumbnailPathname: undefined } : null, revisions: safeRevisions, solutions, decisions, links: undefined })
+  const url = (await artifactUrlResolver(artifact.workspaceId))(artifact.id)
+  const text = [`# ${artifact.title}`, `ID: ${artifact.id}`, ...(url ? [`URL: ${url}`] : []), `Type: ${artifact.sourceType}`, `Kind: ${kind}`, `Status: ${artifact.status}`, `Current revision: ${artifact.currentRevision?.revisionNumber ?? "None"}`, `Linked solutions: ${solutions.map((solution) => `${solution.title} (${solution.id})`).join(", ") || "None"}`].join("\n")
+  return ok(`${text}\nLinked decisions: ${decisions.map((decision) => `${decision.title} (${decision.id})`).join(", ") || "None"}${slideLine}`, { ...artifact, kind, url, ...(slides ? { slides } : {}), currentRevision: artifact.currentRevision ? { ...artifact.currentRevision, blobPathname: undefined, thumbnailPathname: undefined } : null, revisions: safeRevisions, solutions, decisions, links: undefined })
 }
 
 export async function prepareArtifactUploadTool(input: { workspaceId: string; filename: string; fileSize: number }) {
@@ -88,7 +112,8 @@ export async function createArtifact(input: { workspaceId: string; title: string
     if (input.sourceType === "EXTERNAL_LINK" && artifact.currentRevisionId) {
       scheduleArtifactThumbnailCapture({ artifactId: artifact.id, workspaceId: input.workspaceId, revisionId: artifact.currentRevisionId })
     }
-    return ok(`Artifact created.\nID: ${artifact.id}`, { id: artifact.id, title: artifact.title, sourceType: input.sourceType, kind })
+    const url = (await artifactUrlResolver(input.workspaceId))(artifact.id)
+    return ok(withUrlLine(`Artifact created.\nID: ${artifact.id}`, url), { id: artifact.id, title: artifact.title, sourceType: input.sourceType, kind, url })
   } catch (error) { return fail(error instanceof Error ? error.message : "Could not create artifact") }
 }
 
@@ -123,7 +148,8 @@ export async function updateArtifact(input: { artifactId: string; workspaceId: s
       scheduleArtifactThumbnailCapture({ artifactId: input.artifactId, workspaceId: input.workspaceId, revisionId })
     }
     else if (input.title !== undefined || input.description !== undefined || kind !== undefined) await updateArtifactMetadata({ artifactId: input.artifactId, workspaceId: input.workspaceId, title: input.title, description: input.description, kind })
-    return ok(`Artifact updated.\nID: ${input.artifactId}`, { id: input.artifactId, revisionId })
+    const url = (await artifactUrlResolver(input.workspaceId))(input.artifactId)
+    return ok(withUrlLine(`Artifact updated.\nID: ${input.artifactId}`, url), { id: input.artifactId, revisionId, url })
   } catch (error) { return fail(error instanceof Error ? error.message : "Could not update artifact") }
 }
 
