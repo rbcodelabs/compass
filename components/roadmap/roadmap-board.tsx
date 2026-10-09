@@ -588,8 +588,10 @@ export function RoadmapBoard({
           label="Roadmap board"
           className={cn(
             "block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4",
-            // Lanes stack vertically, so the board scrolls both ways in lane mode.
-            spec ? "overflow-y-auto" : "md:overflow-y-hidden",
+            // Lanes stack vertically, so the board scrolls both ways in lane mode. Snapping is off there:
+            // the only snap target would be the "Not scheduled" column, which yanks a freshly loaded
+            // board to its far right and leaves the first lane column under the sidebar.
+            spec ? "snap-none overflow-y-auto" : "md:overflow-y-hidden",
           )}
         >
           <div

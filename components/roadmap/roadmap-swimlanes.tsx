@@ -20,7 +20,7 @@ const HORIZON_ACCENT = {
   SHIPPED: "bg-status-success",
 } as const;
 
-const COLUMN_MIN_PX = 272;
+const COLUMN_MIN_PX = 240;
 const COLUMN_GAP_PX = 12;
 
 type AvailableKR = { id: string; title: string; objectiveTitle: string };
@@ -94,11 +94,13 @@ export function RoadmapSwimlanes({
   }
 
   return (
-    // `contain: inline-size` + `flex-1 basis-0` keep the 1fr columns from sizing to the
-    // widest card text inside the board's `w-max` track (which made them thousands of px wide).
+    // `contain: inline-size` + a zero flex-basis keep the 1fr columns from sizing to the widest
+    // card text inside the board's `w-max` track (which made them thousands of px wide). Grow 3 gives
+    // the lanes most of the free space over the "Not scheduled" column; 240px columns let 4 horizons
+    // plus that column fit a ~1400px viewport without sideways scrolling.
     <div
       data-slot="roadmap-swimlanes"
-      className="flex flex-1 basis-0 flex-col gap-3 pb-3 [contain:inline-size]"
+      className="flex flex-[3_1_0%] flex-col gap-3 pb-3 [contain:inline-size]"
       style={{ minWidth }}
     >
       <div
