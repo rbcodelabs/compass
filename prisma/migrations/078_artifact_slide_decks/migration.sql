@@ -1,4 +1,4 @@
--- Migration 074: slide-deck Artifacts and slide-anchored comments.
+-- Migration 078: slide-deck Artifacts and slide-anchored comments.
 --
 -- Adds two nullable columns:
 --   artifacts.kind                     VARCHAR(30)  presentation kind of the
@@ -20,11 +20,11 @@
 -- correct for every anchor that exists today. elementSelector is already
 -- nullable, so a comment on a whole slide is slide_index with no selector.
 --
--- Deploy order (same as 073_workspace_thinking_model): this migration ships on
--- its own and schema.prisma deliberately does not declare either column yet.
--- Prisma selects every declared scalar, so declaring them before the columns
--- exist would 500 every artifact and comment read. Apply this migration, then
--- deploy the code PR that declares and reads them.
+-- Deploy order (same as 073_workspace_thinking_model): schema.prisma declares
+-- both columns in the same change as the code that reads them. Prisma selects
+-- every declared scalar, so deploying that code before the columns exist would
+-- 500 every artifact and comment read. Apply this migration to the target
+-- database first (or immediately after the deploy lands), then rely on the code.
 --
 -- DSQL rules followed (matching 067_decision_answers and 073):
 --   - Plain ALTER TABLE ADD COLUMN, one DDL per statement. No index, no foreign

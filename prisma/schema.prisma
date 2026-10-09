@@ -924,7 +924,7 @@ model CommentElementAnchor {
   /// artifact.
   screenshotUrl      String?  @map("screenshot_url") @db.Text
   /// Zero-based slide of a SLIDE_DECK artifact the comment was left on, or null
-  /// when the comment is not slide-scoped (migration 077).
+  /// when the comment is not slide-scoped (migration 078).
   slideIndex         Int?     @map("slide_index")
   comment            Comment  @relation(fields: [commentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
@@ -2347,7 +2347,7 @@ model Artifact {
   /// HTML_UPLOAD | EXTERNAL_LINK
   sourceType        String             @map("source_type") @db.VarChar(30)
   /// NULL (= DOCUMENT) | SLIDE_DECK. Presentation kind, orthogonal to sourceType;
-  /// allowed values live in lib/artifact-kind.ts (migration 077).
+  /// allowed values live in lib/artifact-kind.ts (migration 078).
   kind              String?            @map("kind") @db.VarChar(30)
   /// ACTIVE | ARCHIVED
   status            String             @default("ACTIVE") @db.VarChar(20)
