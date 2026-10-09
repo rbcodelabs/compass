@@ -1,12 +1,11 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import {
   BarChart3,
   BookOpen,
   Building2,
-  Check,
   ChevronDown,
   FlaskConical,
   HelpCircle,
@@ -52,7 +51,8 @@ import {
 } from "@/components/ui/sidebar"
 import { SendCompassFeedbackDialog } from "@/components/feedback/send-compass-feedback-dialog"
 import { signOutAction } from "@/lib/actions/auth-actions"
-import { getWorkspaceSwitchPath } from "@/lib/workspace-nav"
+import type { SelectorWorkspace } from "@/components/workspace-selector/model"
+import { WorkspacePicker } from "@/components/workspace-selector/workspace-picker"
 import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
 import { useAgentRailOptional } from "@/components/agent/agent-rail-context"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
@@ -66,7 +66,7 @@ interface SidebarProps {
   userName: string
   userEmail: string
   userImage?: string
-  workspaces: { id: string; name: string; slug: string; orgSlug: string; isReadOnly?: boolean }[]
+  workspaces: SelectorWorkspace[]
   /** Org admins/owners see an "Org Settings" link in the account menu. */
   isOrgAdmin?: boolean
   researchCaptureEnabled?: boolean
@@ -163,7 +163,6 @@ export function Sidebar({
   unreadNotifications = { count: 0, overflow: false },
 }: SidebarProps) {
   const pathname = usePathname()
-  const router = useRouter()
   const base = `/${orgSlug}/${workspaceSlug}`
   const labels = useLabels()
   const baseNavItems = buildBaseNavItems(labels.sections.okrs, labels.opportunity.plural, labels.solution.plural, labels.sections.discoveryFirst)
@@ -175,11 +174,6 @@ export function Sidebar({
     ...(researchCaptureEnabled ? [{ label: "Research", path: "capture", Icon: Microscope }] : []),
     ...baseNavItems.slice(6),
   ]
-
-  const otherWorkspaces = workspaces.filter(
-    (workspace) =>
-      !(workspace.slug === workspaceSlug && workspace.orgSlug === orgSlug)
-  )
 
   return (
     <SidebarRoot
@@ -215,71 +209,13 @@ export function Sidebar({
 
         <SidebarMenu>
           <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <SidebarMenuButton
-                    size="lg"
-                    tooltip={`Workspace: ${workspaceName}`}
-                    className="text-text-secondary hover:bg-sidebar-accent hover:text-sidebar-foreground data-open:bg-sidebar-accent"
-                    aria-label={`Switch workspace. Current workspace: ${workspaceName}`}
-                  />
-                }
-              >
-                <div className="flex size-6 shrink-0 items-center justify-center rounded-md border border-primary/30 bg-primary/20">
-                  <span className="text-[10px] font-bold leading-none text-primary">
-                    {workspaceName[0]?.toUpperCase() ?? "W"}
-                  </span>
-                </div>
-                <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                  {workspaceName}
-                </span>
-                <ChevronDown className="ml-auto size-3 text-text-subtle group-data-[collapsible=icon]:hidden" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="right" align="start" className="min-w-56">
-                {workspaces.map((workspace) => (
-                  <DropdownMenuItem
-                    key={workspace.id}
-                    className="flex cursor-pointer items-center gap-2"
-                    onClick={() =>
-                      router.push(
-                        getWorkspaceSwitchPath(
-                          pathname,
-                          orgSlug,
-                          workspaceSlug,
-                          workspace.orgSlug,
-                          workspace.slug
-                        )
-                      )
-                    }
-                  >
-                    <div className="flex size-4 shrink-0 items-center justify-center">
-                      {workspace.slug === workspaceSlug &&
-                        workspace.orgSlug === orgSlug && (
-                          <Check className="size-3.5 text-primary" aria-hidden="true" />
-                        )}
-                    </div>
-                    <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
-                    {workspace.isReadOnly && (
-                      <span className="shrink-0 rounded border border-border-default px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-subtle">
-                        Read-only
-                      </span>
-                    )}
-                  </DropdownMenuItem>
-                ))}
-                {otherWorkspaces.length === 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      disabled
-                      className="cursor-default text-text-disabled focus:bg-transparent focus:text-text-disabled"
-                    >
-                      No other workspaces
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <WorkspacePicker
+              workspaces={workspaces}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+              workspaceName={workspaceName}
+              userScope={userEmail || undefined}
+            />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>

@@ -59,6 +59,12 @@ On success you land directly in the new workspace's OKRs page, and it appears in
 
 Your organization's *first* workspace is created for you when you sign up, as part of onboarding — this page is for adding further ones later.
 
+## Switching Between Workspaces
+
+Click the workspace name at the top of the sidebar to open the workspace picker. Type to filter by workspace or organization name, use the arrow keys to move through the list, and press Enter to open one. Switching keeps you in the same section (for example, Roadmap stays Roadmap). When you belong to more than four workspaces, the ones you opened most recently appear first in a **Recent** group. Recents are remembered per browser and are not shared across devices.
+
+Choose **All workspaces** at the bottom of the picker to open the full workspace gallery at `/dashboard`. It shows every workspace as a card, grouped by organization, with search (press `/` or ⌘K). Workspaces where you have read-only access are labelled **Read-only**. If you belong to only one workspace, signing in takes you straight to it.
+
 ## Deleting a Workspace
 
 Deleting a workspace is an admin-only action found in **Settings**, in a dedicated danger-zone panel. Click **Delete workspace**, then type the workspace's exact name to confirm — the delete button stays disabled until the typed name matches.
