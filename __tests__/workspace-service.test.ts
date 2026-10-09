@@ -115,6 +115,31 @@ describe("createWorkspaceInOrg", () => {
     expect(seeded.map((d) => d.role)).not.toContain("OWNER")
   })
 
+  it("seeds only org OWNER/ADMIN members when memberSeeding is ORG_ADMINS", async () => {
+    mockPrisma.organizationMember.findMany.mockResolvedValue([
+      { userId: "user-owner", role: "OWNER" },
+      { userId: "user-admin", role: "ADMIN" },
+      { userId: "user-member", role: "MEMBER" },
+      { userId: "user-junk", role: "wat" },
+    ])
+
+    const result = await createWorkspaceInOrg({
+      orgSlug: "rbcodelabs",
+      name: "My Product",
+      slug: "my-product",
+      memberSeeding: "ORG_ADMINS",
+    })
+
+    expect(result.ok).toBe(true)
+    expect(mockPrisma.workspaceMember.createMany).toHaveBeenCalledWith({
+      data: [
+        { workspaceId: "ws-1", userId: "user-owner", role: "ADMIN" },
+        { workspaceId: "ws-1", userId: "user-admin", role: "ADMIN" },
+      ],
+      skipDuplicates: true,
+    })
+  })
+
   it("skips the membership write entirely when the org has no members", async () => {
     mockPrisma.organizationMember.findMany.mockResolvedValue([])
 
