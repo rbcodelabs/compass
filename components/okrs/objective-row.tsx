@@ -19,7 +19,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, X } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical, X } from "lucide-react";
 import type { ObjectiveStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { averageProgress, STATUS_BADGE } from "@/lib/okrs";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
@@ -97,6 +97,9 @@ interface ObjectiveRowProps {
   paceElapsed?: number | null;
   /** Hide progress visuals (ring, bars, percentages) for a not-yet-started period. */
   hideProgress?: boolean;
+  /** Controlled collapsed state. Omit for an uncontrolled row that starts expanded. */
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 export function ObjectiveRow({
@@ -109,8 +112,20 @@ export function ObjectiveRow({
   supportingObjectiveOptions,
   paceElapsed,
   hideProgress,
+  collapsed: collapsedProp,
+  onCollapsedChange,
 }: ObjectiveRowProps) {
   const labels = useLabels();
+  const [localCollapsed, setLocalCollapsed] = useState(false);
+  const collapsed = collapsedProp ?? localCollapsed;
+  const bodyId = useId();
+  function toggleCollapsed() {
+    const next = !collapsed;
+    if (collapsedProp === undefined) setLocalCollapsed(next);
+    onCollapsedChange?.(next);
+  }
+  const krCount = objective.keyResults.length;
+  const krCountLabel = `${krCount} ${krCount === 1 ? labels.keyResult.lower : labels.keyResult.lowerPlural}`;
   const [isPending, startTransition] = useTransition();
   const [isParentKRPending, startParentKRTransition] = useTransition();
   const [parentKRError, setParentKRError] = useState<string | null>(null);
@@ -216,6 +231,16 @@ export function ObjectiveRow({
       }
       title={
         <span className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={toggleCollapsed}
+                aria-expanded={!collapsed}
+                aria-controls={bodyId}
+                aria-label={`${collapsed ? "Expand" : "Collapse"} ${objective.title}`}
+                className="shrink-0 rounded text-text-subtle hover:text-text-default focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
+              >
+                {collapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
+              </button>
               {objective.squad && (
                 <span
                   className="w-2.5 h-2.5 rounded-full shrink-0"
@@ -232,7 +257,10 @@ export function ObjectiveRow({
               </button>
         </span>
       }
-      description={[objective.owner, objective.squad?.name].filter(Boolean).join(" · ") || undefined}
+      description={
+        [objective.owner, objective.squad?.name, collapsed ? krCountLabel : null].filter(Boolean).join(" · ") || undefined
+      }
+      bodyClassName={collapsed ? "mt-0" : undefined}
       actions={
         <div ref={actionsRef} className="flex shrink-0 items-center gap-2">
           {/* Overall progress */}
@@ -263,7 +291,39 @@ export function ObjectiveRow({
         </div>
       }
     >
+      {/* Parent-KR link picker — opened from the ⋯ menu, renders nothing until opened */}
+      {canLinkParent && (
+        <Combobox
+          items={selectableKRs!.map((kr) => ({
+            value: kr.id,
+            label: `${kr.cycleTitle} ${kr.objectiveTitle} ${kr.title}`,
+            render: (
+              <span className="flex min-w-0 flex-col text-left">
+                <span className="truncate text-xs font-medium">{kr.title}</span>
+                <span className="truncate text-[11px] text-muted-foreground">
+                  {kr.cycleTitle} · {kr.objectiveTitle}
+                  {kr.cycleStatus === "CLOSED" ? " · Closed" : ""}
+                </span>
+              </span>
+            ),
+          }))}
+          value={null}
+          onValueChange={handleParentKRChange}
+          disabled={isParentKRPending}
+          open={isParentLinkOpen}
+          onOpenChange={setIsParentLinkOpen}
+        >
+          <ComboboxContent
+            anchor={actionsRef}
+            align="end"
+            inputPlaceholder={`Search ${labels.cycle.lowerPlural}, ${labels.objective.lowerPlural}, and ${labels.keyResult.shortPlural}…`}
+            emptyMessage={`No eligible parent ${labels.keyResult.shortPlural}. A ${labels.cycle.lower}-less ${labels.objective.singular} can support any ${labels.keyResult.singular} in a Draft or Active ${labels.cycle.lower}; otherwise the parent ${labels.cycle.lower} must be Draft or Active, longer, and fully contain this ${labels.cycle.lower}'s dates.`}
+          />
+        </Combobox>
+      )}
 
+      {/* Everything that hides on collapse stays mounted so KR reorder state and open forms survive a toggle. */}
+      <div id={bodyId} hidden={collapsed}>
       {/* Key results */}
       {objective.keyResults.length > 0 && (
         <SortableKeyResults
@@ -320,37 +380,6 @@ export function ObjectiveRow({
         </div>
       )}
 
-      {/* Parent-KR link picker — opened from the ⋯ menu, renders nothing until opened */}
-      {canLinkParent && (
-        <Combobox
-          items={selectableKRs!.map((kr) => ({
-            value: kr.id,
-            label: `${kr.cycleTitle} ${kr.objectiveTitle} ${kr.title}`,
-            render: (
-              <span className="flex min-w-0 flex-col text-left">
-                <span className="truncate text-xs font-medium">{kr.title}</span>
-                <span className="truncate text-[11px] text-muted-foreground">
-                  {kr.cycleTitle} · {kr.objectiveTitle}
-                  {kr.cycleStatus === "CLOSED" ? " · Closed" : ""}
-                </span>
-              </span>
-            ),
-          }))}
-          value={null}
-          onValueChange={handleParentKRChange}
-          disabled={isParentKRPending}
-          open={isParentLinkOpen}
-          onOpenChange={setIsParentLinkOpen}
-        >
-          <ComboboxContent
-            anchor={actionsRef}
-            align="end"
-            inputPlaceholder={`Search ${labels.cycle.lowerPlural}, ${labels.objective.lowerPlural}, and ${labels.keyResult.shortPlural}…`}
-            emptyMessage={`No eligible parent ${labels.keyResult.shortPlural}. A ${labels.cycle.lower}-less ${labels.objective.singular} can support any ${labels.keyResult.singular} in a Draft or Active ${labels.cycle.lower}; otherwise the parent ${labels.cycle.lower} must be Draft or Active, longer, and fully contain this ${labels.cycle.lower}'s dates.`}
-          />
-        </Combobox>
-      )}
-
       {/* Add key result */}
       <div>
         <AddKeyResultForm
@@ -359,6 +388,7 @@ export function ObjectiveRow({
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
         />
+      </div>
       </div>
     </EntityCard>
   );
