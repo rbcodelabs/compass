@@ -2,11 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const getGoldenSnapshotId = vi.fn()
 const bootSandboxFromSnapshot = vi.fn()
+const leaseProtectionBypass = vi.fn()
+const isAutoBypassConfigured = vi.fn()
 
 vi.mock("@/lib/agent-runtime-config", () => ({ getGoldenSnapshotId: () => getGoldenSnapshotId() }))
 vi.mock("@/lib/agent-sandbox", () => ({
   CHROMIUM_LAUNCH_ARGS: ["--no-sandbox"],
   bootSandboxFromSnapshot: (...args: unknown[]) => bootSandboxFromSnapshot(...args),
+}))
+
+vi.mock("@/lib/vercel-protection-bypass", () => ({
+  isAutoBypassConfigured: () => isAutoBypassConfigured(),
+  leaseProtectionBypass: (...args: unknown[]) => leaseProtectionBypass(...args),
 }))
 
 import { captureScreenshot, resolveProtectionBypassSecret, ScreenshotCaptureError } from "@/lib/capture-screenshot"
@@ -44,6 +51,8 @@ function envOf(sandbox: ReturnType<typeof fakeSandbox>) {
 beforeEach(() => {
   vi.clearAllMocks()
   getGoldenSnapshotId.mockResolvedValue("snap_1")
+  isAutoBypassConfigured.mockReturnValue(true)
+  leaseProtectionBypass.mockResolvedValue(null)
 })
 
 describe("captureScreenshot target validation", () => {
@@ -139,6 +148,96 @@ describe("captureScreenshot URL mode", () => {
   it("fails without a golden snapshot", async () => {
     getGoldenSnapshotId.mockResolvedValue(null)
     await expect(captureScreenshot({ url: "https://a.example" })).rejects.toThrow(/No golden sandbox snapshot/)
+  })
+})
+
+describe("captureScreenshot auto protection bypass", () => {
+  const lease = () => ({ projectId: "prj_1", secret: "leased-secret", revoke: vi.fn().mockResolvedValue(undefined) })
+  const authFailure = () => ({
+    async *logs() { yield { data: "Error: Page returned HTTP 401 (not authorized).\n" } },
+    wait: vi.fn().mockResolvedValue({ exitCode: 1 }),
+  })
+
+  afterEach(() => { vi.useRealTimers() })
+
+  it("mints a key, captures with it, and revokes it afterwards", async () => {
+    const l = lease()
+    leaseProtectionBypass.mockResolvedValue(l)
+    const sandbox = fakeSandbox()
+    await captureScreenshot({ url: "https://proto.vercel.app/x", autoProtectionBypass: true })
+    expect(leaseProtectionBypass).toHaveBeenCalledWith("https://proto.vercel.app/x")
+    expect(envOf(sandbox).CAPTURE_BYPASS_SECRET).toBe("leased-secret")
+    expect(sandbox.runCommand.mock.calls[0][0].args).not.toContain("leased-secret")
+    expect(l.revoke).toHaveBeenCalledTimes(1)
+  })
+
+  it("revokes even when the capture fails, and when the sandbox cannot boot", async () => {
+    const l = lease()
+    leaseProtectionBypass.mockResolvedValue(l)
+    bootSandboxFromSnapshot.mockRejectedValue(new Error("no capacity"))
+    await expect(captureScreenshot({ url: "https://proto.vercel.app", autoProtectionBypass: true })).rejects.toThrow(ScreenshotCaptureError)
+    expect(l.revoke).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not mint when a static secret is supplied, the flag is off, or the feature is unconfigured", async () => {
+    fakeSandbox()
+    await captureScreenshot({ url: "https://a.example", protectionBypassSecret: "static", autoProtectionBypass: true })
+    await captureScreenshot({ url: "https://a.example" })
+    isAutoBypassConfigured.mockReturnValue(false)
+    await captureScreenshot({ url: "https://a.example", autoProtectionBypass: true })
+    expect(leaseProtectionBypass).not.toHaveBeenCalled()
+  })
+
+  it("never mints for HTML captures", async () => {
+    fakeSandbox()
+    await captureScreenshot({ html: "<p>x</p>" })
+    expect(leaseProtectionBypass).not.toHaveBeenCalled()
+  })
+
+  it("degrades to an unauthenticated capture when minting fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    leaseProtectionBypass.mockRejectedValue(new Error("Vercel API returned 403"))
+    const sandbox = fakeSandbox()
+    await captureScreenshot({ url: "https://proto.vercel.app", autoProtectionBypass: true })
+    expect(envOf(sandbox).CAPTURE_BYPASS_SECRET).toBe("")
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it("retries a 401 on a leased key (propagation lag) and then succeeds", async () => {
+    vi.useFakeTimers()
+    const l = lease()
+    leaseProtectionBypass.mockResolvedValue(l)
+    const sandbox = fakeSandbox()
+    const ok = await sandbox.runCommand()
+    sandbox.runCommand.mockReset()
+    sandbox.runCommand.mockResolvedValueOnce(authFailure()).mockResolvedValueOnce(ok)
+    const pending = captureScreenshot({ url: "https://proto.vercel.app", autoProtectionBypass: true })
+    await vi.advanceTimersByTimeAsync(2_000)
+    await expect(pending).resolves.toMatchObject({ httpStatus: 200 })
+    expect(sandbox.runCommand).toHaveBeenCalledTimes(2)
+    expect(l.revoke).toHaveBeenCalledTimes(1)
+  })
+
+  it("gives up after the retries and reports the auth failure", async () => {
+    vi.useFakeTimers()
+    const l = lease()
+    leaseProtectionBypass.mockResolvedValue(l)
+    const sandbox = fakeSandbox()
+    sandbox.runCommand.mockImplementation(async () => authFailure())
+    const pending = captureScreenshot({ url: "https://proto.vercel.app", autoProtectionBypass: true })
+    const assertion = expect(pending).rejects.toThrow(/HTTP 401/)
+    await vi.advanceTimersByTimeAsync(7_000)
+    await assertion
+    expect(sandbox.runCommand).toHaveBeenCalledTimes(3)
+    expect(l.revoke).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not retry a 401 when no key was leased", async () => {
+    const sandbox = fakeSandbox()
+    sandbox.runCommand.mockImplementation(async () => authFailure())
+    await expect(captureScreenshot({ url: "https://a.example", protectionBypassSecret: "static" })).rejects.toThrow(/HTTP 401/)
+    expect(sandbox.runCommand).toHaveBeenCalledTimes(1)
   })
 })
 

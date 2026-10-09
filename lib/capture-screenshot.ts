@@ -22,11 +22,19 @@
 import { bootSandboxFromSnapshot, CHROMIUM_LAUNCH_ARGS } from "@/lib/agent-sandbox"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { buildSandboxedHtml } from "@/lib/artifact-preview-html"
+import { isAutoBypassConfigured, leaseProtectionBypass, type BypassLease } from "@/lib/vercel-protection-bypass"
 
 /** Bounds the whole capture, including boot. Independent of the page timeout. */
 const CAPTURE_SANDBOX_TIMEOUT_MS = 2 * 60_000
 const DEFAULT_PAGE_TIMEOUT_MS = 30_000
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 } as const
+
+/**
+ * A freshly minted bypass key can reach Vercel's edge a moment after the API
+ * confirms it, so a 401/403 on a leased key is retried (same key) after these
+ * delays before being reported as a real failure.
+ */
+const LEASED_KEY_RETRY_DELAYS_MS = [2_000, 5_000]
 
 /** Sandbox-relative paths; `writeFiles` resolves these under /vercel/sandbox. */
 const CAPTURE_SCRIPT_PATH = "capture.mjs"
@@ -69,12 +77,21 @@ type CaptureTarget =
        * forbids exactly this, so the header is injected per-request instead.
        */
       protectionBypassSecret?: string
+      /**
+       * When no `protectionBypassSecret` is given, mint a short-lived bypass key on
+       * the Vercel project that serves `url`, capture with it, and revoke it
+       * (lib/vercel-protection-bypass.ts). Needs `VERCEL_ACCESS_TOKEN`; a host that
+       * is not one of our team's projects gets no key. Ignored when a static secret
+       * is supplied.
+       */
+      autoProtectionBypass?: boolean
     }
   | {
       /** A complete HTML document to render with no network access. */
       html: string
       url?: never
       protectionBypassSecret?: never
+      autoProtectionBypass?: never
     }
 
 export type CaptureScreenshotOptions = CaptureTarget & {
@@ -139,6 +156,55 @@ export async function captureScreenshot(
     )
   }
 
+  // The lease is taken only once nothing else can fail cheaply (validation, snapshot),
+  // and revoked in a `finally` that wraps everything that can use it.
+  const lease = await maybeLeaseBypass(target, options)
+  try {
+    return await captureInSandbox({
+      target,
+      options,
+      viewport,
+      snapshotId,
+      startedAt,
+      bypassSecret: lease?.secret ?? options.protectionBypassSecret,
+      retryAuthFailures: Boolean(lease),
+    })
+  } finally {
+    await lease?.revoke()
+  }
+}
+
+/**
+ * Mint a per-capture bypass key when the caller asked for one, supplied no static
+ * secret, and the feature is configured. Any failure to mint degrades to "capture
+ * without a key": a public page still works, and a protected one reports its own
+ * 401 — which is the pre-existing behaviour, not a new failure.
+ */
+async function maybeLeaseBypass(
+  target: ResolvedTarget,
+  options: CaptureScreenshotOptions
+): Promise<BypassLease | null> {
+  if (target.kind !== "url" || !options.autoProtectionBypass) return null
+  if (options.protectionBypassSecret || !isAutoBypassConfigured()) return null
+  try {
+    return await leaseProtectionBypass(target.url.href)
+  } catch (error) {
+    console.warn(`[capture-screenshot] could not mint a protection-bypass key for ${target.label}: ${describe(error)}`)
+    return null
+  }
+}
+
+async function captureInSandbox(input: {
+  target: ResolvedTarget
+  options: CaptureScreenshotOptions
+  viewport: { width: number; height: number }
+  snapshotId: string
+  startedAt: number
+  bypassSecret: string | undefined
+  retryAuthFailures: boolean
+}): Promise<CaptureScreenshotResult> {
+  const { target, options, viewport, snapshotId, startedAt, bypassSecret, retryAuthFailures } = input
+
   const bootStart = Date.now()
   let sandbox: Awaited<ReturnType<typeof bootSandboxFromSnapshot>>
   try {
@@ -163,11 +229,11 @@ export async function captureScreenshot(
       ...(target.kind === "html" ? [{ path: CAPTURE_HTML_PATH, content: target.html }] : []),
     ])
 
-    const command = await sandbox.runCommand({
+    // Passed as env, not argv: argv is visible to every process in the
+    // sandbox via /proc, and the bypass secret must not be.
+    const commandOptions = {
       cmd: "node",
       args: [CAPTURE_SCRIPT_PATH],
-      // Passed as env, not argv: argv is visible to every process in the
-      // sandbox via /proc, and the bypass secret must not be.
       env: {
         CAPTURE_MODE: target.kind,
         CAPTURE_URL: target.kind === "url" ? target.url.href : "",
@@ -178,15 +244,22 @@ export async function captureScreenshot(
         CAPTURE_VIEWPORT_HEIGHT: String(viewport.height),
         CAPTURE_FULL_PAGE: options.fullPage ? "1" : "",
         CAPTURE_TIMEOUT_MS: String(options.timeoutMs ?? DEFAULT_PAGE_TIMEOUT_MS),
-        CAPTURE_BYPASS_SECRET: target.kind === "url" ? (options.protectionBypassSecret ?? "") : "",
+        CAPTURE_BYPASS_SECRET: target.kind === "url" ? (bypassSecret ?? "") : "",
       },
       detached: true,
-    })
+    }
 
     let output = ""
-    for await (const log of command.logs()) output += log.data
-    const result = await command.wait()
-    if (result.exitCode !== 0) {
+    for (let attempt = 0; ; attempt++) {
+      const command = await sandbox.runCommand(commandOptions)
+      output = ""
+      for await (const log of command.logs()) output += log.data
+      const result = await command.wait()
+      if (result.exitCode === 0) break
+      if (retryAuthFailures && attempt < LEASED_KEY_RETRY_DELAYS_MS.length && isAuthRejection(output)) {
+        await new Promise(resolve => setTimeout(resolve, LEASED_KEY_RETRY_DELAYS_MS[attempt]))
+        continue
+      }
       throw new ScreenshotCaptureError(
         `Browser failed to capture ${target.label}: ${summarizeFailure(output)}`
       )
@@ -345,6 +418,11 @@ function parseResultMarker(output: string): {
   } catch (error) {
     throw new ScreenshotCaptureError(`Could not parse browser result: ${describe(error)}`, error)
   }
+}
+
+/** The in-sandbox script's wording for a 401/403 on the main document. */
+function isAuthRejection(output: string): boolean {
+  return /Page returned HTTP (401|403)/.test(output)
 }
 
 /** Last few non-empty lines — enough to diagnose without dumping a whole log. */
