@@ -67,12 +67,16 @@ describe("Roadmap dashboard workspace layout", () => {
 
     const header = screen.getByRole("banner");
     expect(header).toHaveAttribute("data-slot", "workspace-header");
-    expect(header.className).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(header.className).toContain("md:grid-cols-[minmax(0,1fr)_auto_auto]");
+    // The shared frame wraps below md, so the title keeps a readable width.
+    expect(header.className).toContain("flex-wrap");
+    expect(header.className).toContain("md:flex-nowrap");
 
-    const controls = screen.getByLabelText("Roadmap controls");
-    expect(controls.className).toContain("row-start-2");
-    expect(controls.className).toContain("md:row-start-1");
+    // Controls sit on their own full-width row under md, inline from md up.
+    const controls = header.querySelector('[data-slot="workspace-header-controls"]');
+    expect(controls).not.toBeNull();
+    expect(controls!.className).toContain("order-last");
+    expect(controls!.className).toContain("basis-full");
+    expect(controls!.className).toContain("md:basis-auto");
     // Higher timeout below: slower than the default 5s on a cold run,
     // because the first import of this component subtree pulls in the
     // full icon/dropdown/tooltip dependency graph.

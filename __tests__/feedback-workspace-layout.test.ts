@@ -43,6 +43,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({
 
 import { FeedbackGrid } from "@/components/feedback/feedback-grid";
 import { FeedbackHeaderActions } from "@/components/feedback/feedback-header-actions";
+import { FEEDBACK_TOOLBAR_HOST_ID } from "@/components/feedback/feedback-toolbar-host";
 import { NewFeedbackButton } from "@/components/feedback/new-feedback-button";
 import { DataGrid } from "@/components/data-grid/data-grid";
 import { DEFAULT_FEEDBACK_QUERY } from "@/lib/feedback-query";
@@ -109,28 +110,25 @@ describe("Feedback workspace layout", () => {
     setViewport(false);
   });
 
-  it("mounts FeedbackHeaderActions' toolbar host after paint and portals the Feedback grid's toolbar into it", async () => {
+  it("portals the Feedback grid's toolbar into the page's server-rendered toolbar host", async () => {
     const { container } = render(
       h(
         "div",
         null,
+        // The page renders this host in WorkspacePage's `toolbar` slot.
+        h("div", { id: FEEDBACK_TOOLBAR_HOST_ID, "data-toolbar-host": "" }),
         h(FeedbackHeaderActions),
         h(FeedbackGrid, feedbackGridProps()),
       ),
     );
 
-    // The New Feedback trigger is present immediately...
+    // The New Feedback trigger is the header's primary action.
     expect(screen.getByRole("button", { name: "New Feedback" })).toBeInTheDocument();
-    // ...but the toolbar host has not mounted yet, so the grid's toolbar has
-    // nowhere to portal into.
-    expect(container.querySelector("#feedback-header-toolbar")).toBeNull();
 
-    // After the deferred (requestAnimationFrame-gated) mount, the host
-    // appears and the grid's toolbar (with its real Filters control) portals
-    // into it.
+    // The grid's toolbar (with its real Filters control) portals into the host.
     await waitFor(
       () => {
-        const host = container.querySelector("#feedback-header-toolbar");
+        const host = container.querySelector(`#${FEEDBACK_TOOLBAR_HOST_ID}`);
         expect(host).not.toBeNull();
         expect(
           within(host as HTMLElement).getByRole("button", { name: "Filters" }),
@@ -179,6 +177,7 @@ describe("Feedback workspace layout", () => {
       h(
         "div",
         null,
+        h("div", { id: FEEDBACK_TOOLBAR_HOST_ID, "data-toolbar-host": "" }),
         h(FeedbackHeaderActions),
         h(FeedbackGrid, feedbackGridProps({ query: { ...DEFAULT_FEEDBACK_QUERY, type: "IDEA" } })),
       ),
@@ -304,12 +303,12 @@ describe("Feedback workspace layout", () => {
 
   // TODO(test-debt): still a source-text check, not a real render — page.tsx Server Components (auth/prisma/notFound) have no test-execution precedent in this repo yet. See Compass test-suite audit 2026-09-12 and the readFileSync anti-pattern finding. Do not treat this as verified behavior.
   describe("Feedback page shell (unverified source-text check)", () => {
-    it("keeps the approved controls in one title row without a byline or toolbar", () => {
+    it("keeps the primary action in the header and the grid toolbar in the toolbar slot, without a byline", () => {
       const page = source("app/[orgSlug]/[workspaceSlug]/feedback/page.tsx");
 
       expect(page).toContain("<WorkspacePage");
       expect(page).toContain("actions={(");
-      expect(page).not.toContain("toolbar={(");
+      expect(page).toContain("toolbar={<div id={FEEDBACK_TOOLBAR_HOST_ID}");
       expect(page).not.toContain("description={");
       expect(page).not.toContain("PageHeader");
       expect(page).not.toContain('className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8"');
