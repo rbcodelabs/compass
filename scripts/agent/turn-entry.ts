@@ -177,7 +177,7 @@ async function main(): Promise<void> {
   let finalText: string | undefined
   let usage: unknown
 
-  // Scrub host-only secrets before the agent gains Bash (ADR-0019).
+  // Scrub host-only secrets before the agent gains Bash.
   //
   // Every value below was read into a const at module load, so the parent keeps
   // working; only the environment inherited by the Claude Code subprocess — and
@@ -189,11 +189,11 @@ async function main(): Promise<void> {
   // place an agent would look (`env`), so a curious or confused agent cannot
   // trip over them. It is NOT an exfiltration boundary. A determined agent with
   // Bash can still reach whatever the process it runs inside can reach, and
-  // AWS_BEARER_TOKEN_BEDROCK necessarily stays in the environment because the
+  // ANTHROPIC_API_KEY necessarily stays in the environment because the
   // SDK subprocess authenticates with it. The real boundaries remain the ones
   // ADR-0001 named: a disposable sandbox with no database access, and per-user
   // MCP authorization.
-  for (const name of ["MCP_TOKEN", "MCP_BYPASS_SECRET", "AGENT_RUN_TOKEN"]) {
+  for (const name of ["MCP_TOKEN", "MCP_BYPASS_SECRET"]) {
     delete process.env[name]
   }
 
@@ -215,12 +215,12 @@ async function main(): Promise<void> {
       //
       // This was `[]` — no built-ins at all — the posture ADR-0008 (declarative
       // agent capability packs) relies on when it says a pack "cannot grant
-      // itself capabilities". ADR-0019 deliberately reopens it for exactly one
+      // itself capabilities". That is deliberately reopened here for exactly one
       // tool: Bash, so the agent can drive the headless Chromium now baked into
       // the golden snapshot (see lib/agent-sandbox.ts) and do its own scripting
-      // inside a disposable VM. Read ADR-0019 before widening this further —
+      // inside a disposable VM. Think hard before widening this further —
       // a pack's skill prose can now reach a shell, which it previously could
-      // not, and that is the cost the ADR accepts.
+      // not, and that is the cost this change accepts.
       //
       // Scope: this is the CONVERSATIONAL turn only. research-analysis-entry.ts
       // and research-interview-entry.ts keep `tools: []` and are unaffected.

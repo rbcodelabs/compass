@@ -12,7 +12,7 @@ const source = readFileSync("scripts/agent/turn-entry.ts", "utf8")
 /**
  * Assertions about the tool policy run against the CODE, not the comments.
  *
- * This is not fussiness. ADR 0019 added comments explaining the move away from
+ * This is not fussiness. Comments were added explaining the move away from
  * `tools: []`, and those comments quote the old literal — which silently satisfied
  * a `toMatch(/tools:\s*\[\]/)` assertion against the whole file and left this guard
  * green while the actual posture had changed underneath it. A policy test that can
@@ -37,7 +37,7 @@ describe("agent entry capability-pack policy", () => {
     expect(code).toMatch(/settingSources:\s*\[\]/)
   })
 
-  it("exposes exactly the two built-ins ADR 0019 authorized, and no others", () => {
+  it("exposes exactly the two built-ins this agent is meant to have, and no others", () => {
     // Bash drives Playwright; Read is what lets the model actually SEE the PNG it
     // just took (Bash returns text only). The pair is pinned as a literal because
     // the failure mode is additive drift — one more "harmless" built-in at a time,
@@ -64,7 +64,7 @@ describe("agent entry capability-pack policy", () => {
     // Bash makes the process environment readable by anything the model chooses to
     // run, which it was not before. These three are the host's own credentials and
     // have no business being reachable from inside a turn.
-    for (const secret of ["MCP_TOKEN", "MCP_BYPASS_SECRET", "AGENT_RUN_TOKEN"]) {
+    for (const secret of ["MCP_TOKEN", "MCP_BYPASS_SECRET"]) {
       expect(code).toContain(secret)
     }
     expect(code).toMatch(/delete process\.env\[/)

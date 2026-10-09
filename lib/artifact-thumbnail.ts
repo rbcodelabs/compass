@@ -1,6 +1,6 @@
 /**
  * Capture an artifact revision's screenshot and store it as that revision's
- * thumbnail (ADR-0019). The one implementation behind three callers:
+ * thumbnail. The one implementation behind three callers:
  *
  *  - the `capture_screenshot` MCP tool (lib/artifact-tool-handlers.ts),
  *  - the "Capture screenshot" / "Refresh screenshot" button on the artifact page

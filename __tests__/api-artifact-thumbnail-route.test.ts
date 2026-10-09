@@ -24,7 +24,7 @@ function revisionRow(overrides: Record<string, unknown> = {}) {
   return {
     thumbnailPathname: "artifacts/ws-1/art-1/thumbnails/rev-1-x.png",
     thumbnailMimeType: "image/png",
-    artifact: { workspaceId: "ws-1", workspace: { slug: "preview", organization: { slug: "bankrate" } } },
+    artifact: { workspaceId: "ws-1", workspace: { slug: "preview", organization: { slug: "acme" } } },
     ...overrides,
   }
 }
@@ -52,7 +52,7 @@ describe("GET artifact revision thumbnail", () => {
     expect(prisma.artifactRevision.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "rev-1", artifactId: "art-1" } })
     )
-    expect(resolveWorkspaceAccess).toHaveBeenCalledWith("bankrate", "preview", "user-1")
+    expect(resolveWorkspaceAccess).toHaveBeenCalledWith("acme", "preview", "user-1")
     expect(storage.get).toHaveBeenCalledWith("artifacts/ws-1/art-1/thumbnails/rev-1-x.png")
   })
 

@@ -23,7 +23,7 @@
 // Auth: MIGRATION_SECRET via the `x-migration-secret` header — same trust
 // boundary as /api/admin/migrate. No user session; server-to-server only.
 //
-// DURATION — since ADR-0019 the build also installs Chromium's system libraries
+// DURATION — since the headless browser was added the build also installs Chromium's system libraries
 // and downloads the browser, so it is minutes rather than seconds. `maxDuration`
 // below is the ceiling: if a rebuild ever exceeds it, the POST returns a
 // platform timeout while the sandbox keeps going, which can leave a built

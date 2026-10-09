@@ -125,13 +125,6 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Following and in-app notifications (ADR, slice 1): two new tables and five async indexes,
   // IF NOT EXISTS throughout, no data writes. Digest recorded from the shipped SQL; please review it.
   "068_follows_notifications": "0ba97ca0929c09a07c15a82404d5e41fac407fca6f4171aebda50c76e60f533c",
-  // ADR-0019 artifact screenshots. Positioned after 068_follows_notifications and before
-  // 068_workspace_id_on_solution_objective, matching its MIGRATIONS position (main pins its newest migration last). Present because this gate
-  // pins membership and ordering as well as digests — NOT because the SQL has had an
-  // independent audit; the digest was recorded from the shipped file by its own author, so
-  // treat it as a review request. Seven additive ADD COLUMN IF NOT EXISTS statements on
-  // artifact_revisions, every column nullable with no DEFAULT, per Aurora DSQL DDL constraints.
-  "064_artifact_screenshots": "c47b960bee33e375b6ac72249d25bf5b5b4fb8c9d4bdaf999d1f0d6ea73cb69f",
   // Direct workspace_id on solutions and objectives (ADR Phase 0). The pinned SQL is DDL only;
   // the batched backfill and its postconditions run in the runner hook, which is pinned
   // separately in REVIEWED_MIGRATION_CODE_SHA256.
@@ -160,7 +153,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "075_roadmap_item_provenance": "2d4d390790ff8cb20c7918e0b56b2a37ccbc99eddc5216622668ba50602ed0e6",
   // External / manual research studies: five nullable ADD COLUMNs (research_studies and
   // research_sessions), no index, no backfill, no hook. Digest recorded from the shipped SQL; please review it.
-  "076_research_external_studies": "01cc40f387b9171fc6761f598db0ce20e0dae1df9ca58f9755bdbe481bd97cb0"
+  "076_research_external_studies": "01cc40f387b9171fc6761f598db0ce20e0dae1df9ca58f9755bdbe481bd97cb0",
+  // Artifact screenshots: seven nullable ADD COLUMN IF NOT EXISTS statements on artifact_revisions, no DEFAULT, no
+  // index, no backfill. The postcondition hook (lib/migrations/artifact-screenshots.ts) is pinned in
+  // REVIEWED_MIGRATION_CODE_SHA256 below. Digest recorded from the shipped SQL; please review it.
+  "077_artifact_screenshots": "cf897fc83af5b5f42ebb23923717060e45e1c5757f833b36d588d7d38eb98067"
 };
 
 /**
@@ -194,6 +191,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 075 postcondition (both roadmap_items columns present, typed and nullable before the receipt).
   "075_roadmap_item_provenance": {
     "lib/migrations/roadmap-item-provenance.ts": "6f99f4829eccd6864d7dd476a01299bb3027246f4d6e6d2fdbd255980b88f4f5",
+  },
+  // The 077 postcondition (all seven artifact_revisions thumbnail columns present, typed and nullable before the receipt).
+  "077_artifact_screenshots": {
+    "lib/migrations/artifact-screenshots.ts": "0ad4f77ef18ee68fcef5422d2d43040b2ec0ee2ac0c6107c90ac7bff53e05c78",
   },
 };
 

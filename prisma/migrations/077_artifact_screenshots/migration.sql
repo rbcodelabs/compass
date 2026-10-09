@@ -1,4 +1,4 @@
--- Screenshot thumbnails for Artifact revisions (ADR-0019).
+-- Screenshot thumbnails for Artifact revisions.
 --
 -- A revision may carry one captured PNG of whatever it points at, produced by
 -- lib/capture-screenshot.ts. These columns are SIBLINGS of blob_pathname, not a
@@ -12,12 +12,12 @@
 -- ambiguous is worse than no thumbnail.
 --
 -- thumbnail_captured_at is the staleness signal. Nothing invalidates a thumbnail
--- when the target page changes (ADR-0019 §7 records this as an open question),
+-- when the target page changes (an open question left for follow-up),
 -- so the UI needs the capture time to say how old the picture is rather than
 -- implying it is current.
 --
--- DSQL constraints observed here (same set as 055_workspace_launch_workflow_flag
--- and 059_geode_document_storage):
+-- DSQL constraints observed here (the same set as the other plain ADD COLUMN
+-- migrations, e.g. 075_roadmap_item_provenance):
 --   - Plain ALTER TABLE ADD COLUMN, one column per statement.
 --   - No DEFAULT and no NOT NULL on ADD COLUMN — DSQL rejects any constraint
 --     there. Every column is therefore nullable, which is also the correct

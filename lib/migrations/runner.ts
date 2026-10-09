@@ -451,16 +451,6 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     filePath: path.join(process.cwd(), "prisma/migrations/068_follows_notifications/migration.sql"),
   },
   {
-    // ADR-0019 artifact screenshots. Placed after the entries that were already on main
-    // when this branch last synced, and BEFORE 068_workspace_id_on_solution_objective,
-    // because main pins its newest migration as the last registered one
-    // (__tests__/prisma-migrations.test.ts). Array order is the apply order; this is
-    // additive nullable ADD COLUMN IF NOT EXISTS only, so its position relative to the
-    // other entries does not change what any of them see.
-    name: "064_artifact_screenshots",
-    filePath: path.join(process.cwd(), "prisma/migrations/064_artifact_screenshots/migration.sql"),
-  },
-  {
     // Direct workspace_id on solutions and objectives (ADR Phase 0). Schema half
     // is plain nullable ADD COLUMN + ASYNC indexes; the data half is a batched
     // backfill hook (lib/migrations/workspace-id-on-solution-objective.ts) that
@@ -529,6 +519,14 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // research_sessions. Plain ADD COLUMN IF NOT EXISTS: no index, no backfill, no hook.
     name: "076_research_external_studies",
     filePath: path.join(process.cwd(), "prisma/migrations/076_research_external_studies/migration.sql"),
+  },
+  {
+    // Screenshot thumbnails for Artifact revisions: seven nullable ADD COLUMN IF NOT EXISTS statements on
+    // artifact_revisions (DSQL: no DEFAULT/NOT NULL on ADD COLUMN, no index, no backfill). The hook asserts
+    // all seven columns exist with the expected types and are nullable before the receipt is recorded.
+    // Not explicit-only: no rollout dependency and idempotent. Nothing reads the columns until the code ships.
+    name: "077_artifact_screenshots",
+    filePath: path.join(process.cwd(), "prisma/migrations/077_artifact_screenshots/migration.sql"),
   },
 ];
 
@@ -2053,7 +2051,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         await assertTypedLinkTables(client, schema, migration.name)
       }
       if (migration.name === OBJECTIVE_OPTIONAL_CYCLE_MIGRATION) await assertObjectiveCycleIdNullable(client, schema)
-      if (migration.name === "064_artifact_screenshots") await assertArtifactScreenshotsMigration(client, schema)
+      if (migration.name === "077_artifact_screenshots") await assertArtifactScreenshotsMigration(client, schema)
 
       // Only this distinct attempt becomes a successful receipt. A failed
       // attempt remains unfinished as forensic evidence and is never relabeled.

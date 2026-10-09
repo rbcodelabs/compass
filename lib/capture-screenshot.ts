@@ -1,6 +1,6 @@
 /**
  * Screenshot capture in a Vercel Sandbox, using the headless Chromium baked into
- * the agent's golden snapshot (ADR-0019).
+ * the agent's golden snapshot.
  *
  * One library, two kinds of caller: the `capture_screenshot` MCP tool the agent
  * invokes, and artifact thumbnails (lib/artifact-thumbnail.ts — captured in the
@@ -49,8 +49,8 @@ const RESULT_MARKER = "__CAPTURE_RESULT__"
  *
  * HTML MODE exists for HTML_UPLOAD artifacts, whose bytes live in private Blob
  * storage behind no URL Chromium could reach. Rather than mint one (a signed or
- * session-less route serving hostile uploaded HTML is the thing ADR-0019 §7
- * declined to build), the bytes are handed to the browser directly:
+ * session-less route serving hostile uploaded HTML is something we deliberately
+ * do not build), the bytes are handed to the browser directly:
  *
  *  - The document is wrapped in the same Content-Security-Policy the in-app
  *    preview iframe uses (buildSandboxedHtml), so the thumbnail shows what a
@@ -73,8 +73,8 @@ type CaptureTarget =
        * cross-origin subresources or to the target of a cross-origin redirect. The
        * obvious implementation (`setExtraHTTPHeaders`) cannot make that distinction:
        * it stamps the header on every request the page makes, so a page that embeds
-       * a third-party script hands our bypass secret to that third party. ADR-0008
-       * forbids exactly this, so the header is injected per-request instead.
+       * a third-party script hands our bypass secret to that third party. That is
+       * unacceptable, so the header is injected per-request instead.
        */
       protectionBypassSecret?: string
       /**
@@ -484,7 +484,7 @@ try {
   } else {
   if (bypassSecret) {
     // Same-origin only. A cross-origin subresource or redirect target must not
-    // receive the bypass secret (ADR-0008).
+    // receive the bypass secret.
     await page.route("**/*", async route => {
       const request = route.request()
       if (new URL(request.url()).origin === origin) {

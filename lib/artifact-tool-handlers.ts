@@ -37,7 +37,7 @@ export async function getArtifact({ artifactId }: { artifactId: string }) {
   const decisions = await getArtifactDecisions(artifact.workspaceId, artifact.id)
   // Blob pathnames are private storage keys, not caller-facing data. thumbnailPathname
   // is stripped for exactly the same reason blobPathname always has been — it was added
-  // by migration 064 and would otherwise ride out through this spread unnoticed. The
+  // by migration 077 and would otherwise ride out through this spread unnoticed. The
   // remaining thumbnail_* metadata is safe and useful, so it stays.
   const safeRevisions = artifact.revisions.map(
     ({ blobPathname: _privatePath, thumbnailPathname: _privateThumbnail, ...revision }) => revision
@@ -93,7 +93,7 @@ export async function updateArtifact(input: { artifactId: string; workspaceId: s
 
 /**
  * Render an EXTERNAL_LINK artifact's target in a sandboxed headless browser and
- * store the PNG as that revision's thumbnail (ADR-0019).
+ * store the PNG as that revision's thumbnail.
  *
  * WHY THERE IS NO `url` PARAMETER — the URL is read from the revision, never taken
  * from the caller. Accepting one would hand every MCP client a

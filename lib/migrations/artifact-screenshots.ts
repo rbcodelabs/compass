@@ -1,7 +1,7 @@
 import type { PoolClient } from "pg"
 
 /**
- * Postconditions for migration 064_artifact_screenshots (ADR-0019).
+ * Postconditions for migration 077_artifact_screenshots.
  *
  * Seven additive, nullable columns on artifact_revisions. Every one must be
  * nullable with no default: DSQL rejects a constraint on ALTER TABLE ADD COLUMN,
@@ -81,12 +81,12 @@ export async function assertArtifactScreenshotsMigration(client: PoolClient, sch
   const health = await getArtifactScreenshotsHealth(client, schema)
   if (!health.tableExists) {
     throw new Error(
-      `Migration 064 cannot be verified: table ${TABLE} does not exist in schema ${schema} (an earlier Artifact migration has not been applied)`
+      `Migration 077 cannot be verified: table ${TABLE} does not exist in schema ${schema} (an earlier Artifact migration has not been applied)`
     )
   }
   if (!health.ready) {
     throw new Error(
-      `Migration 064 catalog incomplete: missing columns [${health.missingColumns.join(", ")}]; ` +
+      `Migration 077 catalog incomplete: missing columns [${health.missingColumns.join(", ")}]; ` +
         `invalid columns (type/length/nullability/default) [${health.invalidColumns.join(", ")}]`
     )
   }

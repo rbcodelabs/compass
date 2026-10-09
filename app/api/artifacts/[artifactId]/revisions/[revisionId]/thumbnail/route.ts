@@ -6,7 +6,7 @@ import { resolveWorkspaceAccess } from "@/lib/workspace-context"
 export const runtime = "nodejs"
 
 /**
- * Serves an Artifact revision's captured screenshot (ADR-0019) to a signed-in
+ * Serves an Artifact revision's captured screenshot to a signed-in
  * reader of its workspace.
  *
  * ACCESS — the same rule as the Artifact page itself, via resolveWorkspaceAccess:
