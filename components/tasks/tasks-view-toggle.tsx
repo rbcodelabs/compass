@@ -1,7 +1,8 @@
 "use client";
 
+import { Columns3, List } from "lucide-react";
 import { useUrlState } from "@/hooks/use-url-state";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WorkspaceViewSwitcher } from "@/components/patterns/workspace-header-controls";
 
 type View = "board" | "list";
 
@@ -15,11 +16,13 @@ export function TasksViewToggle({ view }: { view: View }) {
   }
 
   return (
-    <Tabs value={view} onValueChange={(value) => setView(value as string)}>
-      <TabsList>
-        <TabsTrigger value="board">Board</TabsTrigger>
-        <TabsTrigger value="list">List</TabsTrigger>
-      </TabsList>
-    </Tabs>
+    <WorkspaceViewSwitcher
+      value={view}
+      onValueChange={setView}
+      options={[
+        { value: "board", label: "Board", icon: <Columns3 /> },
+        { value: "list", label: "List", icon: <List /> },
+      ]}
+    />
   );
 }

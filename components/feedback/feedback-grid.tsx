@@ -35,6 +35,7 @@ import {
   type FeedbackRow,
 } from "./feedback-columns";
 import { FeedbackActionCell } from "./feedback-action-cell";
+import { FEEDBACK_TOOLBAR_HOST_ID } from "./feedback-toolbar-host";
 
 /**
  * The Feedback screen's client shell.
@@ -265,7 +266,7 @@ export function FeedbackGrid({
       // active column and uses each other column's natural first direction.
       onSortChange={(sortKey) => applyPatch({ sort: sortKey })}
       caption="Customer feedback, sortable and filterable. Use the column headers to sort and the Filters menu to narrow the list."
-      toolbarPortalId="feedback-header-toolbar"
+      toolbarPortalId={FEEDBACK_TOOLBAR_HOST_ID}
       searchDisplay="popover"
       search={{
         value: query.q ?? "",

@@ -142,8 +142,8 @@ it("places navigation and reload in the main Roadmap header without a second too
   expect(header).toContainElement(screen.getByRole("button", { name: "Previous period" }));
   expect(header).toContainElement(screen.getByRole("button", { name: "Go to today" }));
   expect(header).toContainElement(screen.getByRole("button", { name: "Next period" }));
-  expect(header).toContainElement(screen.getByRole("button", { name: "View options" }));
-  expect(header).toContainElement(screen.getByRole("button", { name: "Reload timeline" }));
+  expect(header).toContainElement(screen.getByRole("button", { name: "More actions" }));
+  expect(screen.queryByRole("button", { name: "View options" })).not.toBeInTheDocument();
   expect(screen.queryByText("Reload to pick up deletions or conflicting changes made elsewhere.")).not.toBeInTheDocument();
 });
 
@@ -190,16 +190,32 @@ describe("NativeTimeline", () => {
     expect(harness.controller.jumpToday).toHaveBeenCalledTimes(1);
     expect(scrollTo).toHaveBeenCalledWith({ left: 65 * 12 - 400 / 3 });
   });
-  it("offers visible reload recovery and prevents interrupting a pending save", () => {
+
+  it("offers reload recovery in the more-actions menu and prevents interrupting a pending save", async () => {
     const { rerender } = renderTimeline();
-    expect(screen.getByRole("button", { name: "Reload timeline" })).toBeEnabled();
+    const openReload = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+      return screen.findByRole("menuitem", { name: /^Reload timeline/ });
+    };
+    const closeMenu = async () => {
+      fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    };
+
+    expect(await openReload()).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "Reload timeline" })).toBeInTheDocument();
+    await closeMenu();
+
     harness.controller.pendingItemIds = new Set(["saving"]);
     rerender(<NativeTimeline items={[]} squads={[]} workspaceId="workspace-1" unscheduledItems={[]} />);
-    expect(screen.getByRole("button", { name: "Reload timeline" })).toBeDisabled();
+    expect(await openReload()).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "Reload timeline (wait for changes to save)" })).toBeInTheDocument();
+    await closeMenu();
+
     harness.controller.pendingItemIds = new Set();
     harness.controller.pendingBacklogIds = new Set(["scheduling"]);
     rerender(<NativeTimeline items={[]} squads={[]} workspaceId="workspace-1" unscheduledItems={[]} />);
-    expect(screen.getByRole("button", { name: "Reload timeline" })).toBeDisabled();
+    expect(await openReload()).toHaveAttribute("aria-disabled", "true");
   });
   it("shows a dotted move affordance and slim grips on both date borders", () => {
     harness.controller.items = [{ id: "item-1", title: "Compact controls", horizon: "NEXT", squad: null, viewStart: "2026-07-10", viewEnd: "2026-07-28", hasDates: true }];

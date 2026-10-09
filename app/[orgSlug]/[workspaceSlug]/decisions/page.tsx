@@ -109,19 +109,13 @@ export default async function DecisionsPage({ params, searchParams }: {
       actions={
         <Suspense>
           <DecisionsFilters reviewers={members.map((member) => ({ id: member.userId, name: member.user.name ?? member.user.email }))} />
-          {/*
-            The label collapses to the icon under `sm`, matching the Search /
-            Date / Filters triggers beside it. WorkspacePage's header row does
-            not wrap (`flex items-center justify-between`), so four
-            always-labelled controls squeeze the "Decisions" <h1> — which is
-            `min-w-0 truncate` — down to a few characters on a 390px phone.
-          */}
+          {/* Primary action: the label collapses to the icon under `sm` (docs/design/workspace-header.md). */}
           <RequestDecisionLink
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
             label={<span className="hidden sm:inline">New decision</span>}
             ariaLabel="New decision"
-            className={buttonVariants({ variant: "outline", size: "sm" })}
+            className={buttonVariants({ size: "sm" })}
           />
         </Suspense>
       }

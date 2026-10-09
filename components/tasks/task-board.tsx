@@ -24,6 +24,7 @@ import { TaskCard, type TaskCardData } from "./task-card";
 import type { TaskStatus, MemberData } from "@/lib/types";
 import { Board } from "@/components/patterns/board";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { TASK_CREATED_EVENT } from "@/lib/task-created-event";
 
 type ColumnMap = Record<TaskStatus, TaskCardData[]>;
 
@@ -221,6 +222,21 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
       if (patch?.task) handleUpdate(patch.task);
     });
   }, [subscribeEntityMutated, handleUpdate]);
+
+  // Tasks created from the page header (outside this component) arrive as a window event.
+  useEffect(() => {
+    function onCreated(event: Event) {
+      const task = (event as CustomEvent<TaskCardData>).detail;
+      if (!task) return;
+      setColumns((prev) =>
+        prev[task.status].some((t) => t.id === task.id)
+          ? prev
+          : { ...prev, [task.status]: [...prev[task.status], task] }
+      );
+    }
+    window.addEventListener(TASK_CREATED_EVENT, onCreated);
+    return () => window.removeEventListener(TASK_CREATED_EVENT, onCreated);
+  }, []);
 
   const cancelledCount = columns.CANCELLED.length;
 

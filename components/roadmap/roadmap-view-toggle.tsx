@@ -1,7 +1,8 @@
 "use client";
 
+import { ChartGantt, Columns3 } from "lucide-react";
 import { useUrlState } from "@/hooks/use-url-state";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WorkspaceViewSwitcher } from "@/components/patterns/workspace-header-controls";
 
 type View = "board" | "timeline";
 
@@ -15,11 +16,13 @@ export function RoadmapViewToggle({ view }: { view: View }) {
   }
 
   return (
-    <Tabs value={view} onValueChange={(value) => setView(value as string)}>
-      <TabsList className="min-h-[50px] md:min-h-0">
-        <TabsTrigger className="min-h-11 md:min-h-0" value="board">Board</TabsTrigger>
-        <TabsTrigger className="min-h-11 md:min-h-0" value="timeline">Timeline</TabsTrigger>
-      </TabsList>
-    </Tabs>
+    <WorkspaceViewSwitcher
+      value={view}
+      onValueChange={setView}
+      options={[
+        { value: "board", label: "Board", icon: <Columns3 /> },
+        { value: "timeline", label: "Timeline", icon: <ChartGantt /> },
+      ]}
+    />
   );
 }

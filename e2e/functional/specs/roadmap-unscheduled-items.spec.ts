@@ -250,9 +250,10 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // Wait for acknowledged removal, not merely an offscreen drag source,
       // before reloading the route and verifying persistence.
       await expect(sol2UnscheduledCard).toHaveCount(0, { timeout: 10_000 });
+      await page.getByRole("button", { name: "More actions", exact: true }).click();
       await Promise.all([
         page.waitForEvent("load"),
-        page.getByRole("button", { name: "Reload timeline" }).click(),
+        page.getByRole("menuitem", { name: "Reload timeline" }).click(),
       ]);
       const persistedBar = page.locator('[data-testid^="timeline-item-"][data-start]').filter({ hasText: sol2Title });
       await expect(persistedBar).toHaveAttribute("data-start", /^\d{4}-\d{2}-\d{2}$/);
