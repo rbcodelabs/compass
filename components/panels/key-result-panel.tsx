@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { Discussion } from "@/components/comments/discussion";
 
 import {
@@ -19,6 +20,10 @@ import { useLabels, useThinkingModel } from "@/components/thinking-model/thinkin
 import { LinkedSolutionsSection } from "./linked-solutions-section";
 import { cycleRouteSegment, noCycleLabel } from "@/lib/okr-cycle-scope";
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
+import { CheckInForm } from "@/components/okrs/check-in-form";
+import { CheckInHistory, KrHero, KrSparkline } from "@/components/okrs/kr-progress-history";
+import { cycleTiming } from "@/lib/okr-cycle-rollup";
+import "@/components/okrs/okrs-gallery.css";
 
 type KeyResultData = {
   id: string;
@@ -26,7 +31,7 @@ type KeyResultData = {
   current: number;
   target: number;
   unit: string | null;
-  objective: { id: string; title: string; cycleId: string | null } | null;
+  objective: { id: string; title: string; cycleId: string | null; cycle?: { startDate: string; endDate: string } | null } | null;
   checkIns: Array<{ id: string; value: number; note: string | null; createdAt: string }>;
   roadmapItems: Array<{ id: string; title: string; horizon: string; status: string }>;
   opportunities: Array<{ id: string; title: string; status: string }>;
@@ -61,6 +66,9 @@ export function KeyResultPanel({
     workspaceSlug
   );
 
+  // Fixed at mount: the panel is client-fetched (never server-rendered), so there is no hydration drift,
+  // and the sparkline/pace marker don't jitter between renders.
+  const [now] = useState(() => Date.now());
   const labels = useLabels();
   const thinkingModel = useThinkingModel();
   const showLinkedSolutions = thinkingModel.links.solToKr !== "hidden";
@@ -77,7 +85,9 @@ export function KeyResultPanel({
     onSaved: (d) => mutate(d as KeyResultData),
   };
 
-  const pct = data.target > 0 ? Math.round((data.current / data.target) * 100) : null;
+  const cycleDates = data.objective?.cycle ?? null;
+  const timing = cycleDates ? cycleTiming(cycleDates.startDate, cycleDates.endDate, new Date(now)) : null;
+  const elapsed = timing?.phase === "running" ? timing.percentElapsed : null;
 
   const objectiveItems: RelationItem[] = data.objective
     ? [{ type: "objective", id: data.objective.id, title: data.objective.title }]
@@ -126,22 +136,25 @@ export function KeyResultPanel({
       <PanelTitle title={data.title} edit={edit} />
       <MeasurementsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ targetType: "KEY_RESULT", targetId: data.id }} compact />
 
-      {/* Progress */}
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-primary transition-all"
-              style={{ width: `${pct !== null ? Math.min(pct, 100) : 0}%` }}
-            />
-          </div>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {data.current}/{data.target}
-            {data.unit ? ` ${data.unit}` : ""}
-            {pct !== null ? ` · ${pct}%` : ""}
-          </span>
+      <KrHero current={data.current} target={data.target} unit={data.unit} elapsed={elapsed} />
+
+      <section className="okx-psec" aria-label="Check-ins">
+        <h3 className="okx-psec-h">
+          Check-ins <span>{data.checkIns.length}</span>
+        </h3>
+        <KrSparkline points={data.checkIns} target={data.target} cycle={cycleDates} now={now} />
+        <CheckInHistory points={data.checkIns} unit={data.unit} />
+        <div>
+          <CheckInForm
+            keyResultId={data.id}
+            keyResultTitle={data.title}
+            currentValue={data.current}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            onSaved={refresh}
+          />
         </div>
-      </div>
+      </section>
 
       <Section label={labels.objective.singular}>
         <RelationList items={objectiveItems} empty={`No parent ${labels.objective.lower}.`} />

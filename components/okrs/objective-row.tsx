@@ -22,7 +22,6 @@ import {
   Combobox,
   ComboboxContent,
 } from "@/components/ui/combobox";
-import { ProgressRing } from "@/components/ui/progress-ring";
 import {
   updateObjectiveStatus,
   setObjectiveParentKR,
@@ -31,6 +30,7 @@ import {
 import { CardMenu, type CardMenuItem } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { EntityCard } from "@/components/patterns/entity-card";
+import { MiniRing } from "@/components/okrs/okr-visuals";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 
 interface KeyResult {
@@ -77,6 +77,8 @@ interface ObjectiveRowProps {
   availableKRs?: ParentKROption[];
   parentKeyResultId?: string | null;
   supportingObjectiveOptions?: SupportingObjectiveOption[];
+  /** Percent of the cycle elapsed, threaded to each key result's pace tick. */
+  paceElapsed?: number | null;
 }
 
 export function ObjectiveRow({
@@ -87,6 +89,7 @@ export function ObjectiveRow({
   availableKRs,
   parentKeyResultId,
   supportingObjectiveOptions,
+  paceElapsed,
 }: ObjectiveRowProps) {
   const labels = useLabels();
   const [isPending, startTransition] = useTransition();
@@ -179,7 +182,7 @@ export function ObjectiveRow({
       ref={setNodeRef}
       style={style}
       interactive
-      className="touch-none"
+      className="touch-none okx-obj"
       data-pending={isPending || isParentKRPending ? true : undefined}
       leading={
           <button
@@ -215,10 +218,7 @@ export function ObjectiveRow({
         <div ref={actionsRef} className="flex shrink-0 items-center gap-2">
           {/* Overall progress */}
           {objective.keyResults.length > 0 && (
-            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              <ProgressRing value={avgProgress} size={22} className="text-primary/60" />
-              {avgProgress}%
-            </span>
+            <MiniRing progress={avgProgress} />
           )}
 
           {/* Status select */}
@@ -247,7 +247,7 @@ export function ObjectiveRow({
 
       {/* Key results */}
       {objective.keyResults.length > 0 && (
-        <div className="flex flex-col gap-3 pl-2 border-l border-border">
+        <div className="okx-krs">
           {objective.keyResults.map((kr) => (
             <KeyResultBar
               key={kr.id}
@@ -256,6 +256,7 @@ export function ObjectiveRow({
               orgSlug={orgSlug}
               workspaceSlug={workspaceSlug}
               supportingObjectiveOptions={supportingObjectiveOptions}
+              paceElapsed={paceElapsed}
             />
           ))}
         </div>

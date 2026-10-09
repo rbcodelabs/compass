@@ -41,14 +41,23 @@ export function WorkspaceAvatar({
 export function WorkspaceCover({
   name,
   readOnly = false,
+  neutral = false,
   children,
 }: {
   name: string
   readOnly?: boolean
+  /** Hue-less grey cover (e.g. the OKRs "No cycle" tile); the tint comes from tokens, not the name hash. */
+  neutral?: boolean
   children?: React.ReactNode
 }) {
   return (
-    <span className="wsx-cover" data-motif={motifFor(name)} data-readonly={readOnly} style={hueStyle(name)}>
+    <span
+      className="wsx-cover"
+      data-motif={neutral ? "contours" : motifFor(name)}
+      data-neutral={neutral || undefined}
+      data-readonly={readOnly}
+      style={hueStyle(name)}
+    >
       {children}
     </span>
   )

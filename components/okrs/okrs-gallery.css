@@ -1,0 +1,218 @@
+/*
+ * OKRs gallery styling. Builds on the Workspaces gallery (`wsx-` tiles, covers,
+ * pills, group heads, imported by workspace-cover.tsx) and adds the OKR-specific
+ * pieces under an `okx-` namespace. Root elements carry `wsx okx` so both token
+ * sets resolve; everything reads the app's own tokens so `.dark` just works.
+ */
+
+.okx {
+  --okx-ok: var(--status-success);
+  --okx-ok-bg: var(--status-success-surface);
+  --okx-risk: var(--status-warning);
+  --okx-risk-bg: var(--status-warning-surface);
+  --okx-off: var(--status-danger);
+  --okx-off-bg: var(--status-danger-surface);
+  --okx-done: var(--primary);
+  --okx-done-bg: color-mix(in srgb, var(--primary) 14%, var(--card));
+  --okx-track: var(--surface-navigation-active);
+  --okx-mono: var(--font-geist-mono), ui-monospace, Menlo, monospace;
+}
+
+.okx-stack { display: flex; flex-direction: column; gap: clamp(28px, 4vw, 44px); min-width: 0; }
+.okx .wsx-grid { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
+.okx .wsx-section { margin-top: 0; }
+
+/* ---------- Cover text ---------- */
+.okx-cover-text { display: grid; gap: 3px; min-width: 0; text-align: left; }
+.okx-kicker { font-family: var(--okx-mono); font-size: 11.5px; color: color-mix(in srgb, var(--text-primary) 62%, transparent); }
+.okx-cover-name {
+  margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.okx-hero .wsx-cover { height: 150px; padding: 20px 24px; }
+.okx-hero .okx-cover-name { font-size: 24px; letter-spacing: -0.025em; }
+.wsx-cover[data-neutral="true"] { background: linear-gradient(135deg, var(--surface-navigation), var(--surface-navigation-active)); }
+.wsx-cover[data-neutral="true"]::before {
+  background: repeating-radial-gradient(circle at 88% 18%, color-mix(in srgb, var(--text-subtle) 30%, transparent) 0 1px, transparent 1px 13px);
+}
+
+/* ---------- Tile body ---------- */
+.okx-tile-body { padding: 14px 18px 4px; display: grid; gap: 12px; flex: 1; align-content: start; }
+.okx .wsx-tile-meta { margin-top: 8px; }
+.okx-tile-desc { margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.45; }
+.okx-tile[data-closed="true"] .okx-tile-body { opacity: 0.92; }
+.okx-tile-dashed { border-style: dashed; border-color: var(--border-strong); box-shadow: none; background: transparent; }
+.okx-tile-dashed:hover { background: var(--card); }
+
+/* ---------- Progress + pace track ---------- */
+.okx-pace { display: grid; gap: 7px; }
+.okx-pace-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.okx-pace-pct { font-size: 26px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+.okx-pace-pct small { font-size: 14px; font-weight: 600; color: var(--text-subtle); margin-left: 1px; }
+.okx-pace-note { font-size: 12px; color: var(--text-subtle); text-align: right; }
+.okx-pace-note b { font-weight: 600; }
+.okx-pace-note .okx-behind { color: var(--okx-risk); }
+.okx-pace-note .okx-ahead { color: var(--okx-ok); }
+.okx-track { position: relative; height: 8px; border-radius: 999px; background: var(--okx-track); }
+.okx-track-sm { height: 6px; }
+.okx-track-fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--primary); }
+.okx-track-tick { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text-primary); }
+.okx-track-sm .okx-track-tick { top: -3px; bottom: -3px; width: 1.5px; }
+.okx-track-legend { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-subtle); }
+.okx-track-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--primary); margin-right: 5px; vertical-align: -0.5px; }
+.okx-track-legend i.okx-t { width: 2px; height: 10px; border-radius: 1px; background: var(--text-primary); margin: 0 6px 0 3px; vertical-align: -1.5px; }
+
+/* ---------- Status chips ---------- */
+.okx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.okx-chip {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600;
+  padding: 3px 8px; border-radius: 999px; font-variant-numeric: tabular-nums;
+}
+.okx-chip b { font-weight: 700; }
+.okx-chip[data-tone="ok"] { background: var(--okx-ok-bg); color: var(--okx-ok); }
+.okx-chip[data-tone="risk"] { background: var(--okx-risk-bg); color: var(--okx-risk); }
+.okx-chip[data-tone="off"] { background: var(--okx-off-bg); color: var(--okx-off); }
+.okx-chip[data-tone="done"] { background: var(--okx-done-bg); color: var(--okx-done); }
+.okx-chip[data-tone="plain"] { background: var(--surface-navigation); color: var(--text-secondary); border: 1px solid var(--border-default); }
+
+/* ---------- Progress ring ---------- */
+.okx-ring-wrap { position: relative; width: 104px; height: 104px; flex: none; }
+.okx-ring-wrap[data-size="sm"] { width: 92px; height: 92px; }
+.okx-ring {
+  --p: 0; --stroke: 11px;
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(var(--primary) calc(var(--p) * 1%), var(--okx-track) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--stroke)), #000 calc(100% - var(--stroke) + 1px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - var(--stroke)), #000 calc(100% - var(--stroke) + 1px));
+}
+.okx-ring-label { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; line-height: 1.1; }
+.okx-ring-label strong { font-size: 26px; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.okx-ring-wrap[data-size="sm"] .okx-ring-label strong { font-size: 23px; }
+.okx-ring-label strong small { font-size: 13px; color: var(--text-subtle); }
+.okx-ring-label span { font-size: 10.5px; color: var(--text-subtle); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+
+/* ---------- Status mix ---------- */
+.okx-mix { display: grid; gap: 10px; }
+.okx-eyebrow { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-subtle); font-weight: 600; }
+.okx-mix-bar { display: flex; gap: 3px; height: 10px; }
+.okx-mix-bar span { border-radius: 3px; min-width: 6px; }
+.okx-mix-bar [data-tone="ok"], .okx-legend [data-tone="ok"] i { background: var(--okx-ok); }
+.okx-mix-bar [data-tone="risk"], .okx-legend [data-tone="risk"] i { background: var(--okx-risk); }
+.okx-mix-bar [data-tone="off"], .okx-legend [data-tone="off"] i { background: var(--okx-off); }
+.okx-mix-bar [data-tone="done"], .okx-legend [data-tone="done"] i { background: var(--okx-done); }
+.okx-legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; }
+.okx-legend div { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-secondary); }
+.okx-legend i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.okx-legend b { margin-left: auto; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+/* ---------- Hero (featured active cycle) ---------- */
+.okx-hero { text-decoration: none; }
+.okx-hero-body {
+  display: grid; grid-template-columns: auto minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: clamp(20px, 3vw, 40px); align-items: center; padding: 22px 24px 20px;
+}
+.okx-hero-side { display: grid; gap: 14px; }
+.okx-hero .okx-pace-top, .okx-summary .okx-pace-top { flex-direction: column; align-items: flex-start; gap: 4px; }
+.okx-hero .okx-pace-note, .okx-summary .okx-pace-note { text-align: left; font-size: 13px; }
+.okx-hero-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px;
+  padding: 12px 24px 14px; border-top: 1px solid var(--border-default); font-size: 12.5px; color: var(--text-subtle);
+}
+.okx-hero-foot span { display: inline-flex; align-items: center; gap: 5px; }
+.okx-hero-foot svg { width: 13px; height: 13px; }
+.okx-hero-foot .okx-open { margin-left: auto; font-weight: 600; color: var(--primary); font-size: 13px; }
+
+@media (max-width: 760px) {
+  .okx-hero-body { grid-template-columns: minmax(0, 1fr); justify-items: start; }
+}
+@media (max-width: 560px) {
+  .okx .wsx-grid { grid-template-columns: minmax(0, 1fr); }
+  .okx-hero-foot span, .okx .wsx-tile-meta span { white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .okx .wsx-tile { transition: none; }
+  .okx .wsx-tile:hover { transform: none; }
+}
+
+/* ---------- Cycle detail: summary banner ---------- */
+.okx-summary {
+  display: grid; grid-template-columns: auto minmax(0, 1.25fr) minmax(0, 1fr); gap: clamp(20px, 3vw, 40px); align-items: center;
+  padding: 20px 24px; border-radius: 12px; border: 1px solid var(--border-default); background: var(--card); box-shadow: var(--shadow-card);
+}
+@media (max-width: 1100px) {
+  .okx-summary { grid-template-columns: auto minmax(0, 1fr); }
+  .okx-summary > .okx-pace { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+  .okx-summary { grid-template-columns: minmax(0, 1fr); justify-items: start; }
+}
+
+/* ---------- Objective cards / key-result rows ---------- */
+.okx-mring { position: relative; width: 40px; height: 40px; display: inline-grid; place-items: center; flex: none; }
+.okx-mring .okx-ring { --stroke: 5px; }
+.okx-mring-label { position: relative; font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+/* Full-bleed to the card edge (EntityCard pads 16px) so row dividers span the whole card. */
+.okx-krs { margin: 0 -16px; border-top: 1px solid var(--border-default); container-type: inline-size; }
+.okx-krow { padding: 10px 16px; transition: background-color .12s; }
+.okx-krs > .okx-krow + .okx-krow { border-top: 1px solid var(--border-default); }
+.okx-krow:hover { background: color-mix(in srgb, var(--surface-navigation) 55%, transparent); }
+.okx-kr-row {
+  display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(110px, 1fr) 150px 44px auto;
+  gap: 8px 16px; align-items: center;
+}
+.okx-kr-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.okx-kr-name {
+  min-width: 0; background: none; border: 0; padding: 0; text-align: left; font-size: 14px; font-weight: 500;
+  color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.okx-kr-name:hover { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+.okx-kr-bar { min-width: 0; }
+.okx-kr-value { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; color: var(--text-subtle); }
+.okx-kr-value b { font-weight: 500; color: var(--text-primary); }
+.okx-kr-pct { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; color: var(--text-primary); }
+.okx-kr-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+/* The inline check-in form replaces the button: give it its own full-width row. */
+.okx-kr-actions:has(form) { grid-column: 1 / -1; justify-content: stretch; }
+.okx-kr-actions form { flex: 1; min-width: 0; }
+@container (max-width: 680px) {
+  .okx-kr-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .okx-kr-main { grid-column: 1 / -1; }
+  .okx-kr-value { text-align: left; }
+  .okx-kr-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+/* ---------- Key-result panel: hero, sparkline, check-in history ---------- */
+.okx-kr-hero { padding: 16px; border-radius: 12px; border: 1px solid var(--border-default); background: var(--background); display: grid; gap: 12px; }
+.okx-kr-big { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.okx-kr-big strong { font-size: 34px; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+.okx-kr-big span { color: var(--text-subtle); font-size: 14px; }
+.okx-kr-big em { margin-left: auto; font-style: normal; font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
+.okx-kr-hero .okx-track { height: 10px; }
+.okx-psec { display: grid; gap: 10px; }
+.okx-psec-h { margin: 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; }
+.okx-psec-h span { font-family: var(--okx-mono); font-weight: 500; color: var(--text-subtle); letter-spacing: 0; }
+.okx-spark { width: 100%; height: auto; display: block; }
+.okx-sp-target { stroke: var(--border-strong); stroke-dasharray: 3 4; stroke-width: 1; }
+.okx-sp-pace { stroke: var(--text-subtle); stroke-dasharray: 5 4; stroke-width: 1.2; opacity: .8; }
+.okx-sp-today { stroke: var(--text-primary); stroke-width: 1.5; opacity: .85; }
+.okx-sp-area { fill: color-mix(in srgb, var(--primary) 14%, transparent); }
+.okx-sp-line { fill: none; stroke: var(--primary); stroke-width: 2; stroke-linejoin: round; }
+.okx-sp-dot { fill: var(--card); stroke: var(--primary); stroke-width: 2; }
+.okx-spark-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 11.5px; color: var(--text-subtle); }
+.okx-spark-legend i { display: inline-block; width: 14px; height: 0; border-top: 2px solid var(--primary); margin-right: 6px; vertical-align: 3px; }
+.okx-spark-legend i.p { border-top: 1.5px dashed var(--text-subtle); }
+.okx-spark-legend i.t { width: 2px; height: 10px; border: 0; background: var(--text-primary); vertical-align: -1px; }
+.okx-ci-list { list-style: none; margin: 4px 0 0; padding: 0 0 0 5px; display: grid; gap: 0; }
+.okx-ci-list li { position: relative; display: flex; gap: 12px; padding: 0 0 14px 0; }
+.okx-ci-list li::before { content: ""; position: absolute; left: 3px; top: 12px; bottom: -2px; width: 1px; background: var(--border-default); }
+.okx-ci-list li:last-child::before { display: none; }
+.okx-ci-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); margin-top: 6px; flex: none; position: relative; }
+.okx-ci-body { flex: 1; min-width: 0; }
+.okx-ci-top { display: flex; align-items: baseline; gap: 8px; font-size: 14px; }
+.okx-ci-top b { font-variant-numeric: tabular-nums; }
+.okx-ci-delta { font-size: 12px; font-variant-numeric: tabular-nums; }
+.okx-ci-delta[data-dir="up"] { color: var(--okx-ok); }
+.okx-ci-delta[data-dir="down"] { color: var(--okx-off); }
+.okx-ci-top time { margin-left: auto; font-size: 12px; color: var(--text-subtle); }
+.okx-ci-body p { margin: 2px 0 0; font-size: 13px; color: var(--text-secondary); }
+.okx-empty { margin: 0; font-size: 13px; color: var(--text-subtle); }
