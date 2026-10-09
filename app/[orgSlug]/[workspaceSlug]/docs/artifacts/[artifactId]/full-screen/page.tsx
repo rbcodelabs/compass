@@ -2,7 +2,7 @@ import { auth } from "@/auth"
 import { notFound, redirect } from "next/navigation"
 import getPrisma from "@/lib/db"
 import { getArtifactStorage } from "@/lib/artifact-storage"
-import { buildSandboxedHtml } from "@/lib/artifacts"
+import { buildSandboxedHtml, toThumbnailDto } from "@/lib/artifacts"
 import { resolveWorkspaceAccess } from "@/lib/workspace-context"
 import { ArtifactViewer } from "@/components/docs/artifact-viewer"
 
@@ -36,6 +36,7 @@ export default async function ArtifactFullScreenPage({ params }: { params: Promi
         title={artifact.title}
         html={html}
         externalUrl={artifact.currentRevision?.externalUrl}
+        thumbnail={artifact.currentRevision ? toThumbnailDto(artifact.id, artifact.currentRevision) : null}
         artifactId={artifact.id}
         backHref={`${basePath}/artifacts/${artifact.id}`}
         fill

@@ -125,6 +125,13 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Following and in-app notifications (ADR, slice 1): two new tables and five async indexes,
   // IF NOT EXISTS throughout, no data writes. Digest recorded from the shipped SQL; please review it.
   "068_follows_notifications": "0ba97ca0929c09a07c15a82404d5e41fac407fca6f4171aebda50c76e60f533c",
+  // ADR-0019 artifact screenshots. Positioned after 068_follows_notifications and before
+  // 068_workspace_id_on_solution_objective, matching its MIGRATIONS position (main pins its newest migration last). Present because this gate
+  // pins membership and ordering as well as digests — NOT because the SQL has had an
+  // independent audit; the digest was recorded from the shipped file by its own author, so
+  // treat it as a review request. Seven additive ADD COLUMN IF NOT EXISTS statements on
+  // artifact_revisions, every column nullable with no DEFAULT, per Aurora DSQL DDL constraints.
+  "064_artifact_screenshots": "c47b960bee33e375b6ac72249d25bf5b5b4fb8c9d4bdaf999d1f0d6ea73cb69f",
   // Direct workspace_id on solutions and objectives (ADR Phase 0). The pinned SQL is DDL only;
   // the batched backfill and its postconditions run in the runner hook, which is pinned
   // separately in REVIEWED_MIGRATION_CODE_SHA256.

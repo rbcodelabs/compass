@@ -2377,6 +2377,21 @@ model ArtifactRevision {
   createdById    String?    @map("created_by_id") @db.Uuid
   source         String     @default("UI") @db.VarChar(20)
   createdAt      DateTime   @default(now()) @map("created_at")
+
+  /// Captured screenshot of whatever this revision points at (ADR-0019, migration
+  /// 064). These are SIBLINGS of blobPathname, not a replacement: an EXTERNAL_LINK
+  /// revision has no blobPathname of its own but can have a thumbnail. All
+  /// nullable — "no screenshot captured" is the normal state.
+  thumbnailPathname   String?   @map("thumbnail_pathname") @db.Text
+  thumbnailMimeType   String?   @map("thumbnail_mime_type") @db.VarChar(100)
+  thumbnailByteSize   Int?      @map("thumbnail_byte_size")
+  thumbnailWidth      Int?      @map("thumbnail_width")
+  thumbnailHeight     Int?      @map("thumbnail_height")
+  thumbnailCapturedAt DateTime? @map("thumbnail_captured_at")
+  /// The URL actually photographed, AFTER redirects — deliberately not assumed to
+  /// equal externalUrl, which it differs from whenever the target redirects.
+  thumbnailSourceUrl  String?   @map("thumbnail_source_url") @db.Text
+
   artifact       Artifact   @relation("ArtifactRevisions", fields: [artifactId], references: [id])
   currentFor     Artifact[] @relation("CurrentArtifactRevision")
 

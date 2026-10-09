@@ -9,22 +9,65 @@ import { describe, expect, it } from "vitest"
 
 const source = readFileSync("scripts/agent/turn-entry.ts", "utf8")
 
+/**
+ * Assertions about the tool policy run against the CODE, not the comments.
+ *
+ * This is not fussiness. ADR 0019 added comments explaining the move away from
+ * `tools: []`, and those comments quote the old literal — which silently satisfied
+ * a `toMatch(/tools:\s*\[\]/)` assertion against the whole file and left this guard
+ * green while the actual posture had changed underneath it. A policy test that can
+ * be satisfied by prose is not a policy test.
+ */
+const code = source
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "")
+  .replace(/\/\/.*$/gm, "")
+
+/**
+ * The built-ins the agent must NOT hold. Filesystem writes and network fetches are
+ * the two categories that would turn a sandbox escape into a real problem, and
+ * `Skill` would let a pack's prose select its own capabilities.
+ */
+const FORBIDDEN_BUILTINS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch", "Glob", "Grep", "Task", "Skill"]
+
 describe("agent entry capability-pack policy", () => {
-  it("keeps plugins declarative while Compass owns MCP and no built-ins are exposed", () => {
-    expect(source).toContain("skipMcpDiscovery: true")
-    expect(source).toContain("strictMcpConfig: true")
-    expect(source).toMatch(/tools:\s*\[\]/)
-    expect(source).toMatch(/settingSources:\s*\[\]/)
+  it("keeps plugins declarative while Compass owns MCP", () => {
+    expect(code).toContain("skipMcpDiscovery: true")
+    expect(code).toContain("strictMcpConfig: true")
+    expect(code).toMatch(/settingSources:\s*\[\]/)
   })
 
-  it("admits Compass plus per-turn connector prefixes, and nothing wider", () => {
+  it("exposes exactly the two built-ins ADR 0019 authorized, and no others", () => {
+    // Bash drives Playwright; Read is what lets the model actually SEE the PNG it
+    // just took (Bash returns text only). The pair is pinned as a literal because
+    // the failure mode is additive drift — one more "harmless" built-in at a time,
+    // each individually arguable, none of them reviewed as a boundary change.
+    expect(code).toContain('tools: ["Bash", "Read"],')
+    const declared = code.match(/\n\s*tools:\s*\[([^\]]*)\]/)
+    expect(declared).not.toBeNull()
+    for (const forbidden of FORBIDDEN_BUILTINS) {
+      expect(declared![1]).not.toContain(forbidden)
+    }
+  })
+
+  it("admits Compass, the two built-ins, and per-turn connector prefixes — nothing wider", () => {
     // The literal is pinned rather than matched loosely because the failure mode
     // is a silent widening: `allowedTools: ["mcp__*"]`, or dropping the option
     // entirely, both leave a headless agent running in bypassPermissions mode with
     // no allowlist at all. `connectorToolPrefixes` is the only sanctioned way for
     // this list to grow, and it grows per turn from the grants that user holds.
-    expect(source).toContain('allowedTools: ["mcp__compass", ...connectorToolPrefixes]')
-    expect(source).not.toMatch(/allowedTools:\s*\[[^\]]*\*/)
+    expect(code).toContain('allowedTools: ["mcp__compass", "Bash", "Read", ...connectorToolPrefixes]')
+    expect(code).not.toMatch(/allowedTools:\s*\[[^\]]*\*/)
+  })
+
+  it("scrubs host-only secrets from the environment before the model can run a shell", () => {
+    // Bash makes the process environment readable by anything the model chooses to
+    // run, which it was not before. These three are the host's own credentials and
+    // have no business being reachable from inside a turn.
+    for (const secret of ["MCP_TOKEN", "MCP_BYPASS_SECRET", "AGENT_RUN_TOKEN"]) {
+      expect(code).toContain(secret)
+    }
+    expect(code).toMatch(/delete process\.env\[/)
   })
 
   it("derives each connector tool prefix from a slug it has re-validated", () => {

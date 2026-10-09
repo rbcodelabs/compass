@@ -412,7 +412,7 @@ describe("CLASSIC text is identical to main (Phase 4C-2 surfaces)", () => {
   check(
     "artifact-detail",
     <ArtifactDetail
-      artifact={{ id: "a1", title: "Proto", description: null, sourceType: "EXTERNAL_LINK", status: "ACTIVE", currentRevision: { externalUrl: "https://example.com" }, revisions: [] }}
+      artifact={{ id: "a1", title: "Proto", description: null, sourceType: "EXTERNAL_LINK", status: "ACTIVE", currentRevision: { externalUrl: "https://example.com", thumbnail: null }, revisions: [] }}
       workspaceId="w1"
       basePath="/acme/alpha/docs"
       solutions={[{ id: "s1", title: "Fix", linked: true }, { id: "s2", title: "Other", linked: false }]}

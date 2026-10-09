@@ -56,6 +56,7 @@ import { prepareDocImageUploadTool } from "@/lib/doc-image-tool-handlers"
 import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
 import {
   archiveArtifact,
+  captureArtifactScreenshot,
   createArtifact,
   getArtifact,
   linkArtifactDecision,
@@ -3243,6 +3244,11 @@ const _handler = createMcpHandler(
       title: "Archive Artifact", description: "Archives an Artifact while preserving its links and immutable revision history.",
       inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, archiveArtifact)
+    register("capture_screenshot", {
+      title: "Capture Artifact Screenshot",
+      description: "Renders an Artifact revision in a sandboxed headless browser and stores the PNG as that revision's thumbnail, shown on the Artifact page. EXTERNAL_LINK revisions render their URL, which is read from the revision and never supplied by the caller; HTML_UPLOAD revisions render their stored HTML with all network access disabled. Returns image metadata, not the image or its storage key.",
+      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid(), revisionId: z.string().uuid().optional(), fullPage: z.boolean().optional(), viewport: z.object({ width: z.number().int().min(320).max(3840), height: z.number().int().min(240).max(2160) }).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, captureArtifactScreenshot)
 
     register(
       "create_doc_version",
