@@ -11,6 +11,7 @@ import {
   type PickedElement,
 } from "@/components/artifact-sandboxed-frame"
 import type { AnchorResolution } from "@/lib/artifact-anchor-match"
+import type { ArtifactThumbnailDto } from "@/lib/artifacts"
 import type { ReactNode } from "react"
 
 export { ARTIFACT_IFRAME_SANDBOX, ARTIFACT_PREVIEW_MESSAGE_SCOPE, ARTIFACT_PREVIEW_READY_TIMEOUT_MS }
@@ -22,6 +23,7 @@ export function ArtifactPreview({
   title,
   html,
   externalUrl,
+  thumbnail,
   pickMode,
   onElementPicked,
   onPickModeExited,
@@ -34,6 +36,8 @@ export function ArtifactPreview({
   title: string
   html?: string
   externalUrl?: string | null
+  /** A captured screenshot of the external page, when one exists (capture_screenshot). */
+  thumbnail?: ArtifactThumbnailDto | null
   pickMode?: boolean
   onElementPicked?: (picked: PickedElement) => void
   onPickModeExited?: () => void
@@ -44,12 +48,27 @@ export function ArtifactPreview({
   fill?: boolean
 }) {
   if (externalUrl) {
-    return <div className="rounded-lg border border-border-default bg-surface-panel p-8 text-center">
+    return <div className="rounded-lg border border-border-default bg-surface-panel p-4 text-center sm:p-8">
+      {thumbnail && <a href={externalUrl} target="_blank" rel="noopener noreferrer" className="mb-4 block overflow-hidden rounded-md border border-border-default bg-surface-base">
+        {/* A plain <img>, not next/image: the source is an authenticated, no-store
+            route, which the image optimizer would fetch without the reader's
+            session and cache across readers. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={thumbnail.src}
+          width={thumbnail.width}
+          height={thumbnail.height}
+          alt={`Screenshot of ${title}`}
+          loading="lazy"
+          className="block h-auto w-full"
+        />
+      </a>}
       <div className="mb-2 text-xs font-medium uppercase tracking-wide text-text-subtle">External</div>
       <a href={externalUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-primary hover:text-primary/80 font-medium">
         Open external artifact <ExternalLink className="size-4" />
       </a>
       <p className="mt-2 text-xs text-text-subtle break-all">{externalUrl}</p>
+      {thumbnail && <p className="mt-1 text-xs text-text-disabled">Screenshot captured <time dateTime={thumbnail.capturedAt}>{new Date(thumbnail.capturedAt).toLocaleString()}</time></p>}
     </div>
   }
   if (!html) return <p className="text-sm text-text-subtle">Preview content is unavailable.</p>
