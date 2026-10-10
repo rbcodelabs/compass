@@ -23,8 +23,9 @@ type ToolCallback = (args: Record<string, unknown>) => Promise<ToolResult>
 const registeredTools: Record<string, ToolCallback> = {}
 
 vi.mock("mcp-handler", () => ({
-  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: unknown, cb: ToolCallback) => void }) => void) => {
+  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: unknown, cb: ToolCallback) => void; registerResource: (...args: unknown[]) => void }) => void) => {
     setup({
+      registerResource() {},
       registerTool(name, _meta, cb) {
         registeredTools[name] = cb
       },

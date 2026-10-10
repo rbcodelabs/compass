@@ -116,7 +116,7 @@ Every page keeps a history of past versions, so you can always see what changed 
 
 **Restoring.** Each version has a **Restore** button. Restoring asks for confirmation, since it overwrites the page's live content — but nothing is ever actually lost: the page's current state is automatically saved as a new version (labeled "Before restore") right before the restore happens, so you can always undo a restore by restoring again.
 
-Version history is also available over MCP — see [MCP API](/help/09-mcp-api) for `create_doc_version`, `list_doc_versions`, `get_doc_version`, and `restore_doc_version`.
+Version history is also available over MCP — see [MCP API](/help/09-mcp-api) for `list_doc_history` and `restore_doc_version`.
 
 ## Pinning Docs panels
 
@@ -162,13 +162,13 @@ A Canvas doc is an infinite, pannable whiteboard that follows the open [JSON Can
 - **On phones** a canvas opens locked for viewing (pan and zoom); use the lock button to edit.
 - Canvases are limited to roughly 800 KB of JSON.
 
-Agents can create and edit canvases through the MCP `create_doc` / `update_doc` tools with `docType: CANVAS`; see [MCP API](/help/09-mcp-api).
+Agents can create and edit canvases through the MCP `write_doc` tool with `docType: CANVAS`; see [MCP API](/help/09-mcp-api).
 
 ## Positioning & Messaging Briefs
 
 A Positioning & Messaging Brief is a Doc linked one-to-one to a Roadmap Item, used to nail down the story before a launch: problem statement, target audience, core message, proof points, and competitive differentiation. Part of the marketing-launch workflow — see [Roadmap](/help/04-roadmap) — so it's only available once a workspace admin turns on **Settings → Marketing launch** (off by default). With it on, create one from the roadmap item's panel Launch section, or via the MCP API's create_doc tool with docType set to GTM_POSITIONING_BRIEF and roadmapItemId set to the roadmap item it belongs to; if you do not pass explicit content, Compass fills in a five-section starter template you can edit like any other doc. Attempting to link a second brief to the same roadmap item is rejected, since the relationship is one-to-one.
 
-There is no dedicated UI for briefs yet; they appear in the regular Docs tree like any other page, and get_doc surfaces the linked roadmap item and doc type so an agent can discover the linkage.
+There is no dedicated UI for briefs yet; they appear in the regular Docs tree like any other page, and the doc's frontmatter surfaces the linked roadmap item and doc type so an agent can discover the linkage.
 
 ## Page Titles
 

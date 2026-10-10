@@ -19,6 +19,9 @@ const mockPrisma = {
   agentMessage: { create: vi.fn(), findMany: vi.fn() },
   agentAuditLog: { createMany: vi.fn() },
   workspaceCapabilityPack: { findMany: vi.fn() },
+  // ADR 0019: materializeDocTree reads the doc tree via lib/doc-fs.ts before
+  // every turn. Empty by default -- these guard tests aren't about docs.
+  doc: { findMany: vi.fn(), findUnique: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
@@ -75,6 +78,7 @@ beforeEach(() => {
   mockPreparePacks.mockResolvedValue({ files: [], pluginPaths: [], skillIds: [], provenanceJson: "[]", systemPromptAppendices: [] })
   mockResolveAgentHandoffContext.mockResolvedValue(null)
   mockListConnectedSlugs.mockResolvedValue([])
+  mockPrisma.doc.findMany.mockResolvedValue([])
 })
 
 describe("agent turn route — guards", () => {

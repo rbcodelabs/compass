@@ -1,5 +1,7 @@
 /**
- * Handler functions for Docs MCP tools.
+ * Id-addressed Docs handlers. ADR 0019 removed the matching MCP tools (the MCP
+ * surface is path-addressed, see lib/doc-fs-tool-handlers.ts); these now back
+ * only the REST API (lib/rest/execute.ts).
  * Extracted into this module so they can be unit-tested without the MCP server layer.
  *
  * Frontmatter handling:
