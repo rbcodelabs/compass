@@ -178,9 +178,13 @@ test.describe("Native timeline default", () => {
     await expect(page.getByText("Dates are inclusive", { exact: true })).toHaveCount(0);
     await expect(page.getByText("Compass native timeline", { exact: true })).toHaveCount(0);
     await header.getByRole("tab", { name: "Board", exact: true }).click();
-    // Timeline-only controls are hidden, not disabled, on the Board tab.
-    await expect(header.getByRole("button", { name: "More actions" })).toHaveCount(0);
+    // Timeline-only controls are hidden, not disabled, on the Board tab. The
+    // more-actions menu stays for Card sort but drops the timeline scale.
     await expect(header.getByRole("button", { name: "Previous period" })).toHaveCount(0);
+    await header.getByRole("button", { name: "More actions", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: "Card sort", exact: true })).toBeVisible();
+    await expect(page.getByRole("menuitemradio", { name: "Quarter", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Reload timeline" })).toHaveCount(0);
   });
 
   for (const width of [320, 390]) {
