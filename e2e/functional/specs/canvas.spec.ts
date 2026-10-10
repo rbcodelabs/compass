@@ -185,7 +185,7 @@ test.describe("Canvas", () => {
     await expect(ostTreePanel.getByText(assumptionTitle)).toBeVisible({ timeout: 10_000 });
     await ostTreePanel.getByRole("link", { name: "Test this assumption →" }).click();
     await page.waitForLoadState("networkidle");
-    await expect(page.getByText("New Experiment")).toBeVisible();
+    await expect(page.getByRole("dialog").getByRole("heading", { name: "New Experiment" })).toBeVisible();
 
     await page.getByLabel("Title").fill(expTitle);
     await page.getByLabel("Hypothesis").fill("We believe the full OST graph renders correctly.");

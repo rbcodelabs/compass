@@ -72,8 +72,8 @@ test.describe("OKRs", () => {
     await expect(page.getByText(krTitle)).toBeVisible({ timeout: 10_000 });
 
     // ── 6. Log a check-in ───────────────────────────────────────────────────
-    // KR bar shows initial progress "0 % / 100 %"
-    await expect(page.getByText("0 % / 100 %")).toBeVisible();
+    // KR bar shows initial progress "0 / 100 %"
+    await expect(page.getByText("0 / 100 %")).toBeVisible();
 
     await page.getByRole("button", { name: "Check in" }).click();
     // Clear current value (pre-filled with 0) and enter 50
@@ -88,7 +88,7 @@ test.describe("OKRs", () => {
     await page.waitForLoadState("load");
 
     // After check-in, KR bar reflects new value
-    await expect(page.getByText("50 % / 100 %")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("50 / 100 %")).toBeVisible({ timeout: 10_000 });
     // "50%" appears both in the KR progress bubble and the objective avg — use
     // .first() to avoid strict-mode violation.
     await expect(page.getByText("50%").first()).toBeVisible();

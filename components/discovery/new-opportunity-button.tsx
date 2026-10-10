@@ -4,6 +4,7 @@ import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { PlusIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { WorkspaceCreateButton } from "@/components/patterns/workspace-header-controls";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { opportunityComposerId } from "@/lib/opportunity-draft";
 import type { OpportunityStatus } from "@/lib/types";
@@ -12,9 +13,10 @@ type Props = {
   /**
    * `column`: the quiet "Add opportunity" row at the foot of a board column,
    * which presets that column's status. `rail`: the full "New Opportunity"
-   * button at the foot of the discovery rail.
+   * button at the foot of the discovery rail. `header`: the primary create
+   * action in the workspace page header.
    */
-  variant: "column" | "rail";
+  variant: "column" | "rail" | "header";
   status?: OpportunityStatus;
 };
 
@@ -49,6 +51,10 @@ export function NewOpportunityButton({ variant, status }: Props) {
         {`Add ${labels.opportunity.lower}`}
       </button>
     );
+  }
+
+  if (variant === "header") {
+    return <WorkspaceCreateButton label={`New ${labels.opportunity.singular}`} onClick={open} aria-expanded={composerOpen} />;
   }
 
   return (

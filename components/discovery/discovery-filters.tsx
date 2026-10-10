@@ -79,5 +79,5 @@ export function DiscoveryFilters({
 
   if (groups.length === 0) return null;
 
-  return <FacetedFilterMenu onClearAll={clearAll} groups={groups} />;
+  return <FacetedFilterMenu iconOnly onClearAll={clearAll} groups={groups} />;
 }

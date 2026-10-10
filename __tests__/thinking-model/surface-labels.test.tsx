@@ -306,6 +306,13 @@ const SURFACES: Surface[] = [
 ]
 
 const cycleRow = { id: "c1", title: "Q3", startDate: new Date("2026-07-01T12:00:00Z"), endDate: new Date("2026-09-30T12:00:00Z"), status: "ACTIVE" as const }
+
+/** CycleCard takes a server-computed rollup, not a Prisma _count. A fixed timing keeps the render clock-independent. */
+const cycleWith = (row: typeof cycleRow, objectives: number) => ({
+  ...row,
+  rollup: { objectiveCount: objectives, keyResultCount: 0, progress: 0, statusMix: { ON_TRACK: objectives, AT_RISK: 0, OFF_TRACK: 0, COMPLETE: 0 } },
+  timing: { percentElapsed: 50, daysLeft: 45, daysUntilStart: 0, phase: "running" as const },
+})
 const kr = { id: "k1", title: "Reach", objective: { title: "Grow" }, current: 1, target: 2, unit: null }
 const noLinks = { OPPORTUNITY: [], SOLUTION: [], ROADMAP_ITEM: [], OBJECTIVE: [], KEY_RESULT: [], DOC: [], EXPERIMENT: [], FEEDBACK_ITEM: [], DECISION: [] }
 
@@ -315,7 +322,7 @@ const EARLIER: Surface[] = [
   { name: "add-objective", ui: () => <AddObjectiveForm cycleId="c1" {...common} />, interact: click(/add /i), custom: ["Add Aim"] },
   { name: "add-key-result", ui: () => <AddKeyResultForm objectiveId="o1" objectiveTitle="Grow" {...common} />, interact: click(/add /i), custom: ["Add Signal", "Signal"] },
   { name: "create-cycle open", ui: () => <CreateCycleForm workspaceId="w1" {...common} />, interact: click(/new /i), custom: ["New OKR Sprint", "Create sprint"] },
-  { name: "cycle-card", ui: () => <CycleCard cycle={{ ...cycleRow, _count: { objectives: 2 } }} {...common} />, custom: ["2 aims"] },
+  { name: "cycle-card", ui: () => <CycleCard cycle={cycleWith(cycleRow, 2)} {...common} />, custom: ["2 aims"] },
   {
     name: "roadmap add-item",
     ui: () => (
@@ -415,7 +422,7 @@ describe("surfaces converted earlier also follow Opportunity, Solution and Cycle
     expect(objective).not.toMatch(CANONICAL_WORDS)
     entityDetail.data = {
       id: "k1", title: "Reach", current: 1, target: 2, unit: null, objective: { id: "o1", title: "Grow", cycleId: "c1" },
-      supportingObjectives: [], opportunities: [{ id: "p1", title: "Need" }], roadmapItems: [], deliveryTasks: [], linkableTasks: [], members: [],
+      checkIns: [], supportingObjectives: [], opportunities: [{ id: "p1", title: "Need" }], roadmapItems: [], deliveryTasks: [], linkableTasks: [], members: [],
     }
     const keyResult = textFor(CUSTOM, () => <KeyResultPanel id="k1" {...common} />)
     expect(keyResult).toContain("Linked Problems (1)")

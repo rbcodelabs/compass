@@ -14,6 +14,7 @@ import {
   type FeedbackSearchParams,
 } from "@/lib/feedback-query";
 import type { FeedbackType } from "@/lib/types";
+import { FEEDBACK_TOOLBAR_HOST_ID } from "@/components/feedback/feedback-toolbar-host";
 import { FeedbackHeaderActions } from "@/components/feedback/feedback-header-actions";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -42,6 +43,7 @@ export default async function FeedbackPage({ params, searchParams }: Props) {
   return (
     <WorkspacePage
       title="Feedback"
+      toolbar={<div id={FEEDBACK_TOOLBAR_HOST_ID} data-toolbar-host className="flex min-w-0 items-center gap-1.5" />}
       actions={(
         <Suspense>
           <FeedbackHeaderActions />

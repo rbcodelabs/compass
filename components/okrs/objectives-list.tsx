@@ -17,9 +17,9 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { ObjectiveRow } from "@/components/okrs/objective-row";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import {
   reorderObjective,
-  reorderKeyResult,
 } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import type {
   ObjectiveStatus,
@@ -64,6 +64,9 @@ type Props = {
   cyclePath: string;
   availableKRs?: ParentKROption[];
   supportingObjectiveOptions?: SupportingObjectiveOption[];
+  paceElapsed?: number | null;
+  /** Hide progress visuals for a not-yet-started period. */
+  hideProgress?: boolean;
 };
 
 export function ObjectivesList({
@@ -73,8 +76,13 @@ export function ObjectivesList({
   cyclePath,
   availableKRs = [],
   supportingObjectiveOptions,
+  paceElapsed,
+  hideProgress,
 }: Props) {
   const [objectives, setObjectives] = useState(initialObjectives);
+  const labels = useLabels();
+  // Collapsed ids are view state only (not persisted); everything starts expanded.
+  const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [, startTransition] = useTransition();
 
   // Stable across server and client; without it @dnd-kit numbers its
@@ -110,7 +118,31 @@ export function ObjectivesList({
 
   const objectiveIds = objectives.map((o) => o.id);
 
+  function setCollapsed(id: string, collapsed: boolean) {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (collapsed) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  const allCollapsed = objectives.length > 0 && objectives.every((o) => collapsedIds.has(o.id));
+  const toggleAllLabel = `${allCollapsed ? "Expand" : "Collapse"} all ${labels.objective.lowerPlural}`;
+
   return (
+    <>
+    {objectives.length > 1 && (
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setCollapsedIds(allCollapsed ? new Set() : new Set(objectiveIds))}
+          className="rounded text-xs text-text-subtle hover:text-text-default hover:underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
+        >
+          {toggleAllLabel}
+        </button>
+      </div>
+    )}
     <DndContext
       id={dndId}
       sensors={sensors}
@@ -119,7 +151,7 @@ export function ObjectivesList({
     >
       <SortableContext items={objectiveIds} strategy={verticalListSortingStrategy}>
         {objectives.map((obj) => (
-          <ObjectiveRowWithKRSort
+          <ObjectiveRow
             key={obj.id}
             objective={obj}
             orgSlug={orgSlug}
@@ -128,86 +160,14 @@ export function ObjectivesList({
             availableKRs={availableKRs}
             parentKeyResultId={obj.parentKeyResultId ?? null}
             supportingObjectiveOptions={supportingObjectiveOptions}
+            paceElapsed={paceElapsed}
+            hideProgress={hideProgress}
+            collapsed={collapsedIds.has(obj.id)}
+            onCollapsedChange={(c) => setCollapsed(obj.id, c)}
           />
         ))}
       </SortableContext>
     </DndContext>
-  );
-}
-
-// ─── ObjectiveRow with inner KR sort context ──────────────────────────────────
-
-function ObjectiveRowWithKRSort({
-  objective,
-  orgSlug,
-  workspaceSlug,
-  revalidatePathStr,
-  availableKRs,
-  parentKeyResultId,
-  supportingObjectiveOptions,
-}: {
-  objective: ObjectiveData;
-  orgSlug: string;
-  workspaceSlug: string;
-  revalidatePathStr: string;
-  availableKRs?: ParentKROption[];
-  parentKeyResultId?: string | null;
-  supportingObjectiveOptions?: SupportingObjectiveOption[];
-}) {
-  const [keyResults, setKeyResults] = useState(objective.keyResults);
-  const [, startTransition] = useTransition();
-
-  // Stable across server and client; without it @dnd-kit numbers its
-  // aria-describedby ids from a global counter and hydration mismatches.
-  const dndId = useId();
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
-  function handleKRDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const activeId = active.id as string;
-    const overId = over.id as string;
-
-    const oldIndex = keyResults.findIndex((kr) => kr.id === activeId);
-    const newIndex = keyResults.findIndex((kr) => kr.id === overId);
-
-    if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-      const reordered = arrayMove(keyResults, oldIndex, newIndex);
-      setKeyResults(reordered);
-
-      startTransition(async () => {
-        await reorderKeyResult(activeId, newIndex, revalidatePathStr);
-      });
-    }
-  }
-
-  const krIds = keyResults.map((kr) => kr.id);
-
-  // Merge sorted KRs back into the objective for ObjectiveRow
-  const objectiveWithSortedKRs = { ...objective, keyResults };
-
-  return (
-    <DndContext
-      id={dndId}
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragEnd={handleKRDragEnd}
-    >
-      <SortableContext items={krIds} strategy={verticalListSortingStrategy}>
-        <ObjectiveRow
-          objective={objectiveWithSortedKRs}
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-          revalidatePathStr={revalidatePathStr}
-          availableKRs={availableKRs}
-          parentKeyResultId={parentKeyResultId}
-          supportingObjectiveOptions={supportingObjectiveOptions}
-        />
-      </SortableContext>
-    </DndContext>
+    </>
   );
 }

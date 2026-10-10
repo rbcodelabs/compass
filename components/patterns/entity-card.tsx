@@ -12,9 +12,11 @@ type EntityCardProps = Omit<ComponentProps<"article">, "title"> & {
   footer?: ReactNode;
   interactive?: boolean;
   selected?: boolean;
+  /** Extra classes for the children wrapper (default spacing is `mt-3`). */
+  bodyClassName?: string;
 };
 
-export function EntityCard({ title, description, eyebrow, leading, metadata, status, actions, footer, interactive = false, selected = false, children, className, ...props }: EntityCardProps) {
+export function EntityCard({ title, description, eyebrow, leading, metadata, status, actions, footer, interactive = false, selected = false, bodyClassName, children, className, ...props }: EntityCardProps) {
   return (
     <article
       data-slot="card"
@@ -38,7 +40,7 @@ export function EntityCard({ title, description, eyebrow, leading, metadata, sta
         {status && <div className="shrink-0">{status}</div>}
         {actions && <div className="shrink-0">{actions}</div>}
       </div>
-      {children && <div className="mt-3">{children}</div>}
+      {children && <div className={cn("mt-3", bodyClassName)}>{children}</div>}
       {(metadata || footer) && <div className="mt-4 flex items-center justify-between gap-3 border-t border-border-default pt-3 text-xs text-text-subtle"><div>{metadata}</div><div>{footer}</div></div>}
     </article>
   );

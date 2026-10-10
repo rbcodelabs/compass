@@ -2,6 +2,7 @@
 
 import { ListFilter } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,30 +54,58 @@ type FacetedFilterMenuProps = {
   groups: FacetedFilterGroup[];
   onClearAll: () => void;
   compact?: boolean;
+  /**
+   * Icon-only trigger with a tooltip, for the workspace header where every control is an icon.
+   * The accessible name stays "Filters" and the active count moves to a corner badge.
+   */
+  iconOnly?: boolean;
 };
 
-export function FacetedFilterMenu({ groups, onClearAll, compact }: FacetedFilterMenuProps) {
+export function FacetedFilterMenu({ groups, onClearAll, compact, iconOnly }: FacetedFilterMenuProps) {
   const activeCount = groups.filter((group) =>
     isMultiGroup(group)
       ? group.values.length < group.options.length
       : Boolean(group.value),
   ).length;
 
-  return (
+  const menu = (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="outline" size="sm" aria-label="Filters" />
-        }
-      >
-        <ListFilter />
-        <span className={compact ? "hidden sm:inline" : undefined}>Filters</span>
-        {activeCount > 0 && (
-          <span className="ml-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
-            {activeCount}
-          </span>
-        )}
-      </DropdownMenuTrigger>
+      {iconOnly ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <DropdownMenuTrigger
+                render={<Button variant="outline" size="icon" aria-label="Filters" className="relative size-11 md:size-8" />}
+              />
+            }
+          >
+            <ListFilter />
+            {activeCount > 0 && (
+              <span
+                data-slot="faceted-filter-count"
+                className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground"
+              >
+                {activeCount}
+              </span>
+            )}
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Filters</TooltipContent>
+        </Tooltip>
+      ) : (
+        <DropdownMenuTrigger
+          render={
+            <Button variant="outline" size="sm" aria-label="Filters" />
+          }
+        >
+          <ListFilter />
+          <span className={compact ? "hidden sm:inline" : undefined}>Filters</span>
+          {activeCount > 0 && (
+            <span className="ml-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+              {activeCount}
+            </span>
+          )}
+        </DropdownMenuTrigger>
+      )}
       <DropdownMenuContent align="end" className="w-56">
         {groups.map((group, index) => (
           <DropdownMenuGroup key={group.id}>
@@ -146,4 +175,6 @@ export function FacetedFilterMenu({ groups, onClearAll, compact }: FacetedFilter
       </DropdownMenuContent>
     </DropdownMenu>
   );
+
+  return iconOnly ? <TooltipProvider>{menu}</TooltipProvider> : menu;
 }

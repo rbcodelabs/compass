@@ -13,6 +13,8 @@ interface CheckInFormProps {
   currentValue: number;
   orgSlug: string;
   workspaceSlug: string;
+  /** Called after a check-in is saved, e.g. so a panel can refetch its history. */
+  onSaved?: () => void;
 }
 
 export function CheckInForm({
@@ -21,6 +23,7 @@ export function CheckInForm({
   currentValue,
   orgSlug,
   workspaceSlug,
+  onSaved,
 }: CheckInFormProps) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +37,7 @@ export function CheckInForm({
         await logCheckIn(keyResultId, orgSlug, workspaceSlug, formData);
         setOpen(false);
         formRef.current?.reset();
+        onSaved?.();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong");
       }
