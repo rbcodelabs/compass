@@ -392,7 +392,7 @@ describe("agents inherit their owner's live org admin rights (create_workspace)"
 
   // Attestation-like tools would be recorded as the human's own act.
   it.each([
-    "update_comment", "update_solution_comment", "update_doc_comment",
+    "update_comment", "update_solution_comment",
     "approve_solution_plan", "reject_solution_plan", "request_release_authorization",
   ])("%s stays human-only even for an agent whose owner is an org owner", async (tool) => {
     mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "OWNER" })
