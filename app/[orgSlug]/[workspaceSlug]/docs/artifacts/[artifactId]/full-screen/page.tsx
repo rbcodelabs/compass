@@ -42,7 +42,7 @@ export default async function ArtifactFullScreenPage({ params, searchParams }: {
   return (
     // fixed + inset-0 lifts the viewer out of the workspace shell (sidebar/header)
     // so the slide really is edge-to-edge; all controls float over it.
-    <div className="fixed inset-0 z-[100] bg-black">
+    <div className="fixed inset-0 z-50 bg-black">
       <ArtifactViewer
         title={artifact.title}
         html={html}
