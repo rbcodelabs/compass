@@ -9,6 +9,7 @@ import { archiveArtifact, captureArtifactThumbnail, linkArtifact, replaceArtifac
 import { ArtifactViewer } from "./artifact-viewer"
 import type { ArtifactSlideDto } from "@/lib/artifact-slides"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { MarkdownContent } from "@/components/markdown-content"
@@ -82,7 +83,7 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
     />}
     <div className="grid gap-6 @3xl:grid-cols-2">
       <form className="space-y-3 rounded-lg border p-4" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); run(() => updateArtifact(workspaceId, artifact.id, { title: String(data.get("title")), description: String(data.get("description")), ...(artifact.sourceType === "HTML_UPLOAD" ? { kind: data.get("kind") === "SLIDE_DECK" ? "SLIDE_DECK" as const : "DOCUMENT" as const } : {}) }, basePath)) }}>
-        <h2 className="font-semibold">Details</h2><Input name="title" defaultValue={artifact.title} required /><Textarea name="description" defaultValue={artifact.description ?? ""} />{artifact.sourceType === "HTML_UPLOAD" && <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="kind" value="SLIDE_DECK" defaultChecked={artifact.kind === "SLIDE_DECK"} />Show as a slide deck</label>}<Button type="submit" disabled={pending}>Save details</Button>
+        <h2 className="font-semibold">Details</h2><Input name="title" defaultValue={artifact.title} required /><Textarea name="description" defaultValue={artifact.description ?? ""} />{artifact.sourceType === "HTML_UPLOAD" && <label className="flex items-center gap-2 text-sm"><Checkbox name="kind" value="SLIDE_DECK" defaultChecked={artifact.kind === "SLIDE_DECK"} />Show as a slide deck</label>}<Button type="submit" disabled={pending}>Save details</Button>
       </form>
       <form className="space-y-3 rounded-lg border p-4" onSubmit={(event) => { event.preventDefault(); run(() => replaceArtifactRevision(workspaceId, artifact.id, artifact.sourceType, new FormData(event.currentTarget), basePath)) }}>
         <h2 className="font-semibold">New revision</h2>{artifact.sourceType === "EXTERNAL_LINK" ? <Input name="url" type="url" required placeholder="https://…" /> : <Input name="file" type="file" accept=".html,text/html" required />}<Button type="submit" disabled={pending}>Replace current revision</Button>
