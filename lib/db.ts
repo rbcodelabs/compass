@@ -15,6 +15,24 @@ export function getDatabaseUser(): string {
 }
 
 /**
+ * Pool options for the plain-Postgres (`DATABASE_URL`) path.
+ *
+ * `pg` defaults to 10 connections per Pool, and every serverless instance owns
+ * its own Pool. Against a small pooler (e.g. Supabase Free, session mode:
+ * pool_size 15) a handful of instances exhausts it and requests fail with
+ * EMAXCONNSESSION. Keep the per-instance cap low and recycle idle connections
+ * quickly; `DATABASE_POOL_MAX` overrides the cap (e.g. after a plan upgrade).
+ */
+export function getPlainPoolOptions(
+  connectionString: string,
+  env: Record<string, string | undefined>,
+): { connectionString: string; max: number; idleTimeoutMillis: number } {
+  const requested = Number(env.DATABASE_POOL_MAX?.trim() || Number.NaN);
+  const max = Number.isInteger(requested) && requested > 0 ? requested : 3;
+  return { connectionString, max, idleTimeoutMillis: 10_000 };
+}
+
+/**
  * Creates the underlying, unextended PrismaClient.
  *
  * Local dev: if DATABASE_URL is set, connects via plain pg (no DSQL/OIDC).
@@ -31,9 +49,15 @@ export function createBasePrismaClient(): PrismaClient {
     throw new Error("DATABASE_URL is forbidden in automation previews");
   }
 
-  // ── Local dev path ────────────────────────────────────────────────────────
+  // ── Plain Postgres path (local dev, Supabase, any DATABASE_URL) ──────────
   if (process.env.DATABASE_URL) {
-    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    const pool = new Pool(getPlainPoolOptions(process.env.DATABASE_URL, process.env));
+    // On Vercel, let the platform close idle connections before an instance
+    // is suspended so they don't linger against a small pooler limit.
+    if (process.env.VERCEL) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require("@vercel/functions").attachDatabasePool(pool);
+    }
     const adapter = new PrismaPg(pool, { schema });
     return new PrismaClient({ adapter });
   }

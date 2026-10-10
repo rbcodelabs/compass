@@ -53,10 +53,16 @@ with [the overview](docs/content/00-overview.md).
 Next.js 16 · React 19 · TypeScript · Prisma 7 · PostgreSQL · Auth.js ·
 Tailwind 4 · Vitest · Playwright
 
-In production Compass runs on Vercel against **Aurora DSQL**, authenticated with
-Vercel OIDC rather than a static connection string. Locally it runs against plain
-PostgreSQL. `lib/db.ts` picks the path: set `DATABASE_URL` and it uses local
-Postgres; set `PGHOST` and it signs DSQL tokens.
+Compass runs on Vercel. Since 2026-10-09 production uses **Supabase Postgres**
+via `DATABASE_URL` (the Aurora DSQL account became unavailable); the DSQL path
+(Vercel OIDC, no static connection string) remains in the code. Locally it runs
+against plain PostgreSQL. `lib/db.ts` picks the path: set `DATABASE_URL` and it
+uses a plain `pg` pool; set `PGHOST` and it signs DSQL tokens.
+
+On the `DATABASE_URL` path each serverless instance keeps at most 3 connections
+(`DATABASE_POOL_MAX` overrides this). Use the pooler's **session** or direct
+connection string, not the transaction pooler, and size the cap so
+`instances × max` stays under the pooler's client limit (15 on Supabase Free).
 
 Because DSQL does not support foreign-key constraints, `prisma/schema.prisma`
 uses `relationMode = "prisma"` — referential integrity is enforced by Prisma at
