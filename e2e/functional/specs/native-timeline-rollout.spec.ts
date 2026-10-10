@@ -140,6 +140,9 @@ test.describe("Native timeline default", () => {
     // Timeline scale and reload live in the more-actions (⋯) menu.
     const more = header.getByRole("button", { name: "More actions", exact: true });
     await more.focus();
+    // The roadmap supplies a card-sort link, so it is the menu's first entry.
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("menuitem", { name: "Card sort", exact: true })).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(page.getByRole("menuitemradio", { name: "Month", exact: true })).toBeFocused();
     await page.keyboard.press("ArrowDown");
