@@ -121,6 +121,15 @@ describe("POST /api/comments", () => {
     expect(callArgs.elementAnchor).not.toHaveProperty("screenshotUrl")
   })
 
+  it("forwards a slide index and rejects a malformed one", async () => {
+    const anchor = { pageUrl: "https://compass.test/a", pagePath: "/a", slideIndex: 4 }
+    const ok = await POST(request("/api/comments", { method: "POST", body: JSON.stringify({ targetType: "ARTIFACT", targetId: "target-1", body: "Slide 5", elementAnchor: anchor }) }))
+    expect(ok.status).toBe(201)
+    expect(createComment).toHaveBeenCalledWith(expect.objectContaining({ elementAnchor: expect.objectContaining({ slideIndex: 4 }) }))
+    const bad = await POST(request("/api/comments", { method: "POST", body: JSON.stringify({ targetType: "ARTIFACT", targetId: "target-1", body: "x", elementAnchor: { ...anchor, slideIndex: "4" } }) }))
+    expect(bad.status).toBe(400)
+  })
+
   it("omits elementAnchor entirely when the client sends none", async () => {
     await POST(request("/api/comments", { method: "POST", body: JSON.stringify({ targetType: "ROADMAP_ITEM", targetId: "target-1", body: "Hello" }) }))
     const [callArgs] = createComment.mock.calls[0]

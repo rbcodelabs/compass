@@ -73,6 +73,8 @@ export function ArtifactSandboxedFrame({
   resolutions,
   renderPin,
   fill = false,
+  transparent = false,
+  onSettled,
 }: {
   title: string
   html: string
@@ -89,6 +91,10 @@ export function ArtifactSandboxedFrame({
   renderPin?: (commentId: string, resolution: AnchoredResolution) => ReactNode
   /** Stretch to fill an already-sized ancestor (the full-screen route) instead of the docked view's fixed min-height floor. */
   fill?: boolean
+  /** No loading cover or panel background, so a frame stacked underneath shows through while this one loads and fits. */
+  transparent?: boolean
+  /** The slide's fit has settled (or bailed): it is on screen in its final position. */
+  onSettled?: () => void
 }) {
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [attempt, setAttempt] = useState(0)
@@ -106,7 +112,9 @@ export function ArtifactSandboxedFrame({
   const onPickModeExitedRef = useRef(onPickModeExited)
   const onAnchorsResolvedRef = useRef(onAnchorsResolved)
   const anchorsToResolveRef = useRef(anchorsToResolve)
+  const onSettledRef = useRef(onSettled)
   useEffect(() => {
+    onSettledRef.current = onSettled
     onElementPickedRef.current = onElementPicked
     onPickModeExitedRef.current = onPickModeExited
     onAnchorsResolvedRef.current = onAnchorsResolved
@@ -139,6 +147,10 @@ export function ArtifactSandboxedFrame({
         const selector = typeof (message as { selector?: unknown }).selector === "string" ? (message as { selector: string }).selector : null
         const fingerprint = ((message as { fingerprint?: unknown }).fingerprint ?? {}) as ElementFingerprint
         onElementPickedRef.current?.({ selector, fingerprint })
+        return
+      }
+      if (message.type === ARTIFACT_PICK_MESSAGE_TYPES.FIT_SETTLED) {
+        onSettledRef.current?.()
         return
       }
       if (message.type === ARTIFACT_PICK_MESSAGE_TYPES.PICK_MODE_EXITED) {
@@ -214,23 +226,29 @@ export function ArtifactSandboxedFrame({
     (entry): entry is [string, AnchoredResolution] => entry[1].status === "anchored",
   )
 
-  return <div className={`relative min-h-[520px] ${fill ? "h-full" : ""}`}>
-    {state === "loading" && <div role="status" className="absolute inset-0 grid place-items-center rounded-lg border border-border-default bg-surface-inset text-sm text-text-subtle">Loading preview…</div>}
+  return <div className={fill ? "relative h-full" : "relative min-h-[520px]"}>
+    {state === "loading" && !transparent && <div role="status" className={`absolute inset-0 grid place-items-center bg-surface-inset text-sm text-text-subtle ${fill ? "" : "rounded-lg border border-border-default"}`}>Loading preview…</div>}
     <iframe
       ref={frameRef}
       title={`${title} preview`}
       sandbox={ARTIFACT_IFRAME_SANDBOX}
       referrerPolicy="no-referrer"
-      className={`w-full min-h-[520px] rounded-lg border border-border-default bg-surface-panel transition-opacity ${fill ? "h-full" : ""} ${state === "ready" ? "opacity-100" : "pointer-events-none opacity-0"}`}
+      className={`w-full ${transparent ? "bg-transparent" : "bg-surface-panel"} transition-opacity ${fill ? "h-full border-0" : "min-h-[520px] rounded-lg border border-border-default"} ${state === "ready" ? "opacity-100" : "pointer-events-none opacity-0"}`}
     />
-    {state === "ready" && renderPin && anchoredPins.map(([commentId, resolution]) => (
-      <div
-        key={commentId}
-        className="absolute z-10"
-        style={{ left: resolution.geometry.left, top: resolution.geometry.top }}
-      >
-        {renderPin(commentId, resolution)}
-      </div>
-    ))}
+    {/* The document scrolls inside the iframe, so a pin whose element has
+        scrolled out of view lands outside the frame's box. This layer is the
+        frame's exact size and clips it; it passes pointer events through to the
+        iframe everywhere except the pins themselves. */}
+    {state === "ready" && renderPin && anchoredPins.length > 0 && <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-lg">
+      {anchoredPins.map(([commentId, resolution]) => (
+        <div
+          key={commentId}
+          className="pointer-events-auto absolute"
+          style={{ left: resolution.geometry.left, top: resolution.geometry.top }}
+        >
+          {renderPin(commentId, resolution)}
+        </div>
+      ))}
+    </div>}
   </div>
 }

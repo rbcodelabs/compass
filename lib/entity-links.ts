@@ -32,11 +32,11 @@
 import type { EntityType } from "@/lib/entity-detail"
 
 /**
- * Every type that has a canonical in-app location. `doc` is not an
- * `EntityType` (docs have no detail panel) but does have its own page, and the
- * search results and `create_doc` both need to link to it.
+ * Every type that has a canonical in-app location. `doc` and `artifact` are
+ * not `EntityType`s (neither has a detail panel) but each has its own page, and
+ * the search results and the `create_doc` / artifact MCP tools link to them.
  */
-export type EntityLinkType = EntityType | "doc"
+export type EntityLinkType = EntityType | "doc" | "artifact"
 
 // Compile-time proof that EntityLinkType covers every panel entity type, so
 // adding a type to lib/entity-detail.ts's ENTITY_TYPES fails the build here
@@ -52,6 +52,7 @@ const _COVERS_EVERY_ENTITY_TYPE = {
   feedback: true,
   task: true,
   doc: true,
+  artifact: true,
 } satisfies Record<EntityLinkType, true>
 void _COVERS_EVERY_ENTITY_TYPE
 
@@ -107,6 +108,8 @@ export function entityPath(input: EntityLinkInput): string {
       return `${base}/tasks/${id}`
     case "doc":
       return `${base}/docs/${id}`
+    case "artifact":
+      return `${base}/docs/artifacts/${id}`
 
     // ── Entities addressed by the ?detail= panel ───────────────────────────
     case "solution":

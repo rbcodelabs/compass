@@ -16,6 +16,7 @@ import {
   deleteDocCommentCore,
 } from "@/lib/doc-comments";
 import { getArtifactStorage } from "@/lib/artifact-storage";
+import { parseArtifactKind } from "@/lib/artifact-kind";
 import { resolveCanvasCards, searchCanvasCardTargets } from "@/lib/canvas-card-data";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { validateTaskLink } from "@/lib/task-assignment";
@@ -32,6 +33,7 @@ import {
   updateArtifactMetadata,
   MAX_ARTIFACT_HTML_BYTES,
 } from "@/lib/artifacts";
+import { ArtifactThumbnailError, captureAndStoreArtifactThumbnail, scheduleArtifactThumbnailCapture } from "@/lib/artifact-thumbnail";
 
 async function requireWorkspaceMember(workspaceId: string) {
   const session = await auth();
@@ -81,9 +83,13 @@ export async function createArtifact(workspaceId: string, formData: FormData, re
         if (file.size > MAX_ARTIFACT_HTML_BYTES) throw new Error("HTML file exceeds the 2 MB size limit");
         return createHtmlArtifact({
           ...common, filename: file.name, mimeType: file.type,
+          kind: parseArtifactKind(formData.get("kind")) ?? "DOCUMENT",
           bytes: new Uint8Array(await file.arrayBuffer()),
         }, getArtifactStorage());
       })();
+  if (sourceType === "EXTERNAL_LINK") {
+    scheduleArtifactThumbnailCapture({ artifactId: artifact.id, workspaceId, revisionId: artifact.currentRevisionId });
+  }
   revalidatePath(revalidatePathStr);
   return { id: artifact.id };
 }
@@ -91,7 +97,7 @@ export async function createArtifact(workspaceId: string, formData: FormData, re
 export async function updateArtifact(
   workspaceId: string,
   artifactId: string,
-  data: { title?: string; description?: string | null },
+  data: { title?: string; description?: string | null; kind?: "DOCUMENT" | "SLIDE_DECK" },
   revalidatePathStr: string
 ) {
   const user = await requireWorkspaceMember(workspaceId);
@@ -102,7 +108,8 @@ export async function updateArtifact(
 export async function replaceArtifactRevision(workspaceId: string, artifactId: string, sourceType: string, formData: FormData, revalidatePathStr: string) {
   const user = await requireWorkspaceMember(workspaceId);
   if (sourceType === "EXTERNAL_LINK") {
-    await replaceExternalArtifactRevision({ artifactId, workspaceId, url: String(formData.get("url") ?? ""), createdById: user.id, source: "UI" });
+    const revision = await replaceExternalArtifactRevision({ artifactId, workspaceId, url: String(formData.get("url") ?? ""), createdById: user.id, source: "UI" });
+    scheduleArtifactThumbnailCapture({ artifactId, workspaceId, revisionId: revision.id });
   } else {
     const file = formData.get("file");
     if (!(file instanceof File)) throw new Error("HTML file is required");
@@ -110,6 +117,28 @@ export async function replaceArtifactRevision(workspaceId: string, artifactId: s
     await replaceHtmlArtifactRevision({ artifactId, workspaceId, filename: file.name, mimeType: file.type, bytes: new Uint8Array(await file.arrayBuffer()), createdById: user.id, source: "UI" }, getArtifactStorage());
   }
   revalidatePath(revalidatePathStr);
+}
+
+/**
+ * Capture (or re-capture) the current revision's screenshot on request — the retry
+ * for a failed background capture, and the way to pick up a page that changed
+ * since it was saved. Runs inline: the person clicked the button and is waiting.
+ *
+ * Known failures come back as `{ ok: false, error }` rather than a throw, so the
+ * page can show why (e.g. "Page returned HTTP 404") — a thrown error's message is
+ * replaced with a generic digest in production.
+ */
+export async function captureArtifactThumbnail(workspaceId: string, artifactId: string, revalidatePathStr: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireWorkspaceMember(workspaceId);
+  try {
+    await captureAndStoreArtifactThumbnail({ artifactId, workspaceId });
+  } catch (error) {
+    const known = error instanceof ArtifactThumbnailError || (error instanceof Error && error.name === "ScreenshotCaptureError");
+    if (!known) console.error("[artifact-thumbnail] manual capture failed", error);
+    return { ok: false, error: known ? (error as Error).message : "Could not capture a screenshot of this artifact." };
+  }
+  revalidatePath(revalidatePathStr);
+  return { ok: true };
 }
 
 export async function archiveArtifact(workspaceId: string, artifactId: string, revalidatePathStr: string) {

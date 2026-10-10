@@ -56,12 +56,14 @@ import { prepareDocImageUploadTool } from "@/lib/doc-image-tool-handlers"
 import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
 import {
   archiveArtifact,
+  captureArtifactScreenshot,
   createArtifact,
   getArtifact,
   linkArtifactDecision,
   unlinkArtifactDecision,
   linkArtifact,
   listArtifacts,
+  prepareArtifactUploadTool,
   unlinkArtifact,
   updateArtifact,
 } from "@/lib/artifact-tool-handlers"
@@ -295,7 +297,7 @@ const _handler = createMcpHandler(
     register("promote_research_finding_to_evidence", { title: "Promote Research Finding To Evidence", description: "Promote one finding from a stored research synthesis into a linked Evidence record on an opportunity, solution or assumption, carrying its exact source turns. Identify the finding by its index in the synthesis's themes; the excerpt and the cited turns come from the stored document, not from you. Compass re-checks every citation against the saved transcripts first and writes nothing if any no longer resolves. Promoting the same finding again returns the existing evidence; promoting it onto a different target is refused rather than overwriting. Promotion is a reviewed, human-directed step and is unavailable while a synthesis is being generated.", inputSchema: { ...researchScope, researchSynthesisId: z.string().uuid().describe("UUID of the stored CROSS_SESSION synthesis that proposed this finding"), findingIndex: z.number().int().min(0).max(9).describe("Zero-based index of the finding in the synthesis's themes array"), opportunityId: z.string().uuid().optional().describe("UUID of the opportunity to attach to"), solutionId: z.string().uuid().optional().describe("UUID of the solution to attach to"), assumptionId: z.string().uuid().optional().describe("UUID of the assumption to attach to"), confidence: z.enum(["high", "medium", "low"]).optional().describe("Confidence level (default medium)") }, outputSchema: TOOL_OUTPUT_SCHEMA }, promoteResearchFindingToEvidenceTool)
 
     const commentTargetSchema = z.enum(["OBJECTIVE", "KEY_RESULT", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "EXPERIMENT", "ROADMAP_ITEM", "FEEDBACK_ITEM", "TASK", "DOC", "ARTIFACT", "RESEARCH_STUDY", "REVIEW_REQUEST"])
-    register("add_comment", { title: "Add Comment", description: "Adds discussion to a supported Compass object. Comments never constitute a decision or authorization.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), parentId: z.string().uuid().optional(), body: z.string().min(1), authorName: z.string().min(1) }, outputSchema: TOOL_OUTPUT_SCHEMA }, addComment)
+    register("add_comment", { title: "Add Comment", description: "Adds discussion to a supported Compass object. Comments never constitute a decision or authorization.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), parentId: z.string().uuid().optional(), body: z.string().min(1), authorName: z.string().min(1), slideIndex: z.number().int().min(0).optional().describe("Zero-based slide of a SLIDE_DECK Artifact to anchor a root ARTIFACT comment to (see get_artifact slides[].index). Omit for an unanchored comment.") }, outputSchema: TOOL_OUTPUT_SCHEMA }, addComment)
     register("list_comments", { title: "List Comments", description: "Lists shared comments for one supported object.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), status: z.enum(["OPEN", "RESOLVED"]).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listCommentsTool)
     register("get_comment", { title: "Get Comment", description: "Gets one shared comment by ID.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, getCommentTool)
     register("update_comment", { title: "Update Comment", description: "Updates discussion text without changing any decision record.", inputSchema: { commentId: z.string().uuid(), body: z.string().min(1) }, outputSchema: TOOL_OUTPUT_SCHEMA }, updateComment)
@@ -3202,16 +3204,27 @@ const _handler = createMcpHandler(
       inputSchema: { workspaceId: z.string().uuid(), includeArchived: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, listArtifacts)
     register("get_artifact", {
-      title: "Get Artifact", description: "Returns artifact metadata, immutable revision history, linked Solutions and Decisions without exposing private storage keys or HTML content.",
+      title: "Get Artifact", description: "Returns artifact metadata (including kind), immutable revision history, linked Solutions and Decisions without exposing private storage keys or HTML content. A SLIDE_DECK also returns its slides as { index, title, description } — index is the zero-based slideIndex add_comment accepts.",
       inputSchema: { artifactId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, getArtifact)
+    const artifactUploadReceipt = z.string().min(1).optional().describe("Signed receipt from prepare_artifact_upload after the file was uploaded. Use instead of html so the document never passes through the conversation.")
+    register("prepare_artifact_upload", {
+      title: "Prepare Artifact HTML Upload",
+      description: "Prepares a short-lived direct upload (up to 2 MiB) to private storage for an HTML artifact so the file never has to be pasted into a tool call. " +
+        "Upload the file from disk with the returned client token, then pass the returned receipt as uploadReceipt to create_artifact or update_artifact. Prefer this over inline html for anything beyond a few KB.",
+      inputSchema: {
+        workspaceId: z.string().uuid().describe("UUID of the workspace that will own the artifact"),
+        filename: z.string().min(1).max(255).describe("Filename ending in .html"),
+        fileSize: z.number().int().min(1).max(2 * 1024 * 1024).describe("Exact file size in bytes"),
+      }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, prepareArtifactUploadTool)
     register("create_artifact", {
-      title: "Create Artifact", description: "Creates a first-class Artifact from self-contained HTML or an external http/https URL.",
-      inputSchema: { workspaceId: z.string().uuid(), title: z.string().min(1), description: z.string().optional(), sourceType: z.enum(["HTML_UPLOAD", "EXTERNAL_LINK"]), html: z.string().optional(), filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+      title: "Create Artifact", description: "Creates a first-class Artifact from self-contained HTML or an external http/https URL. For HTML, pass uploadReceipt (from prepare_artifact_upload) instead of html to avoid embedding the document in the call.",
+      inputSchema: { workspaceId: z.string().uuid(), title: z.string().min(1), description: z.string().optional(), sourceType: z.enum(["HTML_UPLOAD", "EXTERNAL_LINK"]), kind: z.enum(["DOCUMENT", "SLIDE_DECK"]).optional().describe("Presentation kind. SLIDE_DECK (HTML_UPLOAD only) renders the HTML one slide at a time, split by Reveal.js sections, .slide elements, top-level <section>s or <hr> breaks; DOCUMENT (default) renders it as one page."), html: z.string().optional(), uploadReceipt: artifactUploadReceipt, filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, createArtifact)
     register("update_artifact", {
-      title: "Update Artifact", description: "Updates Artifact metadata and optionally creates a new immutable HTML or URL revision.",
-      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid(), title: z.string().min(1).optional(), description: z.string().nullable().optional(), html: z.string().optional(), filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+      title: "Update Artifact", description: "Updates Artifact metadata and optionally creates a new immutable HTML or URL revision. For HTML, pass uploadReceipt (from prepare_artifact_upload) instead of html to avoid embedding the document in the call.",
+      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid(), title: z.string().min(1).optional(), description: z.string().nullable().optional(), kind: z.enum(["DOCUMENT", "SLIDE_DECK"]).optional().describe("Presentation kind. SLIDE_DECK (HTML_UPLOAD only) renders the HTML one slide at a time, split by Reveal.js sections, .slide elements, top-level <section>s or <hr> breaks; DOCUMENT (default) renders it as one page."), html: z.string().optional(), uploadReceipt: artifactUploadReceipt, filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, updateArtifact)
     register("create_feedback_source", {
       title: "Create Feedback Source",
@@ -3243,6 +3256,11 @@ const _handler = createMcpHandler(
       title: "Archive Artifact", description: "Archives an Artifact while preserving its links and immutable revision history.",
       inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, archiveArtifact)
+    register("capture_screenshot", {
+      title: "Capture Artifact Screenshot",
+      description: "Renders an Artifact revision in a sandboxed headless browser and stores the PNG as that revision's thumbnail, shown on the Artifact page. EXTERNAL_LINK revisions render their URL, which is read from the revision and never supplied by the caller; HTML_UPLOAD revisions render their stored HTML with all network access disabled. Returns image metadata, not the image or its storage key.",
+      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid(), revisionId: z.string().uuid().optional(), fullPage: z.boolean().optional(), viewport: z.object({ width: z.number().int().min(320).max(3840), height: z.number().int().min(240).max(2160) }).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, captureArtifactScreenshot)
 
     register(
       "create_doc_version",

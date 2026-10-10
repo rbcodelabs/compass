@@ -32,6 +32,7 @@ import { assertObjectiveCycleIdNullable, OBJECTIVE_OPTIONAL_CYCLE_MIGRATION } fr
 import { assertWorkspaceIdOnSolutionObjective, backfillWorkspaceIdOnSolutionObjective, getWorkspaceIdBackfillStatus, WORKSPACE_ID_MIGRATION, WORKSPACE_ID_RESIDUAL_MIGRATION } from "@/lib/migrations/workspace-id-on-solution-objective";
 import { TYPED_LINK_RESIDUAL_MIGRATION, TYPED_LINK_TABLES_MIGRATION, assertTypedLinkPreconditions, assertTypedLinkTables, backfillOpportunityObjectiveLinks, getTypedLinkStatus } from "@/lib/migrations/typed-link-tables";
 import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-manifest";
+import { assertArtifactScreenshotsMigration } from "@/lib/migrations/artifact-screenshots";
 
 
 
@@ -518,6 +519,22 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // research_sessions. Plain ADD COLUMN IF NOT EXISTS: no index, no backfill, no hook.
     name: "076_research_external_studies",
     filePath: path.join(process.cwd(), "prisma/migrations/076_research_external_studies/migration.sql"),
+  },
+  {
+    // Screenshot thumbnails for Artifact revisions: seven nullable ADD COLUMN IF NOT EXISTS statements on
+    // artifact_revisions (DSQL: no DEFAULT/NOT NULL on ADD COLUMN, no index, no backfill). The hook asserts
+    // all seven columns exist with the expected types and are nullable before the receipt is recorded.
+    // Not explicit-only: no rollout dependency and idempotent. Nothing reads the columns until the code ships.
+    name: "077_artifact_screenshots",
+    filePath: path.join(process.cwd(), "prisma/migrations/077_artifact_screenshots/migration.sql"),
+  },
+  {
+    // Slide-deck Artifacts: nullable artifacts.kind (NULL = DOCUMENT) and nullable
+    // comment_element_anchors.slide_index. Plain ADD COLUMN IF NOT EXISTS (DSQL: no
+    // constraints, no index, no backfill), so no async-wait or postcondition hook.
+    // schema.prisma declares both columns, so apply this before relying on the slide-deck code, like 073.
+    name: "078_artifact_slide_decks",
+    filePath: path.join(process.cwd(), "prisma/migrations/078_artifact_slide_decks/migration.sql"),
   },
 ];
 
@@ -2042,6 +2059,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         await assertTypedLinkTables(client, schema, migration.name)
       }
       if (migration.name === OBJECTIVE_OPTIONAL_CYCLE_MIGRATION) await assertObjectiveCycleIdNullable(client, schema)
+      if (migration.name === "077_artifact_screenshots") await assertArtifactScreenshotsMigration(client, schema)
 
       // Only this distinct attempt becomes a successful receipt. A failed
       // attempt remains unfinished as forensic evidence and is never relabeled.

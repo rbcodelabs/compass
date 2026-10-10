@@ -139,6 +139,34 @@ describe("createComment element anchors and external authors", () => {
     expect(prisma.commentElementAnchor.create).not.toHaveBeenCalled()
   })
 
+  it("persists a slide index for a SLIDE_DECK Artifact, with no selector for a whole-slide comment", async () => {
+    prisma.artifact.findUnique.mockResolvedValue({ workspaceId: WS, kind: "SLIDE_DECK" })
+    await createComment({ ...baseInput, elementAnchor: { pageUrl: "artifact:a", pagePath: "/slides/3", elementSelector: null, slideIndex: 2 } })
+    expect(prisma.commentElementAnchor.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ artifactId: ARTIFACT, elementSelector: null, slideIndex: 2 }),
+    })
+  })
+
+  it("stores a null slide index when none is given", async () => {
+    await createComment({ ...baseInput, elementAnchor: { pageUrl: "https://prototype.example.com/p", pagePath: "/p" } })
+    expect(prisma.commentElementAnchor.create).toHaveBeenCalledWith({ data: expect.objectContaining({ slideIndex: null }) })
+  })
+
+  it("refuses a slide index on an Artifact that is not a slide deck", async () => {
+    prisma.artifact.findUnique.mockResolvedValue({ workspaceId: WS, kind: null })
+    await expect(createComment({ ...baseInput, elementAnchor: { pageUrl: "artifact:a", pagePath: "/slides/1", slideIndex: 0 } }))
+      .rejects.toThrow("Slide index is allowed only on SLIDE_DECK Artifacts.")
+    expect(prisma.comment.create).not.toHaveBeenCalled()
+  })
+
+  it("refuses an out-of-range or fractional slide index before touching the database", async () => {
+    for (const slideIndex of [-1, 1.5, 200]) {
+      await expect(createComment({ ...baseInput, elementAnchor: { pageUrl: "artifact:a", pagePath: "/slides/1", slideIndex } }))
+        .rejects.toThrow("Slide index must be an integer from 0 to 199.")
+    }
+    expect(prisma.comment.create).not.toHaveBeenCalled()
+  })
+
   it("refuses a comment claiming both a Compass author and an external one", async () => {
     await expect(createComment({ ...baseInput, authorId: "user-1", externalAuthor: { submitterEmail: "dana@example.com" } }))
       .rejects.toThrow("A comment cannot have both a Compass author and an external author.")

@@ -3,8 +3,18 @@ import { fail, ok } from "@/lib/mcp-output"
 
 const shape = (comment: NonNullable<Awaited<ReturnType<typeof getComment>>>) => ({ ...comment, createdAt: comment.createdAt.toISOString(), updatedAt: comment.updatedAt.toISOString() })
 
-export async function addComment(input: { workspaceId: string; targetType: CommentTargetType; targetId: string; parentId?: string; body: string; authorName: string }) {
-  const comment = await createComment({ ...input, parentId: input.parentId ?? null, authorType: "AGENT", source: "MCP" })
+export async function addComment(input: { workspaceId: string; targetType: CommentTargetType; targetId: string; parentId?: string; body: string; authorName: string; slideIndex?: number }) {
+  const { slideIndex, ...rest } = input
+  if (slideIndex !== undefined && (input.targetType !== "ARTIFACT" || input.parentId)) return fail("slideIndex is only supported on a root ARTIFACT comment.")
+  let comment
+  try {
+    // A slide comment from an agent is a whole-slide anchor: no selector, because
+    // the agent is not looking at a rendered page to pick an element from.
+    comment = await createComment({
+      ...rest, parentId: input.parentId ?? null, authorType: "AGENT", source: "MCP",
+      ...(slideIndex !== undefined ? { elementAnchor: { pageUrl: `artifact:${input.targetId}`, pagePath: `/slides/${slideIndex + 1}`, elementSelector: null, slideIndex } } : {}),
+    })
+  } catch (error) { return fail(error instanceof Error ? error.message : "Comment could not be created.") }
   if (!comment) return fail("Comment could not be created.")
   const data = shape(comment)
   return ok(`**Comment added**\nTarget: ${input.targetType} ${input.targetId}\nID: ${comment.id}`, data)

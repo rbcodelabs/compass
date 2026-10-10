@@ -177,6 +177,26 @@ async function main(): Promise<void> {
   let finalText: string | undefined
   let usage: unknown
 
+  // Scrub host-only secrets before the agent gains Bash.
+  //
+  // Every value below was read into a const at module load, so the parent keeps
+  // working; only the environment inherited by the Claude Code subprocess — and
+  // therefore by the agent's Bash commands — loses them. MCP_BYPASS_SECRET is
+  // the one that matters most: it is a long-lived, project-wide Vercel
+  // Deployment Protection secret, not a per-turn credential.
+  //
+  // Be precise about what this buys: it removes these values from the obvious
+  // place an agent would look (`env`), so a curious or confused agent cannot
+  // trip over them. It is NOT an exfiltration boundary. A determined agent with
+  // Bash can still reach whatever the process it runs inside can reach, and
+  // ANTHROPIC_API_KEY necessarily stays in the environment because the
+  // SDK subprocess authenticates with it. The real boundaries remain the ones
+  // ADR-0001 named: a disposable sandbox with no database access, and per-user
+  // MCP authorization.
+  for (const name of ["MCP_TOKEN", "MCP_BYPASS_SECRET"]) {
+    delete process.env[name]
+  }
+
   for await (const message of query({
     prompt,
     options: {
@@ -190,19 +210,56 @@ async function main(): Promise<void> {
         skipMcpDiscovery: true,
       })),
       skills: packConfig.skillIds,
-      // Skill bodies and supported text assets are compiled into systemPrompt
-      // by the host. SDK 0.3.224 does not provide Skill/Read with tools: [].
-      tools: [],
+      // BUILT-IN TOOLS — `tools` selects the base set; `allowedTools` only grants
+      // permission within that set and cannot add to it (SDK 0.3.224).
+      //
+      // This was `[]` — no built-ins at all — the posture ADR-0008 (declarative
+      // agent capability packs) relies on when it says a pack "cannot grant
+      // itself capabilities". That is deliberately reopened here for exactly one
+      // tool: Bash, so the agent can drive the headless Chromium now baked into
+      // the golden snapshot (see lib/agent-sandbox.ts) and do its own scripting
+      // inside a disposable VM. Think hard before widening this further —
+      // a pack's skill prose can now reach a shell, which it previously could
+      // not, and that is the cost this change accepts.
+      //
+      // Scope: this is the CONVERSATIONAL turn only. research-analysis-entry.ts
+      // and research-interview-entry.ts keep `tools: []` and are unaffected.
+      //
+      // Read is here for one reason: it is the only tool that renders an image
+      // into the model's context. Bash returns text, so an agent with Bash alone
+      // can TAKE a screenshot and never SEE it — which defeats the point. Note
+      // that Read grants no authority Bash lacks (`cat` already reads any file
+      // in the sandbox); it only adds perception.
+      //
+      // Still absent: Write, Edit, Glob, Grep, WebFetch, WebSearch. Bash
+      // subsumes the filesystem ones, so listing them adds surface without
+      // capability; the network ones stay off because fetching arbitrary URLs is
+      // a separate decision from rendering a URL we chose.
+      tools: ["Bash", "Read"],
       strictMcpConfig: true,
       settingSources: [],
       systemPrompt: effectiveSystemPrompt,
-      // Compass MCP only, auto-approved. Headless (no human approver): the
-      // real security boundary is the disposable sandbox + per-user MCP auth.
-      allowedTools: ["mcp__compass", ...connectorToolPrefixes],
+      // Compass MCP plus any connected connector, auto-approved, plus Bash —
+      // every tool the agent may use needs a permission entry here as well as a
+      // `tools` entry above. Headless (no human approver): the real security
+      // boundary is the disposable sandbox + per-user MCP auth. A connector
+      // prefix is added only when that user has an actual grant, so this list
+      // widens per turn rather than standing open.
+      allowedTools: ["mcp__compass", "Bash", "Read", ...connectorToolPrefixes],
       // Safety default (Phase 5): keep the two irreversible hard-delete tools
       // out of the agent's reach — everything else is reversible/auditable.
       // Remove entries here to let the agent perform destructive deletes.
-      disallowedTools: ["mcp__compass__delete_assumption", "mcp__compass__delete_solution_comment"],
+      //
+      // `Skill` is listed for a different reason: skill bodies are compiled into
+      // systemPrompt by the host, so the SDK's own Skill tool would offer the
+      // same content a second way. With `tools: []` it was never provided at
+      // all; now that the set is non-empty, disallowing it explicitly preserves
+      // today's behavior rather than leaving it to inference.
+      disallowedTools: [
+        "mcp__compass__delete_assumption",
+        "mcp__compass__delete_solution_comment",
+        "Skill",
+      ],
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       maxTurns: 30,

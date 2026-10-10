@@ -55,12 +55,21 @@ function parseElementAnchor(value: unknown): ElementAnchorInput | undefined {
   if (value === undefined || value === null) return undefined
   if (typeof value !== "object" || Array.isArray(value)) throw new CommentHttpError(400, "elementAnchor must be an object")
   const input = value as Record<string, unknown>
+  const slideIndex = parseSlideIndex(input.slideIndex)
   return {
     pageUrl: requireString(input.pageUrl, "elementAnchor.pageUrl"),
     pagePath: requireString(input.pagePath, "elementAnchor.pagePath"),
     elementSelector: optionalString(input.elementSelector, "elementAnchor.elementSelector"),
     elementFingerprint: parseElementFingerprint(input.elementFingerprint),
+    ...(slideIndex === null ? {} : { slideIndex }),
   }
+}
+
+/** Zero-based slide of a SLIDE_DECK Artifact. Range and kind are checked again in createComment. */
+function parseSlideIndex(value: unknown): number | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw new CommentHttpError(400, "elementAnchor.slideIndex must be a non-negative integer")
+  return value
 }
 
 export async function GET(request: NextRequest) {
