@@ -47,6 +47,14 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({
   promoteFeedbackToRoadmap: vi.fn(),
   rescheduleRoadmapItem: vi.fn(),
   addRoadmapItem: vi.fn(),
+  moveItemToLane: vi.fn(),
+}));
+
+// The header's saved-views menu calls the org-level saved-view actions, which import auth too.
+vi.mock("@/app/[orgSlug]/roadmap/actions", () => ({
+  createRoadmapViewAction: vi.fn(),
+  updateRoadmapViewAction: vi.fn(),
+  deleteRoadmapViewAction: vi.fn(),
 }));
 
 vi.mock("@/components/roadmap/unscheduled-items-panel", async () => {
@@ -130,7 +138,9 @@ describe("Roadmap dashboard workspace layout", () => {
     );
 
     const boardRegion = screen.getByRole("region", { name: "Roadmap board" });
-    const boardWrapper = boardRegion.parentElement!;
+    // The board sits in a row with the docked "Not scheduled" sidebar (md+), inside the height-filling wrapper.
+    expect(boardRegion.parentElement!.className).toContain("md:flex-row");
+    const boardWrapper = boardRegion.parentElement!.parentElement!;
     expect(boardWrapper.className).toContain("flex min-h-0 flex-1 flex-col");
     expect(boardWrapper.className).toContain("md:overflow-hidden");
     expect(boardRegion.className).toContain("scroll-px-3");

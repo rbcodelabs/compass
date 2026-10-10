@@ -107,6 +107,7 @@ export default async function WorkspaceLayout({
           userEmail={user.email ?? ""}
           userImage={user.image ?? undefined}
           isOrgAdmin={isOrgAdmin}
+          showOrgRoadmap={workspaces.filter((w) => w.orgSlug === orgSlug).length > 1}
           followingEnabled={followingEnabled}
           unreadNotifications={unreadNotifications}
         />

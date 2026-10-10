@@ -26,6 +26,7 @@ import { SchedulePalette, type PaletteDates } from "../schedule/schedule-palette
 import { RailRegion, useRailState } from "../schedule/rail-region";
 import type { RailPreference } from "@/lib/roadmap/rail-state";
 import { RangeSchedulePopover } from "../schedule/range-schedule-popover";
+import type { WorkspaceSavedViews } from "../workspace-saved-views";
 import { BuildFromDiscovery } from "../schedule/build-from-discovery";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { pushUndoToast } from "@/lib/ui/undo-toast";
@@ -104,6 +105,7 @@ function formatShortDay(date: CalendarDate): string {
 export function NativeTimeline(props: TimelineEngineProps & {
   headerSquads?: TimelineEngineProps["squads"];
   cardSortHref?: string;
+  savedViews?: WorkspaceSavedViews;
   customFieldGroups?: CustomFieldFilterGroup[];
   activeCustomFieldId?: string | null;
   /** Row grouping mode. Defaults to "phase" — today's only behavior. */
@@ -530,7 +532,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
 
   return (
     <div className="flex min-h-full min-w-0 flex-1 flex-col md:h-full md:min-h-0">
-      <RoadmapHeader squads={props.headerSquads ?? props.squads} customFieldGroups={props.customFieldGroups} activeCustomFieldId={props.activeCustomFieldId ?? null} groupByValue={groupByValue} groupByOptions={props.groupByOptions} cardSortHref={props.cardSortHref} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: goToToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0, schedule: { onOpen: () => setPaletteOpen(true), autoSync: true, rail: { open: rail.open, onToggle: toggleRail, count: controller.unscheduled.length, autoAdded: autoAdded.length, controlsId: railId } } }} />
+      <RoadmapHeader squads={props.headerSquads ?? props.squads} customFieldGroups={props.customFieldGroups} activeCustomFieldId={props.activeCustomFieldId ?? null} groupByValue={groupByValue} groupByOptions={props.groupByOptions} cardSortHref={props.cardSortHref} savedViews={props.savedViews} timeline={{ zoom: controller.zoom, onZoom: controller.setZoom, onShift: controller.shiftViewport, onToday: goToToday, saving: controller.pendingItemIds.size > 0 || controller.pendingBacklogIds.size > 0, schedule: { onOpen: () => setPaletteOpen(true), autoSync: true, rail: { open: rail.open, onToggle: toggleRail, count: controller.unscheduled.length, autoAdded: autoAdded.length, controlsId: railId } } }} />
       <div data-slot="workspace-content" className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 md:px-4 md:py-3">
         <DndContext
           id={dndId}

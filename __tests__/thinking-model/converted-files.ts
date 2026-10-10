@@ -232,6 +232,8 @@ export const CANONICAL_FILES: Record<string, string> = {
   "components/agent/agent-chat.tsx": "research-and-agent-chat",
   "components/settings/delete-organization-panel.tsx": "account-and-org-pages",
   "components/settings/org-readonly-access-panel.tsx": "account-and-org-pages",
+  // The cross-workspace roadmap spans workspaces that may each use a different vocabulary, so its link filters use the canonical names.
+  "components/roadmap/cross-workspace/roadmap-toolbar.tsx": "account-and-org-pages",
   "components/scoring-models/manage-scoring-models-panel.tsx": "account-and-org-pages",
   "app/layout.tsx": "account-and-org-pages",
   "app/login/page.tsx": "account-and-org-pages",

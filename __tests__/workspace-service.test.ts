@@ -179,6 +179,15 @@ describe("createWorkspaceInOrg", () => {
     expect(mockRevalidatePath).not.toHaveBeenCalled()
   })
 
+  it.each(["roadmap", "settings"])("refuses the reserved slug %s without touching the database", async (slug) => {
+    const result = await createWorkspaceInOrg({ orgSlug: "rbcodelabs", name: "Anything", slug })
+
+    expect(result).toMatchObject({ ok: false, code: "SLUG_TAKEN" })
+    expect(mockPrisma.workspace.findFirst).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockRevalidatePath).not.toHaveBeenCalled()
+  })
+
   it("fails with SLUG_TAKEN when a workspace already has that slug in the org", async () => {
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "existing-ws" })
 
