@@ -10,6 +10,30 @@
 | E2E functional | `pnpm test:e2e:functional` |
 | Build | `pnpm build` |
 
+## Where to run (homelab first, local is the fallback)
+
+Heavy gates default to the homelab when it is reachable (`proxmox-devbox` skill; vault note `Agent How-Tos/Proxmox Homelab`). Check first:
+
+```sh
+ssh -o ConnectTimeout=3 -o BatchMode=yes dev-builder 'true' && echo REACHABLE || echo UNREACHABLE
+```
+
+| Step | Where (homelab reachable) | Command |
+|---|---|---|
+| Type-check | `tq-check` | `pnpm tsc --noEmit` (profile runs typecheck) |
+| Unit tests | `tq-check` | `pnpm test` |
+| E2E functional | `dev-builder` (no passing `tq` profile) | `pnpm test:e2e:functional` |
+| E2E screenshots | local (needs seeded local dev server + session file) | `pnpm test:e2e` |
+| Build | `dev-builder` | `pnpm build` |
+
+`compass-e2e` has never passed on a `tq` worker, so do not route E2E through `tq-check`. Run it on `dev-builder` using the Compass recipe in `CLAUDE.md` ("Running the dev server on a remote box (homelab dev-builder)"): exclude `.worktrees`, `.claude`, `.pnpm-store`, `.npm-cache`, `node_modules`, `.next` and `.git` from any rsync (the checkout can hold ~50 GB), `fnm use 22`, and use a throwaway `postgres:16` on `localhost:5440` for `compass_e2e`.
+
+`tq-check` reads the profile (`compass-unit`) from `.testq.json` at the repo root, so there is no repo-name guessing; `tq-check --profile <name>` overrides it.
+
+> `tq-check` and the `compass-unit` profile are being added to `~/projects/testq` in a parallel PR. Until that merges, run the step on `dev-builder` per the `proxmox-devbox` skill, or locally.
+
+If the homelab is unreachable (e.g. off the home LAN), do not ask: run the local command from the table above, after checking load per the user-level Machine Capacity guidance, and state in the PR/report that the step ran locally because the homelab was unreachable. Always report which machine each step ran on. The interactive rev-loop dev server you watch in a browser stays local.
+
 ## Branch Naming
 
 - `fix/<slug>` for bug fixes
