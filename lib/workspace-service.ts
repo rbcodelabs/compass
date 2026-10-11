@@ -27,7 +27,7 @@
 import { revalidatePath } from "next/cache"
 import getPrisma from "@/lib/db"
 import { normalizeWorkspaceRole } from "@/lib/roles"
-import { isReservedWorkspaceSlug } from "@/lib/slug"
+import { resolveWorkspaceSlug } from "@/lib/slug"
 
 export interface CreateWorkspaceInput {
   /** Slug of the organization the workspace belongs to. */
@@ -109,7 +109,7 @@ function isWorkspaceSlugConflict(error: unknown): boolean {
 export async function createWorkspaceInOrg({
   orgSlug,
   name,
-  slug,
+  slug: requestedSlug,
   description,
   agentGrant,
 }: CreateWorkspaceInput): Promise<CreateWorkspaceResult> {
@@ -127,14 +127,9 @@ export async function createWorkspaceInOrg({
     }
   }
 
-  // A static route under /[orgSlug]/ would shadow this workspace (see lib/slug.ts).
-  if (isReservedWorkspaceSlug(slug)) {
-    return {
-      ok: false,
-      code: "SLUG_TAKEN",
-      error: `"${slug}" is reserved for a built-in page. Please choose another slug.`,
-    }
-  }
+  // A static route under /[orgSlug]/ would shadow a workspace with a reserved
+  // slug (see lib/slug.ts), so suffix it, same as onboarding.
+  const slug = resolveWorkspaceSlug(requestedSlug)
 
   // Fast path for the common case, so the user gets a sentence naming the
   // organization rather than a bare constraint violation. This is NOT the

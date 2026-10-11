@@ -42,6 +42,15 @@ export const SLUG_PATTERN = /^[a-z0-9-]+$/
  */
 export const RESERVED_WORKSPACE_SLUGS: ReadonlySet<string> = new Set(["roadmap", "settings"])
 
+/**
+ * The slug a new workspace actually gets: a reserved slug is suffixed with
+ * `-workspace` (so a workspace named "Roadmap" becomes `roadmap-workspace`)
+ * instead of being rejected. Every path that sets a workspace slug uses this.
+ */
+export function resolveWorkspaceSlug(slug: string): string {
+  return isReservedWorkspaceSlug(slug) ? `${slug}-workspace` : slug
+}
+
 export function isReservedWorkspaceSlug(slug: string): boolean {
   return RESERVED_WORKSPACE_SLUGS.has(slug)
 }

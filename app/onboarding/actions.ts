@@ -4,7 +4,7 @@ import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { redirect } from "next/navigation"
 import { z } from "zod"
-import { deriveSlug, isReservedWorkspaceSlug } from "@/lib/slug"
+import { deriveSlug, resolveWorkspaceSlug } from "@/lib/slug"
 
 const OnboardingSchema = z.object({
   orgName: z.string().min(1, "Organization name is required").max(255),
@@ -61,7 +61,7 @@ export async function createOrganizationAndWorkspace(
   // Derive workspace slug from name
   const derivedSlug = deriveSlug(workspaceName, "workspace")
   // A workspace named "Roadmap" must not take the slug of a built-in page.
-  const workspaceSlug = isReservedWorkspaceSlug(derivedSlug) ? `${derivedSlug}-workspace` : derivedSlug
+  const workspaceSlug = resolveWorkspaceSlug(derivedSlug)
 
   // Create org, member, workspace, workspace member in sequence
   // (relationMode = "prisma" — no FK constraints, so we can create in order)

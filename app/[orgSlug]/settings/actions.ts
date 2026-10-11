@@ -428,6 +428,9 @@ export async function deleteOrganization(
       });
     }
     await prisma.scoringModel.deleteMany({ where: { organizationId } });
+    // Org-wide saved roadmap views have a null workspaceId, so the per-workspace
+    // cascade above cannot reach them (no FK cascade on DSQL).
+    await prisma.roadmapView.deleteMany({ where: { organizationId } });
     await prisma.organizationMember.deleteMany({ where: { organizationId } });
     await prisma.organization.delete({ where: { id: organizationId } });
 

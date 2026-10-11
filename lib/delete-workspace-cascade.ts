@@ -274,6 +274,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   await prisma.workspaceScoringConfig.deleteMany({ where: { workspaceId } });
   await prisma.canvasNodePosition.deleteMany({ where: { workspaceId } });
   await prisma.portalHomeLayout.deleteMany({ where: { workspaceId } });
+  await prisma.roadmapView.deleteMany({ where: { workspaceId } });
 
   // 14. Members + squads + docs, then the workspace itself.
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
