@@ -246,3 +246,13 @@ real reason; don't just omit the line.
 This exists because five PRs merged here on 2026-09-26 (#296, #303, #305,
 #306, #308) with no Task or Solution link at all, silently drifting Compass's
 roadmap/solution state out of sync with what had actually shipped.
+
+## Where to run the checks (homelab first)
+
+Type-check and unit tests run on the homelab test-worker pool by default, not on the Mac. From a clean, committed branch:
+
+```bash
+tq-check          # pushes HEAD, runs profile `compass-unit` (from .testq.json), exits 0 only if passed
+```
+
+Run the commands above locally only for a single spec while editing, or when `tq-check` exits 70 (homelab unreachable) — and say which you did in the PR. E2E and screenshots still run locally unless a pool profile for them is listed in the vault note `Agent How-Tos/Test Worker Pool`. Global rules: "Heavy Work Goes to the Homelab First" in `~/.claude/CLAUDE.md`.
