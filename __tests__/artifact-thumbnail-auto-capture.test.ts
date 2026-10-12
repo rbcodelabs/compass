@@ -166,3 +166,35 @@ describe("UI actions", () => {
     expect(m.captureScreenshot).not.toHaveBeenCalled()
   })
 })
+
+describe("Google Drive links are never screenshotted", () => {
+  const driveUrl = "https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz_0123456789-/edit"
+
+  beforeEach(() => {
+    m.prisma.artifactRevision.findFirst.mockResolvedValue({ id: "rev-1", revisionNumber: 1, externalUrl: driveUrl, blobPathname: null })
+  })
+
+  it("the background capture is skipped silently: no browser launch, no store, no warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    scheduleArtifactThumbnailCapture({ artifactId: "art-1", workspaceId: "ws-1", revisionId: "rev-1" })
+    await expect(flushAfter()).resolves.toBeUndefined()
+    expect(m.captureScreenshot).not.toHaveBeenCalled()
+    expect(m.setThumbnail).not.toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it("a manual capture explains why instead of photographing a sign-in page", async () => {
+    const result = await captureArtifactThumbnail("ws-1", "art-1", "/p")
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/Google Drive links are previewed live/) })
+    expect(m.captureScreenshot).not.toHaveBeenCalled()
+    expect(m.setThumbnail).not.toHaveBeenCalled()
+  })
+
+  it("a lookalike host is still captured like any other link", async () => {
+    m.prisma.artifactRevision.findFirst.mockResolvedValue({ id: "rev-1", revisionNumber: 1, externalUrl: "https://docs.google.com.evil.example/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit", blobPathname: null })
+    scheduleArtifactThumbnailCapture({ artifactId: "art-1", workspaceId: "ws-1", revisionId: "rev-1" })
+    await flushAfter()
+    expect(m.captureScreenshot).toHaveBeenCalledTimes(1)
+  })
+})
