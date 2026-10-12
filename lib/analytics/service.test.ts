@@ -381,7 +381,7 @@ describe("metrics dashboard", () => {
 
     const [row] = await listDashboardMetrics(actor, workspace)
 
-    expect(row).toMatchObject({ status: "fresh", statusCaption: "Not yet linked to a metric binding", value: null, delta: null, sparkline: [], bindings: [] })
+    expect(row).toMatchObject({ status: "fresh", statusCaption: "Not yet linked to a metric binding", value: null, delta: null, sparkline: [], bindings: [], refreshBindingId: null })
   })
 
   it("surfaces a failed refresh as failed, not as stale or zero", async () => {
@@ -397,6 +397,23 @@ describe("metrics dashboard", () => {
     expect(row.status).toBe("failed")
     expect(row.statusCaption).toContain("provider token rejected")
     expect(row.bindings).toEqual([{ id: "binding", targetType: "EXPERIMENT", targetId: binding.targetId, targetTitle: "Onboarding redesign" }])
+    expect(row.refreshBindingId).toBe("binding")
+  })
+
+  it("points refresh at the tracking binding behind the headline number, not a newer comparison", async () => {
+    const targetId = "709655a2-35de-436b-a371-a170781445d7"
+    const base = { workspaceId: workspace, metricId, revisionId: "rev", targetType: "EXPERIMENT", targetId, active: true, lastError: null, lastAttemptAt: null }
+    const comparison = { ...base, id: "comparison", baselineJson: '{"since":"2026-05-01","until":"2026-05-30"}', followupJson: '{"since":"2026-06-01","until":"2026-06-30"}', updatedAt: new Date("2026-06-15T12:00:00Z") }
+    const tracking = { ...base, id: "tracking", baselineJson: "null", followupJson: '{"version":1,"mode":"rolling","days":30}', updatedAt: new Date("2026-06-15T10:00:00Z") }
+    db.metricDefinition.findMany.mockResolvedValue([definition()])
+    db.metricRevision.findMany.mockResolvedValue([revision])
+    db.metricBinding.findMany.mockResolvedValue([comparison, tracking])
+    db.metricObservation.findMany.mockResolvedValue([])
+    db.experiment.findMany.mockResolvedValue([{ id: targetId, title: "Onboarding redesign" }])
+
+    const [row] = await listDashboardMetrics(actor, workspace)
+
+    expect(row.refreshBindingId).toBe("tracking")
   })
 
   it("computes the headline value and delta from the two most recent tracking observations", async () => {
