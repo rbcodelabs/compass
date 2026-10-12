@@ -62,6 +62,17 @@ On success you land directly in the new workspace's OKRs page, and it appears in
 
 Your organization's *first* workspace is created for you when you sign up, as part of onboarding — this page is for adding further ones later.
 
+## Changing the Organization URL Slug
+
+The organization's **URL slug** is the first part of every link: `/{slug}/{workspace}/…`. An organization Owner or Admin can change it in **Organization Settings → Organization URL**. Type the new slug (lowercase letters, numbers and hyphens, 2–63 characters; a few words such as `api`, `login` and `portal` are reserved) and click **Change URL slug**. Compass asks you to confirm before it changes anything, then takes you to the new address.
+
+What to expect:
+
+- **Old links keep working.** Opening a link with the old slug redirects to the same page under the new one. This includes shared workspace links, emailed notification links, and your public portal and portal-SSO links.
+- **The old slug stays reserved** for your organization, so no other organization can take it. If you later change back to an earlier slug, it simply becomes live again.
+- **API and MCP clients are not redirected.** An integration that passes the old slug as `orgSlug` gets a "not found" error (over MCP, one that names the new slug), so it fails visibly rather than writing to a different identifier. Update those clients. Anything else that cannot follow a redirect (allow-lists, printed links) should be updated by hand too.
+- Slugs of workspaces are unaffected; they are changed separately.
+
 ## Switching Between Workspaces
 
 Click the workspace name at the top of the sidebar to open the workspace picker. Type to filter by workspace or organization name, use the arrow keys to move through the list, and press Enter to open one. Switching keeps you in the same section (for example, Roadmap stays Roadmap). When you belong to more than four workspaces, the ones you opened most recently appear first in a **Recent** group. Recents are remembered per browser and are not shared across devices.

@@ -7,6 +7,9 @@ const mockOrganization = {
 const mockOrganizationMember = {
   create: vi.fn(),
 };
+const mockOrganizationSlugRedirect = {
+  findUnique: vi.fn(),
+};
 const mockWorkspace = {
   create: vi.fn(),
 };
@@ -17,6 +20,7 @@ const mockWorkspaceMember = {
 const mockPrisma = {
   organization: mockOrganization,
   organizationMember: mockOrganizationMember,
+  organizationSlugRedirect: mockOrganizationSlugRedirect,
   workspace: mockWorkspace,
   workspaceMember: mockWorkspaceMember,
 };
@@ -53,6 +57,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockAuth.mockResolvedValue({ user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T> ? T : never);
   mockOrganization.findFirst.mockResolvedValue(null); // slug not taken
+  mockOrganizationSlugRedirect.findUnique.mockResolvedValue(null); // and not retired by another org
   mockOrganization.create.mockResolvedValue({ id: "org-1", slug: "acme-corp" });
   mockOrganizationMember.create.mockResolvedValue({});
   mockWorkspace.create.mockResolvedValue({ id: "ws-1", slug: "product-team" });
@@ -146,6 +151,19 @@ describe("createOrganizationAndWorkspace — slug uniqueness", () => {
     const fd = makeFormData(VALID_FIELDS);
     const result = await createOrganizationAndWorkspace({}, fd);
     expect(result.errors?.orgSlug).toContain("This slug is already taken. Please choose another.");
+    expect(mockOrganization.create).not.toHaveBeenCalled();
+  });
+
+  it("treats a slug another organization renamed away from as taken", async () => {
+    mockOrganizationSlugRedirect.findUnique.mockResolvedValue({ id: "r-1" });
+    const result = await createOrganizationAndWorkspace({}, makeFormData(VALID_FIELDS));
+    expect(result.errors?.orgSlug).toContain("This slug is already taken. Please choose another.");
+    expect(mockOrganization.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reserved word that would shadow a top-level route", async () => {
+    const result = await createOrganizationAndWorkspace({}, makeFormData({ ...VALID_FIELDS, orgSlug: "login" }));
+    expect(result.errors?.orgSlug?.[0]).toMatch(/reserved/i);
     expect(mockOrganization.create).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,7 @@ import { findMetricConfigIssues, type MetricConfigIssue } from "@/lib/scoring";
 import type { ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { SLUG_PATTERN } from "@/lib/slug";
+import { validateOrgSlug } from "@/lib/org-slug";
 import { createWorkspaceInOrg, type WorkspaceMemberSeeding } from "@/lib/workspace-service";
 import { agentsEnabled } from "@/lib/agent-access";
 
@@ -200,6 +201,98 @@ export async function createWorkspace(
     // returned above as data, so it does not reach here. This message only
     // covers a P2002 from some *other* unique index on the write path.
     return toFailure(error, `That workspace slug is already taken in ${orgSlug}.`);
+  }
+}
+
+// ─── Organization URL slug (org admin only) ───────────────────────────────────
+
+export type UpdateOrganizationSlugResult =
+  | { ok: true; slug: string; redirectTo: string }
+  | { ok: false; error: string };
+
+const ORG_SLUG_TAKEN = "That URL slug is already taken. Choose another.";
+
+/** Thrown inside the rename transaction to roll it back with a user-facing reason. */
+class SlugRenameRejected extends Error {}
+
+/**
+ * Renames this organization's URL slug (`Organization.slug`, the first segment of
+ * every app URL).
+ *
+ * Org OWNER/ADMIN only (`resolveOrgAdmin`), not workspace admin: the slug is an
+ * org-wide identifier that every workspace's URLs hang off.
+ *
+ * Old URLs keep working. In the SAME transaction as the rename, the slug being
+ * left is recorded in `OrganizationSlugRedirect` (migration 080), and `proxy.ts`
+ * redirects `/{oldSlug}/...` to the current slug. A retired slug stays reserved
+ * for this org: another org can neither rename to it nor be created with it. If
+ * this org renames back to one of its own retired slugs, that history row is
+ * deleted (the slug is live again) and the slug just left is retired in its place.
+ *
+ * Returns `redirectTo` instead of calling `redirect()` (like `deleteOrganization`)
+ * so the action stays unit-testable and the navigation stays on the client. The
+ * caller's current URL no longer resolves its own org after this, so it MUST
+ * navigate.
+ */
+export async function updateOrganizationSlug(
+  orgSlug: string,
+  newSlugInput: string
+): Promise<UpdateOrganizationSlugResult> {
+  try {
+    const { prisma, organizationId } = await resolveOrgAdmin(orgSlug);
+
+    // Server Action arguments are attacker-controlled; the form's lowercase
+    // normalisation is a convenience, not a boundary.
+    const newSlug = newSlugInput.trim();
+    const invalid = validateOrgSlug(newSlug);
+    if (invalid) return { ok: false, error: invalid };
+    if (newSlug === orgSlug) {
+      return { ok: false, error: "That is already this organization's URL slug." };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const current = await tx.organization.findUnique({
+        where: { id: organizationId },
+        select: { id: true, slug: true },
+      });
+      // The caller authorised against `orgSlug`; if the stored slug has moved
+      // (a concurrent rename), recording the wrong "old" slug would orphan links.
+      if (!current || current.slug !== orgSlug) {
+        throw new SlugRenameRejected(
+          "This organization's URL slug changed in the meantime. Reload the page and try again."
+        );
+      }
+
+      const holder = await tx.organization.findUnique({
+        where: { slug: newSlug },
+        select: { id: true },
+      });
+      if (holder && holder.id !== organizationId) throw new SlugRenameRejected(ORG_SLUG_TAKEN);
+
+      const retired = await tx.organizationSlugRedirect.findUnique({
+        where: { oldSlug: newSlug },
+        select: { id: true, organizationId: true },
+      });
+      if (retired) {
+        if (retired.organizationId !== organizationId) throw new SlugRenameRejected(ORG_SLUG_TAKEN);
+        // Renaming back to our own retired slug: it is live again, so it must
+        // stop being a redirect (a live slug that also redirects would loop).
+        await tx.organizationSlugRedirect.delete({ where: { id: retired.id } });
+      }
+
+      await tx.organization.update({ where: { id: organizationId }, data: { slug: newSlug } });
+      await tx.organizationSlugRedirect.create({
+        data: { organizationId, oldSlug: orgSlug },
+      });
+    });
+
+    // Every org-scoped layout and the sidebar's workspace links embed the slug.
+    revalidatePath("/", "layout");
+
+    return { ok: true, slug: newSlug, redirectTo: `/${newSlug}/settings` };
+  } catch (error) {
+    if (error instanceof SlugRenameRejected) return { ok: false, error: error.message };
+    return toFailure(error, ORG_SLUG_TAKEN);
   }
 }
 
@@ -439,6 +532,9 @@ export async function deleteOrganization(
     // Org-wide saved roadmap views have a null workspaceId, so the per-workspace
     // cascade above cannot reach them (no FK cascade on DSQL).
     await prisma.roadmapView.deleteMany({ where: { organizationId } });
+    // Retired-slug history (migration 080); no FK cascade on DSQL. Without this a deleted
+    // org's old slugs would stay reserved forever.
+    await prisma.organizationSlugRedirect.deleteMany({ where: { organizationId } });
     await prisma.organizationMember.deleteMany({ where: { organizationId } });
     await prisma.organization.delete({ where: { id: organizationId } });
 

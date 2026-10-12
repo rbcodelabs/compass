@@ -191,6 +191,22 @@ model Organization {
   @@map("organizations")
 }
 
+/// Organization slug history (migration 080). A row means "organizations.slug used to be
+/// oldSlug": the org-slug rename action writes one in the same transaction as the rename, and
+/// the proxy redirects /{oldSlug}/... to the organization's CURRENT slug. organizationId is a bare
+/// UUID (no FK on DSQL; organization deletion removes the rows explicitly). oldSlug is globally
+/// unique, so a retired slug stays reserved for its organization. Insert-only: a rename back to a
+/// retired slug deletes the row, so there is no updatedAt.
+model OrganizationSlugRedirect {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  oldSlug        String   @map("old_slug") @db.VarChar(255)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([oldSlug], map: "idx_organization_slug_redirects_old_slug")
+  @@map("organization_slug_redirects")
+}
+
 model OrganizationMember {
   id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid

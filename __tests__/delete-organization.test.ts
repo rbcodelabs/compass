@@ -46,6 +46,7 @@ const mockCapabilityPackVersion = { findMany: vi.fn(), findFirst: vi.fn(), delet
 const mockCanvasNodePosition = { deleteMany: vi.fn() };
 const mockPortalHomeLayout = { deleteMany: vi.fn() };
 const mockRoadmapView = { deleteMany: vi.fn() };
+const mockOrganizationSlugRedirect = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
 const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) };
@@ -138,6 +139,7 @@ const mockPrisma = {
   canvasNodePosition: mockCanvasNodePosition,
   portalHomeLayout: mockPortalHomeLayout,
   roadmapView: mockRoadmapView,
+  organizationSlugRedirect: mockOrganizationSlugRedirect,
   workspaceMember: mockWorkspaceMember,
   squad: mockSquad,
   doc: mockDoc,
@@ -299,6 +301,7 @@ beforeEach(() => {
     mockCanvasNodePosition.deleteMany,
     mockPortalHomeLayout.deleteMany,
     mockRoadmapView.deleteMany,
+    mockOrganizationSlugRedirect.deleteMany,
     mockWorkspaceMember.deleteMany,
     mockSquad.deleteMany,
     mockDoc.deleteMany,
@@ -575,6 +578,8 @@ describe("deleteOrganization", () => {
     });
     expect(mockScoringModel.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-1" } });
     expect(mockRoadmapView.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-1" } });
+    // Retired slugs must not stay reserved after the org is gone.
+    expect(mockOrganizationSlugRedirect.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-1" } });
     expect(mockOrganizationMember.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-1" } });
     expect(mockOrganization.delete).toHaveBeenCalledWith({ where: { id: "org-1" } });
 
