@@ -117,3 +117,35 @@ describe("captureArtifactScreenshot — unsupported", () => {
     expect(result.content[0].text).toMatch(/not found/)
   })
 })
+
+describe("captureArtifactScreenshot — hardening", () => {
+  it("stores the final URL without its query string or fragment", async () => {
+    mockArtifact("EXTERNAL_LINK")
+    prisma.artifactRevision.findFirst.mockReset()
+      .mockResolvedValueOnce({ id: "rev-1", revisionNumber: 1, externalUrl: "https://a.example/start", blobPathname: null })
+      .mockResolvedValueOnce({ id: "rev-1", thumbnailPathname: null })
+    captureScreenshot.mockResolvedValue(capture({ finalUrl: "https://a.example/final?token=secret#frag" }))
+
+    await captureArtifactScreenshot({ artifactId: "art-1", workspaceId: "ws-1" })
+
+    expect(prisma.artifactRevision.update.mock.calls[0][0].data.thumbnailSourceUrl).toBe("https://a.example/final")
+  })
+
+  it("rejects a second capture for the same artifact while one is in flight", async () => {
+    mockArtifact("HTML_UPLOAD")
+    storage.get.mockResolvedValue(new TextEncoder().encode("<html></html>"))
+    let release!: () => void
+    captureScreenshot.mockReturnValueOnce(new Promise((resolve) => { release = () => resolve(capture({ finalUrl: "about:blank", httpStatus: 0 })) }))
+
+    const first = captureArtifactScreenshot({ artifactId: "art-1", workspaceId: "ws-1" })
+    await vi.waitFor(() => expect(captureScreenshot).toHaveBeenCalledTimes(1))
+    const second = await captureArtifactScreenshot({ artifactId: "art-1", workspaceId: "ws-1" })
+    expect(second.structuredContent.ok).toBe(false)
+    expect(second.content[0].text).toMatch(/already in progress/)
+    expect(captureScreenshot).toHaveBeenCalledTimes(1)
+
+    release()
+    const done = await first
+    expect(done.structuredContent.ok).not.toBe(false)
+  })
+})

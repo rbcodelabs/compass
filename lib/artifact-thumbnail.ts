@@ -33,7 +33,43 @@ export type ArtifactThumbnailCapture = {
   saved: Awaited<ReturnType<typeof setArtifactRevisionThumbnail>>
 }
 
+/**
+ * Per-process guard against stacking sandbox boots for one artifact. Instance-local
+ * by design (cheap, no schema); a durable cross-instance limit is a follow-up.
+ */
+const capturesInFlight = new Set<string>()
+
+/** Drop query and fragment: they can carry tokens and are not needed to identify the page. */
+function stripQueryAndFragment(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.search = ""
+    parsed.hash = ""
+    return parsed.toString()
+  } catch {
+    return url.split(/[?#]/)[0]
+  }
+}
+
 export async function captureAndStoreArtifactThumbnail(input: {
+  artifactId: string
+  workspaceId: string
+  revisionId?: string
+  fullPage?: boolean
+  viewport?: { width: number; height: number }
+}): Promise<ArtifactThumbnailCapture> {
+  if (capturesInFlight.has(input.artifactId)) {
+    throw new ArtifactThumbnailError("A screenshot capture for this artifact is already in progress.")
+  }
+  capturesInFlight.add(input.artifactId)
+  try {
+    return await captureAndStoreArtifactThumbnailUnguarded(input)
+  } finally {
+    capturesInFlight.delete(input.artifactId)
+  }
+}
+
+async function captureAndStoreArtifactThumbnailUnguarded(input: {
   artifactId: string
   workspaceId: string
   revisionId?: string
@@ -92,7 +128,7 @@ export async function captureAndStoreArtifactThumbnail(input: {
       // is taller than the viewport it was taken in.
       width: capture.image.width,
       height: capture.image.height,
-      sourceUrl: isHtml ? null : capture.finalUrl,
+      sourceUrl: isHtml ? null : stripQueryAndFragment(capture.finalUrl),
     },
     getArtifactStorage()
   )
