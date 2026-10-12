@@ -3,6 +3,7 @@
 import { ostLegendRootLabel } from "@/lib/thinking-model/copy";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import Link from "next/link";
+import { experimentComposerId } from "@/lib/experiment-draft";
 import { LinkedObjectivesStrip } from "@/components/discovery/linked-objectives-strip";
 import {
   TrendingUp,
@@ -183,7 +184,7 @@ function AssumptionCard({
         <div className="ml-6 mt-1.5 pl-3 border-l-2 border-border/20 flex items-center gap-2 py-1">
           <p className="text-[10px] text-muted-foreground/50 italic">No experiments yet</p>
           <Link
-            href={`/${orgSlug}/${workspaceSlug}/experiments?assumptionId=${assumption.id}`}
+            href={`/${orgSlug}/${workspaceSlug}/experiments?detail=experiment-new:${experimentComposerId(assumption.id)}`}
             className="text-[10px] font-medium text-emerald-600 hover:text-emerald-700 hover:underline whitespace-nowrap"
           >
             Test this assumption →
