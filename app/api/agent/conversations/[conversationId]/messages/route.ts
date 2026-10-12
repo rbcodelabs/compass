@@ -1,15 +1,15 @@
 /**
  * Messages for one conversation, for the agent rail. The rail fetches these
  * rather than receiving them as server props — see the sibling
- * `../../route.ts` module doc for why, and for why the
- * `workspace.members` predicate below is not redundant with the `userId`
- * scope.
+ * `../../route.ts` module doc for why, and for why the live workspace
+ * membership check (part of the shared access predicate in
+ * lib/agent-conversation-access.ts) is not redundant with the `userId` scope.
  */
 
 import { z } from "zod"
 
 import { auth } from "@/auth"
-import getPrisma from "@/lib/db"
+import { getAgentConversationMessages } from "@/lib/agent-conversations"
 
 // `AgentConversation.id` is `@db.Uuid`. A malformed id would otherwise reach
 // Postgres as a failed cast and surface as a Prisma 500; it names no
@@ -30,28 +30,21 @@ export async function GET(
   if (!conversationIdSchema.safeParse(conversationId).success) {
     return new Response("Not found", { status: 404 })
   }
-  const userId = session.user.id
-  const prisma = getPrisma()
 
-  // Ownership is proven before any message is read, and a conversation the
-  // caller may not see is reported as 404 rather than 403 — the same shape
-  // getAgentConversationMessages uses, so existence is not leaked either way.
-  const conversation = await prisma.agentConversation.findFirst({
-    where: {
-      id: conversationId,
-      workspaceId,
-      userId,
-      workspace: { members: { some: { userId } } },
-    },
-    select: { id: true },
-  })
-  if (!conversation) return new Response("Not found", { status: 404 })
-
-  const messages = await prisma.agentMessage.findMany({
-    where: { conversationId },
-    orderBy: { createdAt: "asc" },
-    select: { id: true, role: true, content: true, createdAt: true },
-  })
+  // Access is proven before any message is read, and a conversation the caller
+  // may not see is reported as 404 rather than 403 (null here) so existence is
+  // not leaked either way.
+  // Optional polling cursor (ISO timestamp). A value that does not parse is a 400
+  // rather than silently falling back to "everything", which would make a buggy
+  // poller re-download the whole transcript every few seconds.
+  const afterParam = new URL(request.url).searchParams.get("after")
+  let after: Date | undefined
+  if (afterParam) {
+    after = new Date(afterParam)
+    if (Number.isNaN(after.getTime())) return new Response("Invalid after cursor", { status: 400 })
+  }
+  const messages = await getAgentConversationMessages(conversationId, workspaceId, session.user.id, { after })
+  if (!messages) return new Response("Not found", { status: 404 })
 
   return Response.json({ messages })
 }

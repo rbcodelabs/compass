@@ -13,6 +13,8 @@ const HEADER_CONTROL_SIZE =
   "[&_[data-slot=tabs-list]]:!h-11 md:[&_[data-slot=tabs-list]]:!h-8";
 
 type WorkspacePageProps = {
+  /** Rendered before the title, e.g. a panel toggle. */
+  leading?: ReactNode;
   title: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
@@ -25,6 +27,8 @@ type WorkspacePageProps = {
 };
 
 type WorkspaceHeaderProps = {
+  /** Rendered before the title, e.g. a panel toggle. */
+  leading?: ReactNode;
   title: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
@@ -37,7 +41,7 @@ type WorkspaceHeaderProps = {
  * it; pages whose header must live inside a client component (Roadmap keeps
  * timeline state) render it directly. See docs/design/workspace-header.md.
  */
-export function WorkspaceHeader({ title, description, actions, controls, className }: WorkspaceHeaderProps) {
+export function WorkspaceHeader({ leading, title, description, actions, controls, className }: WorkspaceHeaderProps) {
   return (
     <header
       data-slot="workspace-header"
@@ -48,13 +52,16 @@ export function WorkspaceHeader({ title, description, actions, controls, classNa
     >
       {/* Below md the header wraps: the min width keeps the title readable, so a wide
           actions cluster drops to its own row instead of squeezing the title to "T…". */}
-      <div className="min-w-[8rem] flex-1 md:min-w-0">
-        <h1 className="truncate text-lg font-semibold tracking-tight text-text-primary">{title}</h1>
-        {description && (
-          <div className="mt-0.5 hidden truncate text-xs text-text-secondary sm:block">
-            {description}
-          </div>
-        )}
+      <div className="flex min-w-[8rem] flex-1 items-center gap-2 md:min-w-0">
+        {leading}
+        <div className="min-w-0">
+          <h1 className="truncate text-lg font-semibold tracking-tight text-text-primary">{title}</h1>
+          {description && (
+            <div className="mt-0.5 hidden truncate text-xs text-text-secondary sm:block">
+              {description}
+            </div>
+          )}
+        </div>
       </div>
       {controls && (
         <div
@@ -75,6 +82,7 @@ export function WorkspaceHeader({ title, description, actions, controls, classNa
 
 /** Full-height composition for board, timeline, and other workspace-style pages. */
 export function WorkspacePage({
+  leading,
   title,
   description,
   actions,
@@ -86,7 +94,7 @@ export function WorkspacePage({
 }: WorkspacePageProps) {
   return (
     <div className={cn("flex min-h-full flex-1 flex-col md:h-full md:min-h-0", className)}>
-      <WorkspaceHeader title={title} description={description} actions={actions} controls={controls} />
+      <WorkspaceHeader leading={leading} title={title} description={description} actions={actions} controls={controls} />
 
       {toolbar && (
         <div

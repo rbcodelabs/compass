@@ -10,20 +10,30 @@ import { describe, expect, it } from "vitest"
 const source = readFileSync("scripts/agent/turn-entry.ts", "utf8")
 
 describe("agent entry capability-pack policy", () => {
-  it("keeps plugins declarative while Compass owns MCP and no built-ins are exposed", () => {
+  it("keeps plugins declarative while Compass owns MCP", () => {
     expect(source).toContain("skipMcpDiscovery: true")
     expect(source).toContain("strictMcpConfig: true")
-    expect(source).toMatch(/tools:\s*\[\]/)
     expect(source).toMatch(/settingSources:\s*\[\]/)
   })
 
-  it("admits Compass plus per-turn connector prefixes, and nothing wider", () => {
+  it("exposes WebFetch as the only built-in tool", () => {
+    // Pinned as a literal: the failure mode is additive drift, one more
+    // "harmless" built-in at a time, none reviewed as a boundary change.
+    expect(source).toContain('tools: ["WebFetch"],')
+    const declared = source.match(/\n\s*tools:\s*\[([^\]]*)\]/)
+    expect(declared).not.toBeNull()
+    for (const forbidden of ["Bash", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "Task", "Skill", "WebSearch"]) {
+      expect(declared![1]).not.toContain(forbidden)
+    }
+  })
+
+  it("admits Compass, WebFetch and per-turn connector prefixes, and nothing wider", () => {
     // The literal is pinned rather than matched loosely because the failure mode
     // is a silent widening: `allowedTools: ["mcp__*"]`, or dropping the option
     // entirely, both leave a headless agent running in bypassPermissions mode with
     // no allowlist at all. `connectorToolPrefixes` is the only sanctioned way for
     // this list to grow, and it grows per turn from the grants that user holds.
-    expect(source).toContain('allowedTools: ["mcp__compass", ...connectorToolPrefixes]')
+    expect(source).toContain('allowedTools: ["mcp__compass", "WebFetch", "mcp__web_search", ...connectorToolPrefixes]')
     expect(source).not.toMatch(/allowedTools:\s*\[[^\]]*\*/)
   })
 
@@ -34,6 +44,14 @@ describe("agent entry capability-pack policy", () => {
     // formatting nicety.
     expect(source).toContain("/^[a-z0-9][a-z0-9-]{0,31}$/.test(slug)")
     expect(source).toContain("connectorToolPrefixes.push(`mcp__${connector.slug}`)")
+  })
+
+  it("always adds web_search as one fixed server, before connectors are read", () => {
+    // The server name and URL are literals; nothing derives them from input, and the
+    // name is registered before connectors so a connector slug cannot shadow it.
+    expect(source).not.toContain("AGENT_WEB_SEARCH")
+    expect(source).toContain('new URL("/api/agent/web-search/mcp", baseUrl)')
+    expect(source.indexOf("mcpServers.web_search")).toBeLessThan(source.indexOf("hasOwnProperty.call(mcpServers, connector.slug)"))
   })
 
   it("never lets a connector shadow Compass's own MCP entry", () => {

@@ -2790,9 +2790,78 @@ model AgentConversation {
   user      User           @relation(fields: [userId], references: [id])
   messages  AgentMessage[]
   runs      AgentRun[]
+  participants AgentConversationParticipant[]
 
   @@index([workspaceId, userId])
   @@map("agent_conversations")
+}
+
+/// A user invited into someone else's agent conversation. The conversation
+/// OWNER is NOT a row here: it stays `AgentConversation.userId`, so a conversation with
+/// no rows behaves exactly as before. `removedAt` null = active; set = removed or left
+/// (re-inviting clears it, the unique index keeps one row per user). Any participant may
+/// invite; there is no cap. Access is re-checked against live workspace membership on
+/// every call, never cached from this row.
+/// DSQL: no FKs, no @updatedAt (set explicitly).
+model AgentConversationParticipant {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  /// Always PARTICIPANT today; the column leaves room for roles without a migration.
+  role          String    @default("PARTICIPANT") @db.VarChar(20)
+  addedByUserId String    @map("added_by_user_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @map("updated_at")
+  removedAt     DateTime? @map("removed_at")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id])
+
+  @@unique([conversationId, userId], map: "idx_agent_conversation_participants_conversation_user")
+  @@index([userId, workspaceId], map: "idx_agent_conversation_participants_user_workspace")
+  @@map("agent_conversation_participants")
+}
+
+/// Pointer to the current Agent SDK session transcript of a conversation (one row per
+/// conversation). The transcript is a private Vercel Blob object at `blobKey`; a new
+/// revision is a NEW blob key, swapped in with a compare-and-set on `revision`.
+/// `throughMessageId` is the user message of the turn that produced the transcript, so
+/// the next turn can tell which later messages the session has not seen.
+/// DSQL: no FKs, PK = conversation_id (no index to build), no @updatedAt trigger.
+model AgentSession {
+  conversationId   String   @id @map("conversation_id") @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  sessionId        String   @map("session_id") @db.VarChar(64)
+  blobKey          String   @map("blob_key") @db.VarChar(512)
+  throughMessageId String   @map("through_message_id") @db.Uuid
+  revision         Int      @default(1)
+  byteSize         Int      @default(0) @map("byte_size")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @map("updated_at")
+
+  @@map("agent_sessions")
+}
+
+/// One attempted agent web_search: the audit record and the per-turn
+/// budget. The composite key is the budget — credentialId is the 5-minute AGENT_TURN
+/// credential (one per turn) and a search claims the next seq, so racing searches
+/// cannot both take the same slot and the cap holds without a lock. Stores the query
+/// and the result URLs only, never page content.
+model AgentWebSearch {
+  credentialId   String    @map("credential_id") @db.Uuid
+  seq            Int
+  userId         String    @map("user_id") @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  conversationId String?   @map("conversation_id") @db.Uuid
+  query          String    @db.VarChar(400)
+  status         String    @default("STARTED") @db.VarChar(20)
+  resultCount    Int       @default(0) @map("result_count")
+  resultUrls     Json      @map("result_urls")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  finishedAt     DateTime? @map("finished_at")
+
+  @@id([credentialId, seq])
+  @@map("agent_web_searches")
 }
 
 /// One durable, detachable agent turn. The sandbox owns execution and
@@ -2900,6 +2969,9 @@ model AgentMessage {
   /// Exact JSON-encoded pack IDs, versions, source commits, digests and enabled
   /// skills used for this assistant turn. TEXT keeps the schema DSQL-safe.
   packProvenance String?  @map("pack_provenance") @db.Text
+  /// Who sent a user message, or who asked for an assistant one. Null for
+  /// every message that predates multi-user conversations, which are the owner's.
+  authorUserId   String?  @map("author_user_id") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at")
 
   conversation AgentConversation @relation(fields: [conversationId], references: [id])

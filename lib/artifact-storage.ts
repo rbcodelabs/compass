@@ -87,3 +87,20 @@ export function getResearchArtifactStorage(): ArtifactStorage {
   if (!token) throw new Error("Research Blob storage is not configured")
   return createVercelBlobStorage(token)
 }
+
+/**
+ * Agent SDK session transcripts (one private object per conversation revision).
+ * Its own store and token: a transcript holds tool results from a user's workspace,
+ * so it must never share a store (or a token's blast radius) with public assets.
+ */
+export function getAgentSessionStorage(): ArtifactStorage {
+  if (process.env.DATABASE_URL) return localStorage
+  const token = process.env.AGENT_SESSION_BLOB_READ_WRITE_TOKEN?.trim()
+  if (!token) throw new Error("Agent session storage is not configured")
+  return createVercelBlobStorage(token)
+}
+
+/** Whether a session transcript can be stored at all on this deployment. */
+export function agentSessionStorageConfigured(): boolean {
+  return Boolean(process.env.DATABASE_URL || process.env.AGENT_SESSION_BLOB_READ_WRITE_TOKEN?.trim())
+}
