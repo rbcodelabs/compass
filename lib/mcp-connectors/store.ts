@@ -35,6 +35,7 @@ import {
   McpConnectorError,
   connectorDefinition,
   connectorEncryptionKey,
+  staticClientCredentials,
   type ConnectorDefinition,
 } from "@/lib/mcp-connectors/config"
 import { discoverConnector, registerConnectorClient } from "@/lib/mcp-connectors/discovery"
@@ -157,26 +158,45 @@ export async function ensureConnector(
   const definition = connectorDefinition(slug)
   if (!definition) throw new McpConnectorError("UNKNOWN_CONNECTOR", `No connector named "${slug}".`)
 
+  // Throws CLIENT_NOT_CONFIGURED before any network call when a static client's
+  // env vars are missing, so an unconfigured deployment fails fast and clearly.
+  const staticClient = staticClientCredentials(definition)
+
   const existing = await findConnector(slug, origin, prisma)
-  if (existing) return existing
+  if (existing) {
+    // The env var is the source of truth for a static client. If the OAuth client
+    // was replaced, follow it rather than keep sending a dead client_id.
+    if (staticClient && existing.clientId !== staticClient.clientId)
+      return prisma.mcpConnector.update({
+        where: { id: existing.id },
+        data: { clientId: staticClient.clientId, updatedAt: new Date() },
+      })
+    return existing
+  }
 
   const discovered = await discoverConnector(definition)
-  if (!discovered.registrationEndpoint)
-    throw new McpConnectorError(
-      "REGISTRATION_FAILED",
-      `${definition.displayName} advertises no registration_endpoint, so Compass cannot obtain a client_id for ${origin}. A pre-registered client would need a schema change.`,
-    )
 
-  const clientId = await registerConnectorClient({
-    registrationEndpoint: discovered.registrationEndpoint,
-    redirectUri,
-    // The origin is in the client name so a human auditing their v0 account can
-    // tell a preview registration from production at a glance. Per-origin
-    // registrations never expire (v0 returns a null `client_secret_expires_at`),
-    // so they accumulate and being able to read them matters.
-    clientName: `Compass (${origin})`,
-    scope: discovered.scope,
-  })
+  let clientId: string
+  if (staticClient) {
+    // Pre-registered: no DCR, and the secret is deliberately never persisted.
+    clientId = staticClient.clientId
+  } else {
+    if (!discovered.registrationEndpoint)
+      throw new McpConnectorError(
+        "REGISTRATION_FAILED",
+        `${definition.displayName} advertises no registration_endpoint, so Compass cannot obtain a client_id for ${origin}. Declare a staticClient on its catalog entry.`,
+      )
+    clientId = await registerConnectorClient({
+      registrationEndpoint: discovered.registrationEndpoint,
+      redirectUri,
+      // The origin is in the client name so a human auditing their v0 account can
+      // tell a preview registration from production at a glance. Per-origin
+      // registrations never expire (v0 returns a null `client_secret_expires_at`),
+      // so they accumulate and being able to read them matters.
+      clientName: `Compass (${origin})`,
+      scope: discovered.scope,
+    })
+  }
 
   const data = {
     slug: definition.slug,
@@ -446,18 +466,34 @@ export async function listConnectedSlugs(
   origin: string,
   prisma: AppPrismaClient = getPrisma(),
 ): Promise<string[]> {
+  return (await listConnectedGrants(userId, origin, prisma)).map(grant => grant.slug)
+}
+
+/**
+ * Like `listConnectedSlugs`, plus the scope the provider recorded on each grant —
+ * which is how a connector's access level is read back (see `ConnectorAccessLevel`).
+ * Sorted by slug.
+ */
+export async function listConnectedGrants(
+  userId: string,
+  origin: string,
+  prisma: AppPrismaClient = getPrisma(),
+): Promise<Array<{ slug: string; scope: string }>> {
   try {
     const grants = await prisma.mcpConnectorGrant.findMany({
       where: { userId, status: "ACTIVE" },
-      select: { connectorId: true },
+      select: { connectorId: true, scope: true },
       take: 100,
     })
     if (!grants.length) return []
     const connectors = await prisma.mcpConnector.findMany({
       where: { id: { in: grants.map(grant => grant.connectorId) }, origin, enabled: true },
-      select: { slug: true },
+      select: { id: true, slug: true },
     })
-    return connectors.map(connector => connector.slug).sort()
+    const scopeById = new Map(grants.map(grant => [grant.connectorId, grant.scope ?? ""]))
+    return connectors
+      .map(connector => ({ slug: connector.slug, scope: scopeById.get(connector.id) ?? "" }))
+      .sort((a, b) => a.slug.localeCompare(b.slug))
   } catch (error) {
     if (isMissingTable(error)) return []
     throw error
