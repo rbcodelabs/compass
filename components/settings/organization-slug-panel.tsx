@@ -118,8 +118,7 @@ export function OrganizationSlugPanel({ orgSlug }: Props) {
             </li>
             <li>
               <strong>Anything that cannot follow a redirect</strong> should be updated by hand:
-              integrations or scripts that pass the org slug to the API or MCP (they will get
-              a &ldquo;not found&rdquo; error naming the new slug), allow-lists, and printed or
+              integrations or scripts that pass the org slug to the API or MCP (they will get a &ldquo;not found&rdquo; error), allow-lists, and printed or
               embedded links.
             </li>
             <li>
