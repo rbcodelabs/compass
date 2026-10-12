@@ -142,6 +142,16 @@ test.describe("Card sort round", () => {
     expect(page.url()).toContain(round.id);
     await expect(page.getByText("Open", { exact: true }).first()).toBeVisible();
 
+    // ── 1b. Quick filter narrows the board without moving anything ──────────
+    const filter = page.getByRole("searchbox", { name: "Filter cards" });
+    await filter.fill(seeded.untouched.title);
+    // The workspace may hold other opportunities, so only the "1 of" is fixed.
+    await expect(page.getByText(/^1 of \d+$/)).toBeVisible();
+    await expect(page.getByRole("button", { name: `Propose a move for ${seeded.moved.title}` })).toHaveCount(0);
+    await filter.press("Escape");
+    await expect(filter).toHaveValue("");
+    await expect(page.getByRole("button", { name: `Propose a move for ${seeded.moved.title}` })).toBeVisible();
+
     // ── 2. Propose a move from the card's menu ──────────────────────────────
     await page.getByRole("button", { name: `Propose a move for ${seeded.moved.title}` }).click();
     // The object is officially in Should, so Should is not offered as a target.
