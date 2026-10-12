@@ -5,6 +5,7 @@ import type { PreviewGrant } from "./grants";
 import { applyPreviewScenario, DEFAULT_PREVIEW_SCENARIO } from "./scenarios";
 import { getActiveSchema } from "@/lib/schema";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
+import { deleteWorkspaceAgentSessions } from "@/lib/agent-session";
 import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { getManagedPilotContext } from "./managed-context";
@@ -61,6 +62,7 @@ export async function cleanupPreviewRun(prisma: AppPrismaClient, runId: string, 
     await prisma.docComment.updateMany({ where: { doc: { workspaceId } }, data: { parentId: null } });
     await prisma.docComment.deleteMany({ where: { doc: { workspaceId } } });
     await prisma.docVersion.deleteMany({ where: { doc: { workspaceId } } });
+    await deleteWorkspaceAgentSessions(prisma, workspaceId);
     await prisma.agentMessage.deleteMany({ where: { conversation: { workspaceId } } });
     await prisma.apiKey.deleteMany({ where: { scopeWorkspaceId: workspaceId, scopeConversationId: { not: null } } });
     await prisma.pMInterview.updateMany({ where: { workspaceId }, data: { agentConversationId: null } });

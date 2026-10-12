@@ -41,13 +41,31 @@
 //                              are not the same capability
 //   AGENT_RUN_HEARTBEAT_MS     (optional) heartbeat interval; default 15000
 //   AGENT_MAX_TURNS            (optional) per-run turn cap; default 30
+//   AGENT_SESSION_ID           (optional) UUID of the Agent SDK session this turn
+//                              belongs to. With it the transcript is mirrored to an
+//                              in-memory SessionStore and handed back to Compass at
+//                              the end, so the NEXT turn can resume it. Absent => stateless, as before.
+//   AGENT_SESSION_MODE         "resume" (session-in.jsonl.gz holds the prior
+//                              transcript; AGENT_PROMPT is only the new message and
+//                              fallback-prompt.txt is the full text replay) or
+//                              "new" (AGENT_PROMPT is the full prompt).
+//
+// Session files (sandbox cwd): session-in.jsonl.gz is read when resuming;
+// session-out.jsonl.gz is written on success for the synchronous path, which has no
+// upload channel. Detached runs POST it to /api/internal/agent/runs/:id/session
+// BEFORE reporting their terminal event (the worker token dies with the run).
 //
 // Output contract (one JSON object per line, prefixed):
 //   AGENT_EVENT <json>   — each SDK stream message (assistant/tool/system)
 //   AGENT_RESULT <json>  — final { text, usage } on success
 //   AGENT_ERROR <json>   — { message } on failure
+//   AGENT_SESSION <json> — { sessionId } the session a successful turn ended in
+//                          (differs from AGENT_SESSION_ID after a resume fallback)
 
-import { query } from "@anthropic-ai/claude-agent-sdk"
+import { query, type Options, type SessionKey, type SessionStore, type SessionStoreEntry } from "@anthropic-ai/claude-agent-sdk"
+import { randomUUID } from "node:crypto"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { gunzipSync, gzipSync } from "node:zlib"
 
 const MCP_BASE_URL = process.env.MCP_BASE_URL
 const MCP_TOKEN = process.env.MCP_TOKEN
@@ -58,8 +76,10 @@ const MCP_BYPASS_SECRET = process.env.MCP_BYPASS_SECRET
 const AGENT_MCP_CONNECTORS = process.env.AGENT_MCP_CONNECTORS
 const AGENT_RUN_ID = process.env.AGENT_RUN_ID
 const AGENT_RUN_TOKEN = process.env.AGENT_RUN_TOKEN
+const AGENT_SESSION_ID = process.env.AGENT_SESSION_ID
+const AGENT_SESSION_MODE = process.env.AGENT_SESSION_MODE
 
-function emit(kind: "AGENT_EVENT" | "AGENT_RESULT" | "AGENT_ERROR", payload: unknown): void {
+function emit(kind: "AGENT_EVENT" | "AGENT_RESULT" | "AGENT_ERROR" | "AGENT_SESSION", payload: unknown): void {
   // Single line so the host can split stdout on newlines and forward as SSE.
   process.stdout.write(`${kind} ${JSON.stringify(payload)}\n`)
 }
@@ -265,6 +285,132 @@ class RunReporter {
 }
 
 let reporter: RunReporter | undefined
+/** Captured at module scope so the session upload can authenticate after the env scrub. */
+let runCallbackHeaders: Record<string, string> | undefined
+
+// ── Session transcript ──────────────────────────────────────────
+
+/** Mirrors lib/agent-session.ts; the server re-validates, this just avoids a doomed upload. */
+const MAX_AGENT_SESSION_BYTES = 4_000_000
+/** Decompressed ceiling for an inbound transcript — a bomb guard, not a product limit. */
+const MAX_SESSION_INPUT_BYTES = 128 * 1024 * 1024
+const SESSION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const SESSION_IN_FILE = "session-in.jsonl.gz"
+const SESSION_OUT_FILE = "session-out.jsonl.gz"
+const FALLBACK_PROMPT_FILE = "fallback-prompt.txt"
+
+/**
+ * In-memory SessionStore. The SDK mirrors every transcript line here as it runs,
+ * so at the end of the turn we hold the exact bytes the next turn needs to
+ * resume. Lines are `{ s: subpath | null, e: entry }`; the projectKey and
+ * sessionId are intentionally not stored — the store is scoped to one
+ * conversation, and the server (not this sandbox) decides which one.
+ */
+class MemorySessionStore implements SessionStore {
+  private readonly lines: { s: string | null; e: SessionStoreEntry }[] = []
+  private readonly seen = new Set<string>()
+  /** The session id the SDK actually wrote the main transcript under. */
+  mainSessionId: string | undefined
+
+  async append(key: SessionKey, entries: SessionStoreEntry[]): Promise<void> {
+    const subpath = key.subpath ?? null
+    if (subpath === null && key.sessionId) this.mainSessionId = key.sessionId
+    for (const entry of entries) {
+      // uuid is the SDK's idempotency key: a retried append must not duplicate.
+      if (typeof entry.uuid === "string") {
+        const id = `${subpath ?? ""}\u0000${entry.uuid}`
+        if (this.seen.has(id)) continue
+        this.seen.add(id)
+      }
+      this.lines.push({ s: subpath, e: entry })
+    }
+  }
+
+  async load(key: SessionKey): Promise<SessionStoreEntry[] | null> {
+    const subpath = key.subpath ?? null
+    const entries = this.lines.filter((line) => line.s === subpath).map((line) => line.e)
+    return entries.length > 0 ? entries : null
+  }
+
+  async listSubkeys(): Promise<string[]> {
+    const subpaths = new Set<string>()
+    for (const line of this.lines) if (line.s !== null) subpaths.add(line.s)
+    return [...subpaths]
+  }
+
+  get size(): number {
+    return this.lines.length
+  }
+
+  toGzip(): Buffer {
+    const text = this.lines.map((line) => JSON.stringify(line)).join("\n") + "\n"
+    return gzipSync(Buffer.from(text, "utf8"))
+  }
+
+  /** Returns undefined for anything that is not a well-formed transcript. */
+  static fromGzip(bytes: Buffer): MemorySessionStore | undefined {
+    try {
+      const text = gunzipSync(bytes, { maxOutputLength: MAX_SESSION_INPUT_BYTES }).toString("utf8")
+      const store = new MemorySessionStore()
+      for (const raw of text.split("\n")) {
+        if (!raw) continue
+        const parsed = JSON.parse(raw) as { s?: unknown; e?: unknown } | null
+        const entry = parsed?.e as SessionStoreEntry | undefined
+        const subpath = parsed?.s
+        if (!entry || typeof entry !== "object" || typeof entry.type !== "string") return undefined
+        if (subpath !== null && typeof subpath !== "string") return undefined
+        if (typeof entry.uuid === "string") store.seen.add(`${subpath ?? ""}\u0000${entry.uuid}`)
+        store.lines.push({ s: subpath, e: entry })
+      }
+      return store.size > 0 ? store : undefined
+    } catch {
+      return undefined
+    }
+  }
+}
+
+function readResumeStore(): MemorySessionStore | undefined {
+  if (!existsSync(SESSION_IN_FILE)) return undefined
+  return MemorySessionStore.fromGzip(readFileSync(SESSION_IN_FILE))
+}
+
+/** Hand the finished transcript back. Never throws: losing it costs the next turn its memory, not this turn its answer. */
+async function publishSession(store: MemorySessionStore, requestedId: string, baseUrl: string): Promise<void> {
+  try {
+    const sessionId = store.mainSessionId && SESSION_UUID_RE.test(store.mainSessionId) ? store.mainSessionId : requestedId
+    if (store.size === 0) {
+      note("no transcript was recorded; the next turn will start a new session")
+      return
+    }
+    const gz = store.toGzip()
+    if (gz.length > MAX_AGENT_SESSION_BYTES) {
+      note(`transcript is ${gz.length} bytes gzipped (cap ${MAX_AGENT_SESSION_BYTES}); not saving — the next turn falls back to text replay`)
+      return
+    }
+    // Sync turns have no upload channel: the host reads this file back out.
+    writeFileSync(SESSION_OUT_FILE, gz)
+    emit("AGENT_SESSION", { sessionId })
+    if (!reporter || !runCallbackHeaders || !AGENT_RUN_ID) return
+    const url = new URL(`/api/internal/agent/runs/${AGENT_RUN_ID}/session`, baseUrl).toString()
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { ...runCallbackHeaders, "content-type": "application/gzip", "x-agent-session-id": sessionId },
+          body: new Uint8Array(gz),
+        })
+        if (response.ok) return
+        note(`session upload attempt ${attempt} returned ${response.status}`)
+        if (response.status >= 400 && response.status < 500 && response.status !== 429) return
+      } catch (error) {
+        note(`session upload attempt ${attempt} threw: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+  } catch (error) {
+    note(`session publish failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
 
 // ── Outbound MCP connectors (ADR-0018) ──────────────────────────────────────
 
@@ -343,6 +489,7 @@ async function main(): Promise<void> {
   if (AGENT_RUN_ID && AGENT_RUN_TOKEN) {
     const callbackHeaders: Record<string, string> = { Authorization: `Bearer ${AGENT_RUN_TOKEN}` }
     if (MCP_BYPASS_SECRET) callbackHeaders["x-vercel-protection-bypass"] = MCP_BYPASS_SECRET
+    runCallbackHeaders = callbackHeaders
     const heartbeatMs = Number(process.env.AGENT_RUN_HEARTBEAT_MS) || DEFAULT_HEARTBEAT_MS
     reporter = new RunReporter(
       new URL(`/api/internal/agent/runs/${AGENT_RUN_ID}/events`, baseUrl).toString(),
@@ -372,6 +519,14 @@ async function main(): Promise<void> {
       alwaysLoad: true,
     },
   }
+  // Compass-hosted search. The name is reserved before connectors are
+  // read so a connector slug cannot shadow it.
+  // No Gateway credential enters the sandbox: it presents the same MCP_TOKEN.
+  mcpServers.web_search = {
+    type: "http",
+    url: new URL("/api/agent/web-search/mcp", baseUrl).toString(),
+    headers,
+  }
   const connectors = parseConnectors(AGENT_MCP_CONNECTORS)
   const connectorToolPrefixes: string[] = []
   const connectorGuidance: string[] = []
@@ -399,72 +554,143 @@ async function main(): Promise<void> {
     ? `${systemPrompt}\n\n## Connected third-party tools\n\n${connectorGuidance.join("\n\n")}`
     : systemPrompt
 
-  let finalText: string | undefined
-  let usage: unknown
+  const baseOptions: Options = {
+    model: "claude-sonnet-5",
+    // Compass's own MCP catalog, reached AS the acting user, plus this turn's
+    // connectors. Built above.
+    mcpServers,
+    plugins: packConfig.pluginPaths.map((pluginPath) => ({
+      type: "local" as const,
+      path: new URL(pluginPath, `file://${process.cwd()}/`).pathname,
+      skipMcpDiscovery: true,
+    })),
+    skills: packConfig.skillIds,
+    // Skill bodies and supported text assets are compiled into systemPrompt
+    // by the host. SDK 0.3.224 does not provide Skill/Read with tools: [].
+    //
+    // WebFetch is the one built-in admitted: it lets the agent read a URL the
+    // user names or a page it already knows about, instead of reporting that it
+    // has no web access. Search is not a built-in: it is the Compass-hosted
+    // web_search MCP tool registered above. Fetched content and search results
+    // are untrusted input: treat them as data, never instructions.
+    tools: ["WebFetch"],
+    strictMcpConfig: true,
+    settingSources: [],
+    systemPrompt: effectiveSystemPrompt,
+    // Compass MCP only, auto-approved. Headless (no human approver): the
+    // real security boundary is the disposable sandbox + per-user MCP auth.
+    allowedTools: ["mcp__compass", "WebFetch", "mcp__web_search", ...connectorToolPrefixes],
+    // Safety default (Phase 5): keep the two irreversible hard-delete tools
+    // out of the agent's reach — everything else is reversible/auditable.
+    // Remove entries here to let the agent perform destructive deletes.
+    disallowedTools: ["mcp__compass__delete_assumption", "mcp__compass__delete_solution_comment"],
+    permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
+    maxTurns: Number(process.env.AGENT_MAX_TURNS) || 30,
+  }
 
-  for await (const message of query({
-    prompt,
-    options: {
-      model: "claude-sonnet-5",
-      // Compass's own MCP catalog, reached AS the acting user, plus this turn's
-      // connectors. Built above.
-      mcpServers,
-      plugins: packConfig.pluginPaths.map((pluginPath) => ({
-        type: "local" as const,
-        path: new URL(pluginPath, `file://${process.cwd()}/`).pathname,
-        skipMcpDiscovery: true,
-      })),
-      skills: packConfig.skillIds,
-      // Skill bodies and supported text assets are compiled into systemPrompt
-      // by the host. SDK 0.3.224 does not provide Skill/Read with tools: [].
-      tools: [],
-      strictMcpConfig: true,
-      settingSources: [],
-      systemPrompt: effectiveSystemPrompt,
-      // Compass MCP only, auto-approved. Headless (no human approver): the
-      // real security boundary is the disposable sandbox + per-user MCP auth.
-      allowedTools: ["mcp__compass", ...connectorToolPrefixes],
-      // Safety default (Phase 5): keep the two irreversible hard-delete tools
-      // out of the agent's reach — everything else is reversible/auditable.
-      // Remove entries here to let the agent perform destructive deletes.
-      disallowedTools: ["mcp__compass__delete_assumption", "mcp__compass__delete_solution_comment"],
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      maxTurns: Number(process.env.AGENT_MAX_TURNS) || 30,
-    },
-  })) {
-    emit("AGENT_EVENT", { type: message.type, message })
-    reporter?.enqueue("agent", { type: message.type, message })
+  type AttemptOutcome = { kind: "ok"; finalText: string; usage: unknown } | { kind: "canceled" }
 
-    // Canceled or swept out from under us: stop spending model tokens on a
-    // result nobody will accept. The server is already terminal, so there is
-    // nothing to report back.
-    if (reporter?.canceledStatus) {
-      note(`stopping early: run is ${reporter.canceledStatus}`)
-      emit("AGENT_ERROR", { message: `run terminated server-side (${reporter.canceledStatus})` })
-      process.exitCode = 1
-      return
-    }
+  /** One pass of the SDK loop. `state.sawAssistant` lets the caller tell a failed resume from a failed turn. */
+  async function runAttempt(
+    attemptPrompt: string,
+    sessionOptions: Partial<Options>,
+    state: { sawAssistant: boolean },
+  ): Promise<AttemptOutcome> {
+    let finalText: string | undefined
+    let usage: unknown
+    for await (const message of query({ prompt: attemptPrompt, options: { ...baseOptions, ...sessionOptions } })) {
+      emit("AGENT_EVENT", { type: message.type, message })
+      reporter?.enqueue("agent", { type: message.type, message })
+      if (message.type === "assistant") state.sawAssistant = true
 
-    if (message.type === "result") {
-      if (message.subtype === "success") {
-        finalText = message.result
-        usage = {
-          durationMs: message.duration_ms,
-          durationApiMs: message.duration_api_ms,
-          numTurns: message.num_turns,
-          totalCostUsd: message.total_cost_usd,
-          usage: message.usage,
-        }
-      } else {
-        throw new Error(`query() ended with subtype: ${message.subtype}`)
+      // Canceled or swept out from under us: stop spending model tokens on a
+      // result nobody will accept. The server is already terminal, so there is
+      // nothing to report back.
+      if (reporter?.canceledStatus) {
+        note(`stopping early: run is ${reporter.canceledStatus}`)
+        emit("AGENT_ERROR", { message: `run terminated server-side (${reporter.canceledStatus})` })
+        process.exitCode = 1
+        return { kind: "canceled" }
       }
+
+      if (message.type === "result") {
+        if (message.subtype === "success") {
+          finalText = message.result
+          usage = {
+            durationMs: message.duration_ms,
+            durationApiMs: message.duration_api_ms,
+            numTurns: message.num_turns,
+            totalCostUsd: message.total_cost_usd,
+            usage: message.usage,
+          }
+        } else {
+          throw new Error(`query() ended with subtype: ${message.subtype}`)
+        }
+      }
+    }
+    if (finalText === undefined) throw new Error("query() ended without a success result")
+    return { kind: "ok", finalText, usage }
+  }
+
+  // Session resume. Anything that goes wrong *loading or resuming* the prior
+  // transcript degrades to a brand-new session driven by the full text replay
+  // the host also sent — the user loses nothing they had before this feature.
+  const requestedSessionId = AGENT_SESSION_ID && SESSION_UUID_RE.test(AGENT_SESSION_ID) ? AGENT_SESSION_ID : undefined
+  let outcome: AttemptOutcome | undefined
+  let activeStore: MemorySessionStore | undefined
+  let activeSessionId = requestedSessionId
+
+  if (!requestedSessionId) {
+    outcome = await runAttempt(prompt, {}, { sawAssistant: false })
+  } else {
+    const resuming = AGENT_SESSION_MODE === "resume"
+    if (resuming) {
+      const resumeStore = readResumeStore()
+      if (!resumeStore) {
+        note("session transcript is missing or malformed; starting a new session from the text replay")
+      } else {
+        const state = { sawAssistant: false }
+        try {
+          outcome = await runAttempt(
+            prompt,
+            { sessionStore: resumeStore, sessionStoreFlush: "eager", resume: requestedSessionId },
+            state,
+          )
+          activeStore = resumeStore
+        } catch (error) {
+          // After the model has answered, this is a genuine turn failure, not a resume failure.
+          if (state.sawAssistant) throw error
+          note(`resume failed (${error instanceof Error ? error.message : String(error)}); starting a new session`)
+        }
+      }
+    }
+    if (!outcome) {
+      // A resumed-then-abandoned id may already name a partial transcript, so never reuse it.
+      activeSessionId = resuming ? randomUUID() : requestedSessionId
+      let freshPrompt = prompt
+      if (resuming) {
+        if (existsSync(FALLBACK_PROMPT_FILE)) freshPrompt = readFileSync(FALLBACK_PROMPT_FILE, "utf8")
+        else note("fallback prompt missing; continuing with the new message alone")
+      }
+      const freshStore = new MemorySessionStore()
+      outcome = await runAttempt(
+        freshPrompt,
+        { sessionStore: freshStore, sessionStoreFlush: "eager", sessionId: activeSessionId },
+        { sawAssistant: false },
+      )
+      activeStore = freshStore
     }
   }
 
-  if (finalText === undefined) throw new Error("query() ended without a success result")
-  emit("AGENT_RESULT", { text: finalText, usage })
-  await reporter?.finish("result", { text: finalText, usage })
+  if (outcome.kind === "canceled") return
+
+  // Before the terminal report: a detached run's worker token stops working the
+  // moment the run is terminal, so the upload has to land first.
+  if (activeStore && activeSessionId) await publishSession(activeStore, activeSessionId, baseUrl)
+
+  emit("AGENT_RESULT", { text: outcome.finalText, usage: outcome.usage })
+  await reporter?.finish("result", { text: outcome.finalText, usage: outcome.usage })
 }
 
 main().catch(async (err: unknown) => {

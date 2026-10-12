@@ -168,6 +168,15 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // and six ASYNC indexes, two of them unique (worker-token lookup, (run_id, seq) idempotency).
   // No ALTER, no backfill, no foreign keys. Digest recorded from the shipped SQL; please review it.
   "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301",
+  // Agent SDK session pointer: one new table keyed by conversation_id, no index, no backfill.
+  // Digest recorded from the shipped SQL; please review it.
+  "080_agent_sessions": "f82aa43816ea5e1f5d393c2e244d4e2b0e41f3ce21e42494c99a587ce78f4475",
+  // Audit + per-turn budget for web_search: one new table keyed by (credential_id, seq), no index, no backfill.
+  // Digest recorded from the shipped SQL; please review it.
+  "081_agent_web_searches": "c2e0c3445770c5fb5adf24c4f043af46fa13472895023b4206993800715c3218",
+  // Multi-user agent conversations: one new table, a unique and a non-unique async index, and
+  // a nullable agent_messages.author_user_id. No backfill. Digest recorded from the shipped SQL; please review it.
+  "082_agent_conversation_participants": "0d72de736539ef65fd48f9111b9b3b9f99a7213d08bc123848335319cc67656b",
   // v0 chat Artifacts: two nullable ADD COLUMNs (artifacts.v0_chat_id, artifact_revisions.v0_version_id),
   // IF NOT EXISTS, no DEFAULT, no backfill, no index. Digest recorded from the shipped SQL; please review it.
   "090_v0_chat_artifacts": "1a2098fa1c19b8257200cf0b00c6d7b9da763d9a13afbf7b1486b95ed3c297e3"
@@ -212,6 +221,18 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 079 postcondition (table shape plus a valid, ready, non-unique org/workspace index before the receipt).
   "079_roadmap_views": {
     "lib/migrations/roadmap-views.ts": "6afd1be2429b929b643e3ab50de8b5fd9b94fe350a4e49f76987e1b80fa9e5eb",
+  },
+  // The 082 postcondition (column shape plus a primary key on conversation_id alone before the receipt).
+  "080_agent_sessions": {
+    "lib/migrations/agent-sessions.ts": "8d4fdc83ab62c345ca0fe00be983904c14495def605ed2e7fc42f4bdcfa6d404",
+  },
+  // The 081 postcondition (column shape plus the composite (credential_id, seq) primary key before the receipt).
+  "081_agent_web_searches": {
+    "lib/migrations/agent-web-searches.ts": "0df81423dd87944c656f88e01ca6b4598f9e6c6fce02974e72819ec3102698c2",
+  },
+  // The 082 postcondition (participants table shape, nullable author column, both indexes valid and ready before the receipt).
+  "082_agent_conversation_participants": {
+    "lib/migrations/agent-conversation-participants.ts": "f7192dade000eae4d957d91711021dda072b0bae7718ec1f29aa1daeae83dbfe",
   },
 };
 

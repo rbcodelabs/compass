@@ -30,6 +30,8 @@
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import type { AppPrismaClient } from "@/lib/db"
+import { resolveConversationAccess } from "@/lib/agent-conversation-access"
+import { authorColumn } from "@/lib/agent-attribution"
 import { bareToolName, isMutationTool } from "@/lib/agent-mutations"
 import { HANDOFF_POLICIES } from "@/lib/agent-handoff-kinds"
 import { HANDOFF_KINDS, type HandoffKind } from "@/lib/pm-agent-processing"
@@ -638,11 +640,15 @@ export async function finalizeAgentRun({
   // leave the run looking unfinished.
   const content = status === "SUCCEEDED" ? (text ?? "") : agentRunFailureMessage(run.kind, status, error)
   try {
+    // Attributed to whoever started the run, so usage limits follow the person who asked.
+    const author = await authorColumn(prisma, run.userId)
     await prisma.agentMessage.create({
+      select: { id: true },
       data: {
         conversationId: run.conversationId,
         role: "assistant",
         content,
+        ...author,
         ...(status === "SUCCEEDED"
           ? {
               model: AGENT_RUN_MODEL_ID,
@@ -695,8 +701,27 @@ export async function cancelAgentRun({
   now?: Date
   cleanup?: AgentRunCleanup
 }) {
-  const run = await prisma.agentRun.findFirst({ where: { id: runId, userId }, select: { id: true } })
+  // Who may stop a run: the person who started it, or the owner of the
+  // conversation it belongs to. Any other participant can watch but not cancel, so
+  // one participant cannot cut off a turn another started. Both halves go through
+  // the conversation access check first, so a removed participant can no longer
+  // cancel the run they started while they were in it.
+  const run = await prisma.agentRun.findFirst({
+    where: { id: runId },
+    select: { id: true, userId: true, conversationId: true, workspaceId: true },
+  })
   if (!run) throw new AgentRunError("Agent run not found", 404, "RUN_NOT_FOUND")
+  const access = await resolveConversationAccess(prisma, {
+    conversationId: run.conversationId,
+    workspaceId: run.workspaceId,
+    userId,
+  })
+  if (!access) throw new AgentRunError("Agent run not found", 404, "RUN_NOT_FOUND")
+  if (run.userId !== userId && access.role !== "OWNER") {
+    // 403 rather than 404: the caller can already see this run, so there is
+    // nothing to hide, and "you can watch but not stop it" is worth saying.
+    throw new AgentRunError("Only the person who started this run or the conversation owner can cancel it", 403, "RUN_CANCEL_FORBIDDEN")
+  }
   return finalizeAgentRun({
     prisma,
     runId,
@@ -778,9 +803,11 @@ export async function sweepAgentRuns({
 /**
  * Authorize a session user to watch a run.
  *
- * Ownership of the run is not sufficient on its own: workspace membership is
- * re-checked so someone removed from a workspace mid-run loses the transcript
- * with it, matching how the turn route authorizes.
+ * Access follows the conversation the run belongs to, not the run's
+ * author: every participant can watch, and reattach to, a run another participant
+ * started. The shared access check includes the live workspace-membership test, so
+ * someone removed from a workspace or from the conversation mid-run loses the
+ * transcript with it, matching how the turn route authorizes.
  */
 export async function getAgentRunForViewer({
   prisma,
@@ -792,9 +819,10 @@ export async function getAgentRunForViewer({
   userId: string
 }) {
   const run = await prisma.agentRun.findFirst({
-    where: { id: runId, userId },
+    where: { id: runId },
     select: {
       id: true,
+      userId: true,
       conversationId: true,
       workspaceId: true,
       status: true,
@@ -817,11 +845,12 @@ export async function getAgentRunForViewer({
     },
   })
   if (!run) return null
-  const member = await prisma.workspace.findFirst({
-    where: { id: run.workspaceId, members: { some: { userId } } },
-    select: { id: true },
+  const access = await resolveConversationAccess(prisma, {
+    conversationId: run.conversationId,
+    workspaceId: run.workspaceId,
+    userId,
   })
-  return member ? run : null
+  return access ? run : null
 }
 
 export async function listAgentRunEvents({

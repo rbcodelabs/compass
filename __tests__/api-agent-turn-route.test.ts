@@ -6,7 +6,8 @@
  * conversation ownership, and runtime prerequisites. The streamed happy path
  * (real sandbox boot + agent run) is verified end-to-end against a deploy.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { accessibleConversationsWhere } from "@/lib/agent-conversation-access"
 import { NextRequest } from "next/server"
 import { normalizeCapabilityPack } from "@/lib/capability-pack"
 
@@ -19,6 +20,8 @@ const mockPrisma = {
   agentMessage: { create: vi.fn(), findMany: vi.fn() },
   agentAuditLog: { createMany: vi.fn() },
   workspaceCapabilityPack: { findMany: vi.fn() },
+  agentConversationParticipant: { findFirst: vi.fn(), findMany: vi.fn() },
+  user: { findMany: vi.fn() },
 }
 
 // `claimInterviewProcessing` is the real implementation here, not a mock, and it
@@ -205,7 +208,14 @@ describe("agent turn route — guards", () => {
     // Membership filter is applied.
     expect(mockPrisma.workspace.findFirst).toHaveBeenCalledWith({
       where: { id: "ws-x", members: { some: { userId: "user-1" } } },
-      select: { id: true, name: true, slug: true, organization: { select: { slug: true } } },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        thinkingModel: true,
+        thinkingModelLabels: true,
+        organization: { select: { slug: true } },
+      },
     })
   })
 
@@ -214,8 +224,8 @@ describe("agent turn route — guards", () => {
     const res = await POST(req({ workspaceId: "ws-1", message: "hi", conversationId: "c-999" }))
     expect(res.status).toBe(404)
     expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
-      where: { id: "c-999", userId: "user-1", workspaceId: "ws-1" },
-      select: { id: true },
+      where: { id: "c-999", ...accessibleConversationsWhere("ws-1", "user-1") },
+      select: { userId: true },
     })
   })
 
@@ -259,7 +269,10 @@ describe("agent turn route — guards", () => {
     mockBootSandbox.mockResolvedValue({ writeFiles: vi.fn(), runCommand: vi.fn().mockResolvedValue(run), stop })
     const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
     expect(await response.text()).toContain("timed out")
-    expect(mockPrisma.agentMessage.create).toHaveBeenCalledWith({ data: expect.objectContaining({ role: "assistant", packProvenance: provenance }) })
+    expect(mockPrisma.agentMessage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ role: "assistant", packProvenance: provenance }),
+      select: { id: true },
+    })
     expect(mockPrisma.agentAuditLog.createMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ toolName: "create_opportunity", packProvenance: provenance })] })
     expect(stop).toHaveBeenCalled()
     expect(mockRevokeKey).toHaveBeenCalledWith("key-1")
@@ -407,6 +420,18 @@ describe("agent turn route — guards", () => {
       await turn(setupRun())
       const { trustedCompassBaseUrl } = await import("@/lib/compass-url")
       expect(mockListConnectedSlugs).toHaveBeenCalledWith("user-1", trustedCompassBaseUrl().origin, expect.anything())
+    })
+
+    describe("web_search", () => {
+      it("always tells the sandbox to use web_search and advertises it in the prompt", async () => {
+        const env = await turn(setupRun())
+        expect("AGENT_WEB_SEARCH" in env).toBe(false)
+        expect(env.AGENT_SYSTEM_PROMPT).toContain("web_search tool")
+        expect(env.AGENT_SYSTEM_PROMPT).not.toContain("cannot search the web")
+        expect(env.AGENT_SYSTEM_PROMPT).not.toMatch(/Unavailable capabilities include[^.]*\bweb\b/)
+        // The sandbox is told to call the Compass route; it is never handed a search credential.
+        expect(Object.keys(env).filter(key => /GATEWAY|OIDC|PERPLEXITY/i.test(key))).toEqual([])
+      })
     })
 
     it("still runs the turn when the connector lookup throws", async () => {

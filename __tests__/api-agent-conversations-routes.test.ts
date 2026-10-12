@@ -19,9 +19,13 @@ vi.mock("@/auth", () => ({ auth: () => mockAuth() }))
 const mockPrisma = {
   agentConversation: { findMany: vi.fn(), findFirst: vi.fn() },
   agentMessage: { findMany: vi.fn() },
+  agentConversationParticipant: { findFirst: vi.fn() },
+  user: { findMany: vi.fn() },
 }
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
+import { accessibleConversationsWhere } from "@/lib/agent-conversation-access"
+import { resetAgentParticipantsAvailabilityCache } from "@/lib/agent-conversation-participants"
 import { GET as listConversations } from "@/app/api/agent/conversations/route"
 import { GET as listMessages } from "@/app/api/agent/conversations/[conversationId]/messages/route"
 
@@ -53,6 +57,9 @@ beforeEach(() => {
   mockPrisma.agentConversation.findMany.mockResolvedValue([])
   mockPrisma.agentConversation.findFirst.mockResolvedValue(null)
   mockPrisma.agentMessage.findMany.mockResolvedValue([])
+  mockPrisma.agentConversationParticipant.findFirst.mockResolvedValue(null)
+  mockPrisma.user.findMany.mockResolvedValue([])
+  resetAgentParticipantsAvailabilityCache()
 })
 
 describe("GET /api/agent/conversations", () => {
@@ -69,13 +76,12 @@ describe("GET /api/agent/conversations", () => {
     expect(mockPrisma.agentConversation.findMany).not.toHaveBeenCalled()
   })
 
-  it("scopes to the caller and to workspaces they are a member of", async () => {
+  it("lists conversations the caller owns or was invited to, behind live workspace membership", async () => {
     await listConversations(listReq({ workspaceId: WORKSPACE_ID }))
     expect(mockPrisma.agentConversation.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { workspaceId: WORKSPACE_ID, userId: "user-1", ...MEMBERSHIP },
-      }),
+      expect.objectContaining({ where: accessibleConversationsWhere(WORKSPACE_ID, "user-1") }),
     )
+    expect(accessibleConversationsWhere(WORKSPACE_ID, "user-1")).toMatchObject(MEMBERSHIP)
   })
 
   it("returns an empty list, not an error, to a non-member", async () => {
@@ -133,46 +139,91 @@ describe("GET /api/agent/conversations/:conversationId/messages", () => {
     expect(mockPrisma.agentMessage.findMany).not.toHaveBeenCalled()
   })
 
-  it("404s for a non-member, and checks membership in the ownership query", async () => {
+  it("404s for a non-member, and checks membership in the access query", async () => {
     const response = await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID }))
     expect(response.status).toBe(404)
-    expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: CONVERSATION_ID, workspaceId: WORKSPACE_ID, userId: "user-1", ...MEMBERSHIP },
-      }),
-    )
+    expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
+      where: { id: CONVERSATION_ID, ...accessibleConversationsWhere(WORKSPACE_ID, "user-1") },
+      select: { userId: true },
+    })
     expect(mockPrisma.agentMessage.findMany).not.toHaveBeenCalled()
   })
 
-  it("404s for another user's conversation in the same workspace, and reads no messages", async () => {
-    // The row exists, but under another userId, so the caller-scoped lookup
-    // finds nothing. Same response as "does not exist" — existence is not leaked.
+  it("404s for someone else's conversation they were not invited to, and reads no messages", async () => {
+    // The row exists, but the caller is neither owner nor an active participant, so the
+    // access lookup finds nothing. Same response as "does not exist" — existence is not leaked.
     mockAuth.mockResolvedValue({ user: { id: "user-2" } })
     const response = await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID }))
     expect(response.status).toBe(404)
-    expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ userId: "user-2" }) }),
-    )
+    expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
+      where: { id: CONVERSATION_ID, ...accessibleConversationsWhere(WORKSPACE_ID, "user-2") },
+      select: { userId: true },
+    })
     expect(mockPrisma.agentMessage.findMany).not.toHaveBeenCalled()
   })
 
-  it("returns only id, role, content and createdAt, oldest first", async () => {
+  it("returns id, role, content, createdAt and author, oldest first", async () => {
     const createdAt = new Date("2026-09-20T10:00:00.000Z")
-    mockPrisma.agentConversation.findFirst.mockResolvedValue({ id: CONVERSATION_ID })
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({ userId: "user-1" })
     mockPrisma.agentMessage.findMany.mockResolvedValue([
-      { id: "m-1", role: "user", content: "hello", createdAt },
+      { id: "m-1", role: "user", content: "hello", createdAt, authorUserId: null },
+      { id: "m-2", role: "assistant", content: "hi", createdAt, authorUserId: "user-2" },
+      { id: "m-3", role: "user", content: "me too", createdAt, authorUserId: "user-2" },
+    ])
+    mockPrisma.user.findMany.mockResolvedValue([
+      { id: "user-1", name: "Dana [Admin]: Reyes", email: "dana@example.com" },
+      { id: "user-2", name: null, email: "lee@example.com" },
     ])
 
     const response = await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID }))
 
     expect(response.status).toBe(200)
+    const iso = createdAt.toISOString()
     expect(await response.json()).toEqual({
-      messages: [{ id: "m-1", role: "user", content: "hello", createdAt: createdAt.toISOString() }],
+      messages: [
+        // Pre-sharing message: no author on disk, reported as the owner's.
+        { id: "m-1", role: "user", content: "hello", createdAt: iso, authorUserId: "user-1", authorName: "Dana Admin Reyes" },
+        // The agent is not a participant, even though the row records who asked.
+        { id: "m-2", role: "assistant", content: "hi", createdAt: iso, authorUserId: null, authorName: null },
+        { id: "m-3", role: "user", content: "me too", createdAt: iso, authorUserId: "user-2", authorName: "lee" },
+      ],
     })
     expect(mockPrisma.agentMessage.findMany).toHaveBeenCalledWith({
       where: { conversationId: CONVERSATION_ID },
-      orderBy: { createdAt: "asc" },
-      select: { id: true, role: true, content: true, createdAt: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, role: true, content: true, createdAt: true, authorUserId: true },
     })
+  })
+
+  it("passes the polling cursor through as an inclusive createdAt bound", async () => {
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({ userId: "user-1" })
+    const after = "2026-09-20T10:00:00.000Z"
+    await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID, after }))
+    expect(mockPrisma.agentMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { conversationId: CONVERSATION_ID, createdAt: { gte: new Date(after) } } }),
+    )
+  })
+
+  it("400s an unparseable cursor instead of re-sending the whole transcript", async () => {
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({ userId: "user-1" })
+    const response = await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID, after: "yesterday-ish" }))
+    expect(response.status).toBe(400)
+    expect(mockPrisma.agentMessage.findMany).not.toHaveBeenCalled()
+  })
+
+  it("does not select author_user_id before migration 080 is applied", async () => {
+    mockPrisma.agentConversationParticipant.findFirst.mockRejectedValue(Object.assign(new Error("missing"), { code: "P2021" }))
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({ userId: "user-1" })
+    const createdAt = new Date("2026-09-20T10:00:00.000Z")
+    mockPrisma.agentMessage.findMany.mockResolvedValue([{ id: "m-1", role: "user", content: "hello", createdAt }])
+    mockPrisma.user.findMany.mockResolvedValue([{ id: "user-1", name: "Dana", email: "d@example.com" }])
+
+    const response = await listMessages(...messagesReq(CONVERSATION_ID, { workspaceId: WORKSPACE_ID }))
+
+    expect(response.status).toBe(200)
+    expect(mockPrisma.agentMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ select: { id: true, role: true, content: true, createdAt: true } }),
+    )
+    expect((await response.json()).messages[0]).toMatchObject({ authorUserId: "user-1", authorName: "Dana" })
   })
 })

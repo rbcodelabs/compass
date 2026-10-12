@@ -87,6 +87,7 @@ const mockPrisma = {
   workspaceActivationState: { deleteMany: vi.fn() },
   apiKey: { deleteMany: vi.fn() },
   agentMessage: { deleteMany: vi.fn() },
+  agentSession: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
   agentAuditLog: { deleteMany: vi.fn() },
   agentConversation: { deleteMany: vi.fn() },
   agentWorkspaceGrant: { deleteMany: vi.fn() },
