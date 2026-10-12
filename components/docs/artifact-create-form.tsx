@@ -27,19 +27,21 @@ export function ArtifactCreateForm({ workspaceId, basePath }: { workspaceId: str
       try {
         setError(null)
         const result = await createArtifact(workspaceId, new FormData(form), basePath)
+        if (result.error !== undefined) { setError(result.error); return }
         router.push(`${basePath}/artifacts/${result.id}`)
       } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create artifact") }
     })
   }}>
     <div className="flex gap-2" role="group" aria-label="Artifact source">
-      {[["HTML_UPLOAD", "Upload HTML"], ["EXTERNAL_LINK", "External link"]].map(([value, label]) => <Button key={value} type="button" aria-pressed={sourceType === value} variant={sourceType === value ? "default" : "outline"} onClick={() => chooseSource(value)}>{label}</Button>)}
+      {[["HTML_UPLOAD", "Upload HTML"], ["EXTERNAL_LINK", "External link"], ["V0_CHAT", "v0 chat"]].map(([value, label]) => <Button key={value} type="button" aria-pressed={sourceType === value} variant={sourceType === value ? "default" : "outline"} onClick={() => chooseSource(value)}>{label}</Button>)}
     </div>
     <input type="hidden" name="sourceType" value={sourceType} />
-    <label className="block text-sm font-medium">Title<Input name="title" required maxLength={255} className="mt-1" /></label>
+    <label className="block text-sm font-medium">Title<Input name="title" required={sourceType !== "V0_CHAT"} maxLength={255} className="mt-1" placeholder={sourceType === "V0_CHAT" ? "Optional — defaults to the v0 chat name" : undefined} /></label>
     <label className="block text-sm font-medium">Description<Textarea name="description" className="mt-1" /></label>
     {sourceType === "HTML_UPLOAD" ? <label className="block text-sm font-medium">Self-contained HTML file<Input ref={fileInput} name="file" type="file" accept=".html,text/html" required className="mt-1" /><span className="block mt-1 text-xs text-text-subtle">One .html file, up to 2 MB. Network access is blocked in preview.</span></label> : null}
     {sourceType === "HTML_UPLOAD" && <label className="flex items-start gap-2 text-sm"><Checkbox name="kind" value="SLIDE_DECK" className="mt-1" /><span><span className="font-medium">This is a slide deck</span><span className="block text-xs text-text-subtle">Show it one slide at a time, with feedback anchored to each slide.</span></span></label>}
-    {sourceType === "HTML_UPLOAD" ? null : <label className="block text-sm font-medium">External URL<Input name="url" type="url" required placeholder="https://…" className="mt-1" /></label>}
+    {sourceType === "V0_CHAT" ? <label className="block text-sm font-medium">v0 chat URL<Input name="url" type="url" required placeholder="https://v0.app/chat/…" className="mt-1" /><span className="block mt-1 text-xs text-text-subtle">Read with your own v0 connection (Settings → My agents). Use “Refresh from v0” later to pick up new versions.</span></label> : null}
+    {sourceType === "EXTERNAL_LINK" ? <label className="block text-sm font-medium">External URL<Input name="url" type="url" required placeholder="https://…" className="mt-1" /></label> : null}
     {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
     <Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create artifact"}</Button>
   </form>

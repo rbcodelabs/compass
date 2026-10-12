@@ -8,6 +8,7 @@ import { ArtifactDetail } from "@/components/docs/artifact-detail"
 import { getArtifactStorage } from "@/lib/artifact-storage"
 import { getArtifactDecisions, toArtifactDetailDto } from "@/lib/artifacts"
 import { buildArtifactPresentation, type ArtifactSlideDto } from "@/lib/artifact-slides"
+import { livePreviewSrcFor } from "@/lib/v0-preview-frame"
 
 /** `?slide=N` is one-based, as shown in the UI; the viewer wants zero-based. */
 function initialSlideFromParam(value: string | string[] | undefined): number {
@@ -37,5 +38,8 @@ export default async function ArtifactPage({ params, searchParams }: { params: P
   const linkedIds = new Set(artifact.links.map((link) => link.linkedId))
   const decisions = await getArtifactDecisions(workspace.id, artifactId)
   const initialCommentsPin = parsePanelPin((await cookies()).get(panelPinCookieName("artifactComments"))?.value)
-  return <ArtifactDetail artifact={toArtifactDetailDto(artifact)} html={html} slides={slides} initialSlideIndex={initialSlideIndex} initialCommentsPin={initialCommentsPin} workspaceId={workspace.id} basePath={`/${orgSlug}/${workspaceSlug}/docs`} decisions={decisions} solutions={rawSolutions.map((solution) => ({ ...solution, linked: linkedIds.has(solution.id) }))} />
+  // A v0 chat shows v0's running app, fetched with the viewer's own grant on every view
+  // (the preview token is short-lived, so it is never stored). Null falls back to the link card.
+  const livePreviewSrc = artifact.sourceType === "V0_CHAT" && artifact.status === "ACTIVE" && artifact.v0ChatId ? await livePreviewSrcFor(session.user.id, artifact.v0ChatId) : null
+  return <ArtifactDetail artifact={toArtifactDetailDto(artifact)} livePreviewSrc={livePreviewSrc} html={html} slides={slides} initialSlideIndex={initialSlideIndex} initialCommentsPin={initialCommentsPin} workspaceId={workspace.id} basePath={`/${orgSlug}/${workspaceSlug}/docs`} decisions={decisions} solutions={rawSolutions.map((solution) => ({ ...solution, linked: linkedIds.has(solution.id) }))} />
 }
