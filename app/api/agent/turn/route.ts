@@ -56,6 +56,7 @@ import {
   type AgentRunKind,
 } from "@/lib/agent-runs"
 import { buildResumePrompt, commitAgentSession, isSessionUuid, planAgentSession } from "@/lib/agent-session"
+import { BoundedStderr } from "@/lib/agent-sandbox-stderr"
 import { WEB_CAPABILITY_SENTENCE } from "@/lib/agent-capabilities"
 import { authorColumn, loadConversationAttribution, SHARED_CONVERSATION_NOTICE, type ConversationAttribution } from "@/lib/agent-attribution"
 import { labelUserTurn } from "@/lib/agent-author-label"
@@ -306,8 +307,13 @@ export async function POST(request: NextRequest) {
       { status: 503 }
     )
   }
+  // `.trim()` is load-bearing: a var added with no value (or later cleared) is
+  // stored as "" rather than unset, and a whitespace-only value passes a bare
+  // truthiness check. Either would be forwarded into the sandbox as a credential
+  // and only fail after a sandbox boot and an MCP key mint, as an opaque
+  // authentication error from the Agent SDK. Reject it here, where it is free.
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY
-  if (!anthropicApiKey) {
+  if (!anthropicApiKey?.trim()) {
     await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
     return new Response("ANTHROPIC_API_KEY is not configured on this deployment.", { status: 500 })
   }
@@ -621,12 +627,21 @@ export async function POST(request: NextRequest) {
         // The entry script writes one JSON object per line, prefixed with a
         // kind. Stdout may arrive in partial chunks, so buffer and split on \n.
         // Accumulate the agent's mutation tool calls for the audit log (Phase 5).
+        //
+        // Stderr is captured rather than dropped, and folded into whichever
+        // error this turn ends up throwing — see lib/agent-sandbox-stderr.ts for
+        // why it is buffered instead of treated as a failure signal on arrival.
         let buffer = ""
+        const stderr = new BoundedStderr()
         const logs = run.logs()[Symbol.asyncIterator]()
         while (true) {
           const entry = await step(() => logs.next())
           if (entry.done) break
           const log = entry.value
+          if (log.stream === "stderr") {
+            stderr.push(log.data)
+            continue
+          }
           if (log.stream !== "stdout") continue
           buffer += log.data
           if (buffer.length > 1_000_000) throw new Error("Agent event exceeded the transport limit")
@@ -668,13 +683,13 @@ export async function POST(request: NextRequest) {
                 if (isSessionUuid(parsed?.sessionId)) endedSessionId = parsed.sessionId
               } catch { /* a missing session id only costs the next turn its memory */ }
             } else if (kind === "AGENT_ERROR") {
-              throw new Error(JSON.parse(rest).message ?? "agent error")
+              throw new Error(stderr.toMessage(JSON.parse(rest).message ?? "agent error"))
             }
           }
         }
         const result = await step(() => run.wait())
         if (result.exitCode !== 0 || assistantText === undefined) {
-          throw new Error(`agent process exited with code ${result.exitCode}`)
+          throw new Error(stderr.toMessage(`agent process exited with code ${result.exitCode}`))
         }
 
         // Persist the assistant message + usage; bump the conversation.
