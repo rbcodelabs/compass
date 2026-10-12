@@ -8,7 +8,7 @@ import { getHumanActivityPrisma } from "@/lib/analytics/activity";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
 import { assertWorkspaceWritable } from "@/lib/workspace-context";
-import { setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
+import { getKeyResultMoveTargets, moveKeyResultToObjective, OKRHierarchyError, setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
 import { drainAfterParentDelete, drainLegacyLinksForOpportunities, drainLinksFor } from "@/lib/typed-links";
 import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
 
@@ -216,6 +216,49 @@ export async function setObjectiveParentKR(
     keyResultId,
   });
   revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
+}
+
+// ─── Move Key Result to another Objective ─────────────────────────────────────
+
+/** Objectives the Key Result can move to (picker options). Read-only; membership is checked via the Key Result. */
+export async function listKeyResultMoveTargets(keyResultId: string) {
+  const { workspaceId } = await requireProductEntity("keyResult", keyResultId);
+  return getKeyResultMoveTargets(workspaceId, keyResultId);
+}
+
+export type MoveKeyResultResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Returns the refusal as a value: production Next masks the message of a thrown server-action error,
+ * and a hierarchy refusal ("closed cycle", "would create a loop") is something the user needs to read.
+ */
+export async function moveKeyResult(
+  keyResultId: string,
+  objectiveId: string,
+  orgSlug: string,
+  workspaceSlug: string
+): Promise<MoveKeyResultResult> {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
+  if (!workspace) throw new Error("Workspace not found");
+  assertWorkspaceWritable(workspace);
+
+  try {
+    // The workspace comes from the membership-checked slugs; both rows are re-verified inside it by the move.
+    await moveKeyResultToObjective({
+      workspaceId: workspace.id,
+      keyResultId,
+      objectiveId,
+      actorId: session.user.id,
+    });
+  } catch (error) {
+    if (error instanceof OKRHierarchyError) return { ok: false, error: error.message };
+    throw error;
+  }
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/discovery`, "layout");
+  return { ok: true };
 }
 
 // ─── Update Objective Status ──────────────────────────────────────────────────

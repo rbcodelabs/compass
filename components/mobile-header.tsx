@@ -3,7 +3,7 @@
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Settings, BookOpen, HelpCircle, Lightbulb, CircleUser, Building2 } from "lucide-react"
+import { Settings, BookOpen, HelpCircle, Lightbulb, CircleUser, Building2, Layers } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { usePanelContext } from "@/components/panels/panel-context"
 import { signOutAction } from "@/lib/actions/auth-actions"
@@ -36,6 +36,8 @@ interface MobileHeaderProps {
   userImage?: string
   /** Org admins/owners see an "Org Settings" link in the account menu. */
   isOrgAdmin?: boolean
+  /** The org has more than one workspace, so the cross-workspace "All roadmaps" page is offered. */
+  showOrgRoadmap?: boolean
   /** Following is on and available: show the notifications bell. */
   followingEnabled?: boolean
   unreadNotifications?: { count: number; overflow: boolean }
@@ -49,6 +51,7 @@ export function MobileHeader({
   userEmail,
   userImage,
   isOrgAdmin = false,
+  showOrgRoadmap = false,
   followingEnabled = false,
   unreadNotifications = { count: 0, overflow: false },
 }: MobileHeaderProps) {
@@ -145,6 +148,18 @@ export function MobileHeader({
               </div>
             </div>
             <DropdownMenuSeparator />
+            {showOrgRoadmap && (
+              <DropdownMenuItem className="p-0 cursor-pointer">
+                <Link
+                  href={`/${orgSlug}/roadmap`}
+                  className="flex w-full items-center gap-2 px-1.5 py-1"
+                  data-testid="mobile-nav-org-roadmap"
+                >
+                  <Layers className="w-3.5 h-3.5 shrink-0 text-text-subtle" aria-hidden="true" />
+                  All roadmaps
+                </Link>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem className="p-0 cursor-pointer">
               <Link
                 href={`${base}/settings`}

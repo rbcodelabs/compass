@@ -923,6 +923,9 @@ model CommentElementAnchor {
   /// comments made inside Compass, where the reviewer is already looking at the
   /// artifact.
   screenshotUrl      String?  @map("screenshot_url") @db.Text
+  /// Zero-based slide of a SLIDE_DECK artifact the comment was left on, or null
+  /// when the comment is not slide-scoped (migration 078).
+  slideIndex         Int?     @map("slide_index")
   comment            Comment  @relation(fields: [commentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([artifactId, pageUrl], map: "idx_comment_element_anchors_artifact_page")
@@ -2343,6 +2346,9 @@ model Artifact {
   description       String?            @db.Text
   /// HTML_UPLOAD | EXTERNAL_LINK
   sourceType        String             @map("source_type") @db.VarChar(30)
+  /// NULL (= DOCUMENT) | SLIDE_DECK. Presentation kind, orthogonal to sourceType;
+  /// allowed values live in lib/artifact-kind.ts (migration 078).
+  kind              String?            @map("kind") @db.VarChar(30)
   /// ACTIVE | ARCHIVED
   status            String             @default("ACTIVE") @db.VarChar(20)
   currentRevisionId String?            @map("current_revision_id") @db.Uuid
@@ -2377,6 +2383,21 @@ model ArtifactRevision {
   createdById    String?    @map("created_by_id") @db.Uuid
   source         String     @default("UI") @db.VarChar(20)
   createdAt      DateTime   @default(now()) @map("created_at")
+
+  /// Captured screenshot of whatever this revision points at (migration
+  /// 077). These are SIBLINGS of blobPathname, not a replacement: an EXTERNAL_LINK
+  /// revision has no blobPathname of its own but can have a thumbnail. All
+  /// nullable — "no screenshot captured" is the normal state.
+  thumbnailPathname   String?   @map("thumbnail_pathname") @db.Text
+  thumbnailMimeType   String?   @map("thumbnail_mime_type") @db.VarChar(100)
+  thumbnailByteSize   Int?      @map("thumbnail_byte_size")
+  thumbnailWidth      Int?      @map("thumbnail_width")
+  thumbnailHeight     Int?      @map("thumbnail_height")
+  thumbnailCapturedAt DateTime? @map("thumbnail_captured_at")
+  /// The URL actually photographed, AFTER redirects — deliberately not assumed to
+  /// equal externalUrl, which it differs from whenever the target redirects.
+  thumbnailSourceUrl  String?   @map("thumbnail_source_url") @db.Text
+
   artifact       Artifact   @relation("ArtifactRevisions", fields: [artifactId], references: [id])
   currentFor     Artifact[] @relation("CurrentArtifactRevision")
 
@@ -3484,4 +3505,30 @@ model PortalHomeLayout {
 
   @@unique([workspaceId], map: "idx_portal_home_layouts_workspace")
   @@map("portal_home_layouts")
+}
+
+/// A saved roadmap view (migration 079): a named, reusable filter + display
+/// configuration. workspaceId NULL = the org-level cross-workspace roadmap
+/// (/{org}/roadmap); workspaceId set = that workspace's own roadmap. visibility is
+/// PERSONAL (owner only) or SHARED (everyone who can reach that surface). `filters`
+/// and `display` are JSON documents Zod-validated on every write and every read
+/// (lib/roadmap-views/schema.ts); sharing never widens data access, because the items
+/// a view returns are re-scoped to the viewer's readable workspaces at query time.
+/// No relations: Aurora DSQL enforces no foreign keys, so ids are validated in
+/// application code and workspace/org deletion removes rows explicitly. updatedAt is
+/// set by the application on every write.
+model RoadmapView {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  workspaceId    String?  @map("workspace_id") @db.Uuid
+  ownerId        String   @map("owner_id") @db.Uuid
+  name           String   @db.VarChar(120)
+  visibility     String   @default("PERSONAL") @db.VarChar(20)
+  filters        Json     @default("{}")
+  display        Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+
+  @@index([organizationId, workspaceId], map: "idx_roadmap_views_org_surface")
+  @@map("roadmap_views")
 }

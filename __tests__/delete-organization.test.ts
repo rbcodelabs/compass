@@ -45,6 +45,7 @@ const mockCapabilityPack = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockCapabilityPackVersion = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockCanvasNodePosition = { deleteMany: vi.fn() };
 const mockPortalHomeLayout = { deleteMany: vi.fn() };
+const mockRoadmapView = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
 const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) };
@@ -136,6 +137,7 @@ const mockPrisma = {
   capabilityPackVersion: mockCapabilityPackVersion,
   canvasNodePosition: mockCanvasNodePosition,
   portalHomeLayout: mockPortalHomeLayout,
+  roadmapView: mockRoadmapView,
   workspaceMember: mockWorkspaceMember,
   squad: mockSquad,
   doc: mockDoc,
@@ -296,6 +298,7 @@ beforeEach(() => {
     mockCapabilityPackVersion.deleteMany,
     mockCanvasNodePosition.deleteMany,
     mockPortalHomeLayout.deleteMany,
+    mockRoadmapView.deleteMany,
     mockWorkspaceMember.deleteMany,
     mockSquad.deleteMany,
     mockDoc.deleteMany,
@@ -558,6 +561,7 @@ describe("deleteOrganization", () => {
     expect(mockWorkspaceScoringConfig.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockCanvasNodePosition.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockPortalHomeLayout.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockRoadmapView.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
 
     // ── Members / squads / docs / workspace ──
     expect(mockWorkspaceMember.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
@@ -570,6 +574,7 @@ describe("deleteOrganization", () => {
       where: { scoringModelId: { in: ["sm-1"] } },
     });
     expect(mockScoringModel.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-1" } });
+    expect(mockRoadmapView.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-1" } });
     expect(mockOrganizationMember.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-1" } });
     expect(mockOrganization.delete).toHaveBeenCalledWith({ where: { id: "org-1" } });
 

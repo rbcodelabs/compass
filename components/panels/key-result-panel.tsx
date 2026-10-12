@@ -1,4 +1,5 @@
 "use client";
+import { useRef, useState, useTransition } from "react";
 import { Discussion } from "@/components/comments/discussion";
 
 import {
@@ -19,6 +20,13 @@ import { useLabels, useThinkingModel } from "@/components/thinking-model/thinkin
 import { LinkedSolutionsSection } from "./linked-solutions-section";
 import { cycleRouteSegment, noCycleLabel } from "@/lib/okr-cycle-scope";
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel";
+import { CheckInForm } from "@/components/okrs/check-in-form";
+import { CheckInHistory, KrHero, KrSparkline } from "@/components/okrs/kr-progress-history";
+import { cycleTiming } from "@/lib/okr-cycle-rollup";
+import { Combobox, ComboboxContent } from "@/components/ui/combobox";
+import { listKeyResultMoveTargets, moveKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
+import type { KeyResultMoveTarget } from "@/lib/okr-hierarchy";
+import "@/components/okrs/okrs-gallery.css";
 
 type KeyResultData = {
   id: string;
@@ -26,7 +34,7 @@ type KeyResultData = {
   current: number;
   target: number;
   unit: string | null;
-  objective: { id: string; title: string; cycleId: string | null } | null;
+  objective: { id: string; title: string; cycleId: string | null; cycle?: { startDate: string; endDate: string } | null } | null;
   checkIns: Array<{ id: string; value: number; note: string | null; createdAt: string }>;
   roadmapItems: Array<{ id: string; title: string; horizon: string; status: string }>;
   opportunities: Array<{ id: string; title: string; status: string }>;
@@ -45,6 +53,99 @@ type KeyResultData = {
   members: MemberData[];
 };
 
+/**
+ * "Move to…" for a Key Result: loads the valid target Objectives when opened (the server filters out closed cycles,
+ * the Key Result's own subtree and cycles that no longer fit its supporters) and re-validates on the move itself.
+ */
+function MoveKeyResultControl({
+  keyResultId,
+  orgSlug,
+  workspaceSlug,
+  onMoved,
+}: {
+  keyResultId: string;
+  orgSlug: string;
+  workspaceSlug: string;
+  onMoved: () => void;
+}) {
+  const labels = useLabels();
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [targets, setTargets] = useState<KeyResultMoveTarget[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) return;
+    setError(null);
+    setTargets(null);
+    listKeyResultMoveTargets(keyResultId)
+      .then(setTargets)
+      .catch((e) => {
+        setTargets([]);
+        setError(e instanceof Error ? e.message : `Could not load ${labels.objective.lowerPlural}.`);
+      });
+  };
+
+  const handleSelect = (objectiveId: string | null) => {
+    if (!objectiveId) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        const result = await moveKeyResult(keyResultId, objectiveId, orgSlug, workspaceSlug);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setOpen(false);
+        // moveKeyResult revalidates the OKR and discovery layouts, which re-renders the open page.
+        onMoved();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : `Could not move the ${labels.keyResult.lower}.`);
+      }
+    });
+  };
+
+  return (
+    <div ref={anchorRef} className="mt-1.5">
+      <button
+        type="button"
+        onClick={() => handleOpenChange(!open)}
+        disabled={isPending}
+        className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+      >
+        {isPending ? "Moving…" : `Move to another ${labels.objective.lower}…`}
+      </button>
+      <Combobox
+        items={(targets ?? []).map((objective) => ({
+          value: objective.id,
+          label: `${objective.title} ${objective.cycleTitle}`,
+          render: (
+            <span className="flex min-w-0 flex-col text-left">
+              <span className="truncate text-xs font-medium">{objective.title}</span>
+              <span className="truncate text-[11px] text-muted-foreground">{objective.cycleTitle}</span>
+            </span>
+          ),
+        }))}
+        value={null}
+        onValueChange={handleSelect}
+        disabled={isPending}
+        open={open}
+        onOpenChange={handleOpenChange}
+      >
+        <ComboboxContent
+          anchor={anchorRef}
+          align="start"
+          inputPlaceholder={`Search ${labels.objective.lowerPlural}…`}
+          emptyMessage={targets === null ? "Loading…" : `No ${labels.objective.lowerPlural} this ${labels.keyResult.lower} can move to.`}
+        />
+      </Combobox>
+      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
 export function KeyResultPanel({
   id,
   orgSlug,
@@ -61,6 +162,9 @@ export function KeyResultPanel({
     workspaceSlug
   );
 
+  // Fixed at mount: the panel is client-fetched (never server-rendered), so there is no hydration drift,
+  // and the sparkline/pace marker don't jitter between renders.
+  const [now] = useState(() => Date.now());
   const labels = useLabels();
   const thinkingModel = useThinkingModel();
   const showLinkedSolutions = thinkingModel.links.solToKr !== "hidden";
@@ -77,7 +181,9 @@ export function KeyResultPanel({
     onSaved: (d) => mutate(d as KeyResultData),
   };
 
-  const pct = data.target > 0 ? Math.round((data.current / data.target) * 100) : null;
+  const cycleDates = data.objective?.cycle ?? null;
+  const timing = cycleDates ? cycleTiming(cycleDates.startDate, cycleDates.endDate, new Date(now)) : null;
+  const elapsed = timing?.phase === "running" ? timing.percentElapsed : null;
 
   const objectiveItems: RelationItem[] = data.objective
     ? [{ type: "objective", id: data.objective.id, title: data.objective.title }]
@@ -126,25 +232,30 @@ export function KeyResultPanel({
       <PanelTitle title={data.title} edit={edit} />
       <MeasurementsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ targetType: "KEY_RESULT", targetId: data.id }} compact />
 
-      {/* Progress */}
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-primary transition-all"
-              style={{ width: `${pct !== null ? Math.min(pct, 100) : 0}%` }}
-            />
-          </div>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {data.current}/{data.target}
-            {data.unit ? ` ${data.unit}` : ""}
-            {pct !== null ? ` · ${pct}%` : ""}
-          </span>
+      <KrHero current={data.current} target={data.target} unit={data.unit} elapsed={elapsed}
+            hideProgress={timing?.phase === "upcoming"} />
+
+      <section className="okx-psec" aria-label="Check-ins">
+        <h3 className="okx-psec-h">
+          Check-ins <span>{data.checkIns.length}</span>
+        </h3>
+        <KrSparkline points={data.checkIns} target={data.target} cycle={cycleDates} now={now} />
+        <CheckInHistory points={data.checkIns} unit={data.unit} />
+        <div>
+          <CheckInForm
+            keyResultId={data.id}
+            keyResultTitle={data.title}
+            currentValue={data.current}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            onSaved={refresh}
+          />
         </div>
-      </div>
+      </section>
 
       <Section label={labels.objective.singular}>
         <RelationList items={objectiveItems} empty={`No parent ${labels.objective.lower}.`} />
+        <MoveKeyResultControl keyResultId={id} orgSlug={orgSlug} workspaceSlug={workspaceSlug} onMoved={refresh} />
       </Section>
 
       <Section label={`Supporting ${labels.objective.plural}`} count={data.supportingObjectives.length}>

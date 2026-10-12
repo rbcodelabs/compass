@@ -156,6 +156,8 @@ describe("getUserWorkspaces", () => {
         id: "ws-1",
         name: "Alpha",
         slug: "alpha",
+        description: null,
+        _count: { members: 2 },
         organization: { slug: "org-1", name: "Org One" },
       },
     ])
@@ -163,7 +165,7 @@ describe("getUserWorkspaces", () => {
     const result = await getUserWorkspaces("user-1")
 
     expect(result).toEqual([
-      { id: "ws-1", name: "Alpha", slug: "alpha", orgSlug: "org-1", orgName: "Org One", isReadOnly: false },
+      { id: "ws-1", name: "Alpha", slug: "alpha", orgSlug: "org-1", orgName: "Org One", isReadOnly: false, description: null, memberCount: 2 },
     ])
   })
 
@@ -195,6 +197,8 @@ describe("getUserWorkspaces", () => {
         id: "ws-2",
         name: "Beta",
         slug: "beta",
+        description: null,
+        _count: { members: 2 },
         organization: { slug: "org-2", name: "Org Two" },
       },
     ])
@@ -204,7 +208,7 @@ describe("getUserWorkspaces", () => {
     // The healthy sibling still comes back — one orphan must not take out the
     // whole authenticated surface, which was the production failure.
     await expect(getUserWorkspaces("user-1")).resolves.toEqual([
-      { id: "ws-2", name: "Beta", slug: "beta", orgSlug: "org-2", orgName: "Org Two", isReadOnly: false },
+      { id: "ws-2", name: "Beta", slug: "beta", orgSlug: "org-2", orgName: "Org Two", isReadOnly: false, description: null, memberCount: 2 },
     ])
 
     // The orphan is logged, not silently dropped without a trace.
@@ -232,19 +236,19 @@ describe("getUserWorkspaces", () => {
       ])
       // Second findMany call: every workspace owned by the read-only org.
       mockWorkspace.findMany.mockResolvedValueOnce([
-        { id: "ws-9", name: "Nine Workspace", slug: "nine", organizationId: "org-9" },
+        { id: "ws-9", name: "Nine Workspace", slug: "nine", description: null, _count: { members: 2 }, organizationId: "org-9" },
       ])
 
       const result = await getUserWorkspaces("user-1")
 
       expect(result).toEqual([
-        { id: "ws-9", name: "Nine Workspace", slug: "nine", orgSlug: "org-9", orgName: "Org Nine", isReadOnly: true },
+        { id: "ws-9", name: "Nine Workspace", slug: "nine", orgSlug: "org-9", orgName: "Org Nine", isReadOnly: true, description: null, memberCount: 2 },
       ])
     })
 
     it("never downgrades a workspace the user is a real member of, even if the org flag is also on", async () => {
       mockWorkspace.findMany.mockResolvedValueOnce([
-        { id: "ws-9", name: "Nine Workspace", slug: "nine", organization: { slug: "org-9", name: "Org Nine" } },
+        { id: "ws-9", name: "Nine Workspace", slug: "nine", description: null, _count: { members: 2 }, organization: { slug: "org-9", name: "Org Nine" } },
       ])
       mockOrganizationMember.findMany.mockResolvedValue([
         { organizationId: "org-9", organization: { slug: "org-9", name: "Org Nine" } },
@@ -252,15 +256,15 @@ describe("getUserWorkspaces", () => {
       // The read-only org owns two workspaces; the user is a real member of
       // one of them (ws-9, already in the first result set above).
       mockWorkspace.findMany.mockResolvedValueOnce([
-        { id: "ws-9", name: "Nine Workspace", slug: "nine", organizationId: "org-9" },
-        { id: "ws-10", name: "Ten Workspace", slug: "ten", organizationId: "org-9" },
+        { id: "ws-9", name: "Nine Workspace", slug: "nine", description: null, _count: { members: 2 }, organizationId: "org-9" },
+        { id: "ws-10", name: "Ten Workspace", slug: "ten", description: null, _count: { members: 2 }, organizationId: "org-9" },
       ])
 
       const result = await getUserWorkspaces("user-1")
 
       expect(result).toEqual([
-        { id: "ws-9", name: "Nine Workspace", slug: "nine", orgSlug: "org-9", orgName: "Org Nine", isReadOnly: false },
-        { id: "ws-10", name: "Ten Workspace", slug: "ten", orgSlug: "org-9", orgName: "Org Nine", isReadOnly: true },
+        { id: "ws-9", name: "Nine Workspace", slug: "nine", orgSlug: "org-9", orgName: "Org Nine", isReadOnly: false, description: null, memberCount: 2 },
+        { id: "ws-10", name: "Ten Workspace", slug: "ten", orgSlug: "org-9", orgName: "Org Nine", isReadOnly: true, description: null, memberCount: 2 },
       ])
     })
 

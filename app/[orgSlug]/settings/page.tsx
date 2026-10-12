@@ -4,6 +4,7 @@ import { ManageScoringModelsPanel } from "@/components/scoring-models/manage-sco
 import { DeleteOrganizationPanel } from "@/components/settings/delete-organization-panel";
 import { CreateWorkspacePanel } from "@/components/settings/create-workspace-panel";
 import type { ScoringModelData, ScoringModelStatus, ScoringFormulaType, MetricDirection } from "@/lib/types";
+import { isOrgAdminRole } from "@/lib/roles";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
 
@@ -42,6 +43,15 @@ export default async function OrgSettingsPage({ params }: Props) {
     orderBy: { name: "asc" },
   });
 
+  // Drives the "who starts as a member" choice in CreateWorkspacePanel, so the
+  // admin sees how many people each option adds before they pick.
+  const orgMemberRoles = await prisma.organizationMember.findMany({
+    where: { organizationId: organization.id },
+    select: { role: true },
+  });
+  const orgMemberCount = orgMemberRoles.length;
+  const orgAdminCount = orgMemberRoles.filter((m) => isOrgAdminRole(m.role)).length;
+
   const models: ScoringModelData[] = rawModels.map((m) => ({
     id: m.id,
     name: m.name,
@@ -68,9 +78,14 @@ export default async function OrgSettingsPage({ params }: Props) {
 
       <SettingsSection
         title="Workspaces"
-        description="Workspaces are where teams run OKRs, discovery, and experiments. Creating one adds every member of this organization to it."
+        description="Workspaces are where teams run OKRs, discovery, and experiments. When you create one, you choose whether every member of this organization is added or only org admins."
       >
-        <CreateWorkspacePanel orgSlug={orgSlug} workspaces={workspaces} />
+        <CreateWorkspacePanel
+          orgSlug={orgSlug}
+          workspaces={workspaces}
+          orgMemberCount={orgMemberCount}
+          orgAdminCount={orgAdminCount}
+        />
       </SettingsSection>
 
       <SettingsSection

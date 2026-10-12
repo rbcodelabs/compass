@@ -17,6 +17,9 @@
  */
 export const CONVERTED_FILES = [
   "components/sidebar.tsx",
+  // Canvas Doc "Build tree" tool: label-driven from the start (no CLASSIC baseline: it is new).
+  "components/docs/canvas/canvas-doc-editor.tsx",
+  "components/docs/canvas/canvas-tree-dialog.tsx",
   // Following (slice 2): label-driven from the start, no CLASSIC baseline.
   "components/notifications/notification-inbox.tsx",
   "components/bottom-nav.tsx",
@@ -27,6 +30,9 @@ export const CONVERTED_FILES = [
   "components/okrs/check-in-form.tsx",
   "components/okrs/create-cycle-form.tsx",
   "components/okrs/cycle-card.tsx",
+  "components/okrs/cycle-summary.tsx",
+  "components/okrs/okr-visuals.tsx",
+  "components/okrs/kr-progress-history.tsx",
   "components/okrs/key-result-bar.tsx",
   "components/okrs/objective-row.tsx",
   "components/okrs/objectives-list.tsx",
@@ -65,9 +71,6 @@ export const CONVERTED_FILES = [
   "lib/okr-cycle-scope.ts",
   "components/okrs/persistent-objectives-card.tsx",
   // Phase 4C-2: the remaining workspace screens, converted whole (CLASSIC text identical to origin/main).
-  "lib/canvas/tiers.ts",
-  "components/canvas/canvas-flow.tsx",
-  "app/[orgSlug]/[workspaceSlug]/canvas/page.tsx",
   "app/[orgSlug]/[workspaceSlug]/discovery/page.tsx",
   "app/[orgSlug]/[workspaceSlug]/solutions/page.tsx",
   "app/[orgSlug]/[workspaceSlug]/discovery/[opportunityId]/page.tsx",
@@ -142,7 +145,6 @@ export const ENTITY_SCREENS = {
     "components/panels/feedback-panel.tsx",
     "components/panels/discovery-rail-panel.tsx",
     "components/feedback/feedback-action-cell.tsx",
-    "components/canvas/canvas-flow.tsx",
     "components/mobile-header.tsx",
     "components/workspace-search-palette.tsx",
     "components/decisions/new-decision-form.tsx",
@@ -162,8 +164,10 @@ export const ENTITY_SCREENS = {
     "components/okrs/outcomes-index.tsx",
     "components/discovery/outcome-tree-view.tsx",
     "components/sidebar.tsx",
+  // Canvas Doc "Build tree" tool: label-driven from the start (no CLASSIC baseline: it is new).
+  "components/docs/canvas/canvas-doc-editor.tsx",
+  "components/docs/canvas/canvas-tree-dialog.tsx",
     "components/bottom-nav.tsx",
-    "components/canvas/canvas-flow.tsx",
     "components/squads/manage-squads-panel.tsx",
     "app/[orgSlug]/[workspaceSlug]/okrs/page.tsx",
     "app/[orgSlug]/[workspaceSlug]/discovery/page.tsx",
@@ -176,7 +180,6 @@ export const ENTITY_SCREENS = {
     "components/discovery/opportunity-header.tsx",
     "components/discovery/opportunity-overview.tsx",
     "components/analytics/measurements-panel.tsx",
-    "components/canvas/canvas-flow.tsx",
     "components/roadmap/add-item-form.tsx",
   ],
   solution: [
@@ -206,10 +209,11 @@ export const ENTITY_SCREENS = {
   cycle: [
     "components/okrs/create-cycle-form.tsx",
     "components/okrs/cycle-card.tsx",
+    "components/okrs/cycle-summary.tsx",
+    "components/okrs/okr-visuals.tsx",
     "components/okrs/persistent-objectives-card.tsx",
     "components/panels/objective-panel.tsx",
     "lib/okr-cycle-scope.ts",
-    "lib/canvas/tiers.ts",
     "app/[orgSlug]/[workspaceSlug]/okrs/page.tsx",
     "app/[orgSlug]/[workspaceSlug]/okrs/[cycleId]/page.tsx",
   ],
@@ -232,6 +236,8 @@ export const CANONICAL_FILES: Record<string, string> = {
   "components/agent/agent-chat.tsx": "research-and-agent-chat",
   "components/settings/delete-organization-panel.tsx": "account-and-org-pages",
   "components/settings/org-readonly-access-panel.tsx": "account-and-org-pages",
+  // The cross-workspace roadmap spans workspaces that may each use a different vocabulary, so its link filters use the canonical names.
+  "components/roadmap/cross-workspace/roadmap-toolbar.tsx": "account-and-org-pages",
   "components/scoring-models/manage-scoring-models-panel.tsx": "account-and-org-pages",
   "app/layout.tsx": "account-and-org-pages",
   "app/login/page.tsx": "account-and-org-pages",
