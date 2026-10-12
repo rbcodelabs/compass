@@ -559,13 +559,18 @@ async function main(): Promise<void> {
     skills: packConfig.skillIds,
     // Skill bodies and supported text assets are compiled into systemPrompt
     // by the host. SDK 0.3.224 does not provide Skill/Read with tools: [].
-    tools: [],
+    //
+    // WebFetch is the one built-in admitted: it lets the agent read a URL the
+    // user names or a page it already knows about, instead of reporting that it
+    // has no web access. WebSearch is deliberately NOT here. Fetched content is
+    // untrusted input: treat it as data, never instructions.
+    tools: ["WebFetch"],
     strictMcpConfig: true,
     settingSources: [],
     systemPrompt: effectiveSystemPrompt,
     // Compass MCP only, auto-approved. Headless (no human approver): the
     // real security boundary is the disposable sandbox + per-user MCP auth.
-    allowedTools: ["mcp__compass", ...connectorToolPrefixes],
+    allowedTools: ["mcp__compass", "WebFetch", ...connectorToolPrefixes],
     // Safety default (Phase 5): keep the two irreversible hard-delete tools
     // out of the agent's reach — everything else is reversible/auditable.
     // Remove entries here to let the agent perform destructive deletes.
