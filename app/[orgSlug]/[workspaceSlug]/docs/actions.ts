@@ -46,6 +46,15 @@ import {
 import { createV0Artifact, refreshV0Artifact, V0ArtifactError } from "@/lib/v0-artifacts";
 import { McpConnectorError } from "@/lib/mcp-connectors/config";
 
+import {
+  ArtifactShareError,
+  changeArtifactSharePassword,
+  enableArtifactShare,
+  generateSharePassword,
+  revokeArtifactShare,
+  rotateArtifactShareLink,
+  setArtifactShareComments,
+} from "@/lib/artifact-share";
 import { ArtifactThumbnailError, captureAndStoreArtifactThumbnail, scheduleArtifactThumbnailCapture } from "@/lib/artifact-thumbnail";
 
 /**
@@ -192,6 +201,75 @@ export async function archiveArtifact(workspaceId: string, artifactId: string, r
   const user = await requireWorkspaceMember(workspaceId);
   await archiveArtifactCore({ workspaceId, artifactId, updatedById: user.id });
   revalidatePath(revalidatePathStr);
+}
+
+// ---- External share (owner side) ------------------------------------------------
+// Each action re-checks workspace membership; the service re-checks that the artifact belongs
+// to that workspace. Only enable and rotate return a raw link token, and only once.
+export type ShareActionResult = { error?: string; rawToken?: string; password?: string };
+
+function shareFailure(error: unknown): { error: string } {
+  if (error instanceof ArtifactShareError) return { error: error.message };
+  console.error("[artifact-share] unexpected failure", error);
+  return { error: "Something went wrong. Try again." };
+}
+
+export async function enableArtifactShareAction(workspaceId: string, artifactId: string, password: string | null, revalidatePathStr: string): Promise<ShareActionResult> {
+  const user = await requireWorkspaceMember(workspaceId);
+  try {
+    // A generated password is returned once so the owner can pass it on; a chosen one is not echoed back.
+    const generated = password === null || password === "" ? generateSharePassword() : null;
+    const { rawToken } = await enableArtifactShare({ workspaceId, artifactId, actorId: user.id, password: generated ?? password! });
+    revalidatePath(revalidatePathStr);
+    return { rawToken, ...(generated ? { password: generated } : {}) };
+  } catch (error) {
+    return shareFailure(error);
+  }
+}
+
+export async function changeArtifactSharePasswordAction(workspaceId: string, artifactId: string, password: string | null, revalidatePathStr: string): Promise<ShareActionResult> {
+  const user = await requireWorkspaceMember(workspaceId);
+  try {
+    const generated = password === null || password === "" ? generateSharePassword() : null;
+    await changeArtifactSharePassword({ workspaceId, artifactId, actorId: user.id, password: generated ?? password! });
+    revalidatePath(revalidatePathStr);
+    return generated ? { password: generated } : {};
+  } catch (error) {
+    return shareFailure(error);
+  }
+}
+
+export async function rotateArtifactShareLinkAction(workspaceId: string, artifactId: string, revalidatePathStr: string): Promise<ShareActionResult> {
+  const user = await requireWorkspaceMember(workspaceId);
+  try {
+    const { rawToken } = await rotateArtifactShareLink({ workspaceId, artifactId, actorId: user.id });
+    revalidatePath(revalidatePathStr);
+    return { rawToken };
+  } catch (error) {
+    return shareFailure(error);
+  }
+}
+
+export async function setArtifactShareCommentsAction(workspaceId: string, artifactId: string, enabled: boolean, revalidatePathStr: string): Promise<ShareActionResult> {
+  const user = await requireWorkspaceMember(workspaceId);
+  try {
+    await setArtifactShareComments({ workspaceId, artifactId, actorId: user.id, enabled: enabled === true });
+    revalidatePath(revalidatePathStr);
+    return {};
+  } catch (error) {
+    return shareFailure(error);
+  }
+}
+
+export async function revokeArtifactShareAction(workspaceId: string, artifactId: string, revalidatePathStr: string): Promise<ShareActionResult> {
+  const user = await requireWorkspaceMember(workspaceId);
+  try {
+    await revokeArtifactShare({ workspaceId, artifactId, actorId: user.id });
+    revalidatePath(revalidatePathStr);
+    return {};
+  } catch (error) {
+    return shareFailure(error);
+  }
 }
 
 export async function linkArtifact(workspaceId: string, artifactId: string, solutionId: string, revalidatePathStr: string) {
