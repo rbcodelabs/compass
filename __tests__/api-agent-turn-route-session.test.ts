@@ -36,7 +36,7 @@ vi.mock("@/lib/artifact-storage", () => ({ getCapabilityPackArtifactStorage: () 
 vi.mock("@/lib/agent-limits", () => ({ checkAgentUsageLimit: () => Promise.resolve({ allowed: true }) }))
 vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: vi.fn().mockResolvedValue(null) }))
 vi.mock("@/lib/entity-summary", () => ({ getEntitySummary: vi.fn().mockResolvedValue(null) }))
-vi.mock("@/lib/mcp-connectors/store", () => ({ listConnectedSlugs: vi.fn().mockResolvedValue([]) }))
+vi.mock("@/lib/mcp-connectors/store", () => ({ listConnectedGrants: vi.fn().mockResolvedValue([]) }))
 
 const runMocks = vi.hoisted(() => ({ available: vi.fn(), create: vi.fn(), started: vi.fn(), finalize: vi.fn() }))
 vi.mock("@/lib/agent-runs", async (original) => ({
