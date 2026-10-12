@@ -200,8 +200,8 @@ describe("pre-change version snapshot", () => {
   it("snapshots for edit_canvas (any editDocumentBody writer) and not for no-op or GEODE docs", async () => {
     mockDoc.findUnique.mockResolvedValue(row({ docType: "CANVAS", content: JSON.stringify({ nodes: [], edges: [] }) }))
     updateDocument.mockResolvedValue(saved("r2"))
-    await editCanvas({ docId: "d1", ops: [{ op: "add_node", node: { type: "text", text: "hi", x: 0, y: 0, width: 100, height: 50 } } as never] })
-    expect(maybeSnapshotDocVersion.mock.calls.length).toBeLessThanOrEqual(1)
+    await editCanvas({ docId: "d1", ops: [{ op: "add_text", text: "new" }] })
+    expect(maybeSnapshotDocVersion).toHaveBeenCalledTimes(1)
 
     maybeSnapshotDocVersion.mockReset()
     mockDoc.findUnique.mockResolvedValue(row())
