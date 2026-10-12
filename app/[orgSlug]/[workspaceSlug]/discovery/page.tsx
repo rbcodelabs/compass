@@ -17,7 +17,7 @@ import type { OpportunityStatus, SolutionStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
-import { ChevronRight, FolderTree, Shuffle } from "lucide-react";
+import { ChevronRight, Download, FolderTree, Shuffle } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -293,6 +293,16 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         }))
       : [];
 
+  // The export carries the filters the page is showing (squad and tag), so the
+  // file matches the screen. View, group-by and sort are presentation only.
+  const exportParams = new URLSearchParams({ orgSlug, workspaceSlug });
+  if (squadFilter) exportParams.set("squad", squadFilter);
+  if (customFieldFilter) {
+    exportParams.set("field", fieldParam ?? "");
+    exportParams.set("fieldValue", fieldValueParam ?? "");
+  }
+  const exportHref = `/api/discovery/export?${exportParams.toString()}`;
+
   return (
     <WorkspacePage
       title="Discovery"
@@ -316,6 +326,9 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
           </Suspense>
           <NewOpportunityButton variant="header" />
           <WorkspaceMoreMenu label="Discovery tools">
+            <DropdownMenuItem render={<a href={exportHref} download />}>
+              <Download /> Export CSV
+            </DropdownMenuItem>
             <DropdownMenuItem render={<Link href={`/${orgSlug}/${workspaceSlug}/card-sort`} />}>
               <Shuffle className="size-4" /> Card sort
             </DropdownMenuItem>

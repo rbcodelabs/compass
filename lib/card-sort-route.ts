@@ -17,7 +17,14 @@ export type CardSortContext = { userId: string; workspaceId: string }
 
 export async function withCardSortContext(
   request: Request,
-  handler: (context: CardSortContext) => Promise<unknown>
+  handler: (context: CardSortContext) => Promise<unknown>,
+  /**
+   * Turns the handler's result into the success response. Defaults to JSON.
+   * Only the success path is customisable: auth, membership and CardSortError
+   * mapping stay in this function, so an export route cannot skip them.
+   */
+  respond: (data: unknown) => Response = (data) =>
+    Response.json(data ?? { ok: true }, { headers: NO_STORE_HEADERS })
 ): Promise<Response> {
   const session = await auth()
   if (!session?.user?.id) {
@@ -44,7 +51,7 @@ export async function withCardSortContext(
 
   try {
     const data = await handler({ userId: session.user.id, workspaceId: workspace.id })
-    return Response.json(data ?? { ok: true }, { headers: NO_STORE_HEADERS })
+    return respond(data)
   } catch (error) {
     if (error instanceof CardSortError) {
       return Response.json(
