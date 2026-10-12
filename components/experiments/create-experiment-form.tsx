@@ -1,8 +1,9 @@
 "use client"
 
 import { useMemo, useRef, useState, useTransition } from "react"
-import { PlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { WorkspaceCreateButton } from "@/components/patterns/workspace-header-controls"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -55,6 +56,14 @@ export function CreateExperimentForm({
     [squads]
   )
 
+  function handleCancel() {
+    setOpen(false)
+    setSquadId(null)
+    setAssumptionId(null)
+    setError(null)
+    formRef.current?.reset()
+  }
+
   function handleSubmit(formData: FormData) {
     const title = formData.get("title") as string
     const hypothesis = formData.get("hypothesis") as string
@@ -90,23 +99,15 @@ export function CreateExperimentForm({
     })
   }
 
-  if (!open) {
-    return (
-      <Button onClick={() => setOpen(true)}>
-        <PlusIcon />
-        New Experiment
-      </Button>
-    )
-  }
-
   return (
-    <form
-      ref={formRef}
-      action={handleSubmit}
-      className="rounded-xl ring-1 ring-border bg-muted/30 p-4 flex flex-col gap-3 w-full max-w-lg"
-    >
-      <p className="text-sm font-medium">New Experiment</p>
-
+    <>
+      <WorkspaceCreateButton label="New Experiment" onClick={() => setOpen(true)} />
+      <Dialog open={open} onOpenChange={(next) => (next ? setOpen(true) : handleCancel())}>
+        <DialogContent showCloseButton className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>New Experiment</DialogTitle>
+          </DialogHeader>
+          <form ref={formRef} action={handleSubmit} className="flex flex-col gap-3">
       {assumptions.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="exp-assumption">Testing assumption (optional)</Label>
@@ -237,26 +238,17 @@ export function CreateExperimentForm({
 
       {error && <p className="text-xs text-destructive">{error}</p>}
 
-      <div className="flex items-center gap-2">
-        <Button type="submit" size="sm" disabled={isPending}>
-          {isPending ? "Creating..." : "Create Experiment"}
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={isPending}
-          onClick={() => {
-            setOpen(false)
-            setSquadId(null)
-            setAssumptionId(null)
-            setError(null)
-            formRef.current?.reset()
-          }}
-        >
-          Cancel
-        </Button>
-      </div>
-    </form>
+            <DialogFooter>
+              <Button type="button" variant="ghost" size="sm" disabled={isPending} onClick={handleCancel}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={isPending}>
+                {isPending ? "Creating..." : "Create Experiment"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

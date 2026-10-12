@@ -23,6 +23,8 @@ export const CANVAS_CARD_KINDS = [
   "experiment",
   "objective",
   "keyResult",
+  "assumption",
+  "roadmapItem",
 ] as const
 export type CanvasCardKind = (typeof CANVAS_CARD_KINDS)[number]
 
@@ -38,6 +40,8 @@ export const CANVAS_CARD_KIND_LABELS: Record<CanvasCardKind, string> = {
   experiment: "Experiment",
   objective: "Objective",
   keyResult: "Key result",
+  assumption: "Assumption",
+  roadmapItem: "Roadmap item",
 }
 
 /** dataTransfer type for dragging a Compass object (JSON {kind,id,title}) onto a canvas. */

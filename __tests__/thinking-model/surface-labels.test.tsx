@@ -86,7 +86,6 @@ import { ProposeNewEntryButton } from "@/components/card-sort/card-sort-new-entr
 import { FeedbackActionCell } from "@/components/feedback/feedback-action-cell"
 import { UnscheduledItemPreview } from "@/components/roadmap/unscheduled-items-panel"
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel"
-import { CanvasFlow } from "@/components/canvas/canvas-flow"
 import { SolutionPanel } from "@/components/panels/solution-panel"
 import { AssumptionPanel } from "@/components/panels/assumption-panel"
 import { FeedbackPanel } from "@/components/panels/feedback-panel"
@@ -101,7 +100,6 @@ import { OpportunityOverview } from "@/components/discovery/opportunity-overview
 import { OpportunityHeader } from "@/components/discovery/opportunity-header"
 import { ObjectivePanel } from "@/components/panels/objective-panel"
 import { KeyResultPanel } from "@/components/panels/key-result-panel"
-import { tierLabels } from "@/lib/canvas/tiers"
 import { trackedSubjectLabels } from "@/lib/tracked-decision-types"
 import { ostLegendRootLabel } from "@/lib/thinking-model/copy"
 import { buildCustomFieldFilterGroups } from "@/lib/custom-field-filter"
@@ -297,15 +295,16 @@ const SURFACES: Surface[] = [
     custom: ["or signal update."],
     torres: ["or success metric update."],
   },
-  {
-    name: "canvas empty",
-    ui: () => <CanvasFlow overview={{ objectives: [], keyResults: [], opportunities: [], solutions: [], assumptions: [], experiments: [], roadmapItems: [], links: { opportunityObjective: [], solutionKeyResult: [] } } as never} />,
-    custom: ["Add Aims and Signals from the OKRs page to see them here."],
-    torres: ["Add Outcomes and Success metrics from the Outcomes page to see them here."],
-  },
 ]
 
 const cycleRow = { id: "c1", title: "Q3", startDate: new Date("2026-07-01T12:00:00Z"), endDate: new Date("2026-09-30T12:00:00Z"), status: "ACTIVE" as const }
+
+/** CycleCard takes a server-computed rollup, not a Prisma _count. A fixed timing keeps the render clock-independent. */
+const cycleWith = (row: typeof cycleRow, objectives: number) => ({
+  ...row,
+  rollup: { objectiveCount: objectives, keyResultCount: 0, progress: 0, statusMix: { ON_TRACK: objectives, AT_RISK: 0, OFF_TRACK: 0, COMPLETE: 0 } },
+  timing: { percentElapsed: 50, daysLeft: 45, daysUntilStart: 0, phase: "running" as const },
+})
 const kr = { id: "k1", title: "Reach", objective: { title: "Grow" }, current: 1, target: 2, unit: null }
 const noLinks = { OPPORTUNITY: [], SOLUTION: [], ROADMAP_ITEM: [], OBJECTIVE: [], KEY_RESULT: [], DOC: [], EXPERIMENT: [], FEEDBACK_ITEM: [], DECISION: [] }
 
@@ -315,7 +314,7 @@ const EARLIER: Surface[] = [
   { name: "add-objective", ui: () => <AddObjectiveForm cycleId="c1" {...common} />, interact: click(/add /i), custom: ["Add Aim"] },
   { name: "add-key-result", ui: () => <AddKeyResultForm objectiveId="o1" objectiveTitle="Grow" {...common} />, interact: click(/add /i), custom: ["Add Signal", "Signal"] },
   { name: "create-cycle open", ui: () => <CreateCycleForm workspaceId="w1" {...common} />, interact: click(/new /i), custom: ["New OKR Sprint", "Create sprint"] },
-  { name: "cycle-card", ui: () => <CycleCard cycle={{ ...cycleRow, _count: { objectives: 2 } }} {...common} />, custom: ["2 aims"] },
+  { name: "cycle-card", ui: () => <CycleCard cycle={cycleWith(cycleRow, 2)} {...common} />, custom: ["2 aims"] },
   {
     name: "roadmap add-item",
     ui: () => (
@@ -415,7 +414,7 @@ describe("surfaces converted earlier also follow Opportunity, Solution and Cycle
     expect(objective).not.toMatch(CANONICAL_WORDS)
     entityDetail.data = {
       id: "k1", title: "Reach", current: 1, target: 2, unit: null, objective: { id: "o1", title: "Grow", cycleId: "c1" },
-      supportingObjectives: [], opportunities: [{ id: "p1", title: "Need" }], roadmapItems: [], deliveryTasks: [], linkableTasks: [], members: [],
+      checkIns: [], supportingObjectives: [], opportunities: [{ id: "p1", title: "Need" }], roadmapItems: [], deliveryTasks: [], linkableTasks: [], members: [],
     }
     const keyResult = textFor(CUSTOM, () => <KeyResultPanel id="k1" {...common} />)
     expect(keyResult).toContain("Linked Problems (1)")
@@ -446,11 +445,6 @@ describe("no provider (portal, help, embed) and explicit CLASSIC render the same
 
 describe("helpers that build copy outside components", () => {
   const labels = (source: ThinkingModelSource) => resolveThinkingModel(source).labels
-
-  it("canvas tier names", () => {
-    expect(tierLabels(labels({})).T1).toBe("Cycle")
-    expect(tierLabels(labels(CUSTOM)).T1).toBe("Sprint")
-  })
 
   it("tracked decision subject names: only the two entities are renamed", () => {
     expect(trackedSubjectLabels(labels({}))).toMatchObject({ OPPORTUNITY: "Opportunity", SOLUTION: "Solution", ROADMAP_ITEM: "Roadmap Item" })

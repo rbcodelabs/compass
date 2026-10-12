@@ -18,6 +18,14 @@ Open a Roadmap item's detail panel to discuss it with the team. Shared Discussio
 
 On mobile, each column fills the available board width with small side gutters. Swipe sideways to reach the next column.
 
+### Board swimlanes
+
+Use **Group board by** in the header to split the Board into horizontal swimlanes — one row per **Squad**, or one row per option of any single-select custom field on roadmap items. Each lane keeps the same horizon columns, with a sticky header so Now/Next/Later stay visible as you scroll, and ends with a **No squad** / **No \<field\>** lane for items with no value (or a value that no longer exists). Click a lane's header to collapse or expand it; the count shows how many items it holds. Choose **No swimlanes** to return to the classic board. Multi-select fields aren't offered, since an item could belong to several lanes at once.
+
+Drag a card into another lane to **reassign** it: the card's squad (or custom-field value) becomes the lane's, and dropping into the *No …* lane clears it. Dragging also changes the horizon in the same move if you drop in a different column. If the change can't be saved, the card snaps back and a message explains. Dragging an item from **Not scheduled** into a lane schedules it and sets that lane's value. Launching and Launched remain workflow-managed: dropping there opens the item instead of moving it.
+
+The grouping is part of the page URL (`?groupBy=`) and of saved views, and the squad filter narrows the squad lanes.
+
 ![Roadmap on mobile](/screenshots/docs/roadmap-mobile.png)
 
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
@@ -157,6 +165,18 @@ With the setting on: moving a roadmap item into the Launching phase requires pic
 Checklist templates are workspace-owned and reusable: define one per tier (for example, a Major Launch Checklist for Tier 1 with items like Write launch announcement, Brief support team, and Update pricing page), and every future Tier 1 launch reuses it. Each launch gets its own frozen copy of the checklist at attach time, so editing a template later does not retroactively change checklists already in flight. Checklist items are tracked as Pending, Done, or Skipped, since Skipped exists so a genuinely inapplicable item does not block completion the way an incomplete Pending item would. The item's panel also offers creating a Positioning & Messaging Brief doc alongside the checklist.
 
 Checklist templates themselves (create_checklist_template, list_checklist_templates) are managed via the MCP API — no dedicated template-management UI ships yet.
+
+## Saved Views
+
+Save the way you like to look at the roadmap and come back to it with one click. On a workspace roadmap, open the **Saved views** menu to save the current squad, custom-field filter, grouping and Board/Timeline choice. Opening a saved view applies those settings to the URL, so you can still change or clear any of them afterwards.
+
+Views are **personal** by default. The owner can share a view with the workspace or the whole organization. Only the owner can edit a view; the owner (or an admin, for shared views) can delete it. Sharing a view never widens access to the items themselves.
+
+## All Roadmaps (Cross-Workspace)
+
+**All roadmaps** in the sidebar opens a read-only roadmap at `/[org]/roadmap` that combines every workspace in the organization you can read. Filter by workspace, horizon, squad, status, date range, or linked key result or solution, then group and sort the results. Each item links back to its own workspace, where you edit it. The same saved views menu is available here.
+
+Because `roadmap` and `settings` are used by these organization pages, they cannot be used as workspace slugs.
 
 ## Keeping the Roadmap Honest
 

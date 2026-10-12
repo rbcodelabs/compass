@@ -196,8 +196,12 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await page.waitForLoadState("networkidle");
 
       await expect(page.getByRole("heading", { name: "Not scheduled" })).toBeVisible({ timeout: 10_000 });
-      const boardColumns = page.locator('[data-slot="roadmap-board-track"] > *');
-      await expect(boardColumns.last()).toHaveAttribute("data-testid", "roadmap-unscheduled-column");
+      // From md up the pane is docked beside the board (outside the scrolling track) so a drag never needs
+      // a mid-drag scroll; below md it stays the last column in the track (kanban-mobile-scroll covers that).
+      await expect(
+        page.getByTestId("roadmap-unscheduled-sidebar").getByTestId("roadmap-unscheduled-column"),
+      ).toBeVisible();
+      await expect(page.locator('[data-slot="roadmap-board-track"]').getByTestId("roadmap-unscheduled-column")).toHaveCount(0);
       // Scoped to the panel specifically — dnd-kit's DragOverlay renders a
       // second (briefly-persisting, drop-animating) clone of the dragged
       // card elsewhere in the DOM, which would otherwise make these
@@ -250,9 +254,10 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       // Wait for acknowledged removal, not merely an offscreen drag source,
       // before reloading the route and verifying persistence.
       await expect(sol2UnscheduledCard).toHaveCount(0, { timeout: 10_000 });
+      await page.getByRole("button", { name: "More actions", exact: true }).click();
       await Promise.all([
         page.waitForEvent("load"),
-        page.getByRole("button", { name: "Reload timeline" }).click(),
+        page.getByRole("menuitem", { name: "Reload timeline" }).click(),
       ]);
       const persistedBar = page.locator('[data-testid^="timeline-item-"][data-start]').filter({ hasText: sol2Title });
       await expect(persistedBar).toHaveAttribute("data-start", /^\d{4}-\d{2}-\d{2}$/);

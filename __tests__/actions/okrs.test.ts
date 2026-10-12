@@ -41,8 +41,16 @@ vi.mock("@/auth", () => ({ auth: vi.fn().mockResolvedValue({ user: { id: "user-1
 vi.mock("@/lib/workspace", () => ({
   getWorkspace: vi.fn().mockResolvedValue({ id: "workspace-1" }),
 }));
+const { mockMoveKeyResultToObjective, mockGetKeyResultMoveTargets, MockOKRHierarchyError } = vi.hoisted(() => ({
+  mockMoveKeyResultToObjective: vi.fn(),
+  mockGetKeyResultMoveTargets: vi.fn(),
+  MockOKRHierarchyError: class MockOKRHierarchyError extends Error {},
+}));
 vi.mock("@/lib/okr-hierarchy", () => ({
   setObjectiveParentKeyResult: vi.fn().mockResolvedValue({ id: "obj-123" }),
+  moveKeyResultToObjective: mockMoveKeyResultToObjective,
+  getKeyResultMoveTargets: mockGetKeyResultMoveTargets,
+  OKRHierarchyError: MockOKRHierarchyError,
 }));
 
 import {
@@ -55,6 +63,8 @@ import {
   reorderObjective,
   reorderKeyResult,
   setObjectiveParentKR,
+  moveKeyResult,
+  listKeyResultMoveTargets,
 } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 
 function makeFormData(fields: Record<string, string>): FormData {
@@ -290,5 +300,41 @@ describe("setObjectiveParentKR", () => {
     await expect(
       setObjectiveParentKR("obj-1", null, "org", "ws")
     ).resolves.not.toThrow();
+  });
+});
+
+// ─── moveKeyResult ────────────────────────────────────────────────────────────
+
+describe("moveKeyResult", () => {
+  it("moves within the membership-checked workspace, as the signed-in user", async () => {
+    mockMoveKeyResultToObjective.mockResolvedValueOnce({});
+    await expect(moveKeyResult("kr-1", "obj-2", "org", "ws")).resolves.toEqual({ ok: true });
+    expect(mockMoveKeyResultToObjective).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      keyResultId: "kr-1",
+      objectiveId: "obj-2",
+      actorId: "user-1",
+    });
+  });
+
+  it("returns a hierarchy refusal as a value so its message survives production masking", async () => {
+    mockMoveKeyResultToObjective.mockRejectedValueOnce(new MockOKRHierarchyError("A closed cycle cannot receive Key Results."));
+    await expect(moveKeyResult("kr-1", "obj-2", "org", "ws")).resolves.toEqual({
+      ok: false,
+      error: "A closed cycle cannot receive Key Results.",
+    });
+  });
+
+  it("lets unexpected errors propagate", async () => {
+    mockMoveKeyResultToObjective.mockRejectedValueOnce(new Error("db down"));
+    await expect(moveKeyResult("kr-1", "obj-2", "org", "ws")).rejects.toThrow("db down");
+  });
+});
+
+describe("listKeyResultMoveTargets", () => {
+  it("lists targets for the key result's own workspace", async () => {
+    mockGetKeyResultMoveTargets.mockResolvedValueOnce([{ id: "obj-2", title: "O2", cycleId: null, cycleTitle: "No cycle" }]);
+    await expect(listKeyResultMoveTargets("kr-1")).resolves.toHaveLength(1);
+    expect(mockGetKeyResultMoveTargets).toHaveBeenCalledWith("workspace-1", "kr-1");
   });
 });

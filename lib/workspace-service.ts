@@ -27,6 +27,7 @@
 import { revalidatePath } from "next/cache"
 import getPrisma from "@/lib/db"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
+import { resolveWorkspaceSlug } from "@/lib/slug"
 
 /**
  * Who is seeded into a new workspace.
@@ -122,7 +123,7 @@ function isWorkspaceSlugConflict(error: unknown): boolean {
 export async function createWorkspaceInOrg({
   orgSlug,
   name,
-  slug,
+  slug: requestedSlug,
   description,
   memberSeeding = "ALL_ORG_MEMBERS",
   agentGrant,
@@ -140,6 +141,10 @@ export async function createWorkspaceInOrg({
       error: `No organization found with slug "${orgSlug}".`,
     }
   }
+
+  // A static route under /[orgSlug]/ would shadow a workspace with a reserved
+  // slug (see lib/slug.ts), so suffix it, same as onboarding.
+  const slug = resolveWorkspaceSlug(requestedSlug)
 
   // Fast path for the common case, so the user gets a sentence naming the
   // organization rather than a bare constraint violation. This is NOT the

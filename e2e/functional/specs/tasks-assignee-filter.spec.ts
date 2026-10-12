@@ -92,7 +92,7 @@ test.describe("Tasks assignee filter", () => {
       // trigger can reopen it in step 5 — clicking "Filters" again while it is
       // still open just toggles it shut, and the "Clear all" item then detaches
       // mid-close instead of becoming clickable. Same reason
-      // native-timeline-rollout.spec.ts escapes before reopening "View options".
+      // native-timeline-rollout.spec.ts escapes before reopening the Roadmap "Filters" menu.
       await page.keyboard.press("Escape");
       await expect(
         page.getByRole("menuitemradio", { name: "Unassigned", exact: true })

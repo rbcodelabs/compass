@@ -3,11 +3,11 @@
 import { PlusIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { WorkspaceCreateButton } from "@/components/patterns/workspace-header-controls";
 import { FEEDBACK_COMPOSER_ID, usePanelContext } from "@/components/panels/panel-context";
-import { cn } from "@/lib/utils";
 
 type Props = {
-  /** Renders a call-to-action styled trigger for the board's empty state instead of the compact toolbar trigger. */
+  /** `empty-state` renders a call-to-action styled trigger for the board's empty state instead of the header's create button. */
   variant?: "toolbar" | "empty-state";
 };
 
@@ -20,26 +20,19 @@ export function NewFeedbackButton({ variant = "toolbar" }: Props) {
   const { panel, openPanel } = usePanelContext();
   const open = panel?.type === "feedback-new";
 
-  return (
-    <Button
-      type="button"
-      variant={variant === "empty-state" ? "default" : "outline"}
-      size="sm"
-      aria-label={variant === "toolbar" ? "New Feedback" : undefined}
-      aria-expanded={open}
-      className={cn(
-        "w-fit",
-        variant === "toolbar" && "size-8 p-0 sm:h-8 sm:w-fit sm:px-3",
-      )}
-      onClick={() => {
-        // Already open: leave the draft and the history entry alone.
-        if (!open) openPanel("feedback-new", FEEDBACK_COMPOSER_ID);
-      }}
-    >
-      <PlusIcon />
-      <span className={cn(variant === "toolbar" && "hidden sm:inline")}>
+  const openComposer = () => {
+    // Already open: leave the draft and the history entry alone.
+    if (!open) openPanel("feedback-new", FEEDBACK_COMPOSER_ID);
+  };
+
+  if (variant === "empty-state") {
+    return (
+      <Button type="button" aria-expanded={open} className="w-fit" onClick={openComposer}>
+        <PlusIcon />
         New Feedback
-      </span>
-    </Button>
-  );
+      </Button>
+    );
+  }
+
+  return <WorkspaceCreateButton label="New Feedback" aria-expanded={open} onClick={openComposer} />;
 }
