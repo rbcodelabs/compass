@@ -7,6 +7,8 @@ import {
   ChevronDown,
   CircleHelp,
   Info,
+  Columns3,
+  List,
   LoaderCircle,
   MoreHorizontal,
   Plus,
@@ -31,8 +33,67 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { FacetedFilterMenu } from "@/components/patterns/faceted-filter-menu";
+import { WorkspaceCreateButton, WorkspaceHeader, WorkspaceIconButton, WorkspaceMoreMenu, WorkspaceViewSwitcher } from "@/components/patterns";
 import { AppShell, Board, BoardColumn, ConfirmDialog, DetailPanel, DetailPanelSection, EmptyState, EntityCard, FilterBar, FormField, LoadingState, MetricBadge, PageHeader, PageSection, SettingsSection, StatusBadge, Toolbar } from "@/components/patterns";
 import { DataGrid, type GridColumnDef, type GridSort } from "@/components/data-grid";
+
+function WorkspaceHeaderExamples() {
+  const [status, setStatus] = useState<string | null>(null);
+  const [view, setView] = useState("board");
+  const filter = (
+    <FacetedFilterMenu
+      iconOnly
+      groups={[{ id: "status", label: "Status", value: status, onValueChange: setStatus, options: [{ value: "open", label: "Open" }, { value: "done", label: "Done" }] }]}
+      onClearAll={() => setStatus(null)}
+    />
+  );
+  const more = (
+    <WorkspaceMoreMenu>
+      <DropdownMenuItem>Export CSV</DropdownMenuItem>
+      <DropdownMenuItem>Page settings</DropdownMenuItem>
+    </WorkspaceMoreMenu>
+  );
+  const viewSwitcher = (
+    <WorkspaceViewSwitcher
+      value={view}
+      onValueChange={setView}
+      options={[
+        { value: "board", label: "Board", icon: <Columns3 /> },
+        { value: "list", label: "List", icon: <List /> },
+      ]}
+    />
+  );
+  return (
+    <>
+      <Example title="Workspace header: full cluster (View → Filter → Primary → ⋯)">
+        <div className="overflow-hidden rounded-xl border border-border-default">
+          <WorkspaceHeader
+            title="Tasks"
+            description="Everything the team is working on."
+            actions={<>{viewSwitcher}{filter}<WorkspaceCreateButton label="New task" />{more}</>}
+          />
+        </div>
+      </Example>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Example title="Workspace header: primary action only">
+          <div className="overflow-hidden rounded-xl border border-border-default">
+            <WorkspaceHeader title="Experiments" actions={<WorkspaceCreateButton label="New Experiment" />} />
+          </div>
+        </Example>
+        <Example title="Workspace header: View in actions, secondary controls (own row under md)">
+          <div className="overflow-hidden rounded-xl border border-border-default">
+            <WorkspaceHeader
+              title="Roadmap"
+              actions={viewSwitcher}
+              controls={<><WorkspaceIconButton label="Previous period"><ChevronDown className="rotate-90" /></WorkspaceIconButton>{filter}{more}</>}
+            />
+          </div>
+        </Example>
+      </div>
+    </>
+  );
+}
 
 const surfaceTokens = [
   ["App", "bg-surface-app"], ["Navigation", "bg-surface-navigation"],
@@ -307,6 +368,7 @@ export function UIRegistry() {
             <Section id="patterns" title="Product patterns" description="Reusable Compass compositions above primitives. These APIs standardize anatomy while leaving domain content to workflows.">
               <div className="space-y-4">
                 <Example title="Page header, toolbar, and section"><div className="space-y-6"><PageHeader eyebrow="Discovery" title="Customer opportunities" description="Connect evidence to opportunities and explore solutions." actions={<Button><Plus />New opportunity</Button>} /><Toolbar leading={<Input aria-label="Search opportunities" placeholder="Search opportunities" />} filters={<FilterBar><StatusBadge status="info">Owner: Rick</StatusBadge><StatusBadge status="neutral">Open</StatusBadge></FilterBar>} actions={<Button variant="outline">Export</Button>} /><PageSection title="Recently updated" description="The opportunities with the newest customer evidence."><EntityCard eyebrow="Opportunity" title="Reduce setup uncertainty" description="New teams need guidance during their first product-planning session." status={<StatusBadge status="warning">Review</StatusBadge>} metadata={<MetricBadge label="Signals" value="8" />} footer="Updated today" /></PageSection></div></Example>
+                <WorkspaceHeaderExamples />
                 <Example title="Application shell"><div className="h-64 overflow-hidden rounded-xl border border-border-default"><AppShell className="min-h-0 [&>div]:min-h-0" navigation={<div className="p-4 text-sm font-semibold">Compass<br /><span className="mt-6 block rounded-lg bg-surface-navigation-active p-2 font-normal">Discovery</span></div>}><PageHeader title="Workspace" description="Shared shell spacing and main-content semantics." /></AppShell></div></Example>
                 <Example title="Board and columns"><Board label="Example opportunity board"><BoardColumn title="Exploring" count={1} accent="info"><EntityCard title="Clarify first-run guidance" description="Synthesize onboarding signals." status={<StatusBadge status="info">Open</StatusBadge>} /></BoardColumn><BoardColumn title="Validating" count={1} accent="warning"><EntityCard title="Test guided setup" description="Prototype a first-session checklist." status={<StatusBadge status="warning">Running</StatusBadge>} /></BoardColumn><BoardColumn title="Learned" count={0} accent="success" emptyState={<EmptyState compact title="Nothing learned yet" description="Concluded experiments appear here." />} /></Board></Example>
                 <div className="grid gap-4 lg:grid-cols-2"><Example title="Form field and settings section"><SettingsSection title="Workspace defaults" description="Applied to new opportunities."><FormField id="registry-pattern-name" label="Default owner" description="The teammate responsible for new work."><Input id="registry-pattern-name" placeholder="Choose an owner" /></FormField></SettingsSection></Example><Example title="Detail panel and loading"><div className="h-80 overflow-hidden rounded-xl border border-border-default"><DetailPanel eyebrow="Opportunity" title="Reduce setup uncertainty" description="Customer onboarding"><DetailPanelSection title="Summary"><p className="text-sm text-text-secondary">Help teams reach their first useful plan with less ambiguity.</p></DetailPanelSection><DetailPanelSection title="Activity"><LoadingState rows={2} label="Loading activity" /></DetailPanelSection></DetailPanel></div></Example></div>

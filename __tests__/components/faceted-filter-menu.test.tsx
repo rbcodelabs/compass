@@ -7,6 +7,21 @@ import { FacetedFilterMenu } from "@/components/patterns/faceted-filter-menu";
 afterEach(cleanup);
 
 describe("FacetedFilterMenu", () => {
+  it("renders an icon-only trigger that keeps its name and shows the active count", async () => {
+    render(
+      <FacetedFilterMenu
+        iconOnly
+        groups={[{ id: "squad", label: "Squad", value: "growth", options: [{ value: "growth", label: "Growth" }], onValueChange: vi.fn() }]}
+        onClearAll={vi.fn()}
+      />
+    );
+    const trigger = screen.getByRole("button", { name: "Filters" });
+    expect(trigger.textContent).toBe("1");
+    expect(trigger.querySelector('[data-slot="faceted-filter-count"]')?.textContent).toBe("1");
+    fireEvent.click(trigger);
+    expect(await screen.findByText("Squad")).toBeTruthy();
+  });
+
   it("opens a labeled filter group without crashing", async () => {
     render(
       <FacetedFilterMenu

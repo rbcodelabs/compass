@@ -12,7 +12,7 @@ import { usePanelContext } from "@/components/panels/panel-context";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { deleteKeyResult, setObjectiveParentKR } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import { Combobox, ComboboxContent } from "@/components/ui/combobox";
-import { ProgressRing } from "@/components/ui/progress-ring";
+import { PaceTrack } from "@/components/okrs/okr-visuals";
 import { averageProgress, clampProgress } from "@/lib/okrs";
 import type { ObjectiveStatus, SquadData } from "@/lib/types";
 
@@ -37,6 +37,10 @@ interface KeyResultBarProps {
   orgSlug: string;
   workspaceSlug: string;
   supportingObjectiveOptions?: SupportingObjectiveOption[];
+  /** Percent of the cycle elapsed (server-computed), drawn as a "today" tick on the progress track. Null/absent: no tick. */
+  paceElapsed?: number | null;
+  /** Hide the progress bar and percentage (e.g. for a not-yet-started period). */
+  hideProgress?: boolean;
 }
 
 export interface SupportingObjectiveOption {
@@ -46,7 +50,7 @@ export interface SupportingObjectiveOption {
   cycleTitle: string;
 }
 
-export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, supportingObjectiveOptions }: KeyResultBarProps) {
+export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, supportingObjectiveOptions, paceElapsed, hideProgress }: KeyResultBarProps) {
   const router = useRouter();
   const labels = useLabels();
   const [, startTransition] = useTransition();
@@ -154,9 +158,9 @@ export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, s
   ];
 
   return (
-    <div ref={setNodeRef} style={style} className="flex flex-col gap-1.5 group touch-none">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+    <div ref={setNodeRef} style={style} className="okx-krow flex flex-col gap-1.5 group touch-none">
+      <div className="okx-kr-row" data-no-progress={hideProgress ? "true" : undefined}>
+        <div className="okx-kr-main">
           {/* Drag handle */}
           <button
             ref={setActivatorNodeRef}
@@ -167,21 +171,26 @@ export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, s
           >
             <GripVertical className="size-3.5" />
           </button>
-          <button
-            type="button"
-            onClick={() => openPanel("keyResult", keyResult.id)}
-            className="min-w-0 overflow-hidden text-left"
-          >
-            <span className="text-sm text-foreground truncate hover:underline underline-offset-2">
-              {keyResult.title}
-            </span>
+          <button type="button" onClick={() => openPanel("keyResult", keyResult.id)} className="okx-kr-name">
+            {keyResult.title}
           </button>
         </div>
-        <div ref={actionsRef} className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <ProgressRing value={progress} size={20} className="text-primary" />
-            {keyResult.current}{unit} / {keyResult.target}{unit}
+        {!hideProgress && (
+          <div className="okx-kr-bar">
+            <PaceTrack progress={progress} elapsed={paceElapsed} small />
+          </div>
+        )}
+        <div className="okx-kr-value">
+          {/* The unit reads once, after the target: "0 / 500000 users". */}
+          <b>{keyResult.current}</b>
+          <span>
+            {" / "}
+            {keyResult.target}
+            {unit}
           </span>
+        </div>
+        {!hideProgress && <div className="okx-kr-pct">{progress}%</div>}
+        <div ref={actionsRef} className="okx-kr-actions">
           <CheckInForm
             keyResultId={keyResult.id}
             keyResultTitle={keyResult.title}
