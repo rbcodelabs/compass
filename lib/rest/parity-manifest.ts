@@ -63,8 +63,6 @@ export const MCP_REST_PARITY_MANIFEST = {
   delete_key_result: direct("deleteKeyResult"),
   delete_objective: direct("deleteObjective"),
   delete_solution_comment: direct("deleteSolutionPlanEntry"),
-  edit_canvas: composition(["getDoc", "updateDoc"], "REST clients read the canvas with getDoc, apply node/edge changes locally and write the full JSON Canvas with updateDoc and expectedRevision."),
-  edit_doc: composition(["getDoc", "updateDoc"], "REST clients read the body with getDoc, apply the text change locally and write it with updateDoc and expectedRevision."),
   follow: direct("followResource"),
   generate_research_guide: excluded("model-orchestration", "Create or update the study's public metadata, then conduct sessions through the participant protocol.", "Guide generation exposes prompt/model workflow internals rather than a stable public resource contract."),
   generate_research_synthesis: direct("createResearchSynthesis"),
