@@ -409,6 +409,14 @@ describe("agent turn route — guards", () => {
       expect(mockListConnectedSlugs).toHaveBeenCalledWith("user-1", trustedCompassBaseUrl().origin, expect.anything())
     })
 
+    describe("web access", () => {
+      it("advertises WebFetch in the prompt and no longer lists the web as unavailable", async () => {
+        const env = await turn(setupRun())
+        expect(env.AGENT_SYSTEM_PROMPT).toContain("WebFetch")
+        expect(env.AGENT_SYSTEM_PROMPT).not.toMatch(/Unavailable capabilities include[^.]*\bweb\b/)
+      })
+    })
+
     it("still runs the turn when the connector lookup throws", async () => {
       // Connectors are additive. A failure to enumerate them must not cost the
       // user their turn — the agent is perfectly useful with Compass's catalog.
