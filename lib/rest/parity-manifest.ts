@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 190,
-  sortedToolNamesSha256: "1f3de9ed543c3ed778cdb6e521aea08d1e595cc7e08b1dd2edaa6ff0d3b9e7d4",
+  toolCount: 191,
+  sortedToolNamesSha256: "630c91148ac12679774466428bfce97b0cd4736e61a6edccf704c6cd8647a6ff",
 } as const
 
 export type McpRestParityDisposition =
@@ -33,6 +33,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   archive_research_study: direct("archiveResearchStudy"),
   archive_scoring_model: direct("archiveScoringModel"),
   assign_squad: composition(["updateOpportunity", "updateExperiment", "updateRoadmapItem", "updateObjective", "updateTask"], "Assign through the PATCH operation for the selected resource type; no polymorphic RPC endpoint is needed."),
+  capture_screenshot: excluded("execution-boundary", "Read the artifact resource; its stored thumbnail is captured server-side.", "Screenshot capture boots a Vercel Sandbox and renders a stored artifact revision in headless Chromium; that is an execution boundary REST must not expose as an ordinary resource mutation."),
   close_decision_no_action: excluded("human-governance", "Read the decision request and leave it pending for an authorized reviewer.", "No-action closure is a human judgment boundary rather than resource administration."),
   close_research_study: direct("closeResearchStudy"),
   conclude_experiment: direct("concludeExperiment"),
