@@ -102,6 +102,18 @@ point is kept, and you can send the message again.
 Daily usage limits are unchanged, and they apply when a run *starts*. A long run
 does not consume more of your daily allowance than a short one.
 
+## When a turn fails
+
+A turn that fails while it is running inside the browser request now reports why. If
+the sandbox wrote anything to its error output before the failure, the first part of
+that output is appended to the error message, so a failure reads as a cause rather than
+only an exit code. Error output from a turn that succeeds is ignored. Output is capped,
+so a very noisy failure shows its beginning, not its end. Runs that execute in the
+background do not include sandbox error output.
+
+A blank or whitespace-only `ANTHROPIC_API_KEY` is treated the same as a missing one:
+the turn is rejected up front with a configuration error, before a sandbox is started.
+
 ## Deployment
 
 Administrators must apply and verify migration `069_background_agent_runs`
