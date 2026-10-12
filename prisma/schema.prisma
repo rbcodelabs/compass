@@ -2346,7 +2346,7 @@ model Artifact {
   description       String?            @db.Text
   /// HTML_UPLOAD | EXTERNAL_LINK | V0_CHAT
   sourceType        String             @map("source_type") @db.VarChar(30)
-  /// v0 chat id; populated only when sourceType is V0_CHAT (migration 081).
+  /// v0 chat id; populated only when sourceType is V0_CHAT (migration 090_v0_chat_artifacts).
   v0ChatId          String?            @map("v0_chat_id") @db.VarChar(100)
   /// NULL (= DOCUMENT) | SLIDE_DECK. Presentation kind, orthogonal to sourceType;
   /// allowed values live in lib/artifact-kind.ts (migration 078).
@@ -2382,7 +2382,7 @@ model ArtifactRevision {
   byteSize       Int?       @map("byte_size")
   sha256         String?    @db.VarChar(64)
   externalUrl    String?    @map("external_url") @db.Text
-  /// v0 version marker captured with this revision (V0_CHAT only, migration 064).
+  /// v0 version marker captured with this revision (V0_CHAT only, migration 090_v0_chat_artifacts).
   v0VersionId    String?    @map("v0_version_id") @db.VarChar(200)
   createdById    String?    @map("created_by_id") @db.Uuid
   source         String     @default("UI") @db.VarChar(20)
