@@ -21,6 +21,9 @@ vi.mock("@/lib/document-service", () => {
 })
 vi.mock("@/lib/document-mcp-actor", () => ({ documentMcpActor: () => ({ authorId: "u1", authorName: "MCP Agent", actorKey: "USER:u1" }) }))
 
+const maybeSnapshotDocVersion = vi.fn()
+vi.mock("@/lib/doc-versions", () => ({ maybeSnapshotDocVersion: (...args: unknown[]) => maybeSnapshotDocVersion(...args) }))
+
 const getCanvasOverview = vi.fn()
 vi.mock("@/lib/canvas/data", () => ({ getCanvasOverview: (...args: unknown[]) => getCanvasOverview(...args) }))
 const layoutTreeCards = vi.fn()
@@ -49,7 +52,7 @@ const saved = { id: "d1", title: "T", revision: "r2", updatedAt: new Date() }
 const message = (r: { content: Array<{ text: string }> }) => r.content[0].text
 
 beforeEach(() => {
-  for (const m of [mockDoc.findUnique, mockWorkspace.findUnique, updateDocument, getCanvasOverview, layoutTreeCards]) m.mockReset()
+  for (const m of [mockDoc.findUnique, mockWorkspace.findUnique, updateDocument, getCanvasOverview, layoutTreeCards, maybeSnapshotDocVersion]) m.mockReset()
   mockWorkspace.findUnique.mockResolvedValue({ thinkingModel: null, thinkingModelLabels: null })
   getCanvasOverview.mockResolvedValue(overview)
   layoutTreeCards.mockResolvedValue(new Map())
@@ -65,6 +68,9 @@ describe("buildCanvasTree", () => {
     const canvas = JSON.parse(updateDocument.mock.calls[0][1].content)
     expect(canvas.nodes.filter((n: { type: string }) => n.type === "link")).toHaveLength(3)
     expect(canvas.edges.length).toBeGreaterThan(0)
+    // Pre-change snapshot so the tree can be undone from the version list.
+    expect(maybeSnapshotDocVersion).toHaveBeenCalledTimes(1)
+    expect(maybeSnapshotDocVersion).toHaveBeenCalledWith("d1", { authorName: "MCP Agent" })
   })
 
   it("is idempotent: a second build adds nothing and does not write", async () => {
