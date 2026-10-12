@@ -102,6 +102,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { createHistory } from "@/lib/json-canvas-history"
 import { canvasNodeTypes, CanvasUiContext, type CanvasUi } from "@/components/docs/canvas/canvas-nodes"
+import { DocsLibraryButton } from "@/components/docs/docs-library-button"
 
 interface CanvasDocEditorProps {
   doc: { id: string; title: string; content: string | null; icon: string | null; revision?: string | null }
@@ -673,6 +674,7 @@ function CanvasEditorBody({
       </div>
 
       <div className="flex items-center gap-2 px-4 pb-2 sm:px-8">
+        <DocsLibraryButton />
         <input
           disabled={isRestoring}
           type="text"

@@ -50,6 +50,7 @@ import {
 import { createDocEditorExtensions } from "@/components/docs/doc-editor-extensions";
 import { resolveCommentAnchor } from "@/lib/comment-anchor";
 import type { PanelPin } from "@/lib/panel-pin";
+import { DocsLibraryButton } from "@/components/docs/docs-library-button";
 
 interface DocEditorProps {
   initialCommentsPin?: PanelPin;
@@ -414,6 +415,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
       {/* Icon + title on a single row */}
       <div className="flex items-center gap-2 px-8 pb-2">
+        <DocsLibraryButton />
         {/* Icon picker */}
         <div className="relative shrink-0">
           <button

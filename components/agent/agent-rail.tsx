@@ -10,7 +10,8 @@ import {
 } from "react"
 import type { CSSProperties, KeyboardEvent } from "react"
 import { useRouter } from "next/navigation"
-import { Maximize2, MessagesSquare, Plus, Sparkles, X } from "lucide-react"
+import { BookOpen, Check, ChevronDown, Library, Maximize2, MessagesSquare, Plus, Sparkles, X } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -27,7 +28,21 @@ import {
 } from "@/components/panels/panel-resize-handle"
 import { usePanelContext } from "@/components/panels/panel-context"
 import { AgentChat } from "@/components/agent/agent-chat"
+import { DocsPanel } from "@/components/agent/docs-panel"
+import { RailLibraryPane } from "@/components/agent/rail-library-pane"
 import { useAgentRail } from "@/components/agent/agent-rail-context"
+import type { RailView } from "@/components/agent/agent-rail-context"
+
+/**
+ * Everything the rail can show, in menu order. Adding a view is: extend
+ * `RailView` in agent-rail-context.tsx, add a row here, and add its pane below.
+ * The header menu, title, icon and aria-label all read from this table.
+ */
+const VIEWS: { id: RailView; label: string; description: string; Icon: LucideIcon }[] = [
+  { id: "agent", label: "Agent", description: "Ask about your workspace", Icon: Sparkles },
+  { id: "help", label: "Help", description: "Search the user guide", Icon: BookOpen },
+  { id: "library", label: "Library", description: "Docs, diagrams and artifacts", Icon: Library },
+]
 
 /**
  * The agent chat, docked as a column to the left of main content.
@@ -198,6 +213,10 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
     selectConversation,
     width,
     commitWidth,
+    view,
+    setView,
+    agentSeed,
+    clearAgentSeed,
   } = useAgentRail()
   // Only to know how much width the detail panel is currently claiming as an
   // in-flow column; the rail never reads or changes its contents. See
@@ -205,6 +224,9 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
   const { detailPanelDock } = usePanelContext()
   const router = useRouter()
   const railRef = useRef<HTMLElement | null>(null)
+  const viewTriggerId = useId()
+  const activeView = VIEWS.find((v) => v.id === view) ?? VIEWS[0]
+  const [orgSlug = "", workspaceSlug = ""] = basePath.split("/").filter(Boolean)
 
   const [threads, setThreads] = useState<RailThread[]>([])
   // Stored *with* the id it was loaded for, and read back through that id
@@ -402,7 +424,7 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
       ref={railRef}
       data-slot="agent-rail"
       data-mode={docked ? "docked" : "overlay"}
-      aria-label="Agent"
+      aria-label={activeView.label}
       onKeyDown={handleKeyDown}
       className={cn(
         "flex min-h-0 flex-col overflow-hidden bg-surface-panel print:hidden",
@@ -434,11 +456,39 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
       )}
 
       <div className="flex shrink-0 items-center gap-1 border-b border-border-default px-3 py-2">
-        <Sparkles className="size-4 shrink-0 text-text-subtle" aria-hidden="true" />
-        <h2 className="mr-auto truncate text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Agent
-        </h2>
+        {/* The view switcher. The title is the trigger, so the rail reads as
+            "Agent" by default and grows new views without growing new chrome. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                id={viewTriggerId}
+                aria-label={`Rail view: ${activeView.label}`}
+                className="-ml-1 mr-auto min-w-0 gap-1.5 px-1.5 text-sm font-semibold uppercase tracking-wider text-muted-foreground"
+              />
+            }
+          >
+            <activeView.Icon className="size-4 shrink-0 text-text-subtle" aria-hidden="true" />
+            <span className="truncate">{activeView.label}</span>
+            <ChevronDown className="size-3 shrink-0 text-text-subtle" aria-hidden="true" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-60">
+            {VIEWS.map(({ id, label, description, Icon }) => (
+              <DropdownMenuItem key={id} onClick={() => setView(id)} className="items-start gap-2">
+                <Icon className="mt-0.5 size-4 shrink-0 text-text-subtle" aria-hidden="true" />
+                <span className="min-w-0 flex-1">
+                  <span className={cn("block text-sm", id === view && "font-semibold")}>{label}</span>
+                  <span className="block text-xs text-text-subtle">{description}</span>
+                </span>
+                {id === view && <Check className="mt-0.5 size-4 shrink-0 text-primary" aria-label="Current view" />}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
+        {view === "agent" && (<>
         <Button
           variant="ghost"
           size="icon-sm"
@@ -499,6 +549,7 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
             Open in full page is available when the response finishes.
           </span>
         )}
+        </>)}
 
         <Button
           variant="ghost"
@@ -511,7 +562,17 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
         </Button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col">
+      {/* Every view stays mounted and the inactive ones are hidden: unmounting
+          AgentChat aborts a streaming turn, and keeping the others alive
+          preserves the open article, the search and the library scroll
+          across switches. */}
+      <div
+        role="region"
+        id="agent-rail-pane-agent"
+        aria-labelledby={viewTriggerId}
+        hidden={view !== "agent"}
+        className={cn("min-h-0 flex-1 flex-col", view === "agent" ? "flex" : "hidden")}
+      >
         <AgentChat
           variant="rail"
           workspaceId={workspaceId}
@@ -522,7 +583,29 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
           userInitials={userInitials}
           onConversationCreated={handleConversationCreated}
           onStreamingChange={setStreaming}
+          composerSeed={agentSeed}
+          onComposerSeedApplied={clearAgentSeed}
         />
+      </div>
+
+      <div
+        role="region"
+        id="agent-rail-pane-help"
+        aria-labelledby={viewTriggerId}
+        hidden={view !== "help"}
+        className={cn("min-h-0 flex-1 flex-col", view === "help" ? "flex" : "hidden")}
+      >
+        <DocsPanel />
+      </div>
+
+      <div
+        role="region"
+        id="agent-rail-pane-library"
+        aria-labelledby={viewTriggerId}
+        hidden={view !== "library"}
+        className={cn("min-h-0 flex-1 flex-col", view === "library" ? "flex" : "hidden")}
+      >
+        <RailLibraryPane orgSlug={orgSlug} workspaceSlug={workspaceSlug} active={view === "library"} />
       </div>
     </aside>
   )

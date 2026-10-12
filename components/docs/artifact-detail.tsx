@@ -16,6 +16,7 @@ import { MarkdownContent } from "@/components/markdown-content"
 import { Discussion } from "@/components/comments/discussion"
 import { DocPanelShell } from "./doc-panel-shell"
 import type { PanelPin } from "@/lib/panel-pin"
+import { DocsLibraryButton } from "@/components/docs/docs-library-button"
 import type { ArtifactThumbnailDto } from "@/lib/artifacts"
 
 type ArtifactDetailProps = {
@@ -58,6 +59,7 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
     {/* Standard top bar (same pattern as the doc editor toolbar): context on the left, every action on the right. Labels collapse to icons when the column is narrow. */}
     <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border-default bg-surface-panel/90 px-4 py-1.5 backdrop-blur-sm @2xl:px-8">
       <div className="flex min-w-0 items-center gap-2">
+        <DocsLibraryButton />
         <span className="truncate text-xs font-medium uppercase tracking-wide text-text-subtle">{artifactTypeLabel}</span>
       </div>
       <div className="flex shrink-0 items-center gap-2">

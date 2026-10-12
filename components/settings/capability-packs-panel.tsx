@@ -1,11 +1,12 @@
 "use client"
 
-import { useId, useState, useTransition } from "react"
+import { useEffect, useId, useState, useTransition } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { installAgenticPmCapabilityPack, installWorkspaceCapabilityPack, updateWorkspaceCapabilityPack } from "@/app/[orgSlug]/[workspaceSlug]/settings/capability-pack-actions"
+import { checkAgenticPmPackUpdate, installAgenticPmCapabilityPack, installWorkspaceCapabilityPack, updateAgenticPmCapabilityPack, updateWorkspaceCapabilityPack } from "@/app/[orgSlug]/[workspaceSlug]/settings/capability-pack-actions"
 import { isAgenticPmPack } from "@/lib/capability-pack-curated"
+import type { PackUpdateStatus } from "@/lib/capability-pack-update"
 
 export type CapabilityPackSettingsRow = { packId: string; sourceRepository: string; sourcePath: string; displayName: string; enabled: boolean; selectedVersionId: string; enabledSkillIds: string[]; versions: Array<{ id: string; version: string; commit: string; digest: string; skills: Array<{ id: string; enabledByDefault?: boolean }> }> }
 
@@ -18,6 +19,22 @@ export function CapabilityPacksPanel({ orgSlug, workspaceSlug, initialPacks }: {
   const advancedId = useId()
   const curatedInstalled = installed || initialPacks.some(isAgenticPmPack)
   const [pending, startTransition] = useTransition()
+  // Keyed on the selected version so the check re-runs after an update (the server
+  // action revalidates the page, which swaps in the new selectedVersionId).
+  const curatedRow = initialPacks.find(isAgenticPmPack)
+  const curatedVersionId = curatedRow?.selectedVersionId
+  const [checked, setChecked] = useState<{ versionId: string; status: PackUpdateStatus | { error: string } } | null>(null)
+  // A result for a previous version is ignored, so a stale "Update available" never flashes after updating.
+  const updateStatus = checked && checked.versionId === curatedVersionId ? checked.status : null
+  const [updating, setUpdating] = useState(false)
+  useEffect(() => {
+    if (!curatedVersionId) return
+    let cancelled = false
+    checkAgenticPmPackUpdate(orgSlug, workspaceSlug)
+      .then((status) => { if (!cancelled) setChecked({ versionId: curatedVersionId, status }) })
+      .catch(() => { if (!cancelled) setChecked({ versionId: curatedVersionId, status: { error: "Unable to check for Agentic PM pack updates." } }) })
+    return () => { cancelled = true }
+  }, [orgSlug, workspaceSlug, curatedVersionId])
   const run = (work: () => Promise<unknown>) => startTransition(async () => { setError(null); try { const result = await work(); if (result && typeof result === "object" && "error" in result && typeof result.error === "string") setError(result.error) } catch (cause) { setError(cause instanceof Error ? cause.message : "Capability pack operation failed") } })
   return <div className="space-y-6">
     <div className="space-y-3 rounded-lg border border-border-default p-4">
@@ -32,6 +49,16 @@ export function CapabilityPacksPanel({ orgSlug, workspaceSlug, initialPacks }: {
         } finally { setInstallingCurated(false) }
       })}>{curatedInstalled ? "Agentic PM pack installed" : installingCurated ? "Installing…" : "Install Agentic PM pack"}</Button>
       {curatedInstalled && <p role="status" className="text-sm text-text-secondary">Installed. Your version and skill choices are preserved; manage them below.</p>}
+      {curatedRow && updateStatus && "error" in updateStatus && <p className="text-sm text-text-muted">{updateStatus.error}</p>}
+      {curatedRow && updateStatus && !("error" in updateStatus) && (updateStatus.updateAvailable
+        ? <div className="flex flex-wrap items-center gap-3">
+            <p role="status" className="text-sm text-text-secondary">Update available: <code>{updateStatus.installedCommit.slice(0, 8)}</code> → <code>{updateStatus.latestCommit.slice(0, 8)}</code>. Your skill choices carry over; the current version stays installed for rollback.</p>
+            <Button size="sm" disabled={pending || updating} onClick={() => run(async () => {
+              setUpdating(true)
+              try { return await updateAgenticPmCapabilityPack(orgSlug, workspaceSlug) } finally { setUpdating(false) }
+            })}>{updating ? "Updating…" : "Update to latest"}</Button>
+          </div>
+        : <p role="status" className="text-sm text-text-muted">Agentic PM pack is up to date (<code>{updateStatus.installedCommit.slice(0, 8)}</code>).</p>)}
       <Button variant="ghost" aria-expanded={advanced} aria-controls={advancedId} onClick={() => setAdvanced(!advanced)}>Advanced</Button>
       {advanced && <div id={advancedId} className="space-y-3">
       <p className="text-sm text-text-secondary">Install a declarative skills-only pack from public GitHub at an immutable commit.</p>
