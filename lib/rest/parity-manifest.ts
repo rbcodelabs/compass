@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 196,
-  sortedToolNamesSha256: "39dae75b9523329425ce7a8eb8b390d6a3592921eeff18b47cdd23cba9d04395",
+  toolCount: 197,
+  sortedToolNamesSha256: "b446e608fa816274d1461be0fe70f2f57c09ecd67d13481684fe700382e077f2",
 } as const
 
 export type McpRestParityDisposition =
@@ -35,6 +35,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   assign_squad: composition(["updateOpportunity", "updateExperiment", "updateRoadmapItem", "updateObjective", "updateTask"], "Assign through the PATCH operation for the selected resource type; no polymorphic RPC endpoint is needed."),
   capture_screenshot: excluded("execution-boundary", "Read the artifact resource; its stored thumbnail is captured server-side.", "Screenshot capture boots a Vercel Sandbox and renders a stored artifact revision in headless Chromium; that is an execution boundary REST must not expose as an ordinary resource mutation."),
   build_canvas_tree: composition(["getDoc", "updateDoc"], "Server-side OST-to-Canvas layout is an MCP convenience; over REST read the canvas, merge the tree client-side and write it back with updateDoc and expectedRevision."),
+  capture_canvas: excluded("execution-boundary", "Read the canvas doc through getDoc; the JSON Canvas content is the source of truth.", "Rendering a canvas boots a Vercel Sandbox and rasterizes it in headless Chromium; that is an execution boundary REST must not expose as an ordinary resource read, and the result is an image, not a REST resource."),
   edit_canvas: composition(["getDoc", "updateDoc"], "REST clients read the canvas with getDoc, apply node/edge changes locally and write the full JSON Canvas with updateDoc and expectedRevision."),
   edit_doc: composition(["getDoc", "updateDoc"], "REST clients read the body with getDoc, apply the text change locally and write it with updateDoc and expectedRevision."),
   close_decision_no_action: excluded("human-governance", "Read the decision request and leave it pending for an authorized reviewer.", "No-action closure is a human judgment boundary rather than resource administration."),

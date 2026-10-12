@@ -84,6 +84,7 @@ import {
   unlinkArtifact,
   updateArtifact,
 } from "@/lib/artifact-tool-handlers"
+import { captureCanvas } from "@/lib/canvas-capture-tool-handlers"
 import { createFeedbackSourceTool, updateFeedbackSourceTool } from "@/lib/feedback-source-tool-handlers"
 import {
   createDocVersion,
@@ -3216,6 +3217,30 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       getDoc
+    )
+
+    register(
+      "capture_canvas",
+      {
+        title: "Capture Canvas Image",
+        description:
+          "Returns a PNG picture of a canvas doc (docType CANVAS) so you can see its layout. The canvas JSON is rendered server-side to a self-contained page and photographed in a sandboxed headless browser; nothing is stored. " +
+          "Default is a fit-all overview. Pass `nodeId` (a node or group id) to zoom on that element with `padding` canvas units of context, or `region` {x,y,width,height} in canvas coordinates to look at an area; pass at most one of the two. " +
+          "Shows node text and colours, groups with labels, edges with arrows and labels, and Compass object cards with their live title, status and facts (cards you cannot see render as unavailable). " +
+          "Read the structure with get_doc; use this tool to check how it looks. Output is capped at 2400 px per side; `scale` (0.05-4) overrides the automatic fit.",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the canvas doc"),
+          nodeId: z.string().min(1).max(200).optional().describe("Node or group id to focus on"),
+          padding: z.number().min(0).max(5000).optional().describe("Canvas units of context around nodeId (default 80)"),
+          region: z
+            .object({ x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive() })
+            .optional()
+            .describe("Area to show, in canvas coordinates"),
+          scale: z.number().min(0.05).max(4).optional().describe("Pixels per canvas unit; default fits the view to about 1600 px"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      captureCanvas
     )
 
     register(
