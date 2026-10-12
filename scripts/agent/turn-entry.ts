@@ -1,16 +1,30 @@
 // Agent turn entry script — runs INSIDE a Vercel Sandbox booted from the golden
 // snapshot (deps pre-installed; see lib/agent-sandbox.ts). The host route
 // (app/api/agent/turn/route.ts) writes this file into the sandbox and runs it
-// per turn, streaming its stdout back to the browser.
+// per turn.
 //
 // It points the Claude Agent SDK at Compass's OWN /api/mcp catalog over HTTP,
 // authenticated with an ephemeral per-user `cmp_` key — so the agent acts AS
 // the user and Phase 1's per-user authorization scopes every tool. No custom
 // tools, no DB access: the sandbox only makes authenticated MCP calls.
 //
+// ── Two transports, on purpose ──────────────────────────────────────────────
+//
+// stdout is kept exactly as it was: one prefixed JSON object per line. It is
+// what the synchronous fallback path drains, and it is the only thing available
+// when debugging a sandbox by hand.
+//
+// Additionally, when AGENT_RUN_ID + AGENT_RUN_TOKEN are present, every event is
+// POSTed back to Compass in batches with a monotonic `seq`, plus a periodic
+// heartbeat. That is what lets the run outlive the request that started it: the
+// database, not the response body, becomes the durable seam. With those two vars
+// absent this file behaves exactly as it did before, which is what makes the
+// pre-migration fallback possible.
+//
 // Required env (passed at runCommand time, never baked into the snapshot):
 //   ANTHROPIC_API_KEY          Claude API key for the Agent SDK
-//   MCP_BASE_URL               Compass origin to call back into (/api/mcp)
+//   MCP_BASE_URL               Compass origin to call back into (/api/mcp, and
+//                              the run callbacks below)
 //   MCP_TOKEN                  ephemeral per-user cmp_ key (scopes the agent)
 //   AGENT_PROMPT               the assembled prompt (history + user turn)
 //   MCP_BYPASS_SECRET          (optional) x-vercel-protection-bypass for
@@ -20,6 +34,13 @@
 //                              (ADR-0018). Slugs only: each is reached through a
 //                              Compass gateway path with the turn credential
 //                              above, so no provider token is passed in here.
+//   AGENT_RUN_ID               (optional) durable run this turn belongs to
+//   AGENT_RUN_TOKEN            (optional) that run's worker bearer token — a
+//                              separate credential from MCP_TOKEN on purpose,
+//                              so forging a transcript and acting as the user
+//                              are not the same capability
+//   AGENT_RUN_HEARTBEAT_MS     (optional) heartbeat interval; default 15000
+//   AGENT_MAX_TURNS            (optional) per-run turn cap; default 30
 //
 // Output contract (one JSON object per line, prefixed):
 //   AGENT_EVENT <json>   — each SDK stream message (assistant/tool/system)
@@ -35,6 +56,8 @@ const AGENT_SYSTEM_PROMPT = process.env.AGENT_SYSTEM_PROMPT
 const AGENT_PACK_CONFIG = process.env.AGENT_PACK_CONFIG
 const MCP_BYPASS_SECRET = process.env.MCP_BYPASS_SECRET
 const AGENT_MCP_CONNECTORS = process.env.AGENT_MCP_CONNECTORS
+const AGENT_RUN_ID = process.env.AGENT_RUN_ID
+const AGENT_RUN_TOKEN = process.env.AGENT_RUN_TOKEN
 
 function emit(kind: "AGENT_EVENT" | "AGENT_RESULT" | "AGENT_ERROR", payload: unknown): void {
   // Single line so the host can split stdout on newlines and forward as SSE.
@@ -47,13 +70,201 @@ function note(message: string): void {
 }
 
 function requireEnv(name: string, value: string | undefined): string {
-  if (!value) {
-    emit("AGENT_ERROR", { message: `Missing required env var: ${name}` })
-    process.exit(1)
-  }
+  if (!value) throw new Error(`Missing required env var: ${name}`)
   return value
 }
 
+
+// ── Run reporter ────────────────────────────────────────────────────────────
+
+type RunEventType = "status" | "agent" | "result" | "error" | "heartbeat"
+type OutboundEvent = { seq: number; type: RunEventType; payload: unknown }
+
+/** Server caps a batch at 32 events / 256 KiB; stay comfortably inside both. */
+const FLUSH_EVENT_COUNT = 32
+const FLUSH_INTERVAL_MS = 500
+const MAX_BATCH_BYTES = 200 * 1024
+/**
+ * A single event larger than this is replaced by a marker rather than dropped or
+ * allowed to blow the batch cap. Generalizes the old 1 MB stdout transport guard:
+ * one pathological tool result should cost its own payload, not the transcript.
+ */
+const MAX_EVENT_BYTES = 64 * 1024
+/** Bound on unsent events when Compass is unreachable. Beyond this the oldest go. */
+const MAX_BACKLOG = 256
+const DEFAULT_HEARTBEAT_MS = 15_000
+
+class RunReporter {
+  private queue: OutboundEvent[] = []
+  private nextSeq = 1
+  private flushing: Promise<void> = Promise.resolve()
+  private timer: NodeJS.Timeout | undefined
+  private heartbeat: NodeJS.Timeout | undefined
+  private dropped = 0
+  /** Set when the server reports this run already terminal — the agent should stop. */
+  canceledStatus: string | undefined
+
+  private readonly eventsUrl: string
+  private readonly heartbeatUrl: string
+  private readonly headers: Record<string, string>
+  private readonly heartbeatMs: number
+
+  // Fields are declared and assigned explicitly rather than via TypeScript
+  // parameter properties (`constructor(private readonly x: string)`). This file is
+  // executed as `node entry.ts` inside the sandbox, where Node only *erases*
+  // types; parameter properties need real codegen, so they abort the process at
+  // load with ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX before a single heartbeat goes
+  // out. Keep every construct in this file strip-only safe — see the guard in
+  // __tests__/agent-entry-scripts.test.ts.
+  constructor(
+    eventsUrl: string,
+    heartbeatUrl: string,
+    headers: Record<string, string>,
+    heartbeatMs: number,
+  ) {
+    this.eventsUrl = eventsUrl
+    this.heartbeatUrl = heartbeatUrl
+    this.headers = headers
+    this.heartbeatMs = heartbeatMs
+  }
+
+  start() {
+    this.heartbeat = setInterval(() => { void this.sendHeartbeat() }, this.heartbeatMs)
+    // The interval must never be the reason the process stays alive.
+    this.heartbeat.unref?.()
+  }
+
+  enqueue(type: RunEventType, payload: unknown) {
+    let serialized = payload
+    const bytes = Buffer.byteLength(JSON.stringify(payload ?? null), "utf8")
+    if (bytes > MAX_EVENT_BYTES) serialized = { truncated: true, type, bytes }
+    this.queue.push({ seq: this.nextSeq++, type, payload: serialized })
+    if (this.queue.length > MAX_BACKLOG) {
+      // Drop from the head: the tail is what a watching user is reading, and a
+      // backlog this deep means Compass has been unreachable for a while.
+      this.dropped += this.queue.length - MAX_BACKLOG
+      this.queue = this.queue.slice(this.queue.length - MAX_BACKLOG)
+    }
+    if (this.queue.length >= FLUSH_EVENT_COUNT) {
+      void this.flush()
+      return
+    }
+    if (!this.timer) {
+      this.timer = setTimeout(() => { void this.flush() }, FLUSH_INTERVAL_MS)
+      this.timer.unref?.()
+    }
+  }
+
+  /** Serialized so two flushes cannot interleave and reorder sequences. */
+  flush(attempts = 2): Promise<void> {
+    this.flushing = this.flushing.then(() => this.drain(attempts)).catch(() => {})
+    return this.flushing
+  }
+
+  private takeBatch(): OutboundEvent[] {
+    const batch: OutboundEvent[] = []
+    let bytes = 0
+    while (this.queue.length > 0 && batch.length < FLUSH_EVENT_COUNT) {
+      const next = this.queue[0]!
+      const size = Buffer.byteLength(JSON.stringify(next), "utf8")
+      if (batch.length > 0 && bytes + size > MAX_BATCH_BYTES) break
+      batch.push(next)
+      bytes += size
+      this.queue.shift()
+    }
+    return batch
+  }
+
+  private async drain(attempts: number) {
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = undefined
+    }
+    while (this.queue.length > 0) {
+      const batch = this.takeBatch()
+      if (batch.length === 0) break
+      const delivered = await this.post(this.eventsUrl, { events: batch }, attempts)
+      if (!delivered) {
+        // Put them back at the head so ordering survives a transient failure.
+        this.queue = [...batch, ...this.queue]
+        return
+      }
+    }
+    if (this.dropped > 0) {
+      note(`dropped ${this.dropped} event(s) after the backlog cap was reached`)
+      this.dropped = 0
+    }
+  }
+
+  private async post(url: string, body: unknown, attempts: number): Promise<boolean> {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { ...this.headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        })
+        if (response.ok) {
+          const data = await response.json().catch(() => null) as { status?: string } | null
+          // 4xx other than 409 means retrying cannot help: a revoked token, a
+          // finished run, or a batch the server will never accept.
+          if (data?.status && data.status !== "QUEUED" && data.status !== "RUNNING") {
+            this.canceledStatus = data.status
+          }
+          return true
+        }
+        if (response.status === 401 || response.status === 403 || response.status === 404) {
+          this.canceledStatus = `HTTP_${response.status}`
+          note(`callback rejected with ${response.status}; giving up on this channel`)
+          return false
+        }
+        if (response.status >= 400 && response.status < 500 && response.status !== 409 && response.status !== 429) {
+          note(`callback refused with ${response.status}; dropping batch`)
+          return true
+        }
+        note(`callback attempt ${attempt} failed with ${response.status}`)
+      } catch (error) {
+        note(`callback attempt ${attempt} threw: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 250 * attempt))
+    }
+    return false
+  }
+
+  private async sendHeartbeat() {
+    try {
+      const response = await fetch(this.heartbeatUrl, { method: "POST", headers: this.headers })
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 404) this.canceledStatus = `HTTP_${response.status}`
+        return
+      }
+      const data = await response.json().catch(() => null) as { status?: string } | null
+      if (data?.status && data.status !== "QUEUED" && data.status !== "RUNNING") this.canceledStatus = data.status
+    } catch {
+      // A missed heartbeat is not itself fatal; the sweeper's margin covers
+      // several of them, and event batches also refresh the heartbeat.
+    }
+  }
+
+  /**
+   * Deliver the terminal event and stop.
+   *
+   * Retried harder than an ordinary batch: losing this one means the run sits
+   * `RUNNING` until the sweeper marks it `INTERRUPTED`, which is a materially
+   * worse outcome for the user than a missing intermediate event.
+   */
+  async finish(type: "result" | "error", payload: unknown) {
+    if (this.heartbeat) clearInterval(this.heartbeat)
+    if (this.canceledStatus) {
+      note(`run already terminal (${this.canceledStatus}); not reporting ${type}`)
+      return
+    }
+    this.enqueue(type, payload)
+    await this.flush(5)
+  }
+}
+
+let reporter: RunReporter | undefined
 
 // ── Outbound MCP connectors (ADR-0018) ──────────────────────────────────────
 
@@ -128,6 +339,20 @@ async function main(): Promise<void> {
   const packConfig = AGENT_PACK_CONFIG
     ? JSON.parse(AGENT_PACK_CONFIG) as { pluginPaths: string[]; skillIds: string[] }
     : { pluginPaths: [], skillIds: [] }
+
+  if (AGENT_RUN_ID && AGENT_RUN_TOKEN) {
+    const callbackHeaders: Record<string, string> = { Authorization: `Bearer ${AGENT_RUN_TOKEN}` }
+    if (MCP_BYPASS_SECRET) callbackHeaders["x-vercel-protection-bypass"] = MCP_BYPASS_SECRET
+    const heartbeatMs = Number(process.env.AGENT_RUN_HEARTBEAT_MS) || DEFAULT_HEARTBEAT_MS
+    reporter = new RunReporter(
+      new URL(`/api/internal/agent/runs/${AGENT_RUN_ID}/events`, baseUrl).toString(),
+      new URL(`/api/internal/agent/runs/${AGENT_RUN_ID}/heartbeat`, baseUrl).toString(),
+      callbackHeaders,
+      heartbeatMs,
+    )
+    reporter.start()
+    reporter.enqueue("status", { phase: "running" })
+  }
 
   // Compass's own catalog plus one HTTP entry per connected provider. Each
   // connector points at a Compass gateway path, not the provider — the sandbox
@@ -205,10 +430,21 @@ async function main(): Promise<void> {
       disallowedTools: ["mcp__compass__delete_assumption", "mcp__compass__delete_solution_comment"],
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      maxTurns: 30,
+      maxTurns: Number(process.env.AGENT_MAX_TURNS) || 30,
     },
   })) {
     emit("AGENT_EVENT", { type: message.type, message })
+    reporter?.enqueue("agent", { type: message.type, message })
+
+    // Canceled or swept out from under us: stop spending model tokens on a
+    // result nobody will accept. The server is already terminal, so there is
+    // nothing to report back.
+    if (reporter?.canceledStatus) {
+      note(`stopping early: run is ${reporter.canceledStatus}`)
+      emit("AGENT_ERROR", { message: `run terminated server-side (${reporter.canceledStatus})` })
+      process.exitCode = 1
+      return
+    }
 
     if (message.type === "result") {
       if (message.subtype === "success") {
@@ -221,20 +457,23 @@ async function main(): Promise<void> {
           usage: message.usage,
         }
       } else {
-        emit("AGENT_ERROR", { message: `query() ended with subtype: ${message.subtype}` })
-        process.exit(1)
+        throw new Error(`query() ended with subtype: ${message.subtype}`)
       }
     }
   }
 
-  if (finalText === undefined) {
-    emit("AGENT_ERROR", { message: "query() ended without a success result" })
-    process.exit(1)
-  }
+  if (finalText === undefined) throw new Error("query() ended without a success result")
   emit("AGENT_RESULT", { text: finalText, usage })
+  await reporter?.finish("result", { text: finalText, usage })
 }
 
-main().catch((err: unknown) => {
-  emit("AGENT_ERROR", { message: err instanceof Error ? err.message : String(err) })
+main().catch(async (err: unknown) => {
+  const message = err instanceof Error ? err.message : String(err)
+  emit("AGENT_ERROR", { message })
+  try {
+    await reporter?.finish("error", { message })
+  } catch {
+    /* the sweeper is the backstop when even the terminal report cannot land */
+  }
   process.exit(1)
 })
