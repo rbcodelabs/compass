@@ -167,7 +167,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Durable background agent runs: two additive CREATE TABLEs (agent_runs, agent_run_events)
   // and six ASYNC indexes, two of them unique (worker-token lookup, (run_id, seq) idempotency).
   // No ALTER, no backfill, no foreign keys. Digest recorded from the shipped SQL; please review it.
-  "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301"
+  "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301",
+  // v0 chat Artifacts: two nullable ADD COLUMNs (artifacts.v0_chat_id, artifact_revisions.v0_version_id),
+  // IF NOT EXISTS, no DEFAULT, no backfill, no index. Digest recorded from the shipped SQL; please review it.
+  "090_v0_chat_artifacts": "1a2098fa1c19b8257200cf0b00c6d7b9da763d9a13afbf7b1486b95ed3c297e3"
 };
 
 /**

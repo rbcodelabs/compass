@@ -549,6 +549,10 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "069_background_agent_runs",
     filePath: path.join(process.cwd(), "prisma/migrations/069_background_agent_runs/migration.sql"),
   },
+  {
+    name: "090_v0_chat_artifacts",
+    filePath: path.join(process.cwd(), "prisma/migrations/090_v0_chat_artifacts/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));
@@ -2075,6 +2079,10 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === OBJECTIVE_OPTIONAL_CYCLE_MIGRATION) await assertObjectiveCycleIdNullable(client, schema)
       if (migration.name === "077_artifact_screenshots") await assertArtifactScreenshotsMigration(client, schema)
       if (migration.name === "069_background_agent_runs") await assertBackgroundAgentRunsMigration(client, schema)
+      if (migration.name === "090_v0_chat_artifacts") {
+        const columns = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND ((table_name='artifacts' AND column_name='v0_chat_id') OR (table_name='artifact_revisions' AND column_name='v0_version_id'))", [schema])
+        if (columns.rows[0]?.count !== "2") throw new Error("Migration 090 postcondition failed: v0 artifact columns missing")
+      }
 
       // Only this distinct attempt becomes a successful receipt. A failed
       // attempt remains unfinished as forensic evidence and is never relabeled.

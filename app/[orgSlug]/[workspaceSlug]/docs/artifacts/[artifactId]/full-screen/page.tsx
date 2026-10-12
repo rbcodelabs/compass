@@ -6,6 +6,7 @@ import { toThumbnailDto } from "@/lib/artifacts"
 import { buildArtifactPresentation, type ArtifactSlideDto } from "@/lib/artifact-slides"
 import { resolveWorkspaceAccess } from "@/lib/workspace-context"
 import { ArtifactViewer } from "@/components/docs/artifact-viewer"
+import { livePreviewSrcFor } from "@/lib/v0-preview-frame"
 
 /** `?slide=N` is one-based, as shown in the UI; the viewer wants zero-based. */
 function initialSlideFromParam(value: string | string[] | undefined): number {
@@ -38,6 +39,7 @@ export default async function ArtifactFullScreenPage({ params, searchParams }: {
     const bytes = await getArtifactStorage().get(artifact.currentRevision.blobPathname)
     if (bytes) ({ html, slides } = buildArtifactPresentation(new TextDecoder().decode(bytes), artifact.kind))
   }
+  const livePreviewSrc = artifact.sourceType === "V0_CHAT" && artifact.status === "ACTIVE" && artifact.v0ChatId ? await livePreviewSrcFor(session.user.id, artifact.v0ChatId) : null
   const basePath = `/${orgSlug}/${workspaceSlug}/docs`
   return (
     // fixed + inset-0 lifts the viewer out of the workspace shell (sidebar/header)
@@ -50,6 +52,7 @@ export default async function ArtifactFullScreenPage({ params, searchParams }: {
         initialSlideIndex={initialSlideFromParam((await searchParams).slide)}
         externalUrl={artifact.currentRevision?.externalUrl}
         thumbnail={artifact.currentRevision ? toThumbnailDto(artifact.id, artifact.currentRevision) : null}
+        livePreviewSrc={livePreviewSrc}
         artifactId={artifact.id}
         backHref={`${basePath}/artifacts/${artifact.id}`}
         fill
