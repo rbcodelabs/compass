@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 190,
-  sortedToolNamesSha256: "1f3de9ed543c3ed778cdb6e521aea08d1e595cc7e08b1dd2edaa6ff0d3b9e7d4",
+  toolCount: 192,
+  sortedToolNamesSha256: "8bd085507d732a069d843a7b43e5beea3ce86df5d41e7bb85636f7ae20da86a2",
 } as const
 
 export type McpRestParityDisposition =
@@ -33,6 +33,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   archive_research_study: direct("archiveResearchStudy"),
   archive_scoring_model: direct("archiveScoringModel"),
   assign_squad: composition(["updateOpportunity", "updateExperiment", "updateRoadmapItem", "updateObjective", "updateTask"], "Assign through the PATCH operation for the selected resource type; no polymorphic RPC endpoint is needed."),
+  capture_screenshot: excluded("execution-boundary", "Read the artifact resource; its stored thumbnail is captured server-side.", "Screenshot capture boots a Vercel Sandbox and renders a stored artifact revision in headless Chromium; that is an execution boundary REST must not expose as an ordinary resource mutation."),
   close_decision_no_action: excluded("human-governance", "Read the decision request and leave it pending for an authorized reviewer.", "No-action closure is a human judgment boundary rather than resource administration."),
   close_research_study: direct("closeResearchStudy"),
   conclude_experiment: direct("concludeExperiment"),
@@ -147,6 +148,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   log_experiment_result: direct("createExperimentResult"),
   mark_read: direct("markNotificationsRead"),
   move_task_status: direct("updateTask"),
+  prepare_artifact_upload: excluded("transport-convenience", "Send the HTML in the createArtifact or updateArtifact request body.", "Direct upload exists only to keep a large document out of a model's context window when an MCP tool call would otherwise embed it twice; a REST client posts the file bytes itself, so the staged-upload step adds nothing."),
   prepare_doc_image_upload: direct("prepareDocImageUpload"),
   prepare_feedback_attachment_upload: direct("prepareFeedbackAttachmentUpload"),
   promote_feedback_to_roadmap: direct("promoteFeedbackToRoadmap"),

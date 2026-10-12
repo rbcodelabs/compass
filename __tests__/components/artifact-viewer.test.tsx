@@ -112,3 +112,126 @@ it("surfaces a stale-anchor count without rendering a pin for it", async () => {
   })
   expect(screen.getByText(/1 pinned comment could not be re-anchored/i)).toBeInTheDocument()
 })
+
+it("opens the full comment when a pin is clicked, and closes it again", async () => {
+  fetchMock.mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+    items: [{ id: "c1", authorName: "Dana", body: "Move this button above the fold.", elementAnchor: { elementSelector: "button.cta", elementFingerprint: { tag: "button" } } }],
+  }), { status: 200 })))
+  render(<ArtifactViewer {...props} />)
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+  act(() => {
+    latestProps.onAnchorsResolved?.({ c1: { status: "anchored", confidence: 1, geometry: { left: 10, top: 20, width: 80, height: 30 } } })
+  })
+  const pin = await screen.findByRole("button", { name: /Feedback from Dana/ })
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+
+  fireEvent.click(pin)
+  expect(screen.getByRole("dialog", { name: "Feedback from Dana" })).toHaveTextContent("Move this button above the fold.")
+
+  fireEvent.click(screen.getByRole("button", { name: "Close feedback" }))
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+})
+
+it("posts a threaded reply from the pin card and shows it in place", async () => {
+  fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      return Promise.resolve(new Response(JSON.stringify({ id: "r1", authorName: "Sam", body: "Done, moved it." }), { status: 201 }))
+    }
+    return Promise.resolve(new Response(JSON.stringify({
+      items: [{
+        id: "c1", authorName: "Dana", body: "Move this button above the fold.",
+        replies: [{ id: "r0", authorName: "Lee", body: "Agreed." }],
+        elementAnchor: { elementSelector: "button.cta", elementFingerprint: { tag: "button" } },
+      }],
+    }), { status: 200 }))
+  })
+  const onFeedbackPosted = vi.fn()
+  render(<ArtifactViewer {...props} onFeedbackPosted={onFeedbackPosted} />)
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+  act(() => {
+    latestProps.onAnchorsResolved?.({ c1: { status: "anchored", confidence: 1, geometry: { left: 10, top: 20, width: 80, height: 30 } } })
+  })
+  fireEvent.click(await screen.findByRole("button", { name: /Feedback from Dana/ }))
+  expect(screen.getByRole("dialog")).toHaveTextContent("Agreed.")
+
+  fireEvent.change(screen.getByRole("textbox", { name: "Reply to Dana" }), { target: { value: "Done, moved it." } })
+  fireEvent.click(screen.getByRole("button", { name: "Post reply" }))
+
+  await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent("Sam"))
+  const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!
+  expect(JSON.parse(post[1].body as string)).toEqual({ targetType: "ARTIFACT", targetId: "artifact-1", parentId: "c1", body: "Done, moved it." })
+  expect(screen.getByRole("textbox", { name: "Reply to Dana" })).toHaveValue("")
+  expect(onFeedbackPosted).toHaveBeenCalledTimes(1)
+})
+
+it("keeps the reply draft and shows the error when a reply is rejected", async () => {
+  fetchMock.mockImplementation((_url: string, init?: RequestInit) => init?.method === "POST"
+    ? Promise.resolve(new Response(JSON.stringify({ error: "Workspace membership required." }), { status: 403 }))
+    : Promise.resolve(new Response(JSON.stringify({
+      items: [{ id: "c1", authorName: "Dana", body: "Hi", elementAnchor: { elementSelector: "a", elementFingerprint: { tag: "a" } } }],
+    }), { status: 200 })))
+  render(<ArtifactViewer {...props} />)
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+  act(() => {
+    latestProps.onAnchorsResolved?.({ c1: { status: "anchored", confidence: 1, geometry: { left: 1, top: 1, width: 1, height: 1 } } })
+  })
+  fireEvent.click(await screen.findByRole("button", { name: /Feedback from Dana/ }))
+  fireEvent.change(screen.getByRole("textbox", { name: "Reply to Dana" }), { target: { value: "No access" } })
+  fireEvent.click(screen.getByRole("button", { name: "Post reply" }))
+  expect(await screen.findByRole("alert")).toHaveTextContent("Workspace membership required.")
+  expect(screen.getByRole("textbox", { name: "Reply to Dana" })).toHaveValue("No access")
+})
+
+function seedPin(item: Record<string, unknown>, patch: (init?: RequestInit) => Response | null) {
+  fetchMock.mockImplementation((_url: string, init?: RequestInit) => Promise.resolve(patch(init) ?? new Response(JSON.stringify({
+    items: [{ id: "c1", authorName: "Dana", body: "Move this.", elementAnchor: { elementSelector: "a", elementFingerprint: { tag: "a" } }, ...item }],
+  }), { status: 200 })))
+}
+async function openPin() {
+  render(<ArtifactViewer {...props} onFeedbackPosted={onPosted} />)
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+  act(() => {
+    latestProps.onAnchorsResolved?.({ c1: { status: "anchored", confidence: 1, geometry: { left: 10, top: 20, width: 80, height: 30 } } })
+  })
+  fireEvent.click(await screen.findByRole("button", { name: /Feedback from Dana/ }))
+}
+const onPosted = vi.fn()
+
+it("resolves a pinned thread from the card, marks the pin and the card, then reopens it", async () => {
+  onPosted.mockReset()
+  seedPin({ status: "OPEN", canModerate: true }, (init) => init?.method === "PATCH"
+    ? new Response(JSON.stringify({ id: "c1", status: JSON.parse(init.body as string).action === "resolve" ? "RESOLVED" : "OPEN" }), { status: 200 })
+    : null)
+  await openPin()
+
+  fireEvent.click(screen.getByRole("button", { name: "Resolve thread by Dana" }))
+  expect(await screen.findByRole("button", { name: "Reopen thread by Dana" })).toBeInTheDocument()
+  const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!
+  expect(patch[0]).toBe("/api/comments/c1")
+  expect(JSON.parse(patch[1].body as string)).toEqual({ action: "resolve" })
+  expect(screen.getByRole("dialog")).toHaveTextContent("Resolved")
+  expect(screen.getByRole("button", { name: /Feedback from Dana \(resolved\)/ })).toBeInTheDocument()
+  expect(onPosted).toHaveBeenCalledTimes(1)
+
+  fireEvent.click(screen.getByRole("button", { name: "Reopen thread by Dana" }))
+  expect(await screen.findByRole("button", { name: "Resolve thread by Dana" })).toBeInTheDocument()
+  expect(JSON.parse(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")[1][1].body as string)).toEqual({ action: "reopen" })
+  expect(screen.getByRole("dialog")).not.toHaveTextContent("Resolved")
+})
+
+it("hides Resolve when the viewer can't moderate and shows the error when it is rejected", async () => {
+  onPosted.mockReset()
+  seedPin({ status: "OPEN", canModerate: false }, () => null)
+  await openPin()
+  expect(screen.queryByRole("button", { name: /Resolve thread/ })).not.toBeInTheDocument()
+  cleanup()
+  fetchMock.mockClear()
+
+  seedPin({ status: "OPEN", canModerate: true }, (init) => init?.method === "PATCH"
+    ? new Response(JSON.stringify({ error: "Not found" }), { status: 404 })
+    : null)
+  await openPin()
+  fireEvent.click(screen.getByRole("button", { name: "Resolve thread by Dana" }))
+  expect(await screen.findByRole("alert")).toHaveTextContent("Not found")
+  expect(screen.getByRole("button", { name: "Resolve thread by Dana" })).toBeInTheDocument()
+})

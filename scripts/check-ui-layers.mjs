@@ -44,6 +44,7 @@ const LAYER_OWNERS = {
     "components/ui/select.tsx",
     "components/ui/combobox.tsx",
     "components/ui/dropdown-menu.tsx",
+    "components/ui/popover.tsx",
     "components/ui/context-menu.tsx",
     "components/ui/tooltip.tsx",
   ],

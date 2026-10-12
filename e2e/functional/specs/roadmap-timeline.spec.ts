@@ -20,7 +20,7 @@ test("dated and undated items support native zoom, date editing and Board roundt
   await page.getByRole("tab", { name: "Timeline", exact: true }).click();
   await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
   for (const zoom of ["Quarter", "Month"]) {
-    await page.getByRole("button", { name: "View options", exact: true }).click();
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
     await page.getByRole("menuitemradio", { name: zoom, exact: true }).click();
     await expect(page.getByRole("menuitemradio", { name: zoom, exact: true })).toHaveAttribute("aria-checked", "true");
     await page.keyboard.press("Escape");
@@ -34,7 +34,8 @@ test("dated and undated items support native zoom, date editing and Board roundt
   await dialog.getByLabel("End", { exact: true }).fill(end);
   await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
   await expect(dialog).not.toBeVisible();
-  await page.getByRole("button", { name: "Reload timeline" }).click();
+  await page.getByRole("button", { name: "More actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Reload timeline" }).click();
   await page.getByRole("button", { name: `Edit dates for ${prefix} undated`, exact: true }).click();
   await expect(dialog.getByLabel("Start", { exact: true })).toHaveValue(start);
   await expect(dialog.getByLabel("End", { exact: true })).toHaveValue(end);
