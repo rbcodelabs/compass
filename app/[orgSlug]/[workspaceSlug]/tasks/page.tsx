@@ -7,6 +7,7 @@ import { TaskBoard } from "@/components/tasks/task-board";
 import { TaskListView } from "@/components/tasks/task-list-view";
 import { TasksViewToggle } from "@/components/tasks/tasks-view-toggle";
 import { TasksFilters } from "@/components/tasks/tasks-filters";
+import { CreateTaskDialog } from "@/components/tasks/create-task-dialog";
 import type { TaskCardData } from "@/components/tasks/task-card";
 import type { SquadData, MemberData } from "@/lib/types";
 import { normalizeWorkspaceRole } from "@/lib/roles";
@@ -161,15 +162,23 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       title="Tasks"
       contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
       actions={(
-        <Suspense>
-          <TasksFilters
-            squads={squads}
+        <>
+          <Suspense>
+            <TasksViewToggle view={view} />
+            <TasksFilters
+              squads={squads}
+              members={members}
+              customFieldGroups={customFieldGroups}
+              activeCustomFieldId={customFieldFilter?.fieldId ?? null}
+            />
+          </Suspense>
+          <CreateTaskDialog
+            workspaceId={workspace.id}
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
             members={members}
-            customFieldGroups={customFieldGroups}
-            activeCustomFieldId={customFieldFilter?.fieldId ?? null}
           />
-          <TasksViewToggle view={view} />
-        </Suspense>
+        </>
       )}
     >
       {view === "list" ? (

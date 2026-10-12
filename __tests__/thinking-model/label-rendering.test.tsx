@@ -47,6 +47,13 @@ const cycle = {
   status: "ACTIVE" as const,
 }
 
+/** CycleCard takes a server-computed rollup, not a Prisma _count. A fixed timing keeps the render clock-independent. */
+const cycleWith = (row: typeof cycle, objectives: number) => ({
+  ...row,
+  rollup: { objectiveCount: objectives, keyResultCount: 0, progress: 0, statusMix: { ON_TRACK: objectives, AT_RISK: 0, OFF_TRACK: 0, COMPLETE: 0 } },
+  timing: { percentElapsed: 50, daysLeft: 45, daysUntilStart: 0, phase: "running" as const },
+})
+
 describe("CLASSIC copy is unchanged (no provider, NULL, and explicit CLASSIC all agree)", () => {
   const variants: Array<[string, (ui: ReactNode) => ReactNode]> = [
     ["no provider", (ui) => ui],
@@ -76,13 +83,13 @@ describe("CLASSIC copy is unchanged (no provider, NULL, and explicit CLASSIC all
     expect(screen.getByRole("button", { name: "Create cycle" })).toBeInTheDocument()
     cleanup()
 
-    render(wrap(createElement(CycleCard, { cycle: { ...cycle, _count: { objectives: 0 } }, orgSlug: "acme", workspaceSlug: "alpha" })))
+    render(wrap(createElement(CycleCard, { cycle: cycleWith(cycle, 0), orgSlug: "acme", workspaceSlug: "alpha" })))
     expect(screen.getByText("No objectives yet")).toBeInTheDocument()
     cleanup()
-    render(wrap(createElement(CycleCard, { cycle: { ...cycle, _count: { objectives: 1 } }, orgSlug: "acme", workspaceSlug: "alpha" })))
+    render(wrap(createElement(CycleCard, { cycle: cycleWith(cycle, 1), orgSlug: "acme", workspaceSlug: "alpha" })))
     expect(screen.getByText("1 objective")).toBeInTheDocument()
     cleanup()
-    render(wrap(createElement(CycleCard, { cycle: { ...cycle, _count: { objectives: 3 } }, orgSlug: "acme", workspaceSlug: "alpha" })))
+    render(wrap(createElement(CycleCard, { cycle: cycleWith(cycle, 3), orgSlug: "acme", workspaceSlug: "alpha" })))
     expect(screen.getByText("3 objectives")).toBeInTheDocument()
   })
 
@@ -126,7 +133,7 @@ describe("TORRES_OST renames a whole screen consistently", () => {
     expect(document.body.textContent).not.toMatch(/key result/i)
     cleanup()
 
-    render(withModel(torres, createElement(CycleCard, { cycle: { ...cycle, _count: { objectives: 2 } }, orgSlug: "acme", workspaceSlug: "alpha" })))
+    render(withModel(torres, createElement(CycleCard, { cycle: cycleWith(cycle, 2), orgSlug: "acme", workspaceSlug: "alpha" })))
     expect(screen.getByText("2 outcomes")).toBeInTheDocument()
   })
 
@@ -139,7 +146,7 @@ describe("TORRES_OST renames a whole screen consistently", () => {
     render(
       withModel(
         { thinkingModel: "CLASSIC", thinkingModelLabels: JSON.stringify({ objective: { singular: "Goal", plural: "Goals" } }) },
-        createElement(CycleCard, { cycle: { ...cycle, _count: { objectives: 1 } }, orgSlug: "acme", workspaceSlug: "alpha" }),
+        createElement(CycleCard, { cycle: cycleWith(cycle, 1), orgSlug: "acme", workspaceSlug: "alpha" }),
       ),
     )
     expect(screen.getByText("1 goal")).toBeInTheDocument()

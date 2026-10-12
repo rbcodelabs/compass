@@ -326,7 +326,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional |
+| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional. For a root `ARTIFACT` comment on a `SLIDE_DECK` Artifact, optional `slideIndex` (zero-based, from `get_artifact` `slides[].index`) anchors it to that whole slide |
 | `list_comments` | List comments for an exact workspace and target, optionally filtered by `OPEN` or `RESOLVED` |
 | `get_comment` | Get one comment and any specialized Doc-anchor or Solution-plan metadata |
 | `update_comment` | Edit a comment body |
@@ -782,6 +782,9 @@ Promotion is a reviewed, human-directed step. While a synthesis is being generat
 | `prepare_doc_image_upload` | Prepare a signed, short-lived upload for a PNG, JPEG, GIF, or WebP image up to 10 MiB in workspace-private Docs storage; returns the upload pathname/token plus the relative Compass image URL and Markdown |
 | `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on. Pass `docType: CANVAS` to create a JSON Canvas doc: `content` must be a valid JSON Canvas 1.0 JSON string (blank canvas if omitted); invalid payloads are rejected with the validation errors. A Compass object card is a standard `link` node with `url: "compass://<kind>/<id>"` and `compass: {"kind","id","title"?}`; `kind` is one of `opportunity`, `solution`, `metric`, `doc`, `task`, `experiment`, `objective`, `keyResult` and `id` a UUID. Invalid card references are rejected (the card is rendered live and re-authorized for each viewer, so only the reference is stored) |
 | `update_doc` | Update an existing doc's title, content, and/or icon. For a `CANVAS` doc, `content` replaces the whole canvas and must be valid JSON Canvas 1.0 (unknown fields are preserved) |
+| `edit_doc` | Targeted text edit of a doc body without resending it: `oldString` → `newString` (must match exactly once unless `replaceAll`), or up to 50 `edits` applied in order, all-or-nothing. Optional `expectedRevision` (from `get_doc`) rejects the edit if the doc changed; without it the edit is re-applied on top of concurrent changes. Edits the body only — change properties with `update_doc_metadata`. On a CANVAS doc the result must still be valid JSON Canvas |
+| `edit_canvas` | Edit a CANVAS doc with domain ops keyed by node id instead of rewriting the JSON: `add_card`, `add_text`, `add_group`, `add_edge`, `move`, `update`, `remove` (up to 200 per call, all-or-nothing; errors name the op index). Ids and placement are automatic; nodes may be referenced by node id or `kind:uuid`; re-adding an existing card or edge is a no-op; removing a node removes its edges. Optional `expectedRevision` |
+| `build_canvas_tree` | Draw the Opportunity Solution Tree onto a CANVAS doc — the same engine as the editor's "Build tree". `scope`: `{kind:"workspace"}` (default) or `{kind: objective\|keyResult\|opportunity\|solution, id}`. Idempotent merge: existing cards are never duplicated, new content is auto-laid-out to the right, one group per root objective. Capped at 400 cards |
 | `create_doc_version` | Save a manual, named snapshot of a doc's current content. Params: `docId`, `label` (optional), `authorName`. Always writes a new version, even if one was just saved seconds ago — named snapshots are never coalesced away |
 | `list_doc_versions` | List a doc's saved versions (id, label, author, created date), newest first, alongside the doc's own current title and last-updated time as a reference point. Param: `docId`. Does not include full content — call `get_doc_version` for that |
 | `get_doc_version` | Return the full title/content/metadata/icon snapshot of a single saved doc version. Param: `versionId` |
@@ -797,7 +800,9 @@ This private flow applies to new uploads. Existing documents may contain older a
 
 ### Authoring Canvas docs (agents)
 
-A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one with `create_doc` and `docType: CANVAS`, passing the JSON as the `content` string. `update_doc` **replaces the whole canvas**, so call `get_doc` first, change the JSON, and send the complete result back.
+A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one with `create_doc` and `docType: CANVAS`, passing the JSON as the `content` string. `update_doc` **replaces the whole canvas**, so for anything but a from-scratch rewrite use the edit tools below instead of resending the JSON.
+
+**Prefer the edit tools to rewriting.** `edit_canvas` applies ops server-side (`add_card`, `add_edge`, `move`, `update`, `remove`, …) with automatic ids and placement, and `build_canvas_tree` draws the OST for you; neither needs the whole canvas in your context. Use `edit_doc` for a precise text replacement. Pass `expectedRevision` from `get_doc` when you want the edit to fail rather than land on a changed doc.
 
 **Workflow**
 1. Look up real object ids with the `list_*` tools (`list_opportunities`, `list_solutions`, `list_metrics`, `list_tasks`, `list_experiments`, `list_docs`, objectives and key results via the OKR tools). Never invent a UUID: an unknown, foreign-workspace or inaccessible id is shown as "Unavailable" to viewers.
@@ -843,23 +848,37 @@ A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one
 
 ### Artifacts
 
-Artifacts are first-class solution deliverables, separate from Markdown Docs. HTML content creates private immutable revisions; external URLs are stored but never server-fetched. Every mutation returns the stable Artifact identifier on a plain `ID: <uuid>` line.
+Artifacts are first-class solution deliverables, separate from Markdown Docs. HTML content creates private immutable revisions; external URLs are stored but never server-fetched. Every mutation returns the stable Artifact identifier on a plain `ID: <uuid>` line. `list_artifacts`, `get_artifact`, `create_artifact` and `update_artifact` also return the clickable Compass page (`<origin>/{org}/{workspace}/docs/artifacts/{id}`) on a `URL:` line and as `url` in the structured data — relay it to the user instead of the bare ID. `url` is `null` (and the line is omitted) when the public Compass URL is not configured; the write still succeeds.
 
 | Tool | Description |
 |---|---|
 | `list_artifacts` | List active Artifacts in a workspace; pass `includeArchived: true` to include archived records |
-| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML |
-| `create_artifact` | Create `HTML_UPLOAD` from `html` plus an optional `.html` filename, or `EXTERNAL_LINK` from an `http`/`https` `url` |
-| `update_artifact` | Update title/description and optionally create a new immutable HTML or URL revision |
+| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML. Includes `kind` (`DOCUMENT` or `SLIDE_DECK`); a `SLIDE_DECK` also returns `slides` as `{ index, title, description }`, split from the current revision at read time |
+| `prepare_artifact_upload` | Prepare a signed, short-lived direct upload for one `.html` file up to 2 MiB; returns the upload pathname, client token, and an `uploadReceipt`. Use this instead of passing `html` inline so the document never enters the conversation |
+| `create_artifact` | Create `HTML_UPLOAD` from an `uploadReceipt` (preferred) or inline `html` plus an optional `.html` filename, or `EXTERNAL_LINK` from an `http`/`https` `url`. Optional `kind`: `DOCUMENT` (default) or `SLIDE_DECK`, which is allowed only for `HTML_UPLOAD` |
+| `update_artifact` | Update title/description and optionally create a new immutable HTML revision (from `uploadReceipt` or inline `html`) or URL revision. Optional `kind` switches an `HTML_UPLOAD` between `DOCUMENT` and `SLIDE_DECK` without a new revision |
 | `link_artifact_to_solution` | Idempotently link an Artifact and Solution in the same workspace |
 | `unlink_artifact_from_solution` | Remove an Artifact-to-Solution link |
 | `link_artifact_to_decision` | Idempotently link an active Artifact to an ordinary tracked Decision in the same workspace; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs, `linkId`, and `created` |
 | `unlink_artifact_from_decision` | Idempotently remove a Decision link; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs and `removed` |
 | `archive_artifact` | Archive an Artifact while preserving its revision history and links |
+| `capture_screenshot` | Render an Artifact revision in a sandboxed headless browser and store the PNG as that revision's thumbnail, which the Artifact page then shows. Takes `workspaceId`, `artifactId`, and optional `revisionId` (default: the current revision), `fullPage`, and `viewport` (`width` 320–3840, `height` 240–2160). There is deliberately **no `url` input**. `EXTERNAL_LINK` revisions render the URL stored on the revision, so the tool cannot be used to render arbitrary pages. `HTML_UPLOAD` revisions render their stored HTML under the same Content-Security-Policy as the in-app preview, with every network request blocked. Returns `ID: <artifactId>` plus metadata only (`revisionId`, `width`, `height`, `byteSize`, `capturedAt`, `sourceUrl`, `httpStatus`; the last two are `null` for `HTML_UPLOAD`). It never returns the image or its storage key. Gate class: `WRITE` |
 | `create_feedback_source` | Create an [embedded-feedback](/help/24-embedded-feedback) source bound to an active Artifact and mint its first token. Takes `workspaceId`, `artifactId`, `name`, `allowedOrigins` and optional `authMode` (`INTERNAL_SSO` default, or `PORTAL`). Returns `sourceId`, the raw `token` **once**, `tokenPrefix`, a ready-to-paste `snippet`, and the stored `allowedOrigins`/`authMode`. Workspace member (same as `create_artifact`) |
 | `update_feedback_source` | Replace a source's `allowedOrigins` (the full list), enable/disable it, rename it, or change `authMode` (which signs out existing visitors). Scoped by `workspaceId`; returns the stored state, never a token. Workspace member (same as `create_artifact`) |
 
 Feedback-source tools are available to workspace members and registered agents, exactly like the other Artifact write tools, and have no delete, token-mint or token-revoke counterpart — rotate or revoke tokens in **Settings → Embedded feedback**. The raw token appears only in the `create_feedback_source` response and is never stored or logged in readable form. If the deployment has no public Compass URL configured, `snippet` is `null` and the response carries `scriptPath` and a note instead of a broken URL.
+
+#### Uploading HTML without putting it in the conversation
+
+Inline `html` costs the document's full size twice in agent context: once when the agent writes the file and again inside the tool call. For anything beyond a trivial page, upload the file from disk instead:
+
+1. Write the HTML to a local file, then call `prepare_artifact_upload` with the workspace, the `.html` filename, and the exact byte size (1 byte to 2 MiB).
+2. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: "text/html" })` from `@vercel/blob/client`, reading the file from disk rather than pasting it into a tool call.
+3. Call `create_artifact` or `update_artifact` with the returned `uploadReceipt` and no `html`. The filename is taken from the receipt, so omit `filename`.
+
+The client token expires after ten minutes, is bound to one random workspace-prefixed staging pathname, `text/html`, and the declared size, and cannot overwrite an existing blob. The receipt is HMAC-signed and bound to the workspace, staging pathname, filename, size, and expiry. The server re-reads the staged bytes and runs the same validation as the inline path (safe filename, non-empty, UTF-8, HTML document, 2 MiB cap), checks the size against what was signed, and deletes the staging blob once the revision is committed, so a receipt is effectively single-use. If validation or the write fails, the staging blob is not deleted and is not currently swept; it is private and workspace-prefixed, but orphaned until cleaned up out of band. Re-prepare to retry.
+
+Direct upload needs the private Artifact Blob store (`ARTIFACT_BLOB_READ_WRITE_TOKEN`), so it is unavailable in local development; use inline `html` there. Provide exactly one of `html` or `uploadReceipt` on create, and at most one of `html`, `uploadReceipt`, or `url` on update.
 
 Decision–Artifact links are live supporting material, not frozen review evidence. `get_decision` and `get_review_request` include an `artifacts` array with title, type, status, and current revision number; legacy review requests return an empty array. `get_artifact.decisions` includes the same-workspace tracked request ID, current title, and state. The new link tools require write access and validate both objects in the declared workspace. They preserve packets, fingerprints, revisions, cycles, and recorded outcomes. New links to archived Artifacts are rejected, but retrying an existing link and removing it remain supported. Links follow the stable Decision request and the current Artifact revision.
 

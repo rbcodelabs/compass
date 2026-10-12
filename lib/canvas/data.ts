@@ -1,5 +1,5 @@
 /**
- * Server-side data loader for the Canvas viewer.
+ * Server-side data loader for the canvas Doc "Build tree" tool.
  *
  * Flat-query-plus-in-memory-join, mirroring okrs/[cycleId]/page.tsx's
  * objective.findMany -> keyResult.findMany({objectiveId:{in}}) -> grouped

@@ -10,13 +10,15 @@ section: "Core Features"
 
 The Docs section brings Markdown **Docs**, **Diagrams**, and **Artifacts** together in one Library. Use Docs for PRDs and research notes, Diagrams for visual thinking, and Artifacts for prototypes and other solution deliverables.
 
-The Library mixes root items alphabetically, keeping child pages beneath their parents. Search **Find in library** across titles, or use **All**, **Docs**, **Diagrams**, and **Artifacts** to narrow the list. Matching nested items keep their parent context visible. Search, filters, and **New** stay above a single scrolling list, including in the mobile Docs drawer.
+The Library mixes root items alphabetically, keeping child pages beneath their parents. Search **Find in library** across titles, or use **All**, **Docs**, **Diagrams**, and **Artifacts** to narrow the list. Matching nested items keep their parent context visible. Search, filters, and **New** stay above a single scrolling list, including on mobile.
 
 Use **New** to create a doc, create a diagram, import a `.canvas` file, or add an artifact.
 
-![Library component on desktop with mixed documents, diagrams, and artifacts](/screenshots/docs/docs-library-desktop.png)
+The Library lives in the agent sidebar, not in a sidebar of its own. Click the **Show library** button (the library icon) beside the page title in any Docs page, diagram, or artifact to open the agent sidebar on its **Library** view; click it again to close the sidebar. You can also switch to **Library** from the sidebar's own view switcher at any time, from any screen. Opening an item loads it in the main area and leaves the sidebar where it is, and the sidebar keeps your agent conversation running while you browse. Its width, and whether it is open, are remembered in this browser. On narrow screens the sidebar opens as an overlay.
 
-![Library component in the mobile Docs drawer](/screenshots/docs/docs-library-mobile.png)
+![Library in the agent sidebar on desktop with mixed documents, diagrams, and artifacts](/screenshots/docs/docs-library-desktop.png)
+
+![Library in the agent sidebar on mobile](/screenshots/docs/docs-library-mobile.png)
 
 These Library illustrations use synthetic content in an isolated component harness. They show the shared navigation component; full workspace behavior is covered separately by functional tests.
 
@@ -26,7 +28,7 @@ These Library illustrations use synthetic content in an isolated component harne
 
 ## Page Hierarchy
 
-Documents are organised as a tree. Each page can have child pages nested beneath it. The left sidebar in the Docs section shows your full tree. Click any page title to open it, or click the **+** icon next to a parent page to create a child page.
+Documents are organised as a tree. Each page can have child pages nested beneath it. The Library (in the agent sidebar) shows your full tree. Click any page title to open it, or click the **+** icon next to a parent page to create a child page.
 
 Drag a page from the Library onto a diagram to add a live Compass card.
 
@@ -150,11 +152,12 @@ Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api)
 
 ## Canvas docs
 
-A Canvas doc is an infinite, pannable whiteboard that follows the open [JSON Canvas](https://jsoncanvas.org) 1.0 format, so canvases move freely between Compass and tools like Obsidian. (This is separate from the read-only [Canvas](/help/12-canvas) viewer of your OST and roadmap.)
+A Canvas doc is an infinite, pannable whiteboard that follows the open [JSON Canvas](https://jsoncanvas.org) 1.0 format, so canvases move freely between Compass and tools like Obsidian. To draw your OKR, discovery and roadmap tree onto a canvas automatically, see [Canvas](/help/12-canvas).
 
 - **Create one** from the Library's **New** menu: **New diagram**, or **Import .canvas file** to bring in an existing file. Diagrams are Canvas docs underneath, using the JSON Canvas format. Files that are not valid JSON Canvas are rejected with the reason.
 - **Edit**: pan by dragging the background, zoom with the scroll wheel, pinch, or the zoom controls. Add **Text**, **Link**, **File** and **Group** cards from the toolbar; drag cards to move them, drag the handles on a selected card to resize it. Double-click a card to edit it; text cards are markdown. Drag from a dot on one card's side to a dot on another to draw a connection (the chosen sides are saved). With a card or connection selected, pick a color (the six presets or any custom color), and for connections set a label and arrowheads. Press Delete or use the toolbar to remove the selection.
-- **Compass cards**: use **Compass** in the toolbar to search and add a live card for an opportunity, solution, metric, doc, task, experiment, objective or key result, or drag a page from the page tree onto the canvas. The canvas stores only a reference (plus a cached title); the card shows the object's current status, score, progress, or metric value and trend each time you open the canvas, and links to it. Cards are checked against your access every time: if the object was deleted, lives in another workspace, or you cannot see it, the card shows "Unavailable" and reveals nothing about it. In other tools such as Obsidian, a Compass card is an ordinary link card (`compass://<kind>/<id>`) and is preserved when the file goes back to Compass.
+- **Compass cards**: use **Compass** in the toolbar to search and add a live card for an opportunity, solution, assumption, metric, doc, task, experiment, objective, key result or roadmap item, or drag a page from the page tree onto the canvas. The canvas stores only a reference (plus a cached title); the card shows the object's current status, score, progress, or metric value and trend each time you open the canvas, and links to it. Cards are checked against your access every time: if the object was deleted, lives in another workspace, or you cannot see it, the card shows "Unavailable" and reveals nothing about it. In other tools such as Obsidian, a Compass card is an ordinary link card (`compass://<kind>/<id>`) and is preserved when the file goes back to Compass.
+- **Build tree**: use **Tree** ("Build tree from Compass…") in the toolbar to add your Objectives, Key Results, Opportunities, Solutions, Assumptions, Experiments and Roadmap items as laid-out, grouped Compass cards, either for the whole workspace or from one item down. See [Canvas](/help/12-canvas).
 - **Undo / redo** with the toolbar or Cmd/Ctrl+Z and Shift+Cmd/Ctrl+Z.
 - **Autosave and history** work exactly like regular pages, including named versions and restore. Inline comments are not available on canvases.
 - **Export** downloads a `.canvas` file. Fields Compass does not understand are kept as-is on import and export.
@@ -162,7 +165,7 @@ A Canvas doc is an infinite, pannable whiteboard that follows the open [JSON Can
 - **On phones** a canvas opens locked for viewing (pan and zoom); use the lock button to edit.
 - Canvases are limited to roughly 800 KB of JSON.
 
-Agents can create and edit canvases through the MCP `create_doc` / `update_doc` tools with `docType: CANVAS`; see [MCP API](/help/09-mcp-api).
+Agents can create canvases with `create_doc` / `update_doc` (`docType: CANVAS`), edit them incrementally with `edit_canvas` (add/move/update/remove cards, text, groups and edges), and draw the Opportunity Solution Tree onto one with `build_canvas_tree`; see [MCP API](/help/09-mcp-api).
 
 ## Positioning & Messaging Briefs
 

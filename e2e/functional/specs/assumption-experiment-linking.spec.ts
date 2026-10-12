@@ -90,7 +90,7 @@ test.describe("Assumption ↔ Experiment linking", () => {
 
       // The create-experiment form should already be open (prefilled), with
       // the assumption picker showing our assumption pre-selected.
-      await expect(page.getByText("New Experiment")).toBeVisible();
+      await expect(page.getByRole("dialog").getByRole("heading", { name: "New Experiment" })).toBeVisible();
       await expect(
         page.getByRole("combobox").filter({ hasText: assumptionTitle })
       ).toBeVisible({ timeout: 10_000 });

@@ -39,6 +39,10 @@ vi.mock("next/navigation", () => ({
   usePathname: () => pathname,
 }));
 
+// The rail now hosts the Docs Library tree, which imports the docs server actions (and through them auth).
+// Stub them so this suite stays a pure client-side test.
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", () => ({ createDoc: vi.fn(), createCanvasDoc: vi.fn() }));
+
 /**
  * How much width the detail panel is claiming as an in-flow column, straight
  * from shared context (see `DetailPanelDock` in `panel-context.tsx`) — this

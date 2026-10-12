@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import getPrisma from "@/lib/db";
-import { CycleCard } from "@/components/okrs/cycle-card";
+import { CycleCard, CycleHero, type CycleCardData } from "@/components/okrs/cycle-card";
+import { cycleTiming, rollupObjectives } from "@/lib/okr-cycle-rollup";
 import { PersistentObjectivesCard } from "@/components/okrs/persistent-objectives-card";
 import { CreateCycleForm } from "@/components/okrs/create-cycle-form";
 import { Target } from "lucide-react";
@@ -58,13 +59,34 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
       where: { workspaceId: workspace.id },
       orderBy: { startDate: "desc" },
       include: {
-        // Count only objectives whose own workspaceId matches, so the card agrees with the (scoped) list.
-        _count: { select: { objectives: { where: { workspaceId: workspace.id } } } },
+        // Only objectives whose own workspaceId matches, so tiles agree with the (scoped) list. Status and KR
+        // numbers feed the per-cycle rollup (progress ring, status mix, pace) — no schema change needed.
+        objectives: {
+          where: { workspaceId: workspace.id },
+          select: { status: true, keyResults: { select: { current: true, target: true } } },
+        },
       },
     }),
     isTorres ? loadOutcomesIndex(prisma, workspace.id) : Promise.resolve(null),
     isTorres ? Promise.resolve(0) : prisma.objective.count({ where: { workspaceId: workspace.id, cycleId: null } }),
   ]);
+
+  // Roll each cycle up once on the server, against a single "now", so tiles never disagree with each other.
+  const now = new Date();
+  const cards: CycleCardData[] = cycles.map((cycle) => ({
+    id: cycle.id,
+    title: cycle.title,
+    startDate: cycle.startDate,
+    endDate: cycle.endDate,
+    status: cycle.status as CycleStatus,
+    rollup: rollupObjectives(cycle.objectives),
+    timing: cycleTiming(cycle.startDate, cycle.endDate, now),
+  }));
+  // Newest-first from the query. The most recent ACTIVE cycle is featured; further ACTIVE cycles get their own group.
+  const [featured, ...otherActive] = cards.filter((c) => c.status === "ACTIVE");
+  // Upcoming reads soonest-first, so flip the newest-first order.
+  const upcoming = cards.filter((c) => c.status === "DRAFT").reverse();
+  const closed = cards.filter((c) => c.status === "CLOSED");
 
   const nothingToShow = cycles.length === 0 && (isTorres ? (outcomesIndex?.rows.length ?? 0) === 0 : persistentObjectiveCount === 0);
   const persistentLinkText = `Or add ${indefiniteTitle(labels.objective)} with no ${labels.cycle.lower} (${noCycleLabel(labels.cycle)})`;
@@ -92,21 +114,43 @@ export default async function OKRsPage({ params }: OKRsPageProps) {
             {persistentLinkText}
           </Link>} />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {cycles.map((cycle) => (
-            <CycleCard
-              key={cycle.id}
-              cycle={{ ...cycle, status: cycle.status as CycleStatus }}
-              orgSlug={orgSlug}
-              workspaceSlug={workspaceSlug}
-            />
-          ))}
+        <div className="wsx okx okx-stack">
+          {featured && <CycleHero cycle={featured} orgSlug={orgSlug} workspaceSlug={workspaceSlug} />}
+          {[
+            { key: "active", title: "Active", items: otherActive },
+            { key: "upcoming", title: "Upcoming", items: upcoming },
+            { key: "closed", title: "Closed", items: closed },
+          ].map(
+            (group) =>
+              group.items.length > 0 && (
+                <section key={group.key} className="wsx-section" aria-labelledby={`okrs-group-${group.key}`}>
+                  <div className="wsx-group-head">
+                    <h2 id={`okrs-group-${group.key}`}>{group.title}</h2>
+                    <span className="wsx-group-count">{group.items.length}</span>
+                    <span className="wsx-group-rule" aria-hidden="true" />
+                  </div>
+                  <ul className="wsx-grid">
+                    {group.items.map((cycle) => (
+                      <li key={cycle.id}>
+                        <CycleCard cycle={cycle} orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ),
+          )}
           {!isTorres && (
-            <PersistentObjectivesCard
-              objectiveCount={persistentObjectiveCount}
-              orgSlug={orgSlug}
-              workspaceSlug={workspaceSlug}
-            />
+            <section className="wsx-section" aria-labelledby="okrs-group-persistent">
+              <div className="wsx-group-head">
+                <h2 id="okrs-group-persistent">Persistent</h2>
+                <span className="wsx-group-rule" aria-hidden="true" />
+              </div>
+              <ul className="wsx-grid">
+                <li>
+                  <PersistentObjectivesCard objectiveCount={persistentObjectiveCount} orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
+                </li>
+              </ul>
+            </section>
           )}
         </div>
       )}

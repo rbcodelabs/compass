@@ -117,9 +117,10 @@ export function DocTreeSidebar({
     <nav aria-label="Library" className="flex min-h-0 flex-1 flex-col">
       {error && <p role="alert" className="text-xs text-status-danger">{error}</p>}
       <div className="flex shrink-0 items-center justify-between px-2 pb-2 pt-1">
-        <span className="text-sm font-semibold text-text-primary">
+        <span className="truncate text-sm font-semibold text-text-primary">
           Library
         </span>
+        <div className="flex shrink-0 items-center gap-0.5">
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button variant="ghost" size="sm" />}
@@ -147,6 +148,7 @@ export function DocTreeSidebar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
         <input
           ref={importInput}
           type="file"

@@ -1,6 +1,6 @@
 /**
  * Thinking model Phase 4B, end to end: the Solution <-> Key Result picker, the Key Result panel's
- * "Linked solutions", the Objective multi-select in the opportunity composer, and the canvas link edges,
+ * "Linked solutions", the Objective multi-select in the opportunity composer,
  * under TORRES_OST, plus CLASSIC seeing none of the new UI.
  *
  * Everything lives in a SYNTHETIC organization and workspace created here by id and removed by id, so the
@@ -12,7 +12,6 @@
  */
 import pg from "pg";
 import { randomUUID } from "node:crypto";
-import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/index";
 import { E2E_SCHEMA, isolatedE2EConnectionString } from "../fixtures/isolated-database";
 
@@ -46,27 +45,6 @@ test.describe.serial("Link authoring (Phase 4B)", () => {
     const result = await pool.query(`SELECT count(*)::int AS n FROM ${S}.${table} WHERE workspace_id = $1 AND ${where}`, [ids.workspace, ...params]);
     return result.rows[0].n as number;
   }
-
-  /** The canvas opens at the Portfolio tier; zoom until the badge reads `label` (the wait outlasts the 400ms tier animation). */
-  async function zoomUntil(page: Page, controlSelector: string, label: string, maxClicks = 16) {
-    for (let i = 0; i < maxClicks; i++) {
-      if (await page.getByText(label, { exact: true }).isVisible().catch(() => false)) return;
-      await page.locator(controlSelector).click();
-      await page.waitForTimeout(500);
-    }
-  }
-
-  async function openCanvasDetail(page: Page) {
-    await page.goto(`${base}/canvas`);
-    await page.waitForLoadState("networkidle");
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("Portfolio", { exact: true })).toBeVisible({ timeout: 15_000 });
-    await zoomUntil(page, ".react-flow__controls-zoomin", "Detail");
-    await expect(page.getByText("Detail", { exact: true })).toBeVisible({ timeout: 10_000 });
-    // Hidden tiers and culled cards are not in the DOM; give React Flow a beat to mount the edges at this zoom.
-    await expect(page.getByText(`${tag} metric`).first()).toBeVisible({ timeout: 15_000 });
-  }
-  const edge = (page: Page, source: string, target: string) => page.locator(`[data-testid="rf__edge-l-${source}-${target}"]`);
 
   test.beforeAll(async () => {
     pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() });
@@ -159,14 +137,7 @@ test.describe.serial("Link authoring (Phase 4B)", () => {
     expect(pointer.rows[0].linked_key_result_id).toBeNull();
   });
 
-  test("TORRES_OST: the canvas draws both link edges", async ({ page }) => {
-    await setModel("TORRES_OST");
-    await openCanvasDetail(page);
-    await expect(edge(page, ids.solution, ids.kr)).toHaveCount(1, { timeout: 15_000 });
-    await expect(edge(page, ids.objective, composedOpp)).toHaveCount(1);
-  });
-
-  test("a LEGACY link never draws a second line: the key result pointer's relationship stays one edge, under both presets", async ({ page }) => {
+  test("linking through the legacy key result combobox dual-writes exactly one LEGACY link", async ({ page }) => {
     // CLASSIC: link the other opportunity through the legacy key result combobox (the dual-write creates a LEGACY link).
     await setModel(null);
     await page.goto(`${base}/discovery/${ids.legacyOpp}`);
@@ -175,17 +146,9 @@ test.describe.serial("Link authoring (Phase 4B)", () => {
     await page.getByRole("option", { name: new RegExp(`${tag} metric`) }).click();
     await expect(page.getByText("change KR")).toBeVisible({ timeout: 15_000 });
     expect(await count("opportunity_objective_links", "opportunity_id = $2 AND origin = 'LEGACY'", [ids.legacyOpp])).toBe(1);
-
-    for (const model of [null, "TORRES_OST"]) {
-      await setModel(model);
-      await openCanvasDetail(page);
-      // The existing KR -> opportunity edge is there, the restating Objective -> opportunity link edge is not.
-      await expect(page.locator(`[data-testid="rf__edge-e-${ids.kr}-${ids.legacyOpp}"]`)).toHaveCount(1, { timeout: 15_000 });
-      await expect(edge(page, ids.objective, ids.legacyOpp)).toHaveCount(0);
-    }
   });
 
-  test("CLASSIC: no picker, no linked-solutions list, no composer field; the canvas keeps only the user-made edges", async ({ page }) => {
+  test("CLASSIC: no picker, no linked-solutions list, no composer field", async ({ page }) => {
     await setModel(null);
     await page.goto(`${base}/discovery?detail=solution:${ids.solution}`);
     await page.waitForLoadState("networkidle");
@@ -201,11 +164,6 @@ test.describe.serial("Link authoring (Phase 4B)", () => {
     await page.waitForLoadState("networkidle");
     await expect(page.getByLabel("Title")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("composer-objective-field")).toHaveCount(0);
-
-    await openCanvasDetail(page);
-    // User-made (DIRECT / solution) links are drawn under CLASSIC too; backfilled LEGACY ones are not.
-    await expect(edge(page, ids.solution, ids.kr)).toHaveCount(1, { timeout: 15_000 });
-    await expect(edge(page, ids.objective, ids.legacyOpp)).toHaveCount(0);
   });
 
   test("OPPORTUNITY_FIRST_OKR: the picker speaks Key Result", async ({ page }) => {

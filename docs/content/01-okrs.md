@@ -28,6 +28,8 @@ An Objective is a qualitative, inspiring statement of what you want to achieve. 
 
 Click **+ Add Objective** inside a cycle to create one. Objectives with no cycle live in the **No cycle / Persistent** card on the OKRs page, which opens a page (`/okrs/none`) with the same list and **+ Add Objective** form; on a new workspace with no cycles yet, the empty state offers **Or add an Objective with no cycle**. Cycle-less Objectives and their Key Results work everywhere else too: they appear on Canvas and in card sorts, can be linked to Opportunities, and agents create them with `create_objective` by leaving out `cycleId`. On workspaces that use the Torres thinking model, cycles are subdued: the list of Outcomes shows cycle-less ones directly, so there is no **No cycle / Persistent** card (see [Thinking models](/help/27-thinking-models#cycles-under-each-model)). Objectives can be assigned to a squad and tagged with custom fields.
 
+To scan many Objectives at once, collapse them. Each Objective card has a chevron beside its title that hides or shows its Key Results; a collapsed card shows how many Key Results it holds (for example, "3 key results"). When a cycle has more than one Objective, a **Collapse all** / **Expand all** control above the list does every card in one click. Cards start expanded, and the state is not saved — it resets when you reload the page.
+
 ## Key Results
 
 Key Results are the measurable outcomes that tell you whether you've hit your Objective. Each KR has:
@@ -38,6 +40,12 @@ Key Results are the measurable outcomes that tell you whether you've hit your Ob
 - **Current value** — Updated via check-ins
 
 A well-formed Key Result is binary-testable at the end of the cycle: either you hit the target or you didn't.
+
+### Moving a Key Result to another Objective
+
+Open the Key Result's detail panel and, in its **Objective** section, click **Move to another objective…**. Pick the new Objective from the searchable list (Objectives in the same cycle come first). The Key Result lands at the end of the new Objective's list, and any Opportunities it drives follow it to the new Objective.
+
+The list only offers Objectives in the same workspace that are not in a closed cycle. Compass also leaves out an Objective that sits below the Key Result in the hierarchy (that would create a loop), and any Objective whose cycle is no longer longer than, and does not fully contain, the cycles of the Objectives supporting the Key Result. A Key Result that drives more than 400 Opportunities can't be moved in one step. If a move is refused, the reason appears under the link.
 
 ## Linking annual and quarterly OKRs
 

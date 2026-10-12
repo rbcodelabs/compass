@@ -419,7 +419,7 @@ const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "app/[orgSlug]/[workspaceSlug]/discovery/actions.ts": 1,
   "app/[orgSlug]/[workspaceSlug]/okrs/actions.ts": 1,
   "app/api/mcp/route.ts": 1,
-  "e2e/functional/specs/canvas-doc.spec.ts": 1, // one solution fixture, created with the e2e workspace's workspaceId
+  "e2e/functional/specs/canvas-doc.spec.ts": 3, // three solution fixtures (one card test, two for the tree builder), each created with the e2e workspace's workspaceId
   "e2e/functional/specs/decisions.spec.ts": 1,
   "e2e/functional/specs/pm-interview.spec.ts": 1,
   "lib/solution-tool-handlers.ts": 1,
@@ -443,7 +443,6 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   "e2e/functional/specs/opportunity-relationships.spec.ts": 1,
   "e2e/functional/specs/typed-links.spec.ts": 1, // objectives for the typed-link fixture, listing workspace_id
   "e2e/functional/specs/thinking-model-tree.spec.ts": 2, // one objective and one solution for the tree fixture, each listing workspace_id
-  "scripts/seed-canvas-scale.ts": 2,
   "scripts/verify-managed-pilot-migrations.ts": 1, // allow-listed dynamic (sentinel table)
   "seed-screenshots.ts": 2,
 };
