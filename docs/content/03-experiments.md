@@ -35,7 +35,7 @@ Use **Filters** at the top of the page to focus the experiment board on a specif
 
 ## Creating an Experiment
 
-Click **+ Add Experiment** on the Experiments page, or click **Test this assumption →** next to any untested assumption in Discovery's OST Tree view — that pre-fills the assumption picker below so you don't have to hunt for it. Fill in:
+Click **New Experiment** on the Experiments page, or click **Test this assumption →** next to any untested assumption in Discovery's OST Tree view — that pre-fills the assumption picker below so you don't have to hunt for it. Either one opens the experiment composer in the right-hand panel. On wide screens it docks beside the board; on narrow screens it opens as a full-width sheet. Fill in:
 
 - **Title** — A short name for the experiment (e.g. "Trial expiry email A/B test")
 - **Hypothesis** — A falsifiable prediction in the format: *"We believe [action] will result in [outcome] for [audience], as measured by [metric]."*
@@ -43,6 +43,9 @@ Click **+ Add Experiment** on the Experiments page, or click **Test this assumpt
 - **Kill conditions** — The conditions under which you'll stop the experiment early (e.g. "If conversion rate drops below 2% in the first 48 hours, stop")
 - **Squad** — Optional team assignment
 - **Linked assumption** — Connect the experiment to the specific assumption from Discovery that it's testing
+- **Metrics** — Optional. Pick existing workspace metrics to track on the experiment. They are linked over the last 30 days once the experiment exists; add comparison periods from the experiment afterwards. If a metric can't be linked, the experiment is still created and the composer tells you which metrics were skipped.
+
+Press **⌘/Ctrl + Enter** or select **Submit** to create the experiment. The composer then turns into the new experiment's detail panel. Your draft is saved on this device for each workspace as you type: closing the panel, reloading or leaving the page keeps it, and the composer says **Restored your unsent draft** the next time you open it. Discarding a draft asks for confirmation first.
 
 ## Recording Results
 

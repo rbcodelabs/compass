@@ -30,8 +30,8 @@ test.describe("Analytics measurements", () => {
     await page.getByLabel("Hypothesis").fill("A clearer result prompt increases recorded learning.");
     await page.getByLabel("Method").fill("Compare two explicit production windows.");
     await page.getByLabel("Kill Condition").fill("Stop if recorded learning declines.");
-    await page.getByRole("button", { name: "Create Experiment" }).click();
-    await page.getByRole("button", { name: experimentName, exact: true }).click();
+    await page.getByRole("form", { name: "New experiment" }).getByRole("button", { name: "Submit" }).click();
+    await expect(page).toHaveURL(/detail=experiment(%3A|:)/, { timeout: 15_000 });
     const fullPageHref = await page.getByRole("link", { name: "Open full page" }).getAttribute("href");
     expect(fullPageHref).toBeTruthy();
     // A direct visit exercises the full record rather than the intercepted panel route.
