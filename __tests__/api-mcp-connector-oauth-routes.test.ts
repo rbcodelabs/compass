@@ -122,6 +122,54 @@ describe("connect route", () => {
     )
   })
 
+  describe("access levels (Google Drive)", () => {
+    const driveConnector = {
+      ...connector,
+      id: "connector-drive",
+      slug: "google-drive",
+      authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+      // What discovery stored: the default level's scope.
+      scope: "https://www.googleapis.com/auth/drive",
+    }
+    const scopeOf = (response: Response) =>
+      new URL(response.headers.get("location") ?? "").searchParams.get("scope")
+
+    beforeEach(() => mockEnsureConnector.mockResolvedValue(driveConnector))
+
+    it("requests read-only scope only when the user chose it", async () => {
+      const response = await connect(
+        get("/api/connectors/google-drive/connect?access=read-only"),
+        params("google-drive"),
+      )
+      expect(response.status).toBe(307)
+      expect(scopeOf(response)).toBe("https://www.googleapis.com/auth/drive.readonly")
+    })
+
+    it("defaults to full access with no choice made", async () => {
+      const response = await connect(get("/api/connectors/google-drive/connect"), params("google-drive"))
+      expect(scopeOf(response)).toBe("https://www.googleapis.com/auth/drive")
+    })
+
+    it("refuses an unknown level with 400 rather than falling back to more access", async () => {
+      const response = await connect(
+        get("/api/connectors/google-drive/connect?access=admin"),
+        params("google-drive"),
+      )
+      expect(response.status).toBe(400)
+      const body = await response.json()
+      expect(body.accessLevels).toEqual(["full", "read-only"])
+      expect(mockEnsureConnector).not.toHaveBeenCalled()
+      expect(mockCreateAuthRequest).not.toHaveBeenCalled()
+    })
+
+    it("ignores the parameter on a connector that offers no levels", async () => {
+      mockEnsureConnector.mockResolvedValue(connector)
+      const response = await connect(get("/api/connectors/v0/connect?access=read-only"), params())
+      expect(response.status).toBe(307)
+      expect(scopeOf(response)).toBe("mcp")
+    })
+  })
+
   it("keys the connector on the deployment's own origin, not a forwarded header", async () => {
     const spoofed = new NextRequest("http://localhost:3000/api/connectors/v0/connect", {
       method: "GET",
@@ -167,6 +215,16 @@ describe("connect route", () => {
     const response = await connect(get("/api/connectors/v0/connect"), params())
     expect(response.status).toBe(503)
     expect((await response.json()).error).toContain("062_mcp_connectors")
+  })
+
+  it("reports a connector with no OAuth client configured as 503, not a provider fault", async () => {
+    mockEnsureConnector.mockRejectedValue(
+      new McpConnectorError("CLIENT_NOT_CONFIGURED", "Google Drive is not configured on this deployment"),
+    )
+    const response = await connect(get("/api/connectors/google-drive/connect"), params("google-drive"))
+    expect(response.status).toBe(503)
+    expect((await response.json()).code).toBe("CLIENT_NOT_CONFIGURED")
+    expect(mockCreateAuthRequest).not.toHaveBeenCalled()
   })
 
   it("surfaces a discovery or registration failure as a 502 with its code", async () => {

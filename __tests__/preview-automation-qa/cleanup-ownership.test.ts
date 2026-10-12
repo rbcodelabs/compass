@@ -12,12 +12,13 @@ function fixture() {
     get(_target, property: string) {
       if (!models.has(property)) {
         const methods: Record<string, ReturnType<typeof vi.fn>> = {};
-        for (const method of ["findUnique", "findFirst", "deleteMany", "updateMany", "update", "count"]) {
+        for (const method of ["findUnique", "findFirst", "findMany", "deleteMany", "updateMany", "update", "count"]) {
           methods[method] = vi.fn(async (args: unknown) => {
             calls.push({ model: property, operation: method, args });
             if (property === "previewAutomationRun" && method === "findUnique") return run;
             if (property === "workspace" && method === "findUnique") return { organizationId: run.orgId };
             if (method === "findFirst") return null;
+            if (method === "findMany") return [];
             return method === "count" ? 0 : { count: 1 };
           });
         }

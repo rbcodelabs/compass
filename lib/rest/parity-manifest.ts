@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 195,
-  sortedToolNamesSha256: "065a41f7c3328607dc86a2538b5a1787c114421693ce08bd3761f46719db6d64",
+  toolCount: 196,
+  sortedToolNamesSha256: "39dae75b9523329425ce7a8eb8b390d6a3592921eeff18b47cdd23cba9d04395",
 } as const
 
 export type McpRestParityDisposition =
@@ -158,6 +158,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   promote_research_finding_to_evidence: direct("promoteResearchEvidence"),
   promote_to_roadmap: direct("promoteSolutionToRoadmap"),
   propose_card_sort_move: direct("proposeCardSortMoves"),
+  refresh_artifact_from_v0: excluded("execution-boundary", "Read the artifact resource; refresh a v0 chat Artifact from the Compass UI or the MCP tool.", "Refreshing re-reads the v0 chat server-side using the signed-in user's own v0 connector grant (ADR-0018); a REST API client has no equivalent per-user connector authorization, so no REST mutation is exposed."),
   refresh_metric_binding: direct("refreshMetricBinding"),
   reject_solution_plan: excluded("human-governance", "Read plan entries and request a tracked decision.", "Plan rejection is a human judgment boundary and REST must not turn proposal review into an ordinary mutation."),
   reopen_comment: direct("reopenComment"),

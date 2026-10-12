@@ -315,3 +315,19 @@ describe("ArtifactPreview Google Drive links", () => {
     expect(screen.queryByRole("img")).toBeNull()
   })
 })
+
+describe("ArtifactPreview — live external preview", () => {
+  afterEach(cleanup)
+  it("frames the live preview above the link card", () => {
+    render(<ArtifactPreview title="Demo" externalUrl="https://v0.app/chat/abc" livePreviewSrc="https://demo.v0.build/?__v0_token=t" />)
+    const frame = screen.getByTitle("Live preview of Demo") as HTMLIFrameElement
+    expect(frame.src).toBe("https://demo.v0.build/?__v0_token=t")
+    expect(frame.getAttribute("sandbox")).not.toContain("allow-top-navigation")
+    expect(screen.getByText("Open external artifact")).toBeInTheDocument()
+  })
+  it("shows only the link card when there is no live preview", () => {
+    render(<ArtifactPreview title="Demo" externalUrl="https://v0.app/chat/abc" livePreviewSrc={null} />)
+    expect(screen.queryByTitle("Live preview of Demo")).toBeNull()
+    expect(screen.getByText("Open external artifact")).toBeInTheDocument()
+  })
+})

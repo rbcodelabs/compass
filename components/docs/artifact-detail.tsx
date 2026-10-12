@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, useTransition } from "react"
 import { Camera, MessageSquare } from "lucide-react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { archiveArtifact, captureArtifactThumbnail, linkArtifact, replaceArtifactRevision, unlinkArtifact, unlinkArtifactDecision, updateArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
+import { archiveArtifact, captureArtifactThumbnail, linkArtifact, refreshArtifactFromV0, replaceArtifactRevision, unlinkArtifact, unlinkArtifactDecision, updateArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
 import { ArtifactViewer } from "./artifact-viewer"
 import type { ArtifactSlideDto } from "@/lib/artifact-slides"
 import { Button } from "@/components/ui/button"
@@ -28,24 +28,27 @@ type ArtifactDetailProps = {
   /** Zero-based slide to open on, from `?slide=`. */
   initialSlideIndex?: number
   initialCommentsPin?: PanelPin
+  /** V0_CHAT only: v0's running preview, fetched per view with the viewer's own grant. */
+  livePreviewSrc?: string | null
   workspaceId: string
   basePath: string
   solutions: Array<{ id: string; title: string; linked: boolean }>
   decisions: Array<{ id: string; title: string; state: string }>
 }
 
-export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, workspaceId, basePath, solutions, decisions, initialCommentsPin }: ArtifactDetailProps) {
+export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, workspaceId, basePath, solutions, decisions, initialCommentsPin, livePreviewSrc }: ArtifactDetailProps) {
   const labels = useLabels()
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [selectedSolution, setSelectedSolution] = useState("")
+  const [notice, setNotice] = useState<string | null>(null)
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [commentsVisits, setCommentsVisits] = useState(0)
   const commentsTrigger = useRef<HTMLButtonElement>(null)
   // Where ArtifactViewer portals its actions (Leave feedback, View full screen) so they sit in the top bar.
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null)
-  const artifactTypeLabel = `Artifact · ${artifact.sourceType === "EXTERNAL_LINK" ? "External" : artifact.kind === "SLIDE_DECK" ? "Slide deck" : "HTML prototype"}`
+  const artifactTypeLabel = `Artifact · ${artifact.sourceType === "V0_CHAT" ? "v0 chat" : artifact.sourceType === "EXTERNAL_LINK" ? "External" : artifact.kind === "SLIDE_DECK" ? "Slide deck" : "HTML prototype"}`
   const changeCommentsOpen = (open: boolean) => {
     setCommentsOpen(open)
     if (open) setCommentsVisits((visits) => visits + 1)
@@ -66,6 +69,7 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
       <div className="flex shrink-0 items-center gap-2">
         <div ref={setToolbarSlot} className="contents" />
         <Button ref={commentsTrigger} variant="outline" size="sm" aria-expanded={commentsOpen} aria-label="Comments" title="Comments" onClick={() => changeCommentsOpen(!commentsOpen)}><MessageSquare aria-hidden /><span className="hidden @2xl:inline">Comments</span></Button>
+        {artifact.sourceType === "V0_CHAT" && artifact.status === "ACTIVE" && <Button variant="outline" size="sm" disabled={pending} onClick={() => run(async () => { setNotice(null); const result = await refreshArtifactFromV0(workspaceId, artifact.id, basePath); if (result.error !== undefined) throw new Error(result.error); setNotice(result.changed ? `New version captured as revision ${result.revisionNumber}.` : "Already up to date with v0.") })}>{pending ? "Refreshing…" : "Refresh from v0"}</Button>}
         {artifact.status === "ACTIVE" && <Button variant="outline" size="sm" disabled={pending} onClick={() => run(() => archiveArtifact(workspaceId, artifact.id, basePath))}>Archive</Button>}
       </div>
     </div>
@@ -75,7 +79,7 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
       {artifact.description && <ArtifactDescription>{artifact.description}</ArtifactDescription>}
     </header>
     {artifact.status === "ARCHIVED" && <div className="rounded-md bg-status-warning-surface p-3 text-sm text-status-warning">This artifact is archived.</div>}
-    <ArtifactViewer title={artifact.title} html={html} slides={slides} initialSlideIndex={initialSlideIndex} toolbarSlot={toolbarSlot} externalUrl={artifact.currentRevision?.externalUrl} thumbnail={artifact.currentRevision?.thumbnail} artifactId={artifact.id} fullScreenHref={`${basePath}/artifacts/${artifact.id}/full-screen`} onFeedbackPosted={() => setCommentsVisits((visits) => visits + 1)} />
+    <ArtifactViewer title={artifact.title} html={html} slides={slides} initialSlideIndex={initialSlideIndex} toolbarSlot={toolbarSlot} externalUrl={artifact.currentRevision?.externalUrl} thumbnail={artifact.currentRevision?.thumbnail} livePreviewSrc={livePreviewSrc} artifactId={artifact.id} fullScreenHref={`${basePath}/artifacts/${artifact.id}/full-screen`} onFeedbackPosted={() => setCommentsVisits((visits) => visits + 1)} />
     {artifact.sourceType === "EXTERNAL_LINK" && artifact.status === "ACTIVE" && artifact.currentRevision?.externalUrl && !isGoogleDriveUrl(artifact.currentRevision.externalUrl) && <ArtifactScreenshotControls
       key={latestRevisionCreatedAt(artifact.revisions)}
       workspaceId={workspaceId}
@@ -89,7 +93,7 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
         <h2 className="font-semibold">Details</h2><Input name="title" defaultValue={artifact.title} required /><Textarea name="description" defaultValue={artifact.description ?? ""} />{artifact.sourceType === "HTML_UPLOAD" && <label className="flex items-center gap-2 text-sm"><Checkbox name="kind" value="SLIDE_DECK" defaultChecked={artifact.kind === "SLIDE_DECK"} />Show as a slide deck</label>}<Button type="submit" disabled={pending}>Save details</Button>
       </form>
       <form className="space-y-3 rounded-lg border p-4" onSubmit={(event) => { event.preventDefault(); run(() => replaceArtifactRevision(workspaceId, artifact.id, artifact.sourceType, new FormData(event.currentTarget), basePath)) }}>
-        <h2 className="font-semibold">New revision</h2>{artifact.sourceType === "EXTERNAL_LINK" ? <Input name="url" type="url" required placeholder="https://…" /> : <Input name="file" type="file" accept=".html,text/html" required />}<Button type="submit" disabled={pending}>Replace current revision</Button>
+        <h2 className="font-semibold">New revision</h2>{artifact.sourceType === "V0_CHAT" ? <p className="text-sm text-text-subtle">Revisions of a v0 chat come from v0. Use “Refresh from v0” above.</p> : artifact.sourceType === "EXTERNAL_LINK" ? <Input name="url" type="url" required placeholder="https://…" /> : <Input name="file" type="file" accept=".html,text/html" required />}{artifact.sourceType !== "V0_CHAT" && <Button type="submit" disabled={pending}>Replace current revision</Button>}
       </form>
     </div>
     <section className="rounded-lg border p-4 space-y-3"><h2 className="font-semibold">{`Linked ${labels.solution.lowerPlural}`}</h2>{linked.length === 0 ? <p className="text-sm text-text-subtle">{`Not linked to ${labels.solution.indefinite}.`}</p> : <ul className="space-y-2">{linked.map((solution) => <li key={solution.id} className="flex items-center justify-between gap-2"><span>{solution.title}</span><Button size="sm" variant="ghost" onClick={() => run(() => unlinkArtifact(workspaceId, artifact.id, solution.id, basePath))}>Unlink</Button></li>)}</ul>}
@@ -104,7 +108,8 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
         <Button size="sm" variant="ghost" disabled={pending} aria-label={`Unlink ${decision.title}`} onClick={() => run(() => unlinkArtifactDecision(workspaceId, artifact.id, decision.id, basePath))}>Unlink</Button>
       </li>)}</ul>}
     </section>
-    <section className="rounded-lg border p-4"><h2 className="font-semibold mb-2">Revision history</h2><ol className="space-y-2 text-sm">{artifact.revisions.map((revision) => <li key={revision.id} className="flex justify-between"><span>Revision {revision.revisionNumber}{revision.filename ? ` · ${revision.filename}` : " · External URL"}</span><time>{new Date(revision.createdAt).toLocaleString()}</time></li>)}</ol></section>
+    <section className="rounded-lg border p-4"><h2 className="font-semibold mb-2">Revision history</h2><ol className="space-y-2 text-sm">{artifact.revisions.map((revision) => <li key={revision.id} className="flex justify-between"><span>Revision {revision.revisionNumber}{revision.filename ? ` · ${revision.filename}` : artifact.sourceType === "V0_CHAT" ? " · v0 chat" : " · External URL"}</span><time>{new Date(revision.createdAt).toLocaleString()}</time></li>)}</ol></section>
+    {notice && !error && <p role="status" className="text-sm text-text-secondary">{notice}</p>}
     {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
     <Link href={basePath} className="text-sm text-primary">Back to Docs</Link>
     </div>

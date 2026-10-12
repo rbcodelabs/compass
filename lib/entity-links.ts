@@ -124,3 +124,96 @@ export function entityPath(input: EntityLinkInput): string {
       return `${base}/okrs${panel}`
   }
 }
+
+// ── Parsing: the inverse of entityPath ──────────────────────────────────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Ids are UUIDs; checking shape here keeps page names (`discovery/tree`) from parsing as entities and keeps non-UUID input away from the uuid columns. */
+export function isEntityId(value: string): boolean {
+  return UUID_RE.test(value)
+}
+
+const PANEL_LINK_TYPES: ReadonlySet<string> = new Set<EntityLinkType>([
+  "objective",
+  "keyResult",
+  "opportunity",
+  "solution",
+  "assumption",
+  "experiment",
+  "roadmapItem",
+  "feedback",
+  "task",
+])
+
+export type ParsedEntityLink = WorkspaceSlugs & { type: EntityLinkType; id: string }
+
+function decodeSegment(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Recognises a link that `entityPath` could have produced and returns what it
+ * addresses, or null for anything else (other pages, other hosts, malformed
+ * ids). Pure and never throws, so it is safe in a markdown renderer.
+ *
+ * `href` may be a relative path or an absolute URL. An absolute URL only
+ * counts when its origin equals `currentOrigin` — a link to some other host is
+ * never promoted to a card, however Compass-shaped its path is.
+ *
+ * Deliberately a recogniser, not an authority: it says what the link *claims*
+ * to point at. Whether the reader may see it is decided by the server when the
+ * card asks for its summary.
+ */
+export function parseEntityLink(href: string, currentOrigin?: string | null): ParsedEntityLink | null {
+  let url: URL
+  try {
+    const isAbsolute = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(href)
+    if (isAbsolute) {
+      url = new URL(href)
+      if (!currentOrigin || url.origin !== currentOrigin) return null
+    } else if (href.startsWith("/") && !href.startsWith("//")) {
+      url = new URL(href, "http://compass.invalid")
+    } else {
+      return null
+    }
+  } catch {
+    return null
+  }
+
+  const segments = url.pathname.split("/").filter(Boolean).map(decodeSegment)
+  if (segments.some((s) => s === null)) return null
+  const [orgSlug, workspaceSlug, section, first, second, ...extra] = segments as string[]
+  if (!orgSlug || !workspaceSlug) return null
+  const slugs = { orgSlug, workspaceSlug }
+
+  // A page of its own: /{org}/{ws}/{section}/{id}
+  const own = (type: EntityLinkType, id: string | undefined): ParsedEntityLink | null =>
+    id && isEntityId(id) && extra.length === 0 ? { ...slugs, type, id } : null
+
+  // A ?detail=<type>:<id> panel link is valid on any workspace page and names the
+  // entity actually shown, so it wins over the page it sits on (a solution link
+  // rides on its opportunity's discovery page).
+  const detail = url.searchParams.get("detail")
+  const sep = detail ? detail.indexOf(":") : -1
+  if (detail && sep > 0) {
+    const type = detail.slice(0, sep)
+    const id = detail.slice(sep + 1)
+    if (PANEL_LINK_TYPES.has(type) && isEntityId(id)) return { ...slugs, type: type as EntityLinkType, id }
+  }
+
+  if (section === "docs" && first === "artifacts") return own("artifact", second)
+  if (second) return null
+  switch (section) {
+    case "discovery": return own("opportunity", first)
+    case "experiments": return own("experiment", first)
+    case "tasks": return own("task", first)
+    case "docs": return own("doc", first)
+    case "roadmap": return own("roadmapItem", first)
+    default: return null
+  }
+}

@@ -161,6 +161,7 @@ export function ArtifactViewer({
   html,
   externalUrl,
   thumbnail,
+  livePreviewSrc,
   artifactId,
   fullScreenHref,
   backHref,
@@ -174,6 +175,7 @@ export function ArtifactViewer({
   html?: string
   externalUrl?: string | null
   thumbnail?: ArtifactThumbnailDto | null
+  livePreviewSrc?: string | null
   artifactId: string
   /** Present only in the docked view — links out to the full-screen route. */
   fullScreenHref?: string
@@ -336,6 +338,7 @@ export function ArtifactViewer({
       html={activeHtml}
       externalUrl={externalUrl}
       thumbnail={thumbnail}
+      livePreviewSrc={livePreviewSrc}
       fill={fill}
       holdPrevious={isDeck}
       pickMode={picking}

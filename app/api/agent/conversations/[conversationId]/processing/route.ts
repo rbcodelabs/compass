@@ -1,5 +1,6 @@
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
+import { ownedConversationsWhere } from "@/lib/agent-conversation-access"
 import { handoffKind, parseProcessingState, processingStatus } from "@/lib/pm-agent-processing"
 
 export async function GET(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
@@ -8,7 +9,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ conv
   const workspaceId = new URL(request.url).searchParams.get("workspaceId")
   if (!workspaceId) return new Response("Workspace required", { status: 400 })
   const { conversationId } = await params
-  const conversation = await getPrisma().agentConversation.findFirst({ where: { id: conversationId, workspaceId, userId: session.user.id, workspace: { members: { some: { userId: session.user.id } } } } })
+  // Handoff/interview conversations stay owner-only even once conversations can
+  // be shared, hence the owner predicate rather than the general one.
+  const conversation = await getPrisma().agentConversation.findFirst({ where: { id: conversationId, ...ownedConversationsWhere(workspaceId, session.user.id) } })
   const state = parseProcessingState(conversation?.interviewProcessingJson)
   if (!state) return new Response("Not found", { status: 404 })
   const status = processingStatus(state)

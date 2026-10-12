@@ -37,7 +37,21 @@ import {
   updateArtifactMetadata,
   MAX_ARTIFACT_HTML_BYTES,
 } from "@/lib/artifacts";
+import { createV0Artifact, refreshV0Artifact, V0ArtifactError } from "@/lib/v0-artifacts";
+import { McpConnectorError } from "@/lib/mcp-connectors/config";
+
 import { ArtifactThumbnailError, captureAndStoreArtifactThumbnail, scheduleArtifactThumbnailCapture } from "@/lib/artifact-thumbnail";
+
+/**
+ * v0 failures the person can act on (bad URL, v0 not connected, chat unreadable)
+ * are returned as values: production replaces the message of a thrown server-action
+ * error with an opaque digest. Anything else is logged and reported generically.
+ */
+function v0Failure(error: unknown, fallback: string): { error: string } {
+  if (error instanceof V0ArtifactError || error instanceof McpConnectorError) return { error: error.message };
+  console.error("[v0-artifact] unexpected failure", error);
+  return { error: fallback };
+}
 
 async function requireWorkspaceMember(workspaceId: string) {
   const session = await auth();
@@ -77,9 +91,20 @@ export async function createArtifact(workspaceId: string, formData: FormData, re
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim() || null;
   const sourceType = String(formData.get("sourceType") ?? "");
-  if (!title) throw new Error("Title is required");
+  // A v0 chat supplies its own title when none is typed.
+  if (!title && sourceType !== "V0_CHAT") throw new Error("Title is required");
   const common = { workspaceId, title, description, createdById: user.id, source: "UI" as const };
-  const artifact = sourceType === "EXTERNAL_LINK"
+  let v0Created: Awaited<ReturnType<typeof createV0Artifact>> | null = null;
+  if (sourceType === "V0_CHAT") {
+    try {
+      v0Created = await createV0Artifact({ workspaceId, title: title || null, description, url: String(formData.get("url") ?? ""), userId: user.id, source: "UI" });
+    } catch (error) {
+      return v0Failure(error, "Could not create the v0 chat artifact.");
+    }
+  }
+  const artifact = v0Created
+    ? v0Created
+    : sourceType === "EXTERNAL_LINK"
     ? await createExternalArtifact({ ...common, url: String(formData.get("url") ?? "") })
     : await (async () => {
         const file = formData.get("file");
@@ -95,7 +120,7 @@ export async function createArtifact(workspaceId: string, formData: FormData, re
     scheduleArtifactThumbnailCapture({ artifactId: artifact.id, workspaceId, revisionId: artifact.currentRevisionId });
   }
   revalidatePath(revalidatePathStr);
-  return { id: artifact.id };
+  return { id: artifact.id, error: undefined };
 }
 
 export async function updateArtifact(
@@ -111,6 +136,7 @@ export async function updateArtifact(
 
 export async function replaceArtifactRevision(workspaceId: string, artifactId: string, sourceType: string, formData: FormData, revalidatePathStr: string) {
   const user = await requireWorkspaceMember(workspaceId);
+  if (sourceType === "V0_CHAT") throw new Error("Revisions of a v0 chat come from v0. Use Refresh from v0.");
   if (sourceType === "EXTERNAL_LINK") {
     const revision = await replaceExternalArtifactRevision({ artifactId, workspaceId, url: String(formData.get("url") ?? ""), createdById: user.id, source: "UI" });
     scheduleArtifactThumbnailCapture({ artifactId, workspaceId, revisionId: revision.id });
@@ -121,6 +147,17 @@ export async function replaceArtifactRevision(workspaceId: string, artifactId: s
     await replaceHtmlArtifactRevision({ artifactId, workspaceId, filename: file.name, mimeType: file.type, bytes: new Uint8Array(await file.arrayBuffer()), createdById: user.id, source: "UI" }, getArtifactStorage());
   }
   revalidatePath(revalidatePathStr);
+}
+
+export async function refreshArtifactFromV0(workspaceId: string, artifactId: string, revalidatePathStr: string) {
+  const user = await requireWorkspaceMember(workspaceId);
+  try {
+    const result = await refreshV0Artifact({ workspaceId, artifactId, userId: user.id, source: "UI" });
+    revalidatePath(revalidatePathStr);
+    return { changed: result.changed, revisionNumber: result.revisionNumber, error: undefined };
+  } catch (error) {
+    return v0Failure(error, "Could not refresh from v0.");
+  }
 }
 
 /**
