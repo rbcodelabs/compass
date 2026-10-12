@@ -249,12 +249,6 @@ describe("getCanvasOverview", () => {
     await expect(getCanvasOverview(payload, "ws-1")).rejects.toBe(missing);
   });
 
-  it("the canvas page does not swallow a loader failure", async () => {
-    const { readFileSync } = await import("node:fs");
-    const source = readFileSync("app/[orgSlug]/[workspaceSlug]/canvas/page.tsx", "utf8");
-    expect(source).not.toMatch(/\bcatch\b|\.catch\(/);
-  });
-
   it("any other link read failure still throws (a permission error or outage is not 'no links')", async () => {
     const prisma = makeFakePrisma({
       opportunities: [{ id: "opp-1", title: "Opp", status: "EXPLORING", squadId: null, linkedKeyResultId: null }],

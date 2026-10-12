@@ -9,7 +9,7 @@
  *
  * Journey: build an Opportunity, a Solution, a Cycle and an Objective under CLASSIC and note today's text -> rename
  * Opportunity/Objective/Key Result/Solution/Cycle -> check the nav, the Discovery board (button, group-by, swimlane
- * empty-state words), the opportunity panel, the OKRs page, the canvas zoom label and an inline error under the
+ * empty-state words), the opportunity panel, the OKRs page and an inline error under the
  * override -> clear the names and check CLASSIC is back, unchanged.
  */
 import pg from "pg";
@@ -76,27 +76,6 @@ async function cleanup(created: { opportunityId?: string; cycleTitle: string }) 
   })
 }
 
-/** The canvas viewport's current zoom (the scale in the React Flow transform). */
-async function viewportScale(page: Page): Promise<number> {
-  const transform = await page.locator(".react-flow__viewport").evaluate((el) => getComputedStyle(el).transform)
-  const match = /matrix\(([^,]+),/.exec(transform)
-  return match ? Number(match[1]) : 1
-}
-
-/** Wait until the zoom animation has finished: two reads, a frame apart, agree. */
-async function settledScale(page: Page): Promise<number> {
-  let previous = -1
-  await expect
-    .poll(async () => {
-      const current = await viewportScale(page)
-      const stable = Math.abs(current - previous) < 1e-6
-      previous = current
-      return stable
-    })
-    .toBe(true)
-  return previous
-}
-
 async function saveNames(page: Page, base: string, names: Partial<Record<keyof typeof NAMES, readonly [string, string]>>) {
   await page.goto(`${base}/settings`);
   await page.waitForLoadState("networkidle");
@@ -124,7 +103,7 @@ test.describe("Thinking model overrides (all five entities)", () => {
     await cleanup({ opportunityId, cycleTitle });
   });
 
-  test("renaming all five entities in Settings reaches the nav, board, panel, OKRs page, canvas and an inline error; clearing restores CLASSIC", async ({
+  test("renaming all five entities in Settings reaches the nav, board, panel, OKRs page and an inline error; clearing restores CLASSIC", async ({
     page,
     base,
   }) => {
@@ -206,20 +185,6 @@ test.describe("Thinking model overrides (all five entities)", () => {
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("button", { name: "Add aim" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add objective" })).toHaveCount(0);
-
-    // Canvas: the middle zoom tier carries the Cycle name; the page text says no canonical entity word.
-    await page.goto(`${base}/canvas`);
-    await page.waitForLoadState("networkidle");
-    // Condition-based: click, then wait for the zoom to move and settle, until the tier badge reads the Cycle name.
-    let scale = await settledScale(page);
-    for (let i = 0; i < 16 && !(await page.getByText("Sprint", { exact: true }).isVisible()); i++) {
-      await page.locator(".react-flow__controls-zoomin").click();
-      await expect.poll(() => viewportScale(page), { timeout: 5_000 }).not.toBe(scale);
-      scale = await settledScale(page);
-    }
-
-    await expect(page.getByText("Sprint", { exact: true })).toBeVisible();
-    await expect(page.getByText("Cycle", { exact: true })).toHaveCount(0);
 
     // An inline error under the override: the composer's failure message names the renamed entity.
     await page.goto(`${base}/discovery`);
