@@ -884,3 +884,46 @@ describe("073_workspace_thinking_model", () => {
     expect(model).toMatch(/thinkingModelLabels\s+String\?\s+@map\("thinking_model_labels"\)\s+@db\.Text/);
   });
 });
+
+describe("078_artifact_slide_decks", () => {
+  const NAME = "078_artifact_slide_decks";
+  const statements = () =>
+    sqlFor(NAME)
+      .split(";")
+      .map((statement) => statement.trim())
+      .filter(Boolean);
+
+  it("is registered exactly once and is the last registered migration", () => {
+    const names = registeredMigrations();
+    expect(names.filter((name) => name === NAME)).toHaveLength(1);
+    expect(names[names.length - 1]).toBe(NAME);
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("077_artifact_screenshots"));
+    expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("076_research_external_studies"));
+  });
+
+  it("is two plain nullable ADD COLUMNs: no default, backfill, index, CHECK, NOT NULL or foreign key", () => {
+    expect(statements()).toEqual([
+      "ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS kind VARCHAR(30)",
+      "ALTER TABLE comment_element_anchors ADD COLUMN IF NOT EXISTS slide_index INTEGER",
+    ]);
+    expect(statements().join("\n")).not.toMatch(/NOT NULL|DEFAULT|REFERENCES|FOREIGN KEY|CHECK|\bINDEX\b|UPDATE|INSERT|DROP/i);
+  });
+
+  it("needs no async-wait entry and no code hook (no index, no backfill)", () => {
+    const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
+    expect(runner.match(new RegExp(NAME, "g"))).toHaveLength(2); // name + filePath, nothing else
+    const manifest = readFileSync(path.join(ROOT, "lib/preview-automation/managed-manifest.ts"), "utf-8");
+    expect(manifest.match(new RegExp(`"${NAME}"`, "g"))).toHaveLength(1);
+  });
+
+  // As with 073: the columns are declared alongside the code that reads them, so the
+  // migration must be applied before that code is relied on (Prisma selects every
+  // declared scalar). Both stay nullable, matching the DDL.
+  it("declares both columns in schema.prisma as nullable", () => {
+    const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8");
+    const artifact = schema.match(/model Artifact \{[\s\S]*?\n\}/)?.[0] ?? "";
+    const anchor = schema.match(/model CommentElementAnchor \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(artifact).toMatch(/\bkind\s+String\?\s+@map\("kind"\)\s+@db\.VarChar\(30\)/);
+    expect(anchor).toMatch(/\bslideIndex\s+Int\?\s+@map\("slide_index"\)/);
+  });
+});

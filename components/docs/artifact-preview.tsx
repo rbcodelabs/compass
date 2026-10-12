@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { ExternalLink } from "lucide-react"
 import {
   ARTIFACT_IFRAME_SANDBOX,
@@ -32,6 +33,7 @@ export function ArtifactPreview({
   resolutions,
   renderPin,
   fill,
+  holdPrevious = false,
 }: {
   title: string
   html?: string
@@ -46,6 +48,8 @@ export function ArtifactPreview({
   resolutions?: AnchorResolutionMap
   renderPin?: (commentId: string, resolution: AnchoredResolution) => ReactNode
   fill?: boolean
+  /** Keep the previous HTML on screen until the new one has loaded and fitted (slide decks), instead of blanking between. */
+  holdPrevious?: boolean
 }) {
   if (externalUrl) {
     return <div className="rounded-lg border border-border-default bg-surface-panel p-4 text-center sm:p-8">
@@ -72,10 +76,10 @@ export function ArtifactPreview({
     </div>
   }
   if (!html) return <p className="text-sm text-text-subtle">Preview content is unavailable.</p>
-  return <ArtifactSandboxedFrame
-    key={html}
+  return <ArtifactFrameStack
     title={title}
     html={html}
+    holdPrevious={holdPrevious}
     pickMode={pickMode}
     onElementPicked={onElementPicked}
     onPickModeExited={onPickModeExited}
@@ -85,4 +89,60 @@ export function ArtifactPreview({
     renderPin={renderPin}
     fill={fill}
   />
+}
+
+/** Longest a superseded frame stays underneath if the new one never reports settled, in ms. */
+const PREVIOUS_FRAME_MAX_MS = ARTIFACT_PREVIEW_READY_TIMEOUT_MS + 2_500
+
+type StackedFrame = { id: number; html: string }
+
+/**
+ * Renders the sandboxed frame for `html`. Switching `html` remounts a fresh
+ * frame (a new document, a new handshake). With `holdPrevious` the old frame
+ * stays mounted underneath, inert, until the new one reports its slide fit
+ * settled, so stepping between slides never shows a blank or black frame while
+ * the next slide loads and is hidden awaiting its fit.
+ */
+function ArtifactFrameStack({ html, holdPrevious, ...frameProps }: {
+  title: string
+  html: string
+  holdPrevious: boolean
+  pickMode?: boolean
+  onElementPicked?: (picked: PickedElement) => void
+  onPickModeExited?: () => void
+  anchorsToResolve?: AnchorRequest[]
+  onAnchorsResolved?: (resolutions: AnchorResolutionMap) => void
+  resolutions?: AnchorResolutionMap
+  renderPin?: (commentId: string, resolution: AnchoredResolution) => ReactNode
+  fill?: boolean
+}) {
+  const [frames, setFrames] = useState<StackedFrame[]>(() => [{ id: 0, html }])
+  const latest = frames[frames.length - 1]
+  if (latest.html !== html) {
+    const next = { id: latest.id + 1, html }
+    setFrames(holdPrevious ? [...frames, next] : [next])
+  }
+
+  const stacked = frames.length > 1
+  const latestId = latest.id
+  useEffect(() => {
+    if (!stacked) return
+    const timer = window.setTimeout(() => setFrames((current) => current.filter((frame) => frame.id === latestId)), PREVIOUS_FRAME_MAX_MS)
+    return () => window.clearTimeout(timer)
+  }, [stacked, latestId])
+
+  const settle = (id: number) => setFrames((current) => (current.some((frame) => frame.id < id) ? current.filter((frame) => frame.id >= id) : current))
+
+  // One uniform list, so a frame keeps its place (and its loaded document)
+  // when it stops being the newest; moving an iframe in the tree would reload it.
+  return <div className={frameProps.fill ? "relative h-full" : "relative"}>
+    {frames.map((frame, index) => {
+      const current = index === frames.length - 1
+      return <div key={frame.id} aria-hidden={current ? undefined : true} className={current ? (frameProps.fill ? "relative h-full" : "relative") : "pointer-events-none absolute inset-0"}>
+        {current
+          ? <ArtifactSandboxedFrame {...frameProps} html={frame.html} transparent={stacked} onSettled={() => settle(frame.id)} />
+          : <ArtifactSandboxedFrame title={frameProps.title} html={frame.html} fill={frameProps.fill} />}
+      </div>
+    })}
+  </div>
 }
