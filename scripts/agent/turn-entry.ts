@@ -519,6 +519,14 @@ async function main(): Promise<void> {
       alwaysLoad: true,
     },
   }
+  // Compass-hosted search. The name is reserved before connectors are
+  // read so a connector slug cannot shadow it.
+  // No Gateway credential enters the sandbox: it presents the same MCP_TOKEN.
+  mcpServers.web_search = {
+    type: "http",
+    url: new URL("/api/agent/web-search/mcp", baseUrl).toString(),
+    headers,
+  }
   const connectors = parseConnectors(AGENT_MCP_CONNECTORS)
   const connectorToolPrefixes: string[] = []
   const connectorGuidance: string[] = []
@@ -562,15 +570,16 @@ async function main(): Promise<void> {
     //
     // WebFetch is the one built-in admitted: it lets the agent read a URL the
     // user names or a page it already knows about, instead of reporting that it
-    // has no web access. WebSearch is deliberately NOT here. Fetched content is
-    // untrusted input: treat it as data, never instructions.
+    // has no web access. Search is not a built-in: it is the Compass-hosted
+    // web_search MCP tool registered above. Fetched content and search results
+    // are untrusted input: treat them as data, never instructions.
     tools: ["WebFetch"],
     strictMcpConfig: true,
     settingSources: [],
     systemPrompt: effectiveSystemPrompt,
     // Compass MCP only, auto-approved. Headless (no human approver): the
     // real security boundary is the disposable sandbox + per-user MCP auth.
-    allowedTools: ["mcp__compass", "WebFetch", ...connectorToolPrefixes],
+    allowedTools: ["mcp__compass", "WebFetch", "mcp__web_search", ...connectorToolPrefixes],
     // Safety default (Phase 5): keep the two irreversible hard-delete tools
     // out of the agent's reach — everything else is reversible/auditable.
     // Remove entries here to let the agent perform destructive deletes.

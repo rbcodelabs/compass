@@ -170,7 +170,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301",
   // Agent SDK session pointer: one new table keyed by conversation_id, no index, no backfill.
   // Digest recorded from the shipped SQL; please review it.
-  "080_agent_sessions": "f82aa43816ea5e1f5d393c2e244d4e2b0e41f3ce21e42494c99a587ce78f4475"
+  "080_agent_sessions": "f82aa43816ea5e1f5d393c2e244d4e2b0e41f3ce21e42494c99a587ce78f4475",
+  // Audit + per-turn budget for web_search: one new table keyed by (credential_id, seq), no index, no backfill.
+  // Digest recorded from the shipped SQL; please review it.
+  "081_agent_web_searches": "c2e0c3445770c5fb5adf24c4f043af46fa13472895023b4206993800715c3218"
 };
 
 /**
@@ -216,6 +219,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 080 postcondition (column shape plus a primary key on conversation_id alone before the receipt).
   "080_agent_sessions": {
     "lib/migrations/agent-sessions.ts": "8d4fdc83ab62c345ca0fe00be983904c14495def605ed2e7fc42f4bdcfa6d404",
+  },
+  // The 081 postcondition (column shape plus the composite (credential_id, seq) primary key before the receipt).
+  "081_agent_web_searches": {
+    "lib/migrations/agent-web-searches.ts": "0df81423dd87944c656f88e01ca6b4598f9e6c6fce02974e72819ec3102698c2",
   },
 };
 

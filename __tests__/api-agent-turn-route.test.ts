@@ -6,7 +6,7 @@
  * conversation ownership, and runtime prerequisites. The streamed happy path
  * (real sandbox boot + agent run) is verified end-to-end against a deploy.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { NextRequest } from "next/server"
 import { normalizeCapabilityPack } from "@/lib/capability-pack"
 
@@ -409,11 +409,15 @@ describe("agent turn route — guards", () => {
       expect(mockListConnectedSlugs).toHaveBeenCalledWith("user-1", trustedCompassBaseUrl().origin, expect.anything())
     })
 
-    describe("web access", () => {
-      it("advertises WebFetch in the prompt and no longer lists the web as unavailable", async () => {
+    describe("web_search", () => {
+      it("always tells the sandbox to use web_search and advertises it in the prompt", async () => {
         const env = await turn(setupRun())
-        expect(env.AGENT_SYSTEM_PROMPT).toContain("WebFetch")
+        expect("AGENT_WEB_SEARCH" in env).toBe(false)
+        expect(env.AGENT_SYSTEM_PROMPT).toContain("web_search tool")
+        expect(env.AGENT_SYSTEM_PROMPT).not.toContain("cannot search the web")
         expect(env.AGENT_SYSTEM_PROMPT).not.toMatch(/Unavailable capabilities include[^.]*\bweb\b/)
+        // The sandbox is told to call the Compass route; it is never handed a search credential.
+        expect(Object.keys(env).filter(key => /GATEWAY|OIDC|PERPLEXITY/i.test(key))).toEqual([])
       })
     })
 

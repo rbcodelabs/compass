@@ -33,7 +33,7 @@ describe("agent entry capability-pack policy", () => {
     // entirely, both leave a headless agent running in bypassPermissions mode with
     // no allowlist at all. `connectorToolPrefixes` is the only sanctioned way for
     // this list to grow, and it grows per turn from the grants that user holds.
-    expect(source).toContain('allowedTools: ["mcp__compass", "WebFetch", ...connectorToolPrefixes]')
+    expect(source).toContain('allowedTools: ["mcp__compass", "WebFetch", "mcp__web_search", ...connectorToolPrefixes]')
     expect(source).not.toMatch(/allowedTools:\s*\[[^\]]*\*/)
   })
 
@@ -44,6 +44,14 @@ describe("agent entry capability-pack policy", () => {
     // formatting nicety.
     expect(source).toContain("/^[a-z0-9][a-z0-9-]{0,31}$/.test(slug)")
     expect(source).toContain("connectorToolPrefixes.push(`mcp__${connector.slug}`)")
+  })
+
+  it("always adds web_search as one fixed server, before connectors are read", () => {
+    // The server name and URL are literals; nothing derives them from input, and the
+    // name is registered before connectors so a connector slug cannot shadow it.
+    expect(source).not.toContain("AGENT_WEB_SEARCH")
+    expect(source).toContain('new URL("/api/agent/web-search/mcp", baseUrl)')
+    expect(source.indexOf("mcpServers.web_search")).toBeLessThan(source.indexOf("hasOwnProperty.call(mcpServers, connector.slug)"))
   })
 
   it("never lets a connector shadow Compass's own MCP entry", () => {

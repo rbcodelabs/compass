@@ -2815,6 +2815,28 @@ model AgentSession {
   @@map("agent_sessions")
 }
 
+/// One attempted agent web_search: the audit record and the per-turn
+/// budget. The composite key is the budget — credentialId is the 5-minute AGENT_TURN
+/// credential (one per turn) and a search claims the next seq, so racing searches
+/// cannot both take the same slot and the cap holds without a lock. Stores the query
+/// and the result URLs only, never page content.
+model AgentWebSearch {
+  credentialId   String    @map("credential_id") @db.Uuid
+  seq            Int
+  userId         String    @map("user_id") @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  conversationId String?   @map("conversation_id") @db.Uuid
+  query          String    @db.VarChar(400)
+  status         String    @default("STARTED") @db.VarChar(20)
+  resultCount    Int       @default(0) @map("result_count")
+  resultUrls     Json      @map("result_urls")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  finishedAt     DateTime? @map("finished_at")
+
+  @@id([credentialId, seq])
+  @@map("agent_web_searches")
+}
+
 /// One durable, detachable agent turn. The sandbox owns execution and
 /// reports back over an authenticated callback; this row owns the *lifecycle*
 /// (status, lease, deadline, cleanup handles) so a turn survives the browser

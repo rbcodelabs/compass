@@ -19,7 +19,7 @@ describe("describeCapabilities", () => {
       const sentence = describeCapabilities(connectors)
       expect(sentence).not.toMatch(/Unavailable capabilities include[^.]*\bweb\b/)
       expect(sentence).toContain("WebFetch")
-      expect(sentence).toContain("cannot search the web")
+      expect(sentence).toContain("web_search")
     }
   })
 
@@ -57,5 +57,16 @@ describe("formatList", () => {
     expect(formatList(["a"])).toBe("a")
     expect(formatList(["a", "b"])).toBe("a, and b")
     expect(formatList(["a", "b", "c"])).toBe("a, b, and c")
+  })
+})
+
+describe("describeCapabilities web search", () => {
+  it("advertises web_search instead of saying search is impossible", () => {
+    const sentence = describeCapabilities([])
+    expect(sentence).toContain("web_search")
+    expect(sentence).toContain("WebFetch")
+    expect(sentence).not.toContain("cannot search the web")
+    expect(sentence).toContain("untrusted")
+    expect(sentence).not.toMatch(/Unavailable capabilities include[^.]*\bweb\b/)
   })
 })
