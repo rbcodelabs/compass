@@ -71,6 +71,10 @@ Once a round is revealed or closed (and always for the facilitator), **Tally** s
 
 Net figures are inflow minus outflow. Every move leaves one bucket and enters another, so they sum to zero unless some proposals came from items with no value yet.
 
+### Exporting the tally
+
+Use **Export CSV** on the tally page to download the tally as a spreadsheet-ready file, one row per proposal: the item, its current value, the proposed value, the proposer, their rationale, how many proposals the item has, and how many different targets were proposed. The export is built from the same data as the tally page, so it follows the same rule: while a round is open, nobody but the facilitator gets the file (the request is refused rather than returning an empty file). Text that starts with `=`, `+`, `-` or `@` is prefixed with an apostrophe so spreadsheets do not run it as a formula.
+
 The tally never changes the official field value. Reconcile the official values yourself, in the usual way, once the team has seen it.
 
 ## Access
