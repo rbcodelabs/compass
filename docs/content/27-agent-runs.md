@@ -63,7 +63,7 @@ Every run gets a time budget — **20 minutes** by default, and never more than
 Whatever the agent produced before that point is preserved.
 
 A run can also end on its own without a reply, if the machine it was running on
-fails. Compass notices within about a minute and marks the run interrupted rather
+fails. Compass notices at its next daily sweep and marks the run interrupted rather
 than leaving the conversation looking busy forever. Your transcript up to that
 point is kept, and you can send the message again.
 
@@ -80,7 +80,7 @@ changes nothing for users.
 
 Two settings matter for a deployed environment:
 
-- **`CRON_SECRET`** must be set. Compass runs a once-a-minute scheduled job
+- **`CRON_SECRET`** must be set. Compass runs a scheduled job once a day (the Vercel plan only allows daily crons)
   (`/api/cron/agent-run-sweeper`) that ends runs which have exceeded their budget
   or whose sandbox has stopped reporting. Without the secret the job refuses to
   run, and interrupted runs stay visible as in-progress until it is configured.
