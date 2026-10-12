@@ -50,3 +50,6 @@ test-results/
 
 # serena MCP local workspace (cache, memories, machine-local project config)
 .serena/
+
+# product demo video: raw recordings, composed output, sync filmstrips
+demo/out/
