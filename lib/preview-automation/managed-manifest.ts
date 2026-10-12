@@ -167,11 +167,7 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Durable background agent runs: two additive CREATE TABLEs (agent_runs, agent_run_events)
   // and six ASYNC indexes, two of them unique (worker-token lookup, (run_id, seq) idempotency).
   // No ALTER, no backfill, no foreign keys. Digest recorded from the shipped SQL; please review it.
-  "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301",
-  // Organization slug history: one additive CREATE TABLE plus one unique ASYNC index on old_slug, no backfill,
-  // no foreign keys. The postcondition hook (lib/migrations/organization-slug-redirects.ts) is pinned in
-  // REVIEWED_MIGRATION_CODE_SHA256 below. Digest recorded from the shipped SQL; please review it.
-  "080_organization_slug_redirects": "719277931a313213104d86c3e2fceac41644b7b6f5167f7978ec17fe1d645c5a"
+  "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301"
 };
 
 /**
@@ -213,10 +209,6 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 079 postcondition (table shape plus a valid, ready, non-unique org/workspace index before the receipt).
   "079_roadmap_views": {
     "lib/migrations/roadmap-views.ts": "6afd1be2429b929b643e3ab50de8b5fd9b94fe350a4e49f76987e1b80fa9e5eb",
-  },
-  // The 080 postcondition (table shape plus a valid, ready, unique old_slug index before the receipt).
-  "080_organization_slug_redirects": {
-    "lib/migrations/organization-slug-redirects.ts": "fe182a0841545a406bfe69419ea167fc6289e5ce8c3f1d85a4b9450a78801264",
   },
 };
 

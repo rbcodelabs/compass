@@ -44,8 +44,9 @@ describe("OrganizationSlugPanel", () => {
     type("acme-labs");
     fireEvent.click(screen.getByRole("button", { name: "Change URL slug" }));
     const dialog = screen.getByRole("alertdialog");
-    expect(dialog).toHaveTextContent(/old links keep working/i);
-    expect(dialog).toHaveTextContent(/cannot follow a redirect/i);
+    expect(dialog).toHaveTextContent(/old links stop working immediately/i);
+    expect(dialog).toHaveTextContent(/portal/i);
+    expect(dialog).toHaveTextContent(/MCP and API clients/i);
     expect(updateOrganizationSlug).not.toHaveBeenCalled();
   });
 

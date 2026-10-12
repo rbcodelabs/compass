@@ -14,7 +14,6 @@ const mockPrisma = {
   workspaceMember: { findFirst: vi.fn() },
   organization: { findUnique: vi.fn() },
   organizationMember: { findFirst: vi.fn() },
-  organizationSlugRedirect: { findUnique: vi.fn() },
   scoringModel: { findUnique: vi.fn() },
   opportunity: { findUnique: vi.fn() },
   solution: { findUnique: vi.fn() },
@@ -190,46 +189,5 @@ describe("assertScoringModelAccess", () => {
     mockPrisma.scoringModel.findUnique.mockResolvedValueOnce({ organizationId: "org-1" })
     await expect(assertScoringModelAccess(SERVICE, "sm-1", { admin: true })).resolves.toEqual({ organizationId: "org-1" })
     expect(mockPrisma.organizationMember.findFirst).not.toHaveBeenCalled()
-  })
-})
-
-describe("renamed-organization hint on a stale orgSlug", () => {
-  beforeEach(() => {
-    mockPrisma.organizationSlugRedirect.findUnique.mockResolvedValue({ organizationId: "org-1" })
-    mockPrisma.organization.findUnique.mockResolvedValue({ slug: "acme-labs" })
-  })
-
-  it("tells a member of the renamed org the current slug, and still denies", async () => {
-    mockPrisma.organizationMember.findFirst
-      .mockResolvedValueOnce(null) // no org named "acme" any more
-      .mockResolvedValueOnce({ organizationId: "org-1" }) // but the caller belongs to the renamed org
-    await expect(assertOrgMemberBySlug(USER, "acme")).rejects.toThrow(
-      /Organization not found or access denied: acme\. The organization was renamed; its current slug is "acme-labs"\./,
-    )
-  })
-
-  it("does not reveal the new slug to someone who is not a member of the renamed org", async () => {
-    mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
-    const error = await assertOrgMemberBySlug(USER, "acme").catch((e: unknown) => e as Error)
-    expect(error).toBeInstanceOf(McpAuthzError)
-    expect((error as Error).message).toBe("Organization not found or access denied: acme")
-  })
-
-  it("tells the service key the current slug", async () => {
-    mockPrisma.organization.findUnique
-      .mockResolvedValueOnce(null) // lookup by the stale slug
-      .mockResolvedValueOnce({ slug: "acme-labs" }) // lookup of the renamed org by id
-    await expect(assertOrgMemberBySlug(SERVICE, "acme")).rejects.toThrow(/current slug is "acme-labs"/)
-  })
-
-  it("never turns a stale slug into access: the caller still gets an error", async () => {
-    mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
-    await expect(assertOrgAdminBySlug(USER, "acme")).rejects.toBeInstanceOf(McpAuthzError)
-  })
-
-  it("falls back to the plain denial if the history lookup itself fails", async () => {
-    mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
-    mockPrisma.organizationSlugRedirect.findUnique.mockRejectedValue(new Error("boom"))
-    await expect(assertOrgMemberBySlug(USER, "acme")).rejects.toThrow(/^Organization not found or access denied: acme$/)
   })
 })

@@ -349,7 +349,7 @@ Notification kinds are `STATUS_CHANGED`, `COMMENT_ADDED`, `COMMENT_REPLIED` and,
 
 ### Workspace
 
-> **Renamed organizations.** An organization's URL slug can be changed in Organization Settings. Tools that take `orgSlug` (`list_workspaces`, `get_workspace_by_slug`, `create_workspace`, scoring and roadmap-view tools, and the REST `/api/v1/organizations/{orgSlug}/…` routes) do **not** follow a retired slug. A stale slug returns a "not found" error. Over MCP, when you are a member of the renamed organization (or use the service key), the error also names the current slug, e.g. `Organization not found or access denied: acme. The organization was renamed; its current slug is "acme-labs".` Re-read the slug and retry. Workspace and entity IDs never change.
+> **Renamed organizations.** An organization's URL slug can be changed in Organization Settings, and the old slug stops working immediately (no redirect, no alias). Tools that take `orgSlug` (`list_workspaces`, `get_workspace_by_slug`, `create_workspace`, scoring and roadmap-view tools, and the REST `/api/v1/organizations/{orgSlug}/…` routes) return "not found" for the old slug, so update any stored slug. Workspace and entity IDs never change.
 
 | Tool | Description |
 |---|---|

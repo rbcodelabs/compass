@@ -55,14 +55,12 @@ export async function createOrganizationAndWorkspace(
     return { errors: { orgSlug: [`"${orgSlug}" is a reserved word. Please choose another.`] } }
   }
 
-  // Check slug uniqueness. A slug another organization renamed away from stays
-  // reserved for it (OrganizationSlugRedirect), so it counts as taken too.
-  const [existing, retired] = await Promise.all([
-    prisma.organization.findFirst({ where: { slug: orgSlug } }),
-    prisma.organizationSlugRedirect.findUnique({ where: { oldSlug: orgSlug }, select: { id: true } }),
-  ])
+  // Check slug uniqueness
+  const existing = await prisma.organization.findFirst({
+    where: { slug: orgSlug },
+  })
 
-  if (existing || retired) {
+  if (existing) {
     return { errors: { orgSlug: ["This slug is already taken. Please choose another."] } }
   }
 

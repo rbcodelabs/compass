@@ -79,7 +79,7 @@ export default async function OrgSettingsPage({ params }: Props) {
 
       <SettingsSection
         title="Organization URL"
-        description="The slug that starts every link to this organization. Changing it is safe for people clicking old links, which redirect, but not for integrations that hard-code the slug."
+        description="The slug that starts every link to this organization. Changing it breaks every existing link that contains the old slug; there is no redirect."
       >
         <OrganizationSlugPanel orgSlug={orgSlug} />
       </SettingsSection>

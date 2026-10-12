@@ -14,9 +14,8 @@ interface Props {
 /**
  * Org URL-slug editor. Renaming is two steps on purpose: the field only
  * validates; "Change URL slug" opens a confirmation that spells out what
- * changes, and only its confirm button calls the action. The old slug keeps
- * redirecting (see lib/org-slug.ts), but anything that cannot follow a
- * redirect — an API client, an allow-list, a printed link — does not.
+ * breaks, and only its confirm button calls the action. The old slug is NOT
+ * kept, so every link containing it stops working immediately.
  */
 export function OrganizationSlugPanel({ orgSlug }: Props) {
   const router = useRouter();
@@ -109,21 +108,18 @@ export function OrganizationSlugPanel({ orgSlug }: Props) {
           </span>
           <ul className="ml-4 list-disc space-y-1 text-sm text-text-primary">
             <li>
-              Every page URL changes, including shared workspace links and your public
-              portal links.
+              <strong>Old links stop working immediately</strong> and show a &ldquo;not found&rdquo;
+              page. There is no redirect from <span className="font-mono">/{orgSlug}/…</span>.
             </li>
             <li>
-              Old links keep working: visiting <span className="font-mono">/{orgSlug}/…</span>{" "}
-              redirects to the new address. Browsers and the portal follow the redirect.
+              That includes bookmarks, links in emails and notifications that were already sent,
+              shared workspace links, and your public portal and portal-SSO links.
             </li>
             <li>
-              <strong>Anything that cannot follow a redirect</strong> should be updated by hand:
-              integrations or scripts that pass the org slug to the API or MCP (they will get a &ldquo;not found&rdquo; error), allow-lists, and printed or
-              embedded links.
+              MCP and API clients that pass the old slug as <span className="font-mono">orgSlug</span>{" "}
+              will get &ldquo;not found&rdquo; until you update them.
             </li>
-            <li>
-              The old slug stays reserved for this organization, so no one else can claim it.
-            </li>
+            <li>The old slug becomes available for any other organization to claim.</li>
           </ul>
           <div className="flex flex-wrap gap-2">
             <Button type="button" disabled={isPending} onClick={handleConfirm}>

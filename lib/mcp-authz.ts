@@ -169,44 +169,6 @@ export async function assertWorkspaceAdmin(
 }
 
 /**
- * Extra sentence for a "not found" denial when `orgSlug` is a slug the
- * organization has since renamed away from (OrganizationSlugRedirect).
- *
- * Programmatic callers are deliberately NOT silently redirected to the new slug:
- * an agent that cached `orgSlug` should find out it is stale, not have a write
- * quietly land under a different identifier. But a bare "not found" sends it
- * hunting, so the error names the current slug.
- *
- * Only revealed to the service key or a member of the renamed organization, so
- * the denial still does not let an outsider map an old slug to a live one.
- * Best-effort: any failure yields "" and the original denial stands unchanged.
- */
-async function renamedOrgHint(actor: McpActor, orgSlug: string): Promise<string> {
-  try {
-    const prisma = getPrisma()
-    const retired = await prisma.organizationSlugRedirect.findUnique({
-      where: { oldSlug: orgSlug },
-      select: { organizationId: true },
-    })
-    if (!retired) return ""
-    if (!isService(actor)) {
-      const member = await prisma.organizationMember.findFirst({
-        where: { organizationId: retired.organizationId, userId: actor.userId! },
-        select: { organizationId: true },
-      })
-      if (!member) return ""
-    }
-    const org = await prisma.organization.findUnique({
-      where: { id: retired.organizationId },
-      select: { slug: true },
-    })
-    return org ? `. The organization was renamed; its current slug is "${org.slug}".` : ""
-  } catch {
-    return ""
-  }
-}
-
-/**
  * Assert the actor may access the workspace identified by org slug +
  * workspace slug (used by get_workspace_by_slug). Returns the resolved id.
  */
@@ -225,7 +187,7 @@ export async function assertWorkspaceBySlug(
     select: { id: true },
   })
   if (!ws) {
-    throw new McpAuthzError(`Workspace not found or access denied: ${orgSlug}/${workspaceSlug}${await renamedOrgHint(actor, orgSlug)}`)
+    throw new McpAuthzError(`Workspace not found or access denied: ${orgSlug}/${workspaceSlug}`)
   }
   await assertWorkspaceMember(actor, ws.id)
   return { workspaceId: ws.id }
@@ -243,7 +205,7 @@ export async function assertOrgMemberBySlug(
   const prisma = getPrisma()
   if (isService(actor)) {
     const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
-    if (!org) throw new McpAuthzError(`Organization not found: ${orgSlug}${await renamedOrgHint(actor, orgSlug)}`)
+    if (!org) throw new McpAuthzError(`Organization not found: ${orgSlug}`)
     return { organizationId: org.id }
   }
   const member = await prisma.organizationMember.findFirst({
@@ -251,7 +213,7 @@ export async function assertOrgMemberBySlug(
     select: { organizationId: true },
   })
   if (!member) {
-    throw new McpAuthzError(`Organization not found or access denied: ${orgSlug}${await renamedOrgHint(actor, orgSlug)}`)
+    throw new McpAuthzError(`Organization not found or access denied: ${orgSlug}`)
   }
   return { organizationId: member.organizationId }
 }
@@ -287,7 +249,7 @@ export async function assertOrgAdminBySlug(
   }
   if (isService(actor)) {
     const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
-    if (!org) throw new McpAuthzError(`Organization not found: ${orgSlug}${await renamedOrgHint(actor, orgSlug)}`)
+    if (!org) throw new McpAuthzError(`Organization not found: ${orgSlug}`)
     return { organizationId: org.id }
   }
   const member = await prisma.organizationMember.findFirst({
@@ -295,7 +257,7 @@ export async function assertOrgAdminBySlug(
     select: { organizationId: true, role: true },
   })
   if (!member) {
-    throw new McpAuthzError(`Organization not found or access denied: ${orgSlug}${await renamedOrgHint(actor, orgSlug)}`)
+    throw new McpAuthzError(`Organization not found or access denied: ${orgSlug}`)
   }
   if (member.role !== "OWNER" && member.role !== "ADMIN") {
     throw new McpAuthzError("Forbidden: organization admin required.")

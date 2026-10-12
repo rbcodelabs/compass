@@ -66,12 +66,14 @@ Your organization's *first* workspace is created for you when you sign up, as pa
 
 The organization's **URL slug** is the first part of every link: `/{slug}/{workspace}/…`. An organization Owner or Admin can change it in **Organization Settings → Organization URL**. Type the new slug (lowercase letters, numbers and hyphens, 2–63 characters; a few words such as `api`, `login` and `portal` are reserved) and click **Change URL slug**. Compass asks you to confirm before it changes anything, then takes you to the new address.
 
-What to expect:
+**Old links stop working immediately.** Compass does not redirect from the old slug, so anything that contains it returns a "not found" page or error:
 
-- **Old links keep working.** Opening a link with the old slug redirects to the same page under the new one. This includes shared workspace links, emailed notification links, and your public portal and portal-SSO links.
-- **The old slug stays reserved** for your organization, so no other organization can take it. If you later change back to an earlier slug, it simply becomes live again.
-- **API and MCP clients are not redirected.** An integration that passes the old slug as `orgSlug` gets a "not found" error (over MCP, one that names the new slug), so it fails visibly rather than writing to a different identifier. Update those clients. Anything else that cannot follow a redirect (allow-lists, printed links) should be updated by hand too.
-- Slugs of workspaces are unaffected; they are changed separately.
+- bookmarks and shared workspace links;
+- links in emails and notifications that were already sent;
+- your public portal links and portal SSO links (update the URLs your own app uses);
+- MCP and API clients that pass the old slug as `orgSlug`: update them to the new slug.
+
+The old slug becomes available for any other organization to claim. Workspace slugs are unaffected; they are changed separately.
 
 ## Switching Between Workspaces
 
