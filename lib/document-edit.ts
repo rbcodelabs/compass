@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto"
 import getPrisma from "@/lib/db"
 import { DocumentError, documentRevision, hydrateDocument, updateDocument } from "@/lib/document-service"
 import { documentMcpActor } from "@/lib/document-mcp-actor"
+import { maybeSnapshotDocVersion } from "@/lib/doc-versions"
 import type { DocType } from "@/lib/doc-types"
 
 export const MAX_EDIT_ATTEMPTS = 4
@@ -62,6 +63,13 @@ export async function editDocumentBody<T>(
     if (!transformed.ok) return { ok: false, code: "rejected", error: transformed.error }
     if (transformed.content === current.content) {
       return { ok: true, doc: { id: row.id, title: row.title, revision, updatedAt: row.updatedAt }, result: transformed.result, attempts: attempt, changed: false }
+    }
+    // Same history guarantee as update_doc: capture the doc's pre-change state before overwriting it, so
+    // an MCP edit (edit_doc / edit_canvas / build_canvas_tree) can be undone from the version list. Only for
+    // DB-stored docs (GEODE-backed docs keep their own history), and only when the body really changes.
+    // Coalescing in maybeSnapshotDocVersion keeps a retry on a CAS conflict from creating a second version.
+    if (row.storageProvider !== "GEODE") {
+      await maybeSnapshotDocVersion(docId, { authorName: options.authorName ?? "MCP Agent" })
     }
     try {
       const updated = await updateDocument(

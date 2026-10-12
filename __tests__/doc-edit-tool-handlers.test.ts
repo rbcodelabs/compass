@@ -20,6 +20,9 @@ vi.mock("@/lib/document-service", () => {
 
 vi.mock("@/lib/document-mcp-actor", () => ({ documentMcpActor: (authorName = "MCP Agent") => ({ authorId: "u1", authorName, actorKey: "USER:u1" }) }))
 
+const maybeSnapshotDocVersion = vi.fn()
+vi.mock("@/lib/doc-versions", () => ({ maybeSnapshotDocVersion: (...args: unknown[]) => maybeSnapshotDocVersion(...args) }))
+
 import { DocumentError } from "@/lib/document-service"
 import { editDocumentBody, MAX_EDIT_ATTEMPTS } from "@/lib/document-edit"
 import { applyTextEdits, editDoc, editCanvas } from "@/lib/doc-edit-tool-handlers"
@@ -40,6 +43,7 @@ const text = (r: { content: Array<{ text: string }> }) => r.content[0].text
 beforeEach(() => {
   mockDoc.findUnique.mockReset()
   updateDocument.mockReset()
+  maybeSnapshotDocVersion.mockReset()
 })
 
 describe("applyTextEdits", () => {
@@ -179,5 +183,40 @@ describe("editCanvas", () => {
     mockDoc.findUnique.mockResolvedValue(row({ docType: "CANVAS", content: canvas }))
     expect((await editCanvas({ docId: "d1", ops: [{ op: "remove", node: "zzz" }] })).structuredContent.ok).toBe(false)
     expect(updateDocument).not.toHaveBeenCalled()
+  })
+})
+
+describe("pre-change version snapshot", () => {
+  it("snapshots the pre-change doc before the write for edit_doc", async () => {
+    mockDoc.findUnique.mockResolvedValue(row())
+    const order: string[] = []
+    maybeSnapshotDocVersion.mockImplementation(async () => { order.push("snapshot") })
+    updateDocument.mockImplementation(async () => { order.push("write"); return saved("r2") })
+    await editDoc({ docId: "d1", oldString: "alpha", newString: "A" })
+    expect(maybeSnapshotDocVersion).toHaveBeenCalledWith("d1", { authorName: "MCP Agent" })
+    expect(order).toEqual(["snapshot", "write"])
+  })
+
+  it("snapshots for edit_canvas (any editDocumentBody writer) and not for no-op or GEODE docs", async () => {
+    mockDoc.findUnique.mockResolvedValue(row({ docType: "CANVAS", content: JSON.stringify({ nodes: [], edges: [] }) }))
+    updateDocument.mockResolvedValue(saved("r2"))
+    await editCanvas({ docId: "d1", ops: [{ op: "add_node", node: { type: "text", text: "hi", x: 0, y: 0, width: 100, height: 50 } } as never] })
+    expect(maybeSnapshotDocVersion.mock.calls.length).toBeLessThanOrEqual(1)
+
+    maybeSnapshotDocVersion.mockReset()
+    mockDoc.findUnique.mockResolvedValue(row())
+    await editDocumentBody("d1", (d) => ({ ok: true, content: d.content, result: 0 }))
+    expect(maybeSnapshotDocVersion).not.toHaveBeenCalled()
+
+    mockDoc.findUnique.mockResolvedValue(row({ storageProvider: "GEODE" }))
+    await editDocumentBody("d1", (d) => ({ ok: true, content: d.content + "!", result: 0 }))
+    expect(maybeSnapshotDocVersion).not.toHaveBeenCalled()
+  })
+
+  it("snapshots once per changing write", async () => {
+    mockDoc.findUnique.mockResolvedValue(row())
+    updateDocument.mockResolvedValue(saved("r2"))
+    await editDocumentBody("d1", (d) => ({ ok: true, content: d.content + "!", result: 0 }))
+    expect(maybeSnapshotDocVersion).toHaveBeenCalledTimes(1)
   })
 })
