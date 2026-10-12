@@ -32,7 +32,8 @@ function uniqueConstraintError() {
 beforeEach(() => {
   vi.resetAllMocks()
   mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma))
-  mockAuth.mockResolvedValue({ user: { id: "user-1" } } as Awaited<ReturnType<typeof auth>>)
+  // auth is overloaded (it also wraps middleware), so the session shape needs an unknown hop.
+  mockAuth.mockResolvedValue({ user: { id: "user-1" } } as unknown as never)
   mockOrganizationMember.findFirst.mockResolvedValue({ role: "ADMIN", organizationId: "org-1" })
   // The org as stored right now.
   mockOrganization.findUnique.mockImplementation(async ({ where }: { where: { id?: string; slug?: string } }) =>
