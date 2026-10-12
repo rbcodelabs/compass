@@ -18,6 +18,7 @@ import { DocPanelShell } from "./doc-panel-shell"
 import type { PanelPin } from "@/lib/panel-pin"
 import { DocsLibraryButton } from "@/components/docs/docs-library-button"
 import type { ArtifactThumbnailDto } from "@/lib/artifacts"
+import { isGoogleDriveUrl } from "@/lib/google-drive-links"
 
 type ArtifactDetailProps = {
   artifact: { id: string; title: string; description: string | null; sourceType: string; kind?: "DOCUMENT" | "SLIDE_DECK"; status: string; currentRevision: { externalUrl: string | null; thumbnail: ArtifactThumbnailDto | null } | null; revisions: Array<{ id: string; revisionNumber: number; filename: string | null; byteSize: number | null; externalUrl: string | null; createdAt: string }> }
@@ -79,7 +80,7 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
     </header>
     {artifact.status === "ARCHIVED" && <div className="rounded-md bg-status-warning-surface p-3 text-sm text-status-warning">This artifact is archived.</div>}
     <ArtifactViewer title={artifact.title} html={html} slides={slides} initialSlideIndex={initialSlideIndex} toolbarSlot={toolbarSlot} externalUrl={artifact.currentRevision?.externalUrl} thumbnail={artifact.currentRevision?.thumbnail} livePreviewSrc={livePreviewSrc} artifactId={artifact.id} fullScreenHref={`${basePath}/artifacts/${artifact.id}/full-screen`} onFeedbackPosted={() => setCommentsVisits((visits) => visits + 1)} />
-    {artifact.sourceType === "EXTERNAL_LINK" && artifact.status === "ACTIVE" && artifact.currentRevision?.externalUrl && <ArtifactScreenshotControls
+    {artifact.sourceType === "EXTERNAL_LINK" && artifact.status === "ACTIVE" && artifact.currentRevision?.externalUrl && !isGoogleDriveUrl(artifact.currentRevision.externalUrl) && <ArtifactScreenshotControls
       key={latestRevisionCreatedAt(artifact.revisions)}
       workspaceId={workspaceId}
       artifactId={artifact.id}

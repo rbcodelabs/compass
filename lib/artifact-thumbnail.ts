@@ -16,6 +16,7 @@ import { after } from "next/server"
 import getPrisma from "@/lib/db"
 import { getArtifactStorage } from "@/lib/artifact-storage"
 import { setArtifactRevisionThumbnail } from "@/lib/artifacts"
+import { isGoogleDriveUrl } from "@/lib/google-drive-links"
 import { captureScreenshot, resolveProtectionBypassSecret, type CaptureScreenshotResult } from "@/lib/capture-screenshot"
 
 /** A failure whose message is safe and useful to show the person who asked. */
@@ -23,6 +24,17 @@ export class ArtifactThumbnailError extends Error {
   constructor(message: string) {
     super(message)
     this.name = "ArtifactThumbnailError"
+  }
+}
+
+/**
+ * A capture that was declined on purpose rather than one that failed. The
+ * background scheduler stays quiet for it; the manual paths show its message.
+ */
+export class ArtifactThumbnailSkipped extends ArtifactThumbnailError {
+  constructor(message: string) {
+    super(message)
+    this.name = "ArtifactThumbnailSkipped"
   }
 }
 
@@ -107,6 +119,12 @@ async function captureAndStoreArtifactThumbnailUnguarded(input: {
     })
   } else {
     if (!revision.externalUrl) throw new ArtifactThumbnailError("Artifact revision has no URL to capture.")
+    // The capture browser is not signed in to Google, so it would photograph a
+    // sign-in page and store it as this link's thumbnail. Drive links are
+    // previewed live in the viewer instead (components/docs/artifact-preview.tsx).
+    if (isGoogleDriveUrl(revision.externalUrl)) {
+      throw new ArtifactThumbnailSkipped("Google Drive links are previewed live and are not screenshotted: the capture browser cannot sign in to Google.")
+    }
     capture = await captureScreenshot({
       url: revision.externalUrl,
       fullPage: input.fullPage,
@@ -157,6 +175,7 @@ export function scheduleArtifactThumbnailCapture(input: { artifactId: string; wo
     try {
       await captureAndStoreArtifactThumbnail(input)
     } catch (error) {
+      if (error instanceof ArtifactThumbnailSkipped) return
       console.warn(
         `[artifact-thumbnail] background capture failed for artifact ${input.artifactId} revision ${input.revisionId}: ` +
           (error instanceof Error ? error.message : String(error))
