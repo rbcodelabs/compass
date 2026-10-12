@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db";
 import { revokeMemberAgentGrants, deleteWorkspaceAgentData } from "@/lib/agent-lifecycle";
 import { resetAgentRunsAvailabilityCache } from "@/lib/agent-runs";
+import { resetAgentSessionsAvailabilityCache } from "@/lib/agent-session";
 
 // `deleteWorkspaceAgentData` probes `agentRunsAvailable`, which reads
 // both run tables and only swallows Prisma's missing-table `P2021` — a stub that
@@ -10,9 +11,14 @@ import { resetAgentRunsAvailabilityCache } from "@/lib/agent-runs";
 const runDelegates = () => ({
   agentRun: { findFirst: vi.fn(async () => null), findMany: vi.fn(async (): Promise<{ id: string }[]> => []), deleteMany: vi.fn() },
   agentRunEvent: { findFirst: vi.fn(async () => null), deleteMany: vi.fn() },
+  // Same reasoning for stored agent sessions (079): the probe reads the table.
+  agentSession: { findFirst: vi.fn(async () => null), findMany: vi.fn(async (): Promise<{ blobKey: string }[]> => []), deleteMany: vi.fn() },
 });
 
-beforeEach(() => resetAgentRunsAvailabilityCache());
+beforeEach(() => {
+  resetAgentRunsAvailabilityCache();
+  resetAgentSessionsAvailabilityCache();
+});
 
 it("deletes conversation credentials and child receipts before conversations", async () => {
   const order: string[] = [];
@@ -45,6 +51,18 @@ describe("agent lifecycle", () => {
     expect(db.agentWorkspaceGrant.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "workspace" } });
     expect(db.agentToolCall.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "workspace" } });
     expect(db.agentRun.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "workspace" } });
+    expect(db.agentSession.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "workspace" } });
+  });
+
+  it("still deletes a workspace when migration 079 has not been applied", async () => {
+    const missingTable = Object.assign(new Error("agent_sessions does not exist"), { code: "P2021" });
+    const db = { apiKey: { deleteMany: vi.fn() }, pMInterview: { updateMany: vi.fn() }, agentMessage: { deleteMany: vi.fn() }, agentAuditLog: { deleteMany: vi.fn() }, agentConversation: { deleteMany: vi.fn() }, agentWorkspaceGrant: { deleteMany: vi.fn() }, agentToolCall: { deleteMany: vi.fn() }, ...runDelegates() };
+    db.agentSession.findFirst = vi.fn(async () => { throw missingTable });
+
+    await deleteWorkspaceAgentData(db as unknown as AppPrismaClient, "workspace");
+
+    expect(db.agentConversation.deleteMany).toHaveBeenCalled();
+    expect(db.agentSession.deleteMany).not.toHaveBeenCalled();
   });
 
   it("still deletes a workspace when migration 069 has not been applied", async () => {

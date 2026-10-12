@@ -6,7 +6,8 @@
  * conversation ownership, and runtime prerequisites. The streamed happy path
  * (real sandbox boot + agent run) is verified end-to-end against a deploy.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { accessibleConversationsWhere } from "@/lib/agent-conversation-access"
 import { NextRequest } from "next/server"
 import { normalizeCapabilityPack } from "@/lib/capability-pack"
 
@@ -19,6 +20,8 @@ const mockPrisma = {
   agentMessage: { create: vi.fn(), findMany: vi.fn() },
   agentAuditLog: { createMany: vi.fn() },
   workspaceCapabilityPack: { findMany: vi.fn() },
+  agentConversationParticipant: { findFirst: vi.fn(), findMany: vi.fn() },
+  user: { findMany: vi.fn() },
 }
 
 // `claimInterviewProcessing` is the real implementation here, not a mock, and it
@@ -61,9 +64,9 @@ vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: (...args: un
 // Mocked at the store rather than at prisma because what matters here
 // is what the route does with the slugs, and `connectorDefinition` is left real
 // so the catalog itself is part of the assertion.
-const mockListConnectedSlugs = vi.fn()
+const mockListConnectedGrants = vi.fn()
 vi.mock("@/lib/mcp-connectors/store", () => ({
-  listConnectedSlugs: (...args: unknown[]) => mockListConnectedSlugs(...args),
+  listConnectedGrants: (...args: unknown[]) => mockListConnectedGrants(...args),
 }))
 
 // `agentRunsAvailable` defaults to false in beforeEach so the existing
@@ -105,7 +108,7 @@ beforeEach(() => {
   mockMintKey.mockResolvedValue({ token: "token", apiKeyId: "key-1" })
   mockPreparePacks.mockResolvedValue({ files: [], pluginPaths: [], skillIds: [], provenanceJson: "[]", systemPromptAppendices: [] })
   mockResolveAgentHandoffContext.mockResolvedValue(null)
-  mockListConnectedSlugs.mockResolvedValue([])
+  mockListConnectedGrants.mockResolvedValue([])
   runMocks.available.mockResolvedValue(false)
   runMocks.started.mockResolvedValue(undefined)
   runMocks.finalize.mockResolvedValue(undefined)
@@ -205,7 +208,14 @@ describe("agent turn route — guards", () => {
     // Membership filter is applied.
     expect(mockPrisma.workspace.findFirst).toHaveBeenCalledWith({
       where: { id: "ws-x", members: { some: { userId: "user-1" } } },
-      select: { id: true, name: true, slug: true, organization: { select: { slug: true } } },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        thinkingModel: true,
+        thinkingModelLabels: true,
+        organization: { select: { slug: true } },
+      },
     })
   })
 
@@ -214,8 +224,8 @@ describe("agent turn route — guards", () => {
     const res = await POST(req({ workspaceId: "ws-1", message: "hi", conversationId: "c-999" }))
     expect(res.status).toBe(404)
     expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
-      where: { id: "c-999", userId: "user-1", workspaceId: "ws-1" },
-      select: { id: true },
+      where: { id: "c-999", ...accessibleConversationsWhere("ws-1", "user-1") },
+      select: { userId: true },
     })
   })
 
@@ -259,7 +269,10 @@ describe("agent turn route — guards", () => {
     mockBootSandbox.mockResolvedValue({ writeFiles: vi.fn(), runCommand: vi.fn().mockResolvedValue(run), stop })
     const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
     expect(await response.text()).toContain("timed out")
-    expect(mockPrisma.agentMessage.create).toHaveBeenCalledWith({ data: expect.objectContaining({ role: "assistant", packProvenance: provenance }) })
+    expect(mockPrisma.agentMessage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ role: "assistant", packProvenance: provenance }),
+      select: { id: true },
+    })
     expect(mockPrisma.agentAuditLog.createMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ toolName: "create_opportunity", packProvenance: provenance })] })
     expect(stop).toHaveBeenCalled()
     expect(mockRevokeKey).toHaveBeenCalledWith("key-1")
@@ -378,7 +391,7 @@ describe("agent turn route — guards", () => {
     })
 
     it("passes slugs and display metadata, and no provider credential", async () => {
-      mockListConnectedSlugs.mockResolvedValue(["v0"])
+      mockListConnectedGrants.mockResolvedValue([{ slug: "v0", scope: "mcp" }])
       const env = await turn(setupRun())
 
       const connectors = JSON.parse(env.AGENT_MCP_CONNECTORS) as { slug: string; displayName: string; guidance?: string }[]
@@ -390,10 +403,40 @@ describe("agent turn route — guards", () => {
       expect(env.AGENT_MCP_CONNECTORS).not.toMatch(/access_?token|refresh_?token|client_?secret|Bearer /i)
     })
 
+    it("tells the agent a read-only Drive grant cannot write, and a full one to be careful", async () => {
+      // The level is read back from the scope Google recorded, so the prompt can
+      // never describe a read-only grant as read-write.
+      mockListConnectedGrants.mockResolvedValue([
+        { slug: "google-drive", scope: "https://www.googleapis.com/auth/drive.readonly" },
+      ])
+      const readOnly = await turn(setupRun())
+      const [ro] = JSON.parse(readOnly.AGENT_MCP_CONNECTORS) as { guidance: string }[]
+      expect(ro.guidance).toContain("READ-ONLY")
+      expect(ro.guidance).not.toContain("full read and write")
+
+      mockListConnectedGrants.mockResolvedValue([{ slug: "google-drive", scope: "https://www.googleapis.com/auth/drive" }])
+      const full = await turn(setupRun())
+      const [rw] = JSON.parse(full.AGENT_MCP_CONNECTORS) as { guidance: string }[]
+      expect(rw.guidance).toContain("full read and write")
+      expect(rw.guidance).not.toContain("READ-ONLY")
+    })
+
+    it("falls back to the level-neutral guidance for a scope that matches no level", async () => {
+      mockListConnectedGrants.mockResolvedValue([{ slug: "google-drive", scope: "https://www.googleapis.com/auth/drive.file" }])
+      const env = await turn(setupRun())
+      const [entry] = JSON.parse(env.AGENT_MCP_CONNECTORS) as { guidance: string }[]
+      expect(entry.guidance).toContain("untrusted data")
+      expect(entry.guidance).not.toContain("READ-ONLY")
+      expect(entry.guidance).not.toContain("full read and write")
+    })
+
     it("drops a slug that is not in the reviewed catalog", async () => {
       // The catalog is the allowlist. A row that outlived its definition — or was
       // written by an older deploy — must not reach the sandbox as a live server.
-      mockListConnectedSlugs.mockResolvedValue(["v0", "not-a-real-connector"])
+      mockListConnectedGrants.mockResolvedValue([
+        { slug: "v0", scope: "mcp" },
+        { slug: "not-a-real-connector", scope: "" },
+      ])
       const env = await turn(setupRun())
       const connectors = JSON.parse(env.AGENT_MCP_CONNECTORS) as { slug: string }[]
       expect(connectors.map(connector => connector.slug)).toEqual(["v0"])
@@ -403,16 +446,28 @@ describe("agent turn route — guards", () => {
       // The gateway resolves the grant under `trustedCompassBaseUrl()`, so the turn
       // has to agree with it — otherwise a turn reached via some other hostname
       // would enable a connector the gateway then refuses to serve.
-      mockListConnectedSlugs.mockResolvedValue([])
+      mockListConnectedGrants.mockResolvedValue([])
       await turn(setupRun())
       const { trustedCompassBaseUrl } = await import("@/lib/compass-url")
-      expect(mockListConnectedSlugs).toHaveBeenCalledWith("user-1", trustedCompassBaseUrl().origin, expect.anything())
+      expect(mockListConnectedGrants).toHaveBeenCalledWith("user-1", trustedCompassBaseUrl().origin, expect.anything())
+    })
+
+    describe("web_search", () => {
+      it("always tells the sandbox to use web_search and advertises it in the prompt", async () => {
+        const env = await turn(setupRun())
+        expect("AGENT_WEB_SEARCH" in env).toBe(false)
+        expect(env.AGENT_SYSTEM_PROMPT).toContain("web_search tool")
+        expect(env.AGENT_SYSTEM_PROMPT).not.toContain("cannot search the web")
+        expect(env.AGENT_SYSTEM_PROMPT).not.toMatch(/Unavailable capabilities include[^.]*\bweb\b/)
+        // The sandbox is told to call the Compass route; it is never handed a search credential.
+        expect(Object.keys(env).filter(key => /GATEWAY|OIDC|PERPLEXITY/i.test(key))).toEqual([])
+      })
     })
 
     it("still runs the turn when the connector lookup throws", async () => {
       // Connectors are additive. A failure to enumerate them must not cost the
       // user their turn — the agent is perfectly useful with Compass's catalog.
-      mockListConnectedSlugs.mockRejectedValue(new Error("connector table is missing"))
+      mockListConnectedGrants.mockRejectedValue(new Error("connector table is missing"))
       vi.spyOn(console, "error").mockImplementation(() => {})
       const runCommand = setupRun()
       const env = await turn(runCommand)

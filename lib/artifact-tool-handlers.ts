@@ -2,6 +2,7 @@ import getPrisma from "@/lib/db"
 import { fail, ok } from "@/lib/mcp-output"
 import { getArtifactStorage } from "@/lib/artifact-storage"
 import { getMcpActor } from "@/lib/mcp-authz"
+import { createV0Artifact, refreshV0Artifact } from "@/lib/v0-artifacts"
 import { loadStagedArtifactUpload, prepareArtifactUpload } from "@/lib/artifact-upload"
 import {
   archiveArtifact as archiveArtifactCore,
@@ -91,8 +92,15 @@ export async function prepareArtifactUploadTool(input: { workspaceId: string; fi
   } catch (error) { return fail(error instanceof Error ? error.message : "Could not prepare artifact upload.") }
 }
 
-export async function createArtifact(input: { workspaceId: string; title: string; description?: string; sourceType: "HTML_UPLOAD" | "EXTERNAL_LINK"; kind?: string; html?: string; uploadReceipt?: string; filename?: string; url?: string }) {
+export async function createArtifact(input: { workspaceId: string; title: string; description?: string; sourceType: "HTML_UPLOAD" | "EXTERNAL_LINK" | "V0_CHAT"; kind?: string; html?: string; uploadReceipt?: string; filename?: string; url?: string }) {
   try {
+    if (input.sourceType === "V0_CHAT") {
+      if (input.html !== undefined || input.uploadReceipt !== undefined || input.filename !== undefined || input.url === undefined) return fail("V0_CHAT requires url (a https://v0.app/chat/<id> link) and does not accept html, uploadReceipt or filename.")
+      // The title is optional for a v0 chat (it defaults to the chat name), but a supplied one must be valid.
+      if (input.title.trim()) validateArtifactTitle(input.title)
+      const artifact = await createV0Artifact({ workspaceId: input.workspaceId, title: input.title, description: input.description, url: input.url, userId: getMcpActor().userId, source: "MCP" })
+      return ok(`Artifact created from v0 chat.\nID: ${artifact.id}`, { id: artifact.id, title: artifact.title, sourceType: "V0_CHAT" })
+    }
     validateArtifactTitle(input.title)
     const kind = parseArtifactKind(input.kind) ?? "DOCUMENT"
     assertKindAllowedForSource(kind, input.sourceType)
@@ -127,6 +135,7 @@ export async function updateArtifact(input: { artifactId: string; workspaceId: s
     const existing = await prisma.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true, sourceType: true } })
     if (!existing) return fail(`Artifact "${input.artifactId}" not found.`)
     if (existing.sourceType === "HTML_UPLOAD" && input.url !== undefined) return fail("HTML_UPLOAD artifacts accept html revisions, not url.")
+    if (existing.sourceType === "V0_CHAT" && (input.html !== undefined || input.uploadReceipt !== undefined || input.url !== undefined || input.filename !== undefined)) return fail("V0_CHAT artifacts get new revisions from v0 only; use refresh_artifact_from_v0.")
     if (existing.sourceType === "EXTERNAL_LINK" && (input.html !== undefined || input.uploadReceipt !== undefined || input.filename !== undefined)) return fail("EXTERNAL_LINK artifacts accept url revisions, not html, uploadReceipt or filename.")
     if (input.filename !== undefined && input.html === undefined) return fail("filename requires html.")
     if (kind !== undefined) assertKindAllowedForSource(kind, existing.sourceType)
@@ -151,6 +160,15 @@ export async function updateArtifact(input: { artifactId: string; workspaceId: s
     const url = (await artifactUrlResolver(input.workspaceId))(input.artifactId)
     return ok(withUrlLine(`Artifact updated.\nID: ${input.artifactId}`, url), { id: input.artifactId, revisionId, url })
   } catch (error) { return fail(error instanceof Error ? error.message : "Could not update artifact") }
+}
+
+export async function refreshArtifactFromV0({ artifactId, workspaceId }: { artifactId: string; workspaceId: string }) {
+  try {
+    const result = await refreshV0Artifact({ artifactId, workspaceId, userId: getMcpActor().userId, source: "MCP" })
+    return result.changed
+      ? ok(`New v0 version captured as revision ${result.revisionNumber}.\nID: ${artifactId}`, { id: artifactId, changed: true, revisionId: result.revisionId, revisionNumber: result.revisionNumber, v0VersionId: result.versionId })
+      : ok(`Already up to date with v0 (revision ${result.revisionNumber ?? "none"}).\nID: ${artifactId}`, { id: artifactId, changed: false, revisionNumber: result.revisionNumber, v0VersionId: result.versionId })
+  } catch (error) { return fail(error instanceof Error ? error.message : "Could not refresh artifact from v0") }
 }
 
 /**

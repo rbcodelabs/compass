@@ -200,15 +200,15 @@ describe("GET /api/agent/conversations/[conversationId]/run", () => {
     expect(mockPrisma.agentConversation.findFirst).not.toHaveBeenCalled()
   })
 
-  it("404s a conversation the caller does not own, checking membership in the same query", async () => {
+  it("404s a conversation the caller cannot access, checking membership in the same query", async () => {
     mockPrisma.agentConversation.findFirst.mockResolvedValue(null)
     const res = await getConversationRun(new Request(url), params({ conversationId: "c-1" }))
     expect(res.status).toBe(404)
     expect(mockPrisma.agentConversation.findFirst.mock.calls[0][0].where).toMatchObject({
       id: "c-1",
       workspaceId: "ws-1",
-      userId: "user-1",
       workspace: { members: { some: { userId: "user-1" } } },
+      OR: expect.arrayContaining([{ userId: "user-1" }]),
     })
   })
 

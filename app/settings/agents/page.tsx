@@ -12,11 +12,11 @@ import { ConnectedAppsPanel } from "@/components/settings/connected-apps-panel";
 import { getConnectedAppsForUser } from "@/lib/oauth/connected-apps";
 import { McpConnectorsPanel } from "@/components/settings/mcp-connectors-panel";
 import { trustedCompassBaseUrl } from "@/lib/compass-url";
-import { CONNECTOR_DEFINITIONS } from "@/lib/mcp-connectors/config";
+import { CONNECTOR_DEFINITIONS, connectorAccessView, isConnectorConfigured } from "@/lib/mcp-connectors/config";
 // Shared with the callback route that produces these params, so the two cannot
 // disagree about their names again (ADR-0018).
 import { readConnectorNotice } from "@/lib/mcp-connectors/notice";
-import { listConnectedSlugs, mcpConnectorsAvailable } from "@/lib/mcp-connectors/store";
+import { listConnectedGrants, mcpConnectorsAvailable } from "@/lib/mcp-connectors/store";
 
 export const metadata = { title: "My agents" };
 
@@ -35,9 +35,9 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
   ]);
   // Origin-scoped: a grant registered on production is a different OAuth client
   // from one registered on a preview branch, so a preview must not show it.
-  const connectedConnectorSlugs = connectorsAvailable
-    ? new Set(await listConnectedSlugs(userId, trustedCompassBaseUrl().origin, prisma))
-    : new Set<string>();
+  const connectedConnectorScopes = new Map(
+    (connectorsAvailable ? await listConnectedGrants(userId, trustedCompassBaseUrl().origin, prisma) : []).map((grant) => [grant.slug, grant.scope]),
+  );
   const workspaceIds = workspaces.map((w) => w.id);
   const agentIds = agents.map((a) => a.id);
   const [grants, activity] = await Promise.all([
@@ -56,7 +56,9 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
         slug: definition.slug,
         displayName: definition.displayName,
         serverUrl: definition.serverUrl,
-        connected: connectedConnectorSlugs.has(definition.slug),
+        connected: connectedConnectorScopes.has(definition.slug),
+        ...connectorAccessView(definition, connectedConnectorScopes.get(definition.slug)),
+        configured: isConnectorConfigured(definition),
       }))}
     />
     <SettingsSection title="Recent agent activity" description="Latest 50 operations in accessible workspaces, including attempts without a recorded workspace. Success means the operation completed, not that the underlying task is finished."><AgentActivity rows={activity.map((r) => ({ ...r, agentName: agents.find((a) => a.id === r.agentId)?.name ?? "Agent", workspaceName: workspaces.find((w) => w.id === r.workspaceId)?.name ?? "Workspace not recorded" }))} /></SettingsSection>

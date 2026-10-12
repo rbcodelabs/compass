@@ -14,7 +14,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
 import { decrypt } from "@/lib/crypto-secrets"
-import { McpConnectorError, connectorEncryptionKey } from "@/lib/mcp-connectors/config"
+import {
+  McpConnectorError,
+  accessLevelForScope,
+  connectorAccessView,
+  connectorDefinition,
+  connectorGuidance,
+  connectorEncryptionKey,
+  isConnectorConfigured,
+  staticClientCredentials,
+} from "@/lib/mcp-connectors/config"
 import { discoverConnector, registerConnectorClient } from "@/lib/mcp-connectors/discovery"
 import {
   FORWARDED_REQUEST_HEADERS,
@@ -26,7 +35,9 @@ import { readConnectorNotice } from "@/lib/mcp-connectors/notice"
 import {
   consumeAuthRequest,
   disconnectGrant,
+  ensureConnector,
   findGrant,
+  listConnectedGrants,
   listConnectedSlugs,
   rotateGrantTokens,
   saveGrant,
@@ -35,8 +46,18 @@ import {
 import {
   buildAuthorizeUrl,
   exchangeAuthorizationCode,
+  refreshGrant,
   refreshTokens,
 } from "@/lib/mcp-connectors/tokens"
+
+// `refreshGrant` writes through `rotateGrantTokens`, which defaults to the shared
+// client. Every other test here passes its fake explicitly, so this only steers
+// the one path that cannot.
+const db = vi.hoisted(() => ({ prisma: null as unknown }))
+vi.mock("@/lib/db", async importOriginal => ({
+  ...(await importOriginal<typeof import("@/lib/db")>()),
+  default: () => db.prisma,
+}))
 
 /** A real 32-byte base64 key — `lib/crypto-secrets` rejects anything else. */
 const KEY = Buffer.alloc(32, 7).toString("base64")
@@ -421,6 +442,48 @@ describe("rotateGrantTokens", () => {
 
 // ── Origin scoping ──────────────────────────────────────────────────────────
 
+describe("listConnectedGrants", () => {
+  it("returns each live grant's recorded scope, sorted by slug, for this origin only", async () => {
+    const prisma = client({
+      mcpConnectorGrant: fakeGrants([
+        { id: "g1", connectorId: "c-v0", userId: "user-1", status: "ACTIVE", scope: "mcp" },
+        {
+          id: "g2",
+          connectorId: "c-drive",
+          userId: "user-1",
+          status: "ACTIVE",
+          scope: "https://www.googleapis.com/auth/drive.readonly",
+        },
+        { id: "g3", connectorId: "c-other", userId: "user-1", status: "ACTIVE", scope: "mcp" },
+      ]),
+      mcpConnector: {
+        findMany: vi.fn(async ({ where }: { where: { id: { in: string[] }; origin: string } }) =>
+          [
+            { id: "c-v0", slug: "v0", origin: "https://compass.example" },
+            { id: "c-drive", slug: "google-drive", origin: "https://compass.example" },
+            { id: "c-other", slug: "v0", origin: "https://preview.example" },
+          ].filter(row => where.id.in.includes(row.id) && row.origin === where.origin),
+        ),
+      },
+    })
+    expect(await listConnectedGrants("user-1", "https://compass.example", prisma)).toEqual([
+      { slug: "google-drive", scope: "https://www.googleapis.com/auth/drive.readonly" },
+      { slug: "v0", scope: "mcp" },
+    ])
+  })
+
+  it("treats absent tables as no grants", async () => {
+    const prisma = client({
+      mcpConnectorGrant: {
+        findMany: vi.fn(async () => {
+          throw Object.assign(new Error("table does not exist"), { code: "P2021" })
+        }),
+      },
+    })
+    expect(await listConnectedGrants("user-1", "https://compass.example", prisma)).toEqual([])
+  })
+})
+
 describe("listConnectedSlugs", () => {
   it("only reports grants whose connector belongs to this origin", async () => {
     // The hazard this guards: the settings page lists connectors under one origin
@@ -799,6 +862,56 @@ describe("discoverConnector", () => {
     await expect(discoverConnector(definition)).rejects.toThrowError(/will not guess/)
   })
 
+  it("uses a pinned resourceMetadataUrl without probing the server (Google Drive)", async () => {
+    const google = connectorDefinition("google-drive")!
+    expect(google.resourceMetadataUrl).toBe(
+      "https://drivemcp.googleapis.com/.well-known/oauth-protected-resource/mcp/v1",
+    )
+    // Documents as served live on 2026-10-06. Note the issuer's trailing slash in
+    // the resource document vs. none in the AS document.
+    const calls = routeFetch({
+      "https://drivemcp.googleapis.com/.well-known/oauth-protected-resource/mcp/v1": () =>
+        json({
+          authorization_servers: ["https://accounts.google.com/"],
+          bearer_methods_supported: ["header"],
+          resource: "https://drivemcp.googleapis.com/mcp/v1",
+          scopes_supported: [
+            "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file",
+          ],
+        }),
+      "https://accounts.google.com/.well-known/oauth-authorization-server": () =>
+        json({
+          issuer: "https://accounts.google.com",
+          authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+          token_endpoint: "https://oauth2.googleapis.com/token",
+          revocation_endpoint: "https://oauth2.googleapis.com/revoke",
+        }),
+    })
+
+    const discovered = await discoverConnector(google)
+
+    expect(discovered.resource).toBe("https://drivemcp.googleapis.com/mcp/v1")
+    // The default level's scope, not the three Google advertises joined together:
+    // the union would ask every user for write access by default.
+    expect(discovered.scope).toBe("https://www.googleapis.com/auth/drive")
+    expect(discovered.authorizationEndpoint).toBe("https://accounts.google.com/o/oauth2/v2/auth")
+    expect(discovered.tokenEndpoint).toBe("https://oauth2.googleapis.com/token")
+    expect(discovered.registrationEndpoint).toBeNull()
+    // Dropping the pin removes the only consumer of the challenge probe for Google.
+    expect(calls.map(call => call.url)).not.toContain("https://drivemcp.googleapis.com/mcp/v1")
+  })
+
+  it("still refuses a pinned resourceMetadataUrl on another origin", async () => {
+    await expect(
+      discoverConnector({
+        ...definition,
+        resourceMetadataUrl: "https://evil.example/.well-known/oauth-protected-resource",
+      }),
+    ).rejects.toThrowError(/not the MCP server's origin/)
+  })
+
   it("falls back to the definition's scope only when neither document advertises one", async () => {
     routeFetch({
       "https://v0.app/api/mcp": () =>
@@ -906,5 +1019,311 @@ describe("McpConnectorError", () => {
   it("defaults its message to the code so a bare throw is still legible in a log", () => {
     expect(new McpConnectorError("NOT_CONNECTED").message).toBe("NOT_CONNECTED")
     expect(new McpConnectorError("NOT_CONNECTED").name).toBe("McpConnectorError")
+  })
+})
+
+// ── Pre-registered (static) client — Google Drive ───────────────────────────
+
+describe("static-client connector (Google Drive)", () => {
+  const drive: ConnectorRecord = {
+    ...connector,
+    id: "connector-drive",
+    slug: "google-drive",
+    displayName: "Google Drive",
+    serverUrl: "https://drivemcp.googleapis.com/mcp/v1",
+    resource: "https://drivemcp.googleapis.com/mcp/v1",
+    authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenEndpoint: "https://oauth2.googleapis.com/token",
+    revocationEndpoint: "https://oauth2.googleapis.com/revoke",
+    scope: "https://www.googleapis.com/auth/drive",
+    clientId: "stale-client-id",
+  }
+  const redirectUri = "https://compass.example/api/connectors/google-drive/callback"
+
+  beforeEach(() => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "env-client.apps.googleusercontent.com")
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "env-client-secret")
+  })
+
+  it("is in the catalog as a static client that asks for offline access", () => {
+    const definition = connectorDefinition("google-drive")
+    expect(definition?.serverUrl).toBe("https://drivemcp.googleapis.com/mcp/v1")
+    expect(definition?.fallbackScope).toBe("https://www.googleapis.com/auth/drive")
+    expect(definition?.staticClient?.authorizeParams).toEqual({ access_type: "offline", prompt: "consent" })
+    expect(definition?.agentGuidance).toMatch(/untrusted/i)
+  })
+
+  it("reports unconfigured, with a stable code, until both env vars are set", () => {
+    const definition = connectorDefinition("google-drive")!
+    expect(isConnectorConfigured(definition)).toBe(true)
+
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "   ")
+    expect(isConnectorConfigured(definition)).toBe(false)
+    expect(throwCode(() => staticClientCredentials(definition))).toBe("CLIENT_NOT_CONFIGURED")
+  })
+
+  it("never asks a DCR connector for credentials", () => {
+    const v0 = connectorDefinition("v0")!
+    expect(staticClientCredentials(v0)).toBeNull()
+    expect(isConnectorConfigured(v0)).toBe(true)
+  })
+
+  it("adds Google's offline parameters to the authorize URL without displacing state or PKCE", () => {
+    const url = new URL(buildAuthorizeUrl(drive, { state: "state-xyz", codeVerifier: "verifier-value", redirectUri }))
+    expect(url.searchParams.get("access_type")).toBe("offline")
+    expect(url.searchParams.get("prompt")).toBe("consent")
+    expect(url.searchParams.get("state")).toBe("state-xyz")
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256")
+    expect(url.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/drive")
+    expect(url.searchParams.get("client_id")).toBe(drive.clientId)
+  })
+
+  it("requests the scope the user chose instead of the connector's default", () => {
+    const readOnly = new URL(
+      buildAuthorizeUrl(drive, {
+        state: "s",
+        codeVerifier: "v",
+        redirectUri,
+        scope: "https://www.googleapis.com/auth/drive.readonly",
+      }),
+    )
+    expect(readOnly.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/drive.readonly")
+    // Still a well-formed Google request otherwise.
+    expect(readOnly.searchParams.get("access_type")).toBe("offline")
+    expect(readOnly.searchParams.get("client_id")).toBe(drive.clientId)
+  })
+
+  it("leaves a DCR connector's authorize URL free of Google parameters", () => {
+    const url = new URL(buildAuthorizeUrl(connector, { state: "s", codeVerifier: "v", redirectUri }))
+    expect(url.searchParams.has("access_type")).toBe(false)
+    expect(url.searchParams.has("prompt")).toBe(false)
+  })
+
+  it("authenticates the exchange and the refresh with the env client_id and secret", async () => {
+    const calls = routeFetch({
+      "https://oauth2.googleapis.com/token": () =>
+        json({ access_token: "at", expires_in: 3599, token_type: "Bearer" }),
+    })
+    await exchangeAuthorizationCode(drive, { code: "c", codeVerifier: "v", redirectUri })
+    await refreshTokens(drive, "rt-old")
+
+    for (const call of calls) {
+      const body = new URLSearchParams(call.init.body as string)
+      // The env value wins over the (possibly stale) stored row.
+      expect(body.get("client_id")).toBe("env-client.apps.googleusercontent.com")
+      expect(body.get("client_secret")).toBe("env-client-secret")
+      expect(body.get("resource")).toBe(drive.resource)
+    }
+  })
+
+  it("never sends a client_secret for a public DCR client", async () => {
+    const calls = routeFetch({ "https://v0.app/oauth/token": () => json({ access_token: "at", token_type: "Bearer" }) })
+    await refreshTokens(connector, "rt")
+    expect(new URLSearchParams(calls[0].init.body as string).has("client_secret")).toBe(false)
+  })
+
+  it("fails before any network call when the secret is missing", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "")
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    expect(await rejectionCode(refreshTokens(drive, "rt"))).toBe("CLIENT_NOT_CONFIGURED")
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps the stored refresh token when Google omits one on refresh", async () => {
+    // Google does not rotate refresh tokens: the response has no refresh_token.
+    // Writing null would strand the grant one hour after it was created.
+    const grants = fakeGrants()
+    const prisma = client({ mcpConnectorGrant: grants })
+    const saved = await saveGrant(
+      {
+        connectorId: drive.id,
+        userId: "user-1",
+        accessToken: "old-access",
+        refreshToken: "long-lived-refresh",
+        accessTokenExpiresAt: new Date(Date.now() - 1000),
+        scope: drive.scope,
+      },
+      prisma,
+    )
+    routeFetch({
+      "https://oauth2.googleapis.com/token": () =>
+        json({ access_token: "new-access", expires_in: 3599, token_type: "Bearer" }),
+    })
+    db.prisma = prisma
+
+    const access = await refreshGrant(drive, saved)
+    expect(access).toBe("new-access")
+    const after = await findGrant(drive.id, "user-1", prisma)
+    expect(after?.refreshToken).toBe("long-lived-refresh")
+  })
+
+  describe("ensureConnector", () => {
+    function fakeConnectors(seed: Row[] = []) {
+      const rows: Row[] = seed.map(row => ({ ...row }))
+      return {
+        rows,
+        findUnique: vi.fn(async ({ where }: { where: { slug_origin: { slug: string; origin: string } } }) =>
+          rows.find(r => r.slug === where.slug_origin.slug && r.origin === where.slug_origin.origin) ?? null),
+        create: vi.fn(async ({ data }: { data: Row }) => {
+          const row = { id: `c-${rows.length + 1}`, enabled: true, ...data }
+          rows.push(row)
+          return row
+        }),
+        update: vi.fn(async ({ where, data }: { where: { id: string }; data: Row }) => {
+          const row = rows.find(r => r.id === where.id)!
+          Object.assign(row, data)
+          return row
+        }),
+      }
+    }
+
+    function googleDiscoveryRoutes() {
+      return routeFetch({
+        "https://drivemcp.googleapis.com/mcp/v1": () =>
+          new Response("unauthorized", {
+            status: 401,
+            headers: {
+              "www-authenticate":
+                'Bearer resource_metadata="https://drivemcp.googleapis.com/.well-known/oauth-protected-resource"',
+            },
+          }),
+        "https://drivemcp.googleapis.com/.well-known/oauth-protected-resource": () =>
+          json({
+            resource: "https://drivemcp.googleapis.com/mcp/v1",
+            authorization_servers: ["https://accounts.google.com"],
+            scopes_supported: ["https://www.googleapis.com/auth/drive"],
+          }),
+        "https://accounts.google.com/.well-known/oauth-authorization-server": () =>
+          json({
+            issuer: "https://accounts.google.com",
+            authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+            token_endpoint: "https://oauth2.googleapis.com/token",
+            revocation_endpoint: "https://oauth2.googleapis.com/revoke",
+            scopes_supported: ["https://www.googleapis.com/auth/drive"],
+            // Google advertises no registration_endpoint.
+          }),
+      })
+    }
+
+    it("uses the env client_id and never attempts registration", async () => {
+      const connectors = fakeConnectors()
+      const calls = googleDiscoveryRoutes()
+      const row = await ensureConnector("google-drive", "https://compass.example", redirectUri, client({ mcpConnector: connectors }))
+
+      expect(row.clientId).toBe("env-client.apps.googleusercontent.com")
+      expect(connectors.create).toHaveBeenCalledOnce()
+      expect(calls.some(call => call.init.method === "POST" && call.url.includes("register"))).toBe(false)
+      // The secret is never persisted.
+      expect(JSON.stringify(connectors.rows)).not.toContain("env-client-secret")
+    })
+
+    it("follows a changed env client_id on an existing row", async () => {
+      const connectors = fakeConnectors([
+        { id: "c-1", slug: "google-drive", origin: "https://compass.example", clientId: "old-client", enabled: true },
+      ])
+      const row = await ensureConnector("google-drive", "https://compass.example", redirectUri, client({ mcpConnector: connectors }))
+      expect(row.clientId).toBe("env-client.apps.googleusercontent.com")
+      expect(connectors.update).toHaveBeenCalledOnce()
+    })
+
+    it("does not rewrite a row whose client_id already matches", async () => {
+      const connectors = fakeConnectors([
+        { id: "c-1", slug: "google-drive", origin: "https://compass.example", clientId: "env-client.apps.googleusercontent.com", enabled: true },
+      ])
+      await ensureConnector("google-drive", "https://compass.example", redirectUri, client({ mcpConnector: connectors }))
+      expect(connectors.update).not.toHaveBeenCalled()
+    })
+
+    it("reports CLIENT_NOT_CONFIGURED without touching the network", async () => {
+      vi.stubEnv("GOOGLE_CLIENT_ID", "")
+      const fetchSpy = vi.fn()
+      vi.stubGlobal("fetch", fetchSpy)
+      const connectors = fakeConnectors()
+      expect(
+        await rejectionCode(ensureConnector("google-drive", "https://compass.example", redirectUri, client({ mcpConnector: connectors }))),
+      ).toBe("CLIENT_NOT_CONFIGURED")
+      expect(fetchSpy).not.toHaveBeenCalled()
+      expect(connectors.create).not.toHaveBeenCalled()
+    })
+  })
+})
+
+// ── Per-user access levels ──────────────────────────────────────────────────
+
+describe("access levels", () => {
+  const drive = connectorDefinition("google-drive")!
+  const v0 = connectorDefinition("v0")!
+  const FULL = "https://www.googleapis.com/auth/drive"
+  const READ = "https://www.googleapis.com/auth/drive.readonly"
+
+  it("lists the widest level first, so it is the default", () => {
+    expect(drive.accessLevels?.map(level => level.id)).toEqual(["full", "read-only"])
+    expect(drive.accessLevels?.[0].scope).toBe(FULL)
+    expect(drive.accessLevels?.[1].scope).toBe(READ)
+    expect(v0.accessLevels).toBeUndefined()
+  })
+
+  describe("accessLevelForScope", () => {
+    it("reads the level back from the scope the provider recorded", () => {
+      expect(accessLevelForScope(drive, FULL)?.id).toBe("full")
+      expect(accessLevelForScope(drive, READ)?.id).toBe("read-only")
+    })
+
+    it("reads a legacy union grant as full, not read-only", () => {
+      // Grants made before levels existed carry everything Google advertised.
+      expect(accessLevelForScope(drive, `${READ} ${FULL} https://www.googleapis.com/auth/drive.file`)?.id).toBe("full")
+    })
+
+    it("answers null for a scope matching no level, an empty scope, or a connector without levels", () => {
+      expect(accessLevelForScope(drive, "https://www.googleapis.com/auth/drive.file")).toBeNull()
+      expect(accessLevelForScope(drive, "")).toBeNull()
+      expect(accessLevelForScope(drive, null)).toBeNull()
+      expect(accessLevelForScope(v0, "mcp")).toBeNull()
+    })
+  })
+
+  describe("connectorGuidance", () => {
+    it("says READ-ONLY for a read-only grant and never claims write access", () => {
+      const text = connectorGuidance(drive, READ)!
+      expect(text).toContain("READ-ONLY")
+      expect(text).not.toContain("full read and write")
+      expect(text).toMatch(/untrusted/i)
+    })
+
+    it("says full access for a full grant and never claims read-only", () => {
+      const text = connectorGuidance(drive, FULL)!
+      expect(text).toContain("full read and write")
+      expect(text).not.toContain("READ-ONLY")
+      expect(text).toMatch(/untrusted/i)
+    })
+
+    it("falls back to the level-neutral text for an unknown grant, which must not read as read-write", () => {
+      const text = connectorGuidance(drive, "https://www.googleapis.com/auth/drive.file")!
+      expect(text).toBe(drive.agentGuidance)
+      expect(text).not.toContain("read and write")
+    })
+
+    it("is just the base guidance for a connector without levels", () => {
+      expect(connectorGuidance(v0, "mcp")).toBe(v0.agentGuidance)
+    })
+  })
+
+  describe("connectorAccessView", () => {
+    it("exposes labels and descriptions but never scopes or guidance", () => {
+      const view = connectorAccessView(drive, READ)
+      expect(view.defaultAccessLevel).toBe("full")
+      expect(view.accessLevel).toBe("read-only")
+      expect(view.accessLevels.map(level => level.id)).toEqual(["full", "read-only"])
+      expect(JSON.stringify(view)).not.toContain("googleapis.com")
+    })
+
+    it("reports no held level when not connected", () => {
+      expect(connectorAccessView(drive).accessLevel).toBeNull()
+    })
+
+    it("is empty for a connector with a single fixed access", () => {
+      expect(connectorAccessView(v0, "mcp")).toEqual({ accessLevels: [], defaultAccessLevel: null, accessLevel: null })
+    })
   })
 })

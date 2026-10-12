@@ -77,7 +77,14 @@ const VIEWS: { id: RailView; label: string; description: string; Icon: LucideIco
  *    which is the constraint that chose the left side in the first place.
  */
 
-type RailMessage = { id: string; role: "user" | "assistant"; content: string }
+type RailMessage = {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  createdAt?: string
+  authorUserId?: string | null
+  authorName?: string | null
+}
 type RailThread = { id: string; title: string | null }
 
 /**
@@ -105,9 +112,19 @@ function toRailMessages(raw: unknown): RailMessage[] {
   if (!Array.isArray(raw)) return NO_MESSAGES
   return raw.flatMap((row) => {
     if (!row || typeof row !== "object") return []
-    const { id, role, content } = row as Record<string, unknown>
+    const { id, role, content, createdAt, authorUserId, authorName } = row as Record<string, unknown>
     if (typeof id !== "string" || typeof content !== "string") return []
-    return [{ id, content, role: role === "assistant" ? ("assistant" as const) : ("user" as const) }]
+    return [
+      {
+        id,
+        content,
+        role: role === "assistant" ? ("assistant" as const) : ("user" as const),
+        // Authorship. Optional: an older server omits all three.
+        ...(typeof createdAt === "string" ? { createdAt } : {}),
+        ...(typeof authorUserId === "string" ? { authorUserId } : {}),
+        ...(typeof authorName === "string" ? { authorName } : {}),
+      },
+    ]
   })
 }
 
@@ -203,9 +220,11 @@ export interface AgentRailProps {
   /** `/${orgSlug}/${workspaceSlug}` — matches AgentChat's prop of the same name. */
   basePath: string
   userInitials: string
+  /** The signed-in user, to tell their messages from other participants'. */
+  userId: string
 }
 
-export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProps) {
+export function AgentRail({ workspaceId, basePath, userInitials, userId }: AgentRailProps) {
   const {
     open,
     closeRail,
@@ -581,6 +600,7 @@ export function AgentRail({ workspaceId, basePath, userInitials }: AgentRailProp
           activeConversationId={conversationId}
           initialMessages={messages}
           userInitials={userInitials}
+          userId={userId}
           onConversationCreated={handleConversationCreated}
           onStreamingChange={setStreaming}
           composerSeed={agentSeed}

@@ -18,13 +18,13 @@ const mockAvailable = vi.fn()
 const mockFindConnector = vi.fn()
 const mockFindGrant = vi.fn()
 const mockDisconnectGrant = vi.fn()
-const mockListConnectedSlugs = vi.fn()
+const mockListConnectedGrants = vi.fn()
 vi.mock("@/lib/mcp-connectors/store", () => ({
   mcpConnectorsAvailable: () => mockAvailable(),
   findConnector: (...args: unknown[]) => mockFindConnector(...args),
   findGrant: (...args: unknown[]) => mockFindGrant(...args),
   disconnectGrant: (...args: unknown[]) => mockDisconnectGrant(...args),
-  listConnectedSlugs: (...args: unknown[]) => mockListConnectedSlugs(...args),
+  listConnectedGrants: (...args: unknown[]) => mockListConnectedGrants(...args),
 }))
 
 const mockRevokeAtProvider = vi.fn()
@@ -47,24 +47,62 @@ beforeEach(() => {
   mockFindGrant.mockResolvedValue({ accessToken: "at", refreshToken: "rt", generation: 1 })
   mockDisconnectGrant.mockResolvedValue(true)
   mockRevokeAtProvider.mockResolvedValue(true)
-  mockListConnectedSlugs.mockResolvedValue([])
+  mockListConnectedGrants.mockResolvedValue([])
   vi.spyOn(console, "error").mockImplementation(() => {})
+  vi.unstubAllEnvs()
 })
 
 describe("GET /api/connectors", () => {
   it("reports the catalog with this user's connection state, scoped to this origin", async () => {
-    mockListConnectedSlugs.mockResolvedValue(["v0"])
+    mockListConnectedGrants.mockResolvedValue([{ slug: "v0", scope: "mcp" }])
     const response = await listConnectors()
     const body = await response.json()
 
     expect(body.available).toBe(true)
     expect(body.connectors).toEqual([
-      expect.objectContaining({ slug: "v0", connected: true, serverUrl: "https://v0.app/api/mcp" }),
+      expect.objectContaining({ slug: "v0", connected: true, serverUrl: "https://v0.app/api/mcp", configured: true }),
+      expect.objectContaining({ slug: "google-drive", connected: false }),
     ])
     // A preview deployment must not report a production grant: that registration
     // has a different client_id and redirect_uri entirely.
-    expect(mockListConnectedSlugs).toHaveBeenCalledWith("user-1", "http://localhost:3000")
+    expect(mockListConnectedGrants).toHaveBeenCalledWith("user-1", "http://localhost:3000")
     expect(response.headers.get("cache-control")).toBe("no-store")
+  })
+
+  it("reports the access choice, and the level a connected grant actually holds", async () => {
+    mockListConnectedGrants.mockResolvedValue([
+      { slug: "google-drive", scope: "https://www.googleapis.com/auth/drive.readonly" },
+    ])
+    const body = await (await listConnectors()).json()
+    const drive = body.connectors.find((c: { slug: string }) => c.slug === "google-drive")
+    expect(drive.accessLevels.map((level: { id: string }) => level.id)).toEqual(["full", "read-only"])
+    expect(drive.defaultAccessLevel).toBe("full")
+    expect(drive.accessLevel).toBe("read-only")
+    // Nothing the client doesn't need: the scopes and guidance stay server-side.
+    expect(JSON.stringify(drive)).not.toContain("googleapis.com/auth")
+
+    const v0 = body.connectors.find((c: { slug: string }) => c.slug === "v0")
+    expect(v0.accessLevels).toEqual([])
+    expect(v0.defaultAccessLevel).toBeNull()
+    expect(v0.accessLevel).toBeNull()
+  })
+
+  it("flags a static-client connector as unconfigured until its env vars exist, and never leaks them", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "")
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "")
+    const unconfigured = await (await listConnectors()).json()
+    const drive = (body: typeof unconfigured) => body.connectors.find((c: { slug: string }) => c.slug === "google-drive")
+    expect(drive(unconfigured).configured).toBe(false)
+    // A DCR connector is always startable.
+    expect(unconfigured.connectors.find((c: { slug: string }) => c.slug === "v0").configured).toBe(true)
+
+    vi.stubEnv("GOOGLE_CLIENT_ID", "id.apps.googleusercontent.com")
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "super-secret-value")
+    const configuredResponse = await listConnectors()
+    const text = await configuredResponse.text()
+    expect(drive(JSON.parse(text)).configured).toBe(true)
+    expect(text).not.toContain("super-secret-value")
+    expect(text).not.toContain("id.apps.googleusercontent.com")
   })
 
   it("renders the catalog as not-connected when the migration is unapplied", async () => {
@@ -73,7 +111,7 @@ describe("GET /api/connectors", () => {
     expect(body.available).toBe(false)
     expect(body.connectors.every((item: { connected: boolean }) => !item.connected)).toBe(true)
     // Not even attempted: `available` is the signal, so there is no query to make.
-    expect(mockListConnectedSlugs).not.toHaveBeenCalled()
+    expect(mockListConnectedGrants).not.toHaveBeenCalled()
   })
 
   it("401s a signed-out caller", async () => {

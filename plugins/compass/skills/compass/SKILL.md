@@ -426,6 +426,25 @@ If validation fails, fix the file and call `prepare_artifact_upload` again
 (the failed staging upload is left behind, not reused). Direct upload needs the private Artifact Blob store and is
 unavailable in local dev; fall back to inline `html` there.
 
+### Artifacts from a v0 chat
+
+`create_artifact` with `sourceType: "V0_CHAT"` and `url: "https://v0.app/chat/<id>"`
+captures a v0 chat as an Artifact. `title` may be empty to use the chat name.
+
+- Pass the chat link from v0: `v0.app/chat/<id>`, the title-slug form, or a
+  team-prefixed link (`v0.app/<team>/chat/<slug>-<id>`).
+- Compass reads the chat server-side with **the caller's own v0 connector grant**,
+  so the user must have connected v0 in Compass first. There is no shared service
+  credential.
+- `refresh_artifact_from_v0(workspaceId, artifactId)` re-reads the chat and adds a revision
+  **only when v0 has a new version**. It returns `changed: false` otherwise, so it
+  is safe to call speculatively. `update_artifact` cannot replace a `V0_CHAT`
+  revision; refresh is the only way to get a new one.
+- The app renders as a live iframe through a Compass-hosted preview proxy on a
+  second domain. If the proxy is not configured in that environment (no
+  `V0_PREVIEW_HOST` / `V0_PREVIEW_TICKET_KEY`), the Artifact falls back to a link
+  card rather than an embedded preview.
+
 #### Feedback
 
 | Tool | Description |

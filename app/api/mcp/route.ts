@@ -79,6 +79,7 @@ import {
   unlinkArtifactDecision,
   linkArtifact,
   listArtifacts,
+  refreshArtifactFromV0,
   prepareArtifactUploadTool,
   unlinkArtifact,
   updateArtifact,
@@ -3475,13 +3476,17 @@ const _handler = createMcpHandler(
       }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, prepareArtifactUploadTool)
     register("create_artifact", {
-      title: "Create Artifact", description: "Creates a first-class Artifact from self-contained HTML or an external http/https URL. For HTML, pass uploadReceipt (from prepare_artifact_upload) instead of html to avoid embedding the document in the call.",
-      inputSchema: { workspaceId: z.string().uuid(), title: z.string().min(1), description: z.string().optional(), sourceType: z.enum(["HTML_UPLOAD", "EXTERNAL_LINK"]), kind: z.enum(["DOCUMENT", "SLIDE_DECK"]).optional().describe("Presentation kind. SLIDE_DECK (HTML_UPLOAD only) renders the HTML one slide at a time, split by Reveal.js sections, .slide elements, top-level <section>s or <hr> breaks; DOCUMENT (default) renders it as one page."), html: z.string().optional(), uploadReceipt: artifactUploadReceipt, filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+      title: "Create Artifact", description: "Creates a first-class Artifact from self-contained HTML, an external http/https URL, or a v0 chat (sourceType V0_CHAT with url https://v0.app/chat/<id>; read with the caller's own v0 connection, and title may be empty to use the chat name). A Google Drive/Docs URL is kept as a link only (Compass never reads the file) and previewed read-only in the app with the viewer's own Google access. For HTML, pass uploadReceipt (from prepare_artifact_upload) instead of html to avoid embedding the document in the call.",
+      inputSchema: { workspaceId: z.string().uuid(), title: z.string(), description: z.string().optional(), sourceType: z.enum(["HTML_UPLOAD", "EXTERNAL_LINK", "V0_CHAT"]), kind: z.enum(["DOCUMENT", "SLIDE_DECK"]).optional().describe("Presentation kind. SLIDE_DECK (HTML_UPLOAD only) renders the HTML one slide at a time, split by Reveal.js sections, .slide elements, top-level <section>s or <hr> breaks; DOCUMENT (default) renders it as one page."), html: z.string().optional(), uploadReceipt: artifactUploadReceipt, filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, createArtifact)
     register("update_artifact", {
       title: "Update Artifact", description: "Updates Artifact metadata and optionally creates a new immutable HTML or URL revision. For HTML, pass uploadReceipt (from prepare_artifact_upload) instead of html to avoid embedding the document in the call.",
       inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid(), title: z.string().min(1).optional(), description: z.string().nullable().optional(), kind: z.enum(["DOCUMENT", "SLIDE_DECK"]).optional().describe("Presentation kind. SLIDE_DECK (HTML_UPLOAD only) renders the HTML one slide at a time, split by Reveal.js sections, .slide elements, top-level <section>s or <hr> breaks; DOCUMENT (default) renders it as one page."), html: z.string().optional(), uploadReceipt: artifactUploadReceipt, filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, updateArtifact)
+    register("refresh_artifact_from_v0", {
+      title: "Refresh Artifact from v0", description: "Re-reads a V0_CHAT Artifact's chat from v0 using the caller's own v0 connection and adds a new immutable revision only if v0 has a new version. Reports changed=false when nothing is new.",
+      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, refreshArtifactFromV0)
     register("create_feedback_source", {
       title: "Create Feedback Source",
       description: "Creates an embedded-feedback source bound to an ACTIVE Artifact in the workspace and mints its first token. Returns the raw token ONCE plus a ready-to-paste <script> snippet for the prototype's root layout. allowedOrigins are exact https origins (no wildcards; http only for localhost); the widget is refused from any other origin, so pass a provisional origin now and call update_feedback_source once the real deploy origin is known (an empty list accepts nothing yet).",

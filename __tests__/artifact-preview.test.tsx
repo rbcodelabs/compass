@@ -255,3 +255,79 @@ describe("ArtifactPreview external thumbnail", () => {
     expect(screen.getByText("https://a.example/")).toBeInTheDocument()
   })
 })
+
+describe("ArtifactPreview Google Drive links", () => {
+  const ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz_0123456789-"
+  const docUrl = `https://docs.google.com/document/d/${ID}/edit?tab=t.0`
+
+  afterEach(() => cleanup())
+
+  it("labels the link and embeds Google's viewer in a read-only frame built from the file ID", () => {
+    render(<ArtifactPreview title="Plan" externalUrl={docUrl} />)
+    expect(screen.getByText("Google Doc")).toBeInTheDocument()
+    const frame = screen.getByTitle("Plan — Google Doc preview") as HTMLIFrameElement
+    expect(frame.getAttribute("src")).toBe(`https://docs.google.com/document/d/${ID}/preview`)
+    expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer")
+    expect(frame.getAttribute("loading")).toBe("lazy")
+  })
+
+  it("sandboxes the frame without form submission or top navigation", () => {
+    render(<ArtifactPreview title="Plan" externalUrl={docUrl} />)
+    const sandbox = (screen.getByTitle("Plan — Google Doc preview") as HTMLIFrameElement).getAttribute("sandbox")!.split(" ")
+    expect(sandbox).toEqual(expect.arrayContaining(["allow-scripts", "allow-same-origin", "allow-popups"]))
+    expect(sandbox).not.toContain("allow-forms")
+    expect(sandbox).not.toContain("allow-top-navigation")
+    expect(sandbox).not.toContain("allow-top-navigation-by-user-activation")
+  })
+
+  it("always offers Open in Google in a noopener noreferrer tab, pointing at the original URL", () => {
+    render(<ArtifactPreview title="Plan" externalUrl={docUrl} />)
+    const link = screen.getByRole("link", { name: /open in google/i })
+    expect(link.getAttribute("href")).toBe(docUrl)
+    expect(link.getAttribute("target")).toBe("_blank")
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer")
+  })
+
+  it("states that only the link is stored and access is the reader's own", () => {
+    render(<ArtifactPreview title="Plan" externalUrl={docUrl} />)
+    expect(screen.getByText(/saves only this link, not the file/i)).toBeInTheDocument()
+  })
+
+  it("does not change the sandbox used for uploaded HTML", () => {
+    expect(ARTIFACT_IFRAME_SANDBOX).toBe("allow-scripts")
+  })
+
+  it("recognises a Form but renders no frame, since the viewer is submittable", () => {
+    render(<ArtifactPreview title="Survey" externalUrl={`https://docs.google.com/forms/d/e/${ID}/viewform`} />)
+    expect(screen.getByText("Google Form")).toBeInTheDocument()
+    expect(document.querySelector("iframe")).toBeNull()
+    expect(screen.getByRole("link", { name: /open in google/i })).toBeInTheDocument()
+  })
+
+  it("does not treat a lookalike host as Google: no frame, generic external card", () => {
+    render(<ArtifactPreview title="Phish" externalUrl={`https://docs.google.com.evil.example/document/d/${ID}/edit`} />)
+    expect(document.querySelector("iframe")).toBeNull()
+    expect(screen.getByRole("link", { name: /open external artifact/i })).toBeInTheDocument()
+  })
+
+  it("shows no stored thumbnail for a Drive link", () => {
+    render(<ArtifactPreview title="Plan" externalUrl={docUrl} thumbnail={{ src: "/t.png", width: 1, height: 1, capturedAt: "2026-10-01T12:00:00.000Z" }} />)
+    expect(screen.queryByRole("img")).toBeNull()
+  })
+})
+
+describe("ArtifactPreview — live external preview", () => {
+  afterEach(cleanup)
+  it("frames the live preview above the link card", () => {
+    render(<ArtifactPreview title="Demo" externalUrl="https://v0.app/chat/abc" livePreviewSrc="https://demo.v0.build/?__v0_token=t" />)
+    const frame = screen.getByTitle("Live preview of Demo") as HTMLIFrameElement
+    expect(frame.src).toBe("https://demo.v0.build/?__v0_token=t")
+    expect(frame.getAttribute("sandbox")).not.toContain("allow-top-navigation")
+    expect(screen.getByText("Open external artifact")).toBeInTheDocument()
+  })
+  it("shows only the link card when there is no live preview", () => {
+    render(<ArtifactPreview title="Demo" externalUrl="https://v0.app/chat/abc" livePreviewSrc={null} />)
+    expect(screen.queryByTitle("Live preview of Demo")).toBeNull()
+    expect(screen.getByText("Open external artifact")).toBeInTheDocument()
+  })
+})

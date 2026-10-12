@@ -14,6 +14,7 @@
 
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
+import { resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { agentRunsAvailable, findActiveAgentRun, getAgentRunForViewer } from "@/lib/agent-runs"
 import { serializeAgentRun } from "@/lib/agent-run-view"
 
@@ -28,14 +29,11 @@ export async function GET(request: Request, context: { params: Promise<{ convers
   const { conversationId } = await context.params
 
   const prisma = getPrisma()
-  // Ownership first, and as a 404 — the same shape the sibling message route
-  // uses, so a conversation belonging to someone else is indistinguishable from
+  // Access first, and as a 404 — the same shape the sibling message route
+  // uses, so a conversation the caller may not see is indistinguishable from
   // one that does not exist.
-  const conversation = await prisma.agentConversation.findFirst({
-    where: { id: conversationId, workspaceId, userId, workspace: { members: { some: { userId } } } },
-    select: { id: true },
-  })
-  if (!conversation) return new Response("Not found", { status: 404 })
+  const access = await resolveConversationAccess(prisma, { conversationId, workspaceId, userId })
+  if (!access) return new Response("Not found", { status: 404 })
 
   const json = (value: unknown) => Response.json(value, { headers: { "cache-control": "no-store" } })
   // Before migration 069 there are no runs to find, and the client's reattach

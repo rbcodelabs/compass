@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -9,6 +9,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", () => ({ createArtifact: vi.fn() }))
 
 import { ArtifactCreateForm } from "@/components/docs/artifact-create-form"
+import { createArtifact } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
 
 afterEach(cleanup)
 
@@ -31,5 +32,16 @@ describe("ArtifactCreateForm source toggle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Upload HTML" }))
     expect(container.querySelector('input[type="file"]')).not.toBeNull()
     expect(screen.getByRole("checkbox", { name: /slide deck/i })).toBeInTheDocument()
+  })
+})
+
+describe("ArtifactCreateForm v0 failures", () => {
+  it("shows an error returned by the server action instead of navigating", async () => {
+    vi.mocked(createArtifact).mockResolvedValueOnce({ error: "That is not a v0 chat URL. Expected https://v0.app/chat/<id>" })
+    const { container } = renderForm()
+    fireEvent.click(screen.getByRole("button", { name: "v0 chat" }))
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[name="url"]')!, { target: { value: "https://v0.app/nope" } })
+    fireEvent.submit(container.querySelector("form")!)
+    await waitFor(() => expect(screen.getByText(/not a v0 chat URL/)).toBeInTheDocument())
   })
 })
