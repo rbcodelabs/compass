@@ -20,6 +20,18 @@ const mockPrisma = {
   agentAuditLog: { createMany: vi.fn() },
   workspaceCapabilityPack: { findMany: vi.fn() },
 }
+
+// `claimInterviewProcessing` is the real implementation here, not a mock, and it
+// does its compare-and-swap inside a transaction. Running the callback against the
+// same object is enough: nothing under test depends on isolation, and it lets the
+// claim's lease arithmetic be asserted directly.
+//
+// Attached after the literal rather than declared inside it, because a property
+// whose type mentions `typeof mockPrisma` makes the object's own inferred type
+// self-referential (TS7022).
+Object.assign(mockPrisma, {
+  $transaction: <T>(fn: (tx: typeof mockPrisma) => Promise<T>) => fn(mockPrisma),
+})
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
 const mockGetGoldenSnapshotId = vi.fn()
@@ -29,7 +41,12 @@ const mockBootSandbox = vi.fn()
 const mockMintKey = vi.fn()
 const mockRevokeKey = vi.fn()
 vi.mock("@/lib/agent-sandbox", () => ({ bootSandboxFromSnapshot: (...args: unknown[]) => mockBootSandbox(...args) }))
-vi.mock("@/lib/agent-mcp-key", () => ({ mintAgentMcpKey: (...args: unknown[]) => mockMintKey(...args), revokeAgentMcpKey: (...args: unknown[]) => mockRevokeKey(...args) }))
+vi.mock("@/lib/agent-mcp-key", () => ({
+  // All arguments forwarded: the detached path's key expiry and handoff scope
+  // are part of the contract, and a mock that drops them cannot see either.
+  mintAgentMcpKey: (...args: unknown[]) => mockMintKey(...args),
+  revokeAgentMcpKey: (id: string) => mockRevokeKey(id),
+}))
 const mockPreparePacks = vi.fn()
 vi.mock("@/lib/capability-pack-runtime", () => ({ prepareCapabilityPacksForTurn: (...args: unknown[]) => mockPreparePacks(...args) }))
 const mockPackStorage = vi.fn()
@@ -41,7 +58,7 @@ vi.mock("@/lib/agent-limits", () => ({ checkAgentUsageLimit: () => mockCheckLimi
 const mockResolveAgentHandoffContext = vi.fn()
 vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: (...args: unknown[]) => mockResolveAgentHandoffContext(...args) }))
 
-// ADR-0018. Mocked at the store rather than at prisma because what matters here
+// Mocked at the store rather than at prisma because what matters here
 // is what the route does with the slugs, and `connectorDefinition` is left real
 // so the catalog itself is part of the assertion.
 const mockListConnectedSlugs = vi.fn()
@@ -49,7 +66,21 @@ vi.mock("@/lib/mcp-connectors/store", () => ({
   listConnectedSlugs: (...args: unknown[]) => mockListConnectedSlugs(...args),
 }))
 
+// `agentRunsAvailable` defaults to false in beforeEach so the existing
+// guard + streaming expectations below keep exercising the synchronous fallback
+// path; the detached path has its own describe block at the end of this file.
+const runMocks = vi.hoisted(() => ({ available: vi.fn(), create: vi.fn(), started: vi.fn(), finalize: vi.fn() }))
+vi.mock("@/lib/agent-runs", async (original) => ({
+  ...await original<object>(),
+  agentRunsAvailable: runMocks.available,
+  createAgentRun: runMocks.create,
+  markAgentRunStarted: runMocks.started,
+  finalizeAgentRun: runMocks.finalize,
+}))
+
 import { POST } from "@/app/api/agent/turn/route"
+import { AgentRunError, DEFAULT_AGENT_RUN_BUDGET_MS } from "@/lib/agent-runs"
+import { DEFAULT_INTERVIEW_CLAIM_LEASE_MS } from "@/lib/pm-agent-service"
 
 function req(body: unknown): NextRequest {
   return new NextRequest("https://compass.rbcodelabs.com/api/agent/turn", {
@@ -75,6 +106,9 @@ beforeEach(() => {
   mockPreparePacks.mockResolvedValue({ files: [], pluginPaths: [], skillIds: [], provenanceJson: "[]", systemPromptAppendices: [] })
   mockResolveAgentHandoffContext.mockResolvedValue(null)
   mockListConnectedSlugs.mockResolvedValue([])
+  runMocks.available.mockResolvedValue(false)
+  runMocks.started.mockResolvedValue(undefined)
+  runMocks.finalize.mockResolvedValue(undefined)
 })
 
 describe("agent turn route — guards", () => {
@@ -385,5 +419,118 @@ describe("agent turn route — guards", () => {
       expect(runCommand).toHaveBeenCalled()
       expect("AGENT_MCP_CONNECTORS" in env).toBe(false)
     })
+  })
+})
+
+/**
+ * The detached path. What matters here is what the route does *not* do:
+ * it never reads the sandbox's stdout, never stops the sandbox, and never revokes
+ * the key on the happy path — all three now belong to `finalizeAgentRun`, which is
+ * reached long after this request has returned.
+ */
+describe("agent turn route — detached runs", () => {
+  const DEADLINE = new Date("2026-09-25T12:34:56.000Z")
+  const RUN = { id: "11111111-1111-4111-8111-111111111111", deadlineAt: DEADLINE }
+
+  function sandbox() {
+    const writeFiles = vi.fn().mockResolvedValue(undefined)
+    const runCommand = vi.fn().mockResolvedValue({})
+    const stop = vi.fn()
+    mockBootSandbox.mockResolvedValue({ writeFiles, runCommand, stop })
+    return { writeFiles, runCommand, stop }
+  }
+
+  beforeEach(() => {
+    runMocks.available.mockResolvedValue(true)
+    runMocks.create.mockResolvedValue({ run: RUN, workerToken: "w".repeat(43), sandboxName: `compass-agent-run-${RUN.id}` })
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", name: "Test", slug: "test", organization: { slug: "org" } })
+    mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+    mockPrisma.agentMessage.create.mockResolvedValue({ id: "m-1" })
+    mockPrisma.agentMessage.findMany.mockResolvedValue([])
+  })
+
+  it("returns 202 with the run handle instead of a stream, and never drains stdout", async () => {
+    const { writeFiles, runCommand, stop } = sandbox()
+    const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+
+    expect(response.status).toBe(202)
+    expect(response.headers.get("content-type")).toContain("application/json")
+    expect(await response.json()).toEqual({
+      runId: RUN.id,
+      conversationId: "c-1",
+      status: "RUNNING",
+      deadlineAt: DEADLINE.toISOString(),
+    })
+    expect(writeFiles).toHaveBeenCalled()
+    // Detached, with the sandbox enforcing the budget itself — the command is
+    // started and never awaited, which is what lets this request return.
+    expect(runCommand).toHaveBeenCalledWith(expect.objectContaining({ detached: true, timeoutMs: DEFAULT_AGENT_RUN_BUDGET_MS }))
+    expect(runMocks.started).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN.id, apiKeyId: "key-1" }))
+    // The three things the synchronous path did on the way out, none of which may
+    // happen here: no stop, no revoke, no assistant message.
+    expect(stop).not.toHaveBeenCalled()
+    expect(mockRevokeKey).not.toHaveBeenCalled()
+    expect(mockPrisma.agentMessage.create).not.toHaveBeenCalledWith({ data: expect.objectContaining({ role: "assistant" }) })
+  })
+
+  it("gives the worker its run credentials and keeps the key alive past the deadline", async () => {
+    const { runCommand } = sandbox()
+    await POST(req({ workspaceId: "ws-1", message: "hi" }))
+
+    const env = runCommand.mock.calls[0][0].env as Record<string, string>
+    expect(env.AGENT_RUN_ID).toBe(RUN.id)
+    expect(env.AGENT_RUN_TOKEN).toBe("w".repeat(43))
+    expect(env.AGENT_RUN_HEARTBEAT_MS).toBeDefined()
+    // Same model-credential contract as the synchronous path.
+    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test")
+
+    // The key must outlive `deadlineAt`, or a run that answers in its last second
+    // loses tool access mid-sentence.
+    const [userId, , , expiresAt] = mockMintKey.mock.calls[0] as [string, unknown, unknown, Date]
+    expect(userId).toBe("user-1")
+    expect(expiresAt.getTime()).toBeGreaterThan(DEADLINE.getTime())
+  })
+
+  it("translates a run already in flight into 409 rather than a generic failure", async () => {
+    sandbox()
+    runMocks.create.mockRejectedValue(new AgentRunError("A run is already in flight for this conversation.", 409, "RUN_IN_FLIGHT"))
+    const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: "A run is already in flight for this conversation.", code: "RUN_IN_FLIGHT" })
+    expect(mockBootSandbox).not.toHaveBeenCalled()
+    expect(mockMintKey).not.toHaveBeenCalled()
+  })
+
+  it("finalizes the run and revokes the key when the sandbox never starts", async () => {
+    mockBootSandbox.mockRejectedValue(new Error("sandbox quota exhausted"))
+    const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+    expect(response.status).toBe(500)
+    // `apiKeyId` is not on the row yet at this point, so finalize's own revocation
+    // cannot see it — the route has to revoke explicitly or the key outlives the run.
+    expect(mockRevokeKey).toHaveBeenCalledWith("key-1")
+    expect(runMocks.finalize).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN.id, status: "FAILED", errorCode: "RUN_START_FAILED" }))
+    expect(runMocks.started).not.toHaveBeenCalled()
+  })
+
+  it("leases a claimed handoff for the whole run budget, not the four-minute request window", async () => {
+    sandbox()
+    mockPrisma.agentConversation.findFirst.mockResolvedValue({
+      id: "c-1",
+      interviewProcessingJson: JSON.stringify({ status: "PENDING", interviewId: "interview" }),
+    })
+    mockPrisma.agentConversation.updateMany.mockResolvedValue({ count: 1 })
+
+    const before = Date.now()
+    const response = await POST(req({ workspaceId: "ws-1", conversationId: "c-1", message: "Finish interview" }))
+    expect(response.status).toBe(202)
+
+    // The lease written by the claim is what `scopedHandoff` fences every MCP tool
+    // call against. On a detached run it has to span the whole budget: a
+    // four-minute lease on a twenty-minute run starts rejecting the agent's own
+    // tool calls a fifth of the way in, and the failure looks like an authz bug.
+    const claimed = JSON.parse(mockPrisma.agentConversation.updateMany.mock.calls[0][0].data.interviewProcessingJson)
+    expect(claimed.status).toBe("RUNNING")
+    expect(claimed.deadline - before).toBeGreaterThanOrEqual(DEFAULT_AGENT_RUN_BUDGET_MS)
+    expect(claimed.deadline - Date.now()).toBeGreaterThan(DEFAULT_INTERVIEW_CLAIM_LEASE_MS)
   })
 })

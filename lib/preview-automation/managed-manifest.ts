@@ -163,7 +163,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "078_artifact_slide_decks": "aa214ce3c2fcc1ce8055e0e9417bda69189aff99794d3bb3b2c14d0a562b3db9",
   // Saved roadmap views: one new table plus one non-unique async index, no backfill.
   // Digest recorded from the shipped SQL; please review it.
-  "079_roadmap_views": "0575ee815ac4c66181d213a7b6f495c77bb62a05271b4fb25d3c92f98df64d5b"
+  "079_roadmap_views": "0575ee815ac4c66181d213a7b6f495c77bb62a05271b4fb25d3c92f98df64d5b",
+  // Durable background agent runs: two additive CREATE TABLEs (agent_runs, agent_run_events)
+  // and six ASYNC indexes, two of them unique (worker-token lookup, (run_id, seq) idempotency).
+  // No ALTER, no backfill, no foreign keys. Digest recorded from the shipped SQL; please review it.
+  "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301"
 };
 
 /**

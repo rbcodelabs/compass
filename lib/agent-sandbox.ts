@@ -364,17 +364,36 @@ function parseBrowserVersion(smokeOutput: string): string {
  * already installed; the caller writes the per-turn entry script and runs it.
  *
  * `timeoutMs` shortens the sandbox lifetime for short-lived callers (the snapshot
- * smoke check and screenshot capture); `tags` labels it for cost attribution.
+ * smoke check and screenshot capture) and, for detached runs, bounds a run that outlives
+ * its starting request: the sandbox own timeout, not the function, is what ends it. The
+ * 5-minute default is kept for the synchronous fallback path. `name` makes the sandbox
+ * addressable later (`Sandbox.get({ name })`), which is how the sweeper reaches a run
+ * nobody is watching. `tags` labels it for cost attribution.
  */
 export async function bootSandboxFromSnapshot(
   snapshotId: string,
-  opts?: { timeoutMs?: number; tags?: Record<string, string> }
+  opts?: { timeoutMs?: number; name?: string; tags?: Record<string, string> }
 ): Promise<Sandbox> {
   return Sandbox.create({
     source: { type: "snapshot", snapshotId },
     timeout: opts?.timeoutMs ?? SANDBOX_TIMEOUT_MS,
+    ...(opts?.name ? { name: opts.name } : {}),
     ...(opts?.tags ? { tags: opts.tags } : {}),
   })
+}
+
+/**
+ * Stop a sandbox by name, for a caller that holds only the name — the run
+ * sweeper and the run finalizer, neither of which has the original handle.
+ *
+ * Throws when the sandbox cannot be reached (already stopped, already collected,
+ * never created). Callers treat that as "nothing left to stop": the sandbox's own
+ * platform-side timeout is the backstop, so a failed stop costs money, not
+ * correctness.
+ */
+export async function stopSandboxByName(name: string): Promise<void> {
+  const sandbox = await Sandbox.get({ name })
+  await sandbox.stop()
 }
 
 /**

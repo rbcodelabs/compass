@@ -7,10 +7,25 @@ vi.mock("next/navigation", () => ({ useRouter: () => router }))
 vi.mock("@/components/agent/markdown", () => ({ Markdown: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }))
 import { AgentChat } from "@/components/agent/agent-chat"
 const props = { workspaceId: "workspace", basePath: "/org/workspace", conversations: [], activeConversationId: "conversation", initialMessages: [], userInitials: "PM" }
+
+// Opening a conversation now makes two independent lookups: this file's subject,
+// the interview-processing poll, plus the reattach probe asking whether a
+// background run is already in flight. So a mock has to route by URL rather than
+// answer everything identically — and it has to build a *fresh* Response per call,
+// because a single Response body can only be read once and the two readers would
+// otherwise fight over it.
+const routed = (processing: () => Response) =>
+  vi.fn(async (url: string) =>
+    url.includes("/processing") ? processing() : new Response(JSON.stringify({ run: null, available: true })))
+const processingCalls = (fetch: ReturnType<typeof routed>) =>
+  fetch.mock.calls.filter(([url]) => String(url).includes("/processing"))
+const turnCalls = (fetch: ReturnType<typeof routed>) =>
+  fetch.mock.calls.filter(([url]) => url === "/api/agent/turn")
+
 beforeEach(() => { vi.clearAllMocks(); Element.prototype.scrollIntoView = vi.fn() })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 it("shows persisted successful edits even with no assistant message", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "SUCCEEDED", interviewId: "interview", receipt: { changedFields: ["description"], before: { description: "Old wording" }, after: { description: "New wording" }, targetUrl: "/org/workspace/opportunities/item" } }))))
+  vi.stubGlobal("fetch", routed(() => new Response(JSON.stringify({ status: "SUCCEEDED", interviewId: "interview", receipt: { changedFields: ["description"], before: { description: "Old wording" }, after: { description: "New wording" }, targetUrl: "/org/workspace/opportunities/item" } }))))
   render(<AgentChat {...props} />)
   expect(await screen.findByText("Item updated")).toBeVisible()
   expect(screen.getByText("description")).toBeVisible()
@@ -28,19 +43,22 @@ it("requires server permission for terminal follow-up chat and marks it as conti
   await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/agent/turn", expect.objectContaining({ body: expect.stringContaining('"continue":true') })))
 })
 it("does not dispatch when processing status cannot be checked", async () => {
-  const fetch = vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 }))
+  const fetch = routed(() => new Response("unavailable", { status: 503 }))
   vi.stubGlobal("fetch", fetch)
   render(<AgentChat {...props} />)
   expect(await screen.findByText(/Unable to check processing status/)).toBeVisible()
   expect(screen.getByRole("textbox")).toBeDisabled()
-  expect(fetch.mock.calls).toHaveLength(1)
+  // The point is that an unreadable status starts no work: polled once, dispatched
+  // nothing. (Counting every call would now also count the reattach probe.)
+  expect(processingCalls(fetch)).toHaveLength(1)
+  expect(turnCalls(fetch)).toHaveLength(0)
 })
 it("does not dispatch a duplicate request for a running interview", async () => {
-  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "RUNNING", interviewId: "interview", receipt: null })))
+  const fetch = routed(() => new Response(JSON.stringify({ status: "RUNNING", interviewId: "interview", receipt: null })))
   vi.stubGlobal("fetch", fetch)
   render(<AgentChat {...props} />)
   expect(await screen.findByText(/Updating your item/)).toBeVisible()
-  expect(fetch.mock.calls.every(([url]) => url.includes("/processing"))).toBe(true)
+  expect(turnCalls(fetch)).toHaveLength(0)
 })
 it("keeps normal conversation composer available when no interview is linked", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })))
@@ -48,7 +66,7 @@ it("keeps normal conversation composer available when no interview is linked", a
   await waitFor(() => expect(screen.getByRole("textbox")).toBeEnabled())
 })
 it("shows no-change receipts rather than claiming an edit", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "SUCCEEDED", interviewId: "interview", receipt: { changedFields: [], targetUrl: "/org/workspace/item" } }))))
+  vi.stubGlobal("fetch", routed(() => new Response(JSON.stringify({ status: "SUCCEEDED", interviewId: "interview", receipt: { changedFields: [], targetUrl: "/org/workspace/item" } }))))
   render(<AgentChat {...props} />)
   expect(await screen.findByText("No changes saved")).toBeVisible()
   expect(screen.queryByText("Item updated")).not.toBeInTheDocument()
