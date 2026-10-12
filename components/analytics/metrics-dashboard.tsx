@@ -615,7 +615,7 @@ function MetricCard({
           variant="ghost"
           size="icon-sm"
           aria-label={`Refresh ${row.metric.name}`}
-          title={row.refreshBindingId ? "Refresh this metric" : "Link this metric to an experiment, roadmap item, or key result to refresh it"}
+          title={row.refreshBindingId ? "Refresh this metric" : "Link this metric to a record to refresh it"}
           disabled={!row.refreshBindingId || refreshing}
           onClick={onRefresh}
         >
