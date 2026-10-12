@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Check, Loader2, Plus, Send, Sparkles, Square } from "lucide-react"
+import { Check, Loader2, Send, Sparkles, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -39,9 +39,21 @@ import {
 } from "@/lib/agent-run-stream"
 import { Markdown } from "@/components/agent/markdown"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
+import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
+import { initialsOf } from "@/lib/user-initials"
 
 type Role = "user" | "assistant"
-type Message = { id: string; role: Role; content: string; toolCalls?: ToolStep[] }
+type Message = {
+  id: string
+  role: Role
+  content: string
+  toolCalls?: ToolStep[]
+  /** ISO instant. Present on messages the server has stored; the polling cursor. */
+  createdAt?: string
+  /** Who sent a user message. Absent on a message this tab has only optimistically shown. */
+  authorUserId?: string | null
+  authorName?: string | null
+}
 type ConversationSummary = { id: string; title: string | null }
 type SeedEntity = { entityType: string; entityId: string; label: string; summary: string; sourceUrl: string }
 
@@ -52,6 +64,8 @@ type Props = {
   activeConversationId: string | null
   initialMessages: Message[]
   userInitials: string
+  /** The signed-in user, to tell their messages from other participants'. */
+  userId: string
   /** "Send to agent" hand-off (lib/agent-context.ts) — only ever set for a brand-new chat. */
   seedEntity?: SeedEntity
   suggestedInstruction?: string
@@ -67,8 +81,8 @@ type Props = {
    * Which surface this chat is rendered on.
    *
    * `"page"` (the default, so every existing call site is unchanged) is the
-   * full-width agent screen: it owns its own card chrome and shows the
-   * conversation list as an inline left column.
+   * full-pane agent screen: it fills whatever its parent gives it and shows a
+   * collapsible conversation list as an inline left column.
    *
    * `"rail"` is the docked left rail. It drops both of those: the rail supplies
    * the surrounding chrome itself, and a 320–560px column has no room for a
@@ -77,6 +91,12 @@ type Props = {
    * renders the thread and composer only.
    */
   variant?: "page" | "rail"
+  /**
+   * Whether the page variant's conversation list is shown. Controlled by the
+   * page shell, which owns the toggle in its title bar (and the cookie behind
+   * it); ignored by the rail, which has no inline list.
+   */
+  listOpen?: boolean
   /**
    * Called when turn 1 of a brand-new chat comes back with the id the server
    * assigned to it.
@@ -110,6 +130,12 @@ type Processing = {
   receipt: { changedFields: string[]; targetUrl: string; before?: Record<string, unknown>; after?: Record<string, unknown> } | null
 }
 
+/** Ids this tab invents for messages the server has not reported back yet. */
+const isLocalMessageId = (id: string) => /^(local|run|a)-/.test(id)
+
+/** How often a shared conversation asks the server what others have said. No push in v1. */
+const SHARED_POLL_MS = 4_000
+
 export function AgentChat({
   workspaceId,
   basePath,
@@ -117,11 +143,13 @@ export function AgentChat({
   activeConversationId,
   initialMessages,
   userInitials,
+  userId,
   seedEntity,
   suggestedInstruction,
   composerSeed,
   onComposerSeedApplied,
   variant = "page",
+  listOpen = true,
   onConversationCreated,
   onStreamingChange,
 }: Props) {
@@ -159,6 +187,10 @@ export function AgentChat({
   /** The detached run this tab is currently viewing, if any. */
   const [activeRun, setActiveRun] = useState<SerializedRun | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  /** Who is in this conversation; null until loaded, or when unavailable. */
+  const [roster, setRoster] = useState<Roster | null>(null)
+  /** Set once the server says this conversation is no longer ours (left, or removed). */
+  const [accessLost, setAccessLost] = useState<"left" | "removed" | null>(null)
   const [processing, setProcessing] = useState<Processing | null>(null)
   const [processingLoading, setProcessingLoading] = useState(Boolean(activeConversationId))
   const started = useRef(new Set<string>())
@@ -188,6 +220,20 @@ export function AgentChat({
   const selfCreated = useRef(new Set<string>())
 
   const isStreaming = phase !== "idle"
+  const shared = Boolean(roster?.available && roster.participants.length > 1)
+  const sharedRef = useRef(shared)
+  useEffect(() => {
+    sharedRef.current = shared
+  }, [shared])
+  const messagesRef = useRef(messages)
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+  const reconcileRef = useRef<(full?: boolean) => Promise<void>>(async () => {})
+  const nameOf = useCallback(
+    (id: string | null | undefined) => roster?.participants.find((p) => p.userId === id)?.name ?? null,
+    [roster],
+  )
 
   // Through a ref for the same reason as onConversationCreated: an inline arrow
   // from the parent must not re-fire this on every render, only on a change.
@@ -240,6 +286,7 @@ export function AgentChat({
     runController.current = null
     sending.current = false
     setActiveRun(null)
+    setAccessLost(null)
     setMessages(initialMessages)
     setStreamingText("")
     setLiveToolSteps([])
@@ -379,6 +426,10 @@ export function AgentChat({
           { id: `run-${runId}`, role: "assistant", content: text || "(no response)", toolCalls: settleSteps(turn.steps) },
         ])
       }
+      // In a shared conversation the server also stored this reply under its own id,
+      // and other people's turns are in the history too, so take the stored
+      // transcript instead of leaving this tab's provisional copy on screen.
+      if (sharedRef.current) void reconcileRef.current(true)
       if (reportedFailure) setError(reportedFailure)
       else if (finalRun && !succeeded) setError(runFailureText(finalRun.status, finalRun.error))
       setStreamingText("")
@@ -466,6 +517,10 @@ export function AgentChat({
           message: text,
           conversationId: activeConversationId ?? undefined,
           ...(seedContextForThisTurn ? { seedContext: seedContextForThisTurn } : {}),
+          // The rail floats over whatever page the user is on, so tell the server which one.
+          // Read at send time (not from render state) so it is the page NOW, not when the
+          // component last rendered. The full-page agent screen has no page behind it.
+          ...(isRail ? { pageUrl: window.location.pathname + window.location.search } : {}),
           ...(retry ? { retry: true } : {}),
           ...(!handoff && processing?.canContinue ? { continue: true } : {}),
         }),
@@ -575,6 +630,23 @@ export function AgentChat({
     }
   }, [input, workspaceId, activeConversationId, basePath, router, isRail, processing?.canContinue, pendingSeedEntity, watchRun])
 
+  /**
+   * Become a viewer of a run that is already in flight. The run may be
+   * one this user started in another tab, or — in a shared conversation — one
+   * another participant started.
+   */
+  const attachToRun = useCallback(async (run: SerializedRun) => {
+    if (watchedRuns.current.has(run.id)) return
+    const controller = new AbortController()
+    runController.current = controller
+    // Block the composer for the duration: one conversation may have only one
+    // run in flight, and the server would 409 a second turn anyway.
+    sending.current = true
+    setActiveRun(run)
+    setPhase(run.status === "QUEUED" ? "booting" : "running")
+    await watchRun(run.id, controller)
+  }, [watchRun])
+
   // Reattach to a run already in flight for this conversation.
   //
   // This is the payoff for making runs durable: a reopened tab asks the
@@ -594,15 +666,7 @@ export function AgentChat({
         if (cancelled || !res.ok) return
         const body = await res.json() as { run: SerializedRun | null; available: boolean }
         if (cancelled || !body.run || body.run.done) return
-        if (watchedRuns.current.has(body.run.id)) return
-        const controller = new AbortController()
-        runController.current = controller
-        // Block the composer for the duration: one conversation may have only one
-        // run in flight, and the server would 409 a second turn anyway.
-        sending.current = true
-        setActiveRun(body.run)
-        setPhase(body.run.status === "QUEUED" ? "booting" : "running")
-        await watchRun(body.run.id, controller)
+        await attachToRun(body.run)
       } catch {
         // Best-effort: failing to reattach leaves a normal, idle chat on screen,
         // and the run carries on regardless.
@@ -612,7 +676,107 @@ export function AgentChat({
       cancelled = true
       lookup.abort()
     }
-  }, [activeConversationId, workspaceId, watchRun])
+  }, [activeConversationId, workspaceId, attachToRun])
+
+  // Shared conversations: what other participants say, and the runs
+  // they start, arrive by polling. There is no server push in v1, so this is the
+  // whole of "live" — a few seconds behind, by design.
+  //
+  // It only acts while this tab is idle. A tab that is sending or watching a run
+  // already has that turn's state in hand, and a poll landing in the middle would
+  // race it; the run's end reconciles the transcript instead (see watchRun).
+  const reconcile = useCallback(async (full = false) => {
+    if (!activeConversationId) return
+    const after = full
+      ? null
+      : messagesRef.current.reduce<string | null>(
+          (latest, m) => (m.createdAt && (!latest || m.createdAt > latest) ? m.createdAt : latest),
+          null,
+        )
+    const url = `/api/agent/conversations/${activeConversationId}/messages?workspaceId=${encodeURIComponent(workspaceId)}${
+      after ? `&after=${encodeURIComponent(after)}` : ""
+    }`
+    const res = await fetch(url)
+    if (res.status === 404) {
+      setAccessLost("removed")
+      return
+    }
+    if (!res.ok) return
+    const body = await res.json() as { messages?: Message[] }
+    const incoming = (body.messages ?? []).flatMap((m) =>
+      m && typeof m.id === "string" && typeof m.content === "string"
+        ? [{ ...m, role: m.role === "assistant" ? ("assistant" as const) : ("user" as const) }]
+        : [],
+    )
+    if (!after) {
+      // No cursor: this is the whole transcript, so it replaces what is on screen.
+      if (incoming.length === 0) return
+      setMessages((current) => {
+        // The tool steps live only in this tab (the server stores the reply text),
+        // so carry them onto the stored copy of the reply they belong to.
+        const steps = current.find((m) => m.id.startsWith("run-") && m.toolCalls?.length)?.toolCalls
+        if (!steps) return incoming
+        const lastAssistant = incoming.map((m) => m.role).lastIndexOf("assistant")
+        return incoming.map((m, i) => (i === lastAssistant && !m.toolCalls ? { ...m, toolCalls: steps } : m))
+      })
+      return
+    }
+    if (incoming.length === 0) return
+    setMessages((current) => {
+      const known = new Set(current.map((m) => m.id))
+      const fresh = incoming.filter((m) => !known.has(m.id))
+      if (fresh.length === 0) return current
+      // The cursor is inclusive, so the last message comes back every time and is
+      // skipped above. A provisional copy of a message the server now reports is
+      // dropped rather than shown twice.
+      const kept = current.filter(
+        (m) => !(isLocalMessageId(m.id) && fresh.some((f) => f.role === m.role && f.content === m.content)),
+      )
+      return [...kept, ...fresh]
+    })
+  }, [activeConversationId, workspaceId])
+  useEffect(() => {
+    reconcileRef.current = (full) => reconcile(full).catch(() => {})
+  }, [reconcile])
+
+  useEffect(() => {
+    if (!activeConversationId || !shared || accessLost) return
+    let cancelled = false
+    const tick = async () => {
+      if (cancelled || document.visibilityState !== "visible") return
+      if (sending.current || phase !== "idle") return
+      try {
+        // Messages first: the sender's message is stored before its run starts, so
+        // when a run is found below its prompt is already on screen.
+        await reconcile()
+        if (cancelled || sending.current) return
+        const res = await fetch(
+          `/api/agent/conversations/${activeConversationId}/run?workspaceId=${encodeURIComponent(workspaceId)}`,
+        )
+        if (cancelled || !res.ok || sending.current) return
+        const body = await res.json() as { run: SerializedRun | null }
+        if (body.run && !body.run.done) void attachToRun(body.run)
+      } catch {
+        // A missed tick costs a few seconds; the next one catches up.
+      }
+    }
+    const timer = setInterval(() => void tick(), SHARED_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [activeConversationId, workspaceId, shared, accessLost, phase, reconcile, attachToRun])
+
+  const handleAccessLost = useCallback(
+    (reason: "left" | "removed") => {
+      streamController.current?.abort()
+      runController.current?.abort()
+      setAccessLost(reason)
+      // Leaving on the full page drops the now-inaccessible thread from the URL.
+      if (reason === "left" && !isRail) router.replace(`${basePath}/agent`)
+    },
+    [isRail, router, basePath],
+  )
 
   const sendRef = useRef(send)
   useEffect(() => { sendRef.current = send }, [send])
@@ -651,26 +815,26 @@ export function AgentChat({
     return null
   }, [phase, streamingText, liveToolSteps.length])
 
+  // Stop is for whoever started the run, and for the owner (enforced server-side too).
+  const runStarterId = activeRun?.startedByUserId ?? null
+  const runStartedByOther = Boolean(runStarterId && runStarterId !== userId)
+  const canCancelRun = !runStartedByOther || roster?.viewerRole === "OWNER"
+
   return (
     <div
-      className={`flex min-h-0 flex-1 overflow-hidden bg-surface-panel ${
-        // The rail draws its own border and header, so a second rounded card
-        // inside it would read as a box in a box.
-        isRail ? "" : "rounded-xl border border-default"
-      }`}
+      // No card chrome in either variant: the page sits under WorkspacePage's
+      // header and fills the pane edge to edge, and the rail draws its own
+      // border and header.
+      className="flex min-h-0 flex-1 overflow-hidden bg-surface-panel"
     >
       {/* Conversation list — page only; in the rail these controls live in the
           rail header instead, because 256px of list plus a readable thread does
-          not fit in a 320–560px column. */}
-      {!isRail && (
+          not fit in a 320–560px column. Shown or removed entirely by the page
+          shell's title-bar toggle (no residual strip). Below md it is hidden
+          outright, as before. */}
+      {!isRail && listOpen && (
       <aside className="hidden w-64 shrink-0 flex-col border-r border-default bg-surface-inset md:flex">
-        <div className="p-3">
-          <Button variant="outline" size="sm" className="w-full justify-start gap-2" render={<Link href={`${basePath}/agent`} />}>
-            <Plus className="size-4" aria-hidden="true" />
-            New chat
-          </Button>
-        </div>
-        <ScrollArea className="min-h-0 flex-1 px-2 pb-2">
+        <ScrollArea className="min-h-0 flex-1 p-2">
           <ul className="flex flex-col gap-1">
             {conversations.length === 0 && (
               <li className="px-2 py-6 text-center text-sm text-text-subtle">No conversations yet</li>
@@ -707,6 +871,16 @@ export function AgentChat({
           the Send button and the chip's own dismiss control off-screen on
           any width below ~1000px. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {activeConversationId && !accessLost && (
+          <AgentParticipantsPanel
+            conversationId={activeConversationId}
+            workspaceId={workspaceId}
+            userId={userId}
+            compact={isRail}
+            onRoster={setRoster}
+            onAccessLost={handleAccessLost}
+          />
+        )}
         <ScrollArea className="min-h-0 flex-1">
           {/* `sm:p-6` is dropped in the rail: the breakpoint tracks the
               viewport, not this column, so a 360px rail on a wide screen would
@@ -747,13 +921,15 @@ export function AgentChat({
             )}
 
             {messages.map((m) => (
-              <MessageRow key={m.id} message={m} userInitials={userInitials} />
+              <MessageRow key={m.id} message={m} userInitials={userInitials} userId={userId} shared={shared} />
             ))}
 
             {isStreaming && (
               <MessageRow
                 message={{ id: "streaming", role: "assistant", content: streamingText, toolCalls: liveToolSteps }}
                 userInitials={userInitials}
+                userId={userId}
+                shared={shared}
                 phaseLabel={phaseLabel}
               />
             )}
@@ -762,8 +938,21 @@ export function AgentChat({
                 synchronous fallback still dies with this request. */}
             {activeRun && !activeRun.done && (
               <p className="pl-10 text-xs text-text-subtle">
-                This runs on the server — you can close this tab and pick the reply up here later.
+                {runStartedByOther
+                  ? `${nameOf(runStarterId) ?? "Another participant"} asked this. You can watch, and send your own message once it finishes.`
+                  : "This runs on the server — you can close this tab and pick the reply up here later."}
               </p>
+            )}
+
+            {accessLost && (
+              <div role="alert" className="rounded-lg border border-default bg-surface-inset px-4 py-3 text-sm text-text-secondary">
+                {accessLost === "left"
+                  ? "You left this conversation. It no longer appears in your list."
+                  : "You no longer have access to this conversation."}{" "}
+                <Link className="underline" href={`${basePath}/agent`}>
+                  Start a new chat
+                </Link>
+              </div>
             )}
 
             {error && (
@@ -809,21 +998,22 @@ export function AgentChat({
               }}
               placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
               rows={1}
-              disabled={isStreaming || composerBlocked}
+              disabled={isStreaming || composerBlocked || Boolean(accessLost)}
               className="max-h-40 flex-1"
             />
             {activeRun && !activeRun.done ? (
               <Button
                 size="icon"
                 variant="outline"
+                disabled={!canCancelRun}
                 onClick={() => void cancelRun(activeRun.id)}
                 aria-label="Stop this agent run"
-                title="Stop this run"
+                title={canCancelRun ? "Stop this run" : "Only the person who asked, or the owner, can stop this run"}
               >
                 <Square className="size-4" aria-hidden="true" />
               </Button>
             ) : (
-              <Button size="icon" onClick={() => void send()} disabled={isStreaming || composerBlocked || !input.trim()} aria-label="Send message">
+              <Button size="icon" onClick={() => void send()} disabled={isStreaming || composerBlocked || Boolean(accessLost) || !input.trim()} aria-label="Send message">
                 <Send className="size-4" aria-hidden="true" />
               </Button>
             )}
@@ -855,38 +1045,52 @@ function ToolSteps({ steps }: { steps: ToolStep[] }) {
 function MessageRow({
   message,
   userInitials,
+  userId,
+  shared,
   phaseLabel,
 }: {
   message: Message
   userInitials: string
+  userId: string
+  shared: boolean
   phaseLabel?: string | null
 }) {
   const isUser = message.role === "user"
+  // A message with no recorded author is this tab's own, not yet reported back.
+  const fromOther = shared && isUser && Boolean(message.authorUserId) && message.authorUserId !== userId
+  const authorName = fromOther ? (message.authorName ?? "Participant") : null
   return (
-    <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
+    <div className={`flex gap-3 ${isUser && !fromOther ? "flex-row-reverse" : "flex-row"}`}>
       <Avatar className="size-7 shrink-0">
         <AvatarFallback className={isUser ? "bg-surface-interactive text-text-secondary" : "bg-primary text-primary-foreground"}>
-          {isUser ? userInitials : <Sparkles className="size-4" aria-hidden="true" />}
+          {isUser ? (fromOther ? initialsOf(authorName) : userInitials) : <Sparkles className="size-4" aria-hidden="true" />}
         </AvatarFallback>
       </Avatar>
-      <div
-        className={`min-w-0 max-w-[85%] rounded-xl px-4 py-2.5 text-sm ${
-          isUser ? "bg-primary text-primary-foreground" : "border border-default bg-surface-card text-text-primary"
-        }`}
-      >
-        {!isUser && message.toolCalls && <ToolSteps steps={message.toolCalls} />}
-        {isUser ? (
-          <p className="whitespace-pre-wrap break-words">{message.content}</p>
-        ) : message.content ? (
-          <Markdown>{message.content}</Markdown>
-        ) : phaseLabel ? (
-          <p className="flex items-center gap-1.5 text-text-subtle">
-            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-            {phaseLabel}
-          </p>
-        ) : (
-          <p className="text-text-subtle">…</p>
-        )}
+      <div className="flex min-w-0 max-w-[85%] flex-col gap-1">
+        {authorName && <span className="px-1 text-xs text-text-subtle">{authorName}</span>}
+        <div
+          className={`min-w-0 rounded-xl px-4 py-2.5 text-sm ${
+            isUser
+              ? fromOther
+                ? "border border-default bg-surface-inset text-text-primary"
+                : "bg-primary text-primary-foreground"
+              : "border border-default bg-surface-card text-text-primary"
+          }`}
+        >
+          {!isUser && message.toolCalls && <ToolSteps steps={message.toolCalls} />}
+          {isUser ? (
+            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+          ) : message.content ? (
+            <Markdown>{message.content}</Markdown>
+          ) : phaseLabel ? (
+            <p className="flex items-center gap-1.5 text-text-subtle">
+              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+              {phaseLabel}
+            </p>
+          ) : (
+            <p className="text-text-subtle">…</p>
+          )}
+        </div>
       </div>
     </div>
   )

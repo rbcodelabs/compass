@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest"
 
-import { entityPath, workspaceBasePath } from "@/lib/entity-links"
+import { entityPath, parseEntityLink, workspaceBasePath } from "@/lib/entity-links"
 
 const slugs = { orgSlug: "rbcodelabs", workspaceSlug: "compass" }
 
@@ -97,5 +97,44 @@ describe("entityPath — encoding", () => {
   it("percent-encodes the opportunity segment of a nested panel link", () => {
     expect(entityPath({ ...slugs, type: "solution", id: "sol/1", opportunityId: "opp 1" }))
       .toBe("/rbcodelabs/compass/discovery/opp%201?detail=solution%3Asol%2F1")
+  })
+})
+
+describe("parseEntityLink — the inverse of entityPath", () => {
+  const ID = "0b9a7f6e-3c1d-4e2a-8f5b-6d7c8e9fa0b1"
+  const ID2 = "1c0b8a7f-4d2e-4f3b-9a6c-7e8d9fa0b1c2"
+  const back = (input: Parameters<typeof entityPath>[0]) => parseEntityLink(entityPath(input))
+
+  it("round-trips every type entityPath can emit", () => {
+    const types = ["objective", "keyResult", "opportunity", "solution", "assumption", "experiment", "roadmapItem", "feedback", "task", "doc", "artifact"] as const
+    for (const type of types) {
+      expect(back({ ...slugs, type, id: ID })).toEqual({ ...slugs, type, id: ID })
+    }
+  })
+
+  it("prefers the ?detail= entity over the discovery page it rides on", () => {
+    expect(back({ ...slugs, type: "solution", id: ID, opportunityId: ID2 })).toEqual({ ...slugs, type: "solution", id: ID })
+  })
+
+  it("accepts an absolute URL only on the current origin", () => {
+    const url = `https://compass.example.com${entityPath({ ...slugs, type: "task", id: ID })}`
+    expect(parseEntityLink(url, "https://compass.example.com")).toMatchObject({ type: "task", id: ID })
+    expect(parseEntityLink(url, "https://other.example.com")).toBeNull()
+    expect(parseEntityLink(url)).toBeNull()
+  })
+
+  it("ignores page links, non-uuid ids, extra segments and protocol-relative hrefs", () => {
+    expect(parseEntityLink("/rbcodelabs/compass/discovery/tree")).toBeNull()
+    expect(parseEntityLink("/rbcodelabs/compass/discovery")).toBeNull()
+    expect(parseEntityLink(`/rbcodelabs/compass/tasks/${ID}/edit`)).toBeNull()
+    expect(parseEntityLink("/rbcodelabs/compass/docs/artifacts")).toBeNull()
+    expect(parseEntityLink(`/rbcodelabs/compass/okrs?detail=bogus:${ID}`)).toBeNull()
+    expect(parseEntityLink(`//evil.example.com/rbcodelabs/compass/tasks/${ID}`)).toBeNull()
+    expect(parseEntityLink("mailto:a@b.co")).toBeNull()
+    expect(parseEntityLink("#section")).toBeNull()
+  })
+
+  it("never throws on malformed escapes", () => {
+    expect(parseEntityLink("/%E0%A4%A/compass/tasks/x")).toBeNull()
   })
 })

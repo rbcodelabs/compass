@@ -1,14 +1,26 @@
 import { describe, it, expect } from "vitest"
-import { describeCapabilities, formatList } from "@/lib/agent-capabilities"
+import { describeCapabilities, formatList, WEB_CAPABILITY_SENTENCE } from "@/lib/agent-capabilities"
 
 describe("describeCapabilities", () => {
-  it("is unchanged from the hardcoded sentence when nothing is connected", () => {
-    // This is the exact string the prompt carried before connectors existed. A
-    // user with no grants must get byte-identical instructions.
+  it("is the baseline sentence when nothing is connected", () => {
+    // A user with no grants gets this exact text. "web" is not on the
+    // unavailable list; the web sentence replaces it.
     expect(describeCapabilities([])).toBe(
       "Available host capability: compass.product_state. " +
-        "Unavailable capabilities include local files, shell, web, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.",
+        "Unavailable capabilities include local files, shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents." +
+        WEB_CAPABILITY_SENTENCE,
     )
+  })
+
+  it("does not tell the model the web is unavailable, since WebFetch is enabled", () => {
+    // Regression: the prompt listed "web" as unavailable, so the model refused
+    // "fetch https://example.com" without ever calling WebFetch.
+    for (const connectors of [[], [{ slug: "v0", displayName: "v0" }]]) {
+      const sentence = describeCapabilities(connectors)
+      expect(sentence).not.toMatch(/Unavailable capabilities include[^.]*\bweb\b/)
+      expect(sentence).toContain("WebFetch")
+      expect(sentence).toContain("web_search")
+    }
   })
 
   it("advertises a connected connector as available", () => {
@@ -22,7 +34,7 @@ describe("describeCapabilities", () => {
     // declines work the freshly connected server can actually do.
     const sentence = describeCapabilities([{ slug: "github", displayName: "GitHub" }])
     expect(sentence).not.toContain("GitHub, Jira")
-    expect(sentence).toContain("Unavailable capabilities include local files, shell, web, Jira,")
+    expect(sentence).toContain("Unavailable capabilities include local files, shell, Jira,")
     expect(sentence).toContain("Available host capabilities: compass.product_state, github.")
   })
 
@@ -45,5 +57,16 @@ describe("formatList", () => {
     expect(formatList(["a"])).toBe("a")
     expect(formatList(["a", "b"])).toBe("a, and b")
     expect(formatList(["a", "b", "c"])).toBe("a, b, and c")
+  })
+})
+
+describe("describeCapabilities web search", () => {
+  it("advertises web_search instead of saying search is impossible", () => {
+    const sentence = describeCapabilities([])
+    expect(sentence).toContain("web_search")
+    expect(sentence).toContain("WebFetch")
+    expect(sentence).not.toContain("cannot search the web")
+    expect(sentence).toContain("untrusted")
+    expect(sentence).not.toMatch(/Unavailable capabilities include[^.]*\bweb\b/)
   })
 })
