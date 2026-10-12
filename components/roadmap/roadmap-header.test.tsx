@@ -3,6 +3,13 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 const url = vi.hoisted(() => ({ set: vi.fn() }));
+// The header's saved-views menu imports the org-level saved-view actions, which pull in auth; stub them at the boundary.
+vi.mock("@/app/[orgSlug]/roadmap/actions", () => ({
+  createRoadmapViewAction: vi.fn(),
+  updateRoadmapViewAction: vi.fn(),
+  deleteRoadmapViewAction: vi.fn(),
+}));
+
 vi.mock("@/hooks/use-url-state", () => ({ useUrlState: () => ({ params: new URLSearchParams("view=timeline&squad=alpha&item=details"), set: url.set }) }));
 import { RoadmapHeader } from "./roadmap-header";
 const squads = [{ id: "alpha", name: "Alpha", color: "#6366f1" }];

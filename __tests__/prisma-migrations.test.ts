@@ -893,10 +893,10 @@ describe("078_artifact_slide_decks", () => {
       .map((statement) => statement.trim())
       .filter(Boolean);
 
-  it("is registered exactly once and is the last registered migration", () => {
+  it("is registered exactly once and is registered before 079", () => {
     const names = registeredMigrations();
     expect(names.filter((name) => name === NAME)).toHaveLength(1);
-    expect(names[names.length - 1]).toBe(NAME);
+    expect(names.indexOf(NAME)).toBeLessThan(names.indexOf("079_roadmap_views"));
     expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("077_artifact_screenshots"));
     expect(names.indexOf(NAME)).toBeGreaterThan(names.indexOf("076_research_external_studies"));
   });

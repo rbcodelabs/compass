@@ -5,6 +5,13 @@ import "@testing-library/jest-dom/vitest"
 
 import { RoadmapHeader } from "@/components/roadmap/roadmap-header"
 
+// The header's saved-views menu imports the org-level saved-view actions, which pull in auth; stub them at the boundary.
+vi.mock("@/app/[orgSlug]/roadmap/actions", () => ({
+  createRoadmapViewAction: vi.fn(),
+  updateRoadmapViewAction: vi.fn(),
+  deleteRoadmapViewAction: vi.fn(),
+}));
+
 vi.mock("@/hooks/use-url-state", () => ({
   useUrlState: () => ({ params: new URLSearchParams(), set: vi.fn() }),
 }))

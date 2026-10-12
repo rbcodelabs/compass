@@ -9,6 +9,7 @@ import {
   ChevronDown,
   FlaskConical,
   HelpCircle,
+  Layers,
   Lightbulb,
   Puzzle,
   ListChecks,
@@ -175,6 +176,10 @@ export function Sidebar({
     ...baseNavItems.slice(6),
   ]
 
+  // The cross-workspace roadmap only earns a nav slot when there is more than one workspace in this org to compare.
+  const orgWorkspaceCount = workspaces.filter((w) => w.orgSlug === orgSlug).length
+  const orgRoadmapHref = `/${orgSlug}/roadmap`
+  const isOrgRoadmapActive = pathname === orgRoadmapHref
   return (
     <SidebarRoot
       collapsible="icon"
@@ -267,6 +272,29 @@ export function Sidebar({
                   </SidebarMenuItem>
                 )
               })}
+              {(orgWorkspaceCount > 1 || isOrgRoadmapActive) && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    render={<Link href={orgRoadmapHref} />}
+                    isActive={isOrgRoadmapActive}
+                    tooltip="All roadmaps"
+                    className="relative h-9 rounded-lg text-text-secondary"
+                    data-testid="nav-org-roadmap"
+                  >
+                    {isOrgRoadmapActive && (
+                      <span
+                        className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary group-data-[collapsible=icon]:hidden"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <Layers
+                      className={isOrgRoadmapActive ? "text-primary" : "text-text-subtle"}
+                      aria-hidden="true"
+                    />
+                    <span>All roadmaps</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               <AgentRailToggle />
               </SidebarMenu>
             </nav>

@@ -11,6 +11,7 @@ import { WorkspaceCreateButton, WorkspaceIconButton, WorkspaceMoreMenu } from "@
 import { RoadmapViewToggle } from "./roadmap-view-toggle";
 import { RoadmapGroupByToggle, type RoadmapGroupByFieldOption } from "./roadmap-group-by-toggle";
 import { RoadmapFilters } from "./roadmap-filters";
+import { WorkspaceSavedViewsMenu, type WorkspaceSavedViews } from "./workspace-saved-views";
 import type { TimelineZoom } from "./native-timeline/timeline-model";
 import type { CustomFieldFilterGroup } from "@/lib/custom-field-filter";
 import type { SquadData } from "@/lib/types";
@@ -75,7 +76,7 @@ function RailToggleButton({ rail }: { rail: RailToggle }) {
  * timeline scale and reload, timeline only).
  * The row below the title under `md` carries everything after the view toggle.
  */
-export function RoadmapHeader({ squads, timeline, customFieldGroups = [], activeCustomFieldId = null, groupByValue, groupByOptions = [], cardSortHref }: {
+export function RoadmapHeader({ squads, timeline, customFieldGroups = [], activeCustomFieldId = null, groupByValue, groupByOptions = [], cardSortHref, savedViews }: {
   squads: SquadData[];
   timeline?: TimelineControls;
   /** Picklist fields on Roadmap Item that have options to filter by. */
@@ -88,6 +89,8 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
   groupByOptions?: RoadmapGroupByFieldOption[];
   /** Where the Card sort entry point goes (a round over Roadmap Items). Omitted = no link. */
   cardSortHref?: string;
+  /** Saved roadmap views for this workspace. Omitted = no picker (e.g. in isolated tests). */
+  savedViews?: WorkspaceSavedViews;
 }) {
   return (
     <WorkspaceHeader
@@ -95,6 +98,7 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
       actions={<RoadmapViewToggle view={timeline ? "timeline" : "board"} />}
       controls={
         <>
+          {savedViews && <WorkspaceSavedViewsMenu savedViews={savedViews} />}
           {timeline && (
             <div role="group" aria-label="Timeline navigation" className="mr-auto flex items-center gap-1 md:mr-0">
               <WorkspaceIconButton label="Previous period" onClick={() => timeline.onShift(-1)}><ChevronLeft /></WorkspaceIconButton>
@@ -103,7 +107,7 @@ export function RoadmapHeader({ squads, timeline, customFieldGroups = [], active
             </div>
           )}
           {timeline?.schedule?.rail && <RailToggleButton rail={timeline.schedule.rail} />}
-          {timeline && <RoadmapGroupByToggle value={groupByValue ?? "phase"} customFieldOptions={groupByOptions} />}
+          {(timeline || groupByValue !== undefined) && <RoadmapGroupByToggle variant={timeline ? "timeline" : "board"} value={groupByValue ?? "phase"} customFieldOptions={groupByOptions} />}
           <div className={timeline ? undefined : "ml-auto md:ml-0"}>
             <RoadmapFilters squads={squads} customFieldGroups={customFieldGroups} activeCustomFieldId={activeCustomFieldId} />
           </div>

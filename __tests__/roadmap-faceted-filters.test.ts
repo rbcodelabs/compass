@@ -6,6 +6,13 @@ import { createElement } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
+// The header's saved-views menu imports the org-level saved-view actions, which pull in auth; stub them at the boundary.
+vi.mock("@/app/[orgSlug]/roadmap/actions", () => ({
+  createRoadmapViewAction: vi.fn(),
+  updateRoadmapViewAction: vi.fn(),
+  deleteRoadmapViewAction: vi.fn(),
+}));
+
 
 const root = process.cwd();
 const source = (path: string) => readFileSync(join(root, path), "utf8");

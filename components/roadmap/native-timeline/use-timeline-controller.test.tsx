@@ -3,6 +3,13 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@t
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const viewUrl = vi.hoisted(() => ({ query: "", set: vi.fn() }));
+// The header's saved-views menu imports the org-level saved-view actions, which pull in auth; stub them at the boundary.
+vi.mock("@/app/[orgSlug]/roadmap/actions", () => ({
+  createRoadmapViewAction: vi.fn(),
+  updateRoadmapViewAction: vi.fn(),
+  deleteRoadmapViewAction: vi.fn(),
+}));
+
 vi.mock("@/hooks/use-url-state", () => ({ useUrlState: () => ({ params: new URLSearchParams(viewUrl.query), set: viewUrl.set }) }));
 
 const actions = vi.hoisted(() => ({
