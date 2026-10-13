@@ -796,3 +796,110 @@ describe("CardSortKanban", () => {
     expect(handle).toHaveAttribute("aria-roledescription", "draggable")
   })
 })
+
+// ── Quick filter ────────────────────────────────────────────────────────────
+
+const filterBox = () => screen.getByRole("searchbox", { name: "Filter cards" })
+const typeFilter = (text: string) => fireEvent.change(filterBox(), { target: { value: text } })
+
+describe("Card sort quick filter — kanban", () => {
+  it("hides cards that do not match, case-insensitively, and reports N of M", () => {
+    renderKanban()
+    typeFilter("rate TABLE")
+
+    expect(screen.getByText("Rate table redesign")).toBeInTheDocument()
+    expect(screen.queryByText("CARD Act audit")).not.toBeInTheDocument()
+    expect(screen.queryByText("Unsorted item")).not.toBeInTheDocument()
+    expect(screen.getByText("1 of 3")).toBeInTheDocument()
+    // Columns emptied by the filter say so, rather than claiming to be empty.
+    expect(within(column("Must Do")).getByText("No matches")).toBeInTheDocument()
+  })
+
+  it("never changes a column's official count — the filter hides, it does not move", () => {
+    renderKanban()
+    typeFilter("rate")
+    // CARD Act audit is hidden but is still officially in Must Do.
+    expect(column("Must Do")).toHaveAccessibleName(/^Must Do: 1 official/)
+  })
+
+  it("matches on description and squad name as well as title", () => {
+    renderKanban({
+      cardMeta: {
+        "opp-1": {
+          description: "Regulatory review of disclosures",
+          status: "EXPLORING",
+          squad: { name: "Compliance Squad", color: "#f00" },
+          solutionCount: 0,
+          evidenceCount: 0,
+          evidenceSourceCount: 0,
+          score: null,
+        } as never,
+      },
+    })
+    typeFilter("disclosures")
+    expect(screen.getByText("CARD Act audit")).toBeInTheDocument()
+    expect(screen.queryByText("Rate table redesign")).not.toBeInTheDocument()
+
+    typeFilter("compliance")
+    expect(screen.getByText("CARD Act audit")).toBeInTheDocument()
+    expect(screen.getByText("1 of 3")).toBeInTheDocument()
+  })
+
+  it("keeps a filtered-in card's ghost, so where it came from stays visible", () => {
+    renderKanban({ proposals: [MY_PROPOSAL] })
+    typeFilter("rate")
+    // opp-2 is landed in Must Do; its ghost stays in Should Do.
+    expect(within(column("Should Do")).getByText("Rate table redesign")).toBeInTheDocument()
+    expect(within(column("Must Do")).getByText("Rate table redesign")).toBeInTheDocument()
+  })
+
+  it("clears with the × button and with Escape", () => {
+    renderKanban()
+    typeFilter("zzz")
+    expect(screen.queryByText("CARD Act audit")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Clear filter" }))
+    expect(filterBox()).toHaveValue("")
+    expect(filterBox()).toHaveFocus()
+    expect(screen.getByText("CARD Act audit")).toBeInTheDocument()
+
+    typeFilter("zzz")
+    fireEvent.keyDown(filterBox(), { key: "Escape" })
+    expect(filterBox()).toHaveValue("")
+    expect(screen.getByText("Rate table redesign")).toBeInTheDocument()
+  })
+})
+
+describe("Card sort quick filter — table", () => {
+  it("filters rows and shows a no-match row when nothing matches", () => {
+    renderBoard()
+    typeFilter("audit")
+    expect(screen.getByText("CARD Act audit")).toBeInTheDocument()
+    expect(screen.queryByText("Rate table redesign")).not.toBeInTheDocument()
+    expect(screen.getByText("1 of 3")).toBeInTheDocument()
+
+    typeFilter("nothing like this")
+    expect(screen.getByText(/No matches for/)).toBeInTheDocument()
+    // Nothing to select, so select-all is off rather than a no-op.
+    expect(screen.getByRole("checkbox", { name: "Select all rows" })).toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("select-all and the bulk proposal reach only the visible rows", async () => {
+    renderBoard()
+    typeFilter("rate")
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all rows" }))
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Propose move for all 1" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Could Do/ }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    expect(lastProposalCall().body).toMatchObject({ objectIds: ["opp-2"], proposedValue: "could" })
+  })
+
+  it("drops selections the filter hides", () => {
+    renderBoard()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all rows" }))
+    expect(screen.getByText("3 selected")).toBeInTheDocument()
+    typeFilter("audit")
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+  })
+})

@@ -12,9 +12,13 @@ const prisma = {
 }
 
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
+const refreshV0Artifact = vi.fn()
+const createV0Artifact = vi.fn()
+vi.mock("@/lib/v0-artifacts", () => ({ refreshV0Artifact: (...a: unknown[]) => refreshV0Artifact(...a), createV0Artifact: (...a: unknown[]) => createV0Artifact(...a) }))
+vi.mock("@/lib/mcp-authz", async (orig) => ({ ...(await orig<typeof import("@/lib/mcp-authz")>()), getMcpActor: () => ({ userId: "user-1", purpose: "AGENT", agentId: "agent" }) }))
 vi.mock("@/lib/artifact-storage", () => ({ getArtifactStorage: () => storage }))
 
-import { getArtifact, listArtifacts, updateArtifact } from "@/lib/artifact-tool-handlers"
+import { createArtifact, getArtifact, listArtifacts, refreshArtifactFromV0, updateArtifact } from "@/lib/artifact-tool-handlers"
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -75,6 +79,46 @@ describe("Artifact MCP output redaction", () => {
     const result = await getArtifact({ artifactId: "art-1" })
     expect(JSON.stringify(result)).not.toContain("private/")
     expect(JSON.stringify(result)).not.toContain("blobPathname")
+  })
+})
+
+describe("V0_CHAT over MCP", () => {
+  it("create_artifact requires a url and refuses html/filename for V0_CHAT", async () => {
+    const noUrl = await createArtifact({ workspaceId: "ws-1", title: "", sourceType: "V0_CHAT" })
+    expect(noUrl.content[0].text).toMatch(/requires url/i)
+    const withHtml = await createArtifact({ workspaceId: "ws-1", title: "", sourceType: "V0_CHAT", url: "https://v0.app/chat/abc123", html: "<p/>" })
+    expect(withHtml.content[0].text).toMatch(/does not accept html/i)
+    expect(createV0Artifact).not.toHaveBeenCalled()
+  })
+
+  it("create_artifact creates as the acting user with source MCP", async () => {
+    createV0Artifact.mockResolvedValue({ id: "art-9", title: "Chat" })
+    const result = await createArtifact({ workspaceId: "ws-1", title: "", sourceType: "V0_CHAT", url: "https://v0.app/chat/abc123" })
+    expect(result.content[0].text).toContain("ID: art-9")
+    expect(createV0Artifact).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1", source: "MCP", workspaceId: "ws-1", url: "https://v0.app/chat/abc123" }))
+  })
+
+  it("create_artifact surfaces a connector failure as a tool error", async () => {
+    createV0Artifact.mockRejectedValue(new Error("You have not connected v0 to Compass."))
+    const result = await createArtifact({ workspaceId: "ws-1", title: "", sourceType: "V0_CHAT", url: "https://v0.app/chat/abc123" })
+    expect(result.content[0].text).toMatch(/not connected v0/)
+  })
+
+  it("update_artifact refuses html or url revisions on a V0_CHAT artifact", async () => {
+    prisma.artifact.findFirst.mockResolvedValue({ id: "art-1", sourceType: "V0_CHAT" })
+    const result = await updateArtifact({ artifactId: "art-1", workspaceId: "ws-1", url: "https://example.com" })
+    expect(result.content[0].text).toMatch(/refresh_artifact_from_v0/)
+    expect(prisma.artifact.update).not.toHaveBeenCalled()
+  })
+
+  it("refresh_artifact_from_v0 reports changed and unchanged", async () => {
+    refreshV0Artifact.mockResolvedValueOnce({ changed: true, revisionId: "rev-3", revisionNumber: 3, versionId: "v3" })
+    const changed = await refreshArtifactFromV0({ artifactId: "art-1", workspaceId: "ws-1" })
+    expect(changed.content[0].text).toMatch(/revision 3/)
+    expect(refreshV0Artifact).toHaveBeenCalledWith(expect.objectContaining({ artifactId: "art-1", workspaceId: "ws-1", userId: "user-1", source: "MCP" }))
+    refreshV0Artifact.mockResolvedValueOnce({ changed: false, revisionNumber: 3, versionId: "v3" })
+    const same = await refreshArtifactFromV0({ artifactId: "art-1", workspaceId: "ws-1" })
+    expect(same.content[0].text).toMatch(/up to date/i)
   })
 })
 

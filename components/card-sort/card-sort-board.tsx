@@ -51,6 +51,9 @@ import { Badge } from "@/components/ui/badge"
 import { ProposeContextMenu, ProposeMenuButton } from "./card-sort-propose-menu"
 import type { CardSortView } from "./card-sort-round-header"
 import { useCardSortProposals } from "./use-card-sort-proposals"
+import { CardSortQuickFilter } from "./card-sort-quick-filter"
+import { cardSearchFields, matchesQuickFilter } from "@/lib/card-sort-filter"
+import type { CardSortCardMeta } from "@/lib/card-sort-cards"
 import { cn } from "@/lib/utils"
 import type { SelectOption } from "@/lib/types"
 
@@ -78,6 +81,8 @@ type Props = {
   round: BoardRound
   factor: { id: string; name: string; options: SelectOption[] }
   rows: BoardRow[]
+  /** Card fields the quick filter also searches (description, squad). */
+  cardMeta?: Record<string, CardSortCardMeta>
   isFacilitator: boolean
   canSeeTally: boolean
   view?: CardSortView
@@ -90,9 +95,38 @@ export function CardSortBoard({
   workspaceSlug,
   round,
   factor,
-  rows,
+  rows: allRows,
+  cardMeta = {},
 }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [query, setQuery] = useState("")
+  const filtering = query.trim().length > 0
+
+  // The filter only narrows what is drawn. Select-all and the bulk bar act on the
+  // visible rows, so a bulk proposal can never reach a row the user cannot see.
+  const rows = useMemo(
+    () =>
+      filtering
+        ? allRows.filter((row) => matchesQuickFilter(cardSearchFields(row.title, cardMeta[row.objectId]), query))
+        : allRows,
+    [allRows, cardMeta, filtering, query]
+  )
+
+  const changeQuery = (next: string) => {
+    setQuery(next)
+    const terms = next.trim()
+    if (!terms) return
+    // Drop selections the new filter hides, so "N selected" always means N visible.
+    const stillVisible = new Set(
+      allRows
+        .filter((row) => matchesQuickFilter(cardSearchFields(row.title, cardMeta[row.objectId]), next))
+        .map((row) => row.objectId)
+    )
+    setSelected((previous) => {
+      const kept = [...previous].filter((id) => stillVisible.has(id))
+      return kept.length === previous.size ? previous : new Set(kept)
+    })
+  }
   const { propose, withdraw, error, working } = useCardSortProposals({
     orgSlug,
     workspaceSlug,
@@ -120,10 +154,12 @@ export function CardSortBoard({
       return next
     })
 
-  const allSelected = rows.length > 0 && selected.size === rows.length
+  const allSelected = rows.length > 0 && rows.every((row) => selected.has(row.objectId))
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <CardSortQuickFilter value={query} onChange={changeQuery} shown={rows.length} total={allRows.length} />
+
       {error && (
         <p role="alert" className="rounded-md bg-surface-panel px-3 py-2 text-xs text-text-primary ring-1 ring-border-default">
           {error}
@@ -188,7 +224,7 @@ export function CardSortBoard({
                 <Checkbox
                   aria-label={allSelected ? "Deselect all rows" : "Select all rows"}
                   checked={allSelected}
-                  disabled={readOnly}
+                  disabled={readOnly || rows.length === 0}
                   onCheckedChange={() =>
                     setSelected(allSelected ? new Set() : new Set(rows.map((row) => row.objectId)))
                   }
@@ -209,6 +245,13 @@ export function CardSortBoard({
             </TableRow>
           </TableHeader>
           <TableBody>
+            {filtering && rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="px-3 py-6 text-center text-sm text-text-subtle">
+                  No matches for &ldquo;{query.trim()}&rdquo;
+                </TableCell>
+              </TableRow>
+            )}
             {rows.map((row, index) => {
               // Grouping is a visual break at each change of current bucket.
               // The server already sorted rows into the factor's own option

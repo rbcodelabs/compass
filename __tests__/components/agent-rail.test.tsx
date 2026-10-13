@@ -167,7 +167,7 @@ function railTree({
   return (
     <Harness>
       <AgentRailProvider initialPin={{ pinned, width }}>
-        <AgentRail workspaceId="ws-1" basePath="/acme/product" userInitials="RB" />
+        <AgentRail workspaceId="ws-1" basePath="/acme/product" userInitials="RB" userId="user-1" />
       </AgentRailProvider>
     </Harness>
   );
@@ -421,7 +421,7 @@ describe("conversation handling", () => {
     rerender(
       <Harness>
         <AgentRailProvider initialPin={{ pinned: true, width: PANEL_WIDTH_DEFAULT }}>
-          <AgentRail workspaceId="ws-1" basePath="/acme/product" userInitials="RB" />
+          <AgentRail workspaceId="ws-1" basePath="/acme/product" userInitials="RB" userId="user-1" />
         </AgentRailProvider>
       </Harness>,
     );

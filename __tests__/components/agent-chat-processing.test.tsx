@@ -6,7 +6,7 @@ const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }))
 vi.mock("next/navigation", () => ({ useRouter: () => router }))
 vi.mock("@/components/agent/markdown", () => ({ Markdown: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }))
 import { AgentChat } from "@/components/agent/agent-chat"
-const props = { workspaceId: "workspace", basePath: "/org/workspace", conversations: [], activeConversationId: "conversation", initialMessages: [], userInitials: "PM" }
+const props = { workspaceId: "workspace", basePath: "/org/workspace", conversations: [], activeConversationId: "conversation", initialMessages: [], userInitials: "PM", userId: "user-1" }
 
 // Opening a conversation now makes two independent lookups: this file's subject,
 // the interview-processing poll, plus the reattach probe asking whether a
@@ -61,7 +61,11 @@ it("does not dispatch a duplicate request for a running interview", async () => 
   expect(turnCalls(fetch)).toHaveLength(0)
 })
 it("keeps normal conversation composer available when no interview is linked", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })))
+  // Only the processing lookup 404s (no interview linked). A 404 from the roster or
+  // transcript routes would mean the conversation itself is gone, which is a
+  // different, access-lost state covered below.
+  vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+    url.includes("/processing") ? new Response("", { status: 404 }) : new Response(JSON.stringify({ run: null, available: true }))))
   render(<AgentChat {...props} />)
   await waitFor(() => expect(screen.getByRole("textbox")).toBeEnabled())
 })

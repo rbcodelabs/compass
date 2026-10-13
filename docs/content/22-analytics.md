@@ -36,6 +36,8 @@ Each card shows, depending on its size:
 
 Drag a card by its header to reorder the dashboard; drag its bottom-right corner to resize it freely, or use the **⋯** card menu for quick S/M/L presets. The same menu edits the metric, removes it from the dashboard (the definition and its history are kept — use **Add widget** at the end of the grid to bring it back), or archives it.
 
+Select the refresh icon on a card to capture a fresh observation for it without leaving the page; **Refresh all** (next to **New metric**) does the same for every shown metric, one at a time. A card refreshes the measurement that drives its headline number: the tracking link when there is one, otherwise the most recently updated link. A metric that is not yet linked to an experiment, roadmap item, or key result has nothing to refresh into, so its icon is disabled. If a refresh fails, the alert names the metric and the card shows the recorded failure; the previous value is kept, never replaced with zero. Refreshing is still manual — there is no background polling.
+
 Dashboard layout (which metrics are shown, their size, and their order) is a workspace-level setting: everyone viewing the workspace sees the same arrangement, consistent with the rest of Compass having no per-user board personalization.
 
 ## Define a metric

@@ -34,6 +34,7 @@ vi.mock("@/components/panels/roadmap-item-panel", () => ({ RoadmapItemPanel: () 
 vi.mock("@/components/panels/feedback-panel", () => ({ FeedbackPanel: () => null }));
 vi.mock("@/components/feedback/feedback-composer", () => ({ FeedbackComposer: () => null }));
 vi.mock("@/components/discovery/opportunity-composer", () => ({ OpportunityComposer: () => null }));
+vi.mock("@/components/experiments/experiment-composer", () => ({ ExperimentComposer: () => null }));
 vi.mock("@/components/tasks/task-detail", () => ({ TaskDetail: () => null }));
 
 import { PanelShell } from "@/components/panels/panel-shell";

@@ -316,6 +316,7 @@ Field *definitions* and shared option sets are UI-only (Settings → Custom Fiel
 | `edit_doc` | Targeted text edit of a doc body without resending it: `oldString` → `newString` (must match exactly once unless `replaceAll`), or up to 50 `edits` applied in order, all-or-nothing. Optional `expectedRevision` (from `get_doc`) rejects the edit if the doc changed; without it the edit is re-applied on top of concurrent changes. Edits the body only — change properties with `update_doc_metadata`. On a CANVAS doc the result must still be valid JSON Canvas |
 | `edit_canvas` | Edit a CANVAS doc with domain ops keyed by node id instead of rewriting the JSON: `add_card`, `add_text`, `add_group`, `add_edge`, `move`, `update`, `remove` (up to 200 per call, all-or-nothing; errors name the op index). Ids and placement are automatic; nodes may be referenced by node id or `kind:uuid`; re-adding an existing card or edge is a no-op; removing a node removes its edges. Optional `expectedRevision` |
 | `build_canvas_tree` | Draw the Opportunity Solution Tree onto a CANVAS doc — the same engine as the editor's "Build tree". `scope`: `{kind:"workspace"}` (default) or `{kind: objective\|keyResult\|opportunity\|solution, id}`. Idempotent merge: existing cards are never duplicated, new content is auto-laid-out to the right, one group per root objective. Capped at 400 cards |
+| `capture_canvas` | See a canvas: returns a PNG of a CANVAS doc. `docId`, then optionally `nodeId` (zoom on a node or group, `padding` default 80) or `region` `{x,y,width,height}` in canvas coordinates (not both); default is a fit-all overview. `scale` 0.05-4, output capped at 2400 px per side. Draws nodes, colours, groups, edges and live Compass cards. Read-only; the image is not stored. Use it to check layout after `edit_canvas` / `build_canvas_tree` |
 | `create_doc_version` | Save a manual, named snapshot of a doc's current content. Params: `docId`, `label` (optional), `authorName`. Never coalesced — always writes a new version |
 | `list_doc_versions` | List a doc's saved versions (id, label, author, created date), newest first. Param: `docId`. Metadata only — use `get_doc_version` for full content |
 | `get_doc_version` | Return the full title/content/metadata/icon snapshot of a single saved version. Param: `versionId` |
@@ -424,6 +425,25 @@ any non-trivial page, upload from disk instead:
 If validation fails, fix the file and call `prepare_artifact_upload` again
 (the failed staging upload is left behind, not reused). Direct upload needs the private Artifact Blob store and is
 unavailable in local dev; fall back to inline `html` there.
+
+### Artifacts from a v0 chat
+
+`create_artifact` with `sourceType: "V0_CHAT"` and `url: "https://v0.app/chat/<id>"`
+captures a v0 chat as an Artifact. `title` may be empty to use the chat name.
+
+- Pass the chat link from v0: `v0.app/chat/<id>`, the title-slug form, or a
+  team-prefixed link (`v0.app/<team>/chat/<slug>-<id>`).
+- Compass reads the chat server-side with **the caller's own v0 connector grant**,
+  so the user must have connected v0 in Compass first. There is no shared service
+  credential.
+- `refresh_artifact_from_v0(workspaceId, artifactId)` re-reads the chat and adds a revision
+  **only when v0 has a new version**. It returns `changed: false` otherwise, so it
+  is safe to call speculatively. `update_artifact` cannot replace a `V0_CHAT`
+  revision; refresh is the only way to get a new one.
+- The app renders as a live iframe through a Compass-hosted preview proxy on a
+  second domain. If the proxy is not configured in that environment (no
+  `V0_PREVIEW_HOST` / `V0_PREVIEW_TICKET_KEY`), the Artifact falls back to a link
+  card rather than an embedded preview.
 
 #### Feedback
 

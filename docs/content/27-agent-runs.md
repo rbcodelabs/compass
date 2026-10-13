@@ -42,6 +42,38 @@ Nothing is lost in between: the agent records each step as it happens rather tha
 only at the end, so a run you never watched has the same transcript as one you
 watched throughout.
 
+## Links to Compass items appear as cards
+
+When the agent links to something in your workspace — an opportunity, task, doc,
+key result and so on — the link shows as a card with the item's current title,
+status and a line of context, rather than a bare URL. Click the card to open the
+item.
+
+Cards are live: they refresh when you return to the tab, so a status changed
+elsewhere shows up without re-asking the agent. A link to another site, to a
+page rather than one item, or to something you don't have access to stays an
+ordinary link.
+
+## Sharing a conversation
+
+A conversation starts private to the person who began it. The owner, or anyone
+already in the conversation, can invite other members of the workspace from the
+people panel; there is no limit on how many. Invited people see the whole
+conversation, can send messages, and can watch a run as it happens.
+
+- Each message shows who sent it, and the agent is told who said what, so it can
+  tell two colleagues apart.
+- Usage from a turn is counted against the person who sent it.
+- Still one turn at a time: if someone else's run is going, you cannot send
+  until it finishes (you are told the agent is busy).
+- Only the person who started a run, or the conversation owner, can **Stop** it.
+- The owner can remove anyone; anyone else can leave. Someone who is removed, or
+  who leaves the workspace, loses access straight away.
+- Other people's messages and replies appear within a few seconds. There is no
+  live push, so a brief delay is expected.
+- Conversations the agent starts from a hand-off or interview stay private to the
+  person who began them and cannot be shared.
+
 ## Stopping a run
 
 **Stop** ends the run on the server and releases its resources. The conversation
@@ -63,12 +95,24 @@ Every run gets a time budget — **20 minutes** by default, and never more than
 Whatever the agent produced before that point is preserved.
 
 A run can also end on its own without a reply, if the machine it was running on
-fails. Compass notices within about a minute and marks the run interrupted rather
+fails. Compass notices at its next daily sweep and marks the run interrupted rather
 than leaving the conversation looking busy forever. Your transcript up to that
 point is kept, and you can send the message again.
 
 Daily usage limits are unchanged, and they apply when a run *starts*. A long run
 does not consume more of your daily allowance than a short one.
+
+## When a turn fails
+
+A turn that fails while it is running inside the browser request now reports why. If
+the sandbox wrote anything to its error output before the failure, the first part of
+that output is appended to the error message, so a failure reads as a cause rather than
+only an exit code. Error output from a turn that succeeds is ignored. Output is capped,
+so a very noisy failure shows its beginning, not its end. Runs that execute in the
+background do not include sandbox error output.
+
+A blank or whitespace-only `ANTHROPIC_API_KEY` is treated the same as a missing one:
+the turn is rejected up front with a configuration error, before a sandbox is started.
 
 ## Deployment
 
@@ -80,7 +124,7 @@ changes nothing for users.
 
 Two settings matter for a deployed environment:
 
-- **`CRON_SECRET`** must be set. Compass runs a once-a-minute scheduled job
+- **`CRON_SECRET`** must be set. Compass runs a scheduled job once a day (the Vercel plan only allows daily crons)
   (`/api/cron/agent-run-sweeper`) that ends runs which have exceeded their budget
   or whose sandbox has stopped reporting. Without the secret the job refuses to
   run, and interrupted runs stay visible as in-progress until it is configured.

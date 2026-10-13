@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 195,
-  sortedToolNamesSha256: "065a41f7c3328607dc86a2538b5a1787c114421693ce08bd3761f46719db6d64",
+  toolCount: 197,
+  sortedToolNamesSha256: "b446e608fa816274d1461be0fe70f2f57c09ecd67d13481684fe700382e077f2",
 } as const
 
 export type McpRestParityDisposition =
@@ -35,6 +35,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   assign_squad: composition(["updateOpportunity", "updateExperiment", "updateRoadmapItem", "updateObjective", "updateTask"], "Assign through the PATCH operation for the selected resource type; no polymorphic RPC endpoint is needed."),
   capture_screenshot: excluded("execution-boundary", "Read the artifact resource; its stored thumbnail is captured server-side.", "Screenshot capture boots a Vercel Sandbox and renders a stored artifact revision in headless Chromium; that is an execution boundary REST must not expose as an ordinary resource mutation."),
   build_canvas_tree: composition(["getDoc", "updateDoc"], "Server-side OST-to-Canvas layout is an MCP convenience; over REST read the canvas, merge the tree client-side and write it back with updateDoc and expectedRevision."),
+  capture_canvas: excluded("execution-boundary", "Read the canvas doc through getDoc; the JSON Canvas content is the source of truth.", "Rendering a canvas boots a Vercel Sandbox and rasterizes it in headless Chromium; that is an execution boundary REST must not expose as an ordinary resource read, and the result is an image, not a REST resource."),
   edit_canvas: composition(["getDoc", "updateDoc"], "REST clients read the canvas with getDoc, apply node/edge changes locally and write the full JSON Canvas with updateDoc and expectedRevision."),
   edit_doc: composition(["getDoc", "updateDoc"], "REST clients read the body with getDoc, apply the text change locally and write it with updateDoc and expectedRevision."),
   close_decision_no_action: excluded("human-governance", "Read the decision request and leave it pending for an authorized reviewer.", "No-action closure is a human judgment boundary rather than resource administration."),
@@ -158,6 +159,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   promote_research_finding_to_evidence: direct("promoteResearchEvidence"),
   promote_to_roadmap: direct("promoteSolutionToRoadmap"),
   propose_card_sort_move: direct("proposeCardSortMoves"),
+  refresh_artifact_from_v0: excluded("execution-boundary", "Read the artifact resource; refresh a v0 chat Artifact from the Compass UI or the MCP tool.", "Refreshing re-reads the v0 chat server-side using the signed-in user's own v0 connector grant (ADR-0018); a REST API client has no equivalent per-user connector authorization, so no REST mutation is exposed."),
   refresh_metric_binding: direct("refreshMetricBinding"),
   reject_solution_plan: excluded("human-governance", "Read plan entries and request a tracked decision.", "Plan rejection is a human judgment boundary and REST must not turn proposal review into an ordinary mutation."),
   reopen_comment: direct("reopenComment"),

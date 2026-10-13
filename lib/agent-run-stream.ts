@@ -77,6 +77,8 @@ export type SerializedRun = {
   error: string | null
   errorCode: string | null
   deadlineAt: string
+  /** Who sent the turn this run answers. Absent from an older server. */
+  startedByUserId?: string | null
 }
 
 /** The banner text for a run that ended without a result of its own. */

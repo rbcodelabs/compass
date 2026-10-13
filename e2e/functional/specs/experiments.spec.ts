@@ -27,14 +27,14 @@ test.describe("Experiments", () => {
       await page.getByLabel("Kill Condition").fill(
         "Stop if fewer than 10% of users engage after 14 days."
       );
-      await page.getByRole("button", { name: "Create Experiment" }).click();
+      await page.getByRole("form", { name: "New experiment" }).getByRole("button", { name: "Submit" }).click();
 
-      // Experiment card appears in DESIGNING column
-      await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
+      // The composer hands off to the new experiment's detail panel in place,
+      // and the card appears in the DESIGNING column behind it.
+      await expect(page).toHaveURL(/detail=experiment(%3A|:)/, { timeout: 15_000 });
+      await expect(page.getByRole("button", { name: expTitle }).first()).toBeVisible({ timeout: 15_000 });
 
-      // ── 3. Open the panel, then continue to the full detail page ──────────
-      await page.getByRole("button", { name: expTitle }).click();
-      await expect(page).toHaveURL(/detail=experiment/);
+      // ── 3. Continue from the panel to the full detail page ─────────────────
       await openFullPage(page);
 
       // Confirm we're on the detail page
@@ -100,11 +100,9 @@ test.describe("Experiments", () => {
       await page.getByLabel("Kill Condition").fill(
         "Stop if fewer than 10% of users engage after 14 days."
       );
-      await page.getByRole("button", { name: "Create Experiment" }).click();
-      await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
-
-      await page.getByRole("button", { name: expTitle }).click();
-      await expect(page).toHaveURL(/detail=experiment/);
+      await page.getByRole("form", { name: "New experiment" }).getByRole("button", { name: "Submit" }).click();
+      await expect(page).toHaveURL(/detail=experiment(%3A|:)/, { timeout: 15_000 });
+      await expect(page.getByRole("button", { name: expTitle }).first()).toBeVisible({ timeout: 15_000 });
       await openFullPage(page);
       await expect(page.getByRole("heading", { name: expTitle })).toBeVisible();
       await expect(page.getByText("Designing").first()).toBeVisible();

@@ -20,7 +20,71 @@ beforeEach(() => {
   router.refresh.mockReset()
 })
 
+const levels = [
+  { id: "full", label: "Read and write", description: "Search, read and change files." },
+  { id: "read-only", label: "Read only", description: "Search and read files." },
+]
+const drive = {
+  slug: "google-drive",
+  displayName: "Google Drive",
+  serverUrl: "https://drivemcp.googleapis.com/mcp/v1",
+  connected: false,
+  accessLevels: levels,
+  defaultAccessLevel: "full",
+  accessLevel: null,
+}
+
 describe("McpConnectorsPanel", () => {
+  describe("access levels", () => {
+    it("preselects the default and links Connect with that level", () => {
+      render(<McpConnectorsPanel connectors={[drive]} available notice={null} />)
+
+      expect((screen.getByLabelText(/Read and write/) as HTMLInputElement).checked).toBe(true)
+      expect((screen.getByLabelText(/Read only/) as HTMLInputElement).checked).toBe(false)
+      expect(screen.getByLabelText("Connect Google Drive").getAttribute("href")).toBe(
+        "/api/connectors/google-drive/connect?returnTo=%2Fsettings%2Fagents&access=full",
+      )
+    })
+
+    it("carries the chosen level on the Connect link, which stays a plain anchor", () => {
+      render(<McpConnectorsPanel connectors={[drive]} available notice={null} />)
+
+      fireEvent.click(screen.getByLabelText(/Read only/))
+
+      const link = screen.getByLabelText("Connect Google Drive") as HTMLAnchorElement
+      expect(link.tagName).toBe("A")
+      expect(link.getAttribute("href")).toBe(
+        "/api/connectors/google-drive/connect?returnTo=%2Fsettings%2Fagents&access=read-only",
+      )
+    })
+
+    it("shows the held level once connected, and offers reconnecting at the other one only", () => {
+      render(
+        <McpConnectorsPanel connectors={[{ ...drive, connected: true, accessLevel: "read-only" }]} available notice={null} />,
+      )
+
+      expect(screen.getByText("Connected to your account · Read only.")).toBeTruthy()
+      expect(screen.queryByRole("radio")).toBeNull()
+      const reconnect = screen.getByLabelText("Reconnect Google Drive with read and write access")
+      expect(reconnect.getAttribute("href")).toBe(
+        "/api/connectors/google-drive/connect?returnTo=%2Fsettings%2Fagents&access=full",
+      )
+      expect(screen.queryByLabelText("Reconnect Google Drive with read only access")).toBeNull()
+    })
+
+    it("does not guess a level when the grant's level is unknown", () => {
+      render(<McpConnectorsPanel connectors={[{ ...drive, connected: true, accessLevel: null }]} available notice={null} />)
+
+      expect(screen.getByText("Connected to your account.")).toBeTruthy()
+      expect(screen.queryByText(/To change access/)).toBeNull()
+    })
+
+    it("shows no choice for a connector without levels", () => {
+      render(<McpConnectorsPanel connectors={[v0]} available notice={null} />)
+      expect(screen.queryByRole("radio")).toBeNull()
+    })
+  })
+
   it("offers a real navigation to the connect route, carrying returnTo", () => {
     // Must be an <a href>, not an onClick: the route answers with a cross-origin
     // 302 that only a top-level navigation can follow.
@@ -40,6 +104,21 @@ describe("McpConnectorsPanel", () => {
     const link = screen.getByLabelText("Connect v0")
     expect(link.getAttribute("aria-disabled")).toBe("true")
     expect(link.className).toContain("pointer-events-none")
+  })
+
+  it("shows an unconfigured connector as unavailable and disables Connect", () => {
+    const drive = { slug: "google-drive", displayName: "Google Drive", serverUrl: "https://drivemcp.googleapis.com/mcp/v1", connected: false, configured: false }
+    render(<McpConnectorsPanel connectors={[drive]} available notice={null} />)
+
+    expect(screen.getByText("Not configured on this deployment.")).toBeTruthy()
+    const link = screen.getByLabelText("Connect Google Drive")
+    expect(link.getAttribute("aria-disabled")).toBe("true")
+    expect(link.className).toContain("pointer-events-none")
+  })
+
+  it("treats an omitted configured flag as configured", () => {
+    render(<McpConnectorsPanel connectors={[v0]} available notice={null} />)
+    expect(screen.getByLabelText("Connect v0").getAttribute("aria-disabled")).not.toBe("true")
   })
 
   it("shows Disconnect instead of Connect once connected", () => {

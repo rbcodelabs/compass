@@ -6,7 +6,8 @@
  * conversation ownership, and runtime prerequisites. The streamed happy path
  * (real sandbox boot + agent run) is verified end-to-end against a deploy.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { accessibleConversationsWhere } from "@/lib/agent-conversation-access"
 import { NextRequest } from "next/server"
 import { normalizeCapabilityPack } from "@/lib/capability-pack"
 
@@ -19,6 +20,8 @@ const mockPrisma = {
   agentMessage: { create: vi.fn(), findMany: vi.fn() },
   agentAuditLog: { createMany: vi.fn() },
   workspaceCapabilityPack: { findMany: vi.fn() },
+  agentConversationParticipant: { findFirst: vi.fn(), findMany: vi.fn() },
+  user: { findMany: vi.fn() },
 }
 
 // `claimInterviewProcessing` is the real implementation here, not a mock, and it
@@ -61,9 +64,9 @@ vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: (...args: un
 // Mocked at the store rather than at prisma because what matters here
 // is what the route does with the slugs, and `connectorDefinition` is left real
 // so the catalog itself is part of the assertion.
-const mockListConnectedSlugs = vi.fn()
+const mockListConnectedGrants = vi.fn()
 vi.mock("@/lib/mcp-connectors/store", () => ({
-  listConnectedSlugs: (...args: unknown[]) => mockListConnectedSlugs(...args),
+  listConnectedGrants: (...args: unknown[]) => mockListConnectedGrants(...args),
 }))
 
 // `agentRunsAvailable` defaults to false in beforeEach so the existing
@@ -105,7 +108,7 @@ beforeEach(() => {
   mockMintKey.mockResolvedValue({ token: "token", apiKeyId: "key-1" })
   mockPreparePacks.mockResolvedValue({ files: [], pluginPaths: [], skillIds: [], provenanceJson: "[]", systemPromptAppendices: [] })
   mockResolveAgentHandoffContext.mockResolvedValue(null)
-  mockListConnectedSlugs.mockResolvedValue([])
+  mockListConnectedGrants.mockResolvedValue([])
   runMocks.available.mockResolvedValue(false)
   runMocks.started.mockResolvedValue(undefined)
   runMocks.finalize.mockResolvedValue(undefined)
@@ -205,7 +208,14 @@ describe("agent turn route — guards", () => {
     // Membership filter is applied.
     expect(mockPrisma.workspace.findFirst).toHaveBeenCalledWith({
       where: { id: "ws-x", members: { some: { userId: "user-1" } } },
-      select: { id: true, name: true, slug: true, organization: { select: { slug: true } } },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        thinkingModel: true,
+        thinkingModelLabels: true,
+        organization: { select: { slug: true } },
+      },
     })
   })
 
@@ -214,8 +224,8 @@ describe("agent turn route — guards", () => {
     const res = await POST(req({ workspaceId: "ws-1", message: "hi", conversationId: "c-999" }))
     expect(res.status).toBe(404)
     expect(mockPrisma.agentConversation.findFirst).toHaveBeenCalledWith({
-      where: { id: "c-999", userId: "user-1", workspaceId: "ws-1" },
-      select: { id: true },
+      where: { id: "c-999", ...accessibleConversationsWhere("ws-1", "user-1") },
+      select: { userId: true },
     })
   })
 
@@ -231,6 +241,25 @@ describe("agent turn route — guards", () => {
     mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
     const res = await POST(req({ workspaceId: "ws-1", message: "hi" }))
     expect(res.status).toBe(500)
+  })
+
+  // A present-but-empty var is the realistic shape of this misconfiguration:
+  // a var added with no value, or later cleared, is stored as "" rather than
+  // unset. A bare truthiness check passes it through to the sandbox as a
+  // credential, so the turn pays for a sandbox boot and an MCP key before an
+  // opaque authentication error. These cases assert it is refused here instead.
+  it.each([
+    ["empty", ""],
+    ["a single space", " "],
+    ["whitespace and newlines", "  \n\t "],
+  ])("500 when ANTHROPIC_API_KEY is %s, without booting a sandbox", async (_label, value) => {
+    process.env.ANTHROPIC_API_KEY = value
+    mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+    const res = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+    expect(res.status).toBe(500)
+    expect(await res.text()).toMatch(/ANTHROPIC_API_KEY/)
+    expect(mockBootSandbox).not.toHaveBeenCalled()
+    expect(mockMintKey).not.toHaveBeenCalled()
   })
 
   it("revokes the acting-user MCP key when capability-pack preparation fails", async () => {
@@ -259,10 +288,87 @@ describe("agent turn route — guards", () => {
     mockBootSandbox.mockResolvedValue({ writeFiles: vi.fn(), runCommand: vi.fn().mockResolvedValue(run), stop })
     const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
     expect(await response.text()).toContain("timed out")
-    expect(mockPrisma.agentMessage.create).toHaveBeenCalledWith({ data: expect.objectContaining({ role: "assistant", packProvenance: provenance }) })
+    expect(mockPrisma.agentMessage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ role: "assistant", packProvenance: provenance }),
+      select: { id: true },
+    })
     expect(mockPrisma.agentAuditLog.createMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ toolName: "create_opportunity", packProvenance: provenance })] })
     expect(stop).toHaveBeenCalled()
     expect(mockRevokeKey).toHaveBeenCalledWith("key-1")
+  })
+
+  /**
+   * Sandbox stderr used to be dropped by the log loop (`if (log.stream !==
+   * "stdout") continue`), so a sandbox that died for a reason the entry script
+   * never got to report surfaced to the client as nothing but an exit code.
+   * lib/agent-sandbox-stderr.ts unit-tests the folding itself; these assert the
+   * route is actually wired to it on both throw paths.
+   */
+  describe("sandbox stderr legibility", () => {
+    beforeEach(() => {
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", name: "Test", slug: "test", organization: { slug: "org" } })
+      mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+      mockPrisma.agentConversation.update.mockResolvedValue({})
+      mockPrisma.agentMessage.create.mockResolvedValue({ id: "current-message" })
+      mockPrisma.agentMessage.findMany.mockResolvedValue([])
+    })
+
+    function sandboxRunning(run: { logs: () => AsyncGenerator<{ stream: string; data: string }>; wait: () => Promise<{ exitCode: number } | undefined> }) {
+      mockBootSandbox.mockResolvedValue({ writeFiles: vi.fn(), runCommand: vi.fn().mockResolvedValue(run), stop: vi.fn() })
+    }
+
+    it("folds stderr into a nonzero-exit error instead of reporting only the code", async () => {
+      sandboxRunning({
+        async *logs() {
+          yield { stream: "stderr", data: "Error: Cannot find module 'node:sqlite'\n    at loadESM\n" }
+        },
+        wait: async () => ({ exitCode: 1 }),
+      })
+      const body = await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+      expect(body).toContain("exited with code 1")
+      // The part that was previously lost entirely:
+      expect(body).toContain("Cannot find module 'node:sqlite'")
+    })
+
+    it("folds stderr into an AGENT_ERROR message too", async () => {
+      sandboxRunning({
+        async *logs() {
+          yield { stream: "stderr", data: "credential resolution failed\n" }
+          yield { stream: "stdout", data: `AGENT_ERROR ${JSON.stringify({ message: "agent error" })}\n` }
+        },
+        wait: async () => undefined,
+      })
+      const body = await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+      expect(body).toContain("agent error")
+      expect(body).toContain("credential resolution failed")
+    })
+
+    it("does not treat stderr output as a failure on a turn that succeeds", async () => {
+      // Node writes ExperimentalWarning and friends to stderr during turns that
+      // complete perfectly. Buffering rather than aborting is the whole reason
+      // this is fold-on-error and not fail-on-stderr.
+      sandboxRunning({
+        async *logs() {
+          yield { stream: "stderr", data: "(node:1) ExperimentalWarning: type stripping is experimental\n" }
+          yield { stream: "stdout", data: 'AGENT_RESULT {"text":"all good"}\n' }
+        },
+        wait: async () => ({ exitCode: 0 }),
+      })
+      const body = await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+      expect(body).not.toContain("ExperimentalWarning")
+      const assistantCall = mockPrisma.agentMessage.create.mock.calls.find((c) => c[0]?.data?.role === "assistant")
+      expect(assistantCall![0].data.content).toBe("all good")
+    })
+
+    it("still reports the bare exit code when the sandbox wrote nothing to stderr", async () => {
+      sandboxRunning({
+        async *logs() {},
+        wait: async () => ({ exitCode: 137 }),
+      })
+      const body = await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+      expect(body).toContain("exited with code 137")
+      expect(body).not.toContain("stderr:")
+    })
   })
 
   describe("seedContext hand-off (\"Send to agent\")", () => {
@@ -378,7 +484,7 @@ describe("agent turn route — guards", () => {
     })
 
     it("passes slugs and display metadata, and no provider credential", async () => {
-      mockListConnectedSlugs.mockResolvedValue(["v0"])
+      mockListConnectedGrants.mockResolvedValue([{ slug: "v0", scope: "mcp" }])
       const env = await turn(setupRun())
 
       const connectors = JSON.parse(env.AGENT_MCP_CONNECTORS) as { slug: string; displayName: string; guidance?: string }[]
@@ -390,10 +496,40 @@ describe("agent turn route — guards", () => {
       expect(env.AGENT_MCP_CONNECTORS).not.toMatch(/access_?token|refresh_?token|client_?secret|Bearer /i)
     })
 
+    it("tells the agent a read-only Drive grant cannot write, and a full one to be careful", async () => {
+      // The level is read back from the scope Google recorded, so the prompt can
+      // never describe a read-only grant as read-write.
+      mockListConnectedGrants.mockResolvedValue([
+        { slug: "google-drive", scope: "https://www.googleapis.com/auth/drive.readonly" },
+      ])
+      const readOnly = await turn(setupRun())
+      const [ro] = JSON.parse(readOnly.AGENT_MCP_CONNECTORS) as { guidance: string }[]
+      expect(ro.guidance).toContain("READ-ONLY")
+      expect(ro.guidance).not.toContain("full read and write")
+
+      mockListConnectedGrants.mockResolvedValue([{ slug: "google-drive", scope: "https://www.googleapis.com/auth/drive" }])
+      const full = await turn(setupRun())
+      const [rw] = JSON.parse(full.AGENT_MCP_CONNECTORS) as { guidance: string }[]
+      expect(rw.guidance).toContain("full read and write")
+      expect(rw.guidance).not.toContain("READ-ONLY")
+    })
+
+    it("falls back to the level-neutral guidance for a scope that matches no level", async () => {
+      mockListConnectedGrants.mockResolvedValue([{ slug: "google-drive", scope: "https://www.googleapis.com/auth/drive.file" }])
+      const env = await turn(setupRun())
+      const [entry] = JSON.parse(env.AGENT_MCP_CONNECTORS) as { guidance: string }[]
+      expect(entry.guidance).toContain("untrusted data")
+      expect(entry.guidance).not.toContain("READ-ONLY")
+      expect(entry.guidance).not.toContain("full read and write")
+    })
+
     it("drops a slug that is not in the reviewed catalog", async () => {
       // The catalog is the allowlist. A row that outlived its definition — or was
       // written by an older deploy — must not reach the sandbox as a live server.
-      mockListConnectedSlugs.mockResolvedValue(["v0", "not-a-real-connector"])
+      mockListConnectedGrants.mockResolvedValue([
+        { slug: "v0", scope: "mcp" },
+        { slug: "not-a-real-connector", scope: "" },
+      ])
       const env = await turn(setupRun())
       const connectors = JSON.parse(env.AGENT_MCP_CONNECTORS) as { slug: string }[]
       expect(connectors.map(connector => connector.slug)).toEqual(["v0"])
@@ -403,16 +539,28 @@ describe("agent turn route — guards", () => {
       // The gateway resolves the grant under `trustedCompassBaseUrl()`, so the turn
       // has to agree with it — otherwise a turn reached via some other hostname
       // would enable a connector the gateway then refuses to serve.
-      mockListConnectedSlugs.mockResolvedValue([])
+      mockListConnectedGrants.mockResolvedValue([])
       await turn(setupRun())
       const { trustedCompassBaseUrl } = await import("@/lib/compass-url")
-      expect(mockListConnectedSlugs).toHaveBeenCalledWith("user-1", trustedCompassBaseUrl().origin, expect.anything())
+      expect(mockListConnectedGrants).toHaveBeenCalledWith("user-1", trustedCompassBaseUrl().origin, expect.anything())
+    })
+
+    describe("web_search", () => {
+      it("always tells the sandbox to use web_search and advertises it in the prompt", async () => {
+        const env = await turn(setupRun())
+        expect("AGENT_WEB_SEARCH" in env).toBe(false)
+        expect(env.AGENT_SYSTEM_PROMPT).toContain("web_search tool")
+        expect(env.AGENT_SYSTEM_PROMPT).not.toContain("cannot search the web")
+        expect(env.AGENT_SYSTEM_PROMPT).not.toMatch(/Unavailable capabilities include[^.]*\bweb\b/)
+        // The sandbox is told to call the Compass route; it is never handed a search credential.
+        expect(Object.keys(env).filter(key => /GATEWAY|OIDC|PERPLEXITY/i.test(key))).toEqual([])
+      })
     })
 
     it("still runs the turn when the connector lookup throws", async () => {
       // Connectors are additive. A failure to enumerate them must not cost the
       // user their turn — the agent is perfectly useful with Compass's catalog.
-      mockListConnectedSlugs.mockRejectedValue(new Error("connector table is missing"))
+      mockListConnectedGrants.mockRejectedValue(new Error("connector table is missing"))
       vi.spyOn(console, "error").mockImplementation(() => {})
       const runCommand = setupRun()
       const env = await turn(runCommand)
