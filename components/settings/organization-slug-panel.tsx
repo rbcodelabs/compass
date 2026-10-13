@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateOrganizationSlug } from "@/app/[orgSlug]/settings/actions";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,8 @@ export function OrganizationSlugPanel({ orgSlug }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const confirmRef = useRef<HTMLDivElement>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
 
   const trimmed = value.trim();
   const unchanged = trimmed === orgSlug;
@@ -30,6 +32,17 @@ export function OrganizationSlugPanel({ orgSlug }: Props) {
   // not red on first paint.
   const validationError = unchanged ? null : validateOrgSlug(trimmed);
   const canSubmit = !unchanged && !validationError && !isPending;
+
+  // The confirm step and any server error open below the field. On a phone they can land
+  // under the fixed bottom nav (or off-screen), so a tap would hit a nav link instead of
+  // the button. Centre them whenever they appear; scroll-mb-16 on each matches the pb-16
+  // the settings layout reserves for that nav.
+  useEffect(() => {
+    if (confirming) confirmRef.current?.scrollIntoView({ block: "center" });
+  }, [confirming]);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ block: "center" });
+  }, [error]);
 
   function handleChange(next: string) {
     // Lowercase as they type; the server re-validates regardless.
@@ -96,11 +109,13 @@ export function OrganizationSlugPanel({ orgSlug }: Props) {
         )}
       </div>
 
-      {confirming && canSubmit && (
+      {/* Stays mounted while the action is pending (canSubmit goes false then), so the card does not collapse. */}
+      {confirming && !unchanged && !validationError && (
         <div
+          ref={confirmRef}
           role="alertdialog"
           aria-labelledby="org-slug-confirm-title"
-          className="flex flex-col gap-3 rounded-xl border border-status-warning/40 bg-status-warning-surface px-4 py-4"
+          className="flex scroll-mb-16 flex-col gap-3 rounded-xl border border-status-warning/40 bg-status-warning-surface px-4 py-4"
         >
           <span id="org-slug-confirm-title" className="text-sm font-semibold text-text-primary">
             Change the URL slug from <span className="font-mono">{orgSlug}</span> to{" "}
@@ -138,7 +153,7 @@ export function OrganizationSlugPanel({ orgSlug }: Props) {
       )}
 
       {error && (
-        <p role="alert" className="text-sm font-medium text-destructive">
+        <p ref={errorRef} role="alert" className="scroll-mb-16 text-sm font-medium text-destructive">
           {error}
         </p>
       )}

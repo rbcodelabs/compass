@@ -20,6 +20,31 @@
 import { test, expect } from "../fixtures/index";
 
 test.describe("Organization URL slug rename", () => {
+  // Regression: on a phone the confirm step opened below the fold, the page did not
+  // scroll to it, and the fixed bottom nav covered the confirm button so a tap hit
+  // the "Opportunities" link instead. Nothing is submitted, so no cleanup is needed.
+  test("mobile: confirm button is not covered by the bottom nav", async ({ page, orgSlug }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/${orgSlug}/settings`);
+    await page.waitForLoadState("networkidle");
+    await page.getByLabel("Organization URL slug", { exact: true }).fill(`${orgSlug}-mobile`);
+    await page.getByRole("button", { name: "Change URL slug" }).click();
+
+    const confirm = page.getByRole("button", { name: "Yes, change URL slug" });
+    await expect(confirm).toBeVisible();
+    await expect
+      .poll(
+        async () =>
+          confirm.evaluate((el) => {
+            const r = el.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return hit === el || el.contains(hit);
+          }),
+        { message: "elementFromPoint at the confirm button's centre should be the button" },
+      )
+      .toBe(true);
+  });
+
   test("rename → new URL works → old URL 404s → rename back", async ({ page, orgSlug, workspaceSlug }) => {
     const renamed = `e2e-renamed-${Date.now()}`;
     let renamedOnce = false;

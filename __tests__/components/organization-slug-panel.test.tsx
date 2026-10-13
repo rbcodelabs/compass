@@ -18,8 +18,12 @@ function type(value: string) {
   fireEvent.change(screen.getByLabelText("Organization URL slug"), { target: { value } });
 }
 
+const scrollIntoView = vi.fn();
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // jsdom does not implement scrollIntoView.
+  Element.prototype.scrollIntoView = scrollIntoView;
 });
 afterEach(cleanup);
 
@@ -79,5 +83,39 @@ describe("OrganizationSlugPanel", () => {
     expect(await screen.findByText("That URL slug is already taken. Choose another.")).toBeInTheDocument();
     expect(push).not.toHaveBeenCalled();
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("scrolls the confirmation to the centre of the viewport when it opens, so the fixed mobile nav cannot cover its buttons", () => {
+    render(<OrganizationSlugPanel orgSlug="acme" />);
+    type("acme-labs");
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Change URL slug" }));
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByRole("alertdialog"));
+  });
+
+  it("keeps the confirmation visible while the change is pending", async () => {
+    let resolve!: (v: unknown) => void;
+    updateOrganizationSlug.mockReturnValue(new Promise((r) => (resolve = r)));
+    render(<OrganizationSlugPanel orgSlug="acme" />);
+    type("acme-labs");
+    fireEvent.click(screen.getByRole("button", { name: "Change URL slug" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, change URL slug" }));
+    expect(await screen.findByRole("button", { name: "Changing…" })).toBeDisabled();
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    resolve({ ok: false, error: "nope" });
+    await screen.findByText("nope");
+  });
+
+  it("scrolls a server error into view", async () => {
+    updateOrganizationSlug.mockResolvedValue({ ok: false, error: "That URL slug is already taken. Choose another." });
+    render(<OrganizationSlugPanel orgSlug="acme" />);
+    type("taken");
+    fireEvent.click(screen.getByRole("button", { name: "Change URL slug" }));
+    scrollIntoView.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Yes, change URL slug" }));
+    const err = await screen.findByText("That URL slug is already taken. Choose another.");
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" }));
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(err);
   });
 });
