@@ -23,15 +23,23 @@ test.describe("Organization URL slug rename", () => {
   // Regression: on a phone the confirm step opened below the fold, the page did not
   // scroll to it, and the fixed bottom nav covered the confirm button so a tap hit
   // the "Opportunities" link instead. Nothing is submitted, so no cleanup is needed.
-  test("mobile: confirm button is not covered by the bottom nav", async ({ page, orgSlug }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
+  // isMobile + hasTouch is the emulation a phone actually gets (different layout viewport than a narrow desktop window).
+  test.describe("mobile emulation", () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  test("opening the confirm step scrolls it clear of the bottom nav", async ({ page, orgSlug }) => {
     await page.goto(`/${orgSlug}/settings`);
     await page.waitForLoadState("networkidle");
+    const main = page.locator("main").first();
+    expect(await main.evaluate((el) => el.scrollTop)).toBe(0);
     await page.getByLabel("Organization URL slug", { exact: true }).fill(`${orgSlug}-mobile`);
     await page.getByRole("button", { name: "Change URL slug" }).click();
 
-    const confirm = page.getByRole("button", { name: "Yes, change URL slug" });
+    const dialog = page.getByRole("alertdialog");
+    const confirm = dialog.getByRole("button", { name: "Yes, change URL slug" });
     await expect(confirm).toBeVisible();
+    // The scroll container is <main>, and it must actually have moved.
+    await expect.poll(() => main.evaluate((el) => el.scrollTop), { message: "main.scrollTop after opening confirm" }).toBeGreaterThan(0);
+    await expect(dialog).toHaveCSS("scroll-margin-bottom", "64px");
     await expect
       .poll(
         async () =>
@@ -43,6 +51,31 @@ test.describe("Organization URL slug rename", () => {
         { message: "elementFromPoint at the confirm button's centre should be the button" },
       )
       .toBe(true);
+  });
+  });
+
+  // Regression: the confirm card used to unmount while the action was pending.
+  test("desktop: confirm card stays visible while the rename is pending", async ({ page, orgSlug }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${orgSlug}/settings`);
+    await page.waitForLoadState("networkidle");
+    // Hold the server action open so the pending state is observable, then fail it so nothing is renamed.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    await page.route(`**/${orgSlug}/settings`, async (route) => {
+      if (route.request().method() === "POST" && route.request().headers()["next-action"]) {
+        await gate;
+        await route.abort();
+        return;
+      }
+      await route.continue();
+    });
+    await page.getByLabel("Organization URL slug", { exact: true }).fill(`${orgSlug}-pending`);
+    await page.getByRole("button", { name: "Change URL slug" }).click();
+    await page.getByRole("button", { name: "Yes, change URL slug" }).click();
+    await expect(page.getByRole("button", { name: "Changing…" })).toBeDisabled();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    release();
   });
 
   test("rename → new URL works → old URL 404s → rename back", async ({ page, orgSlug, workspaceSlug }) => {
