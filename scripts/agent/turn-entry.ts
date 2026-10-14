@@ -22,7 +22,13 @@
 // pre-migration fallback possible.
 //
 // Required env (passed at runCommand time, never baked into the snapshot):
-//   ANTHROPIC_API_KEY          Claude API key for the Agent SDK
+//   AGENT_MODEL                model id for the Agent SDK (host resolves it from
+//                              AGENT_MODEL_PROVIDER / AGENT_MODEL_ID)
+//   ANTHROPIC_API_KEY          Claude API key (provider "anthropic", the default)
+//   -- or, provider "bedrock" --
+//   AWS_BEARER_TOKEN_BEDROCK   long-lived Bedrock bearer token
+//   CLAUDE_CODE_USE_BEDROCK    "1" - routes the Agent SDK at Bedrock
+//   AWS_REGION                 Bedrock region
 //   MCP_BASE_URL               Compass origin to call back into (/api/mcp, and
 //                              the run callbacks below)
 //   MCP_TOKEN                  ephemeral per-user cmp_ key (scopes the agent)
@@ -478,7 +484,14 @@ async function main(): Promise<void> {
   const token = requireEnv("MCP_TOKEN", MCP_TOKEN)
   const prompt = requireEnv("AGENT_PROMPT", AGENT_PROMPT)
   const systemPrompt = requireEnv("AGENT_SYSTEM_PROMPT", AGENT_SYSTEM_PROMPT)
-  requireEnv("ANTHROPIC_API_KEY", process.env.ANTHROPIC_API_KEY)
+  // The credential depends on the provider. Without it query() would silently
+  // fall back to looking for a key we never set.
+  if (process.env.CLAUDE_CODE_USE_BEDROCK === "1") {
+    requireEnv("AWS_BEARER_TOKEN_BEDROCK", process.env.AWS_BEARER_TOKEN_BEDROCK)
+  } else {
+    requireEnv("ANTHROPIC_API_KEY", process.env.ANTHROPIC_API_KEY)
+  }
+  const model = requireEnv("AGENT_MODEL", process.env.AGENT_MODEL)
 
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
   if (MCP_BYPASS_SECRET) headers["x-vercel-protection-bypass"] = MCP_BYPASS_SECRET
@@ -555,7 +568,7 @@ async function main(): Promise<void> {
     : systemPrompt
 
   const baseOptions: Options = {
-    model: "claude-sonnet-5",
+    model,
     // Compass's own MCP catalog, reached AS the acting user, plus this turn's
     // connectors. Built above.
     mcpServers,
