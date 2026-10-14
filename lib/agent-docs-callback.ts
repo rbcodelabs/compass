@@ -71,7 +71,7 @@ function parseFinalFiles(value: unknown): DocFinalFile[] | null {
     // Content wins: a sandbox-claimed hash is only honoured when no content is sent.
     if (!hasContent && !hasHash) return null
     files.push({
-      path: f.path,
+      path: f.path as string,
       frontmatterDocId: f.frontmatterDocId as string | null,
       ...(hasContent ? { content: f.content as string } : { contentSha256: (f.contentSha256 as string).toLowerCase() }),
     })
