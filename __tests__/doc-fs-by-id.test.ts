@@ -124,7 +124,51 @@ describe("deleteDocById is single-doc and never recursive", () => {
   })
 })
 
+describe("write side sanitizes segments so paths round-trip with listPaths", () => {
+  it("writes to '.env/foo' resolve against the escaped '_env/foo' instead of creating a duplicate each time", async () => {
+    mocks.db.doc.findMany.mockResolvedValue([row("env", ".env"), row("foo", "foo", "env")])
+    const result = await (await import("@/lib/doc-fs")).writePath(WS, ".env/foo", "body", OPTS)
+    expect(result).toMatchObject({ created: false, path: "_env/foo" })
+    expect(mocks.updateDocument).toHaveBeenCalledWith("foo", expect.anything(), expect.anything())
+    expect(mocks.createDocument).not.toHaveBeenCalled()
+  })
+
+  it("creates new docs under the escaped title", async () => {
+    mocks.db.doc.findMany.mockResolvedValue([])
+    await createPath(WS, "Q3: Plan/$notes", "body", { authorName: "Agent" })
+    const titles = mocks.createDocument.mock.calls.map((c) => c[0].title)
+    expect(titles).toEqual(["Q3_ Plan", "_notes"])
+  })
+})
+
+describe("moveDocById onto an occupied path", () => {
+  it("refuses to take a path another doc holds (no silent '(xxxxxxxx)' sibling)", async () => {
+    mocks.db.doc.findMany.mockResolvedValue([row("mover", "Old"), row("human", "Taken")])
+    await expect(moveDocById(WS, "mover", "Taken", OPTS)).rejects.toMatchObject({ code: "exists" })
+    expect(mocks.updateDocument).not.toHaveBeenCalled()
+  })
+
+  it("allows it when the occupant is a doc the same pass is moving or deleting", async () => {
+    mocks.db.doc.findMany.mockResolvedValue([row("mover", "Old"), row("leaving", "Taken")])
+    await moveDocById(WS, "mover", "Taken", { ...OPTS, occupantMayLeave: new Set(["leaving"]) })
+    expect(mocks.updateDocument).toHaveBeenCalledWith("mover", expect.objectContaining({ title: "Taken" }), expect.anything())
+  })
+
+  it("a move onto its own current path is a no-op, not a conflict", async () => {
+    mocks.db.doc.findMany.mockResolvedValue([row("mover", "Same")])
+    await expect(moveDocById(WS, "mover", "Same", OPTS)).resolves.toMatchObject({ docId: "mover" })
+  })
+})
+
 describe("createPath never silently updates an existing doc", () => {
+  it("treats a path occupied by its own earlier create (operation receipt present) as a replay, not a conflict", async () => {
+    mocks.db.doc.findMany.mockResolvedValue([row("mine", "Fresh")])
+    mocks.db.docOperation = { findUnique: vi.fn().mockResolvedValue({ id: "receipt" }) } as never
+    await createPath(WS, "Fresh", "body", OPTS)
+    expect(mocks.createDocument).toHaveBeenCalledTimes(1) // createDocument replays the stored result for the same receipt
+    delete (mocks.db as Record<string, unknown>).docOperation
+  })
+
   it("throws exists when something already lives at the path", async () => {
     mocks.db.doc.findMany.mockResolvedValue([row("human", "Plan")])
     await expect(createPath(WS, "Plan", "agent content", OPTS)).rejects.toMatchObject({ code: "exists" })

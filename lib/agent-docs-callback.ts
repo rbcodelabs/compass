@@ -18,14 +18,13 @@
 import getPrisma, { type AppPrismaClient } from "@/lib/db"
 import { AgentRunError, authorizeAgentRunWorker } from "@/lib/agent-runs"
 import { verifyDocManifest } from "@/lib/agent-doc-manifest"
-import { reconcileAgentDocs, type DocFinalFile } from "@/lib/agent-doc-reconciliation"
+import { MAX_FINAL_FILES, reconcileAgentDocs, type DocFinalFile } from "@/lib/agent-doc-reconciliation"
 import { validateDocPath } from "@/lib/doc-path"
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
 const sha256Hex = /^[a-f0-9]{64}$/i
 
 export const MAX_AGENT_DOCS_BODY_BYTES = 8 * 1024 * 1024
-const MAX_FINAL_FILES = 5_000
 
 const respond = (value: unknown, status = 200) =>
   Response.json(value, { status, headers: { "cache-control": "no-store" } })
@@ -79,15 +78,14 @@ function parseFinalFiles(value: unknown): DocFinalFile[] | null {
   return files
 }
 
-function parseDeletedPaths(value: unknown): string[] | null {
-  if (value === undefined) return []
-  if (!Array.isArray(value) || value.length > MAX_FINAL_FILES) return null
-  const out: string[] = []
-  for (const path of value) {
-    if (validateDocPath(path) !== null) return null
-    out.push(path as string)
-  }
-  return out
+/**
+ * Unlike `files`, a bad entry here is dropped, not fatal: deletedPaths can only
+ * NARROW what gets deleted, so ignoring an entry is always the safe direction, and
+ * rejecting the whole request over one would throw away every edit in it.
+ */
+function parseDeletedPaths(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((p): p is string => typeof p === "string" && validateDocPath(p) === null).slice(0, MAX_FINAL_FILES)
 }
 
 export async function handleAgentDocsReconcile(request: Request, runId: string, database?: AppPrismaClient) {
@@ -123,7 +121,6 @@ export async function handleAgentDocsReconcile(request: Request, runId: string, 
     if (!files) return respond({ error: "Invalid doc file list", code: "INVALID_DOC_FILES" }, 400)
 
     const deletedPaths = parseDeletedPaths(body.deletedPaths)
-    if (!deletedPaths) return respond({ error: "Invalid deleted path list", code: "INVALID_DOC_FILES" }, 400)
     // Anything but an explicit `false` is treated as incomplete: fail closed.
     const incomplete = body.incomplete !== false
     // Two entries for one path, or a hash-only entry that cannot be honoured, are malformed input.

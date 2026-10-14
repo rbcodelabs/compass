@@ -72,7 +72,7 @@ import { WEB_CAPABILITY_SENTENCE } from "@/lib/agent-capabilities"
 import { authorColumn, loadConversationAttribution, SHARED_CONVERSATION_NOTICE, type ConversationAttribution } from "@/lib/agent-attribution"
 import { labelUserTurn } from "@/lib/agent-author-label"
 import * as docFs from "@/lib/doc-fs"
-import { reconcileAgentDocs, type DocBaselineEntry, type DocFinalState } from "@/lib/agent-doc-reconciliation"
+import { coerceFinalState, reconcileAgentDocs, type DocBaselineEntry, type DocFinalState } from "@/lib/agent-doc-reconciliation"
 import { selectMaterializable } from "@/lib/agent-doc-materialize"
 import { signDocManifest, DOC_MANIFEST_FILE } from "@/lib/agent-doc-manifest"
 
@@ -695,6 +695,7 @@ export async function POST(request: NextRequest) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let usage: any
       let docState: DocFinalState | undefined
+      let rejectedDocFiles = 0
       let baseline: DocBaselineEntry[] = []
       const turnId = randomUUID()
 
@@ -799,9 +800,11 @@ export async function POST(request: NextRequest) {
               // fails would apply mutations the agent's own turn never
               // actually completed.
               try {
-                const parsedState = JSON.parse(rest) as DocFinalState | DocFinalState["files"]
-                // Older entry scripts emitted the bare file list.
-                docState = Array.isArray(parsedState) ? { files: parsedState, incomplete: true } : parsedState
+                // Untrusted stdout from a sandbox running agent-controlled code: same
+                // path validation as the detached callback, and fail closed on `incomplete`.
+                const coerced = coerceFinalState(JSON.parse(rest))
+                docState = coerced.state
+                rejectedDocFiles = coerced.rejectedFiles
               } catch {
                 /* malformed AGENT_DOC_STATE -- reconciliation below skips a doc tree it never received */
               }
@@ -833,6 +836,7 @@ export async function POST(request: NextRequest) {
         if (docState) {
           try {
             const { notices } = await step(() => reconcileAgentDocs(workspaceId, turnId, baseline, docState!, "Compass Agent"))
+            if (rejectedDocFiles > 0) notices.push(`${rejectedDocFiles} doc file${rejectedDocFiles === 1 ? " was" : "s were"} not saved because the name or content was not valid.`)
             if (notices.length > 0) assistantText = `${assistantText}\n\n${notices.join("\n")}`
           } catch (reconcileError) {
             console.error("[agent-turn] doc reconciliation failed", reconcileError)

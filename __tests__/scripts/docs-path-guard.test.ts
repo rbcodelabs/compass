@@ -17,7 +17,13 @@ import {
   AGENT_PRIVATE_ENV,
   DOCS_GUARDED_TOOLS_MATCHER,
   checkDocsToolUse,
+  checkWebFetch,
+  createAllowedUrls,
   createDocsPreToolUseHook,
+  createSearchResultCollector,
+  createWebFetchPreToolUseHook,
+  extractUrls,
+  normalizeFetchUrl,
   scrubbedAgentEnv,
 } from "../../scripts/agent/docs-path-guard"
 
@@ -121,9 +127,67 @@ describe("checkDocsToolUse: denied", () => {
     expect(denied("Read", "Product/_doc.md")).toBe(true)
   })
 
-  it("does not treat ~ or a drive letter as the root", () => {
-    expect(denied("Read", { file_path: "~/.ssh/id_rsa" })).toBe(false) // literal directory named "~" under the root: harmless
-    expect(denied("Read", { file_path: "C:\\Windows\\win.ini" })).toBe(false) // a literal relative name on POSIX: still inside the root
+  it("denies every spelling the Claude CLI would normalize before opening (whitespace trim, ~ expansion)", () => {
+    // The CLI trims a path argument and expands ~ and ~/ to the home directory, so a guard that
+    // resolved the raw string approved all of these while the tool read something else.
+    const spellings = [
+      " /proc/self/environ",
+      "/proc/self/environ ",
+      "\n/proc/self/cmdline",
+      "/proc/self/cmdline\n",
+      "\t/proc/self/environ",
+      "\r\n/etc/passwd",
+      "\u00a0/proc/self/environ", // no-break space
+      "\u2028/proc/self/environ", // line separator
+      "\u3000/proc/self/environ", // ideographic space
+      "\ufeff/proc/self/environ", // BOM
+      " Product/_doc.md",
+      "Product/_doc.md ",
+      "~/.bashrc",
+      "~/x",
+      "~",
+      "~root/.ssh/id_rsa",
+      "~+/x",
+      "~-/x",
+      "~user",
+      " ~/x",
+      "$HOME/.bashrc",
+      "${HOME}/.bashrc",
+      "%HOME%/.bashrc",
+      "Product/$X",
+      "Product/50%",
+      "\"Product/_doc.md\"",
+      "'Product/_doc.md'",
+      "\u0060Product/_doc.md\u0060",
+      "file:///etc/passwd",
+      "Product/\n/../../entry.ts",
+      "Product/\u0000",
+      "Product/\u0085x", // C1 NEL
+      "Product/\u007fx",
+    ]
+    for (const tool of ["Read", "Write", "Edit"]) {
+      for (const file_path of spellings) expect(denied(tool, { file_path }), `${tool} ${JSON.stringify(file_path)}`).toBe(true)
+    }
+    expect(denied("Glob", { pattern: "*", path: "~" })).toBe(true)
+    expect(denied("Glob", { pattern: "*", path: " /proc" })).toBe(true)
+    expect(denied("Glob", { pattern: "*", path: "~/" })).toBe(true)
+    expect(denied("Glob", { pattern: " *.md" })).toBe(true)
+    expect(denied("Glob", { pattern: "*.md\n" })).toBe(true)
+    expect(denied("Glob", { pattern: "$HOME/*" })).toBe(true)
+    expect(denied("Glob", { pattern: "~/*" })).toBe(true)
+    expect(denied("NotebookEdit", { notebook_path: "~/x.ipynb" })).toBe(true)
+  })
+
+  it("denies /proc, /sys and /dev by name, including through ./ and // spellings", () => {
+    for (const p of ["/proc", "/proc/", "/proc//self/environ", "/proc/./self/environ", "//proc/self/environ", "/sys", "/dev/null", "/dev/../proc/self/environ", path.join(root, "..", "..", "..", "..", "..", "proc", "self", "environ")]) {
+      expect(denied("Read", { file_path: p }), p).toBe(true)
+    }
+  })
+
+  it("still allows interior spaces and ordinary punctuation that real doc names contain", () => {
+    expect(allowed("Write", { file_path: "Q3 Plan (draft)/_doc.md", content: "x" })).toBe(true)
+    expect(allowed("Write", { file_path: "Rick's plan/_doc.md", content: "x" })).toBe(true)
+    expect(allowed("Write", { file_path: "日本語 notes/_doc.md", content: "x" })).toBe(true)
   })
 
   it("denies a path field smuggled onto any tool, and Glob roots/patterns that escape", () => {
@@ -195,5 +259,69 @@ describe("scrubbedAgentEnv", () => {
     const env = { MCP_TOKEN: "mcp" }
     scrubbedAgentEnv(env)
     expect(env.MCP_TOKEN).toBe("mcp")
+  })
+})
+
+describe("WebFetch exfiltration guard", () => {
+  const allowed = createAllowedUrls("Please summarise https://example.com/article?id=7, and also see (https://docs.example.org/a/b).")
+
+  it("extracts URLs from prose without trailing punctuation or brackets", () => {
+    expect(extractUrls("see https://a.test/x. and https://b.test/y?q=1, (https://c.test/z)")).toEqual([
+      "https://a.test/x",
+      "https://b.test/y?q=1",
+      "https://c.test/z",
+    ])
+  })
+
+  it("allows exactly the URLs the user wrote", () => {
+    expect(checkWebFetch({ url: "https://example.com/article?id=7", prompt: "x" }, allowed).allowed).toBe(true)
+    expect(checkWebFetch({ url: "https://docs.example.org/a/b" }, allowed).allowed).toBe(true)
+  })
+
+  it("denies a model-invented URL, including one that appends data to an allowed URL", () => {
+    for (const url of [
+      "https://attacker.example/?d=SECRET",
+      "https://attacker.example/SECRET",
+      "https://example.com/article?id=7&d=SECRET",
+      "https://example.com/article?id=7#SECRET-is-dropped-so-this-is-allowed-elsewhere",
+      "https://example.com/article",
+      "https://example.com/article/SECRET",
+      "https://example.com.attacker.example/article?id=7",
+      "https://user:pass@example.com/article?id=7",
+      "http://example.com/article?id=7",
+    ]) {
+      // The fragment variant normalizes to an allowed URL; everything else must be refused.
+      const expectAllowed = url.includes("#SECRET-is-dropped")
+      expect(checkWebFetch({ url }, allowed).allowed, url).toBe(expectAllowed)
+    }
+  })
+
+  it("denies non-URLs, non-http schemes and padded values", () => {
+    for (const url of [undefined, 5, "", " https://example.com/article?id=7", "https://example.com/article?id=7\n", "file:///etc/passwd", "javascript:alert(1)", "ftp://example.com/", "not a url"]) {
+      expect(checkWebFetch({ url }, allowed).allowed, String(url)).toBe(false)
+    }
+    expect(checkWebFetch(null, allowed).allowed).toBe(false)
+  })
+
+  it("normalizes so equivalent spellings of an allowed URL match", () => {
+    expect(normalizeFetchUrl("https://Example.com:443/article?id=7")).toBe("https://example.com/article?id=7")
+    expect(checkWebFetch({ url: "https://EXAMPLE.com/article?id=7" }, allowed).allowed).toBe(true)
+  })
+
+  it("makes URLs returned by web_search fetchable, and only from that tool's results", async () => {
+    const set = createAllowedUrls("no urls here")
+    const hook = createWebFetchPreToolUseHook(set)
+    const call = { tool_name: "WebFetch", tool_input: { url: "https://found.example/page" } }
+    expect(((await hook(call)) as { hookSpecificOutput?: { permissionDecision: string } }).hookSpecificOutput?.permissionDecision).toBe("deny")
+    await createSearchResultCollector(set)({ tool_response: { content: [{ type: "text", text: "1. Title https://found.example/page - snippet" }] } })
+    expect(await hook(call)).toEqual({ continue: true })
+    expect(((await hook({ tool_input: { url: "https://found.example/other" } })) as { hookSpecificOutput?: { permissionDecision: string } }).hookSpecificOutput?.permissionDecision).toBe("deny")
+  })
+
+  it("caps how many URLs a search result can make fetchable", async () => {
+    const set = createAllowedUrls("")
+    const urls = Array.from({ length: 800 }, (_, i) => `https://s.example/${i}`).join(" ")
+    await createSearchResultCollector(set)({ tool_response: urls })
+    expect(set.size).toBeLessThanOrEqual(500)
   })
 })

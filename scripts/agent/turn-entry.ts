@@ -68,7 +68,16 @@ import { mkdir } from "node:fs/promises"
 import { query, createSdkMcpServer, tool, type Options, type SessionKey, type SessionStore, type SessionStoreEntry } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod"
 import { openWikiSession, type WikiSession } from "@rbcodelabs/geode-headless/wiki"
-import { createDocsPreToolUseHook, DOCS_GUARDED_TOOLS_MATCHER, scrubbedAgentEnv } from "./docs-path-guard.ts"
+import {
+  createAllowedUrls,
+  createDocsPreToolUseHook,
+  createSearchResultCollector,
+  createWebFetchPreToolUseHook,
+  DOCS_GUARDED_TOOLS_MATCHER,
+  scrubbedAgentEnv,
+  WEB_FETCH_MATCHER,
+  WEB_SEARCH_MATCHER,
+} from "./docs-path-guard.ts"
 import { createHash, randomUUID } from "node:crypto"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { gunzipSync, gzipSync } from "node:zlib"
@@ -514,7 +523,10 @@ function buildDocsFsServer(session: WikiSession, deletedByAgent: Set<string>) {
           // The ONLY signal that a doc going missing is intentional: a file that is
           // merely absent from the final tree (unreadable, past a walk limit) must
           // never be hard-deleted on that evidence alone.
-          deletedByAgent.add(path.endsWith("/_doc.md") ? path.slice(0, -"/_doc.md".length) : path)
+          // Only a name the server would accept is recorded; anything else could not
+          // have been a baseline doc, and the server drops what it cannot validate anyway.
+          const docPath = (path.endsWith("/_doc.md") ? path.slice(0, -"/_doc.md".length) : path).replace(/^\.\//, "")
+          if (isValidDocName(docPath)) deletedByAgent.add(docPath)
           return { content: [{ type: "text" as const, text: `Deleted ${path}` }] }
         }
       ),
@@ -571,7 +583,7 @@ type CollectedDocState = {
 
 const MAX_DOC_DEPTH = 30
 // eslint-disable-next-line no-control-regex
-const ILLEGAL_SEGMENT_CHARS = /[/\\:*?"<>|\x00-\x1f]/
+const ILLEGAL_SEGMENT_CHARS = /[/\\:*?"<>|$%\x00-\x1f\x7f-\x9f]/
 
 /** Mirrors lib/doc-path.ts validateDocPath, which the server applies again; this one only avoids sending a doomed request. */
 function isValidDocName(docPath: string): boolean {
@@ -584,6 +596,7 @@ function isValidDocName(docPath: string): boolean {
     segment !== "node_modules" && segment !== "_doc.md" &&
     !ILLEGAL_SEGMENT_CHARS.test(segment) &&
     segment === segment.trim() &&
+    !/^['\u0060]|['\u0060]$/.test(segment) &&
     !segment.endsWith(".") &&
     Buffer.byteLength(segment, "utf8") <= 200)
 }
@@ -788,6 +801,10 @@ async function main(): Promise<void> {
     ? `${systemPrompt}\n\n## Connected third-party tools\n\n${connectorGuidance.join("\n\n")}`
     : systemPrompt
 
+  const allowedFetchUrls = createAllowedUrls(
+    `${prompt}\n${existsSync(FALLBACK_PROMPT_FILE) ? readFileSync(FALLBACK_PROMPT_FILE, "utf8") : ""}`,
+  )
+
   const baseOptions: Options = {
     model: "claude-sonnet-5",
     // Compass's own MCP catalog, reached AS the acting user, plus this turn's
@@ -820,8 +837,21 @@ async function main(): Promise<void> {
     // accept any absolute path (`Read /proc/self/environ` exposes every secret in
     // this process). The hook denies any path that does not resolve, symlinks
     // included, to a location inside the docs directory. See docs-path-guard.ts.
+    //
+    // WebFetch is the one way left to move data off the box with the file tools
+    // confined, so it too is restricted when docs are materialized: only URLs the
+    // user wrote (or the replayed history holds) and URLs web_search returned this
+    // turn, matched exactly. See the WebFetch section of docs-path-guard.ts.
     ...(docsSession && docsRoot
-      ? { hooks: { PreToolUse: [{ matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot)] }] } }
+      ? {
+          hooks: {
+            PreToolUse: [
+              { matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot)] },
+              { matcher: WEB_FETCH_MATCHER, hooks: [createWebFetchPreToolUseHook(allowedFetchUrls)] },
+            ],
+            PostToolUse: [{ matcher: WEB_SEARCH_MATCHER, hooks: [createSearchResultCollector(allowedFetchUrls)] }],
+          },
+        }
       : {}),
     // The model-facing CLI process does not need this script's own credentials
     // (the run callback token and the MCP bearer are used in-process only), so it

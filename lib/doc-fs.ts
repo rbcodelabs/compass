@@ -66,6 +66,11 @@ export type DocFsMutationOptions = {
    * Forwarded verbatim when present -- doc-fs never derives its own.
    */
   actorKey?: string
+  /**
+   * Move-only. Doc ids that may already sit at the destination path because they are
+   * themselves being moved or deleted in the same reconciliation pass.
+   */
+  occupantMayLeave?: ReadonlySet<string>
 }
 
 /** Builds the shared authorId/authorName/actorKey slice of DocumentMutationOptions from a DocFsMutationOptions. */
@@ -218,8 +223,14 @@ function stripReservedKeys(data: Record<string, unknown> | null): Record<string,
   return Object.keys(out).length > 0 ? out : null
 }
 
+/**
+ * Splits a caller-supplied path and sanitizes every segment, so a path written
+ * through here round-trips with `listPaths` (which sanitizes titles): a write to
+ * ".env/foo" or "Q3: Plan" resolves to, and is stored under, the same escaped
+ * names that listing shows, instead of creating a fresh doc on every write.
+ */
 function splitPath(path: string): string[] {
-  return path.split("/").filter((segment) => segment.length > 0)
+  return path.split("/").filter((segment) => segment.length > 0).map(sanitizeTitleSegment)
 }
 
 async function nextSortOrder(workspaceId: string, parentId: string | null): Promise<number> {
@@ -290,7 +301,7 @@ export async function writePath(
   let body = parsed.matter ? parsed.content.trimStart() : content
   const metadata = stripReservedKeys(parsed.data && Object.keys(parsed.data).length > 0 ? (parsed.data as Record<string, unknown>) : null)
 
-  const existing = await resolvePath(workspaceId, path)
+  const existing = await resolvePath(workspaceId, segments.join("/"))
   const effectiveDocType: DocType = existing ? existing.docType : (opts.docType ?? "STANDARD")
   // A CANVAS doc's body is a JSON Canvas document, not markdown: validate it
   // (strict Compass card references; blank canvas when empty) before storing.
@@ -305,7 +316,7 @@ export async function writePath(
       { content: body, metadata: metadata ? toJsonInput(metadata) : undefined },
       { operationId: opts.operationId, expectedRevision: opts.expectedRevision, ...actorOpts(opts) }
     )
-    return { docId: updated.id, created: false, revision: documentRevision(updated), path }
+    return { docId: updated.id, created: false, revision: documentRevision(updated), path: segments.join("/") }
   }
   return createAtPath(workspaceId, segments, body, metadata, effectiveDocType, opts)
 }
@@ -324,7 +335,15 @@ export async function createPath(
 ): Promise<WritePathResult> {
   const segments = splitPath(path)
   if (segments.length === 0) throw new DocFsError("invalid-path", `Invalid doc path: "${path}".`)
-  if (await resolvePath(workspaceId, path)) throw new DocFsError("exists", `A doc already exists at "${path}".`)
+  if (await resolvePath(workspaceId, segments.join("/"))) {
+    // A retried pass (a lost response) finds its own earlier create at the path.
+    // The operation receipt tells that apart from someone else's doc, and
+    // createDocument replays the original result for the same receipt.
+    const receipt = opts.operationId
+      ? await getPrisma().docOperation.findUnique({ where: { workspaceId_operationId: { workspaceId, operationId: opts.operationId } } })
+      : null
+    if (!receipt) throw new DocFsError("exists", `A doc already exists at "${path}".`)
+  }
   const parsed = safeMatter(content)
   let body = parsed.matter ? parsed.content.trimStart() : content
   const metadata = stripReservedKeys(parsed.data && Object.keys(parsed.data).length > 0 ? (parsed.data as Record<string, unknown>) : null)
@@ -486,10 +505,18 @@ async function moveNode(
   const fromPath = node.path
   const toSegments = splitPath(toPath)
   if (toSegments.length === 0) throw new DocFsError("invalid-path", `Invalid destination path: "${toPath}".`)
-  if (toPath === fromPath) return { docId: node.docId, revision: null }
+  const normalizedTo = toSegments.join("/")
+  if (normalizedTo === fromPath) return { docId: node.docId, revision: null }
   // A doc cannot be moved inside its own subtree.
-  if (toPath.startsWith(`${fromPath}/`)) {
+  if (normalizedTo.startsWith(`${fromPath}/`)) {
     throw new DocFsError("invalid-move", `Cannot move "${fromPath}" into its own subtree.`)
+  }
+  // Moving onto a path another doc holds would silently give the mover a
+  // "(xxxxxxxx)" sibling name. Refuse unless the caller says the occupant is
+  // known to be leaving (the reconciler passes the baseline docs it is also moving or deleting).
+  const occupant = await resolvePath(workspaceId, normalizedTo)
+  if (occupant && occupant.docId !== node.docId && !opts.occupantMayLeave?.has(occupant.docId)) {
+    throw new DocFsError("exists", `A doc already exists at "${normalizedTo}".`)
   }
 
   const title = toSegments[toSegments.length - 1]

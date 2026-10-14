@@ -8,7 +8,10 @@ export const MAX_SEGMENT_BYTES = 200
 /** Deepest doc nesting the sandbox's wiki walk can enumerate (maxDepth 32, minus the `_doc.md` leaf and a margin). */
 export const MAX_DOC_DEPTH = 30
 // eslint-disable-next-line no-control-regex
-const ILLEGAL_CHARS = /[/\\:*?"<>|\x00-\x1f]/g
+// `$` and `%` are escaped too: the agent's file tools refuse any path containing
+// them (the CLI expands variables in a path), so a doc named "50% off" would
+// otherwise be unreadable to the agent that is meant to edit it.
+const ILLEGAL_CHARS = /[/\\:*?"<>|$%\x00-\x1f\x7f-\x9f]/g
 
 /**
  * The wiki session the sandbox reads its tree through (`@rbcodelabs/geode-headless/wiki`)
@@ -44,6 +47,8 @@ export function sanitizeTitleSegment(title: string): string {
     while (s.endsWith(".")) s = s.slice(0, -1)
     if (!s) s = "Untitled"
   }
+  // A leading/trailing quote makes the file tools treat the path as quoted (and refuse it).
+  s = s.replace(/^['`]|['`]$/g, "_")
   if (s.startsWith(".")) s = s.replace(/^\.+/, (dots) => "_".repeat(dots.length))
   if (s === "node_modules" || s === RESERVED_SEGMENT) s = `${s}_`
   return s

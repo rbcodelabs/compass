@@ -23,6 +23,8 @@ import {
   guardDeletes,
   reconcileAgentDocs,
   describeConflict,
+  coerceFinalState,
+  MAX_FINAL_FILES,
   type DocBaselineEntry,
   type DocFinalFile,
   type ReconciliationAction,
@@ -355,11 +357,90 @@ describe("applyReconciliationPlan", () => {
     expect(result.conflicts).toEqual([{ path: "A", title: "A", reason: "revision" }])
   })
 
-  it("re-throws anything that is not a doc-level failure", async () => {
-    mocks.writeDocById.mockRejectedValue(new Error("boom"))
-    await expect(
-      applyReconciliationPlan("ws-1", "turn-1", [{ type: "update", path: "A", docId: "doc-a", content: "x", expectedRevision: "r" }], "Agent")
-    ).rejects.toThrow("boom")
+  it("records a non-doc error (DB write conflict) as that action's failure and keeps going", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    mocks.writeDocById.mockRejectedValueOnce(new Error("write conflict"))
+    const result = await applyReconciliationPlan(
+      "ws-1",
+      "turn-1",
+      [
+        { type: "update", path: "A", docId: "doc-a", content: "x", expectedRevision: "r" },
+        { type: "update", path: "B", docId: "doc-b", content: "y", expectedRevision: "r" },
+        { type: "create", path: "C", content: "z" },
+      ],
+      "Agent"
+    )
+    spy.mockRestore()
+    expect(result.conflicts).toEqual([{ path: "A", title: "A", reason: "failed" }])
+    expect(result.applied.map((a) => a.type)).toEqual(["update", "create"])
+    expect(mocks.recordConflictingSnapshot).not.toHaveBeenCalled()
+  })
+
+  it("lets a move land on a path held by a doc that is part of the same pass, but passes nothing for strangers", async () => {
+    await applyReconciliationPlan(
+      "ws-1",
+      "turn-1",
+      [{ type: "move", fromPath: "A", toPath: "B", docId: "a", expectedRevision: "r" }],
+      "Agent",
+      { baselineDocIds: new Set(["a", "b"]) }
+    )
+    expect(mocks.moveDocById.mock.calls[0][3].occupantMayLeave).toEqual(new Set(["a", "b"]))
+    mocks.moveDocById.mockClear()
+    await applyReconciliationPlan("ws-1", "turn-1", [{ type: "move", fromPath: "A", toPath: "B", docId: "a", expectedRevision: "r" }], "Agent")
+    expect(mocks.moveDocById.mock.calls[0][3].occupantMayLeave).toBeUndefined()
+  })
+
+  it("reports a move onto a doc outside the baseline as an 'exists' conflict", async () => {
+    mocks.moveDocById.mockRejectedValueOnce(Object.assign(new Error("exists"), { name: "DocFsError", code: "exists" }))
+    const result = await applyReconciliationPlan("ws-1", "turn-1", [{ type: "move", fromPath: "A", toPath: "Taken", docId: "a", expectedRevision: "r" }], "Agent")
+    expect(result.conflicts).toEqual([{ path: "Taken", title: "Taken", reason: "exists" }])
+  })
+})
+
+describe("guardDeletes fails closed on a missing flag", () => {
+  it("treats an undefined `incomplete` as incomplete", () => {
+    const del: ReconciliationAction = { type: "delete", path: "A", docId: "a", expectedRevision: "r" }
+    expect(guardDeletes([del], 3, { deletedPaths: ["A"] }).plan).toEqual([])
+    expect(guardDeletes([del], 3, { incomplete: false, deletedPaths: ["A"] }).plan).toEqual([del])
+  })
+
+  it("reconcileAgentDocs applies no delete when the state carries no incomplete flag", async () => {
+    mocks.deleteDocById.mockResolvedValue(undefined)
+    await reconcileAgentDocs("ws-1", "run", [{ path: "A", docId: "a", revision: "r", content: "a" }], { files: [], deletedPaths: ["A"] }, "Agent")
+    expect(mocks.deleteDocById).not.toHaveBeenCalled()
+  })
+})
+
+describe("coerceFinalState (synchronous path: untrusted stdout)", () => {
+  const file = (path: string, extra: Record<string, unknown> = {}) => ({ path, content: "c", frontmatterDocId: null, ...extra })
+
+  it("keeps valid files, drops invalid-path, duplicate and contentless ones, and counts them", () => {
+    const { state, rejectedFiles } = coerceFinalState({
+      files: [file("Good"), file("../escape"), file(".hidden"), file("Good"), { path: "NoContent", frontmatterDocId: null }, file("a:b"), null],
+      incomplete: false,
+      deletedPaths: [],
+    })
+    expect(state.files.map((f) => f.path)).toEqual(["Good"])
+    expect(rejectedFiles).toBe(6)
+  })
+
+  it("drops invalid deletedPaths silently instead of failing", () => {
+    const { state } = coerceFinalState({ files: [], incomplete: false, deletedPaths: ["Fine", "../etc", 7, ".x", "Also Fine"] })
+    expect(state.deletedPaths).toEqual(["Fine", "Also Fine"])
+  })
+
+  it("fails closed: anything but an explicit incomplete:false is incomplete, and a bare array (old format) is too", () => {
+    expect(coerceFinalState({ files: [], incomplete: false }).state.incomplete).toBe(false)
+    expect(coerceFinalState({ files: [] }).state.incomplete).toBe(true)
+    expect(coerceFinalState({ files: [], incomplete: "false" }).state.incomplete).toBe(true)
+    expect(coerceFinalState([file("A")]).state.incomplete).toBe(true)
+    expect(coerceFinalState(null).state).toEqual({ files: [], incomplete: true, deletedPaths: [] })
+    expect(coerceFinalState("garbage").state.files).toEqual([])
+  })
+
+  it("caps the file count", () => {
+    const many = Array.from({ length: MAX_FINAL_FILES + 5 }, (_, i) => file(`Doc ${i}`))
+    expect(coerceFinalState({ files: many, incomplete: false }).state.files).toHaveLength(MAX_FINAL_FILES)
   })
 })
 
@@ -398,7 +479,7 @@ describe("reconcileAgentDocs", () => {
 
 describe("describeConflict", () => {
   it("has a distinct, actionable sentence per reason", () => {
-    const reasons = ["revision", "operation", "has-children", "exists", "gone", "invalid"] as const
+    const reasons = ["revision", "operation", "has-children", "exists", "gone", "invalid", "failed"] as const
     const sentences = reasons.map((reason) => describeConflict({ path: "A/B", title: "B", reason }))
     expect(new Set(sentences).size).toBeGreaterThanOrEqual(5)
     expect(sentences.every((s) => s.includes("'B'"))).toBe(true)

@@ -74,10 +74,17 @@ describe("agent entry capability-pack policy", () => {
   it("ADR 0019: confines the file tools with a PreToolUse path guard and keeps run credentials out of the CLI's environment", () => {
     // Without the hook, `Read /proc/self/environ` returns every secret in this process.
     expect(source).toContain('from "./docs-path-guard.ts"')
-    expect(source).toContain("hooks: { PreToolUse: [{ matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot)] }] }")
+    expect(source).toContain("{ matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot)] }")
     expect(source).toContain("env: scrubbedAgentEnv(process.env)")
     // The guard must be registered exactly when the file tools are.
-    expect(source).toMatch(/docsSession && docsRoot\s*\?\s*\{ hooks:/)
+    expect(source).toMatch(/docsSession && docsRoot\s*\?\s*\{\s*hooks:/)
+  })
+
+  it("ADR 0019: WebFetch is limited to user-supplied and web_search-returned URLs whenever docs are materialized", () => {
+    expect(source).toContain("{ matcher: WEB_FETCH_MATCHER, hooks: [createWebFetchPreToolUseHook(allowedFetchUrls)] }")
+    expect(source).toContain("PostToolUse: [{ matcher: WEB_SEARCH_MATCHER, hooks: [createSearchResultCollector(allowedFetchUrls)] }]")
+    // seeded from the prompt (and the replayed history on a resumed turn), never from agent output
+    expect(source).toMatch(/createAllowedUrls\(\s*`\$\{prompt\}/)
   })
 
   it("ADR 0019: reports whether the sandbox's view was complete and which docs the agent deleted on purpose", () => {

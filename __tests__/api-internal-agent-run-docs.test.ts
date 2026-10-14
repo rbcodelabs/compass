@@ -211,9 +211,39 @@ describe("agent run docs callback — manifest and body validation", () => {
     expect(response.status).toBe(200)
   })
 
-  it("rejects an invalid deletedPaths entry and duplicate file paths", async () => {
-    expect((await handleAgentDocsReconcile(post(validBody(unchangedFiles, { deletedPaths: ["../etc"] })), RUN_ID, harness())).status).toBe(400)
+  it("rejects duplicate file paths", async () => {
     expect((await handleAgentDocsReconcile(post(validBody([...unchangedFiles, unchangedFiles[0]])), RUN_ID, harness())).status).toBe(400)
+  })
+
+  it("DROPS an invalid deletedPaths entry instead of failing the request, so the edits in it still land", async () => {
+    // deletedPaths can only narrow what gets deleted, so ignoring a bad entry is the safe direction.
+    const response = await handleAgentDocsReconcile(
+      post(validBody([{ path: "Product", frontmatterDocId: "doc-1", content: "edited" }], { deletedPaths: ["../etc", ".hidden", 7, "Product/Plan"] })),
+      RUN_ID,
+      harness()
+    )
+    expect(response.status).toBe(200)
+    expect(docFs.writeDocById).toHaveBeenCalledWith(WS, "doc-1", "edited", expect.anything())
+    // the one valid, explicit entry still authorises its delete
+    expect(docFs.deleteDocById).toHaveBeenCalledWith(WS, "doc-2", expect.anything())
+  })
+
+  it("tolerates a non-array deletedPaths", async () => {
+    const response = await handleAgentDocsReconcile(post(validBody(unchangedFiles, { deletedPaths: "Product/Plan" })), RUN_ID, harness())
+    expect(response.status).toBe(200)
+    expect(docFs.deleteDocById).not.toHaveBeenCalled()
+  })
+
+  it("accepts as many files as the sandbox walk can enumerate, with headroom", async () => {
+    const files = [...unchangedFiles, ...Array.from({ length: 5_000 }, (_, i) => ({ path: `New ${i}`, frontmatterDocId: null, content: "x" }))]
+    const response = await handleAgentDocsReconcile(post(validBody(files)), RUN_ID, harness())
+    expect(response.status).toBe(200)
+    expect(docFs.createPath).toHaveBeenCalledTimes(5_000)
+  })
+
+  it("rejects a file list past the cap", async () => {
+    const files = Array.from({ length: 6_000 }, (_, i) => ({ path: `New ${i}`, frontmatterDocId: null, content: "x" }))
+    expect((await handleAgentDocsReconcile(post(validBody(files)), RUN_ID, harness())).status).toBe(400)
   })
 })
 
@@ -315,14 +345,20 @@ describe("agent run docs callback — reconciliation", () => {
     expect(body.conflicts.map((c: { reason: string }) => c.reason)).toEqual(["revision", "has-children"])
   })
 
-  it("answers 500 without leaking internals when applying throws a non-doc error", async () => {
+  it("reports a non-doc error as that doc's failure (200, no internals leaked) and still applies the rest", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
     docFs.writeDocById.mockRejectedValueOnce(new Error("database password leaked"))
     const response = await handleAgentDocsReconcile(
-      post(validBody([{ path: "Product", frontmatterDocId: "doc-1", content: "x" }, unchangedFiles[1]])),
+      post(validBody([{ path: "Product", frontmatterDocId: "doc-1", content: "x" }, unchangedFiles[1], { path: "Fresh", frontmatterDocId: null, content: "y" }])),
       RUN_ID,
       harness()
     )
-    expect(response.status).toBe(500)
-    expect(JSON.stringify(await response.json())).not.toContain("password")
+    spy.mockRestore()
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(JSON.stringify(body)).not.toContain("password")
+    expect(body.conflicts).toEqual([{ path: "Product", title: "Product", reason: "failed" }])
+    expect(body.applied).toBe(1)
+    expect(docFs.createPath).toHaveBeenCalled()
   })
 })

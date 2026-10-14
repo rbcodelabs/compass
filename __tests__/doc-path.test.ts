@@ -14,12 +14,20 @@ describe("sanitizeTitleSegment escapes names the sandbox's wiki walk skips", () 
   })
 
   it("never yields a name the wiki would exclude, for a spread of hostile titles", () => {
-    for (const title of [".", "..", "...", ".a", ". a", " .a", "node_modules", "node_modules.", "  node_modules  ", "_doc.md", ".\u0000x", "./x", "../x"]) {
+    for (const title of [".", "..", "...", ".a", ". a", " .a", "node_modules", "node_modules.", "  node_modules  ", "_doc.md", ".\u0000x", "./x", "../x", "$HOME", "50% off", "%PATH%", "'quoted'", "\u0060tick\u0060", "tab\there", "nel\u0085x"]) {
       const out = sanitizeTitleSegment(title)
       expect(isWikiExcludedSegment(out), title).toBe(false)
       expect(out, title).not.toBe("_doc.md")
       expect(sanitizeTitleSegment(out), `${title} is idempotent`).toBe(out)
     }
+  })
+
+  it("escapes variable-expansion and quote characters the agent's file tools refuse", () => {
+    expect(sanitizeTitleSegment("50% off")).toBe("50_ off")
+    expect(sanitizeTitleSegment("$HOME")).toBe("_HOME")
+    expect(sanitizeTitleSegment("'quoted'")).toBe("_quoted_")
+    // interior apostrophes are ordinary
+    expect(sanitizeTitleSegment("Rick's plan")).toBe("Rick's plan")
   })
 
   it("leaves ordinary titles alone", () => {
@@ -61,6 +69,10 @@ describe("validateDocPath", () => {
     ["trailing."],
     ["x".repeat(201)],
     ["日".repeat(70)],
+    ["50%"],
+    ["$HOME"],
+    ["'quoted'"],
+    ["nel\u0085x"],
   ])("rejects %j", (path) => {
     expect(validateDocPath(path)).not.toBeNull()
   })
