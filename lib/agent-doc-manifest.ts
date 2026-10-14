@@ -58,6 +58,10 @@ export function signDocManifest(runId: string, workspaceId: string, baseline: re
     revision: b.revision,
     contentSha256: b.contentSha256 ?? sha256(b.content ?? ""),
   }))
+  // The reconciler keys on both. A duplicate would let two entries claim one doc
+  // or one path, so refuse to sign an ambiguous baseline at all.
+  if (new Set(entries.map((e) => e.docId)).size !== entries.length) throw new Error("Doc manifest has a duplicate docId")
+  if (new Set(entries.map((e) => e.path)).size !== entries.length) throw new Error("Doc manifest has a duplicate path")
   return { runId, workspaceId, entries, signature: sign(runId, workspaceId, entries) }
 }
 
@@ -77,8 +81,10 @@ export function verifyDocManifest(value: unknown, expected: { runId: string; wor
   if (!value || typeof value !== "object") return null
   const m = value as Record<string, unknown>
   if (m.runId !== expected.runId || m.workspaceId !== expected.workspaceId) return null
-  if (typeof m.signature !== "string" || !Array.isArray(m.entries) || !m.entries.every(isEntry)) return null
+  if (typeof m.signature !== "string" || !/^[a-f0-9]{64}$/.test(m.signature)) return null
+  if (!Array.isArray(m.entries) || !m.entries.every(isEntry)) return null
   const entries = m.entries as DocManifestEntry[]
+  if (new Set(entries.map((e) => e.docId)).size !== entries.length || new Set(entries.map((e) => e.path)).size !== entries.length) return null
   const actual = Buffer.from(sign(expected.runId, expected.workspaceId, entries), "hex")
   const provided = Buffer.from(m.signature, "hex")
   if (actual.length !== provided.length || !timingSafeEqual(actual, provided)) return null

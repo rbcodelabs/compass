@@ -68,6 +68,7 @@ import { mkdir } from "node:fs/promises"
 import { query, createSdkMcpServer, tool, type Options, type SessionKey, type SessionStore, type SessionStoreEntry } from "@anthropic-ai/claude-agent-sdk"
 import { z } from "zod"
 import { openWikiSession, type WikiSession } from "@rbcodelabs/geode-headless/wiki"
+import { createDocsPreToolUseHook, DOCS_GUARDED_TOOLS_MATCHER, scrubbedAgentEnv } from "./docs-path-guard.ts"
 import { createHash, randomUUID } from "node:crypto"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { gunzipSync, gzipSync } from "node:zlib"
@@ -495,7 +496,7 @@ function parseConnectors(raw: string | undefined): ConnectorRef[] {
 // The actual deleteDocument/movePath call against Compass happens in the same
 // end-to-end reconciliation pass as every other change, after this process
 // exits (app/api/agent/turn/route.ts).
-function buildDocsFsServer(session: WikiSession) {
+function buildDocsFsServer(session: WikiSession, deletedByAgent: Set<string>) {
   return createSdkMcpServer({
     name: "docsfs",
     version: "1.0.0",
@@ -510,6 +511,10 @@ function buildDocsFsServer(session: WikiSession) {
           if (result.status !== "ok") {
             return { content: [{ type: "text" as const, text: `Could not delete "${path}": ${result.status}` }], isError: true }
           }
+          // The ONLY signal that a doc going missing is intentional: a file that is
+          // merely absent from the final tree (unreadable, past a walk limit) must
+          // never be hard-deleted on that evidence alone.
+          deletedByAgent.add(path.endsWith("/_doc.md") ? path.slice(0, -"/_doc.md".length) : path)
           return { content: [{ type: "text" as const, text: `Deleted ${path}` }] }
         }
       ),
@@ -556,30 +561,65 @@ const DOCS_SAVE_FAILED_NOTICE = "(Some doc changes from this turn may not have s
 
 type FinalDocFile = { path: string; frontmatterDocId: string | null; content: string }
 
+type CollectedDocState = {
+  files: FinalDocFile[]
+  /** The wiki view was cut short, or a discovered note could not be read: absence proves nothing. */
+  incomplete: boolean
+  /** Files left out because their names are not valid doc names (the server would refuse them). */
+  skippedNames: string[]
+}
+
+const MAX_DOC_DEPTH = 30
+// eslint-disable-next-line no-control-regex
+const ILLEGAL_SEGMENT_CHARS = /[/\\:*?"<>|\x00-\x1f]/
+
+/** Mirrors lib/doc-path.ts validateDocPath, which the server applies again; this one only avoids sending a doomed request. */
+function isValidDocName(docPath: string): boolean {
+  const segments = docPath.split("/")
+  if (segments.length > MAX_DOC_DEPTH) return false
+  return segments.every((segment) =>
+    segment.length > 0 &&
+    segment !== "." && segment !== ".." &&
+    !segment.startsWith(".") &&
+    segment !== "node_modules" && segment !== "_doc.md" &&
+    !ILLEGAL_SEGMENT_CHARS.test(segment) &&
+    segment === segment.trim() &&
+    !segment.endsWith(".") &&
+    Buffer.byteLength(segment, "utf8") <= 200)
+}
+
 /**
  * The agent's final doc tree, read through the same session used throughout the
  * turn. Its read-after-write guarantee (ADR 0023 in the geode repo) means this is
  * exactly the state the agent's own edits left behind, not a possibly-still-settling
  * view from a second, freshly-opened session.
  */
-function collectFinalDocFiles(session: WikiSession): FinalDocFile[] {
+function collectFinalDocState(session: WikiSession): CollectedDocState {
   const files: FinalDocFile[] = []
+  const skippedNames: string[] = []
+  const info = session.info()
+  // False when a limit (entries, depth, bytes) cut the walk short or a note's bytes
+  // could not be read; either way a missing doc is not proof it was removed.
+  let incomplete = !info.discoveryComplete || !info.noteContentComplete
   for (const entry of session.listFiles()) {
     if (entry.kind !== "note" || !entry.path.endsWith("/_doc.md")) continue
+    const docPath = entry.path.slice(0, -"/_doc.md".length)
     const read = session.readNote(entry.path)
     if (read.status !== "ok") {
-      // An unreadable note is reported as a diagnostic, not fatal to the turn:
-      // the reconciler will see this doc's baseline entry missing from the
-      // final tree and treat it as deleted, which is the safe default when
-      // this file's content can no longer be trusted.
+      // An unreadable note must not look like a deletion, so the whole state is marked incomplete.
       note(`could not read "${entry.path}" for final doc state: ${read.reason}`)
+      incomplete = true
+      continue
+    }
+    if (!isValidDocName(docPath)) {
+      skippedNames.push(docPath)
       continue
     }
     const frontmatter = read.note.metadata?.frontmatter
     const frontmatterDocId = frontmatter && typeof frontmatter.compass_doc_id === "string" ? frontmatter.compass_doc_id : null
-    files.push({ path: entry.path.slice(0, -"/_doc.md".length), content: read.note.text, frontmatterDocId })
+    files.push({ path: docPath, content: read.note.text, frontmatterDocId })
   }
-  return files
+  return { files, incomplete, skippedNames }
 }
 
 /**
@@ -596,18 +636,24 @@ function collectFinalDocFiles(session: WikiSession): FinalDocFile[] {
  *
  * Never throws: a doc-saving problem must not cost the user the agent's answer.
  */
-async function reportDocState(session: WikiSession, baseUrl: string, finalText: string): Promise<string> {
-  let files: FinalDocFile[]
+async function reportDocState(session: WikiSession, baseUrl: string, finalText: string, deletedByAgent: Set<string>): Promise<string> {
+  let collected: CollectedDocState
   try {
-    files = collectFinalDocFiles(session)
+    collected = collectFinalDocState(session)
   } catch (error) {
     note(`could not read final doc state: ${error instanceof Error ? error.message : String(error)}`)
     return `${finalText}\n\n${DOCS_SAVE_FAILED_NOTICE}`
   }
+  const { files, incomplete, skippedNames } = collected
+  const deletedPaths = [...deletedByAgent]
+  const skippedNotice = skippedNames.length
+    ? `\n\n${skippedNames.length} doc file${skippedNames.length === 1 ? " was" : "s were"} not saved because the name is not valid for a doc: ${skippedNames.slice(0, 5).map((n) => `'${n}'`).join(", ")}.`
+    : ""
+  const withNotice = (text: string) => `${text}${skippedNotice}`
 
   if (!reporter || !runCallbackHeaders || !AGENT_RUN_ID) {
-    emit("AGENT_DOC_STATE", files)
-    return finalText
+    emit("AGENT_DOC_STATE", { files, incomplete, deletedPaths })
+    return withNotice(finalText)
   }
 
   try {
@@ -631,14 +677,14 @@ async function reportDocState(session: WikiSession, baseUrl: string, finalText: 
     const response = await fetch(url, {
       method: "POST",
       headers: { ...runCallbackHeaders, "content-type": "application/json" },
-      body: JSON.stringify({ manifest, files: payloadFiles }),
+      body: JSON.stringify({ manifest, files: payloadFiles, incomplete, deletedPaths }),
     })
     if (!response.ok) throw new Error(`docs reconciliation returned ${response.status}`)
     const result = (await response.json()) as { notice?: string | null }
-    return result.notice ? `${finalText}\n\n${result.notice}` : finalText
+    return withNotice(result.notice ? `${finalText}\n\n${result.notice}` : finalText)
   } catch (error) {
     note(`doc reconciliation failed: ${error instanceof Error ? error.message : String(error)}`)
-    return `${finalText}\n\n${DOCS_SAVE_FAILED_NOTICE}`
+    return withNotice(`${finalText}\n\n${DOCS_SAVE_FAILED_NOTICE}`)
   }
 }
 
@@ -673,6 +719,7 @@ async function main(): Promise<void> {
   // handoff runs get no DOCS_ROOT (their MCP key is narrower than "act as the user"),
   // and keep the MCP-only configuration, including write_doc and friends.
   let docsSession: WikiSession | undefined
+  const deletedByAgent = new Set<string>()
   const docsRoot = DOCS_ROOT
   if (docsRoot) {
     // The host may not have written anything under DOCS_ROOT at all (a
@@ -704,7 +751,7 @@ async function main(): Promise<void> {
       // searching for tools; with it, it can act directly.
       alwaysLoad: true,
     },
-    ...(docsSession ? { docsfs: buildDocsFsServer(docsSession) } : {}),
+    ...(docsSession ? { docsfs: buildDocsFsServer(docsSession, deletedByAgent) } : {}),
   }
   // Compass-hosted search. The name is reserved before connectors are
   // read so a connector slug cannot shadow it.
@@ -769,6 +816,17 @@ async function main(): Promise<void> {
     tools: docsSession ? ["WebFetch", "Read", "Write", "Edit", "Glob"] : ["WebFetch"],
     // Scopes the agent's native file tools to the materialized doc tree.
     ...(docsSession && docsRoot ? { cwd: docsRoot } : {}),
+    // `cwd` alone confines nothing: under bypassPermissions Read/Write/Edit/Glob
+    // accept any absolute path (`Read /proc/self/environ` exposes every secret in
+    // this process). The hook denies any path that does not resolve, symlinks
+    // included, to a location inside the docs directory. See docs-path-guard.ts.
+    ...(docsSession && docsRoot
+      ? { hooks: { PreToolUse: [{ matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot)] }] } }
+      : {}),
+    // The model-facing CLI process does not need this script's own credentials
+    // (the run callback token and the MCP bearer are used in-process only), so it
+    // does not inherit them.
+    env: scrubbedAgentEnv(process.env),
     strictMcpConfig: true,
     settingSources: [],
     systemPrompt: effectiveSystemPrompt,
@@ -900,7 +958,7 @@ async function main(): Promise<void> {
   // terminal report and the session upload for the same reason as the session:
   // a detached run's worker token stops working the moment the run is terminal.
   let finalText = outcome.finalText
-  if (docsSession) finalText = await reportDocState(docsSession, baseUrl, finalText)
+  if (docsSession) finalText = await reportDocState(docsSession, baseUrl, finalText, deletedByAgent)
 
   // Before the terminal report: a detached run's worker token stops working the
   // moment the run is terminal, so the upload has to land first.

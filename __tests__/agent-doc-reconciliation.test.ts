@@ -7,15 +7,26 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
 
 const mocks = vi.hoisted(() => ({
-  writePath: vi.fn(),
-  movePath: vi.fn(),
-  deletePath: vi.fn(),
+  writeDocById: vi.fn(),
+  moveDocById: vi.fn(),
+  deleteDocById: vi.fn(),
+  createPath: vi.fn(),
+  resolvePath: vi.fn(),
   recordConflictingSnapshot: vi.fn(),
   deriveOperationId: vi.fn((base: string, salt: string) => `${base}::${salt}`),
 }))
 vi.mock("@/lib/doc-fs", () => mocks)
 
-import { planReconciliation, applyReconciliationPlan, type DocBaselineEntry, type DocFinalFile } from "@/lib/agent-doc-reconciliation"
+import {
+  planReconciliation,
+  applyReconciliationPlan,
+  guardDeletes,
+  reconcileAgentDocs,
+  describeConflict,
+  type DocBaselineEntry,
+  type DocFinalFile,
+  type ReconciliationAction,
+} from "@/lib/agent-doc-reconciliation"
 import { DocumentError } from "@/lib/document-service"
 
 function baseline(entries: Partial<DocBaselineEntry>[]): DocBaselineEntry[] {
@@ -150,14 +161,70 @@ describe("planReconciliation", () => {
   })
 })
 
+describe("planReconciliation ordering", () => {
+  it("applies moves (parents first) before deletes, and deletes before creates", () => {
+    const plan = planReconciliation(
+      baseline([
+        { path: "A", docId: "a", content: "a", revision: "ra" },
+        { path: "A/Child", docId: "c", content: "c", revision: "rc" },
+        { path: "Gone", docId: "g", content: "g", revision: "rg" },
+      ]),
+      final([
+        { path: "B/Deep/Child", content: "c", frontmatterDocId: "c" },
+        { path: "B", content: "a", frontmatterDocId: "a" },
+        { path: "Fresh", content: "n", frontmatterDocId: null },
+      ])
+    )
+    expect(plan.map((p) => p.type)).toEqual(["move", "move", "delete", "create"])
+    expect(plan.filter((p) => p.type === "move").map((p) => (p.type === "move" ? p.toPath : ""))).toEqual(["B", "B/Deep/Child"])
+  })
+})
+
+describe("guardDeletes (fail-closed hard deletes)", () => {
+  const del = (path: string): ReconciliationAction => ({ type: "delete", path, docId: `id-${path}`, expectedRevision: "r" })
+
+  it("keeps a delete only when the agent explicitly removed that doc", () => {
+    const { plan, skipped } = guardDeletes([del("A"), del("B")], 5, { deletedPaths: ["A"] })
+    expect(plan.map((p) => (p.type === "delete" ? p.path : null))).toEqual(["A"])
+    expect(skipped).toEqual([{ path: "B", reason: "not-requested" }])
+  })
+
+  it("skips every delete when the sandbox view was incomplete, even explicit ones", () => {
+    const { plan, skipped } = guardDeletes([del("A")], 5, { incomplete: true, deletedPaths: ["A"] })
+    expect(plan).toEqual([])
+    expect(skipped).toEqual([{ path: "A", reason: "incomplete" }])
+  })
+
+  it("leaves non-delete actions untouched", () => {
+    const update: ReconciliationAction = { type: "update", path: "U", docId: "u", content: "x", expectedRevision: "r" }
+    expect(guardDeletes([update, del("A")], 5, {}).plan).toEqual([update])
+  })
+
+  it("refuses an implausibly large explicit purge (over the cap AND over half the baseline)", () => {
+    const paths = Array.from({ length: 12 }, (_, i) => `Doc ${i}`)
+    const { plan, skipped } = guardDeletes(paths.map(del), 20, { deletedPaths: paths })
+    expect(plan).toEqual([])
+    expect(skipped).toHaveLength(12)
+    expect(new Set(skipped.map((s) => s.reason))).toEqual(new Set(["too-many"]))
+  })
+
+  it("allows the same count when it is a small share of a large workspace", () => {
+    const paths = Array.from({ length: 12 }, (_, i) => `Doc ${i}`)
+    expect(guardDeletes(paths.map(del), 200, { deletedPaths: paths }).plan).toHaveLength(12)
+  })
+})
+
 describe("applyReconciliationPlan", () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.writeDocById.mockResolvedValue({ docId: "d", revision: "r2" })
+    mocks.moveDocById.mockResolvedValue({ docId: "d", revision: "r-moved" })
+    mocks.deleteDocById.mockResolvedValue(undefined)
+    mocks.createPath.mockResolvedValue({ docId: "n", created: true, revision: "r", path: "p" })
+    mocks.recordConflictingSnapshot.mockResolvedValue(undefined)
+  })
 
-  it("applies each action type through the matching doc-fs call", async () => {
-    mocks.writePath.mockResolvedValue({ docId: "d", created: false, revision: "r", path: "p" })
-    mocks.movePath.mockResolvedValue({ docId: "d", revision: "r" })
-    mocks.deletePath.mockResolvedValue(undefined)
-
+  it("addresses existing docs by id, never by baseline path, and deletes non-recursively", async () => {
     const result = await applyReconciliationPlan(
       "ws-1",
       "turn-1",
@@ -170,60 +237,170 @@ describe("applyReconciliationPlan", () => {
       ],
       "Compass Agent"
     )
-
-    expect(mocks.writePath).toHaveBeenCalledWith("ws-1", "A", "new", expect.objectContaining({ expectedRevision: "rev-a" }))
-    expect(mocks.movePath).toHaveBeenCalledWith("ws-1", "B", "B2", expect.objectContaining({ expectedRevision: "rev-b" }))
-    expect(mocks.deletePath).toHaveBeenCalledWith("ws-1", "C", expect.objectContaining({ expectedRevision: "rev-c", recursive: true }))
-    expect(mocks.writePath).toHaveBeenCalledWith("ws-1", "D", "content", expect.anything())
+    expect(mocks.writeDocById).toHaveBeenCalledWith("ws-1", "doc-a", "new", expect.objectContaining({ expectedRevision: "rev-a" }))
+    expect(mocks.moveDocById).toHaveBeenCalledWith("ws-1", "doc-b", "B2", expect.objectContaining({ expectedRevision: "rev-b" }))
+    const deleteOptions = mocks.deleteDocById.mock.calls[0][2]
+    expect(mocks.deleteDocById).toHaveBeenCalledWith("ws-1", "doc-c", expect.objectContaining({ expectedRevision: "rev-c" }))
+    expect(deleteOptions).not.toHaveProperty("recursive")
+    expect(mocks.createPath).toHaveBeenCalledWith("ws-1", "D", "content", expect.anything())
     expect(result.applied).toHaveLength(5)
     expect(result.conflicts).toEqual([])
   })
 
-  it("moveAndUpdate calls movePath then writePath at the new path", async () => {
-    mocks.movePath.mockResolvedValue({ docId: "doc-a", revision: "r" })
-    mocks.writePath.mockResolvedValue({ docId: "doc-a", created: false, revision: "r2", path: "New" })
+  it("moveAndUpdate moves by id, then pins the revision the move produced for the content write", async () => {
     await applyReconciliationPlan(
       "ws-1",
       "turn-1",
       [{ type: "moveAndUpdate", fromPath: "Old", toPath: "New", docId: "doc-a", content: "new content", expectedRevision: "rev-a" }],
       "Compass Agent"
     )
-    expect(mocks.movePath).toHaveBeenCalledWith("ws-1", "Old", "New", expect.objectContaining({ expectedRevision: "rev-a" }))
-    expect(mocks.writePath).toHaveBeenCalledWith("ws-1", "New", "new content", expect.anything())
+    expect(mocks.moveDocById).toHaveBeenCalledWith("ws-1", "doc-a", "New", expect.objectContaining({ expectedRevision: "rev-a" }))
+    expect(mocks.writeDocById).toHaveBeenCalledWith("ws-1", "doc-a", "new content", expect.objectContaining({ expectedRevision: "r-moved" }))
   })
 
-  it("never touches the live doc on a revision conflict: snapshots the would-be content and reports it, applying nothing further for that action", async () => {
-    mocks.writePath.mockRejectedValue(new DocumentError("revision-conflict"))
-    mocks.recordConflictingSnapshot.mockResolvedValue(undefined)
+  it("still resolves a child after its parent was renamed earlier in the same pass (no path lookup)", async () => {
+    await applyReconciliationPlan(
+      "ws-1",
+      "turn-1",
+      [
+        { type: "move", fromPath: "A", toPath: "B", docId: "parent", expectedRevision: "r1" },
+        { type: "update", path: "A/Child", docId: "child", content: "edited", expectedRevision: "r2" },
+      ],
+      "Compass Agent"
+    )
+    expect(mocks.writeDocById).toHaveBeenCalledWith("ws-1", "child", "edited", expect.anything())
+    expect(mocks.resolvePath).not.toHaveBeenCalled()
+  })
 
+  it("on a revision conflict snapshots the would-be content, reports it, and CONTINUES with later actions", async () => {
+    mocks.writeDocById.mockRejectedValueOnce(new DocumentError("revision-conflict"))
     const result = await applyReconciliationPlan(
       "ws-1",
       "turn-1",
-      [{ type: "update", path: "A", docId: "doc-a", content: "agent's version", expectedRevision: "stale-rev" }],
+      [
+        { type: "update", path: "A", docId: "doc-a", content: "agent's version", expectedRevision: "stale-rev" },
+        { type: "update", path: "B", docId: "doc-b", content: "fine", expectedRevision: "rev-b" },
+      ],
       "Compass Agent"
     )
-
     expect(mocks.recordConflictingSnapshot).toHaveBeenCalledWith("doc-a", "agent's version", "Compass Agent")
-    expect(result.conflicts).toEqual([{ path: "A", title: "A" }])
-    expect(result.applied).toEqual([])
+    expect(result.conflicts).toEqual([{ path: "A", title: "A", reason: "revision" }])
+    expect(result.applied).toEqual([expect.objectContaining({ docId: "doc-b" })])
   })
 
-  it("reports a delete conflict without attempting to snapshot content (there is none)", async () => {
-    mocks.deletePath.mockRejectedValue(new DocumentError("revision-conflict"))
+  it("reports a parent delete that still has children as a conflict, not an exception, and leaves content alone", async () => {
+    mocks.deleteDocById.mockRejectedValueOnce(Object.assign(new Error("has children"), { name: "DocFsError", code: "has-children" }))
     const result = await applyReconciliationPlan(
       "ws-1",
       "turn-1",
-      [{ type: "delete", path: "A", docId: "doc-a", expectedRevision: "stale-rev" }],
+      [{ type: "delete", path: "Parent", docId: "p", expectedRevision: "r" }],
       "Compass Agent"
     )
+    expect(result.conflicts).toEqual([{ path: "Parent", title: "Parent", reason: "has-children" }])
     expect(mocks.recordConflictingSnapshot).not.toHaveBeenCalled()
-    expect(result.conflicts).toEqual([{ path: "A", title: "A" }])
   })
 
-  it("re-throws any error that isn't a revision conflict", async () => {
-    mocks.writePath.mockRejectedValue(new Error("boom"))
+  it("a refused child delete is not overridden by its parent's delete", async () => {
+    mocks.deleteDocById.mockImplementation(async (_ws: string, docId: string) => {
+      if (docId === "child") throw new DocumentError("revision-conflict")
+      throw Object.assign(new Error("has children"), { name: "DocFsError", code: "has-children" })
+    })
+    const result = await applyReconciliationPlan(
+      "ws-1",
+      "turn-1",
+      [
+        { type: "delete", path: "P/C", docId: "child", expectedRevision: "r1" },
+        { type: "delete", path: "P", docId: "parent", expectedRevision: "r2" },
+      ],
+      "Compass Agent"
+    )
+    expect(result.applied).toEqual([])
+    expect(result.conflicts.map((c) => c.reason)).toEqual(["revision", "has-children"])
+    for (const call of mocks.deleteDocById.mock.calls) expect(call[2]).not.toHaveProperty("recursive")
+  })
+
+  it("maps operation-conflict to a conflict too, and keeps going", async () => {
+    mocks.moveDocById.mockRejectedValueOnce(new DocumentError("operation-conflict"))
+    const result = await applyReconciliationPlan(
+      "ws-1",
+      "turn-1",
+      [
+        { type: "move", fromPath: "A", toPath: "A2", docId: "a", expectedRevision: "r" },
+        { type: "create", path: "Z", content: "z" },
+      ],
+      "Compass Agent"
+    )
+    expect(result.conflicts).toEqual([{ path: "A2", title: "A2", reason: "operation" }])
+    expect(mocks.createPath).toHaveBeenCalled()
+  })
+
+  it("refuses to overwrite a doc already at a created path: conflict plus a version on the existing doc", async () => {
+    mocks.createPath.mockRejectedValueOnce(Object.assign(new Error("exists"), { name: "DocFsError", code: "exists" }))
+    mocks.resolvePath.mockResolvedValue({ docId: "someone-elses" })
+    const result = await applyReconciliationPlan("ws-1", "turn-1", [{ type: "create", path: "Taken", content: "agent text" }], "Compass Agent")
+    expect(result.conflicts).toEqual([{ path: "Taken", title: "Taken", reason: "exists" }])
+    expect(mocks.recordConflictingSnapshot).toHaveBeenCalledWith("someone-elses", "agent text", "Compass Agent")
+  })
+
+  it("treats a delete of a doc that is already gone as done, so repeating a pass is harmless", async () => {
+    mocks.deleteDocById.mockRejectedValueOnce(new DocumentError("not-found"))
+    const result = await applyReconciliationPlan("ws-1", "turn-1", [{ type: "delete", path: "A", docId: "a", expectedRevision: "r" }], "Compass Agent")
+    expect(result.conflicts).toEqual([])
+    expect(result.applied).toHaveLength(1)
+  })
+
+  it("never deletes or moves when no revision can be pinned (fail closed)", async () => {
+    const result = await applyReconciliationPlan("ws-1", "turn-1", [{ type: "delete", path: "A", docId: "a", expectedRevision: null }], "Compass Agent")
+    expect(mocks.deleteDocById).not.toHaveBeenCalled()
+    expect(result.conflicts).toEqual([{ path: "A", title: "A", reason: "revision" }])
+  })
+
+  it("re-throws anything that is not a doc-level failure", async () => {
+    mocks.writeDocById.mockRejectedValue(new Error("boom"))
     await expect(
       applyReconciliationPlan("ws-1", "turn-1", [{ type: "update", path: "A", docId: "doc-a", content: "x", expectedRevision: "r" }], "Agent")
     ).rejects.toThrow("boom")
+  })
+})
+
+describe("reconcileAgentDocs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.writeDocById.mockResolvedValue({ docId: "d", revision: "r2" })
+    mocks.deleteDocById.mockResolvedValue(undefined)
+    mocks.createPath.mockResolvedValue({ docId: "n", created: true, revision: "r", path: "p" })
+  })
+  const base = [
+    { path: "Keep", docId: "k", revision: "rk", content: "k" },
+    { path: "Lost", docId: "l", revision: "rl", content: "l" },
+    { path: "Removed", docId: "x", revision: "rx", content: "x" },
+  ]
+
+  it("deletes only what the agent removed; a merely-missing doc is left alone and the user is told", async () => {
+    const outcome = await reconcileAgentDocs(
+      "ws-1",
+      "run-1",
+      base,
+      { files: [{ path: "Keep", content: "k", frontmatterDocId: "k" }], incomplete: false, deletedPaths: ["Removed"] },
+      "Compass Agent"
+    )
+    expect(mocks.deleteDocById).toHaveBeenCalledTimes(1)
+    expect(mocks.deleteDocById).toHaveBeenCalledWith("ws-1", "x", expect.anything())
+    expect(outcome.notices.join(" ")).toContain("'Lost'")
+  })
+
+  it("applies no delete at all from an incomplete sandbox view, and says so", async () => {
+    const outcome = await reconcileAgentDocs("ws-1", "run-1", base, { files: [], incomplete: true, deletedPaths: ["Removed"] }, "Compass Agent")
+    expect(mocks.deleteDocById).not.toHaveBeenCalled()
+    expect(outcome.notices.join(" ")).toContain("incomplete")
+  })
+})
+
+describe("describeConflict", () => {
+  it("has a distinct, actionable sentence per reason", () => {
+    const reasons = ["revision", "operation", "has-children", "exists", "gone", "invalid"] as const
+    const sentences = reasons.map((reason) => describeConflict({ path: "A/B", title: "B", reason }))
+    expect(new Set(sentences).size).toBeGreaterThanOrEqual(5)
+    expect(sentences.every((s) => s.includes("'B'"))).toBe(true)
   })
 })

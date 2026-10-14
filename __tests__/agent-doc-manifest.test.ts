@@ -65,6 +65,20 @@ describe("doc manifest", () => {
     expect(verifyDocManifest(signed, { runId: RUN, workspaceId: WS })).toBeNull()
   })
 
+  it("refuses to sign an ambiguous baseline (duplicate docId or duplicate path)", () => {
+    expect(() => signDocManifest(RUN, WS, [baseline[0], { ...baseline[1], docId: "doc-1" }])).toThrow(/duplicate docId/)
+    expect(() => signDocManifest(RUN, WS, [baseline[0], { ...baseline[1], path: "Product" }])).toThrow(/duplicate path/)
+  })
+
+  it("rejects a validly-signed-looking manifest with duplicate entries, and a signature that is not 64 hex chars", () => {
+    const signed = JSON.parse(JSON.stringify(signDocManifest(RUN, WS, baseline)))
+    expect(verifyDocManifest({ ...signed, signature: signed.signature.toUpperCase() }, { runId: RUN, workspaceId: WS })).toBeNull()
+    expect(verifyDocManifest({ ...signed, signature: signed.signature.slice(0, 62) }, { runId: RUN, workspaceId: WS })).toBeNull()
+    expect(verifyDocManifest({ ...signed, signature: "not hex at all" }, { runId: RUN, workspaceId: WS })).toBeNull()
+    const dup = { ...signed, entries: [signed.entries[0], signed.entries[0]] }
+    expect(verifyDocManifest(dup, { runId: RUN, workspaceId: WS })).toBeNull()
+  })
+
   it("refuses to sign without a server secret", () => {
     delete process.env.AUTH_SECRET
     expect(() => signDocManifest(RUN, WS, baseline)).toThrow(/AUTH_SECRET/)

@@ -431,6 +431,51 @@ than "act as the user" (it is fenced to one conversation claim), and a host-appl
 would sidestep that fence. For those runs no `DOCS_ROOT` is set, the sandbox keeps the MCP-only
 configuration, and `write_doc`/`delete_doc`/`move_doc` are not disallowed.
 
+### 2.7 Review hardening (deletions, directory renames, secrets, path validation)
+
+**A missing file is not a deletion.** The sandbox reads its tree through the geode wiki
+session, whose walk skips dot-prefixed names and `node_modules`, stops at 10,000 entries /
+depth 32, and cannot read notes over 2 MiB. A baseline doc past any of those would look
+deleted, and a hard delete cascades to comments and history. Four layers, all fail-closed:
+
+1. *Do not materialize what cannot be read back.* `selectMaterializable`
+   (`lib/agent-doc-materialize.ts`) keeps docs over the byte, depth, entry or total-size limits
+   out of the files AND out of the signed baseline, so the reconciler never learns their ids.
+2. *Escape names the wiki skips.* `sanitizeTitleSegment` (`lib/doc-path.ts`) maps a leading `.`,
+   `node_modules` and `_doc.md` to `_`-escaped forms, so no doc path contains one.
+3. *Report completeness.* `turn-entry.ts` sends `incomplete: true` when `session.info()` has
+   `discoveryComplete` or `noteContentComplete` false, or any note read fails. An absent flag
+   counts as incomplete. No delete is applied from an incomplete view.
+4. *Delete only on an explicit signal.* The only way for a file to disappear is
+   `delete_local_doc`, which records the path; the sandbox sends `deletedPaths`, and
+   `guardDeletes` drops every delete not in it. More than 10 explicit deletes that are also
+   more than half the baseline are refused as a unit. Soft-delete/tombstones were considered and
+   not built.
+
+**Reconciliation is id-addressed and continues past conflicts.** Actions carry a `docId`;
+`writeDocById`/`moveDocById`/`deleteDocById` resolve the doc's *current* path at apply time, so
+an earlier rename of an ancestor cannot strand later actions. Plan order is moves (parents
+first), updates, deletes (deepest first), creates (top-down). Deletes are single-doc and
+non-recursive, so a child whose delete was refused is never swept away by its parent; a parent
+that still has children is a reported conflict. Revision conflict, operation conflict, a taken
+path (`createPath` is create-only), a concurrently deleted doc, and invalid input are each
+recorded as a conflict (with the agent's content preserved as a version where a doc exists) and
+the pass carries on. Only non-doc errors abort. A delete of an already-gone doc counts as done.
+
+**File tools are confined.** Under `bypassPermissions` the SDK's Read/Write/Edit/Glob accept any
+path, so `Read /proc/self/environ` exposes the run token, MCP token, API key and bypass secret.
+`scripts/agent/docs-path-guard.ts` registers a `PreToolUse` hook that denies any path whose
+symlink-resolved location is outside the docs directory (and Glob patterns that anchor outside
+it); verified live against Agent SDK 0.3.224 under `bypassPermissions`. The CLI process also no
+longer inherits `AGENT_RUN_TOKEN`, `MCP_TOKEN` or `MCP_BYPASS_SECRET`. `ANTHROPIC_API_KEY` must
+stay in its environment, and `WebFetch` remains an outbound channel, so the guard, not secrecy,
+is what protects the key.
+
+**The callback validates everything it is sent.** Every `files[].path` and `deletedPaths[]`
+entry must satisfy `validateDocPath` (sanitizing each segment is a no-op, no dot segments, depth
+at most 30) or the request is a 400; duplicate paths are a 400; the manifest signature must be
+64 lowercase hex characters and the manifest may not contain a duplicate docId or path.
+
 ---
 
 ## 3. External MCP projection

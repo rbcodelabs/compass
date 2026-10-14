@@ -252,7 +252,12 @@ export async function deleteDocument(docId: string, opts: DocumentMutationOption
     // always supplies one (requireOperation above enforces that); any other
     // caller only pays the guard when it actually asks for one.
     if (doc.storageProvider === "GEODE" || opts.expectedRevision !== undefined) {
-      const changed = await tx.doc.updateMany({ where: { id: docId, workspaceId, revision: opts.expectedRevision }, data: { revision: randomUUID() } })
+      // revisionWhere, not a bare `revision: expected`: a legacy doc has a null
+      // column and a derived `legacy:<updatedAt>` revision, which a bare equality
+      // would never match (every guarded delete of one would fail), and a missing
+      // expectedRevision must never degrade into "match anything".
+      if (!opts.expectedRevision) throw new DocumentError("revision-required")
+      const changed = await tx.doc.updateMany({ where: { id: docId, workspaceId, ...revisionWhere(doc, opts.expectedRevision) }, data: { revision: randomUUID() } })
       if (changed.count !== 1) throw new DocumentError("revision-conflict")
     }
     if (await tx.doc.findFirst({ where: { parentId: docId } })) throw new DocumentError("has-children")

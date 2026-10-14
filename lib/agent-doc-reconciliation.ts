@@ -145,27 +145,113 @@ export function planReconciliation(baseline: readonly DocBaselineEntry[], final:
     .map((c): ReconciliationAction => ({ type: "create", path: c.path, content: contentOf(c) }))
     .sort((a, b) => (a.type === "create" && b.type === "create" ? a.path.split("/").length - b.path.split("/").length : 0))
 
-  return [...deletes, ...actions, ...sortedCreates]
+  // Order matters because every action addresses its doc by id but names its
+  // destination by path: moves first, parents before children, so a later move
+  // or create can land under a directory an earlier move just produced; deletes
+  // after moves so a child moved out of a deleted parent no longer blocks it;
+  // creates last, top-down, so they can nest under anything that now exists.
+  const depth = (path: string) => path.split("/").length
+  const moves = actions
+    .filter((a) => a.type === "move" || a.type === "moveAndUpdate")
+    .sort((a, b) => (a.type === "move" || a.type === "moveAndUpdate") && (b.type === "move" || b.type === "moveAndUpdate") ? depth(a.toPath) - depth(b.toPath) : 0)
+  const rest = actions.filter((a) => a.type !== "move" && a.type !== "moveAndUpdate")
+  return [...moves, ...rest, ...deletes, ...sortedCreates]
 }
 
-export type ReconciliationConflict = { path: string; title: string }
+/** Reconciliation inputs beyond the file list: what the sandbox could and could not see, and what it deleted on purpose. */
+export type DocFinalState = {
+  files: DocFinalFile[]
+  /** The sandbox's wiki view was cut short or a note could not be read: absence proves nothing. */
+  incomplete?: boolean
+  /** Doc paths the agent removed through delete_local_doc. Anything else missing from `files` is not a deletion. */
+  deletedPaths?: string[]
+}
+
+/** Above this many explicit deletes AND above half the baseline, nothing is deleted without a human looking. */
+export const MAX_UNREVIEWED_DELETES = 10
+
+/**
+ * Fail-closed filter for delete actions. A baseline doc that merely vanished
+ * from the final tree (unreadable, past a walk limit, hidden by a name the wiki
+ * skips) is indistinguishable from a deleted one by file comparison alone, and a
+ * hard delete cascades to comments and history. So a delete runs only when the
+ * agent explicitly removed that doc, the sandbox's view was complete, and the
+ * count is not an implausible share of the workspace.
+ */
+export function guardDeletes(
+  plan: readonly ReconciliationAction[],
+  baselineSize: number,
+  state: Pick<DocFinalState, "incomplete" | "deletedPaths">
+): { plan: ReconciliationAction[]; skipped: { path: string; reason: "incomplete" | "not-requested" | "too-many" }[] } {
+  const explicit = new Set(state.deletedPaths ?? [])
+  const skipped: { path: string; reason: "incomplete" | "not-requested" | "too-many" }[] = []
+  let allowed = plan.filter((a): a is Extract<ReconciliationAction, { type: "delete" }> => {
+    if (a.type !== "delete") return false
+    if (state.incomplete) { skipped.push({ path: a.path, reason: "incomplete" }); return false }
+    if (!explicit.has(a.path)) { skipped.push({ path: a.path, reason: "not-requested" }); return false }
+    return true
+  })
+  if (allowed.length > MAX_UNREVIEWED_DELETES && allowed.length > baselineSize / 2) {
+    for (const a of allowed) skipped.push({ path: a.path, reason: "too-many" })
+    allowed = []
+  }
+  const kept = new Set<ReconciliationAction>(allowed)
+  return { plan: plan.filter((a) => a.type !== "delete" || kept.has(a)), skipped }
+}
+
+export type ConflictReason = "revision" | "operation" | "has-children" | "exists" | "gone" | "invalid"
+
+export type ReconciliationConflict = { path: string; title: string; reason: ConflictReason; detail?: string }
 
 export type ReconciliationResult = {
   applied: ReconciliationAction[]
   conflicts: ReconciliationConflict[]
 }
 
+/** Duck-typed so this module does not need a runtime import of DocFsError from doc-fs. */
+function isDocFsError(error: unknown): error is Error & { code: string } {
+  return error instanceof Error && error.name === "DocFsError" && typeof (error as { code?: unknown }).code === "string"
+}
+
+function classify(error: unknown): { reason: ConflictReason; detail?: string } | null {
+  if (error instanceof DocumentError) {
+    switch (error.code) {
+      case "revision-conflict": return { reason: "revision" }
+      case "operation-conflict": return { reason: "operation" }
+      case "has-children": return { reason: "has-children" }
+      case "not-found": return { reason: "gone" }
+      default: return { reason: "invalid", detail: error.code }
+    }
+  }
+  if (isDocFsError(error)) {
+    switch (error.code) {
+      case "has-children": return { reason: "has-children" }
+      case "exists": return { reason: "exists" }
+      case "not-found": return { reason: "gone" }
+      default: return { reason: "invalid", detail: error.code }
+    }
+  }
+  return null
+}
+
 /**
  * Applies a reconciliation plan through lib/doc-fs.ts, one action at a time
- * (never in parallel — see the module comment on why sequential application
- * is what makes doc-fs's implicit parent-chain creation converge instead of
- * racing to create the same new directory twice).
+ * (never in parallel — sequential application is what makes doc-fs's implicit
+ * parent-chain creation converge instead of racing to create the same new
+ * directory twice).
  *
- * A revision conflict (a human edited the same doc in the UI mid-turn) is
- * never silently retried or dropped: the agent's would-be content is
- * preserved as a labeled, non-current DocVersion on the doc as it now
- * actually stands, and the conflict is reported back for the turn's final
- * message (spec §2.4).
+ * Actions address docs by id, never by baseline path: an earlier action in the
+ * same pass may have renamed or reparented an ancestor, which would leave a
+ * baseline path pointing at nothing. Deletes are single-doc and non-recursive,
+ * so a child whose delete was refused is never swept away by its parent's.
+ *
+ * Every per-action doc-level failure (revision or operation conflict, a parent
+ * that still has children, a path that is already taken, a doc a human deleted
+ * meanwhile) is recorded as a conflict and the pass CONTINUES. The agent's
+ * would-be content is preserved as a labeled, non-current DocVersion where a doc
+ * exists to hang it on, so nothing is silently dropped and nothing live is
+ * silently overwritten (spec §2.4). Anything that is not a doc-level failure
+ * (database down, a bug) still throws.
  */
 export async function applyReconciliationPlan(
   workspaceId: string,
@@ -178,68 +264,127 @@ export async function applyReconciliationPlan(
 
   for (const action of actions) {
     const operationId = docFs.deriveOperationId(turnId, "docId" in action ? action.docId : action.path)
+    const destination = "toPath" in action ? action.toPath : action.path
     try {
+      if ("expectedRevision" in action && action.expectedRevision === null) {
+        // No revision to pin means no way to prove the doc is unchanged: refuse.
+        throw new DocumentError("revision-conflict")
+      }
       switch (action.type) {
         case "noop":
           break
         case "update":
-          await docFs.writePath(workspaceId, action.path, action.content, {
+          await docFs.writeDocById(workspaceId, action.docId, action.content, {
             operationId,
             expectedRevision: action.expectedRevision ?? undefined,
             authorName,
           })
           break
         case "move":
-          await docFs.movePath(workspaceId, action.fromPath, action.toPath, {
+          await docFs.moveDocById(workspaceId, action.docId, action.toPath, {
             operationId,
             expectedRevision: action.expectedRevision ?? undefined,
             authorName,
           })
           break
-        case "moveAndUpdate":
-          await docFs.movePath(workspaceId, action.fromPath, action.toPath, {
+        case "moveAndUpdate": {
+          const moved = await docFs.moveDocById(workspaceId, action.docId, action.toPath, {
             operationId: docFs.deriveOperationId(operationId, "move"),
             expectedRevision: action.expectedRevision ?? undefined,
             authorName,
           })
-          await docFs.writePath(workspaceId, action.toPath, action.content, {
+          // The move bumped the revision; the content write pins the one it produced.
+          await docFs.writeDocById(workspaceId, action.docId, action.content, {
             operationId: docFs.deriveOperationId(operationId, "update"),
+            expectedRevision: moved.revision ?? action.expectedRevision ?? undefined,
             authorName,
           })
           break
+        }
         case "delete":
-          await docFs.deletePath(workspaceId, action.path, {
-            operationId,
-            expectedRevision: action.expectedRevision ?? undefined,
-            authorName,
-            recursive: true,
-          })
+          try {
+            await docFs.deleteDocById(workspaceId, action.docId, {
+              operationId,
+              expectedRevision: action.expectedRevision ?? undefined,
+              authorName,
+            })
+          } catch (error) {
+            // Already gone (a human, or a replay of this same pass): the goal state holds.
+            if (!(isDocFsError(error) && error.code === "not-found") && !(error instanceof DocumentError && error.code === "not-found")) throw error
+          }
           break
         case "create":
-          await docFs.writePath(workspaceId, action.path, action.content, { operationId, authorName })
+          await docFs.createPath(workspaceId, action.path, action.content, { operationId, authorName })
           break
       }
       applied.push(action)
     } catch (error) {
-      if (error instanceof DocumentError && error.code === "revision-conflict") {
-        const path = "toPath" in action ? action.toPath : action.path
-        const content = "content" in action ? action.content : null
-        const docId = "docId" in action ? action.docId : null
-        if (content !== null && docId) {
-          // Record the agent's would-be content as history WITHOUT touching
-          // the doc's live state — the live doc keeps the human's concurrent
-          // edit (never silently overwritten), and the agent's edit is
-          // durably preserved for review/restore (never silently dropped).
-          await docFs.recordConflictingSnapshot(docId, content, authorName).catch(() => {
-            /* best-effort: the conflict is still reported even if the snapshot write itself fails */
-          })
-        }
-        conflicts.push({ path, title: path.split("/").pop() ?? path })
-        continue
+      const kind = classify(error)
+      if (!kind) throw error
+      const content = "content" in action ? action.content : null
+      let docId = "docId" in action ? action.docId : null
+      if (action.type === "create" && kind.reason === "exists") docId = (await docFs.resolvePath(workspaceId, action.path).catch(() => null))?.docId ?? null
+      if (content !== null && docId && (kind.reason === "revision" || kind.reason === "operation" || kind.reason === "exists")) {
+        // Record the agent's would-be content as history WITHOUT touching
+        // the doc's live state — the live doc keeps the concurrent edit
+        // (never silently overwritten), and the agent's edit is durably
+        // preserved for review/restore (never silently dropped).
+        await docFs.recordConflictingSnapshot(docId, content, authorName).catch(() => {
+          /* best-effort: the conflict is still reported even if the snapshot write itself fails */
+        })
       }
-      throw error
+      conflicts.push({ path: destination, title: destination.split("/").pop() ?? destination, reason: kind.reason, ...(kind.detail ? { detail: kind.detail } : {}) })
     }
   }
 
   return { applied, conflicts }
+}
+
+/** One sentence per outcome the user can act on; shared by the callback and the synchronous route. */
+export function describeConflict(c: ReconciliationConflict): string {
+  switch (c.reason) {
+    case "revision":
+    case "operation":
+      return `Couldn't save changes to '${c.title}' — someone else edited it while I was working; your edit is saved in its version history for you to review or restore.`
+    case "exists":
+      return `Couldn't create '${c.title}' — a doc already exists at that path; the content I wrote is saved in that doc's version history.`
+    case "has-children":
+      return `Didn't delete '${c.title}' — it still contains docs that were not deleted.`
+    case "gone":
+      return `Couldn't update '${c.title}' — it was deleted while I was working.`
+    default:
+      return `Couldn't apply my change to '${c.title}'${c.detail ? ` (${c.detail})` : ""}.`
+  }
+}
+
+export function describeSkippedDeletes(skipped: readonly { path: string; reason: "incomplete" | "not-requested" | "too-many" }[]): string | null {
+  if (skipped.length === 0) return null
+  const titles = skipped.slice(0, 5).map((s) => `'${s.path.split("/").pop()}'`).join(", ") + (skipped.length > 5 ? `, and ${skipped.length - 5} more` : "")
+  const reasons = new Set(skipped.map((s) => s.reason))
+  if (reasons.has("incomplete")) return `My working copy of the docs was incomplete, so I did not delete anything (${titles} left in place).`
+  if (reasons.has("too-many")) return `That would delete ${skipped.length} docs at once, so I did not delete any of them; ask again to confirm (${titles} left in place).`
+  return `${skipped.length} doc${skipped.length === 1 ? " was" : "s were"} missing from my working copy but not deleted on purpose, so ${skipped.length === 1 ? "it was" : "they were"} left in place: ${titles}.`
+}
+
+export type ReconcileOutcome = { applied: number; conflicts: ReconciliationConflict[]; notices: string[] }
+
+/**
+ * The one entry point both reconciliation paths call (the detached callback and
+ * the synchronous route): plan, fail-closed delete filtering, apply, and the
+ * user-facing notices.
+ */
+export async function reconcileAgentDocs(
+  workspaceId: string,
+  turnId: string,
+  baseline: readonly DocBaselineEntry[],
+  state: DocFinalState,
+  authorName: string
+): Promise<ReconcileOutcome> {
+  const planned = planReconciliation(baseline, state.files)
+  const { plan, skipped } = guardDeletes(planned, baseline.length, state)
+  const { applied, conflicts } = await applyReconciliationPlan(workspaceId, turnId, plan, authorName)
+  const notices = [...conflicts.map(describeConflict)]
+  const skippedNotice = describeSkippedDeletes(skipped)
+  if (skippedNotice) notices.push(skippedNotice)
+  return { applied: applied.filter((a) => a.type !== "noop").length, conflicts, notices }
 }

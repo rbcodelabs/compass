@@ -20,6 +20,7 @@
  * directory's own path, without a trailing "/_doc.md") and content strings
  * (frontmatter + body, spec §1.3).
  */
+import { sanitizeTitleSegment } from "@/lib/doc-path"
 import { createHash } from "node:crypto"
 import { safeMatter, stringifyFrontMatter } from "@/lib/safe-matter"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
@@ -72,32 +73,7 @@ function actorOpts(opts: DocFsMutationOptions) {
   return { authorId: opts.authorId ?? null, authorName: opts.authorName, ...(opts.actorKey ? { actorKey: opts.actorKey } : {}) }
 }
 
-const MAX_SEGMENT_BYTES = 200
-// eslint-disable-next-line no-control-regex
-const ILLEGAL_CHARS = /[/\\:*?"<>|\x00-\x1f]/g
-
-/**
- * A path segment is the doc's title, lightly sanitized — not a slugified
- * lowercase string (spec §1.1). Filesystem-illegal characters become `_`;
- * leading/trailing whitespace and trailing dots are trimmed; length is capped
- * at 200 UTF-8 bytes (truncate, not reject).
- */
-export function sanitizeTitleSegment(title: string): string {
-  let s = title.replace(ILLEGAL_CHARS, "_").trim()
-  while (s.endsWith(".")) s = s.slice(0, -1)
-  s = s.trim()
-  if (!s) s = "Untitled"
-  const buf = Buffer.from(s, "utf8")
-  if (buf.byteLength > MAX_SEGMENT_BYTES) {
-    // toString("utf8") replaces a truncated trailing multi-byte sequence with
-    // U+FFFD rather than throwing — strip it so a byte-boundary cut never
-    // leaves a mangled replacement character at the end of the segment.
-    s = buf.subarray(0, MAX_SEGMENT_BYTES).toString("utf8").replace(/�+$/, "").trim()
-    while (s.endsWith(".")) s = s.slice(0, -1)
-    if (!s) s = "Untitled"
-  }
-  return s
-}
+export { sanitizeTitleSegment }
 
 /** First 8 hex chars of a docId, used to disambiguate a title collision among siblings. */
 function collisionSuffix(docId: string): string {
@@ -331,6 +307,45 @@ export async function writePath(
     )
     return { docId: updated.id, created: false, revision: documentRevision(updated), path }
   }
+  return createAtPath(workspaceId, segments, body, metadata, effectiveDocType, opts)
+}
+
+/**
+ * Create-only counterpart of writePath: refuses with `exists` instead of silently
+ * updating whatever already lives at `path`. The sandbox reconciler uses it so an
+ * agent-authored file can never overwrite a doc a human (or another turn) created
+ * at the same path while the turn ran.
+ */
+export async function createPath(
+  workspaceId: string,
+  path: string,
+  content: string,
+  opts: DocFsMutationOptions
+): Promise<WritePathResult> {
+  const segments = splitPath(path)
+  if (segments.length === 0) throw new DocFsError("invalid-path", `Invalid doc path: "${path}".`)
+  if (await resolvePath(workspaceId, path)) throw new DocFsError("exists", `A doc already exists at "${path}".`)
+  const parsed = safeMatter(content)
+  let body = parsed.matter ? parsed.content.trimStart() : content
+  const metadata = stripReservedKeys(parsed.data && Object.keys(parsed.data).length > 0 ? (parsed.data as Record<string, unknown>) : null)
+  const docType: DocType = opts.docType ?? "STANDARD"
+  if (docType === "CANVAS") {
+    const canvas = normalizeCanvasContent(body, { strictCards: true })
+    if (!canvas.ok) throw new DocFsError("invalid-canvas", canvas.error)
+    body = canvas.content
+  }
+  return createAtPath(workspaceId, segments, body, metadata, docType, opts)
+}
+
+async function createAtPath(
+  workspaceId: string,
+  segments: string[],
+  body: string,
+  metadata: Record<string, unknown> | null,
+  effectiveDocType: DocType,
+  opts: DocFsMutationOptions
+): Promise<WritePathResult> {
+  const path = segments.join("/")
 
   const title = segments[segments.length - 1]
   const parentId = await ensureParentChain(workspaceId, segments.slice(0, -1), opts)
@@ -344,6 +359,70 @@ export async function writePath(
 }
 
 export type DeletePathOptions = DocFsMutationOptions & { recursive?: boolean }
+
+/**
+ * Id-addressed update: the sandbox reconciler holds docIds, and a path computed
+ * at baseline time goes stale the moment an earlier action in the same pass
+ * renames or reparents an ancestor.
+ */
+export async function writeDocById(
+  workspaceId: string,
+  docId: string,
+  content: string,
+  opts: DocFsMutationOptions
+): Promise<{ docId: string; revision: string | null }> {
+  const node = await resolveById(workspaceId, docId)
+  if (!node) throw new DocFsError("not-found", `No doc with id "${docId}".`)
+  const parsed = safeMatter(content)
+  let body = parsed.matter ? parsed.content.trimStart() : content
+  const metadata = stripReservedKeys(parsed.data && Object.keys(parsed.data).length > 0 ? (parsed.data as Record<string, unknown>) : null)
+  if (node.docType === "CANVAS") {
+    const canvas = normalizeCanvasContent(body, { strictCards: true })
+    if (!canvas.ok) throw new DocFsError("invalid-canvas", canvas.error)
+    body = canvas.content
+  }
+  const updated = await updateDocument(
+    docId,
+    { content: body, metadata: metadata ? toJsonInput(metadata) : undefined },
+    { operationId: opts.operationId, expectedRevision: opts.expectedRevision, ...actorOpts(opts) }
+  )
+  return { docId: updated.id, revision: documentRevision(updated) }
+}
+
+/** Resolves a doc by id to its current node (and so its current path), or null. */
+export async function resolveById(workspaceId: string, docId: string): Promise<DocFsNode | null> {
+  const nodes = await listPaths(workspaceId)
+  return nodes.find((n) => n.docId === docId) ?? null
+}
+
+/**
+ * Deletes exactly one doc by id and never its descendants. A doc that still has
+ * children throws `has-children`, so a parent's delete can never override a child
+ * whose own delete was refused (revision conflict) earlier in the same pass.
+ */
+export async function deleteDocById(workspaceId: string, docId: string, opts: DocFsMutationOptions): Promise<void> {
+  const node = await resolveById(workspaceId, docId)
+  if (!node) throw new DocFsError("not-found", `No doc with id "${docId}".`)
+  if (node.hasChildren) throw new DocFsError("has-children", `Doc "${node.path}" has children; they were not deleted.`)
+  await deleteDocument(docId, {
+    operationId: opts.operationId,
+    expectedRevision: opts.expectedRevision,
+    ...actorOpts(opts),
+    workspaceId,
+  })
+}
+
+/** Id-addressed move: the destination is a path, the source is a docId (see writeDocById). */
+export async function moveDocById(
+  workspaceId: string,
+  docId: string,
+  toPath: string,
+  opts: DocFsMutationOptions
+): Promise<{ docId: string; revision: string | null }> {
+  const node = await resolveById(workspaceId, docId)
+  if (!node) throw new DocFsError("not-found", `No doc with id "${docId}".`)
+  return moveNode(workspaceId, node, toPath, opts)
+}
 
 /**
  * Deletes the doc at `path`. Refuses (matching Unix `rmdir` vs `rm -r`) if it
@@ -395,11 +474,21 @@ export async function movePath(
 ): Promise<{ docId: string; revision: string | null }> {
   const node = await resolvePath(workspaceId, fromPath)
   if (!node) throw new DocFsError("not-found", `No doc at path "${fromPath}".`)
+  return moveNode(workspaceId, node, toPath, opts)
+}
+
+async function moveNode(
+  workspaceId: string,
+  node: DocFsNode,
+  toPath: string,
+  opts: DocFsMutationOptions
+): Promise<{ docId: string; revision: string | null }> {
+  const fromPath = node.path
   const toSegments = splitPath(toPath)
   if (toSegments.length === 0) throw new DocFsError("invalid-path", `Invalid destination path: "${toPath}".`)
   if (toPath === fromPath) return { docId: node.docId, revision: null }
   // A doc cannot be moved inside its own subtree.
-  if (toPath === fromPath || toPath.startsWith(`${fromPath}/`)) {
+  if (toPath.startsWith(`${fromPath}/`)) {
     throw new DocFsError("invalid-move", `Cannot move "${fromPath}" into its own subtree.`)
   }
 

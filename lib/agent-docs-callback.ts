@@ -18,7 +18,8 @@
 import getPrisma, { type AppPrismaClient } from "@/lib/db"
 import { AgentRunError, authorizeAgentRunWorker } from "@/lib/agent-runs"
 import { verifyDocManifest } from "@/lib/agent-doc-manifest"
-import { applyReconciliationPlan, planReconciliation, type DocFinalFile } from "@/lib/agent-doc-reconciliation"
+import { reconcileAgentDocs, type DocFinalFile } from "@/lib/agent-doc-reconciliation"
+import { validateDocPath } from "@/lib/doc-path"
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
 const sha256Hex = /^[a-f0-9]{64}$/i
@@ -61,7 +62,9 @@ function parseFinalFiles(value: unknown): DocFinalFile[] | null {
   for (const item of value) {
     if (!item || typeof item !== "object") return null
     const f = item as Record<string, unknown>
-    if (typeof f.path !== "string" || f.path.length === 0) return null
+    // The sandbox runs agent-controlled code: a path is only ever accepted in the
+    // exact form the doc layer itself could have produced.
+    if (validateDocPath(f.path) !== null) return null
     if (f.frontmatterDocId !== null && typeof f.frontmatterDocId !== "string") return null
     const hasContent = typeof f.content === "string"
     const hasHash = typeof f.contentSha256 === "string" && sha256Hex.test(f.contentSha256)
@@ -76,10 +79,15 @@ function parseFinalFiles(value: unknown): DocFinalFile[] | null {
   return files
 }
 
-export function conflictNotice(titles: readonly string[]): string {
-  return titles
-    .map((title) => `Couldn't save changes to '${title}' — someone else edited it while I was working; your edit is saved in its version history for you to review or restore.`)
-    .join("\n")
+function parseDeletedPaths(value: unknown): string[] | null {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > MAX_FINAL_FILES) return null
+  const out: string[] = []
+  for (const path of value) {
+    if (validateDocPath(path) !== null) return null
+    out.push(path as string)
+  }
+  return out
 }
 
 export async function handleAgentDocsReconcile(request: Request, runId: string, database?: AppPrismaClient) {
@@ -108,23 +116,32 @@ export async function handleAgentDocsReconcile(request: Request, runId: string, 
       if (error instanceof AgentRunError) throw error
       return respond({ error: "Body must be JSON", code: "INVALID_CALLBACK_BODY" }, 400)
     }
-    const body = (parsed ?? {}) as { manifest?: unknown; files?: unknown }
+    const body = (parsed ?? {}) as { manifest?: unknown; files?: unknown; incomplete?: unknown; deletedPaths?: unknown }
     const baseline = verifyDocManifest(body.manifest, { runId, workspaceId: run.workspaceId })
     if (!baseline) return respond({ error: "Doc manifest failed verification", code: "INVALID_DOC_MANIFEST" }, 422)
     const files = parseFinalFiles(body.files)
     if (!files) return respond({ error: "Invalid doc file list", code: "INVALID_DOC_FILES" }, 400)
 
-    let plan: ReturnType<typeof planReconciliation>
+    const deletedPaths = parseDeletedPaths(body.deletedPaths)
+    if (!deletedPaths) return respond({ error: "Invalid deleted path list", code: "INVALID_DOC_FILES" }, 400)
+    // Anything but an explicit `false` is treated as incomplete: fail closed.
+    const incomplete = body.incomplete !== false
+    // Two entries for one path, or a hash-only entry that cannot be honoured, are malformed input.
+    if (new Set(files.map((f) => f.path)).size !== files.length) return respond({ error: "Duplicate doc paths", code: "INVALID_DOC_FILES" }, 400)
+
+    let outcome: Awaited<ReturnType<typeof reconcileAgentDocs>>
     try {
-      plan = planReconciliation(baseline, files)
+      outcome = await reconcileAgentDocs(run.workspaceId, runId, baseline, { files, incomplete, deletedPaths }, "Compass Agent")
     } catch (error) {
-      return respond({ error: error instanceof Error ? error.message : "Invalid doc state", code: "INVALID_DOC_FILES" }, 400)
+      if (error instanceof Error && /no content was provided|neither content nor/.test(error.message)) {
+        return respond({ error: error.message, code: "INVALID_DOC_FILES" }, 400)
+      }
+      throw error
     }
-    const { applied, conflicts } = await applyReconciliationPlan(run.workspaceId, runId, plan, "Compass Agent")
     return respond({
-      applied: applied.filter((a) => a.type !== "noop").length,
-      conflicts: conflicts.map((c) => ({ path: c.path, title: c.title })),
-      notice: conflicts.length > 0 ? conflictNotice(conflicts.map((c) => c.title)) : null,
+      applied: outcome.applied,
+      conflicts: outcome.conflicts.map((c) => ({ path: c.path, title: c.title, reason: c.reason })),
+      notice: outcome.notices.length > 0 ? outcome.notices.join("\n") : null,
     })
   } catch (error) {
     if (error instanceof AgentRunError) return respond({ error: error.message, code: error.code }, error.status)

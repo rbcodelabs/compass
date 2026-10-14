@@ -71,8 +71,29 @@ describe("agent entry capability-pack policy", () => {
     expect(source).not.toContain('requireEnv("DOCS_ROOT"')
   })
 
+  it("ADR 0019: confines the file tools with a PreToolUse path guard and keeps run credentials out of the CLI's environment", () => {
+    // Without the hook, `Read /proc/self/environ` returns every secret in this process.
+    expect(source).toContain('from "./docs-path-guard.ts"')
+    expect(source).toContain("hooks: { PreToolUse: [{ matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot)] }] }")
+    expect(source).toContain("env: scrubbedAgentEnv(process.env)")
+    // The guard must be registered exactly when the file tools are.
+    expect(source).toMatch(/docsSession && docsRoot\s*\?\s*\{ hooks:/)
+  })
+
+  it("ADR 0019: reports whether the sandbox's view was complete and which docs the agent deleted on purpose", () => {
+    expect(source).toContain("const info = session.info()")
+    expect(source).toContain("!info.discoveryComplete || !info.noteContentComplete")
+    expect(source).toContain("incomplete = true")
+    expect(source).toContain("deletedByAgent.add(")
+    expect(source).toContain("JSON.stringify({ manifest, files: payloadFiles, incomplete, deletedPaths })")
+    expect(source).toContain('emit("AGENT_DOC_STATE", { files, incomplete, deletedPaths })')
+    // move_local_doc must not count as a deletion: the doc survives at its new path.
+    const moveTool = source.slice(source.indexOf('"move_local_doc"'), source.indexOf("// ── doc tree reconciliation hand-off"))
+    expect(moveTool).not.toContain("deletedByAgent")
+  })
+
   it("ADR 0019: a detached run reconciles docs over the run callback before its terminal event", () => {
-    const reconcile = source.indexOf("await reportDocState(docsSession, baseUrl, finalText)")
+    const reconcile = source.indexOf("await reportDocState(docsSession, baseUrl, finalText, deletedByAgent)")
     const session = source.indexOf("await publishSession(activeStore, activeSessionId, baseUrl)")
     const terminal = source.indexOf('await reporter?.finish("result"')
     expect(reconcile).toBeGreaterThan(-1)

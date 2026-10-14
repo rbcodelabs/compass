@@ -650,6 +650,26 @@ describe("agent turn route — detached runs", () => {
     expect(runCommand.mock.calls[0][0].env.AGENT_SYSTEM_PROMPT).toContain("_doc.md")
   })
 
+  it("keeps docs the sandbox could not read back (over 2 MiB) out of both the files and the signed baseline", async () => {
+    const mk = (id: string, title: string) => ({ id, title, parentId: null, roadmapItemId: null, docType: "STANDARD", sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) })
+    mockPrisma.doc.findMany.mockResolvedValue([mk("doc-small", "Small"), mk("doc-big", "Big")])
+    mockPrisma.doc.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => ({
+      id: where.id, workspaceId: "ws-1", title: where.id, parentId: null, roadmapItemId: null, docType: "STANDARD",
+      content: where.id === "doc-big" ? "x".repeat(3 * 1024 * 1024) : "small", metadata: null, revision: `rev-${where.id}`,
+      storageProvider: "DATABASE", updatedAt: new Date(1),
+    }))
+    const { writeFiles } = sandbox()
+    await POST(req({ workspaceId: "ws-1", message: "hi" }))
+
+    const files = writeFiles.mock.calls[0][0] as { path: string; content: string }[]
+    expect(files.map(f => f.path)).toContain("docs/Small/_doc.md")
+    expect(files.map(f => f.path)).not.toContain("docs/Big/_doc.md")
+    expect(files.map(f => f.path)).toContain("docs-path-guard.ts")
+    const manifest = JSON.parse(files.find(f => f.path === "docs-manifest.json")!.content)
+    expect(manifest.entries.map((e: { docId: string }) => e.docId)).toEqual(["doc-small"])
+    mockPrisma.doc.findUnique.mockReset()
+  })
+
   it("gives a claim-scoped handoff run no docs at all: no files, no manifest, no DOCS_ROOT", async () => {
     // Their MCP key is narrower than "act as the user"; a host-applied file edit
     // would sidestep that, so the doc tree is neither materialized nor reconciled.

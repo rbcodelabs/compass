@@ -72,7 +72,8 @@ import { WEB_CAPABILITY_SENTENCE } from "@/lib/agent-capabilities"
 import { authorColumn, loadConversationAttribution, SHARED_CONVERSATION_NOTICE, type ConversationAttribution } from "@/lib/agent-attribution"
 import { labelUserTurn } from "@/lib/agent-author-label"
 import * as docFs from "@/lib/doc-fs"
-import { planReconciliation, applyReconciliationPlan, type DocBaselineEntry, type DocFinalFile } from "@/lib/agent-doc-reconciliation"
+import { reconcileAgentDocs, type DocBaselineEntry, type DocFinalState } from "@/lib/agent-doc-reconciliation"
+import { selectMaterializable } from "@/lib/agent-doc-materialize"
 import { signDocManifest, DOC_MANIFEST_FILE } from "@/lib/agent-doc-manifest"
 
 /** Absolute path inside the sandbox where the doc tree is materialized (ADR 0019 §2.2). */
@@ -98,6 +99,11 @@ function readEntryScript(): string {
   return readFileSync(path.join(process.cwd(), "scripts/agent/turn-entry.ts"), "utf8")
 }
 
+/** Imported by entry.ts as "./docs-path-guard.ts", so it is written next to it. */
+function readDocsPathGuard(): string {
+  return readFileSync(path.join(process.cwd(), "scripts/agent/docs-path-guard.ts"), "utf8")
+}
+
 /**
  * Captures the reconciliation baseline (ADR 0019 §2.4) and the sandbox files
  * to materialize it from -- one `_doc.md` per doc, at
@@ -111,14 +117,17 @@ async function materializeDocTree(workspaceId: string): Promise<{
   files: { path: string; content: string }[]
 }> {
   const nodes = await docFs.listPaths(workspaceId)
-  const baseline: DocBaselineEntry[] = []
-  const files: { path: string; content: string }[] = []
+  const read: (DocBaselineEntry & { content: string })[] = []
   for (const node of nodes) {
-    const read = await docFs.readDocById(workspaceId, node.docId)
-    if (!read) continue // raced with a concurrent delete between listPaths and readPath; skip it, it's gone
-    baseline.push({ path: node.path, docId: read.docId, revision: read.revision, content: read.content })
-    files.push({ path: `docs/${node.path}/_doc.md`, content: read.content })
+    const doc = await docFs.readDocById(workspaceId, node.docId)
+    if (!doc) continue // raced with a concurrent delete between listPaths and readDocById; skip it, it's gone
+    read.push({ path: node.path, docId: doc.docId, revision: doc.revision, content: doc.content })
   }
+  // Docs the sandbox could not enumerate or read back stay out of BOTH the files
+  // and the baseline, so reconciliation can never mistake them for deletions.
+  const { included } = selectMaterializable(read)
+  const baseline = included.map((e) => ({ path: e.path, docId: e.docId, revision: e.revision, content: e.content }))
+  const files = included.map((e) => ({ path: `docs/${e.path}/_doc.md`, content: e.content }))
   return { baseline, files }
 }
 
@@ -525,6 +534,7 @@ export async function POST(request: NextRequest) {
     .map(slug => connectorDefinition(slug))
     .filter((definition): definition is NonNullable<typeof definition> => definition !== null)
   const entryScript = readEntryScript()
+  const docsPathGuard = readDocsPathGuard()
 
   // Hoisted above both paths: the MCP key's scope, the run's `claimId`, and the
   // synchronous path's audit redaction all key off the same claim.
@@ -603,6 +613,7 @@ export async function POST(request: NextRequest) {
         : []
       await sandbox.writeFiles([
         { path: "entry.ts", content: entryScript },
+        { path: "docs-path-guard.ts", content: docsPathGuard },
         ...(docMaterial?.files ?? []),
         ...manifestFiles,
         ...sessionFiles,
@@ -683,7 +694,7 @@ export async function POST(request: NextRequest) {
       const auditRows: { toolName: string; argsSummary: string | null }[] = []
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let usage: any
-      let docState: DocFinalFile[] | undefined
+      let docState: DocFinalState | undefined
       let baseline: DocBaselineEntry[] = []
       const turnId = randomUUID()
 
@@ -704,7 +715,7 @@ export async function POST(request: NextRequest) {
         const docMaterial = scope ? undefined : await step(() => materializeDocTree(workspaceId))
         baseline = docMaterial?.baseline ?? []
 
-        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, ...(docMaterial?.files ?? []), ...sessionFiles, ...preparedPacks.files]))
+        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, { path: "docs-path-guard.ts", content: docsPathGuard }, ...(docMaterial?.files ?? []), ...sessionFiles, ...preparedPacks.files]))
         sse("status", { phase: "running" })
 
         const run = await step(() => sandbox!.runCommand({
@@ -788,7 +799,9 @@ export async function POST(request: NextRequest) {
               // fails would apply mutations the agent's own turn never
               // actually completed.
               try {
-                docState = JSON.parse(rest) as DocFinalFile[]
+                const parsedState = JSON.parse(rest) as DocFinalState | DocFinalState["files"]
+                // Older entry scripts emitted the bare file list.
+                docState = Array.isArray(parsedState) ? { files: parsedState, incomplete: true } : parsedState
               } catch {
                 /* malformed AGENT_DOC_STATE -- reconciliation below skips a doc tree it never received */
               }
@@ -819,14 +832,8 @@ export async function POST(request: NextRequest) {
         // than losing the whole response to an unrelated persistence bug.
         if (docState) {
           try {
-            const plan = planReconciliation(baseline, docState)
-            const { conflicts } = await step(() => applyReconciliationPlan(workspaceId, turnId, plan, "Compass Agent"))
-            if (conflicts.length > 0) {
-              const conflictLines = conflicts
-                .map(c => `Couldn't save changes to '${c.title}' — someone else edited it while I was working; your edit is saved in its version history for you to review or restore.`)
-                .join("\n")
-              assistantText = `${assistantText}\n\n${conflictLines}`
-            }
+            const { notices } = await step(() => reconcileAgentDocs(workspaceId, turnId, baseline, docState!, "Compass Agent"))
+            if (notices.length > 0) assistantText = `${assistantText}\n\n${notices.join("\n")}`
           } catch (reconcileError) {
             console.error("[agent-turn] doc reconciliation failed", reconcileError)
             assistantText = `${assistantText}\n\n(Some doc changes from this turn may not have saved -- please check the affected docs.)`
