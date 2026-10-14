@@ -85,6 +85,10 @@ function stream(lines: string[], exitCode = 0) {
 beforeEach(() => {
   vi.clearAllMocks()
   process.env.ANTHROPIC_API_KEY = "sk-ant-test"
+  delete process.env.AGENT_MODEL_PROVIDER
+  delete process.env.AGENT_MODEL_ID
+  delete process.env.BEDROCK_API_KEY
+  delete process.env.AWS_REGION
   mockAuth.mockResolvedValue({ user: { id: "user-1" } })
   mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", name: "Acme", slug: "acme", organization: { slug: "org" } })
   mockPrisma.agentConversation.findFirst.mockResolvedValue(null)
