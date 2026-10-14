@@ -29,7 +29,7 @@ import {
 } from "@/lib/agent-sandbox"
 
 const EXPECTED_DEPS_FINGERPRINT =
-  "8f3d6073b2f387e11d798497ab3184f394531561e598973cc967e587811999b3"
+  "2962a60c1a43534a8bc1f624ef83155f0468011766cc6b70e8378258dd6b68a0"
 
 describe("sandbox deps fingerprint drift guard", () => {
   it("matches the pinned fingerprint (update + rebuild the snapshot if this fails)", () => {

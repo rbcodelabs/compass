@@ -55,6 +55,30 @@ describe("agent entry capability-pack policy", () => {
     expect(source).toContain('"mcp__compass__move_doc"')
     expect(source).not.toContain('"mcp__compass__list_doc_history"')
     expect(source).not.toContain('"mcp__compass__restore_doc_version"')
+    // The docId-addressed tools act on the saved doc directly and have no file
+    // shape; they stay reachable, and stay out of the disallow list.
+    for (const kept of ["edit_doc", "edit_canvas", "build_canvas_tree", "capture_canvas"]) {
+      expect(source).not.toContain(`"mcp__compass__${kept}"`)
+    }
+    // ...but only the docs-materialized agent loses the MCP doc writers.
+    expect(source).toContain('...(docsSession ? ["mcp__compass__write_doc", "mcp__compass__delete_doc", "mcp__compass__move_doc"] : []),')
+  })
+
+  it("ADR 0019: docs are file-shaped only when the host materialized them (claim-scoped runs keep MCP-only docs)", () => {
+    expect(source).toContain("const docsRoot = DOCS_ROOT")
+    expect(source).toContain("if (docsRoot) {")
+    expect(source).toContain("...(docsSession ? { docsfs: buildDocsFsServer(docsSession) } : {}),")
+    expect(source).not.toContain('requireEnv("DOCS_ROOT"')
+  })
+
+  it("ADR 0019: a detached run reconciles docs over the run callback before its terminal event", () => {
+    const reconcile = source.indexOf("await reportDocState(docsSession, baseUrl, finalText)")
+    const session = source.indexOf("await publishSession(activeStore, activeSessionId, baseUrl)")
+    const terminal = source.indexOf('await reporter?.finish("result"')
+    expect(reconcile).toBeGreaterThan(-1)
+    expect(reconcile).toBeLessThan(terminal)
+    expect(reconcile).toBeLessThan(session)
+    expect(source).toContain("/api/internal/agent/runs/${AGENT_RUN_ID}/docs")
   })
 
   it("derives each connector tool prefix from a slug it has re-validated", () => {

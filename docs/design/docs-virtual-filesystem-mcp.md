@@ -396,6 +396,41 @@ version. This mirrors ordinary "opened an old copy, kept editing, saved"
 behavior a human could equally cause, and is not treated as a defect worth
 solving in v1.
 
+### 2.6 Detached runs (added on merge with background agent runs)
+
+The reconciliation described in §2.4 assumed the host request that materialized the
+tree is still alive when the agent finishes, so it could hold the baseline in memory
+and read `AGENT_DOC_STATE` off stdout. Background agent runs
+(`069_background_agent_runs`) break that assumption: the route returns `202` and the
+sandbox reports its own events and result to `/api/internal/agent/runs/:id/*`. The
+design therefore has two paths, selected exactly the way the route already selects
+detached vs synchronous:
+
+| | Synchronous fallback | Detached run |
+|---|---|---|
+| Baseline | in memory in the request | host-signed manifest written into the sandbox (`docs-manifest.json`) |
+| Final state | `AGENT_DOC_STATE` on stdout | `POST /api/internal/agent/runs/:id/docs`, before the terminal event |
+| Who reconciles | the request, after the process exits | that callback, while the run's worker token is still bound |
+| Conflict notice | appended by the route | returned in the response; the sandbox appends it to the final answer |
+
+The manifest is `{ runId, workspaceId, entries: [{ path, docId, revision, contentSha256 }], signature }`,
+HMAC-signed with `AUTH_SECRET` (`lib/agent-doc-manifest.ts`). It carries hashes and ids, never
+content, so no baseline has to be stored server-side. Signing matters because the sandbox
+runs agent-controlled code: without it a compromised turn could forge a `docId` or revision
+and aim a write at a doc it was never shown. `planReconciliation` already refuses any
+`compass_doc_id` that is not in the baseline; the signature makes the baseline itself
+trustworthy. To keep a large unchanged tree off the wire, the sandbox sends a file whose
+content still hashes to its baseline entry as a hash alone; anything else carries content, and
+the planner will not turn a bare hash into a write (`lib/agent-doc-reconciliation.ts`).
+
+The callback takes the workspace and acting user from the run row, re-checks workspace
+membership, and refuses claim-scoped runs.
+
+**Claim-scoped handoff runs get no docs projection.** Their MCP key is deliberately narrower
+than "act as the user" (it is fenced to one conversation claim), and a host-applied file edit
+would sidestep that fence. For those runs no `DOCS_ROOT` is set, the sandbox keeps the MCP-only
+configuration, and `write_doc`/`delete_doc`/`move_doc` are not disallowed.
+
 ---
 
 ## 3. External MCP projection
@@ -498,6 +533,36 @@ rather than defaulting to the more dangerous behavior.
 `move_doc(workspaceId, fromPath, toPath)` — handles rename (same parent, new
 title) and reparent (new parent) uniformly, since both are just "the path
 changed."
+
+### 3.2.1 Tools added to main after this design: `edit_doc`, `edit_canvas`, `build_canvas_tree`, `capture_canvas`
+
+These four are **deliberately left docId-addressed** and are not part of the 15-tool cutover:
+
+- `edit_doc` is a server-side text patch against the *current* body (retrying on top of
+  concurrent changes unless `expectedRevision` is pinned). It is a different operation from
+  `write_doc`, which replaces content; a path-addressed replace cannot express "change this
+  string, whatever else changed meanwhile".
+- `edit_canvas` / `build_canvas_tree` are domain ops on a CANVAS doc (add card, move, merge the
+  OST) that would be lossy and expensive to express as whole-file rewrites of JSON Canvas, and
+  `capture_canvas` renders a canvas to an image (an execution boundary, not a content read).
+
+How an agent obtains the `docId` and `expectedRevision` without `get_doc`: the `docs://` resource
+read returns both in `_meta` (`docId`, `revision`), and the doc's `compass_doc_id` frontmatter
+carries the id in the sandbox projection. `write_doc` and `move_doc` results also return the
+new `revision`.
+
+Interaction with the in-app agent's file tools: these four act on the *saved* doc immediately,
+while the agent's file edits are applied at end of turn. The materialized file is not updated by
+them, so if the agent calls `edit_doc` on a doc it has not touched as a file, the file still
+hashes to its baseline and reconciles as a no-op (the `edit_doc` result stands). If it also edits
+that doc's file in the same turn, the file write meets a bumped revision and surfaces as a normal
+revision conflict (the agent's version is kept in version history), never a silent overwrite. The
+agent's system prompt tells it not to do both.
+
+All four remain `READ`/`WRITE` classified in `lib/mcp-tool-gates.ts` with `assertEntityAccess`
+gates, unchanged. `write_doc` keeps supporting `docType: CANVAS` creation; creating a
+`GTM_POSITIONING_BRIEF` (which needs `roadmapItemId`) is not expressible through `write_doc` and
+remains a UI action, as already noted in the MCP API docs.
 
 ### 3.3 Authorization
 

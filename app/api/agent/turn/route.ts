@@ -114,7 +114,7 @@ async function materializeDocTree(workspaceId: string): Promise<{
   const baseline: DocBaselineEntry[] = []
   const files: { path: string; content: string }[] = []
   for (const node of nodes) {
-    const read = await docFs.readPath(workspaceId, node.path)
+    const read = await docFs.readDocById(workspaceId, node.docId)
     if (!read) continue // raced with a concurrent delete between listPaths and readPath; skip it, it's gone
     baseline.push({ path: node.path, docId: read.docId, revision: read.revision, content: read.content })
     files.push({ path: `docs/${node.path}/_doc.md`, content: read.content })

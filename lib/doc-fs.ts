@@ -205,8 +205,17 @@ export type DocFsContent = { docId: string; content: string; revision: string | 
 export async function readPath(workspaceId: string, path: string): Promise<DocFsContent | null> {
   const node = await resolvePath(workspaceId, path)
   if (!node) return null
+  return readDocById(workspaceId, node.docId)
+}
+
+/**
+ * Reads one doc's frontmatter + body by id. Split out of `readPath` so a caller
+ * that already holds the whole tree from `listPaths` (the agent turn route
+ * materializing every doc) does not re-list the entire workspace once per doc.
+ */
+export async function readDocById(workspaceId: string, docId: string): Promise<DocFsContent | null> {
   const prisma = getPrisma()
-  const doc = await prisma.doc.findUnique({ where: { id: node.docId } })
+  const doc = await prisma.doc.findUnique({ where: { id: docId } })
   if (!doc || doc.workspaceId !== workspaceId) return null
   const hydrated = await hydrateDocument(workspaceId, doc)
   const userMetadata =

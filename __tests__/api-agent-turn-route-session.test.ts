@@ -18,6 +18,8 @@ const mockPrisma = {
   agentMessage: { create: vi.fn(), findMany: vi.fn() },
   agentAuditLog: { createMany: vi.fn() },
   workspaceCapabilityPack: { findMany: vi.fn() },
+  // ADR 0019: the route materializes the doc tree (via lib/doc-fs.ts) before every turn.
+  doc: { findMany: vi.fn(), findUnique: vi.fn() },
 }
 Object.assign(mockPrisma, { $transaction: <T>(fn: (tx: typeof mockPrisma) => Promise<T>) => fn(mockPrisma) })
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
@@ -94,6 +96,8 @@ beforeEach(() => {
   mockPrisma.agentMessage.create.mockResolvedValue({ id: "user-msg-1" })
   mockPrisma.agentMessage.findMany.mockResolvedValue([])
   runMocks.available.mockResolvedValue(false)
+  mockPrisma.doc.findMany.mockResolvedValue([])
+  process.env.AUTH_SECRET = "test-auth-secret"
   runMocks.started.mockResolvedValue(undefined)
   sessionMocks.commit.mockResolvedValue({ committed: true, revision: 1 })
 })
