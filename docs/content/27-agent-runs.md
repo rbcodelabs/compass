@@ -111,8 +111,27 @@ only an exit code. Error output from a turn that succeeds is ignored. Output is 
 so a very noisy failure shows its beginning, not its end. Runs that execute in the
 background do not include sandbox error output.
 
-A blank or whitespace-only `ANTHROPIC_API_KEY` is treated the same as a missing one:
+A blank or whitespace-only API key for the selected model provider (see below) is treated the same as a missing one:
 the turn is rejected up front with a configuration error, before a sandbox is started.
+
+## Model provider
+
+The agent uses Anthropic's API by default. A deployment can opt in to AWS Bedrock
+instead with environment variables:
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `AGENT_MODEL_PROVIDER` | `anthropic` or `bedrock` | `anthropic` |
+| `ANTHROPIC_API_KEY` | Required when the provider is `anthropic` | none |
+| `BEDROCK_API_KEY` | Required when the provider is `bedrock`: a Bedrock long-lived API key (bearer token) | none |
+| `AWS_REGION` | Bedrock region | `us-east-1` |
+| `AGENT_MODEL_ID` | Overrides the model id | `claude-sonnet-5` (anthropic), `global.anthropic.claude-sonnet-5-5` (bedrock) |
+
+Only the selected provider's key is needed and only that key is passed into the
+sandbox. An unrecognised `AGENT_MODEL_PROVIDER` is rejected with a configuration
+error, the same as a missing key. The Bedrock default is a cross-region inference
+profile id; set `AGENT_MODEL_ID` if your account uses a different profile. The model
+recorded on each assistant message is the one the turn actually ran with.
 
 ## Deployment
 
