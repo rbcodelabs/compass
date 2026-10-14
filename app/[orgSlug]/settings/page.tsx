@@ -3,6 +3,7 @@ import getPrisma from "@/lib/db";
 import { ManageScoringModelsPanel } from "@/components/scoring-models/manage-scoring-models-panel";
 import { DeleteOrganizationPanel } from "@/components/settings/delete-organization-panel";
 import { CreateWorkspacePanel } from "@/components/settings/create-workspace-panel";
+import { OrganizationSlugPanel } from "@/components/settings/organization-slug-panel";
 import type { ScoringModelData, ScoringModelStatus, ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { isOrgAdminRole } from "@/lib/roles";
 import { PageHeader } from "@/components/patterns/page-header";
@@ -91,6 +92,13 @@ export default async function OrgSettingsPage({ params }: Props) {
   return (
     <main className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-8 max-w-3xl">
       <PageHeader title="Organization Settings" description={organization.name} />
+
+      <SettingsSection
+        title="Organization URL"
+        description="The slug that starts every link to this organization. Changing it breaks every existing link that contains the old slug; there is no redirect."
+      >
+        <OrganizationSlugPanel orgSlug={orgSlug} />
+      </SettingsSection>
 
       <SettingsSection
         title="Workspaces"

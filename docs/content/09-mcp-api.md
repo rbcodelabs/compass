@@ -349,6 +349,8 @@ Notification kinds are `STATUS_CHANGED`, `COMMENT_ADDED`, `COMMENT_REPLIED` and,
 
 ### Workspace
 
+> **Renamed organizations.** An organization's URL slug can be changed in Organization Settings, and the old slug stops working immediately (no redirect, no alias). Tools that take `orgSlug` (`list_workspaces`, `get_workspace_by_slug`, `create_workspace`, scoring and roadmap-view tools, and the REST `/api/v1/organizations/{orgSlug}/…` routes) return "not found" for the old slug, so update any stored slug. Workspace and entity IDs never change.
+
 | Tool | Description |
 |---|---|
 | `get_workspace_summary` | Returns high-level counts and status for a workspace: OKR cycles, opportunities, experiments, roadmap items, active experiments, active OKR cycle, and squads. Also returns the workspace's `thinkingModel` (see below) |

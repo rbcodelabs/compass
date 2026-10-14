@@ -148,6 +148,12 @@ describe("createOrganizationAndWorkspace — slug uniqueness", () => {
     expect(result.errors?.orgSlug).toContain("This slug is already taken. Please choose another.");
     expect(mockOrganization.create).not.toHaveBeenCalled();
   });
+
+  it("rejects a reserved word that would shadow a top-level route", async () => {
+    const result = await createOrganizationAndWorkspace({}, makeFormData({ ...VALID_FIELDS, orgSlug: "login" }));
+    expect(result.errors?.orgSlug?.[0]).toMatch(/reserved/i);
+    expect(mockOrganization.create).not.toHaveBeenCalled();
+  });
 });
 
 // ─── Workspace slug derivation ────────────────────────────────────────────────
