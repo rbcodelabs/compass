@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   db: {
     doc: { findMany: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn() },
     docVersion: { create: vi.fn() },
+    docOperation: { findUnique: vi.fn() },
   },
   createDocument: vi.fn(),
   updateDocument: vi.fn(),
@@ -48,6 +49,7 @@ beforeEach(() => {
   mocks.updateDocument.mockResolvedValue({ id: "doc", revision: "rev-2", updatedAt: new Date() })
   mocks.createDocument.mockResolvedValue({ id: "new-doc", revision: "rev-n", updatedAt: new Date() })
   mocks.db.doc.findFirst.mockResolvedValue(null)
+  mocks.db.docOperation.findUnique.mockResolvedValue(null)
 })
 
 describe("titles the sandbox could not see are escaped in listPaths", () => {
@@ -163,10 +165,9 @@ describe("moveDocById onto an occupied path", () => {
 describe("createPath never silently updates an existing doc", () => {
   it("treats a path occupied by its own earlier create (operation receipt present) as a replay, not a conflict", async () => {
     mocks.db.doc.findMany.mockResolvedValue([row("mine", "Fresh")])
-    mocks.db.docOperation = { findUnique: vi.fn().mockResolvedValue({ id: "receipt" }) } as never
+    mocks.db.docOperation.findUnique.mockResolvedValue({ id: "receipt" })
     await createPath(WS, "Fresh", "body", OPTS)
     expect(mocks.createDocument).toHaveBeenCalledTimes(1) // createDocument replays the stored result for the same receipt
-    delete (mocks.db as Record<string, unknown>).docOperation
   })
 
   it("throws exists when something already lives at the path", async () => {
