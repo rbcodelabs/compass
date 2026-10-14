@@ -112,11 +112,12 @@ describe("checkDocsToolUse: denied", () => {
     // path.resolve("<root>/Product/up/../outside/secret.txt") = "<root>/Product/outside/secret.txt" (inside, and absent),
     // but opening the raw string follows `up` -> <root> first and reads <base>/outside/secret.txt.
     expect(denied("Read", { file_path: "Product/up/../outside/secret.txt" })).toBe(true)
-    expect(denied("Read", { file_path: path.join(root, "Product", "up", "..", "outside", "secret.txt") })).toBe(true)
+    // Built by concatenation: path.join would collapse the ".." lexically and test a different string.
+    expect(denied("Read", { file_path: `${root}/Product/up/../outside/secret.txt` })).toBe(true)
     expect(denied("Write", { file_path: "Product/up/../outside/new.md", content: "x" })).toBe(true)
     expect(denied("Glob", { pattern: "*", path: "Product/up/../outside" })).toBe(true)
     // the escape the guard must not be fooled by really exists
-    expect(readFileSync(path.join(root, "Product", "up", "..", "outside", "secret.txt"), "utf8")).toBe("top secret")
+    expect(readFileSync(`${root}/Product/up/../outside/secret.txt`, "utf8")).toBe("top secret")
     // a plain symlink to the root stays fine
     expect(allowed("Read", { file_path: "Product/up/Product/_doc.md" })).toBe(true)
   })
