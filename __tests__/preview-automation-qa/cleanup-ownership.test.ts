@@ -12,12 +12,13 @@ function fixture() {
     get(_target, property: string) {
       if (!models.has(property)) {
         const methods: Record<string, ReturnType<typeof vi.fn>> = {};
-        for (const method of ["findUnique", "findFirst", "deleteMany", "updateMany", "update", "count"]) {
+        for (const method of ["findUnique", "findFirst", "findMany", "deleteMany", "updateMany", "update", "count"]) {
           methods[method] = vi.fn(async (args: unknown) => {
             calls.push({ model: property, operation: method, args });
             if (property === "previewAutomationRun" && method === "findUnique") return run;
             if (property === "workspace" && method === "findUnique") return { organizationId: run.orgId };
             if (method === "findFirst") return null;
+            if (method === "findMany") return [];
             return method === "count" ? 0 : { count: 1 };
           });
         }
@@ -36,6 +37,10 @@ describe("independent QA: exact cleanup ownership and recoverable revocation", (
     vi.mocked(db.docStorageObject.findFirst).mockResolvedValueOnce({ id: "object" } as never);
     await expect(cleanupPreviewRun(db, run.id, run.deploymentId)).rejects.toThrow("explicit cleanup review");
     expect(db.session.deleteMany).toHaveBeenCalled();
+    expect(db.apiKey.deleteMany).toHaveBeenCalledWith({ where: { userId: { in: [run.ownerUserId, run.viewerUserId] } } });
+    const revoke = calls.findIndex(call => call.model === "previewAutomationRun" && call.operation === "update");
+    const apiKeys = calls.findIndex(call => call.model === "apiKey" && call.operation === "deleteMany");
+    expect(apiKeys).toBeGreaterThan(revoke);
     expect(cascade).not.toHaveBeenCalled();
     expect(calls.some(call => call.model === "previewAutomationRun" && JSON.stringify(call.args).includes("cleanedAt"))).toBe(false);
   });
@@ -74,6 +79,8 @@ describe("independent QA: exact cleanup ownership and recoverable revocation", (
     const { db } = fixture();
     vi.mocked(db.session.deleteMany).mockRejectedValueOnce(new Error("session deletion failed"));
     await expect(cleanupPreviewRun(db, run.id, run.deploymentId)).rejects.toThrow();
+    expect(db.apiKey.deleteMany).toHaveBeenCalledWith({ where: { userId: { in: [run.ownerUserId, run.viewerUserId] } } });
+    expect(db.oAuthToken.deleteMany).toHaveBeenCalledWith({ where: { userId: { in: [run.ownerUserId, run.viewerUserId] } } });
     expect(db.previewAutomationSession.deleteMany).not.toHaveBeenCalled();
     expect(cascade).not.toHaveBeenCalled();
   });

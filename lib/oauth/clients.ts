@@ -20,7 +20,7 @@
  */
 import type { Prisma } from "@prisma/client"
 import getPrisma from "@/lib/db"
-import { SUPPORTED_SCOPES, filterSupportedScopes, formatScope } from "@/lib/oauth/constants"
+import { DEFAULT_CLIENT_SCOPES, SUPPORTED_SCOPES, filterSupportedScopes, formatScope } from "@/lib/oauth/constants"
 import { isLoopbackRedirectUri } from "@/lib/oauth/redirect-uri"
 import { hashOAuthToken, mintClientId, mintClientSecret } from "@/lib/oauth/tokens"
 
@@ -265,7 +265,7 @@ export function validateRegistrationRequest(body: unknown): RegistrationValidati
   // actually granted, so the client learns what it got. Rejecting outright would
   // fail a client asking for a reasonable superset.
   const requestedScope = typeof input.scope === "string" ? input.scope : null
-  const granted = requestedScope ? filterSupportedScopes(requestedScope) : [...SUPPORTED_SCOPES]
+  const granted = requestedScope ? filterSupportedScopes(requestedScope) : [...DEFAULT_CLIENT_SCOPES]
   if (granted.length === 0) {
     return {
       ok: false,

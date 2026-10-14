@@ -5,13 +5,17 @@ const panels = [
   ["objective-panel.tsx", "OBJECTIVE"], ["key-result-panel.tsx", "KEY_RESULT"],
   ["solution-panel.tsx", "SOLUTION"],
   ["assumption-panel.tsx", "ASSUMPTION"], ["experiment-panel.tsx", "EXPERIMENT"],
-  ["roadmap-item-panel.tsx", "ROADMAP_ITEM"], ["feedback-panel.tsx", "FEEDBACK_ITEM"],
+  ["feedback-panel.tsx", "FEEDBACK_ITEM"],
 ] as const
 
 describe("entity panel discussion wiring", () => {
   it("connects the shared opportunity detail to its discussion", () => {
     const source = readFileSync(new URL("../../components/discovery/opportunity-detail.tsx", import.meta.url), "utf8")
     expect(source).toContain('<Discussion targetType="OPPORTUNITY" targetId={opportunityId} />')
+  })
+  it("connects the shared roadmap item detail to its discussion", () => {
+    const source = readFileSync(new URL("../../components/roadmap/roadmap-item-detail.tsx", import.meta.url), "utf8")
+    expect(source).toContain('<Discussion targetType="ROADMAP_ITEM" targetId={itemId} />')
   })
   it("connects Task detail to its own TASK discussion", () => {
     // TaskDetail is the shared "one component, two mount points" body (the

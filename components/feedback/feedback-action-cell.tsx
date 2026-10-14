@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useState, useTransition } from "react";
 import { Link2, Loader2, Rocket } from "lucide-react";
 
@@ -68,6 +69,7 @@ export function FeedbackActionCell({
   orgSlug,
   workspaceSlug,
 }: FeedbackActionCellProps) {
+  const labels = useLabels();
   const [isPromoting, startPromote] = useTransition();
   // Server truth for a freshly promoted row does not arrive until a refresh
   // (promote revalidates the roadmap path, not this one), so the cell keeps the
@@ -194,18 +196,18 @@ export function FeedbackActionCell({
         <ComboboxTrigger
           size="sm"
           className="w-full max-w-full"
-          aria-label={`Link ${row.title} to an opportunity`}
+          aria-label={`Link ${row.title} to ${labels.opportunity.indefinite}`}
           aria-invalid={error ? true : undefined}
           data-error={error ? "true" : undefined}
           data-testid="feedback-link-opportunity"
         >
           <Link2 aria-hidden className="size-3 shrink-0 text-text-subtle" />
-          <ComboboxValue placeholder="Link opportunity" />
+          <ComboboxValue placeholder={`Link ${labels.opportunity.lower}`} />
         </ComboboxTrigger>
         <ComboboxContent
           align="end"
-          emptyMessage="No opportunities."
-          inputPlaceholder="Search opportunities…"
+          emptyMessage={`No ${labels.opportunity.lowerPlural}.`}
+          inputPlaceholder={`Search ${labels.opportunity.lowerPlural}…`}
         />
       </Combobox>
       {error && (

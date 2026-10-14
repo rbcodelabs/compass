@@ -20,6 +20,7 @@ import { hashOAuthToken, mintClientSecret } from "@/lib/oauth/tokens"
 
 const ORIGIN = "https://compass.example.com"
 const RESOURCE = `${ORIGIN}/api/mcp`
+const API_RESOURCE = `${ORIGIN}/api/v1`
 const CLIENT_ID = "cmp_oc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const VERIFIER = "a".repeat(64)
 const REDIRECT_URI = "http://127.0.0.1:54321/callback"
@@ -119,6 +120,53 @@ describe("authorization_code grant", () => {
   it("binds the token to the audience the authorization request carried", async () => {
     await exchange(await issueCode())
     for (const row of store.oAuthToken.rows) expect(row.resource).toBe(RESOURCE)
+  })
+
+  it("issues and refreshes REST tokens without crossing audience or scope families", async () => {
+    await store.organizationMember.create({
+      data: { organizationId: "org-1", userId: "user-1", role: "OWNER" },
+    })
+    const code = await issueCode({ resource: API_RESOURCE, scope: "api:read api:write" })
+    const issuedResponse = await exchange(code, { resource: API_RESOURCE })
+    expect(issuedResponse.status).toBe(200)
+    const issued = await issuedResponse.json()
+    expect(issued.scope).toBe("api:read api:write")
+    expect(store.oAuthToken.rows.every((row) => row.resource === API_RESOURCE)).toBe(true)
+
+    const crossed = await post({ grant_type: "refresh_token", refresh_token: issued.refresh_token, client_id: CLIENT_ID, resource: RESOURCE })
+    expect(crossed.status).toBe(400)
+    expect((await crossed.json()).error).toBe("invalid_target")
+  })
+
+  it("preserves the REST audience while narrowing scope during refresh", async () => {
+    await store.organizationMember.create({
+      data: { organizationId: "org-1", userId: "user-1", role: "OWNER" },
+    })
+    const code = await issueCode({ resource: API_RESOURCE, scope: "api:read api:write" })
+    const issued = await (await exchange(code, { resource: API_RESOURCE })).json()
+
+    const refreshedResponse = await post({
+      grant_type: "refresh_token",
+      refresh_token: issued.refresh_token,
+      client_id: CLIENT_ID,
+      resource: API_RESOURCE,
+      scope: "api:read",
+    })
+
+    expect(refreshedResponse.status).toBe(200)
+    const refreshed = await refreshedResponse.json()
+    expect(refreshed.scope).toBe("api:read")
+    const refreshedRows = store.oAuthToken.rows.filter((row) => row.parentTokenId !== null)
+    expect(refreshedRows).toHaveLength(2)
+    expect(refreshedRows.every((row) => row.resource === API_RESOURCE && row.scope === "api:read")).toBe(true)
+  })
+
+  it("refuses to exchange a code whose scope family does not match its REST audience", async () => {
+    const code = await issueCode({ resource: API_RESOURCE, scope: "mcp:read" })
+    const response = await exchange(code, { resource: API_RESOURCE })
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toBe("invalid_scope")
+    expect(store.oAuthToken.rows).toHaveLength(0)
   })
 
   it("rejects a wrong code_verifier — and burns the code doing it", async () => {

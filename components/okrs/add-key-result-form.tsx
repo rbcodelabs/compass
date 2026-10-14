@@ -5,6 +5,7 @@ import { PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { addKeyResult } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 
 interface AddKeyResultFormProps {
@@ -20,6 +21,7 @@ export function AddKeyResultForm({
   orgSlug,
   workspaceSlug,
 }: AddKeyResultFormProps) {
+  const labels = useLabels();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -42,7 +44,7 @@ export function AddKeyResultForm({
     return (
       <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
         <PlusIcon className="size-3.5" />
-        Add key result
+        Add {labels.keyResult.lower}
       </Button>
     );
   }
@@ -54,7 +56,7 @@ export function AddKeyResultForm({
       className="rounded-xl ring-1 ring-border bg-muted/30 p-4 flex flex-col gap-3"
     >
       <p className="text-sm font-medium">
-        Add Key Result
+        Add {labels.keyResult.singular}
         <span className="ml-1 font-normal text-muted-foreground">
           — {objectiveTitle}
         </span>
@@ -102,7 +104,7 @@ export function AddKeyResultForm({
 
       <div className="flex items-center gap-2">
         <Button type="submit" size="sm" disabled={isPending}>
-          {isPending ? "Adding…" : "Add key result"}
+          {isPending ? "Adding…" : `Add ${labels.keyResult.lower}`}
         </Button>
         <Button
           type="button"

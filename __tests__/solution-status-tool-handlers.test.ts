@@ -10,7 +10,11 @@ vi.mock("@/lib/db", () => ({
   default: () => ({ solution: mockSolution }),
 }))
 
+const { mockSync } = vi.hoisted(() => ({ mockSync: vi.fn() }))
+vi.mock("@/lib/roadmap/solution-sync", () => ({ syncRoadmapOnSolutionChange: mockSync }))
+
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
+import { runWithMcpActor } from "@/lib/mcp-authz"
 
 const SOLUTION_ID = "7df95340-297e-40e7-b021-42e2ecbf22e3"
 
@@ -22,6 +26,7 @@ beforeEach(() => {
     status: "IDEA",
   })
   mockSolution.update.mockResolvedValue({ id: SOLUTION_ID })
+  mockSync.mockResolvedValue({ autoAdded: null, skipped: "not-building", followed: 0, error: null })
 })
 
 describe("updateSolutionStatus", () => {
@@ -107,5 +112,40 @@ describe("updateSolutionStatus", () => {
       previousStatus: "IDEA",
       status: "SHIPPED",
     })
+  })
+})
+
+describe("updateSolutionStatus: roadmap auto-sync", () => {
+  const WORKSPACE_ID = "ws-1"
+  const withWorkspace = (status: string) => mockSolution.findUnique.mockResolvedValue({ id: SOLUTION_ID, title: "Adoption dashboard", status, workspaceId: WORKSPACE_ID })
+  const asUser = <T,>(run: () => Promise<T>) => runWithMcpActor({ userId: "user-1", purpose: "USER" }, run)
+
+  it("hands the transition to the roadmap sync after the status write, attributed to the calling user", async () => {
+    withWorkspace("VALIDATED")
+    await asUser(() => updateSolutionStatus({ solutionId: SOLUTION_ID, status: "IN_DELIVERY" }))
+    expect(mockSolution.update).toHaveBeenCalled()
+    expect(mockSync).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ source: "MCP", userId: "user-1" }),
+      { solutionId: SOLUTION_ID, workspaceId: WORKSPACE_ID, previousStatus: "VALIDATED", status: "IN_DELIVERY" },
+    )
+  })
+
+  it("reports the auto-added roadmap item on its own ID line and in the structured data", async () => {
+    withWorkspace("VALIDATED")
+    mockSync.mockResolvedValue({ autoAdded: { itemId: "item-1", workspaceId: WORKSPACE_ID, title: "Adoption dashboard", start: "2026-10-05", end: "2026-11-15" }, skipped: null, followed: 0, error: null })
+    const result = await asUser(() => updateSolutionStatus({ solutionId: SOLUTION_ID, status: "IN_DELIVERY" }))
+    expect(result.content[0].text).toContain("Auto-added to the roadmap.")
+    expect(result.content[0].text).toContain("Roadmap Item ID: item-1")
+    expect(result.structuredContent.data).toMatchObject({ status: "IN_DELIVERY", roadmapItemId: "item-1" })
+  })
+
+  it("does not touch the roadmap when the status did not change or the solution has no workspace", async () => {
+    withWorkspace("IN_DELIVERY")
+    await asUser(() => updateSolutionStatus({ solutionId: SOLUTION_ID, status: "IN_DELIVERY" }))
+    expect(mockSync).not.toHaveBeenCalled()
+    mockSolution.findUnique.mockResolvedValue({ id: SOLUTION_ID, title: "Legacy", status: "VALIDATED", workspaceId: null })
+    await asUser(() => updateSolutionStatus({ solutionId: SOLUTION_ID, status: "IN_DELIVERY" }))
+    expect(mockSync).not.toHaveBeenCalled()
   })
 })

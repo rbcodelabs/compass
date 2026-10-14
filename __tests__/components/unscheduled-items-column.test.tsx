@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DndContext } from "@dnd-kit/core";
 import "@testing-library/jest-dom/vitest";
-import { UnscheduledItemsColumn } from "@/components/roadmap/unscheduled-items-panel";
+import { UnscheduledItemsColumn, UnscheduledItemsSidebar } from "@/components/roadmap/unscheduled-items-panel";
 
 const openPanel = vi.fn();
 vi.mock("@/components/panels/panel-context", () => ({
@@ -67,5 +67,26 @@ describe("UnscheduledItemsColumn", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Fix the broken export" }));
     expect(openPanel).toHaveBeenCalledWith("feedback", "feedback-1");
+  });
+});
+
+describe("UnscheduledItemsSidebar", () => {
+  const items = [{ kind: "feedback" as const, id: "feedback-1", title: "Fix the broken export" }];
+
+  it("docks the Not scheduled pane and collapses to a rail that shows the count", () => {
+    render(
+      <DndContext>
+        <UnscheduledItemsSidebar items={items} onQuickAdd={vi.fn()} />
+      </DndContext>
+    );
+
+    const sidebar = screen.getByTestId("roadmap-unscheduled-sidebar");
+    expect(within(sidebar).getByTestId("roadmap-unscheduled-column")).toBeInTheDocument();
+    expect(within(sidebar).getByText("Fix the broken export")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Not scheduled" }));
+    expect(screen.queryByTestId("roadmap-unscheduled-column")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand Not scheduled (1)" }));
+    expect(screen.getByText("Fix the broken export")).toBeInTheDocument();
   });
 });

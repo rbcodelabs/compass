@@ -165,11 +165,11 @@ export async function listEvidence({
 
   const items = await prisma.evidence.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   })
 
   if (!items.length) {
-    return fail("No evidence found.")
+    return ok("No evidence found.", { items: [], count: 0 })
   }
 
   // ADR-0012 step 6a. Costs nothing when nothing on this node was promoted;

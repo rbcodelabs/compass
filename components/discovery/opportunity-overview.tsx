@@ -24,6 +24,8 @@ import { EvidenceList, type EvidenceListItem } from "@/components/discovery/evid
 import { AddEvidenceDialog } from "@/components/discovery/add-evidence-dialog";
 import type { OpportunityStatus, CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types";
 import { MarkdownContent } from "@/components/markdown-content";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { linkToPlaceholder } from "@/lib/thinking-model/copy";
 
 const STATUS_LABELS: Record<OpportunityStatus, string> = {
   EXPLORING: "Exploring",
@@ -80,6 +82,7 @@ export function OpportunityOverview({
   orgSlug,
   workspaceSlug,
 }: Props) {
+  const labels = useLabels();
   const [isPending, startTransition] = useTransition();
 
   function handleStatusChange(value: string | null) {
@@ -156,7 +159,7 @@ export function OpportunityOverview({
 
       {/* Key Result link */}
       {availableKeyResults.length > 0 && (
-        <Field label="Linked Key Result">
+        <Field label={`Linked ${labels.keyResult.singular}`}>
           <Combobox
             items={keyResultComboboxItems(availableKeyResults)}
             value={opportunity.linkedKeyResult?.id ?? "__none__"}
@@ -164,7 +167,7 @@ export function OpportunityOverview({
             disabled={isPending}
           >
             <ComboboxTrigger size="sm" className="w-64">
-              <ComboboxValue placeholder="Link to a key result…" />
+              <ComboboxValue placeholder={linkToPlaceholder(labels.keyResult)} />
             </ComboboxTrigger>
             <ComboboxContent />
           </Combobox>

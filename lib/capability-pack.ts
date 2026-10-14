@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import path from "node:path"
-import matter from "gray-matter"
+import { safeMatter } from "@/lib/safe-matter"
 
 export const CAPABILITY_PACK_LIMITS = {
   packBytes: 1024 * 1024,
@@ -121,7 +121,7 @@ export function normalizeCapabilityPack(input: Map<string, Uint8Array>): Normali
     let markdown: string
     try { markdown = decoder.decode(bytes) } catch { throw new Error(`Skill must be UTF-8 Markdown: ${skill.path}`) }
     let frontmatter: Record<string, unknown>
-    try { frontmatter = matter(markdown).data } catch { throw new Error(`Skill frontmatter is invalid: ${skill.path}`) }
+    try { frontmatter = safeMatter(markdown).data } catch { throw new Error(`Skill frontmatter is invalid: ${skill.path}`) }
     if (frontmatter.name !== skill.id) throw new Error(`Skill frontmatter name must match ${skill.id}`)
     for (const asset of referencedAssets(markdown, skill.path)) {
       if (!files.has(asset)) throw new Error(`Unresolved asset reference from ${skill.path}: ${asset}`)

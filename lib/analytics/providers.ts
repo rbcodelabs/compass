@@ -1,7 +1,11 @@
 import { z } from "zod"
 
 export const DAY_MS = 86_400_000
-export const windowSchema = z.object({ since: z.string(), until: z.string() }).strict()
+const isoDateSchema = z.iso.date().describe("A valid ISO 8601 calendar date.")
+export const windowSchema = z.object({ since: isoDateSchema, until: isoDateSchema }).strict().superRefine((window, context) => {
+  const days = (Date.parse(window.until) - Date.parse(window.since)) / DAY_MS + 1
+  if (days < 1 || days > 90) context.addIssue({ code: "custom", message: "Window must cover 1 to 90 days." })
+}).describe("since must be on or before until; the window must cover 1 to 90 inclusive calendar days.")
 export type MetricWindow = z.infer<typeof windowSchema>
 export const querySchema = z.object({
   metric: z.enum(["pageviews", "daily_visitors", "event_count", "active_discovery_teams"]),

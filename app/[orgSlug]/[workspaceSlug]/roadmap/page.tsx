@@ -1,7 +1,18 @@
 import { Suspense } from "react";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { canShareOnSurface } from "@/lib/roadmap-views/access";
+import { listRoadmapViews, resolveRoadmapViewActor } from "@/lib/roadmap-views/service";
+import { ROADMAP_URL_PARAMS, type RawSearchParams } from "@/lib/roadmap-views/schema";
+import {
+  isWorkspaceStateModified,
+  needsSavedViewExpansion,
+  resolveWorkspaceRoadmapState,
+  workspacePageParams,
+  workspaceRoadmapHref,
+} from "@/lib/roadmap-views/workspace";
 import getPrisma from "@/lib/db";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
 import { NativeTimeline } from "@/components/roadmap/native-timeline/native-timeline";
@@ -9,16 +20,21 @@ import { RoadmapHeader } from "@/components/roadmap/roadmap-header";
 import type { Horizon, SquadData, TaskStatus } from "@/lib/types";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import type { UnscheduledItem } from "@/components/roadmap/unscheduled-items-panel";
-import { deriveRoadmapDeliveryStatus } from "@/lib/roadmap-delivery-status";
+import { ROADMAP_CARD_INCLUDE, toRoadmapCardData } from "@/lib/roadmap/card-data";
+import { READY_STATUSES, type ScheduleCatalog } from "@/lib/roadmap/rail";
 import { loadCustomFieldDefinitions } from "@/lib/custom-field-definitions";
 import {
   buildCustomFieldFilterGroups,
   parseCustomFieldFilterParams,
   resolveCustomFieldFilter,
 } from "@/lib/custom-field-filter";
+import { objectTypeLabels } from "@/components/custom-fields/object-type-labels";
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { roadmapBoardFilterKey } from "@/lib/roadmap-filters";
 import { parseGroupByParam, resolveRoadmapGroupBy } from "@/lib/roadmap-group-by";
 import { loadCustomFieldValuesForObjects } from "@/lib/custom-field-values-batch";
+import type { SwimlaneSpec } from "@/lib/roadmap/swimlanes";
+import { RAIL_COOKIE_NAME, parseRailPreference } from "@/lib/roadmap/rail-state";
 
 export const metadata = {
   title: "Roadmap",
@@ -26,22 +42,17 @@ export const metadata = {
 
 interface RoadmapPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
-  searchParams: Promise<{ squad?: string; view?: string; field?: string; fieldValue?: string; groupBy?: string }>;
+  searchParams: Promise<RawSearchParams>;
 }
 
 export default async function RoadmapPage({ params, searchParams }: RoadmapPageProps) {
   const session = await auth();
-  if (!session) redirect("/login");
+  if (!session?.user?.id) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const {
-    squad: squadFilter,
-    view: viewParam,
-    field: fieldParam,
-    fieldValue: fieldValueParam,
-    groupBy: groupByParam,
-  } = await searchParams;
-  const view = viewParam === "timeline" ? "timeline" : "board";
+  const query = await searchParams;
+  // Read on the server so a saved open/closed choice is in the first paint, not applied after hydration.
+  const initialRailPreference = parseRailPreference((await cookies()).get(RAIL_COOKIE_NAME)?.value);
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
@@ -52,6 +63,42 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   });
 
   if (!workspace) notFound();
+
+  // Saved views: resolve the selected view (if any) into the same squad / field /
+  // groupBy / view params the page has always read, so everything below is unchanged.
+  const actor = await resolveRoadmapViewActor(session.user.id, orgSlug);
+  const savedViews = actor ? await listRoadmapViews(actor, workspace.id) : [];
+  const savedParam = query[ROADMAP_URL_PARAMS.savedView];
+  const savedId = Array.isArray(savedParam) ? savedParam[0] : savedParam;
+  // An id that was deleted, or that this viewer cannot see, just means "no saved view".
+  const savedView = savedViews.find((v) => v.id === savedId) ?? null;
+  const viewState = resolveWorkspaceRoadmapState(query, savedView);
+  const basePath = `/${orgSlug}/${workspaceSlug}/roadmap`;
+  // `?saved=<id>` alone expands to the full state so the header controls, which edit
+  // single URL params, can also clear something a saved view had set.
+  if (savedView && needsSavedViewExpansion(query)) redirect(workspaceRoadmapHref(basePath, viewState, savedView.id));
+  // Without a saved view the page reads its own params exactly as it always has (untouched,
+  // so a stale or hand-edited link behaves as before); with one, the resolved state drives them.
+  const pick = (key: string) => {
+    const raw = query[key];
+    return (Array.isArray(raw) ? raw[0] : raw) || undefined;
+  };
+  const resolved = workspacePageParams(viewState);
+  const squadFilter = savedView ? resolved.squad : pick("squad");
+  const fieldParam = savedView ? resolved.field : pick("field");
+  const fieldValueParam = savedView ? resolved.fieldValue : pick("fieldValue");
+  const groupByParam = savedView ? resolved.groupBy : pick("groupBy");
+  const view = savedView ? resolved.view : pick("view");
+  const savedViewsProps = actor
+    ? {
+        orgSlug,
+        workspaceId: workspace.id,
+        views: savedViews,
+        savedViewId: savedView?.id ?? null,
+        modified: isWorkspaceStateModified(viewState, savedView),
+        canShare: canShareOnSurface(actor, workspace.id),
+      }
+    : undefined;
 
   const [roadmapFieldDefs, customFieldFilter] = await Promise.all([
     loadCustomFieldDefinitions(prisma, {
@@ -64,7 +111,9 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       filter: parseCustomFieldFilterParams({ field: fieldParam, fieldValue: fieldValueParam }),
     }),
   ]);
-  const customFieldGroups = buildCustomFieldFilterGroups(roadmapFieldDefs);
+  const { labels } = resolveThinkingModel(workspace);
+  const cardSortHref = `/${orgSlug}/${workspaceSlug}/card-sort?objectType=ROADMAP_ITEM`;
+  const customFieldGroups = buildCustomFieldFilterGroups(roadmapFieldDefs, objectTypeLabels(labels));
   // Only SELECT-type fields are groupable — MULTI_SELECT is out of scope
   // (an item could belong to more than one group, which breaks
   // one-row-per-item lane packing on the timeline).
@@ -73,7 +122,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     .filter((field) => field.fieldType === "SELECT")
     .map((field) => ({ id: field.id, label: field.name }));
 
-  const [rawSquads, items, rawKRs, rawSolutions, rawOpportunities, rawExperiments, unscheduledSolutions, unscheduledBugs] = await Promise.all([
+  const [rawSquads, items, rawKRs, rawSolutions, rawOpportunities, rawExperiments, catalogSolutions, unscheduledBugs, activeItemCount] = await Promise.all([
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { createdAt: "asc" },
@@ -86,39 +135,10 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
         ...(customFieldFilter ? { id: { in: customFieldFilter.objectIds } } : {}),
       },
       orderBy: [{ horizon: "asc" }, { sortOrder: "asc" }],
-      include: {
-        solution: {
-          select: { id: true, title: true },
-        },
-        keyResult: {
-          select: {
-            id: true,
-            title: true,
-            current: true,
-            target: true,
-            unit: true,
-            objective: { select: { cycleId: true } },
-          },
-        },
-        opportunity: {
-          select: { id: true, title: true },
-        },
-        experiment: {
-          select: { id: true, title: true },
-        },
-        feedback: {
-          select: { id: true, title: true, type: true },
-        },
-        squad: {
-          select: { id: true, name: true, color: true },
-        },
-        launchChecklist: {
-          select: { tier: true, items: { select: { status: true } } },
-        },
-      },
+      include: ROADMAP_CARD_INCLUDE,
     }),
     prisma.keyResult.findMany({
-      where: { objective: { cycle: { workspaceId: workspace.id } } },
+      where: { objective: { workspaceId: workspace.id } },
       select: {
         id: true,
         title: true,
@@ -127,7 +147,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       orderBy: { createdAt: "asc" },
     }),
     prisma.solution.findMany({
-      where: { opportunity: { workspaceId: workspace.id } },
+      where: { workspaceId: workspace.id },
       select: {
         id: true,
         title: true,
@@ -137,7 +157,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     }),
     prisma.opportunity.findMany({
       where: { workspaceId: workspace.id, status: { not: "ARCHIVED" } },
-      select: { id: true, title: true },
+      select: { id: true, title: true, squadId: true },
       orderBy: { createdAt: "asc" },
     }),
     prisma.experiment.findMany({
@@ -145,22 +165,25 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       select: { id: true, title: true, status: true },
       orderBy: { createdAt: "asc" },
     }),
-    // Validated/in-delivery Solutions with no ACTIVE RoadmapItem yet — the
-    // same "ready to promote" condition as the Discovery solution card's
-    // own Promote-to-Roadmap button, just surfaced on the roadmap itself.
+    // Every live Discovery solution, flagged by whether it already has an ACTIVE
+    // RoadmapItem. This one read feeds the "Ready to schedule" rail (validated and
+    // in-delivery solutions with no item yet, the same "ready to promote" condition
+    // as the Discovery solution card), the schedule palette and the empty-roadmap
+    // presets. It is deliberately not narrowed by the view filters: a solution
+    // scheduled under another squad is still scheduled.
     prisma.solution.findMany({
-      where: {
-        opportunity: { workspaceId: workspace.id },
-        status: { in: ["VALIDATED", "IN_DELIVERY"] },
-        roadmapItems: { none: { status: "ACTIVE" } },
-      },
+      where: { workspaceId: workspace.id, status: { not: "KILLED" } },
       select: {
         id: true,
         title: true,
+        status: true,
         opportunityId: true,
         opportunity: { select: { title: true, squadId: true } },
+        score: { select: { normalizedScore: true } },
+        roadmapItems: { where: { status: "ACTIVE" }, select: { id: true }, take: 1 },
       },
       orderBy: { createdAt: "asc" },
+      take: 500,
     }),
     // Bug-type feedback with no ACTIVE RoadmapItem yet. Ideas are excluded —
     // they're expected to go through Opportunity -> Solution discovery
@@ -174,6 +197,8 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       select: { id: true, title: true },
       orderBy: { voteCount: "desc" },
     }),
+    // Unfiltered: the empty-roadmap prompt must not appear just because a filter hid every item.
+    prisma.roadmapItem.count({ where: { workspaceId: workspace.id, status: "ACTIVE" } }),
   ]);
 
   const customFieldValuesByItemId = resolvedGroupBy.mode === "customField"
@@ -226,45 +251,22 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     status: exp.status,
   }));
 
-  const cardItems: RoadmapCardData[] = items.map((item) => ({
-    id: item.id,
-    title: item.title,
-    description: item.description ?? null,
-    horizon: item.horizon as Horizon,
-    sortOrder: item.sortOrder,
-    isPrivate: item.isPrivate,
-    solutionId: item.solutionId ?? null,
-    keyResultId: item.keyResultId ?? null,
-    opportunityId: item.opportunityId ?? null,
-    experimentId: item.experimentId ?? null,
-    feedbackId: item.feedbackId ?? null,
-    startDate: item.startDate ? item.startDate.toISOString() : null,
-    endDate: item.endDate ? item.endDate.toISOString() : null,
-    updatedAt: item.updatedAt.toISOString(),
-    solution: item.solution ?? null,
-    keyResult: item.keyResult
-      ? {
-          id: item.keyResult.id,
-          title: item.keyResult.title,
-          current: item.keyResult.current,
-          target: item.keyResult.target,
-          unit: item.keyResult.unit,
-          cycleId: item.keyResult.objective?.cycleId ?? null,
-        }
-      : null,
-    opportunity: item.opportunity ?? null,
-    experiment: item.experiment ?? null,
-    feedback: item.feedback ?? null,
-    squad: item.squad ?? null,
-    launchChecklist: item.launchChecklist
-      ? {
-          tier: item.launchChecklist.tier,
-          done: item.launchChecklist.items.filter((i) => i.status === "DONE").length,
-          total: item.launchChecklist.items.length,
-        }
-      : null,
-    deliveryStatus: deriveRoadmapDeliveryStatus(taskStatusesByRoadmapItem.get(item.id) ?? []),
-  }));
+  // Board swimlanes: the same ?groupBy= the timeline uses. Phase / None mean the
+  // classic lane-less board. A squad filter narrows the squad lanes to match.
+  const swimlaneSpec: SwimlaneSpec | null =
+    resolvedGroupBy.mode === "squad"
+      ? { mode: "squad", squads: squadFilter ? squads.filter((squad) => squad.id === squadFilter) : squads }
+      : resolvedGroupBy.mode === "customField"
+        ? {
+            mode: "customField",
+            fieldId: resolvedGroupBy.field.id,
+            fieldName: resolvedGroupBy.field.name,
+            options: resolvedGroupBy.field.options ?? [],
+            valuesByItemId: customFieldValuesByItemId ?? {},
+          }
+        : null;
+
+  const cardItems: RoadmapCardData[] = items.map((item) => toRoadmapCardData(item, taskStatusesByRoadmapItem.get(item.id) ?? []));
 
   // A filter change is a new dataset; ordinary refreshes must preserve
   // in-flight mutation fences and optimistic edits. Both views seed their own
@@ -276,16 +278,39 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
     field: customFieldFilter?.fieldId ?? null,
     fieldValue: fieldValueParam,
   });
+  const boardKey = `${filterKey}|${swimlaneSpec ? (swimlaneSpec.mode === "squad" ? "squad" : swimlaneSpec.fieldId) : ""}`;
 
-  const unscheduledItems: UnscheduledItem[] = [
-    ...unscheduledSolutions.map((sol) => ({
-      kind: "solution" as const,
+  const scheduleCatalog: ScheduleCatalog = {
+    solutions: catalogSolutions.map((sol) => ({
       id: sol.id,
       title: sol.title,
+      status: sol.status,
+      score: sol.score?.normalizedScore ?? null,
       opportunityId: sol.opportunityId,
       opportunityTitle: sol.opportunity.title,
       squadId: sol.opportunity.squadId ?? null,
     })),
+    opportunities: rawOpportunities.map((opp) => ({
+      id: opp.id,
+      title: opp.title,
+      squadId: opp.squadId ?? null,
+    })),
+    scheduledSolutionIds: catalogSolutions.filter((sol) => sol.roadmapItems.length > 0).map((sol) => sol.id),
+  };
+
+  const unscheduledItems: UnscheduledItem[] = [
+    ...catalogSolutions
+      .filter((sol) => READY_STATUSES.includes(sol.status) && sol.roadmapItems.length === 0)
+      .map((sol) => ({
+        kind: "solution" as const,
+        id: sol.id,
+        title: sol.title,
+        opportunityId: sol.opportunityId,
+        opportunityTitle: sol.opportunity.title,
+        squadId: sol.opportunity.squadId ?? null,
+        status: sol.status,
+        score: sol.score?.normalizedScore ?? null,
+      })),
     ...unscheduledBugs.map((fb) => ({
       kind: "feedback" as const,
       id: fb.id,
@@ -302,15 +327,20 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
             items={cardItems}
             squads={squadFilter ? squads.filter((squad) => squad.id === squadFilter) : squads}
             headerSquads={squads}
+            cardSortHref={cardSortHref}
             customFieldGroups={customFieldGroups}
             activeCustomFieldId={customFieldFilter?.fieldId ?? null}
             workspaceId={workspace.id}
             unscheduledItems={unscheduledItems}
+            scheduleCatalog={scheduleCatalog}
+            roadmapEmpty={activeItemCount === 0}
+            initialRailPreference={initialRailPreference}
             groupBy={resolvedGroupBy.mode}
             groupByField={resolvedGroupBy.mode === "customField" ? { id: resolvedGroupBy.field.id, name: resolvedGroupBy.field.name, options: resolvedGroupBy.field.options ?? [] } : undefined}
             customFieldValuesByItemId={customFieldValuesByItemId}
             groupByOptions={groupByOptions}
             launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
+            savedViews={savedViewsProps}
           />
         </Suspense>
       ) : (
@@ -320,11 +350,16 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
               squads={squads}
               customFieldGroups={customFieldGroups}
               activeCustomFieldId={customFieldFilter?.fieldId ?? null}
+              cardSortHref={cardSortHref}
+              savedViews={savedViewsProps}
+              groupByValue={resolvedGroupBy.mode === "customField" ? resolvedGroupBy.field.id : resolvedGroupBy.mode}
+              groupByOptions={groupByOptions}
             />
           </Suspense>
           <div data-slot="workspace-content" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
             <RoadmapBoard
-              key={filterKey}
+              key={boardKey}
+              swimlaneSpec={swimlaneSpec}
               initialItems={cardItems}
               workspaceId={workspace.id}
               orgSlug={orgSlug}

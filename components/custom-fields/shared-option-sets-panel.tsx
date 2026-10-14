@@ -14,17 +14,9 @@ import {
 import { OptionListEditor } from "@/components/custom-fields/option-list-editor";
 import { hasOptionListIssues } from "@/lib/option-list";
 import type { SelectOptionInput } from "@/lib/shared-field-options";
-import type { CustomFieldObjectType, SharedFieldOptionSetData } from "@/lib/types";
-
-const OBJECT_TYPE_LABELS: Record<CustomFieldObjectType, string> = {
-  OPPORTUNITY: "Opportunity",
-  SOLUTION: "Solution",
-  EXPERIMENT: "Experiment",
-  OBJECTIVE: "Objective",
-  KEY_RESULT: "Key Result",
-  ROADMAP_ITEM: "Roadmap Item",
-  TASK: "Task",
-};
+import type { SharedFieldOptionSetData } from "@/lib/types";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { objectTypeLabels } from "./object-type-labels";
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Something went wrong";
@@ -64,6 +56,7 @@ function SetRow({
   const [options, setOptions] = useState<SelectOptionInput[]>(set.options);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const OBJECT_TYPE_LABELS = objectTypeLabels(useLabels());
 
   function save(event: React.FormEvent) {
     event.preventDefault();

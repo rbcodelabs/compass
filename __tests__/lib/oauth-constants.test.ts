@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CompassUrlNotConfiguredError } from "@/lib/compass-url"
 import {
   RESOURCE_SCOPES,
+  API_RESOURCE_SCOPES,
+  SCOPE_API_READ,
+  SCOPE_API_WRITE,
   SCOPE_MCP_READ,
   SCOPE_MCP_WRITE,
   SCOPE_OFFLINE_ACCESS,
@@ -28,19 +31,21 @@ afterEach(() =>
 )
 
 describe("scope vocabulary", () => {
-  it("is exactly the three scopes the design settles on", () => {
-    expect(SUPPORTED_SCOPES).toEqual(["mcp:read", "mcp:write", "offline_access"])
-    expect([SCOPE_MCP_READ, SCOPE_MCP_WRITE, SCOPE_OFFLINE_ACCESS]).toEqual([...SUPPORTED_SCOPES])
+  it("contains the two audience-specific scope families and offline access", () => {
+    expect(SUPPORTED_SCOPES).toEqual(["mcp:read", "mcp:write", "api:read", "api:write", "offline_access"])
+    expect([SCOPE_MCP_READ, SCOPE_MCP_WRITE, SCOPE_API_READ, SCOPE_API_WRITE, SCOPE_OFFLINE_ACCESS]).toEqual([...SUPPORTED_SCOPES])
   })
 
   it("keeps offline_access out of the protected-resource document", () => {
     // Different file from the AS metadata; the spec's "SHOULD NOT advertise
     // offline_access" guidance applies to this one only.
     expect(RESOURCE_SCOPES).toEqual(["mcp:read", "mcp:write"])
+    expect(API_RESOURCE_SCOPES).toEqual(["api:read", "api:write"])
   })
 
-  it("stays short, because an unscoped challenge makes clients request everything listed", () => {
-    expect(SUPPORTED_SCOPES.length).toBeLessThanOrEqual(3)
+  it("keeps each protected resource scope vocabulary short", () => {
+    expect(RESOURCE_SCOPES.length).toBeLessThanOrEqual(2)
+    expect(API_RESOURCE_SCOPES.length).toBeLessThanOrEqual(2)
   })
 
   it("recognises supported scopes and nothing else", () => {

@@ -1,5 +1,6 @@
 "use client"
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -13,6 +14,10 @@ type SearchState = "idle" | "loading" | "ready" | "error"
 
 export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: string; workspaceSlug: string }) {
   const router = useRouter()
+  const labels = useLabels()
+  // The API names its groups canonically; this screen shows the workspace's own words for the two it can rename.
+  const groupLabel = (group: { type: string; label: string }) =>
+    group.type === "opportunity" ? labels.opportunity.plural : group.type === "solution" ? labels.solution.plural : group.label
   const workspaceScope = `${orgSlug}:${workspaceSlug}`
   const listboxId = useId()
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -150,7 +155,7 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
               value={query}
               onChange={(event) => handleQueryChange(event.target.value)}
               onKeyDown={handleInputKeyDown}
-              placeholder="Search opportunities, tasks, docs…"
+              placeholder={`Search ${labels.opportunity.lowerPlural}, tasks, docs…`}
               className="h-14 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground"
             />
             <kbd className="rounded border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">ESC</kbd>
@@ -163,8 +168,8 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
             {state === "ready" && currentResponse?.groups.map((group) => {
               if (!group.items.length) return null
               return (
-                <div key={group.type} role="group" aria-label={group.label} className="mb-2 last:mb-0">
-                  <p className="px-3 py-1.5 text-xs font-medium text-muted-foreground">{group.label}</p>
+                <div key={group.type} role="group" aria-label={groupLabel(group)} className="mb-2 last:mb-0">
+                  <p className="px-3 py-1.5 text-xs font-medium text-muted-foreground">{groupLabel(group)}</p>
                   {group.items.map((item) => {
                     const index = items.findIndex((candidate) => candidate.type === item.type && candidate.id === item.id)
                     return (

@@ -4,8 +4,12 @@ import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
-import { OpportunityCreateError, createOpportunityWithLinks, type NewOpportunityInput } from "@/lib/opportunity-create";
+import { OpportunityCreateError, createOpportunityWithLinks, opportunityCreateErrorMessage, type NewOpportunityInput } from "@/lib/opportunity-create";
 import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
+import { syncRoadmapOnSolutionChange } from "@/lib/roadmap/solution-sync";
+import { setOpportunityKeyResult } from "@/lib/typed-links";
+import { loadThinkingModelSource } from "@/lib/thinking-model/link-surfaces";
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { Prisma } from "@prisma/client";
 import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat";
 import { computeScore, validateMetricsForFormula, type ScoringMetricDef } from "@/lib/scoring";
@@ -62,12 +66,33 @@ export async function createOpportunityFromComposer(
     return { ok: false, error: "Workspace not found or you no longer have access to it." };
   }
   try {
-    const opportunity = await createOpportunityWithLinks(getPrisma(), workspaceId, data);
+    // Attribution for any Objective links chosen in the composer (null for an unattributed session).
+    const session = data.objectiveIds?.length ? await auth() : null;
+    const opportunity = await createOpportunityWithLinks(getPrisma(), workspaceId, data, { createdById: session?.user?.id ?? null });
     revalidatePath(`/[orgSlug]/[workspaceSlug]/discovery`, "layout");
     if (data.feedbackIds?.length) revalidatePath(`/${orgSlug}/${workspaceSlug}/feedback`);
+    if (data.objectiveIds?.length) revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`);
     return { ok: true, opportunity: { id: opportunity.id, title: opportunity.title } };
   } catch (error) {
-    if (error instanceof OpportunityCreateError) return { ok: false, error: error.message };
+    if (error instanceof OpportunityCreateError) {
+      // The key-result message names an entity; say it in the workspace's words (the other messages name none).
+      let keyResultLower = "key result";
+      if (error.code) {
+        try {
+          keyResultLower = resolveThinkingModel(await loadThinkingModelSource(getPrisma(), workspaceId)).labels.keyResult.lower;
+        } catch {
+          // A failed lookup must not replace the validation message; the canonical wording is still correct.
+        }
+      }
+      return { ok: false, error: opportunityCreateErrorMessage(error, keyResultLower) };
+    }
+    // A failed objective link (including a missing link table) rolled the whole create back. Fail loudly but generically:
+    // log only the error name and code (a database error message can carry row data) and keep the draft.
+    if (data.objectiveIds?.length) {
+      const e = error as { name?: string; code?: string } | null;
+      console.error(JSON.stringify({ event: "opportunity_composer.link_failed", name: e?.name ?? "Error", code: e?.code ?? null }));
+      return { ok: false, error: "Something went wrong. Nothing was created. Please try again." };
+    }
     throw error;
   }
 }
@@ -82,6 +107,11 @@ export type OpportunityComposerOptions = {
     status: string;
     opportunity: { id: string; title: string } | null;
   }[];
+  /**
+   * Objectives the composer may link (Phase 4B). Present only for presets whose composer offers the Opportunity<->Objective
+   * link (links.oppToObjective "primary"); CLASSIC reads nothing extra and the field is omitted.
+   */
+  objectives?: { id: string; title: string; cycleTitle: string | null }[];
 };
 
 /** How many recent feedback items the composer's "Seed from feedback" picker searches. */
@@ -103,10 +133,12 @@ export async function loadOpportunityComposerOptions(
     return { ok: false, error: "Workspace not found or you no longer have access to it." };
   }
   const prisma = getPrisma();
-  const [squads, keyResults, feedback] = await Promise.all([
+  // Display decision only: whether the composer offers the Objective picker. Nothing else depends on the preset.
+  const offersObjectives = resolveThinkingModel(await loadThinkingModelSource(prisma, workspaceId)).links.oppToObjective === "primary";
+  const [squads, keyResults, feedback, objectives] = await Promise.all([
     prisma.squad.findMany({ where: { workspaceId }, select: { id: true, name: true, color: true }, orderBy: { createdAt: "asc" } }),
     prisma.keyResult.findMany({
-      where: { objective: { cycle: { workspaceId } } },
+      where: { objective: { workspaceId } },
       select: { id: true, title: true, objective: { select: { title: true } } },
       orderBy: { createdAt: "asc" },
     }),
@@ -116,6 +148,14 @@ export async function loadOpportunityComposerOptions(
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       take: COMPOSER_FEEDBACK_LIMIT,
     }),
+    // Filtered on the Objective's own workspaceId, so a NULL / drifted row is never offered.
+    offersObjectives
+      ? prisma.objective.findMany({
+          where: { workspaceId },
+          select: { id: true, title: true, cycle: { select: { title: true } } },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        })
+      : Promise.resolve(null),
   ]);
   return {
     ok: true,
@@ -123,6 +163,7 @@ export async function loadOpportunityComposerOptions(
       squads,
       keyResults: keyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })),
       feedback,
+      ...(objectives ? { objectives: objectives.map((o) => ({ id: o.id, title: o.title, cycleTitle: o.cycle?.title ?? null })) } : {}),
     },
   };
 }
@@ -147,10 +188,13 @@ export async function addSolution(
   data: { title: string; description?: string },
   revalidatePathStr: string
 ) {
-  await requireProductEntity("opportunity", opportunityId);
+  // The Solution's workspace is derived from the authorized parent Opportunity,
+  // never from client input.
+  const { workspaceId } = await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
   const solution = await captureWorkspaceMutation(prisma, "solution", "create", "UI", undefined, tx => tx.solution.create({
     data: {
+      workspaceId,
       opportunityId,
       title: data.title,
       description: data.description,
@@ -160,19 +204,34 @@ export async function addSolution(
   return solution;
 }
 
+/**
+ * Runs after a UI status change commits: Building auto-adds the solution to the
+ * roadmap and linked items follow the new status (see lib/roadmap/solution-sync).
+ * Never throws; the status change itself has already succeeded.
+ */
+async function syncRoadmapAfterStatusChange(
+  prisma: ReturnType<typeof getPrisma>,
+  change: { solutionId: string; workspaceId: string; previousStatus: string; status: SolutionStatus },
+) {
+  const session = await auth();
+  return syncRoadmapOnSolutionChange(prisma, { source: "UI", captureSource: "UI", userId: session?.user?.id ?? null }, change);
+}
+
 export async function updateSolutionStatus(
   solutionId: string,
   status: SolutionStatus,
   revalidatePathStr: string
 ) {
-  await requireProductEntity("solution", solutionId);
+  const { workspaceId } = await requireProductEntity("solution", solutionId);
   const prisma = getPrisma();
+  const before = await prisma.solution.findUnique({ where: { id: solutionId }, select: { status: true } });
   const solution = await captureWorkspaceMutation(prisma, "solution", "update", "UI", solutionId, tx => tx.solution.update({
     where: { id: solutionId },
     data: { status },
   }));
+  const roadmapSync = await syncRoadmapAfterStatusChange(prisma, { solutionId, workspaceId, previousStatus: before?.status ?? "", status });
   revalidatePath(revalidatePathStr);
-  return solution;
+  return { ...solution, roadmapSync };
 }
 
 export async function addAssumption(
@@ -211,11 +270,22 @@ export async function linkOpportunityToKeyResult(
   keyResultId: string | null,
   revalidatePathStr: string
 ) {
+  // A server action is a public POST endpoint: both ends need the caller's membership, and the key result
+  // must be in the opportunity's own workspace (a member of two workspaces must not cross-link them).
+  const { workspaceId } = await requireProductEntity("opportunity", opportunityId);
+  if (keyResultId) await requireProductEntity("keyResult", keyResultId, workspaceId);
+  const session = await auth();
   const prisma = getPrisma();
-  await captureWorkspaceMutation(prisma, "opportunity", "update", "UI", opportunityId, tx => tx.opportunity.update({
-    where: { id: opportunityId },
-    data: { linkedKeyResultId: keyResultId },
-  }));
+  // Dual-write in ONE transaction: the legacy column and its LEGACY Opportunity<->Objective link.
+  await captureWorkspaceMutation(
+    prisma,
+    "opportunity",
+    "update",
+    "UI",
+    opportunityId,
+    tx => setOpportunityKeyResult(tx, { opportunityId, keyResultId, expectedWorkspaceId: workspaceId, ctx: { source: "UI", createdById: session?.user?.id ?? null } }),
+    { atomic: true },
+  );
   revalidatePath(revalidatePathStr);
 }
 
@@ -363,11 +433,14 @@ export async function moveSolutionStatus(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
+  const before = await prisma.solution.findUnique({ where: { id: solutionId }, select: { status: true } });
   await captureWorkspaceMutation(prisma, "solution", "update", "UI", solutionId, tx => tx.solution.update({
     where: { id: solutionId },
     data: { status, sortOrder },
   }));
+  const roadmapSync = await syncRoadmapAfterStatusChange(prisma, { solutionId, workspaceId: authorized.workspaceId, previousStatus: before?.status ?? "", status });
   revalidatePath(revalidatePathStr);
+  return { roadmapSync };
 }
 
 // ─── Reorder Solution ─────────────────────────────────────────────────────────
@@ -538,7 +611,7 @@ export async function saveSolutionScore(
   const { prisma, workspaceId, userId } = await resolveWorkspace(orgSlug, workspaceSlug);
 
   const solution = await prisma.solution.findFirst({
-    where: { id: solutionId, opportunity: { workspaceId } },
+    where: { id: solutionId, workspaceId },
     select: { id: true },
   });
   if (!solution) throw new Error("Solution not found");

@@ -122,9 +122,9 @@ async function findTarget(tx: AppTransactionClient, input: PromoteFindingInput, 
     return { kind: "opportunity", node: await tx.opportunity.findFirst({ where: { id: input.opportunityId, workspaceId }, select: { id: true, title: true } }) }
   }
   if (input.solutionId) {
-    return { kind: "solution", node: await tx.solution.findFirst({ where: { id: input.solutionId, opportunity: { workspaceId } }, select: { id: true, title: true } }) }
+    return { kind: "solution", node: await tx.solution.findFirst({ where: { id: input.solutionId, workspaceId }, select: { id: true, title: true } }) }
   }
-  return { kind: "assumption", node: await tx.assumption.findFirst({ where: { id: input.assumptionId, solution: { opportunity: { workspaceId } } }, select: { id: true, title: true } }) }
+  return { kind: "assumption", node: await tx.assumption.findFirst({ where: { id: input.assumptionId, solution: { workspaceId } }, select: { id: true, title: true } }) }
 }
 
 /**

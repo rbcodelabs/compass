@@ -4,11 +4,13 @@ import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { CapabilityPacksPanel, type CapabilityPackSettingsRow } from "@/components/settings/capability-packs-panel"
 
-const { install, update, curated } = vi.hoisted(() => ({ install: vi.fn(), update: vi.fn(), curated: vi.fn() }))
+const { install, update, curated, check, upgrade } = vi.hoisted(() => ({ install: vi.fn(), update: vi.fn(), curated: vi.fn(), check: vi.fn(), upgrade: vi.fn() }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/capability-pack-actions", () => ({
   installWorkspaceCapabilityPack: install,
   updateWorkspaceCapabilityPack: update,
   installAgenticPmCapabilityPack: curated,
+  checkAgenticPmPackUpdate: check,
+  updateAgenticPmCapabilityPack: upgrade,
 }))
 const pack: CapabilityPackSettingsRow = {
   packId: "sample.product", displayName: "Sample Product Skills", enabled: true, sourceRepository: "https://github.com/example/skills", sourcePath: "packs/compass",
@@ -20,7 +22,7 @@ const pack: CapabilityPackSettingsRow = {
 }
 const panel = () => <CapabilityPacksPanel orgSlug="sample" workspaceSlug="product" initialPacks={[pack]} />
 afterEach(cleanup)
-beforeEach(() => { vi.resetAllMocks(); install.mockResolvedValue({ id: "v2" }); update.mockResolvedValue(undefined) })
+beforeEach(() => { vi.resetAllMocks(); install.mockResolvedValue({ id: "v2" }); update.mockResolvedValue(undefined); check.mockResolvedValue({ error: "Unable to check for Agentic PM pack updates." }) })
 
 describe("capability pack settings", () => {
   it("offers one-click installation with manual source fields collapsed under Advanced", async () => {
@@ -99,5 +101,43 @@ describe("capability pack settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Install and enable" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid commit SHA")
     expect(install).toHaveBeenCalledWith("sample", "product", { repositoryUrl: "https://github.com/sample/product", commitSha: "not-a-commit", packPath: "packs/compass" })
+  })
+
+  describe("Agentic PM update check", () => {
+    const curatedPack: CapabilityPackSettingsRow = { ...pack, packId: "agentic-pm-compass", sourceRepository: "https://github.com/rbcodelabs/agent-pm-playbook", selectedVersionId: "c1" }
+    const curatedPanel = () => <CapabilityPacksPanel orgSlug="sample" workspaceSlug="product" initialPacks={[curatedPack]} />
+    it("never checks GitHub when the curated pack is not installed", () => {
+      render(panel())
+      expect(check).not.toHaveBeenCalled()
+    })
+    it("shows the installed and latest commits and updates on request", async () => {
+      check.mockResolvedValue({ installedCommit: "a".repeat(40), latestCommit: "b".repeat(40), updateAvailable: true })
+      upgrade.mockResolvedValue({ updated: true, commit: "b".repeat(40) })
+      render(curatedPanel())
+      expect(await screen.findByText(/Update available/)).toHaveTextContent("aaaaaaaa")
+      expect(screen.getByText(/Update available/)).toHaveTextContent("bbbbbbbb")
+      fireEvent.click(screen.getByRole("button", { name: "Update to latest" }))
+      await waitFor(() => expect(upgrade).toHaveBeenCalledWith("sample", "product"))
+    })
+    it("reports up to date without offering an update", async () => {
+      check.mockResolvedValue({ installedCommit: "a".repeat(40), latestCommit: "a".repeat(40), updateAvailable: false })
+      render(curatedPanel())
+      expect(await screen.findByText(/up to date/)).toBeVisible()
+      expect(screen.queryByRole("button", { name: "Update to latest" })).not.toBeInTheDocument()
+    })
+    it("degrades quietly when the check fails", async () => {
+      check.mockRejectedValue(new Error("boom"))
+      render(curatedPanel())
+      expect(await screen.findByText("Unable to check for Agentic PM pack updates.")).toBeVisible()
+      expect(screen.queryByRole("button", { name: "Update to latest" })).not.toBeInTheDocument()
+    })
+    it("surfaces an update failure and keeps the button available for retry", async () => {
+      check.mockResolvedValue({ installedCommit: "a".repeat(40), latestCommit: "b".repeat(40), updateAvailable: true })
+      upgrade.mockResolvedValue({ error: "Unable to update the Agentic PM pack. Your installed version is unchanged." })
+      render(curatedPanel())
+      fireEvent.click(await screen.findByRole("button", { name: "Update to latest" }))
+      expect(await screen.findByRole("alert")).toHaveTextContent("installed version is unchanged")
+      expect(screen.getByRole("button", { name: "Update to latest" })).toBeEnabled()
+    })
   })
 })

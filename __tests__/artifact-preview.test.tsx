@@ -187,3 +187,147 @@ describe("ArtifactPreview element picking and anchor pins", () => {
     expect(view.getByTestId("pin-anchored").parentElement).toHaveStyle({ left: "10px", top: "20px" })
   })
 })
+
+describe("ArtifactPreview holdPrevious (slide decks)", () => {
+  const slide = (n: number) => `<html><body><section class="slide">Slide ${n}</section></body></html>`
+  const frames = (title: string) => screen.getAllByTitle(title) as HTMLIFrameElement[]
+
+  it("keeps the previous slide mounted and inert until the next one settles", () => {
+    const view = render(<ArtifactPreview title="Deck" html={slide(1)} holdPrevious />)
+    const [first] = frames("Deck preview")
+    const firstSrcdoc = first.srcdoc
+    post(first, handshake(first), "READY")
+
+    view.rerender(<ArtifactPreview title="Deck" html={slide(2)} holdPrevious />)
+    const stacked = frames("Deck preview")
+    expect(stacked).toHaveLength(2)
+    // The old document is not reloaded, and it cannot be interacted with.
+    expect(stacked[0]).toBe(first)
+    expect(stacked[0].srcdoc).toBe(firstSrcdoc)
+    expect(stacked[0].parentElement?.parentElement).toHaveAttribute("aria-hidden", "true")
+    expect(stacked[0].parentElement?.parentElement).toHaveClass("pointer-events-none")
+    // The new frame has no opaque cover, so the old slide shows through while it fits.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    expect(stacked[1].className).toContain("bg-transparent")
+
+    postTyped(stacked[1], handshake(stacked[1]), { type: "FIT_SETTLED" })
+    expect(frames("Deck preview")).toHaveLength(1)
+    expect(frames("Deck preview")[0].srcdoc).toContain("Slide 2")
+  })
+
+  it("drops the previous slide after a deadline if the next never settles", () => {
+    vi.useFakeTimers()
+    const view = render(<ArtifactPreview title="Deck" html={slide(1)} holdPrevious />)
+    post(frames("Deck preview")[0], handshake(frames("Deck preview")[0]), "READY")
+    view.rerender(<ArtifactPreview title="Deck" html={slide(2)} holdPrevious />)
+    expect(frames("Deck preview")).toHaveLength(2)
+    const next = frames("Deck preview")[1]
+    post(next, handshake(next), "READY")
+    act(() => { vi.advanceTimersByTime(ARTIFACT_PREVIEW_READY_TIMEOUT_MS + 2_600) })
+    expect(frames("Deck preview")).toHaveLength(1)
+  })
+
+  it("remounts without stacking when holdPrevious is off", () => {
+    const view = render(<ArtifactPreview title="Doc" html={slide(1)} />)
+    view.rerender(<ArtifactPreview title="Doc" html={slide(2)} />)
+    expect(frames("Doc preview")).toHaveLength(1)
+  })
+})
+
+describe("ArtifactPreview external thumbnail", () => {
+  it("renders the captured screenshot from the authenticated route, linked to the URL", () => {
+    render(<ArtifactPreview title="Live site" externalUrl="https://a.example/" thumbnail={{
+      src: "/api/artifacts/art-1/revisions/rev-1/thumbnail?v=1", width: 1280, height: 1900, capturedAt: "2026-10-01T12:00:00.000Z",
+    }} />)
+    const img = screen.getByAltText("Screenshot of Live site") as HTMLImageElement
+    expect(img.getAttribute("src")).toBe("/api/artifacts/art-1/revisions/rev-1/thumbnail?v=1")
+    expect(img.getAttribute("width")).toBe("1280")
+    expect(img.getAttribute("height")).toBe("1900")
+    const link = img.closest("a")!
+    expect(link.getAttribute("href")).toBe("https://a.example/")
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer")
+    expect(screen.getByText(/Screenshot captured/)).toBeInTheDocument()
+  })
+
+  it("renders no image when there is no thumbnail", () => {
+    render(<ArtifactPreview title="Live site" externalUrl="https://a.example/" />)
+    expect(screen.queryByRole("img")).toBeNull()
+    expect(screen.getByText("https://a.example/")).toBeInTheDocument()
+  })
+})
+
+describe("ArtifactPreview Google Drive links", () => {
+  const ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz_0123456789-"
+  const docUrl = `https://docs.google.com/document/d/${ID}/edit?tab=t.0`
+
+  afterEach(() => cleanup())
+
+  it("labels the link and embeds Google's viewer in a read-only frame built from the file ID", () => {
+    render(<ArtifactPreview title="Plan" externalUrl={docUrl} />)
+    expect(screen.getByText("Google Doc")).toBeInTheDocument()
+    const frame = screen.getByTitle("Plan — Google Doc preview") as HTMLIFrameElement
+    expect(frame.getAttribute("src")).toBe(`https://docs.google.com/document/d/${ID}/preview`)
+    expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer")
+    expect(frame.getAttribute("loading")).toBe("lazy")
+  })
+
+  it("sandboxes the frame without form submission or top navigation", () => {
+    render(<ArtifactPreview title="Plan" externalUrl={docUrl} />)
+    const sandbox = (screen.getByTitle("Plan — Google Doc preview") as HTMLIFrameElement).getAttribute("sandbox")!.split(" ")
+    expect(sandbox).toEqual(expect.arrayContaining(["allow-scripts", "allow-same-origin", "allow-popups"]))
+    expect(sandbox).not.toContain("allow-forms")
+    expect(sandbox).not.toContain("allow-top-navigation")
+    expect(sandbox).not.toContain("allow-top-navigation-by-user-activation")
+  })
+
+  it("always offers Open in Google in a noopener noreferrer tab, pointing at the original URL", () => {
+    render(<ArtifactPreview title="Plan" externalUrl={docUrl} />)
+    const link = screen.getByRole("link", { name: /open in google/i })
+    expect(link.getAttribute("href")).toBe(docUrl)
+    expect(link.getAttribute("target")).toBe("_blank")
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer")
+  })
+
+  it("states that only the link is stored and access is the reader's own", () => {
+    render(<ArtifactPreview title="Plan" externalUrl={docUrl} />)
+    expect(screen.getByText(/saves only this link, not the file/i)).toBeInTheDocument()
+  })
+
+  it("does not change the sandbox used for uploaded HTML", () => {
+    expect(ARTIFACT_IFRAME_SANDBOX).toBe("allow-scripts")
+  })
+
+  it("recognises a Form but renders no frame, since the viewer is submittable", () => {
+    render(<ArtifactPreview title="Survey" externalUrl={`https://docs.google.com/forms/d/e/${ID}/viewform`} />)
+    expect(screen.getByText("Google Form")).toBeInTheDocument()
+    expect(document.querySelector("iframe")).toBeNull()
+    expect(screen.getByRole("link", { name: /open in google/i })).toBeInTheDocument()
+  })
+
+  it("does not treat a lookalike host as Google: no frame, generic external card", () => {
+    render(<ArtifactPreview title="Phish" externalUrl={`https://docs.google.com.evil.example/document/d/${ID}/edit`} />)
+    expect(document.querySelector("iframe")).toBeNull()
+    expect(screen.getByRole("link", { name: /open external artifact/i })).toBeInTheDocument()
+  })
+
+  it("shows no stored thumbnail for a Drive link", () => {
+    render(<ArtifactPreview title="Plan" externalUrl={docUrl} thumbnail={{ src: "/t.png", width: 1, height: 1, capturedAt: "2026-10-01T12:00:00.000Z" }} />)
+    expect(screen.queryByRole("img")).toBeNull()
+  })
+})
+
+describe("ArtifactPreview — live external preview", () => {
+  afterEach(cleanup)
+  it("frames the live preview above the link card", () => {
+    render(<ArtifactPreview title="Demo" externalUrl="https://v0.app/chat/abc" livePreviewSrc="https://demo.v0.build/?__v0_token=t" />)
+    const frame = screen.getByTitle("Live preview of Demo") as HTMLIFrameElement
+    expect(frame.src).toBe("https://demo.v0.build/?__v0_token=t")
+    expect(frame.getAttribute("sandbox")).not.toContain("allow-top-navigation")
+    expect(screen.getByText("Open external artifact")).toBeInTheDocument()
+  })
+  it("shows only the link card when there is no live preview", () => {
+    render(<ArtifactPreview title="Demo" externalUrl="https://v0.app/chat/abc" livePreviewSrc={null} />)
+    expect(screen.queryByTitle("Live preview of Demo")).toBeNull()
+    expect(screen.getByText("Open external artifact")).toBeInTheDocument()
+  })
+})

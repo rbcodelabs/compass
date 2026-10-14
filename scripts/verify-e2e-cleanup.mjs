@@ -23,15 +23,19 @@ try {
        (SELECT COUNT(*)::int FROM compass_dev.organizations
         WHERE slug = 'e2e-test-org') AS fixture_orgs,
        (SELECT COUNT(*)::int FROM public.e2e_database_sentinel
-        WHERE value = 'compass-authenticated-e2e') AS sentinels`,
+        WHERE value = 'compass-authenticated-e2e') AS sentinels,
+       -- A cycle-less Objective (migration 070) is not reached by cycle-based cleanup and
+       -- would block prisma db push for branches where cycle_id is still NOT NULL.
+       (SELECT COUNT(*)::int FROM compass_dev.objectives
+        WHERE cycle_id IS NULL) AS cycleless_objectives`,
   );
   const result = rows[0];
-  if (result?.fixture_orgs !== 0 || result?.sentinels !== 1) {
+  if (result?.fixture_orgs !== 0 || result?.sentinels !== 1 || result?.cycleless_objectives !== 0) {
     throw new Error(
-      `Authenticated E2E cleanup verification failed: fixture_orgs=${result?.fixture_orgs}, sentinels=${result?.sentinels}`,
+      `Authenticated E2E cleanup verification failed: fixture_orgs=${result?.fixture_orgs}, sentinels=${result?.sentinels}, cycleless_objectives=${result?.cycleless_objectives}`,
     );
   }
-  console.log("[e2e db] Cleanup verified: fixture_orgs=0, sentinels=1");
+  console.log("[e2e db] Cleanup verified: fixture_orgs=0, sentinels=1, cycleless_objectives=0");
 } finally {
   await pool.end();
 }

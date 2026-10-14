@@ -30,6 +30,7 @@ import {
   assertOrgMemberBySlug,
   assertOrgAdminBySlug,
   assertEntityAccess,
+  assertSameWorkspaceEntities,
   assertScoringModelAccess,
 } from "@/lib/mcp-authz"
 import { SCOPE_MCP_READ, SCOPE_MCP_WRITE } from "@/lib/oauth/constants"
@@ -192,13 +193,21 @@ export const TOOL_GATES: Record<string, Gate> = {
   delete_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
   resolve_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
   reopen_comment: async (a, x) => void (await assertEntityAccess(a, "comment", x.commentId)),
+  // Following: workspace membership only. The handler resolves the caller to a
+  // single user, and agent identities are refused by AGENT_TOOL_POLICY (DENY).
+  follow: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  unfollow: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  list_notifications: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  mark_read: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   // Workspace ---------------------------------------------------------------
   get_workspace_summary: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   // list_workspaces additionally filters its results to the caller's
   // memberships in the handler; org membership is the gate.
   list_workspaces: async (a, x) => void (await assertOrgMemberBySlug(a, x.orgSlug)),
   get_workspace_by_slug: async (a, x) => void (await assertWorkspaceBySlug(a, x.orgSlug, x.workspaceSlug)),
-  create_workspace: async (a, x) => void (await assertOrgAdminBySlug(a, x.orgSlug)),
+  // An agent inherits its owner's CURRENT org OWNER/ADMIN rights here (no
+  // AgentOrgAdminGrant needed); everyone else is gated exactly as before.
+  create_workspace: async (a, x) => void (await assertOrgAdminBySlug(a, x.orgSlug, { inheritOwnerAdmin: true })),
 
   // OKRs --------------------------------------------------------------------
   list_okr_cycles: (a, x) => assertWorkspaceMember(a, x.workspaceId),
@@ -215,19 +224,49 @@ export const TOOL_GATES: Record<string, Gate> = {
     await assertEntityAccess(a, "objective", x.objectiveId)
     if (x.keyResultId) await assertEntityAccess(a, "keyResult", x.keyResultId)
   },
-  list_eligible_parent_key_results: (a, x) => assertChildInDeclaredWorkspace(a, "okrCycle", x.cycleId, x.workspaceId),
+  // Without a cycle there is no child to tie to the declared workspace; membership of the declared workspace is the whole check.
+  list_eligible_parent_key_results: (a, x) =>
+    x.cycleId ? assertChildInDeclaredWorkspace(a, "okrCycle", x.cycleId, x.workspaceId) : assertWorkspaceMember(a, x.workspaceId),
 
   // Discovery ---------------------------------------------------------------
   list_opportunities: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   list_solutions: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   list_assumptions: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_opportunity: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
-  create_opportunity: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  create_opportunity: async (a, x) => {
+    await assertWorkspaceMember(a, x.workspaceId)
+    // The key result becomes this opportunity's legacy pointer AND a typed link, so it must be in this workspace.
+    if (x.keyResultId) await assertChildInDeclaredWorkspace(a, "keyResult", x.keyResultId, x.workspaceId)
+  },
   update_opportunity: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   update_opportunity_status: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   link_opportunity_to_kr: async (a, x) => {
-    await assertEntityAccess(a, "opportunity", x.opportunityId)
-    if (x.keyResultId) await assertEntityAccess(a, "keyResult", x.keyResultId)
+    // Access to each end independently let a member of two workspaces cross-link them; both ends must share one.
+    if (x.keyResultId) await assertSameWorkspaceEntities(a, [["opportunity", x.opportunityId], ["keyResult", x.keyResultId]])
+    else await assertEntityAccess(a, "opportunity", x.opportunityId)
+  },
+
+  // Typed links (ADR Phase 2) ------------------------------------------------
+  // `workspaceId` on these is a PRECONDITION the entities must satisfy, not the source of the stored
+  // link's workspace (lib/typed-links.ts copies that from the authorized parent row). Unlinks gate only
+  // the parent: a link to an endpoint that has since vanished must still be removable, and the delete is
+  // scoped to the parent's workspace anyway.
+  link_opportunity_to_objective: async (a, x) => {
+    await assertChildInDeclaredWorkspace(a, "opportunity", x.opportunityId, x.workspaceId)
+    await assertChildInDeclaredWorkspace(a, "objective", x.objectiveId, x.workspaceId)
+  },
+  unlink_opportunity_from_objective: (a, x) => assertChildInDeclaredWorkspace(a, "opportunity", x.opportunityId, x.workspaceId),
+  link_solution_to_key_result: async (a, x) => {
+    await assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId)
+    await assertChildInDeclaredWorkspace(a, "keyResult", x.keyResultId, x.workspaceId)
+  },
+  unlink_solution_from_key_result: (a, x) => assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId),
+  list_links: async (a, x) => {
+    await assertWorkspaceMember(a, x.workspaceId)
+    if (x.opportunityId) await assertChildInDeclaredWorkspace(a, "opportunity", x.opportunityId, x.workspaceId)
+    if (x.objectiveId) await assertChildInDeclaredWorkspace(a, "objective", x.objectiveId, x.workspaceId)
+    if (x.solutionId) await assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId)
+    if (x.keyResultId) await assertChildInDeclaredWorkspace(a, "keyResult", x.keyResultId, x.workspaceId)
   },
   add_solution: async (a, x) => void (await assertEntityAccess(a, "opportunity", x.opportunityId)),
   update_solution_status: async (a, x) => void (await assertEntityAccess(a, "solution", x.solutionId)),
@@ -332,14 +371,41 @@ export const TOOL_GATES: Record<string, Gate> = {
   assign_squad: async (a, x) => {
     const entity = ASSIGN_SQUAD_ENTITY[x.objectType]
     if (!entity) throw new McpAuthzError(`Unknown objectType: ${x.objectType}`)
-    await assertEntityAccess(a, entity, x.objectId)
-    if (x.squadId) await assertEntityAccess(a, "squad", x.squadId)
+    const object = await assertEntityAccess(a, entity, x.objectId)
+    if (x.squadId) {
+      const squad = await assertEntityAccess(a, "squad", x.squadId)
+      // Membership of both is not enough: a member of two workspaces must not attach A's squad to B's object.
+      if (squad.workspaceId !== object.workspaceId) throw new McpAuthzError("Squad does not belong to the same workspace as the object.")
+    }
   },
 
   // Custom Fields -------------------------------------------------------------
   list_custom_field_definitions: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_custom_field_values: assertCustomFieldObjectAccess,
   set_custom_field_value: assertCustomFieldObjectAccess,
+
+  // Card Sort ---------------------------------------------------------------
+  // Plain workspace membership is the whole gate here, deliberately. The two
+  // finer-grained authorizations these tools need are not membership questions
+  // and cannot be expressed as one: whether the caller is the round's
+  // facilitator (reveal/close, and seeing others' proposals while OPEN), and
+  // whether a proposal belongs to the caller (withdraw). Both depend on the
+  // round row, so both are enforced in lib/card-sort.ts — canSeeOtherProposals
+  // and the userId-scoped delete filter — where the HTTP routes get them too.
+  // Duplicating either check here would create a second copy to drift.
+  //
+  // Every card sort tool therefore takes workspaceId as well as roundId, and
+  // lib/card-sort.ts independently verifies the round belongs to that
+  // workspace, so a foreign roundId is a not-found rather than a leak.
+  list_card_sort_factors: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  create_card_sort_round: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  list_card_sort_rounds: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  set_card_sort_round_state: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  propose_card_sort_move: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  withdraw_card_sort_proposal: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  get_card_sort_proposals: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  get_card_sort_board: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  get_card_sort_tally: (a, x) => assertWorkspaceMember(a, x.workspaceId),
 
   // Tasks -------------------------------------------------------------------
   create_task: async (a, x) => {
@@ -393,6 +459,7 @@ export const TOOL_GATES: Record<string, Gate> = {
   list_docs: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   prepare_doc_image_upload: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_doc: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
+  capture_canvas: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
   create_doc: async (a, x) => {
     await assertWorkspaceMember(a, x.workspaceId)
     if (x.parentId) await assertChildInDeclaredWorkspace(a, "doc", x.parentId, x.workspaceId)
@@ -402,6 +469,9 @@ export const TOOL_GATES: Record<string, Gate> = {
     if (x.docType === "GTM_POSITIONING_BRIEF") await assertLaunchWorkflowEnabled(x.workspaceId)
   },
   update_doc: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
+  edit_doc: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
+  edit_canvas: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
+  build_canvas_tree: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
   create_doc_version: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
   list_doc_versions: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
   get_doc_version: async (a, x) => void (await assertEntityAccess(a, "docVersion", x.versionId)),
@@ -417,8 +487,15 @@ export const TOOL_GATES: Record<string, Gate> = {
   // Artifacts ---------------------------------------------------------------
   list_artifacts: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   get_artifact: async (a, x) => void (await assertEntityAccess(a, "artifact", x.artifactId)),
+  prepare_artifact_upload: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   create_artifact: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  // Gated exactly like create_artifact (workspace member; agents allowed via the
+  // WRITE entries in AGENT_TOOL_POLICY). The service scopes the source and the
+  // bound artifact to the declared workspace.
+  create_feedback_source: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  update_feedback_source: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   update_artifact: (a, x) => assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId),
+  refresh_artifact_from_v0: (a, x) => assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId),
   link_artifact_to_solution: async (a, x) => {
     await assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId)
     await assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId)
@@ -428,6 +505,7 @@ export const TOOL_GATES: Record<string, Gate> = {
     await assertChildInDeclaredWorkspace(a, "solution", x.solutionId, x.workspaceId)
   },
   archive_artifact: (a, x) => assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId),
+  capture_screenshot: (a, x) => assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId),
   link_artifact_to_decision: async (a, x) => {
     await assertChildInDeclaredWorkspace(a, "artifact", x.artifactId, x.workspaceId)
     await assertChildInDeclaredWorkspace(a, "reviewRequest", x.requestId, x.workspaceId)
@@ -505,9 +583,11 @@ export const TOOL_GATES: Record<string, Gate> = {
  * TOOL_GATES has.
  */
 const READ_TOOLS = [
+  "list_card_sort_factors", "list_card_sort_rounds", "get_card_sort_proposals",
+  "get_card_sort_board", "get_card_sort_tally",
   "list_analytics_connections", "list_metrics", "get_metric", "list_metric_bindings", "get_metric_binding", "list_metric_observations", "get_metric_observation",
   "get_artifact", "get_comment", "get_current_identity", "get_custom_field_values",
-  "get_decision", "get_doc", "get_doc_comment", "get_doc_version", "get_experiment",
+  "get_decision", "get_doc", "capture_canvas", "get_doc_comment", "get_doc_version", "get_experiment",
   "get_feedback_item", "get_help", "get_launch_checklist", "get_okr_cycle", "get_opportunity",
   "get_opportunity_score", "get_pm_interview", "get_research_session", "get_research_study",
   "get_review_request", "get_scoring_model", "get_solution_comment", "get_solution_score", "get_squad", "get_task",
@@ -520,6 +600,8 @@ const READ_TOOLS = [
   "list_review_requests", "list_roadmap_items", "list_scoring_models",
   "list_solution_comments", "list_solutions", "list_squads", "list_task_assignees",
   "list_task_links", "list_tasks", "list_top_opportunities", "list_workspaces", "search_help",
+  "list_links",
+  "list_notifications",
 ] as const
 
 /**
@@ -535,34 +617,44 @@ const READ_TOOLS = [
  *    `get_opportunity_score` only reads one back.
  */
 const WRITE_TOOLS = [
+  // Card sort. propose/withdraw write a proposal row, and
+  // set_card_sort_round_state is a one-way reveal — all writes. Note that none
+  // of them touch an official custom field value; a read-only token still
+  // should not be able to cast or retract a vote, or reveal a live round.
+  "create_card_sort_round", "set_card_sort_round_state", "propose_card_sort_move",
+  "withdraw_card_sort_proposal",
   "create_metric", "update_metric", "archive_metric", "link_metric", "update_metric_binding", "unlink_metric", "refresh_metric_binding",
   "activate_research_study", "add_assumption", "add_comment", "add_doc_comment",
   "add_evidence", "add_feedback_attachment", "add_key_result", "add_solution",
   "add_solution_comment", "add_solution_plan", "add_to_roadmap", "apply_recorded_decision",
-  "approve_solution_plan", "archive_artifact", "archive_research_study",
+  "approve_solution_plan", "archive_artifact", "archive_research_study", "capture_screenshot",
   "archive_scoring_model", "assign_squad", "close_decision_no_action", "close_research_study",
   "conclude_experiment", "create_artifact", "create_checklist_template", "create_doc",
-  "create_doc_version", "create_experiment", "create_feedback", "create_objective",
+  "create_doc_version", "create_experiment", "create_feedback", "create_feedback_source", "update_feedback_source", "create_objective",
   "create_okr_cycle", "create_opportunity", "create_research_study", "create_scoring_model",
   "create_squad", "create_task", "create_workspace", "delete_assumption", "delete_comment",
   "delete_doc_comment", "delete_key_result", "delete_objective", "delete_solution_comment",
   "generate_research_guide", "generate_research_synthesis", "issue_research_link",
   "link_artifact_to_decision", "link_artifact_to_solution", "link_evidence",
-  "link_feedback_to_opportunity", "link_opportunity_to_kr", "link_task", "log_checkin",
-  "log_experiment_result", "move_task_status", "prepare_doc_image_upload", "prepare_feedback_attachment_upload",
+  "link_feedback_to_opportunity", "link_opportunity_to_kr", "link_opportunity_to_objective", "link_solution_to_key_result", "link_task", "log_checkin",
+  "unlink_opportunity_from_objective", "unlink_solution_from_key_result",
+  "log_experiment_result", "move_task_status", "prepare_artifact_upload", "prepare_doc_image_upload", "prepare_feedback_attachment_upload",
   "promote_feedback_to_roadmap", "promote_research_finding_to_evidence", "promote_to_roadmap",
   "reject_solution_plan", "reopen_comment", "reopen_doc_comment", "request_decision",
   "request_release_authorization", "resolve_comment", "resolve_doc_comment",
   "restore_doc_version", "revoke_research_links", "rotate_research_link", "score_opportunity",
   "score_solution", "set_custom_field_value", "set_launch_tier", "set_objective_parent_kr",
   "set_workspace_scoring_model", "unlink_artifact_from_decision",
-  "unlink_artifact_from_solution", "unlink_task", "update_artifact", "update_assumption",
+  "unlink_artifact_from_solution", "unlink_task", "refresh_artifact_from_v0", "update_artifact", "update_assumption",
+  "edit_doc", "edit_canvas", "build_canvas_tree",
   "update_comment", "update_doc", "update_doc_comment", "update_experiment", "update_feedback",
   "update_feedback_status", "update_feedback_type", "update_key_result",
   "update_launch_checklist_item", "update_objective", "update_opportunity",
   "update_opportunity_status", "update_research_study", "update_roadmap_item",
   "update_scoring_model", "update_solution", "update_solution_comment",
   "update_solution_status", "update_squad", "update_task",
+  // Following changes the caller's own follow rows and read state only.
+  "follow", "unfollow", "mark_read",
 ] as const
 
 export type ToolScope = typeof SCOPE_MCP_READ | typeof SCOPE_MCP_WRITE
@@ -646,11 +738,11 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ...["generate_research_guide", "create_research_study", "update_research_study", "generate_research_synthesis", "promote_research_finding_to_evidence"].map(name => [name, "WRITE"]),
   ...["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
-    "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_docs", "get_doc", "list_doc_versions", "get_doc_version", "list_doc_comments", "get_doc_comment", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values",
+    "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_docs", "get_doc", "capture_canvas", "list_doc_versions", "get_doc_version", "list_doc_comments", "get_doc_comment", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values", "list_links",
   ].map(name => [name, "READ"]),
   ...[
     "link_artifact_to_decision", "unlink_artifact_from_decision",
-    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "create_doc_version", "restore_doc_version", "add_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "update_artifact", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "score_opportunity", "score_solution", "set_custom_field_value",
+    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "link_opportunity_to_objective", "unlink_opportunity_from_objective", "link_solution_to_key_result", "unlink_solution_from_key_result", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_artifact_upload", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "create_doc", "update_doc", "edit_doc", "edit_canvas", "build_canvas_tree", "create_doc_version", "restore_doc_version", "add_doc_comment", "delete_doc_comment", "resolve_doc_comment", "reopen_doc_comment", "create_artifact", "refresh_artifact_from_v0", "update_artifact", "create_feedback_source", "update_feedback_source", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "capture_screenshot", "score_opportunity", "score_solution", "set_custom_field_value",
   ].map(name => [name, "WRITE"]),
   // ADR 0020: no longer unconditionally human-only. Each of these four now
   // carries its own agentCapability check inside its TOOL_GATES entry above
@@ -661,11 +753,32 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   // question than "may a human-elevated agent ever call this" (yes, per the
   // ADR); the actual authorization is enforced downstream, not here.
   ...["create_scoring_model", "update_scoring_model", "archive_scoring_model", "set_workspace_scoring_model"].map(name => [name, "WRITE"]),
+  // Card sort reads are ordinary member reads, and get_card_sort_tally carries
+  // its own OPEN-round guard regardless of who is asking.
+  ...["list_card_sort_factors", "list_card_sort_rounds", "get_card_sort_board", "get_card_sort_proposals", "get_card_sort_tally"].map(name => [name, "READ"]),
+  // Every card sort write is human-only, for the same reason the comment edits
+  // below are: a CardSortProposal has no agent author column, so a proposal an
+  // agent cast would be stored as, and read back as, the delegating human's own
+  // opinion. The whole artifact is a record of what named people think, and a
+  // forged ballot is worse than a missing capability. set_card_sort_round_state
+  // is denied too — revealing a round is an irreversible disclosure of other
+  // people's in-progress positions, which is a facilitator's judgment call.
+  ...["create_card_sort_round", "set_card_sort_round_state", "propose_card_sort_move", "withdraw_card_sort_proposal"].map(name => [name, "DENY"]),
   // Legacy comments lack a durable agent author ID; body edits could retain a human label or approval badge.
-  // create_workspace, approve_solution_plan, reject_solution_plan, and
-  // request_release_authorization remain unconditionally human-only per ADR
-  // 0020 — explicitly out of scope for AgentOrgAdminGrant delegation.
-  ...["update_comment", "update_solution_comment", "update_doc_comment", "create_workspace", "approve_solution_plan", "reject_solution_plan", "request_release_authorization"].map(name => [name, "DENY"]),
+  // approve_solution_plan, reject_solution_plan, and request_release_authorization
+  // remain unconditionally human-only per ADR 0020: they are approval /
+  // attestation acts that would be recorded as the delegating human's own.
+  ...["update_comment", "update_solution_comment", "update_doc_comment", "approve_solution_plan", "reject_solution_plan", "request_release_authorization"].map(name => [name, "DENY"]),
+  // create_workspace was DENY under ADR 0020. It is now a WRITE: an agent
+  // inherits its owner's live org admin rights (see hasOwnerOrgAdminRights),
+  // enforced inside its TOOL_GATES entry. Creating a workspace is pure
+  // administration, not an attestation, and createWorkspaceInOrg records the
+  // creating agent's WRITE grant so it can keep working in what it created.
+  ["create_workspace", "WRITE"],
+  // Follows and the inbox belong to a person (ADR "Following and in-app
+  // notifications", 2.7). An agent-scoped token acts as an Agent, so it must not
+  // follow on, read, or clear the inbox of the human who owns it.
+  ...["follow", "unfollow", "list_notifications", "mark_read"].map(name => [name, "DENY"]),
 ])
 
 /**

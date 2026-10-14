@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const prisma = {
@@ -45,7 +46,7 @@ describe("tracked decisions", () => {
   })
 
   it("creates a pending tracking-only request for a workspace-scoped entity", async () => {
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
 
     await createTrackedDecisionRequest({
       workspaceId: "ws-1",
@@ -73,8 +74,8 @@ describe("tracked decisions", () => {
   it("snapshots, deduplicates, and canonically orders supporting sources in a v2 packet", async () => {
     const capturedAt = new Date("2026-09-04T12:00:00.000Z")
     prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Brand test", workspaceId: "ws-1", updatedAt: capturedAt })
-    prisma.assumption.findUnique.mockResolvedValue({ id: "assumption-1", title: "People understand the brand", updatedAt: capturedAt, solution: { opportunity: { workspaceId: "ws-1" } } })
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Brand concepts", updatedAt: capturedAt, opportunity: { workspaceId: "ws-1" } })
+    prisma.assumption.findUnique.mockResolvedValue({ id: "assumption-1", title: "People understand the brand", updatedAt: capturedAt, solution: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Brand concepts", updatedAt: capturedAt, workspaceId: "ws-1" })
 
     await createTrackedDecisionRequest({
       workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1",
@@ -122,7 +123,7 @@ describe("tracked decisions", () => {
   it("treats normalized sources as part of idempotency equality", async () => {
     const updatedAt = new Date("2026-09-04T12:00:00.000Z")
     prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Brand test", workspaceId: "ws-1", updatedAt })
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Brand concepts", updatedAt, opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Brand concepts", updatedAt, workspaceId: "ws-1" })
     const packetJson = JSON.stringify({ schemaVersion: "tracked-decision/v2", question: "Ready?", context: "Review it.", entity: { type: "EXPERIMENT", id: "experiment-1", title: "Brand test", updatedAt: updatedAt.toISOString() }, sources: [] })
     prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision: { packetJson } })
 
@@ -142,7 +143,7 @@ describe("tracked decisions", () => {
     }) }
     prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision })
     prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Renamed test", workspaceId: "ws-1", updatedAt: new Date("2026-09-05T12:00:00.000Z") })
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Renamed concepts", updatedAt: new Date("2026-09-05T12:00:00.000Z"), opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Renamed concepts", updatedAt: new Date("2026-09-05T12:00:00.000Z"), workspaceId: "ws-1" })
 
     await expect(createTrackedDecisionRequest({
       workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1",
@@ -163,8 +164,8 @@ describe("tracked decisions", () => {
     }) }
     prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision })
     prisma.experiment.findUnique.mockResolvedValue({ id: "experiment-1", title: "Test", workspaceId: "ws-1", updatedAt })
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Concepts", updatedAt, opportunity: { workspaceId: "ws-1" } })
-    prisma.assumption.findUnique.mockResolvedValue({ id: "assumption-1", title: "Assumption", updatedAt, solution: { opportunity: { workspaceId: "ws-1" } } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Concepts", updatedAt, workspaceId: "ws-1" })
+    prisma.assumption.findUnique.mockResolvedValue({ id: "assumption-1", title: "Assumption", updatedAt, solution: { workspaceId: "ws-1" } })
 
     await expect(createTrackedDecisionRequest({
       workspaceId: "ws-1", subjectType: "EXPERIMENT", subjectId: "experiment-1",
@@ -200,7 +201,7 @@ describe("tracked decisions", () => {
   })
 
   it("returns the current revision when the same pending request is retried", async () => {
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
     const currentRevision = { id: "revision-current", requestId: "request-1", packetJson: JSON.stringify({ question: "Build it?", context: "Same context", entity: { type: "SOLUTION", id: "solution-1", title: "Simple decisions" } }) }
     prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", state: "PENDING", currentRevisionId: "revision-current", currentRevision, revisionCount: 1, decisionCycle: 1 })
 
@@ -263,7 +264,7 @@ describe("tracked decisions", () => {
   })
 
   it("allows many independent decisions to link to the same entity", async () => {
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
     await createTrackedDecisionRequest({ workspaceId: "ws-1", subjectType: "SOLUTION", subjectId: "solution-1", question: "First question?", context: "First context", idempotencyKey: key1 })
     await createTrackedDecisionRequest({ workspaceId: "ws-1", subjectType: "SOLUTION", subjectId: "solution-1", question: "Second question?", context: "Second context", idempotencyKey: key2 })
     expect(prisma.reviewRequest.create).toHaveBeenNthCalledWith(1, { data: expect.objectContaining({ subjectId: key1 }) })
@@ -271,7 +272,7 @@ describe("tracked decisions", () => {
   })
 
   it("returns the committed request when concurrent identical creates race", async () => {
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
     prisma.$transaction.mockRejectedValueOnce({ code: "P2002" })
     const currentRevision = { id: "revision-winner", requestId: "request-winner", packetJson: JSON.stringify({ question: "Build it?", context: "Same context", entity: { type: "SOLUTION", id: "solution-1", title: "Simple decisions" } }) }
     prisma.reviewRequest.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "request-winner", state: "PENDING", currentRevision })
@@ -303,7 +304,7 @@ describe("tracked decisions", () => {
   })
 
   it("persists requestedByAgentId alongside requestedById on create", async () => {
-    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", opportunity: { workspaceId: "ws-1" } })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
 
     await createTrackedDecisionRequest({
       workspaceId: "ws-1", subjectType: "SOLUTION", subjectId: "solution-1",
@@ -503,5 +504,341 @@ describe("applyTrackedDecision", () => {
     })
     await expect(applyTrackedDecision("decision-1")).rejects.toEqual(expect.objectContaining({ code: "DECISION_MISMATCH" }))
     expect(prisma.decisionApplication.create).not.toHaveBeenCalled()
+  })
+})
+
+describe("tracked decision options (question with choices)", () => {
+  const base = { workspaceId: "ws-1", subjectType: "SOLUTION" as const, subjectId: "solution-1", question: "Which plan?", context: "Pick one.", idempotencyKey: key1 }
+  const choices = [{ label: "Ship now", description: "Release this week." }, { label: "Wait a sprint" }]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) => fn(prisma))
+    prisma.reviewRequest.findFirst.mockResolvedValue(null)
+    prisma.reviewRequest.create.mockResolvedValue({ id: "request-1", decisionCycle: 1, revisionCount: 0 })
+    prisma.reviewRevision.create.mockResolvedValue({ id: "revision-1", requestId: "request-1", fingerprint: "fp" })
+    prisma.reviewRequest.update.mockResolvedValue({})
+    prisma.reviewRequest.updateMany.mockResolvedValue({ count: 1 })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
+  })
+
+  const createdData = () => prisma.reviewRevision.create.mock.calls[0][0].data
+
+  it("creates APPROVE-class choices followed by Request changes and Reject", async () => {
+    await createTrackedDecisionRequest({ ...base, options: choices })
+
+    expect(createdData().options.create).toEqual([
+      { actionKey: "CHOICE_1", label: "Ship now", description: "Release this week.", outcomeClass: "APPROVE", continuationKey: "NO_ACTION", sortOrder: 0 },
+      { actionKey: "CHOICE_2", label: "Wait a sprint", outcomeClass: "APPROVE", continuationKey: "NO_ACTION", sortOrder: 1 },
+      { actionKey: "REQUEST_CHANGES", label: "Request changes", outcomeClass: "REQUEST_CHANGES", continuationKey: "NO_ACTION", sortOrder: 2 },
+      { actionKey: "REJECT", label: "Reject", outcomeClass: "REJECT", continuationKey: "NO_ACTION", sortOrder: 3 },
+    ])
+    expect(JSON.parse(createdData().packetJson).options).toEqual(choices)
+  })
+
+  it("trims labels and descriptions and drops blank descriptions", async () => {
+    await createTrackedDecisionRequest({ ...base, options: [{ label: "  A  ", description: "  keep  " }, { label: "B", description: "   " }, { label: "C", description: null }] })
+    expect(JSON.parse(createdData().packetJson).options).toEqual([{ label: "A", description: "keep" }, { label: "B" }, { label: "C" }])
+    expect(createdData().options.create.map((row: { sortOrder: number }) => row.sortOrder)).toEqual([0, 1, 2, 3, 4])
+  })
+
+  it("accepts the maximum of four choices", async () => {
+    await createTrackedDecisionRequest({ ...base, options: ["A", "B", "C", "D"].map((label) => ({ label })) })
+    expect(createdData().options.create.map((row: { actionKey: string }) => row.actionKey)).toEqual(["CHOICE_1", "CHOICE_2", "CHOICE_3", "CHOICE_4", "REQUEST_CHANGES", "REJECT"])
+  })
+
+  it("leaves the option-less path byte-for-byte unchanged: same rows, same packet, same fingerprint", async () => {
+    await createTrackedDecisionRequest(base)
+    const data = createdData()
+    expect(data.options.create).toEqual([
+      { actionKey: "APPROVE", label: "Approve", outcomeClass: "APPROVE", continuationKey: "NO_ACTION", sortOrder: 0 },
+      { actionKey: "REQUEST_CHANGES", label: "Request changes", outcomeClass: "REQUEST_CHANGES", continuationKey: "NO_ACTION", sortOrder: 1 },
+      { actionKey: "REJECT", label: "Reject", outcomeClass: "REJECT", continuationKey: "NO_ACTION", sortOrder: 2 },
+    ])
+    const packet = { schemaVersion: "tracked-decision/v2", question: "Which plan?", context: "Pick one.", entity: { type: "SOLUTION", id: "solution-1", title: "Simple decisions", updatedAt: new Date(0).toISOString() }, sources: [] }
+    expect(data.packetJson).toBe(JSON.stringify(packet))
+    expect(data.fingerprint).toBe(createHash("sha256").update(JSON.stringify({ requestId: "request-1", decisionCycle: 1, revisionNumber: 1, packet })).digest("hex"))
+  })
+
+  it.each([undefined, null, []])("treats options=%j as no custom options", async (options) => {
+    await createTrackedDecisionRequest({ ...base, options })
+    expect(JSON.parse(createdData().packetJson)).not.toHaveProperty("options")
+    expect(createdData().options.create.map((row: { actionKey: string }) => row.actionKey)).toEqual(["APPROVE", "REQUEST_CHANGES", "REJECT"])
+  })
+
+  it.each([
+    ["a single option", [{ label: "Only" }]],
+    ["five options", ["A", "B", "C", "D", "E"].map((label) => ({ label }))],
+    ["a blank label", [{ label: "A" }, { label: "   " }]],
+    ["a label over 120 characters", [{ label: "A" }, { label: "x".repeat(121) }]],
+    ["a description over 500 characters", [{ label: "A" }, { label: "B", description: "x".repeat(501) }]],
+    ["case-insensitive duplicate labels", [{ label: "Ship" }, { label: " ship " }]],
+    ["a reserved Reject label", [{ label: "A" }, { label: "reject" }]],
+    ["a reserved Request changes label", [{ label: "A" }, { label: "Request Changes" }]],
+  ])("rejects %s with INVALID_INPUT before writing anything", async (_name, options) => {
+    await expect(createTrackedDecisionRequest({ ...base, options })).rejects.toEqual(expect.objectContaining({ code: "INVALID_INPUT" }))
+    expect(prisma.reviewRequest.create).not.toHaveBeenCalled()
+    expect(prisma.reviewRevision.create).not.toHaveBeenCalled()
+  })
+
+  it("accepts a 120 character label and a 500 character description", async () => {
+    await createTrackedDecisionRequest({ ...base, options: [{ label: "x".repeat(120), description: "y".repeat(500) }, { label: "B" }] })
+    expect(prisma.reviewRevision.create).toHaveBeenCalledOnce()
+  })
+
+  describe("idempotent replay", () => {
+    const stored = (options?: unknown) => ({ id: "revision-current", packetJson: JSON.stringify({ schemaVersion: "tracked-decision/v2", question: "Which plan?", context: "Pick one.", entity: { type: "SOLUTION", id: "solution-1", title: "Simple decisions", updatedAt: new Date(0).toISOString() }, sources: [], ...(options ? { options } : {}) }) })
+
+    it("replays when the same options are sent again, ignoring surrounding whitespace", async () => {
+      const revision = stored(choices)
+      prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision: revision })
+      await expect(createTrackedDecisionRequest({ ...base, options: [{ label: " Ship now ", description: "Release this week." }, { label: "Wait a sprint" }] })).resolves.toBe(revision)
+      expect(prisma.reviewRevision.create).not.toHaveBeenCalled()
+    })
+
+    it("conflicts when the options differ", async () => {
+      prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision: stored(choices) })
+      await expect(createTrackedDecisionRequest({ ...base, options: [{ label: "Ship now" }, { label: "Wait a sprint" }] })).rejects.toEqual(expect.objectContaining({ code: "IDEMPOTENCY_KEY_CONFLICT" }))
+      await expect(createTrackedDecisionRequest({ ...base, options: [{ label: "Wait a sprint" }, { label: "Ship now", description: "Release this week." }] })).rejects.toEqual(expect.objectContaining({ code: "IDEMPOTENCY_KEY_CONFLICT" }))
+    })
+
+    it("conflicts when an option-less request is replayed with options, and vice versa", async () => {
+      prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision: stored() })
+      await expect(createTrackedDecisionRequest({ ...base, options: choices })).rejects.toEqual(expect.objectContaining({ code: "IDEMPOTENCY_KEY_CONFLICT" }))
+      prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision: stored(choices) })
+      await expect(createTrackedDecisionRequest(base)).rejects.toEqual(expect.objectContaining({ code: "IDEMPOTENCY_KEY_CONFLICT" }))
+    })
+
+    it("still replays an option-less request created before options existed", async () => {
+      const revision = stored()
+      prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision: revision })
+      await expect(createTrackedDecisionRequest(base)).resolves.toBe(revision)
+    })
+  })
+
+  describe("revising", () => {
+    const decidedRequest = (packet: object) => ({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1, currentRevision: { packetJson: JSON.stringify(packet) } })
+    const v2 = (options?: unknown) => ({ schemaVersion: "tracked-decision/v2", entity: { type: "SOLUTION", id: "solution-1" }, sources: [], ...(options ? { options } : {}) })
+    const revise = (extra: { options?: Array<{ label: string; description?: string | null }> | null } = {}) => reviseTrackedDecisionRequest({ requestId: "request-1", workspaceId: "ws-1", subjectType: "SOLUTION", subjectId: "solution-1", question: "Again?", context: "New.", expectedDecisionId: "decision-1", reason: "Changed", ...extra })
+    const revisedData = () => prisma.reviewRevision.create.mock.calls[0][0].data
+
+    beforeEach(() => {
+      prisma.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", requestId: "request-1", revisionId: "revision-old", option: { outcomeClass: "REQUEST_CHANGES" } })
+    })
+
+    it("inherits the prior options by default and recreates the option rows", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2(choices)))
+      await revise()
+      expect(JSON.parse(revisedData().packetJson).options).toEqual(choices)
+      expect(revisedData().options.create.map((row: { actionKey: string; label: string }) => `${row.actionKey}:${row.label}`)).toEqual(["CHOICE_1:Ship now", "CHOICE_2:Wait a sprint", "REQUEST_CHANGES:Request changes", "REJECT:Reject"])
+    })
+
+    it("inherits options from a legacy v1 packet without upgrading it", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest({ schemaVersion: "tracked-decision/v1", entity: { type: "SOLUTION", id: "solution-1" }, options: choices }))
+      await revise()
+      const packet = JSON.parse(revisedData().packetJson)
+      expect(packet.schemaVersion).toBe("tracked-decision/v1")
+      expect(packet.options).toEqual(choices)
+    })
+
+    it("replaces the prior options when new ones are supplied", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2(choices)))
+      await revise({ options: [{ label: "Ship" }, { label: "Cancel", description: "Stop the work." }] })
+      expect(JSON.parse(revisedData().packetJson).options).toEqual([{ label: "Ship" }, { label: "Cancel", description: "Stop the work." }])
+    })
+
+    it("returns to Approve / Request changes / Reject when cleared with an empty list", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2(choices)))
+      await revise({ options: [] })
+      expect(JSON.parse(revisedData().packetJson)).not.toHaveProperty("options")
+      expect(revisedData().options.create.map((row: { actionKey: string }) => row.actionKey)).toEqual(["APPROVE", "REQUEST_CHANGES", "REJECT"])
+    })
+
+    it("keeps an option-less request option-less when revised without options", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2()))
+      await revise()
+      expect(JSON.parse(revisedData().packetJson)).not.toHaveProperty("options")
+    })
+
+    it("validates override options and rejects them before writing", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2(choices)))
+      await expect(revise({ options: [{ label: "Only" }] })).rejects.toEqual(expect.objectContaining({ code: "INVALID_INPUT" }))
+      expect(prisma.reviewRevision.create).not.toHaveBeenCalled()
+    })
+
+    it("reports a corrupt inherited option list as an invalid packet", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2([{ label: "Only" }])))
+      await expect(revise()).rejects.toEqual(expect.objectContaining({ code: "INVALID_PACKET" }))
+      expect(prisma.reviewRevision.create).not.toHaveBeenCalled()
+    })
+  })
+})
+
+describe("tracked decision questions (multi-question requests)", () => {
+  const base = { workspaceId: "ws-1", subjectType: "SOLUTION" as const, subjectId: "solution-1", question: "Plan the launch", context: "Answer each.", idempotencyKey: key1 }
+  const questions = [
+    { header: "Timing", question: "When do we ship?", options: [{ label: "Now", description: "This week." }, { label: "Later" }] },
+    { question: "Who announces it?", options: [{ label: "PM" }, { label: "Marketing" }, { label: "Founder" }] },
+  ]
+  const storedQuestions = [
+    { header: "Timing", question: "When do we ship?", options: [{ label: "Now", description: "This week." }, { label: "Later" }] },
+    { question: "Who announces it?", options: [{ label: "PM" }, { label: "Marketing" }, { label: "Founder" }] },
+  ]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => unknown) => fn(prisma))
+    prisma.reviewRequest.findFirst.mockResolvedValue(null)
+    prisma.reviewRequest.create.mockResolvedValue({ id: "request-1", decisionCycle: 1, revisionCount: 0 })
+    prisma.reviewRevision.create.mockResolvedValue({ id: "revision-1", requestId: "request-1", fingerprint: "fp" })
+    prisma.reviewRequest.update.mockResolvedValue({})
+    prisma.reviewRequest.updateMany.mockResolvedValue({ count: 1 })
+    prisma.solution.findUnique.mockResolvedValue({ id: "solution-1", title: "Simple decisions", workspaceId: "ws-1" })
+  })
+
+  const createdData = () => prisma.reviewRevision.create.mock.calls[0][0].data
+
+  it("stores the questions in the packet and creates Submit answers / Request changes / Reject rows", async () => {
+    await createTrackedDecisionRequest({ ...base, questions })
+    expect(JSON.parse(createdData().packetJson).questions).toEqual(storedQuestions)
+    expect(JSON.parse(createdData().packetJson)).not.toHaveProperty("options")
+    expect(createdData().options.create).toEqual([
+      { actionKey: "SUBMIT_ANSWERS", label: "Submit answers", outcomeClass: "APPROVE", continuationKey: "NO_ACTION", sortOrder: 0 },
+      { actionKey: "REQUEST_CHANGES", label: "Request changes", outcomeClass: "REQUEST_CHANGES", continuationKey: "NO_ACTION", sortOrder: 1 },
+      { actionKey: "REJECT", label: "Reject", outcomeClass: "REJECT", continuationKey: "NO_ACTION", sortOrder: 2 },
+    ])
+  })
+
+  it("normalizes whitespace and drops an empty header", async () => {
+    await createTrackedDecisionRequest({ ...base, questions: [{ header: "   ", question: "  Which?  ", options: [{ label: " A ", description: "  " }, { label: "B" }] }] })
+    expect(JSON.parse(createdData().packetJson).questions).toEqual([{ question: "Which?", options: [{ label: "A" }, { label: "B" }] }])
+  })
+
+  it.each([undefined, null, []])("treats questions=%j as no questions and leaves the packet byte-for-byte unchanged", async (value) => {
+    await createTrackedDecisionRequest({ ...base, questions: value })
+    const data = createdData()
+    const packet = { schemaVersion: "tracked-decision/v2", question: "Plan the launch", context: "Answer each.", entity: { type: "SOLUTION", id: "solution-1", title: "Simple decisions", updatedAt: new Date(0).toISOString() }, sources: [] }
+    expect(data.packetJson).toBe(JSON.stringify(packet))
+    expect(data.fingerprint).toBe(createHash("sha256").update(JSON.stringify({ requestId: "request-1", decisionCycle: 1, revisionNumber: 1, packet })).digest("hex"))
+    expect(data.options.create.map((row: { actionKey: string }) => row.actionKey)).toEqual(["APPROVE", "REQUEST_CHANGES", "REJECT"])
+  })
+
+  it("leaves the single-options path byte-for-byte unchanged when questions is omitted", async () => {
+    await createTrackedDecisionRequest({ ...base, options: [{ label: "A" }, { label: "B" }] })
+    const packet = { schemaVersion: "tracked-decision/v2", question: "Plan the launch", context: "Answer each.", entity: { type: "SOLUTION", id: "solution-1", title: "Simple decisions", updatedAt: new Date(0).toISOString() }, sources: [], options: [{ label: "A" }, { label: "B" }] }
+    expect(createdData().packetJson).toBe(JSON.stringify(packet))
+    expect(createdData().options.create.map((row: { actionKey: string }) => row.actionKey)).toEqual(["CHOICE_1", "CHOICE_2", "REQUEST_CHANGES", "REJECT"])
+  })
+
+  it("rejects passing both options and questions before writing", async () => {
+    await expect(createTrackedDecisionRequest({ ...base, options: [{ label: "A" }, { label: "B" }], questions })).rejects.toEqual(expect.objectContaining({ code: "INVALID_INPUT", message: "Pass either options or questions, not both." }))
+    expect(prisma.reviewRevision.create).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["five questions", Array.from({ length: 5 }, (_, i) => ({ question: `Q${i}`, options: [{ label: "A" }, { label: "B" }] }))],
+    ["an empty question text", [{ question: "  ", options: [{ label: "A" }, { label: "B" }] }]],
+    ["a question over 255 characters", [{ question: "x".repeat(256), options: [{ label: "A" }, { label: "B" }] }]],
+    ["a header over 40 characters", [{ header: "h".repeat(41), question: "Q", options: [{ label: "A" }, { label: "B" }] }]],
+    ["one option", [{ question: "Q", options: [{ label: "A" }] }]],
+    ["five options", [{ question: "Q", options: ["A", "B", "C", "D", "E"].map((label) => ({ label })) }]],
+    ["duplicate labels within a question", [{ question: "Q", options: [{ label: "A" }, { label: "a" }] }]],
+    ["a reserved label", [{ question: "Q", options: [{ label: "Reject" }, { label: "B" }] }]],
+  ])("rejects %s with INVALID_INPUT before writing anything", async (_name, value) => {
+    await expect(createTrackedDecisionRequest({ ...base, questions: value })).rejects.toEqual(expect.objectContaining({ code: "INVALID_INPUT" }))
+    expect(prisma.reviewRevision.create).not.toHaveBeenCalled()
+  })
+
+  it("allows the same option label in different questions", async () => {
+    await createTrackedDecisionRequest({ ...base, questions: [{ question: "One", options: [{ label: "Yes" }, { label: "No" }] }, { question: "Two", options: [{ label: "Yes" }, { label: "No" }] }] })
+    expect(JSON.parse(createdData().packetJson).questions).toHaveLength(2)
+  })
+
+  it("names the offending question in the error", async () => {
+    await expect(createTrackedDecisionRequest({ ...base, questions: [{ question: "Fine", options: [{ label: "A" }, { label: "B" }] }, { question: "Bad", options: [{ label: "X" }, { label: "x" }] }] }))
+      .rejects.toEqual(expect.objectContaining({ message: "Question 2: Option labels must be unique." }))
+  })
+
+  describe("idempotent replay", () => {
+    const stored = (qs?: unknown) => ({ id: "revision-current", packetJson: JSON.stringify({ schemaVersion: "tracked-decision/v2", question: "Plan the launch", context: "Answer each.", entity: { type: "SOLUTION", id: "solution-1", title: "Simple decisions", updatedAt: new Date(0).toISOString() }, sources: [], ...(qs ? { questions: qs } : {}) }) })
+
+    it("replays when the same questions are sent again", async () => {
+      const revision = stored(storedQuestions)
+      prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision: revision })
+      await expect(createTrackedDecisionRequest({ ...base, questions })).resolves.toBe(revision)
+      expect(prisma.reviewRevision.create).not.toHaveBeenCalled()
+    })
+
+    it("conflicts when a question, header, or option differs", async () => {
+      prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision: stored(storedQuestions) })
+      const changed = [{ ...questions[0], header: "Other" }, questions[1]]
+      await expect(createTrackedDecisionRequest({ ...base, questions: changed })).rejects.toEqual(expect.objectContaining({ code: "IDEMPOTENCY_KEY_CONFLICT" }))
+      const reordered = [{ ...questions[0], options: [...questions[0].options].reverse() }, questions[1]]
+      await expect(createTrackedDecisionRequest({ ...base, questions: reordered })).rejects.toEqual(expect.objectContaining({ code: "IDEMPOTENCY_KEY_CONFLICT" }))
+    })
+
+    it("conflicts between a question-less request and one with questions, both ways", async () => {
+      prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision: stored() })
+      await expect(createTrackedDecisionRequest({ ...base, questions })).rejects.toEqual(expect.objectContaining({ code: "IDEMPOTENCY_KEY_CONFLICT" }))
+      prisma.reviewRequest.findFirst.mockResolvedValue({ currentRevision: stored(storedQuestions) })
+      await expect(createTrackedDecisionRequest(base)).rejects.toEqual(expect.objectContaining({ code: "IDEMPOTENCY_KEY_CONFLICT" }))
+    })
+  })
+
+  describe("revising", () => {
+    const decidedRequest = (packet: object) => ({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", currentRevisionId: "revision-old", revisionCount: 1, decisionCycle: 1, currentRevision: { packetJson: JSON.stringify(packet) } })
+    const v2 = (extra: object = {}) => ({ schemaVersion: "tracked-decision/v2", entity: { type: "SOLUTION", id: "solution-1" }, sources: [], ...extra })
+    const revise = (extra: { options?: Array<{ label: string }> | null; questions?: typeof questions | null } = {}) => reviseTrackedDecisionRequest({ requestId: "request-1", workspaceId: "ws-1", subjectType: "SOLUTION", subjectId: "solution-1", question: "Again?", context: "New.", expectedDecisionId: "decision-1", reason: "Changed", ...extra })
+    const revisedData = () => prisma.reviewRevision.create.mock.calls[0][0].data
+
+    beforeEach(() => {
+      prisma.decisionRecord.findUnique.mockResolvedValue({ id: "decision-1", requestId: "request-1", revisionId: "revision-old", option: { outcomeClass: "REQUEST_CHANGES" } })
+    })
+
+    it("inherits the prior questions by default and recreates the Submit answers rows", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2({ questions: storedQuestions })))
+      await revise()
+      expect(JSON.parse(revisedData().packetJson).questions).toEqual(storedQuestions)
+      expect(revisedData().options.create.map((row: { actionKey: string }) => row.actionKey)).toEqual(["SUBMIT_ANSWERS", "REQUEST_CHANGES", "REJECT"])
+    })
+
+    it("replaces the prior questions when new ones are supplied", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2({ questions: storedQuestions })))
+      await revise({ questions: [{ question: "Only?", options: [{ label: "Yes" }, { label: "No" }] }] })
+      expect(JSON.parse(revisedData().packetJson).questions).toEqual([{ question: "Only?", options: [{ label: "Yes" }, { label: "No" }] }])
+    })
+
+    it("clears back to Approve / Request changes / Reject with an empty list", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2({ questions: storedQuestions })))
+      await revise({ questions: [] })
+      expect(JSON.parse(revisedData().packetJson)).not.toHaveProperty("questions")
+      expect(revisedData().options.create.map((row: { actionKey: string }) => row.actionKey)).toEqual(["APPROVE", "REQUEST_CHANGES", "REJECT"])
+    })
+
+    it("swaps questions for single options when options are supplied", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2({ questions: storedQuestions })))
+      await revise({ options: [{ label: "A" }, { label: "B" }] })
+      const packet = JSON.parse(revisedData().packetJson)
+      expect(packet).not.toHaveProperty("questions")
+      expect(packet.options).toEqual([{ label: "A" }, { label: "B" }])
+    })
+
+    it("rejects sending both on a revision", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2()))
+      await expect(revise({ options: [{ label: "A" }, { label: "B" }], questions })).rejects.toEqual(expect.objectContaining({ code: "INVALID_INPUT" }))
+      expect(prisma.reviewRevision.create).not.toHaveBeenCalled()
+    })
+
+    it("keeps a question-less request question-less when revised without questions", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2()))
+      await revise()
+      expect(JSON.parse(revisedData().packetJson)).not.toHaveProperty("questions")
+    })
+
+    it("reports a corrupt inherited question list as an invalid packet", async () => {
+      prisma.reviewRequest.findUnique.mockResolvedValue(decidedRequest(v2({ questions: [{ question: "Q", options: [{ label: "Only" }] }] })))
+      await expect(revise()).rejects.toEqual(expect.objectContaining({ code: "INVALID_PACKET" }))
+      expect(prisma.reviewRevision.create).not.toHaveBeenCalled()
+    })
   })
 })

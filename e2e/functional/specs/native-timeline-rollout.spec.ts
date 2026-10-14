@@ -5,8 +5,11 @@ import type { Locator, Page } from "@playwright/test";
 
 const nativeId = "daf2cdb6-0c38-4c29-bc2b-090bfa391532";
 const nativeBase = "/e2e-test-org/native-dogfood";
-const start = new Date().toISOString().slice(0, 8) + "01";
-const end = new Date().toISOString().slice(0, 8) + "28";
+// The app positions "today" by the browser-local calendar date, so derive the
+// fixture month the same way (toISOString is UTC and drifts a day-month near midnight).
+const localMonth = (() => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-`; })();
+const start = localMonth + "01";
+const end = localMonth + "28";
 
 function shiftDate(value: string, days: number) {
   const date = new Date(`${value}T12:00:00Z`);
@@ -89,7 +92,7 @@ test.describe("Native timeline default", () => {
         FROM compass_dev.roadmap_items WHERE workspace_id = $1 AND id = ANY($2::uuid[]) ORDER BY id`, [nativeId, ids]);
       const before = (await readSchedules()).rows;
       await page.goto(`${nativeBase}/roadmap?view=timeline`);
-      await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+      await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
       await scrollToFixtureMonth(page);
       for (const item of cases) {
         await page.getByRole("button", { name: `Edit dates for ${item.title}`, exact: true }).click();
@@ -100,7 +103,7 @@ test.describe("Native timeline default", () => {
         await page.keyboard.press("Escape");
       }
       await page.reload();
-      await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+      await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
       expect((await readSchedules()).rows).toEqual(before);
       await scrollToFixtureMonth(page);
       await page.screenshot({ path: testInfo.outputPath("legacy-schedule-recovery.png"), fullPage: true, style: "nextjs-portal { display: none }" });
@@ -111,7 +114,7 @@ test.describe("Native timeline default", () => {
       await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
       await expect(dialog).not.toBeVisible();
       await page.reload();
-      await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+      await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
       const { rows: [repaired] } = await pool.query(`SELECT start_date::date::text AS start, end_date::date::text AS end
         FROM compass_dev.roadmap_items WHERE workspace_id = $1 AND id = $2`, [nativeId, ids[0]]);
       expect(repaired).toEqual({ start, end });
@@ -127,46 +130,61 @@ test.describe("Native timeline default", () => {
     await page.goto(`${nativeBase}/roadmap?view=timeline`);
     const header = page.locator('[data-slot="workspace-header"]');
     await expect(header.getByRole("heading", { name: "Roadmap" })).toBeVisible();
-    for (const name of ["Previous period", "Go to today", "Next period", "View options", "Reload timeline"]) {
+    for (const name of ["Previous period", "Go to today", "Next period", "More actions"]) {
       const button = header.getByRole("button", { name, exact: true });
       await button.focus();
       const tooltip = page.getByRole("tooltip", { name, exact: true });
       await expect(tooltip).toBeVisible();
       await expect(button).toHaveAttribute("aria-describedby", await tooltip.getAttribute("id") as string);
     }
-    const options = header.getByRole("button", { name: "View options", exact: true });
-    await options.focus();
+    // Timeline scale and reload live in the more-actions (⋯) menu.
+    const more = header.getByRole("button", { name: "More actions", exact: true });
+    await more.focus();
+    // The roadmap supplies a card-sort link, so it is the menu's first entry.
     await page.keyboard.press("ArrowDown");
-    await expect(page.getByRole("menuitemradio", { name: "All squads", exact: true })).toBeFocused();
-    await page.keyboard.press("End");
+    await expect(page.getByRole("menuitem", { name: "Card sort", exact: true })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("menuitemradio", { name: "Month", exact: true })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
     await expect(page.getByRole("menuitemradio", { name: "Quarter", exact: true })).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/timelineScale=quarter/);
     await expect(page.getByRole("menuitemradio", { name: "Quarter", exact: true })).toHaveAttribute("aria-checked", "true");
     await page.screenshot({ path: "public/screenshots/docs/native-timeline-options-1280.png", style: "nextjs-portal { display: none }" });
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu", { name: "More actions" })).not.toBeVisible();
+    await expect(more).toBeFocused();
+
+    // Squad filtering lives in the shared Filters menu.
+    const filters = header.getByRole("button", { name: "Filters" });
+    await filters.click();
     await page.getByRole("menuitemradio", { name: "Alpha", exact: true }).click();
     await expect(page).toHaveURL(/squad=/);
     await page.keyboard.press("Escape");
-    await expect(page.getByRole("menu", { name: "View options" })).not.toBeVisible();
-    await options.click();
-    await page.getByRole("menuitem", { name: "Clear filters", exact: true }).click();
+    await expect(page.getByRole("menu", { name: "Filters" })).not.toBeVisible();
+    await filters.click();
+    await page.getByRole("menuitem", { name: "Clear all", exact: true }).click();
     await expect(page).not.toHaveURL(/squad=/);
     await expect(page).toHaveURL(/timelineScale=quarter/);
     await page.keyboard.press("Escape");
-    await expect(page.getByRole("menu", { name: "View options" })).not.toBeVisible();
-    await options.click();
+    await expect(page.getByRole("menu", { name: "Filters" })).not.toBeVisible();
+    await more.click();
     await expect(page.getByRole("menuitemradio", { name: "Quarter", exact: true })).toHaveAttribute("aria-checked", "true");
     await page.keyboard.press("Escape");
-    await expect(options).toBeFocused();
+    await expect(more).toBeFocused();
     await page.goBack();
     await expect(page).toHaveURL(/squad=/);
     await expect(page).toHaveURL(/timelineScale=quarter/);
     await expect(page.getByText("Dates are inclusive", { exact: true })).toHaveCount(0);
     await expect(page.getByText("Compass native timeline", { exact: true })).toHaveCount(0);
     await header.getByRole("tab", { name: "Board", exact: true }).click();
-    await expect(header.getByRole("button", { name: "Reload timeline" })).toHaveCount(0);
-    await options.click();
+    // Timeline-only controls are hidden, not disabled, on the Board tab. The
+    // more-actions menu stays for Card sort but drops the timeline scale.
+    await expect(header.getByRole("button", { name: "Previous period" })).toHaveCount(0);
+    await header.getByRole("button", { name: "More actions", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: "Card sort", exact: true })).toBeVisible();
     await expect(page.getByRole("menuitemradio", { name: "Quarter", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Reload timeline" })).toHaveCount(0);
   });
 
   for (const width of [320, 390]) {
@@ -179,18 +197,18 @@ test.describe("Native timeline default", () => {
       const previous = await targetBounds(header.getByRole("button", { name: "Previous period" }));
       expect(Math.abs(title.y + title.height / 2 - toggle.y - toggle.height / 2)).toBeLessThan(3);
       expect(previous.y).toBeGreaterThan(title.y + title.height);
-      for (const name of ["Previous period", "Go to today", "Next period", "View options", "Reload timeline"]) {
+      for (const name of ["Previous period", "Go to today", "Next period", "More actions"]) {
         const bounds = await targetBounds(header.getByRole("button", { name, exact: true }));
         expect(bounds.width).toBeGreaterThanOrEqual(44);
         expect(bounds.height).toBeGreaterThanOrEqual(44);
       }
-      await header.getByRole("button", { name: "View options" }).click();
-      const menu = await targetBounds(page.getByRole("menu", { name: "View options" }));
+      await header.getByRole("button", { name: "More actions" }).click();
+      const menu = await targetBounds(page.getByRole("menu", { name: "More actions" }));
       expect(menu.x).toBeGreaterThanOrEqual(0);
       expect(menu.x + menu.width).toBeLessThanOrEqual(width);
       await page.screenshot({ path: `public/screenshots/docs/native-timeline-options-${width}.png`, style: "nextjs-portal { display: none }" });
       await page.keyboard.press("Escape");
-      await expect(page.getByRole("menu", { name: "View options" })).not.toBeVisible();
+      await expect(page.getByRole("menu", { name: "More actions" })).not.toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
       const chart = page.getByTestId("native-timeline-scroll");
       expect(await chart.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
@@ -238,12 +256,12 @@ test.describe("Native timeline default", () => {
           probe.remove();
           return value;
         });
-        await expect(title.locator("..")).toHaveAttribute("data-slot", "workspace-header");
+        await expect(title.locator("xpath=ancestor::header[1]")).toHaveAttribute("data-slot", "workspace-header");
         const scroll = page.getByTestId("native-timeline-scroll");
         await expect(scroll.locator("../..")).toHaveCSS("background-color", cardColor);
         await expect(scroll.locator("../div").first()).toHaveCSS("background-color", cardColor);
         await expect(scroll.locator(":scope > div > div").first()).toHaveCSS("background-color", cardColor);
-        await expect(page.locator("#unscheduled-items-panel [data-slot=badge]").first()).toHaveCSS("background-color", cardColor);
+        await expect(page.getByTestId("schedule-rail")).toHaveCSS("background-color", cardColor);
         const grid = page.getByTestId("timeline-grid");
         expect(await grid.evaluate((element) => getComputedStyle(element).backgroundImage)).not.toContain("226, 232, 240");
         await scrollToFixtureMonth(page);
@@ -266,7 +284,9 @@ test.describe("Native timeline default", () => {
     await page.getByRole("button", { name: "Add Item", exact: true }).click();
     await expect(page.getByText("Native rollout scheduling", { exact: true })).toBeVisible();
     await page.getByRole("tab", { name: "Timeline", exact: true }).click();
-    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
+    // The new undated item sits at today; bring it into the rendered window like a user would.
+    await page.getByRole("button", { name: "Go to today", exact: true }).click();
     await page.getByRole("button", { name: "Edit dates for Native rollout scheduling", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Start", { exact: true }).fill(start);
@@ -285,11 +305,11 @@ test.describe("Native timeline default", () => {
     }
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`${nativeBase}/roadmap?view=timeline&timelineEngine=classic`);
-    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
     await page.getByRole("tab", { name: "Board", exact: true }).click();
     await expect(page.getByRole("button", { name: "Add item", exact: true }).first()).toBeVisible();
     await page.getByRole("tab", { name: "Timeline", exact: true }).click();
-    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Use classic timeline" })).toHaveCount(0);
   });
 
@@ -297,13 +317,14 @@ test.describe("Native timeline default", () => {
     await page.goto(`${nativeBase}/roadmap?view=timeline`);
     await expect(page.getByRole("button", { name: /Open details for Alpha delivery/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Open details for Beta delivery/ })).toBeVisible();
-    await page.getByRole("button", { name: "View options", exact: true }).click();
+    await page.getByRole("button", { name: "Filters", exact: true }).click();
     await page.getByRole("menuitemradio", { name: "Alpha", exact: true }).click();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: /Open details for Alpha delivery/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Open details for Beta delivery/ })).toHaveCount(0);
     const squad = new URL(page.url()).searchParams.get("squad");
-    await page.getByRole("button", { name: "Reload timeline" }).click();
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Reload timeline" }).click();
     expect(new URL(page.url()).searchParams.get("squad")).toBe(squad);
     await expect(page.getByRole("button", { name: /Open details for Beta delivery/ })).toHaveCount(0);
   });
@@ -405,7 +426,7 @@ test.describe("Native timeline default", () => {
 
   test("another workspace gets native without an opt-in", async ({ page, base }) => {
     await page.goto(`${base}/roadmap?view=timeline`);
-    await expect(page.getByTestId("timeline-engine-native")).toBeVisible();
+    await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Use classic timeline" })).toHaveCount(0);
   });
 
@@ -458,14 +479,15 @@ test.describe("Native timeline default", () => {
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Start", { exact: true }).fill(shiftDate(previousStart!, 1));
     await dialog.getByRole("button", { name: "Save schedule", exact: true }).click();
-    await expect(page.getByTestId("timeline-engine-native").getByRole("status")).toContainText("Changes rolled back; try again.");
+    await expect(page.getByTestId("timeline-engine-native").filter({ visible: true }).getByRole("status")).toContainText("Changes rolled back; try again.");
     expect(blocked).toBe(1);
     await expect(dialog).toBeVisible();
     await expect(card).toHaveAttribute("data-start", previousStart!);
     await expect(card).toHaveAttribute("data-end", previousEnd!);
     await page.keyboard.press("Escape");
     await page.unroute("**/roadmap*");
-    await page.getByRole("button", { name: "Reload timeline" }).click();
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Reload timeline" }).click();
     await scrollToFixtureMonth(page);
     await expect(card).toHaveAttribute("data-start", previousStart!);
     await expect(card).toHaveAttribute("data-end", previousEnd!);
@@ -473,6 +495,10 @@ test.describe("Native timeline default", () => {
 
   test("native backlog quick-add persists on the roadmap", async ({ page }) => {
     await page.goto(`${nativeBase}/roadmap?view=timeline`);
+    await page.waitForLoadState("networkidle"); // aria-expanded is only accurate once hydrated
+    // Below 1320px the Ready to schedule rail is collapsed until the header button opens it.
+    const railToggle = page.getByRole("button", { name: /ready-to-schedule rail/ });
+    if ((await railToggle.getAttribute("aria-expanded")) === "false") await railToggle.click();
     const backlog = page.locator('[data-testid^="unscheduled-item-"]').filter({ hasText: "Native backlog bug" });
     await backlog.getByRole("button", { name: "Card actions" }).click();
     await page.getByRole("menuitem", { name: "Add to Next", exact: true }).click();

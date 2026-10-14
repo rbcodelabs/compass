@@ -71,6 +71,8 @@ describe("authorizationServerMetadata", () => {
     expect(authorizationServerMetadata().scopes_supported).toEqual([
       "mcp:read",
       "mcp:write",
+      "api:read",
+      "api:write",
       "offline_access",
     ])
   })

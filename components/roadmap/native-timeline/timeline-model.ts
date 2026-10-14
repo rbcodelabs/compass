@@ -230,6 +230,20 @@ export function isBacklogCompatibleWithRow(
   return item.kind === "solution" ? row.squadId === item.squadId : row.squadId === null;
 }
 
+/**
+ * Where a dropped (or click-dragged) solution lands on a row: its squad is the
+ * row's squad, and its horizon is the row's own planning horizon in Phase
+ * grouping (null in every other mode, where the horizon follows the dates).
+ * Null when the row cannot take new work: a header row, or a horizon other than
+ * Now / Next / Later.
+ */
+export function solutionDropTarget(row: TimelineRow): { squadId: string | null; horizon: "NOW" | "NEXT" | "LATER" | null } | null {
+  if (row.kind !== "lane") return null;
+  if (row.horizon === null) return { squadId: row.squadId, horizon: null };
+  if (!NATIVE_BACKLOG_HORIZONS.includes(row.horizon)) return null;
+  return { squadId: row.squadId, horizon: row.horizon as "NOW" | "NEXT" | "LATER" };
+}
+
 export function isInternalTimelineDestination(source: Horizon, destination: Horizon): boolean {
   if (source === "LAUNCHING" || source === "LAUNCHED") return false;
   return source === destination || NATIVE_INTERNAL_DESTINATIONS.includes(destination);

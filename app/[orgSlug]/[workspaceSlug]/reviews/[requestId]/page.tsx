@@ -12,6 +12,9 @@ import { SendToAgentPicker } from "@/components/agent/send-to-agent-picker"
 import { getDecisionArtifacts } from "@/lib/artifacts"
 import { buildFollowUpDraft, suggestFollowUpAssignee } from "@/lib/decision-followthrough"
 import { eligibleTaskAssignees } from "@/lib/task-assignment"
+import { isChoiceActionKey, parseDecisionAnswers, parsePacketQuestions } from "@/lib/tracked-decision-types"
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
+import { DecisionAnswerList, DecisionQuestionList } from "@/components/decisions/decision-answers"
 
 function parsePacket(raw: string): Record<string, unknown> {
   try { return JSON.parse(raw) as Record<string, unknown> } catch { return {} }
@@ -37,6 +40,7 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
     },
   })
   if (!request?.currentRevision || (request.workspace.members.length === 0 && !isOrgAdminRole(request.workspace.organization.members[0]?.role))) notFound()
+  const { labels } = resolveThinkingModel(request.workspace)
   const revision = request.currentRevision
   const freshness = { stale: Boolean(revision.supersededAt) }
   const packet = parsePacket(revision.packetJson) as {
@@ -60,6 +64,9 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
     entity?: { type?: string; id?: string; title?: string }
   }
   const decided = revision.decisions[0]
+  const choiceOptions = revision.options.filter((option) => isChoiceActionKey(option.actionKey))
+  const questions = request.gateType === "TRACKED_DECISION" ? parsePacketQuestions(revision.packetJson) : []
+  const answers = parseDecisionAnswers(decided?.answersJson)
   const isRelease = request.gateType === "RELEASE_AUTHORIZATION"
   const isInvestment = request.gateType === "BUILDING_INVESTMENT" || request.gateType === "BUILDING_INVESTMENT_REVOCATION"
   const isRevocation = request.gateType === "BUILDING_INVESTMENT_REVOCATION"
@@ -106,8 +113,8 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
       <section className="min-w-0 max-w-full rounded-lg border p-4 text-sm">
         {isTracked ? <div className="space-y-5">
           {trackedPacket
-            ? <DecisionSources orgSlug={orgSlug} workspaceSlug={workspaceSlug} entity={trackedPacket.entity} sources={trackedPacket.sources} supportingArtifacts={supportingArtifacts} />
-            : <div className="space-y-2"><h2 className="text-sm font-medium">Linked to</h2><p className="mt-2 text-muted-foreground">{request.subjectType.replaceAll("_", " ").toLowerCase()}</p>{supportingArtifacts}</div>}
+            ? <DecisionSources orgSlug={orgSlug} workspaceSlug={workspaceSlug} entity={trackedPacket.entity} sources={trackedPacket.sources} supportingArtifacts={supportingArtifacts} labels={labels} />
+            : <div className="space-y-2"><h2 className="text-sm font-medium">Linked to</h2><p className="mt-2 text-muted-foreground">{request.subjectType === "OPPORTUNITY" ? labels.opportunity.lower : request.subjectType === "SOLUTION" ? labels.solution.lower : request.subjectType.replaceAll("_", " ").toLowerCase()}</p>{supportingArtifacts}</div>}
           <div className="border-t pt-4">
             <h2 className="mb-2 text-sm font-medium">Context</h2>
             <DecisionLongForm content={trackedPacket?.context ?? revision.summary} />
@@ -122,10 +129,10 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
             <dt>Covered tasks</dt><dd>{packet.taskIds?.join(", ")}</dd>
             <dt>Policy</dt><dd>{packet.releasePolicyId}</dd>
           </> : isInvestment ? <>
-            <dt>Solution</dt><dd>{packet.solution?.title}</dd>
+            <dt>{labels.solution.singular}</dt><dd>{packet.solution?.title}</dd>
             {isRevocation && <><dt>Authority decision</dt><dd className="break-all font-mono">{packet.authorityDecisionId}</dd></>}
             <dt>Status</dt><dd>{packet.solution?.status}</dd>
-            <dt>Opportunity</dt><dd>{packet.solution?.opportunityTitle}</dd>
+            <dt>{labels.opportunity.singular}</dt><dd>{packet.solution?.opportunityTitle}</dd>
           </> : isPolicyActivation ? <>
             <dt>Workspace</dt><dd>{request.workspaceId}</dd>
             <dt>Mode</dt><dd>{packet.mode}</dd>
@@ -134,8 +141,8 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
             <dt>Native approvals</dt><dd>{packet.inspection?.verifiedDecisionCount}</dd>
           </> : <>
             <dt>Roadmap item</dt><dd>{packet.roadmapItem?.title}</dd>
-            <dt>Solution</dt><dd>{packet.roadmapItem?.solutionId ?? "Not linked"}</dd>
-            <dt>Opportunity</dt><dd>{packet.roadmapItem?.opportunityId ?? "Not linked"}</dd>
+            <dt>{labels.solution.singular}</dt><dd>{packet.roadmapItem?.solutionId ?? "Not linked"}</dd>
+            <dt>{labels.opportunity.singular}</dt><dd>{packet.roadmapItem?.opportunityId ?? "Not linked"}</dd>
             <dt>Owning squad</dt><dd>{packet.roadmapItem?.squadId ?? "Unassigned"}</dd>
             <dt>Policy</dt><dd>{packet.policyVersion}</dd>
           </>}
@@ -151,15 +158,24 @@ export default async function ReviewRequestPage({ params }: { params: Promise<{ 
         </section>
       ) : decided ? (
         <section className="space-y-2 rounded-lg border bg-status-success-surface p-4 text-sm text-status-success">
-          <p>Decision recorded: <strong>{decided.option.label}</strong> by {decided.actorRole} at {decided.decidedAt.toLocaleString()}.</p>
+          <p className="break-words [overflow-wrap:anywhere]">Decision recorded: <strong>{decided.option.label}</strong> by {decided.actorRole} at {decided.decidedAt.toLocaleString()}.</p>
+          {decided.option.description && <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-foreground/80">{decided.option.description}</p>}
+          <DecisionAnswerList answers={answers} />
           <DecisionLongForm className="text-foreground" content={decided.rationale} />
           {isTracked && decided.option.outcomeClass === "REQUEST_CHANGES" && <a className="inline-block font-medium text-primary underline" href={`/${orgSlug}/${workspaceSlug}/decisions/new?reviseRequestId=${request.id}`}>Create revised request</a>}
           {isTracked && decided.option.outcomeClass === "APPROVE" && <SendToAgentPicker orgSlug={orgSlug} workspaceSlug={workspaceSlug} entityType="decision" entityId={request.id} className="inline-block font-medium text-primary underline">Send to agent</SendToAgentPicker>}
         </section>
       ) : isTracked && canDecide ? (
-        <DecisionActions workspaceId={request.workspaceId} revisionId={revision.id} fingerprint={revision.fingerprint} options={revision.options.map((option) => ({ id: option.id, label: option.label, outcomeClass: option.outcomeClass }))} />
+        <DecisionActions workspaceId={request.workspaceId} revisionId={revision.id} fingerprint={revision.fingerprint} options={revision.options.map((option) => ({ id: option.id, label: option.label, outcomeClass: option.outcomeClass, actionKey: option.actionKey, description: option.description }))} questions={questions} />
       ) : isTracked ? (
-        <section className="rounded-lg border p-4 text-sm text-muted-foreground">Waiting for a workspace or organization admin to decide.</section>
+        <section className="space-y-3 rounded-lg border p-4 text-sm text-muted-foreground">
+          <p>Waiting for a workspace or organization admin to decide.</p>
+          <DecisionQuestionList questions={questions} />
+          {choiceOptions.length > 0 && <div className="space-y-2">
+            <p className="font-medium text-foreground">Options offered</p>
+            <ul className="space-y-2">{choiceOptions.map((option) => <li key={option.id} className="min-w-0 rounded-md border bg-background p-3"><span className="block break-words [overflow-wrap:anywhere] font-medium text-foreground">{option.label}</span>{option.description && <span className="mt-0.5 block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{option.description}</span>}</li>)}</ul>
+          </div>}
+        </section>
       ) : (
         <div className="flex flex-wrap gap-3">
           {revision.options.map((option) => (

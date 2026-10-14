@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import matter from "gray-matter";
+import { safeMatter } from "@/lib/safe-matter"
 import { remark } from "remark";
 import remarkGfm from "remark-gfm";
 import remarkRehype from "remark-rehype";
@@ -41,7 +41,7 @@ export function getAllDocs(): DocMeta[] {
     .map((file) => {
       const slug = file.replace(/\.md$/, "");
       const raw = fs.readFileSync(path.join(DOCS_DIR, file), "utf-8");
-      const { data } = matter(raw);
+      const { data } = safeMatter(raw);
       return {
         slug,
         title: data.title as string,
@@ -58,7 +58,7 @@ export async function getDoc(slug: string): Promise<DocPage | null> {
   const file = path.join(DOCS_DIR, `${slug}.md`);
   if (!fs.existsSync(file)) return null;
   const raw = fs.readFileSync(file, "utf-8");
-  const { data, content } = matter(raw);
+  const { data, content } = safeMatter(raw);
   const result = await remark()
     .use(remarkGfm)
     .use(remarkRehype, { allowDangerousHtml: true })
@@ -85,7 +85,7 @@ export function getDocRaw(slug: string): DocRaw | null {
   const file = path.join(DOCS_DIR, `${slug}.md`);
   if (!fs.existsSync(file)) return null;
   const raw = fs.readFileSync(file, "utf-8");
-  const { data, content } = matter(raw);
+  const { data, content } = safeMatter(raw);
   return {
     slug,
     title: data.title as string,
@@ -108,7 +108,10 @@ export function getDocRaw(slug: string): DocRaw | null {
 function slugifyHeading(text: string): string {
   return text
     .toLowerCase()
-    .replace(/[`*_~]/g, "") // strip markdown emphasis/code markers
+    .replace(/[`*~]/g, "") // strip markdown emphasis/code markers
+    // An underscore is an emphasis marker only at a word edge. Inside snake_case (a tool name such as `list_links`)
+    // rehype-slug / github-slugger keeps it, so stripping it would point search anchors at an id that does not exist.
+    .replace(/(^|\s)_+|_+(?=\s|$)/g, "$1")
     .replace(/[^\w\- ]+/g, "") // strip remaining punctuation
     .trim()
     .replace(/\s+/g, "-")
@@ -224,12 +227,19 @@ export function searchHelp(query: string, limit = 5): HelpSearchResult[] {
     return terms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0);
   };
 
+  // A query that is exactly an identifier (an MCP tool name such as `list_links`) is a lookup, not a topic. Term overlap alone
+  // splits it into common words and lets any prose section that happens to share them outrank the tool's own reference
+  // section, so a verbatim hit on the whole identifier earns a bonus (a heading hit far more than a body mention).
+  const identifier = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/i.test(query.trim()) ? query.trim().toLowerCase() : null;
+  const identifierBonus = (heading: string | null, text: string) =>
+    identifier === null ? 0 : (heading?.toLowerCase().includes(identifier) ? 20 : 0) + (text.toLowerCase().includes(identifier) ? 3 : 0);
+
   const results: HelpSearchResult[] = [];
 
   for (const meta of getAllDocs()) {
     const file = path.join(DOCS_DIR, `${meta.slug}.md`);
     const raw = fs.readFileSync(file, "utf-8");
-    const { content } = matter(raw);
+    const { content } = safeMatter(raw);
 
     let best: HelpSearchResult | null = null;
 
@@ -249,7 +259,7 @@ export function searchHelp(query: string, limit = 5): HelpSearchResult[] {
 
     // Per-section match via heading text + body.
     for (const sec of splitIntoSections(content)) {
-      const total = (sec.heading ? scoreText(sec.heading) * 4 : 0) + scoreText(sec.text);
+      const total = (sec.heading ? scoreText(sec.heading) * 4 : 0) + scoreText(sec.text) + identifierBonus(sec.heading, sec.text);
       if (total <= 0) continue;
       if (best && best.score >= total) continue;
       best = {

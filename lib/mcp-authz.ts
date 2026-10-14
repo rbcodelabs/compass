@@ -35,7 +35,7 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import getPrisma from "@/lib/db"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
-import { agentWorkspaceWhere, hasValidAgentOrgAdminGrant, type AgentAdminCapability } from "@/lib/agent-access"
+import { agentWorkspaceWhere, hasOwnerOrgAdminRights, hasValidAgentOrgAdminGrant, type AgentAdminCapability } from "@/lib/agent-access"
 import { getManagedPilotContext } from "@/lib/preview-automation/managed-context"
 
 export type McpActor = {
@@ -224,18 +224,26 @@ export async function assertOrgMemberBySlug(
  * See assertWorkspaceAdmin's doc comment for `opts.agentCapability` — same
  * ADR 0020 escape hatch, resolved against the org this slug names instead of
  * a workspace's parent org.
+ *
+ * `opts.inheritOwnerAdmin` lets an AGENT/AGENT_TURN identity act with its
+ * owner's current org OWNER/ADMIN rights (hasOwnerOrgAdminRights), with no
+ * AgentOrgAdminGrant. It is opt-in per call site; only `create_workspace`
+ * passes it.
  */
 export async function assertOrgAdminBySlug(
   actor: McpActor,
   orgSlug: string,
-  opts: { agentCapability?: AgentAdminCapability } = {}
+  opts: { agentCapability?: AgentAdminCapability; inheritOwnerAdmin?: boolean } = {}
 ): Promise<{ organizationId: string }> {
   if (getManagedPilotContext()) throw new McpAuthzError("Organization-wide mutations are unavailable in the managed pilot.")
   const prisma = getPrisma()
   if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") {
-    if (opts.agentCapability) {
+    if (opts.agentCapability || opts.inheritOwnerAdmin) {
       const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
-      if (org && (await hasValidAgentOrgAdminGrant(actor, org.id, opts.agentCapability))) return { organizationId: org.id }
+      if (org && opts.agentCapability && (await hasValidAgentOrgAdminGrant(actor, org.id, opts.agentCapability))) return { organizationId: org.id }
+      // Opt-in only (see hasOwnerOrgAdminRights): the agent exercises its
+      // owner's CURRENT org admin role, no per-agent grant needed.
+      if (org && opts.inheritOwnerAdmin && (await hasOwnerOrgAdminRights(actor, org.id))) return { organizationId: org.id }
     }
     throw new McpAuthzError("Human administrator required.")
   }
@@ -300,28 +308,26 @@ const WORKSPACE_ENTITY_RESOLVERS: Record<
   opportunity: async (p, id) =>
     (await p.opportunity.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   solution: async (p, id) =>
-    (await p.solution.findUnique({ where: { id }, select: { opportunity: { select: { workspaceId: true } } } }))
-      ?.opportunity?.workspaceId ?? null,
+    (await p.solution.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   assumption: async (p, id) =>
     (await p.assumption.findUnique({
       where: { id },
-      select: { solution: { select: { opportunity: { select: { workspaceId: true } } } } },
-    }))?.solution?.opportunity?.workspaceId ?? null,
+      select: { solution: { select: { workspaceId: true } } },
+    }))?.solution?.workspaceId ?? null,
   solutionComment: async (p, id) =>
     (await p.solutionComment.findUnique({
       where: { id },
-      select: { solution: { select: { opportunity: { select: { workspaceId: true } } } } },
-    }))?.solution?.opportunity?.workspaceId ?? null,
+      select: { solution: { select: { workspaceId: true } } },
+    }))?.solution?.workspaceId ?? null,
   okrCycle: async (p, id) =>
     (await p.oKRCycle.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   objective: async (p, id) =>
-    (await p.objective.findUnique({ where: { id }, select: { cycle: { select: { workspaceId: true } } } }))
-      ?.cycle?.workspaceId ?? null,
+    (await p.objective.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   keyResult: async (p, id) =>
     (await p.keyResult.findUnique({
       where: { id },
-      select: { objective: { select: { cycle: { select: { workspaceId: true } } } } },
-    }))?.objective?.cycle?.workspaceId ?? null,
+      select: { objective: { select: { workspaceId: true } } },
+    }))?.objective?.workspaceId ?? null,
   experiment: async (p, id) =>
     (await p.experiment.findUnique({ where: { id }, select: { workspaceId: true } }))?.workspaceId ?? null,
   roadmapItem: async (p, id) =>
@@ -403,6 +409,28 @@ export async function assertEntityAccess(
     await assertWorkspaceMember(actor, workspaceId)
   }
   return { workspaceId }
+}
+
+/**
+ * Assert the actor may act on EVERY listed entity AND that they all belong to one workspace.
+ *
+ * Membership of each workspace is not enough for a call that joins two entities: a member of two
+ * workspaces could otherwise attach A's entity to B's. Access is asserted first, entity by entity,
+ * so a non-member learns nothing about whether the other end exists or where it lives; only then is
+ * the workspace comparison made. Returns the shared `workspaceId`.
+ */
+export async function assertSameWorkspaceEntities(
+  actor: McpActor,
+  entities: readonly (readonly [WorkspaceEntityType, string])[]
+): Promise<{ workspaceId: string }> {
+  const workspaceIds = new Set<string>()
+  for (const [entityType, entityId] of entities) {
+    workspaceIds.add((await assertEntityAccess(actor, entityType, entityId)).workspaceId)
+  }
+  if (workspaceIds.size !== 1) {
+    throw new McpAuthzError(`${entities.map(([type]) => type).join(" and ")} must belong to the same workspace.`)
+  }
+  return { workspaceId: [...workspaceIds][0] }
 }
 
 // ──────────────────────────────────────────────────────────────────────────

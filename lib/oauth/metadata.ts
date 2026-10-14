@@ -21,7 +21,9 @@
  */
 import {
   RESOURCE_SCOPES,
+  API_RESOURCE_SCOPES,
   SUPPORTED_SCOPES,
+  apiResourceUri,
   mcpResourceUri,
   oauthIssuer,
 } from "@/lib/oauth/constants"
@@ -41,6 +43,7 @@ export const REVOCATION_ENDPOINT_PATH = "/api/oauth/revoke"
  */
 export const PROTECTED_RESOURCE_METADATA_PATH =
   "/.well-known/oauth-protected-resource/api/mcp"
+export const API_PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource/api/v1"
 
 /**
  * RFC 8414 §3 and OIDC Discovery. Clients MUST support both spellings and
@@ -98,13 +101,14 @@ export function authorizationServerMetadata(): Record<string, unknown> {
  * offline_access" guidance applies to this document, while the AS metadata
  * above must advertise it for Claude to request a refresh token.
  */
-export function protectedResourceMetadata(): Record<string, unknown> {
+export function protectedResourceMetadata(family: "mcp" | "api" = "mcp"): Record<string, unknown> {
+  const api = family === "api"
   return {
-    resource: mcpResourceUri(),
+    resource: api ? apiResourceUri() : mcpResourceUri(),
     authorization_servers: [oauthIssuer()],
-    scopes_supported: [...RESOURCE_SCOPES],
+    scopes_supported: [...(api ? API_RESOURCE_SCOPES : RESOURCE_SCOPES)],
     bearer_methods_supported: ["header"],
-    resource_name: "Compass",
-    resource_documentation: `${oauthIssuer()}/help/09-mcp-api`,
+    resource_name: api ? "Compass REST API" : "Compass",
+    resource_documentation: `${oauthIssuer()}${api ? "/help/09-rest-api" : "/help/09-mcp-api"}`,
   }
 }

@@ -32,6 +32,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FEEDBACK_STATUS_META, type FeedbackStatus } from "@/lib/feedback-meta";
+import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
+import { ComposerObjectiveField } from "@/components/discovery/composer-objective-field";
+import { linkPlaceholder } from "@/lib/thinking-model/copy";
 import {
   NEW_OPPORTUNITY_STATUSES,
   OPPORTUNITY_SEED_FEEDBACK_MAX,
@@ -109,6 +112,7 @@ function ComposerForm({
   presetStatus: NewOpportunityStatus | null;
 }) {
   const router = useRouter();
+  const labels = useLabels();
   const { openPanel, closePanel } = usePanelContext();
   const [title, setTitle] = useState(restored?.title ?? "");
   const [description, setDescription] = useState(restored?.description ?? "");
@@ -119,6 +123,9 @@ function ComposerForm({
   const [squadId, setSquadId] = useState<string | null>(restored?.squadId ?? null);
   const [keyResultId, setKeyResultId] = useState<string | null>(restored?.keyResultId ?? null);
   const [feedbackIds, setFeedbackIds] = useState<string[]>(restored?.feedbackIds ?? []);
+  const [objectiveIds, setObjectiveIds] = useState<string[]>(restored?.objectiveIds ?? []);
+  // Presentation only: presets that make the Opportunity<->Objective link primary offer the picker (CLASSIC does not).
+  const offersObjectives = useThinkingModel().links.oppToObjective === "primary";
   const [error, setError] = useState<string | null>(null);
   const [titleInvalid, setTitleInvalid] = useState(false);
   const [optionsState, setOptionsState] = useState<OptionsState>({ status: "loading" });
@@ -150,6 +157,8 @@ function ComposerForm({
         setSquadId((id) => (id && options.squads.some((squad) => squad.id === id) ? id : null));
         setKeyResultId((id) => (id && options.keyResults.some((kr) => kr.id === id) ? id : null));
         setFeedbackIds((selected) => selected.filter((id) => options.feedback.some((item) => item.id === id)));
+        // Same for chosen Objectives: when the options carry none (the preset does not offer them), nothing stays chosen.
+        setObjectiveIds((selected) => selected.filter((id) => options.objectives?.some((o) => o.id === id)));
       })
       .catch(() => {
         if (!cancelled) setOptionsState({ status: "error" });
@@ -159,12 +168,12 @@ function ComposerForm({
     };
   }, [orgSlug, workspaceSlug]);
 
-  const draft: OpportunityDraft = { title, description, customerSegment, status, squadId, keyResultId, feedbackIds };
+  const draft: OpportunityDraft = { title, description, customerSegment, status, squadId, keyResultId, feedbackIds, objectiveIds };
   const draftEmpty = isOpportunityDraftEmpty(draft);
 
   useEffect(() => {
-    saveOpportunityDraft(draftKey, { title, description, customerSegment, status, squadId, keyResultId, feedbackIds });
-  }, [draftKey, title, description, customerSegment, status, squadId, keyResultId, feedbackIds]);
+    saveOpportunityDraft(draftKey, { title, description, customerSegment, status, squadId, keyResultId, feedbackIds, objectiveIds });
+  }, [draftKey, title, description, customerSegment, status, squadId, keyResultId, feedbackIds, objectiveIds]);
 
   useFocusOnOpen(titleRef);
 
@@ -177,6 +186,7 @@ function ComposerForm({
     setSquadId(null);
     setKeyResultId(null);
     setFeedbackIds([]);
+    setObjectiveIds([]);
   };
 
   const discardDraft = () => {
@@ -208,6 +218,7 @@ function ComposerForm({
           squadId,
           linkedKeyResultId: keyResultId,
           feedbackIds,
+          ...(offersObjectives ? { objectiveIds } : {}),
         });
         if (!result.ok) {
           setError(result.error);
@@ -219,7 +230,7 @@ function ComposerForm({
         // Same slot, same history entry: the composer becomes the opportunity.
         openPanel("opportunity", result.opportunity.id, { replace: true });
       } catch {
-        setError("Couldn't create the opportunity right now. Your draft is saved on this device — try again.");
+        setError(`Couldn't create the ${labels.opportunity.lower} right now. Your draft is saved on this device — try again.`);
       }
     });
   };
@@ -241,7 +252,7 @@ function ComposerForm({
   return (
     <form
       noValidate
-      aria-label="New opportunity"
+      aria-label={`New ${labels.opportunity.lower}`}
       onSubmit={onSubmit}
       onKeyDown={onKeyDown}
       className="relative flex min-h-0 flex-1 flex-col"
@@ -262,7 +273,7 @@ function ComposerForm({
             }
           }}
           maxLength={OPPORTUNITY_TITLE_MAX_LENGTH}
-          placeholder="What opportunity have you discovered?"
+          placeholder={`What ${labels.opportunity.lower} have you discovered?`}
           invalid={titleInvalid}
           errorId={`${ids}-error`}
           disabled={isPending}
@@ -302,23 +313,32 @@ function ComposerForm({
           onChange={setDescription}
           placeholder="Who has this problem, what does it cost them today, and what evidence do you have?"
           disabled={isPending}
-          templateLabel="Insert opportunity outline"
+          templateLabel={`Insert ${labels.opportunity.lower} outline`}
           onInsertTemplate={() => setDescription((current) => appendTemplate(current, OPPORTUNITY_OUTLINE))}
         />
 
         {optionsState.status === "loading" && (
           <p className="text-xs text-text-subtle" aria-busy="true">
-            Loading key results and feedback…
+            Loading {labels.keyResult.lowerPlural} and feedback…
           </p>
         )}
         {optionsState.status === "error" && (
           <p className="text-xs text-text-subtle">
-            Couldn&apos;t load key results and feedback. You can still create the opportunity and link them from its
+            Couldn&apos;t load {labels.keyResult.lowerPlural} and feedback. You can still create the {labels.opportunity.lower} and link them from its
             panel afterwards.
           </p>
         )}
         {options && (
           <>
+            {offersObjectives && options.objectives && (
+              <ComposerObjectiveField
+                id={`${ids}-objectives`}
+                objectives={options.objectives}
+                value={objectiveIds}
+                onChange={setObjectiveIds}
+                disabled={isPending}
+              />
+            )}
             <KeyResultField
               id={`${ids}-kr`}
               keyResults={options.keyResults}
@@ -461,13 +481,14 @@ function KeyResultField({
   onChange: (value: string | null) => void;
   disabled: boolean;
 }) {
+  const labels = useLabels();
   return (
     <div className="flex flex-col gap-1.5">
       <FieldLabel id={id}>
-        Driving key result <span className="font-normal text-text-subtle">· optional</span>
+        Driving {labels.keyResult.lower} <span className="font-normal text-text-subtle">· optional</span>
       </FieldLabel>
       {keyResults.length === 0 ? (
-        <p className="text-xs text-text-subtle">No key results in this workspace yet.</p>
+        <p className="text-xs text-text-subtle">No {labels.keyResult.lowerPlural} in this workspace yet.</p>
       ) : (
         <Combobox
           items={keyResultComboboxItems(keyResults)}
@@ -477,10 +498,10 @@ function KeyResultField({
           onValueChange={(next) => onChange(!next || next === NO_KEY_RESULT ? null : next)}
           disabled={disabled}
         >
-          <ComboboxTrigger aria-label="Key result" className="w-full">
-            <ComboboxValue placeholder="Link a key result" />
+          <ComboboxTrigger aria-label={labels.keyResult.sentence} className="w-full">
+            <ComboboxValue placeholder={linkPlaceholder(labels.keyResult)} />
           </ComboboxTrigger>
-          <ComboboxContent align="start" inputPlaceholder="Search key results…" emptyMessage="No matching key results." />
+          <ComboboxContent align="start" inputPlaceholder={`Search ${labels.keyResult.lowerPlural}…`} emptyMessage={`No matching ${labels.keyResult.lowerPlural}.`} />
         </Combobox>
       )}
     </div>
@@ -522,6 +543,7 @@ function FeedbackSeedField({
   onChange: (value: string[]) => void;
   disabled: boolean;
 }) {
+  const labels = useLabels();
   const items = useMemo(() => feedback.map(feedbackItem), [feedback]);
   const byId = useMemo(() => new Map(feedback.map((item) => [item.id, item])), [feedback]);
   const selected = value.map((feedbackId) => byId.get(feedbackId)).filter((item) => item !== undefined);
@@ -545,7 +567,7 @@ function FeedbackSeedField({
           >
             <ComboboxTrigger aria-label="Seed from feedback" className="w-full">
               <span className="flex-1 text-left text-muted-foreground">
-                {value.length ? `${value.length} selected — add more` : "Link feedback that points to this opportunity"}
+                {value.length ? `${value.length} selected — add more` : `Link feedback that points to this ${labels.opportunity.lower}`}
               </span>
             </ComboboxTrigger>
             <ComboboxContent align="start" inputPlaceholder="Search feedback…" emptyMessage="No matching feedback." />
@@ -580,8 +602,8 @@ function FeedbackSeedField({
           {relinking > 0 && (
             <p className="text-xs text-text-subtle">
               {relinking === 1
-                ? "1 is linked to another opportunity and will move here."
-                : `${relinking} are linked to other opportunities and will move here.`}
+                ? `1 is linked to another ${labels.opportunity.lower} and will move here.`
+                : `${relinking} are linked to other ${labels.opportunity.lowerPlural} and will move here.`}
             </p>
           )}
         </>

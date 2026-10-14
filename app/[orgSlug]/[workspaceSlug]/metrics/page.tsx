@@ -4,6 +4,7 @@ import { getWorkspace } from "@/lib/workspace";
 import { listConnections, listDashboardMetrics } from "@/lib/analytics/service";
 import { MetricsDashboard } from "@/components/analytics/metrics-dashboard";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 
 export const metadata = { title: "Metrics" };
 
@@ -29,7 +30,7 @@ export default async function MetricsPage({ params }: Props) {
   return (
     <WorkspacePage
       title="Metrics"
-      description="Product usage from your analytics providers, connected to experiments, roadmap launches, and key results."
+      description={`Product usage from your analytics providers, connected to experiments, roadmap launches, and ${resolveThinkingModel(workspace).labels.keyResult.lowerPlural}.`}
       contentClassName="md:overflow-y-auto"
     >
       <MetricsDashboard

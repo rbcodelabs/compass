@@ -326,7 +326,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional |
+| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional. For a root `ARTIFACT` comment on a `SLIDE_DECK` Artifact, optional `slideIndex` (zero-based, from `get_artifact` `slides[].index`) anchors it to that whole slide |
 | `list_comments` | List comments for an exact workspace and target, optionally filtered by `OPEN` or `RESOLVED` |
 | `get_comment` | Get one comment and any specialized Doc-anchor or Solution-plan metadata |
 | `update_comment` | Edit a comment body |
@@ -334,46 +334,92 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `resolve_comment` | Mark a comment resolved |
 | `reopen_comment` | Mark a resolved comment open |
 
+### Following and notifications
+
+Follow an object to get its status changes and comments in your in-app notifications inbox. These tools act on the **calling person's own** follows and inbox, so they need a user identity: agent-scoped tokens and credentials with no user get a clear error and never touch anyone's inbox. Following is gated by `FOLLOWING_ENABLED`; while it is off the tools return "Following is not enabled." Today `OPPORTUNITY`, `SOLUTION`, `TASK` and `DOC` are followable; the remaining subject types are rejected with "cannot be followed yet" until their rollout slice ships. Unfollowing is remembered: commenting on or being assigned an object you unfollowed does not re-follow it, but an explicit `follow` does.
+
+| Tool | Description |
+|---|---|
+| `follow` | Follow an object. Requires `workspaceId`, `subjectType`, `subjectId`. Idempotent; clears an earlier unfollow |
+| `unfollow` | Stop notifications for an object. Leaves a muted marker so automatic follows (creating, commenting, being assigned) do not undo it |
+| `list_notifications` | List your notifications in one workspace, newest first, with `unreadCount`. Optional `limit` (1–100), `cursor` (from `nextCursor`), `unreadOnly`. Titles and links are resolved at read time and are `null` for an object that was deleted or you can no longer see |
+| `mark_read` | Mark notifications read. Pass `notificationIds` (up to 100) or `all: true`, not both. Only your own notifications are affected |
+
+Notification kinds are `STATUS_CHANGED`, `COMMENT_ADDED`, `COMMENT_REPLIED` and, for Tasks only, `ASSIGNED` (sent to the assignee).
+
 ### Workspace
 
 | Tool | Description |
 |---|---|
-| `get_workspace_summary` | Returns high-level counts and status for a workspace: OKR cycles, opportunities, experiments, roadmap items, active experiments, active OKR cycle, and squads |
+| `get_workspace_summary` | Returns high-level counts and status for a workspace: OKR cycles, opportunities, experiments, roadmap items, active experiments, active OKR cycle, and squads. Also returns the workspace's `thinkingModel` (see below) |
 | `list_workspaces` | List all workspaces in an organization by org slug; use as the first call when you don't yet know a workspace ID |
-| `get_workspace_by_slug` | Look up a single workspace's ID, name, and description directly by org slug + workspace slug, without listing all workspaces |
-| `create_workspace` | Create a new workspace inside an organization |
+| `get_workspace_by_slug` | Look up a single workspace's ID, name, and description directly by org slug + workspace slug, without listing all workspaces. Also returns the workspace's `thinkingModel` (see below) |
+| `create_workspace` | Create a new workspace inside an organization. Requires an organization OWNER/ADMIN; an agent may call it when its owner currently holds that role (see Inherited admin rights below) |
+
+### The workspace's thinking model
+
+`get_workspace_summary` and `get_workspace_by_slug` include a `thinkingModel` object in their structured data. It is read-only: there is no tool to change a workspace's model, because that is a workspace-admin action in Settings (see [Thinking models](/help/27-thinking-models)).
+
+```json
+{
+  "thinkingModel": {
+    "key": "TORRES_OST",
+    "name": "Torres opportunity solution tree",
+    "labels": {
+      "opportunity": { "singular": "Opportunity", "plural": "Opportunities" },
+      "objective": { "singular": "Outcome", "plural": "Outcomes" },
+      "keyResult": { "singular": "Success metric", "plural": "Success metrics" },
+      "solution": { "singular": "Solution", "plural": "Solutions" },
+      "cycle": { "singular": "Cycle", "plural": "Cycles" }
+    }
+  }
+}
+```
+
+- `key` is `CLASSIC` (also reported for a workspace that never chose a model), `OPPORTUNITY_FIRST_OKR` or `TORRES_OST`.
+- `labels` are how the people in the workspace talk. They cover all five entities (`opportunity`, `objective`, `keyResult`, `solution`, `cycle`) and include any workspace-specific renames of them.
+- **Tool names, tool descriptions, input fields and every other part of the output stay canonical** (Objective, Key Result, `objectiveId`, `keyResultId`) under every model. Use the labels only when you write to the humans in that workspace.
+- When a workspace shows custom names for any entity, the text output gains one line pointing at `thinkingModel.labels`. The label text itself appears only in the structured data, never in that line.
+- The model is presentation only. Data, links and validation are identical under every model, so no tool behaves differently.
 
 ### OKRs
 
 | Tool | Description |
 |---|---|
-| `list_okr_cycles` | List all OKR cycles for a workspace with IDs, titles, dates, and status |
+| `list_okr_cycles` | List all OKR cycles for a workspace with IDs, titles, dates, and status, followed by the cycle-less Objectives under "No cycle / Persistent" (also returned as `persistentObjectives`) |
 | `create_okr_cycle` | Create a new OKR cycle for a workspace (defaults to DRAFT status) |
 | `get_okr_cycle` | Return a full OKR cycle with Objective/KR progress, higher-level parent links, and supporting Objectives |
-| `create_objective` | Create an Objective; optionally assign a squad or link to an eligible KR in a longer-horizon cycle |
+| `create_objective` | Create an Objective, optionally in an OKR cycle: leave out `cycleId` for a cycle-less (persistent) Objective, which `list_okr_cycles` reports under "No cycle / Persistent" and `get_okr_cycle` never returns. Optionally assign a squad or link to an eligible KR: for a cycled Objective, one in a longer-horizon cycle that contains it, or one on a cycle-less Objective; for a cycle-less Objective, any KR in an open cycle or on another cycle-less Objective. Under the Torres model the humans in the workspace call the Objective an "Outcome", but the tool and its fields keep the Objective names |
 | `update_objective` | Partially update an Objective's title, description, or status (ON_TRACK/AT_RISK/OFF_TRACK/COMPLETE) |
-| `delete_objective` | Permanently delete a childless Objective and its Task links/entity metadata; refuses deletion while child Key Results exist |
+| `delete_objective` | Permanently delete a childless Objective and its Task links/entity metadata; refuses deletion while child Key Results exist. Its Opportunity links are removed too |
 | `add_key_result` | Add a Key Result to an existing Objective |
 | `update_key_result` | Partially update a Key Result's title, target, unit, or current value |
-| `delete_key_result` | Permanently delete a Key Result; atomically unlinks Opportunities, supporting Objectives, Roadmap Items, and Tasks, then deletes dependent Check-Ins/entity metadata |
+| `delete_key_result` | Permanently delete a Key Result; atomically unlinks Opportunities, supporting Objectives, Roadmap Items, and Tasks, then deletes dependent Check-Ins/entity metadata. Afterwards it also removes the Solution links to that Key Result and the derived (`LEGACY`) Opportunity–Objective link the Key Result implied; `DIRECT` Opportunity–Objective links stay. The result reports `removedSolutionLinks` and `removedOpportunityLinks` |
 | `log_checkin` | Record a progress check-in for a Key Result and update its current value |
 | `list_eligible_parent_key_results` | List open, longer-horizon KRs whose cycle contains the specified child cycle |
 | `set_objective_parent_kr` | Link an Objective to an eligible higher-level KR it supports, or clear the link |
 
 ### Discovery — Opportunities, Solutions, Assumptions
 
+Typed links connect an Opportunity to Objectives and a Solution to Key Results (`link_*`, `unlink_*` and `list_links` below; full reference in [Typed links](#typed-links)). Both ends of a link must be in the declared workspace: a call that names an entity from another workspace is rejected, even if you are a member of both. `list_opportunities` and `get_opportunity` add a `linkedObjectives` list (`{ id, title }`, oldest link first) and `list_solutions` adds `linkedKeyResults` (`{ id, title, objectiveId }`); `linkedKeyResult` on an opportunity still comes only from `link_opportunity_to_kr`, never from these links.
+
 | Tool | Description |
 |---|---|
-| `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
+| `list_opportunities` | Fetch a page of opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result; **paginated** via `limit`/`cursor` (see [Paginating `list_opportunities`](#paginating-list_opportunities)); filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
 | `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
-| `create_opportunity` | Create a new opportunity with title, description, status |
+| `create_opportunity` | Create a new opportunity with title, description, status. An optional `keyResultId` behaves like `link_opportunity_to_kr` (the Key Result must be in this workspace) |
 | `update_opportunity` | Update an existing opportunity's title and/or description; pass `null` to clear its description |
 | `update_opportunity_status` | Move an opportunity through its discovery pipeline: EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
-| `link_opportunity_to_kr` | Associate an opportunity with a Key Result it is expected to move (or clear the link) |
+| `link_opportunity_to_kr` | Associate an opportunity with a Key Result it is expected to move (pass `keyResultId: null` to clear). An opportunity has at most one linked Key Result. The Key Result must be in the opportunity's workspace: a Key Result from another workspace is rejected, even if you are a member of both. The link is also recorded as a `LEGACY` typed Opportunity–Objective link to that Key Result's Objective (see [Typed links](#typed-links)) |
+| `link_opportunity_to_objective` | Link an Opportunity directly to an Objective in the same workspace. Idempotent: repeating returns `created: false`. A direct link is not removed when the opportunity's Key Result is cleared |
+| `unlink_opportunity_from_objective` | Remove an Opportunity–Objective link; returns `removed: 0` when there is none. A link implied by the opportunity's linked Key Result stays until that Key Result is cleared (`removed: 0, stillLinkedViaKeyResult: true` is a successful no-op, not a failure) |
+| `link_solution_to_key_result` | Link a Solution to a Key Result in the same workspace. Idempotent. The Solution keeps its single parent Opportunity |
+| `unlink_solution_from_key_result` | Remove a Solution–Key Result link; returns `removed: 0` when there is none |
+| `list_links` | List the typed links on one Opportunity, Objective, Solution or Key Result (pass exactly one id plus `workspaceId`), oldest first, with `limit` and `cursor` paging |
 | `add_solution` | Add a proposed Solution to an Opportunity |
-| `update_solution_status` | Update a Solution's lifecycle status (IDEA/VALIDATED/IN_DELIVERY/SHIPPED/KILLED); any valid status may transition directly to any other valid status |
+| `update_solution_status` | Update a Solution's lifecycle status (IDEA/VALIDATED/IN_DELIVERY/SHIPPED/KILLED); any valid status may transition directly to any other valid status. Moving a Solution to IN_DELIVERY also adds it to the roadmap once (flagged auto-created) unless a person already removed its auto-added item; the response then carries the new `Roadmap Item ID` |
 | `update_solution` | Update an existing Solution's title and/or description (pass an empty string to clear the description); at least one field must be provided |
 | `add_assumption` | Add a testable Assumption to a Solution, with a risk level (HIGH/MEDIUM/LOW); starts UNTESTED |
 | `update_assumption` | Update an Assumption's title, description, risk level, or status (UNTESTED/TESTING/VALIDATED/INVALIDATED) |
@@ -386,9 +432,90 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | `delete_solution_comment` | Permanently delete a Plan & Discussion entry |
 | `approve_solution_plan` | Mark a PLAN entry as APPROVED (only applies to PLAN entries, not COMMENT replies) |
 | `reject_solution_plan` | Mark a PLAN entry as REJECTED (only applies to PLAN entries, not COMMENT replies) |
-| `promote_to_roadmap` | Promote a validated Solution directly to the roadmap, creating a Roadmap Item linked back to the originating opportunity. Accepts an optional `isPrivate` flag |
+| `promote_to_roadmap` | Promote a validated Solution directly to the roadmap, creating a Roadmap Item linked back to the originating opportunity. Idempotent: a Solution already on the roadmap returns its existing item. The item inherits the Solution's title, squad and key result and takes the first free slot for its squad (six weeks). Accepts an optional `isPrivate` flag |
 
 `approve_solution_plan` and `reject_solution_plan` preserve the legacy, reversible plan-status marker only. They do not create a tracked Decision, authorize delivery, or establish authoritative approval semantics for new plans.
+
+### Typed links
+
+Compass keeps two many-to-many links, in addition to the single parent each entity already has:
+
+| Link | Meaning | Write tools |
+|---|---|---|
+| **Opportunity ↔ Objective** | "We chose to pursue this opportunity for this objective." An opportunity can serve several Objectives and an Objective can have many opportunities | `link_opportunity_to_objective`, `unlink_opportunity_from_objective` |
+| **Solution ↔ Key Result** | "This solution is meant to move this measure." A solution keeps its single parent opportunity and can additionally aim at any number of Key Results | `link_solution_to_key_result`, `unlink_solution_from_key_result` |
+
+`list_links` reads either kind. Every call needs `workspaceId`, and **both ends must belong to that workspace**. An entity from another workspace is rejected even if the caller is a member of both, and a link can never span two workspaces. The names are canonical under every [thinking model](/help/27-thinking-models): a Torres workspace calls Objectives "Outcomes", but these tools still say Objective.
+
+Every link tool is **idempotent**. Repeating a call, or removing a link that is not there, is a successful no-op, not an error, so an agent can retry safely.
+
+### `link_opportunity_to_objective`
+
+Input: `workspaceId`, `opportunityId`, `objectiveId` (all UUIDs).
+
+Output data: `{ created, originFlipped, link: { id, workspaceId, opportunityId, objectiveId, origin, source } }`.
+
+- A new link returns `created: true` with `origin: "DIRECT"`.
+- Repeating it returns `created: false` and the existing link.
+- If the pair is already linked only because the opportunity's linked Key Result sits under that Objective (`origin: "LEGACY"`), the call turns it into a `DIRECT` link and returns `created: false, originFlipped: true`. It then survives clearing or changing that Key Result.
+
+### `unlink_opportunity_from_objective`
+
+Input: `workspaceId`, `opportunityId`, `objectiveId`.
+
+Output data: `{ removed, opportunityId, objectiveId }`, plus `stillLinkedViaKeyResult: true` when that case applies.
+
+- `removed: 1` means the link was deleted.
+- `removed: 0` with no other field means there was no such link.
+- **`removed: 0, stillLinkedViaKeyResult: true` is a successful no-op.** The opportunity's linked Key Result is under this Objective, so the Objective link is derived from it and stays. A `DIRECT` link in that situation is demoted to `LEGACY`; the pair is no longer a deliberate, standalone link. To remove the link entirely, clear the Key Result with `link_opportunity_to_kr` and `keyResultId: null`, then unlink again.
+- When a link exists, the call also bumps the opportunity's `updatedAt`, even if the link is kept, so a concurrent edit conflicts instead of racing.
+- Only the opportunity is checked, not the Objective, so a link to an Objective that has since gone can still be removed.
+
+### `link_solution_to_key_result`
+
+Input: `workspaceId`, `solutionId`, `keyResultId`.
+
+Output data: `{ created, link: { id, workspaceId, solutionId, keyResultId, source } }`. `created: false` on a repeat. There is no `origin` on this link and no legacy field behind it.
+
+### `unlink_solution_from_key_result`
+
+Input: `workspaceId`, `solutionId`, `keyResultId`. Output data: `{ removed, solutionId, keyResultId }`, where `removed` is `1` or `0` (no such link). Only the solution is checked, as above.
+
+### `list_links`
+
+Input: `workspaceId` plus **exactly one** of `opportunityId` (its Objectives), `objectiveId` (its opportunities), `solutionId` (its Key Results) or `keyResultId` (its solutions); optional `limit` (1–100, default 50) and `cursor`. Passing none or several, or an unknown field, is rejected.
+
+Output data: `{ items, count, nextCursor }`, oldest link first.
+
+- An Opportunity–Objective item is `{ kind: "opportunity_objective", id, opportunityId, opportunityTitle, objectiveId, objectiveTitle, origin, source, createdAt }`.
+- A Solution–Key Result item is `{ kind: "solution_key_result", id, solutionId, solutionTitle, keyResultId, keyResultTitle, source, createdAt }`.
+- To read the next page, pass `nextCursor` back as `cursor`; `nextCursor` is `null` on the last page. The cursor is opaque, and an altered one fails with `Invalid cursor.`
+- A page can hold fewer than `limit` items without being the last: a link whose other end is missing or outside the workspace is left out. Keep paging until `nextCursor` is `null`.
+
+### Typed links: `DIRECT` and `LEGACY` origins
+
+Every Opportunity–Objective link has an `origin`:
+
+- `DIRECT`: made on purpose, with `link_opportunity_to_objective` or, in a workspace on the Opportunity-first or Torres model, from the Objectives (Outcomes) box on an opportunity in the app. `source` records which (`MCP` or `UI`).
+- `LEGACY`: derived from the opportunity's linked Key Result (`linkedKeyResult`, set with `link_opportunity_to_kr` or `create_opportunity`'s `keyResultId`, or by choosing a Driving Key Result in the app). Compass links the opportunity to that Key Result's Objective automatically and keeps the link in step when the Key Result changes or is cleared. Deleting the Key Result removes it.
+
+A `DIRECT` link is never removed by clearing or changing the linked Key Result. A pair has one origin: adding a `DIRECT` link over a `LEGACY` one upgrades it, and a Key Result change never downgrades a `DIRECT` link.
+
+### Typed links: single-value fields still work
+
+The existing fields are kept, so current agents are unaffected:
+
+- `linkedKeyResult` (and `linkedKeyResultId` in the result of `link_opportunity_to_kr`) still names the one specific Key Result. It is read from that field only and is never inferred from links, because an Objective-level link cannot say *which* Key Result.
+- Each solution still has exactly one parent opportunity (its `opportunityId` does not change), and `add_solution` is unchanged.
+- The new fields are additive: `linkedObjectives` on `list_opportunities` items and `get_opportunity`, and `linkedKeyResults` on `list_solutions` items. Both are empty lists when there are no links. They are read from the link tables, so if the database does not have them yet (migration 071 not applied) these tools return the database error rather than an empty list: an empty list always means "no links".
+
+### Typed links: authorization and errors
+
+- `list_links` needs `mcp:read`. The four link and unlink tools need `mcp:write`. Delegated agents may use all five.
+- A gate rejects the call before it runs if the caller is not a member of the workspace, or an id belongs to a different workspace than the declared `workspaceId`.
+- A handler failure comes back as a failed tool result with a short message and writes nothing, for example `Opportunity not found.`, `Objective not found in this workspace.`, `Key Result not found in this workspace.`, `Solution not found.` or `Provide exactly one of opportunityId, objectiveId, solutionId or keyResultId.`
+
+Deleting an Objective removes every link that names it, deleting a Key Result removes the Solution links to it (and the derived `LEGACY` link it implied), and deleting a workspace removes all of its links. The links are removed *after* the Objective or Key Result itself is deleted, so a delete that is refused touches no link. If that cleanup fails, the delete still succeeds (the failure is logged, not returned) and a leftover link stays hidden: reads and `list_links` only return links whose other end exists in the workspace.
 
 ### Experiments
 
@@ -405,9 +532,9 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 | Tool | Description |
 |---|---|
 | `list_roadmap_items` | Fetch active roadmap items for a workspace in rank order, grouped by horizon (including LAUNCHING/LAUNCHED), with dates, timestamps, `sortOrder`, commitment provenance, and stable linked-object IDs; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
-| `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag |
+| `add_to_roadmap` | Create a roadmap item in NOW, NEXT, LATER, or SHIPPED, optionally with dates and an `isPrivate` flag. With a `solutionId` it is idempotent (a Solution already on the roadmap returns its existing item) and unspecified squad, key result and dates are filled from the Solution and the first free slot |
 | `update_roadmap_item` | Update a roadmap item's ordinary horizon, status, title, description, dates, `isPrivate`, or links (`keyResultId`, `opportunityId`, `solutionId`, `squadId`). Omit a link to preserve it; pass a UUID to set it or `null` to clear it. USER/AGENT targets must belong to the item's workspace, even when the caller can access both workspaces. NOW behaves like other ordinary horizons; LAUNCHING/LAUNCHED use the launch workflow (rejected here — see below — and gated by the workspace's Marketing launch setting) |
-| `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources |
+| `request_decision` | Request a tracking-only human decision linked to a workspace, Opportunity, Solution, Roadmap Item, Doc, Experiment, or Feedback item, with up to 12 supporting Compass sources and optionally 2–4 single-choice `options`, or 1–4 `questions` each with its own single-choice options |
 | `list_decisions` | List tracking-only decisions newest-first, optionally filtered by state (`PENDING`, `DECIDED`, or `AWAITING_FOLLOW_THROUGH`), linked item type, outcome, reviewer, or search text |
 | `get_decision` | Read one tracking-only decision, its immutable revision history, the resolved requester (the human or Agent who raised it), and any linked follow-up Tasks |
 | `close_decision_no_action` | Explicitly close a DECIDED decision as needing no follow-up work, with a required reason. Refuses if the decision already has a linked follow-up Task or was already closed this way |
@@ -444,6 +571,45 @@ declared workspace, and snapshots the source title and `updatedAt` version into
 the immutable packet. If any source is missing or belongs to another workspace,
 the whole request fails and no review is created. Put readable reasoning in the
 Markdown `context`; do not embed source UUIDs there.
+
+`request_decision.options` turns the request into a single-choice question. It
+is an optional array of 2–4 `{ label, description? }` objects (`label` 1–120
+characters and unique case-insensitively; `description` up to 500 characters;
+the labels "Request changes" and "Reject" are reserved). When supplied, the
+human sees your choices as selectable cards, followed by **Request changes** and
+**Reject** so they can always push back. Choosing one of your options records an
+`APPROVE` outcome on that option; the rationale is optional for it and still
+required for Request changes and Reject. There is no built-in "Other" — the
+rationale box is the free-text field. When `options` is omitted the human gets
+the standard Approve / Request changes / Reject, exactly as before. The options
+are part of the immutable packet, so retrying the same `idempotencyKey` with
+different options is rejected as a conflict. `get_decision`,
+`list_decisions`, and `get_review_request` return the offered `options`
+(`label`, `description`, `outcomeClass`) and, once decided, the `chosenOption`.
+Revising a request-changes decision inherits the previous options unless new
+ones are supplied.
+
+`request_decision.questions` asks **several questions in one request**, like
+AskUserQuestion's `questions[]`. It is an optional array of 1–4 items
+`{ header?, question, options }`: `header` is a short label (up to 40
+characters), `question` is 1–255 characters, and `options` is 2–4
+`{ label, description? }` objects with the same rules as `options` above
+(unique case-insensitively **within a question**; "Request changes" and
+"Reject" reserved). `questions` and `options` are mutually exclusive — sending
+both is rejected — and the top-level `question` stays required as the request's
+title. The human answers every question with one option each and submits once
+(**Submit answers**, disabled until every question is answered); that records an
+`APPROVE` outcome with the per-question answers. **Request changes** and
+**Reject** apply to the whole request, still require a rationale, and need no
+answers. `get_decision`, `list_decisions`, and `get_review_request` return
+`questions` (`header`, `question`, and `options` with `label` / `description`)
+and, once decided with answers, `answers` as
+`[{ questionIndex, question, chosenOption }]`; both are empty arrays for requests
+without questions. As with `options`, the questions are part of the immutable
+packet, so retrying an `idempotencyKey` with different questions is a conflict.
+Revising a request-changes decision inherits the previous questions unless you
+send new `questions`, send `options` (which replaces them), or send an empty
+array to clear back to Approve / Request changes / Reject.
 
 `apply_recorded_decision` applies a decided review request through the
 applicator matching its `gateType`, and is idempotent: a repeat call replays
@@ -507,6 +673,24 @@ Custom fields let a workspace tag Opportunities, Solutions, Experiments, Objecti
 | `set_custom_field_value` | Set or clear one custom field's value on an object |
 
 Passing `null` (or an empty string or empty array) to `set_custom_field_value` clears the field, matching the Settings UI's own clearing behavior. The value is validated against the field's type — a SELECT/MULTI_SELECT value must be one of the field's currently defined options. The tool also rejects a `fieldId` that belongs to a different object type, or to a different workspace, than the target object.
+
+### Card sort
+
+Card sort rounds let a team propose moves between the buckets of a single-select custom field without editing the official value. See the Card sort page for the concept. Every card sort tool takes `workspaceId` and gates on workspace membership; whether the caller is the round's facilitator, and whether a proposal is theirs, is enforced in the service layer so it holds identically here and in the UI.
+
+| Tool | What it does |
+| --- | --- |
+| `list_card_sort_factors` | List the single-select custom fields usable as a factor for an object type, with each one's effective options (including options inherited from a shared option set) |
+| `list_card_sort_rounds` | List the workspace's rounds with state, factor, total proposal count and how many are the caller's own; optionally filter by state |
+| `get_card_sort_board` | Read a round's items with their current bucket. Never includes other people's proposals |
+| `get_card_sort_proposals` | The caller's own proposals in a round, with the snapshotted from-value |
+| `get_card_sort_tally` | Everyone's proposals, aggregated. Refused for everyone except the facilitator until the round is revealed |
+| `create_card_sort_round` | Start an OPEN round on a factor; the caller becomes its facilitator |
+| `propose_card_sort_move` | Propose moving one or more objects to a bucket (replaces the caller's earlier proposal for each) |
+| `withdraw_card_sort_proposal` | Remove the caller's own proposal for one object |
+| `set_card_sort_round_state` | Reveal or close a round. Facilitator only, and irreversible |
+
+**The four write tools are human-only.** `create_card_sort_round`, `propose_card_sort_move`, `withdraw_card_sort_proposal` and `set_card_sort_round_state` are denied to agent identities: a proposal has no agent author column, so one cast by an agent would be stored and read back as the delegating human's own opinion, and revealing a round discloses other people's in-progress positions. Agents may use the five read tools.
 
 ### Feedback
 
@@ -594,10 +778,14 @@ Promotion is a reviewed, human-directed step. While a synthesis is being generat
 | Tool | Description |
 |---|---|
 | `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc`; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`). A doc whose parent is excluded by a recency filter is rendered at the top level so it stays reachable |
-| `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body, and `docType`/`roadmapItemId` when set |
+| `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body (for `docType: CANVAS`, the JSON Canvas 1.0 document as a JSON string), and `docType`/`roadmapItemId` when set |
+| `capture_canvas` | Returns a PNG picture of a canvas doc (docType `CANVAS`) so an agent can check layout. Takes `docId`, and optionally `nodeId` (a node or group id to zoom on) with `padding` (canvas units of context, default 80), or `region` (`x`, `y`, `width`, `height` in canvas coordinates); pass at most one of `nodeId` and `region`. Default is a fit-all overview. `scale` (0.05–4) overrides the automatic fit; output is capped at 2400 px per side. The canvas JSON is rendered to a self-contained page and photographed in a Vercel Sandbox with no network. Nodes, colours, group labels, edges with arrows and labels, and Compass object cards (live title, status, facts; cards outside the doc workspace show as unavailable) are drawn. Returns an MCP image content block plus text and metadata (`view`, `region`, `scale`, `image`, `byteSize`, `counts`, `timings`). The image is not stored. Gate class: `READ` |
 | `prepare_doc_image_upload` | Prepare a signed, short-lived upload for a PNG, JPEG, GIF, or WebP image up to 10 MiB in workspace-private Docs storage; returns the upload pathname/token plus the relative Compass image URL and Markdown |
-| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on |
-| `update_doc` | Update an existing doc's title, content, and/or icon |
+| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on. Pass `docType: CANVAS` to create a JSON Canvas doc: `content` must be a valid JSON Canvas 1.0 JSON string (blank canvas if omitted); invalid payloads are rejected with the validation errors. A Compass object card is a standard `link` node with `url: "compass://<kind>/<id>"` and `compass: {"kind","id","title"?}`; `kind` is one of `opportunity`, `solution`, `metric`, `doc`, `task`, `experiment`, `objective`, `keyResult` and `id` a UUID. Invalid card references are rejected (the card is rendered live and re-authorized for each viewer, so only the reference is stored) |
+| `update_doc` | Update an existing doc's title, content, and/or icon. For a `CANVAS` doc, `content` replaces the whole canvas and must be valid JSON Canvas 1.0 (unknown fields are preserved) |
+| `edit_doc` | Targeted text edit of a doc body without resending it: `oldString` → `newString` (must match exactly once unless `replaceAll`), or up to 50 `edits` applied in order, all-or-nothing. Optional `expectedRevision` (from `get_doc`) rejects the edit if the doc changed; without it the edit is re-applied on top of concurrent changes. Edits the body only — change properties with `update_doc_metadata`. On a CANVAS doc the result must still be valid JSON Canvas |
+| `edit_canvas` | Edit a CANVAS doc with domain ops keyed by node id instead of rewriting the JSON: `add_card`, `add_text`, `add_group`, `add_edge`, `move`, `update`, `remove` (up to 200 per call, all-or-nothing; errors name the op index). Ids and placement are automatic; nodes may be referenced by node id or `kind:uuid`; re-adding an existing card or edge is a no-op; removing a node removes its edges. Optional `expectedRevision` |
+| `build_canvas_tree` | Draw the Opportunity Solution Tree onto a CANVAS doc — the same engine as the editor's "Build tree". `scope`: `{kind:"workspace"}` (default) or `{kind: objective\|keyResult\|opportunity\|solution, id}`. Idempotent merge: existing cards are never duplicated, new content is auto-laid-out to the right, one group per root objective. Capped at 400 cards |
 | `create_doc_version` | Save a manual, named snapshot of a doc's current content. Params: `docId`, `label` (optional), `authorName`. Always writes a new version, even if one was just saved seconds ago — named snapshots are never coalesced away |
 | `list_doc_versions` | List a doc's saved versions (id, label, author, created date), newest first, alongside the doc's own current title and last-updated time as a reference point. Param: `docId`. Does not include full content — call `get_doc_version` for that |
 | `get_doc_version` | Return the full title/content/metadata/icon snapshot of a single saved doc version. Param: `versionId` |
@@ -611,21 +799,88 @@ To add a local screenshot, call `prepare_doc_image_upload` with its exact filena
 
 This private flow applies to new uploads. Existing documents may contain older absolute `*.public.blob.vercel-storage.com` image URLs; they remain public and continue rendering. Compass does not migrate, delete, or rewrite those legacy blobs automatically.
 
+### Authoring Canvas docs (agents)
+
+A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one with `create_doc` and `docType: CANVAS`, passing the JSON as the `content` string. `update_doc` **replaces the whole canvas**, so for anything but a from-scratch rewrite use the edit tools below instead of resending the JSON.
+
+**Prefer the edit tools to rewriting.** `edit_canvas` applies ops server-side (`add_card`, `add_edge`, `move`, `update`, `remove`, …) with automatic ids and placement, and `build_canvas_tree` draws the OST for you; neither needs the whole canvas in your context. Use `edit_doc` for a precise text replacement. Pass `expectedRevision` from `get_doc` when you want the edit to fail rather than land on a changed doc.
+
+**Workflow**
+1. Look up real object ids with the `list_*` tools (`list_opportunities`, `list_solutions`, `list_metrics`, `list_tasks`, `list_experiments`, `list_docs`, objectives and key results via the OKR tools). Never invent a UUID: an unknown, foreign-workspace or inaccessible id is shown as "Unavailable" to viewers.
+2. Build the `nodes` and `edges` arrays.
+3. Call `create_doc`. Invalid JSON or invalid Compass card references are rejected with the reasons; fix and retry.
+
+**Nodes** (`nodes[]`). Every node needs a unique string `id`, a `type`, and numeric `x`, `y`, `width`, `height` (pixels; `x` grows right, `y` grows down; the top-left corner is the anchor).
+- `text`: `text` is markdown.
+- `link`: `url` is a web URL. A **Compass object card** is a `link` node with `url: "compass://<kind>/<id>"` and `compass: {"kind", "id", "title"?}`. `kind` is `opportunity`, `solution`, `metric`, `doc`, `task`, `experiment`, `objective` or `keyResult`; `id` is the object's UUID. Keep `url` and `compass` identical. Only the reference and an optional cached `title` are stored; status, score, progress and metric values are read live for each viewer.
+- `group`: a labelled box (`label`). A group contains the nodes whose rectangles sit inside it.
+- `file`: refers to a vault file path; not useful for Compass-hosted canvases.
+- Optional `color` on any node or edge: `"1"` red, `"2"` orange, `"3"` yellow, `"4"` green, `"5"` cyan, `"6"` purple, or a `#rrggbb` hex.
+
+**Edges** (`edges[]`): unique `id`, `fromNode`, `toNode` (existing node ids), and optionally `fromSide` / `toSide` (`top`, `right`, `bottom`, `left`), `toEnd` / `fromEnd` (`arrow` or `none`), `label`, `color`.
+
+**Layout rules of thumb**
+- Compass cards render at about 280 x 120; use that size.
+- Lay out left to right in columns (opportunity -> solutions -> metrics): about 240 px between columns and 40 px between rows, so nodes never overlap.
+- Connect `right` of the source to `left` of the target for left-to-right flows.
+- Size a group so it fully encloses its members with about 40 px padding.
+- Stay well under the 800 KB limit; a few hundred nodes is the practical ceiling for readability.
+- Fields Compass does not recognize are preserved, so other tools' extras are safe to keep when editing.
+
+**Example**: one opportunity, two candidate solutions, and the metric one of them moves (replace the UUIDs with real ids):
+
+```json
+{
+  "nodes": [
+    {"id": "grp-opp", "type": "group", "label": "Opportunity", "x": 0, "y": 0, "width": 360, "height": 240, "color": "6"},
+    {"id": "opp", "type": "link", "url": "compass://opportunity/11111111-1111-4111-8111-111111111111", "compass": {"kind": "opportunity", "id": "11111111-1111-4111-8111-111111111111", "title": "Onboarding drop-off"}, "x": 40, "y": 60, "width": 280, "height": 120},
+    {"id": "sol-a", "type": "link", "url": "compass://solution/22222222-2222-4222-8222-222222222222", "compass": {"kind": "solution", "id": "22222222-2222-4222-8222-222222222222", "title": "Guided setup"}, "x": 520, "y": 0, "width": 280, "height": 120},
+    {"id": "sol-b", "type": "link", "url": "compass://solution/33333333-3333-4333-8333-333333333333", "compass": {"kind": "solution", "id": "33333333-3333-4333-8333-333333333333", "title": "Checklist"}, "x": 520, "y": 160, "width": 280, "height": 120},
+    {"id": "met", "type": "link", "url": "compass://metric/44444444-4444-4444-8444-444444444444", "compass": {"kind": "metric", "id": "44444444-4444-4444-8444-444444444444", "title": "Activation rate"}, "x": 1000, "y": 80, "width": 280, "height": 120},
+    {"id": "note", "type": "text", "text": "**Hypothesis:** guided setup lifts activation.", "x": 520, "y": 340, "width": 280, "height": 100}
+  ],
+  "edges": [
+    {"id": "e1", "fromNode": "opp", "toNode": "sol-a", "fromSide": "right", "toSide": "left", "toEnd": "arrow", "label": "addressed by"},
+    {"id": "e2", "fromNode": "opp", "toNode": "sol-b", "fromSide": "right", "toSide": "left", "toEnd": "arrow"},
+    {"id": "e3", "fromNode": "sol-a", "toNode": "met", "fromSide": "right", "toSide": "left", "toEnd": "arrow", "label": "moves"}
+  ]
+}
+```
+
 ### Artifacts
 
-Artifacts are first-class solution deliverables, separate from Markdown Docs. HTML content creates private immutable revisions; external URLs are stored but never server-fetched. Every mutation returns the stable Artifact identifier on a plain `ID: <uuid>` line.
+Artifacts are first-class solution deliverables, separate from Markdown Docs. HTML content creates private immutable revisions; external URLs are stored but never server-fetched. Every mutation returns the stable Artifact identifier on a plain `ID: <uuid>` line. `list_artifacts`, `get_artifact`, `create_artifact` and `update_artifact` also return the clickable Compass page (`<origin>/{org}/{workspace}/docs/artifacts/{id}`) on a `URL:` line and as `url` in the structured data — relay it to the user instead of the bare ID. `url` is `null` (and the line is omitted) when the public Compass URL is not configured; the write still succeeds.
 
 | Tool | Description |
 |---|---|
 | `list_artifacts` | List active Artifacts in a workspace; pass `includeArchived: true` to include archived records |
-| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML |
-| `create_artifact` | Create `HTML_UPLOAD` from `html` plus an optional `.html` filename, or `EXTERNAL_LINK` from an `http`/`https` `url` |
-| `update_artifact` | Update title/description and optionally create a new immutable HTML or URL revision |
+| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML. Includes `kind` (`DOCUMENT` or `SLIDE_DECK`); a `SLIDE_DECK` also returns `slides` as `{ index, title, description }`, split from the current revision at read time |
+| `prepare_artifact_upload` | Prepare a signed, short-lived direct upload for one `.html` file up to 2 MiB; returns the upload pathname, client token, and an `uploadReceipt`. Use this instead of passing `html` inline so the document never enters the conversation |
+| `create_artifact` | Create `HTML_UPLOAD` from an `uploadReceipt` (preferred) or inline `html` plus an optional `.html` filename, `EXTERNAL_LINK` from an `http`/`https` `url` (Google Drive/Docs links are recognised and previewed read-only in the app; only the URL is stored), or `V0_CHAT` from a `https://v0.app/chat/<id>` `url` (read with the caller's own v0 connector grant; `title` may be empty to use the chat name). Optional `kind`: `DOCUMENT` (default) or `SLIDE_DECK`, which is allowed only for `HTML_UPLOAD` |
+| `refresh_artifact_from_v0` | Re-read a `V0_CHAT` Artifact from v0 and add a new revision only when v0 has a new version; returns `changed` |
+| `update_artifact` | Update title/description and optionally create a new immutable HTML revision (from `uploadReceipt` or inline `html`) or URL revision. Optional `kind` switches an `HTML_UPLOAD` between `DOCUMENT` and `SLIDE_DECK` without a new revision |
 | `link_artifact_to_solution` | Idempotently link an Artifact and Solution in the same workspace |
 | `unlink_artifact_from_solution` | Remove an Artifact-to-Solution link |
 | `link_artifact_to_decision` | Idempotently link an active Artifact to an ordinary tracked Decision in the same workspace; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs, `linkId`, and `created` |
 | `unlink_artifact_from_decision` | Idempotently remove a Decision link; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs and `removed` |
 | `archive_artifact` | Archive an Artifact while preserving its revision history and links |
+| `capture_screenshot` | Render an Artifact revision in a sandboxed headless browser and store the PNG as that revision's thumbnail, which the Artifact page then shows. Takes `workspaceId`, `artifactId`, and optional `revisionId` (default: the current revision), `fullPage`, and `viewport` (`width` 320–3840, `height` 240–2160). There is deliberately **no `url` input**. `EXTERNAL_LINK` revisions render the URL stored on the revision, so the tool cannot be used to render arbitrary pages. Google Drive/Docs links are refused, because the capture browser is not signed in to Google. `HTML_UPLOAD` revisions render their stored HTML under the same Content-Security-Policy as the in-app preview, with every network request blocked. Returns `ID: <artifactId>` plus metadata only (`revisionId`, `width`, `height`, `byteSize`, `capturedAt`, `sourceUrl`, `httpStatus`; the last two are `null` for `HTML_UPLOAD`). It never returns the image or its storage key. Gate class: `WRITE` |
+| `create_feedback_source` | Create an [embedded-feedback](/help/24-embedded-feedback) source bound to an active Artifact and mint its first token. Takes `workspaceId`, `artifactId`, `name`, `allowedOrigins` and optional `authMode` (`INTERNAL_SSO` default, or `PORTAL`). Returns `sourceId`, the raw `token` **once**, `tokenPrefix`, a ready-to-paste `snippet`, and the stored `allowedOrigins`/`authMode`. Workspace member (same as `create_artifact`) |
+| `update_feedback_source` | Replace a source's `allowedOrigins` (the full list), enable/disable it, rename it, or change `authMode` (which signs out existing visitors). Scoped by `workspaceId`; returns the stored state, never a token. Workspace member (same as `create_artifact`) |
+
+Feedback-source tools are available to workspace members and registered agents, exactly like the other Artifact write tools, and have no delete, token-mint or token-revoke counterpart — rotate or revoke tokens in **Settings → Embedded feedback**. The raw token appears only in the `create_feedback_source` response and is never stored or logged in readable form. If the deployment has no public Compass URL configured, `snippet` is `null` and the response carries `scriptPath` and a note instead of a broken URL.
+
+#### Uploading HTML without putting it in the conversation
+
+Inline `html` costs the document's full size twice in agent context: once when the agent writes the file and again inside the tool call. For anything beyond a trivial page, upload the file from disk instead:
+
+1. Write the HTML to a local file, then call `prepare_artifact_upload` with the workspace, the `.html` filename, and the exact byte size (1 byte to 2 MiB).
+2. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: "text/html" })` from `@vercel/blob/client`, reading the file from disk rather than pasting it into a tool call.
+3. Call `create_artifact` or `update_artifact` with the returned `uploadReceipt` and no `html`. The filename is taken from the receipt, so omit `filename`.
+
+The client token expires after ten minutes, is bound to one random workspace-prefixed staging pathname, `text/html`, and the declared size, and cannot overwrite an existing blob. The receipt is HMAC-signed and bound to the workspace, staging pathname, filename, size, and expiry. The server re-reads the staged bytes and runs the same validation as the inline path (safe filename, non-empty, UTF-8, HTML document, 2 MiB cap), checks the size against what was signed, and deletes the staging blob once the revision is committed, so a receipt is effectively single-use. If validation or the write fails, the staging blob is not deleted and is not currently swept; it is private and workspace-prefixed, but orphaned until cleaned up out of band. Re-prepare to retry.
+
+Direct upload needs the private Artifact Blob store (`ARTIFACT_BLOB_READ_WRITE_TOKEN`), so it is unavailable in local development; use inline `html` there. Provide exactly one of `html` or `uploadReceipt` on create, and at most one of `html`, `uploadReceipt`, or `url` on update.
 
 Decision–Artifact links are live supporting material, not frozen review evidence. `get_decision` and `get_review_request` include an `artifacts` array with title, type, status, and current revision number; legacy review requests return an empty array. `get_artifact.decisions` includes the same-workspace tracked request ID, current title, and state. The new link tools require write access and validate both objects in the declared workspace. They preserve packets, fingerprints, revisions, cycles, and recorded outcomes. New links to archived Artifacts are rejected, but retrying an existing link and removing it remain supported. Links follow the stable Decision request and the current Artifact revision.
 
@@ -665,6 +920,8 @@ Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-te
 | `set_workspace_scoring_model` | Set (or clear) the workspace's active scoring model |
 | `score_opportunity` | Compute and save an opportunity's score using its workspace's active scoring model |
 | `get_opportunity_score` | Get an opportunity's saved score, including a `stale` flag if the live model has since been updated |
+| `score_solution` | Compute and save a solution's score using the workspace's active Solution scoring model (a slot independent of the Opportunity model); stores the raw and 0-100 normalized score with a frozen snapshot of the formula |
+| `get_solution_score` | Get a solution's saved score, the model version it was scored under, and a `stale` flag if the live model has since been updated |
 | `list_top_opportunities` | List scored opportunities ranked by normalized score (0-100); pass `orgSlug` for a cross-workspace comparability view or `workspaceId` for a single workspace |
 
 ## Recency filtering and sorting
@@ -687,6 +944,51 @@ differ between identical calls.
 `list_feedback` is the exception worth reading closely: there `updatedSince`
 starts a stable keyset scan paged by an opaque `cursor` (see the feedback section
 above), rather than a simple filter.
+
+## Paginating `list_opportunities`
+
+`list_opportunities` returns **one page at a time**, not the whole workspace.
+Pass `limit` (1–200, default 50) and page forward with `cursor`.
+
+Every response reports where the caller is in the listing, in both the text
+block and `structuredContent.data`:
+
+| Field | Meaning |
+|---|---|
+| `count` | Items in *this* page |
+| `total` | Items matching the filters across the **whole** listing |
+| `hasMore` | Whether any matching item has not yet been returned |
+| `nextCursor` | Opaque cursor for the next page, or `null` at the end |
+
+When more remain, the text block ends with an explicit continuation line —
+`Showing 1-50 of 139. 89 not yet listed. To continue, call list_opportunities
+again with cursor: "…"` — and the final page says `End of list - every item has
+now been listed.` **Page until you see that sentence.** A full page is not
+evidence that you have seen everything; `hasMore` is.
+
+To walk the list: call once with no `cursor`, then repeat with the previous
+response's `nextCursor` **and the identical `workspaceId`, filters and `sort`**.
+The cursor pins all of them and a mismatched continuation is rejected rather than
+served, because resuming a differently-filtered listing would silently skip some
+rows and repeat others. A malformed cursor is likewise rejected instead of
+falling back to the first page, so a paging bug cannot masquerade as an endless
+supply of page one.
+
+This is keyset paging, not `OFFSET`. Inserts and deletes elsewhere in the
+workspace do not shift the rows a cursor resumes after — which is also why the
+default ordering carries an `id` tiebreaker (`createdAt desc, id asc`). Bulk
+imports give thousands of opportunities the same `createdAt`, and without the
+tiebreaker those ties come back in an arbitrary order that can differ between
+identical calls, leaving nothing stable for a cursor to name.
+
+A single-page listing that fits inside `limit` gets no footer at all, so callers
+whose workspaces are small see byte-identical output to before.
+
+> **Why this exists.** An unbounded listing of a real workspace was ~124 KB
+> (~31K tokens) in one tool result, with no total and no "more remain" signal.
+> An agent asked to work through every opportunity would process the head of the
+> list, report completion, and on its next turn start over from the same head —
+> indistinguishable, from the inside, from having finished.
 
 ### What `updatedAt` does and does not capture
 
@@ -743,6 +1045,8 @@ with no such grant is refused these tools exactly as before. Every call made
 under a grant is attributed to it in the agent's audit trail. See ADR 0020
 ("Explicit, Auditable Admin Grants for Delegated Agent Identities") in
 Compass Docs → Architecture Decisions.
+
+**Inherited admin rights (`create_workspace`).** An agent acts with the authority of the person who owns it. `create_workspace` therefore works for an agent whose owner is currently an org OWNER/ADMIN of that organization — no per-agent grant is needed. The owner's role is re-checked live on every call, so demoting or removing the owner stops the agent immediately; a suspended agent, a disabled agents rollout, and a workspace-scoped identity are all refused. The agent receives a WRITE workspace grant on the workspace it creates (recorded as granted by its owner) so it can keep working there, and the call appears in its audit trail against the new workspace. This applies only to `create_workspace`: comment edits, plan approval/rejection and release authorization remain human-only, and the scoring-model tools above still need their own delegation. The REST `createWorkspace` route is unchanged and remains human-only.
 
 Solution comments and plans created with agent credentials use the authenticated
 agent's name and `AGENT` author type, overriding caller-supplied attribution.

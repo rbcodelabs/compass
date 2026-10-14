@@ -3,13 +3,9 @@ import getPrisma from "@/lib/db"
 import { resolveCommentAuthors } from "@/lib/comment-authors"
 import { COMMENT_TARGET_TYPES, resolveCommentTarget, type CommentTargetType } from "@/lib/comments"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
+import { CommentHttpError } from "@/lib/comment-http-error"
 
-export class CommentHttpError extends Error {
-  constructor(public readonly status: number, message: string) {
-    super(message)
-    this.name = "CommentHttpError"
-  }
-}
+export { CommentHttpError } from "@/lib/comment-http-error"
 
 export type CommentActor = { userId: string; name: string; workspaceId: string; admin: boolean }
 export type BrowserDocAnchor = { commentId: string; anchorText: string; anchorPrefix: string | null; anchorSuffix: string | null; anchorStart: number | null; anchorEnd: number | null }
@@ -17,6 +13,8 @@ export type BrowserSolutionPlanProposal = { commentId: string; trackedDecisionRe
 export type BrowserElementAnchor = {
   commentId: string; artifactId: string; artifactRevisionId: string | null; pageUrl: string; pagePath: string
   elementSelector: string | null; elementFingerprint: unknown; screenshotUrl: string | null
+  /** Zero-based slide of a SLIDE_DECK Artifact, or null when not slide-scoped (migration 078). */
+  slideIndex?: number | null
 }
 export type BrowserCommentRow = {
   id: string; workspaceId: string; targetType: string; targetId: string; parentId: string | null

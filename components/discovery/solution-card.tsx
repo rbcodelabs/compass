@@ -4,6 +4,7 @@ import * as React from "react";
 import { useTransition } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import Link from "next/link";
 import { GripVertical } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EntityCard } from "@/components/patterns/entity-card";
@@ -12,6 +13,7 @@ import { ScoreBadge } from "@/components/discovery/score-badge";
 import { CardMenu } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { SOLUTION_STATUS } from "@/lib/solution-status";
+import { announceRoadmapSync } from "@/lib/ui/roadmap-sync-toast";
 import {
   updateSolutionStatus,
   archiveSolution,
@@ -71,10 +73,21 @@ type Props = {
    */
   showScore?: boolean;
   scoringHref?: string;
+  /**
+   * The owning Opportunity, rendered as a link under the title. Set on boards
+   * that list Solutions from many Opportunities side by side (the Solutions
+   * backlog), where the parent is the context that is otherwise missing.
+   */
+  parent?: { title: string; href: string; squad?: { name: string; color: string } | null };
+  /**
+   * False on read-only boards (the Solutions backlog grouped by squad, parent or
+   * field): no drag handle and no sortable registration.
+   */
+  draggable?: boolean;
   onChanged?: () => void;
 };
 
-export function SolutionCard({ solution, revalidatePathStr, showStatus = true, showScore = false, scoringHref, onChanged }: Props) {
+export function SolutionCard({ solution, revalidatePathStr, showStatus = true, showScore = false, scoringHref, parent, draggable = true, onChanged }: Props) {
   const { openPanel } = usePanelContext();
   const [isPending, startTransition] = useTransition();
 
@@ -86,7 +99,7 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, s
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: solution.id });
+  } = useSortable({ id: solution.id, disabled: !draggable });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -96,7 +109,8 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, s
 
   function moveStatus(status: SolutionStatus) {
     startTransition(async () => {
-      await updateSolutionStatus(solution.id, status, revalidatePathStr);
+      const result = await updateSolutionStatus(solution.id, status, revalidatePathStr);
+      announceRoadmapSync(result.roadmapSync);
       onChanged?.();
     });
   }
@@ -128,7 +142,7 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, s
         }
         description={solution.description}
         leading={
-          <button
+          draggable ? <button
             ref={setActivatorNodeRef}
             {...attributes}
             {...listeners}
@@ -136,7 +150,7 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, s
             aria-label="Drag to reorder"
           >
             <GripVertical className="size-3.5" />
-          </button>
+          </button> : undefined
         }
         status={
           showStatus ? (
@@ -163,6 +177,20 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, s
         data-pending={isPending ? true : undefined}
         data-dragging={isDragging ? true : undefined}
       >
+        {parent && (
+          <div data-slot="solution-card-parent" className="mb-2 flex min-w-0 items-center gap-1.5 text-xs text-text-secondary">
+            {parent.squad && (
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: parent.squad.color }}
+                title={parent.squad.name}
+              />
+            )}
+            <Link href={parent.href} className="min-w-0 truncate hover:underline underline-offset-2">
+              {parent.title}
+            </Link>
+          </div>
+        )}
         {hasMetadata && (
           <div data-slot="solution-card-meta" className="flex flex-wrap items-center gap-1.5">
             {showScore && scoringHref && (

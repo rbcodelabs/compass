@@ -91,6 +91,9 @@ export const pmInterviewContextSchema = z.object({
   target: z.object({ type: z.enum(PM_INTERVIEW_TARGET_TYPES), id: z.string().uuid(), fields: z.record(z.string(), nullableFieldValue) }).strict(),
   parents: z.array(z.object({ type: z.string(), id: z.string().uuid(), title: z.string() }).strict()).max(4),
   outcome: z.object({ id: z.string().uuid(), title: z.string() }).strict().nullable(),
+  // Additive (ADR Phase 2): the objectives the opportunity is linked to through the typed links. Absent when there are none,
+  // so existing snapshots, and the context a target without links produces, are unchanged.
+  linkedObjectives: z.array(z.object({ id: z.string().uuid(), title: z.string() }).strict()).max(20).optional(),
   evidence: z.array(z.object({ id: z.string().uuid(), excerpt: z.string().max(1_000) }).strict()).max(20),
   feedback: z.array(z.object({ id: z.string().uuid(), excerpt: z.string().max(1_000) }).strict()).max(20),
   omissions: z.array(z.string().max(500)).max(20),

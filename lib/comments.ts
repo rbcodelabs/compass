@@ -1,7 +1,14 @@
 import getPrisma from "@/lib/db"
+import { readArtifactKind } from "@/lib/artifact-kind"
+import { MAX_SLIDES } from "@/lib/deck-contract"
 import { resolveCommentAuthors } from "@/lib/comment-authors"
 import { withWorkspaceUpdates, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture"
 import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
+import { followingAvailable, followingEnabled } from "@/lib/following-flag"
+import { runAfterCommit } from "@/lib/following-commit"
+import { applyFollowingEffects, buildCommentEffects, resolveCommentFollowActor } from "@/lib/following-hooks"
+import { isSubjectTypeActive } from "@/lib/followable"
+import type { AppTransactionClient } from "@/lib/db"
 
 export const COMMENT_TARGET_TYPES = [
   "OBJECTIVE", "KEY_RESULT", "OPPORTUNITY", "SOLUTION", "ASSUMPTION",
@@ -55,6 +62,12 @@ export type ElementAnchorInput = {
    * would be a tracking pixel aimed at the org.
    */
   screenshotUrl?: string | null
+  /**
+   * Zero-based slide of a SLIDE_DECK Artifact the comment was left on, or null for
+   * a comment that is not slide-scoped. With no elementSelector it is a comment on
+   * the whole slide. Only accepted when the Artifact's kind is SLIDE_DECK.
+   */
+  slideIndex?: number | null
 }
 
 /// Identity for an author who is not a Compass User, so `authorId` can stay a
@@ -65,7 +78,7 @@ export type ExternalAuthorInput = {
   embedTokenId?: string | null
 }
 
-type CreateCommentInput = {
+export type CreateCommentInput = {
   id?: string
   workspaceId: string
   targetType: CommentTargetType
@@ -85,25 +98,51 @@ type CreateCommentInput = {
   externalAuthor?: ExternalAuthorInput
 }
 
+export async function createCommentRows(
+  tx: AppTransactionClient,
+  input: CreateCommentInput,
+  onCreated?: (id: string) => void,
+) {
+  const body = input.body.trim()
+  if (!body) throw new Error("Comment body must not be empty.")
+  validateExtensions(input)
+  const comment = await tx.comment.create({ data: {
+    ...(input.id ? { id: input.id } : {}), workspaceId: input.workspaceId,
+    targetType: input.targetType, targetId: input.targetId, parentId: input.parentId ?? null,
+    body, status: input.status ?? "OPEN", authorId: input.authorId ?? null,
+    authorName: input.authorName, authorType: input.authorType ?? "HUMAN",
+    source: input.source ?? "UI", ...(input.createdAt ? { createdAt: input.createdAt } : {}),
+    ...(input.updatedAt ? { updatedAt: input.updatedAt } : {}),
+  } })
+  onCreated?.(comment.id)
+  if (input.docAnchor) await tx.docCommentAnchor.create({ data: { commentId: comment.id, ...input.docAnchor } })
+  if (input.solutionPlan) await tx.solutionPlanProposal.create({ data: { commentId: comment.id, trackedDecisionRequestId: input.solutionPlan.trackedDecisionRequestId ?? null, legacyPlanStatus: input.solutionPlan.legacyPlanStatus ?? null } })
+  // artifactId is the comment's own targetId, never a caller-supplied value —
+  // validateExtensions has already established targetType === "ARTIFACT".
+  if (input.elementAnchor) await tx.commentElementAnchor.create({ data: { commentId: comment.id, artifactId: input.targetId, artifactRevisionId: input.elementAnchor.artifactRevisionId ?? null, pageUrl: input.elementAnchor.pageUrl, pagePath: input.elementAnchor.pagePath, elementSelector: input.elementAnchor.elementSelector ?? null, elementFingerprint: input.elementAnchor.elementFingerprint ?? undefined, screenshotUrl: input.elementAnchor.screenshotUrl ?? null, slideIndex: input.elementAnchor.slideIndex ?? null } })
+  if (input.externalAuthor) await tx.commentExternalAuthor.create({ data: { commentId: comment.id, submitterEmail: input.externalAuthor.submitterEmail ?? null, portalAccountId: input.externalAuthor.portalAccountId ?? null, embedTokenId: input.externalAuthor.embedTokenId ?? null } })
+  return comment
+}
+
 export async function resolveCommentTarget(targetType: CommentTargetType, targetId: string) {
   const prisma = getPrisma()
   switch (targetType) {
     case "OBJECTIVE": {
-      const row = await prisma.objective.findUnique({ where: { id: targetId }, select: { cycle: { select: { workspaceId: true } } } })
-      return row ? { workspaceId: row.cycle.workspaceId } : null
+      const row = await prisma.objective.findUnique({ where: { id: targetId }, select: { workspaceId: true } })
+      return row?.workspaceId ? { workspaceId: row.workspaceId } : null
     }
     case "KEY_RESULT": {
-      const row = await prisma.keyResult.findUnique({ where: { id: targetId }, select: { objective: { select: { cycle: { select: { workspaceId: true } } } } } })
-      return row ? { workspaceId: row.objective.cycle.workspaceId } : null
+      const row = await prisma.keyResult.findUnique({ where: { id: targetId }, select: { objective: { select: { workspaceId: true } } } })
+      return row?.objective.workspaceId ? { workspaceId: row.objective.workspaceId } : null
     }
     case "OPPORTUNITY": return prisma.opportunity.findUnique({ where: { id: targetId }, select: { workspaceId: true } })
     case "SOLUTION": {
-      const row = await prisma.solution.findUnique({ where: { id: targetId }, select: { opportunity: { select: { workspaceId: true } } } })
-      return row ? { workspaceId: row.opportunity.workspaceId } : null
+      const row = await prisma.solution.findUnique({ where: { id: targetId }, select: { workspaceId: true } })
+      return row?.workspaceId ? { workspaceId: row.workspaceId } : null
     }
     case "ASSUMPTION": {
-      const row = await prisma.assumption.findUnique({ where: { id: targetId }, select: { solution: { select: { opportunity: { select: { workspaceId: true } } } } } })
-      return row ? { workspaceId: row.solution.opportunity.workspaceId } : null
+      const row = await prisma.assumption.findUnique({ where: { id: targetId }, select: { solution: { select: { workspaceId: true } } } })
+      return row?.solution.workspaceId ? { workspaceId: row.solution.workspaceId } : null
     }
     case "EXPERIMENT": return prisma.experiment.findUnique({ where: { id: targetId }, select: { workspaceId: true } })
     case "ROADMAP_ITEM": return prisma.roadmapItem.findUnique({ where: { id: targetId }, select: { workspaceId: true } })
@@ -136,6 +175,11 @@ function validateExtensions(input: CreateCommentInput) {
   }
   if (input.elementAnchor && !input.elementAnchor.pageUrl.trim()) throw new Error("Element anchor page URL must not be empty.")
   if (input.elementAnchor && !input.elementAnchor.pagePath.trim()) throw new Error("Element anchor page path must not be empty.")
+  const slideIndex = input.elementAnchor?.slideIndex ?? null
+  if (slideIndex !== null) {
+    if (!input.elementAnchor) throw new Error("Slide index requires an element anchor.")
+    if (!Number.isInteger(slideIndex) || slideIndex < 0 || slideIndex >= MAX_SLIDES) throw new Error(`Slide index must be an integer from 0 to ${MAX_SLIDES - 1}.`)
+  }
   // An external author, unlike an anchor, is valid on a reply too: an outside
   // submitter answering a question on their own thread is the normal case.
   if (input.externalAuthor && input.authorId) {
@@ -143,7 +187,7 @@ function validateExtensions(input: CreateCommentInput) {
   }
 }
 
-export async function createComment(input: CreateCommentInput) {
+export async function createComment(input: CreateCommentInput, options: { beforeCreate?: (tx: AppTransactionClient) => Promise<void> } = {}) {
   const prisma = getPrisma()
   const body = input.body.trim()
   if (!body) throw new Error("Comment body must not be empty.")
@@ -152,6 +196,13 @@ export async function createComment(input: CreateCommentInput) {
   const target = await resolveCommentTarget(input.targetType, input.targetId)
   if (!target) throw new Error(`${input.targetType} target not found or not commentable.`)
   if (target.workspaceId !== input.workspaceId) throw new Error("Comment target does not belong to the declared workspace.")
+  const slideIndex = input.elementAnchor?.slideIndex ?? null
+  if (slideIndex !== null) {
+    // Kind is a presentation choice that can change later; this only stops a
+    // slide anchor being written against an Artifact that is not a deck now.
+    const artifact = await prisma.artifact.findUnique({ where: { id: input.targetId }, select: { kind: true } })
+    if (readArtifactKind(artifact?.kind) !== "SLIDE_DECK") throw new Error("Slide index is allowed only on SLIDE_DECK Artifacts.")
+  }
 
   if (input.parentId) {
     const parent = await prisma.comment.findUnique({ where: { id: input.parentId }, select: { id: true, workspaceId: true, targetType: true, targetId: true, parentId: true } })
@@ -162,36 +213,24 @@ export async function createComment(input: CreateCommentInput) {
   }
 
   const comment = await withWorkspaceUpdates(prisma, async (tx, capture) => {
-  const comment = await tx.comment.create({
-    data: {
-      ...(input.id ? { id: input.id } : {}), workspaceId: input.workspaceId,
-      targetType: input.targetType, targetId: input.targetId, parentId: input.parentId ?? null,
-      body, status: input.status ?? "OPEN", authorId: input.authorId ?? null,
-      authorName: input.authorName, authorType: input.authorType ?? "HUMAN",
-      source: input.source ?? "UI", ...(input.createdAt ? { createdAt: input.createdAt } : {}),
-      ...(input.updatedAt ? { updatedAt: input.updatedAt } : {}),
-    },
-  })
+  let createdId: string | undefined
+  let comment
   try {
-    if (input.docAnchor) await tx.docCommentAnchor.create({ data: { commentId: comment.id, ...input.docAnchor } })
-    if (input.solutionPlan) await tx.solutionPlanProposal.create({ data: { commentId: comment.id, trackedDecisionRequestId: input.solutionPlan.trackedDecisionRequestId ?? null, legacyPlanStatus: input.solutionPlan.legacyPlanStatus ?? null } })
-    // artifactId is the comment's own targetId, never a caller-supplied value —
-    // validateExtensions has already established targetType === "ARTIFACT".
-    if (input.elementAnchor) await tx.commentElementAnchor.create({ data: { commentId: comment.id, artifactId: input.targetId, artifactRevisionId: input.elementAnchor.artifactRevisionId ?? null, pageUrl: input.elementAnchor.pageUrl, pagePath: input.elementAnchor.pagePath, elementSelector: input.elementAnchor.elementSelector ?? null, elementFingerprint: input.elementAnchor.elementFingerprint ?? undefined, screenshotUrl: input.elementAnchor.screenshotUrl ?? null } })
-    if (input.externalAuthor) await tx.commentExternalAuthor.create({ data: { commentId: comment.id, submitterEmail: input.externalAuthor.submitterEmail ?? null, portalAccountId: input.externalAuthor.portalAccountId ?? null, embedTokenId: input.externalAuthor.embedTokenId ?? null } })
+    await options.beforeCreate?.(tx)
+    comment = await createCommentRows(tx, input, id => { createdId = id })
   } catch (error) {
-    if (!capture) {
+    if (!capture && createdId) {
       // `capture === false` can mean `tx` is the plain client, so this delete is
       // the only rollback there is. A comment can now carry TWO extensions at
       // once (element anchor + external author), so the successful one has to be
       // removed first: relationMode="prisma" emulates `onDelete: Restrict`, and
       // leaving an extension row behind would make the compensating delete throw
       // a second error that masks the real one.
-      await tx.commentElementAnchor.deleteMany({ where: { commentId: comment.id } })
-      await tx.commentExternalAuthor.deleteMany({ where: { commentId: comment.id } })
-      await tx.docCommentAnchor.deleteMany({ where: { commentId: comment.id } })
-      await tx.solutionPlanProposal.deleteMany({ where: { commentId: comment.id } })
-      await tx.comment.delete({ where: { id: comment.id } })
+      await tx.commentElementAnchor.deleteMany({ where: { commentId: createdId } })
+      await tx.commentExternalAuthor.deleteMany({ where: { commentId: createdId } })
+      await tx.docCommentAnchor.deleteMany({ where: { commentId: createdId } })
+      await tx.solutionPlanProposal.deleteMany({ where: { commentId: createdId } })
+      await tx.comment.delete({ where: { id: createdId } })
     }
     throw error
   }
@@ -200,8 +239,30 @@ export async function createComment(input: CreateCommentInput) {
     await recordWorkspaceUpdate(tx, { workspaceId: input.workspaceId, entityType: "COMMENT", entityId: comment.id, groupType: input.targetType === "REVIEW_REQUEST" ? "DECISION" : input.targetType, groupId: input.targetId, kind: input.solutionPlan ? "PLAN_PROPOSED" : "COMMENT_ADDED", ...actor })
   }
   return comment
-  })
+  }, { atomic: Boolean(options.beforeCreate) })
+  await followAfterComment(input, comment.id)
   return getComment(comment.id)
+}
+
+/**
+ * Following hook (ADR "Following and in-app notifications", section 2.5). This is
+ * the single comment choke point, so UI, MCP, embed and the legacy Solution and
+ * Doc mirrors are all covered here and nowhere else. It runs after the comment
+ * has committed, never throws, and is queued until the outer transaction commits
+ * when an MCP tool is inside the PM receipt transaction.
+ */
+export async function followAfterComment(input: CreateCommentInput, commentId: string) {
+  try {
+    if (input.source === "MIGRATION" || !followingEnabled() || !isSubjectTypeActive(input.targetType)) return
+    if (!(await followingAvailable(getPrisma()))) return
+    const effects = buildCommentEffects({
+      workspaceId: input.workspaceId, targetType: input.targetType, targetId: input.targetId, commentId,
+      parentId: input.parentId, source: input.source, actor: resolveCommentFollowActor(input),
+    })
+    if (effects.length > 0) await runAfterCommit(() => applyFollowingEffects(effects))
+  } catch (error) {
+    console.error("[following] comment hook failed", error)
+  }
 }
 
 export async function listComments(workspaceId: string, targetType: CommentTargetType, targetId: string, status?: CommentStatus) {

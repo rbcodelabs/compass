@@ -14,7 +14,7 @@ async function seedRelationships() {
       JOIN compass_dev.okr_cycles c ON c.workspace_id=w.id
       WHERE o.slug='e2e-test-org' AND w.slug='e2e-workspace' LIMIT 1`);
     const { rows: [objective] } = await pool.query(`INSERT INTO compass_dev.objectives
-      (id,cycle_id,title) VALUES (gen_random_uuid(),$1,'Help teams adopt discovery') RETURNING id`, [workspace.cycle_id]);
+      (id,workspace_id,cycle_id,title) VALUES (gen_random_uuid(),$1,$2,'Help teams adopt discovery') RETURNING id`, [workspace.id, workspace.cycle_id]);
     const { rows: [kr] } = await pool.query(`INSERT INTO compass_dev.key_results
       (id,objective_id,title,target,current) VALUES (gen_random_uuid(),$1,$2,50,12) RETURNING id`, [objective.id, krTitle]);
     const { rows: [opportunity] } = await pool.query(`INSERT INTO compass_dev.opportunities

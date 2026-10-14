@@ -76,7 +76,7 @@ import {
   signAuthorizationRequest,
   type GrantedAccessSummary,
 } from "@/lib/oauth/consent"
-import { SCOPE_MCP_READ, SCOPE_MCP_WRITE, SCOPE_OFFLINE_ACCESS, parseScope } from "@/lib/oauth/constants"
+import { SCOPE_API_READ, SCOPE_API_WRITE, SCOPE_MCP_READ, SCOPE_MCP_WRITE, SCOPE_OFFLINE_ACCESS, parseScope } from "@/lib/oauth/constants"
 import { ConsentForm } from "./consent-form"
 
 export const dynamic = "force-dynamic"
@@ -373,6 +373,10 @@ function describeScope(scope: string): string {
       return "Read your opportunities, solutions, roadmap, OKRs, research, feedback and docs"
     case SCOPE_MCP_WRITE:
       return "Create and change that same data on your behalf"
+    case SCOPE_API_READ:
+      return "Read your Compass resources through the REST API"
+    case SCOPE_API_WRITE:
+      return "Create and change Compass resources through the REST API"
     case SCOPE_OFFLINE_ACCESS:
       return "Stay connected without asking you to sign in again"
     default:

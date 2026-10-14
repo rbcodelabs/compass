@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockSolution = { findMany: vi.fn() }
 const mockAssumption = { findMany: vi.fn() }
-const mockPrisma = { solution: mockSolution, assumption: mockAssumption }
+const mockSolutionKeyResultLink = { findMany: vi.fn() }
+const mockPrisma = { solution: mockSolution, assumption: mockAssumption, solutionKeyResultLink: mockSolutionKeyResultLink }
 
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 
@@ -36,7 +37,8 @@ describe("listSolutions", () => {
         roadmapItems: [],
       },
     ])
-
+    // The additive typed-link read runs on ids this query already filtered by workspace, so it is one link read (default: none).
+    mockSolutionKeyResultLink.findMany.mockResolvedValue([])
     const result = await listSolutions({
       workspaceId: "workspace-1",
       status: "VALIDATED",
@@ -48,8 +50,8 @@ describe("listSolutions", () => {
     expect(mockSolution.findMany).toHaveBeenCalledWith({
       where: {
         status: "VALIDATED",
+        workspaceId: "workspace-1",
         opportunity: {
-          workspaceId: "workspace-1",
           status: "ACTIVE",
           squadId: "squad-1",
         },
@@ -75,6 +77,7 @@ describe("listSolutions", () => {
           opportunityStatus: "ACTIVE",
           squadId: "squad-1",
           roadmapItems: [],
+          linkedKeyResults: [],
           createdAt: new Date("2026-08-01T00:00:00.000Z"),
           updatedAt: new Date("2026-09-01T00:00:00.000Z"),
         },
@@ -131,9 +134,9 @@ describe("listAssumptions", () => {
         status: "UNTESTED",
         riskLevel: "HIGH",
         solution: {
+          workspaceId: "workspace-1",
           status: "IDEA",
           opportunity: {
-            workspaceId: "workspace-1",
             status: "ACTIVE",
             squadId: "squad-1",
           },
@@ -199,7 +202,9 @@ describe("listSolutions recency filtering and sorting", () => {
     await listSolutions({ workspaceId: "workspace-1", updatedSince: "2026-09-01T00:00:00.000Z" })
 
     // A solution is stale on its own timeline; its opportunity may be fresher.
-    expect(queryFor().where.opportunity).toEqual({ workspaceId: "workspace-1" })
+    // Tenant scope is the Solution's own workspaceId, with no parent filter.
+    expect(queryFor().where.workspaceId).toBe("workspace-1")
+    expect(queryFor().where).not.toHaveProperty("opportunity")
     expect(queryFor().where.updatedAt).toEqual({ gte: new Date("2026-09-01T00:00:00.000Z") })
   })
 
@@ -227,7 +232,8 @@ describe("listSolutions recency filtering and sorting", () => {
 
     expect(queryFor().where).toEqual({
       status: "VALIDATED",
-      opportunity: { workspaceId: "workspace-1", status: "ACTIVE", squadId: "squad-1" },
+      workspaceId: "workspace-1",
+      opportunity: { status: "ACTIVE", squadId: "squad-1" },
       roadmapItems: { none: {} },
       updatedAt: { lt: new Date("2026-09-10T00:00:00.000Z") },
     })
@@ -291,8 +297,9 @@ describe("listAssumptions recency filtering and sorting", () => {
       status: "UNTESTED",
       riskLevel: "HIGH",
       solution: {
+        workspaceId: "workspace-1",
         status: "IDEA",
-        opportunity: { workspaceId: "workspace-1", status: "EXPLORING", squadId: "squad-1" },
+        opportunity: { status: "EXPLORING", squadId: "squad-1" },
       },
       updatedAt: { gte: new Date("2026-09-01T00:00:00.000Z") },
     })

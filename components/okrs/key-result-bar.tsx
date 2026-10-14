@@ -9,9 +9,10 @@ import { GripVertical, X } from "lucide-react";
 import { CheckInForm } from "@/components/okrs/check-in-form";
 import { CardMenu, type CardMenuItem } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { deleteKeyResult, setObjectiveParentKR } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import { Combobox, ComboboxContent } from "@/components/ui/combobox";
-import { ProgressRing } from "@/components/ui/progress-ring";
+import { PaceTrack } from "@/components/okrs/okr-visuals";
 import { averageProgress, clampProgress } from "@/lib/okrs";
 import type { ObjectiveStatus, SquadData } from "@/lib/types";
 
@@ -31,9 +32,15 @@ interface KeyResultBarProps {
       keyResults: Array<{ current: number; target: number }>;
     }>;
   };
+  /** The Objective this KR belongs to; its own Objective is never offered as a supporter. */
+  objectiveId?: string;
   orgSlug: string;
   workspaceSlug: string;
   supportingObjectiveOptions?: SupportingObjectiveOption[];
+  /** Percent of the cycle elapsed (server-computed), drawn as a "today" tick on the progress track. Null/absent: no tick. */
+  paceElapsed?: number | null;
+  /** Hide the progress bar and percentage (e.g. for a not-yet-started period). */
+  hideProgress?: boolean;
 }
 
 export interface SupportingObjectiveOption {
@@ -43,8 +50,9 @@ export interface SupportingObjectiveOption {
   cycleTitle: string;
 }
 
-export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObjectiveOptions }: KeyResultBarProps) {
+export function KeyResultBar({ keyResult, objectiveId, orgSlug, workspaceSlug, supportingObjectiveOptions, paceElapsed, hideProgress }: KeyResultBarProps) {
   const router = useRouter();
+  const labels = useLabels();
   const [, startTransition] = useTransition();
   const [isLinkPending, startLinkTransition] = useTransition();
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -54,7 +62,7 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
     keyResult.supportingObjectives ?? []
   );
   const [localSupportingOptions, setLocalSupportingOptions] = useState(
-    supportingObjectiveOptions ?? []
+    (supportingObjectiveOptions ?? []).filter((option) => option.id !== objectiveId)
   );
   const { openPanel } = usePanelContext();
   const progress = clampProgress(keyResult.current, keyResult.target);
@@ -135,14 +143,14 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
     ...(canLinkSupporting
       ? [
           {
-            label: "Link supporting objective…",
+            label: `Link supporting ${labels.objective.lower}…`,
             // Defer until the dropdown has closed so focus moves cleanly into the combobox popup.
             onClick: () => requestAnimationFrame(() => setIsLinkOpen(true)),
           },
         ]
       : []),
     {
-      label: "Delete KR",
+      label: `Delete ${labels.keyResult.short}`,
       onClick: () => handleDelete(),
       destructive: true,
       separator: canLinkSupporting,
@@ -150,9 +158,9 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
   ];
 
   return (
-    <div ref={setNodeRef} style={style} className="flex flex-col gap-1.5 group touch-none">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+    <div ref={setNodeRef} style={style} className="okx-krow flex flex-col gap-1.5 group touch-none">
+      <div className="okx-kr-row" data-no-progress={hideProgress ? "true" : undefined}>
+        <div className="okx-kr-main">
           {/* Drag handle */}
           <button
             ref={setActivatorNodeRef}
@@ -163,21 +171,26 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
           >
             <GripVertical className="size-3.5" />
           </button>
-          <button
-            type="button"
-            onClick={() => openPanel("keyResult", keyResult.id)}
-            className="min-w-0 overflow-hidden text-left"
-          >
-            <span className="text-sm text-foreground truncate hover:underline underline-offset-2">
-              {keyResult.title}
-            </span>
+          <button type="button" onClick={() => openPanel("keyResult", keyResult.id)} className="okx-kr-name">
+            {keyResult.title}
           </button>
         </div>
-        <div ref={actionsRef} className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <ProgressRing value={progress} size={20} className="text-primary" />
-            {keyResult.current}{unit} / {keyResult.target}{unit}
+        {!hideProgress && (
+          <div className="okx-kr-bar">
+            <PaceTrack progress={progress} elapsed={paceElapsed} small />
+          </div>
+        )}
+        <div className="okx-kr-value">
+          {/* The unit reads once, after the target: "0 / 500000 users". */}
+          <b>{keyResult.current}</b>
+          <span>
+            {" / "}
+            {keyResult.target}
+            {unit}
           </span>
+        </div>
+        {!hideProgress && <div className="okx-kr-pct">{progress}%</div>}
+        <div ref={actionsRef} className="okx-kr-actions">
           <CheckInForm
             keyResultId={keyResult.id}
             keyResultTitle={keyResult.title}
@@ -210,8 +223,8 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
           <ComboboxContent
             anchor={actionsRef}
             align="end"
-            inputPlaceholder="Search shorter-cycle Objectives…"
-            emptyMessage="No eligible unlinked Objectives."
+            inputPlaceholder={`Search shorter-${labels.cycle.lower} ${labels.objective.plural}…`}
+            emptyMessage={`No eligible unlinked ${labels.objective.plural}.`}
           />
         </Combobox>
       )}
@@ -220,7 +233,7 @@ export function KeyResultBar({ keyResult, orgSlug, workspaceSlug, supportingObje
       {localSupportingObjectives.length > 0 && (
         <div className="ml-5 mt-1 flex flex-col gap-1 rounded-md bg-muted/50 px-2.5 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Supporting objectives
+            Supporting {labels.objective.lowerPlural}
           </p>
           {localSupportingObjectives.map((objective) => (
             <div key={objective.id} className="flex items-start justify-between gap-3 rounded-sm py-0.5 sm:items-center">

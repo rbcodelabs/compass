@@ -1,5 +1,5 @@
 /**
- * Server-side data loader for the Canvas viewer.
+ * Server-side data loader for the canvas Doc "Build tree" tool.
  *
  * Flat-query-plus-in-memory-join, mirroring okrs/[cycleId]/page.tsx's
  * objective.findMany -> keyResult.findMany({objectiveId:{in}}) -> grouped
@@ -17,6 +17,14 @@
  * before).
  */
 import type { AppPrismaClient } from "@/lib/db";
+import {
+  getCanvasLinkRows,
+  getLinkedKeyResultsBySolution,
+  getLinkedObjectivesByOpportunity,
+  type CanvasLinkRows,
+  type LinkedKeyResult,
+  type LinkedObjective,
+} from "@/lib/typed-links";
 import type {
   ObjectiveStatus,
   OpportunityStatus,
@@ -55,6 +63,11 @@ export interface CanvasOpportunity {
   status: OpportunityStatus;
   squad: SquadData | null;
   linkedKeyResultId: string | null;
+  /**
+   * Typed Opportunity<->Objective links (ADR Phase 2), payload only: canvas EDGES are still drawn from
+   * linkedKeyResultId and nothing renders this yet. Optional so existing constructors stay valid.
+   */
+  linkedObjectives?: LinkedObjective[];
   position: CanvasPosition | null;
 }
 
@@ -63,6 +76,8 @@ export interface CanvasSolution {
   opportunityId: string;
   title: string;
   status: SolutionStatus;
+  /** Typed Solution<->Key Result links (ADR Phase 2), payload only. */
+  linkedKeyResults?: LinkedKeyResult[];
   position: CanvasPosition | null;
 }
 
@@ -106,7 +121,21 @@ export interface CanvasOverview {
   assumptions: CanvasAssumption[];
   experiments: CanvasExperiment[];
   roadmapItems: CanvasRoadmapItem[];
+  /**
+   * Typed link rows (ADR Phase 4B) for the link-edge layer, ids only. Optional: absent (or empty) means "draw no link edges",
+   * which is also what a deployment without the link tables gets. Which of them are drawn is a presentation rule
+   * (see buildCanvasEdges); the data is the same for every thinking model.
+   */
+  links?: CanvasLinkRows;
 }
+
+export type CanvasOverviewOptions = {
+  /**
+   * "DIRECT" reads only user-made Opportunity<->Objective links (the CLASSIC canvas never draws the backfilled LEGACY ones, so
+   * they are not even sent to the browser). "ALL" (default) reads both. buildCanvasEdges enforces the same rule regardless.
+   */
+  linkOrigins?: "ALL" | "DIRECT";
+};
 
 /**
  * Loads the entire connected OST + Roadmap graph for a workspace, plus any
@@ -125,14 +154,15 @@ export interface CanvasOverview {
  */
 export async function getCanvasOverview(
   prisma: AppPrismaClient,
-  workspaceId: string
+  workspaceId: string,
+  options: CanvasOverviewOptions = {}
 ): Promise<CanvasOverview> {
   // ── Batch 1: workspace-scoped, no FK dependency on anything fetched below ──
   const [squadsRaw, objectivesRaw, opportunitiesRaw, experimentsRaw, roadmapItemsRaw] =
     await Promise.all([
       prisma.squad.findMany({ where: { workspaceId } }),
       prisma.objective.findMany({
-        where: { cycle: { workspaceId } },
+        where: { workspaceId },
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       }),
       prisma.opportunity.findMany({
@@ -165,24 +195,30 @@ export async function getCanvasOverview(
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         })
       : Promise.resolve([]),
-    opportunityIds.length > 0
-      ? prisma.solution.findMany({
-          where: { opportunityId: { in: opportunityIds } },
-          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        })
-      : Promise.resolve([]),
+    // Scoped by the Solution's own workspaceId (migration 068); a NULL row is
+    // simply not returned.
+    prisma.solution.findMany({
+      where: { workspaceId },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    }),
   ]);
 
   const solutionIds = solutionsRaw.map((s) => s.id);
 
   // ── Batch 3: depends on batch 2 ids ─────────────────────────────────────
-  const assumptionsRaw =
+  // The typed links ride along as additive payload (workspace-filtered batch reads); edges are unchanged.
+  const [assumptionsRaw, linkedObjectives, linkedKeyResults, linkRows] = await Promise.all([
     solutionIds.length > 0
-      ? await prisma.assumption.findMany({
+      ? prisma.assumption.findMany({
           where: { solutionId: { in: solutionIds } },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         })
-      : [];
+      : Promise.resolve([]),
+    getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunityIds, { preverified: true }),
+    getLinkedKeyResultsBySolution(prisma, workspaceId, solutionIds, { preverified: true }),
+    // Link rows for the edge layer (ids only; endpoints are filtered against the workspace-scoped nodes above when edges are built).
+    getCanvasLinkRows(prisma, workspaceId, { opportunityIds, solutionIds, origins: options.linkOrigins ?? "ALL" }),
+  ]);
 
   // ── Positions: one round-trip covering every fetched entity id ─────────
   const entityIds = [
@@ -249,6 +285,7 @@ export async function getCanvasOverview(
     status: opp.status as OpportunityStatus,
     squad: opp.squadId ? (squadById.get(opp.squadId) ?? null) : null,
     linkedKeyResultId: opp.linkedKeyResultId,
+    linkedObjectives: linkedObjectives.get(opp.id) ?? [],
     position: positionByEntity.get(`OPPORTUNITY:${opp.id}`) ?? null,
   }));
 
@@ -257,6 +294,7 @@ export async function getCanvasOverview(
     opportunityId: sol.opportunityId,
     title: sol.title,
     status: sol.status as SolutionStatus,
+    linkedKeyResults: linkedKeyResults.get(sol.id) ?? [],
     position: positionByEntity.get(`SOLUTION:${sol.id}`) ?? null,
   }));
 
@@ -300,5 +338,6 @@ export async function getCanvasOverview(
     assumptions,
     experiments,
     roadmapItems,
+    links: linkRows,
   };
 }

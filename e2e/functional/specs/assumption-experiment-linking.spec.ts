@@ -86,11 +86,11 @@ test.describe("Assumption ↔ Experiment linking", () => {
       // ── 5. Follow the CTA to the Experiments page ──────────────────────────
       await cta.click();
       await page.waitForLoadState("networkidle");
-      await expect(page).toHaveURL(/\/experiments\?assumptionId=/);
+      await expect(page).toHaveURL(/\/experiments\?detail=experiment-new(%3A|:)new-/);
 
-      // The create-experiment form should already be open (prefilled), with
+      // The New experiment composer should already be open in the side panel, with
       // the assumption picker showing our assumption pre-selected.
-      await expect(page.getByText("New Experiment")).toBeVisible();
+      await expect(page.getByRole("form", { name: "New experiment" })).toBeVisible();
       await expect(
         page.getByRole("combobox").filter({ hasText: assumptionTitle })
       ).toBeVisible({ timeout: 10_000 });
@@ -100,9 +100,11 @@ test.describe("Assumption ↔ Experiment linking", () => {
       await page.getByLabel("Hypothesis").fill("We believe linking assumptions works.");
       await page.getByLabel("Method").fill("Manual QA pass.");
       await page.getByLabel("Kill Condition").fill("Abandon if the link never appears.");
-      await page.getByRole("button", { name: "Create Experiment" }).click();
+      await page.getByRole("form", { name: "New experiment" }).getByRole("button", { name: "Submit" }).click();
 
-      await expect(page.getByText(expTitle)).toBeVisible({ timeout: 15_000 });
+      // The title appears on both the board card and the experiment panel the
+      // composer hands off to, so take the first match.
+      await expect(page.getByRole("button", { name: expTitle }).first()).toBeVisible({ timeout: 15_000 });
 
       // ── 7. Verify the OST tree now shows the linked experiment ─────────────
       await page.goto(`${base}/discovery`);

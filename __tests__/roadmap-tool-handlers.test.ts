@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { runWithMcpActor } from "@/lib/mcp-authz"
 
 // --- Prisma mock setup -------------------------------------------------------
 
@@ -14,8 +15,13 @@ const mockWorkspace = {
 
 const mockRoadmapItem = {
   findUnique: vi.fn(),
+  findFirst: vi.fn(),
+  findMany: vi.fn(),
+  create: vi.fn(),
   update: vi.fn(),
 }
+const mockSolution = { findFirst: vi.fn(), findMany: vi.fn() }
+const mockSquad = { findMany: vi.fn() }
 
 const mockChecklistTemplate = {
   create: vi.fn(),
@@ -42,6 +48,8 @@ const mockLaunchChecklistItem = {
 const mockPrisma = {
   workspace: mockWorkspace,
   roadmapItem: mockRoadmapItem,
+  solution: mockSolution,
+  squad: mockSquad,
   checklistTemplate: mockChecklistTemplate,
   checklistTemplateItem: mockChecklistTemplateItem,
   launchChecklist: mockLaunchChecklist,
@@ -60,6 +68,8 @@ vi.mock("@/lib/db", () => ({
 // Import handlers AFTER the mock is in place
 import {
   createChecklistTemplate,
+  promoteSolutionToRoadmap,
+  createRoadmapItem,
   listChecklistTemplates,
   setLaunchTier,
   getLaunchChecklist,
@@ -171,11 +181,122 @@ describe("createChecklistTemplate", () => {
     const text = textOf(result)
     expect(text).toContain(`ID: ${TEMPLATE_ID}`)
     expect(text).not.toContain("**ID:**")
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce()
+  })
+
+  it("aborts template creation when the item batch fails", async () => {
+    mockChecklistTemplateItem.createMany.mockRejectedValueOnce(new Error("item write failed"))
+    await expect(createChecklistTemplate({ workspaceId: WORKSPACE_ID, tier: "TIER_1", name: "Atomic", items: [{ label: "One" }] })).rejects.toThrow("item write failed")
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce()
   })
 
   it("skips createMany when no items are provided", async () => {
     await createChecklistTemplate({ workspaceId: WORKSPACE_ID, tier: "TIER_3", name: "Silent", items: [] })
     expect(mockChecklistTemplateItem.createMany).not.toHaveBeenCalled()
+  })
+})
+
+describe("promoteSolutionToRoadmap", () => {
+  const OPERATION_ID = "44444444-4444-4444-8444-444444444444"
+  const solutionRow = { id: "solution-1", title: "Ship", opportunity: { id: "opportunity-1", title: "Opp", squadId: "squad-1" } }
+  const asActor = <T,>(run: () => Promise<T>) => runWithMcpActor({ userId: "user-1", purpose: "USER" }, run)
+  const storedRow = (overrides: Record<string, unknown> = {}) => ({ id: OPERATION_ID, workspaceId: WORKSPACE_ID, solutionId: "solution-1", opportunityId: "opportunity-1", squadId: "squad-1", horizon: "NEXT", isPrivate: false, source: "API", title: "Ship", startDate: null, endDate: null, ...overrides })
+
+  beforeEach(() => {
+    mockSolution.findFirst.mockResolvedValue(solutionRow)
+    mockSolution.findMany.mockResolvedValue([{ id: "solution-1", title: "Ship", opportunityId: "opportunity-1", opportunity: { id: "opportunity-1", squadId: "squad-1", linkedKeyResultId: "kr-1" } }])
+    mockSquad.findMany.mockResolvedValue([{ id: "squad-1" }])
+    mockRoadmapItem.findMany.mockResolvedValue([])
+    mockRoadmapItem.findFirst.mockResolvedValue(null)
+  })
+
+  it("persists API provenance with inherited opportunity, squad and key result links and records the creator", async () => {
+    mockRoadmapItem.findUnique.mockResolvedValueOnce(null).mockResolvedValue(storedRow())
+    mockRoadmapItem.create.mockImplementation(({ data }) => Promise.resolve({ ...storedRow(), ...data }))
+    await asActor(() => promoteSolutionToRoadmap({ workspaceId: WORKSPACE_ID, solutionId: "solution-1", horizon: "NEXT", source: "API", operationId: OPERATION_ID }))
+    expect(mockRoadmapItem.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      id: OPERATION_ID, source: "API", opportunityId: "opportunity-1", squadId: "squad-1", keyResultId: "kr-1", createdById: "user-1", solutionId: "solution-1",
+      startDate: expect.any(Date), endDate: expect.any(Date),
+    }) })
+  })
+
+  it("is idempotent per solution: an ACTIVE item already linking it is returned and nothing is created", async () => {
+    mockRoadmapItem.findUnique.mockResolvedValueOnce(null).mockResolvedValue(storedRow({ id: "existing-item" }))
+    // The linked-items query filters by solutionId; the occupied-dates query does not.
+    mockRoadmapItem.findMany.mockImplementation(({ where }: { where: { solutionId?: unknown } }) => Promise.resolve(where.solutionId ? [{ id: "existing-item", solutionId: "solution-1" }] : []))
+    const result = await asActor(() => promoteSolutionToRoadmap({ workspaceId: WORKSPACE_ID, solutionId: "solution-1", horizon: "NEXT", source: "API", operationId: OPERATION_ID }))
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled()
+    expect(result.structuredContent).toMatchObject({ ok: true, data: { id: "existing-item", created: false } })
+  })
+
+  it("converges a same-operation insert race and rejects changed reuse", async () => {
+    mockRoadmapItem.create.mockRejectedValue(Object.assign(new Error("duplicate"), { code: "P2002" }))
+    // 1st read: no prior row. 2nd read (after losing the insert race): the stored row.
+    mockRoadmapItem.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(storedRow())
+    await expect(asActor(() => promoteSolutionToRoadmap({ workspaceId: WORKSPACE_ID, solutionId: "solution-1", horizon: "NEXT", source: "API", operationId: OPERATION_ID }))).resolves.toMatchObject({ structuredContent: { ok: true } })
+    mockRoadmapItem.findUnique.mockReset()
+    mockRoadmapItem.findUnique.mockResolvedValue(storedRow({ horizon: "NOW", source: "MCP" }))
+    await expect(asActor(() => promoteSolutionToRoadmap({ workspaceId: WORKSPACE_ID, solutionId: "solution-1", horizon: "NEXT", source: "API", operationId: OPERATION_ID }))).rejects.toThrow("different roadmap promotion")
+  })
+})
+
+describe("createRoadmapItem (add_to_roadmap) with a solutionId", () => {
+  const asActor = <T,>(run: () => Promise<T>) => runWithMcpActor({ userId: "user-1", purpose: "USER" }, run)
+  const workspaceRow = { name: "Compass", slug: "compass", organization: { slug: "acme" } }
+  const solutionForBatch = { id: "solution-1", title: "Ship", opportunityId: "opportunity-1", opportunity: { id: "opportunity-1", squadId: "squad-1", linkedKeyResultId: "kr-1" } }
+
+  beforeEach(() => {
+    mockWorkspace.findUnique.mockResolvedValue(workspaceRow)
+    mockSolution.findMany.mockResolvedValue([solutionForBatch])
+    mockSquad.findMany.mockResolvedValue([{ id: "squad-1" }])
+    mockRoadmapItem.findMany.mockResolvedValue([])
+    mockRoadmapItem.findFirst.mockResolvedValue(null)
+    mockRoadmapItem.create.mockImplementation(({ data }) => Promise.resolve({ id: "item-new", ...data }))
+    mockRoadmapItem.findUnique.mockImplementation(({ where }: { where: { id: string } }) => Promise.resolve({
+      id: where.id, title: "Ship", horizon: "NEXT", isPrivate: false, solutionId: "solution-1", keyResultId: "kr-1", opportunityId: "opportunity-1", squadId: "squad-1", startDate: new Date("2026-10-05T00:00:00Z"), endDate: new Date("2026-11-15T00:00:00Z"),
+    }))
+  })
+
+  it("fills the squad, key result and a suggested slot from the solution, and records the creator", async () => {
+    const result = await asActor(() => createRoadmapItem({ workspaceId: WORKSPACE_ID, title: "  Ship it ", horizon: "NEXT", solutionId: "solution-1" }))
+    expect(mockRoadmapItem.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      title: "Ship it", solutionId: "solution-1", squadId: "squad-1", keyResultId: "kr-1", opportunityId: "opportunity-1", createdById: "user-1", source: "MCP",
+      startDate: expect.any(Date), endDate: expect.any(Date),
+    }) })
+    expect(result.structuredContent).toMatchObject({ ok: true, data: { created: true } })
+  })
+
+  it("lets explicit squad, key result and dates win over the inherited defaults", async () => {
+    mockSquad.findMany.mockResolvedValue([{ id: "squad-1" }, { id: "squad-2" }])
+    await asActor(() => createRoadmapItem({ workspaceId: WORKSPACE_ID, title: "Ship", horizon: "LATER", solutionId: "solution-1", squadId: "squad-2", keyResultId: "kr-9", startDate: "2027-02-01", endDate: "2027-02-28" }))
+    const { data } = mockRoadmapItem.create.mock.calls[0][0]
+    expect(data).toMatchObject({ squadId: "squad-2", keyResultId: "kr-9", horizon: "LATER" })
+    expect(data.startDate).toEqual(new Date("2027-02-01T00:00:00.000Z"))
+    expect(data.endDate).toEqual(new Date("2027-02-28T00:00:00.000Z"))
+  })
+
+  it("is idempotent: a solution already on the roadmap returns its item and creates nothing", async () => {
+    mockRoadmapItem.findMany.mockImplementation(({ where }: { where: { solutionId?: unknown } }) => Promise.resolve(where.solutionId ? [{ id: "existing-item", solutionId: "solution-1" }] : []))
+    const result = await asActor(() => createRoadmapItem({ workspaceId: WORKSPACE_ID, title: "Ship", horizon: "NEXT", solutionId: "solution-1" }))
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled()
+    expect(result.structuredContent).toMatchObject({ ok: true, data: { id: "existing-item", created: false } })
+    expect(result.content[0].text).toContain("already on the roadmap")
+  })
+
+  it("reports a solution outside the workspace as not found", async () => {
+    mockSolution.findMany.mockResolvedValue([])
+    const result = await asActor(() => createRoadmapItem({ workspaceId: WORKSPACE_ID, title: "Ship", horizon: "NEXT", solutionId: "foreign" }))
+    expect(result.structuredContent.ok).toBe(false)
+    expect(mockRoadmapItem.create).not.toHaveBeenCalled()
+  })
+
+  it("keeps the no-solution path exactly as before: no inherited links, no invented dates", async () => {
+    mockRoadmapItem.create.mockImplementation(({ data }) => Promise.resolve({ id: "plain", ...data }))
+    await asActor(() => createRoadmapItem({ workspaceId: WORKSPACE_ID, title: "Plain", horizon: "NOW" }))
+    expect(mockSolution.findMany).not.toHaveBeenCalled()
+    const { data } = mockRoadmapItem.create.mock.calls[0][0]
+    expect(data).toMatchObject({ solutionId: null, squadId: null, keyResultId: null })
+    expect(data.startDate).toBeUndefined()
   })
 })
 

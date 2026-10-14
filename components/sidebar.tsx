@@ -1,27 +1,28 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import {
   BarChart3,
   BookOpen,
   Building2,
-  Check,
   ChevronDown,
   FlaskConical,
   HelpCircle,
+  Layers,
   Lightbulb,
+  Puzzle,
   ListChecks,
   Map,
   MessageSquare,
   MessageSquareCheck,
+  Microscope,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
-  Sparkles,
   Target,
-  Waypoints,
   Clock3,
+  House,
 } from "lucide-react"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -49,9 +50,13 @@ import {
 } from "@/components/ui/sidebar"
 import { SendCompassFeedbackDialog } from "@/components/feedback/send-compass-feedback-dialog"
 import { signOutAction } from "@/lib/actions/auth-actions"
-import { getWorkspaceSwitchPath } from "@/lib/workspace-nav"
+import type { SelectorWorkspace } from "@/components/workspace-selector/model"
+import { WorkspacePicker } from "@/components/workspace-selector/workspace-picker"
 import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
 import { useAgentRailOptional } from "@/components/agent/agent-rail-context"
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
+import { orderPrimaryNav } from "@/lib/workspace-nav"
+import { NotificationBellNavItem } from "@/components/notifications/notification-bell"
 
 interface SidebarProps {
   orgSlug: string
@@ -60,50 +65,48 @@ interface SidebarProps {
   userName: string
   userEmail: string
   userImage?: string
-  workspaces: { id: string; name: string; slug: string; orgSlug: string; isReadOnly?: boolean }[]
+  workspaces: SelectorWorkspace[]
   /** Org admins/owners see an "Org Settings" link in the account menu. */
   isOrgAdmin?: boolean
   researchCaptureEnabled?: boolean
   updatesEnabled?: boolean
+  /** Following is on and available: show the notifications bell. Absent in the settings tree. */
+  followingEnabled?: boolean
+  unreadNotifications?: { count: number; overflow: boolean }
 }
 
-const baseNavItems = [
-  { label: "OKRs", path: "okrs", Icon: Target },
-  { label: "Discovery", path: "discovery", Icon: Lightbulb },
+// A function, not a constant, because the OKRs entry's name comes from the
+// workspace's thinking model ("OKRs" by default, "Outcomes" under Torres).
+const buildBaseNavItems = (okrsLabel: string, discoveryLabel: string, solutionsLabel: string, discoveryFirst: boolean) => orderPrimaryNav([
+  { label: okrsLabel, path: "okrs", Icon: Target },
+  { label: discoveryLabel, path: "discovery", Icon: Lightbulb },
+  { label: solutionsLabel, path: "solutions", Icon: Puzzle },
   { label: "Experiments", path: "experiments", Icon: FlaskConical },
   { label: "Roadmap", path: "roadmap", Icon: Map },
   { label: "Metrics", path: "metrics", Icon: BarChart3 },
   { label: "Tasks", path: "tasks", Icon: ListChecks },
   { label: "Decisions", path: "decisions", Icon: MessageSquareCheck },
   { label: "Docs", path: "docs", Icon: BookOpen },
-  { label: "Canvas", path: "canvas", Icon: Waypoints },
-  { label: "Agent", path: "agent", Icon: Sparkles },
-]
+], discoveryFirst)
 
 /**
- * Opens/closes the agent rail.
+ * Opens/closes the rail (Agent, Help and Library views, switched from the rail header). Lives in the footer beside the
+ * account menu rather than in the main nav.
  *
- * ## Why a row of its own, and not a trailing button on the Agent row
- *
- * The Agent row has to stay a plain link to the full-page agent screen — both
- * surfaces are keepers, and the page is the one that survives a refresh and a
- * shared URL. That leaves `SidebarMenuAction` as the obvious home for a toggle,
- * except its class list carries `group-data-[collapsible=icon]:hidden`: it
- * disappears the moment the nav collapses to icons. The users who collapse the
- * nav are *exactly* the ones making room for this rail, so that placement would
- * hide the control from its own audience and leave them nothing but ⌘J.
- *
- * A sibling menu row survives the collapse as an icon with a tooltip, so the
- * affordance is visible in both nav states. The cost is two agent-ish entries
- * in the nav, which the distinct label and icon carry.
+ * There is deliberately no "Agent" page row in the main nav: the full-page agent
+ * screen (`/agent`, still a real route that survives a refresh and a shared URL)
+ * is reached from the rail's own expand icon, which carries the current
+ * conversation with it. This toggle is therefore the only agent entry point in
+ * the sidebar. It is a menu row (not `SidebarMenuAction`, which hides when the
+ * nav collapses to icons) so it stays visible in both nav states.
+ * Help is one view over, or "?" from anywhere.
  *
  * Returns `null` outside a workspace — this sidebar also renders in the settings
- * tree, which mounts no `AgentRailProvider` and has no rail to toggle.
+ * tree, which mounts no `AgentRailProvider` and has no rail to toggle. Also
+ * absent on the full-page agent screen, which already runs its own live chat.
  */
 function AgentRailToggle() {
   const rail = useAgentRailOptional()
-  // Also absent on the full-page agent screen: the rail is unavailable there,
-  // since that page already runs its own live chat.
   if (!rail?.available) return null
 
   const Icon = rail.open ? PanelLeftClose : PanelLeftOpen
@@ -112,16 +115,14 @@ function AgentRailToggle() {
     <SidebarMenuItem>
       <SidebarMenuButton
         onClick={rail.toggleRail}
-        // Not `isActive`: that styling means "this is the page you are on", and
-        // is already spoken for by the Agent row when you are on the agent
-        // screen. Open-ness is a pressed state, which is what screen readers
-        // will announce here.
+        // Not `isActive`: that styling means "this is the page you are on".
+        // Open-ness is a pressed state, which screen readers announce here.
         aria-pressed={rail.open}
-        tooltip={rail.open ? "Hide agent panel (⌘J)" : "Show agent panel (⌘J)"}
-        className="relative h-9 rounded-lg text-text-secondary"
+        tooltip={rail.open ? "Hide agent (⌘J)" : "Show agent (⌘J)"}
+        className="text-text-secondary"
       >
         <Icon className={rail.open ? "text-primary" : "text-text-subtle"} aria-hidden="true" />
-        <span>Agent panel</span>
+        <span>Agent</span>
       </SidebarMenuButton>
     </SidebarMenuItem>
   )
@@ -147,24 +148,26 @@ export function Sidebar({
   isOrgAdmin = false,
   researchCaptureEnabled = true,
   updatesEnabled = false,
+  followingEnabled = false,
+  unreadNotifications = { count: 0, overflow: false },
 }: SidebarProps) {
   const pathname = usePathname()
-  const router = useRouter()
   const base = `/${orgSlug}/${workspaceSlug}`
+  const labels = useLabels()
+  const baseNavItems = buildBaseNavItems(labels.sections.okrs, labels.opportunity.plural, labels.solution.plural, labels.sections.discoveryFirst)
   const navItems = [
+    { label: "Home", path: "home", Icon: House },
     ...(updatesEnabled ? [{ label: "Updates", path: "updates", Icon: Clock3 }] : []),
     ...baseNavItems.slice(0, 6),
-    researchCaptureEnabled
-      ? { label: "Capture", path: "capture", Icon: MessageSquare }
-      : { label: "Feedback", path: "feedback", Icon: MessageSquare },
+    { label: "Feedback", path: "feedback", Icon: MessageSquare },
+    ...(researchCaptureEnabled ? [{ label: "Research", path: "capture", Icon: Microscope }] : []),
     ...baseNavItems.slice(6),
   ]
 
-  const otherWorkspaces = workspaces.filter(
-    (workspace) =>
-      !(workspace.slug === workspaceSlug && workspace.orgSlug === orgSlug)
-  )
-
+  // The cross-workspace roadmap only earns a nav slot when there is more than one workspace in this org to compare.
+  const orgWorkspaceCount = workspaces.filter((w) => w.orgSlug === orgSlug).length
+  const orgRoadmapHref = `/${orgSlug}/roadmap`
+  const isOrgRoadmapActive = pathname === orgRoadmapHref
   return (
     <SidebarRoot
       collapsible="icon"
@@ -199,71 +202,13 @@ export function Sidebar({
 
         <SidebarMenu>
           <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <SidebarMenuButton
-                    size="lg"
-                    tooltip={`Workspace: ${workspaceName}`}
-                    className="text-text-secondary hover:bg-sidebar-accent hover:text-sidebar-foreground data-open:bg-sidebar-accent"
-                    aria-label={`Switch workspace. Current workspace: ${workspaceName}`}
-                  />
-                }
-              >
-                <div className="flex size-6 shrink-0 items-center justify-center rounded-md border border-primary/30 bg-primary/20">
-                  <span className="text-[10px] font-bold leading-none text-primary">
-                    {workspaceName[0]?.toUpperCase() ?? "W"}
-                  </span>
-                </div>
-                <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                  {workspaceName}
-                </span>
-                <ChevronDown className="ml-auto size-3 text-text-subtle group-data-[collapsible=icon]:hidden" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="right" align="start" className="min-w-56">
-                {workspaces.map((workspace) => (
-                  <DropdownMenuItem
-                    key={workspace.id}
-                    className="flex cursor-pointer items-center gap-2"
-                    onClick={() =>
-                      router.push(
-                        getWorkspaceSwitchPath(
-                          pathname,
-                          orgSlug,
-                          workspaceSlug,
-                          workspace.orgSlug,
-                          workspace.slug
-                        )
-                      )
-                    }
-                  >
-                    <div className="flex size-4 shrink-0 items-center justify-center">
-                      {workspace.slug === workspaceSlug &&
-                        workspace.orgSlug === orgSlug && (
-                          <Check className="size-3.5 text-primary" aria-hidden="true" />
-                        )}
-                    </div>
-                    <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
-                    {workspace.isReadOnly && (
-                      <span className="shrink-0 rounded border border-border-default px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-subtle">
-                        Read-only
-                      </span>
-                    )}
-                  </DropdownMenuItem>
-                ))}
-                {otherWorkspaces.length === 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      disabled
-                      className="cursor-default text-text-disabled focus:bg-transparent focus:text-text-disabled"
-                    >
-                      No other workspaces
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <WorkspacePicker
+              workspaces={workspaces}
+              orgSlug={orgSlug}
+              workspaceSlug={workspaceSlug}
+              workspaceName={workspaceName}
+              userScope={userEmail || undefined}
+            />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
@@ -280,6 +225,14 @@ export function Sidebar({
             </SidebarMenu>
             <nav aria-label="Main navigation">
               <SidebarMenu className="gap-0.5">
+              {followingEnabled && (
+                <NotificationBellNavItem
+                  orgSlug={orgSlug}
+                  workspaceSlug={workspaceSlug}
+                  initialCount={unreadNotifications.count}
+                  initialOverflow={unreadNotifications.overflow}
+                />
+              )}
               {navItems.map(({ label, path, Icon }) => {
                 const href = `${base}/${path}`
                 const isActive = pathname.startsWith(href)
@@ -307,7 +260,29 @@ export function Sidebar({
                   </SidebarMenuItem>
                 )
               })}
-              <AgentRailToggle />
+              {(orgWorkspaceCount > 1 || isOrgRoadmapActive) && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    render={<Link href={orgRoadmapHref} />}
+                    isActive={isOrgRoadmapActive}
+                    tooltip="All roadmaps"
+                    className="relative h-9 rounded-lg text-text-secondary"
+                    data-testid="nav-org-roadmap"
+                  >
+                    {isOrgRoadmapActive && (
+                      <span
+                        className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary group-data-[collapsible=icon]:hidden"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <Layers
+                      className={isOrgRoadmapActive ? "text-primary" : "text-text-subtle"}
+                      aria-hidden="true"
+                    />
+                    <span>All roadmaps</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               </SidebarMenu>
             </nav>
           </SidebarGroupContent>
@@ -318,6 +293,7 @@ export function Sidebar({
 
       <SidebarFooter className="px-2 py-3">
         <SidebarMenu>
+          <AgentRailToggle />
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger

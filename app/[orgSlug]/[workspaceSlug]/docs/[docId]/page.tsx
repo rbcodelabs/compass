@@ -6,10 +6,12 @@ import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin";
 import { redirect, notFound } from "next/navigation";
 import getPrisma from "@/lib/db";
 import { DocEditor } from "@/components/docs/doc-editor";
+import { CanvasDocEditor } from "@/components/docs/canvas/canvas-doc-editor";
 import { DocDecisionAction } from "@/components/docs/doc-decision-action";
+import { FollowButton } from "@/components/following/follow-button";
 import { listDocDecisions } from "@/lib/tracked-decisions";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
-import { hydrateDocument } from "@/lib/document-service";
+import { documentRevision, hydrateDocument } from "@/lib/document-service";
 
 type Props = {
   params: Promise<{
@@ -45,11 +47,14 @@ export default async function DocPage({ params }: Props) {
 
   const storedDoc = await prisma.doc.findFirst({
     where: { id: docId, workspaceId: workspace.id },
-    select: { id: true, title: true, content: true, icon: true, metadata: true, storageProvider: true, contentRef: true, revision: true },
+    select: { id: true, title: true, content: true, icon: true, metadata: true, storageProvider: true, contentRef: true, revision: true, updatedAt: true, docType: true },
   });
 
   if (!storedDoc) notFound();
-  const doc = await hydrateDocument(workspace.id, storedDoc);
+  const hydrated = await hydrateDocument(workspace.id, storedDoc);
+  // Docs created before revisions existed have a null revision; the save path expects the `legacy:<updatedAt>` form
+  // documentRevision() derives, so always hand the editor that, never the raw null.
+  const doc = { ...hydrated, revision: documentRevision(storedDoc) };
 
   // An unavailable lookup is distinct from a document with no decisions.
   const decisions = await listDocDecisions(workspace.id, doc.id).catch(() => null);
@@ -72,6 +77,19 @@ export default async function DocPage({ params }: Props) {
   const linkedTasks = await fetchLinkedTasksBundle(workspace.id, "DOC", doc.id);
   const cookieStore = await cookies();
 
+  if (doc.docType === "CANVAS") {
+    return (
+      <CanvasDocEditor
+        key={doc.id}
+        doc={{ id: doc.id, title: doc.title, content: doc.content, icon: doc.icon, revision: doc.revision }}
+        versions={versions}
+        revalidatePathStr={revalidatePathStr}
+        initialHistoryPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsHistory"))?.value)}
+        decisionAction={<DocDecisionAction orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
+      />
+    );
+  }
+
   return (
     <DocEditor
       key={doc.id}
@@ -85,6 +103,7 @@ export default async function DocPage({ params }: Props) {
       workspaceSlug={workspaceSlug}
       workspaceId={workspace.id}
       linkedTasks={linkedTasks}
+      followAction={<FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="DOC" subjectId={doc.id} />}
       decisionAction={<DocDecisionAction orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
     />
   );

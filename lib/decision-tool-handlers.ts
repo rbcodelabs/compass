@@ -3,7 +3,8 @@ import { getDecisionArtifacts } from "@/lib/artifacts"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { ok, fail } from "@/lib/mcp-output"
 import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator, type ReleaseScope } from "@/lib/release-authorization"
-import { applyTrackedDecision, createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, recordDecisionNoAction, TrackedDecisionError, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { applyTrackedDecision, createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, recordDecisionNoAction, TrackedDecisionError, type TrackedDecisionOptionInput, type TrackedDecisionQuestionInput, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { isChoiceActionKey, parseDecisionAnswers, parsePacketQuestions } from "@/lib/tracked-decision-types"
 import { CompassUrlNotConfiguredError, reviewRequestUrl, withUrlLine } from "@/lib/compass-url"
 
 /**
@@ -79,6 +80,53 @@ async function resolveFollowUpTasks(requestId: string) {
   return links.map((link) => link.task)
 }
 
+type OptionRow = { id: string; actionKey: string; label: string; description?: string | null; outcomeClass: string }
+type OptionSummary = { id: string; actionKey: string; label: string; description: string | null; outcomeClass: string }
+const summarizeOption = (option: OptionRow): OptionSummary => ({ id: option.id, actionKey: option.actionKey, label: option.label, description: option.description ?? null, outcomeClass: option.outcomeClass })
+
+/**
+ * Flat, agent-friendly view of a decision revision's options and, once decided,
+ * the option that was chosen. The same data is nested under currentRevision;
+ * this lifts it to the top level so an agent does not have to walk the tree to
+ * find the human's answer. `hasChoices` is true only for requests that carried
+ * caller-supplied options, so option-less decisions keep their existing text.
+ */
+export function summarizeDecisionOptions(revision: { options?: OptionRow[]; decisions?: Array<{ optionId: string; option?: OptionRow }> } | null | undefined) {
+  const options = (revision?.options ?? []).map(summarizeOption)
+  const decision = revision?.decisions?.[0]
+  const chosen = decision ? (decision.option ?? revision?.options?.find((option) => option.id === decision.optionId)) : undefined
+  return { options, chosenOption: chosen ? summarizeOption(chosen) : null, hasChoices: options.some((option) => isChoiceActionKey(option.actionKey)) }
+}
+
+/**
+ * Multi-question view of a decision revision: the questions frozen in its packet
+ * (with their options) and, once decided, the per-question answers recorded on
+ * the decision. Both are empty arrays for option-less and single-options requests.
+ */
+export function summarizeDecisionQuestions(revision: { packetJson?: string | null; decisions?: Array<{ answersJson?: string | null }> } | null | undefined) {
+  const questions = parsePacketQuestions(revision?.packetJson).map((question) => ({ header: question.header ?? null, question: question.question, options: question.options.map((option) => ({ label: option.label, description: option.description ?? null })) }))
+  const answers = parseDecisionAnswers(revision?.decisions?.[0]?.answersJson).map((answer) => ({ questionIndex: answer.questionIndex, question: answer.question, chosenOption: answer.chosenOption }))
+  return { questions, answers }
+}
+
+function questionLines(summary: ReturnType<typeof summarizeDecisionQuestions>): string[] {
+  if (!summary.questions.length) return []
+  return [
+    "Questions:",
+    ...summary.questions.flatMap((question, index) => {
+      const answer = summary.answers.find((candidate) => candidate.questionIndex === index)
+      return [`  ${index + 1}. ${question.header ? `[${question.header}] ` : ""}${question.question}`, ...question.options.map((option) => `     • ${option.label}${option.description ? ` — ${option.description}` : ""}`), ...(answer ? [`     Answer: ${answer.chosenOption}`] : [])]
+    }),
+  ]
+}
+
+function optionLines(summary: ReturnType<typeof summarizeDecisionOptions>): string[] {
+  if (!summary.hasChoices) return []
+  const lines = ["Options:", ...summary.options.map((option) => `  • ${option.label}${option.description ? ` — ${option.description}` : ""}`)]
+  if (summary.chosenOption) lines.push(`Chosen: ${summary.chosenOption.label} (${summary.chosenOption.outcomeClass})`)
+  return lines
+}
+
 export async function requestDecision(input: {
   workspaceId: string
   subjectType: TrackedSubjectType
@@ -87,6 +135,8 @@ export async function requestDecision(input: {
   context: string
   idempotencyKey: string
   sources?: TrackedDecisionSourceInput[]
+  options?: TrackedDecisionOptionInput[]
+  questions?: TrackedDecisionQuestionInput[]
 }) {
   const actor = getMcpActor()
   try {
@@ -99,7 +149,7 @@ export async function requestDecision(input: {
     const revision = await createTrackedDecisionRequest({ ...input, requestedById: actor.userId, requestedByAgentId })
     const reviewUrl = await reviewUrlByWorkspace(input.workspaceId, revision.requestId)
     return ok(
-      withUrlLine(`Decision requested.\nID: ${revision.requestId}\nRevision ID: ${revision.id}`, reviewUrl),
+      withUrlLine(`Decision requested.\nID: ${revision.requestId}\nRevision ID: ${revision.id}${input.options?.length ? `\nOptions: ${input.options.map((option) => option.label.trim()).join(" | ")}` : ""}${input.questions?.length ? `\nQuestions: ${input.questions.length}` : ""}`, reviewUrl),
       { ...revision, reviewUrl },
     )
   } catch (error) {
@@ -120,14 +170,23 @@ export async function listDecisions(input: {
   try {
     const result = await listTrackedDecisions({ ...input, tab: input.state })
     const slugs = await workspaceSlugs(input.workspaceId)
-    const requests = await Promise.all(result.requests.map(async (request) => ({
-      ...request,
-      reviewUrl: buildReviewUrl(slugs, request.id),
-      requestedBy: await resolveRequester(request),
-    })))
+    const requests = await Promise.all(result.requests.map(async (request) => {
+      const { options, chosenOption } = summarizeDecisionOptions(request.currentRevision)
+      const { questions, answers } = summarizeDecisionQuestions(request.currentRevision)
+      return {
+        ...request,
+        reviewUrl: buildReviewUrl(slugs, request.id),
+        requestedBy: await resolveRequester(request),
+        options,
+        chosenOption,
+        questions,
+        answers,
+      }
+    }))
     return ok(requests.length
       ? requests.map((request) => {
-          const line = `• ${request.currentRevision?.title ?? request.subjectId} [${request.state}] (${request.id})`
+          const chosen = request.chosenOption && request.options.some((option) => isChoiceActionKey(option.actionKey)) ? ` → ${request.chosenOption.label}` : request.answers.length ? ` → ${request.answers.map((answer) => answer.chosenOption).join(" / ")}` : ""
+          const line = `• ${request.currentRevision?.title ?? request.subjectId} [${request.state}]${chosen} (${request.id})`
           return request.reviewUrl ? `${line}\n  URL: ${request.reviewUrl}` : line
         }).join("\n")
       : "No decisions found.", { ...result, requests })
@@ -147,8 +206,12 @@ export async function getDecision({ workspaceId, requestId }: { workspaceId: str
     ])
     const reviewUrl = await reviewUrlByWorkspace(workspaceId, request.id)
     const noAction = request.noActionAt ? { at: request.noActionAt, reason: request.noActionReason } : null
+    const optionSummary = summarizeDecisionOptions(request.currentRevision)
+    const questionSummary = summarizeDecisionQuestions(request.currentRevision)
     const lines = [
       `${request.currentRevision?.title ?? "Decision"} [${request.state}]`,
+      ...optionLines(optionSummary),
+      ...questionLines(questionSummary),
       requestedBy ? `Requested by: ${requestedBy.name} (${requestedBy.type.toLowerCase()})` : null,
       followUpTasks.length ? `Follow-up work (${followUpTasks.length}):\n` + followUpTasks.map((task) => `  • [${task.status}] ${task.title} — ID: ${task.id}`).join("\n") : null,
       noAction ? `No action needed: ${noAction.reason}` : null,
@@ -156,7 +219,7 @@ export async function getDecision({ workspaceId, requestId }: { workspaceId: str
     ].filter((line): line is string => line !== null)
     return ok(
       withUrlLine(lines.join("\n"), reviewUrl),
-      { ...request, artifacts, reviewUrl, requestedBy, followUpTasks, noAction },
+      { ...request, artifacts, reviewUrl, requestedBy, followUpTasks, noAction, options: optionSummary.options, chosenOption: optionSummary.chosenOption, questions: questionSummary.questions, answers: questionSummary.answers },
     )
   } catch (error) {
     return fail(error instanceof Error ? error.message : "Could not get decision.")
@@ -205,9 +268,11 @@ export async function getReviewRequest({ requestId }: { requestId: string }) {
   if (!request) return fail(`Review request "${requestId}" not found.`)
   const artifacts = request.gateType === "TRACKED_DECISION" ? await getDecisionArtifacts(request.workspaceId, requestId) : []
   const reviewUrl = await reviewUrlByWorkspace(request.workspaceId, request.id)
+  const optionSummary = summarizeDecisionOptions(request.currentRevision)
+  const questionSummary = summarizeDecisionQuestions(request.currentRevision)
   return ok(
-    withUrlLine(`Review request ${request.id} [${request.state}]\nGate: ${request.gateType}\nSubject: ${request.subjectType} ${request.subjectId}`, reviewUrl),
-    { ...request, artifacts, reviewUrl },
+    withUrlLine([`Review request ${request.id} [${request.state}]`, `Gate: ${request.gateType}`, `Subject: ${request.subjectType} ${request.subjectId}`, ...optionLines(optionSummary), ...questionLines(questionSummary)].join("\n"), reviewUrl),
+    { ...request, artifacts, reviewUrl, options: optionSummary.options, chosenOption: optionSummary.chosenOption, questions: questionSummary.questions, answers: questionSummary.answers },
   )
 }
 

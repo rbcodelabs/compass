@@ -40,7 +40,7 @@
  */
 import getPrisma from "@/lib/db"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
-import { SCOPE_MCP_WRITE } from "@/lib/oauth/constants"
+import { SCOPE_API_WRITE, SCOPE_MCP_WRITE } from "@/lib/oauth/constants"
 import type { AuthorizationBinding } from "@/lib/oauth/codes"
 
 /** One workspace an agent may be granted access to at consent time. */
@@ -268,7 +268,7 @@ export function selectAgentReach(
  * words, so it is disclosed rather than inferred silently.
  */
 export function inlineGrantAccess(requestedScopes: readonly string[]): "READ" | "WRITE" {
-  return requestedScopes.includes(SCOPE_MCP_WRITE) ? "WRITE" : "READ"
+  return requestedScopes.includes(SCOPE_MCP_WRITE) || requestedScopes.includes(SCOPE_API_WRITE) ? "WRITE" : "READ"
 }
 
 export const AGENTS_ENABLED_ENV = "COMPASS_AGENTS_ENABLED"

@@ -190,8 +190,8 @@ export async function seedE2E(
 
   const { rows: [policySolution] } = await pool.query<{ id: string }>(`
     INSERT INTO "${S}".solutions
-      (id, opportunity_id, title, status, sort_order, created_at, updated_at)
-    SELECT gen_random_uuid(), $1, 'E2E Native NOW Policy Solution', 'IN_DELIVERY', 0, NOW(), NOW()
+      (id, workspace_id, opportunity_id, title, status, sort_order, created_at, updated_at)
+    SELECT gen_random_uuid(), (SELECT workspace_id FROM "${S}".opportunities WHERE id = $1), $1, 'E2E Native NOW Policy Solution', 'IN_DELIVERY', 0, NOW(), NOW()
     WHERE NOT EXISTS (
       SELECT 1 FROM "${S}".solutions
       WHERE opportunity_id = $1 AND title = 'E2E Native NOW Policy Solution'
@@ -278,8 +278,8 @@ export async function seedE2E(
   `, [ws.id]);
   await pool.query(`
     INSERT INTO "${S}".solutions
-      (id, opportunity_id, title, status, sort_order, created_at, updated_at)
-    SELECT gen_random_uuid(), $1, 'E2E Baseline Solution', 'IDEA', 0, NOW(), NOW()
+      (id, workspace_id, opportunity_id, title, status, sort_order, created_at, updated_at)
+    SELECT gen_random_uuid(), (SELECT workspace_id FROM "${S}".opportunities WHERE id = $1), $1, 'E2E Baseline Solution', 'IDEA', 0, NOW(), NOW()
     WHERE NOT EXISTS (
       SELECT 1 FROM "${S}".solutions
       WHERE opportunity_id = $1 AND title = 'E2E Baseline Solution'

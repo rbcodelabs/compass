@@ -64,6 +64,7 @@ vi.mock("@/components/panels/roadmap-item-panel", () => ({ RoadmapItemPanel: () 
 vi.mock("@/components/panels/feedback-panel", () => ({ FeedbackPanel: () => null }));
 vi.mock("@/components/feedback/feedback-composer", () => ({ FeedbackComposer: () => null }));
 vi.mock("@/components/discovery/opportunity-composer", () => ({ OpportunityComposer: () => null }));
+vi.mock("@/components/experiments/experiment-composer", () => ({ ExperimentComposer: () => null }));
 vi.mock("@/components/panels/discovery-rail-panel", () => ({ DiscoveryRailPanel: () => null }));
 vi.mock("@/components/tasks/task-detail", () => ({ TaskDetail: () => null }));
 
@@ -153,6 +154,7 @@ describe("PanelShell mode selection", () => {
   it.each([
     ["opportunity", "discovery", true], ["opportunity", "discovery", false],
     ["task", "tasks", true], ["task", "tasks", false],
+    ["roadmapItem", "roadmap", true], ["roadmapItem", "roadmap", false],
   ] as const)("keeps one compact %s full-page action beside pin and close (%s, pinned=%s)", async (type, route, pinned) => {
     panelState = { type, id: "entity-1" };
     render(<PanelShell initialPin={{ pinned, width: PANEL_WIDTH_DEFAULT }} />);

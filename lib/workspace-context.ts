@@ -40,9 +40,16 @@ export const WORKSPACE_SUMMARY_SELECT = {
   brandingFontPresetId: true,
   brandingFontFamily: true,
   brandingLogoUrl: true,
+  // Thinking-model preset key and label overrides (migration 073). Selected here
+  // because the workspace layout resolves them once for every page. Shipping this
+  // before 073 is applied would 500 every workspace page.
+  thinkingModel: true,
+  thinkingModelLabels: true,
 } satisfies Prisma.WorkspaceSelect
 
 export type WorkspaceSummary = WorkspaceBrandingFields & {
+  thinkingModel: string | null
+  thinkingModelLabels: string | null
   id: string
   name: string
   slug: string

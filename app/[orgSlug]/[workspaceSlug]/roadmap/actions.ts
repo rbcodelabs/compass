@@ -9,6 +9,12 @@ import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
 import type { Horizon } from "@/lib/types";
 import { isLaunchHorizon } from "@/lib/roadmap";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
+import { calendarDateToUtcMilliseconds } from "@/lib/roadmap-timeline/calendar-geometry";
+import { durationDaysFor, proposeBatch } from "@/lib/roadmap/scheduling";
+import { createRoadmapItemsFromSolutions, utcToday, type SolutionScheduleRequest } from "@/lib/roadmap/create-from-solution";
+import { ROADMAP_CARD_INCLUDE, toRoadmapCardData } from "@/lib/roadmap/card-data";
+import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
+import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
 
 type Database = ReturnType<typeof getPrisma>;
 const ROADMAP_ITEM_NOT_FOUND = "Roadmap item not found";
@@ -39,8 +45,8 @@ async function validateRoadmapRelations(
   relations: { solutionId?: string; keyResultId?: string; opportunityId?: string; experimentId?: string; squadId?: string | null },
 ) {
   const checks: Array<Promise<unknown>> = [];
-  if (relations.solutionId) checks.push(prisma.solution.findFirst({ where: { id: relations.solutionId, opportunity: { workspaceId } }, select: { id: true } }));
-  if (relations.keyResultId) checks.push(prisma.keyResult.findFirst({ where: { id: relations.keyResultId, objective: { cycle: { workspaceId } } }, select: { id: true } }));
+  if (relations.solutionId) checks.push(prisma.solution.findFirst({ where: { id: relations.solutionId, workspaceId }, select: { id: true } }));
+  if (relations.keyResultId) checks.push(prisma.keyResult.findFirst({ where: { id: relations.keyResultId, objective: { workspaceId } }, select: { id: true } }));
   if (relations.opportunityId) checks.push(prisma.opportunity.findFirst({ where: { id: relations.opportunityId, workspaceId }, select: { id: true } }));
   if (relations.experimentId) checks.push(prisma.experiment.findFirst({ where: { id: relations.experimentId, workspaceId }, select: { id: true } }));
   if (relations.squadId) checks.push(prisma.squad.findFirst({ where: { id: relations.squadId, workspaceId }, select: { id: true } }));
@@ -128,11 +134,13 @@ export async function updateRoadmapItem(
   if (data.startDate !== undefined || data.endDate !== undefined) {
     validateInclusiveDates(data.startDate === undefined ? current.startDate : data.startDate, data.endDate === undefined ? current.endDate : data.endDate);
   }
-  const updateData: typeof data & { updatedAt: Date } = { updatedAt: new Date() };
+  const updateData: typeof data & { updatedAt: Date; scheduleEditedAt?: Date } = { updatedAt: new Date() };
   if (data.title !== undefined) updateData.title = data.title;
   if (data.description !== undefined) updateData.description = data.description;
   if (data.startDate !== undefined) updateData.startDate = data.startDate;
   if (data.endDate !== undefined) updateData.endDate = data.endDate;
+  // A hand-edited schedule stops the item following its solution (migration 075).
+  if (data.startDate !== undefined || data.endDate !== undefined) updateData.scheduleEditedAt = new Date();
   if (data.isPrivate !== undefined) updateData.isPrivate = data.isPrivate;
   const item = await captureWorkspaceMutation(prisma, "roadmapItem", "update", "UI", itemId, tx => tx.roadmapItem.update({ where: { id: itemId }, data: updateData }));
   revalidateRoadmap();
@@ -200,12 +208,15 @@ export async function editRoadmapItem(
     endDate?: Date | null;
     isPrivate?: boolean;
     opportunityId?: string | null;
+    scheduleEditedAt?: Date;
     updatedAt: Date;
   } = { updatedAt: new Date() };
   if (data.title !== undefined) updateData.title = data.title;
   if (data.description !== undefined) updateData.description = data.description;
   if (data.startDate !== undefined) updateData.startDate = data.startDate;
   if (data.endDate !== undefined) updateData.endDate = data.endDate;
+  // A hand-edited schedule stops the item following its solution (migration 075).
+  if (data.startDate !== undefined || data.endDate !== undefined) updateData.scheduleEditedAt = new Date();
   if (data.isPrivate !== undefined) updateData.isPrivate = data.isPrivate;
   if (opportunityChanged) updateData.opportunityId = data.opportunityId;
 
@@ -244,7 +255,7 @@ export async function promoteToRoadmap(
   const prisma = getPrisma();
 
   const solution = await prisma.solution.findFirst({
-    where: { id: solutionId, opportunity: { workspaceId } },
+    where: { id: solutionId, workspaceId },
     select: { title: true, opportunityId: true, opportunity: { select: { id: true, squadId: true } } },
   });
   if (!solution) throw new Error("Solution not found");
@@ -337,7 +348,7 @@ export async function rescheduleRoadmapItem(
     const updated = await database.roadmapItem.update({
       where: { id: current.id },
       data: { horizon: data.horizon, startDate: data.startDate, endDate: data.endDate,
-        sortOrder, updatedAt: new Date() },
+        sortOrder, updatedAt: new Date(), scheduleEditedAt: new Date() },
     });
     if (capture && actor) await recordWorkspaceUpdate(tx, { workspaceId, entityType: "ROADMAP_ITEM", entityId: itemId, kind: "STATUS_CHANGED", before: current.horizon, after: updated.horizon, ...actor });
     return updated;
@@ -350,4 +361,231 @@ export async function rescheduleRoadmapItem(
     endDate: item.endDate?.toISOString() ?? null,
     updatedAt: item.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Where a card lands when it is dragged to another swimlane on the Board.
+ * `squad` sets the card's squad (`null` clears it); `customField` sets one
+ * SELECT field's value to an option value (`null` clears it).
+ */
+export type LaneAssignment =
+  | { kind: "squad"; squadId: string | null }
+  | { kind: "customField"; fieldId: string; value: string | null };
+
+/**
+ * Reassign the field a swimlane is grouped by. Authenticated and
+ * workspace-scoped like every other roadmap write: the item, squad, and field
+ * must all belong to `workspaceId`, and a field value must be one of the
+ * field's current options. Does not touch horizon or ordering.
+ */
+export async function moveItemToLane(
+  itemId: string,
+  workspaceId: string,
+  assignment: LaneAssignment,
+): Promise<{ id: string; squadId: string | null; fieldId?: string; value?: string | null }> {
+  await requireWorkspaceMember(workspaceId);
+  const prisma = getPrisma();
+  const current = await requireRoadmapItem(prisma, itemId, workspaceId);
+  if (current.status !== "ACTIVE") throw new Error(ROADMAP_ITEM_NOT_FOUND);
+
+  if (assignment.kind === "squad") {
+    await validateRoadmapRelations(prisma, workspaceId, { squadId: assignment.squadId });
+    const item = await captureWorkspaceMutation(prisma, "roadmapItem", "update", "UI", itemId, tx =>
+      tx.roadmapItem.update({ where: { id: itemId }, data: { squadId: assignment.squadId, updatedAt: new Date() } }),
+    );
+    revalidateRoadmap();
+    return { id: item.id, squadId: item.squadId ?? null };
+  }
+
+  const fieldRow = await prisma.customFieldDefinition.findFirst({
+    where: { id: assignment.fieldId, workspaceId },
+    include: { sharedOptionSet: { select: { id: true, name: true, options: true } } },
+  });
+  if (!fieldRow || fieldRow.objectType !== "ROADMAP_ITEM") throw new Error("Related record not found");
+  const field = toCustomFieldDefinitionData(fieldRow);
+  if (field.fieldType !== "SELECT") throw new Error("Only single-select fields can be used as swimlanes");
+  if (assignment.value === null) {
+    await prisma.customFieldValue.deleteMany({ where: { fieldId: field.id, objectId: itemId } });
+  } else {
+    const value = assignment.value;
+    if (!(field.options ?? []).some(option => option.value === value)) throw new Error("Value is not an option of this field");
+    await prisma.customFieldValue.upsert({
+      where: { fieldId_objectId: { fieldId: field.id, objectId: itemId } },
+      create: { fieldId: field.id, objectId: itemId, value },
+      update: { value, updatedAt: new Date() },
+    });
+  }
+  revalidateRoadmap();
+  return { id: itemId, squadId: null, fieldId: field.id, value: assignment.value };
+}
+
+// ─── Build the roadmap from Discovery ────────────────────────────────────────
+// Every create below goes through createRoadmapItemsFromSolutions, the same
+// helper the MCP tools and Building auto-sync use: one ACTIVE item per solution,
+// squad / key result / title inherited from the solution, a suggested
+// non-overlapping slot, and the creator recorded on the row.
+
+export type ScheduleSolutionRequest = {
+  solutionId: string;
+  horizon?: "NOW" | "NEXT" | "LATER";
+  /** `undefined` inherits the opportunity's squad; `null` means no squad. */
+  squadId?: string | null;
+  /** Inclusive `YYYY-MM-DD` dates. Omit both to take the suggested slot. */
+  startDate?: string;
+  endDate?: string;
+};
+
+export type ScheduleSolutionsResult = {
+  /** Newly created items, shaped exactly as the roadmap page renders them. */
+  created: RoadmapCardData[];
+  /** Solutions that were already on the roadmap; nothing was added for them. */
+  existing: Array<{ solutionId: string; itemId: string }>;
+  missing: string[];
+};
+
+export type RoadmapBuildPreset = "validated" | "top-scored" | "building";
+const SCHEDULE_HORIZONS = new Set(["NOW", "NEXT", "LATER"]);
+const TOP_SCORE_THRESHOLD = 70;
+const MAX_BATCH_SIZE = 100;
+
+function parseCalendarDate(value: string | undefined, label: string): string | undefined {
+  if (value === undefined) return undefined;
+  try {
+    calendarDateToUtcMilliseconds(value);
+  } catch {
+    throw new Error(`${label} must be a YYYY-MM-DD date`);
+  }
+  return value;
+}
+
+async function loadCreatedCards(prisma: Database, workspaceId: string, ids: string[]): Promise<RoadmapCardData[]> {
+  if (ids.length === 0) return [];
+  const rows = await prisma.roadmapItem.findMany({ where: { id: { in: ids }, workspaceId }, include: ROADMAP_CARD_INCLUDE });
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return ids.flatMap((id) => {
+    const row = byId.get(id);
+    return row ? [toRoadmapCardData(row)] : [];
+  });
+}
+
+/**
+ * Create linked roadmap items for the given solutions. Idempotent: a solution
+ * that already has an ACTIVE item is reported in `existing` and left alone.
+ * `today` is the caller's local calendar date so "first free slot at or after
+ * today" matches what the user sees.
+ */
+export async function scheduleSolutionsToRoadmap(
+  workspaceId: string,
+  requests: ScheduleSolutionRequest[],
+  today?: string,
+): Promise<ScheduleSolutionsResult> {
+  const userId = await requireWorkspaceMember(workspaceId);
+  if (requests.length === 0) return { created: [], existing: [], missing: [] };
+  if (requests.length > MAX_BATCH_SIZE) throw new Error(`Schedule at most ${MAX_BATCH_SIZE} solutions at a time`);
+  const prisma = getPrisma();
+  const normalized: SolutionScheduleRequest[] = requests.map((request) => {
+    if (request.horizon !== undefined && !SCHEDULE_HORIZONS.has(request.horizon)) throw new Error("Invalid horizon");
+    const startDate = parseCalendarDate(request.startDate, "Start date");
+    const endDate = parseCalendarDate(request.endDate, "End date");
+    if ((startDate === undefined) !== (endDate === undefined) && endDate !== undefined) throw new Error("An end date needs a start date");
+    return { solutionId: request.solutionId, horizon: request.horizon, squadId: request.squadId, startDate, endDate };
+  });
+  const result = await createRoadmapItemsFromSolutions(
+    prisma,
+    { workspaceId, source: "UI", captureSource: "UI", userId, today: parseCalendarDate(today, "Today") },
+    normalized,
+  );
+  revalidateRoadmap();
+  return {
+    created: await loadCreatedCards(prisma, workspaceId, result.created.map((item) => item.id)),
+    existing: result.existing,
+    missing: result.missing,
+  };
+}
+
+/**
+ * The empty-roadmap "Build from discovery" flow: pick a preset of unscheduled
+ * solutions and place them at proposed non-overlapping slots, highest score
+ * first within each squad.
+ */
+export async function buildRoadmapFromDiscovery(
+  workspaceId: string,
+  preset: RoadmapBuildPreset,
+  today?: string,
+): Promise<ScheduleSolutionsResult> {
+  const userId = await requireWorkspaceMember(workspaceId);
+  const todayDate = parseCalendarDate(today, "Today") ?? utcToday();
+  const prisma = getPrisma();
+  const statuses = preset === "building" ? ["IN_DELIVERY"] : preset === "validated" ? ["VALIDATED"] : ["VALIDATED", "IN_DELIVERY"];
+  const [solutions, occupied] = await Promise.all([
+    prisma.solution.findMany({
+      where: {
+        workspaceId,
+        status: { in: statuses },
+        roadmapItems: { none: { status: "ACTIVE" } },
+        ...(preset === "top-scored" ? { score: { is: { normalizedScore: { gte: TOP_SCORE_THRESHOLD } } } } : {}),
+      },
+      select: { id: true, opportunity: { select: { squadId: true } }, score: { select: { normalizedScore: true } } },
+      orderBy: { createdAt: "asc" },
+      take: MAX_BATCH_SIZE,
+    }),
+    prisma.roadmapItem.findMany({
+      where: { workspaceId, status: "ACTIVE", startDate: { not: null }, endDate: { not: null } },
+      select: { squadId: true, startDate: true, endDate: true },
+    }),
+  ]);
+  const proposals = proposeBatch({
+    candidates: solutions.map((solution) => ({
+      solutionId: solution.id,
+      squadId: solution.opportunity.squadId ?? null,
+      score: solution.score?.normalizedScore ?? null,
+      durationDays: durationDaysFor(null),
+    })),
+    existing: occupied.map((item) => ({
+      squadId: item.squadId,
+      start: (item.startDate as Date).toISOString().slice(0, 10),
+      end: (item.endDate as Date).toISOString().slice(0, 10),
+    })),
+    today: todayDate,
+  });
+  const result = await createRoadmapItemsFromSolutions(
+    prisma,
+    { workspaceId, source: "UI", captureSource: "UI", userId, today: todayDate },
+    proposals.map((proposal) => ({
+      solutionId: proposal.solutionId,
+      squadId: proposal.squadId,
+      horizon: proposal.horizon,
+      startDate: proposal.start,
+      endDate: proposal.end,
+    })),
+  );
+  revalidateRoadmap();
+  return {
+    created: await loadCreatedCards(prisma, workspaceId, result.created.map((item) => item.id)),
+    existing: result.existing,
+    missing: result.missing,
+  };
+}
+
+/**
+ * Undo for any create above (and for an auto-added item): archive the items.
+ * The source solutions are never touched, so each one simply returns to the
+ * "Ready to schedule" rail. An archived auto-created item stays behind as the
+ * marker that stops Building auto-sync re-adding it.
+ */
+export async function undoRoadmapCreate(workspaceId: string, itemIds: string[]): Promise<{ archived: string[] }> {
+  await requireWorkspaceMember(workspaceId);
+  if (itemIds.length > MAX_BATCH_SIZE) throw new Error(`Undo at most ${MAX_BATCH_SIZE} items at a time`);
+  const prisma = getPrisma();
+  const items = await prisma.roadmapItem.findMany({
+    where: { id: { in: itemIds }, workspaceId, status: "ACTIVE" },
+    select: { id: true },
+  });
+  for (const item of items) {
+    await captureWorkspaceMutation(prisma, "roadmapItem", "update", "UI", item.id, (tx) =>
+      tx.roadmapItem.update({ where: { id: item.id }, data: { status: "ARCHIVED", updatedAt: new Date() } }),
+    );
+  }
+  revalidateRoadmap();
+  return { archived: items.map((item) => item.id) };
 }

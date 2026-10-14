@@ -18,9 +18,13 @@ const models = {
   task: { findFirst: vi.fn(), update: vi.fn() },
 };
 
+const links = { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() };
+
 const database = {
   ...models,
+  opportunityObjectiveLink: links,
   squad: { findFirst: vi.fn() },
+  opportunity: models.opportunity,
   workspace: { findUnique: vi.fn() },
   portfolioCapacityReservation: { findUnique: vi.fn(), update: vi.fn() },
   portfolioCapacityPlan: { updateMany: vi.fn() },
@@ -28,6 +32,10 @@ const database = {
 };
 
 vi.mock("@/lib/db", () => ({ default: () => database }));
+
+// The roadmap sync has its own suite (roadmap-solution-sync.test.ts); here we only pin that solution edits call it.
+const { mockSync } = vi.hoisted(() => ({ mockSync: vi.fn() }));
+vi.mock("@/lib/roadmap/solution-sync", () => ({ syncRoadmapOnSolutionChange: mockSync }));
 
 // assignmentUpdate has its own dedicated unit tests in task-assignment.test.ts
 // (workspace-membership / agent-grant validation). Here we only need to know
@@ -41,6 +49,7 @@ const WS = "ws-1";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockSync.mockResolvedValue({ autoAdded: null, skipped: null, followed: 0, error: null });
   // default: entity is in the workspace
   for (const m of Object.values(models)) m.findFirst.mockResolvedValue({ id: "e1" });
   models.roadmapItem.findUnique.mockResolvedValue({ id: "e1", horizon: "NEXT", status: "ACTIVE" });
@@ -62,14 +71,48 @@ describe("EDIT_CONFIG", () => {
   });
 });
 
+describe("opportunity linkedKeyResultId edits dual-write the LEGACY link", () => {
+  beforeEach(() => {
+    models.opportunity.findFirst.mockResolvedValue({ id: "e1", workspaceId: WS, title: "Opp", linkedKeyResultId: null });
+    models.keyResult.findFirst.mockResolvedValue({ id: "target", title: "KR", objectiveId: "obj-1", objective: { workspaceId: WS } });
+    links.findFirst.mockResolvedValue(null);
+    links.create.mockResolvedValue({ id: "link-1" });
+    links.deleteMany.mockResolvedValue({ count: 0 });
+  });
+
+  it("set: validates the key result in the workspace, writes the column and the link in one transaction", async () => {
+    expect(await updateEntityField("opportunity", "e1", WS, "linkedKeyResultId", "target", { kind: "USER", id: "user-1" })).toEqual({ ok: true });
+    expect(models.keyResult.findFirst).toHaveBeenCalledWith({ where: { id: "target", objective: { workspaceId: WS } }, select: { id: true } });
+    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { linkedKeyResultId: "target", updatedAt: expect.any(Date), updatedById: "user-1" } });
+    expect(links.create).toHaveBeenCalledWith({
+      data: { workspaceId: WS, opportunityId: "e1", objectiveId: "obj-1", origin: "LEGACY", source: "UI", createdById: "user-1" },
+    });
+    expect(database.$transaction).toHaveBeenCalled();
+  });
+
+  it("clear: nulls the column and deletes only the LEGACY links of that opportunity", async () => {
+    expect(await updateEntityField("opportunity", "e1", WS, "linkedKeyResultId", null)).toEqual({ ok: true });
+    expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { linkedKeyResultId: null, updatedAt: expect.any(Date) } });
+    expect(links.deleteMany).toHaveBeenCalledWith({ where: { opportunityId: "e1", origin: "LEGACY" } });
+    expect(links.create).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when the key result's objective is not in the workspace", async () => {
+    models.keyResult.findFirst.mockResolvedValue(null);
+    expect(await updateEntityField("opportunity", "e1", WS, "linkedKeyResultId", "foreign")).toMatchObject({ ok: false, status: 404 });
+    expect(models.opportunity.update).not.toHaveBeenCalled();
+    expect(links.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("opportunity relationship edits", () => {
-  it.each(["squadId", "linkedKeyResultId"])("sets and clears %s only inside the workspace", async (field) => {
+  it("sets and clears squadId only inside the workspace", async () => {
+    const field = "squadId";
     database.squad.findFirst.mockResolvedValue({ id: "target" });
     models.keyResult.findFirst.mockResolvedValue({ id: "target" });
     expect(await updateEntityField("opportunity", "e1", WS, field, "target")).toEqual({ ok: true });
     expect(models.opportunity.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { [field]: "target", updatedAt: expect.any(Date) } });
-    const targetQuery = field === "squadId" ? database.squad.findFirst : models.keyResult.findFirst;
-    expect(targetQuery).toHaveBeenCalledWith({ where: field === "squadId" ? { id: "target", workspaceId: WS } : { id: "target", objective: { cycle: { workspaceId: WS } } }, select: { id: true } });
+    expect(database.squad.findFirst).toHaveBeenCalledWith({ where: { id: "target", workspaceId: WS }, select: { id: true } });
     expect(await updateEntityField("opportunity", "e1", WS, field, null)).toEqual({ ok: true });
   });
   it.each(["squadId", "linkedKeyResultId"])("rejects a missing or foreign %s and invalid values", async (field) => {
@@ -156,6 +199,40 @@ describe("updateEntityField — validation", () => {
     const r = await updateEntityField("opportunity", "e1", WS, "workspaceId", "other-ws");
     expect(r).toEqual({ ok: false, status: 400, error: 'Field "workspaceId" is not editable' });
     expect(models.opportunity.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateEntityField: solution edits reach the roadmap", () => {
+  beforeEach(() => {
+    models.solution.findFirst.mockResolvedValue({ id: "e1", status: "VALIDATED", title: "Old title" });
+  });
+
+  it("a status change hands the transition to the roadmap sync and returns what it did", async () => {
+    mockSync.mockResolvedValue({ autoAdded: { itemId: "item-1", workspaceId: WS, title: "Old title", start: "2026-10-05", end: "2026-11-15" }, skipped: null, followed: 0, error: null });
+    const result = await updateEntityField("solution", "e1", WS, "status", "IN_DELIVERY", { kind: "USER", id: "user-1" });
+    expect(models.solution.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { status: "IN_DELIVERY", updatedAt: expect.any(Date) } });
+    expect(mockSync).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ source: "UI", userId: "user-1" }),
+      { solutionId: "e1", workspaceId: WS, previousStatus: "VALIDATED", status: "IN_DELIVERY" },
+    );
+    expect(result).toMatchObject({ ok: true, roadmapSync: { autoAdded: { itemId: "item-1" } } });
+  });
+
+  it("a title change lets linked items that still carry the old title follow it", async () => {
+    await updateEntityField("solution", "e1", WS, "title", "  New title ", { kind: "USER", id: "user-1" });
+    expect(mockSync).toHaveBeenCalledWith(expect.anything(), expect.anything(), { solutionId: "e1", workspaceId: WS, previousTitle: "Old title", title: "New title" });
+  });
+
+  it("a description edit and edits to other entities do not touch the roadmap", async () => {
+    await updateEntityField("solution", "e1", WS, "description", "More", { kind: "USER", id: "user-1" });
+    await updateEntityField("opportunity", "e1", WS, "status", "ACTIVE", { kind: "USER", id: "user-1" });
+    expect(mockSync).not.toHaveBeenCalled();
+  });
+
+  it("a hand-edited roadmap item horizon marks its schedule as edited so it stops following the solution", async () => {
+    await updateEntityField("roadmapItem", "e1", WS, "horizon", "LATER", { kind: "USER", id: "user-1" });
+    expect(models.roadmapItem.update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { horizon: "LATER", updatedAt: expect.any(Date), scheduleEditedAt: expect.any(Date) } });
   });
 });
 
@@ -356,8 +433,62 @@ describe("updateEntityField — workspace scoping (write-side IDOR guard)", () =
   it("verifies with the parent-chain scope for indirect entities before updating", async () => {
     await updateEntityField("solution", "sol-1", WS, "title", "New");
     expect(models.solution.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "sol-1", opportunity: { workspaceId: WS } } })
+      expect.objectContaining({ where: { id: "sol-1", workspaceId: WS } })
     );
     expect(models.solution.update).toHaveBeenCalled();
+  });
+});
+
+describe("roadmap item detail fields", () => {
+  const user = { kind: "USER" as const, id: "user-1" };
+
+  it("sets a squad only when it belongs to the workspace", async () => {
+    database.squad.findFirst.mockResolvedValueOnce({ id: "sq-1" });
+    expect(await updateEntityField("roadmapItem", "e1", WS, "squadId", "sq-1", user)).toEqual({ ok: true });
+    expect(database.squad.findFirst).toHaveBeenCalledWith({ where: { id: "sq-1", workspaceId: WS }, select: { id: true } });
+    expect(models.roadmapItem.update.mock.calls[0][0].data).toMatchObject({ squadId: "sq-1" });
+
+    models.roadmapItem.update.mockClear();
+    database.squad.findFirst.mockResolvedValueOnce(null);
+    expect(await updateEntityField("roadmapItem", "e1", WS, "squadId", "foreign", user)).toEqual({ ok: false, status: 404, error: "Not found" });
+    expect(models.roadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("links an active opportunity from the same workspace and can clear it", async () => {
+    models.opportunity.findFirst.mockResolvedValueOnce({ id: "opp-1" });
+    expect(await updateEntityField("roadmapItem", "e1", WS, "opportunityId", "opp-1", user)).toEqual({ ok: true });
+    expect(models.opportunity.findFirst).toHaveBeenCalledWith({ where: { id: "opp-1", workspaceId: WS, status: { not: "ARCHIVED" } }, select: { id: true } });
+    expect(await updateEntityField("roadmapItem", "e1", WS, "opportunityId", null, user)).toEqual({ ok: true });
+    expect(models.roadmapItem.update.mock.calls.at(-1)![0].data).toMatchObject({ opportunityId: null });
+  });
+
+  it("rejects an opportunity outside the workspace", async () => {
+    models.opportunity.findFirst.mockResolvedValueOnce(null);
+    expect(await updateEntityField("roadmapItem", "e1", WS, "opportunityId", "foreign", user)).toEqual({ ok: false, status: 404, error: "Not found" });
+    expect(models.roadmapItem.update).not.toHaveBeenCalled();
+  });
+
+  it("toggles privacy and rejects a non-boolean", async () => {
+    expect(await updateEntityField("roadmapItem", "e1", WS, "isPrivate", true, user)).toEqual({ ok: true });
+    expect(models.roadmapItem.update.mock.calls[0][0].data).toMatchObject({ isPrivate: true });
+    expect(await updateEntityField("roadmapItem", "e1", WS, "isPrivate", "yes", user)).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("saves an inclusive schedule as a pair and rejects partial or inverted ranges", async () => {
+    expect(await updateEntityField("roadmapItem", "e1", WS, "schedule", { startDate: "2026-07-01", endDate: "2026-07-31" }, user)).toEqual({ ok: true });
+    expect(models.roadmapItem.update.mock.calls[0][0].data).toMatchObject({ startDate: new Date("2026-07-01"), endDate: new Date("2026-07-31") });
+    models.roadmapItem.update.mockClear();
+
+    for (const bad of [{ startDate: "2026-07-01", endDate: null }, { startDate: null, endDate: "2026-07-01" }, { startDate: "2026-08-01", endDate: "2026-07-01" }, { startDate: "nope", endDate: "nope" }, null]) {
+      expect(await updateEntityField("roadmapItem", "e1", WS, "schedule", bad, user)).toMatchObject({ ok: false, status: 400 });
+    }
+    expect(models.roadmapItem.update).not.toHaveBeenCalled();
+
+    expect(await updateEntityField("roadmapItem", "e1", WS, "schedule", { startDate: null, endDate: null }, user)).toEqual({ ok: true });
+    expect(models.roadmapItem.update.mock.calls[0][0].data).toMatchObject({ startDate: null, endDate: null });
+  });
+
+  it("does not offer these fields on other entity types", async () => {
+    expect(await updateEntityField("feedback", "e1", WS, "isPrivate", true, user)).toMatchObject({ ok: false, status: 400 });
   });
 });

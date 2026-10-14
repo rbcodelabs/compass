@@ -27,6 +27,7 @@ const mockPrisma = {
   workspaceMember: mockWorkspaceMember,
   agent: mockAgent,
   agentOrgAdminGrant: mockAgentOrgAdminGrant,
+  $transaction: vi.fn(),
 };
 
 vi.mock("@/lib/db", () => ({
@@ -67,6 +68,7 @@ function uniqueConstraintError() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma));
   mockAuth.mockResolvedValue({ user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T>
     ? T
     : never);
@@ -113,6 +115,24 @@ describe("createWorkspace", () => {
       },
     });
     expect(mockRevalidatePath).toHaveBeenCalledWith("/acme/settings");
+  });
+
+  it("seeds only org admins when the form asks for ORG_ADMINS", async () => {
+    mockOrganizationMember.findMany.mockResolvedValue([
+      { userId: "user-owner", role: "OWNER" },
+      { userId: "user-member", role: "MEMBER" },
+    ]);
+
+    await createWorkspace("acme", {
+      name: "Product Team",
+      slug: "product-team",
+      memberSeeding: "ORG_ADMINS",
+    });
+
+    expect(mockWorkspaceMember.createMany).toHaveBeenCalledWith({
+      data: [{ workspaceId: "ws-1", userId: "user-owner", role: "ADMIN" }],
+      skipDuplicates: true,
+    });
   });
 
   it("seeds workspace membership for every org member with normalized roles", async () => {

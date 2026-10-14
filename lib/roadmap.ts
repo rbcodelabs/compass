@@ -30,7 +30,7 @@ export const HORIZON_META: Record<Horizon, HorizonMeta> = {
     accentClass: "bg-emerald-500",
     emptyText: "What are you shipping right now?",
     color: "#10b981", // emerald-500
-    badgeClass: "bg-indigo-100 text-indigo-700",
+    badgeClass: "bg-status-success-surface text-status-success",
     portalDescription: "In progress or shipping soon",
   },
   NEXT: {
@@ -38,7 +38,7 @@ export const HORIZON_META: Record<Horizon, HorizonMeta> = {
     accentClass: "bg-blue-500",
     emptyText: "What's coming up after the current work?",
     color: "#3b82f6", // blue-500
-    badgeClass: "bg-blue-100 text-blue-700",
+    badgeClass: "bg-status-info-surface text-status-info",
     portalDescription: "Planned for the next cycle",
   },
   LATER: {
@@ -46,7 +46,7 @@ export const HORIZON_META: Record<Horizon, HorizonMeta> = {
     accentClass: "bg-slate-400",
     emptyText: "Ideas and things on the horizon.",
     color: "#94a3b8", // slate-400
-    badgeClass: "bg-slate-100 text-slate-600",
+    badgeClass: "bg-status-neutral-surface text-status-neutral",
     portalDescription: "On the horizon",
   },
   LAUNCHING: {
@@ -54,7 +54,7 @@ export const HORIZON_META: Record<Horizon, HorizonMeta> = {
     accentClass: "bg-amber-500",
     emptyText: "Items in an active launch with a checklist in flight.",
     color: "#f59e0b", // amber-500
-    badgeClass: "bg-amber-100 text-amber-700",
+    badgeClass: "bg-status-warning-surface text-status-warning",
     portalDescription: "Rolling out now",
   },
   LAUNCHED: {
@@ -62,7 +62,7 @@ export const HORIZON_META: Record<Horizon, HorizonMeta> = {
     accentClass: "bg-teal-500",
     emptyText: "Recently launched work.",
     color: "#14b8a6", // teal-500
-    badgeClass: "bg-teal-100 text-teal-700",
+    badgeClass: "bg-status-success-surface text-status-success",
     portalDescription: "Launched and live",
   },
   SHIPPED: {
@@ -70,7 +70,7 @@ export const HORIZON_META: Record<Horizon, HorizonMeta> = {
     accentClass: "bg-purple-500",
     emptyText: "Nothing shipped yet",
     color: "#a855f7", // purple-500
-    badgeClass: "bg-green-100 text-green-700",
+    badgeClass: "bg-status-success-surface text-status-success",
     portalDescription: "Completed and live",
   },
 };

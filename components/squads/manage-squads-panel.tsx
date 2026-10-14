@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useState, useTransition, useRef } from "react";
 import { PlusIcon, TrashIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -124,6 +125,7 @@ function AddSquadForm({
 }
 
 export function ManageSquadsPanel({ orgSlug, workspaceSlug, initialSquads }: Props) {
+  const labels = useLabels();
   const [squads, setSquads] = useState(initialSquads);
   const [isPending, startTransition] = useTransition();
 
@@ -167,7 +169,7 @@ export function ManageSquadsPanel({ orgSlug, workspaceSlug, initialSquads }: Pro
 
       {squads.length === 0 && (
         <p className="text-xs text-muted-foreground">
-          No squads yet. Create one to start assigning ownership across opportunities, experiments, and objectives.
+          {`No squads yet. Create one to start assigning ownership across ${labels.opportunity.lowerPlural}, experiments, and ${labels.objective.lowerPlural}.`}
         </p>
       )}
 

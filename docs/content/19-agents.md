@@ -45,7 +45,9 @@ choose which members' agents can operate in the workspace:
 
 Agent access never exceeds its owner's current access. Agents cannot manage
 memberships, keys, grants, or human approvals. New workspaces do not automatically
-enable your agents. Removing a member revokes their agents' workspace grants;
+enable your agents, with one exception: if your agent creates a workspace (it may,
+while you are an organization owner or admin), it is given Write access to that
+workspace, recorded as granted by you. Removing a member revokes their agents' workspace grants;
 rejoining requires an administrator to grant access again.
 
 Agents can add comments and plans, but cannot rewrite existing comments. Append

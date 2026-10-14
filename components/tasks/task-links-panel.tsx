@@ -8,18 +8,8 @@ import { unlinkTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import { usePanelContext, type EntityPanelType } from "@/components/panels/panel-context";
 import { LinkTaskDialog, type LinkableTargets } from "./link-task-dialog";
 import type { TaskLinkData, TaskLinkedType } from "@/lib/types";
-
-const LINKED_TYPE_LABELS: Record<TaskLinkedType, string> = {
-  OPPORTUNITY: "Opportunity",
-  SOLUTION: "Solution",
-  ROADMAP_ITEM: "Roadmap Item",
-  OBJECTIVE: "Objective",
-  KEY_RESULT: "Key Result",
-  DOC: "Doc",
-  EXPERIMENT: "Experiment",
-  FEEDBACK_ITEM: "Feedback Item",
-  DECISION: "Decision",
-};
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { linkedTypeLabels } from "./linked-type-labels";
 
 // DOC and DECISION have no corresponding entity-detail panel — they navigate
 // to the doc page / review page instead. `assumption` is a valid panel type
@@ -45,6 +35,7 @@ type Props = {
 };
 
 export function TaskLinksPanel({ taskId, initialLinks, revalidatePathStr, linkableTargets, orgSlug, workspaceSlug }: Props) {
+  const typeLabels = linkedTypeLabels(useLabels());
   const [links, setLinks] = useState(initialLinks);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -72,7 +63,7 @@ export function TaskLinksPanel({ taskId, initialLinks, revalidatePathStr, linkab
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-xs bg-muted rounded px-1.5 py-0.5 text-muted-foreground shrink-0">
-                    {LINKED_TYPE_LABELS[link.linkedType]}
+                    {typeLabels[link.linkedType]}
                   </span>
                   {link.linkedType === "DOC" ? (
                     <Link

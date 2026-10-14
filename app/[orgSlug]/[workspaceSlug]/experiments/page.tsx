@@ -4,9 +4,10 @@ import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { getWorkspace } from "@/lib/workspace"
 import { ExperimentBoard } from "@/components/experiments/experiment-board"
-import { CreateExperimentForm } from "@/components/experiments/create-experiment-form"
+import { NewExperimentButton } from "@/components/experiments/new-experiment-button"
 import { ExperimentsFilters } from "@/components/experiments/experiments-filters"
-import type { AssumptionOptionData, ExperimentStatus, SquadData } from "@/lib/types"
+import type { ExperimentStatus, SquadData } from "@/lib/types"
+import { experimentComposerId } from "@/lib/experiment-draft"
 import type { ExperimentCardData } from "@/components/experiments/experiment-card"
 import { WorkspacePage } from "@/components/patterns/workspace-page"
 
@@ -24,7 +25,7 @@ export default async function ExperimentsPage({
   searchParams,
 }: ExperimentsPageProps) {
   const { orgSlug, workspaceSlug } = await params
-  const { squad: squadFilter, assumptionId: prefillAssumptionId } = await searchParams
+  const { squad: squadFilter, assumptionId: legacyAssumptionId } = await searchParams
 
   const session = await auth()
   const userId = session?.user?.id
@@ -37,9 +38,19 @@ export default async function ExperimentsPage({
     redirect("/dashboard")
   }
 
+  // Links from before the composer moved into the side panel used
+  // ?assumptionId=<id>. Forward them so old bookmarks and shared URLs still land
+  // on the composer with that assumption preset.
+  if (legacyAssumptionId) {
+    const params = new URLSearchParams()
+    if (squadFilter) params.set("squad", squadFilter)
+    params.set("detail", `experiment-new:${experimentComposerId(legacyAssumptionId)}`)
+    redirect(`/${orgSlug}/${workspaceSlug}/experiments?${params.toString()}`)
+  }
+
   const prisma = getPrisma()
 
-  const [rawSquads, rawExperiments, rawAssumptions] = await Promise.all([
+  const [rawSquads, rawExperiments] = await Promise.all([
     prisma.squad.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { createdAt: "asc" },
@@ -60,33 +71,12 @@ export default async function ExperimentsPage({
         conclusion: true,
       },
     }),
-    prisma.assumption.findMany({
-      where: { solution: { opportunity: { workspaceId: workspace.id } } },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        title: true,
-        solution: {
-          select: {
-            title: true,
-            opportunity: { select: { title: true } },
-          },
-        },
-      },
-    }),
   ])
 
   const squads: SquadData[] = rawSquads.map((s) => ({
     id: s.id,
     name: s.name,
     color: s.color,
-  }))
-
-  const assumptions: AssumptionOptionData[] = rawAssumptions.map((a) => ({
-    id: a.id,
-    title: a.title,
-    solutionTitle: a.solution.title,
-    opportunityTitle: a.solution.opportunity.title,
   }))
 
   const experiments: ExperimentCardData[] = rawExperiments.map((e) => ({
@@ -103,12 +93,7 @@ export default async function ExperimentsPage({
           <Suspense>
             <ExperimentsFilters squads={squads} />
           </Suspense>
-          <CreateExperimentForm
-            workspaceId={workspace.id}
-            squads={squads}
-            assumptions={assumptions}
-            prefillAssumptionId={prefillAssumptionId ?? null}
-          />
+          <NewExperimentButton />
         </>
       )}
     >

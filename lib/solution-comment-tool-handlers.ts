@@ -41,10 +41,14 @@ export async function addSolutionPlan({
   solutionId,
   body,
   authorName,
+  authorType = "AGENT",
+  source = "MCP",
 }: {
   solutionId: string
   body: string
   authorName: string
+  authorType?: AuthorType
+  source?: "UI" | "MCP"
 }) {
   const prisma = getPrisma()
 
@@ -61,8 +65,8 @@ export async function addSolutionPlan({
       solutionId,
       commentType: "PLAN",
       body: body.trim(),
-      ...await resolveAuthor(authorName, "AGENT"),
-      source: "MCP",
+      ...await resolveAuthor(authorName, authorType),
+      source,
     },
   })
   try { await mirrorLegacySolutionComment(comment) } catch (error) { await prisma.solutionComment.delete({ where: { id: comment.id } }); throw error }

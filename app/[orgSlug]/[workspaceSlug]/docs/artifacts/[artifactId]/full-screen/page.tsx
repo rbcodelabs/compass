@@ -2,9 +2,18 @@ import { auth } from "@/auth"
 import { notFound, redirect } from "next/navigation"
 import getPrisma from "@/lib/db"
 import { getArtifactStorage } from "@/lib/artifact-storage"
-import { buildSandboxedHtml } from "@/lib/artifacts"
+import { toThumbnailDto } from "@/lib/artifacts"
+import { buildArtifactPresentation, type ArtifactSlideDto } from "@/lib/artifact-slides"
 import { resolveWorkspaceAccess } from "@/lib/workspace-context"
 import { ArtifactViewer } from "@/components/docs/artifact-viewer"
+import { livePreviewSrcFor } from "@/lib/v0-preview-frame"
+
+/** `?slide=N` is one-based, as shown in the UI; the viewer wants zero-based. */
+function initialSlideFromParam(value: string | string[] | undefined): number {
+  const raw = Array.isArray(value) ? value[0] : value
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed - 1 : 0
+}
 
 /**
  * Full-viewport artifact view — the same auth and data-loading shape as the
@@ -14,7 +23,7 @@ import { ArtifactViewer } from "@/components/docs/artifact-viewer"
  * `expandToPage`) rather than a modal or the browser Fullscreen API: a real
  * route with a real "Back to artifact" link, not an overlay.
  */
-export default async function ArtifactFullScreenPage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string; artifactId: string }> }) {
+export default async function ArtifactFullScreenPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; artifactId: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
   const { orgSlug, workspaceSlug, artifactId } = await params
@@ -25,17 +34,25 @@ export default async function ArtifactFullScreenPage({ params }: { params: Promi
   const artifact = await prisma.artifact.findFirst({ where: { id: artifactId, workspaceId: workspace.id }, include: { currentRevision: true } })
   if (!artifact) notFound()
   let html: string | undefined
+  let slides: ArtifactSlideDto[] | undefined
   if (artifact.currentRevision?.blobPathname) {
     const bytes = await getArtifactStorage().get(artifact.currentRevision.blobPathname)
-    if (bytes) html = buildSandboxedHtml(new TextDecoder().decode(bytes))
+    if (bytes) ({ html, slides } = buildArtifactPresentation(new TextDecoder().decode(bytes), artifact.kind))
   }
+  const livePreviewSrc = artifact.sourceType === "V0_CHAT" && artifact.status === "ACTIVE" && artifact.v0ChatId ? await livePreviewSrcFor(session.user.id, artifact.v0ChatId) : null
   const basePath = `/${orgSlug}/${workspaceSlug}/docs`
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden p-4">
+    // fixed + inset-0 lifts the viewer out of the workspace shell (sidebar/header)
+    // so the slide really is edge-to-edge; all controls float over it.
+    <div className="fixed inset-0 z-50 bg-black">
       <ArtifactViewer
         title={artifact.title}
         html={html}
+        slides={slides}
+        initialSlideIndex={initialSlideFromParam((await searchParams).slide)}
         externalUrl={artifact.currentRevision?.externalUrl}
+        thumbnail={artifact.currentRevision ? toThumbnailDto(artifact.id, artifact.currentRevision) : null}
+        livePreviewSrc={livePreviewSrc}
         artifactId={artifact.id}
         backHref={`${basePath}/artifacts/${artifact.id}`}
         fill

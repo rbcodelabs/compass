@@ -14,15 +14,19 @@ export const TOP_LEVEL_SECTIONS: ReadonlySet<string> = new Set([
   "agent",
   "canvas",
   "capture",
+  "card-sort",
   "decisions",
   "discovery",
   "docs",
   "experiments",
   "feedback",
+  "home",
   "metrics",
+  "notifications",
   "okrs",
   "roadmap",
   "settings",
+  "solutions",
   "tasks",
   "updates",
 ]);
@@ -51,4 +55,18 @@ export function getWorkspaceSwitchPath(
   const safeSection = topLevel && TOP_LEVEL_SECTIONS.has(topLevel) ? `/${topLevel}` : "";
 
   return `/${toOrgSlug}/${toWorkspaceSlug}${safeSection}`;
+}
+
+/**
+ * Moves the Opportunities (/discovery) entry directly ahead of the OKRs (/okrs)
+ * entry when the workspace's thinking model asks for it. Pure; returns a new array.
+ */
+export function orderPrimaryNav<T extends { path: string }>(items: readonly T[], discoveryFirst: boolean): T[] {
+  if (!discoveryFirst) return [...items]
+  const discovery = items.find((i) => i.path === "discovery")
+  const okrsIndex = items.findIndex((i) => i.path === "okrs")
+  if (!discovery || okrsIndex < 0) return [...items]
+  const rest = items.filter((i) => i !== discovery)
+  const at = rest.findIndex((i) => i.path === "okrs")
+  return [...rest.slice(0, at), discovery, ...rest.slice(at)]
 }

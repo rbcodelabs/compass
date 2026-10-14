@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { deleteWorkspace } from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export function DeleteWorkspacePanel({ orgSlug, workspaceSlug, workspaceName }: Props) {
+  const labels = useLabels();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [confirmName, setConfirmName] = useState("");
@@ -75,7 +77,7 @@ export function DeleteWorkspacePanel({ orgSlug, workspaceSlug, workspaceName }: 
             <DialogTitle>Delete workspace</DialogTitle>
             <DialogDescription>
               This will permanently delete <strong>{workspaceName}</strong> and all its data,
-              including OKRs, opportunities, experiments, roadmap items, and feedback.
+              including {labels.sections.okrs}, {labels.opportunity.lowerPlural}, experiments, roadmap items, and feedback.
               This action cannot be undone.
             </DialogDescription>
           </DialogHeader>

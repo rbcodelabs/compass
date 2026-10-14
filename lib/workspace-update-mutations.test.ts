@@ -17,10 +17,18 @@ describe("explicit capture adapters", () => {
     expect(mutate).toHaveBeenCalledWith(db)
     expect(mocks.record).not.toHaveBeenCalled()
   })
-  it("resolves assumption workspace through its explicit ancestors", async () => {
-    findUnique.mockResolvedValueOnce({ id: "s", opportunityId: "o" }).mockResolvedValueOnce({ id: "o", workspaceId: "w" })
+  it("resolves assumption workspace through its Solution's own workspaceId", async () => {
+    findUnique.mockResolvedValueOnce({ id: "s", workspaceId: "w", opportunityId: "o" })
     await captureWorkspaceMutation(db, "assumption", "create", actor, undefined, async () => ({ id: "a", solutionId: "s" }))
     expect(mocks.record).toHaveBeenCalledWith(db, expect.objectContaining({ workspaceId: "w", entityType: "ASSUMPTION", kind: "CREATED" }))
+    // One lookup: the Solution. The Opportunity is never consulted for scope.
+    expect(findUnique).toHaveBeenCalledTimes(1)
+  })
+  it("fails closed when a Solution has no workspaceId instead of attributing it through its Opportunity", async () => {
+    findUnique.mockResolvedValueOnce({ id: "s", workspaceId: null, opportunityId: "o" }).mockResolvedValueOnce({ id: "o", workspaceId: "w" })
+    await expect(captureWorkspaceMutation(db, "solution", "create", actor, undefined, async () => ({ id: "s", workspaceId: null, opportunityId: "o", status: "IDEA" })))
+      .rejects.toThrow("Workspace update source has no workspace")
+    expect(mocks.record).not.toHaveBeenCalled()
   })
   it("groups experiment results under the experiment without copying result text", async () => {
     findUnique.mockResolvedValue({ id: "e", workspaceId: "w" })

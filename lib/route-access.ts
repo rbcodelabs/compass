@@ -34,6 +34,9 @@ export function isPublicPath(pathname: string): boolean {
     // MCP route uses Bearer token auth — let it through so the route
     // handler can validate the API key and return 401 (not 302) on failure.
     pathname.startsWith("/api/mcp") ||
+    // Versioned programmatic API authenticates bearer credentials in-route.
+    // Segment-safe matching keeps /api/v10 and /api/v1evil behind session auth.
+    (pathname === "/api/v1" || pathname.startsWith("/api/v1/")) ||
     // OAuth discovery documents (RFC 8414 / RFC 9728 / OIDC Discovery). An MCP
     // client fetches these before any user exists, so a 302 to /login would
     // make the server look like it has no authorization server at all.
@@ -98,6 +101,16 @@ export function isPublicPath(pathname: string): boolean {
     // connect/callback flow deliberately lives elsewhere (/api/connectors/…) and is
     // NOT public: it needs the middleware login redirect to preserve its query string.
     /^\/api\/integrations\/mcp\/[a-z0-9][a-z0-9-]{0,31}$/.test(pathname) ||
+    // Agent run worker callbacks: the sandbox reports in from outside
+    // any session, bound to one run by its worker bearer token. Enumerated the
+    // same way as the voice callbacks — a `startsWith("/api/internal/")` would
+    // make every future internal route public by default.
+    /^\/api\/internal\/agent\/runs\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/(?:heartbeat|events|session)$/i.test(pathname) ||
+    // Vercel Cron invokes production URLs with no session at all. The sweeper
+    // authenticates CRON_SECRET (or MIGRATION_SECRET for a manual run) itself and
+    // fails closed when neither is configured. Enumerated rather than a
+    // `startsWith("/api/cron/")` so a future cron route is not public by default.
+    pathname === "/api/cron/agent-run-sweeper" ||
     // Docs API routes use session auth internally — let them handle 401 themselves
     pathname.startsWith("/api/docs/") ||
     // Agent turn route uses session auth internally (returns 401, not a 302)

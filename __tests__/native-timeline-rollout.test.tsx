@@ -2,8 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 vi.mock("@/auth", () => ({ auth: async () => ({ user: { id: "user" } }) }));
 const workspace = { id: "3eaf938a-782c-4073-a452-070d54156896" };
-vi.mock("@/lib/db", () => ({ default: () => new Proxy({}, { get: (_, name) => name === "workspace" ? { findFirst: async () => workspace } : { findMany: async () => [] } }) }));
+vi.mock("@/lib/db", () => ({ default: () => new Proxy({}, { get: (_, name) => name === "workspace" ? { findFirst: async () => workspace } : { findMany: async () => [], count: async () => 0 } }) }));
+const railCookie = vi.hoisted(() => ({ value: undefined as string | undefined }));
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "compass_roadmap_rail" && railCookie.value ? { value: railCookie.value } : undefined) }) }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn(), notFound: vi.fn() }));
+// Saved views have their own tests (roadmap-views-*); this file is about timeline routing, so the viewer has no saved views.
+vi.mock("@/lib/roadmap-views/service", () => ({ resolveRoadmapViewActor: async () => null, listRoadmapViews: async () => [] }));
 vi.mock("@/components/roadmap/roadmap-board", () => ({ RoadmapBoard: () => null }));
 vi.mock("@/components/roadmap/native-timeline/native-timeline", () => ({ NativeTimeline: () => null }));
 vi.mock("@/components/roadmap/roadmap-filters", () => ({ RoadmapFilters: () => null }));
@@ -26,6 +30,18 @@ describe("native timeline default", () => {
     expect(find(await render({ view: "timeline" }), NativeTimeline)?.key).toBe(first?.key);
     expect(find(await render({ view: "timeline", squad: "squad-2" }), NativeTimeline)?.key).not.toBe(first?.key);
     expect(find(await render({ view: "timeline", squad: "all" }), NativeTimeline)?.key).not.toBe(first?.key);
+  });
+  it("seeds the Ready to schedule rail's open/closed choice from the cookie, ignoring junk", async () => {
+    const preference = async () => find(await render({ view: "timeline" }), NativeTimeline)?.props as { initialRailPreference?: string | null };
+    try {
+      expect((await preference()).initialRailPreference).toBeNull();
+      railCookie.value = "closed";
+      expect((await preference()).initialRailPreference).toBe("closed");
+      railCookie.value = "open";
+      expect((await preference()).initialRailPreference).toBe("open");
+      railCookie.value = "garbage";
+      expect((await preference()).initialRailPreference).toBeNull();
+    } finally { railCookie.value = undefined; }
   });
   it("keeps Board the default", async () => { expect(find(await render(), RoadmapBoard)).toBeDefined(); });
   it("renders native for old classic bookmarks", async () => { expect(find(await render({ view: "timeline", timelineEngine: "classic" }), NativeTimeline)).toBeDefined(); });

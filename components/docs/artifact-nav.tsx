@@ -23,7 +23,7 @@ export function ArtifactNav({ artifacts, basePath }: { artifacts: ArtifactNavIte
             const href = `${basePath}/artifacts/${artifact.id}`
             return <li key={artifact.id}>
               <Link href={href} className={cn("flex items-center gap-1.5 rounded-md py-1 px-2 text-sm", pathname === href ? "bg-primary/10 text-primary font-medium" : "text-text-secondary hover:bg-surface-interactive")}>
-                {artifact.sourceType === "EXTERNAL_LINK" ? <ExternalLink className="w-3.5 h-3.5 text-text-disabled" /> : <Box className="w-3.5 h-3.5 text-text-disabled" />}
+                {(artifact.sourceType === "EXTERNAL_LINK" || artifact.sourceType === "V0_CHAT") ? <ExternalLink className="w-3.5 h-3.5 text-text-disabled" /> : <Box className="w-3.5 h-3.5 text-text-disabled" />}
                 <span className="truncate">{artifact.title}</span>
               </Link>
             </li>

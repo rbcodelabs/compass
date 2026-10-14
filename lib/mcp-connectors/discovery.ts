@@ -12,7 +12,12 @@
  *
  * Deriving the path-inserted form against v0 returns 404, which reads as "this
  * server doesn't do OAuth" rather than "we guessed the URL". So the challenge is
- * the only source: no challenge header, no discovery, and a loud error.
+ * the default source: no challenge header, no discovery, and a loud error.
+ *
+ * The one exception is a definition that pins `resourceMetadataUrl` in a
+ * reviewed diff. Google's Drive MCP server never sends a challenge (it answers
+ * `initialize` and `tools/list` with a plain 200), and publishes its document at
+ * the path-inserted form. That is a human-verified pin, not a guess.
  *
  * ## What is trusted
  *
@@ -46,7 +51,9 @@ export interface DiscoveredConnector {
 
 export async function discoverConnector(definition: ConnectorDefinition): Promise<DiscoveredConnector> {
   const serverUrl = https(definition.serverUrl, "serverUrl")
-  const pointer = await fetchResourceMetadataPointer(serverUrl)
+  const pointer = definition.resourceMetadataUrl
+    ? https(definition.resourceMetadataUrl, "resourceMetadataUrl")
+    : await fetchResourceMetadataPointer(serverUrl)
   requireSameOrigin(pointer, serverUrl, "resource_metadata pointer")
 
   const resourceDocument = await fetchJsonObject(pointer, { method: "GET" }, "DISCOVERY_FAILED")
@@ -180,8 +187,13 @@ function resolveScope(
   resourceDocument: Record<string, unknown>,
   asDocument: Record<string, unknown>,
 ): string {
-  const scopes =
-    optionalStringArray(resourceDocument.scopes_supported) ??
+  // A connector with explicit access levels owns its scopes. The provider's
+  // "everything I support" list is the wrong default for a grant that acts as
+  // the user, and this row's scope is only ever the default level's.
+  const owned = definition.accessLevels?.[0]?.scope
+  const scopes = owned
+    ? [owned]
+    : optionalStringArray(resourceDocument.scopes_supported) ??
     optionalStringArray(asDocument.scopes_supported) ??
     [definition.fallbackScope]
   const scope = scopes.join(" ")

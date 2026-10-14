@@ -22,13 +22,13 @@ Each panel shows the essentials for that item — its status, key fields, and th
 
 | Item | Shows |
 |---|---|
-| **Objective** | Status, cycle, and its Key Results |
-| **Key Result** | Progress, its Objective, and any linked Opportunities and Roadmap items |
-| **Opportunity** | The shared full-page detail: editable header, Key Result, Solutions, Evidence, OST Tree, configured scoring/custom fields, feedback, delivery tasks and Discussion |
-| **Solution** | Status, its Opportunity, assumptions, and roadmap links |
+| **Objective** | Status, cycle, and its Key Results. An Objective with no cycle shows **No cycle / Persistent** as its cycle (on Torres workspaces a cycle is shown only when there is one) |
+| **Key Result** | Progress, its Objective (with a **Move to another objective…** picker, see [OKRs](/help/01-okrs#moving-a-key-result-to-another-objective)), any supporting Objectives, and any linked Opportunities and Roadmap items. On Opportunity-first and Torres workspaces it also has a read-only **Linked Solutions** list (each row opens that solution) |
+| **Opportunity** | The shared full-page detail: editable header, Key Result, Solutions, Evidence, OST Tree, configured scoring/custom fields, feedback, delivery tasks and Discussion. On Opportunity-first and Torres workspaces the header also has an **Objectives** (**Outcomes**) box listing the Objectives it is linked to, with a **Change** control to add or remove them |
+| **Solution** | Status, its Opportunity, assumptions, and roadmap links. On Opportunity-first and Torres workspaces it also has a **Linked Key Results** box (**Linked Success metrics** under Torres) where you tick or untick the Key Results the solution is meant to move; each tick saves immediately |
 | **Assumption** | Status, risk level, its Solution, and experiments |
 | **Experiment** | Status, kill condition, the assumption it tests, and results |
-| **Roadmap item** | Horizon, votes, and everything it's linked to |
+| **Roadmap item** | The shared full-page detail: editable title, horizon, squad and dates in one summary row, votes and a Private chip, delivery tasks, launch checklist (when enabled), linked records, measurements, configured custom fields and Discussion |
 | **Task** | Status, priority, assignee, owner, squad, subtasks, and everything it's linked to |
 | **Feedback** | Type, status, votes, linked Opportunity, and attachments |
 
@@ -77,6 +77,7 @@ An Opportunity's **Driving Key Result** title and **Linked feedback** rows open 
 You don't have to open the full page to make a quick change. In the panel you can:
 
 - **Change the status** (or a Roadmap item's horizon) from the dropdown at the top.
+- On a Roadmap item, set the **squad** and **dates** from the summary row, and the linked Opportunity and **Private** visibility under **More properties**.
 - **Rename** an item — click its title and type.
 - **Edit the description** — select **Edit** beside it to open the Markdown editor. Use **Rich** for formatted writing or **Markdown** to edit the source directly.
 
@@ -90,15 +91,17 @@ Place the cursor in a table to add or delete rows and columns. Table cells suppo
 
 Descriptions containing raw HTML, images, task lists, footnotes, or code-fence metadata open in source mode with Rich disabled, preserving content the rich editor cannot safely represent. Images and raw HTML are not displayed in rendered descriptions. Source edits retain your Markdown; saving continues to trim outer whitespace, and an empty description clears the field.
 
-The same editor is available on full-page Tasks and in the Roadmap **Edit** dialog. In that dialog, **Save changes** saves all item fields together; **Cancel** discards them. Creation forms retain their compact text fields.
+The same editor is available on full-page Tasks, Opportunities and Roadmap items. Creation forms retain their compact text fields.
 
 ![Description editing on mobile](/screenshots/docs/markdown-description-mobile.png)
 
 For anything deeper, use **Open full page** at the top of the panel.
 
-Task and opportunity panels keep **Open full page** as a compact icon beside the pin and close controls, in both floating and pinned panels.
+Task, opportunity and roadmap item panels keep **Open full page** as a compact icon beside the pin and close controls, in both floating and pinned panels.
 Their compact summary puts status, priority, assignee, and due date below the title;
 expand **More properties** below subtasks for the remaining task fields.
+
+Roadmap items use one responsive detail view in the panel and on their own full page (**Open full page** goes to `/roadmap/<item>`). Container width, not the screen, decides the layout: Discussion sits beside the content on a wide surface and below it in a narrow panel or on a phone, and the **Discussion** shortcut jumps to it. Everything saves as you change it, and the board card updates behind the panel. See [Roadmap](/help/04-roadmap#roadmap-item-detail).
 
 ## Shareable links
 

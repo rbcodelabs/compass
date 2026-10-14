@@ -15,6 +15,14 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/mcp")).toBe(true);
   });
 
+  it("allows only the versioned REST segment through to bearer auth", () => {
+    expect(isPublicPath("/api/v1")).toBe(true);
+    expect(isPublicPath("/api/v1/openapi.json")).toBe(true);
+    expect(isPublicPath("/api/v1/workspaces/example")).toBe(true);
+    expect(isPublicPath("/api/v10")).toBe(false);
+    expect(isPublicPath("/api/v1evil")).toBe(false);
+  });
+
   it("allows admin routes (x-migration-secret auth handled by the route itself)", () => {
     expect(isPublicPath("/api/admin/migrate")).toBe(true);
   });
@@ -122,6 +130,7 @@ describe("isPublicPath", () => {
     // make Compass look like it has no authorization server at all.
     expect(isPublicPath("/.well-known/oauth-protected-resource")).toBe(true);
     expect(isPublicPath("/.well-known/oauth-protected-resource/api/mcp")).toBe(true);
+    expect(isPublicPath("/.well-known/oauth-protected-resource/api/v1")).toBe(true);
     expect(isPublicPath("/.well-known/oauth-authorization-server")).toBe(true);
     expect(isPublicPath("/.well-known/openid-configuration")).toBe(true);
   });
@@ -152,6 +161,14 @@ describe("isPublicPath", () => {
     const base = "/api/internal/research/voice/00000000-0000-4000-8000-000000000001"
     for (const suffix of ["heartbeat", "events", "commands/claim", "commands/result"]) expect(isPublicPath(`${base}/${suffix}`)).toBe(true)
     for (const path of ["/api/internal/other", `${base}/ready`, `${base}/events/extra`, "/api/internal/research/voice/not-a-uuid/events"]) expect(isPublicPath(path)).toBe(false)
+  });
+
+  it("allows only the exact bearer-authenticated agent run callbacks and the sweeper cron", () => {
+    const base = "/api/internal/agent/runs/00000000-0000-4000-8000-000000000001"
+    for (const suffix of ["heartbeat", "events", "session"]) expect(isPublicPath(`${base}/${suffix}`)).toBe(true)
+    for (const path of [`${base}/other`, `${base}/session/extra`, `${base}/events/extra`, "/api/internal/agent/runs/not-a-uuid/events", "/api/internal/agent/other"]) expect(isPublicPath(path)).toBe(false)
+    expect(isPublicPath("/api/cron/agent-run-sweeper")).toBe(true)
+    expect(isPublicPath("/api/cron/some-future-job")).toBe(false)
   });
 
   it("allows the outbound MCP connector gateway, which the sandbox calls with an AGENT_TURN bearer", () => {

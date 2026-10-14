@@ -3,6 +3,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
+// The header's saved-views menu imports the org-level saved-view actions, which pull in auth; stub them at the boundary.
+vi.mock("@/app/[orgSlug]/roadmap/actions", () => ({
+  createRoadmapViewAction: vi.fn(),
+  updateRoadmapViewAction: vi.fn(),
+  deleteRoadmapViewAction: vi.fn(),
+}));
+
 vi.mock("@/hooks/use-url-state", () => ({ useUrlState: () => ({ params: new URLSearchParams(), set: vi.fn() }) }));
 
 type DndHarnessProps = {
@@ -27,7 +34,10 @@ const harness = vi.hoisted(() => ({
       viewEnd: string;
       hasDates: boolean;
     }>,
-    unscheduled: [] as Array<{ kind: "feedback"; id: string; title: string }>,
+    unscheduled: [] as Array<
+      | { kind: "feedback"; id: string; title: string }
+      | { kind: "solution"; id: string; title: string; opportunityId: string; opportunityTitle: string; squadId: string | null; status?: string; score?: number | null }
+    >,
     zoom: "month" as "month" | "quarter",
     setZoom: vi.fn(),
     viewportStart: "2026-07-01",
@@ -39,6 +49,10 @@ const harness = vi.hoisted(() => ({
     reconciliationRequiredIds: new Set<string>(),
     pendingBacklogIds: new Set<string>(),
     scheduleBacklog: vi.fn(),
+    scheduleSolutions: vi.fn(),
+    buildFromDiscovery: vi.fn(),
+    undoCreated: vi.fn(),
+    scheduledSolutionIds: new Set<string>(),
     quickAdd: vi.fn(),
     announcement: "Timeline ready",
     setAnnouncement: vi.fn(),
@@ -58,8 +72,27 @@ vi.mock("@dnd-kit/core", () => ({
   useSensors: () => [],
 }));
 
+vi.mock("../schedule/schedule-rail", () => ({
+  ScheduleRail: (props: { items: unknown[]; autoAdded: unknown[]; className?: string }) => (
+    <aside aria-label="Ready to schedule" data-testid="schedule-rail" data-count={props.items.length} data-auto={props.autoAdded.length} className={props.className}><button type="button">Rail action</button></aside>
+  ),
+}));
+vi.mock("../schedule/schedule-palette", () => ({
+  SchedulePalette: ({ open }: { open: boolean }) => (open ? <div role="dialog" aria-label="Schedule from discovery" /> : null),
+}));
+vi.mock("../schedule/range-schedule-popover", () => ({
+  RangeSchedulePopover: ({ range, candidates, onPick }: { range: { start: string; end: string }; candidates: Array<{ id: string; title: string }>; onPick: (item: { id: string; title: string }) => void }) => (
+    <div role="dialog" aria-label="Schedule from…" data-range={`${range.start}..${range.end}`}>
+      {candidates.map((item) => <button key={item.id} type="button" onClick={() => onPick(item)}>{item.title}</button>)}
+    </div>
+  ),
+}));
+vi.mock("../schedule/build-from-discovery", () => ({
+  BuildFromDiscovery: ({ onAddManually }: { onAddManually: () => void }) => <div data-testid="roadmap-empty-state"><button type="button" onClick={onAddManually}>Add an item manually</button></div>,
+}));
+
 vi.mock("../unscheduled-items-panel", () => ({
-  UnscheduledItemsPanel: () => <div id="unscheduled-items-panel"><div data-slot="card" className="transition-opacity" /></div>,
+  unscheduledDragId: (item: { kind: string; id: string }) => `unscheduled:${item.kind}:${item.id}`,
   parseUnscheduledDragId: (dragId: string) => {
     const match = /^unscheduled:(solution|feedback):(.+)$/.exec(dragId);
     return match ? { kind: match[1], id: match[2] } : null;
@@ -116,8 +149,8 @@ it("places navigation and reload in the main Roadmap header without a second too
   expect(header).toContainElement(screen.getByRole("button", { name: "Previous period" }));
   expect(header).toContainElement(screen.getByRole("button", { name: "Go to today" }));
   expect(header).toContainElement(screen.getByRole("button", { name: "Next period" }));
-  expect(header).toContainElement(screen.getByRole("button", { name: "View options" }));
-  expect(header).toContainElement(screen.getByRole("button", { name: "Reload timeline" }));
+  expect(header).toContainElement(screen.getByRole("button", { name: "More actions" }));
+  expect(screen.queryByRole("button", { name: "View options" })).not.toBeInTheDocument();
   expect(screen.queryByText("Reload to pick up deletions or conflicting changes made elsewhere.")).not.toBeInTheDocument();
 });
 
@@ -138,6 +171,10 @@ beforeEach(() => {
   harness.controller.reconciliationRequiredIds = new Set();
   harness.controller.pendingBacklogIds = new Set();
   harness.controller.scheduleBacklog.mockReset().mockResolvedValue(undefined);
+  harness.controller.scheduleSolutions.mockReset().mockResolvedValue([]);
+  harness.controller.buildFromDiscovery.mockReset().mockResolvedValue([]);
+  harness.controller.undoCreated.mockReset().mockResolvedValue(undefined);
+  harness.controller.scheduledSolutionIds = new Set();
   harness.controller.setAnnouncement.mockReset();
 });
 
@@ -147,16 +184,45 @@ afterEach(() => {
 });
 
 describe("NativeTimeline", () => {
-  it("offers visible reload recovery and prevents interrupting a pending save", () => {
+  it("scrolls today into view on Go to today instead of only resetting the window", () => {
+    // localCalendarToday is mocked to 2026-09-04. Jul 1 -> Sep 4 is 65 days at
+    // 12px/day; jumping must scroll there (a third of the way across the
+    // 400px viewport), not just reset the window.
+    const windowStart = "2026-07-01";
+    harness.controller.jumpToday.mockReset().mockReturnValue(windowStart);
+    renderTimeline();
+    const scrollTo = vi.fn();
+    screen.getByTestId("native-timeline-scroll").scrollTo = scrollTo;
+    fireEvent.click(screen.getByRole("button", { name: "Go to today" }));
+    expect(harness.controller.jumpToday).toHaveBeenCalledTimes(1);
+    expect(scrollTo).toHaveBeenCalledWith({ left: 65 * 12 - 400 / 3 });
+  });
+
+  it("offers reload recovery in the more-actions menu and prevents interrupting a pending save", async () => {
     const { rerender } = renderTimeline();
-    expect(screen.getByRole("button", { name: "Reload timeline" })).toBeEnabled();
+    const openReload = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+      return screen.findByRole("menuitem", { name: /^Reload timeline/ });
+    };
+    const closeMenu = async () => {
+      fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    };
+
+    expect(await openReload()).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "Reload timeline" })).toBeInTheDocument();
+    await closeMenu();
+
     harness.controller.pendingItemIds = new Set(["saving"]);
     rerender(<NativeTimeline items={[]} squads={[]} workspaceId="workspace-1" unscheduledItems={[]} />);
-    expect(screen.getByRole("button", { name: "Reload timeline" })).toBeDisabled();
+    expect(await openReload()).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "Reload timeline (wait for changes to save)" })).toBeInTheDocument();
+    await closeMenu();
+
     harness.controller.pendingItemIds = new Set();
     harness.controller.pendingBacklogIds = new Set(["scheduling"]);
     rerender(<NativeTimeline items={[]} squads={[]} workspaceId="workspace-1" unscheduledItems={[]} />);
-    expect(screen.getByRole("button", { name: "Reload timeline" })).toBeDisabled();
+    expect(await openReload()).toHaveAttribute("aria-disabled", "true");
   });
   it("shows a dotted move affordance and slim grips on both date borders", () => {
     harness.controller.items = [{ id: "item-1", title: "Compact controls", horizon: "NEXT", squad: null, viewStart: "2026-07-10", viewEnd: "2026-07-28", hasDates: true }];
@@ -305,12 +371,15 @@ describe("NativeTimeline", () => {
     expect(scrollRegion).toHaveAttribute("tabindex", "0");
   });
 
-  it("suppresses shared backlog card transitions under reduced motion without changing the shared panel", () => {
+  it("puts the Ready to schedule rail beside the timeline on desktop and stacks it above on mobile", () => {
     renderTimeline();
 
-    expect(screen.getByTestId("timeline-engine-native")).toHaveClass(
-      "motion-reduce:[&_#unscheduled-items-panel_[data-slot=card]]:transition-none",
-    );
+    const engine = screen.getByTestId("timeline-engine-native");
+    expect(engine).toHaveClass("flex-col", "min-[1320px]:flex-row");
+    // The rail comes first in the DOM so it stacks above the timeline below the wide-desktop breakpoint.
+    expect(engine.firstElementChild).toBe(screen.getByTestId("schedule-rail-region"));
+    expect(screen.getByTestId("schedule-rail-region")).toContainElement(screen.getByTestId("schedule-rail"));
+    expect(screen.getByTestId("schedule-rail")).toHaveClass("min-[1320px]:w-80");
   });
 
   it("measures a bounded window before paint and refreshes it after resize and zoom", () => {
@@ -805,5 +874,303 @@ describe("NativeTimeline", () => {
 
       expect(screen.queryByTestId("group-badge")).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("NativeTimeline: scheduling from discovery", () => {
+  const squads = [{ id: "squad-a", name: "Alpha", color: "#222222" }, { id: "squad-b", name: "Bravo", color: "#111111" }];
+  const solution = (id: string, over: Record<string, unknown> = {}) => ({
+    kind: "solution" as const,
+    id,
+    title: `Solution ${id}`,
+    opportunityId: "opp-1",
+    opportunityTitle: "Opportunity one",
+    squadId: null as string | null,
+    status: "VALIDATED",
+    score: 50,
+    ...over,
+  });
+  const renderWithSquads = (extra: Partial<React.ComponentProps<typeof NativeTimeline>> = {}) => render(
+    <NativeTimeline items={[]} squads={squads} workspaceId="workspace-1" unscheduledItems={[]} {...extra} />,
+  );
+  function mockCanvas(left = -100) {
+    const canvas = screen.getByTestId("native-timeline-scroll").firstElementChild as HTMLElement;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ left } as DOMRect);
+  }
+
+  it("opens the schedule palette from the header button and shows the auto-sync indicator", () => {
+    renderWithSquads();
+    expect(screen.getByTestId("auto-sync-indicator")).toHaveTextContent("Auto-sync on");
+    expect(screen.queryByRole("dialog", { name: "Schedule from discovery" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Schedule from discovery/ }));
+    expect(screen.getByRole("dialog", { name: "Schedule from discovery" })).toBeInTheDocument();
+  });
+
+  it("opens the palette on / but never while typing or with a modifier", () => {
+    renderWithSquads();
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    fireEvent.keyDown(input, { key: "/" });
+    expect(screen.queryByRole("dialog", { name: "Schedule from discovery" })).not.toBeInTheDocument();
+    input.remove();
+
+    fireEvent.keyDown(document.body, { key: "/", ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: "/", metaKey: true });
+    expect(screen.queryByRole("dialog", { name: "Schedule from discovery" })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(document.body, { key: "/" });
+    expect(screen.getByRole("dialog", { name: "Schedule from discovery" })).toBeInTheDocument();
+  });
+
+  it("creates a linked item with the row's squad and horizon at the date under the pointer when a rail card is dropped", () => {
+    harness.controller.unscheduled = [solution("sol-1")];
+    renderWithSquads();
+    mockCanvas();
+
+    act(() => harness.dndProps?.onDragStart?.({ active: { id: "unscheduled:solution:sol-1" }, activatorEvent: new MouseEvent("pointerdown", { clientX: 120 }) }));
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientX: 600 })));
+    act(() => harness.dndProps?.onDragEnd?.({ active: { id: "unscheduled:solution:sol-1" }, delta: { x: 480, y: 0 }, over: { id: "lane:NEXT:squad-b" } }));
+
+    expect(harness.controller.scheduleSolutions).toHaveBeenCalledWith([{
+      solutionId: "sol-1",
+      horizon: "NEXT",
+      squadId: "squad-b",
+      startDate: "2026-08-28",
+      endDate: "2026-10-08", // the default six weeks, inclusive
+    }]);
+    expect(harness.controller.scheduleBacklog).not.toHaveBeenCalled();
+  });
+
+  it("refuses a drop on a header row and announces it", () => {
+    harness.controller.unscheduled = [solution("sol-1")];
+    renderWithSquads();
+    mockCanvas();
+    act(() => harness.dndProps?.onDragStart?.({ active: { id: "unscheduled:solution:sol-1" }, activatorEvent: new MouseEvent("pointerdown", { clientX: 120 }) }));
+    act(() => harness.dndProps?.onDragEnd?.({ active: { id: "unscheduled:solution:sol-1" }, delta: { x: 0, y: 0 }, over: { id: "horizon:NOW" } }));
+    expect(harness.controller.scheduleSolutions).not.toHaveBeenCalled();
+    expect(harness.controller.setAnnouncement).toHaveBeenCalledWith("Solution sol-1 cannot be scheduled in that lane");
+  });
+
+  it("shows a ghost bar with dates and a release tip while a rail card is dragged over a row, and clears it on drop", () => {
+    harness.controller.unscheduled = [solution("sol-1")];
+    renderWithSquads();
+    mockCanvas();
+    act(() => harness.dndProps?.onDragStart?.({ active: { id: "unscheduled:solution:sol-1" }, activatorEvent: new MouseEvent("pointerdown", { clientX: 120 }) }));
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientX: 600 })));
+    act(() => harness.dndProps?.onDragMove?.({ active: { id: "unscheduled:solution:sol-1" }, delta: { x: 480, y: 0 }, over: { id: "lane:NEXT:squad-a" } }));
+
+    const ghost = screen.getByTestId("timeline-drop-ghost");
+    expect(ghost).toHaveTextContent("Solution sol-1");
+    expect(ghost).toHaveTextContent("Aug 28 – Oct 8 · 6 wks");
+    expect(screen.getByTestId("timeline-drop-tip")).toHaveTextContent("Release to create roadmap item");
+    expect(screen.getByTestId("timeline-drop-tip")).toHaveTextContent("squad Alpha");
+
+    act(() => harness.dndProps?.onDragEnd?.({ active: { id: "unscheduled:solution:sol-1" }, delta: { x: 480, y: 0 }, over: { id: "lane:NEXT:squad-a" } }));
+    expect(screen.queryByTestId("timeline-drop-ghost")).not.toBeInTheDocument();
+  });
+
+  it("does not show a ghost over a row that cannot take new work", () => {
+    harness.controller.unscheduled = [solution("sol-1")];
+    renderWithSquads();
+    mockCanvas();
+    act(() => harness.dndProps?.onDragStart?.({ active: { id: "unscheduled:solution:sol-1" }, activatorEvent: new MouseEvent("pointerdown", { clientX: 120 }) }));
+    act(() => harness.dndProps?.onDragMove?.({ active: { id: "unscheduled:solution:sol-1" }, delta: { x: 0, y: 0 }, over: { id: "lane:SHIPPED:squad-a" } }));
+    expect(screen.queryByTestId("timeline-drop-ghost")).not.toBeInTheDocument();
+  });
+
+  describe("click-drag on an empty row", () => {
+    function drawRange(from = 300, to = 600) {
+      const lane = screen.getByTestId("timeline-drop-lane:NEXT:squad-a");
+      fireEvent.pointerDown(lane, { clientX: from, clientY: 50, pointerId: 1, button: 0 });
+      const grid = screen.getByTestId("timeline-grid");
+      fireEvent.pointerMove(grid, { clientX: to, clientY: 50, pointerId: 1 });
+      return { grid, lane };
+    }
+
+    it("draws the range, then lists unscheduled solutions with the row's squad first", () => {
+      harness.controller.unscheduled = [
+        solution("other", { squadId: "squad-b", score: 99 }),
+        solution("low-same", { squadId: "squad-a", score: 20 }),
+        solution("high-same", { squadId: "squad-a", score: 80 }),
+      ];
+      renderWithSquads();
+      mockCanvas();
+      const { grid } = drawRange();
+      expect(screen.getByTestId("timeline-range-draft")).toBeInTheDocument();
+      fireEvent.pointerUp(grid, { clientX: 600, clientY: 50, pointerId: 1 });
+
+      const popover = screen.getByRole("dialog", { name: "Schedule from…" });
+      // 300 and 600 px over a canvas starting at -100: 400px and 700px => days 33 and 58 from Jul 1.
+      expect(popover).toHaveAttribute("data-range", "2026-08-03..2026-08-28");
+      expect([...popover.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Solution high-same", "Solution low-same", "Solution other"]);
+    });
+
+    it("creates the item over exactly the drawn range in the row's squad and horizon", () => {
+      harness.controller.unscheduled = [solution("sol-1", { squadId: "squad-a" })];
+      renderWithSquads();
+      mockCanvas();
+      const { grid } = drawRange();
+      fireEvent.pointerUp(grid, { clientX: 600, clientY: 50, pointerId: 1 });
+      fireEvent.click(screen.getByRole("button", { name: "Solution sol-1" }));
+
+      expect(harness.controller.scheduleSolutions).toHaveBeenCalledWith([{
+        solutionId: "sol-1",
+        horizon: "NEXT",
+        squadId: "squad-a",
+        startDate: "2026-08-03",
+        endDate: "2026-08-28",
+      }]);
+      expect(screen.queryByRole("dialog", { name: "Schedule from…" })).not.toBeInTheDocument();
+    });
+
+    it("treats a tiny movement as a click, and ignores touch pointers", () => {
+      harness.controller.unscheduled = [solution("sol-1")];
+      renderWithSquads();
+      mockCanvas();
+      const lane = screen.getByTestId("timeline-drop-lane:NEXT:squad-a");
+      fireEvent.pointerDown(lane, { clientX: 300, pointerId: 1, button: 0 });
+      fireEvent.pointerUp(screen.getByTestId("timeline-grid"), { clientX: 304, pointerId: 1 });
+      expect(screen.queryByRole("dialog", { name: "Schedule from…" })).not.toBeInTheDocument();
+
+      fireEvent.pointerDown(lane, { clientX: 300, pointerId: 2, button: 0, pointerType: "touch" });
+      expect(screen.queryByTestId("timeline-range-draft")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows the build-from-discovery empty state only for an empty workspace, and Add an item manually reveals the timeline", () => {
+    const { unmount } = renderWithSquads({ roadmapEmpty: true });
+    expect(screen.getByTestId("roadmap-empty-state")).toBeInTheDocument();
+    expect(screen.queryByTestId("timeline-grid")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add an item manually" }));
+    expect(screen.queryByTestId("roadmap-empty-state")).not.toBeInTheDocument();
+    expect(screen.getByTestId("timeline-grid")).toBeInTheDocument();
+    unmount();
+
+    renderWithSquads({ roadmapEmpty: false });
+    expect(screen.queryByTestId("roadmap-empty-state")).not.toBeInTheDocument();
+  });
+
+  it("hands auto-created items to the rail's Auto-added section", () => {
+    harness.controller.items = [
+      { id: "auto-1", title: "Auto one", horizon: "NOW", squad: null, viewStart: "2026-07-10", viewEnd: "2026-07-20", hasDates: true, autoCreated: true, updatedAt: "2026-07-01T00:00:00Z" },
+      { id: "manual-1", title: "Manual", horizon: "NOW", squad: null, viewStart: "2026-07-10", viewEnd: "2026-07-20", hasDates: true, autoCreated: false, updatedAt: "2026-07-01T00:00:00Z" },
+    ] as never;
+    renderWithSquads();
+    expect(screen.getByTestId("schedule-rail")).toHaveAttribute("data-auto", "1");
+  });
+});
+
+describe("NativeTimeline: collapsible Ready to schedule rail", () => {
+  const cookieWrites: string[] = [];
+  let wide = true;
+  const solution = (id: string) => ({ kind: "solution" as const, id, title: `Solution ${id}`, opportunityId: "o", opportunityTitle: "O", squadId: null, status: "VALIDATED", score: 50 });
+  const renderRail = (extra: Partial<React.ComponentProps<typeof NativeTimeline>> = {}) =>
+    render(<NativeTimeline items={[]} squads={[]} workspaceId="workspace-1" unscheduledItems={[]} {...extra} />);
+  const toggle = () => screen.getByTestId("rail-toggle");
+  const region = () => screen.getByTestId("schedule-rail-region");
+
+  beforeEach(() => {
+    wide = true;
+    cookieWrites.length = 0;
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("1320") ? wide : false, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    const cookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, "cookie");
+    Object.defineProperty(document, "cookie", { configurable: true, get: () => "", set: (value: string) => { cookieWrites.push(value); } });
+    return () => { if (cookieDescriptor) Object.defineProperty(document, "cookie", cookieDescriptor); else delete (document as unknown as Record<string, unknown>).cookie; };
+  });
+
+  it("is open by default on wide screens, wired to the header toggle, with the unscheduled count", () => {
+    harness.controller.unscheduled = [solution("a"), solution("b")];
+    renderRail();
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    expect(toggle()).toHaveAttribute("aria-controls", region().id);
+    expect(region()).toContainElement(screen.getByTestId("schedule-rail"));
+    expect(screen.getByTestId("rail-toggle-count")).toHaveTextContent("2");
+    expect(region()).not.toHaveAttribute("inert");
+  });
+
+  it("is collapsed by default where the rail would stack above the timeline, and inert", () => {
+    wide = false;
+    renderRail();
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    expect(toggle()).toHaveAccessibleName("Show ready-to-schedule rail");
+    expect(region().firstElementChild).toHaveAttribute("inert");
+    expect(screen.getByTestId("timeline-grid")).toBeInTheDocument();
+  });
+
+  it("keeps the count visible while collapsed and reports auto-added items", () => {
+    harness.controller.unscheduled = [solution("a")];
+    harness.controller.items = [{ id: "auto-1", title: "Auto one", horizon: "NOW", squad: null, viewStart: "2026-07-10", viewEnd: "2026-07-20", hasDates: true, autoCreated: true, updatedAt: "2026-07-01T00:00:00Z" }] as never;
+    renderRail({ initialRailPreference: "closed" });
+    expect(screen.getByTestId("rail-toggle-count")).toHaveTextContent("1");
+    expect(toggle()).toHaveAccessibleDescription("1 ready to schedule, 1 auto-added");
+    expect(screen.getByTestId("auto-added-count")).toHaveTextContent("1 added");
+  });
+
+  it("collapses and expands from the header, makes the closed rail inert, and remembers the choice in a cookie", () => {
+    renderRail();
+    fireEvent.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    expect(region()).toHaveAttribute("data-state", "closed");
+    expect(region().firstElementChild).toHaveAttribute("inert");
+    expect(cookieWrites.at(-1)).toMatch(/^compass_roadmap_rail=closed;/);
+    fireEvent.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    expect(region().firstElementChild).not.toHaveAttribute("inert");
+    expect(cookieWrites.at(-1)).toMatch(/^compass_roadmap_rail=open;/);
+  });
+
+  it("lets an explicit saved choice override the viewport default in both directions", () => {
+    wide = false;
+    const { unmount } = renderRail({ initialRailPreference: "open" });
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    unmount();
+    wide = true;
+    renderRail({ initialRailPreference: "closed" });
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("starts expanded on an empty roadmap unless the user explicitly collapsed it", () => {
+    wide = false;
+    const { unmount } = renderRail({ roadmapEmpty: true });
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    unmount();
+    renderRail({ roadmapEmpty: true, initialRailPreference: "closed" });
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("toggles on [ but never while typing, in a dialog, or with a modifier", () => {
+    renderRail();
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    fireEvent.keyDown(input, { key: "[" });
+    input.remove();
+    fireEvent.keyDown(document.body, { key: "[", ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: "[", metaKey: true });
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(document.body, { key: "[" });
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    fireEvent.keyDown(document.body, { key: "[" });
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("returns focus to the toggle when the rail closes while focus is inside it", () => {
+    renderRail();
+    const inside = screen.getByRole("button", { name: "Rail action" });
+    inside.focus();
+    fireEvent.keyDown(inside, { key: "[" });
+    expect(toggle()).toHaveFocus();
+  });
+
+  it("keeps the / palette working while the rail is collapsed", () => {
+    renderRail({ initialRailPreference: "closed" });
+    fireEvent.keyDown(document.body, { key: "/" });
+    expect(screen.getByRole("dialog", { name: "Schedule from discovery" })).toBeInTheDocument();
+  });
+
+  it("does not leave a gap: the rail region carries its own spacing and the section has no flex gap", () => {
+    renderRail();
+    expect(screen.getByTestId("timeline-engine-native").className).not.toMatch(/\bgap-/);
   });
 });

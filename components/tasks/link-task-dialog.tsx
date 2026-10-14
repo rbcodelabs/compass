@@ -7,23 +7,15 @@ import { Button } from "@/components/ui/button";
 import { linkTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import { cn } from "@/lib/utils";
 import type { TaskLinkedType, TaskLinkData } from "@/lib/types";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
+import { linkedTypeLabels, linkedTypePluralLabels } from "./linked-type-labels";
 
-const LINKED_TYPE_LABELS: Record<TaskLinkedType, string> = {
-  OPPORTUNITY: "Opportunity", SOLUTION: "Solution", ROADMAP_ITEM: "Roadmap Item",
-  OBJECTIVE: "Objective", KEY_RESULT: "Key Result", DOC: "Doc", EXPERIMENT: "Experiment",
-  FEEDBACK_ITEM: "Feedback Item", DECISION: "Decision",
-};
-const LINKED_TYPE_PLURAL_LABELS: Record<TaskLinkedType, string> = {
-  OPPORTUNITY: "Opportunities", SOLUTION: "Solutions", ROADMAP_ITEM: "Roadmap items",
-  OBJECTIVE: "Objectives", KEY_RESULT: "Key results", DOC: "Docs", EXPERIMENT: "Experiments",
-  FEEDBACK_ITEM: "Feedback items", DECISION: "Decisions",
-};
 const LINKED_TYPE_ICONS: Record<TaskLinkedType, React.ComponentType<{ className?: string; "aria-hidden"?: React.AriaAttributes["aria-hidden"] }>> = {
   OPPORTUNITY: TargetIcon, SOLUTION: LightbulbIcon, ROADMAP_ITEM: MapIcon, OBJECTIVE: FlagIcon,
   KEY_RESULT: CheckIcon, DOC: FileTextIcon, EXPERIMENT: BeakerIcon,
   FEEDBACK_ITEM: MessageSquareTextIcon, DECISION: CircleHelpIcon,
 };
-const LINKED_TYPES = Object.keys(LINKED_TYPE_LABELS) as TaskLinkedType[];
+const LINKED_TYPES = Object.keys(LINKED_TYPE_ICONS) as TaskLinkedType[];
 const PRIMARY_FILTERS: TaskLinkedType[] = ["OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "DOC"];
 const SECONDARY_FILTERS = LINKED_TYPES.filter((type) => !PRIMARY_FILTERS.includes(type));
 const MAX_VISIBLE_RESULTS = 75;
@@ -59,6 +51,9 @@ function getMatchingItems(allItems: LinkableItem[], query: string, typeFilter: T
 }
 
 export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, linkableTargets, onLinked }: Props) {
+  const labels = useLabels();
+  const LINKED_TYPE_LABELS = linkedTypeLabels(labels);
+  const LINKED_TYPE_PLURAL_LABELS = linkedTypePluralLabels(labels);
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const allItems = useMemo(() => flattenTargets(linkableTargets), [linkableTargets]);
@@ -147,7 +142,7 @@ export function LinkTaskDialog({ taskId, open, onOpenChange, revalidatePathStr, 
                   setQuery(nextQuery); setActiveIndex(0); setError(null);
                   if (selectedItem && !getMatchingItems(allItems, nextQuery, typeFilter).slice(0, MAX_VISIBLE_RESULTS).includes(selectedItem)) setSelectedCompositeId(null);
                 }}
-                onKeyDown={handleInputKeyDown} placeholder="Search opportunities, docs, roadmap, and more…"
+                onKeyDown={handleInputKeyDown} placeholder={`Search ${labels.opportunity.lowerPlural}, docs, roadmap, and more…`}
                 className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed" />
               <kbd className="hidden rounded border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground sm:block">ESC</kbd>
             </div>

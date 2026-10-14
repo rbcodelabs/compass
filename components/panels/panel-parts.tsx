@@ -6,6 +6,7 @@
  * handful of layout primitives (section, field, relation row) — each panel
  * body is then mostly a declarative arrangement of these.
  */
+import { announceRoadmapSync } from "@/lib/ui/roadmap-sync-toast";
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import Link from "next/link";
 import { ExternalLinkIcon, ChevronRightIcon } from "lucide-react";
@@ -118,7 +119,9 @@ export async function patchEntityField(
     }
   );
   if (!res.ok) throw new Error("save failed");
-  return res.json();
+  const json = await res.json();
+  announceRoadmapSync(json?.roadmapSync);
+  return json;
 }
 
 export function PanelSkeleton() {
@@ -398,6 +401,9 @@ export function EditableText({
 }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  // A rejected save used to vanish silently (the field just snapped back).
+  // Show why, inline, until the next edit attempt.
+  const [saveError, setSaveError] = useState<string | null>(null);
   // Uncontrolled input read via ref: commit takes the field's *actual* value
   // at commit time rather than a `draft` state snapshot. Reading state would
   // race when the value arrives all at once and Enter follows immediately —
@@ -405,12 +411,16 @@ export function EditableText({
   // re-rendered the new draft into the commit closure yet.
   const ref = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
 
-  const begin = () => setEditing(true);
+  const begin = () => { setSaveError(null); setEditing(true); };
 
   const commit = async () => {
     setEditing(false);
     const raw = (ref.current?.value ?? "").trim();
     if (raw === (value ?? "").trim()) return; // unchanged
+    if (field === "title" && raw.length === 0) {
+      setSaveError("A title is required. The previous title was kept.");
+      return;
+    }
 
     let next: string | number | null;
     if (type === "number") {
@@ -418,7 +428,7 @@ export function EditableText({
         next = null;
       } else {
         const parsed = Number(raw);
-        if (!Number.isFinite(parsed)) return; // invalid — drop back to display mode, nothing to save
+        if (!Number.isFinite(parsed)) { setSaveError("Enter a valid number."); return; }
         next = parsed;
       }
     } else {
@@ -435,10 +445,11 @@ export function EditableText({
         field,
         next
       );
+      setSaveError(null);
       edit.onSaved(res.data);
     } catch {
-      // Rejected (e.g. empty title) — the panel data is unchanged, so nothing
-      // to revert; just drop back to display mode.
+      // Rejected — the panel data is unchanged, so nothing to revert; say so.
+      setSaveError(field === "title" ? "Could not save the title. The previous title was kept." : "Could not save that change. Try again.");
     } finally {
       setSaving(false);
     }
@@ -470,21 +481,24 @@ export function EditableText({
 
   const isEmpty = !value || value.trim().length === 0;
   return (
-    <button
-      type="button"
-      onClick={begin}
-      disabled={saving}
-      title="Click to edit"
-      className={`group/edit text-left rounded-md -mx-1 px-1 hover:bg-muted/60 transition-colors ${saving ? "opacity-60" : ""} ${className ?? ""}`}
-    >
-      {isEmpty ? (
-        <span className="text-sm text-muted-foreground italic">
-          {placeholder ?? "Add…"}
-        </span>
-      ) : (
-        <span className="whitespace-pre-wrap">{value}</span>
-      )}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={begin}
+        disabled={saving}
+        title="Click to edit"
+        className={`group/edit text-left rounded-md -mx-1 px-1 hover:bg-muted/60 transition-colors ${saving ? "opacity-60" : ""} ${className ?? ""}`}
+      >
+        {isEmpty ? (
+          <span className="text-sm text-muted-foreground italic">
+            {placeholder ?? "Add…"}
+          </span>
+        ) : (
+          <span className="whitespace-pre-wrap">{value}</span>
+        )}
+      </button>
+      {saveError && <p role="alert" className="text-xs font-normal text-destructive">{saveError}</p>}
+    </>
   );
 }
 

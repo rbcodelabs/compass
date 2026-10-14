@@ -17,7 +17,7 @@
  * still bound onto the token and still enforced on every request by the
  * resource server, which is where the spec's actual security property lives.
  */
-import { mcpResourceUri } from "@/lib/oauth/constants"
+import { apiResourceUri, mcpResourceUri } from "@/lib/oauth/constants"
 
 export type ResourceResolution =
   | { ok: true; resource: string }
@@ -53,7 +53,9 @@ export function resolveResource(raw: string | null | undefined): ResourceResolut
     }
   }
 
-  if (normalize(raw) !== normalize(canonical)) {
+  const candidates = [canonical, apiResourceUri()]
+  const matched = candidates.find((candidate) => normalize(raw) === normalize(candidate))
+  if (!matched) {
     // The canonical URI is echoed back because it is not a secret — it is
     // published in the protected-resource metadata document — and telling the
     // client the one audience this server will mint is what lets it retry
@@ -61,10 +63,10 @@ export function resolveResource(raw: string | null | undefined): ResourceResolut
     return {
       ok: false,
       error: "invalid_target",
-      description: `This authorization server only issues tokens for ${canonical}.`,
+      description: `This authorization server only issues tokens for ${candidates.join(" or ")}.`,
     }
   }
-  return { ok: true, resource: canonical }
+  return { ok: true, resource: matched }
 }
 
 /** Drops a single trailing slash. Nothing else is touched. */

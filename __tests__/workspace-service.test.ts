@@ -15,6 +15,7 @@ const mockPrisma = {
   workspace: { findFirst: vi.fn(), create: vi.fn() },
   organizationMember: { findMany: vi.fn() },
   workspaceMember: { createMany: vi.fn() },
+  $transaction: vi.fn(),
 }
 
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
@@ -38,6 +39,7 @@ beforeEach(() => {
   })
   mockPrisma.organizationMember.findMany.mockResolvedValue([])
   mockPrisma.workspaceMember.createMany.mockResolvedValue({ count: 0 })
+  mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma))
 })
 
 describe("createWorkspaceInOrg", () => {
@@ -113,6 +115,31 @@ describe("createWorkspaceInOrg", () => {
     expect(seeded.map((d) => d.role)).not.toContain("OWNER")
   })
 
+  it("seeds only org OWNER/ADMIN members when memberSeeding is ORG_ADMINS", async () => {
+    mockPrisma.organizationMember.findMany.mockResolvedValue([
+      { userId: "user-owner", role: "OWNER" },
+      { userId: "user-admin", role: "ADMIN" },
+      { userId: "user-member", role: "MEMBER" },
+      { userId: "user-junk", role: "wat" },
+    ])
+
+    const result = await createWorkspaceInOrg({
+      orgSlug: "rbcodelabs",
+      name: "My Product",
+      slug: "my-product",
+      memberSeeding: "ORG_ADMINS",
+    })
+
+    expect(result.ok).toBe(true)
+    expect(mockPrisma.workspaceMember.createMany).toHaveBeenCalledWith({
+      data: [
+        { workspaceId: "ws-1", userId: "user-owner", role: "ADMIN" },
+        { workspaceId: "ws-1", userId: "user-admin", role: "ADMIN" },
+      ],
+      skipDuplicates: true,
+    })
+  })
+
   it("skips the membership write entirely when the org has no members", async () => {
     mockPrisma.organizationMember.findMany.mockResolvedValue([])
 
@@ -124,6 +151,32 @@ describe("createWorkspaceInOrg", () => {
 
     expect(result.ok).toBe(true)
     expect(mockPrisma.workspaceMember.createMany).not.toHaveBeenCalled()
+  })
+
+  it("creates the workspace and inherited memberships in one transaction", async () => {
+    mockPrisma.organizationMember.findMany.mockResolvedValue([
+      { userId: "user-owner", role: "OWNER" },
+    ])
+
+    await createWorkspaceInOrg({ orgSlug: "rbcodelabs", name: "My Product", slug: "my-product" })
+
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce()
+    expect(mockPrisma.workspace.create).toHaveBeenCalledOnce()
+    expect(mockPrisma.workspaceMember.createMany).toHaveBeenCalledOnce()
+  })
+
+  it("does not revalidate when inherited membership seeding aborts the transaction", async () => {
+    mockPrisma.organizationMember.findMany.mockResolvedValue([
+      { userId: "user-owner", role: "OWNER" },
+    ])
+    mockPrisma.workspaceMember.createMany.mockRejectedValue(new Error("membership write failed"))
+
+    await expect(
+      createWorkspaceInOrg({ orgSlug: "rbcodelabs", name: "My Product", slug: "my-product" })
+    ).rejects.toThrow("membership write failed")
+
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce()
+    expect(mockRevalidatePath).not.toHaveBeenCalled()
   })
 
   it("revalidates /dashboard and the root layout on success", async () => {
@@ -149,6 +202,18 @@ describe("createWorkspaceInOrg", () => {
     })
     expect(mockPrisma.workspace.create).not.toHaveBeenCalled()
     expect(mockRevalidatePath).not.toHaveBeenCalled()
+  })
+
+  it.each(["roadmap", "settings"])("auto-suffixes the reserved slug %s instead of rejecting", async (slug) => {
+    const result = await createWorkspaceInOrg({ orgSlug: "rbcodelabs", name: "Anything", slug })
+
+    expect(result.ok).toBe(true)
+    expect(mockPrisma.workspace.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { organizationId: expect.anything(), slug: `${slug}-workspace` } })
+    )
+    expect(mockPrisma.workspace.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ slug: `${slug}-workspace` }) })
+    )
   })
 
   it("fails with SLUG_TAKEN when a workspace already has that slug in the org", async () => {

@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useState, useTransition, useId } from "react";
 import {
   DndContext,
@@ -95,6 +96,7 @@ function DiscoveryColumn({
   showScore: boolean;
   dragEnabled: boolean;
 }) {
+  const labels = useLabels();
   const itemIds = items.map((i) => i.id);
   const { setNodeRef, isOver } = useDroppable({
     id: `column-${status}`,
@@ -106,7 +108,7 @@ function DiscoveryColumn({
       <EmptyState
         compact
         icon={<Lightbulb className="size-4" />}
-        title="No opportunities yet"
+        title={`No ${labels.opportunity.lowerPlural} yet`}
         className={isOver ? "border-border-interactive" : undefined}
       />
     ) : (
@@ -164,6 +166,7 @@ export function OpportunityBoard({
   hasActiveScoringModel = false,
   sortByScore = false,
 }: Props) {
+  const labels = useLabels();
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/discovery`;
 
   // Score sort is only meaningful when there is a model to score against.
@@ -298,7 +301,7 @@ export function OpportunityBoard({
         onDragEnd={handleDragEnd}
       >
         <Board
-          label="Opportunity board"
+          label={`${labels.opportunity.singular} board`}
           className="block min-h-[24rem] flex-1 scroll-px-3 overflow-x-auto p-0 sm:scroll-px-4 md:overflow-y-hidden"
         >
           <div

@@ -4,6 +4,7 @@ import React, { createContext, useContext, useCallback, useMemo, useRef, useStat
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import type { Horizon } from "@/lib/types";
 import type { TaskCardData } from "@/components/tasks/task-card";
+import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import { COMPOSER_PANEL_TYPES, isComposerPanelType, type ComposerPanelType } from "./composer-panel-types";
 
 /**
@@ -86,8 +87,16 @@ function decodePanel(raw: string | null): PanelState {
  * a listener to apply the one change it cares about optimistically. `task`
  * carries the full card-shaped data because TaskBoard/TaskListView need to
  * patch their own local rows (they're panel siblings, not children) after any
- * of the ~9 editable fields changes in the panel. */
-export type EntityMutationPatch = { horizon?: Horizon; updatedAt?: string; task?: TaskCardData };
+ * of the ~9 editable fields changes in the panel. `roadmapItem` carries the
+ * card-shaped fields the roadmap detail can edit, and `archived` tells the
+ * board to drop the card. */
+export type EntityMutationPatch = {
+  horizon?: Horizon;
+  updatedAt?: string;
+  task?: TaskCardData;
+  roadmapItem?: Partial<RoadmapCardData>;
+  archived?: boolean;
+};
 
 type EntityMutationListener = (id: string, patch?: EntityMutationPatch) => void;
 

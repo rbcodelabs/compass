@@ -50,6 +50,7 @@ import {
 import { createDocEditorExtensions } from "@/components/docs/doc-editor-extensions";
 import { resolveCommentAnchor } from "@/lib/comment-anchor";
 import type { PanelPin } from "@/lib/panel-pin";
+import { DocsLibraryButton } from "@/components/docs/docs-library-button";
 
 interface DocEditorProps {
   initialCommentsPin?: PanelPin;
@@ -75,6 +76,8 @@ interface DocEditorProps {
     members: MemberData[];
   };
   decisionAction?: React.ReactNode;
+  /** Follow toggle, rendered beside the decision action. */
+  followAction?: React.ReactNode;
 }
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -116,7 +119,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, initialCommentsPin, initialHistoryPin }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, initialCommentsPin, initialHistoryPin }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
@@ -412,6 +415,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
       {/* Icon + title on a single row */}
       <div className="flex items-center gap-2 px-8 pb-2">
+        <DocsLibraryButton />
         {/* Icon picker */}
         <div className="relative shrink-0">
           <button
@@ -615,7 +619,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             </div>
           )}
         </div>
-        {decisionAction && <div className="shrink-0 pl-1">{decisionAction}</div>}
+        {(followAction || decisionAction) && <div className="flex shrink-0 items-center gap-1.5 pl-1">{followAction}{decisionAction}</div>}
       </div>
 
       {/* Hidden file input */}

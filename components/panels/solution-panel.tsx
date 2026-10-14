@@ -38,10 +38,13 @@ import {
   solutionStatusBadge,
 } from "@/lib/solution-status";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
+import { FollowButton } from "@/components/following/follow-button";
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
+import { SolutionKeyResultPicker } from "@/components/discovery/solution-key-result-picker";
+import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
 import type { CustomFieldWithValue } from "@/lib/custom-field-definitions";
 
 type SolutionData = {
@@ -51,7 +54,12 @@ type SolutionData = {
   title: string;
   description: string | null;
   status: string;
-  opportunity: { id: string; title: string; workspaceId: string; squadId: string | null } | null;
+  /** The Solution's own workspace (not its Opportunity's). */
+  workspaceId: string;
+  /** Typed Solution<->Key Result links (Phase 4B). The options are only sent for presets that offer the link. */
+  linkedKeyResults?: Array<{ id: string; title: string; objectiveId: string }>;
+  availableKeyResults?: Array<{ id: string; title: string; objectiveTitle: string }>;
+  opportunity: { id: string; title: string; squadId: string | null } | null;
   assumptions: AssumptionItemData[];
   evidence: EvidenceListItem[];
   comments: SolutionComment[];
@@ -96,7 +104,10 @@ export function SolutionPanel({
     workspaceSlug
   );
 
-  if (error) return <PanelError label="solution" />;
+  const labels = useLabels();
+  const offersKeyResultLinks = useThinkingModel().links.solToKr !== "hidden";
+
+  if (error) return <PanelError label={labels.solution.lower} />;
   if (!data) return <PanelSkeleton />;
 
   const edit: EditContext = {
@@ -139,6 +150,7 @@ export function SolutionPanel({
         edit={edit}
         statusEdit={{ field: "status", options: STATUS_ORDER, map: STATUS }}
       />
+      <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="SOLUTION" subjectId={data.id} />
       <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="SOLUTION" subjectId={data.id} subjectTitle={data.title} />
       {data.pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="SOLUTION" targetId={id} />}
 
@@ -166,9 +178,21 @@ export function SolutionPanel({
         </Section>
       )}
 
-      <Section {...SECTION} defaultOpen label="Opportunity" empty={oppItems.length === 0}>
-        <RelationList items={oppItems} empty="No parent opportunity." />
+      <Section {...SECTION} defaultOpen label={labels.opportunity.singular} empty={oppItems.length === 0}>
+        <RelationList items={oppItems} empty={`No parent ${labels.opportunity.lower}.`} />
       </Section>
+
+      {/* Phase 4B: the Solution <-> Key Result picker, only for presets that offer it (the fetcher sends its options only then). */}
+      {offersKeyResultLinks && data.availableKeyResults && (
+        <Section {...SECTION} defaultOpen label={`Linked ${labels.keyResult.plural}`} count={data.linkedKeyResults?.length}>
+          <SolutionKeyResultPicker
+            solutionId={data.id}
+            linked={data.linkedKeyResults ?? []}
+            available={data.availableKeyResults}
+            onChanged={refresh}
+          />
+        </Section>
+      )}
 
       <Section {...SECTION} defaultOpen label="Assumptions" count={data.assumptions.length}>
         {data.opportunity ? (
@@ -178,7 +202,7 @@ export function SolutionPanel({
             // server data instead of needing an effect to sync props in.
             key={data.assumptions.map((a) => a.id).join(",")}
             solutionId={data.id}
-            workspaceId={data.opportunity.workspaceId}
+            workspaceId={data.workspaceId}
             assumptions={data.assumptions}
             revalidatePathStr={revalidatePathStr}
             onChanged={refresh}
@@ -206,7 +230,7 @@ export function SolutionPanel({
         <Section {...SECTION} label="Evidence" count={data.evidence.length}>
           <div className="flex flex-col gap-2">
             <AddEvidenceDialog
-              workspaceId={data.opportunity.workspaceId}
+              workspaceId={data.workspaceId}
               nodeType="solution"
               nodeId={data.id}
               revalidatePathStr={revalidatePathStr}
@@ -228,7 +252,7 @@ export function SolutionPanel({
           {canPromote && data.opportunity && (
             <PromoteToRoadmap
               solutionId={data.id}
-              workspaceId={data.opportunity.workspaceId}
+              workspaceId={data.workspaceId}
               squadId={data.opportunity.squadId}
               opportunityId={data.opportunity.id}
               onDone={refresh}
@@ -256,7 +280,7 @@ export function SolutionPanel({
         <Section {...SECTION} label="Artifacts" count={data.artifacts.length}>
           <SolutionArtifacts
             solutionId={data.id}
-            workspaceId={data.opportunity.workspaceId}
+            workspaceId={data.workspaceId}
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
             artifacts={data.artifacts}

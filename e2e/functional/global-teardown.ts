@@ -109,9 +109,14 @@ export default async function globalTeardown() {
       [orgId]
     );
 
+    // Saved roadmap views are org-scoped (workspace_id is nullable), so delete by org before the per-workspace loop.
+    await pool.query(`DELETE FROM "${S}".roadmap_views WHERE organization_id = $1`, [orgId]);
+
     for (const { id: wsId } of wsRows) {
       // ── Delete in strict dependency order (no DB-level cascades) ──────────
-      for (const table of ["metric_observations", "metric_bindings", "metric_revisions", "metric_definitions", "analytics_connections", "workspace_activation_states"]) {
+      // The typed link tables have no foreign keys, so nothing removes their rows with the opportunities, solutions and
+      // objectives deleted below; the dual-writing UI actions create LEGACY links for opportunities the specs create.
+      for (const table of ["notifications", "follows", "opportunity_objective_links", "solution_key_result_links", "metric_observations", "metric_bindings", "metric_revisions", "metric_definitions", "analytics_connections", "workspace_activation_states"]) {
         await pool.query(`DELETE FROM "${S}"."${table}" WHERE workspace_id = $1`, [wsId]);
       }
       await pool.query(`DELETE FROM "${S}".research_participant_voice_events WHERE workspace_id = $1`, [wsId]);
@@ -193,7 +198,7 @@ export default async function globalTeardown() {
            SELECT id FROM "${S}".key_results
            WHERE objective_id IN (
              SELECT id FROM "${S}".objectives
-             WHERE cycle_id IN (
+             WHERE workspace_id = $1 OR cycle_id IN (
                SELECT id FROM "${S}".okr_cycles WHERE workspace_id = $1
              )
            )
@@ -304,15 +309,16 @@ export default async function globalTeardown() {
         `DELETE FROM "${S}".key_results
          WHERE objective_id IN (
            SELECT id FROM "${S}".objectives
-           WHERE cycle_id IN (
+           WHERE workspace_id = $1 OR cycle_id IN (
              SELECT id FROM "${S}".okr_cycles WHERE workspace_id = $1
            )
          )`,
         [wsId]
       );
       await pool.query(
+        // A cycle-less Objective (070) is reachable only through its own workspace_id.
         `DELETE FROM "${S}".objectives
-         WHERE cycle_id IN (
+         WHERE workspace_id = $1 OR cycle_id IN (
            SELECT id FROM "${S}".okr_cycles WHERE workspace_id = $1
          )`,
         [wsId]
@@ -373,6 +379,21 @@ export default async function globalTeardown() {
       );
       await pool.query(
         `DELETE FROM "${S}".docs WHERE workspace_id = $1`,
+        [wsId]
+      );
+      // Card sort: proposals and new entries hang off a round (no workspace_id
+      // of their own), and rounds reference a custom field, so they go first.
+      for (const table of ["card_sort_proposals", "card_sort_new_entries"]) {
+        await pool.query(
+          `DELETE FROM "${S}"."${table}"
+           WHERE round_id IN (
+             SELECT id FROM "${S}".card_sort_rounds WHERE workspace_id = $1
+           )`,
+          [wsId]
+        );
+      }
+      await pool.query(
+        `DELETE FROM "${S}".card_sort_rounds WHERE workspace_id = $1`,
         [wsId]
       );
       await pool.query(

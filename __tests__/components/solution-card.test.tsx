@@ -50,7 +50,7 @@ function cardFor(title: string) {
 // SolutionsList, so it stays on by default. On a board whose columns *are*
 // statuses it's pure redundancy that steals width from the title (the same
 // reason OpportunityCard passes no status prop at all), so callers there opt
-// out — see solution-swimlane-board.tsx.
+// out — see components/solutions/solution-backlog-board.tsx.
 
 describe("SolutionCard status badge", () => {
   it("leaves card content pannable while reserving touch handling for the drag handle", () => {
@@ -127,5 +127,26 @@ describe("SolutionCard metadata chips", () => {
     renderCard({ ...baseSolution, _count: { assumptions: 0, evidence: 0 } });
     const card = cardFor("Guided setup wizard");
     expect(within(card).getByText("Step-by-step first-run flow")).toBeInTheDocument();
+  });
+});
+
+describe("SolutionCard parent opportunity", () => {
+  it("renders the owning opportunity as a link when a parent is given", () => {
+    render(
+      <DndContext>
+        <SolutionCard
+          solution={baseSolution}
+          revalidatePathStr="/org/ws/solutions"
+          parent={{ title: "Teams cannot maintain a living OST", href: "/org/ws/discovery/opp-1" }}
+        />
+      </DndContext>
+    );
+    const link = within(cardFor("Guided setup wizard")).getByRole("link", { name: "Teams cannot maintain a living OST" });
+    expect(link).toHaveAttribute("href", "/org/ws/discovery/opp-1");
+  });
+
+  it("renders no parent row by default", () => {
+    renderCard();
+    expect(cardFor("Guided setup wizard").querySelector("[data-slot=solution-card-parent]")).toBeNull();
   });
 });

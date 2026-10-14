@@ -140,8 +140,8 @@ describe("assertEntityAccess", () => {
     await expect(assertEntityAccess(USER, "opportunity", "opp-1")).resolves.toEqual({ workspaceId: "ws-9" })
   })
 
-  it("resolves a nested entity (solution → opportunity → workspace)", async () => {
-    mockPrisma.solution.findUnique.mockResolvedValue({ opportunity: { workspaceId: "ws-9" } })
+  it("resolves Solution through its own workspaceId, not the opportunity chain", async () => {
+    mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-9" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-9" })
     await expect(assertEntityAccess(USER, "solution", "sol-1")).resolves.toEqual({ workspaceId: "ws-9" })
   })

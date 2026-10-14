@@ -8,7 +8,7 @@ test.describe("Decisions", () => {
     const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug } })
     const suffix = Date.now().toString()
     const opportunity = await prisma.opportunity.create({ data: { workspaceId: workspace.id, title: `Brand opportunity ${suffix}` } })
-    const solution = await prisma.solution.create({ data: { opportunityId: opportunity.id, title: `Brand concepts ${suffix}` } })
+    const solution = await prisma.solution.create({ data: { workspaceId: workspace.id, opportunityId: opportunity.id, title: `Brand concepts ${suffix}` } })
     const assumption = await prisma.assumption.create({ data: { solutionId: solution.id, title: `Visitors recognize the product ${suffix}` } })
     const experiment = await prisma.experiment.create({ data: {
       workspaceId: workspace.id,

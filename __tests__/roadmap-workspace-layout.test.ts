@@ -47,6 +47,14 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({
   promoteFeedbackToRoadmap: vi.fn(),
   rescheduleRoadmapItem: vi.fn(),
   addRoadmapItem: vi.fn(),
+  moveItemToLane: vi.fn(),
+}));
+
+// The header's saved-views menu calls the org-level saved-view actions, which import auth too.
+vi.mock("@/app/[orgSlug]/roadmap/actions", () => ({
+  createRoadmapViewAction: vi.fn(),
+  updateRoadmapViewAction: vi.fn(),
+  deleteRoadmapViewAction: vi.fn(),
 }));
 
 vi.mock("@/components/roadmap/unscheduled-items-panel", async () => {
@@ -67,12 +75,16 @@ describe("Roadmap dashboard workspace layout", () => {
 
     const header = screen.getByRole("banner");
     expect(header).toHaveAttribute("data-slot", "workspace-header");
-    expect(header.className).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(header.className).toContain("md:grid-cols-[minmax(0,1fr)_auto_auto]");
+    // The shared frame wraps below md, so the title keeps a readable width.
+    expect(header.className).toContain("flex-wrap");
+    expect(header.className).toContain("md:flex-nowrap");
 
-    const controls = screen.getByLabelText("Roadmap controls");
-    expect(controls.className).toContain("row-start-2");
-    expect(controls.className).toContain("md:row-start-1");
+    // Controls sit on their own full-width row under md, inline from md up.
+    const controls = header.querySelector('[data-slot="workspace-header-controls"]');
+    expect(controls).not.toBeNull();
+    expect(controls!.className).toContain("order-last");
+    expect(controls!.className).toContain("basis-full");
+    expect(controls!.className).toContain("md:basis-auto");
     // Higher timeout below: slower than the default 5s on a cold run,
     // because the first import of this component subtree pulls in the
     // full icon/dropdown/tooltip dependency graph.
@@ -130,7 +142,9 @@ describe("Roadmap dashboard workspace layout", () => {
     );
 
     const boardRegion = screen.getByRole("region", { name: "Roadmap board" });
-    const boardWrapper = boardRegion.parentElement!;
+    // The board sits in a row with the docked "Not scheduled" sidebar (md+), inside the height-filling wrapper.
+    expect(boardRegion.parentElement!.className).toContain("md:flex-row");
+    const boardWrapper = boardRegion.parentElement!.parentElement!;
     expect(boardWrapper.className).toContain("flex min-h-0 flex-1 flex-col");
     expect(boardWrapper.className).toContain("md:overflow-hidden");
     expect(boardRegion.className).toContain("scroll-px-3");
@@ -160,7 +174,6 @@ describe("Roadmap dashboard workspace layout", () => {
         revalidatePathStr: "/rbcodelabs/compass/roadmap",
         onItemAdded: vi.fn(),
         onArchive: vi.fn(),
-        onUpdate: vi.fn(),
       }),
     );
 

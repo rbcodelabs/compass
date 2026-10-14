@@ -1,5 +1,16 @@
+import getPrisma from "@/lib/db";
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db";
+import { followingAvailable, followingEnabled } from "@/lib/following-flag";
+import { runAfterCommit } from "@/lib/following-commit";
+import {
+  applyFollowingEffects,
+  buildFollowingEffects,
+  followingTracksModel,
+  type FollowActor,
+  type FollowingEffect,
+} from "@/lib/following-hooks";
 import { getMcpActor } from "@/lib/mcp-authz";
+import { detectFieldTransitions } from "@/lib/status-transitions";
 import {
   recordWorkspaceUpdate,
   withWorkspaceUpdates,
@@ -22,6 +33,9 @@ type Row = {
   workspaceId?: string;
   status?: string;
   horizon?: string;
+  updatedAt?: Date | string | null;
+  assigneeUserId?: string | null;
+  assigneeAgentId?: string | null;
   parentTaskId?: string | null;
   opportunityId?: string | null;
   solutionId?: string | null;
@@ -73,11 +87,12 @@ async function scope(
   row: Row,
 ): Promise<string> {
   if (row.workspaceId) return row.workspaceId;
+  // Solution carries its own workspaceId (migration 068) and deliberately has
+  // no parent-chain fallback: an event is never attributed to a workspace by
+  // way of an Opportunity. A NULL solution workspaceId fails closed below.
   const parent =
-    model === "solution"
-      ? (["opportunity", row.opportunityId] as const)
-      : model === "assumption"
-        ? (["solution", row.solutionId] as const)
+    model === "assumption"
+      ? (["solution", row.solutionId] as const)
         : model === "experimentResult"
           ? (["experiment", row.experimentId] as const)
           : null;
@@ -86,6 +101,35 @@ async function scope(
     if (record) return scope(tx, parent[0], record);
   }
   throw new Error("Workspace update source has no workspace");
+}
+
+/**
+ * Who a following effect is attributed to. Never throws: a missing session or
+ * MCP context must not fail a write just because following is on, so it falls
+ * back to SYSTEM (which the emitter treats as nobody to exclude).
+ */
+async function followActorFor(
+  source: "UI" | "MCP" | UpdateActor,
+  known: UpdateActor | null,
+): Promise<FollowActor> {
+  try {
+    const actor = known ?? (await workspaceMutationActor(source));
+    return { type: actor.actorType, id: actor.actorId };
+  } catch {
+    return { type: "SYSTEM", id: null };
+  }
+}
+
+/**
+ * Following is on, available, and this model's subject type has shipped. The
+ * flag check is synchronous and first, so with FOLLOWING_ENABLED off this costs
+ * nothing: no read, no auth() call. The availability probe uses the plain
+ * client, never the caller's, because a missing-table error would abort a
+ * transaction (and an MCP tool's client is already inside one).
+ */
+async function followingActiveFor(model: Model): Promise<boolean> {
+  if (!followingEnabled() || !followingTracksModel(model)) return false;
+  return followingAvailable(getPrisma());
 }
 
 /** Explicit call-site adapter: ordinary edits and ordering emit no events. */
@@ -98,20 +142,67 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
   mutate: (tx: AppTransactionClient) => Promise<T>,
   options?: WorkspaceUpdatesOptions,
 ): Promise<T> {
-  return withWorkspaceUpdates(prisma, async (tx, enabled) => {
-    if (!enabled) return mutate(tx);
-    const actor = await workspaceMutationActor(source);
-    const before =
-      operation === "update" && id ? await readRow(tx, model, id) : null;
-    const result = await mutate(tx);
-    const after = result as Row;
-    const fields =
-      model === "roadmapItem"
-        ? (["status", "horizon"] as const)
-        : (["status"] as const);
-    const changed = fields.filter(
-      (field) => before?.[field] !== after[field] && after[field] !== undefined,
-    );
+  const following = await followingActiveFor(model);
+  let pending: FollowingEffect[] = [];
+  const result = await withWorkspaceUpdates(
+    prisma,
+    async (tx, enabled) => {
+      // This callback can replay on a rolled-back attempt; only the attempt
+      // that commits may leave effects behind.
+      pending = [];
+      if (!enabled && !following) return mutate(tx);
+      const updateActor = enabled ? await workspaceMutationActor(source) : null;
+      const followActor = following
+        ? await followActorFor(source, updateActor)
+        : null;
+      const before =
+        operation === "update" && id ? await readRow(tx, model, id) : null;
+      const result = await mutate(tx);
+      const after = result as Row;
+      const changed = detectFieldTransitions(model, before, after);
+      if (followActor) {
+        try {
+          pending = await buildFollowingEffects({
+            model,
+            operation,
+            before,
+            after,
+            actor: followActor,
+            transitions: changed,
+            workspaceId: () => scope(tx, model, after),
+          });
+        } catch (error) {
+          // Best-effort by contract: a following problem never fails the edit.
+          console.error("[following] could not plan effects", error);
+          pending = [];
+        }
+      }
+      if (!enabled) return result;
+      const actor = updateActor!;
+      return recordUpdates(tx, model, operation, actor, before, after, changed, result);
+    },
+    options,
+  );
+  if (pending.length > 0) {
+    const effects = pending;
+    // After the commit; queued until the outer transaction commits for MCP
+    // tools that run inside the PM interview receipt transaction.
+    await runAfterCommit(() => applyFollowingEffects(effects));
+  }
+  return result;
+}
+
+async function recordUpdates<T extends { id: string }>(
+  tx: AppTransactionClient,
+  model: Model,
+  operation: "create" | "update",
+  actor: UpdateActor,
+  before: Row | null,
+  after: Row,
+  changed: ReturnType<typeof detectFieldTransitions>,
+  result: T,
+): Promise<T> {
+  {
     const evidenceAttached =
       model === "evidence" &&
       ["opportunityId", "solutionId", "assumptionId"].some((field) => {
@@ -154,7 +245,7 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
         ...actor,
       });
     } else {
-      for (const field of changed)
+      for (const transition of changed)
         await recordWorkspaceUpdate(tx, {
           workspaceId,
           entityType,
@@ -162,11 +253,11 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
           groupType,
           groupId,
           kind: "STATUS_CHANGED",
-          before: before?.[field],
-          after: after[field],
+          before: transition.from,
+          after: transition.to,
           ...actor,
         });
     }
     return result;
-  }, options);
+  }
 }

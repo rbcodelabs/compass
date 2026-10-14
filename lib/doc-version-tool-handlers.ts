@@ -47,7 +47,7 @@ export async function createDocVersion({
     return fail(`Doc "${docId}" not found.`)
   }
 
-  if (doc.storageProvider === "GEODE") {
+  if (doc.storageProvider === "GEODE" || operationId) {
     const version = await snapshotDocument(docId, { ...documentMcpActor(authorName), expectedRevision, operationId, label: label?.trim() || "Snapshot" })
     return ok(`Named snapshot saved for doc "${doc.title}"\nID: ${version?.id}`, { id: version?.id, label: version?.label })
   }
@@ -172,7 +172,7 @@ export async function restoreDocVersion({ versionId, expectedRevision, operation
     return fail(`Doc "${version.docId}" not found.`)
   }
 
-  const restored = doc.storageProvider === "GEODE"
+  const restored = doc.storageProvider === "GEODE" || operationId
     ? await restoreDocument(versionId, { ...documentMcpActor(), expectedRevision, operationId })
     : await restoreDocVersionCore(versionId, { authorName: "MCP Agent" })
   // restored can only be null here if the version/doc vanished between the

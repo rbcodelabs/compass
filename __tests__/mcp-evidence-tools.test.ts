@@ -249,7 +249,7 @@ describe("listEvidence", () => {
     expect(text).toContain("https://example.com/recording")
     expect(mockEvidence.findMany).toHaveBeenCalledWith({
       where: { opportunityId: OPP_ID },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     })
   })
 
@@ -260,7 +260,7 @@ describe("listEvidence", () => {
 
     expect(mockEvidence.findMany).toHaveBeenCalledWith({
       where: { solutionId: SOLUTION_ID },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     })
   })
 
@@ -271,7 +271,7 @@ describe("listEvidence", () => {
 
     expect(mockEvidence.findMany).toHaveBeenCalledWith({
       where: { assumptionId: ASSUMPTION_ID },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     })
   })
 
@@ -281,5 +281,6 @@ describe("listEvidence", () => {
     const result = await listEvidence({ nodeId: OPP_ID, nodeType: "opportunity" })
 
     expect(result.content[0].text).toBe("No evidence found.")
+    expect(result.structuredContent.data).toEqual({ items: [], count: 0 })
   })
 })

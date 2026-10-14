@@ -1,6 +1,10 @@
 "use client";
 
+import { ostLegendRootLabel } from "@/lib/thinking-model/copy";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import Link from "next/link";
+import { experimentComposerId } from "@/lib/experiment-draft";
+import { LinkedObjectivesStrip } from "@/components/discovery/linked-objectives-strip";
 import {
   TrendingUp,
   Lightbulb,
@@ -60,6 +64,8 @@ export type OSTOpportunityNode = {
     title: string;
     objective: { title: string };
   } | null;
+  /** Typed Opportunity<->Objective links (Phase 4B); shown only by presets that offer them. */
+  linkedObjectives?: Array<{ id: string; title: string }>;
   solutions: OSTSolutionNode[];
 };
 
@@ -178,7 +184,7 @@ function AssumptionCard({
         <div className="ml-6 mt-1.5 pl-3 border-l-2 border-border/20 flex items-center gap-2 py-1">
           <p className="text-[10px] text-muted-foreground/50 italic">No experiments yet</p>
           <Link
-            href={`/${orgSlug}/${workspaceSlug}/experiments?assumptionId=${assumption.id}`}
+            href={`/${orgSlug}/${workspaceSlug}/experiments?detail=experiment-new:${experimentComposerId(assumption.id)}`}
             className="text-[10px] font-medium text-emerald-600 hover:text-emerald-700 hover:underline whitespace-nowrap"
           >
             Test this assumption →
@@ -235,6 +241,7 @@ function SolutionCard({
 // ─── Root tree component ──────────────────────────────────────────────────────
 
 export function OSTTreeView({ opportunity, orgSlug, workspaceSlug }: Props) {
+  const labels = useLabels();
   const oppStatus = OPPORTUNITY_STATUS_BADGE[opportunity.status];
   const hasSolutions = opportunity.solutions.length > 0;
 
@@ -244,9 +251,9 @@ export function OSTTreeView({ opportunity, orgSlug, workspaceSlug }: Props) {
       <div className="flex items-center gap-4 mb-4 flex-wrap">
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mr-1">Legend</p>
         {[
-          { Icon: TrendingUp,    cls: "text-indigo-500",  label: "Outcome" },
-          { Icon: Lightbulb,     cls: "text-violet-500",  label: "Opportunity" },
-          { Icon: Layers,        cls: "text-blue-500",    label: "Solution" },
+          { Icon: TrendingUp,    cls: "text-indigo-500",  label: ostLegendRootLabel(labels) },
+          { Icon: Lightbulb,     cls: "text-violet-500",  label: labels.opportunity.singular },
+          { Icon: Layers,        cls: "text-blue-500",    label: labels.solution.singular },
           { Icon: AlertTriangle, cls: "text-amber-500",   label: "Assumption" },
           { Icon: FlaskConical,  cls: "text-emerald-500", label: "Experiment" },
         ].map(({ Icon, cls, label }) => (
@@ -256,6 +263,8 @@ export function OSTTreeView({ opportunity, orgSlug, workspaceSlug }: Props) {
           </div>
         ))}
       </div>
+
+      <LinkedObjectivesStrip objectives={opportunity.linkedObjectives} />
 
       {/* KR / Outcome node */}
       {opportunity.linkedKeyResult && (
@@ -314,6 +323,7 @@ function OppAndSolutions({
   oppStatus: { label: string; className: string };
   hasSolutions: boolean;
 }) {
+  const labels = useLabels();
   return (
     <div>
       {/* Opportunity node */}
@@ -339,7 +349,7 @@ function OppAndSolutions({
         </TreeBranch>
       ) : (
         <div className="ml-6 mt-2 pl-3 border-l-2 border-border/20">
-          <p className="text-xs text-muted-foreground/50 italic py-1">No solutions yet</p>
+          <p className="text-xs text-muted-foreground/50 italic py-1">{`No ${labels.solution.lowerPlural} yet`}</p>
         </div>
       )}
     </div>

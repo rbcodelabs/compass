@@ -27,6 +27,7 @@ Once enabled, your portal URLs are:
 
 - **Feedback:** `/portal/[org]/[workspace]/feedback`
 - **Public Roadmap:** `/portal/[org]/[workspace]/roadmap`
+- **Home:** `/portal/[org]/[workspace]` — a widget board you design yourself (see [Portal home](/help/28-portal-home))
 
 Share these links in your product, in onboarding emails, or in your documentation. By default, no login is required for visitors to submit or vote.
 

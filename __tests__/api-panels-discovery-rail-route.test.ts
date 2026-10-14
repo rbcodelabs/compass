@@ -11,10 +11,14 @@ const mockWorkspace = { findFirst: vi.fn() };
 const mockOpportunity = { findMany: vi.fn() };
 const mockSquad = { findMany: vi.fn() };
 const mockOrgMember = { findFirst: vi.fn() };
+const mockLinks = { findMany: vi.fn() };
+const mockObjective = { findMany: vi.fn() };
 
 const mockPrisma = {
   workspace: mockWorkspace,
   opportunity: mockOpportunity,
+  opportunityObjectiveLink: mockLinks,
+  objective: mockObjective,
   squad: mockSquad,
   organizationMember: mockOrgMember,
 };
@@ -41,6 +45,8 @@ function makeRequest(query: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockOrgMember.findFirst.mockResolvedValue({ role: "MEMBER" });
+  mockLinks.findMany.mockResolvedValue([]);
+  mockObjective.findMany.mockResolvedValue([]);
 });
 
 describe("GET /api/panels/discovery-rail", () => {
@@ -95,6 +101,10 @@ describe("GET /api/panels/discovery-rail", () => {
       { id: "squad-1", name: "Growth", color: "#6366f1" },
     ]);
 
+    // The same opportunity query serves the typed-link verification read.
+    mockLinks.findMany.mockResolvedValue([{ id: "l1", opportunityId: "opp-1", objectiveId: "obj-1", createdAt: new Date(1) }]);
+    mockObjective.findMany.mockResolvedValue([{ id: "obj-1", title: "Grow revenue" }]);
+
     const res = await GET(makeRequest("?orgSlug=acme&workspaceSlug=ws"));
     const data = await res.json();
 
@@ -107,6 +117,7 @@ describe("GET /api/panels/discovery-rail", () => {
         status: "EXPLORING",
         squad: { id: "squad-1", name: "Growth", color: "#6366f1" },
         linkedKeyResultId: "kr-1",
+        linkedObjectives: [{ id: "obj-1", title: "Grow revenue" }],
       },
       {
         id: "opp-2",
@@ -114,8 +125,12 @@ describe("GET /api/panels/discovery-rail", () => {
         status: "ACTIVE",
         squad: null,
         linkedKeyResultId: null,
+        linkedObjectives: [],
       },
     ]);
+    // Links are read under the workspace, and their objectives are read under it too.
+    expect(mockLinks.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "ws-1", opportunityId: { in: ["opp-1", "opp-2"] } } }));
+    expect(mockObjective.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["obj-1"] }, workspaceId: "ws-1" } }));
     expect(data.squads).toEqual([{ id: "squad-1", name: "Growth", color: "#6366f1" }]);
   });
 });

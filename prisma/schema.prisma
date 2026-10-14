@@ -231,6 +231,12 @@ model Workspace {
   brandingFontPresetId String?                 @map("branding_font_preset_id") @db.VarChar(50)
   brandingFontFamily   String?                 @map("branding_font_family") @db.VarChar(100)
   brandingLogoUrl      String?                 @map("branding_logo_url") @db.Text
+  // Thinking-model preset KEY only (labels come from code; see lib/thinking-model).
+  // NULL means CLASSIC forever. Added by migration 073, which must be applied
+  // before any code selecting these columns ships.
+  thinkingModel        String?                 @map("thinking_model") @db.VarChar(40)
+  // JSON label overrides ({ entity: { singular, plural? } }); NULL = none.
+  thinkingModelLabels  String?                 @map("thinking_model_labels") @db.Text
   ssoEnabled           Boolean?                @default(false) @map("sso_enabled")
   // Gates the entire marketing-launch surface: launch tiers/checklists, the
   // LAUNCHING/LAUNCHED roadmap horizons, the roadmap-item panel's Launch
@@ -258,6 +264,8 @@ model Workspace {
   members              WorkspaceMember[]
   okrCycles            OKRCycle[]
   opportunities        Opportunity[]
+  solutions            Solution[]
+  objectives           Objective[]
   experiments          Experiment[]
   roadmapItems         RoadmapItem[]
   customFieldDefs      CustomFieldDefinition[]
@@ -281,6 +289,7 @@ model Workspace {
   releaseRuns          ReleaseRun[]
   portfolioCapacityPlans PortfolioCapacityPlan[]
   feedbackSources      FeedbackSource[]
+  cardSortRounds       CardSortRound[]
 
   @@unique([organizationId, slug])
   @@map("workspaces")
@@ -306,6 +315,9 @@ model ResearchStudy {
   createdById       String?                    @map("created_by_id") @db.Uuid
   updatedById       String?                    @map("updated_by_id") @db.Uuid
   source            String                     @default("UI") @db.VarChar(20)
+  /// EXTERNAL studies only: USERTESTING | MAZE | OTHER (app-validated; migration 075).
+  externalProvider  String?                    @map("external_provider") @db.VarChar(30)
+  externalUrl       String?                    @map("external_url") @db.Text
   workspace         Workspace                  @relation(fields: [workspaceId], references: [id])
   artifact          Artifact?                  @relation(fields: [artifactId], references: [id])
   sessions          ResearchSession[]
@@ -380,6 +392,11 @@ model ResearchSession {
   voiceAttemptCount      Int?                      @default(0) @map("voice_attempt_count")
   voiceTurnCount         Int?                      @default(0) @map("voice_turn_count")
   voiceTranscriptChars   Int?                      @default(0) @map("voice_transcript_chars")
+  /// NULL = native Compass session; EXTERNAL_IMPORT = pasted by a member (member-reported, not
+  /// provider-authenticated). Migration 075.
+  provenance             String?                   @db.VarChar(30)
+  externalUrl            String?                   @map("external_url") @db.Text
+  sessionNotes           String?                   @map("session_notes") @db.Text
   pmInterview            PMInterview?
 
   @@index([studyId, status])
@@ -674,7 +691,14 @@ model OKRCycle {
 
 model Objective {
   id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  cycleId           String      @map("cycle_id") @db.Uuid
+  /// Direct tenant scope (migration 068). Authorization reads this column, never
+  /// the cycle parent chain. Nullable in the database only because DSQL cannot
+  /// add a NOT NULL column to a populated table; every write path sets it and
+  /// every read path treats NULL as deny.
+  workspaceId       String?     @map("workspace_id") @db.Uuid
+  /// Optional (migration 070): an Objective without a cycle is a persistent /
+  /// cross-cycle Objective. NULL means "no cycle", not "unknown".
+  cycleId           String?     @map("cycle_id") @db.Uuid
   squadId           String?     @map("squad_id") @db.Uuid
   parentKeyResultId String?     @map("parent_key_result_id") @db.Uuid
   title             String      @db.VarChar(255)
@@ -684,7 +708,8 @@ model Objective {
   sortOrder         Int         @default(0) @map("sort_order")
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @default(now()) @map("updated_at")
-  cycle             OKRCycle    @relation(fields: [cycleId], references: [id])
+  workspace         Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  cycle             OKRCycle?   @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   squad             Squad?      @relation(fields: [squadId], references: [id])
   parentKeyResult   KeyResult?  @relation("SquadKRSupport", fields: [parentKeyResultId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   keyResults        KeyResult[]
@@ -692,6 +717,7 @@ model Objective {
   updatedById       String?     @map("updated_by_id") @db.Uuid
   source            String      @default("UI") @map("source") @db.VarChar(20)
 
+  @@index([workspaceId], map: "idx_objectives_workspace_id")
   @@map("objectives")
 }
 
@@ -762,6 +788,11 @@ model Opportunity {
 
 model Solution {
   id            String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Direct tenant scope (migration 068). Authorization reads this column, never
+  /// the opportunity parent chain. Nullable in the database only because DSQL
+  /// cannot add a NOT NULL column to a populated table; every write path sets
+  /// it and every read path treats NULL as deny.
+  workspaceId   String?           @map("workspace_id") @db.Uuid
   opportunityId String            @map("opportunity_id") @db.Uuid
   title         String            @db.VarChar(255)
   description   String?           @db.Text
@@ -769,6 +800,7 @@ model Solution {
   sortOrder     Int               @default(0) @map("sort_order")
   createdAt     DateTime          @default(now()) @map("created_at")
   updatedAt     DateTime          @default(now()) @map("updated_at")
+  workspace     Workspace?        @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   opportunity   Opportunity       @relation(fields: [opportunityId], references: [id])
   assumptions   Assumption[]
   roadmapItems  RoadmapItem[]
@@ -779,6 +811,7 @@ model Solution {
   comments      SolutionComment[]
   score         SolutionScore?
 
+  @@index([workspaceId], map: "idx_solutions_workspace_id")
   @@map("solutions")
 }
 
@@ -890,6 +923,9 @@ model CommentElementAnchor {
   /// comments made inside Compass, where the reviewer is already looking at the
   /// artifact.
   screenshotUrl      String?  @map("screenshot_url") @db.Text
+  /// Zero-based slide of a SLIDE_DECK artifact the comment was left on, or null
+  /// when the comment is not slide-scoped (migration 078).
+  slideIndex         Int?     @map("slide_index")
   comment            Comment  @relation(fields: [commentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([artifactId, pageUrl], map: "idx_comment_element_anchors_artifact_page")
@@ -1155,6 +1191,11 @@ model RoadmapItem {
   feedbackId       String?          @map("feedback_id") @db.Uuid
   nowCommitmentProvenance String     @default("LEGACY_UNGATED") @map("now_commitment_provenance") @db.VarChar(30)
   nowDecisionRecordId String?        @map("now_decision_record_id") @db.Uuid
+  /// TRUE when auto-sync created this item because its solution reached Building (migration 075).
+  /// An ARCHIVED row with this flag is the suppression marker: auto-sync never re-adds it.
+  autoCreated      Boolean?         @map("auto_created")
+  /// Set when a human edits the dates or horizon (migration 075). While NULL, a linked item follows its solution.
+  scheduleEditedAt DateTime?        @map("schedule_edited_at")
   createdAt        DateTime         @default(now()) @map("created_at")
   updatedAt        DateTime         @default(now()) @map("updated_at")
   workspace        Workspace        @relation(fields: [workspaceId], references: [id])
@@ -1279,6 +1320,7 @@ model ReviewOption {
   revisionId        String           @map("revision_id") @db.Uuid
   actionKey         String           @map("action_key") @db.VarChar(50)
   label             String           @db.VarChar(120)
+  description       String?          @db.Text
   outcomeClass      String           @map("outcome_class") @db.VarChar(30)
   continuationKey   String           @map("continuation_key") @db.VarChar(80)
   sortOrder         Int              @default(0) @map("sort_order")
@@ -1300,6 +1342,7 @@ model DecisionRecord {
   actorUserId     String                @map("actor_user_id") @db.Uuid
   actorRole       String                @map("actor_role") @db.VarChar(30)
   rationale       String?               @db.Text
+  answersJson     String?               @map("answers_json") @db.Text
   idempotencyKey  String                @unique(map: "idx_decision_records_idempotency") @map("idempotency_key") @db.VarChar(128)
   decidedAt       DateTime              @default(now()) @map("decided_at")
   request         ReviewRequest         @relation(fields: [requestId], references: [id])
@@ -1694,6 +1737,7 @@ model CustomFieldDefinition {
   workspace       Workspace             @relation(fields: [workspaceId], references: [id])
   sharedOptionSet SharedFieldOptionSet? @relation(fields: [sharedOptionSetId], references: [id])
   values          CustomFieldValue[]
+  cardSortRounds  CardSortRound[]
   createdById String?            @map("created_by_id") @db.Uuid
   updatedById String?            @map("updated_by_id") @db.Uuid
   source      String             @default("UI") @map("source") @db.VarChar(20)
@@ -1714,6 +1758,137 @@ model CustomFieldValue {
 
   @@unique([fieldId, objectId])
   @@map("custom_field_values")
+}
+
+// ─── Card Sorting ─────────────────────────────────────────────────────────────
+
+// A repeatable "propose moves on a factor" exercise. The factor is any SELECT
+// CustomFieldDefinition; its effective options (local, or inherited from a
+// SharedFieldOptionSet) are the buckets. Nothing here is specific to MoSCoW /
+// Priority — that is merely the first factor it was built for.
+//
+// Rounds exist so the exercise is repeatable: this quarter's tally must not be
+// polluted by last quarter's proposals, and "reveal" must be a discrete event
+// rather than a per-proposal flag.
+
+model CardSortRound {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  name        String @db.VarChar(255)
+  /// One of: OPPORTUNITY | SOLUTION | EXPERIMENT | OBJECTIVE | KEY_RESULT | ROADMAP_ITEM | TASK.
+  /// Must match the factor field's own objectType — validated in app code.
+  objectType  String @map("object_type") @db.VarChar(50)
+  /// The factor being judged. Points at a SELECT CustomFieldDefinition; the
+  /// round's buckets are that field's *effective* options, so a field backed by
+  /// a SharedFieldOptionSet picks up the set's list. Deliberately not
+  /// denormalized here — re-resolved on every read via
+  /// lib/shared-field-options.ts, so editing the option set is reflected
+  /// immediately instead of silently diverging from the round.
+  fieldDefinitionId String @map("field_definition_id") @db.Uuid
+  /// One of: OPEN | REVEALED | CLOSED.
+  /// OPEN     — participants may read only their OWN proposals.
+  /// REVEALED — tally readable by anyone who can read the workspace.
+  /// CLOSED   — same visibility as REVEALED; no further proposals accepted.
+  state       String    @default("OPEN") @db.VarChar(20)
+  createdById String    @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+  /// No @updatedAt — DSQL has no ON UPDATE triggers. Bumped by the
+  /// injectUpdatedAt client extension (lib/prisma-updated-at.ts).
+  updatedAt   DateTime  @default(now()) @map("updated_at")
+  revealedAt  DateTime? @map("revealed_at")
+  closedAt    DateTime? @map("closed_at")
+
+  workspace       Workspace             @relation(fields: [workspaceId], references: [id])
+  fieldDefinition CustomFieldDefinition @relation(fields: [fieldDefinitionId], references: [id])
+  proposals       CardSortProposal[]
+  newEntries      CardSortNewEntry[]
+
+  @@index([workspaceId, state])
+  @@map("card_sort_rounds")
+}
+
+// One person's proposed move for one object in one round.
+//
+// Proposals are SPARSE DELTAS: a row exists only where someone actively
+// disagreed with the official value. The absence of a row means "no opinion
+// recorded" — it is NOT implicit agreement, and no aggregate in
+// lib/card-sort-tally.ts may treat it as such.
+
+model CardSortProposal {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roundId  String @map("round_id") @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+  objectId String @map("object_id") @db.Uuid
+  /// The option value this proposal moves the object TO. Validated against the
+  /// factor field's effective options, and rejected when it equals fromValue
+  /// (a no-op is not an opinion).
+  proposedValue String @map("proposed_value") @db.VarChar(255)
+  /// Snapshot of the official value at the moment the proposal was made.
+  ///
+  /// Always written by the server from the live CustomFieldValue — never
+  /// supplied by the caller, so it cannot be spoofed or accidentally omitted.
+  /// Nullable only to represent "the object had no value for this factor yet",
+  /// which is a real state for factors with unset objects; a sentinel string
+  /// would be indistinguishable from a genuine option value.
+  ///
+  /// Not an optimization: once a facilitator reconciles the official value, a
+  /// proposal reading "move to should_do" is uninterpretable without knowing
+  /// what it moved from, and net-flow math has no source bucket at all.
+  fromValue String?  @map("from_value") @db.VarChar(255)
+  rationale String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  /// See CardSortRound.updatedAt — extension-managed, not @updatedAt.
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  round CardSortRound @relation(fields: [roundId], references: [id])
+
+  /// One live proposal per person per object per round: changing your mind
+  /// updates this row rather than appending a second opinion.
+  @@unique([roundId, userId, objectId])
+  @@index([roundId, objectId])
+  @@map("card_sort_proposals")
+}
+
+// One person's proposal that a NEW object be added to the thing being sorted.
+//
+// A proposed entry is NOT an Opportunity. It is a pending request held on the
+// round, and nothing in the OST changes until the round's facilitator accepts
+// it — at which point the real Opportunity is created (accepted_object_id
+// records which one). Until then it never appears among the board's rows, the
+// tally, or anywhere outside the round, so an unvetted idea cannot leak into
+// the team's real backlog. Only OPPORTUNITY rounds accept entries.
+//
+// Visibility follows the same blind-vote rule as proposals
+// (canSeeOtherProposals in lib/card-sort.ts): while a round is OPEN only the
+// proposer and the facilitator can see an entry.
+
+model CardSortNewEntry {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roundId     String  @map("round_id") @db.Uuid
+  /// The proposer. Attributed, like every other card sort ballot.
+  userId      String  @map("user_id") @db.Uuid
+  title       String  @db.VarChar(255)
+  description String? @db.Text
+  /// The bucket the proposer thinks it belongs in, as one of the factor's
+  /// option values. Optional. On accept it becomes the proposer's ordinary
+  /// CardSortProposal on the new opportunity — never the official field value.
+  suggestedValue String? @map("suggested_value") @db.VarChar(255)
+  /// One of: PENDING | ACCEPTED | REJECTED.
+  status      String  @default("PENDING") @db.VarChar(20)
+  /// The Opportunity created on accept. Null unless status = ACCEPTED.
+  acceptedObjectId String?   @map("accepted_object_id") @db.Uuid
+  resolvedById     String?   @map("resolved_by_id") @db.Uuid
+  resolvedAt       DateTime? @map("resolved_at")
+  /// Why it was rejected, shown to the proposer. Null unless status = REJECTED.
+  resolutionNote   String?   @map("resolution_note") @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+  /// See CardSortRound.updatedAt — extension-managed, not @updatedAt.
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  round CardSortRound @relation(fields: [roundId], references: [id])
+
+  @@index([roundId, status])
+  @@map("card_sort_new_entries")
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
@@ -2169,8 +2344,13 @@ model Artifact {
   workspaceId       String             @map("workspace_id") @db.Uuid
   title             String             @db.VarChar(255)
   description       String?            @db.Text
-  /// HTML_UPLOAD | EXTERNAL_LINK
+  /// HTML_UPLOAD | EXTERNAL_LINK | V0_CHAT
   sourceType        String             @map("source_type") @db.VarChar(30)
+  /// v0 chat id; populated only when sourceType is V0_CHAT (migration 090_v0_chat_artifacts).
+  v0ChatId          String?            @map("v0_chat_id") @db.VarChar(100)
+  /// NULL (= DOCUMENT) | SLIDE_DECK. Presentation kind, orthogonal to sourceType;
+  /// allowed values live in lib/artifact-kind.ts (migration 078).
+  kind              String?            @map("kind") @db.VarChar(30)
   /// ACTIVE | ARCHIVED
   status            String             @default("ACTIVE") @db.VarChar(20)
   currentRevisionId String?            @map("current_revision_id") @db.Uuid
@@ -2202,9 +2382,26 @@ model ArtifactRevision {
   byteSize       Int?       @map("byte_size")
   sha256         String?    @db.VarChar(64)
   externalUrl    String?    @map("external_url") @db.Text
+  /// v0 version marker captured with this revision (V0_CHAT only, migration 090_v0_chat_artifacts).
+  v0VersionId    String?    @map("v0_version_id") @db.VarChar(200)
   createdById    String?    @map("created_by_id") @db.Uuid
   source         String     @default("UI") @db.VarChar(20)
   createdAt      DateTime   @default(now()) @map("created_at")
+
+  /// Captured screenshot of whatever this revision points at (migration
+  /// 077). These are SIBLINGS of blobPathname, not a replacement: an EXTERNAL_LINK
+  /// revision has no blobPathname of its own but can have a thumbnail. All
+  /// nullable — "no screenshot captured" is the normal state.
+  thumbnailPathname   String?   @map("thumbnail_pathname") @db.Text
+  thumbnailMimeType   String?   @map("thumbnail_mime_type") @db.VarChar(100)
+  thumbnailByteSize   Int?      @map("thumbnail_byte_size")
+  thumbnailWidth      Int?      @map("thumbnail_width")
+  thumbnailHeight     Int?      @map("thumbnail_height")
+  thumbnailCapturedAt DateTime? @map("thumbnail_captured_at")
+  /// The URL actually photographed, AFTER redirects — deliberately not assumed to
+  /// equal externalUrl, which it differs from whenever the target redirects.
+  thumbnailSourceUrl  String?   @map("thumbnail_source_url") @db.Text
+
   artifact       Artifact   @relation("ArtifactRevisions", fields: [artifactId], references: [id])
   currentFor     Artifact[] @relation("CurrentArtifactRevision")
 
@@ -2596,9 +2793,165 @@ model AgentConversation {
   workspace Workspace      @relation(fields: [workspaceId], references: [id])
   user      User           @relation(fields: [userId], references: [id])
   messages  AgentMessage[]
+  runs      AgentRun[]
+  participants AgentConversationParticipant[]
 
   @@index([workspaceId, userId])
   @@map("agent_conversations")
+}
+
+/// A user invited into someone else's agent conversation. The conversation
+/// OWNER is NOT a row here: it stays `AgentConversation.userId`, so a conversation with
+/// no rows behaves exactly as before. `removedAt` null = active; set = removed or left
+/// (re-inviting clears it, the unique index keeps one row per user). Any participant may
+/// invite; there is no cap. Access is re-checked against live workspace membership on
+/// every call, never cached from this row.
+/// DSQL: no FKs, no @updatedAt (set explicitly).
+model AgentConversationParticipant {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  /// Always PARTICIPANT today; the column leaves room for roles without a migration.
+  role          String    @default("PARTICIPANT") @db.VarChar(20)
+  addedByUserId String    @map("added_by_user_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @map("updated_at")
+  removedAt     DateTime? @map("removed_at")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id])
+
+  @@unique([conversationId, userId], map: "idx_agent_conversation_participants_conversation_user")
+  @@index([userId, workspaceId], map: "idx_agent_conversation_participants_user_workspace")
+  @@map("agent_conversation_participants")
+}
+
+/// Pointer to the current Agent SDK session transcript of a conversation (one row per
+/// conversation). The transcript is a private Vercel Blob object at `blobKey`; a new
+/// revision is a NEW blob key, swapped in with a compare-and-set on `revision`.
+/// `throughMessageId` is the user message of the turn that produced the transcript, so
+/// the next turn can tell which later messages the session has not seen.
+/// DSQL: no FKs, PK = conversation_id (no index to build), no @updatedAt trigger.
+model AgentSession {
+  conversationId   String   @id @map("conversation_id") @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  sessionId        String   @map("session_id") @db.VarChar(64)
+  blobKey          String   @map("blob_key") @db.VarChar(512)
+  throughMessageId String   @map("through_message_id") @db.Uuid
+  revision         Int      @default(1)
+  byteSize         Int      @default(0) @map("byte_size")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @map("updated_at")
+
+  @@map("agent_sessions")
+}
+
+/// One attempted agent web_search: the audit record and the per-turn
+/// budget. The composite key is the budget — credentialId is the 5-minute AGENT_TURN
+/// credential (one per turn) and a search claims the next seq, so racing searches
+/// cannot both take the same slot and the cap holds without a lock. Stores the query
+/// and the result URLs only, never page content.
+model AgentWebSearch {
+  credentialId   String    @map("credential_id") @db.Uuid
+  seq            Int
+  userId         String    @map("user_id") @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  conversationId String?   @map("conversation_id") @db.Uuid
+  query          String    @db.VarChar(400)
+  status         String    @default("STARTED") @db.VarChar(20)
+  resultCount    Int       @default(0) @map("result_count")
+  resultUrls     Json      @map("result_urls")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  finishedAt     DateTime? @map("finished_at")
+
+  @@id([credentialId, seq])
+  @@map("agent_web_searches")
+}
+
+/// One durable, detachable agent turn. The sandbox owns execution and
+/// reports back over an authenticated callback; this row owns the *lifecycle*
+/// (status, lease, deadline, cleanup handles) so a turn survives the browser
+/// closing and can be swept by cron rather than by a request's `finally` block.
+///
+/// Lease/heartbeat/worker-token shape is deliberately the same as
+/// ResearchVoiceCall — see lib/research-voice-operations.ts for the precedent.
+/// `workerTokenHash` is SHA-256 of a single-purpose callback token that cannot
+/// call MCP tools; the MCP key is tracked separately as `apiKeyId` so both the
+/// result path and the sweeper can revoke it.
+///
+/// DSQL: no FKs enforced, no @updatedAt trigger (set explicitly), JSON as TEXT.
+model AgentRun {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId  String    @map("conversation_id") @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  /// QUEUED | RUNNING | SUCCEEDED | FAILED | INTERRUPTED | CANCELED
+  status          String    @default("QUEUED") @db.VarChar(20)
+  /// "CHAT", or the HandoffKind when this run drives a handoff claim.
+  kind            String    @default("CHAT") @db.VarChar(30)
+  /// SHA-256 of the run's callback bearer token (never the token itself).
+  workerTokenHash String    @unique(map: "idx_agent_runs_worker_token") @map("worker_token_hash") @db.VarChar(64)
+  /// The ephemeral MCP key minted for this run, revocable from either path.
+  apiKeyId        String?   @map("api_key_id") @db.Uuid
+  /// Vercel Sandbox *name* — `Sandbox.get` is keyed by name, not id. Derived
+  /// from the run id (`compass-agent-run-<runId>`) so the sweeper can reach a
+  /// sandbox even when the start path died before persisting this column.
+  sandboxName     String?   @map("sandbox_name") @db.VarChar(255)
+  sandboxStoppedAt DateTime? @map("sandbox_stopped_at")
+  /// Handoff claim this run owns, when there is one (ProcessingState.claimId).
+  claimId         String?   @map("claim_id") @db.Uuid
+  /// Wall-clock bound; enforced sandbox-side too, and checked by the sweeper
+  /// independently of the heartbeat so a dead sweeper still terminates runs.
+  deadlineAt      DateTime  @map("deadline_at")
+  lastHeartbeatAt DateTime? @map("last_heartbeat_at")
+  statusChangedAt DateTime  @default(now()) @map("status_changed_at")
+  startedAt       DateTime? @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+  /// Highest accepted event sequence; the cheap cursor the viewer tails from.
+  lastSeq         Int       @default(0) @map("last_seq")
+  /// Per-run caps: a chatty run must not be able to flood DSQL writes.
+  eventCount      Int       @default(0) @map("event_count")
+  payloadBytes    Int       @default(0) @map("payload_bytes")
+  model           String?   @db.VarChar(100)
+  inputTokens     Int?      @map("input_tokens")
+  outputTokens    Int?      @map("output_tokens")
+  numTurns        Int?      @map("num_turns")
+  costUsd         Float?    @map("cost_usd")
+  durationMs      Int?      @map("duration_ms")
+  packProvenance  String?   @map("pack_provenance") @db.Text
+  error           String?   @db.Text
+  errorCode       String?   @map("error_code") @db.VarChar(50)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @map("updated_at")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id])
+  events       AgentRunEvent[]
+
+  @@index([conversationId, createdAt], map: "idx_agent_runs_conversation_created")
+  @@index([status, lastHeartbeatAt], map: "idx_agent_runs_status_heartbeat")
+  @@index([workspaceId, userId], map: "idx_agent_runs_workspace_user")
+  @@map("agent_runs")
+}
+
+/// Append-only trace of one run: status phases, agent stream messages, the
+/// result, and heartbeats. The unique (runId, seq) is what makes a retried
+/// callback batch idempotent — a duplicate delivery collides and is discarded
+/// instead of doubling the transcript.
+model AgentRunEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  runId       String   @map("run_id") @db.Uuid
+  /// Monotonic per run, assigned in the sandbox, starting at 1.
+  seq         Int
+  /// status | agent | result | error | heartbeat
+  type        String   @db.VarChar(20)
+  payloadJson String   @map("payload_json") @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  run AgentRun @relation(fields: [runId], references: [id])
+
+  @@unique([runId, seq], map: "idx_agent_run_events_run_seq")
+  @@index([runId, createdAt], map: "idx_agent_run_events_run_created")
+  @@map("agent_run_events")
 }
 
 /// One message in an AgentConversation. `role` is "user" | "assistant".
@@ -2620,6 +2973,9 @@ model AgentMessage {
   /// Exact JSON-encoded pack IDs, versions, source commits, digests and enabled
   /// skills used for this assistant turn. TEXT keeps the schema DSQL-safe.
   packProvenance String?  @map("pack_provenance") @db.Text
+  /// Who sent a user message, or who asked for an assistant one. Null for
+  /// every message that predates multi-user conversations, which are the owner's.
+  authorUserId   String?  @map("author_user_id") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at")
 
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
@@ -3102,4 +3458,153 @@ model WorkspaceActivationState {
   learningAt DateTime? @map("learning_at")
   updatedAt DateTime @default(now()) @map("updated_at")
   @@map("workspace_activation_states")
+}
+
+// ─── Typed link tables (migration 071) ────────────────────────────────────────
+// Many-to-many links that replace the single nullable opportunities.linked_key_result_id
+// pointer. Created by migration 071, which backfills Opportunity <-> Objective from
+// that pointer; Solution <-> Key Result starts empty.
+//
+// ONLY lib/typed-links.ts (plus the migration hook in lib/migrations and its SQL) reads or writes
+// these models; __tests__/typed-link-access.test.ts guards that. Code that uses them must not be
+// deployed before migration 071 has created the tables: every read and write fails with the
+// database error until it has (reads included, on purpose: there is no "no links" fallback).
+//
+// Deliberately scalar ids only, no Prisma relation fields: under relationMode = "prisma"
+// a relation makes Prisma query the child table whenever a parent row is deleted or
+// updated, which would make existing Opportunity/Objective/Solution/KeyResult code paths
+// touch these tables before the migration is applied. Integrity is application-level
+// (plus the migration postconditions); there is no foreign key either way.
+
+/// Opportunity <-> Objective. origin is DIRECT (created through the new UI/API) or
+/// LEGACY (copied from opportunities.linked_key_result_id by migration 071).
+model OpportunityObjectiveLink {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  opportunityId String   @map("opportunity_id") @db.Uuid
+  objectiveId   String   @map("objective_id") @db.Uuid
+  /// One of: DIRECT | LEGACY
+  origin        String   @db.VarChar(20)
+  source        String   @default("UI") @db.VarChar(20)
+  createdById   String?  @map("created_by_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([opportunityId, objectiveId], map: "idx_opportunity_objective_links_pair")
+  @@index([objectiveId, opportunityId], map: "idx_opportunity_objective_links_objective")
+  @@index([workspaceId], map: "idx_opportunity_objective_links_workspace")
+  @@map("opportunity_objective_links")
+}
+
+/// Solution <-> Key Result. Starts empty; written only by code that ships after 071.
+model SolutionKeyResultLink {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  solutionId  String   @map("solution_id") @db.Uuid
+  keyResultId String   @map("key_result_id") @db.Uuid
+  source      String   @default("UI") @db.VarChar(20)
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([solutionId, keyResultId], map: "idx_solution_key_result_links_pair")
+  @@index([keyResultId, solutionId], map: "idx_solution_key_result_links_key_result")
+  @@index([workspaceId], map: "idx_solution_key_result_links_workspace")
+  @@map("solution_key_result_links")
+}
+
+/// A user's subscription to one subject (Following and in-app notifications,
+/// migration 068). Polymorphic: `subjectType` reuses the COMMENT_TARGET_TYPES
+/// vocabulary plus METRIC, and there is deliberately no @relation because DSQL
+/// enforces no foreign keys; integrity lives in lib/followable.ts. `userId` is
+/// always a Compass User with a WorkspaceMember row, never an Agent.
+/// state: FOLLOWING | MUTED (an unfollow tombstone that auto-follow never
+/// overrides). source: MANUAL | AUTO_CREATE | AUTO_COMMENT | AUTO_ASSIGN.
+model Follow {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  subjectType String   @map("subject_type") @db.VarChar(40)
+  subjectId   String   @map("subject_id") @db.Uuid
+  state       String   @db.VarChar(20)
+  source      String   @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  @@unique([userId, subjectType, subjectId], map: "idx_follows_user_subject")
+  @@index([subjectType, subjectId], map: "idx_follows_subject")
+  @@index([workspaceId, userId], map: "idx_follows_workspace_user")
+  @@map("follows")
+}
+
+/// One in-app notification for one recipient (migration 068). Fan-out on write,
+/// never updated after insert except `readAt`. `payload` holds machine facts
+/// only (no titles or comment excerpts); display data is resolved at read time
+/// behind an access check. `dedupeKey` + recipient is unique so a replayed emit
+/// is harmless. kind: STATUS_CHANGED | COMMENT_ADDED | COMMENT_REPLIED | ASSIGNED.
+/// actorType: USER | AGENT | EXTERNAL | SYSTEM.
+model Notification {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  recipientUserId String    @map("recipient_user_id") @db.Uuid
+  subjectType     String    @map("subject_type") @db.VarChar(40)
+  subjectId       String    @map("subject_id") @db.Uuid
+  kind            String    @db.VarChar(40)
+  actorType       String    @map("actor_type") @db.VarChar(20)
+  actorId         String?   @map("actor_id") @db.Uuid
+  payload         Json      @default("{}")
+  dedupeKey       String    @map("dedupe_key") @db.VarChar(200)
+  readAt          DateTime? @map("read_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@unique([recipientUserId, dedupeKey], map: "idx_notifications_recipient_dedupe")
+  @@index([workspaceId, recipientUserId, createdAt], map: "idx_notifications_inbox")
+  @@map("notifications")
+}
+
+/// One row per workspace holding the Portal Home widget board (migration 074).
+/// draftWidgets is the admin draft in progress; publishedWidgets is what
+/// customers see, NULL until the first publish (the code-defined default home
+/// renders meanwhile). Both are JSON arrays of widgets
+/// {id, type, size, order, config, visibility}, Zod-validated on every write and
+/// every read (lib/portal-home/schema.ts). No relation to Workspace: Aurora DSQL
+/// enforces no foreign keys, so workspaceId is validated in application code and
+/// delete-workspace-cascade removes the row explicitly. updatedAt is set by the
+/// application on every write.
+model PortalHomeLayout {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  draftWidgets     Json      @default("[]") @map("draft_widgets")
+  publishedWidgets Json?     @map("published_widgets")
+  publishedAt      DateTime? @map("published_at")
+  publishedById    String?   @map("published_by_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @map("updated_at")
+
+  @@unique([workspaceId], map: "idx_portal_home_layouts_workspace")
+  @@map("portal_home_layouts")
+}
+
+/// A saved roadmap view (migration 079): a named, reusable filter + display
+/// configuration. workspaceId NULL = the org-level cross-workspace roadmap
+/// (/{org}/roadmap); workspaceId set = that workspace's own roadmap. visibility is
+/// PERSONAL (owner only) or SHARED (everyone who can reach that surface). `filters`
+/// and `display` are JSON documents Zod-validated on every write and every read
+/// (lib/roadmap-views/schema.ts); sharing never widens data access, because the items
+/// a view returns are re-scoped to the viewer's readable workspaces at query time.
+/// No relations: Aurora DSQL enforces no foreign keys, so ids are validated in
+/// application code and workspace/org deletion removes rows explicitly. updatedAt is
+/// set by the application on every write.
+model RoadmapView {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  workspaceId    String?  @map("workspace_id") @db.Uuid
+  ownerId        String   @map("owner_id") @db.Uuid
+  name           String   @db.VarChar(120)
+  visibility     String   @default("PERSONAL") @db.VarChar(20)
+  filters        Json     @default("{}")
+  display        Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+
+  @@index([organizationId, workspaceId], map: "idx_roadmap_views_org_surface")
+  @@map("roadmap_views")
 }

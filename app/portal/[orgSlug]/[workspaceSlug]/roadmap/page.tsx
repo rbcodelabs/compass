@@ -3,7 +3,8 @@ import { MessageSquare } from "lucide-react";
 import getPrisma from "@/lib/db";
 import { getPortalSession } from "@/lib/portal-auth";
 import { RoadmapVoteSection } from "@/components/portal/roadmap-vote-section";
-import { HORIZON_META, PORTAL_HORIZONS, portalBucketFor } from "@/lib/roadmap";
+import { portalBucketFor } from "@/lib/roadmap";
+import type { Horizon } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/patterns/empty-state";
 import { PageHeader } from "@/components/patterns/page-header";
@@ -20,10 +21,14 @@ type RoadmapItemWithVotes = {
   _count: { votes: number };
 };
 
-// Public columns: NOW / NEXT / LATER / LAUNCHING / SHIPPED. LAUNCHED items
-// fold into the Shipped column (portalBucketFor); private items are already
-// excluded by the query below.
-const HORIZONS = PORTAL_HORIZONS;
+// Public view merges the five stored portal buckets into three readable
+// columns. LAUNCHED already folds into SHIPPED (portalBucketFor); private
+// items are excluded by the query below.
+const COLUMNS: { key: string; label: string; description: string; horizons: Horizon[] }[] = [
+  { key: "now", label: "Now", description: "In progress and rolling out", horizons: ["NOW", "LAUNCHING"] },
+  { key: "next", label: "Coming Up", description: "Planned and on the horizon", horizons: ["NEXT", "LATER"] },
+  { key: "shipped", label: "Shipped", description: "Completed and live", horizons: ["SHIPPED"] },
+];
 
 export default async function PortalRoadmapPage({ params }: Props) {
   const { orgSlug, workspaceSlug } = await params;
@@ -68,16 +73,12 @@ export default async function PortalRoadmapPage({ params }: Props) {
     },
   });
 
-  const itemsByHorizon = HORIZONS.reduce(
-    (acc, h) => {
-      acc[h] = [];
-      return acc;
-    },
-    {} as Record<string, RoadmapItemWithVotes[]>
-  );
+  const itemsByColumn: Record<string, RoadmapItemWithVotes[]> = {};
+  for (const c of COLUMNS) itemsByColumn[c.key] = [];
   for (const item of rawItems) {
     const bucket = portalBucketFor(item.horizon);
-    if (bucket) itemsByHorizon[bucket].push(item);
+    const column = bucket && COLUMNS.find((c) => c.horizons.includes(bucket));
+    if (column) itemsByColumn[column.key].push(item);
   }
 
   return (
@@ -93,20 +94,20 @@ export default async function PortalRoadmapPage({ params }: Props) {
         ) : undefined}
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
-        {HORIZONS.map((horizon) => (
-          <section key={horizon} className="flex flex-col gap-3 rounded-xl border border-border-default bg-surface-inset p-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+        {COLUMNS.map((column) => (
+          <section key={column.key} className="flex flex-col gap-3 rounded-xl border border-border-default bg-surface-inset p-3">
             <div className="flex flex-col gap-0.5 border-b border-border-default pb-2">
               <span className="text-sm font-semibold text-text-primary">
-                {HORIZON_META[horizon].label}
+                {column.label}
               </span>
-              <span className="text-xs text-text-subtle">{HORIZON_META[horizon].portalDescription}</span>
+              <span className="text-xs text-text-subtle">{column.description}</span>
             </div>
             <div className="flex flex-col gap-2">
-              {itemsByHorizon[horizon].length === 0 ? (
+              {itemsByColumn[column.key].length === 0 ? (
                 <p className="py-4 text-center text-xs text-text-subtle">Nothing here yet</p>
               ) : (
-                itemsByHorizon[horizon].map((item) => (
+                itemsByColumn[column.key].map((item) => (
                   <RoadmapVoteSection
                     key={item.id}
                     item={item}

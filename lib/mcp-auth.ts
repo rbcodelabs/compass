@@ -35,6 +35,17 @@ export type McpAuthResult = {
 // 3. Otherwise looks up a per-user ApiKey by prefix+hash, checking it's not revoked.
 // Returns the userId if a per-user key matched (null for service key), or false if invalid.
 export async function validateMcpAuth(request: Request): Promise<McpAuthResult> {
+  try {
+    return validateProgrammaticAuth(request, { resource: mcpResourceUri() })
+  } catch {
+    return { valid: false }
+  }
+}
+
+export async function validateProgrammaticAuth(
+  request: Request,
+  options: { resource: string },
+): Promise<McpAuthResult> {
   const authHeader = request.headers.get("authorization")
   if (!authHeader?.startsWith("Bearer ")) return { valid: false }
   const token = authHeader.slice(7)
@@ -48,7 +59,7 @@ export async function validateMcpAuth(request: Request): Promise<McpAuthResult> 
     return { valid: true, userId: null, purpose: "SERVICE", scopeWorkspaceId: null }
   }
 
-  if (token.startsWith(ACCESS_TOKEN_PREFIX)) return validateOAuthAccessToken(token)
+  if (token.startsWith(ACCESS_TOKEN_PREFIX)) return validateOAuthAccessToken(token, options.resource)
 
   // Per-user key: format is cmp_<32 hex chars>
   if (!token.startsWith("cmp_") || token.length !== 36) return { valid: false }
@@ -133,10 +144,9 @@ export async function validateMcpAuth(request: Request): Promise<McpAuthResult> 
  * binding a 1-hour token with a 30-day refresh to a turn-scoped purpose is
  * incoherent rather than merely unimplemented.
  */
-async function validateOAuthAccessToken(token: string): Promise<McpAuthResult> {
-  let resource: string
+async function validateOAuthAccessToken(token: string, expectedResource: string): Promise<McpAuthResult> {
   try {
-    resource = mcpResourceUri()
+    new URL(expectedResource)
   } catch {
     // The deployment cannot name its own canonical audience, so it cannot
     // verify one. Refusing is the only safe answer: the alternative is
@@ -151,7 +161,7 @@ async function validateOAuthAccessToken(token: string): Promise<McpAuthResult> {
       type: "ACCESS",
       revokedAt: null,
       expiresAt: { gt: new Date() },
-      resource,
+      resource: expectedResource,
     },
     select: { id: true, userId: true, scope: true, scopeWorkspaceId: true, authorizationMode: true, agentId: true },
   })

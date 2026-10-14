@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { grantAgentScoringModelAdmin, revokeAgentScoringModelAdmin } from "@/app/[orgSlug]/settings/actions";
 import type { AgentAccessRow } from "@/lib/agent-org-admin-access";
 
@@ -50,22 +51,21 @@ export function AgentAccessPanel({
       {rows.length === 0 ? (
         <p className="text-sm text-text-muted">No active agents owned by organization members.</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[40rem] text-sm">
-            <thead>
-              <tr className="border-b border-border-default text-left text-text-muted">
-                <th className="py-2 pr-4 font-medium">Agent</th>
-                <th className="py-2 pr-4 font-medium">Owner</th>
-                <th className="py-2 pr-4 font-medium">Scoring-model admin</th>
-                <th className="py-2 font-medium"><span className="sr-only">Action</span></th>
-              </tr>
-            </thead>
-            <tbody>
+        <Table className="min-w-[40rem]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Agent</TableHead>
+                <TableHead>Owner</TableHead>
+                <TableHead>Scoring-model admin</TableHead>
+                <TableHead><span className="sr-only">Action</span></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {rows.map((row) => (
-                <tr key={row.agentId} className="border-b border-border-default last:border-0">
-                  <td className="py-2 pr-4 font-medium text-text-primary">{row.agentName}</td>
-                  <td className="py-2 pr-4">{row.ownerName}</td>
-                  <td className="py-2 pr-4">
+                <TableRow key={row.agentId}>
+                  <TableCell className="font-medium text-text-primary">{row.agentName}</TableCell>
+                  <TableCell>{row.ownerName}</TableCell>
+                  <TableCell>
                     {!row.granted && "Not granted"}
                     {row.granted && !row.inactive && `Granted by ${row.grantedByName}`}
                     {row.granted && row.inactive && (
@@ -73,8 +73,8 @@ export function AgentAccessPanel({
                         Inactive — grantor no longer an org admin ({row.grantedByName})
                       </span>
                     )}
-                  </td>
-                  <td className="whitespace-nowrap py-2 text-right">
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-right">
                     {row.granted ? (
                       <Button variant="outline" size="sm" disabled={isPending} onClick={() => run(revokeAgentScoringModelAdmin, row.agentId)}>
                         Revoke
@@ -89,12 +89,11 @@ export function AgentAccessPanel({
                         Re-grant as me
                       </Button>
                     )}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+        </Table>
       )}
     </div>
   );

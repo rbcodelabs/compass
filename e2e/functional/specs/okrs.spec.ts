@@ -72,8 +72,8 @@ test.describe("OKRs", () => {
     await expect(page.getByText(krTitle)).toBeVisible({ timeout: 10_000 });
 
     // ── 6. Log a check-in ───────────────────────────────────────────────────
-    // KR bar shows initial progress "0 % / 100 %"
-    await expect(page.getByText("0 % / 100 %")).toBeVisible();
+    // KR bar shows initial progress "0 / 100 %"
+    await expect(page.getByText("0 / 100 %")).toBeVisible();
 
     await page.getByRole("button", { name: "Check in" }).click();
     // Clear current value (pre-filled with 0) and enter 50
@@ -88,7 +88,7 @@ test.describe("OKRs", () => {
     await page.waitForLoadState("load");
 
     // After check-in, KR bar reflects new value
-    await expect(page.getByText("50 % / 100 %")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("50 / 100 %")).toBeVisible({ timeout: 10_000 });
     // "50%" appears both in the KR progress bubble and the objective avg — use
     // .first() to avoid strict-mode violation.
     await expect(page.getByText("50%").first()).toBeVisible();
@@ -196,5 +196,42 @@ test.describe("OKRs", () => {
     await expect(page.getByText("Supporting objectives")).toBeVisible();
     await expect(page.getByText(quarterlyObjective)).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("okr-hierarchy-mobile.png"), fullPage: true });
+  });
+
+  test("an Objective with no cycle is created, listed under 'No cycle / Persistent', and keeps its KR", async ({
+    page,
+    base,
+  }) => {
+    const ts = Date.now();
+    const objectiveTitle = `E2E Persistent Objective ${ts}`;
+    const krTitle = `E2E Persistent KR ${ts}`;
+
+    // With cycles (or cycle-less Objectives) the index shows the labeled card; a workspace with neither
+    // shows the empty state, which offers the same route as a link. Either entry reaches /okrs/none.
+    await page.goto(`${base}/okrs`);
+    await page.waitForLoadState("networkidle");
+    await page
+      .locator('[data-testid="persistent-objectives-card"], [data-testid="persistent-objectives-link"]')
+      .first()
+      .click();
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("heading", { name: "No cycle / Persistent" })).toBeVisible();
+
+    await page.getByRole("button", { name: /Add objective/i }).click();
+    await page.getByLabel("Title").fill(objectiveTitle);
+    await page.getByRole("button", { name: "Add objective" }).click();
+    await expect(page.getByText(objectiveTitle)).toBeVisible({ timeout: 10_000 });
+
+    await page.getByRole("button", { name: /Add key result/i }).click();
+    await page.getByLabel("Title").fill(krTitle);
+    await page.getByLabel("Target").fill("10");
+    await page.getByRole("button", { name: "Add key result" }).click();
+    await expect(page.getByLabel("Target")).not.toBeVisible({ timeout: 20_000 });
+    await page.reload();
+    await expect(page.getByText(krTitle)).toBeVisible({ timeout: 10_000 });
+
+    // It survives a reload of the index and stays reachable (never vanishes).
+    await page.goto(`${base}/okrs`);
+    await expect(page.getByTestId("persistent-objectives-card")).toContainText(/\d+ objectives?/);
   });
 });

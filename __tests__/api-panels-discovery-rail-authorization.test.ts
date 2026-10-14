@@ -40,6 +40,22 @@ describe("GET /api/panels/discovery-rail authorization", () => {
     expect(body.squads.map((s: { id: string }) => s.id)).toEqual(["squad-a"]);
   });
 
+  it("adds linkedObjectives from the typed links, never a link row that is wrong for the workspace, and nothing of B's", async () => {
+    session.userId = USERS.alice;
+    const links = fake.current!.state.opportunityObjectiveLinks;
+    const row = (extra: Record<string, unknown>) => ({ id: `l${links.length}`, createdAt: new Date(links.length + 1), origin: "DIRECT", ...extra });
+    links.push(row({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a" }));
+    // Stamped with A's workspaceId but pointing at B's objective, and at an objective with a NULL workspaceId: both hidden.
+    links.push(row({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-b" }));
+    links.push(row({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-null" }));
+    // B's own link, stamped B: never in A's payload.
+    links.push(row({ workspaceId: WS_B.id, opportunityId: "opp-b", objectiveId: "obj-b" }));
+    const res = await get(WS_A.org, WS_A.slug);
+    const body = await res.json();
+    expect(body.opportunities).toEqual([expect.objectContaining({ id: "opp-a", linkedObjectives: [{ id: "obj-a", title: "A objective" }] })]);
+    expect(JSON.stringify(body)).not.toContain("B objective");
+  });
+
   it("401s with no session and reads nothing", async () => {
     const res = await get(WS_B.org, WS_B.slug);
     expect(res.status).toBe(401);

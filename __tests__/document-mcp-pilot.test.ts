@@ -6,7 +6,12 @@ const mocks = vi.hoisted(() => ({
 }))
 vi.mock("@/lib/db", () => ({ default: () => mocks.db }))
 vi.mock("@/lib/document-storage", () => ({ isDocumentPilotWorkspace: () => true }))
-vi.mock("@/lib/document-service", () => ({ createDocument: mocks.create, updateDocument: mocks.update, hydrateDocument: mocks.hydrate }))
+vi.mock("@/lib/document-service", () => ({
+  createDocument: mocks.create,
+  updateDocument: mocks.update,
+  hydrateDocument: mocks.hydrate,
+  documentRevision: (row: { revision: string | null; updatedAt: Date }) => row.revision ?? `legacy:${row.updatedAt.toISOString()}`,
+}))
 import { createDoc, updateDoc, getDoc } from "@/lib/doc-tool-handlers"
 
 const actor = { userId: null, purpose: "AGENT" as const, agentId: "agent-a" }

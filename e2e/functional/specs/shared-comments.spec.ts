@@ -26,7 +26,7 @@ test.describe("Roadmap Item shared Discussion", () => {
     await card.getByRole("button", { name: itemTitle }).click();
 
     let panel = page.locator('[data-slot="sheet-content"]');
-    const discussion = panel.getByRole("heading", { name: "Discussion" }).locator("..");
+    const discussion = panel.getByRole("heading", { name: "Discussion", exact: true }).locator("..");
     await expect(panel.getByText("No comments yet.")).toBeVisible({ timeout: 10_000 });
 
     await panel.getByLabel("Add comment").fill(rootBody);

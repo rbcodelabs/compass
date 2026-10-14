@@ -106,10 +106,142 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "064_solution_scoring": "21f12a454e74c576b421be93f5fd65228126682d46ffb21eb7baf5f4d9a5456b",
   // Embedded feedback widget (RFC #298). Last, matching its MIGRATIONS position.
   "064_embed_feedback_sources": "767145991806adc79c0867428a513a14410fd8e6bd0a5023e3541bd73078643e",
+  // Review option description (question/options on tracked decisions). Last, matching its MIGRATIONS position.
+  "065_review_option_description": "bfd2f9f0dc95b85477bc83fc104c1d48cba82b3e20b0809d39ec17f14bad3b70",
   // Org-wide member read-only workspace access. Last, matching its MIGRATIONS position.
   "065_org_member_workspace_readonly": "23494bba1b038c15392f9f8d1d7c41be858dc33bebbd96b5f2185d2675676f5c",
-  "066_agent_org_admin_grants": "083b64d82e25724c5827a34c8eea97c1a63c21be6ead6c9caeaf3eac89288371"
+  "066_agent_org_admin_grants": "083b64d82e25724c5827a34c8eea97c1a63c21be6ead6c9caeaf3eac89288371",
+  // Per-question answers on decision records (multi-question tracked decisions). Last, matching its MIGRATIONS position.
+  "067_decision_answers": "d79f88798ff1764d42fd8e0a08dc65510fb39bef6f8d9bdf32aec1abe13ce14f",
+  // Card sort rounds and proposals (two additive CREATE TABLEs, three ASYNC indexes;
+  // no ALTER, no backfill). Last, matching its MIGRATIONS position. The SQL was audited
+  // by a read-only reviewer other than its author on 2026-09-30 (DSQL compatibility,
+  // schema parity, digest match) with no blocking findings, and applied to production
+  // the same day.
+  "067_card_sort_rounds": "dcc4a678a63bd6d8dd46f33338f06ccb4acd4fc54a932417f3656ab5a8689285",
+  // Proposed new entries for card sort rounds (one additive CREATE TABLE, one ASYNC
+  // index; no ALTER, no backfill). Same 2026-09-30 audit and production apply as 067.
+  "068_card_sort_new_entries": "133d41beb53cbab557ab9075df6bdc4a9bc625c3f46b93dc7979cbba2d75d6e7",
+  // Following and in-app notifications (ADR, slice 1): two new tables and five async indexes,
+  // IF NOT EXISTS throughout, no data writes. Digest recorded from the shipped SQL; please review it.
+  "068_follows_notifications": "0ba97ca0929c09a07c15a82404d5e41fac407fca6f4171aebda50c76e60f533c",
+  // Direct workspace_id on solutions and objectives (ADR Phase 0). The pinned SQL is DDL only;
+  // the batched backfill and its postconditions run in the runner hook, which is pinned
+  // separately in REVIEWED_MIGRATION_CODE_SHA256.
+  "068_workspace_id_on_solution_objective": "efc74d966e413e3cd5ad211f41ac96bbc6bcb6fa5cd230c9ac3e6a050ffbe9e1",
+  // DDL-free residual backfill: the SQL file is comments only, the work is the pinned hook below.
+  "069_workspace_id_residual_backfill": "9edcc2e6020df3065bde0bf0e2fd836f710adceef6f5ba0a018347ff8bdba74d",
+  // objectives.cycle_id DROP NOT NULL (ADR Phase 1): one DDL statement, no data writes.
+  // Digest recorded from the shipped SQL; please review that line.
+  "070_objective_optional_cycle": "4a6c14548f4cd58efe6509ad21976ac7728b364a619e644c208492fd12e56dfe",
+  // Typed link tables (ADR Phase 2, PR-1). DDL only here; the precondition, backfill with orphan
+  // quarantine and integrity postconditions are pinned in REVIEWED_MIGRATION_CODE_SHA256.
+  "071_typed_link_tables": "ed2bbdf524c02436eceba30b20b73a32111ddec3a4dbf9011f389984be189606",
+  // DDL-free residual pass of the typed link backfill (ADR Phase 2, PR-2). Comments only; the work is the pinned hook below.
+  "072_typed_links_residual_backfill": "7aed4ba070ff8e99b5d2207d76bcad9ee0cdb14d56ca2f343c44c340551a27a0",
+  // Workspace thinking model (two nullable ADD COLUMNs on workspaces; no index, no
+  // backfill, no hook). Last, matching its MIGRATIONS position. Migration only: no code
+  // reads the columns yet.
+  "073_workspace_thinking_model": "8c412a4c999568bc8ea2e802a3214ae5710f0721506d36eb3636afdd8574b7c6",
+  // Portal Home widget layout: one new table plus one unique ASYNC index, IF NOT EXISTS throughout,
+  // no data writes. Digest recorded from the shipped SQL; please review it. The postcondition hook
+  // (lib/migrations/portal-home-layout.ts) is pinned in REVIEWED_MIGRATION_CODE_SHA256 below.
+  "074_portal_home_layout": "a55135642d04825fc221b2ae1992972bdd118d8cbf8dc4289db75b1af5e80b3b",
+  // Roadmap item provenance: two nullable ADD COLUMNs on roadmap_items (auto_created, schedule_edited_at); no
+  // index, no backfill, no data writes. The postcondition hook (lib/migrations/roadmap-item-provenance.ts) is
+  // pinned in REVIEWED_MIGRATION_CODE_SHA256 below. Digest recorded from the shipped SQL; please review it.
+  "075_roadmap_item_provenance": "2d4d390790ff8cb20c7918e0b56b2a37ccbc99eddc5216622668ba50602ed0e6",
+  // External / manual research studies: five nullable ADD COLUMNs (research_studies and
+  // research_sessions), no index, no backfill, no hook. Digest recorded from the shipped SQL; please review it.
+  "076_research_external_studies": "01cc40f387b9171fc6761f598db0ce20e0dae1df9ca58f9755bdbe481bd97cb0",
+  // Artifact screenshots: seven nullable ADD COLUMN IF NOT EXISTS statements on artifact_revisions, no DEFAULT, no
+  // index, no backfill. The postcondition hook (lib/migrations/artifact-screenshots.ts) is pinned in
+  // REVIEWED_MIGRATION_CODE_SHA256 below. Digest recorded from the shipped SQL; please review it.
+  "077_artifact_screenshots": "cf897fc83af5b5f42ebb23923717060e45e1c5757f833b36d588d7d38eb98067",
+  // Slide-deck Artifacts (nullable artifacts.kind + comment_element_anchors.slide_index;
+  // no index, no backfill, no hook). Last, matching its MIGRATIONS position.
+  "078_artifact_slide_decks": "aa214ce3c2fcc1ce8055e0e9417bda69189aff99794d3bb3b2c14d0a562b3db9",
+  // Saved roadmap views: one new table plus one non-unique async index, no backfill.
+  // Digest recorded from the shipped SQL; please review it.
+  "079_roadmap_views": "0575ee815ac4c66181d213a7b6f495c77bb62a05271b4fb25d3c92f98df64d5b",
+  // Durable background agent runs: two additive CREATE TABLEs (agent_runs, agent_run_events)
+  // and six ASYNC indexes, two of them unique (worker-token lookup, (run_id, seq) idempotency).
+  // No ALTER, no backfill, no foreign keys. Digest recorded from the shipped SQL; please review it.
+  "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301",
+  // Agent SDK session pointer: one new table keyed by conversation_id, no index, no backfill.
+  // Digest recorded from the shipped SQL; please review it.
+  "080_agent_sessions": "f82aa43816ea5e1f5d393c2e244d4e2b0e41f3ce21e42494c99a587ce78f4475",
+  // Audit + per-turn budget for web_search: one new table keyed by (credential_id, seq), no index, no backfill.
+  // Digest recorded from the shipped SQL; please review it.
+  "081_agent_web_searches": "c2e0c3445770c5fb5adf24c4f043af46fa13472895023b4206993800715c3218",
+  // Multi-user agent conversations: one new table, a unique and a non-unique async index, and
+  // a nullable agent_messages.author_user_id. No backfill. Digest recorded from the shipped SQL; please review it.
+  "082_agent_conversation_participants": "0d72de736539ef65fd48f9111b9b3b9f99a7213d08bc123848335319cc67656b",
+  // v0 chat Artifacts: two nullable ADD COLUMNs (artifacts.v0_chat_id, artifact_revisions.v0_version_id),
+  // IF NOT EXISTS, no DEFAULT, no backfill, no index. Digest recorded from the shipped SQL; please review it.
+  "090_v0_chat_artifacts": "1a2098fa1c19b8257200cf0b00c6d7b9da763d9a13afbf7b1486b95ed3c297e3"
 };
+
+/**
+ * Migrations whose data half lives in TypeScript run by the runner (a backfill
+ * hook plus its postconditions). The SQL pin above cannot see that code, so the
+ * hook file is pinned here too: changing it requires the same explicit review.
+ */
+export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  "068_workspace_id_on_solution_objective": {
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  "069_workspace_id_residual_backfill": {
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 070 postcondition (objectives.cycle_id must really be nullable before the receipt).
+  "070_objective_optional_cycle": {
+    "lib/migrations/objective-optional-cycle.ts": "a81fe680f7a4e1510df7fda78997760d9c1bcf4168eeb4691feff5a49e7f30dc",
+  },
+  // 071 pins only its own hook: it carries a private copy of withOccRetry rather than importing the 068 hook.
+  // 071 and 072 run the very same hook file, so they carry the same digest: editing it re-reviews both.
+  "071_typed_link_tables": {
+    "lib/migrations/typed-link-tables.ts": "e5c230a29b094608fa3a2d0a5cc94f2b1e31c65307f1cb93e7d6a7afc41160df",
+  },
+  "072_typed_links_residual_backfill": {
+    "lib/migrations/typed-link-tables.ts": "e5c230a29b094608fa3a2d0a5cc94f2b1e31c65307f1cb93e7d6a7afc41160df",
+  },
+  // The 074 postcondition (table shape plus a valid, ready, unique workspace index before the receipt).
+  "074_portal_home_layout": {
+    "lib/migrations/portal-home-layout.ts": "4ad0279c979c9e90971958e475e521c5eda0ef043c6bd1fb1461b9482f94700d",
+  },
+  // The 075 postcondition (both roadmap_items columns present, typed and nullable before the receipt).
+  "075_roadmap_item_provenance": {
+    "lib/migrations/roadmap-item-provenance.ts": "6f99f4829eccd6864d7dd476a01299bb3027246f4d6e6d2fdbd255980b88f4f5",
+  },
+  // The 077 postcondition (all seven artifact_revisions thumbnail columns present, typed and nullable before the receipt).
+  "077_artifact_screenshots": {
+    "lib/migrations/artifact-screenshots.ts": "0ad4f77ef18ee68fcef5422d2d43040b2ec0ee2ac0c6107c90ac7bff53e05c78",
+  },
+  // The 079 postcondition (table shape plus a valid, ready, non-unique org/workspace index before the receipt).
+  "079_roadmap_views": {
+    "lib/migrations/roadmap-views.ts": "6afd1be2429b929b643e3ab50de8b5fd9b94fe350a4e49f76987e1b80fa9e5eb",
+  },
+  // The 082 postcondition (column shape plus a primary key on conversation_id alone before the receipt).
+  "080_agent_sessions": {
+    "lib/migrations/agent-sessions.ts": "8d4fdc83ab62c345ca0fe00be983904c14495def605ed2e7fc42f4bdcfa6d404",
+  },
+  // The 081 postcondition (column shape plus the composite (credential_id, seq) primary key before the receipt).
+  "081_agent_web_searches": {
+    "lib/migrations/agent-web-searches.ts": "0df81423dd87944c656f88e01ca6b4598f9e6c6fce02974e72819ec3102698c2",
+  },
+  // The 082 postcondition (participants table shape, nullable author column, both indexes valid and ready before the receipt).
+  "082_agent_conversation_participants": {
+    "lib/migrations/agent-conversation-participants.ts": "f7192dade000eae4d957d91711021dda072b0bae7718ec1f29aa1daeae83dbfe",
+  },
+};
+
+export function assertReviewedMigrationCode(name: string, read: (relativePath: string) => Buffer = (relativePath) => readFileSync(path.join(process.cwd(), relativePath))): void {
+  for (const [relativePath, expected] of Object.entries(REVIEWED_MIGRATION_CODE_SHA256[name] ?? {})) {
+    const digest = createHash("sha256").update(read(relativePath)).digest("hex");
+    if (digest !== expected) throw new Error(`Reviewed managed manifest code digest changed: ${name} ${relativePath}`);
+  }
+}
 
 export function assertReviewedManagedManifest(migrations: readonly { name: string; filePath: string }[]): void {
   const names = migrations.map(migration => migration.name);
@@ -122,5 +254,6 @@ export function assertReviewedManagedManifest(migrations: readonly { name: strin
     if (path.resolve(migration.filePath) !== filePath) throw new Error("Reviewed managed manifest path changed");
     const digest = createHash("sha256").update(readFileSync(filePath)).digest("hex");
     if (digest !== REVIEWED_SQL_SHA256[migration.name]) throw new Error(`Reviewed managed manifest digest changed: ${migration.name}`);
+    assertReviewedMigrationCode(migration.name);
   }
 }

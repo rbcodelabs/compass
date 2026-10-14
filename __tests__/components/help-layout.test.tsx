@@ -2,6 +2,7 @@
 import { render, screen } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { describe, expect, it, vi } from "vitest"
+vi.mock("next/navigation", () => ({ usePathname: () => "/help/00-overview" }))
 
 vi.mock("@/lib/docs", () => ({
   getAllDocs: () => [

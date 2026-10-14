@@ -1,0 +1,14 @@
+-- Migration 069: residual backfill of solutions.workspace_id / objectives.workspace_id.
+--
+-- NO DDL. 068 added the columns and backfilled every row that existed when it was
+-- POSTed, but the runner never re-runs a migration once its receipt is written, and
+-- instances of the previous deploy keep inserting Solutions and Objectives with a NULL
+-- workspace_id until they drain. Every read path treats NULL as "deny", so those rows
+-- would stay hidden forever. This migration is the second, later pass: POST it after the
+-- deploy that writes the column has fully rolled out. The runner hook
+-- (lib/migrations/workspace-id-on-solution-objective.ts) re-runs the same batched,
+-- idempotent backfill and the same postconditions (zero NULLs, every row equal to its
+-- parent's workspace) before the receipt is recorded, so it fails closed on an orphan or
+-- a drifted row exactly as 068 does.
+--
+-- This file intentionally contains no executable statement; the work is the hook.

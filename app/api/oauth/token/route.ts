@@ -47,7 +47,7 @@ import {
 import { verifyPkce } from "@/lib/oauth/pkce"
 import { resolveResource } from "@/lib/oauth/resource"
 import { hashOAuthToken, isOAuthRefreshToken } from "@/lib/oauth/tokens"
-import { parseScope } from "@/lib/oauth/constants"
+import { filterScopesForResource, parseScope } from "@/lib/oauth/constants"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -199,6 +199,9 @@ async function authorizationCodeGrant(
   if (resource.resource !== stored.resource) {
     return fail("invalid_target", "resource does not match the authorization request.")
   }
+  if (!scopeMatchesResource(stored.scope, stored.resource)) {
+    return fail("invalid_scope", "The authorization grant contains scopes for a different resource.")
+  }
 
   const binding = carryAuthorizationBinding(stored)
   if (!binding) {
@@ -252,6 +255,10 @@ async function refreshTokenGrant(
     await revokeTokenFamily(previous.familyId)
     return fail("invalid_grant", "This refresh token was issued to a different client.")
   }
+  if (!scopeMatchesResource(previous.scope, previous.resource)) {
+    await revokeTokenFamily(previous.familyId)
+    return fail("invalid_scope", "The refresh grant contains scopes for a different resource.")
+  }
 
   const binding = carryAuthorizationBinding(previous)
   if (!binding) {
@@ -300,6 +307,12 @@ async function refreshTokenGrant(
     return fail("invalid_grant", "The refresh token is invalid, expired, or has been revoked.")
   }
   return tokenResponse(tokens)
+}
+
+function scopeMatchesResource(scope: string, resource: string): boolean {
+  const requested = parseScope(scope)
+  const allowed = new Set(filterScopesForResource(scope, resource))
+  return requested.every((entry) => allowed.has(entry as never))
 }
 
 /**

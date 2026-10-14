@@ -17,6 +17,10 @@ const mockPrisma = {
   workspace: {
     findUnique: vi.fn(),
   },
+  squad: { findFirst: vi.fn() },
+  solution: { findFirst: vi.fn() },
+  opportunity: { findFirst: vi.fn() },
+  keyResult: { findFirst: vi.fn() },
   roadmapItem: {
     findFirst: vi.fn(),
     findUnique: vi.fn(),
@@ -93,6 +97,10 @@ function textOf(result: { content: Array<{ type: string; text: string }> }): str
 }
 
 beforeEach(() => {
+  mockPrisma.squad.findFirst.mockResolvedValue({ id: "linked" })
+  mockPrisma.solution.findFirst.mockResolvedValue({ id: "linked" })
+  mockPrisma.opportunity.findFirst.mockResolvedValue({ id: "linked" })
+  mockPrisma.keyResult.findFirst.mockResolvedValue({ id: "linked" })
   mockPrisma.portfolioCapacityReservation.findUnique.mockResolvedValue(null)
   mockPrisma.$transaction.mockImplementation((operation: Promise<unknown>[] | ((database: typeof mockPrisma) => unknown)) => Array.isArray(operation) ? Promise.all(operation) : operation(mockPrisma))
 })
@@ -252,6 +260,8 @@ describe("update_roadmap_item MCP tool — optional links", () => {
     expect(data).toEqual({
       keyResultId: targetId, solutionId: null, title: "Updated", horizon: "NEXT",
       status: "ACTIVE", isPrivate: false, startDate: new Date("2026-09-01"), updatedAt: expect.any(Date),
+      // A hand-set schedule ends the item following its solution (migration 075).
+      scheduleEditedAt: expect.any(Date),
     })
     expect(data).not.toHaveProperty("opportunityId")
     expect(data).not.toHaveProperty("squadId")

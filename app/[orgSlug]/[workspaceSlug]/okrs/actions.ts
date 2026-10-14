@@ -8,7 +8,9 @@ import { getHumanActivityPrisma } from "@/lib/analytics/activity";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
 import { assertWorkspaceWritable } from "@/lib/workspace-context";
-import { setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
+import { getKeyResultMoveTargets, moveKeyResultToObjective, OKRHierarchyError, setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
+import { drainAfterParentDelete, drainLegacyLinksForOpportunities, drainLinksFor } from "@/lib/typed-links";
+import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
 
 // ─── Create Cycle ─────────────────────────────────────────────────────────────
 
@@ -34,6 +36,8 @@ export async function createCycle(
     throw new Error(parsed.error.issues[0].message);
   }
 
+  // workspaceId arrives from the client: prove the caller is a member of it.
+  await requireProductWorkspace(workspaceId);
   const prisma = getPrisma();
 
   const cycle = await prisma.oKRCycle.create({
@@ -57,8 +61,22 @@ const CreateObjectiveSchema = z.object({
   squadId: z.string().uuid().optional(),
 });
 
+/** Authorized workspace for a new Objective: the cycle's when given, else the membership-checked slugs'. */
+async function resolveObjectiveWorkspaceId(cycleId: string | null, orgSlug: string, workspaceSlug: string): Promise<string> {
+  const slugWorkspaceId = await requireProductWorkspaceBySlug(orgSlug, workspaceSlug);
+  if (!cycleId) return slugWorkspaceId;
+  // The URL and the cycle must agree (parity with the MCP tool): a cycle from another
+  // workspace the caller belongs to is rejected instead of silently winning.
+  const { workspaceId } = await requireProductEntity("okrCycle", cycleId, slugWorkspaceId);
+  return workspaceId;
+}
+
+/**
+ * `cycleId === null` creates a cycle-less (persistent) Objective; its workspace
+ * then comes from the membership-checked org/workspace slugs instead of a cycle.
+ */
 export async function createObjective(
-  cycleId: string,
+  cycleId: string | null,
   orgSlug: string,
   workspaceSlug: string,
   formData: FormData
@@ -74,11 +92,18 @@ export async function createObjective(
     throw new Error(parsed.error.issues[0].message);
   }
 
+  // The Objective's workspace is derived from the authorized cycle (or, with no
+  // cycle, from the membership-checked slugs), never from client-supplied ids,
+  // so it cannot disagree with the cycle it is created under.
+  const workspaceId = await resolveObjectiveWorkspaceId(cycleId, orgSlug, workspaceSlug);
   const prisma = getPrisma();
+  // A client-supplied squad must live in the same workspace as the cycle.
+  if (parsed.data.squadId) await requireProductEntity("squad", parsed.data.squadId, workspaceId);
 
   await prisma.objective.create({
     data: {
-      cycleId,
+      workspaceId,
+      cycleId: cycleId ?? null,
       title: parsed.data.title,
       description: parsed.data.description,
       owner: parsed.data.owner,
@@ -113,6 +138,7 @@ export async function addKeyResult(
     throw new Error(parsed.error.issues[0].message);
   }
 
+  await requireProductEntity("objective", objectiveId);
   const prisma = getPrisma();
 
   await prisma.keyResult.create({
@@ -149,6 +175,7 @@ export async function logCheckIn(
     throw new Error(parsed.error.issues[0].message);
   }
 
+  await requireProductEntity("keyResult", keyResultId);
   // Create check-in record and update the KR's current value in one transaction.
   await getHumanActivityPrisma().$transaction(async tx => {
     await tx.checkIn.create({
@@ -191,6 +218,49 @@ export async function setObjectiveParentKR(
   revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
 }
 
+// ─── Move Key Result to another Objective ─────────────────────────────────────
+
+/** Objectives the Key Result can move to (picker options). Read-only; membership is checked via the Key Result. */
+export async function listKeyResultMoveTargets(keyResultId: string) {
+  const { workspaceId } = await requireProductEntity("keyResult", keyResultId);
+  return getKeyResultMoveTargets(workspaceId, keyResultId);
+}
+
+export type MoveKeyResultResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Returns the refusal as a value: production Next masks the message of a thrown server-action error,
+ * and a hierarchy refusal ("closed cycle", "would create a loop") is something the user needs to read.
+ */
+export async function moveKeyResult(
+  keyResultId: string,
+  objectiveId: string,
+  orgSlug: string,
+  workspaceSlug: string
+): Promise<MoveKeyResultResult> {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
+  if (!workspace) throw new Error("Workspace not found");
+  assertWorkspaceWritable(workspace);
+
+  try {
+    // The workspace comes from the membership-checked slugs; both rows are re-verified inside it by the move.
+    await moveKeyResultToObjective({
+      workspaceId: workspace.id,
+      keyResultId,
+      objectiveId,
+      actorId: session.user.id,
+    });
+  } catch (error) {
+    if (error instanceof OKRHierarchyError) return { ok: false, error: error.message };
+    throw error;
+  }
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/discovery`, "layout");
+  return { ok: true };
+}
+
 // ─── Update Objective Status ──────────────────────────────────────────────────
 
 const ObjectiveStatusSchema = z.enum([
@@ -212,6 +282,7 @@ export async function updateObjectiveStatus(
     throw new Error("Invalid status value");
   }
 
+  await requireProductEntity("objective", objectiveId);
   const prisma = getPrisma();
 
   await prisma.objective.update({
@@ -228,8 +299,14 @@ export async function deleteObjective(
   objectiveId: string,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("objective", objectiveId);
   const prisma = getPrisma();
+  // The objective is deleted FIRST; a refusal (Restrict: it still has key results) throws here with every link untouched. Its links are
+  // drained AFTER, in committed passes of at most 500 links (no foreign key reaches the link tables, and one transaction could not hold
+  // an objective's links under DSQL's 3,000-row cap). A failed drain is logged and swallowed: the delete succeeded, and leftovers are
+  // reported by linkIntegrity and pruned by 072.
   await prisma.objective.delete({ where: { id: objectiveId } });
+  await drainAfterParentDelete("ui.deleteObjective", () => drainLinksFor(prisma, "objective", [objectiveId]));
   revalidatePath(revalidatePathStr);
 }
 
@@ -239,8 +316,17 @@ export async function deleteKeyResult(
   keyResultId: string,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("keyResult", keyResultId);
   const prisma = getPrisma();
+  // Read BEFORE the delete: the relation's SetNull clears these pointers, and the LEGACY links they implied are what goes afterwards.
+  const keyResult = await prisma.keyResult.findUnique({ where: { id: keyResultId }, select: { objectiveId: true } });
+  const pointing = await prisma.opportunity.findMany({ where: { linkedKeyResultId: keyResultId }, select: { id: true } });
+  // Delete the key result FIRST. It can be refused under relationMode="prisma" (Restrict: supporting objectives, check-ins); a refusal
+  // throws here and no link has been touched. Links are drained AFTER (see deleteObjective): the LEGACY links implied by the pointers
+  // (DIRECT links are the user's own and stay) and every solution link to this key result. A failed drain is logged and swallowed.
   await prisma.keyResult.delete({ where: { id: keyResultId } });
+  await drainAfterParentDelete("ui.deleteKeyResult.legacy", () => drainLegacyLinksForOpportunities(prisma, pointing.map((o) => o.id), keyResult?.objectiveId));
+  await drainAfterParentDelete("ui.deleteKeyResult.solution", () => drainLinksFor(prisma, "keyResult", [keyResultId]));
   revalidatePath(revalidatePathStr);
 }
 
@@ -251,6 +337,7 @@ export async function reorderObjective(
   sortOrder: number,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("objective", objectiveId);
   const prisma = getPrisma();
   await prisma.objective.update({
     where: { id: objectiveId },
@@ -266,6 +353,7 @@ export async function reorderKeyResult(
   sortOrder: number,
   revalidatePathStr: string
 ) {
+  await requireProductEntity("keyResult", keyResultId);
   const prisma = getPrisma();
   await prisma.keyResult.update({
     where: { id: keyResultId },

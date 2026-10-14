@@ -15,7 +15,8 @@ import {
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { getWorkspace } from "@/lib/workspace"
-import { listTrackedDecisions, TRACKED_SUBJECT_LABELS, TRACKED_SUBJECT_TYPES, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { listTrackedDecisions, TRACKED_SUBJECT_TYPES, type TrackedSubjectType } from "@/lib/tracked-decisions"
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { WorkspacePage } from "@/components/patterns/workspace-page"
 import { EmptyState } from "@/components/patterns/empty-state"
 import { StatusBadge } from "@/components/patterns/status-badge"
@@ -24,8 +25,7 @@ import { DecisionsFilters } from "@/components/decisions/decisions-filters"
 import { DecisionsTabs } from "@/components/decisions/decisions-tabs"
 import { buttonVariants } from "@/components/ui/button"
 import { isOrgAdminRole } from "@/lib/roles"
-
-const LABELS: Record<string, string> = TRACKED_SUBJECT_LABELS
+import { isChoiceActionKey, parseDecisionAnswers, trackedSubjectLabels } from "@/lib/tracked-decision-types"
 
 const SUBJECT_ICON: Record<TrackedSubjectType, ComponentType<{ className?: string }>> = {
   WORKSPACE: Building2,
@@ -80,6 +80,7 @@ export default async function DecisionsPage({ params, searchParams }: {
   if (!session?.user?.id) redirect("/login")
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id)
   if (!workspace) notFound()
+  const LABELS: Record<string, string> = trackedSubjectLabels(resolveThinkingModel(workspace).labels)
   const tab = query.tab === "decided" ? "DECIDED" : query.tab === "awaiting" ? "AWAITING_FOLLOW_THROUGH" : "PENDING"
   const subjectType = TRACKED_SUBJECT_TYPES.includes(query.type as TrackedSubjectType) ? query.type as TrackedSubjectType : undefined
   const page = Math.max(1, Number.parseInt(query.page ?? "1", 10) || 1)
@@ -108,19 +109,13 @@ export default async function DecisionsPage({ params, searchParams }: {
       actions={
         <Suspense>
           <DecisionsFilters reviewers={members.map((member) => ({ id: member.userId, name: member.user.name ?? member.user.email }))} />
-          {/*
-            The label collapses to the icon under `sm`, matching the Search /
-            Date / Filters triggers beside it. WorkspacePage's header row does
-            not wrap (`flex items-center justify-between`), so four
-            always-labelled controls squeeze the "Decisions" <h1> — which is
-            `min-w-0 truncate` — down to a few characters on a 390px phone.
-          */}
+          {/* Primary action: the label collapses to the icon under `sm` (docs/design/workspace-header.md). */}
           <RequestDecisionLink
             orgSlug={orgSlug}
             workspaceSlug={workspaceSlug}
             label={<span className="hidden sm:inline">New decision</span>}
             ariaLabel="New decision"
-            className={buttonVariants({ variant: "outline", size: "sm" })}
+            className={buttonVariants({ size: "sm" })}
           />
         </Suspense>
       }
@@ -164,6 +159,10 @@ export default async function DecisionsPage({ params, searchParams }: {
                       </p>
                       <h2 className="mt-0.5 truncate text-sm font-semibold text-text-primary">{revision?.title ?? "Decision"}</h2>
                       <p className="mt-1 line-clamp-2 text-sm text-text-secondary">{revision?.summary}</p>
+                      {decision && isChoiceActionKey(decision.option.actionKey) && <p className="mt-1 line-clamp-2 break-words text-sm text-text-primary [overflow-wrap:anywhere]"><span className="text-text-subtle">Chosen:</span> <span className="font-medium">{decision.option.label}</span></p>}
+                      {decision && parseDecisionAnswers(decision.answersJson).length > 0 && <ul aria-label="Answers" className="mt-1 space-y-0.5 text-sm">
+                        {parseDecisionAnswers(decision.answersJson).map((answer) => <li key={answer.questionIndex} className="min-w-0 break-words text-text-primary [overflow-wrap:anywhere]"><span className="text-text-subtle">{answer.question}</span> <span aria-hidden className="text-text-subtle">→</span> <span className="font-medium">{answer.chosenOption}</span></li>)}
+                      </ul>}
                       <p className="mt-2 text-xs text-text-subtle">
                         Updated {request.updatedAt.toLocaleDateString()}
                         {decision ? ` • ${reviewerNames.get(decision.actorUserId) ?? "Workspace admin"}` : ""}

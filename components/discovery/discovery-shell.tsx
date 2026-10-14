@@ -22,7 +22,8 @@ export function DiscoveryShell({
   // Matches exactly one more path segment, e.g. "/abc123" — the opportunity detail route.
   const detailMatch = afterBase ? /^\/([^/]+)\/?$/.exec(afterBase) : null;
 
-  if (!detailMatch) {
+  // /discovery/tree is the workspace tree (TORRES_OST / OPPORTUNITY_FIRST_OKR), not an opportunity id.
+  if (!detailMatch || detailMatch[1] === "tree") {
     return <>{children}</>;
   }
 

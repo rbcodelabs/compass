@@ -5,6 +5,7 @@ import { assertInterviewToolInput, assertPmInterviewKind, handoffKind, parseProc
 import { assertResearchSynthesisToolInput } from "@/lib/research-handoff-scope"
 import { PM_INTERVIEW_ALLOWED_FIELDS, parsePmInterviewTargetType } from "@/lib/pm-interview-contracts"
 import { withToolTransaction } from "@/lib/mcp-tool-db"
+import { withFollowingCommit } from "@/lib/following-commit"
 import { ok } from "@/lib/mcp-output"
 import { researchFailureDiagnostic } from "@/lib/research-failure-diagnostics"
 
@@ -21,7 +22,20 @@ export async function failPendingInterviewProcessing(conversationId: string, use
   await prisma.agentConversation.updateMany({ where: { id: conversationId, userId, workspaceId, interviewProcessingJson: conversation!.interviewProcessingJson }, data: { interviewProcessingJson: JSON.stringify({ ...state, status: "FAILED" }), updatedAt: new Date() } })
 }
 
-export async function claimInterviewProcessing(conversationId: string, userId: string, workspaceId: string, retry: boolean) {
+/**
+ * Default claim lease. Was inlined as `Date.now() + 240_000` — the same four
+ * minutes the turn route used to be capped at.
+ *
+ * It has to be a parameter now that a run can legitimately last twenty minutes
+ *: `scopedHandoff` rejects every MCP tool call once `state.deadline`
+ * passes, so a hardcoded four-minute lease would quietly start failing the
+ * agent's tool calls a quarter of the way into a long handoff turn. The default
+ * is unchanged so the synchronous fallback path and existing callers behave
+ * exactly as before.
+ */
+export const DEFAULT_INTERVIEW_CLAIM_LEASE_MS = 240_000
+
+export async function claimInterviewProcessing(conversationId: string, userId: string, workspaceId: string, retry: boolean, leaseMs: number = DEFAULT_INTERVIEW_CLAIM_LEASE_MS) {
   const prisma = getPrisma()
   return prisma.$transaction(async tx => {
     const conversation = await tx.agentConversation.findFirst({ where: { id: conversationId, userId, workspaceId } })
@@ -31,7 +45,7 @@ export async function claimInterviewProcessing(conversationId: string, userId: s
     const status = processingStatus(state)
     if (status === "SUCCEEDED" || status === "RUNNING" || (status !== "PENDING" && !retry)) return { claimed: false as const, state: { ...state, status } }
     const claimId = randomUUID()
-    const next: ProcessingState = { ...state, status: "RUNNING", claimId, deadline: Date.now() + 240_000 }
+    const next: ProcessingState = { ...state, status: "RUNNING", claimId, deadline: Date.now() + leaseMs }
     const changed = await tx.agentConversation.updateMany({ where: { id: conversationId, interviewProcessingJson: conversation.interviewProcessingJson }, data: { interviewProcessingJson: JSON.stringify(next), updatedAt: new Date() } })
     if (changed.count !== 1) throw new Error("Interview processing changed; reopen the conversation")
     return { claimed: true as const, state: next }
@@ -117,8 +131,8 @@ async function ownerInterview(actor: McpActor, id: string) {
 
 async function readTarget(tx: AppTransactionClient, type: string, id: string, workspaceId: string) {
   if (type === "OPPORTUNITY") return tx.opportunity.findFirst({ where: { id, workspaceId } })
-  if (type === "SOLUTION") return tx.solution.findFirst({ where: { id, opportunity: { workspaceId } } })
-  if (type === "ASSUMPTION") return tx.assumption.findFirst({ where: { id, solution: { opportunity: { workspaceId } } } })
+  if (type === "SOLUTION") return tx.solution.findFirst({ where: { id, workspaceId } })
+  if (type === "ASSUMPTION") return tx.assumption.findFirst({ where: { id, solution: { workspaceId } } })
   return tx.experiment.findFirst({ where: { id, workspaceId } })
 }
 
@@ -162,7 +176,9 @@ export async function withInterviewMutation<T>(tool: string, args: Record<string
   // PM receipt machinery must not run — the handler executes untouched.
   if (kind === "RESEARCH_SYNTHESIS") return handler()
   assertExhaustiveKind(kind)
-  return getPrisma().$transaction(async tx => {
+  // Following effects (notifications, auto-follow) queued by the handler run
+  // only after this transaction commits, and are dropped if it rolls back.
+  return withFollowingCommit(() => getPrisma().$transaction(async tx => {
     const { conversation, state, interview } = await scopedInterview(actor, tx)
     assertInterviewToolInput(interview.targetType, interview.targetId, tool, args)
     const payloadHash = createHash("sha256").update(JSON.stringify(Object.entries(args).sort(([a], [b]) => a.localeCompare(b)))).digest("hex")
@@ -185,5 +201,5 @@ export async function withInterviewMutation<T>(tool: string, args: Record<string
     const saved = await tx.agentConversation.updateMany({ where: { id: conversation.id, interviewProcessingJson: conversation.interviewProcessingJson }, data: { interviewProcessingJson: JSON.stringify({ ...state, status: "SUCCEEDED", receipt }), updatedAt: new Date() } })
     if (saved.count !== 1) throw new Error("Interview attempt was superseded")
     return result
-  })
+  }))
 }

@@ -29,7 +29,7 @@ const baseProps = {
   userName: "Rick Bowman",
   userEmail: "rick@rbcodelabs.com",
   workspaces: [
-    { id: "ws-1", name: "Compass", slug: "compass", orgSlug: "rbcodelabs" },
+    { id: "ws-1", name: "Compass", slug: "compass", orgSlug: "rbcodelabs", orgName: "RB Codelabs" },
   ],
 };
 
@@ -149,31 +149,54 @@ describe("Sidebar", () => {
     expect(sidebar).toHaveAttribute("data-state", "collapsed");
   });
 
-  it("keeps legacy Feedback navigation when research capture is gated off", () => {
+  it("shows Feedback without Research when research capture is gated off", () => {
     renderSidebar(true, false)
     const mainNav = screen.getByRole("navigation", { name: "Main navigation" })
     expect(within(mainNav).getByRole("link", { name: "Feedback" }))
       .toHaveAttribute("href", "/rbcodelabs/compass/feedback")
+    expect(within(mainNav).queryByRole("link", { name: "Research" })).not.toBeInTheDocument()
+    expect(within(mainNav).queryByRole("link", { name: "Capture" })).not.toBeInTheDocument()
+  })
+
+  it("splits Feedback and Research into separate items when research capture is enabled", () => {
+    renderSidebar(true, true)
+    const mainNav = screen.getByRole("navigation", { name: "Main navigation" })
+    expect(within(mainNav).getByRole("link", { name: "Feedback" }))
+      .toHaveAttribute("href", "/rbcodelabs/compass/feedback")
+    expect(within(mainNav).getByRole("link", { name: "Research" }))
+      .toHaveAttribute("href", "/rbcodelabs/compass/capture")
     expect(within(mainNav).queryByRole("link", { name: "Capture" })).not.toBeInTheDocument()
   })
 
   /**
-   * The agent rail's toggle. It lives in this nav rather than as a trailing
-   * action on the Agent row because `SidebarMenuAction` is hidden in icon mode,
+   * The agent rail's toggle. It is a footer row beside the account menu rather
+   * than a trailing action because `SidebarMenuAction` is hidden in icon mode,
    * which would hide the control from precisely the users who collapse the nav
-   * to make room for the rail.
+   * to make room for the rail. It is the only agent entry in the sidebar: the
+   * full-page screen is reached from the rail's expand icon.
    */
   describe("agent panel toggle", () => {
     it("is absent outside a workspace, where there is no rail to toggle", () => {
       // The settings tree renders this sidebar with no AgentRailProvider.
       renderSidebar(true);
-      expect(screen.queryByRole("button", { name: /agent panel/i })).not.toBeInTheDocument();
-      // The Agent *link* is untouched either way — both surfaces are keepers.
-      const mainNav = screen.getByRole("navigation", { name: "Main navigation" });
-      expect(within(mainNav).getByRole("link", { name: "Agent" })).toHaveAttribute(
-        "href",
-        "/rbcodelabs/compass/agent",
+      expect(screen.queryByRole("button", { name: "Agent" })).not.toBeInTheDocument();
+    });
+
+    it("the main nav has no Agent link to the full-page screen", () => {
+      render(
+        <TooltipProvider>
+          <SidebarProvider>
+            <AgentRailProvider>
+              <Sidebar {...baseProps} isOrgAdmin researchCaptureEnabled />
+            </AgentRailProvider>
+          </SidebarProvider>
+        </TooltipProvider>,
       );
+      const mainNav = screen.getByRole("navigation", { name: "Main navigation" });
+      expect(within(mainNav).queryByRole("link", { name: "Agent" })).not.toBeInTheDocument();
+      expect(within(mainNav).queryByRole("button", { name: "Agent" })).not.toBeInTheDocument();
+      // ...and the toggle sits outside it, in the footer by the account menu.
+      expect(screen.getByRole("button", { name: "Agent" })).toBeInTheDocument();
     });
 
     it("toggles the rail without touching the nav's own collapsed state", () => {
@@ -188,12 +211,12 @@ describe("Sidebar", () => {
       );
 
       const sidebar = document.querySelector('[data-slot="sidebar"][data-state]');
-      const toggle = screen.getByRole("button", { name: "Agent panel" });
+      const toggle = screen.getByRole("button", { name: "Agent" });
       expect(toggle).toHaveAttribute("aria-pressed", "false");
 
       fireEvent.click(toggle);
 
-      expect(screen.getByRole("button", { name: "Agent panel" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Agent" })).toHaveAttribute(
         "aria-pressed",
         "true",
       );
@@ -214,10 +237,7 @@ describe("Sidebar", () => {
           </SidebarProvider>
         </TooltipProvider>,
       );
-      expect(screen.queryByRole("button", { name: /agent panel/i })).not.toBeInTheDocument();
-      // The Agent link itself is still there — it is the page you are on.
-      const mainNav = screen.getByRole("navigation", { name: "Main navigation" });
-      expect(within(mainNav).getByRole("link", { name: "Agent" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Agent" })).not.toBeInTheDocument();
     });
   });
 });

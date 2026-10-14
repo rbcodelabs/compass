@@ -18,6 +18,14 @@ Open a Roadmap item's detail panel to discuss it with the team. Shared Discussio
 
 On mobile, each column fills the available board width with small side gutters. Swipe sideways to reach the next column.
 
+### Board swimlanes
+
+Use **Group board by** in the header to split the Board into horizontal swimlanes — one row per **Squad**, or one row per option of any single-select custom field on roadmap items. Each lane keeps the same horizon columns, with a sticky header so Now/Next/Later stay visible as you scroll, and ends with a **No squad** / **No \<field\>** lane for items with no value (or a value that no longer exists). Click a lane's header to collapse or expand it; the count shows how many items it holds. Choose **No swimlanes** to return to the classic board. Multi-select fields aren't offered, since an item could belong to several lanes at once.
+
+Drag a card into another lane to **reassign** it: the card's squad (or custom-field value) becomes the lane's, and dropping into the *No …* lane clears it. Dragging also changes the horizon in the same move if you drop in a different column. If the change can't be saved, the card snaps back and a message explains. Dragging an item from **Not scheduled** into a lane schedules it and sets that lane's value. Launching and Launched remain workflow-managed: dropping there opens the item instead of moving it.
+
+The grouping is part of the page URL (`?groupBy=`) and of saved views, and the squad filter narrows the squad lanes.
+
 ![Roadmap on mobile](/screenshots/docs/roadmap-mobile.png)
 
 > 📸 Screenshot: run `pnpm docs:screenshots` with a `DOCS_SESSION_FILE` to capture this image.
@@ -47,10 +55,28 @@ Click **+ Add Item** in any horizon column. A roadmap item has:
 - **Linked Key Result** — The outcome it contributes to
 - **Linked Experiment** — The experiment that validated the approach
 - **Squad** — Team assignment
-- **Start date / End date** — Optional. Leave these blank for items whose timing isn't settled yet — the item still appears on the Timeline as a dashed placeholder bar you can drag to schedule; fill them in (here, via Edit, or by dragging the bar) once you know when the work will happen.
+- **Start date / End date** — Optional. Leave these blank for items whose timing isn't settled yet — the item still appears on the Timeline as a dashed placeholder bar you can drag to schedule; fill them in (in the item detail, or by dragging the bar) once you know when the work will happen.
 - **Private** — Optional checkbox. Hides the item from the public portal roadmap and blocks voting on it, while still showing it (with a 🔒 Private badge) on the internal Board and Timeline. Use it for items you don't want visible to customers — security fixes, sensitive internal work, anything you'd rather not telegraph externally.
 
-The linked metadata appears as small icon badges on each card, giving stakeholders a quick way to trace the evidence behind each item. Use a card's **Edit** menu action at any time to add or change its title, description, dates, linked opportunity, or private status. Choose **None** in the Opportunity picker to remove an existing opportunity link.
+The linked metadata appears as small icon badges on each card, giving stakeholders a quick way to trace the evidence behind each item. A card's **Edit** menu action (or clicking its title) opens the item's detail, where you can change its title, description, horizon, squad, dates, linked opportunity, or private status. Choose **None** in the Opportunity picker to remove an existing opportunity link.
+
+## Roadmap item detail
+
+The item detail is one responsive view that appears as a side panel from the board or timeline and as a full page at `/roadmap/<item>` (use **Open full page**). Edits save as you make them.
+
+- **Summary row** — the horizon dropdown, squad, dates, and a vote count sit beside the **Discussion** shortcut, **Follow**, and **Request decision**. A **Private** chip shows when the item is hidden from the public roadmap, and an **Archived** chip when it has been archived.
+- **Dates** are an inclusive range: set both a start and an end, or clear both with **Clear dates**.
+- **Main sections** — Launch (when the marketing-launch workflow is on), Delivery tasks, Linked to, custom fields, and Measurements. **Linked to** lists the Opportunity, Solution, Experiment, Key Result, and Feedback the item came from; each row opens its panel.
+- **More properties** (collapsed by default) holds the linked Opportunity picker, the **Private** toggle, and **Archive item**.
+- **Discussion** sits beside the content on a wide surface and below it on a narrow panel or phone. Layouts scroll rather than squash, so nothing is clipped on a phone.
+
+Private items are visible to workspace members here and on the board; only the public portal hides them. **Follow** appears once Following is enabled for roadmap items.
+
+![Roadmap item full page on desktop](/screenshots/docs/roadmap-item-fullpage-desktop.png)
+
+![Roadmap item panel with properties](/screenshots/docs/roadmap-item-properties-desktop.png)
+
+![Roadmap item on a phone](/screenshots/docs/roadmap-item-overlay-mobile.png)
 
 ## Timeline View
 
@@ -98,9 +124,31 @@ Use **Reload timeline** to fetch a fresh snapshot after changes made elsewhere. 
 Compass surfaces validated or in-delivery Solutions from Discovery, and Bug-type Feedback items, that don't have a roadmap item yet. These are the same items that already have a "Promote to roadmap" action on the Discovery solution card or the Feedback board; this is a second entry point that lets you schedule them without leaving the roadmap.
 
 - **On the Board** — these candidates live in an always-visible **Not scheduled** Kanban column after Shipped. Drag a card from it onto any roadmap horizon to schedule it there, or use its **⋯** menu to add it directly to Now/Next/Later without dragging. The column remains visible when empty so the board layout stays consistent.
-- **On the Timeline** — the same **Not yet on the roadmap** panel remains below the chart. Drop a card on a compatible Now, Next, or Later lane to schedule it at the drop date, or use the panel's quick-add menu without dragging. Squad-linked solutions must stay in their own squad's lane. Pending items cannot be submitted again while their save is in progress.
+- **On the Timeline** — the collapsible **Ready to schedule** rail beside (or, on narrower screens, above) the chart. See [Build the roadmap from Discovery](#build-the-roadmap-from-discovery) below.
 
-Ideas (as opposed to Bugs) aren't included in this panel — they're expected to go through Opportunity → Solution discovery first, same as everywhere else in Compass.
+Ideas (as opposed to Bugs) aren't included in the list — they're expected to go through Opportunity → Solution discovery first, same as everywhere else in Compass.
+
+## Build the roadmap from Discovery
+
+On the Timeline you rarely need to type a roadmap item. Start from the Solutions and Opportunities you already have, and Compass creates the roadmap item for you. Every item created this way is **linked** to its Solution (and Opportunity), takes its title, its squad (from the Opportunity) and its key result, and is placed at a suggested slot: the first free stretch in that squad's row on or after today, six weeks long unless the Solution has an effort estimate. Each Solution has at most one active roadmap item, so scheduling something that is already on the roadmap does nothing.
+
+- **Show or hide the rail.** The panel button next to **Schedule from discovery…** in the header (**Hide ready-to-schedule rail** / **Show ready-to-schedule rail**, or the `[` key, ignored while you type in a field) collapses the rail so the chart takes the full width, and brings it back. A small badge on the button shows how many items are waiting in the rail, so you can see there is work to schedule while it is closed; it also notes how many items Auto-sync added. Compass remembers your choice in this browser. Until you choose, the rail is open beside the chart on wide screens (1320px and up) and closed on narrower ones, where it would otherwise push the chart down; open it from the same button and it stacks above the chart. An empty roadmap opens the rail by default. Everything else (the `/` palette, drawing a range on a row, **Build from discovery**, Auto-sync and Undo) works with the rail closed; only dragging a card from the rail needs it open.
+- **Ready to schedule rail.** The left rail lists validated and in-delivery Solutions that have no roadmap item, grouped under their Opportunity, with status, score and squad chips. Search it, filter by **All / Validated / Scored 70+**, and click a card's title to open its details. Bug feedback with no roadmap item is listed here too.
+- **Drag to a row.** Drag a card onto a squad row. A ghost bar shows the dates under your pointer and **Release to create roadmap item**; dropping creates the item in that row's squad starting on that date.
+- **Schedule button.** Every card has a **Schedule →** button that creates the item at the suggested slot, so the whole flow works from the keyboard.
+- **Bulk.** Tick several cards, then choose **Now / Next / Later** to schedule them at the start of that horizon, or **Auto-fit** to place them highest score first in each squad's first free slot.
+- **Draw a range.** Click and drag across an empty part of a row (mouse or pen). Pick a Solution from the **Schedule from…** popover (the row's squad first, then by score) and it is created over exactly that range.
+- **Schedule from discovery… (`/`).** The header button, or the `/` key anywhere on the Timeline (ignored while you type in a field), opens a command palette over every Solution and Opportunity. **Enter** schedules the highlighted Solution at the suggested slot, **Tab** lets you choose a start date and length first, **Shift+Enter** schedules every unscheduled Solution under that Opportunity, and **Esc** closes it. Solutions already on the roadmap are shown as *scheduled* and can't be chosen.
+- **Empty roadmap.** A workspace with no roadmap items offers **Build from discovery**: choose **All validated**, **Top scored (70+)** or **Currently building** and **Create N roadmap items** to drop a first pass at proposed, non-overlapping slots (highest score first within each squad). **Add an item manually** shows the blank timeline instead.
+- **Undo.** Every create shows a toast with **Undo**. Undo archives the new roadmap items; the Solutions themselves are never changed and simply return to the rail.
+
+### Auto-sync
+
+Moving a Solution to **In delivery** (from the Discovery card, its detail panel, the Solutions board, MCP `update_solution_status` or the API) adds it to the roadmap automatically if it has no roadmap item yet. Validated does not: it stays in the rail as ready to schedule. The header shows **Auto-sync on**, the bar carries an **auto** badge, the rail lists it under **Auto-added** with an **Undo**, and a toast offers Undo when you made the change.
+
+- The item is added once. If you remove or undo an auto-added item, Compass never adds it back for that Solution, even if its status changes again.
+- Removing or archiving a roadmap item never changes its Solution.
+- While a linked item hasn't been edited by hand, its title follows the Solution's title, and moving the Solution to In delivery or Shipped moves the item to Now or Shipped (an unstarted item also starts today). Once you edit an item's dates or horizon, its schedule stops following the Solution. Rename the item and its title stops following too.
 
 ## Drag to Reorder
 
@@ -118,13 +166,25 @@ Checklist templates are workspace-owned and reusable: define one per tier (for e
 
 Checklist templates themselves (create_checklist_template, list_checklist_templates) are managed via the MCP API — no dedicated template-management UI ships yet.
 
+## Saved Views
+
+Save the way you like to look at the roadmap and come back to it with one click. On a workspace roadmap, open the **Saved views** menu to save the current squad, custom-field filter, grouping and Board/Timeline choice. Opening a saved view applies those settings to the URL, so you can still change or clear any of them afterwards.
+
+Views are **personal** by default. The owner can share a view with the workspace or the whole organization. Only the owner can edit a view; the owner (or an admin, for shared views) can delete it. Sharing a view never widens access to the items themselves.
+
+## All Roadmaps (Cross-Workspace)
+
+**All roadmaps** in the sidebar opens a read-only roadmap at `/[org]/roadmap` that combines every workspace in the organization you can read. Filter by workspace, horizon, squad, status, date range, or linked key result or solution, then group and sort the results. Each item links back to its own workspace, where you edit it. The same saved views menu is available here.
+
+Because `roadmap` and `settings` are used by these organization pages, they cannot be used as workspace slugs.
+
 ## Keeping the Roadmap Honest
 
 A roadmap that isn't updated is worse than no roadmap — it creates false confidence. Compass is designed to make updates low-friction: drag to move between horizons, click to update details. The links to opportunities, KRs, and experiments mean the roadmap is always one click away from the evidence behind it.
 
 ## Public Roadmap (Portal)
 
-If your workspace has **Public Roadmap** enabled (see [Enabling the Portal](/help/05-feedback#enabling-the-portal) in Feedback Portal — the same workspace-wide toggle controls both feedback and roadmap visibility), visitors can view your Now / Next / Later items at `/portal/[org]/[workspace]/roadmap` and vote on the ones they care about.
+If your workspace has **Public Roadmap** enabled (see [Enabling the Portal](/help/05-feedback#enabling-the-portal) in Feedback Portal — the same workspace-wide toggle controls both feedback and roadmap visibility), visitors can view your items in three columns — **Now** (in progress and launching), **Coming Up** (Next and Later) and **Shipped** — at `/portal/[org]/[workspace]/roadmap` and vote on the ones they care about.
 
 Each roadmap card on the portal shows a vote button with the current count. Hovering over a card expands its description if it's been truncated, so visitors can read the full context before voting. Voting follows the same account rules as feedback submission — if **Require an account to submit/vote** is on, visitors verify their email via magic link (or arrive pre-verified via SSO Identify) before voting; otherwise a name (optional) and email (required) are collected inline.
 

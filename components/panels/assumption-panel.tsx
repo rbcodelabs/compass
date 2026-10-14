@@ -1,4 +1,5 @@
 "use client";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { Discussion } from "@/components/comments/discussion";
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
@@ -65,6 +66,7 @@ export function AssumptionPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
+  const labels = useLabels();
   const { data, error, mutate } = useEntityDetail<AssumptionData>(
     "assumption",
     id,
@@ -119,8 +121,8 @@ export function AssumptionPanel({
 
       <EditableText value={data.description} field="description" edit={edit} multiline placeholder="Add a description…" />
 
-      <Section label="Solution">
-        <RelationList items={solutionItems} empty="No parent solution." />
+      <Section label={labels.solution.singular}>
+        <RelationList items={solutionItems} empty={`No parent ${labels.solution.lower}.`} />
       </Section>
 
       <Section label="Experiments" count={data.experiments.length}>

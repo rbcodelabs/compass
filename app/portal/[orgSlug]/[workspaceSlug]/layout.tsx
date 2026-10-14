@@ -4,6 +4,7 @@ import { getPortalSession } from "@/lib/portal-auth";
 import { PortalAuthStatus } from "@/components/portal/portal-auth-status";
 import { WorkspaceThemeStyle } from "@/components/branding/workspace-theme-style";
 import { resolveWorkspaceBranding } from "@/lib/branding";
+import { PortalNav } from "@/components/portal-home/portal-nav";
 
 type Props = {
   children: ReactNode;
@@ -19,6 +20,8 @@ export default async function PortalLayout({ children, params }: Props) {
       where: { slug: workspaceSlug, organization: { slug: orgSlug } },
       select: {
         name: true,
+        roadmapPublic: true,
+        feedbackEnabled: true,
         brandingPaletteId: true,
         brandingPrimaryHex: true,
         brandingFontPresetId: true,
@@ -36,7 +39,7 @@ export default async function PortalLayout({ children, params }: Props) {
     <div className="flex min-h-screen flex-col bg-surface-app">
       <WorkspaceThemeStyle branding={branding} />
       <header className="border-b border-border-default bg-surface-panel px-6 py-4">
-        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
+        <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0 shadow-sm">
               <svg
@@ -56,6 +59,12 @@ export default async function PortalLayout({ children, params }: Props) {
             </div>
             <span className="text-sm font-semibold text-text-primary">{workspaceName}</span>
           </div>
+          <PortalNav
+            orgSlug={orgSlug}
+            workspaceSlug={workspaceSlug}
+            roadmapPublic={workspace?.roadmapPublic === true}
+            feedbackEnabled={workspace?.feedbackEnabled === true}
+          />
           {portalSession && <PortalAuthStatus email={portalSession.email} />}
         </div>
       </header>

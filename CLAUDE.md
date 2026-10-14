@@ -59,6 +59,35 @@ Vercel env values are **write-only**. `vercel env pull` and `vercel env ls` will
 
 Related: when checking whether a migration is applied, compare **exact names**, never substrings. `"051" in name` matches `051_pm_agent_handoff` as readily as `051_decision_task_bridge`. Note also that duplicate leading numbers are normal and accepted here (`main` carries two `049_*` migrations) because the runner keys on the exact name — a collision is not a bug to "fix", and branch previews share one `compass_preview` schema, so its applied list routinely contains migrations from branches other than yours.
 
+## Preview login — authenticated smoke tests on a preview
+
+Previews expose `/preview-login` (owner/viewer personas on the `preview-sample/workspace` sample workspace). In the agent harness the access code is `COMPASS_PREVIEW_LOGIN_ACCESS_CODE`; do not report the authenticated UI as unverifiable on a preview.
+
+```bash
+curl -s -c jar -b jar -X POST "$PREVIEW/api/preview-login/start" \
+  -H "x-vercel-protection-bypass: $COMPASS_VERCEL_BYPASS_SECRET" -H "Content-Type: application/json" \
+  -d "{\"code\":\"$COMPASS_PREVIEW_LOGIN_ACCESS_CODE\",\"persona\":\"owner\"}"
+```
+
+Then reuse the cookie jar (or a Playwright `request.post` + `newPage()` in the same context) for `/preview-sample/workspace/...`. Never print the code.
+
+## Preview login — authenticated smoke tests on a preview
+
+Previews expose `/preview-login` (owner/viewer personas on the
+`preview-sample/workspace` sample workspace). In the agent harness the access
+code is `COMPASS_PREVIEW_LOGIN_ACCESS_CODE`. Do not report the authenticated UI
+as unverifiable on a preview — sign in:
+
+```bash
+curl -s -c jar -b jar -X POST "$PREVIEW/api/preview-login/start" \
+  -H "x-vercel-protection-bypass: $COMPASS_VERCEL_BYPASS_SECRET" \
+  -H "Content-Type: application/json" \
+  -d "{\"code\":\"$COMPASS_PREVIEW_LOGIN_ACCESS_CODE\",\"persona\":\"owner\"}"
+```
+
+Then reuse the cookie jar (or a Playwright `request.post` + `newPage()` in the
+same context) for `/preview-sample/workspace/...`. Never print the code.
+
 ## Production data migrations
 
 Production schema and data maintenance runs through the registered migrations in `lib/migrations/runner.ts` and the authenticated `/api/admin/migrate` endpoint. Do not run local scripts directly against Aurora DSQL or use an AWS CLI login as an alternate production write path.
@@ -66,6 +95,17 @@ Production schema and data maintenance runs through the registered migrations in
 For a targeted migration: deploy the registered migration, use authenticated `GET /api/admin/migrate` to confirm the schema, manifest, preflight, and pending state, then `POST /api/admin/migrate` with `{"script":"<exact migration name>"}`. Do not omit `script` when unrelated migrations are pending. Afterward, repeat the status GET and perform application-level readback. A data migration must finish its postconditions before the runner records a successful receipt; reruns must be idempotent and safely resume unfinished work.
 
 In the agent harness, retrieve the production migration credential as `COMPASS_PRODUCTION_MIGRATION_SECRET` and pass it only as the `x-migration-secret` header (for example by assigning it to `MIGRATION_SECRET` in the command environment). Never print it, persist it in a repository file, or substitute direct database credentials when it is unavailable.
+
+## Running the dev server on a remote box (homelab dev-builder)
+
+The generic recipe is the `proxmox-devbox` skill. These are the Compass-specific parts:
+
+- **Database:** set `DATABASE_URL` (plain `pg`; without it the app tries Aurora DSQL/OIDC). In development the app reads the **`compass_dev` schema, not `public`** (`lib/schema.ts`), so create the tables there: `DATABASE_URL="postgres://…/compass?schema=compass_dev" node node_modules/prisma/build/index.js db push --accept-data-loss`. Local-only; never for preview or production (those use the migration runner).
+- **Env:** `.env.local` also needs `AUTH_SECRET`, `AUTH_URL` (the box's origin) and `AUTH_TRUST_HOST=true`. The repo's own `.env.local` only holds a Vercel OIDC token.
+- **Node:** `engines` requires 22.x; the VM default is newer, so `fnm use 22` first.
+- **Sync size:** the checkout can hold ~50 GB in `.worktrees`, `.claude`, `.pnpm-store` and `.npm-cache`. Exclude all four (plus `node_modules`, `.next`, `.git`) from any rsync, or it hangs.
+- **Data:** run `npx tsx --env-file=.env.local scripts/seed-portal-demo.ts` to get a public roadmap at `/portal/demo/acme/roadmap`. It seeds no user, so authenticated pages won't work.
+- **Typecheck/E2E on the box:** `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit`. The functional E2E needs a local `compass_e2e` database; a throwaway `postgres:16` container on `localhost:5440` works (`pnpm test:e2e:functional -- <spec>`). `launch-tiers.spec.ts` currently fails there on a trailing console-error check (four 404s), identically on `main`.
 
 ## Portal SSO Identify — resyncing a drifted customer secret
 

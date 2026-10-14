@@ -1,5 +1,6 @@
 "use client"
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { useEffect, useRef, useState } from "react"
 import { CalendarRange, Search, X } from "lucide-react"
 
@@ -8,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { FacetedFilterMenu } from "@/components/patterns/faceted-filter-menu"
-import { TRACKED_SUBJECT_LABELS, TRACKED_SUBJECT_TYPES } from "@/lib/tracked-decision-types"
+import { TRACKED_SUBJECT_TYPES, trackedSubjectLabels } from "@/lib/tracked-decision-types"
 
 const OUTCOME_OPTIONS = [
   { value: "APPROVE", label: "Approved" },
@@ -27,6 +28,7 @@ const SEARCH_DEBOUNCE_MS = 300
  * links exactly like Tasks/Experiments.
  */
 export function DecisionsFilters({ reviewers }: { reviewers: { id: string; name: string }[] }) {
+  const subjectLabels = trackedSubjectLabels(useLabels())
   const { params, set } = useUrlState()
   const q = params.get("q") ?? ""
   const from = params.get("from") ?? ""
@@ -68,10 +70,9 @@ export function DecisionsFilters({ reviewers }: { reviewers: { id: string; name:
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="outline" size="sm" aria-label="Search decisions" />}>
+        <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="Search decisions" className="relative size-11 md:size-8" />}>
           <Search />
-          <span className="hidden sm:inline">Search</span>
-          {q && <span className="size-1.5 rounded-full bg-primary" aria-label="Search active" />}
+          {q && <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" aria-label="Search active" />}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-72 p-2">
           <div className="relative">
@@ -103,10 +104,9 @@ export function DecisionsFilters({ reviewers }: { reviewers: { id: string; name:
       </DropdownMenu>
 
       <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="outline" size="sm" aria-label="Filter by date" />}>
+        <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="Filter by date" className="relative size-11 md:size-8" />}>
           <CalendarRange />
-          <span className="hidden sm:inline">Date</span>
-          {dateActive && <span className="size-1.5 rounded-full bg-primary" aria-label="Date filter active" />}
+          {dateActive && <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" aria-label="Date filter active" />}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64 space-y-2 p-3">
           <label className="flex flex-col gap-1 text-xs font-medium text-text-subtle">
@@ -147,6 +147,7 @@ export function DecisionsFilters({ reviewers }: { reviewers: { id: string; name:
       </DropdownMenu>
 
       <FacetedFilterMenu
+        iconOnly
         onClearAll={() => set({ type: null, outcome: null, reviewer: null, page: null })}
         groups={[
           {
@@ -154,7 +155,7 @@ export function DecisionsFilters({ reviewers }: { reviewers: { id: string; name:
             label: "Linked item",
             value: type,
             onValueChange: (value) => set({ type: value, page: null }),
-            options: TRACKED_SUBJECT_TYPES.map((subjectType) => ({ value: subjectType, label: TRACKED_SUBJECT_LABELS[subjectType] })),
+            options: TRACKED_SUBJECT_TYPES.map((subjectType) => ({ value: subjectType, label: subjectLabels[subjectType] })),
           },
           {
             id: "outcome",

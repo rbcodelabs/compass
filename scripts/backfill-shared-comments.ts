@@ -31,12 +31,12 @@ async function backfillSolutions() {
   for (;;) {
     const rows = await prisma.solutionComment.findMany({
       take: BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}), orderBy: { id: "asc" },
-      include: { solution: { select: { opportunity: { select: { workspaceId: true } } } } },
+      include: { solution: { select: { workspaceId: true } } },
     })
     if (!rows.length) break
-    const orphan = rows.find((row) => !row.solution?.opportunity)
+    const orphan = rows.find((row) => !row.solution?.workspaceId)
     if (orphan) throw new Error(`Legacy SolutionComment ${orphan.id} has no workspace-owning Solution/Opportunity; refusing to fabricate ownership.`)
-    await prisma.comment.createMany({ skipDuplicates: true, data: rows.map((row) => ({ id: row.id, workspaceId: row.solution.opportunity.workspaceId, targetType: "SOLUTION", targetId: row.solutionId, parentId: null, body: row.body, status: "OPEN", authorId: null, authorName: row.authorName, authorType: row.authorType, source: row.source, createdAt: row.createdAt, updatedAt: row.updatedAt })) })
+    await prisma.comment.createMany({ skipDuplicates: true, data: rows.map((row) => ({ id: row.id, workspaceId: row.solution.workspaceId!, targetType: "SOLUTION", targetId: row.solutionId, parentId: null, body: row.body, status: "OPEN", authorId: null, authorName: row.authorName, authorType: row.authorType, source: row.source, createdAt: row.createdAt, updatedAt: row.updatedAt })) })
     const plans = rows.filter((row) => row.commentType === "PLAN").map((row) => ({ commentId: row.id, trackedDecisionRequestId: null, legacyPlanStatus: row.planStatus }))
     if (plans.length) await prisma.solutionPlanProposal.createMany({ skipDuplicates: true, data: plans })
     cursor = rows.at(-1)!.id

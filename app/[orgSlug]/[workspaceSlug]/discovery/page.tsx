@@ -4,17 +4,21 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { OpportunityBoard } from "@/components/discovery/opportunity-board";
 import { DiscoveryFilters } from "@/components/discovery/discovery-filters";
+import { NewOpportunityButton } from "@/components/discovery/new-opportunity-button";
+import { WorkspaceMoreMenu } from "@/components/patterns/workspace-header-controls";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { DiscoveryTableView, type DiscoveryTableOpportunity } from "@/components/discovery/discovery-table-view";
 import { DiscoveryViewToggle, type DiscoveryView } from "@/components/discovery/discovery-view-toggle";
 import { DiscoveryGroupByToggle } from "@/components/discovery/discovery-group-by-toggle";
 import { OpportunityFieldBoard, type FieldBoardOpportunity } from "@/components/discovery/opportunity-field-board";
 import { DiscoverySortToggle, type DiscoverySort } from "@/components/discovery/discovery-sort-toggle";
-import { SolutionSwimlaneBoard, type SwimlaneOpportunity } from "@/components/discovery/solution-swimlane-board";
 import { resolveWorkspaceScoringModel, toScoreSummary } from "@/lib/scoring-model";
 import type { OpportunityStatus, SolutionStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
-import { ChevronRight } from "lucide-react";
+import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
+import { ChevronRight, Download, FolderTree, Shuffle } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { loadCustomFieldDefinitions } from "@/lib/custom-field-definitions";
@@ -23,7 +27,8 @@ import {
   parseCustomFieldFilterParams,
   resolveCustomFieldFilter,
 } from "@/lib/custom-field-filter";
-import { solutionSwimlaneKey } from "@/lib/discovery-filters";
+import { objectTypeLabels } from "@/components/custom-fields/object-type-labels";
+import { legacySwimlaneRedirectPath } from "@/lib/solution-backlog";
 import { loadCustomFieldValuesForObjects } from "@/lib/custom-field-values-batch";
 import {
   columnValueFor,
@@ -68,6 +73,15 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     field: fieldParam,
     fieldValue: fieldValueParam,
   } = await searchParams;
+  // The Solution swimlane ("Group by: Opportunity") moved to its own backlog;
+  // old bookmarks and shared links land there instead of on a silent Status board.
+  if (requestedGroupBy === "opportunity") {
+    redirect(legacySwimlaneRedirectPath(orgSlug, workspaceSlug, {
+      squad: squadFilter,
+      field: fieldParam,
+      fieldValue: fieldValueParam,
+    }));
+  }
   const view: DiscoveryView = requestedView === "table" ? "table" : "board";
   const sort: DiscoverySort = requestedSort === "score" ? "score" : "manual";
   const prisma = getPrisma();
@@ -82,8 +96,12 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
 
   if (!workspace) notFound();
 
-  // Discovery renders Opportunities *and* their Solutions, so both object
-  // types contribute filter facets and either can own the active filter.
+  // The workspace tree exists only for the presets whose tree is not the classic KR-rooted one.
+  const thinkingModel = await getThinkingModelForSlugs(orgSlug, workspaceSlug);
+  const showWorkspaceTree = thinkingModel.tree !== "kr-rooted";
+
+  // The table view nests each Opportunity's Solutions, so both object types
+  // contribute filter facets and either can own the active filter.
   const [discoveryFieldDefs, customFieldFilter] = await Promise.all([
     loadCustomFieldDefinitions(prisma, {
       workspaceId: workspace.id,
@@ -95,7 +113,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       filter: parseCustomFieldFilterParams({ field: fieldParam, fieldValue: fieldValueParam }),
     }),
   ]);
-  const customFieldGroups = buildCustomFieldFilterGroups(discoveryFieldDefs);
+  const customFieldGroups = buildCustomFieldFilterGroups(discoveryFieldDefs, objectTypeLabels(thinkingModel.labels));
   // Stale or ineligible field ids fall back to Status (see resolveDiscoveryGroupBy).
   const groupableFields = groupableOpportunityFields(discoveryFieldDefs);
   const groupBy = resolveDiscoveryGroupBy(requestedGroupBy, groupableFields);
@@ -107,9 +125,8 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     customFieldFilter?.objectType === "OPPORTUNITY"
       ? { id: { in: customFieldFilter.objectIds } }
       : {};
-  // A Solution-level tag narrows which solutions render inside each lane; the
-  // Opportunities themselves are untouched, matching how Solutions are nested
-  // rather than listed on their own route.
+  // A Solution-level tag narrows which solutions render nested under each
+  // Opportunity in the table; the Opportunities themselves are untouched.
   const solutionIdFilter =
     customFieldFilter?.objectType === "SOLUTION" ? new Set(customFieldFilter.objectIds) : null;
 
@@ -134,16 +151,16 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         sortOrder: true,
         squadId: true,
         score: { select: { normalizedScore: true, modelVersion: true } },
-        _count: { select: { solutions: true, evidence: true } },
+        _count: { select: { solutions: { where: { workspaceId: workspace.id } }, evidence: true } },
         solutions: {
+          // A solution whose own workspaceId is NULL or names another workspace is hidden, not trusted via its parent.
+          where: { workspaceId: workspace.id },
           orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: {
             id: true,
             title: true,
-            description: true,
             status: true,
             sortOrder: true,
-            score: { select: { normalizedScore: true, modelVersion: true } },
             _count: { select: { evidence: true, assumptions: true } },
           },
         },
@@ -165,7 +182,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         sortOrder: true,
         squadId: true,
         score: { select: { normalizedScore: true, modelVersion: true } },
-        _count: { select: { solutions: true, evidence: true } },
+        _count: { select: { solutions: { where: { workspaceId: workspace.id } }, evidence: true } },
       },
     }),
     // Distinct source-type count per opportunity, used for the "from N sources" badge.
@@ -177,10 +194,6 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     // score UI and no sort toggle at all, same gate as the detail page.
     resolveWorkspaceScoringModel(workspace.id, "OPPORTUNITY"),
   ]);
-
-  // Independent of the Opportunity model above — only used to gate the
-  // ScoreBadge on Solution cards (see SwimlaneOpportunity below).
-  const solutionScoringModel = await resolveWorkspaceScoringModel(workspace.id, "SOLUTION");
 
   const hasActiveScoringModel = scoringModel !== null;
 
@@ -268,28 +281,6 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       }))
   );
 
-  // Lanes are exactly the Opportunities shown on today's board — same
-  // ACTIVE_STATUSES + squad filter, same order — mapped into the shape
-  // SolutionSwimlaneBoard needs instead of bucketed by Opportunity status.
-  const swimlaneOpportunities: SwimlaneOpportunity[] = opportunities
-    // A Solution-level tag hides lanes with nothing left to show.
-    .filter((opportunity) => !solutionIdFilter || visibleSolutions(opportunity.solutions).length > 0)
-    .map((opportunity) => ({
-    id: opportunity.id,
-    title: opportunity.title,
-    squad: opportunity.squadId ? (squadMap.get(opportunity.squadId) ?? null) : null,
-    solutions: visibleSolutions(opportunity.solutions).map((solution) => ({
-      id: solution.id,
-      title: solution.title,
-      description: solution.description,
-      status: solution.status as SolutionStatus,
-      sortOrder: solution.sortOrder,
-      _count: solution._count,
-      // null whenever there is no score row *or* no active Solution model.
-      score: toScoreSummary(solution.score, solutionScoringModel),
-    })),
-  }));
-
   const fieldBoardOpportunities: FieldBoardOpportunity[] =
     groupField && groupFieldValues
       ? opportunities.map((opportunity) => ({
@@ -302,13 +293,23 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         }))
       : [];
 
+  // The export carries the filters the page is showing (squad and tag), so the
+  // file matches the screen. View, group-by and sort are presentation only.
+  const exportParams = new URLSearchParams({ orgSlug, workspaceSlug });
+  if (squadFilter) exportParams.set("squad", squadFilter);
+  if (customFieldFilter) {
+    exportParams.set("field", fieldParam ?? "");
+    exportParams.set("fieldValue", fieldValueParam ?? "");
+  }
+  const exportHref = `/api/discovery/export?${exportParams.toString()}`;
+
   return (
     <WorkspacePage
       title="Discovery"
       contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
       actions={(
-        <Suspense>
-          <div className="flex items-center gap-2">
+        <>
+          <Suspense>
             <DiscoveryViewToggle view={view} />
             {view === "board" && <DiscoveryGroupByToggle
                 groupBy={groupBy}
@@ -322,8 +323,22 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
               customFieldGroups={customFieldGroups}
               activeCustomFieldId={customFieldFilter?.fieldId ?? null}
             />
-          </div>
-        </Suspense>
+          </Suspense>
+          <NewOpportunityButton variant="header" />
+          <WorkspaceMoreMenu label="Discovery tools">
+            <DropdownMenuItem render={<a href={exportHref} download />}>
+              <Download /> Export CSV
+            </DropdownMenuItem>
+            <DropdownMenuItem render={<Link href={`/${orgSlug}/${workspaceSlug}/card-sort`} />}>
+              <Shuffle className="size-4" /> Card sort
+            </DropdownMenuItem>
+            {showWorkspaceTree && (
+              <DropdownMenuItem render={<Link href={`/${orgSlug}/${workspaceSlug}/discovery/tree`} />}>
+                <FolderTree className="size-4" /> {thinkingModel.labels.objective.singular} tree
+              </DropdownMenuItem>
+            )}
+          </WorkspaceMoreMenu>
+        </>
       )}
     >
       {view === "table" ? (
@@ -338,19 +353,6 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           workspaceId={workspace.id}
-        />
-      ) : groupBy === "opportunity" ? (
-        <SolutionSwimlaneBoard
-          // Keyed on what is rendered, not on the pre-filter query: a
-          // Solution-level tag leaves the opportunity rows untouched by design,
-          // so keying off `opportunities` never changed and surviving lanes went
-          // on showing their untagged solutions.
-          key={solutionSwimlaneKey(swimlaneOpportunities)}
-          opportunities={swimlaneOpportunities}
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-          workspaceId={workspace.id}
-          hasActiveScoringModel={solutionScoringModel !== null}
         />
       ) : (
         <OpportunityBoard

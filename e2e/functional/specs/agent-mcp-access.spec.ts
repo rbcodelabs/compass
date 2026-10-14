@@ -20,6 +20,7 @@ test("one agent key spans granted organizations while assignments, revocation an
   const orgIds = [randomUUID(), randomUUID()];
   const workspaceIds = [randomUUID(), randomUUID(), randomUUID()];
   const orgSlugs = orgIds.map(id => `agent-test-${id}`);
+  let createdWorkspaceId: string | null = null;
   const token = `cmp_${randomBytes(16).toString("hex")}`;
 
   async function tool(client: APIRequestContext, name: string, args: Record<string, unknown> = {}): Promise<ToolResult> {
@@ -68,7 +69,18 @@ test("one agent key spans granted organizations while assignments, revocation an
     const firstTask = succeeded(await tool(request, "create_task", { workspaceId: workspaceIds[0], title: "Assigned external work", assignee: { type: "AGENT", id: agentId } }));
     succeeded(await tool(request, "create_task", { workspaceId: workspaceIds[1], title: "Same key, other organization" }));
     denied(await tool(request, "create_task", { workspaceId: workspaceIds[2], title: "Must not be created" }));
+    // An agent inherits its owner's CURRENT org admin rights: denied while the owner is a plain member...
+    await pool.query("UPDATE compass_dev.organization_members SET role='MEMBER' WHERE organization_id=$1 AND user_id=$2", [orgIds[0], userId]);
     denied(await tool(request, "create_workspace", { orgSlug: orgSlugs[0], name: "Agent cannot administer", slug: "must-not-exist" }));
+    expect((await pool.query("SELECT count(*) FROM compass_dev.workspaces WHERE organization_id=$1 AND slug='must-not-exist'", [orgIds[0]])).rows[0].count).toBe("0");
+    // ...and allowed once the owner is an org admin, with no AgentOrgAdminGrant row.
+    await pool.query("UPDATE compass_dev.organization_members SET role='ADMIN' WHERE organization_id=$1 AND user_id=$2", [orgIds[0], userId]);
+    const created = succeeded(await tool(request, "create_workspace", { orgSlug: orgSlugs[0], name: "Agent created", slug: "agent-created" }));
+    createdWorkspaceId = String(created.id);
+    expect((await pool.query("SELECT access,granted_by_user_id FROM compass_dev.agent_workspace_grants WHERE agent_id=$1 AND workspace_id=$2 AND revoked_at IS NULL", [agentId, createdWorkspaceId])).rows).toEqual([{ access: "WRITE", granted_by_user_id: userId }]);
+    expect((await pool.query("SELECT count(*) FROM compass_dev.agent_org_admin_grants WHERE agent_id=$1", [agentId])).rows[0].count).toBe("0");
+    succeeded(await tool(request, "create_task", { workspaceId: createdWorkspaceId, title: "Agent works in the workspace it created" }));
+    await pool.query("UPDATE compass_dev.organization_members SET role='OWNER' WHERE organization_id=$1 AND user_id=$2", [orgIds[0], userId]);
     const assigned = succeeded(await tool(request, "list_tasks", { workspaceId: workspaceIds[0], assignedToMe: true }));
     expect(JSON.stringify(assigned)).toContain(String(firstTask.id));
     denied(await tool(request, "list_tasks", { workspaceId: workspaceIds[0], assignedToMe: true, assignee: { type: "USER", id: userId } }));
@@ -106,13 +118,14 @@ test("one agent key spans granted organizations while assignments, revocation an
     });
     expect(suspended.status()).toBe(401);
   } finally {
+    const cleanupWorkspaceIds: string[] = [...workspaceIds, ...(createdWorkspaceId ? [createdWorkspaceId] : [])];
     await pool.query("DELETE FROM compass_dev.agent_tool_calls WHERE agent_id=$1", [agentId]);
     await pool.query("DELETE FROM compass_dev.api_keys WHERE id=$1", [keyId]);
     await pool.query("DELETE FROM compass_dev.agent_workspace_grants WHERE agent_id=$1", [agentId]);
-    await pool.query("DELETE FROM compass_dev.tasks WHERE workspace_id=ANY($1::uuid[])", [workspaceIds]);
+    await pool.query("DELETE FROM compass_dev.tasks WHERE workspace_id=ANY($1::uuid[])", [cleanupWorkspaceIds]);
     await pool.query("DELETE FROM compass_dev.agents WHERE id=$1", [agentId]);
-    await pool.query("DELETE FROM compass_dev.workspace_members WHERE workspace_id=ANY($1::uuid[])", [workspaceIds]);
-    await pool.query("DELETE FROM compass_dev.workspaces WHERE id=ANY($1::uuid[])", [workspaceIds]);
+    await pool.query("DELETE FROM compass_dev.workspace_members WHERE workspace_id=ANY($1::uuid[])", [cleanupWorkspaceIds]);
+    await pool.query("DELETE FROM compass_dev.workspaces WHERE id=ANY($1::uuid[])", [cleanupWorkspaceIds]);
     await pool.query("DELETE FROM compass_dev.organization_members WHERE organization_id=ANY($1::uuid[])", [orgIds]);
     await pool.query("DELETE FROM compass_dev.organizations WHERE id=ANY($1::uuid[])", [orgIds]);
     await pool.end();

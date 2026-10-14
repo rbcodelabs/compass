@@ -5,7 +5,7 @@ const agent = { findFirst: vi.fn() }
 const oAuthToken = { findFirst: vi.fn(), update: vi.fn() }
 vi.mock("@/lib/db", () => ({ default: () => ({ apiKey, agent, oAuthToken }) }))
 
-import { validateMcpAuth } from "@/lib/mcp-auth"
+import { validateMcpAuth, validateProgrammaticAuth } from "@/lib/mcp-auth"
 import { hashOAuthToken } from "@/lib/oauth/tokens"
 
 function request() {
@@ -158,6 +158,16 @@ describe("OAuth access tokens", () => {
       },
       select: { id: true, userId: true, scope: true, scopeWorkspaceId: true, authorizationMode: true, agentId: true },
     })
+  })
+
+  it("enforces the 2x2 MCP/REST audience matrix at the database predicate", async () => {
+    oAuthToken.findFirst.mockResolvedValue(row)
+    await validateMcpAuth(oauthRequest())
+    expect(oAuthToken.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ resource: "http://localhost:3000/api/mcp" }) }))
+
+    oAuthToken.findFirst.mockClear()
+    await validateProgrammaticAuth(oauthRequest(), { resource: "http://localhost:3000/api/v1" })
+    expect(oAuthToken.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ resource: "http://localhost:3000/api/v1" }) }))
   })
 
   it("rejects when no row matches, without falling through to the API-key lookup", async () => {

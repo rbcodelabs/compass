@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { Prisma, type Doc } from "@prisma/client"
 import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { getDocumentStore, isDocumentPilotWorkspace } from "@/lib/document-storage"
+import { normalizeCanvasContent } from "@/lib/json-canvas"
 
 export type DocumentMutationOptions = {
   expectedRevision?: string
@@ -19,7 +20,14 @@ type BodyRow = { content: string | null; storageProvider?: string | null; conten
 type DocumentChange = { title?: string; content?: string | null; icon?: string | null; metadata?: Prisma.InputJsonValue | typeof Prisma.JsonNull }
 
 export class DocumentError extends Error {
-  constructor(public readonly code: string) { super(`Document ${code}`); this.name = "DocumentError" }
+  constructor(public readonly code: string, detail?: string) { super(detail ? `Document ${code}: ${detail}` : `Document ${code}`); this.name = "DocumentError" }
+}
+
+/** CANVAS docs store a JSON Canvas document; reject anything that is not one before it reaches storage. */
+function canonicalCanvasContent(content: string | null | undefined): string {
+  const result = normalizeCanvasContent(content ?? "")
+  if (!result.ok) throw new DocumentError("invalid-canvas", result.error)
+  return result.content
 }
 
 function canonical(value: unknown): string {
@@ -35,7 +43,13 @@ function requireOperation(opts: DocumentMutationOptions, requireRevision = true)
   if (requireRevision && !opts.expectedRevision) throw new DocumentError("revision-required")
 }
 function payload(type: string, id: string, data: unknown, opts: DocumentMutationOptions) {
-  return digest({ type, id, data, expectedRevision: opts.expectedRevision, authorId: opts.authorId ?? null, authorName: opts.authorName, actorKey: opts.actorKey, label: opts.label, restoreVersionId: opts.restoreVersionId })
+  return digest({ type, id, data, expectedRevision: opts.expectedRevision, actorKey: opts.actorKey ?? `user:${opts.authorId ?? "unknown"}`, label: opts.label, restoreVersionId: opts.restoreVersionId })
+}
+export function documentRevision(doc: Pick<Doc, "revision" | "updatedAt">): string {
+  return doc.revision ?? `legacy:${doc.updatedAt.toISOString()}`
+}
+function revisionWhere(doc: Pick<Doc, "revision" | "updatedAt">, expectedRevision: string) {
+  return doc.revision ? { revision: expectedRevision } : { revision: null, updatedAt: doc.updatedAt }
 }
 async function replay(workspaceId: string, operationId: string, payloadDigest: string, db = getPrisma()) {
   const receipt = await db.docOperation.findUnique({ where: { workspaceId_operationId: { workspaceId, operationId } } })
@@ -85,12 +99,14 @@ async function snapshot(tx: AppTransactionClient, doc: Doc, opts: DocumentMutati
   } })
 }
 
-export async function createDocument(data: Prisma.DocUncheckedCreateInput, opts: DocumentMutationOptions) {
+export async function createDocument(input: Prisma.DocUncheckedCreateInput, opts: DocumentMutationOptions) {
   const db = getPrisma()
+  const data = input.docType === "CANVAS" ? { ...input, content: canonicalCanvasContent(input.content) } : input
   const pilot = isDocumentPilotWorkspace(data.workspaceId)
+  const guarded = pilot || Boolean(opts.operationId)
   const requestData = { ...data, sortOrder: undefined }
   const hash = payload("create", data.workspaceId, requestData, opts)
-  if (pilot) {
+  if (guarded) {
     requireOperation(opts, false)
     const previous = await replay(data.workspaceId, opts.operationId!, hash)
     if (previous) return previous as Doc
@@ -98,41 +114,47 @@ export async function createDocument(data: Prisma.DocUncheckedCreateInput, opts:
   // Validate references before any external storage write, including MCP calls.
   if (data.parentId && !await db.doc.findFirst({ where: { id: data.parentId, workspaceId: data.workspaceId } })) throw new DocumentError("parent-not-found")
   if (data.roadmapItemId && !await db.roadmapItem.findFirst({ where: { id: data.roadmapItemId, workspaceId: data.workspaceId } })) throw new DocumentError("roadmap-item-not-found")
-  if (!pilot) return db.doc.create({ data })
-  const contentRef = await upload(data.workspaceId, data.content ?? "")
+  const contentRef = pilot ? await upload(data.workspaceId, data.content ?? "") : null
   try {
     return await db.$transaction(async tx => {
-      const doc = await tx.doc.create({ data: { ...data, storageProvider: "GEODE", content: null, contentRef, revision: randomUUID() } })
-      await record(tx, doc, opts.operationId!, hash, doc)
+      const doc = await tx.doc.create({ data: pilot
+        ? { ...data, storageProvider: "GEODE", content: null, contentRef, revision: randomUUID() }
+        : { ...data, revision: randomUUID() } })
+      if (guarded) await record(tx, doc, opts.operationId!, hash, doc)
       return doc
     })
   } catch (error) {
-    const previous = await replay(data.workspaceId, opts.operationId!, hash)
-    if (previous) return previous as Doc
+    if (guarded) {
+      const previous = await replay(data.workspaceId, opts.operationId!, hash)
+      if (previous) return previous as Doc
+    }
     throw error
   }
 }
 
-export async function updateDocument(docId: string, data: DocumentChange, opts: DocumentMutationOptions): Promise<Doc> {
+export async function updateDocument(docId: string, change: DocumentChange, opts: DocumentMutationOptions): Promise<Doc> {
   const db = getPrisma()
   const doc = await db.doc.findUnique({ where: { id: docId } })
   if (!doc) throw new DocumentError("not-found")
-  if (doc.storageProvider !== "GEODE") {
+  const data = doc.docType === "CANVAS" && typeof change.content === "string" ? { ...change, content: canonicalCanvasContent(change.content) } : change
+  if (doc.storageProvider !== "GEODE" && !opts.operationId) {
     return db.$transaction(async tx => {
       if (Object.keys(data).length) await snapshot(tx, doc, opts)
-      return tx.doc.update({ where: { id: docId }, data: { ...data, updatedAt: new Date() } })
+      return tx.doc.update({ where: { id: docId }, data: { ...data, revision: randomUUID(), updatedAt: new Date() } })
     })
   }
   requireOperation(opts)
   const hash = opts.receiptDigest ?? payload("update", docId, data, opts)
   const previous = await replay(doc.workspaceId, opts.operationId!, hash)
   if (previous) return previous as Doc
-  if (doc.revision !== opts.expectedRevision) throw new DocumentError("revision-conflict")
-  const contentRef = data.content !== undefined ? await upload(doc.workspaceId, data.content ?? "") : doc.contentRef
+  if (documentRevision(doc) !== opts.expectedRevision) throw new DocumentError("revision-conflict")
+  const contentRef = doc.storageProvider === "GEODE" && data.content !== undefined ? await upload(doc.workspaceId, data.content ?? "") : doc.contentRef
   try {
     return await db.$transaction(async tx => {
       const revision = randomUUID()
-      const changed = await tx.doc.updateMany({ where: { id: docId, workspaceId: doc.workspaceId, revision: opts.expectedRevision }, data: { ...data, content: null, contentRef, revision, updatedAt: new Date() } })
+      const changed = await tx.doc.updateMany({ where: { id: docId, workspaceId: doc.workspaceId, ...revisionWhere(doc, opts.expectedRevision!) }, data: doc.storageProvider === "GEODE"
+        ? { ...data, content: null, contentRef, revision, updatedAt: new Date() }
+        : { ...data, revision, updatedAt: new Date() } })
       if (changed.count !== 1) throw new DocumentError("revision-conflict")
       await snapshot(tx, doc, opts)
       const updated = await tx.doc.findUnique({ where: { id: docId } })
@@ -151,15 +173,15 @@ export async function snapshotDocument(docId: string, opts: DocumentMutationOpti
   const db = getPrisma()
   const doc = await db.doc.findUnique({ where: { id: docId } })
   if (!doc) throw new DocumentError("not-found")
-  if (doc.storageProvider !== "GEODE") return db.$transaction(tx => snapshot(tx, doc, opts))
+  if (doc.storageProvider !== "GEODE" && !opts.operationId) return db.$transaction(tx => snapshot(tx, doc, opts))
   requireOperation(opts)
   const hash = payload("snapshot", docId, {}, opts)
   const previous = await replay(doc.workspaceId, opts.operationId!, hash)
   if (previous) return previous
-  if (doc.revision !== opts.expectedRevision) throw new DocumentError("revision-conflict")
+  if (documentRevision(doc) !== opts.expectedRevision) throw new DocumentError("revision-conflict")
   try { return await db.$transaction(async tx => {
     // Touch the same revision to participate in DSQL's write-conflict detection.
-    const changed = await tx.doc.updateMany({ where: { id: docId, workspaceId: doc.workspaceId, revision: opts.expectedRevision }, data: { revision: opts.expectedRevision } })
+    const changed = await tx.doc.updateMany({ where: { id: docId, workspaceId: doc.workspaceId, ...revisionWhere(doc, opts.expectedRevision!) }, data: { revision: doc.revision ?? randomUUID() } })
     if (changed.count !== 1) throw new DocumentError("revision-conflict")
     const version = await snapshot(tx, doc, { ...opts, label: opts.label || "Snapshot" })
     await record(tx, doc, opts.operationId!, hash, version)
@@ -178,7 +200,7 @@ export async function restoreDocument(versionId: string, opts: DocumentMutationO
   const doc = await db.doc.findUnique({ where: { id: version.docId } })
   if (!doc) return null
   const hash = payload("restore", versionId, {}, opts)
-  if (doc.storageProvider === "GEODE") {
+  if (doc.storageProvider === "GEODE" || opts.operationId) {
     requireOperation(opts)
     const previous = await replay(doc.workspaceId, opts.operationId!, hash)
     if (previous) return { id: previous.id, docId: doc.id, title: previous.title, revision: previous.revision, restoredFrom: version.createdAt }

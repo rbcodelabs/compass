@@ -33,6 +33,51 @@ validates that every source belongs to the same workspace and snapshots its
 title and version date into the immutable review packet. Renaming or removing a
 source later does not erase what the reviewer originally saw.
 
+## Decisions with options
+
+A decision can be a question with a few possible answers instead of a plain
+yes/no. When requesting a decision, add **2 to 4 options**, each with a short
+label (up to 120 characters, unique within the request) and an optional
+description (up to 500 characters). Leave the options empty to keep the standard
+Approve / Request changes / Reject.
+
+On the review page your options appear as selectable cards. **Request changes**
+and **Reject** are always offered as secondary actions below them, so the
+decider can push back instead of choosing. Picking an option records it as an
+approval of that choice; the rationale is optional. Request changes and Reject
+still require a rationale, and the rationale box doubles as the free-text
+"something else" answer. The decided banner and the Decisions list show the
+chosen option's label (and the banner its description). The **Approved** outcome
+filter includes decisions resolved by choosing an option.
+
+Agents can pass the same `options` list to `request_decision` and read the
+chosen option back with `get_decision`. Revising a request-changes decision
+keeps the previous options by default; the revision form lets you edit or clear
+them.
+
+## Decisions with several questions
+
+When one decision needs more than one answer, use the **Questions** section of
+the request form instead of a single set of options. Add **1 to 4 questions**;
+each has an optional short label (up to 40 characters), the question itself (up
+to 255 characters) and its own **2 to 4 options**. The top-level decision
+question stays the title of the request. Questions and the single **Answer
+options** editor are mutually exclusive: the form disables one while the other
+is in use.
+
+The review page shows each question as its own group of selectable cards with a
+single **Submit answers** button, which stays disabled until every question is
+answered. Submitting records an approval together with each answer. **Request
+changes** and **Reject** remain available as secondary actions; they apply to the
+whole request, need no answers, and still require a rationale. The decided banner
+and the Decisions list show every question with its chosen answer, and the
+**Approved** filter includes these decisions.
+
+Agents pass `questions` to `request_decision` (never together with `options`) and
+read each answer back from `answers` on `get_decision`. Revising a
+request-changes decision keeps the previous questions by default; the revision
+form lets you edit or clear them.
+
 ## Supporting Artifacts
 
 Wireframes and prototypes can be linked directly in **Linked to**, beneath the original subject. Workspace members select an active same-workspace Artifact with **Artifact to link** and choose **Link**. Open its title to view the current preview; **Unlink** removes only the relationship. Artifact detail shows reciprocal **Linked decisions** and also supports unlinking. A URL pasted into a discussion does not create this structured relationship.

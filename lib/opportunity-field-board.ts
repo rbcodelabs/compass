@@ -10,8 +10,8 @@ import type { CustomFieldDefinitionData, SelectOption } from "@/lib/types"
  * "which column does this value belong to" and "is this a legal drop".
  */
 
-/** Built-in groupings plus `field:<CustomFieldDefinition id>`. */
-export type DiscoveryGroupBy = "status" | "opportunity" | `field:${string}`
+/** Status (the default) plus `field:<CustomFieldDefinition id>`. */
+export type DiscoveryGroupBy = "status" | `field:${string}`
 
 const FIELD_PREFIX = "field:"
 
@@ -46,14 +46,14 @@ export function groupByFieldId(groupBy: DiscoveryGroupBy): string | null {
 /**
  * Resolves the raw `?groupBy=` param. Absent/unknown values, and field ids that
  * are stale (deleted, retyped, emptied, wrong object type), fall back to the
- * default Status board rather than erroring — the same forgiving behaviour as
+ * default Status board rather than erroring (this includes the retired
+ * `opportunity` swimlane value; the page redirects that one to /solutions) — the same forgiving behaviour as
  * the roadmap timeline's grouping param.
  */
 export function resolveDiscoveryGroupBy(
   raw: string | undefined,
   definitions: readonly CustomFieldDefinitionData[]
 ): DiscoveryGroupBy {
-  if (raw === "opportunity") return "opportunity"
   if (!raw || !raw.startsWith(FIELD_PREFIX)) return "status"
   const fieldId = raw.slice(FIELD_PREFIX.length)
   if (!fieldId) return "status"

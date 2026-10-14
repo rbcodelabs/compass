@@ -108,8 +108,8 @@ export async function seedOkrCycleAndObjectives(
     if (!obj) {
       obj = await one(
         exec,
-        `INSERT INTO "${schema}".objectives (cycle_id, title, status, description)
-         VALUES ($1,$2,$3,$4) RETURNING id`,
+        `INSERT INTO "${schema}".objectives (workspace_id, cycle_id, title, status, description)
+         VALUES ((SELECT workspace_id FROM "${schema}".okr_cycles WHERE id = $1),$1,$2,$3,$4) RETURNING id`,
         [cycle.id, o.title, o.status, "Drive the product forward with clear, measurable goals."]
       );
     }
@@ -213,8 +213,8 @@ export async function seedSolutions(
     if (!r) {
       r = await one(
         exec,
-        `INSERT INTO "${schema}".solutions (opportunity_id, title, status, sort_order)
-         VALUES ($1,$2,$3,$4) RETURNING id`,
+        `INSERT INTO "${schema}".solutions (workspace_id, opportunity_id, title, status, sort_order)
+         VALUES ((SELECT workspace_id FROM "${schema}".opportunities WHERE id = $1),$1,$2,$3,$4) RETURNING id`,
         [oppIds[s.oppIdx], s.title, s.status, solutionIds.length]
       );
     }

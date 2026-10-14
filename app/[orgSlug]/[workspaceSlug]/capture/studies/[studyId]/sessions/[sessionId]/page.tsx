@@ -8,6 +8,7 @@ import { parseResearchPage } from "@/lib/research-analysis"
 import { deserializeResearchGuide } from "@/lib/research"
 import { SessionAnalysisResults } from "@/components/research/analysis-results"
 import { PageHeader } from "@/components/patterns/page-header"
+import { ExternalSessionMeta, isExternalSession } from "@/components/research/external-session-meta"
 
 export default async function ResearchSessionPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; studyId: string; sessionId: string }>; searchParams: Promise<{ page?: string; attachmentPage?: string; turnId?: string }> }) {
   if (!isResearchCaptureEnabled()) notFound()
@@ -28,12 +29,14 @@ export default async function ResearchSessionPage({ params, searchParams }: { pa
     prisma.researchTurn.findMany({ where: { sessionId }, orderBy: { sequence: "asc" }, skip: (page - 1) * 50, take: 51 }),
     prisma.researchAttachment.findMany({ where: { sessionId, studyId, status: "READY" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], skip: (attachmentPage - 1) * 20, take: 21 }),
   ])
+  const external = isExternalSession(session)
   const studyUrl = `/${orgSlug}/${workspaceSlug}/capture/studies/${studyId}`
   const url = `${studyUrl}/sessions/${sessionId}`
   return <main className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8">
     <Link className="text-sm underline" href={studyUrl}>Back to study</Link>
-    <PageHeader title={`${session.modality === "VOICE" ? "Voice" : "Chat"} interview`} description={`${session.study.name} · ${session.status.toLowerCase()} · ${session._count.turns} saved turns`} />
-    <p className="text-sm text-text-muted">Started {session.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC{session.modality === "VOICE" ? ". Voice source is unverified in this view. Browser voice transcripts are participant-reported evidence." : ""}</p>
+    <PageHeader title={external ? "External session" : `${session.modality === "VOICE" ? "Voice" : "Chat"} interview`} description={`${session.study.name} · ${session.status.toLowerCase()} · ${session._count.turns} saved turns`} />
+    {external && <ExternalSessionMeta session={session} />}
+    <p className="text-sm text-text-muted">{external ? "Session date" : "Started"} {(external ? session.startedAt ?? session.createdAt : session.createdAt).toISOString().slice(0, 16).replace("T", " ")} UTC{session.modality === "VOICE" ? ". Voice source is unverified in this view. Browser voice transcripts are participant-reported evidence." : ""}</p>
     <section className="max-w-3xl rounded-xl border bg-surface-panel p-5"><SessionAnalysisResults studyId={studyId} sessionId={sessionId} status={session.status} summary={session.summary} guide={deserializeResearchGuide(session.study.guide)} sessionUrl={url} /></section>
     <section className="max-w-3xl"><h2 className="font-semibold">Saved transcript</h2><ol className="mt-3 space-y-3">{turns.slice(0, 50).map(turn => <li id={`turn-${turn.id}`} key={turn.id} className="scroll-mt-20 rounded-lg border bg-surface-panel p-4 text-sm"><span className="font-medium">{turn.role === "PARTICIPANT" ? "Participant" : "Interviewer"}:</span><p className="mt-1 whitespace-pre-wrap break-words">{turn.content || "Attachment shared"}</p></li>)}</ol>
       <nav aria-label="Transcript pages" className="mt-4 flex gap-4 text-sm">{page > 1 && <Link className="underline" href={`${url}?page=${page - 1}&attachmentPage=${attachmentPage}`}>Previous turns</Link>}<span>Page {page}</span>{turns.length > 50 && <Link className="underline" href={`${url}?page=${page + 1}&attachmentPage=${attachmentPage}`}>Next turns</Link>}</nav>

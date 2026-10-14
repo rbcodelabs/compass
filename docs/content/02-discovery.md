@@ -37,15 +37,20 @@ Opportunities move through four columns on the kanban board:
 
 Drag cards between columns to update status. Use **Filters** at the top of the page to filter opportunities by squad, or switch between **Board** and **Tree** views using the view control.
 
-### Group by: Status, Opportunity, or a custom field
+### Exporting opportunities to CSV
+
+Open the **⋯** (Discovery tools) menu and choose **Export CSV** to download the opportunities on the page as a spreadsheet-ready file. The export respects the squad and tag filters currently applied, so the file matches what you are looking at; view, group-by and sort are presentation only and do not change it. Columns: Title, Status, Squad, Customer segment, Score, Solutions, Evidence, and a Link back to the opportunity. Rows are ordered by status (Exploring, Validating, Prioritized, Active, then Archived), keeping the manual order within each status. Archived opportunities are included, so filter the Status column in your spreadsheet to hide them. Score is blank when an opportunity has no score or the workspace has no active scoring model.
+
+### Group by: Status or a custom field
 
 In Board view, use the **Group by** picker next to Filters to switch how cards are grouped:
 
 - **Status** (default) — the Opportunity board described above, columns are Opportunity statuses.
 - **A custom field** — every Opportunity single-select custom field with at least one option is listed after the built-in groupings (for example a **MoSCoW** field with Must, Should, Could, and Won't). See [Card sorting by a custom field](#card-sorting-by-a-custom-field) below.
-- **Opportunity** — a swimlane board for Solutions, the middle tier of the OST that otherwise only appears in a flat list inside an Opportunity's detail panel. Each active Opportunity gets its own collapsible lane (click the chevron to collapse or expand it), with five columns for the Solution lifecycle: **Idea**, **Validated**, **In delivery**, **Shipped**, **Killed**. Drag a Solution card to a different column to change its status; drag it to reorder within a column. Use **+ Add Solution** at the bottom of a lane to create a new Solution directly on that Opportunity.
 
-Dragging a Solution card only ever changes its status within its own lane — dropping it on a different Opportunity's lane snaps it back with no change. Re-parenting a Solution to a different Opportunity is a deliberate action from its detail panel, not something a board drag can do by accident.
+Solutions are not grouped here any more — they have their own backlog, described in [The Solutions backlog](#the-solutions-backlog). An old link with `groupBy=opportunity` opens that page instead.
+
+A Solution belongs to the Opportunity it was created on for good: there is no action, in the board, the detail panel or the MCP API, that moves it to a different Opportunity. To aim an existing idea at another Opportunity, add a new Solution there. (A Solution can additionally be linked to Key Results; see [Linking an opportunity to Objectives, and the workspace tree](#linking-an-opportunity-to-objectives-and-the-workspace-tree).)
 
 ### Card sorting by a custom field
 
@@ -84,10 +89,11 @@ The composer opens in the right-hand panel. On wide screens it docks beside the 
 - **Status** starts as the status of the column you opened it from. From the rail it starts as **Exploring**. You can change it before you submit.
 - **Squad** and **Customer segment** are optional.
 - **Description** supports Markdown, with the same rich editor and Markdown source mode used elsewhere. **Insert opportunity outline** adds *Who's affected*, *Current pain*, *Evidence* and *Desired outcome* headings.
+- **Objectives** (**Outcomes** under Torres) is optional and appears only on Opportunity-first and Torres workspaces, above the Driving key result. Open the box, search, and tick every Objective this opportunity is being pursued for, up to 25. Each chosen Objective shows its cycle beside it when it has one; an Objective with no cycle is listed like any other. The links are created in the same save as the opportunity. Classic workspaces do not see this box.
 - **Driving key result** is optional. Search the workspace's Key Results and choose the one this opportunity should move.
 - **Seed from feedback** is optional. Search the workspace's feedback and select every item that points to this opportunity. Selected items appear as a list, and you can remove any of them. Linking works the same way as it does from the feedback board: the item's status doesn't change, and an item that is already linked to another opportunity moves to this one. The composer tells you when that will happen.
 
-Press **⌘/Ctrl + Enter** or select **Submit** to create the opportunity. The opportunity, its Key Result link and its feedback links are saved together. If any part is invalid, for example a Key Result from another workspace, nothing is created and the error appears in the composer. When it succeeds, the new card appears on the board and the composer turns into the new opportunity's panel. Browser Back doesn't return to an empty composer.
+Press **⌘/Ctrl + Enter** or select **Submit** to create the opportunity. The opportunity, its Objective links, its Key Result link and its feedback links are saved together. If any part is invalid, for example a Key Result from another workspace, nothing is created and the error appears in the composer. When it succeeds, the new card appears on the board and the composer turns into the new opportunity's panel. Browser Back doesn't return to an empty composer.
 
 Your draft is saved on this device for each workspace as you type. If you close the panel (with **Esc** or the close button), reload, or leave the page, the draft is kept and the composer says **Restored your unsent draft** the next time you open it. **Cancel** asks before discarding a draft.
 
@@ -114,6 +120,32 @@ Linked Feedback and Evidence are separate records. Linking a feedback item does 
 ![Linked feedback and driving Key Result on an opportunity](/screenshots/docs/opportunity-links-page-desktop.png)
 
 ![Opportunity relationships on mobile](/screenshots/docs/opportunity-links-page-mobile.png)
+
+## The Solutions backlog
+
+Discovery is the Opportunity backlog. To see every Solution against each other, open **Solutions** in the sidebar (next to Opportunities). It is a flat board of all the Solutions in the workspace, with one column per status: **Idea**, **Validated**, **In delivery**, **Shipped**, **Killed**.
+
+- Each card shows the Solution title, its parent Opportunity (click it to open that Opportunity), a score badge when the workspace has an active Solution scoring model, and its assumption and evidence counts. Click the title to open the Solution panel.
+- Drag a card to another column to change its status. Order within a column is not draggable here, because a column mixes Solutions from many Opportunities; use **Sort by score** (shown when a Solution scoring model is active) to rank them instead.
+- **Filters** narrow the board by squad (the parent Opportunity’s squad) and by Solution custom fields. They apply to the table view too.
+- **New Solution** (top right) opens a dialog: choose the parent Opportunity (required; any non-archived Opportunity in the workspace), enter a title and an optional description, and the Solution lands in the Idea column. It is the same action as **+ Add Solution** in an Opportunity’s panel. Moving a Solution to a different Opportunity is done from its panel, never by dragging.
+
+### Board and table views
+
+The **Board / Table** toggle switches between the status board and a flat table (`?view=table`). The table has one row per Solution: title (opens the Solution panel), parent Opportunity (a link), squad, status, score (only with an active Solution scoring model), evidence, and assumptions. Rows run from Idea to Killed in board order; **Sort by score** ranks them by score instead. The table respects the same filters as the board.
+
+### Group by
+
+On the board, **Group by** changes what the columns are (`?groupBy=`):
+
+- **Status** (default): one column per status. This is the only grouping where you can drag cards, and dragging changes the status.
+- **Squad**: one column per squad, plus **No squad**. A Solution’s squad is its parent Opportunity’s squad.
+- **Opportunity**: one column per parent Opportunity that has at least one Solution matching the filters.
+- **A Solution custom field**: any single-select Solution field with options gets an entry in the menu. Columns are **Unspecified** (no value, or a value that no longer matches an option) followed by the field’s options in order.
+
+Squad, Opportunity and custom-field groupings are read-only: cards cannot be dragged between those columns (a Solution’s squad and parent belong to its Opportunity, and Solution field values are edited in the Solution panel). Use a card’s **⋯** menu to change status, or switch back to Status to drag. An unknown or stale `groupBy` value (for example a deleted field) opens the Status board.
+
+Columns keep a minimum width and the board scrolls sideways when the screen is narrower.
 
 ## Solutions
 
@@ -169,6 +201,20 @@ Click **+ Add Evidence** from any opportunity, solution, or assumption to attach
 
 Because evidence doesn't roll up the tree, attach it to the specific node it actually supports — evidence for a particular solution belongs on that solution, not on the parent opportunity.
 
+## Linking an opportunity to Objectives, and the workspace tree
+
+Discovery connects to your OKRs through links:
+
+- **Opportunity ↔ Objective.** An opportunity can be linked to as many Objectives as you chose to pursue it for. Its **Driving Key Result** (above) also links it to that Key Result's Objective, so older data is not left unlinked.
+- **Solution ↔ Key Result.** A solution can be linked to the Key Results it is meant to move, in addition to its one parent opportunity. On Opportunity-first and Torres workspaces you make them yourself: open the solution and use its **Linked Key Results** box (**Linked Success metrics** under Torres) to tick or untick any Key Result in the workspace, each tick saving immediately. The Key Result's panel lists its **Linked Solutions**. Agents make the same links with the link tools in the [MCP API](/help/09-mcp-api#typed-links). The workspace tree below and the [Canvas](/help/12-canvas) show them.
+
+Workspaces that use the **Opportunity-first OKRs** or **Torres** thinking model (a workspace admin picks it in Settings) get two extra things in Discovery:
+
+- On an opportunity, a multi-select box (titled **Objectives**, or **Outcomes** under Torres) to link the opportunity to every Objective you chose to pursue it for. Once the workspace has at least one Objective, select **Change** (or **Link objectives** when there are none), then tick or untick; each tick saves immediately. If an Objective is linked only because of the opportunity's Driving Key Result, unticking it explains that and changes nothing: change the Key Result instead.
+- A tree button in the Discovery header (**Objective tree** / **Outcome tree**) that opens the workspace tree at `/discovery/tree`: Objectives, their linked opportunities and the solutions under them, with opportunities that are not linked to any Objective gathered in a pool. Solutions are shown against the Key Results they are linked to.
+
+Classic workspaces see neither: there is no box and `/discovery/tree` is not found. The board, the Tree view and the Solutions list work the same under every model. Details are on the [Thinking models](/help/27-thinking-models) page.
+
 ## The OST Tree View
 
 Switch from board view to **Tree view** using the toggle at the top right of the Discovery page. The Tree view renders your full Opportunity Solution Tree:
@@ -181,4 +227,4 @@ Switch from board view to **Tree view** using the toggle at the top right of the
 
 This view is most useful in team discussions and stakeholder reviews, where you need to show the full reasoning chain from outcome to experimental evidence.
 
-Any assumption with no linked experiment yet shows a **Test this assumption →** link. Clicking it opens the Experiments page with a new experiment form pre-filled to test that assumption, closing the loop without leaving the tree to hunt down the right assumption manually.
+Any assumption with no linked experiment yet shows a **Test this assumption →** link. Clicking it opens the Experiments page with the new experiment composer open and pre-filled to test that assumption, closing the loop without leaving the tree to hunt down the right assumption manually.

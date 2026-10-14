@@ -18,13 +18,14 @@ import { runWithMcpActor } from "@/lib/mcp-authz"
 const mockPrisma = {
   workspace: { findUnique: vi.fn() },
   opportunity: { findUnique: vi.fn(), create: vi.fn() },
-  solution: { findUnique: vi.fn(), create: vi.fn() },
+  solution: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+  squad: { findMany: vi.fn() },
   assumption: { findUnique: vi.fn(), create: vi.fn() },
-  objective: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
-  keyResult: { create: vi.fn() },
-  oKRCycle: { findFirst: vi.fn() },
+  objective: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+  keyResult: { create: vi.fn(), findMany: vi.fn() },
+  oKRCycle: { findFirst: vi.fn(), findMany: vi.fn() },
   experiment: { create: vi.fn() },
-  roadmapItem: { findFirst: vi.fn(), create: vi.fn() },
+  roadmapItem: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
   portfolioCapacityReservation: { findUnique: vi.fn() },
   portfolioCapacityPlan: { updateMany: vi.fn() },
   $transaction: vi.fn(),
@@ -131,8 +132,7 @@ describe("add_solution deeplink", () => {
 describe("add_assumption deeplink", () => {
   it("opens the assumption panel on the owning opportunity page (two-hop scope)", async () => {
     mockPrisma.solution.findUnique.mockResolvedValue({
-      id: "sol-1", title: "Guided setup",
-      opportunity: { id: "opp-1", workspace: SLUGGED },
+      id: "sol-1", title: "Guided setup", opportunityId: "opp-1", workspace: SLUGGED,
     })
     mockPrisma.assumption.create.mockResolvedValue({ id: "asm-1", title: "Users will finish", riskLevel: "HIGH", status: "UNTESTED", description: null })
     const text = (await call("add_assumption", { solutionId: "sol-1", title: "Users will finish", riskLevel: "HIGH" })).content[0].text
@@ -155,20 +155,52 @@ describe("create_objective deeplink", () => {
     const text = (await call("create_objective", { workspaceId: "ws-1", cycleId: "cycle-1", title: "Grow activation" })).content[0].text
     expect(text).toContain(`URL: ${BASE}/okrs?detail=objective%3Aobj-1`)
   })
+
+  it("creates a cycle-less Objective when cycleId is omitted (migration 070) and still links to it", async () => {
+    mockPrisma.workspace.findUnique.mockResolvedValue({ id: "ws-1", ...SLUGGED })
+    mockPrisma.objective.create.mockResolvedValue({ id: "obj-2", title: "Always-on goal", status: "ON_TRACK", description: null, owner: null, squadId: null, parentKeyResultId: null })
+    const text = (await call("create_objective", { workspaceId: "ws-1", title: "Always-on goal" })).content[0].text
+    expect(mockPrisma.oKRCycle.findFirst).not.toHaveBeenCalled()
+    expect(mockPrisma.objective.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ workspaceId: "ws-1", cycleId: null, title: "Always-on goal" }),
+    })
+    expect(text).toContain("No cycle / Persistent")
+    expect(text).toContain(`URL: ${BASE}/okrs?detail=objective%3Aobj-2`)
+  })
+
+  it("still verifies a provided cycle belongs to the workspace", async () => {
+    mockPrisma.oKRCycle.findFirst.mockResolvedValue(null)
+    const result = await call("create_objective", { workspaceId: "ws-1", cycleId: "11111111-1111-4111-8111-111111111111", title: "x" })
+    expect(result.content[0].text).toContain("not found in workspace")
+    expect(mockPrisma.oKRCycle.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "11111111-1111-4111-8111-111111111111", workspaceId: "ws-1" } }))
+    expect(mockPrisma.objective.create).not.toHaveBeenCalled()
+  })
+})
+
+describe("list_okr_cycles with cycle-less Objectives", () => {
+  it("lists them under a labeled group so they never vanish, even when there are no cycles", async () => {
+    mockPrisma.oKRCycle.findMany.mockResolvedValue([])
+    mockPrisma.objective.findMany.mockResolvedValue([{ id: "obj-2", title: "Always-on goal", status: "ON_TRACK" }])
+    const result = await call("list_okr_cycles", { workspaceId: "ws-1" })
+    expect(mockPrisma.objective.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "ws-1", cycleId: null } }))
+    expect(result.content[0].text).toContain("No cycle / Persistent")
+    expect(result.content[0].text).toContain("Always-on goal")
+    expect(result.content[0].text).toContain("Objective ID: obj-2")
+  })
 })
 
 describe("add_key_result deeplink", () => {
-  it("opens the key result panel on the OKRs page (scoped through objective -> cycle)", async () => {
+  it("opens the key result panel on the OKRs page (scoped through the objective's own workspace)", async () => {
     mockPrisma.objective.findUnique.mockResolvedValue({
-      id: "obj-1", title: "Grow activation", cycle: { workspace: SLUGGED },
+      id: "obj-1", title: "Grow activation", workspaceId: "ws-1", workspace: SLUGGED,
     })
     mockPrisma.keyResult.create.mockResolvedValue({ id: "kr-1", title: "Activation rate", target: 50, unit: "%", current: 0 })
     const text = (await call("add_key_result", { objectiveId: "obj-1", title: "Activation rate", target: 50 })).content[0].text
     expect(text).toContain(`URL: ${BASE}/okrs?detail=keyResult%3Akr-1`)
   })
 
-  it("omits the URL line when the cycle's workspace slugs are unavailable", async () => {
-    mockPrisma.objective.findUnique.mockResolvedValue({ id: "obj-1", title: "Grow activation" })
+  it("omits the URL line when the workspace slugs are unavailable", async () => {
+    mockPrisma.objective.findUnique.mockResolvedValue({ id: "obj-1", title: "Grow activation", workspaceId: "ws-1" })
     mockPrisma.keyResult.create.mockResolvedValue({ id: "kr-1", title: "Activation rate", target: 50, unit: null, current: 0 })
     const text = (await call("add_key_result", { objectiveId: "obj-1", title: "Activation rate", target: 50 })).content[0].text
     expect(text).toContain("ID: kr-1")
@@ -195,24 +227,37 @@ describe("add_to_roadmap deeplink", () => {
 })
 
 describe("promote_to_roadmap deeplink", () => {
+  const solution = { id: "sol-1", title: "Guided setup", opportunityId: "opp-1", opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null, linkedKeyResultId: null } }
+  const created = { id: "item-2", workspaceId: "ws-1", title: "Guided setup", horizon: "NOW", isPrivate: false, squadId: null, solutionId: "sol-1", opportunityId: "opp-1", startDate: null, endDate: null, keyResultId: null, autoCreated: null }
+
+  beforeEach(() => {
+    mockPrisma.workspace.findUnique.mockResolvedValue(SLUGGED)
+    mockPrisma.solution.findFirst.mockResolvedValue(solution)
+    mockPrisma.solution.findMany.mockResolvedValue([solution])
+    mockPrisma.squad.findMany.mockResolvedValue([])
+    mockPrisma.roadmapItem.findMany.mockResolvedValue([])
+    mockPrisma.roadmapItem.findUnique.mockResolvedValue(created)
+    mockPrisma.roadmapItem.create.mockResolvedValue(created)
+  })
+
   it("opens the new roadmap item panel on the roadmap", async () => {
-    mockPrisma.solution.findUnique.mockResolvedValue({
-      id: "sol-1", title: "Guided setup",
-      opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null, workspaceId: "ws-1", workspace: SLUGGED },
-    })
-    mockPrisma.roadmapItem.create.mockResolvedValue({ id: "item-2", title: "Guided setup", isPrivate: false, squadId: null })
     const text = (await call("promote_to_roadmap", { solutionId: "sol-1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
     expect(text).toContain(`URL: ${BASE}/roadmap?detail=roadmapItem%3Aitem-2`)
   })
 
-  it("omits the URL line when the solution's opportunity belongs to a different workspace", async () => {
-    mockPrisma.solution.findUnique.mockResolvedValue({
-      id: "sol-1", title: "Guided setup",
-      opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null, workspaceId: "other-ws", workspace: SLUGGED },
-    })
-    mockPrisma.roadmapItem.create.mockResolvedValue({ id: "item-2", title: "Guided setup", isPrivate: false, squadId: null })
+  it("is idempotent: a solution already on the roadmap returns its item and creates nothing", async () => {
+    mockPrisma.roadmapItem.findMany.mockImplementation(({ where }: { where: { solutionId?: unknown } }) => Promise.resolve(where.solutionId ? [{ id: "item-2", solutionId: "sol-1" }] : []))
     const text = (await call("promote_to_roadmap", { solutionId: "sol-1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
+    expect(text).toContain("Already on the roadmap")
     expect(text).toContain("Roadmap Item ID: item-2")
-    expect(text).not.toContain("URL:")
+    expect(mockPrisma.roadmapItem.create).not.toHaveBeenCalled()
   })
+
+  it("does not promote a solution that belongs to a different workspace", async () => {
+    mockPrisma.solution.findFirst.mockResolvedValue(null)
+    const text = (await call("promote_to_roadmap", { solutionId: "sol-1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
+    expect(text).toContain("not found")
+    expect(mockPrisma.roadmapItem.create).not.toHaveBeenCalled()
+  })
+
 })

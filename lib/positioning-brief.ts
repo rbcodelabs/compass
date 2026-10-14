@@ -77,7 +77,7 @@ export async function createPositioningBriefCore(
     };
   const doc = isDocumentPilotWorkspace(workspaceId)
     ? await createDocument(data, { operationId: randomUUID(), authorName: "Compass" })
-    : await prisma.doc.create({ data });
+    : await prisma.doc.create({ data: { ...data, revision: randomUUID() } });
 
   return { ok: true, docId: doc.id, title: doc.title, created: true };
 }

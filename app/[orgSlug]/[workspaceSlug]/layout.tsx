@@ -6,6 +6,8 @@ import { Sidebar } from "@/components/sidebar"
 import { BottomNav } from "@/components/bottom-nav"
 import { MobileHeader } from "@/components/mobile-header"
 import { PanelProvider } from "@/components/panels/panel-context"
+import { ThinkingModelProvider } from "@/components/thinking-model/thinking-model-provider"
+import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { PanelShell } from "@/components/panels/panel-shell"
 import { AgentRailProvider } from "@/components/agent/agent-rail-context"
 import { AgentRail } from "@/components/agent/agent-rail"
@@ -21,7 +23,11 @@ import { ThemeProvider } from "@/components/theme/theme-provider"
 import { workspaceThemeInitScript } from "@/lib/theme"
 import getPrisma from "@/lib/db"
 import { workspaceUpdatesAvailable } from "@/lib/workspace-updates-capture"
+import { followingAvailable } from "@/lib/following-flag"
+import { unreadCount } from "@/lib/notifications"
 import { ReadOnlyBanner } from "@/components/workspace/read-only-banner"
+import { UndoToastHost } from "@/components/ui/undo-toast-host"
+import { WorkspaceVisitRecorder } from "@/components/workspace-selector/workspace-visit-recorder"
 
 interface WorkspaceLayoutProps {
   children: React.ReactNode
@@ -64,8 +70,19 @@ export default async function WorkspaceLayout({
   const initialAgentPin = parsePanelPin(
     cookieStore.get(panelPinCookieName("agent"))?.value
   )
+  // Resolved once from the already-loaded workspace (no extra query) and handed
+  // to client components as plain data.
+  const thinkingModel = resolveThinkingModel(workspace)
   const researchCaptureEnabled = isResearchCaptureEnabled()
-  const updatesEnabled = await workspaceUpdatesAvailable(getPrisma())
+  const [updatesEnabled, followingEnabled] = await Promise.all([
+    workspaceUpdatesAvailable(getPrisma()),
+    followingAvailable(getPrisma()),
+  ])
+  // Seeds the bell for the first painted frame; the client refetches on
+  // navigation and when the tab becomes visible. Zero cost with following off.
+  const unreadNotifications = followingEnabled
+    ? await unreadCount(user.id, workspace.id)
+    : { count: 0, overflow: false }
 
   return (
     <>
@@ -73,6 +90,7 @@ export default async function WorkspaceLayout({
       <WorkspaceThemeStyle branding={resolveWorkspaceBranding(workspace)} />
       <ThemeProvider>
         <div className="workspace-theme-scope contents">
+        <ThinkingModelProvider value={thinkingModel}>
         <PanelProvider orgSlug={orgSlug} workspaceSlug={workspaceSlug}>
         {/* Inside PanelProvider, because the rail measures around the detail
             panel and so reads that context; and at layout level rather than
@@ -90,7 +108,13 @@ export default async function WorkspaceLayout({
           userEmail={user.email ?? ""}
           userImage={user.image ?? undefined}
           isOrgAdmin={isOrgAdmin}
+          showOrgRoadmap={workspaces.filter((w) => w.orgSlug === orgSlug).length > 1}
+          followingEnabled={followingEnabled}
+          unreadNotifications={unreadNotifications}
         />
+
+        <UndoToastHost />
+        <WorkspaceVisitRecorder orgSlug={orgSlug} workspaceSlug={workspaceSlug} userScope={user.email || undefined} />
 
         <TooltipProvider>
           <SidebarProvider
@@ -120,6 +144,8 @@ export default async function WorkspaceLayout({
               isOrgAdmin={isOrgAdmin}
               researchCaptureEnabled={researchCaptureEnabled}
               updatesEnabled={updatesEnabled}
+              followingEnabled={followingEnabled}
+              unreadNotifications={unreadNotifications}
             />
 
             {/* Between the nav and main content, so the docked rail is a real
@@ -131,6 +157,7 @@ export default async function WorkspaceLayout({
               workspaceId={workspace.id}
               basePath={`/${orgSlug}/${workspaceSlug}`}
               userInitials={initialsOf(user.name ?? user.email)}
+              userId={user.id}
             />
 
             {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}
@@ -153,6 +180,7 @@ export default async function WorkspaceLayout({
         <BottomNav orgSlug={orgSlug} workspaceSlug={workspaceSlug} researchCaptureEnabled={researchCaptureEnabled} updatesEnabled={updatesEnabled} />
         </AgentRailProvider>
         </PanelProvider>
+        </ThinkingModelProvider>
         </div>
       </ThemeProvider>
     </>

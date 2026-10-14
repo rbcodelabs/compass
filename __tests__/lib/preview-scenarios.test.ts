@@ -34,6 +34,7 @@ function fixture() {
     user: { createMany: vi.fn() }, organizationMember: { createMany: vi.fn() }, workspaceMember: { createMany: vi.fn() },
     session: { create: vi.fn().mockImplementation(({ data }) => data) },
     previewAutomationSession: { create: vi.fn() },
+    apiKey: { create: vi.fn() }, oAuthToken: { create: vi.fn() },
   };
   return { tx, client: { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as AppPrismaClient };
 }

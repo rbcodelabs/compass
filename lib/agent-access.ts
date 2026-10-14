@@ -70,3 +70,34 @@ export async function hasValidAgentOrgAdminGrant(
   actor.agentAdminGrantId = grant.id
   return true
 }
+
+/**
+ * True when `actor` (an AGENT/AGENT_TURN identity) may exercise its OWNER's
+ * org admin rights in `organizationId`: an agent acts with the delegated
+ * authority of the human who owns it, so no per-agent AgentOrgAdminGrant is
+ * needed for the tools that opt in (today only `create_workspace`).
+ *
+ * Requires ALL of:
+ *   - agents are enabled, and the actor carries both an agentId and userId;
+ *   - the actor is not bound to a single workspace (`scopeWorkspaceId`): a
+ *     workspace-scoped identity must not be able to mint new workspaces;
+ *   - the agent is ACTIVE and owned by actor.userId;
+ *   - the owner is a CURRENT org OWNER/ADMIN, re-read from OrganizationMember
+ *     on every call (time-of-check, same principle as
+ *     hasValidAgentOrgAdminGrant) — demoting the owner revokes this at once.
+ *
+ * Audit attribution needs nothing extra: withAgentActivity already writes the
+ * AgentToolCall row with agentId/userId, and `agentAdminGrantId` stays null
+ * because no grant authorized the call.
+ */
+export async function hasOwnerOrgAdminRights(actor: McpActor, organizationId: string): Promise<boolean> {
+  if (!agentsEnabled() || !actor.agentId || !actor.userId || actor.scopeWorkspaceId) return false
+  const prisma = getPrisma()
+  const agent = await prisma.agent.findFirst({ where: { id: actor.agentId, ownerUserId: actor.userId, status: "ACTIVE" }, select: { id: true } })
+  if (!agent) return false
+  const owner = await prisma.organizationMember.findFirst({
+    where: { organizationId, userId: actor.userId },
+    select: { role: true },
+  })
+  return isOrgAdminRole(owner?.role)
+}

@@ -16,6 +16,8 @@ export const OPPORTUNITY_TITLE_MAX_LENGTH = 255
 export const OPPORTUNITY_SEGMENT_MAX_LENGTH = 255
 /** A seed set, not a bulk re-parenting tool; keeps one transaction small. */
 export const OPPORTUNITY_SEED_FEEDBACK_MAX = 50
+/** Objectives linkable from the composer in one create (each link is 4 modified rows in the transaction). */
+export const OPPORTUNITY_LINK_OBJECTIVES_MAX = 25
 
 /** The statuses a new opportunity can start in (never ARCHIVED). */
 export const NEW_OPPORTUNITY_STATUSES = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"] as const
@@ -34,6 +36,8 @@ export type OpportunityDraft = {
   squadId: string | null
   keyResultId: string | null
   feedbackIds: string[]
+  /** Objectives to link in the same transaction (Phase 4B); only chosen under presets that offer it. */
+  objectiveIds: string[]
 }
 
 export const EMPTY_OPPORTUNITY_DRAFT: OpportunityDraft = Object.freeze({
@@ -44,6 +48,7 @@ export const EMPTY_OPPORTUNITY_DRAFT: OpportunityDraft = Object.freeze({
   squadId: null,
   keyResultId: null,
   feedbackIds: [],
+  objectiveIds: [],
 }) as OpportunityDraft
 
 /**
@@ -57,7 +62,8 @@ export function isOpportunityDraftEmpty(draft: OpportunityDraft): boolean {
     !draft.customerSegment.trim() &&
     !draft.squadId &&
     !draft.keyResultId &&
-    draft.feedbackIds.length === 0
+    draft.feedbackIds.length === 0 &&
+    draft.objectiveIds.length === 0
   )
 }
 
@@ -74,6 +80,9 @@ const store = createComposerDraftStore<OpportunityDraft>({
     keyResultId: draftId(v.keyResultId),
     feedbackIds: Array.isArray(v.feedbackIds)
       ? [...new Set(v.feedbackIds.filter((id): id is string => typeof id === "string" && id.length > 0))]
+      : [],
+    objectiveIds: Array.isArray(v.objectiveIds)
+      ? [...new Set(v.objectiveIds.filter((id): id is string => typeof id === "string" && id.length > 0))]
       : [],
   }),
 })

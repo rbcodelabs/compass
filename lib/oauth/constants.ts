@@ -13,6 +13,8 @@ import { trustedCompassBaseUrl } from "@/lib/compass-url"
 export const SCOPE_MCP_READ = "mcp:read"
 /** Mutating MCP tool access. */
 export const SCOPE_MCP_WRITE = "mcp:write"
+export const SCOPE_API_READ = "api:read"
+export const SCOPE_API_WRITE = "api:write"
 /**
  * Advertised so clients that gate refresh-token requests on it (Claude) ask
  * for one. Compass issues a refresh token for every authorization-code grant
@@ -28,7 +30,7 @@ export const SCOPE_OFFLINE_ACCESS = "offline_access"
  * challenge requests everything listed here, so each extra entry is consent
  * surface granted by default.
  */
-export const SUPPORTED_SCOPES = [SCOPE_MCP_READ, SCOPE_MCP_WRITE, SCOPE_OFFLINE_ACCESS] as const
+export const SUPPORTED_SCOPES = [SCOPE_MCP_READ, SCOPE_MCP_WRITE, SCOPE_API_READ, SCOPE_API_WRITE, SCOPE_OFFLINE_ACCESS] as const
 
 /**
  * `scopes_supported` for the **protected resource** metadata document. A
@@ -36,6 +38,9 @@ export const SUPPORTED_SCOPES = [SCOPE_MCP_READ, SCOPE_MCP_WRITE, SCOPE_OFFLINE_
  * offline_access" guidance applies to this one only — hence the split.
  */
 export const RESOURCE_SCOPES = [SCOPE_MCP_READ, SCOPE_MCP_WRITE] as const
+export const API_RESOURCE_SCOPES = [SCOPE_API_READ, SCOPE_API_WRITE] as const
+/** Backward-compatible DCR default for clients that predate the REST audience. */
+export const DEFAULT_CLIENT_SCOPES = [SCOPE_MCP_READ, SCOPE_MCP_WRITE, SCOPE_OFFLINE_ACCESS] as const
 
 export type SupportedScope = (typeof SUPPORTED_SCOPES)[number]
 
@@ -62,6 +67,21 @@ export function filterSupportedScopes(raw: string | null | undefined): Supported
   return parseScope(raw).filter(isSupportedScope)
 }
 
+export function scopesForResource(resource: string): readonly SupportedScope[] {
+  return resource === apiResourceUri() ? API_RESOURCE_SCOPES : RESOURCE_SCOPES
+}
+
+export function filterScopesForResource(raw: string | null | undefined, resource: string): SupportedScope[] {
+  const allowed = new Set<string>([...scopesForResource(resource), SCOPE_OFFLINE_ACCESS])
+  return filterSupportedScopes(raw).filter((scope) => allowed.has(scope))
+}
+
+export function scopesSatisfy(granted: readonly string[], required: typeof SCOPE_MCP_READ | typeof SCOPE_MCP_WRITE | typeof SCOPE_API_READ | typeof SCOPE_API_WRITE): boolean {
+  if (granted.includes(required)) return true
+  return (required === SCOPE_MCP_READ && granted.includes(SCOPE_MCP_WRITE)) ||
+    (required === SCOPE_API_READ && granted.includes(SCOPE_API_WRITE))
+}
+
 /**
  * The OAuth issuer identifier: origin only, no path, no trailing slash.
  *
@@ -85,6 +105,10 @@ export function oauthIssuer(): string {
  */
 export function mcpResourceUri(): string {
   return assertCanonical(new URL("/api/mcp", trustedCompassBaseUrl()).toString())
+}
+
+export function apiResourceUri(): string {
+  return assertCanonical(new URL("/api/v1", trustedCompassBaseUrl()).toString())
 }
 
 /**

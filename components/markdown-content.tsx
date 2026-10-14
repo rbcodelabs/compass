@@ -1,4 +1,5 @@
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import type { ReactNode } from "react";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 
@@ -27,21 +28,45 @@ function safeUrl(url: string): string {
   return defaultUrlTransform(url);
 }
 
-export function MarkdownContent({ children, className }: { children: string | null | undefined; className?: string }) {
+type LinkRenderer = (props: { href?: string; children?: ReactNode }) => ReactNode;
+
+function DefaultLink({ href, children }: { href?: string; children?: ReactNode }) {
+  if (!href) return <span>{children}</span>;
+  const external = Boolean(href && /^(?:https?:)?\/\//i.test(href));
+  return <a href={href} {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}>{children}</a>;
+}
+
+// Module-level so the renderer identity is stable across renders. react-markdown
+// treats a new component function as a new element type and remounts it, which
+// for a streaming chat reply would reset any stateful link renderer every chunk.
+const COMPONENTS_BY_LINK = new WeakMap<LinkRenderer, Components>();
+
+function componentsFor(Link: LinkRenderer): Components {
+  let components = COMPONENTS_BY_LINK.get(Link);
+  if (!components) {
+    components = { a: ({ href, children }) => <Link href={href}>{children}</Link>, img: () => null };
+    COMPONENTS_BY_LINK.set(Link, components);
+  }
+  return components;
+}
+
+/**
+ * `linkComponent` swaps the renderer for every link (the agent transcript uses it
+ * to show Compass entity links as cards). It must be a stable, module-level
+ * component — not an inline function.
+ */
+export function MarkdownContent({
+  children,
+  className,
+  linkComponent = DefaultLink,
+}: {
+  children: string | null | undefined;
+  className?: string;
+  linkComponent?: LinkRenderer;
+}) {
   return (
     <div className={cn(PROSE, className)}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        urlTransform={safeUrl}
-        components={{
-          a: ({ href, children }) => {
-            if (!href) return <span>{children}</span>;
-            const external = Boolean(href && /^(?:https?:)?\/\//i.test(href));
-            return <a href={href} {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}>{children}</a>;
-          },
-          img: () => null,
-        }}
-      >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={safeUrl} components={componentsFor(linkComponent)}>
         {children ?? ""}
       </ReactMarkdown>
     </div>

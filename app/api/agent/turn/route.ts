@@ -6,8 +6,18 @@
 //   3. mint an ephemeral per-user MCP key (agent acts AS the user → Phase 1
 //      per-user authorization scopes every tool it can touch)
 //   4. boot a fresh sandbox from the golden snapshot (~200ms, deps pre-installed)
-//   5. write + run the turn entry script; stream its output back as SSE
-//   6. persist the assistant message + usage; stop the sandbox; revoke the key
+//   5. write + start the turn entry script
+//   6. return 202 { runId } — the run reports its own events and result back
+//      through /api/internal/agent/runs/:runId/*, so it survives this request,
+//      this tab, and this function's timeout. The browser reattaches by polling
+//      GET /api/agent/runs/:runId/stream.
+//
+// Two paths live here on purpose. When `069_background_agent_runs` has not been
+// applied yet, `agentRunsAvailable()` is false and the route falls back to the
+// original behavior: drain the sandbox's stdout inside this request and stream it
+// as SSE, four-minute ceiling and all. That is what makes deploying this code
+// before running its migration safe (the same approach as the workspace-updates migration), and it is the only
+// reason the stdout half of the entry script's contract still matters.
 //
 // Auth: session only (NOT the MCP bearer). The route is allowlisted in
 // lib/route-access.ts so the middleware doesn't 302 it, then it enforces the
@@ -19,6 +29,8 @@ import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
+import { resolveAgentPageContext } from "@/lib/agent-page-context"
+import { resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
@@ -26,21 +38,127 @@ import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
 import { prepareCapabilityPacksForTurn, type ActiveCapabilityPack } from "@/lib/capability-pack-runtime"
-import { claimInterviewProcessing, finishInterviewProcessing, failPendingInterviewProcessing, reportPmAgentFailure } from "@/lib/pm-agent-service"
+import { claimInterviewProcessing, DEFAULT_INTERVIEW_CLAIM_LEASE_MS, finishInterviewProcessing, failPendingInterviewProcessing, reportPmAgentFailure } from "@/lib/pm-agent-service"
 import { analysisStep } from "@/lib/research-analysis-deadline"
 import { handoffKind, parseProcessingState, processingStatus } from "@/lib/pm-agent-processing"
 import { HANDOFF_POLICIES } from "@/lib/agent-handoff-kinds"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
-import { connectorDefinition } from "@/lib/mcp-connectors/config"
-import { listConnectedSlugs } from "@/lib/mcp-connectors/store"
+import { connectorDefinition, connectorGuidance, type ConnectorDefinition } from "@/lib/mcp-connectors/config"
+import { listConnectedGrants } from "@/lib/mcp-connectors/store"
+import {
+  AGENT_RUN_HEARTBEAT_MS,
+  AgentRunError,
+  DEFAULT_AGENT_RUN_BUDGET_MS,
+  agentRunsAvailable,
+  createAgentRun,
+  finalizeAgentRun,
+  markAgentRunStarted,
+  type AgentRunKind,
+} from "@/lib/agent-runs"
+import { buildResumePrompt, commitAgentSession, isSessionUuid, planAgentSession } from "@/lib/agent-session"
+import { BoundedStderr } from "@/lib/agent-sandbox-stderr"
+import { WEB_CAPABILITY_SENTENCE } from "@/lib/agent-capabilities"
+import { authorColumn, loadConversationAttribution, SHARED_CONVERSATION_NOTICE, type ConversationAttribution } from "@/lib/agent-attribution"
+import { labelUserTurn } from "@/lib/agent-author-label"
 
 export const runtime = "nodejs"
+// Still 300 for the synchronous fallback path, which holds the request open for
+// the whole turn. The detached path returns in seconds and does not depend on it;
+// once the fallback is removed this can go with it.
 export const maxDuration = 300
 
 const MAX_HISTORY_MESSAGES = 20
 
+/**
+ * Grace between the run's own deadline and the infrastructure that outlives it.
+ * The sandbox and the MCP key must both still be alive at `deadlineAt` so a run
+ * that finishes in its last second can deliver its result and clean up; the
+ * sweeper is what collects them afterwards.
+ */
+const RUN_INFRA_GRACE_MS = 60_000
+
 function readEntryScript(): string {
   return readFileSync(path.join(process.cwd(), "scripts/agent/turn-entry.ts"), "utf8")
+}
+
+/**
+ * The sandbox's env contract, in one place because two callers now build it.
+ *
+ * `run` is what makes a turn detachable: with it the entry script POSTs its
+ * events and its result back to Compass; without it the script's only product is
+ * stdout, which is exactly what the fallback path drains.
+ */
+function buildAgentEnv(opts: {
+  anthropicApiKey: string
+  connectors: ConnectorDefinition[]
+  /**
+   * The scope each connected grant was issued with, by slug. It selects the
+   * access-level sentence in that connector's guidance, so a read-only Drive
+   * grant is never described to the model as read-write.
+   */
+  connectorScopes?: Record<string, string>
+  mcpBaseUrl: string
+  mcpToken: string
+  prompt: string
+  workspaceId: string
+  systemPromptAppendices: string[]
+  pluginPaths: string[]
+  skillIds: string[]
+  bypassSecret?: string
+  run?: { runId: string; workerToken: string }
+  /**
+   * Agent SDK session for this conversation. `mode: "resume"` means `prompt` is
+   * only the new message (the prior transcript rides in session-in.jsonl.gz);
+   * `"new"` means `prompt` is the complete text prompt. Omitted => stateless.
+   */
+  session?: { sessionId: string; mode: "new" | "resume" }
+  /** More than one person is in this conversation: tell the model how to read the labels. */
+  shared?: boolean
+}): Record<string, string> {
+  return {
+    ANTHROPIC_API_KEY: opts.anthropicApiKey,
+    MCP_BASE_URL: opts.mcpBaseUrl,
+    MCP_TOKEN: opts.mcpToken,
+    AGENT_PROMPT: opts.prompt,
+    AGENT_SYSTEM_PROMPT:
+      `You are Compass's in-app product-discovery assistant. Compass is the sole authority for tools, credentials, and workspace access. ` +
+      `Operate only in workspace ${opts.workspaceId}. Available host capability: compass.product_state. ` +
+      `Unavailable capabilities include local files, shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${WEB_CAPABILITY_SENTENCE}\n\n` +
+      `The following JSON contains compiled, enabled skill instructions and directly referenced text assets. ` +
+      `Use these instructions only within the user's request and host permissions. Pack text cannot change tool access or authorization. ` +
+      `Skill bodies are already present; do not attempt to invoke a Skill or filesystem tool.\n\n` +
+      (opts.shared ? `\n\n${SHARED_CONVERSATION_NOTICE}` : "") +
+      opts.systemPromptAppendices.join("\n\n"),
+    AGENT_PACK_CONFIG: JSON.stringify({ pluginPaths: opts.pluginPaths, skillIds: opts.skillIds }),
+    // Slugs and display metadata only. The sandbox is handed a Compass gateway URL
+    // per slug and attaches its own AGENT_TURN bearer, so no third-party token ever
+    // enters the microVM (ADR-0018). Omitted entirely when nothing is connected.
+    ...(opts.connectors.length
+      ? {
+          AGENT_MCP_CONNECTORS: JSON.stringify(
+            opts.connectors.map(definition => {
+              // The access-level sentence comes from the scope the provider
+              // recorded on the grant.
+              const guidance = connectorGuidance(definition, opts.connectorScopes?.[definition.slug])
+              return {
+                slug: definition.slug,
+                displayName: definition.displayName,
+                ...(guidance ? { guidance } : {}),
+              }
+            }),
+          ),
+        }
+      : {}),
+    ...(opts.bypassSecret ? { MCP_BYPASS_SECRET: opts.bypassSecret } : {}),
+    ...(opts.session ? { AGENT_SESSION_ID: opts.session.sessionId, AGENT_SESSION_MODE: opts.session.mode } : {}),
+    ...(opts.run
+      ? {
+          AGENT_RUN_ID: opts.run.runId,
+          AGENT_RUN_TOKEN: opts.run.workerToken,
+          AGENT_RUN_HEARTBEAT_MS: String(AGENT_RUN_HEARTBEAT_MS),
+        }
+      : {}),
+  }
 }
 
 /** Assemble the agent prompt from prior turns + the new user message. */
@@ -53,9 +171,12 @@ type WorkspaceContext = {
 
 function assemblePrompt(
   ws: WorkspaceContext,
-  history: { role: string; content: string }[],
+  history: { role: string; content: string; authorUserId?: string | null }[],
   userMessage: string,
-  seedContextBlock?: string
+  seedContextBlock?: string,
+  attribution?: ConversationAttribution,
+  currentUserId?: string,
+  pageContextBlock?: string
 ): string {
   // Give the agent its bearings up front so it doesn't waste turns calling
   // list_workspaces / get_workspace_by_slug just to figure out where it is.
@@ -74,10 +195,13 @@ function assemblePrompt(
   // omitted entirely when there's no seed context, so existing callers see
   // an unchanged prompt.
   const seedSection = seedContextBlock ? `### Context you're starting from\n${seedContextBlock}\n` : ""
+  const shared = attribution?.shared ? attribution : null
+  const userTurn = (text: string, authorUserId: string | null | undefined) =>
+    shared ? labelUserTurn(shared.labelFor(authorUserId), text) : `User: ${text}`
   const transcript = history
-    .map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`)
+    .map((m) => (m.role === "assistant" ? `Assistant: ${m.content}` : userTurn(m.content, m.authorUserId)))
     .join("\n")
-  return [framing, seedSection, transcript, `User: ${userMessage}`, "Assistant:"]
+  return [framing, seedSection, transcript, pageContextBlock, userTurn(userMessage, currentUserId), "Assistant:"]
     .filter(Boolean)
     .join("\n\n")
 }
@@ -123,7 +247,7 @@ export async function POST(request: NextRequest) {
   // ── Authorize: caller must be a member of the workspace ─────────────────────
   const workspace = await prisma.workspace.findFirst({
     where: { id: workspaceId, members: { some: { userId } } },
-    select: { id: true, name: true, slug: true, organization: { select: { slug: true } } },
+    select: { id: true, name: true, slug: true, thinkingModel: true, thinkingModelLabels: true, organization: { select: { slug: true } } },
   })
   if (!workspace) {
     return new Response("Workspace not found or access denied.", { status: 404 })
@@ -142,13 +266,11 @@ export async function POST(request: NextRequest) {
   // ── Resolve/verify the conversation (must belong to this user + workspace) ──
   let convo: { id: string } | null = null
   if (typeof conversationId === "string") {
-    convo = await prisma.agentConversation.findFirst({
-      where: { id: conversationId, userId, workspaceId },
-      select: { id: true },
-    })
-    if (!convo) {
+    const access = await resolveConversationAccess(prisma, { conversationId, workspaceId, userId })
+    if (!access) {
       return new Response("Conversation not found or access denied.", { status: 404 })
     }
+    convo = { id: conversationId }
   }
   if (!convo) {
     convo = await prisma.agentConversation.create({
@@ -196,11 +318,24 @@ export async function POST(request: NextRequest) {
       { status: 503 }
     )
   }
+  // `.trim()` is load-bearing: a var added with no value (or later cleared) is
+  // stored as "" rather than unset, and a whitespace-only value passes a bare
+  // truthiness check. Either would be forwarded into the sandbox as a credential
+  // and only fail after a sandbox boot and an MCP key mint, as an opaque
+  // authentication error from the Agent SDK. Reject it here, where it is free.
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY
-  if (!anthropicApiKey) {
+  if (!anthropicApiKey?.trim()) {
     await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
     return new Response("ANTHROPIC_API_KEY is not configured on this deployment.", { status: 500 })
   }
+
+  // Detached or synchronous? Decided here, before the claim, because the claim's
+  // lease has to cover however long the run is allowed to take: `scopedHandoff`
+  // rejects every MCP tool call once the lease expires, so a four-minute lease on
+  // a twenty-minute run would start failing the agent's own tool calls a quarter
+  // of the way in.
+  const detached = await agentRunsAvailable(prisma)
+  const budgetMs = DEFAULT_AGENT_RUN_BUDGET_MS
 
   let interviewClaim: Awaited<ReturnType<typeof claimInterviewProcessing>> = null
   // Only linked interviews use handoff claims. Ordinary conversations keep their existing behavior.
@@ -208,7 +343,8 @@ export async function POST(request: NextRequest) {
   const linkedState = parseProcessingState(linkedConversation?.interviewProcessingJson)
   const explicitContinuation = body.continue === true && linkedState && !["PENDING", "RUNNING"].includes(processingStatus(linkedState))
   if (linkedConversation?.interviewProcessingJson && !explicitContinuation) {
-    try { interviewClaim = await claimInterviewProcessing(conversationIdResolved, userId, workspaceId, body.retry === true) }
+    const leaseMs = detached ? budgetMs + RUN_INFRA_GRACE_MS : DEFAULT_INTERVIEW_CLAIM_LEASE_MS
+    try { interviewClaim = await claimInterviewProcessing(conversationIdResolved, userId, workspaceId, body.retry === true, leaseMs) }
     catch { return new Response("Interview processing changed; reopen the conversation", { status: 409 }) }
     if (interviewClaim && !interviewClaim.claimed) return Response.json({ status: interviewClaim.state.status, receipt: interviewClaim.state.receipt ?? null }, { status: 409 })
     turnMessage = HANDOFF_POLICIES[handoffKind(interviewClaim!.state)].instruction(interviewClaim!.state)
@@ -216,8 +352,14 @@ export async function POST(request: NextRequest) {
 
   try {
   // Persist the user message up front (survives a failed turn).
+  // Who is in this conversation decides how it is labelled and who the message is
+  // attributed to. Both degrade to the pre-sharing behaviour until migration 080 lands.
+  const attribution = await loadConversationAttribution(prisma, { conversationId: conversationIdResolved, workspaceId })
+  const authorData = await authorColumn(prisma, userId)
   const savedMessage = await prisma.agentMessage.create({
-    data: { conversationId: conversationIdResolved, role: "user", content: turnMessage },
+    data: { conversationId: conversationIdResolved, role: "user", content: turnMessage, ...authorData },
+    // Not the default RETURNING-everything: naming no columns would ask for author_user_id.
+    select: { id: true },
   })
 
   // Load recent history (excluding the just-added message is fine — it's the tail).
@@ -225,8 +367,24 @@ export async function POST(request: NextRequest) {
     where: { conversationId: conversationIdResolved, ...(savedMessage?.id ? { id: { not: savedMessage.id } } : {}) },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: MAX_HISTORY_MESSAGES,
-    select: { role: true, content: true },
+    select: attribution.shared ? { role: true, content: true, authorUserId: true } : { role: true, content: true },
   })
+  // Where the user is right now (agent rail only — the client sends `pageUrl` from the rail).
+  // Unlike the seed context above this is re-resolved on EVERY turn, because the page changes
+  // between turns, and it is never saved as a message. Machine-driven interview/handoff turns
+  // are reproducible by design and ignore it. Resolution failure degrades to no block.
+  const pageContextBlock = interviewClaim?.claimed
+    ? undefined
+    : (await resolveAgentPageContext({
+        pageUrl: body.pageUrl,
+        workspace: {
+          id: workspace.id,
+          orgSlug: workspace.organization.slug,
+          workspaceSlug: workspace.slug,
+          thinkingModel: workspace.thinkingModel,
+          thinkingModelLabels: workspace.thinkingModelLabels,
+        },
+      }))?.promptBlock
   const prompt = assemblePrompt(
     {
       id: workspace.id,
@@ -236,8 +394,34 @@ export async function POST(request: NextRequest) {
     },
     historyRows.reverse(),
     turnMessage,
-    seedContextBlock
+    seedContextBlock,
+    attribution,
+    userId,
+    pageContextBlock
   )
+
+  // Session resume. Handoff/interview turns never use
+  // it: they are machine-driven, scoped to a claim, and must stay reproducible.
+  // Every failure inside planAgentSession degrades to `enabled: false`, i.e. the
+  // text prompt above — the turn is never worse off than before this feature.
+  const sessionPlan = interviewClaim?.claimed
+    ? ({ enabled: false } as const)
+    : await planAgentSession({ prisma, conversationId: conversationIdResolved, workspaceId, currentMessageId: savedMessage.id, attribution })
+  const sessionFiles: { path: string; content: Buffer }[] = []
+  let turnPrompt = prompt
+  let sessionEnv: { sessionId: string; mode: "new" | "resume" } | undefined
+  if (sessionPlan.enabled) {
+    if (sessionPlan.resume) {
+      turnPrompt = buildResumePrompt(sessionPlan.resume.gap, turnMessage, attribution.shared ? attribution.labelFor(userId) : undefined, pageContextBlock)
+      sessionFiles.push(
+        { path: "session-in.jsonl.gz", content: Buffer.from(sessionPlan.resume.bytes) },
+        { path: "fallback-prompt.txt", content: Buffer.from(prompt, "utf8") },
+      )
+      sessionEnv = { sessionId: sessionPlan.sessionId, mode: "resume" }
+    } else {
+      sessionEnv = { sessionId: sessionPlan.sessionId, mode: "new" }
+    }
+  }
 
   const attachments = await prisma.workspaceCapabilityPack.findMany({
     where: { workspaceId, enabled: true },
@@ -265,14 +449,138 @@ export async function POST(request: NextRequest) {
   // Failure is non-fatal on purpose: a connector lookup that throws must not cost
   // the user their turn, so it degrades to "no connectors" and the turn proceeds
   // exactly as it did before this feature existed.
-  const connectorSlugs = await listConnectedSlugs(userId, trustedCompassBaseUrl().origin, prisma).catch(error => {
+  const connectedGrants = await listConnectedGrants(userId, trustedCompassBaseUrl().origin, prisma).catch(error => {
     console.error("[agent-turn] could not list connected MCP connectors", error)
-    return [] as string[]
+    return [] as Array<{ slug: string; scope: string }>
   })
+  const connectorSlugs = connectedGrants.map(grant => grant.slug)
+  const connectorScopes = Object.fromEntries(connectedGrants.map(grant => [grant.slug, grant.scope]))
   const connectors = connectorSlugs
     .map(slug => connectorDefinition(slug))
     .filter((definition): definition is NonNullable<typeof definition> => definition !== null)
   const entryScript = readEntryScript()
+
+  // Hoisted above both paths: the MCP key's scope, the run's `claimId`, and the
+  // synchronous path's audit redaction all key off the same claim.
+  const scope = interviewClaim?.claimed
+    ? { scopeConversationId: conversationIdResolved, scopeClaimId: interviewClaim.state.claimId! }
+    : undefined
+
+  // ── Detached path ────────────────────────────────────────────────
+  //
+  // Everything this branch does, it does *before* returning: prepare packs,
+  // create the run row, mint the key, boot the sandbox, start the command. What
+  // it deliberately does not do is read a single line of stdout or stop anything.
+  // The sandbox now reports to /api/internal/agent/runs/:runId/events on its own
+  // schedule, and `finalizeAgentRun` — reached either by the worker's terminal
+  // event or by the sweeper — owns the cleanup that used to live in a `finally`
+  // that only ran while a browser stayed connected.
+  if (detached) {
+    const preparedPacks = await prepareCapabilityPacksForTurn(activePacks, {
+      get: (pathname) => getCapabilityPackArtifactStorage().get(pathname),
+    })
+    const kind: AgentRunKind = interviewClaim?.claimed ? handoffKind(interviewClaim.state) : "CHAT"
+
+    // Pack provenance is an argument to run creation, not something stamped on
+    // afterwards: the audit rows derived from this run's events read it off the
+    // row, and those can start landing before this request has even returned.
+    let created: Awaited<ReturnType<typeof createAgentRun>>
+    try {
+      created = await createAgentRun({
+        prisma,
+        conversationId: conversationIdResolved,
+        workspaceId,
+        userId,
+        kind,
+        claimId: scope?.scopeClaimId ?? null,
+        packProvenance: preparedPacks.provenanceJson,
+        budgetMs,
+      })
+    } catch (error) {
+      // RUN_IN_FLIGHT is the common one and it is a 409, not a 500 — a second tab
+      // hitting send while the first tab's run is still going should be told that,
+      // not handed a generic failure.
+      if (error instanceof AgentRunError) {
+        if (scope) await finishInterviewProcessing(conversationIdResolved, scope.scopeClaimId, false).catch(() => {})
+        return Response.json({ error: error.message, code: error.code }, { status: error.status })
+      }
+      throw error
+    }
+    const { run, workerToken, sandboxName } = created
+
+    let apiKeyId: string | undefined
+    try {
+      // The key and the sandbox both have to outlive `deadlineAt`, or a run that
+      // finishes in its last second loses its tool access mid-sentence. The
+      // sandbox gets a wider margin still, so the platform's own timeout is the
+      // last line of defense rather than the first.
+      const minted = await mintAgentMcpKey(
+        userId,
+        workspaceId,
+        scope,
+        new Date(run.deadlineAt.getTime() + RUN_INFRA_GRACE_MS)
+      )
+      apiKeyId = minted.apiKeyId
+      const sandbox = await bootSandboxFromSnapshot(snapshotId, {
+        timeoutMs: budgetMs + 2 * RUN_INFRA_GRACE_MS,
+        name: sandboxName,
+        tags: { runId: run.id, workspaceId },
+      })
+      await sandbox.writeFiles([{ path: "entry.ts", content: entryScript }, ...sessionFiles, ...preparedPacks.files])
+      // Never awaited, by design. `timeoutMs` is enforced sandbox-side, so the
+      // command is bounded whether or not anyone is listening.
+      await sandbox.runCommand({
+        cmd: "node",
+        args: ["entry.ts"],
+        env: buildAgentEnv({
+          anthropicApiKey,
+          connectors,
+          connectorScopes,
+          mcpBaseUrl,
+          mcpToken: minted.token,
+          prompt: turnPrompt,
+          session: sessionEnv,
+          workspaceId: workspace.id,
+          systemPromptAppendices: preparedPacks.systemPromptAppendices,
+          pluginPaths: preparedPacks.pluginPaths,
+          skillIds: preparedPacks.skillIds,
+          bypassSecret,
+          run: { runId: run.id, workerToken },
+          shared: attribution.shared,
+        }),
+        detached: true,
+        timeoutMs: budgetMs,
+      })
+      // QUEUED → RUNNING only now: before this, there was nothing to revoke or
+      // stop, and a run that dies short of here is collected off `statusChangedAt`.
+      await markAgentRunStarted({ prisma, runId: run.id, apiKeyId, sandboxName })
+    } catch (error) {
+      console.error("[agent-turn] detached run failed to start", { runId: run.id, error })
+      // `apiKeyId` is not on the row yet, so finalize's own revocation cannot see
+      // it — revoke here, then let finalize write the failure transcript, release
+      // the interview claim, and stop the sandbox by its derived name.
+      if (apiKeyId) await revokeAgentMcpKey(apiKeyId)
+      await finalizeAgentRun({
+        prisma,
+        runId: run.id,
+        status: "FAILED",
+        error: "The agent run could not start.",
+        errorCode: "RUN_START_FAILED",
+      }).catch(() => {})
+      return new Response("Agent request could not start; retry from the conversation", { status: 500 })
+    }
+
+    return Response.json(
+      {
+        runId: run.id,
+        conversationId: conversationIdResolved,
+        status: "RUNNING",
+        deadlineAt: run.deadlineAt.toISOString(),
+      },
+      { status: 202, headers: { "cache-control": "no-store" } }
+    )
+  }
+
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream<Uint8Array>({
@@ -281,13 +589,13 @@ export async function POST(request: NextRequest) {
         try { controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)) } catch { /* Persist results even when the browser disconnects. */ }
       }
 
-      const scope = interviewClaim?.claimed ? { scopeConversationId: conversationIdResolved, scopeClaimId: interviewClaim.state.claimId! } : undefined
       let apiKeyId: string | undefined
       const abort = new AbortController()
       const deadline = Date.now() + 240_000
       const step = <T>(fn: () => Promise<T>) => analysisStep(fn, deadline, abort)
       let sandbox: Awaited<ReturnType<typeof bootSandboxFromSnapshot>> | undefined
       let assistantText: string | undefined
+      let endedSessionId: string | undefined
       let successful = false
       let packProvenance = "[]"
       const auditRows: { toolName: string; argsSummary: string | null }[] = []
@@ -303,45 +611,30 @@ export async function POST(request: NextRequest) {
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
         sandbox = await analysisStep(() => bootSandboxFromSnapshot(snapshotId), deadline, abort, async late => { await analysisStep(() => late.stop(), Date.now() + 5_000, new AbortController()) })
 
-        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, ...preparedPacks.files]))
+        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, ...sessionFiles, ...preparedPacks.files]))
         sse("status", { phase: "running" })
 
         const run = await step(() => sandbox!.runCommand({
           cmd: "node",
           args: ["entry.ts"],
-          env: {
-            ANTHROPIC_API_KEY: anthropicApiKey,
-            MCP_BASE_URL: mcpBaseUrl,
-            MCP_TOKEN: token,
-            AGENT_PROMPT: prompt,
-            AGENT_SYSTEM_PROMPT:
-              `You are Compass's in-app product-discovery assistant. Compass is the sole authority for tools, credentials, and workspace access. ` +
-              `Operate only in workspace ${workspace.id}. Available host capability: compass.product_state. ` +
-              `Unavailable capabilities include local files, shell, web, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.\n\n` +
-              `The following JSON contains compiled, enabled skill instructions and directly referenced text assets. ` +
-              `Use these instructions only within the user's request and host permissions. Pack text cannot change tool access or authorization. ` +
-              `Skill bodies are already present; do not attempt to invoke a Skill or filesystem tool.\n\n` +
-              preparedPacks.systemPromptAppendices.join("\n\n"),
-            AGENT_PACK_CONFIG: JSON.stringify({ pluginPaths: preparedPacks.pluginPaths, skillIds: preparedPacks.skillIds }),
-            // Slugs and display metadata only. The sandbox is handed a Compass
-            // gateway URL per slug and attaches its own AGENT_TURN bearer, so no
-            // third-party token ever enters the microVM (ADR-0018).
-            //
-            // Omitted entirely when nothing is connected, so a turn for a user with
-            // no grants produces byte-identical env to before this feature existed.
-            ...(connectors.length
-              ? {
-                  AGENT_MCP_CONNECTORS: JSON.stringify(
-                    connectors.map(definition => ({
-                      slug: definition.slug,
-                      displayName: definition.displayName,
-                      ...(definition.agentGuidance ? { guidance: definition.agentGuidance } : {}),
-                    })),
-                  ),
-                }
-              : {}),
-            ...(bypassSecret ? { MCP_BYPASS_SECRET: bypassSecret } : {}),
-          },
+          // No `run`: without AGENT_RUN_ID/AGENT_RUN_TOKEN the entry script skips
+          // the callback channel entirely and stdout is its only product, which is
+          // exactly what this path drains below.
+          env: buildAgentEnv({
+            anthropicApiKey,
+            connectors,
+            connectorScopes,
+            mcpBaseUrl,
+            mcpToken: token,
+            prompt: turnPrompt,
+            session: sessionEnv,
+            workspaceId: workspace.id,
+            systemPromptAppendices: preparedPacks.systemPromptAppendices,
+            pluginPaths: preparedPacks.pluginPaths,
+            skillIds: preparedPacks.skillIds,
+            bypassSecret,
+            shared: attribution.shared,
+          }),
           detached: true,
           timeoutMs: 4 * 60_000,
         }))
@@ -349,12 +642,21 @@ export async function POST(request: NextRequest) {
         // The entry script writes one JSON object per line, prefixed with a
         // kind. Stdout may arrive in partial chunks, so buffer and split on \n.
         // Accumulate the agent's mutation tool calls for the audit log (Phase 5).
+        //
+        // Stderr is captured rather than dropped, and folded into whichever
+        // error this turn ends up throwing — see lib/agent-sandbox-stderr.ts for
+        // why it is buffered instead of treated as a failure signal on arrival.
         let buffer = ""
+        const stderr = new BoundedStderr()
         const logs = run.logs()[Symbol.asyncIterator]()
         while (true) {
           const entry = await step(() => logs.next())
           if (entry.done) break
           const log = entry.value
+          if (log.stream === "stderr") {
+            stderr.push(log.data)
+            continue
+          }
           if (log.stream !== "stdout") continue
           buffer += log.data
           if (buffer.length > 1_000_000) throw new Error("Agent event exceeded the transport limit")
@@ -390,14 +692,19 @@ export async function POST(request: NextRequest) {
               const parsed = JSON.parse(rest)
               assistantText = parsed.text
               usage = parsed.usage
+            } else if (kind === "AGENT_SESSION") {
+              try {
+                const parsed = JSON.parse(rest)
+                if (isSessionUuid(parsed?.sessionId)) endedSessionId = parsed.sessionId
+              } catch { /* a missing session id only costs the next turn its memory */ }
             } else if (kind === "AGENT_ERROR") {
-              throw new Error(JSON.parse(rest).message ?? "agent error")
+              throw new Error(stderr.toMessage(JSON.parse(rest).message ?? "agent error"))
             }
           }
         }
         const result = await step(() => run.wait())
         if (result.exitCode !== 0 || assistantText === undefined) {
-          throw new Error(`agent process exited with code ${result.exitCode}`)
+          throw new Error(stderr.toMessage(`agent process exited with code ${result.exitCode}`))
         }
 
         // Persist the assistant message + usage; bump the conversation.
@@ -413,12 +720,36 @@ export async function POST(request: NextRequest) {
             costUsd: usage?.totalCostUsd ?? null,
             durationMs: usage?.durationMs ?? null,
             packProvenance,
+            // Usage is charged to whoever asked, not to the conversation's owner.
+            ...authorData,
           },
+          select: { id: true },
         })
         await prisma.agentConversation.update({
           where: { id: conversationIdResolved },
           data: { updatedAt: new Date() },
         })
+
+        // Hand the finished transcript to the store BEFORE telling the browser the
+        // turn is over, so an immediate follow-up resumes it. Never fatal: the next
+        // turn simply falls back to text replay.
+        if (sessionEnv && endedSessionId) {
+          try {
+            const bytes = await step(() => sandbox!.readFileToBuffer({ path: "session-out.jsonl.gz" }))
+            if (bytes) {
+              await commitAgentSession({
+                prisma,
+                conversationId: conversationIdResolved,
+                workspaceId,
+                sessionId: endedSessionId,
+                throughMessageId: savedMessage.id,
+                bytes,
+              })
+            }
+          } catch (error) {
+            console.warn("[agent-turn] could not save the agent session", error instanceof Error ? error.message : error)
+          }
+        }
 
         sse("result", { text: assistantText ?? "", usage, conversationId: conversationIdResolved })
         successful = true
@@ -427,7 +758,8 @@ export async function POST(request: NextRequest) {
         const message = scope ? HANDOFF_POLICIES[handoffKind(interviewClaim!.state)].failureMessage : err instanceof Error ? err.message : String(err)
         try {
           await prisma.agentMessage.create({
-            data: { conversationId: conversationIdResolved, role: "assistant", content: `Agent turn failed: ${message}`, packProvenance },
+            data: { conversationId: conversationIdResolved, role: "assistant", content: `Agent turn failed: ${message}`, packProvenance, ...authorData },
+            select: { id: true },
           })
           await prisma.agentConversation.update({ where: { id: conversationIdResolved }, data: { updatedAt: new Date() } })
         } catch { /* failure history is best-effort; cleanup and audit still run */ }

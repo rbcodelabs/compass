@@ -87,6 +87,9 @@ describe.skipIf(!databaseUrl)("real PostgreSQL preview lifecycle (not DSQL isola
     const a = await prisma.previewAutomationRun.findUniqueOrThrow({ where: { id: runA } });
     const b = await prisma.previewAutomationRun.findUniqueOrThrow({ where: { id: runB } });
     const opportunity = await prisma.opportunity.create({ data: { workspaceId: a.workspaceId, title: "Disposable opportunity" } });
+    // INTENTIONAL NULL workspaceId: this row is created the way pre-068 code (or an old instance mid-rollout) created it,
+    // so the test exercises the NULL arm of the workspace cascade, which must still remove it through its opportunity.
+    // The write-path guard allow-lists this exact file (__tests__/tenant-isolation/solution-objective-write-paths.test.ts).
     const solution = await prisma.solution.create({ data: { opportunityId: opportunity.id, title: "Disposable solution" } });
     const task = await prisma.task.create({ data: { workspaceId: a.workspaceId, title: "Disposable task" } });
     await prisma.taskLink.create({ data: { taskId: task.id, linkedType: "SOLUTION", linkedId: solution.id } });

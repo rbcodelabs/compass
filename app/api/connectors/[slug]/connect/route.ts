@@ -19,8 +19,10 @@ import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import {
   DEFAULT_CONNECTOR_RETURN_PATH,
   McpConnectorError,
+  accessLevelById,
   connectorDefinition,
   connectorRedirectUri,
+  defaultAccessLevel,
 } from "@/lib/mcp-connectors/config"
 import {
   createAuthRequest,
@@ -43,8 +45,27 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const { slug } = await context.params
-  if (!connectorDefinition(slug))
-    return NextResponse.json({ error: `Unknown connector "${slug}".` }, { status: 404 })
+  const definition = connectorDefinition(slug)
+  if (!definition) return NextResponse.json({ error: `Unknown connector "${slug}".` }, { status: 404 })
+
+  // The user's chosen access level, when the connector offers any. An unknown
+  // value is a 400 rather than a silent fallback to the default: quietly
+  // granting *more* access than the link asked for is the wrong way to fail.
+  // A connector with no levels ignores the parameter.
+  const requestedAccess = request.nextUrl.searchParams.get("access")
+  const level = definition.accessLevels
+    ? requestedAccess
+      ? accessLevelById(definition, requestedAccess)
+      : defaultAccessLevel(definition)
+    : null
+  if (definition.accessLevels && !level)
+    return NextResponse.json(
+      {
+        error: `Unknown access level "${requestedAccess}" for ${definition.displayName}.`,
+        accessLevels: definition.accessLevels.map(candidate => candidate.id),
+      },
+      { status: 400 },
+    )
 
   if (!(await mcpConnectorsAvailable()))
     return NextResponse.json(
@@ -81,12 +102,16 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     // Opportunistic and unawaited: expired rows are dead weight, there is no
     // cron for this feature, and a failure here must not fail the connect.
     void pruneExpiredAuthRequests().catch(() => {})
-    return NextResponse.redirect(buildAuthorizeUrl(connector, { state, codeVerifier, redirectUri }), {
+    return NextResponse.redirect(buildAuthorizeUrl(connector, { state, codeVerifier, redirectUri, scope: level?.scope }), {
       // No-store so a back-navigation re-enters this route and mints a fresh
       // state instead of replaying a consumed one out of the browser's cache.
       headers: { "Cache-Control": "no-store" },
     })
   } catch (error) {
+    // A deployment problem the operator fixes by setting env vars, not an
+    // upstream fault, so it is a 503 rather than the 502 used for the provider.
+    if (error instanceof McpConnectorError && error.code === "CLIENT_NOT_CONFIGURED")
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 503 })
     if (error instanceof McpConnectorError)
       return NextResponse.json({ error: error.message, code: error.code }, { status: 502 })
     throw error

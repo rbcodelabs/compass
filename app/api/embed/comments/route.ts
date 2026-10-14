@@ -83,7 +83,8 @@ import {
   touchEmbedToken,
   type ResolvedEmbedSource,
 } from "@/lib/embed-sources"
-import { resolveEmbedVisitorToken, type EmbedVisitorIdentity } from "@/lib/embed-visitor"
+import { hashVisitorSecret, resolveEmbedVisitorToken, type EmbedVisitorIdentity } from "@/lib/embed-visitor"
+import { resolveEmbedAuthMode } from "@/lib/embed-auth-mode"
 import { isEmbedScreenshotUrl } from "@/lib/embed-screenshots"
 import { isWorkspaceMember } from "@/lib/workspace"
 import { EMBED_VISITOR_HEADER, embedCorsPreflight, embedError, embedJson, readBoundedEmbedBody } from "@/lib/embed/http"
@@ -452,6 +453,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const rawVisitorHeader = request.headers.get(EMBED_VISITOR_HEADER)?.trim() ?? ""
+    const rawVisitorToken = rawVisitorHeader.toLowerCase().startsWith("bearer ") ? rawVisitorHeader.slice(7).trim() : rawVisitorHeader
     const comment = await createComment({
       workspaceId: source.workspaceId,
       targetType: "ARTIFACT",
@@ -486,7 +489,16 @@ export async function POST(request: NextRequest) {
               embedTokenId: source.tokenId,
             },
           }),
-    })
+    }, { beforeCreate: async tx => {
+      const [currentSource, currentVisitor, currentMembership] = await Promise.all([
+        tx.feedbackSource.findFirst({ where: { id: source.sourceId, enabled: true }, select: { authMode: true } }),
+        tx.embedVisitorSession.findFirst({ where: { tokenHash: hashVisitorSecret(rawVisitorToken), feedbackSourceId: source.sourceId, revokedAt: null, expiresAt: { gt: new Date() } }, select: { id: true } }),
+        visitor.kind === "INTERNAL" ? tx.workspaceMember.findFirst({ where: { workspaceId: source.workspaceId, userId: visitor.userId }, select: { id: true } }) : Promise.resolve({ id: "portal" }),
+      ])
+      const currentMode = currentSource ? resolveEmbedAuthMode(currentSource.authMode) : null
+      const compatible = visitor.kind === "INTERNAL" ? currentMode === "INTERNAL_SSO" : currentMode === "PORTAL" || currentMode === "PORTAL_SSO"
+      if (!currentVisitor || !currentMembership || !compatible) throw new EmbedSourceError(401, "Sign in required to leave feedback.")
+    } })
 
     void touchEmbedToken(source.tokenId)
     // Only the id and timestamp: the widget does not need the stored row back,

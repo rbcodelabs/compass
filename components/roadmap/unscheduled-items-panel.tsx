@@ -1,8 +1,9 @@
 "use client";
 
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import * as React from "react";
 import { useDraggable } from "@dnd-kit/core";
-import { GripVertical, Layers, Bug, MoreHorizontal } from "lucide-react";
+import { GripVertical, Layers, Bug, MoreHorizontal, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,10 @@ export type UnscheduledItem =
       opportunityId: string;
       opportunityTitle: string;
       squadId: string | null;
+      /** Solution lifecycle status (VALIDATED / IN_DELIVERY). */
+      status?: string;
+      /** Normalized 0-100 score, when the solution has been scored. */
+      score?: number | null;
     }
   | {
       kind: "feedback";
@@ -106,14 +111,36 @@ export function UnscheduledItemsColumn({
   allowedHorizons = QUICK_ADD_HORIZONS,
   pendingItemKeys = NO_PENDING_ITEMS,
   interactionMode = "compact",
-}: Props) {
+  layout = "column",
+  onCollapse,
+}: Props & {
+  /** "column" is the last swipe column inside the scrolling board (mobile); "sidebar" is a fixed-width pane beside it. */
+  layout?: "column" | "sidebar";
+  onCollapse?: () => void;
+}) {
   return (
     <BoardColumn
       title="Not scheduled"
       count={items.length}
       accent="neutral"
       data-testid="roadmap-unscheduled-column"
-      className="w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"
+      actions={
+        onCollapse ? (
+          <button
+            type="button"
+            onClick={onCollapse}
+            aria-label="Collapse Not scheduled"
+            className="inline-flex size-6 items-center justify-center rounded text-text-subtle hover:bg-surface-panel hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <PanelRightClose aria-hidden className="size-4" />
+          </button>
+        ) : undefined
+      }
+      className={
+        layout === "sidebar"
+          ? "h-full w-72 min-w-0 flex-none overflow-hidden"
+          : "w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"
+      }
       bodyId="unscheduled-items-column"
       bodyClassName="min-h-44 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"
     >
@@ -133,6 +160,38 @@ export function UnscheduledItemsColumn({
         ))
       )}
     </BoardColumn>
+  );
+}
+
+/**
+ * The "Not scheduled" pane docked to the right of the roadmap board (md and up). It lives outside the
+ * board's horizontal scroller, so it stays put while the horizon columns scroll — dragging an item to
+ * any column never needs a scroll mid-drag. Collapses to a slim rail to give the columns the room back.
+ */
+export function UnscheduledItemsSidebar(props: Props) {
+  const [open, setOpen] = React.useState(true);
+  return (
+    <aside
+      data-testid="roadmap-unscheduled-sidebar"
+      aria-label="Not scheduled"
+      className="hidden min-h-0 shrink-0 py-3 pr-3 md:flex lg:pr-4"
+    >
+      {open ? (
+        <UnscheduledItemsColumn {...props} layout="sidebar" onCollapse={() => setOpen(false)} />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label={`Expand Not scheduled (${props.items.length})`}
+          aria-expanded={false}
+          className="flex h-fit w-10 flex-col items-center gap-2 rounded-xl border border-border-default bg-surface-inset py-3 text-text-subtle hover:bg-surface-panel hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <PanelRightOpen aria-hidden className="size-4" />
+          <span className="rounded-full bg-surface-panel px-1.5 py-0.5 text-xs tabular-nums">{props.items.length}</span>
+          <span className="text-xs font-semibold [writing-mode:vertical-rl]">Not scheduled</span>
+        </button>
+      )}
+    </aside>
   );
 }
 
@@ -222,13 +281,14 @@ function UnscheduledItemCard({
 }
 
 function UnscheduledItemBody({ item }: { item: UnscheduledItem }) {
+  const labels = useLabels();
   return (
     <CardContent className="flex flex-col gap-1.5 pt-0">
       {item.kind === "solution" ? (
         <>
           <Badge variant="outline" className="gap-1 w-fit">
             <Layers className="size-3" />
-            Solution
+            {labels.solution.singular}
           </Badge>
           <p className="text-[11px] text-muted-foreground/70 truncate">{item.opportunityTitle}</p>
         </>

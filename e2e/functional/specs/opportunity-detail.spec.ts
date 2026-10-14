@@ -16,8 +16,8 @@ async function seedOpportunity() {
       [workspace.id, title, "Getting research into the workspace is easy. Turning it into a shared understanding takes too much coordination."],
     );
     await pool.query(
-      "INSERT INTO compass_dev.solutions (id,opportunity_id,title,description,status) VALUES (gen_random_uuid(),$1,'A shared first-insight recap','Give the team a starting point for a useful conversation.','IDEA')",
-      [opportunity.id],
+      "INSERT INTO compass_dev.solutions (id,workspace_id,opportunity_id,title,description,status) VALUES (gen_random_uuid(),$1,$2,'A shared first-insight recap','Give the team a starting point for a useful conversation.','IDEA')",
+      [workspace.id, opportunity.id],
     );
     return opportunity.id as string;
   } finally {

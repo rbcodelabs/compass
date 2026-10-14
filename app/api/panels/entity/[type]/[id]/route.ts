@@ -124,5 +124,6 @@ export async function PATCH(
   }
 
   const detail = await getEntityDetail(type, id, workspace.id);
-  return NextResponse.json(detail);
+  // A solution moving to Building can add it to the roadmap; tell the client so it can offer Undo.
+  return NextResponse.json(result.roadmapSync ? { ...detail, roadmapSync: result.roadmapSync } : detail);
 }

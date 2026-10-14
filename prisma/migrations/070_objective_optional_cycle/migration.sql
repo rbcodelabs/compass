@@ -1,0 +1,22 @@
+-- Migration 070: Objective.cycle_id becomes optional
+-- (ADR "Thinking-model presets and typed links", Phase 1, decisions 5-7).
+--
+-- An Objective may now exist without a cycle (a persistent / cross-cycle
+-- Objective). Existing rows keep their cycle_id; nothing is backfilled and no
+-- row changes. Tenant scope already lives on objectives.workspace_id (068), so
+-- the cycle is no longer needed for authorization.
+--
+-- Aurora DSQL rules followed:
+--   - ALTER TABLE ... ALTER COLUMN ... DROP NOT NULL is in DSQL's documented
+--     ALTER TABLE syntax (AWS docs: Aurora DSQL, "ALTER TABLE" supported
+--     syntax). It has not been exercised on a live DSQL cluster from this repo,
+--     so the postcondition in lib/migrations/objective-optional-cycle.ts proves
+--     the catalog really changed before the receipt is recorded: a DSQL that
+--     refuses the statement fails loudly instead of silently recording success.
+--     Apply it to the shared preview schema and check status before production.
+--   - A single DDL statement, no foreign key (relationMode = "prisma"), no index
+--     change (objectives.cycle_id has no index to rebuild).
+--   - DROP NOT NULL on an already-nullable column is a no-op, so a resumed or
+--     repeated run is idempotent.
+
+ALTER TABLE objectives ALTER COLUMN cycle_id DROP NOT NULL;
