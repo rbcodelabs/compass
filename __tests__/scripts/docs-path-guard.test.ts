@@ -221,7 +221,7 @@ describe("the PreToolUse hook the SDK calls", () => {
         hookSpecificOutput?: { hookEventName: string; permissionDecision: string; permissionDecisionReason: string }
       }
       expect(out.hookSpecificOutput).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" })
-      expect(out.hookSpecificOutput?.permissionDecisionReason).toMatch(/outside the docs directory/)
+      expect(out.hookSpecificOutput?.permissionDecisionReason).toMatch(/system path|outside the docs directory/)
     }
   })
 

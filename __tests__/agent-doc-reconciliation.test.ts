@@ -186,7 +186,7 @@ describe("guardDeletes (fail-closed hard deletes)", () => {
   const del = (path: string): ReconciliationAction => ({ type: "delete", path, docId: `id-${path}`, expectedRevision: "r" })
 
   it("keeps a delete only when the agent explicitly removed that doc", () => {
-    const { plan, skipped } = guardDeletes([del("A"), del("B")], 5, { deletedPaths: ["A"] })
+    const { plan, skipped } = guardDeletes([del("A"), del("B")], 5, { incomplete: false, deletedPaths: ["A"] })
     expect(plan.map((p) => (p.type === "delete" ? p.path : null))).toEqual(["A"])
     expect(skipped).toEqual([{ path: "B", reason: "not-requested" }])
   })
@@ -204,7 +204,7 @@ describe("guardDeletes (fail-closed hard deletes)", () => {
 
   it("refuses an implausibly large explicit purge (over the cap AND over half the baseline)", () => {
     const paths = Array.from({ length: 12 }, (_, i) => `Doc ${i}`)
-    const { plan, skipped } = guardDeletes(paths.map(del), 20, { deletedPaths: paths })
+    const { plan, skipped } = guardDeletes(paths.map(del), 20, { incomplete: false, deletedPaths: paths })
     expect(plan).toEqual([])
     expect(skipped).toHaveLength(12)
     expect(new Set(skipped.map((s) => s.reason))).toEqual(new Set(["too-many"]))
@@ -212,7 +212,7 @@ describe("guardDeletes (fail-closed hard deletes)", () => {
 
   it("allows the same count when it is a small share of a large workspace", () => {
     const paths = Array.from({ length: 12 }, (_, i) => `Doc ${i}`)
-    expect(guardDeletes(paths.map(del), 200, { deletedPaths: paths }).plan).toHaveLength(12)
+    expect(guardDeletes(paths.map(del), 200, { incomplete: false, deletedPaths: paths }).plan).toHaveLength(12)
   })
 })
 
