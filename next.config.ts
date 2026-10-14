@@ -6,6 +6,14 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname),
   },
   devIndicators: false,
+  // assertReviewedMigrationCode() reads migration SQL and reviewed migration
+  // code by a runtime-computed path, which Next cannot trace statically (it
+  // used to fall back to tracing the whole repo, ~1,900 files / ~37 MB, into
+  // every function that imports it). Name exactly what those routes read.
+  outputFileTracingIncludes: {
+    "/api/admin/migrate": ["./prisma/migrations/**/migration.sql", "./lib/migrations/*.ts"],
+    "/api/preview-automation/*": ["./prisma/migrations/**/migration.sql", "./lib/migrations/*.ts"],
+  },
   async headers() {
     return [
       {
