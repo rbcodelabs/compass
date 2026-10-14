@@ -39,6 +39,11 @@ token for the `/api/v1` resource with `api:read` or `api:write` scope. The guide
 documents authorization boundaries, including excluded human decision recording,
 solution-plan approval, decision application, and release dispatch operations.
 
+The custom [API explorer](https://compass.rbcodelabs.com/help/api-explorer)
+browses that live contract and can explicitly execute authenticated GET reads on
+the current deployment. Writes are documentation-only; credentials and results
+remain in page memory. See the [explorer guide](docs/content/09-api-explorer.md).
+
 The opt-in **[Updates](docs/content/22-updates.md)** landing page groups recent
 workspace activity into inspectable stories, with personal catch-up state and
 explicit Mark caught up / Undo controls. It requires the registered
