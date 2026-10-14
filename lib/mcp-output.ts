@@ -61,3 +61,26 @@ export function fail(text: string, data: unknown = null): ToolResult {
     structuredContent: { ok: false, message: text, data },
   }
 }
+
+/** A tool result that carries an image the model can look at directly. */
+export type ImageToolResult = {
+  content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[]
+  structuredContent: { ok: boolean; message: string; data: unknown }
+}
+
+/**
+ * Success result with an inline image. The text block and `structuredContent`
+ * are built exactly as `ok()` builds them, so the outputSchema invariant above
+ * still holds; the image rides as an extra MCP image content block. Keep the
+ * image bytes OUT of `data` — structuredContent is logged and echoed to callers
+ * that cannot render it.
+ */
+export function okWithImage(text: string, image: { data: Buffer; mimeType: string }, data: unknown = null): ImageToolResult {
+  return {
+    content: [
+      { type: "text", text },
+      { type: "image", data: image.data.toString("base64"), mimeType: image.mimeType },
+    ],
+    structuredContent: { ok: true, message: text, data },
+  }
+}

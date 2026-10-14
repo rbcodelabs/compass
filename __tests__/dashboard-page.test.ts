@@ -22,9 +22,13 @@ const mockWorkspaceMember = { findMany: vi.fn() };
 const mockPrisma = { workspaceMember: mockWorkspaceMember };
 vi.mock("@/lib/db", () => ({ default: () => mockPrisma }));
 
-const authState = vi.hoisted(() => ({ userId: null as string | null }));
+const authState = vi.hoisted(() => ({
+  userId: null as string | null,
+  user: null as { id: string; name?: string; email?: string } | null,
+}));
 vi.mock("@/auth", () => ({
-  auth: async () => (authState.userId ? { user: { id: authState.userId } } : null),
+  auth: async () =>
+    authState.userId ? { user: authState.user ?? { id: authState.userId } } : null,
 }));
 
 const mockGetUserWorkspaces = vi.hoisted(() => vi.fn());
@@ -39,9 +43,14 @@ vi.mock("next/navigation", () => ({ redirect }));
 
 import DashboardPage from "@/app/dashboard/page";
 
+// The page wraps the gallery in a theme wrapper; unwrap to the gallery element.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const gallery = async () => ((await DashboardPage()) as any).props.children as { props: Record<string, any> };
+
 beforeEach(() => {
   vi.clearAllMocks();
   authState.userId = "user-1";
+  authState.user = null;
   mockWorkspaceMember.findMany.mockResolvedValue([]);
   mockGetUserWorkspaces.mockResolvedValue([]);
 });
@@ -97,5 +106,48 @@ describe("DashboardPage", () => {
     const result = await DashboardPage();
     expect(redirect).not.toHaveBeenCalled();
     expect(result).toBeTruthy();
+  });
+
+  it("hands the gallery a flagged read-only list with the read-only notice on", async () => {
+    mockWorkspaceMember.findMany.mockResolvedValue([]);
+    mockGetUserWorkspaces.mockResolvedValue([
+      { id: "ws-9", name: "Nine", slug: "nine", orgSlug: "org-9", orgName: "Org Nine", description: "d", memberCount: 4, isReadOnly: true },
+      { id: "ws-10", name: "Ten", slug: "ten", orgSlug: "org-9", orgName: "Org Nine", isReadOnly: true },
+    ]);
+    const result = await gallery();
+    expect(result.props.readOnlyNotice).toBe(true);
+    expect(result.props.workspaces).toEqual([
+      expect.objectContaining({ slug: "nine", description: "d", memberCount: 4, isReadOnly: true }),
+      expect.objectContaining({ slug: "ten", isReadOnly: true }),
+    ]);
+  });
+
+  it("maps multiple real memberships into gallery workspaces, with member counts and the session user", async () => {
+    authState.user = { id: "user-1", name: "Ada Lovelace", email: "ada@example.com" };
+    mockWorkspaceMember.findMany.mockResolvedValue([
+      { workspace: { id: "ws-1", slug: "core", name: "Core", description: "Main", _count: { members: 7 }, organization: { slug: "acme", name: "Acme" } } },
+      // No `_count` -- must not throw.
+      { workspace: { id: "ws-2", slug: "edge", name: "Edge", description: null, organization: { slug: "acme", name: "Acme" } } },
+    ]);
+    const result = await gallery();
+    expect(redirect).not.toHaveBeenCalled();
+    expect(result.props.userName).toBe("Ada Lovelace");
+    expect(result.props.userEmail).toBe("ada@example.com");
+    expect(result.props.readOnlyNotice).toBeUndefined();
+    expect(result.props.workspaces).toEqual([
+      { id: "ws-1", name: "Core", slug: "core", orgSlug: "acme", orgName: "Acme", description: "Main", memberCount: 7 },
+      { id: "ws-2", name: "Edge", slug: "edge", orgSlug: "acme", orgName: "Acme", description: null, memberCount: undefined },
+    ]);
+  });
+
+  it("falls back to the email, then a neutral name, when the session has no display name", async () => {
+    authState.user = { id: "user-1", email: "ada@example.com" };
+    mockWorkspaceMember.findMany.mockResolvedValue([
+      { workspace: { id: "a", slug: "a", name: "A", description: null, organization: { slug: "o", name: "O" } } },
+      { workspace: { id: "b", slug: "b", name: "B", description: null, organization: { slug: "o", name: "O" } } },
+    ]);
+    expect((await gallery()).props.userName).toBe("ada@example.com");
+    authState.user = { id: "user-1" };
+    expect((await gallery()).props.userName).toBe("there");
   });
 });

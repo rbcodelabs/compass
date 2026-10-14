@@ -31,7 +31,9 @@
 import {
   McpConnectorError,
   REFRESH_SKEW_SECONDS,
+  connectorDefinition,
   connectorEncryptionKey,
+  staticClientCredentials,
 } from "@/lib/mcp-connectors/config"
 import { fetchJsonObject, outboundFetch, requireHttpsUrl } from "@/lib/mcp-connectors/http"
 import {
@@ -53,19 +55,29 @@ import { computeS256Challenge } from "@/lib/oauth/pkce"
  */
 export function buildAuthorizeUrl(
   connector: ConnectorRecord,
-  input: { state: string; codeVerifier: string; redirectUri: string },
+  input: {
+    state: string
+    codeVerifier: string
+    redirectUri: string
+    /** Overrides `connector.scope` for this one request (the user's chosen access level). */
+    scope?: string
+  },
 ): string {
   const url = requireHttpsUrl(connector.authorizationEndpoint, "authorization_endpoint", "DISCOVERY_FAILED")
   const params = new URLSearchParams({
     response_type: "code",
     client_id: connector.clientId,
     redirect_uri: input.redirectUri,
-    scope: connector.scope,
+    scope: input.scope ?? connector.scope,
     state: input.state,
     code_challenge: computeS256Challenge(input.codeVerifier),
     code_challenge_method: "S256",
     resource: connector.resource,
   })
+  // Provider-specific extras (Google's access_type/prompt). Set before the
+  // standard parameters so a catalog entry can never override `state` or PKCE.
+  const extras = connectorDefinition(connector.slug)?.staticClient?.authorizeParams ?? {}
+  for (const [key, value] of Object.entries(extras)) url.searchParams.set(key, value)
   // Appended rather than assigned, so a provider whose authorization endpoint
   // already carries query parameters keeps them.
   for (const [key, value] of params) url.searchParams.set(key, value)
@@ -74,12 +86,17 @@ export function buildAuthorizeUrl(
 
 /** Shared by the exchange and the refresh, so `resource` cannot be forgotten on one. */
 function tokenRequestBody(connector: ConnectorRecord, fields: Record<string, string>): URLSearchParams {
+  const definition = connectorDefinition(connector.slug)
+  // A static client is confidential: authenticate with client_secret_post, read
+  // from env on every call because the secret is never stored.
+  const credentials = definition ? staticClientCredentials(definition) : null
   return new URLSearchParams({
     ...fields,
-    // Public client: `client_id` in the body *is* the client authentication
-    // (RFC 6749 §2.1 / §3.2.1). There is no secret to send, by design — v0
-    // registers Compass with `token_endpoint_auth_method: "none"`.
-    client_id: connector.clientId,
+    // DCR public client: `client_id` in the body *is* the client authentication
+    // (RFC 6749 §2.1 / §3.2.1), by design — v0 registers Compass with
+    // `token_endpoint_auth_method: "none"`.
+    client_id: credentials?.clientId ?? connector.clientId,
+    ...(credentials ? { client_secret: credentials.clientSecret } : {}),
     resource: connector.resource,
   })
 }
@@ -223,6 +240,10 @@ export async function refreshGrant(connector: ConnectorRecord, grant: GrantRecor
     grantId: grant.id,
     expectedGeneration: grant.generation,
     ...tokens,
+    // Only a rotating provider (v0) returns a new refresh token. Google returns
+    // none on refresh, and storing null here would strand the grant after its
+    // first hour, so keep the one we already hold.
+    refreshToken: tokens.refreshToken ?? grant.refreshToken,
   })
   return stored.accessToken
 }

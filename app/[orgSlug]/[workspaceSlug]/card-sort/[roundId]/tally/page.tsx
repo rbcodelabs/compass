@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
-import { GitFork, Table2 } from "lucide-react"
+import { Download, GitFork, Table2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { auth } from "@/auth"
 import { getWorkspace } from "@/lib/workspace"
 import { CardSortError, getCardSortTally } from "@/lib/card-sort"
@@ -65,23 +66,39 @@ export default async function CardSortTallyPage({
         />
       }
       actions={
-        <CardSortViewToggle
-          label="Tally view"
-          options={[
-            {
-              href: `/${orgSlug}/${workspaceSlug}/card-sort/${roundId}/tally?view=flow`,
-              label: "Flow",
-              icon: GitFork,
-              current: view === "flow",
-            },
-            {
-              href: `/${orgSlug}/${workspaceSlug}/card-sort/${roundId}/tally?view=table`,
-              label: "Table",
-              icon: Table2,
-              current: view === "table",
-            },
-          ]}
-        />
+        <>
+          <CardSortViewToggle
+            label="Tally view"
+            options={[
+              {
+                href: `/${orgSlug}/${workspaceSlug}/card-sort/${roundId}/tally?view=flow`,
+                label: "Flow",
+                icon: GitFork,
+                current: view === "flow",
+              },
+              {
+                href: `/${orgSlug}/${workspaceSlug}/card-sort/${roundId}/tally?view=table`,
+                label: "Table",
+                icon: Table2,
+                current: view === "table",
+              },
+            ]}
+          />
+          {/* Only rendered once getCardSortTally has succeeded above, i.e. past
+              the reveal gate; the endpoint re-runs that gate regardless. */}
+          <Button
+            variant="outline"
+            size="sm"
+            render={
+              <a
+                href={`/api/card-sort/rounds/${roundId}/tally/export?${new URLSearchParams({ orgSlug, workspaceSlug })}`}
+                download
+              />
+            }
+          >
+            <Download /> Export CSV
+          </Button>
+        </>
       }
       contentClassName="md:overflow-y-auto"
     >

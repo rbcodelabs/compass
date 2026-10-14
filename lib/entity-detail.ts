@@ -135,7 +135,7 @@ async function fetchKeyResult(id: string, workspaceId: string) {
   const item = await getPrisma().keyResult.findFirst({
     where: { id, objective: { workspaceId } },
     include: {
-      objective: { select: { id: true, title: true, cycleId: true } },
+      objective: { select: { id: true, title: true, cycleId: true, cycle: { select: { startDate: true, endDate: true } } } },
       checkIns: {
         select: { id: true, value: true, note: true, createdAt: true },
         orderBy: { createdAt: "desc" },

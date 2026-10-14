@@ -31,6 +31,7 @@ export function ExperimentsFilters({ squads }: { squads: SquadData[] }) {
 
   return (
     <FacetedFilterMenu
+      iconOnly
       onClearAll={clearAll}
       groups={[{
         id: "squad",

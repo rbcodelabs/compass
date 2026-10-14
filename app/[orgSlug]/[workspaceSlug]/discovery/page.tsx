@@ -4,6 +4,9 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { OpportunityBoard } from "@/components/discovery/opportunity-board";
 import { DiscoveryFilters } from "@/components/discovery/discovery-filters";
+import { NewOpportunityButton } from "@/components/discovery/new-opportunity-button";
+import { WorkspaceMoreMenu } from "@/components/patterns/workspace-header-controls";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { DiscoveryTableView, type DiscoveryTableOpportunity } from "@/components/discovery/discovery-table-view";
 import { DiscoveryViewToggle, type DiscoveryView } from "@/components/discovery/discovery-view-toggle";
 import { DiscoveryGroupByToggle } from "@/components/discovery/discovery-group-by-toggle";
@@ -14,9 +17,9 @@ import type { OpportunityStatus, SolutionStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
-import { ChevronRight, FolderTree, Shuffle } from "lucide-react";
+import { ChevronRight, Download, FolderTree, Shuffle } from "lucide-react";
 import Link from "next/link";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { loadCustomFieldDefinitions } from "@/lib/custom-field-definitions";
 import {
@@ -290,13 +293,23 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         }))
       : [];
 
+  // The export carries the filters the page is showing (squad and tag), so the
+  // file matches the screen. View, group-by and sort are presentation only.
+  const exportParams = new URLSearchParams({ orgSlug, workspaceSlug });
+  if (squadFilter) exportParams.set("squad", squadFilter);
+  if (customFieldFilter) {
+    exportParams.set("field", fieldParam ?? "");
+    exportParams.set("fieldValue", fieldValueParam ?? "");
+  }
+  const exportHref = `/api/discovery/export?${exportParams.toString()}`;
+
   return (
     <WorkspacePage
       title="Discovery"
       contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
       actions={(
-        <Suspense>
-          <div className="flex items-center gap-2">
+        <>
+          <Suspense>
             <DiscoveryViewToggle view={view} />
             {view === "board" && <DiscoveryGroupByToggle
                 groupBy={groupBy}
@@ -310,22 +323,22 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
               customFieldGroups={customFieldGroups}
               activeCustomFieldId={customFieldFilter?.fieldId ?? null}
             />
-            <Link
-              href={`/${orgSlug}/${workspaceSlug}/card-sort`}
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-            >
+          </Suspense>
+          <NewOpportunityButton variant="header" />
+          <WorkspaceMoreMenu label="Discovery tools">
+            <DropdownMenuItem render={<a href={exportHref} download />}>
+              <Download /> Export CSV
+            </DropdownMenuItem>
+            <DropdownMenuItem render={<Link href={`/${orgSlug}/${workspaceSlug}/card-sort`} />}>
               <Shuffle className="size-4" /> Card sort
-            </Link>
+            </DropdownMenuItem>
             {showWorkspaceTree && (
-              <Link
-                href={`/${orgSlug}/${workspaceSlug}/discovery/tree`}
-                className={buttonVariants({ variant: "outline", size: "sm" })}
-              >
+              <DropdownMenuItem render={<Link href={`/${orgSlug}/${workspaceSlug}/discovery/tree`} />}>
                 <FolderTree className="size-4" /> {thinkingModel.labels.objective.singular} tree
-              </Link>
+              </DropdownMenuItem>
             )}
-          </div>
-        </Suspense>
+          </WorkspaceMoreMenu>
+        </>
       )}
     >
       {view === "table" ? (

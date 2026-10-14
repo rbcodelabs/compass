@@ -26,6 +26,15 @@ a connector's authorization also exists at the provider.
 3. Approve there. The provider returns you to this page, which then shows the
    server as connected to your account.
 
+Some servers let you choose how much access to grant before you connect (Google
+Drive: **Read and write**, or **Read only**). The choice is a set of radio
+buttons next to **Connect**, and the first option is preselected. It is yours
+alone: another person connecting the same server picks their own.
+
+To change the level later, use the **Reconnect** links shown under a connected
+server. The level is the permission the provider actually issued, so changing it
+means authorizing again; Compass cannot widen or narrow an existing token.
+
 A connection belongs to **you**, not to a workspace. Two people using the same
 workspace each connect separately, and neither one's agent turns use the other's
 authorization. This is deliberate: a shared token would let one person's agent
@@ -51,6 +60,66 @@ provider supports it, Compass also revokes the token at the provider and says so
 Where it does not, the message tells you the token is gone from Compass and that
 you may also want to remove Compass from that provider's own list of authorized
 applications.
+
+## Emergency revocation
+
+If `MCP_CONNECTOR_SECRET_ENCRYPTION_KEY` may have leaked, or a database dump may
+have left the environment, treat every stored third-party token as compromised.
+Operators can disconnect **everyone** at once with
+`POST /api/admin/revoke-connector-grants`, authenticated with the
+`x-migration-secret` header (the same credential as `/api/admin/migrate`).
+
+**Run this before rotating the encryption key.** Asking a provider to revoke a
+token needs the plaintext token, so the old key must still be configured.
+
+1. **Dry run first.** `dryRun` defaults to `true`; only an explicit `false` writes.
+
+   ```bash
+   curl -s -X POST https://<host>/api/admin/revoke-connector-grants \
+     -H "x-migration-secret: $MIGRATION_SECRET" \
+     -H "Content-Type: application/json" -d '{}'
+   ```
+
+   The response lists how many grants would be touched per connector and whether
+   Compass can tell that provider to revoke them.
+
+2. **Revoke.** Send `{"dryRun": false}`. Optional `slug` (one connector, for
+   example `"google-drive"`) and `userId` (one person) narrow the run.
+
+3. **Repeat while `truncated` is `true`.** Work is chunked against a time budget,
+   so a large install may need several calls. Re-sending the same body continues
+   where the last call stopped and is safe to repeat.
+
+4. **Then rotate** `MCP_CONNECTOR_SECRET_ENCRYPTION_KEY` and redeploy.
+
+For each grant, Compass wipes its own copy first (status `REVOKED`, both tokens
+blanked) and only then asks the provider to revoke, so a slow or unreachable
+provider never leaves a token usable through Compass. The response contains
+counts only, never tokens or user identifiers:
+
+| Field | Meaning |
+| --- | --- |
+| `matched` | Grants that held tokens when the run started |
+| `wiped` | Compass's copies removed |
+| `providerRevoked` | The provider confirmed the revocation |
+| `providerNotConfirmed` | The provider has no revocation endpoint, or did not confirm |
+| `undecryptable` | Could not be opened with the current key: wiped locally, provider not told |
+| `remaining` / `truncated` | Grants still holding tokens / whether to call again |
+
+Compass wiping its copy does **not** by itself invalidate a token the provider has
+already issued. For anything counted in `providerNotConfirmed` or `undecryptable`
+(always the case if the old key is already gone), also:
+
+- delete or rotate the OAuth client at the provider (for Google Drive, the OAuth
+  client in Google Cloud Console; rotating only `GOOGLE_CLIENT_SECRET` does
+  **not** invalidate refresh tokens that were already issued), and/or
+- ask users to remove Compass at the provider's authorized-apps page (for Google,
+  myaccount.google.com/permissions).
+
+One limit worth knowing: a token refresh running at the exact moment of the sweep
+can mint a rotated token that is not revoked at the provider. Compass's copy of it
+is still discarded; re-running the sweep after a minute, or removing the OAuth
+client, closes that window.
 
 ## When a call takes too long
 
@@ -84,3 +153,36 @@ alone: the panel reports connectors as unavailable rather than failing, and agen
 turns are unaffected. Without the encryption key, a connection attempt reports
 that connector storage is not configured rather than storing a token it could not
 protect.
+
+### Google Drive
+
+Google Drive offers two access levels, chosen by each person when they connect:
+
+| Level | Google scope | What the agent can do |
+|---|---|---|
+| **Read and write** (default) | `https://www.googleapis.com/auth/drive` | Search and read your files and, when you ask, create, edit, move, trash or share them. |
+| **Read only** | `https://www.googleapis.com/auth/drive.readonly` | Search and read files. Google refuses any change. |
+
+Read only is enforced by Google, not by Compass: the token itself cannot write,
+so a document that tricks the agent into attempting a change still fails. Prefer
+it unless you need the agent to change files. The agent is also told which level
+you chose, so with read only it says plainly that it cannot make a change and
+points you to **Reconnect**, rather than trying.
+
+With read and write, treat anything the agent reads from a Drive file as
+untrusted: the agent is told not to follow instructions found in documents and to
+change files only when you ask for that specific change, but you should still
+disconnect Drive if you are not using it.
+
+A link can also pick the level directly: `/api/connectors/google-drive/connect?access=read-only`
+(or `access=full`). An unrecognised value is refused with a 400 rather than
+falling back to broader access. Connections made before access levels existed
+hold the broad scope and show as **Read and write**.
+
+Unlike v0, Google offers no self-registration, so Compass uses a pre-registered
+OAuth client. Administrators set `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` for each environment, add
+`<origin>/api/connectors/google-drive/callback` to that client's authorized
+redirect URIs, and enable the Google Drive MCP API in its Google Cloud project.
+Until the variables are set, Google Drive shows as **Not configured on this
+deployment** and cannot be connected.

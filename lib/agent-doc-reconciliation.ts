@@ -23,8 +23,15 @@ import { createHash } from "node:crypto"
 import * as docFs from "@/lib/doc-fs"
 import { DocumentError } from "@/lib/document-service"
 
-export type DocBaselineEntry = { path: string; docId: string; revision: string | null; content: string }
-export type DocFinalFile = { path: string; content: string; frontmatterDocId: string | null }
+/**
+ * Either `content` or `contentSha256` identifies what a file held. The
+ * synchronous turn path has full content on both sides; the detached path only
+ * has a signed hash manifest for the baseline, and the sandbox sends content
+ * for a final file only when it differs from that baseline (otherwise just the
+ * hash), so a large unchanged tree never crosses the callback.
+ */
+export type DocBaselineEntry = { path: string; docId: string; revision: string | null; content?: string; contentSha256?: string }
+export type DocFinalFile = { path: string; frontmatterDocId: string | null; content?: string; contentSha256?: string }
 
 export type ReconciliationAction =
   | { type: "noop"; path: string; docId: string }
@@ -34,8 +41,20 @@ export type ReconciliationAction =
   | { type: "delete"; path: string; docId: string; expectedRevision: string | null }
   | { type: "create"; path: string; content: string }
 
-function sha256(text: string): string {
+export function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex")
+}
+
+function hashOf(entry: { content?: string; contentSha256?: string }): string {
+  if (entry.contentSha256) return entry.contentSha256
+  if (entry.content !== undefined) return sha256(entry.content)
+  throw new Error("Doc entry carries neither content nor a content hash")
+}
+
+/** An action that writes needs real bytes; a hash alone must never become an empty overwrite. */
+function contentOf(entry: { path: string; content?: string }): string {
+  if (entry.content === undefined) throw new Error(`Doc "${entry.path}" changed but no content was provided`)
+  return entry.content
 }
 
 /** Longest common prefix length, used to pick the "lexically closest" path among duplicate ids. */
@@ -52,7 +71,7 @@ function commonPrefixLength(a: string, b: string): number {
  */
 export function planReconciliation(baseline: readonly DocBaselineEntry[], final: readonly DocFinalFile[]): ReconciliationAction[] {
   const baselineById = new Map(baseline.map((b) => [b.docId, b]))
-  const baselineHash = new Map(baseline.map((b) => [b.docId, sha256(b.content)]))
+  const baselineHash = new Map(baseline.map((b) => [b.docId, hashOf(b)]))
 
   // Group final entries by VALIDATED docId. An id is only trusted if it was a
   // real docId in this turn's own baseline — anything else degrades to "no id".
@@ -90,21 +109,21 @@ export function planReconciliation(baseline: readonly DocBaselineEntry[], final:
       }
     }
     for (const loser of entries) {
-      if (loser !== winner) creates.push({ path: loser.path, content: loser.content, frontmatterDocId: null })
+      if (loser !== winner) creates.push({ path: loser.path, content: contentOf(loser), frontmatterDocId: null })
     }
 
-    const finalHash = sha256(winner.content)
+    const finalHash = hashOf(winner)
     const baseHash = baselineHash.get(docId)!
     const samePath = winner.path === base.path
     const sameContent = finalHash === baseHash
     if (samePath && sameContent) {
       actions.push({ type: "noop", path: base.path, docId })
     } else if (samePath && !sameContent) {
-      actions.push({ type: "update", path: base.path, docId, content: winner.content, expectedRevision: base.revision })
+      actions.push({ type: "update", path: base.path, docId, content: contentOf(winner), expectedRevision: base.revision })
     } else if (!samePath && sameContent) {
       actions.push({ type: "move", fromPath: base.path, toPath: winner.path, docId, expectedRevision: base.revision })
     } else {
-      actions.push({ type: "moveAndUpdate", fromPath: base.path, toPath: winner.path, docId, content: winner.content, expectedRevision: base.revision })
+      actions.push({ type: "moveAndUpdate", fromPath: base.path, toPath: winner.path, docId, content: contentOf(winner), expectedRevision: base.revision })
     }
   }
 
@@ -123,7 +142,7 @@ export function planReconciliation(baseline: readonly DocBaselineEntry[], final:
   // implicit parent-chain creation makes this a nicety, not a correctness
   // requirement, but it keeps the plan legible and avoids relying on that).
   const sortedCreates = creates
-    .map((c): ReconciliationAction => ({ type: "create", path: c.path, content: c.content }))
+    .map((c): ReconciliationAction => ({ type: "create", path: c.path, content: contentOf(c) }))
     .sort((a, b) => (a.type === "create" && b.type === "create" ? a.path.split("/").length - b.path.split("/").length : 0))
 
   return [...deletes, ...actions, ...sortedCreates]

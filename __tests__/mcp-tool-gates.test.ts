@@ -680,6 +680,19 @@ describe("applyToolGate", () => {
     })).rejects.toThrow(/does not belong to workspace/)
   })
 
+  it("refresh_artifact_from_v0: rejects an artifact from another workspace", async () => {
+    mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    await expect(applyToolGate("refresh_artifact_from_v0", MEMBER, { artifactId: "art-1", workspaceId: "ws-1" }))
+      .rejects.toThrow(/does not belong to workspace/)
+  })
+
+  it("refresh_artifact_from_v0: denies a non-member", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate("refresh_artifact_from_v0", MEMBER, { artifactId: "art-1", workspaceId: "ws-1" }))
+      .rejects.toThrow(/not found or access denied/)
+  })
+
   it("prepare_feedback_attachment_upload denies a non-member", async () => {
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
     await expect(applyToolGate("prepare_feedback_attachment_upload", MEMBER, { workspaceId: "ws-1" }))

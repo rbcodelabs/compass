@@ -13,6 +13,8 @@ Choose **Install Agentic PM pack** for one-click setup. Compass resolves the cur
 
 For another pack or an explicit update, expand **Advanced** and enter a public GitHub repository URL, a full 40-character commit SHA, and the path containing the pack. Compass validates the content before attaching it. Installed versions are immutable and never update automatically: to upgrade, install another commit and select its version; to roll back, select an earlier version.
 
+When the Agentic PM pack is installed, Compass compares your selected version with the Playbook repository's current `main` each time an administrator opens this page and shows either **up to date** or **Update available** with both short commit SHAs. The check is advisory: it never installs anything by itself, and if GitHub is unavailable or rate-limited the page simply says it could not check. Choose **Update to latest** to install that commit as a new immutable version and select it. Your enabled/disabled state and skill choices carry over: skills in both versions keep your choice, skills new in the update follow their defaults, and skills the update removed are dropped. The previous version stays installed, so rolling back is still a version change in the dropdown.
+
 ![One-click pack installation on desktop](/screenshots/docs/capability-packs-install-desktop.png)
 
 Use each skill's checkbox to choose which instructions are active, or disable the whole pack without removing its installed versions. A version change restores that version's default skill selection. Changes appear after saving; if a save fails, the previous selection remains visible with an error message.

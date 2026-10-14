@@ -232,6 +232,76 @@ test.describe("JSON Canvas doc", () => {
     await expect(page.getByTestId("canvas-surface")).not.toContainText(`Canvas card sol ${suffix}`);
   });
 
+  test("Build tree: draw an item's tree -> connected cards -> persists -> building again adds nothing", async ({ page, base, workspaceSlug }) => {
+    const prisma = getPrisma();
+    const workspace = await prisma.workspace.findFirstOrThrow({ where: { slug: workspaceSlug } });
+    const suffix = Date.now().toString();
+    const opportunity = await prisma.opportunity.create({
+      data: { workspaceId: workspace.id, title: `Tree opp ${suffix}`, status: "VALIDATED" },
+    });
+    const solutionA = await prisma.solution.create({
+      data: { workspaceId: workspace.id, opportunityId: opportunity.id, title: `Tree sol A ${suffix}` },
+    });
+    const solutionB = await prisma.solution.create({
+      data: { workspaceId: workspace.id, opportunityId: opportunity.id, title: `Tree sol B ${suffix}` },
+    });
+
+    try {
+      await page.goto(`${base}/docs`);
+      await page.waitForLoadState("networkidle");
+      await page.getByTestId("library-create-menu").click();
+      await page.getByRole("menuitem", { name: "New diagram" }).click();
+      await page.waitForURL(/\/docs\/[0-9a-f-]+$/, { timeout: 15_000 });
+      await expect(page.getByTestId("canvas-doc-editor")).toBeVisible({ timeout: 15_000 });
+
+      // ── Scope the build to one opportunity ───────────────────────────────────
+      await page.getByRole("button", { name: /Build tree from Compass/ }).click();
+      const dialog = page.getByTestId("canvas-tree-dialog");
+      await expect(dialog).toBeVisible();
+      await dialog.getByTestId("tree-scope-item").click();
+      await dialog.getByPlaceholder("Search by title…").fill(`Tree opp ${suffix}`);
+      await dialog.getByTestId("tree-scope-results").getByRole("button", { name: new RegExp(`Tree opp ${suffix}`) }).click();
+      await expect(dialog.getByTestId("tree-picked")).toContainText(`Tree opp ${suffix}`);
+      await dialog.getByTestId("tree-build").click();
+
+      // ── The opportunity and both solutions land as connected Compass cards ───
+      await expect(dialog).toBeHidden({ timeout: 15_000 });
+      await expect(page.getByText("Added 3 cards.")).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId("compass-card")).toHaveCount(3, { timeout: 15_000 });
+      for (const title of [`Tree opp ${suffix}`, `Tree sol A ${suffix}`, `Tree sol B ${suffix}`]) {
+        await expect(page.getByTestId("compass-card").filter({ hasText: title }).first()).toBeVisible();
+      }
+      await expect(page.locator(".react-flow__edge")).toHaveCount(2);
+
+      // ── One undo removes the whole tree, redo restores it ────────────────────
+      await page.getByRole("button", { name: "Undo" }).click();
+      await expect(page.getByTestId("compass-card")).toHaveCount(0);
+      await page.getByRole("button", { name: "Redo" }).click();
+      await expect(page.getByTestId("compass-card")).toHaveCount(3);
+
+      // ── Autosave, reload, still there ────────────────────────────────────────
+      await page.waitForResponse(isActionPost, { timeout: 15_000 });
+      await expect(page.getByText("Saved")).toBeVisible({ timeout: 15_000 });
+      await page.reload();
+      await page.waitForLoadState("networkidle");
+      await expect(page.getByTestId("compass-card")).toHaveCount(3, { timeout: 15_000 });
+      await expect(page.locator(".react-flow__edge")).toHaveCount(2);
+
+      // ── Building the same tree again is refused rather than duplicating cards ─
+      await page.getByRole("button", { name: /Build tree from Compass/ }).click();
+      await dialog.getByTestId("tree-scope-item").click();
+      await dialog.getByPlaceholder("Search by title…").fill(`Tree opp ${suffix}`);
+      await dialog.getByTestId("tree-scope-results").getByRole("button", { name: new RegExp(`Tree opp ${suffix}`) }).click();
+      await dialog.getByTestId("tree-build").click();
+      await expect(dialog.getByRole("alert")).toContainText("already on this canvas");
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("compass-card")).toHaveCount(3);
+    } finally {
+      await prisma.solution.deleteMany({ where: { id: { in: [solutionA.id, solutionB.id] } } });
+      await prisma.opportunity.delete({ where: { id: opportunity.id } });
+    }
+  });
+
   test("imported cards: unknown objects are unavailable, invalid refs degrade to plain links", async ({ page, base }) => {
     const missing = "11111111-2222-4333-8444-555555555555";
     const imported = {

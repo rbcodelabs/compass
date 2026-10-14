@@ -55,9 +55,16 @@ vi.mock("@/components/discovery/opportunity-composer", () => ({
     <div data-testid="opportunity-composer-body">{composerId}</div>
   ),
 }));
+vi.mock("@/components/experiments/experiment-composer", () => ({
+  ExperimentComposer: ({ composerId }: { composerId: string }) => (
+    <div data-testid="experiment-composer-body">{composerId}</div>
+  ),
+}));
 vi.mock("@/components/panels/solution-panel", () => ({ SolutionPanel: () => null }));
 vi.mock("@/components/panels/assumption-panel", () => ({ AssumptionPanel: () => null }));
-vi.mock("@/components/panels/experiment-panel", () => ({ ExperimentPanel: () => null }));
+vi.mock("@/components/panels/experiment-panel", () => ({
+  ExperimentPanel: ({ experimentId }: { experimentId: string }) => <div data-testid="experiment-body">{experimentId}</div>,
+}));
 vi.mock("@/components/panels/roadmap-item-panel", () => ({ RoadmapItemPanel: () => null }));
 vi.mock("@/components/panels/discovery-rail-panel", () => ({ DiscoveryRailPanel: () => null }));
 vi.mock("@/components/tasks/task-detail", () => ({ TaskDetail: () => null }));
@@ -186,5 +193,34 @@ describe("PanelShell — opportunity composer", () => {
     rerender(<PanelShell initialPin={unpinned} />);
     expect(aside()).not.toBeNull();
     expect(screen.getByTestId("opportunity-body")).toHaveTextContent("opp-1");
+  });
+});
+
+describe("PanelShell — experiment composer", () => {
+  beforeEach(() => {
+    panelState = { type: "experiment-new", id: "new-assumption-1" };
+  });
+
+  it("docks like the other composers, titled New experiment, and passes the assumption preset through", () => {
+    render(<PanelShell initialPin={unpinned} />);
+    expect(aside()).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "New experiment" })).toBeInTheDocument();
+    expect(screen.getByTestId("experiment-composer-body")).toHaveTextContent("new-assumption-1");
+    expect(screen.queryByRole("button", { name: /Pin panel|Unpin panel/ })).toBeNull();
+  });
+
+  it("falls back to a full-width sheet below the pin breakpoint", async () => {
+    setViewportAllowsPin(false);
+    render(<PanelShell initialPin={unpinned} />);
+    const body = await screen.findByTestId("experiment-composer-body", {}, { timeout: 2000 });
+    expect(body.closest('[data-slot="sheet-content"]')).toHaveClass("w-full", "sm:max-w-xl");
+  });
+
+  it("keeps the created experiment docked after the hand-off", () => {
+    const { rerender } = render(<PanelShell initialPin={unpinned} />);
+    panelState = { type: "experiment", id: "exp-1" };
+    rerender(<PanelShell initialPin={unpinned} />);
+    expect(aside()).not.toBeNull();
+    expect(screen.getByTestId("experiment-body")).toHaveTextContent("exp-1");
   });
 });

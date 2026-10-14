@@ -9,6 +9,11 @@
  * one. Confusing the two would mean offering "Revoke" on a grant that lives at a
  * third party.
  *
+ * Some connectors offer an access choice (Google Drive: read and write, or read
+ * only). It is made here, before Connect, and travels as `?access=` on the
+ * connect link; changing it later is a reconnect, because the level is the OAuth
+ * scope the provider issued and only a new authorization can change that.
+ *
  * Connect is a plain link, not a fetch: the flow's first step is a 302 to
  * somebody else's authorization server, and a browser has to follow it with the
  * user watching. Disconnect is a fetch, because its only product is a state
@@ -26,6 +31,22 @@ export interface McpConnectorView {
   displayName: string
   serverUrl: string
   connected: boolean
+  /**
+   * False when a pre-registered-client connector has no credentials on this
+   * deployment. Omitted means configured, so DCR connectors need no value.
+   */
+  configured?: boolean
+  /** Empty or omitted for a connector with a single, fixed access. */
+  accessLevels?: Array<{ id: string; label: string; description: string }>
+  defaultAccessLevel?: string | null
+  /** The level the connected grant holds; null when unknown or not connected. */
+  accessLevel?: string | null
+}
+
+function connectHref(slug: string, access?: string | null): string {
+  const query = new URLSearchParams({ returnTo: "/settings/agents" })
+  if (access) query.set("access", access)
+  return `/api/connectors/${encodeURIComponent(slug)}/connect?${query.toString()}`
 }
 
 /**
@@ -47,6 +68,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   REGISTRATION_FAILED: "Compass could not register itself as a client with the provider.",
   DISCOVERY_FAILED: "Compass could not read the provider's OAuth metadata.",
   ENCRYPTION_NOT_CONFIGURED: "Connector storage is not configured on this deployment.",
+  CLIENT_NOT_CONFIGURED: "This connector has no OAuth client configured on this deployment.",
 }
 
 export function McpConnectorsPanel({
@@ -64,6 +86,8 @@ export function McpConnectorsPanel({
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  // Per-connector choice made before connecting; absent means the default level.
+  const [chosen, setChosen] = useState<Record<string, string>>({})
 
   const noticeName = notice ? connectors.find((item) => item.slug === notice.slug)?.displayName ?? notice.slug : null
 
@@ -78,7 +102,7 @@ export function McpConnectorsPanel({
         if (!response.ok) throw new Error(`Could not disconnect ${connector.displayName}.`)
         const body = (await response.json()) as { revokedAtProvider?: boolean }
         setConnectors((current) =>
-          current.map((item) => (item.slug === connector.slug ? { ...item, connected: false } : item)),
+          current.map((item) => (item.slug === connector.slug ? { ...item, connected: false, accessLevel: null } : item)),
         )
         // Stated rather than hidden: Compass always drops its own copy, but it
         // cannot always tell the provider, and the user may want to revoke at the
@@ -117,7 +141,12 @@ export function McpConnectorsPanel({
         {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
         {status && <p role="status" className="text-sm text-text-subtle">{status}</p>}
         {connectors.length === 0 && <p className="text-sm text-text-muted">No connectors are configured.</p>}
-        {connectors.map((connector) => (
+        {connectors.map((connector) => {
+          const levels = connector.accessLevels ?? []
+          const selected = chosen[connector.slug] ?? connector.defaultAccessLevel ?? levels[0]?.id ?? null
+          const currentLevel = connector.connected ? levels.find((level) => level.id === connector.accessLevel) : undefined
+          const otherLevels = connector.connected && currentLevel ? levels.filter((level) => level.id !== currentLevel.id) : []
+          return (
           <article
             key={connector.slug}
             className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-default p-4"
@@ -126,8 +155,50 @@ export function McpConnectorsPanel({
               <h3 className="font-medium text-text-primary">{connector.displayName}</h3>
               <p className="text-xs text-text-muted">{connector.serverUrl}</p>
               <p className="mt-1 text-xs text-text-muted">
-                {connector.connected ? "Connected to your account." : "Not connected."}
+                {connector.connected
+                  ? `Connected to your account${currentLevel ? ` · ${currentLevel.label}` : ""}.`
+                  : connector.configured === false
+                    ? "Not configured on this deployment."
+                    : "Not connected."}
               </p>
+              {currentLevel && <p className="text-xs text-text-muted">{currentLevel.description}</p>}
+              {!connector.connected && levels.length > 0 && (
+                <fieldset className="mt-2 space-y-1">
+                  <legend className="sr-only">{connector.displayName} access</legend>
+                  {levels.map((level) => (
+                    <label key={level.id} className="flex items-start gap-2 text-xs text-text-subtle">
+                      <input
+                        type="radio"
+                        name={`access-${connector.slug}`}
+                        value={level.id}
+                        checked={selected === level.id}
+                        onChange={() => setChosen((current) => ({ ...current, [connector.slug]: level.id }))}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="font-medium text-text-primary">{level.label}</span> — {level.description}
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
+              {connector.connected && otherLevels.length > 0 && (
+                <p className="mt-1 text-xs text-text-muted">
+                  To change access, reconnect:{" "}
+                  {otherLevels.map((level, index) => (
+                    <span key={level.id}>
+                      {index > 0 && " · "}
+                      <a
+                        href={connectHref(connector.slug, level.id)}
+                        className="underline"
+                        aria-label={`Reconnect ${connector.displayName} with ${level.label.toLowerCase()} access`}
+                      >
+                        {level.label}
+                      </a>
+                    </span>
+                  ))}
+                </p>
+              )}
             </div>
             {connector.connected ? (
               <Button
@@ -148,19 +219,20 @@ export function McpConnectorsPanel({
               // Button has no `asChild`, and nesting a link inside it would
               // produce a button containing an anchor.
               <a
-                href={`/api/connectors/${encodeURIComponent(connector.slug)}/connect?returnTo=${encodeURIComponent("/settings/agents")}`}
+                href={connectHref(connector.slug, selected)}
                 aria-label={`Connect ${connector.displayName}`}
-                aria-disabled={available ? undefined : true}
+                aria-disabled={available && connector.configured !== false ? undefined : true}
                 className={cn(
                   buttonVariants({ variant: "outline", size: "sm" }),
-                  available ? undefined : "pointer-events-none opacity-50",
+                  available && connector.configured !== false ? undefined : "pointer-events-none opacity-50",
                 )}
               >
                 Connect
               </a>
             )}
           </article>
-        ))}
+          )
+        })}
       </div>
     </SettingsSection>
   )

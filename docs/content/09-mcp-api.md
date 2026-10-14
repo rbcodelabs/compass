@@ -326,7 +326,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional |
+| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional. For a root `ARTIFACT` comment on a `SLIDE_DECK` Artifact, optional `slideIndex` (zero-based, from `get_artifact` `slides[].index`) anchors it to that whole slide |
 | `list_comments` | List comments for an exact workspace and target, optionally filtered by `OPEN` or `RESOLVED` |
 | `get_comment` | Get one comment and any specialized Doc-anchor or Solution-plan metadata |
 | `update_comment` | Edit a comment body |
@@ -405,7 +405,7 @@ Typed links connect an Opportunity to Objectives and a Solution to Key Results (
 
 | Tool | Description |
 |---|---|
-| `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
+| `list_opportunities` | Fetch a page of opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result; **paginated** via `limit`/`cursor` (see [Paginating `list_opportunities`](#paginating-list_opportunities)); filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
 | `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
@@ -806,7 +806,11 @@ path. Two sibling docs sharing a title are disambiguated with a suffix, e.g.
 | `move_doc` | Rename and/or reparent a doc by changing its path — both are just "the path changed." Missing intermediate directories on the destination are created implicitly |
 | `list_doc_history` | List the saved versions of the doc at a path (id, label, author, created date), newest first. Does not include full content — call `restore_doc_version` to apply one |
 | `restore_doc_version` | Restore the doc at a path to a previously saved version (from `list_doc_history`). The doc's current state is snapshotted first (labeled "Before restore"), so restoring never loses data |
+| `capture_canvas` | Returns a PNG picture of a canvas doc (docType `CANVAS`) so an agent can check layout. Takes `docId` (the `compass_doc_id` in the canvas doc's `docs://` frontmatter), and optionally `nodeId` (a node or group id to zoom on) with `padding` (canvas units of context, default 80), or `region` (`x`, `y`, `width`, `height` in canvas coordinates); pass at most one of `nodeId` and `region`. Default is a fit-all overview. `scale` (0.05–4) overrides the automatic fit; output is capped at 2400 px per side. The canvas JSON is rendered to a self-contained page and photographed in a Vercel Sandbox with no network. Nodes, colours, group labels, edges with arrows and labels, and Compass object cards (live title, status, facts; cards outside the doc workspace show as unavailable) are drawn. Returns an MCP image content block plus text and metadata (`view`, `region`, `scale`, `image`, `byteSize`, `counts`, `timings`). The image is not stored. Gate class: `READ` |
 | `prepare_doc_image_upload` | Prepare a signed, short-lived upload for a PNG, JPEG, GIF, or WebP image up to 10 MiB in workspace-private Docs storage; returns the upload pathname/token plus the relative Compass image URL and Markdown |
+| `edit_doc` | Targeted text edit of a doc body without resending it, addressed by `docId` (the `compass_doc_id` in the doc's `docs://` frontmatter): `oldString` → `newString` (must match exactly once unless `replaceAll`), or up to 50 `edits` applied in order, all-or-nothing. Optional `expectedRevision` (the `_meta.revision` of a `docs://` resource read, or a prior `write_doc` result) rejects the edit if the doc changed; without it the edit is re-applied on top of concurrent changes. Edits the body only — change frontmatter properties with `write_doc`. On a CANVAS doc the result must still be valid JSON Canvas |
+| `edit_canvas` | Edit a CANVAS doc (by `docId`, as for `edit_doc`) with domain ops keyed by node id instead of rewriting the JSON: `add_card`, `add_text`, `add_group`, `add_edge`, `move`, `update`, `remove` (up to 200 per call, all-or-nothing; errors name the op index). Ids and placement are automatic; nodes may be referenced by node id or `kind:uuid`; re-adding an existing card or edge is a no-op; removing a node removes its edges. Optional `expectedRevision` |
+| `build_canvas_tree` | Draw the Opportunity Solution Tree onto a CANVAS doc (by `docId`) — the same engine as the editor's "Build tree". `scope`: `{kind:"workspace"}` (default) or `{kind: objective\|keyResult\|opportunity\|solution, id}`. Idempotent merge: existing cards are never duplicated, new content is auto-laid-out to the right, one group per root objective. Capped at 400 cards |
 
 `write_doc` deliberately does not split into separate create/update tools —
 the path already tells you which one it is: writing to a path you just read
@@ -844,6 +848,8 @@ This private flow applies to new uploads. Existing documents may contain older a
 ### Authoring Canvas docs (agents)
 
 A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one with `write_doc` and `docType: CANVAS`, passing the JSON as the body of `content` (after any frontmatter). Writing to an existing canvas path **replaces the whole canvas**, so read the `docs://{workspaceId}/{path}` resource first, change the JSON, and send the complete result back.
+
+**Prefer the edit tools to rewriting.** `edit_canvas` applies ops server-side (`add_card`, `add_edge`, `move`, `update`, `remove`, …) with automatic ids and placement, and `build_canvas_tree` draws the OST for you; neither needs the whole canvas in your context. Use `edit_doc` for a precise text replacement. These tools take a `docId`: read it from `compass_doc_id` in the `docs://` resource's frontmatter. Pass `expectedRevision` (the resource read's `_meta.revision`) when you want the edit to fail rather than land on a changed doc.
 
 **Workflow**
 1. Look up real object ids with the `list_*` tools (`list_opportunities`, `list_solutions`, `list_metrics`, `list_tasks`, `list_experiments`, the `docs://` resource, objectives and key results via the OKR tools). Never invent a UUID: an unknown, foreign-workspace or inaccessible id is shown as "Unavailable" to viewers.
@@ -889,23 +895,38 @@ A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one
 
 ### Artifacts
 
-Artifacts are first-class solution deliverables, separate from Markdown Docs. HTML content creates private immutable revisions; external URLs are stored but never server-fetched. Every mutation returns the stable Artifact identifier on a plain `ID: <uuid>` line.
+Artifacts are first-class solution deliverables, separate from Markdown Docs. HTML content creates private immutable revisions; external URLs are stored but never server-fetched. Every mutation returns the stable Artifact identifier on a plain `ID: <uuid>` line. `list_artifacts`, `get_artifact`, `create_artifact` and `update_artifact` also return the clickable Compass page (`<origin>/{org}/{workspace}/docs/artifacts/{id}`) on a `URL:` line and as `url` in the structured data — relay it to the user instead of the bare ID. `url` is `null` (and the line is omitted) when the public Compass URL is not configured; the write still succeeds.
 
 | Tool | Description |
 |---|---|
 | `list_artifacts` | List active Artifacts in a workspace; pass `includeArchived: true` to include archived records |
-| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML |
-| `create_artifact` | Create `HTML_UPLOAD` from `html` plus an optional `.html` filename, or `EXTERNAL_LINK` from an `http`/`https` `url` |
-| `update_artifact` | Update title/description and optionally create a new immutable HTML or URL revision |
+| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML. Includes `kind` (`DOCUMENT` or `SLIDE_DECK`); a `SLIDE_DECK` also returns `slides` as `{ index, title, description }`, split from the current revision at read time |
+| `prepare_artifact_upload` | Prepare a signed, short-lived direct upload for one `.html` file up to 2 MiB; returns the upload pathname, client token, and an `uploadReceipt`. Use this instead of passing `html` inline so the document never enters the conversation |
+| `create_artifact` | Create `HTML_UPLOAD` from an `uploadReceipt` (preferred) or inline `html` plus an optional `.html` filename, `EXTERNAL_LINK` from an `http`/`https` `url` (Google Drive/Docs links are recognised and previewed read-only in the app; only the URL is stored), or `V0_CHAT` from a `https://v0.app/chat/<id>` `url` (read with the caller's own v0 connector grant; `title` may be empty to use the chat name). Optional `kind`: `DOCUMENT` (default) or `SLIDE_DECK`, which is allowed only for `HTML_UPLOAD` |
+| `refresh_artifact_from_v0` | Re-read a `V0_CHAT` Artifact from v0 and add a new revision only when v0 has a new version; returns `changed` |
+| `update_artifact` | Update title/description and optionally create a new immutable HTML revision (from `uploadReceipt` or inline `html`) or URL revision. Optional `kind` switches an `HTML_UPLOAD` between `DOCUMENT` and `SLIDE_DECK` without a new revision |
 | `link_artifact_to_solution` | Idempotently link an Artifact and Solution in the same workspace |
 | `unlink_artifact_from_solution` | Remove an Artifact-to-Solution link |
 | `link_artifact_to_decision` | Idempotently link an active Artifact to an ordinary tracked Decision in the same workspace; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs, `linkId`, and `created` |
 | `unlink_artifact_from_decision` | Idempotently remove a Decision link; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs and `removed` |
 | `archive_artifact` | Archive an Artifact while preserving its revision history and links |
+| `capture_screenshot` | Render an Artifact revision in a sandboxed headless browser and store the PNG as that revision's thumbnail, which the Artifact page then shows. Takes `workspaceId`, `artifactId`, and optional `revisionId` (default: the current revision), `fullPage`, and `viewport` (`width` 320–3840, `height` 240–2160). There is deliberately **no `url` input**. `EXTERNAL_LINK` revisions render the URL stored on the revision, so the tool cannot be used to render arbitrary pages. Google Drive/Docs links are refused, because the capture browser is not signed in to Google. `HTML_UPLOAD` revisions render their stored HTML under the same Content-Security-Policy as the in-app preview, with every network request blocked. Returns `ID: <artifactId>` plus metadata only (`revisionId`, `width`, `height`, `byteSize`, `capturedAt`, `sourceUrl`, `httpStatus`; the last two are `null` for `HTML_UPLOAD`). It never returns the image or its storage key. Gate class: `WRITE` |
 | `create_feedback_source` | Create an [embedded-feedback](/help/24-embedded-feedback) source bound to an active Artifact and mint its first token. Takes `workspaceId`, `artifactId`, `name`, `allowedOrigins` and optional `authMode` (`INTERNAL_SSO` default, or `PORTAL`). Returns `sourceId`, the raw `token` **once**, `tokenPrefix`, a ready-to-paste `snippet`, and the stored `allowedOrigins`/`authMode`. Workspace member (same as `create_artifact`) |
 | `update_feedback_source` | Replace a source's `allowedOrigins` (the full list), enable/disable it, rename it, or change `authMode` (which signs out existing visitors). Scoped by `workspaceId`; returns the stored state, never a token. Workspace member (same as `create_artifact`) |
 
 Feedback-source tools are available to workspace members and registered agents, exactly like the other Artifact write tools, and have no delete, token-mint or token-revoke counterpart — rotate or revoke tokens in **Settings → Embedded feedback**. The raw token appears only in the `create_feedback_source` response and is never stored or logged in readable form. If the deployment has no public Compass URL configured, `snippet` is `null` and the response carries `scriptPath` and a note instead of a broken URL.
+
+#### Uploading HTML without putting it in the conversation
+
+Inline `html` costs the document's full size twice in agent context: once when the agent writes the file and again inside the tool call. For anything beyond a trivial page, upload the file from disk instead:
+
+1. Write the HTML to a local file, then call `prepare_artifact_upload` with the workspace, the `.html` filename, and the exact byte size (1 byte to 2 MiB).
+2. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: "text/html" })` from `@vercel/blob/client`, reading the file from disk rather than pasting it into a tool call.
+3. Call `create_artifact` or `update_artifact` with the returned `uploadReceipt` and no `html`. The filename is taken from the receipt, so omit `filename`.
+
+The client token expires after ten minutes, is bound to one random workspace-prefixed staging pathname, `text/html`, and the declared size, and cannot overwrite an existing blob. The receipt is HMAC-signed and bound to the workspace, staging pathname, filename, size, and expiry. The server re-reads the staged bytes and runs the same validation as the inline path (safe filename, non-empty, UTF-8, HTML document, 2 MiB cap), checks the size against what was signed, and deletes the staging blob once the revision is committed, so a receipt is effectively single-use. If validation or the write fails, the staging blob is not deleted and is not currently swept; it is private and workspace-prefixed, but orphaned until cleaned up out of band. Re-prepare to retry.
+
+Direct upload needs the private Artifact Blob store (`ARTIFACT_BLOB_READ_WRITE_TOKEN`), so it is unavailable in local development; use inline `html` there. Provide exactly one of `html` or `uploadReceipt` on create, and at most one of `html`, `uploadReceipt`, or `url` on update.
 
 Decision–Artifact links are live supporting material, not frozen review evidence. `get_decision` and `get_review_request` include an `artifacts` array with title, type, status, and current revision number; legacy review requests return an empty array. `get_artifact.decisions` includes the same-workspace tracked request ID, current title, and state. The new link tools require write access and validate both objects in the declared workspace. They preserve packets, fingerprints, revisions, cycles, and recorded outcomes. New links to archived Artifacts are rejected, but retrying an existing link and removing it remain supported. Links follow the stable Decision request and the current Artifact revision.
 
@@ -973,6 +994,51 @@ calls.
 `list_feedback` is the exception worth reading closely: there `updatedSince`
 starts a stable keyset scan paged by an opaque `cursor` (see the feedback section
 above), rather than a simple filter.
+
+## Paginating `list_opportunities`
+
+`list_opportunities` returns **one page at a time**, not the whole workspace.
+Pass `limit` (1–200, default 50) and page forward with `cursor`.
+
+Every response reports where the caller is in the listing, in both the text
+block and `structuredContent.data`:
+
+| Field | Meaning |
+|---|---|
+| `count` | Items in *this* page |
+| `total` | Items matching the filters across the **whole** listing |
+| `hasMore` | Whether any matching item has not yet been returned |
+| `nextCursor` | Opaque cursor for the next page, or `null` at the end |
+
+When more remain, the text block ends with an explicit continuation line —
+`Showing 1-50 of 139. 89 not yet listed. To continue, call list_opportunities
+again with cursor: "…"` — and the final page says `End of list - every item has
+now been listed.` **Page until you see that sentence.** A full page is not
+evidence that you have seen everything; `hasMore` is.
+
+To walk the list: call once with no `cursor`, then repeat with the previous
+response's `nextCursor` **and the identical `workspaceId`, filters and `sort`**.
+The cursor pins all of them and a mismatched continuation is rejected rather than
+served, because resuming a differently-filtered listing would silently skip some
+rows and repeat others. A malformed cursor is likewise rejected instead of
+falling back to the first page, so a paging bug cannot masquerade as an endless
+supply of page one.
+
+This is keyset paging, not `OFFSET`. Inserts and deletes elsewhere in the
+workspace do not shift the rows a cursor resumes after — which is also why the
+default ordering carries an `id` tiebreaker (`createdAt desc, id asc`). Bulk
+imports give thousands of opportunities the same `createdAt`, and without the
+tiebreaker those ties come back in an arbitrary order that can differ between
+identical calls, leaving nothing stable for a cursor to name.
+
+A single-page listing that fits inside `limit` gets no footer at all, so callers
+whose workspaces are small see byte-identical output to before.
+
+> **Why this exists.** An unbounded listing of a real workspace was ~124 KB
+> (~31K tokens) in one tool result, with no total and no "more remain" signal.
+> An agent asked to work through every opportunity would process the head of the
+> list, report completion, and on its next turn start over from the same head —
+> indistinguishable, from the inside, from having finished.
 
 ### What `updatedAt` does and does not capture
 

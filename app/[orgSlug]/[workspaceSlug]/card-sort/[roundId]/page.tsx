@@ -142,6 +142,7 @@ export default async function CardSortRoundPage({
             round={round}
             factor={board.factor}
             rows={board.rows}
+            cardMeta={cards.meta}
             isFacilitator={board.isFacilitator}
             canSeeTally={board.canSeeTally}
             view={view}

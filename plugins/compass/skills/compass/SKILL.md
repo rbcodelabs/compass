@@ -313,6 +313,10 @@ Field *definitions* and shared option sets are UI-only (Settings → Custom Fiel
 | `prepare_doc_image_upload` | Prepare a short-lived private direct upload for a PNG, JPEG, GIF, or WebP image up to 10 MiB. Upload with `@vercel/blob/client` using `access: "private"`, then embed the returned relative URL or Markdown in a Doc |
 | `create_doc` | Create a new doc page, optionally nested under a parent. Pass `roadmapItemId` + `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on. Pass `docType: CANVAS` for a JSON Canvas 1.0 doc (`content` = JSON string, validated; blank canvas if omitted; a Compass object card is a `link` node with `url: compass://<kind>/<id>` and `compass: {kind, id, title?}`, kind in opportunity/solution/metric/doc/task/experiment/objective/keyResult); `update_doc` on a CANVAS doc also requires valid JSON Canvas content |
 | `update_doc` | Update a doc's title, content, or metadata (properties). Automatically snapshots the doc's pre-change state first (coalesced to one snapshot per 5-min window per author) |
+| `edit_doc` | Targeted text edit of a doc body without resending it: `oldString` → `newString` (must match exactly once unless `replaceAll`), or up to 50 `edits` applied in order, all-or-nothing. Optional `expectedRevision` (from `get_doc`) rejects the edit if the doc changed; without it the edit is re-applied on top of concurrent changes. Edits the body only — change properties with `update_doc_metadata`. On a CANVAS doc the result must still be valid JSON Canvas |
+| `edit_canvas` | Edit a CANVAS doc with domain ops keyed by node id instead of rewriting the JSON: `add_card`, `add_text`, `add_group`, `add_edge`, `move`, `update`, `remove` (up to 200 per call, all-or-nothing; errors name the op index). Ids and placement are automatic; nodes may be referenced by node id or `kind:uuid`; re-adding an existing card or edge is a no-op; removing a node removes its edges. Optional `expectedRevision` |
+| `build_canvas_tree` | Draw the Opportunity Solution Tree onto a CANVAS doc — the same engine as the editor's "Build tree". `scope`: `{kind:"workspace"}` (default) or `{kind: objective\|keyResult\|opportunity\|solution, id}`. Idempotent merge: existing cards are never duplicated, new content is auto-laid-out to the right, one group per root objective. Capped at 400 cards |
+| `capture_canvas` | See a canvas: returns a PNG of a CANVAS doc. `docId`, then optionally `nodeId` (zoom on a node or group, `padding` default 80) or `region` `{x,y,width,height}` in canvas coordinates (not both); default is a fit-all overview. `scale` 0.05-4, output capped at 2400 px per side. Draws nodes, colours, groups, edges and live Compass cards. Read-only; the image is not stored. Use it to check layout after `edit_canvas` / `build_canvas_tree` |
 | `create_doc_version` | Save a manual, named snapshot of a doc's current content. Params: `docId`, `label` (optional), `authorName`. Never coalesced — always writes a new version |
 | `list_doc_versions` | List a doc's saved versions (id, label, author, created date), newest first. Param: `docId`. Metadata only — use `get_doc_version` for full content |
 | `get_doc_version` | Return the full title/content/metadata/icon snapshot of a single saved version. Param: `versionId` |
@@ -327,7 +331,9 @@ Field *definitions* and shared option sets are UI-only (Settings → Custom Fiel
 
 ### Authoring Canvas docs (agents)
 
-A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one with `create_doc` and `docType: CANVAS`, passing the JSON as the `content` string. `update_doc` **replaces the whole canvas**, so call `get_doc` first, change the JSON, and send the complete result back.
+A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one with `create_doc` and `docType: CANVAS`, passing the JSON as the `content` string. `update_doc` **replaces the whole canvas**, so for anything but a from-scratch rewrite use the edit tools below instead of resending the JSON.
+
+**Prefer the edit tools to rewriting.** `edit_canvas` applies ops server-side (`add_card`, `add_edge`, `move`, `update`, `remove`, …) with automatic ids and placement, and `build_canvas_tree` draws the OST for you; neither needs the whole canvas in your context. Use `edit_doc` for a precise text replacement. Pass `expectedRevision` from `get_doc` when you want the edit to fail rather than land on a changed doc.
 
 **Workflow**
 1. Look up real object ids with the `list_*` tools (`list_opportunities`, `list_solutions`, `list_metrics`, `list_tasks`, `list_experiments`, `list_docs`, objectives and key results via the OKR tools). Never invent a UUID: an unknown, foreign-workspace or inaccessible id is shown as "Unavailable" to viewers.
@@ -401,6 +407,43 @@ If uploading or authenticated display verification is blocked, report
 **screenshot publication incomplete** separately from test results. Do not
 claim the handoff complete, make images public, or bypass auth. A vault path
 may identify an optional archive, but is not evidence accessible to Compass readers.
+
+### Uploading HTML Artifacts without bloating context
+
+Passing `html` inline to `create_artifact` / `update_artifact` puts the whole
+document in your context twice (once writing the file, once in the call). For
+any non-trivial page, upload from disk instead:
+
+1. Write the HTML to a local file and note its exact byte size (max 2 MiB).
+2. Call `prepare_artifact_upload(workspaceId, filename, fileSize)`.
+3. Upload with `put(pathname, file, { access: "private", token: clientToken,
+   contentType: "text/html" })` from `@vercel/blob/client`, reading the file
+   from disk. Never paste the HTML into a tool call. Keep the token in memory.
+4. Call `create_artifact` (or `update_artifact`) with `uploadReceipt` and **no**
+   `html` or `filename`. Receipts expire after ten minutes and work once.
+
+If validation fails, fix the file and call `prepare_artifact_upload` again
+(the failed staging upload is left behind, not reused). Direct upload needs the private Artifact Blob store and is
+unavailable in local dev; fall back to inline `html` there.
+
+### Artifacts from a v0 chat
+
+`create_artifact` with `sourceType: "V0_CHAT"` and `url: "https://v0.app/chat/<id>"`
+captures a v0 chat as an Artifact. `title` may be empty to use the chat name.
+
+- Pass the chat link from v0: `v0.app/chat/<id>`, the title-slug form, or a
+  team-prefixed link (`v0.app/<team>/chat/<slug>-<id>`).
+- Compass reads the chat server-side with **the caller's own v0 connector grant**,
+  so the user must have connected v0 in Compass first. There is no shared service
+  credential.
+- `refresh_artifact_from_v0(workspaceId, artifactId)` re-reads the chat and adds a revision
+  **only when v0 has a new version**. It returns `changed: false` otherwise, so it
+  is safe to call speculatively. `update_artifact` cannot replace a `V0_CHAT`
+  revision; refresh is the only way to get a new one.
+- The app renders as a live iframe through a Compass-hosted preview proxy on a
+  second domain. If the proxy is not configured in that environment (no
+  `V0_PREVIEW_HOST` / `V0_PREVIEW_TICKET_KEY`), the Artifact falls back to a link
+  card rather than an embedded preview.
 
 #### Feedback
 

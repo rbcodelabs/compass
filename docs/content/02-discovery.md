@@ -37,6 +37,10 @@ Opportunities move through four columns on the kanban board:
 
 Drag cards between columns to update status. Use **Filters** at the top of the page to filter opportunities by squad, or switch between **Board** and **Tree** views using the view control.
 
+### Exporting opportunities to CSV
+
+Open the **⋯** (Discovery tools) menu and choose **Export CSV** to download the opportunities on the page as a spreadsheet-ready file. The export respects the squad and tag filters currently applied, so the file matches what you are looking at; view, group-by and sort are presentation only and do not change it. Columns: Title, Status, Squad, Customer segment, Score, Solutions, Evidence, and a Link back to the opportunity. Rows are ordered by status (Exploring, Validating, Prioritized, Active, then Archived), keeping the manual order within each status. Archived opportunities are included, so filter the Status column in your spreadsheet to hide them. Score is blank when an opportunity has no score or the workspace has no active scoring model.
+
 ### Group by: Status or a custom field
 
 In Board view, use the **Group by** picker next to Filters to switch how cards are grouped:
@@ -223,4 +227,4 @@ Switch from board view to **Tree view** using the toggle at the top right of the
 
 This view is most useful in team discussions and stakeholder reviews, where you need to show the full reasoning chain from outcome to experimental evidence.
 
-Any assumption with no linked experiment yet shows a **Test this assumption →** link. Clicking it opens the Experiments page with a new experiment form pre-filled to test that assumption, closing the loop without leaving the tree to hunt down the right assumption manually.
+Any assumption with no linked experiment yet shows a **Test this assumption →** link. Clicking it opens the Experiments page with the new experiment composer open and pre-filled to test that assumption, closing the loop without leaving the tree to hunt down the right assumption manually.

@@ -923,6 +923,9 @@ model CommentElementAnchor {
   /// comments made inside Compass, where the reviewer is already looking at the
   /// artifact.
   screenshotUrl      String?  @map("screenshot_url") @db.Text
+  /// Zero-based slide of a SLIDE_DECK artifact the comment was left on, or null
+  /// when the comment is not slide-scoped (migration 078).
+  slideIndex         Int?     @map("slide_index")
   comment            Comment  @relation(fields: [commentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([artifactId, pageUrl], map: "idx_comment_element_anchors_artifact_page")
@@ -2341,8 +2344,13 @@ model Artifact {
   workspaceId       String             @map("workspace_id") @db.Uuid
   title             String             @db.VarChar(255)
   description       String?            @db.Text
-  /// HTML_UPLOAD | EXTERNAL_LINK
+  /// HTML_UPLOAD | EXTERNAL_LINK | V0_CHAT
   sourceType        String             @map("source_type") @db.VarChar(30)
+  /// v0 chat id; populated only when sourceType is V0_CHAT (migration 090_v0_chat_artifacts).
+  v0ChatId          String?            @map("v0_chat_id") @db.VarChar(100)
+  /// NULL (= DOCUMENT) | SLIDE_DECK. Presentation kind, orthogonal to sourceType;
+  /// allowed values live in lib/artifact-kind.ts (migration 078).
+  kind              String?            @map("kind") @db.VarChar(30)
   /// ACTIVE | ARCHIVED
   status            String             @default("ACTIVE") @db.VarChar(20)
   currentRevisionId String?            @map("current_revision_id") @db.Uuid
@@ -2374,9 +2382,26 @@ model ArtifactRevision {
   byteSize       Int?       @map("byte_size")
   sha256         String?    @db.VarChar(64)
   externalUrl    String?    @map("external_url") @db.Text
+  /// v0 version marker captured with this revision (V0_CHAT only, migration 090_v0_chat_artifacts).
+  v0VersionId    String?    @map("v0_version_id") @db.VarChar(200)
   createdById    String?    @map("created_by_id") @db.Uuid
   source         String     @default("UI") @db.VarChar(20)
   createdAt      DateTime   @default(now()) @map("created_at")
+
+  /// Captured screenshot of whatever this revision points at (migration
+  /// 077). These are SIBLINGS of blobPathname, not a replacement: an EXTERNAL_LINK
+  /// revision has no blobPathname of its own but can have a thumbnail. All
+  /// nullable — "no screenshot captured" is the normal state.
+  thumbnailPathname   String?   @map("thumbnail_pathname") @db.Text
+  thumbnailMimeType   String?   @map("thumbnail_mime_type") @db.VarChar(100)
+  thumbnailByteSize   Int?      @map("thumbnail_byte_size")
+  thumbnailWidth      Int?      @map("thumbnail_width")
+  thumbnailHeight     Int?      @map("thumbnail_height")
+  thumbnailCapturedAt DateTime? @map("thumbnail_captured_at")
+  /// The URL actually photographed, AFTER redirects — deliberately not assumed to
+  /// equal externalUrl, which it differs from whenever the target redirects.
+  thumbnailSourceUrl  String?   @map("thumbnail_source_url") @db.Text
+
   artifact       Artifact   @relation("ArtifactRevisions", fields: [artifactId], references: [id])
   currentFor     Artifact[] @relation("CurrentArtifactRevision")
 
@@ -2768,9 +2793,165 @@ model AgentConversation {
   workspace Workspace      @relation(fields: [workspaceId], references: [id])
   user      User           @relation(fields: [userId], references: [id])
   messages  AgentMessage[]
+  runs      AgentRun[]
+  participants AgentConversationParticipant[]
 
   @@index([workspaceId, userId])
   @@map("agent_conversations")
+}
+
+/// A user invited into someone else's agent conversation. The conversation
+/// OWNER is NOT a row here: it stays `AgentConversation.userId`, so a conversation with
+/// no rows behaves exactly as before. `removedAt` null = active; set = removed or left
+/// (re-inviting clears it, the unique index keeps one row per user). Any participant may
+/// invite; there is no cap. Access is re-checked against live workspace membership on
+/// every call, never cached from this row.
+/// DSQL: no FKs, no @updatedAt (set explicitly).
+model AgentConversationParticipant {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  /// Always PARTICIPANT today; the column leaves room for roles without a migration.
+  role          String    @default("PARTICIPANT") @db.VarChar(20)
+  addedByUserId String    @map("added_by_user_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @map("updated_at")
+  removedAt     DateTime? @map("removed_at")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id])
+
+  @@unique([conversationId, userId], map: "idx_agent_conversation_participants_conversation_user")
+  @@index([userId, workspaceId], map: "idx_agent_conversation_participants_user_workspace")
+  @@map("agent_conversation_participants")
+}
+
+/// Pointer to the current Agent SDK session transcript of a conversation (one row per
+/// conversation). The transcript is a private Vercel Blob object at `blobKey`; a new
+/// revision is a NEW blob key, swapped in with a compare-and-set on `revision`.
+/// `throughMessageId` is the user message of the turn that produced the transcript, so
+/// the next turn can tell which later messages the session has not seen.
+/// DSQL: no FKs, PK = conversation_id (no index to build), no @updatedAt trigger.
+model AgentSession {
+  conversationId   String   @id @map("conversation_id") @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  sessionId        String   @map("session_id") @db.VarChar(64)
+  blobKey          String   @map("blob_key") @db.VarChar(512)
+  throughMessageId String   @map("through_message_id") @db.Uuid
+  revision         Int      @default(1)
+  byteSize         Int      @default(0) @map("byte_size")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @map("updated_at")
+
+  @@map("agent_sessions")
+}
+
+/// One attempted agent web_search: the audit record and the per-turn
+/// budget. The composite key is the budget — credentialId is the 5-minute AGENT_TURN
+/// credential (one per turn) and a search claims the next seq, so racing searches
+/// cannot both take the same slot and the cap holds without a lock. Stores the query
+/// and the result URLs only, never page content.
+model AgentWebSearch {
+  credentialId   String    @map("credential_id") @db.Uuid
+  seq            Int
+  userId         String    @map("user_id") @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  conversationId String?   @map("conversation_id") @db.Uuid
+  query          String    @db.VarChar(400)
+  status         String    @default("STARTED") @db.VarChar(20)
+  resultCount    Int       @default(0) @map("result_count")
+  resultUrls     Json      @map("result_urls")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  finishedAt     DateTime? @map("finished_at")
+
+  @@id([credentialId, seq])
+  @@map("agent_web_searches")
+}
+
+/// One durable, detachable agent turn. The sandbox owns execution and
+/// reports back over an authenticated callback; this row owns the *lifecycle*
+/// (status, lease, deadline, cleanup handles) so a turn survives the browser
+/// closing and can be swept by cron rather than by a request's `finally` block.
+///
+/// Lease/heartbeat/worker-token shape is deliberately the same as
+/// ResearchVoiceCall — see lib/research-voice-operations.ts for the precedent.
+/// `workerTokenHash` is SHA-256 of a single-purpose callback token that cannot
+/// call MCP tools; the MCP key is tracked separately as `apiKeyId` so both the
+/// result path and the sweeper can revoke it.
+///
+/// DSQL: no FKs enforced, no @updatedAt trigger (set explicitly), JSON as TEXT.
+model AgentRun {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId  String    @map("conversation_id") @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  /// QUEUED | RUNNING | SUCCEEDED | FAILED | INTERRUPTED | CANCELED
+  status          String    @default("QUEUED") @db.VarChar(20)
+  /// "CHAT", or the HandoffKind when this run drives a handoff claim.
+  kind            String    @default("CHAT") @db.VarChar(30)
+  /// SHA-256 of the run's callback bearer token (never the token itself).
+  workerTokenHash String    @unique(map: "idx_agent_runs_worker_token") @map("worker_token_hash") @db.VarChar(64)
+  /// The ephemeral MCP key minted for this run, revocable from either path.
+  apiKeyId        String?   @map("api_key_id") @db.Uuid
+  /// Vercel Sandbox *name* — `Sandbox.get` is keyed by name, not id. Derived
+  /// from the run id (`compass-agent-run-<runId>`) so the sweeper can reach a
+  /// sandbox even when the start path died before persisting this column.
+  sandboxName     String?   @map("sandbox_name") @db.VarChar(255)
+  sandboxStoppedAt DateTime? @map("sandbox_stopped_at")
+  /// Handoff claim this run owns, when there is one (ProcessingState.claimId).
+  claimId         String?   @map("claim_id") @db.Uuid
+  /// Wall-clock bound; enforced sandbox-side too, and checked by the sweeper
+  /// independently of the heartbeat so a dead sweeper still terminates runs.
+  deadlineAt      DateTime  @map("deadline_at")
+  lastHeartbeatAt DateTime? @map("last_heartbeat_at")
+  statusChangedAt DateTime  @default(now()) @map("status_changed_at")
+  startedAt       DateTime? @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+  /// Highest accepted event sequence; the cheap cursor the viewer tails from.
+  lastSeq         Int       @default(0) @map("last_seq")
+  /// Per-run caps: a chatty run must not be able to flood DSQL writes.
+  eventCount      Int       @default(0) @map("event_count")
+  payloadBytes    Int       @default(0) @map("payload_bytes")
+  model           String?   @db.VarChar(100)
+  inputTokens     Int?      @map("input_tokens")
+  outputTokens    Int?      @map("output_tokens")
+  numTurns        Int?      @map("num_turns")
+  costUsd         Float?    @map("cost_usd")
+  durationMs      Int?      @map("duration_ms")
+  packProvenance  String?   @map("pack_provenance") @db.Text
+  error           String?   @db.Text
+  errorCode       String?   @map("error_code") @db.VarChar(50)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @map("updated_at")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id])
+  events       AgentRunEvent[]
+
+  @@index([conversationId, createdAt], map: "idx_agent_runs_conversation_created")
+  @@index([status, lastHeartbeatAt], map: "idx_agent_runs_status_heartbeat")
+  @@index([workspaceId, userId], map: "idx_agent_runs_workspace_user")
+  @@map("agent_runs")
+}
+
+/// Append-only trace of one run: status phases, agent stream messages, the
+/// result, and heartbeats. The unique (runId, seq) is what makes a retried
+/// callback batch idempotent — a duplicate delivery collides and is discarded
+/// instead of doubling the transcript.
+model AgentRunEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  runId       String   @map("run_id") @db.Uuid
+  /// Monotonic per run, assigned in the sandbox, starting at 1.
+  seq         Int
+  /// status | agent | result | error | heartbeat
+  type        String   @db.VarChar(20)
+  payloadJson String   @map("payload_json") @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  run AgentRun @relation(fields: [runId], references: [id])
+
+  @@unique([runId, seq], map: "idx_agent_run_events_run_seq")
+  @@index([runId, createdAt], map: "idx_agent_run_events_run_created")
+  @@map("agent_run_events")
 }
 
 /// One message in an AgentConversation. `role` is "user" | "assistant".
@@ -2792,6 +2973,9 @@ model AgentMessage {
   /// Exact JSON-encoded pack IDs, versions, source commits, digests and enabled
   /// skills used for this assistant turn. TEXT keeps the schema DSQL-safe.
   packProvenance String?  @map("pack_provenance") @db.Text
+  /// Who sent a user message, or who asked for an assistant one. Null for
+  /// every message that predates multi-user conversations, which are the owner's.
+  authorUserId   String?  @map("author_user_id") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at")
 
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
@@ -3397,4 +3581,30 @@ model PortalHomeLayout {
 
   @@unique([workspaceId], map: "idx_portal_home_layouts_workspace")
   @@map("portal_home_layouts")
+}
+
+/// A saved roadmap view (migration 079): a named, reusable filter + display
+/// configuration. workspaceId NULL = the org-level cross-workspace roadmap
+/// (/{org}/roadmap); workspaceId set = that workspace's own roadmap. visibility is
+/// PERSONAL (owner only) or SHARED (everyone who can reach that surface). `filters`
+/// and `display` are JSON documents Zod-validated on every write and every read
+/// (lib/roadmap-views/schema.ts); sharing never widens data access, because the items
+/// a view returns are re-scoped to the viewer's readable workspaces at query time.
+/// No relations: Aurora DSQL enforces no foreign keys, so ids are validated in
+/// application code and workspace/org deletion removes rows explicitly. updatedAt is
+/// set by the application on every write.
+model RoadmapView {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  workspaceId    String?  @map("workspace_id") @db.Uuid
+  ownerId        String   @map("owner_id") @db.Uuid
+  name           String   @db.VarChar(120)
+  visibility     String   @default("PERSONAL") @db.VarChar(20)
+  filters        Json     @default("{}")
+  display        Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+
+  @@index([organizationId, workspaceId], map: "idx_roadmap_views_org_surface")
+  @@map("roadmap_views")
 }

@@ -1,7 +1,8 @@
 "use client";
 
+import { Columns3, Table } from "lucide-react";
 import { useUrlState } from "@/hooks/use-url-state";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WorkspaceViewSwitcher } from "@/components/patterns/workspace-header-controls";
 
 export type DiscoveryView = "board" | "table";
 
@@ -9,14 +10,13 @@ export function DiscoveryViewToggle({ view }: { view: DiscoveryView }) {
   const { set } = useUrlState();
 
   return (
-    <Tabs
+    <WorkspaceViewSwitcher
       value={view}
       onValueChange={(next) => set({ view: next === "table" ? "table" : null })}
-    >
-      <TabsList>
-        <TabsTrigger value="board">Board</TabsTrigger>
-        <TabsTrigger value="table">Table</TabsTrigger>
-      </TabsList>
-    </Tabs>
+      options={[
+        { value: "board", label: "Board", icon: <Columns3 /> },
+        { value: "table", label: "Table", icon: <Table /> },
+      ]}
+    />
   );
 }

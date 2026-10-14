@@ -16,24 +16,33 @@ describe("agent entry capability-pack policy", () => {
     expect(source).toMatch(/settingSources:\s*\[\]/)
   })
 
-  it("ADR 0019: grants exactly Read/Write/Edit/Glob, scoped to the materialized doc tree via cwd", () => {
-    // `allowedTools` does nothing under bypassPermissions (see the comment in
-    // turn-entry.ts) -- `tools` is the real gate, so this is pinned exactly
-    // rather than loosely matched. Bash is deliberately absent: it can read
-    // process.env (the MCP bearer token) and would punch a hole next to the
-    // MCP-intermediated boundary rather than through it.
-    expect(source).toContain('tools: ["Read", "Write", "Edit", "Glob"]')
-    expect(source).not.toMatch(/tools:\s*\[[^\]]*Bash/)
-    expect(source).toContain("cwd: docsRoot")
+  it("exposes WebFetch as the only built-in tool unless the host materialized docs", () => {
+    // Pinned as a literal: the failure mode is additive drift, one more
+    // "harmless" built-in at a time, none reviewed as a boundary change.
+    expect(source).toContain('tools: docsSession ? ["WebFetch", "Read", "Write", "Edit", "Glob"] : ["WebFetch"],')
+    // Bash can read process.env (the MCP bearer token) and would punch a hole
+    // next to the MCP-intermediated boundary rather than through it.
+    for (const forbidden of ["Bash", "MultiEdit", "NotebookEdit", "Grep", "Task", "Skill", "WebSearch"]) {
+      expect(source).not.toMatch(new RegExp(`tools:[^\\n]*"${forbidden}"`))
+    }
   })
 
-  it("admits Compass, docsfs, the native doc-file tools, and per-turn connector prefixes -- nothing wider", () => {
+  it("ADR 0019: scopes the native file tools to the materialized doc tree via cwd", () => {
+    // `allowedTools` does nothing under bypassPermissions (see the comment in
+    // turn-entry.ts) -- `tools` is the real gate, and `cwd` is what keeps Read/
+    // Write/Edit/Glob inside the doc tree.
+    expect(source).toContain("...(docsSession && docsRoot ? { cwd: docsRoot } : {})")
+  })
+
+  it("admits Compass, WebFetch, docsfs plus the native doc-file tools (only with docs), and per-turn connector prefixes -- nothing wider", () => {
     // The literal is pinned rather than matched loosely because the failure mode
     // is a silent widening: `allowedTools: ["mcp__*"]`, or dropping the option
     // entirely, both leave a headless agent running in bypassPermissions mode with
     // no allowlist at all. `connectorToolPrefixes` is the only sanctioned way for
     // this list to grow, and it grows per turn from the grants that user holds.
-    expect(source).toContain('allowedTools: ["mcp__compass", "mcp__docsfs", "Read", "Write", "Edit", "Glob", ...connectorToolPrefixes]')
+    expect(source).toContain('...(docsSession ? ["mcp__docsfs", "Read", "Write", "Edit", "Glob"] : []),')
+    expect(source).toContain('"mcp__compass",\n      "WebFetch",\n      "mcp__web_search",')
+    expect(source).toContain("...connectorToolPrefixes,")
     expect(source).not.toMatch(/allowedTools:\s*\[[^\]]*\*/)
   })
 
@@ -55,6 +64,14 @@ describe("agent entry capability-pack policy", () => {
     // formatting nicety.
     expect(source).toContain("/^[a-z0-9][a-z0-9-]{0,31}$/.test(slug)")
     expect(source).toContain("connectorToolPrefixes.push(`mcp__${connector.slug}`)")
+  })
+
+  it("always adds web_search as one fixed server, before connectors are read", () => {
+    // The server name and URL are literals; nothing derives them from input, and the
+    // name is registered before connectors so a connector slug cannot shadow it.
+    expect(source).not.toContain("AGENT_WEB_SEARCH")
+    expect(source).toContain('new URL("/api/agent/web-search/mcp", baseUrl)')
+    expect(source.indexOf("mcpServers.web_search")).toBeLessThan(source.indexOf("hasOwnProperty.call(mcpServers, connector.slug)"))
   })
 
   it("never lets a connector shadow Compass's own MCP entry", () => {
