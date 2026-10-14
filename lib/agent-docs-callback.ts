@@ -85,7 +85,10 @@ function parseFinalFiles(value: unknown): DocFinalFile[] | null {
  */
 function parseDeletedPaths(value: unknown): string[] {
   if (!Array.isArray(value)) return []
-  return value.filter((p): p is string => typeof p === "string" && validateDocPath(p) === null).slice(0, MAX_FINAL_FILES)
+  // De-duplicated, not rejected: a repeat cannot widen what is deleted, and failing the
+  // request over it would throw away every edit it carries.
+  const valid = value.filter((p): p is string => typeof p === "string" && validateDocPath(p) === null)
+  return [...new Set(valid)].slice(0, MAX_FINAL_FILES)
 }
 
 export async function handleAgentDocsReconcile(request: Request, runId: string, database?: AppPrismaClient) {

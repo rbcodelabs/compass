@@ -424,6 +424,10 @@ describe("coerceFinalState (synchronous path: untrusted stdout)", () => {
     expect(rejectedFiles).toBe(6)
   })
 
+  it("de-duplicates deletedPaths", () => {
+    expect(coerceFinalState({ files: [], incomplete: false, deletedPaths: ["A", "A", "B", "A"] }).state.deletedPaths).toEqual(["A", "B"])
+  })
+
   it("drops invalid deletedPaths silently instead of failing", () => {
     const { state } = coerceFinalState({ files: [], incomplete: false, deletedPaths: ["Fine", "../etc", 7, ".x", "Also Fine"] })
     expect(state.deletedPaths).toEqual(["Fine", "Also Fine"])

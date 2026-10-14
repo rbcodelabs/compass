@@ -435,8 +435,8 @@ export function coerceFinalState(raw: unknown): { state: DocFinalState; rejected
     seen.add(f.path)
     files.push({ path: f.path, content: f.content, frontmatterDocId: (f.frontmatterDocId as string | null | undefined) ?? null })
   }
-  const deletedPaths = (Array.isArray(obj.deletedPaths) ? obj.deletedPaths : [])
-    .filter((p): p is string => typeof p === "string" && validateDocPath(p) === null)
-    .slice(0, MAX_FINAL_FILES)
+  const deletedPaths = [
+    ...new Set((Array.isArray(obj.deletedPaths) ? obj.deletedPaths : []).filter((p): p is string => typeof p === "string" && validateDocPath(p) === null)),
+  ].slice(0, MAX_FINAL_FILES)
   return { state: { files, incomplete: obj.incomplete !== false, deletedPaths }, rejectedFiles }
 }

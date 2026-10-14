@@ -228,6 +228,16 @@ describe("agent run docs callback — manifest and body validation", () => {
     expect(docFs.deleteDocById).toHaveBeenCalledWith(WS, "doc-2", expect.anything())
   })
 
+  it("de-duplicates repeated deletedPaths entries (200, deleted once), consistently, rather than failing the request", async () => {
+    const response = await handleAgentDocsReconcile(
+      post(validBody([unchangedFiles[0]], { deletedPaths: ["Product/Plan", "Product/Plan", "Product/Plan"] })),
+      RUN_ID,
+      harness()
+    )
+    expect(response.status).toBe(200)
+    expect(docFs.deleteDocById).toHaveBeenCalledTimes(1)
+  })
+
   it("tolerates a non-array deletedPaths", async () => {
     const response = await handleAgentDocsReconcile(post(validBody(unchangedFiles, { deletedPaths: "Product/Plan" })), RUN_ID, harness())
     expect(response.status).toBe(200)

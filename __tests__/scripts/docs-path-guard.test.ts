@@ -10,7 +10,7 @@
  * back as "Blocked: file_path is outside the docs directory" (see the PR notes).
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import {
@@ -45,6 +45,8 @@ beforeAll(() => {
   symlinkSync(path.join(outside, "secret.txt"), path.join(root, "link-to-secret.md"))
   symlinkSync(outside, path.join(root, "link-to-outside-dir"))
   symlinkSync(path.join(root, "Product"), path.join(root, "link-inside"))
+  // A symlink back up to the root, so that "Product/up/../outside/x" is, to the kernel, "<base>/outside/x".
+  symlinkSync("..", path.join(root, "Product", "up"))
 })
 
 afterAll(() => rmSync(base, { recursive: true, force: true }))
@@ -104,6 +106,19 @@ describe("checkDocsToolUse: denied", () => {
     expect(denied("Read", { file_path: path.join(root, "..", "entry.ts") })).toBe(true)
     expect(denied("Read", { file_path: path.join(root, "Product", "..", "..", "entry.ts") })).toBe(true)
     expect(denied("Write", { file_path: "../escaped/_doc.md", content: "x" })).toBe(true)
+  })
+
+  it("denies a symlink-plus-dot-dot path the kernel resolves outside the root even though a lexical collapse stays inside", () => {
+    // path.resolve("<root>/Product/up/../outside/secret.txt") = "<root>/Product/outside/secret.txt" (inside, and absent),
+    // but opening the raw string follows `up` -> <root> first and reads <base>/outside/secret.txt.
+    expect(denied("Read", { file_path: "Product/up/../outside/secret.txt" })).toBe(true)
+    expect(denied("Read", { file_path: path.join(root, "Product", "up", "..", "outside", "secret.txt") })).toBe(true)
+    expect(denied("Write", { file_path: "Product/up/../outside/new.md", content: "x" })).toBe(true)
+    expect(denied("Glob", { pattern: "*", path: "Product/up/../outside" })).toBe(true)
+    // the escape the guard must not be fooled by really exists
+    expect(readFileSync(path.join(root, "Product", "up", "..", "outside", "secret.txt"), "utf8")).toBe("top secret")
+    // a plain symlink to the root stays fine
+    expect(allowed("Read", { file_path: "Product/up/Product/_doc.md" })).toBe(true)
   })
 
   it("denies a symlink inside the root that points outside it, as a file and as a directory", () => {

@@ -78,6 +78,12 @@ function checkPath(value: unknown, field: string, realRoot: string): string | nu
   if (typeof value !== "string" || value.length === 0) return `${field} must be a non-empty string`
   const raw = rawValueProblem(value, field)
   if (raw) return raw
+  // A `..` segment is refused outright, not collapsed. Collapsing it lexically
+  // before realpath is wrong whenever an earlier segment is a symlink: for
+  // "A/up/../outside/x" with A/up -> .., path.resolve says "A/outside/x" (inside)
+  // while the kernel, which resolves `up` first, opens "<root>/../outside/x".
+  // No legitimate doc path needs one (titles never produce a dot-dot segment).
+  if (value.split(/[\\/]/).includes("..")) return `${field} contains a .. segment`
   // Relative paths are relative to the docs root (the agent's cwd).
   const resolved = path.resolve(realRoot, value)
   if (DENIED_ROOTS.some((root) => resolved === root || resolved.startsWith(root + "/"))) return `${field} is a system path`
