@@ -236,7 +236,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
 };
 
-export function assertReviewedMigrationCode(name: string, read: (relativePath: string) => Buffer = (relativePath) => readFileSync(path.join(process.cwd(), relativePath))): void {
+export function assertReviewedMigrationCode(name: string, read: (relativePath: string) => Buffer = (relativePath) => readFileSync(path.join(/*turbopackIgnore: true*/ process.cwd(), relativePath))): void {
   for (const [relativePath, expected] of Object.entries(REVIEWED_MIGRATION_CODE_SHA256[name] ?? {})) {
     const digest = createHash("sha256").update(read(relativePath)).digest("hex");
     if (digest !== expected) throw new Error(`Reviewed managed manifest code digest changed: ${name} ${relativePath}`);
