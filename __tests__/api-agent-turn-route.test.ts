@@ -102,6 +102,10 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockPackStorage.mockReturnValue({})
   process.env.ANTHROPIC_API_KEY = "sk-ant-test"
+  delete process.env.AGENT_MODEL_PROVIDER
+  delete process.env.AGENT_MODEL_ID
+  delete process.env.BEDROCK_API_KEY
+  delete process.env.AWS_REGION
   mockAuth.mockResolvedValue(SESSION)
   mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
   mockPrisma.agentConversation.findFirst.mockResolvedValue(null)
@@ -277,6 +281,86 @@ describe("agent turn route — guards", () => {
     expect(await res.text()).toMatch(/ANTHROPIC_API_KEY/)
     expect(mockBootSandbox).not.toHaveBeenCalled()
     expect(mockMintKey).not.toHaveBeenCalled()
+  })
+
+  describe("model provider selection", () => {
+    function setupRun() {
+      const runCommand = vi.fn().mockResolvedValue({ async *logs() { yield { stream: "stdout", data: 'AGENT_ERROR {"message":"test stop"}\n' } }, wait: vi.fn() })
+      mockBootSandbox.mockResolvedValue({ writeFiles: vi.fn(), runCommand, stop: vi.fn() })
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", name: "Test", slug: "test", organization: { slug: "org" } })
+      mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+      mockPrisma.agentMessage.findMany.mockResolvedValue([{ role: "user", content: "hi" }])
+      return runCommand
+    }
+
+    it("defaults to the Anthropic API: key and model forwarded, no Bedrock env", async () => {
+      const runCommand = setupRun()
+      await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+      const env = runCommand.mock.calls[0][0].env as Record<string, string>
+      expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test")
+      expect(env.AGENT_MODEL).toBe("claude-sonnet-5")
+      expect(env).not.toHaveProperty("CLAUDE_CODE_USE_BEDROCK")
+      expect(env).not.toHaveProperty("AWS_BEARER_TOKEN_BEDROCK")
+    })
+
+    it("routes the sandbox at Bedrock when AGENT_MODEL_PROVIDER=bedrock", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock"
+      process.env.BEDROCK_API_KEY = "bedrock-test-token"
+      const runCommand = setupRun()
+      await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+      const env = runCommand.mock.calls[0][0].env as Record<string, string>
+      expect(env.AWS_BEARER_TOKEN_BEDROCK).toBe("bedrock-test-token")
+      expect(env.CLAUDE_CODE_USE_BEDROCK).toBe("1")
+      expect(env.AWS_REGION).toBe("us-east-1")
+      expect(env.AGENT_MODEL).toBe("global.anthropic.claude-sonnet-5-5")
+      // The other provider's credential never enters the sandbox.
+      expect(env).not.toHaveProperty("ANTHROPIC_API_KEY")
+    })
+
+    it("honors AGENT_MODEL_ID and AWS_REGION", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock"
+      process.env.BEDROCK_API_KEY = "bedrock-test-token"
+      process.env.AGENT_MODEL_ID = "us.anthropic.custom"
+      process.env.AWS_REGION = "us-west-2"
+      const runCommand = setupRun()
+      await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+      const env = runCommand.mock.calls[0][0].env as Record<string, string>
+      expect(env.AGENT_MODEL).toBe("us.anthropic.custom")
+      expect(env.AWS_REGION).toBe("us-west-2")
+    })
+
+    it.each([
+      ["missing", undefined],
+      ["empty", ""],
+      ["whitespace", " \n\t "],
+    ])("500 naming BEDROCK_API_KEY when it is %s, without booting a sandbox", async (_label, value) => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock"
+      if (value === undefined) delete process.env.BEDROCK_API_KEY
+      else process.env.BEDROCK_API_KEY = value
+      mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+      const res = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(res.status).toBe(500)
+      expect(await res.text()).toMatch(/BEDROCK_API_KEY/)
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+      expect(mockMintKey).not.toHaveBeenCalled()
+    })
+
+    it("does not accept the Anthropic key as a stand-in for the Bedrock one", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock" // ANTHROPIC_API_KEY is set by beforeEach
+      mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+      const res = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(res.status).toBe(500)
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+    })
+
+    it("500 on an unknown AGENT_MODEL_PROVIDER", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "vertex"
+      mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+      const res = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(res.status).toBe(500)
+      expect(await res.text()).toMatch(/AGENT_MODEL_PROVIDER/)
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+    })
   })
 
   it("revokes the acting-user MCP key when capability-pack preparation fails", async () => {

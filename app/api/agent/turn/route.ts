@@ -39,6 +39,7 @@ import { randomUUID } from "node:crypto"
 import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
+import { providerSandboxEnv, resolveAgentModel, type ResolvedAgentModel } from "@/lib/agent-model"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { resolveAgentPageContext } from "@/lib/agent-page-context"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
@@ -172,10 +173,17 @@ const DOCS_FILESYSTEM_PROMPT =
  * events and its result back to Compass; without it the script's only product is
  * stdout, which is exactly what the fallback path drains.
  */
+function claudeProviderEnv(model: Extract<ResolvedAgentModel, { ok: true }> | undefined): Record<string, string> {
+  // Fail closed: the Claude harness without a resolved provider would boot with no credential.
+  if (!model) throw new Error("buildAgentEnv: harness claude requires a resolved model provider")
+  return providerSandboxEnv(model)
+}
+
 function buildAgentEnv(opts: {
-  /** Which harness's credential to forward: Claude gets ANTHROPIC_API_KEY, opencode only the AI Gateway key. */
+  /** Which harness's credential to forward: Claude gets the provider credential from `model`, opencode only the AI Gateway key. */
   harness?: AgentHarness
-  anthropicApiKey: string
+  /** Resolved model provider + credential. Required for `harness: "claude"`; never read (or forwarded) on the opencode path. */
+  model?: Extract<ResolvedAgentModel, { ok: true }>
   /** Required for `harness: "opencode"`; never forwarded on the Claude path. */
   gatewayApiKey?: string
   connectors: ConnectorDefinition[]
@@ -212,7 +220,7 @@ function buildAgentEnv(opts: {
   return {
     ...(opts.harness === "opencode"
       ? { AI_GATEWAY_API_KEY: opts.gatewayApiKey ?? "", AGENT_MODEL: opencodeModel(process.env.AGENT_OPENCODE_MODEL) }
-      : { ANTHROPIC_API_KEY: opts.anthropicApiKey }),
+      : claudeProviderEnv(opts.model)),
     MCP_BASE_URL: opts.mcpBaseUrl,
     MCP_TOKEN: opts.mcpToken,
     AGENT_PROMPT: opts.prompt,
@@ -419,16 +427,18 @@ export async function POST(request: NextRequest) {
       { status: 503 }
     )
   }
-  // `.trim()` is load-bearing: a var added with no value (or later cleared) is
-  // stored as "" rather than unset, and a whitespace-only value passes a bare
-  // truthiness check. Either would be forwarded into the sandbox as a credential
-  // and only fail after a sandbox boot and an MCP key mint, as an opaque
-  // authentication error from the Agent SDK. Reject it here, where it is free.
+  // HARNESS is the outer choice. Only the Claude harness consults the model
+  // provider (AGENT_MODEL_PROVIDER); a Bedrock selection is ignored for opencode,
+  // which uses only the AI Gateway credential below. resolveAgentModel's
+  // `.trim()` check is load-bearing: a var added with no value (or later cleared)
+  // is stored as "" rather than unset, and a whitespace-only value would be
+  // forwarded into the sandbox as a credential and only fail after a sandbox boot
+  // and an MCP key mint, as an opaque auth error. Reject it here, where it is free.
   const harness = resolveAgentHarness(process.env.AGENT_HARNESS)
-  const anthropicApiKey = process.env.ANTHROPIC_API_KEY
-  if (harness === "claude" && !anthropicApiKey?.trim()) {
+  const resolved = harness === "claude" ? resolveAgentModel() : null
+  if (resolved && !resolved.ok) {
     await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
-    return new Response("ANTHROPIC_API_KEY is not configured on this deployment.", { status: 500 })
+    return new Response(resolved.message, { status: 500 })
   }
   // opencode needs only the gateway credential; the Anthropic key is not forwarded to it.
   const gatewayApiKey = harness === "opencode" ? await resolveGatewayCredential(process.env) : undefined
@@ -662,7 +672,7 @@ export async function POST(request: NextRequest) {
         args: ["entry.ts"],
         env: buildAgentEnv({
           harness,
-          anthropicApiKey: anthropicApiKey ?? "",
+          model: resolved?.ok ? resolved : undefined,
           gatewayApiKey,
           connectors,
           connectorScopes,
@@ -765,7 +775,7 @@ export async function POST(request: NextRequest) {
           // exactly what this path drains below.
           env: buildAgentEnv({
             harness,
-            anthropicApiKey: anthropicApiKey ?? "",
+            model: resolved?.ok ? resolved : undefined,
             gatewayApiKey,
             connectors,
             connectorScopes,
@@ -890,7 +900,7 @@ export async function POST(request: NextRequest) {
             conversationId: conversationIdResolved,
             role: "assistant",
             content: assistantText ?? "",
-            model: harness === "opencode" ? opencodeModel(process.env.AGENT_OPENCODE_MODEL) : "claude-sonnet-5",
+            model: resolved?.ok ? resolved.modelId : harness === "opencode" ? opencodeModel(process.env.AGENT_OPENCODE_MODEL) : "claude-sonnet-5",
             inputTokens: usage?.usage?.input_tokens ?? null,
             outputTokens: usage?.usage?.output_tokens ?? null,
             numTurns: usage?.numTurns ?? null,
