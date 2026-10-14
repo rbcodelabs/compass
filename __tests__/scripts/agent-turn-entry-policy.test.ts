@@ -67,7 +67,7 @@ describe("agent entry capability-pack policy", () => {
   it("ADR 0019: docs are file-shaped only when the host materialized them (claim-scoped runs keep MCP-only docs)", () => {
     expect(source).toContain("const docsRoot = DOCS_ROOT")
     expect(source).toContain("if (docsRoot) {")
-    expect(source).toContain("...(docsSession ? { docsfs: buildDocsFsServer(docsSession) } : {}),")
+    expect(source).toContain("...(docsSession ? { docsfs: buildDocsFsServer(docsSession, deletedByAgent) } : {}),")
     expect(source).not.toContain('requireEnv("DOCS_ROOT"')
   })
 
