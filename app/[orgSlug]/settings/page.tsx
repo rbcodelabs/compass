@@ -11,7 +11,6 @@ import { AgentAccessPanel } from "@/components/settings/agent-access-panel";
 import { listAgentAccessRows } from "@/lib/agent-org-admin-access";
 import { agentsEnabled } from "@/lib/agent-access";
 import { getSessionUser } from "@/lib/session";
-import { isOrgAdminRole } from "@/lib/roles";
 
 export const metadata = { title: "Organization Settings" };
 
