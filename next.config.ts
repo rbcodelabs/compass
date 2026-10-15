@@ -6,10 +6,16 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname),
   },
   devIndicators: false,
-  // The agent turn route reads the sandbox entry script and its helper modules from disk at
-  // request time and writes them into the sandbox. Nothing imports them, so the file tracer
-  // only keeps them if told to; without them every agent turn would die with ENOENT.
+  // assertReviewedMigrationCode() reads migration SQL and reviewed migration
+  // code by a runtime-computed path, which Next cannot trace statically (it
+  // used to fall back to tracing the whole repo, ~1,900 files / ~37 MB, into
+  // every function that imports it). Name exactly what those routes read.
   outputFileTracingIncludes: {
+    "/api/admin/migrate": ["./prisma/migrations/**/migration.sql", "./lib/migrations/*.ts"],
+    "/api/preview-automation/*": ["./prisma/migrations/**/migration.sql", "./lib/migrations/*.ts"],
+    // The agent turn route reads its sandbox entry script and helper modules from disk at
+    // request time and writes them into the sandbox. Nothing imports them, so the file
+    // tracer only keeps them if told to; without them every agent turn would die with ENOENT.
     "/api/agent/turn": ["./scripts/agent/**/*"],
   },
   async headers() {

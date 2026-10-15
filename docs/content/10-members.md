@@ -62,6 +62,19 @@ On success you land directly in the new workspace's OKRs page, and it appears in
 
 Your organization's *first* workspace is created for you when you sign up, as part of onboarding — this page is for adding further ones later.
 
+## Changing the Organization URL Slug
+
+The organization's **URL slug** is the first part of every link: `/{slug}/{workspace}/…`. An organization Owner or Admin can change it in **Organization Settings → Organization URL**. Type the new slug (lowercase letters, numbers and hyphens, 2–63 characters; a few words such as `api`, `login` and `portal` are reserved) and click **Change URL slug**. Compass asks you to confirm before it changes anything, then takes you to the new address.
+
+**Old links stop working immediately.** Compass does not redirect from the old slug, so anything that contains it returns a "not found" page or error:
+
+- bookmarks and shared workspace links;
+- links in emails and notifications that were already sent;
+- your public portal links and portal SSO links (update the URLs your own app uses);
+- MCP and API clients that pass the old slug as `orgSlug`: update them to the new slug.
+
+The old slug becomes available for any other organization to claim. Workspace slugs are unaffected; they are changed separately.
+
 ## Switching Between Workspaces
 
 Click the workspace name at the top of the sidebar to open the workspace picker. Type to filter by workspace or organization name, use the arrow keys to move through the list, and press Enter to open one. Switching keeps you in the same section (for example, Roadmap stays Roadmap). When you belong to more than four workspaces, the ones you opened most recently appear first in a **Recent** group. Recents are remembered per browser and are not shared across devices.

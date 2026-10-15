@@ -1,0 +1,453 @@
+{
+  "title": "Compass: from feedback to roadmap",
+  "target": {
+    "type": "web",
+    "url": "http://localhost:3100/",
+    "startCommand": "set -a; . ~/.compass-demo.env; set +a; exec node demo/serve.mjs",
+    "readySelector": "[data-testid=\"feedback-link-opportunity\"]",
+    "readyTimeoutMs": 600000
+  },
+  "environment": {
+    "record": {
+      "runner": "ssh",
+      "host": "dev-builder",
+      "remoteDir": "~/product-demo-work",
+      "shellInit": "export PATH=\"$HOME/.local/share/fnm:$PATH\"\neval \"$(fnm env)\"\nfnm use 22 >/dev/null\nset -a; . ~/.compass-demo.env; set +a",
+      "setup": [
+        "pnpm install --frozen-lockfile --reporter=silent",
+        "node demo/engine/node_modules/@playwright/test/cli.js install chromium",
+        "node node_modules/prisma/build/index.js db push --accept-data-loss",
+        "npx tsx scripts/seed-demo-intro.ts --reset"
+      ],
+      "syncExclude": [
+        ".next",
+        "coverage",
+        "test-results",
+        ".pnpm-store",
+        ".npm-cache",
+        ".claude",
+        ".worktrees"
+      ]
+    }
+  },
+  "capture": {
+    "width": 1440,
+    "height": 900,
+    "fps": 30
+  },
+  "output": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "look": {
+    "style": "macos",
+    "dockApps": [
+      "Finder",
+      "Safari",
+      "Mail",
+      "Calendar",
+      "Notes",
+      "Music"
+    ],
+    "appIcon": "app/apple-icon.png",
+    "windowWidth": 1440,
+    "cornerRadius": 12,
+    "dock": true,
+    "menuBar": {
+      "appName": "Compass",
+      "items": [
+        "File",
+        "Edit",
+        "View",
+        "Window",
+        "Help"
+      ],
+      "clock": "Tue 9:41 AM"
+    }
+  },
+  "voice": {
+    "provider": "elevenlabs",
+    "modelId": "eleven_multilingual_v2",
+    "stability": 0.5,
+    "similarityBoost": 0.75,
+    "style": 0
+  },
+  "timing": {
+    "leadMs": 400,
+    "tailMs": 700,
+    "maxSlowdown": 1.3
+  },
+  "scenes": [
+    {
+      "id": "signal",
+      "narration": "Every product loop starts with a signal. Here, two customers have told us the same thing: they signed up, and had no idea what to do first.",
+      "actions": [
+        {
+          "type": "waitFor",
+          "selector": "text=\"I signed up and had no idea what to do first\""
+        },
+        {
+          "type": "hover",
+          "selector": "text=\"I signed up and had no idea what to do first\"",
+          "cue": "two customers"
+        },
+        {
+          "type": "hover",
+          "selector": "text=\"Setup feels like a maze for new teammates\"",
+          "cue": "the same thing"
+        }
+      ]
+    },
+    {
+      "id": "opportunity",
+      "narration": "Instead of leaving it in a list, we turn it into an Opportunity. Open the Opportunities board, add a new one, and name the problem in plain words, the way a customer would say it. Then seed it with that feedback, so the evidence travels with it.",
+      "actions": [
+        {
+          "type": "click",
+          "selector": "a[href$=\"/discovery\"]",
+          "cue": "Open the Opportunities board"
+        },
+        {
+          "type": "click",
+          "selector": "text=\"Add opportunity\"",
+          "cue": "add a new one"
+        },
+        {
+          "type": "click",
+          "selector": "[placeholder^=\"What opportunity have you discovered\"]",
+          "cue": "name the problem"
+        },
+        {
+          "type": "type",
+          "text": "New teams don't know what to do first",
+          "delayMs": 20
+        },
+        {
+          "type": "click",
+          "selector": "[aria-label=\"Seed from feedback\"]",
+          "cue": "seed it with that feedback"
+        },
+        {
+          "type": "click",
+          "selector": "role=option[name=/I signed up and had no idea/]"
+        },
+        {
+          "type": "click",
+          "selector": "role=option[name=/Setup feels like a maze/]"
+        },
+        {
+          "type": "click",
+          "selector": "text=/^New opportunity$/i"
+        }
+      ]
+    },
+    {
+      "id": "outcome",
+      "narration": "Next, we tie it to an outcome. We link a Key Result, week-one activation, so everyone sees what this work is meant to move: thirty-eight percent today, fifty-five at target.",
+      "actions": [
+        {
+          "type": "click",
+          "selector": "[aria-label=\"Key result\"]",
+          "cue": "tie it to an outcome"
+        },
+        {
+          "type": "click",
+          "selector": "text=\"Week-1 activation rate\"",
+          "cue": "week-one activation"
+        },
+        {
+          "type": "click",
+          "selector": "role=button[name=\"Submit\"]",
+          "cue": "so everyone sees"
+        },
+        {
+          "type": "hover",
+          "selector": "text=/38\\/55/",
+          "cue": "thirty-eight percent"
+        }
+      ]
+    },
+    {
+      "id": "solution",
+      "narration": "Now we explore a solution: a guided setup checklist. Every solution rests on assumptions that could be wrong, so we write down the riskiest one: new teams will finish a three-step checklist. If that is wrong, the whole idea is in trouble.",
+      "actions": [
+        {
+          "type": "click",
+          "selector": "role=button[name=\"Add Solution\"]",
+          "cue": "explore a solution"
+        },
+        {
+          "type": "click",
+          "selector": "[placeholder=\"Solution title\"]",
+          "cue": "a guided setup checklist"
+        },
+        {
+          "type": "type",
+          "text": "Guided setup checklist",
+          "delayMs": 25
+        },
+        {
+          "type": "click",
+          "selector": "role=button[name=\"Add Solution\"]"
+        },
+        {
+          "type": "click",
+          "selector": "text=\"Guided setup checklist\"",
+          "cue": "so we write down"
+        },
+        {
+          "type": "click",
+          "selector": "role=button[name=\"Add Assumption\"]",
+          "cue": "new teams will finish"
+        },
+        {
+          "type": "click",
+          "selector": "[placeholder=\"Assumption title\"]"
+        },
+        {
+          "type": "type",
+          "text": "New teams will finish a three-step checklist",
+          "delayMs": 22
+        },
+        {
+          "type": "press",
+          "key": "Enter"
+        }
+      ]
+    },
+    {
+      "id": "test",
+      "narration": "A real assumption deserves a real test, not a hunch. So we design an experiment against it. We pick the assumption, name the test, write the hypothesis and the method, and set a kill condition that says in advance when to stop. That way, nobody can move the goalposts later.",
+      "actions": [
+        {
+          "type": "press",
+          "key": "Escape",
+          "cue": "A real assumption"
+        },
+        {
+          "type": "click",
+          "selector": "a[href$=\"/experiments\"]"
+        },
+        {
+          "type": "click",
+          "selector": "role=button[name=/New Experiment/]",
+          "cue": "design an experiment"
+        },
+        {
+          "type": "click",
+          "selector": "#exp-assumption"
+        },
+        {
+          "type": "click",
+          "selector": "text=\"New teams will finish a three-step checklist\""
+        },
+        {
+          "type": "click",
+          "selector": "[placeholder=\"What are you testing?\"]"
+        },
+        {
+          "type": "type",
+          "text": "Checklist prototype with eight new teams",
+          "delayMs": 20
+        },
+        {
+          "type": "press",
+          "key": "Tab"
+        },
+        {
+          "type": "type",
+          "text": "A checklist gets teams to a first project.",
+          "delayMs": 20
+        },
+        {
+          "type": "press",
+          "key": "Tab"
+        },
+        {
+          "type": "type",
+          "text": "Sessions with eight new teams.",
+          "delayMs": 20
+        },
+        {
+          "type": "press",
+          "key": "Tab"
+        },
+        {
+          "type": "type",
+          "text": "Fewer than five finish unaided.",
+          "delayMs": 20
+        },
+        {
+          "type": "click",
+          "selector": "role=button[name=\"Create Experiment\"]",
+          "cue": "goalposts"
+        }
+      ]
+    },
+    {
+      "id": "result",
+      "narration": "The test ran with eight new teams. We open the experiment and log what we saw: six of eight finished setup on their own, with no help at all. That is better than the five we needed. That clears the kill condition, so we conclude: proceed. The assumption flips to validated, with the evidence attached.",
+      "actions": [
+        {
+          "type": "click",
+          "selector": "text=\"Checklist prototype with eight new teams\"",
+          "cue": "We open the experiment"
+        },
+        {
+          "type": "click",
+          "selector": "text=\"Open full page\""
+        },
+        {
+          "type": "pause",
+          "ms": 2000
+        },
+        {
+          "type": "click",
+          "selector": "role=button[name=\"Log Result\"]"
+        },
+        {
+          "type": "click",
+          "selector": "[placeholder=\"What did you observe?\"]"
+        },
+        {
+          "type": "type",
+          "text": "Six of eight teams finished unaided.",
+          "delayMs": 30
+        },
+        {
+          "type": "click",
+          "selector": "role=button[name=\"Log Result\"]",
+          "cue": "That clears the kill condition"
+        },
+        {
+          "type": "click",
+          "selector": "role=button[name=\"Conclude Experiment\"]",
+          "cue": "so we conclude"
+        },
+        {
+          "type": "click",
+          "selector": "role=button[name=/^Proceed/]"
+        },
+        {
+          "type": "click",
+          "selector": "role=button[name=\"Conclude as Proceed\"]",
+          "cue": "The assumption flips"
+        }
+      ]
+    },
+    {
+      "id": "validate",
+      "narration": "With the assumption validated, the solution earns its next step. Back on the solutions board, we open the checklist and, with one click, mark it validated.",
+      "actions": [
+        {
+          "type": "click",
+          "selector": "a[href$=\"/solutions\"]",
+          "cue": "solutions board"
+        },
+        {
+          "type": "click",
+          "selector": "text=\"Guided setup checklist\""
+        },
+        {
+          "type": "click",
+          "selector": "span.text-xs.font-medium:has-text(\"Idea\")"
+        },
+        {
+          "type": "click",
+          "selector": "role=option[name=\"Validated\"]",
+          "cue": "mark it validated"
+        }
+      ]
+    },
+    {
+      "id": "roadmap",
+      "narration": "Now it can go on the roadmap. We promote it with one click, and it lands in Now, ready for delivery. Open the roadmap, and the card is still linked to its Opportunity and its Solution, so nobody has to ask where it came from.",
+      "actions": [
+        {
+          "type": "click",
+          "selector": "text=\"Roadmap\" >> nth=-1",
+          "cue": "Now it can"
+        },
+        {
+          "type": "click",
+          "selector": "role=button[name=/Promote to Roadmap/]",
+          "cue": "We promote it"
+        },
+        {
+          "type": "click",
+          "selector": "role=button[name=\"→ Roadmap\"]",
+          "cue": "one click"
+        },
+        {
+          "type": "pause",
+          "ms": 1800
+        },
+        {
+          "type": "press",
+          "key": "Escape"
+        },
+        {
+          "type": "click",
+          "selector": "a[href$=\"/roadmap\"]",
+          "cue": "Open the roadmap"
+        },
+        {
+          "type": "pause",
+          "ms": 1500
+        },
+        {
+          "type": "click",
+          "selector": "text=\"Guided setup checklist\" >> visible=true",
+          "cue": "still linked"
+        }
+      ]
+    },
+    {
+      "id": "loop",
+      "narration": "Now let's pull back and look at the whole loop. Open the opportunity, and the outcome tree shows it end to end. From the Key Result, to the Opportunity, the Solution, the assumption, and the experiment that proved it. Feedback to delivery, in one connected view.",
+      "actions": [
+        {
+          "type": "press",
+          "key": "Escape",
+          "cue": "pull back"
+        },
+        {
+          "type": "click",
+          "selector": "text=\"New teams don't know what to do first\"",
+          "cue": "Open the opportunity"
+        },
+        {
+          "type": "click",
+          "selector": "text=\"OST\"",
+          "cue": "outcome tree"
+        },
+        {
+          "type": "hover",
+          "selector": "text=\"Week-1 activation rate\" >> nth=-1",
+          "cue": "From the Key Result"
+        },
+        {
+          "type": "hover",
+          "selector": "text=\"New teams don't know what to do first\" >> nth=-1",
+          "cue": "to the Opportunity"
+        },
+        {
+          "type": "hover",
+          "selector": "text=\"Guided setup checklist\" >> nth=-1",
+          "cue": "the Solution"
+        },
+        {
+          "type": "hover",
+          "selector": "text=\"New teams will finish a three-step checklist\" >> nth=-1",
+          "cue": "the assumption"
+        },
+        {
+          "type": "hover",
+          "selector": "text=\"Checklist prototype with eight new teams\" >> nth=-1",
+          "cue": "the experiment that proved it"
+        }
+      ]
+    }
+  ]
+}

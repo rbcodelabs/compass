@@ -5,6 +5,7 @@ import getPrisma from "@/lib/db"
 import { redirect } from "next/navigation"
 import { z } from "zod"
 import { deriveSlug, resolveWorkspaceSlug } from "@/lib/slug"
+import { isReservedOrgSlug } from "@/lib/org-slug"
 
 const OnboardingSchema = z.object({
   orgName: z.string().min(1, "Organization name is required").max(255),
@@ -48,6 +49,11 @@ export async function createOrganizationAndWorkspace(
   const userId = session.user.id
 
   const prisma = getPrisma()
+
+  // A reserved word would be shadowed by (or shadow) a top-level route.
+  if (isReservedOrgSlug(orgSlug)) {
+    return { errors: { orgSlug: [`"${orgSlug}" is a reserved word. Please choose another.`] } }
+  }
 
   // Check slug uniqueness
   const existing = await prisma.organization.findFirst({

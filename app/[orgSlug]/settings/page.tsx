@@ -3,10 +3,15 @@ import getPrisma from "@/lib/db";
 import { ManageScoringModelsPanel } from "@/components/scoring-models/manage-scoring-models-panel";
 import { DeleteOrganizationPanel } from "@/components/settings/delete-organization-panel";
 import { CreateWorkspacePanel } from "@/components/settings/create-workspace-panel";
+import { OrganizationSlugPanel } from "@/components/settings/organization-slug-panel";
 import type { ScoringModelData, ScoringModelStatus, ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { isOrgAdminRole } from "@/lib/roles";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
+import { AgentAccessPanel } from "@/components/settings/agent-access-panel";
+import { listAgentAccessRows } from "@/lib/agent-org-admin-access";
+import { agentsEnabled } from "@/lib/agent-access";
+import { getSessionUser } from "@/lib/session";
 
 export const metadata = { title: "Organization Settings" };
 
@@ -43,6 +48,18 @@ export default async function OrgSettingsPage({ params }: Props) {
     orderBy: { name: "asc" },
   });
 
+  // The layout already restricts this route to org admins; re-derived here so
+  // the Agent access section never depends on that gate staying in place.
+  const user = await getSessionUser();
+  const viewerMembership = user
+    ? await prisma.organizationMember.findFirst({
+        where: { organizationId: organization.id, userId: user.id },
+        select: { role: true },
+      })
+    : null;
+  const canManageAgents = isOrgAdminRole(viewerMembership?.role);
+  const agentRows = canManageAgents ? await listAgentAccessRows(prisma, organization.id) : [];
+
   // Drives the "who starts as a member" choice in CreateWorkspacePanel, so the
   // admin sees how many people each option adds before they pick.
   const orgMemberRoles = await prisma.organizationMember.findMany({
@@ -77,6 +94,13 @@ export default async function OrgSettingsPage({ params }: Props) {
       <PageHeader title="Organization Settings" description={organization.name} />
 
       <SettingsSection
+        title="Organization URL"
+        description="The slug that starts every link to this organization. Changing it breaks every existing link that contains the old slug; there is no redirect."
+      >
+        <OrganizationSlugPanel orgSlug={orgSlug} />
+      </SettingsSection>
+
+      <SettingsSection
         title="Workspaces"
         description="Workspaces are where teams run OKRs, discovery, and experiments. When you create one, you choose whether every member of this organization is added or only org admins."
       >
@@ -94,6 +118,15 @@ export default async function OrgSettingsPage({ params }: Props) {
       >
         <ManageScoringModelsPanel orgSlug={orgSlug} initialModels={models} />
       </SettingsSection>
+
+      {canManageAgents && (
+        <SettingsSection
+          title="Agent access"
+          description="Delegate narrow organization-admin capabilities to a specific agent."
+        >
+          <AgentAccessPanel orgSlug={orgSlug} rows={agentRows} canManage={canManageAgents} agentsEnabled={agentsEnabled()} />
+        </SettingsSection>
+      )}
 
       <SettingsSection
         title="Danger Zone"
