@@ -11,7 +11,7 @@
 // code that reports its own result. A PreToolUse hook runs before the permission
 // mode is consulted, so a deny here holds regardless of it.
 
-import { realpathSync } from "node:fs"
+import { lstatSync, realpathSync } from "node:fs"
 import path from "node:path"
 
 export type GuardDecision = { allowed: true } | { allowed: false; reason: string }
@@ -27,8 +27,13 @@ const GLOB_TOOLS = new Set(["Glob", "Grep"])
  * resolved. A path that does not exist yet (Write creating a new file) resolves
  * its deepest existing ancestor and re-appends the rest, so a symlinked directory
  * cannot smuggle a not-yet-created file outside the root.
+ *
+ * Returns null for a DANGLING symlink (the link exists, its target does not):
+ * realpath fails on it exactly as it does for a missing file, so treating it as
+ * "not there yet" would let `Write` follow the link and create a file wherever it
+ * points, inside the root or not.
  */
-function resolveReal(target: string): string {
+function resolveReal(target: string): string | null {
   let current = target
   const tail: string[] = []
   for (;;) {
@@ -36,6 +41,12 @@ function resolveReal(target: string): string {
       const real = realpathSync(current)
       return tail.length ? path.join(real, ...tail.reverse()) : real
     } catch {
+      try {
+        lstatSync(current)
+        return null // it exists as a link but does not resolve
+      } catch {
+        /* genuinely absent: climb */
+      }
       const parent = path.dirname(current)
       if (parent === current) return target
       tail.push(path.basename(current))
@@ -88,6 +99,7 @@ function checkPath(value: unknown, field: string, realRoot: string): string | nu
   const resolved = path.resolve(realRoot, value)
   if (DENIED_ROOTS.some((root) => resolved === root || resolved.startsWith(root + "/"))) return `${field} is a system path`
   const real = resolveReal(resolved)
+  if (real === null) return `${field} is a dangling symlink`
   if (DENIED_ROOTS.some((root) => real === root || real.startsWith(root + "/"))) return `${field} is a system path`
   return insideRoot(realRoot, real) ? null : `${field} is outside the docs directory`
 }
@@ -136,11 +148,17 @@ export function checkDocsToolUse(toolName: string, toolInput: unknown, docsRoot:
 /** The PreToolUse hook the Agent SDK calls before every matched tool use. */
 export function createDocsPreToolUseHook(docsRoot: string) {
   return async function docsPreToolUse(input: unknown): Promise<Record<string, unknown>> {
-    const event = (input ?? {}) as { tool_name?: unknown; tool_input?: unknown }
-    const decision: GuardDecision =
-      typeof event.tool_name === "string" && event.tool_name.length > 0
-        ? checkDocsToolUse(event.tool_name, event.tool_input, docsRoot)
-        : { allowed: false, reason: "Blocked: malformed tool call" }
+    let decision: GuardDecision
+    try {
+      const event = (input ?? {}) as { tool_name?: unknown; tool_input?: unknown }
+      decision =
+        typeof event.tool_name === "string" && event.tool_name.length > 0
+          ? checkDocsToolUse(event.tool_name, event.tool_input, docsRoot)
+          : { allowed: false, reason: "Blocked: malformed tool call" }
+    } catch {
+      // An exception must never read as "no objection".
+      decision = { allowed: false, reason: "Blocked: the path could not be checked" }
+    }
     if (decision.allowed) return { continue: true }
     return {
       hookSpecificOutput: {
@@ -155,13 +173,30 @@ export function createDocsPreToolUseHook(docsRoot: string) {
 /** Matches every SDK tool that takes a path; the hook is registered for exactly these. */
 export const DOCS_GUARDED_TOOLS_MATCHER = "Read|Write|Edit|MultiEdit|NotebookEdit|Glob|Grep"
 
-/** Environment variables the model-facing CLI process must never inherit from the entry process. */
+/** Credentials of the entry script itself: never handed to the model-facing CLI process, whatever else is. */
 export const AGENT_PRIVATE_ENV = ["AGENT_RUN_TOKEN", "MCP_TOKEN", "MCP_BYPASS_SECRET"]
 
-/** `process.env` minus the entry script's own credentials. ANTHROPIC_API_KEY stays: the CLI cannot call the model without it. */
+/** Exact names the CLI process legitimately needs (runtime, locale, TLS, proxies). */
+const CLI_ENV_NAMES = new Set([
+  "PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "LANG", "LANGUAGE", "TERM", "COLORTERM", "TMPDIR", "TMP", "TEMP", "TZ", "CI",
+  "NODE_OPTIONS", "NODE_PATH", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+])
+/** Families of names: locale, XDG dirs, Node, and everything the Anthropic SDK / Claude Code read. */
+const CLI_ENV_PREFIXES = ["LC_", "XDG_", "NODE_", "ANTHROPIC_", "CLAUDE_", "CLAUDECODE", "DISABLE_"]
+
+/**
+ * The environment the model-facing CLI process gets: an ALLOW-list, so a variable
+ * added to this process later (a new token, an AGENT_* secret) is not inherited
+ * by default. ANTHROPIC_API_KEY is in it because the CLI cannot call the model
+ * without it; the file-tool guard, not secrecy, is what protects that one.
+ */
 export function scrubbedAgentEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
-  const out: Record<string, string | undefined> = { ...env }
-  for (const name of AGENT_PRIVATE_ENV) delete out[name]
+  const out: Record<string, string | undefined> = {}
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined || AGENT_PRIVATE_ENV.includes(name)) continue
+    if (CLI_ENV_NAMES.has(name) || CLI_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))) out[name] = value
+  }
   return out
 }
 
@@ -231,8 +266,12 @@ export function checkWebFetch(toolInput: unknown, allowed: ReadonlySet<string>):
 /** PreToolUse hook for WebFetch. */
 export function createWebFetchPreToolUseHook(allowed: ReadonlySet<string>) {
   return async function webFetchPreToolUse(input: unknown): Promise<Record<string, unknown>> {
-    const event = (input ?? {}) as { tool_input?: unknown }
-    const decision = checkWebFetch(event.tool_input, allowed)
+    let decision: GuardDecision
+    try {
+      decision = checkWebFetch(((input ?? {}) as { tool_input?: unknown }).tool_input, allowed)
+    } catch {
+      decision = { allowed: false, reason: "Blocked: the URL could not be checked" }
+    }
     if (decision.allowed) return { continue: true }
     return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: decision.reason } }
   }
@@ -256,4 +295,8 @@ export function createSearchResultCollector(allowed: Set<string>) {
 }
 
 export const WEB_FETCH_MATCHER = "WebFetch"
-export const WEB_SEARCH_MATCHER = "mcp__web_search"
+// The Compass-hosted search server is registered as `web_search` and exposes one tool,
+// `web_search`, so the model-facing name is `mcp__web_search__web_search`. A hook matcher made
+// only of [A-Za-z0-9_|] is an EXACT tool name, so the bare server prefix never matched anything;
+// the `.*` makes it a regex that covers every tool on that server.
+export const WEB_SEARCH_MATCHER = "mcp__web_search__.*"

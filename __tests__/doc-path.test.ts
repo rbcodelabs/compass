@@ -14,7 +14,7 @@ describe("sanitizeTitleSegment escapes names the sandbox's wiki walk skips", () 
   })
 
   it("never yields a name the wiki would exclude, for a spread of hostile titles", () => {
-    for (const title of [".", "..", "...", ".a", ". a", " .a", "node_modules", "node_modules.", "  node_modules  ", "_doc.md", ".\u0000x", "./x", "../x", "$HOME", "50% off", "%PATH%", "'quoted'", "\u0060tick\u0060", "tab\there", "nel\u0085x"]) {
+    for (const title of [".", "..", "...", ".a", ". a", " .a", "node_modules", "node_modules.", "  node_modules  ", "_doc.md", ".\u0000x", "./x", "../x", "$HOME", "50% off", "%PATH%", "'quoted'", "\u0060tick\u0060", "tab\there", "nel\u0085x", "~root", "~/x", "~+", ".~"]) {
       const out = sanitizeTitleSegment(title)
       expect(isWikiExcludedSegment(out), title).toBe(false)
       expect(out, title).not.toBe("_doc.md")
@@ -26,6 +26,9 @@ describe("sanitizeTitleSegment escapes names the sandbox's wiki walk skips", () 
     expect(sanitizeTitleSegment("50% off")).toBe("50_ off")
     expect(sanitizeTitleSegment("$HOME")).toBe("_HOME")
     expect(sanitizeTitleSegment("'quoted'")).toBe("_quoted_")
+    expect(sanitizeTitleSegment("~root/notes")).toBe("_root_notes")
+    expect(sanitizeTitleSegment("~draft")).toBe("_draft")
+    expect(sanitizeTitleSegment("a~b")).toBe("a~b")
     // interior apostrophes are ordinary
     expect(sanitizeTitleSegment("Rick's plan")).toBe("Rick's plan")
   })
@@ -70,6 +73,8 @@ describe("validateDocPath", () => {
     ["x".repeat(201)],
     ["日".repeat(70)],
     ["50%"],
+    ["~draft"],
+    [`${"a/".repeat(2000)}a`],
     ["$HOME"],
     ["'quoted'"],
     ["nel\u0085x"],

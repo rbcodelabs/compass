@@ -49,6 +49,8 @@ export function sanitizeTitleSegment(title: string): string {
   }
   // A leading/trailing quote makes the file tools treat the path as quoted (and refuse it).
   s = s.replace(/^['`]|['`]$/g, "_")
+  // The CLI expands a leading ~ in a path argument, so the agent's file tools refuse one.
+  if (s.startsWith("~")) s = `_${s.slice(1)}`
   if (s.startsWith(".")) s = s.replace(/^\.+/, (dots) => "_".repeat(dots.length))
   if (s === "node_modules" || s === RESERVED_SEGMENT) s = `${s}_`
   return s

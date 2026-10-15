@@ -376,18 +376,32 @@ describe("applyReconciliationPlan", () => {
     expect(mocks.recordConflictingSnapshot).not.toHaveBeenCalled()
   })
 
-  it("lets a move land on a path held by a doc that is part of the same pass, but passes nothing for strangers", async () => {
+  it("lets a move land only on a doc that is really leaving: one being moved or one whose delete is in the plan", async () => {
     await applyReconciliationPlan(
       "ws-1",
       "turn-1",
-      [{ type: "move", fromPath: "A", toPath: "B", docId: "a", expectedRevision: "r" }],
-      "Agent",
-      { baselineDocIds: new Set(["a", "b"]) }
+      [
+        { type: "move", fromPath: "A", toPath: "B", docId: "a", expectedRevision: "r" },
+        { type: "move", fromPath: "C", toPath: "D", docId: "c", expectedRevision: "r" },
+        { type: "delete", path: "E", docId: "e", expectedRevision: "r" },
+        { type: "update", path: "F", docId: "f", content: "x", expectedRevision: "r" },
+        { type: "noop", path: "G", docId: "g" },
+      ],
+      "Agent"
     )
-    expect(mocks.moveDocById.mock.calls[0][3].occupantMayLeave).toEqual(new Set(["a", "b"]))
-    mocks.moveDocById.mockClear()
-    await applyReconciliationPlan("ws-1", "turn-1", [{ type: "move", fromPath: "A", toPath: "B", docId: "a", expectedRevision: "r" }], "Agent")
-    expect(mocks.moveDocById.mock.calls[0][3].occupantMayLeave).toBeUndefined()
+    const allowed = mocks.moveDocById.mock.calls[0][3].occupantMayLeave as ReadonlySet<string>
+    expect([...allowed].sort()).toEqual(["a", "c", "e"])
+    // unchanged (noop), updated-in-place and never-mentioned docs are NOT allowed to be moved onto
+    expect(allowed.has("g")).toBe(false)
+    expect(allowed.has("f")).toBe(false)
+  })
+
+  it("a delete that guardDeletes dropped does not make its doc a legal move target", async () => {
+    const del: ReconciliationAction = { type: "delete", path: "Kept", docId: "kept", expectedRevision: "r" }
+    const mover: ReconciliationAction = { type: "move", fromPath: "A", toPath: "Kept", docId: "a", expectedRevision: "r" }
+    const { plan } = guardDeletes([mover, del], 5, { incomplete: false, deletedPaths: [] })
+    await applyReconciliationPlan("ws-1", "turn-1", plan, "Agent")
+    expect((mocks.moveDocById.mock.calls[0][3].occupantMayLeave as ReadonlySet<string>).has("kept")).toBe(false)
   })
 
   it("reports a move onto a doc outside the baseline as an 'exists' conflict", async () => {

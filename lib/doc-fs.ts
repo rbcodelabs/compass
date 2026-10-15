@@ -168,10 +168,17 @@ export async function listPaths(workspaceId: string): Promise<DocFsNode[]> {
   return buildTree(docs)
 }
 
-/** Resolves one path to its node (docId, title, etc.), or null if it doesn't exist. */
+/**
+ * Resolves one path to its node (docId, title, etc.), or null if it doesn't exist.
+ * The path is sanitized segment by segment first, exactly as listPaths builds its
+ * paths, so a caller may name a doc by its raw title ("Q3: Plan", ".env/foo") and
+ * still find it under the escaped form listing shows. Sanitizing is idempotent, so
+ * a path taken from listPaths resolves unchanged.
+ */
 export async function resolvePath(workspaceId: string, path: string): Promise<DocFsNode | null> {
+  const wanted = splitPath(path).join("/")
   const nodes = await listPaths(workspaceId)
-  return nodes.find((n) => n.path === path) ?? null
+  return nodes.find((n) => n.path === wanted) ?? null
 }
 
 export type DocFsContent = { docId: string; content: string; revision: string | null }
@@ -467,7 +474,7 @@ export async function deletePath(workspaceId: string, path: string, opts: Delete
   }
 
   const all = await listPaths(workspaceId)
-  const descendants = all.filter((n) => n.path === path || n.path.startsWith(`${path}/`))
+  const descendants = all.filter((n) => n.path === node.path || n.path.startsWith(`${node.path}/`))
   // Deepest paths first so a child is always deleted before its parent.
   descendants.sort((a, b) => b.path.split("/").length - a.path.split("/").length)
   for (const d of descendants) {

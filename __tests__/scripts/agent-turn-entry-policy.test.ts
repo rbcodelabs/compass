@@ -83,6 +83,10 @@ describe("agent entry capability-pack policy", () => {
   it("ADR 0019: WebFetch is limited to user-supplied and web_search-returned URLs whenever docs are materialized", () => {
     expect(source).toContain("{ matcher: WEB_FETCH_MATCHER, hooks: [createWebFetchPreToolUseHook(allowedFetchUrls)] }")
     expect(source).toContain("PostToolUse: [{ matcher: WEB_SEARCH_MATCHER, hooks: [createSearchResultCollector(allowedFetchUrls)] }]")
+    // The matcher itself is behaviour-tested in docs-path-guard.test.ts; here, make sure the entry registers the
+    // real server and tool the matcher is written for (mcp__web_search__web_search).
+    expect(source).toContain("mcpServers.web_search = {")
+    expect(readFileSync("app/api/agent/web-search/[transport]/route.ts", "utf8")).toContain('"web_search",')
     // seeded from the prompt (and the replayed history on a resumed turn), never from agent output
     expect(source).toMatch(/createAllowedUrls\(\s*`\$\{prompt\}/)
   })

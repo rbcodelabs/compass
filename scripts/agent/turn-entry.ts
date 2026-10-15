@@ -78,6 +78,7 @@ import {
   WEB_FETCH_MATCHER,
   WEB_SEARCH_MATCHER,
 } from "./docs-path-guard.ts"
+import { collectFinalDocState, isValidDocName, type CollectedDocState } from "./docs-final-state.ts"
 import { createHash, randomUUID } from "node:crypto"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { gunzipSync, gzipSync } from "node:zlib"
@@ -505,6 +506,14 @@ function parseConnectors(raw: string | undefined): ConnectorRef[] {
 // The actual deleteDocument/movePath call against Compass happens in the same
 // end-to-end reconciliation pass as every other change, after this process
 // exits (app/api/agent/turn/route.ts).
+async function refreshView(session: WikiSession): Promise<boolean> {
+  try {
+    return (await session.refresh()).status === "ok"
+  } catch {
+    return false
+  }
+}
+
 function buildDocsFsServer(session: WikiSession, deletedByAgent: Set<string>) {
   return createSdkMcpServer({
     name: "docsfs",
@@ -516,6 +525,9 @@ function buildDocsFsServer(session: WikiSession, deletedByAgent: Set<string>) {
           "This does not touch Compass directly -- the real deletion is recorded when this turn ends.",
         { path: z.string().min(1).describe('Path to the doc\'s _doc.md file, e.g. "Product/Roadmap/Q3 Plan/_doc.md"') },
         async ({ path }) => {
+          // The session is a scan: a file the agent wrote natively this turn is not in it until a refresh.
+          const refreshed = await refreshView(session)
+          if (!refreshed) return { content: [{ type: "text" as const, text: "Could not refresh the docs view; try again." }], isError: true }
           const result = await session.deleteNote(path)
           if (result.status !== "ok") {
             return { content: [{ type: "text" as const, text: `Could not delete "${path}": ${result.status}` }], isError: true }
@@ -544,6 +556,8 @@ function buildDocsFsServer(session: WikiSession, deletedByAgent: Set<string>) {
           // Markdown files. The Compass-side reconciler detects the move by
           // comparing before/after compass_doc_id placement regardless of which
           // local syscalls produced the after-state.
+          const refreshed = await refreshView(session)
+          if (!refreshed) return { content: [{ type: "text" as const, text: "Could not refresh the docs view; try again." }], isError: true }
           const read = session.readNote(fromPath)
           if (read.status !== "ok") {
             return { content: [{ type: "text" as const, text: `Could not read "${fromPath}": ${read.status}` }], isError: true }
@@ -571,70 +585,6 @@ function buildDocsFsServer(session: WikiSession, deletedByAgent: Set<string>) {
 const DOC_MANIFEST_PATH = "docs-manifest.json"
 const DOCS_SAVE_FAILED_NOTICE = "(Some doc changes from this turn may not have saved -- please check the affected docs.)"
 
-type FinalDocFile = { path: string; frontmatterDocId: string | null; content: string }
-
-type CollectedDocState = {
-  files: FinalDocFile[]
-  /** The wiki view was cut short, or a discovered note could not be read: absence proves nothing. */
-  incomplete: boolean
-  /** Files left out because their names are not valid doc names (the server would refuse them). */
-  skippedNames: string[]
-}
-
-const MAX_DOC_DEPTH = 30
-// eslint-disable-next-line no-control-regex
-const ILLEGAL_SEGMENT_CHARS = /[/\\:*?"<>|$%\x00-\x1f\x7f-\x9f]/
-
-/** Mirrors lib/doc-path.ts validateDocPath, which the server applies again; this one only avoids sending a doomed request. */
-function isValidDocName(docPath: string): boolean {
-  const segments = docPath.split("/")
-  if (segments.length > MAX_DOC_DEPTH) return false
-  return segments.every((segment) =>
-    segment.length > 0 &&
-    segment !== "." && segment !== ".." &&
-    !segment.startsWith(".") &&
-    segment !== "node_modules" && segment !== "_doc.md" &&
-    !ILLEGAL_SEGMENT_CHARS.test(segment) &&
-    segment === segment.trim() &&
-    !/^['\u0060]|['\u0060]$/.test(segment) &&
-    !segment.endsWith(".") &&
-    Buffer.byteLength(segment, "utf8") <= 200)
-}
-
-/**
- * The agent's final doc tree, read through the same session used throughout the
- * turn. Its read-after-write guarantee (ADR 0023 in the geode repo) means this is
- * exactly the state the agent's own edits left behind, not a possibly-still-settling
- * view from a second, freshly-opened session.
- */
-function collectFinalDocState(session: WikiSession): CollectedDocState {
-  const files: FinalDocFile[] = []
-  const skippedNames: string[] = []
-  const info = session.info()
-  // False when a limit (entries, depth, bytes) cut the walk short or a note's bytes
-  // could not be read; either way a missing doc is not proof it was removed.
-  let incomplete = !info.discoveryComplete || !info.noteContentComplete
-  for (const entry of session.listFiles()) {
-    if (entry.kind !== "note" || !entry.path.endsWith("/_doc.md")) continue
-    const docPath = entry.path.slice(0, -"/_doc.md".length)
-    const read = session.readNote(entry.path)
-    if (read.status !== "ok") {
-      // An unreadable note must not look like a deletion, so the whole state is marked incomplete.
-      note(`could not read "${entry.path}" for final doc state: ${read.reason}`)
-      incomplete = true
-      continue
-    }
-    if (!isValidDocName(docPath)) {
-      skippedNames.push(docPath)
-      continue
-    }
-    const frontmatter = read.note.metadata?.frontmatter
-    const frontmatterDocId = frontmatter && typeof frontmatter.compass_doc_id === "string" ? frontmatter.compass_doc_id : null
-    files.push({ path: docPath, content: read.note.text, frontmatterDocId })
-  }
-  return { files, incomplete, skippedNames }
-}
-
 /**
  * Hands the final doc tree to Compass and returns the answer to show the user.
  *
@@ -652,7 +602,7 @@ function collectFinalDocState(session: WikiSession): CollectedDocState {
 async function reportDocState(session: WikiSession, baseUrl: string, finalText: string, deletedByAgent: Set<string>): Promise<string> {
   let collected: CollectedDocState
   try {
-    collected = collectFinalDocState(session)
+    collected = await collectFinalDocState(session, note)
   } catch (error) {
     note(`could not read final doc state: ${error instanceof Error ? error.message : String(error)}`)
     return `${finalText}\n\n${DOCS_SAVE_FAILED_NOTICE}`

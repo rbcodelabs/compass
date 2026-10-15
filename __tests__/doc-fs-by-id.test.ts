@@ -143,6 +143,43 @@ describe("write side sanitizes segments so paths round-trip with listPaths", () 
   })
 })
 
+describe("read, resolve, delete and move-source sanitize like the write side", () => {
+  it("resolves a doc by its raw title: '.env/foo', 'Q3: Plan', '~draft' find the escaped paths listPaths shows", async () => {
+    mocks.db.doc.findMany.mockResolvedValue([row("env", ".env"), row("foo", "foo", "env"), row("q3", "Q3: Plan"), row("t", "~draft")])
+    const mod = await import("@/lib/doc-fs")
+    expect((await mod.resolvePath(WS, ".env/foo"))?.docId).toBe("foo")
+    expect((await mod.resolvePath(WS, "Q3: Plan"))?.docId).toBe("q3")
+    expect((await mod.resolvePath(WS, "~draft"))?.docId).toBe("t")
+    // a path copied from the listing resolves unchanged
+    expect((await mod.resolvePath(WS, "_env/foo"))?.docId).toBe("foo")
+    expect(await mod.resolvePath(WS, "nope")).toBeNull()
+  })
+
+  it("readPath round-trips a raw title", async () => {
+    mocks.db.doc.findMany.mockResolvedValue([row("q3", "Q3: Plan")])
+    mocks.db.doc.findUnique.mockResolvedValue({
+      id: "q3", workspaceId: WS, title: "Q3: Plan", content: "body", metadata: null, roadmapItemId: null, docType: "STANDARD",
+      revision: "rev-1", updatedAt: new Date("2026-01-01"), storageProvider: "DATABASE", contentRef: null,
+    })
+    mocks.hydrateDocument.mockImplementation(async (_ws: string, r: unknown) => r)
+    const read = await (await import("@/lib/doc-fs")).readPath(WS, "Q3: Plan")
+    expect(read).toMatchObject({ docId: "q3", revision: "rev-1" })
+    expect(read?.content).toContain("compass_doc_id: q3")
+  })
+
+  it("deletePath('Q3: Plan') finds and deletes the doc (recursive uses the resolved path, not the raw one)", async () => {
+    mocks.db.doc.findMany.mockResolvedValue([row("q3", "Q3: Plan"), row("kid", "Kid", "q3")])
+    await (await import("@/lib/doc-fs")).deletePath(WS, "Q3: Plan", { ...OPTS, recursive: true })
+    expect(mocks.deleteDocument.mock.calls.map((c) => c[0])).toEqual(["kid", "q3"])
+  })
+
+  it("movePath takes its source by raw title too", async () => {
+    mocks.db.doc.findMany.mockResolvedValue([row("env", ".env")])
+    await (await import("@/lib/doc-fs")).movePath(WS, ".env", "Renamed", OPTS)
+    expect(mocks.updateDocument).toHaveBeenCalledWith("env", expect.objectContaining({ title: "Renamed" }), expect.anything())
+  })
+})
+
 describe("moveDocById onto an occupied path", () => {
   it("refuses to take a path another doc holds (no silent '(xxxxxxxx)' sibling)", async () => {
     mocks.db.doc.findMany.mockResolvedValue([row("mover", "Old"), row("human", "Taken")])

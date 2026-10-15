@@ -259,11 +259,16 @@ export async function applyReconciliationPlan(
   workspaceId: string,
   turnId: string,
   actions: readonly ReconciliationAction[],
-  authorName: string,
-  options: { baselineDocIds?: ReadonlySet<string> } = {}
+  authorName: string
 ): Promise<ReconciliationResult> {
-  // A move may land on a path held by a doc that is itself part of this pass.
-  const occupantMayLeave = options.baselineDocIds
+  // A move may land on a path held by a doc that is really leaving it in this pass:
+  // one being moved elsewhere or one whose delete is actually in the (already
+  // guarded) plan. Any other occupant, an unchanged doc or a doc whose delete
+  // guardDeletes skipped, stays put, so a move onto it reports `exists` instead of
+  // minting a "(xxxxxxxx)" sibling.
+  const occupantMayLeave: ReadonlySet<string> = new Set(
+    actions.filter((a) => a.type === "move" || a.type === "moveAndUpdate" || a.type === "delete").map((a) => (a as { docId: string }).docId)
+  )
   const applied: ReconciliationAction[] = []
   const conflicts: ReconciliationConflict[] = []
 
@@ -397,9 +402,7 @@ export async function reconcileAgentDocs(
 ): Promise<ReconcileOutcome> {
   const planned = planReconciliation(baseline, state.files)
   const { plan, skipped } = guardDeletes(planned, baseline.length, state)
-  const { applied, conflicts } = await applyReconciliationPlan(workspaceId, turnId, plan, authorName, {
-    baselineDocIds: new Set(baseline.map((b) => b.docId)),
-  })
+  const { applied, conflicts } = await applyReconciliationPlan(workspaceId, turnId, plan, authorName)
   const notices = [...conflicts.map(describeConflict)]
   const skippedNotice = describeSkippedDeletes(skipped)
   if (skippedNotice) notices.push(skippedNotice)

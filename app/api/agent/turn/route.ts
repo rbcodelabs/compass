@@ -99,9 +99,12 @@ function readEntryScript(): string {
   return readFileSync(path.join(process.cwd(), "scripts/agent/turn-entry.ts"), "utf8")
 }
 
-/** Imported by entry.ts as "./docs-path-guard.ts", so it is written next to it. */
-function readDocsPathGuard(): string {
-  return readFileSync(path.join(process.cwd(), "scripts/agent/docs-path-guard.ts"), "utf8")
+/** Imported by entry.ts as "./docs-path-guard.ts" and "./docs-final-state.ts", so both are written next to it. */
+function readEntryModules(): { path: string; content: string }[] {
+  return ["docs-path-guard.ts", "docs-final-state.ts"].map((name) => ({
+    path: name,
+    content: readFileSync(path.join(process.cwd(), "scripts/agent", name), "utf8"),
+  }))
 }
 
 /**
@@ -534,7 +537,7 @@ export async function POST(request: NextRequest) {
     .map(slug => connectorDefinition(slug))
     .filter((definition): definition is NonNullable<typeof definition> => definition !== null)
   const entryScript = readEntryScript()
-  const docsPathGuard = readDocsPathGuard()
+  const entryModules = readEntryModules()
 
   // Hoisted above both paths: the MCP key's scope, the run's `claimId`, and the
   // synchronous path's audit redaction all key off the same claim.
@@ -613,7 +616,7 @@ export async function POST(request: NextRequest) {
         : []
       await sandbox.writeFiles([
         { path: "entry.ts", content: entryScript },
-        { path: "docs-path-guard.ts", content: docsPathGuard },
+        ...entryModules,
         ...(docMaterial?.files ?? []),
         ...manifestFiles,
         ...sessionFiles,
@@ -716,7 +719,7 @@ export async function POST(request: NextRequest) {
         const docMaterial = scope ? undefined : await step(() => materializeDocTree(workspaceId))
         baseline = docMaterial?.baseline ?? []
 
-        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, { path: "docs-path-guard.ts", content: docsPathGuard }, ...(docMaterial?.files ?? []), ...sessionFiles, ...preparedPacks.files]))
+        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, ...entryModules, ...(docMaterial?.files ?? []), ...sessionFiles, ...preparedPacks.files]))
         sse("status", { phase: "running" })
 
         const run = await step(() => sandbox!.runCommand({
