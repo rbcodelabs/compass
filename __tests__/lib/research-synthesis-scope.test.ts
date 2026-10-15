@@ -154,7 +154,7 @@ describe("RESEARCH_SYNTHESIS cannot mutate discovery state", () => {
     ["add_assumption", { solutionId: "solution-1", statement: "x" }],
     ["create_experiment", { workspaceId: WORKSPACE_ID, title: "x" }],
     ["request_decision", { workspaceId: WORKSPACE_ID, subjectType: "WORKSPACE", subjectId: WORKSPACE_ID }],
-    ["create_doc", { workspaceId: WORKSPACE_ID, title: "x" }],
+    ["write_doc", { workspaceId: WORKSPACE_ID, path: "x", content: "x" }],
     ["add_comment", { workspaceId: WORKSPACE_ID, targetType: "RESEARCH_STUDY", targetId: STUDY_ID, body: "x", authorName: "x" }],
     // Participant-link issuance is study-scoped and would otherwise "belong" to
     // the bound study — the allowlist, not the study binding, is what stops it.

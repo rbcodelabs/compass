@@ -1,4 +1,5 @@
-// In-app agent turn service (ADR 0001, Phase 3).
+// In-app agent turn service (ADR 0001, Phase 3; docs materialization/
+// reconciliation added by ADR 0019 — Docs as a Virtual Filesystem).
 //
 // Session-authed. One POST = one agent turn in a workspace-scoped conversation:
 //   1. authenticate the user (NextAuth session) + authorize workspace membership
@@ -6,8 +7,10 @@
 //   3. mint an ephemeral per-user MCP key (agent acts AS the user → Phase 1
 //      per-user authorization scopes every tool it can touch)
 //   4. boot a fresh sandbox from the golden snapshot (~200ms, deps pre-installed)
-//   5. write + start the turn entry script
-//   6. return 202 { runId } — the run reports its own events and result back
+//   5. capture the workspace's doc tree as a reconciliation baseline, and
+//      materialize it into the sandbox as real `_doc.md` files (ADR 0019 §2.4)
+//   6. write + start the turn entry script
+//   7. return 202 { runId } — the run reports its own events and result back
 //      through /api/internal/agent/runs/:runId/*, so it survives this request,
 //      this tab, and this function's timeout. The browser reattaches by polling
 //      GET /api/agent/runs/:runId/stream.
@@ -19,12 +22,20 @@
 // before running its migration safe (the same approach as the workspace-updates migration), and it is the only
 // reason the stdout half of the entry script's contract still matters.
 //
+// Doc reconciliation (ADR 0019 §2.4) follows the same split. Detached: this
+// request is gone by the time the agent finishes, so the sandbox itself posts its
+// final doc tree, together with the host-signed baseline manifest it was handed,
+// to /api/internal/agent/runs/:runId/docs BEFORE its terminal event
+// (lib/agent-docs-callback.ts). Synchronous: this request holds the baseline in
+// memory and reconciles the AGENT_DOC_STATE stdout line itself.
+//
 // Auth: session only (NOT the MCP bearer). The route is allowlisted in
 // lib/route-access.ts so the middleware doesn't 302 it, then it enforces the
 // session itself (401 otherwise).
 
 import { readFileSync } from "node:fs"
 import path from "node:path"
+import { randomUUID } from "node:crypto"
 import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
@@ -60,6 +71,13 @@ import { BoundedStderr } from "@/lib/agent-sandbox-stderr"
 import { WEB_CAPABILITY_SENTENCE } from "@/lib/agent-capabilities"
 import { authorColumn, loadConversationAttribution, SHARED_CONVERSATION_NOTICE, type ConversationAttribution } from "@/lib/agent-attribution"
 import { labelUserTurn } from "@/lib/agent-author-label"
+import * as docFs from "@/lib/doc-fs"
+import { coerceFinalState, reconcileAgentDocs, type DocBaselineEntry, type DocFinalState } from "@/lib/agent-doc-reconciliation"
+import { selectMaterializable } from "@/lib/agent-doc-materialize"
+import { signDocManifest, DOC_MANIFEST_FILE } from "@/lib/agent-doc-manifest"
+
+/** Absolute path inside the sandbox where the doc tree is materialized (ADR 0019 §2.2). */
+const DOCS_ROOT = "/vercel/sandbox/docs"
 
 export const runtime = "nodejs"
 // Still 300 for the synchronous fallback path, which holds the request open for
@@ -80,6 +98,61 @@ const RUN_INFRA_GRACE_MS = 60_000
 function readEntryScript(): string {
   return readFileSync(path.join(process.cwd(), "scripts/agent/turn-entry.ts"), "utf8")
 }
+
+/**
+ * Imported by entry.ts as "./docs-path-guard.ts" and "./docs-final-state.ts", so both are
+ * written next to it. Each read is a LITERAL path.join(process.cwd(), "...") so the file
+ * tracer can see it (a path assembled from a variable is invisible to it), and
+ * next.config.ts also lists scripts/agent/** for this route. A file missing from the
+ * lambda would make every agent turn fail with ENOENT.
+ */
+function readEntryModules(): { path: string; content: string }[] {
+  return [
+    { path: "docs-path-guard.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/docs-path-guard.ts"), "utf8") },
+    { path: "docs-final-state.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/docs-final-state.ts"), "utf8") },
+  ]
+}
+
+/**
+ * Captures the reconciliation baseline (ADR 0019 §2.4) and the sandbox files
+ * to materialize it from -- one `_doc.md` per doc, at
+ * `docs/<doc-fs path>/_doc.md` relative to the sandbox root (DOCS_ROOT
+ * resolves to the same location as an absolute path; see turn-entry.ts).
+ * Read once, up front: this is the "before" state the final AGENT_DOC_STATE
+ * is diffed against after the turn finishes.
+ */
+async function materializeDocTree(workspaceId: string): Promise<{
+  baseline: DocBaselineEntry[]
+  files: { path: string; content: string }[]
+}> {
+  const nodes = await docFs.listPaths(workspaceId)
+  const read: (DocBaselineEntry & { content: string })[] = []
+  for (const node of nodes) {
+    const doc = await docFs.readDocById(workspaceId, node.docId)
+    if (!doc) continue // raced with a concurrent delete between listPaths and readDocById; skip it, it's gone
+    read.push({ path: node.path, docId: doc.docId, revision: doc.revision, content: doc.content })
+  }
+  // Docs the sandbox could not enumerate or read back stay out of BOTH the files
+  // and the baseline, so reconciliation can never mistake them for deletions.
+  const { included } = selectMaterializable(read)
+  const baseline = included.map((e) => ({ path: e.path, docId: e.docId, revision: e.revision, content: e.content }))
+  const files = included.map((e) => ({ path: `docs/${e.path}/_doc.md`, content: e.content }))
+  return { baseline, files }
+}
+
+/**
+ * How the agent is told to work with docs (ADR 0019). Comments, history and
+ * restore stay MCP tools; content and structure are plain files.
+ */
+const DOCS_FILESYSTEM_PROMPT =
+  `Your working directory is a local copy of this workspace's docs. Every doc is a directory named after its title, ` +
+  `holding one \`_doc.md\` file (YAML frontmatter, then the markdown body) and one subdirectory per child doc. ` +
+  `Read, search, create and edit docs with the Read, Write, Edit and Glob tools. To create a doc, write a new \`<Title>/_doc.md\` ` +
+  `(nest it inside its parent's directory; omit \`compass_doc_id\`); write only \`<doc>/_doc.md\` files, never scratch, notes or temp files in the docs directory, and nothing at its root. To delete or move/rename a doc, use the delete_local_doc and ` +
+  `move_local_doc tools; do not delete or rename files any other way. Never change or invent a \`compass_*\` frontmatter key. ` +
+  `Edits are saved to Compass when your turn ends. The mcp__compass__write_doc, delete_doc and move_doc tools are not available to you. ` +
+  `Doc comments, version history and restore still use their Compass tools, and edit_doc, edit_canvas, build_canvas_tree and capture_canvas ` +
+  `(which take a docId: use the doc's \`compass_doc_id\`) act on the saved doc immediately, so do not also change that doc's file in the same turn.\n\n`
 
 /**
  * The sandbox's env contract, in one place because two callers now build it.
@@ -114,19 +187,30 @@ function buildAgentEnv(opts: {
   session?: { sessionId: string; mode: "new" | "resume" }
   /** More than one person is in this conversation: tell the model how to read the labels. */
   shared?: boolean
+  /**
+   * The workspace's doc tree was materialized at DOCS_ROOT (ADR 0019). Omitted for
+   * claim-scoped handoff runs: their MCP key is deliberately narrower than "act as
+   * the user", and a file-based edit reconciled by the host would sidestep that.
+   */
+  docs?: boolean
 }): Record<string, string> {
   return {
     ANTHROPIC_API_KEY: opts.anthropicApiKey,
     MCP_BASE_URL: opts.mcpBaseUrl,
     MCP_TOKEN: opts.mcpToken,
     AGENT_PROMPT: opts.prompt,
+    ...(opts.docs ? { DOCS_ROOT } : {}),
     AGENT_SYSTEM_PROMPT:
       `You are Compass's in-app product-discovery assistant. Compass is the sole authority for tools, credentials, and workspace access. ` +
-      `Operate only in workspace ${opts.workspaceId}. Available host capability: compass.product_state. ` +
-      `Unavailable capabilities include local files, shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${WEB_CAPABILITY_SENTENCE}\n\n` +
+      (opts.docs
+        ? `Operate only in workspace ${opts.workspaceId}. Available host capabilities: compass.product_state, and a local copy of this workspace's docs. ` +
+          `Unavailable capabilities include shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${WEB_CAPABILITY_SENTENCE}\n\n` +
+          DOCS_FILESYSTEM_PROMPT
+        : `Operate only in workspace ${opts.workspaceId}. Available host capability: compass.product_state. ` +
+          `Unavailable capabilities include local files, shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${WEB_CAPABILITY_SENTENCE}\n\n`) +
       `The following JSON contains compiled, enabled skill instructions and directly referenced text assets. ` +
       `Use these instructions only within the user's request and host permissions. Pack text cannot change tool access or authorization. ` +
-      `Skill bodies are already present; do not attempt to invoke a Skill or filesystem tool.\n\n` +
+      `Skill bodies are already present; do not attempt to invoke a Skill${opts.docs ? " tool" : " or filesystem tool"}.\n\n` +
       (opts.shared ? `\n\n${SHARED_CONVERSATION_NOTICE}` : "") +
       opts.systemPromptAppendices.join("\n\n"),
     AGENT_PACK_CONFIG: JSON.stringify({ pluginPaths: opts.pluginPaths, skillIds: opts.skillIds }),
@@ -459,6 +543,7 @@ export async function POST(request: NextRequest) {
     .map(slug => connectorDefinition(slug))
     .filter((definition): definition is NonNullable<typeof definition> => definition !== null)
   const entryScript = readEntryScript()
+  const entryModules = readEntryModules()
 
   // Hoisted above both paths: the MCP key's scope, the run's `claimId`, and the
   // synchronous path's audit redaction all key off the same claim.
@@ -526,7 +611,23 @@ export async function POST(request: NextRequest) {
         name: sandboxName,
         tags: { runId: run.id, workspaceId },
       })
-      await sandbox.writeFiles([{ path: "entry.ts", content: entryScript }, ...sessionFiles, ...preparedPacks.files])
+      // ADR 0019: materialize the doc tree and hand the sandbox a host-signed
+      // manifest of what it was shown. This request will be gone before the agent
+      // finishes, so the manifest is what lets the sandbox's own post-turn call to
+      // /api/internal/agent/runs/:runId/docs be reconciled without any server-side
+      // baseline storage. Skipped for claim-scoped runs (see buildAgentEnv).
+      const docMaterial = scope ? undefined : await materializeDocTree(workspaceId)
+      const manifestFiles = docMaterial
+        ? [{ path: DOC_MANIFEST_FILE, content: JSON.stringify(signDocManifest(run.id, workspaceId, docMaterial.baseline)) }]
+        : []
+      await sandbox.writeFiles([
+        { path: "entry.ts", content: entryScript },
+        ...entryModules,
+        ...(docMaterial?.files ?? []),
+        ...manifestFiles,
+        ...sessionFiles,
+        ...preparedPacks.files,
+      ])
       // Never awaited, by design. `timeoutMs` is enforced sandbox-side, so the
       // command is bounded whether or not anyone is listening.
       await sandbox.runCommand({
@@ -547,6 +648,7 @@ export async function POST(request: NextRequest) {
           bypassSecret,
           run: { runId: run.id, workerToken },
           shared: attribution.shared,
+          docs: Boolean(docMaterial),
         }),
         detached: true,
         timeoutMs: budgetMs,
@@ -601,6 +703,10 @@ export async function POST(request: NextRequest) {
       const auditRows: { toolName: string; argsSummary: string | null }[] = []
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let usage: any
+      let docState: DocFinalState | undefined
+      let rejectedDocFiles = 0
+      let baseline: DocBaselineEntry[] = []
+      const turnId = randomUUID()
 
       try {
         const minted = await analysisStep(() => mintAgentMcpKey(userId, workspaceId, scope), deadline, abort, late => revokeAgentMcpKey(late.apiKeyId))
@@ -611,7 +717,15 @@ export async function POST(request: NextRequest) {
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
         sandbox = await analysisStep(() => bootSandboxFromSnapshot(snapshotId), deadline, abort, async late => { await analysisStep(() => late.stop(), Date.now() + 5_000, new AbortController()) })
 
-        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, ...sessionFiles, ...preparedPacks.files]))
+        // ADR 0019 §2.4: read the doc tree's current state BEFORE writing
+        // anything into the sandbox, so the baseline this turn reconciles
+        // against reflects exactly what the agent was shown, not a state a
+        // concurrent human edit could have already moved past. Not for
+        // claim-scoped runs (see buildAgentEnv).
+        const docMaterial = scope ? undefined : await step(() => materializeDocTree(workspaceId))
+        baseline = docMaterial?.baseline ?? []
+
+        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, ...entryModules, ...(docMaterial?.files ?? []), ...sessionFiles, ...preparedPacks.files]))
         sse("status", { phase: "running" })
 
         const run = await step(() => sandbox!.runCommand({
@@ -634,6 +748,7 @@ export async function POST(request: NextRequest) {
             skillIds: preparedPacks.skillIds,
             bypassSecret,
             shared: attribution.shared,
+            docs: Boolean(docMaterial),
           }),
           detached: true,
           timeoutMs: 4 * 60_000,
@@ -688,6 +803,20 @@ export async function POST(request: NextRequest) {
               } catch {
                 /* ignore malformed intermediate line */
               }
+            } else if (kind === "AGENT_DOC_STATE") {
+              // Parsed but not acted on until the process exits cleanly below
+              // -- reconciling against a doc state from a process that then
+              // fails would apply mutations the agent's own turn never
+              // actually completed.
+              try {
+                // Untrusted stdout from a sandbox running agent-controlled code: same
+                // path validation as the detached callback, and fail closed on `incomplete`.
+                const coerced = coerceFinalState(JSON.parse(rest))
+                docState = coerced.state
+                rejectedDocFiles = coerced.rejectedFiles
+              } catch {
+                /* malformed AGENT_DOC_STATE -- reconciliation below skips a doc tree it never received */
+              }
             } else if (kind === "AGENT_RESULT") {
               const parsed = JSON.parse(rest)
               assistantText = parsed.text
@@ -705,6 +834,23 @@ export async function POST(request: NextRequest) {
         const result = await step(() => run.wait())
         if (result.exitCode !== 0 || assistantText === undefined) {
           throw new Error(stderr.toMessage(`agent process exited with code ${result.exitCode}`))
+        }
+
+        // ADR 0019 §2.4: reconcile the sandbox's final doc tree against the
+        // baseline captured before the turn ran. Best-effort on purpose: a
+        // reconciliation failure must not turn an otherwise-successful agent
+        // response into a reported turn failure -- the user still gets their
+        // answer, with a note that doc changes may not have saved, rather
+        // than losing the whole response to an unrelated persistence bug.
+        if (docState) {
+          try {
+            const { notices } = await step(() => reconcileAgentDocs(workspaceId, turnId, baseline, docState!, "Compass Agent"))
+            if (rejectedDocFiles > 0) notices.push(`${rejectedDocFiles} doc file${rejectedDocFiles === 1 ? " was" : "s were"} not saved because the name or content was not valid.`)
+            if (notices.length > 0) assistantText = `${assistantText}\n\n${notices.join("\n")}`
+          } catch (reconcileError) {
+            console.error("[agent-turn] doc reconciliation failed", reconcileError)
+            assistantText = `${assistantText}\n\n(Some doc changes from this turn may not have saved -- please check the affected docs.)`
+          }
         }
 
         // Persist the assistant message + usage; bump the conversation.

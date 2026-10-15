@@ -48,7 +48,7 @@ export async function editDocumentBody<T>(
     if (!row) return { ok: false, code: "not-found", error: `Doc "${docId}" not found.` }
     const revision = documentRevision(row)
     if (pinned && pinned !== revision) {
-      return { ok: false, code: "revision-conflict", error: `Doc changed since revision ${pinned} (now ${revision}). Re-read it with get_doc and retry.` }
+      return { ok: false, code: "revision-conflict", error: `Doc changed since revision ${pinned} (now ${revision}). Re-read the doc (docs:// resource) and retry.` }
     }
     const hydrated = await hydrateDocument(row.workspaceId, row)
     const current: EditableDoc = {
@@ -81,7 +81,7 @@ export async function editDocumentBody<T>(
     } catch (error) {
       if (error instanceof DocumentError && error.code === "revision-conflict") {
         if (pinned || attempt === MAX_EDIT_ATTEMPTS) {
-          return { ok: false, code: "revision-conflict", error: pinned ? `Doc changed since revision ${pinned}. Re-read it with get_doc and retry.` : `Doc kept changing underneath this edit (${MAX_EDIT_ATTEMPTS} attempts). Retry in a moment.` }
+          return { ok: false, code: "revision-conflict", error: pinned ? `Doc changed since revision ${pinned}. Re-read the doc (docs:// resource) and retry.` : `Doc kept changing underneath this edit (${MAX_EDIT_ATTEMPTS} attempts). Retry in a moment.` }
         }
         continue
       }

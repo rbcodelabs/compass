@@ -30,7 +30,16 @@ describe("sandbox entry scripts are strip-only safe", () => {
     expect(typeof stripTypeScriptTypes).toBe("function")
   })
 
-  it.each(entryScripts)("%s loads under Node's type-stripping", name => {
+  // EVERY script the route ships into the sandbox, not just the *-entry.ts ones: a helper with
+  // codegen-only syntax (enum, parameter property) would kill the worker at import, before it
+  // has a reporter.
+  const allScripts = readdirSync(dir).filter(name => name.endsWith(".ts"))
+
+  it("covers the helper modules turn-entry.ts imports", () => {
+    expect(allScripts).toEqual(expect.arrayContaining(["turn-entry.ts", "docs-path-guard.ts", "docs-final-state.ts"]))
+  })
+
+  it.each(allScripts)("%s loads under Node's type-stripping", name => {
     const source = readFileSync(path.join(dir, name), "utf8")
     expect(() => stripTypeScriptTypes!(source, { mode: "strip" })).not.toThrow()
   })

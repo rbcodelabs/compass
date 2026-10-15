@@ -38,7 +38,7 @@ export function applyTextEdits(body: string, edits: TextEdit[]): { ok: true; con
     let count = 0
     for (let at = content.indexOf(edit.oldString); at !== -1; at = content.indexOf(edit.oldString, at + edit.oldString.length)) count++
     if (count === 0) {
-      return { ok: false, error: `${label}oldString was not found in the doc body. Frontmatter properties are not part of the body: change them with update_doc_metadata. Re-read with get_doc and copy the text exactly, including whitespace.` }
+      return { ok: false, error: `${label}oldString was not found in the doc body. Frontmatter properties are not part of the body: change them with write_doc. Re-read the doc's docs:// resource and copy the text exactly, including whitespace.` }
     }
     if (count > 1 && !edit.replaceAll) {
       return { ok: false, error: `${label}oldString matches ${count} places. Include more surrounding text to make it unique, or set replaceAll.` }

@@ -122,7 +122,7 @@ Every page keeps a history of past versions, so you can always see what changed 
 
 **Restoring.** Each version has a **Restore** button. Restoring asks for confirmation, since it overwrites the page's live content — but nothing is ever actually lost: the page's current state is automatically saved as a new version (labeled "Before restore") right before the restore happens, so you can always undo a restore by restoring again.
 
-Version history is also available over MCP — see [MCP API](/help/09-mcp-api) for `create_doc_version`, `list_doc_versions`, `get_doc_version`, and `restore_doc_version`.
+Version history is also available over MCP — see [MCP API](/help/09-mcp-api) for `list_doc_history` and `restore_doc_version`.
 
 ## Pinning Docs panels
 
@@ -152,7 +152,7 @@ Leave Google-Docs-style comments anchored to a specific span of a page, so discu
 
 **Doc-level comments.** A comment doesn't have to be anchored — over MCP you can add a general, page-level comment with no anchored text (see below). In the sidebar these are labelled **general**.
 
-Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api) for `add_doc_comment`, `list_doc_comments`, `get_doc_comment`, `update_doc_comment`, `delete_doc_comment`, `resolve_doc_comment`, and `reopen_doc_comment`. These Doc-specific tools remain domain-friendly compatibility aliases over shared Comment IDs and preserve inline anchor creation and updates. The generic shared-comment tools can also operate on `DOC` targets by Comment ID, but generic `add_comment` creates an unanchored Doc comment; use `add_doc_comment` when creating an inline anchor.
+Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api) for `add_doc_comment`, `list_doc_comments`, and `resolve_doc_comment` (pass `resolved: false` to reopen). These Doc-specific tools are path-addressed (workspace ID plus doc path) and preserve inline anchor creation. The generic shared-comment tools can also operate on `DOC` targets by Comment ID, but generic `add_comment` creates an unanchored Doc comment; use `add_doc_comment` when creating an inline anchor.
 
 ## Canvas docs
 
@@ -169,13 +169,13 @@ A Canvas doc is an infinite, pannable whiteboard that follows the open [JSON Can
 - **On phones** a canvas opens locked for viewing (pan and zoom); use the lock button to edit.
 - Canvases are limited to roughly 800 KB of JSON.
 
-Agents can create canvases with `create_doc` / `update_doc` (`docType: CANVAS`), edit them incrementally with `edit_canvas` (add/move/update/remove cards, text, groups and edges), and draw the Opportunity Solution Tree onto one with `build_canvas_tree`; see [MCP API](/help/09-mcp-api).
+Agents can create canvases with the MCP `write_doc` tool (`docType: CANVAS`), edit them incrementally with `edit_canvas` (add/move/update/remove cards, text, groups and edges), and draw the Opportunity Solution Tree onto one with `build_canvas_tree`; see [MCP API](/help/09-mcp-api). `edit_canvas`, `edit_doc`, `build_canvas_tree` and `capture_canvas` take a doc ID: read the doc's `docs://` resource and use its `compass_doc_id`.
 
 ## Positioning & Messaging Briefs
 
-A Positioning & Messaging Brief is a Doc linked one-to-one to a Roadmap Item, used to nail down the story before a launch: problem statement, target audience, core message, proof points, and competitive differentiation. Part of the marketing-launch workflow — see [Roadmap](/help/04-roadmap) — so it's only available once a workspace admin turns on **Settings → Marketing launch** (off by default). With it on, create one from the roadmap item's panel Launch section, or via the MCP API's create_doc tool with docType set to GTM_POSITIONING_BRIEF and roadmapItemId set to the roadmap item it belongs to; if you do not pass explicit content, Compass fills in a five-section starter template you can edit like any other doc. Attempting to link a second brief to the same roadmap item is rejected, since the relationship is one-to-one.
+A Positioning & Messaging Brief is a Doc linked one-to-one to a Roadmap Item, used to nail down the story before a launch: problem statement, target audience, core message, proof points, and competitive differentiation. Part of the marketing-launch workflow — see [Roadmap](/help/04-roadmap) — so it's only available once a workspace admin turns on **Settings → Marketing launch** (off by default). With it on, create one from the roadmap item's panel Launch section; Compass fills in a five-section starter template you can edit like any other doc. Attempting to link a second brief to the same roadmap item is rejected, since the relationship is one-to-one.
 
-There is no dedicated UI for briefs yet; they appear in the regular Docs tree like any other page, and get_doc surfaces the linked roadmap item and doc type so an agent can discover the linkage.
+There is no dedicated UI for briefs yet; they appear in the regular Docs tree like any other page, and the doc's frontmatter surfaces the linked roadmap item and doc type so an agent can discover the linkage.
 
 ## Page Titles
 
@@ -183,4 +183,4 @@ Click the title area at the top of the editor to rename a page. Titles are saved
 
 ## Preview: Geode content storage
 
-An explicitly configured synthetic preview workspace can store new document bodies through the packaged Geode Headless SDK. Existing documents keep their current storage. The editor reports save conflicts and retains unsaved changes for retry; MCP callers supply a stable operation ID and the revision returned by `get_doc` for pilot changes. This preview does not enable production storage or desktop sync. See the repository's `docs/testing/geode-documents-pilot.md` for configuration and verification.
+An explicitly configured synthetic preview workspace can store new document bodies through the packaged Geode Headless SDK. Existing documents keep their current storage. The editor reports save conflicts and retains unsaved changes for retry; MCP callers supply a stable operation ID and the revision returned by `write_doc` or the `docs://` resource read (`_meta.revision`) for pilot changes. This preview does not enable production storage or desktop sync. See the repository's `docs/testing/geode-documents-pilot.md` for configuration and verification.

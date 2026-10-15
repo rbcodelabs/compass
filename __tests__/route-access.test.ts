@@ -165,7 +165,7 @@ describe("isPublicPath", () => {
 
   it("allows only the exact bearer-authenticated agent run callbacks and the sweeper cron", () => {
     const base = "/api/internal/agent/runs/00000000-0000-4000-8000-000000000001"
-    for (const suffix of ["heartbeat", "events", "session"]) expect(isPublicPath(`${base}/${suffix}`)).toBe(true)
+    for (const suffix of ["heartbeat", "events", "session", "docs"]) expect(isPublicPath(`${base}/${suffix}`)).toBe(true)
     for (const path of [`${base}/other`, `${base}/session/extra`, `${base}/events/extra`, "/api/internal/agent/runs/not-a-uuid/events", "/api/internal/agent/other"]) expect(isPublicPath(path)).toBe(false)
     expect(isPublicPath("/api/cron/agent-run-sweeper")).toBe(true)
     expect(isPublicPath("/api/cron/some-future-job")).toBe(false)

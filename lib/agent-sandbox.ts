@@ -105,6 +105,12 @@ export const CHROMIUM_LAUNCH_ARGS: readonly string[] = [
 export const SANDBOX_DEPENDENCIES: Record<string, string> = {
   "@anthropic-ai/claude-agent-sdk": "0.3.224",
   "@modelcontextprotocol/sdk": "^1.29.0",
+  // ADR 0019 (Docs as a Virtual Filesystem): turn-entry.ts's `docsfs` in-process
+  // MCP server wraps @rbcodelabs/geode-headless's /wiki subpath
+  // (openWikiSession) for the sandbox-local delete/move/final-state-read
+  // mechanics. Pinned to the exact version Compass already depends on
+  // host-side (package.json) so both sides of the pilot stay in lockstep.
+  "@rbcodelabs/geode-headless": "0.1.0",
   "@playwright/browser-chromium": PLAYWRIGHT_VERSION,
   "playwright-core": PLAYWRIGHT_VERSION,
   zod: "^4.0.0",

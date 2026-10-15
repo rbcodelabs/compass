@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 197,
-  sortedToolNamesSha256: "b446e608fa816274d1461be0fe70f2f57c09ecd67d13481684fe700382e077f2",
+  toolCount: 190,
+  sortedToolNamesSha256: "4e3b5e3055bfa0ac1a5379819f4a411e3ec79fc06b000bfdef7bf98125bcdcaa",
 } as const
 
 export type McpRestParityDisposition =
@@ -44,8 +44,6 @@ export const MCP_REST_PARITY_MANIFEST = {
   create_artifact: direct("createArtifact"),
   create_card_sort_round: direct("createCardSortRound"),
   create_checklist_template: direct("createChecklistTemplate"),
-  create_doc: direct("createDoc"),
-  create_doc_version: direct("createDocVersion"),
   create_experiment: direct("createExperiment"),
   create_feedback: composition(["createFeedback", "prepareFeedbackAttachmentUpload", "completeFeedbackAttachmentUpload"], "Create plain feedback directly; feedback with attachments uses the bounded direct-upload workflow because inline base64 is MCP-only."),
   create_feedback_source: direct("createFeedbackSource"),
@@ -60,7 +58,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   create_workspace: direct("createWorkspace"),
   delete_assumption: direct("deleteAssumption"),
   delete_comment: direct("deleteComment"),
-  delete_doc_comment: direct("deleteDocComment"),
+  delete_doc: excluded("transport-convenience", "Docs are deleted in the app; REST has no document-delete operation.", "Path-addressed recursive deletion is an MCP filesystem convenience and REST deliberately exposes no document deletion."),
   delete_key_result: direct("deleteKeyResult"),
   delete_objective: direct("deleteObjective"),
   delete_solution_comment: direct("deleteSolutionPlanEntry"),
@@ -75,9 +73,6 @@ export const MCP_REST_PARITY_MANIFEST = {
   get_current_identity: direct("getCurrentIdentity"),
   get_custom_field_values: direct("listCustomFieldValues"),
   get_decision: direct("getDecision"),
-  get_doc: direct("getDoc"),
-  get_doc_comment: direct("getDocComment"),
-  get_doc_version: direct("getDocVersion"),
   get_experiment: direct("getExperiment"),
   get_feedback_item: direct("getFeedback"),
   get_help: direct("getHelp"),
@@ -119,9 +114,8 @@ export const MCP_REST_PARITY_MANIFEST = {
   list_comments: direct("listComments"),
   list_custom_field_definitions: direct("listCustomFieldDefinitions"),
   list_decisions: direct("listDecisions"),
+  list_doc_history: composition(["listDocVersions"], "REST lists versions by document id rather than by path."),
   list_doc_comments: direct("listDocComments"),
-  list_doc_versions: direct("listDocVersions"),
-  list_docs: direct("listDocs"),
   list_eligible_parent_key_results: direct("listEligibleParentKeyResults"),
   list_evidence: direct("listEvidence"),
   list_experiments: direct("listExperiments"),
@@ -151,6 +145,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   log_checkin: direct("createCheckIn"),
   log_experiment_result: direct("createExperimentResult"),
   mark_read: direct("markNotificationsRead"),
+  move_doc: composition(["updateDoc"], "REST renames a document by PATCHing its title on its id; reparenting has no REST operation, MCP expresses both as a path change."),
   move_task_status: direct("updateTask"),
   prepare_artifact_upload: excluded("transport-convenience", "Send the HTML in the createArtifact or updateArtifact request body.", "Direct upload exists only to keep a large document out of a model's context window when an MCP tool call would otherwise embed it twice; a REST client posts the file bytes itself, so the staged-upload step adds nothing."),
   prepare_doc_image_upload: direct("prepareDocImageUpload"),
@@ -163,7 +158,6 @@ export const MCP_REST_PARITY_MANIFEST = {
   refresh_metric_binding: direct("refreshMetricBinding"),
   reject_solution_plan: excluded("human-governance", "Read plan entries and request a tracked decision.", "Plan rejection is a human judgment boundary and REST must not turn proposal review into an ordinary mutation."),
   reopen_comment: direct("reopenComment"),
-  reopen_doc_comment: direct("reopenDocComment"),
   request_decision: direct("requestDecision"),
   request_release_authorization: direct("requestReleaseAuthorization"),
   resolve_comment: direct("resolveComment"),
@@ -189,8 +183,6 @@ export const MCP_REST_PARITY_MANIFEST = {
   update_artifact: direct("updateArtifact"),
   update_assumption: direct("updateAssumption"),
   update_comment: direct("updateComment"),
-  update_doc: direct("updateDoc"),
-  update_doc_comment: direct("updateDocComment"),
   update_experiment: direct("updateExperiment"),
   update_feedback: direct("updateFeedback"),
   update_feedback_source: direct("updateFeedbackSource"),
@@ -210,6 +202,8 @@ export const MCP_REST_PARITY_MANIFEST = {
   update_solution_comment: direct("updateSolutionPlanEntry"),
   update_solution_status: direct("updateSolution"),
   update_squad: direct("updateSquad"),
+
   update_task: direct("updateTask"),
   withdraw_card_sort_proposal: direct("withdrawCardSortProposal"),
+  write_doc: composition(["createDoc", "updateDoc"], "REST creates with POST and updates by id with PATCH; MCP upserts by path."),
 } as const satisfies Record<string, McpRestParityDisposition>
