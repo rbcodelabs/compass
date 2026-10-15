@@ -92,9 +92,14 @@ describe("agent entry capability-pack policy", () => {
   })
 
   it("ADR 0019: reports whether the sandbox's view was complete and which docs the agent deleted on purpose", () => {
-    expect(source).toContain("const info = session.info()")
-    expect(source).toContain("!info.discoveryComplete || !info.noteContentComplete")
-    expect(source).toContain("incomplete = true")
+    // Collection (refresh first, completeness flags) lives in docs-final-state.ts and is behaviour-tested against a
+    // real wiki session in docs-final-state.test.ts; here, make sure the entry uses it and refreshes before acting.
+    const finalState = readFileSync("scripts/agent/docs-final-state.ts", "utf8")
+    expect(finalState).toContain("await session.refresh()")
+    expect(finalState.indexOf("await session.refresh()")).toBeLessThan(finalState.indexOf("session.info()"))
+    expect(finalState).toContain("!info.discoveryComplete || !info.noteContentComplete")
+    expect(source).toContain("await collectFinalDocState(session, note)")
+    expect(source.match(/await refreshView\(session\)/g)?.length).toBeGreaterThanOrEqual(2)
     expect(source).toContain("deletedByAgent.add(")
     expect(source).toContain("JSON.stringify({ manifest, files: payloadFiles, incomplete, deletedPaths })")
     expect(source).toContain('emit("AGENT_DOC_STATE", { files, incomplete, deletedPaths })')
