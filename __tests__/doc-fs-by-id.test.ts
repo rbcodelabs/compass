@@ -155,6 +155,20 @@ describe("read, resolve, delete and move-source sanitize like the write side", (
     expect(await mod.resolvePath(WS, "nope")).toBeNull()
   })
 
+  it("refuses '.', '..', empty and whitespace segments BEFORE sanitizing, so they can never resolve to a doc titled 'Untitled'", async () => {
+    mocks.db.doc.findMany.mockResolvedValue([row("u", "Untitled")])
+    const mod = await import("@/lib/doc-fs")
+    for (const bad of ["..", ".", "", " ", "   ", "a//b", "/a", "a/", "./a", "a/../b", "a/ /b"]) {
+      await expect(mod.resolvePath(WS, bad), JSON.stringify(bad)).rejects.toMatchObject({ code: "invalid-path" })
+    }
+    await expect(mod.deletePath(WS, "..", { ...OPTS })).rejects.toMatchObject({ code: "invalid-path" })
+    await expect(mod.movePath(WS, "Untitled", "..", OPTS)).rejects.toMatchObject({ code: "invalid-path" })
+    await expect(mod.writePath(WS, "a/../b", "x", OPTS)).rejects.toMatchObject({ code: "invalid-path" })
+    expect(mocks.deleteDocument).not.toHaveBeenCalled()
+    // a genuinely untitled doc is still reachable by its real name
+    expect((await mod.resolvePath(WS, "Untitled"))?.docId).toBe("u")
+  })
+
   it("readPath round-trips a raw title", async () => {
     mocks.db.doc.findMany.mockResolvedValue([row("q3", "Q3: Plan")])
     mocks.db.doc.findUnique.mockResolvedValue({

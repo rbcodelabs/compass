@@ -11,7 +11,12 @@ export type CollectedDocState = {
   files: FinalDocFile[]
   /** The wiki view was cut short, could not be refreshed, or a discovered note could not be read: absence proves nothing. */
   incomplete: boolean
-  /** Files left out because their names are not valid doc names (the server would refuse them). */
+  /**
+   * The re-scan itself failed, so every file below is from a STALE scan and none of it can
+   * be trusted, creates and updates included, not just deletes. The caller must not reconcile.
+   */
+  refreshFailed: boolean
+  /** Files left out: invalid doc names, a root-level _doc.md, and notes that are not a doc's _doc.md. */
   skippedNames: string[]
 }
 
@@ -58,22 +63,31 @@ export async function collectFinalDocState(session: WikiSession, log: (message: 
   const files: FinalDocFile[] = []
   const skippedNames: string[] = []
   let incomplete = false
+  let refreshFailed = false
   try {
     const refreshed = await session.refresh()
     if (refreshed.status !== "ok") {
       log(`docs session refresh did not succeed: ${JSON.stringify(refreshed).slice(0, 200)}`)
       incomplete = true
+      refreshFailed = true
     }
   } catch (error) {
     log(`docs session refresh threw: ${error instanceof Error ? error.message : String(error)}`)
     incomplete = true
+    refreshFailed = true
   }
   const info = session.info()
   // False when a limit (entries, depth, bytes) cut the walk short or a note's bytes
   // could not be read; either way a missing doc is not proof it was removed.
   if (!info.discoveryComplete || !info.noteContentComplete) incomplete = true
   for (const entry of session.listFiles()) {
-    if (entry.kind !== "note" || !entry.path.endsWith("/_doc.md")) continue
+    if (entry.kind !== "note") continue
+    // A doc is a directory holding exactly one _doc.md. A root-level _doc.md has no doc to belong
+    // to, and any other note (Product/notes.md) is not one at all: tell the user instead of dropping them silently.
+    if (entry.path === "_doc.md" || !entry.path.endsWith("/_doc.md")) {
+      skippedNames.push(entry.path)
+      continue
+    }
     const docPath = entry.path.slice(0, -"/_doc.md".length)
     const read = session.readNote(entry.path)
     if (read.status !== "ok") {
@@ -90,5 +104,5 @@ export async function collectFinalDocState(session: WikiSession, log: (message: 
     const frontmatterDocId = frontmatter && typeof frontmatter.compass_doc_id === "string" ? frontmatter.compass_doc_id : null
     files.push({ path: docPath, content: read.note.text, frontmatterDocId })
   }
-  return { files, incomplete, skippedNames }
+  return { files, incomplete, refreshFailed, skippedNames }
 }

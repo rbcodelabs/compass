@@ -6,6 +6,12 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname),
   },
   devIndicators: false,
+  // The agent turn route reads the sandbox entry script and its helper modules from disk at
+  // request time and writes them into the sandbox. Nothing imports them, so the file tracer
+  // only keeps them if told to; without them every agent turn would die with ENOENT.
+  outputFileTracingIncludes: {
+    "/api/agent/turn": ["./scripts/agent/**/*"],
+  },
   async headers() {
     return [
       {

@@ -155,6 +155,18 @@ describe("agent turn route — guards", () => {
     expect(prompt.match(/unique current input/g)).toHaveLength(1)
     expect(prompt.indexOf("earlier question")).toBeLessThan(prompt.indexOf("latest prior answer"))
   })
+  it("synchronous path: writes both entry helper modules (and the docs) next to entry.ts", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", name: "Test", slug: "test", organization: { slug: "org" } })
+    mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+    mockPrisma.agentMessage.findMany.mockResolvedValue([{ role: "user", content: "hi" }])
+    const runCommand = vi.fn().mockResolvedValue({ async *logs() { yield { stream: "stdout", data: 'AGENT_ERROR {"message":"test stop"}\n' } }, wait: vi.fn() })
+    const writeFiles = vi.fn()
+    mockBootSandbox.mockResolvedValue({ writeFiles, runCommand, stop: vi.fn() })
+    await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+    const paths = (writeFiles.mock.calls[0][0] as { path: string }[]).map(f => f.path)
+    expect(paths).toEqual(expect.arrayContaining(["entry.ts", "docs-path-guard.ts", "docs-final-state.ts"]))
+  })
+
   it("runs without dedicated pack storage when no packs are active", async () => {
     const actual = await vi.importActual<typeof import("@/lib/capability-pack-runtime")>("@/lib/capability-pack-runtime")
     mockPreparePacks.mockImplementation(actual.prepareCapabilityPacksForTurn)
@@ -664,10 +676,17 @@ describe("agent turn route — detached runs", () => {
     const files = writeFiles.mock.calls[0][0] as { path: string; content: string }[]
     expect(files.map(f => f.path)).toContain("docs/Small/_doc.md")
     expect(files.map(f => f.path)).not.toContain("docs/Big/_doc.md")
-    expect(files.map(f => f.path)).toContain("docs-path-guard.ts")
+    expect(files.map(f => f.path)).toEqual(expect.arrayContaining(["docs-path-guard.ts", "docs-final-state.ts"]))
     const manifest = JSON.parse(files.find(f => f.path === "docs-manifest.json")!.content)
     expect(manifest.entries.map((e: { docId: string }) => e.docId)).toEqual(["doc-small"])
     mockPrisma.doc.findUnique.mockReset()
+  })
+
+  it("always ships both entry helper modules next to entry.ts, whether or not the run gets docs", async () => {
+    const { writeFiles } = sandbox()
+    await POST(req({ workspaceId: "ws-1", message: "hi" }))
+    const paths = (writeFiles.mock.calls[0][0] as { path: string; content: string }[]).map(f => f.path)
+    expect(paths).toEqual(expect.arrayContaining(["entry.ts", "docs-path-guard.ts", "docs-final-state.ts"]))
   })
 
   it("gives a claim-scoped handoff run no docs at all: no files, no manifest, no DOCS_ROOT", async () => {
@@ -685,6 +704,8 @@ describe("agent turn route — detached runs", () => {
     const files = writeFiles.mock.calls[0][0] as { path: string }[]
     expect(files.map(f => f.path)).not.toContain("docs-manifest.json")
     expect(files.some(f => f.path.startsWith("docs/"))).toBe(false)
+    // entry.ts imports the helper modules unconditionally, so they must be present even with no docs
+    expect(files.map(f => f.path)).toEqual(expect.arrayContaining(["docs-path-guard.ts", "docs-final-state.ts"]))
     const env = runCommand.mock.calls[0][0].env as Record<string, string>
     expect(env).not.toHaveProperty("DOCS_ROOT")
     expect(env.AGENT_SYSTEM_PROMPT).not.toContain("_doc.md")

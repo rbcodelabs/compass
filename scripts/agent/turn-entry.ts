@@ -583,6 +583,7 @@ function buildDocsFsServer(session: WikiSession, deletedByAgent: Set<string>) {
 // ── doc tree reconciliation hand-off (ADR 0019 §2.4) ────────────────────────
 
 const DOC_MANIFEST_PATH = "docs-manifest.json"
+const DOCS_REREAD_FAILED_NOTICE = "(My working copy of the docs could not be re-read at the end of this turn, so none of my doc edits were saved. Please check the affected docs and ask me to redo them.)"
 const DOCS_SAVE_FAILED_NOTICE = "(Some doc changes from this turn may not have saved -- please check the affected docs.)"
 
 /**
@@ -607,10 +608,16 @@ async function reportDocState(session: WikiSession, baseUrl: string, finalText: 
     note(`could not read final doc state: ${error instanceof Error ? error.message : String(error)}`)
     return `${finalText}\n\n${DOCS_SAVE_FAILED_NOTICE}`
   }
-  const { files, incomplete, skippedNames } = collected
+  const { files, incomplete, skippedNames, refreshFailed } = collected
+  if (refreshFailed) {
+    // Everything collected is from a stale scan: reconciling it could save out-of-date content
+    // over newer edits, or miss creates entirely. Save nothing and say so.
+    note("docs working copy could not be re-read; skipping reconciliation")
+    return `${finalText}\n\n${DOCS_REREAD_FAILED_NOTICE}`
+  }
   const deletedPaths = [...deletedByAgent]
   const skippedNotice = skippedNames.length
-    ? `\n\n${skippedNames.length} doc file${skippedNames.length === 1 ? " was" : "s were"} not saved because the name is not valid for a doc: ${skippedNames.slice(0, 5).map((n) => `'${n}'`).join(", ")}.`
+    ? `\n\n${skippedNames.length} doc file${skippedNames.length === 1 ? " was" : "s were"} not saved because they are not valid doc files (a bad name, a root-level _doc.md, or a note other than a doc's _doc.md): ${skippedNames.slice(0, 5).map((n) => `'${n}'`).join(", ")}.`
     : ""
   const withNotice = (text: string) => `${text}${skippedNotice}`
 

@@ -99,12 +99,18 @@ function readEntryScript(): string {
   return readFileSync(path.join(process.cwd(), "scripts/agent/turn-entry.ts"), "utf8")
 }
 
-/** Imported by entry.ts as "./docs-path-guard.ts" and "./docs-final-state.ts", so both are written next to it. */
+/**
+ * Imported by entry.ts as "./docs-path-guard.ts" and "./docs-final-state.ts", so both are
+ * written next to it. Each read is a LITERAL path.join(process.cwd(), "...") so the file
+ * tracer can see it (a path assembled from a variable is invisible to it), and
+ * next.config.ts also lists scripts/agent/** for this route. A file missing from the
+ * lambda would make every agent turn fail with ENOENT.
+ */
 function readEntryModules(): { path: string; content: string }[] {
-  return ["docs-path-guard.ts", "docs-final-state.ts"].map((name) => ({
-    path: name,
-    content: readFileSync(path.join(process.cwd(), "scripts/agent", name), "utf8"),
-  }))
+  return [
+    { path: "docs-path-guard.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/docs-path-guard.ts"), "utf8") },
+    { path: "docs-final-state.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/docs-final-state.ts"), "utf8") },
+  ]
 }
 
 /**

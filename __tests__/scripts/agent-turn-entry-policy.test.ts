@@ -99,6 +99,13 @@ describe("agent entry capability-pack policy", () => {
     expect(finalState.indexOf("await session.refresh()")).toBeLessThan(finalState.indexOf("session.info()"))
     expect(finalState).toContain("!info.discoveryComplete || !info.noteContentComplete")
     expect(source).toContain("await collectFinalDocState(session, note)")
+    // a failed refresh means a stale scan: nothing is reconciled, and the user is told
+    expect(source).toContain("if (refreshFailed) {")
+    expect(source).toContain("DOCS_REREAD_FAILED_NOTICE")
+    const guardIndex = source.indexOf("if (refreshFailed) {")
+    expect(guardIndex).toBeGreaterThan(-1)
+    expect(guardIndex).toBeLessThan(source.indexOf('emit("AGENT_DOC_STATE"'))
+    expect(guardIndex).toBeLessThan(source.indexOf("/api/internal/agent/runs/${AGENT_RUN_ID}/docs"))
     expect(source.match(/await refreshView\(session\)/g)?.length).toBeGreaterThanOrEqual(2)
     expect(source).toContain("deletedByAgent.add(")
     expect(source).toContain("JSON.stringify({ manifest, files: payloadFiles, incomplete, deletedPaths })")

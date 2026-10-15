@@ -237,7 +237,14 @@ function stripReservedKeys(data: Record<string, unknown> | null): Record<string,
  * names that listing shows, instead of creating a fresh doc on every write.
  */
 function splitPath(path: string): string[] {
-  return path.split("/").filter((segment) => segment.length > 0).map(sanitizeTitleSegment)
+  const raw = path.split("/")
+  // Refused BEFORE sanitizing: sanitizeTitleSegment turns "" / "." / ".." / "   " into the title
+  // "Untitled", so delete_doc("..") would otherwise resolve to a doc someone titled "Untitled".
+  // These are exactly the segments validateDocPath rejects.
+  if (raw.some((segment) => segment === "" || segment === "." || segment === ".." || segment.trim() === "")) {
+    throw new DocFsError("invalid-path", `Invalid doc path: "${path}".`)
+  }
+  return raw.map(sanitizeTitleSegment)
 }
 
 async function nextSortOrder(workspaceId: string, parentId: string | null): Promise<number> {

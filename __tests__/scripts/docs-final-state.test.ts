@@ -82,12 +82,24 @@ describe("collectFinalDocState reports when it cannot be trusted", () => {
     expect(state.files.map((f) => f.path)).toEqual(["Product"])
   })
 
-  it("is incomplete when the refresh reports an error", async () => {
+  it("is incomplete AND refreshFailed when the refresh reports an error (the scan is stale: nothing in it is trustworthy)", async () => {
     const real = await open()
     const session = new Proxy(real, {
       get: (target, prop) => (prop === "refresh" ? async () => ({ status: "error", error: { code: "boom" } }) : (target as never)[prop]),
     })
-    expect((await collectFinalDocState(session)).incomplete).toBe(true)
+    const state = await collectFinalDocState(session)
+    expect(state.incomplete).toBe(true)
+    expect(state.refreshFailed).toBe(true)
+  })
+
+  it("a healthy refresh leaves refreshFailed false, and so does a mere discovery limit", async () => {
+    expect((await collectFinalDocState(await open())).refreshFailed).toBe(false)
+    for (let i = 0; i < 30; i++) doc(`Many/Doc ${i}/_doc.md`, "x")
+    const opened = await openWikiSession(root, { limits: { maxEntries: 10 } })
+    if (opened.status !== "ok") throw new Error("open failed")
+    const limited = await collectFinalDocState(opened.session)
+    expect(limited.incomplete).toBe(true)
+    expect(limited.refreshFailed).toBe(false)
   })
 
   it("is incomplete when the refresh throws", async () => {
@@ -103,6 +115,7 @@ describe("collectFinalDocState reports when it cannot be trusted", () => {
     const logs: string[] = []
     const state = await collectFinalDocState(session, (m) => logs.push(m))
     expect(state.incomplete).toBe(true)
+    expect(state.refreshFailed).toBe(true)
     expect(logs.join(" ")).toContain("disk went away")
   })
 
@@ -123,6 +136,19 @@ describe("collectFinalDocState skips names the server would refuse", () => {
     const state = await collectFinalDocState(session)
     expect(state.files.map((f) => f.path)).toEqual(["Product"])
     expect(state.skippedNames.sort()).toEqual(["Q3: Plan", "cost $5", "~draft"])
+    expect(state.incomplete).toBe(false)
+  })
+})
+
+describe("collectFinalDocState reports stray notes instead of dropping them silently", () => {
+  it("lists a root-level _doc.md and a note that is not a doc's _doc.md", async () => {
+    const session = await open()
+    doc("_doc.md", "no doc to belong to")
+    doc("Product/notes.md", "a stray note beside the doc")
+    doc("loose.md", "a loose note")
+    const state = await collectFinalDocState(session)
+    expect(state.files.map((f) => f.path)).toEqual(["Product"])
+    expect(state.skippedNames.sort()).toEqual(["Product/notes.md", "_doc.md", "loose.md"])
     expect(state.incomplete).toBe(false)
   })
 })
