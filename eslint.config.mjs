@@ -16,6 +16,8 @@ const eslintConfig = defineConfig([
     // not be linted as part of this repository's source tree.
     ".claude/**",
     "coverage/**",
+    // Standalone demo-video tooling with its own deps and a CJS Electron entry.
+    "demo/**",
     // Vendored third-party builds, checked in because the embedded widget is a
     // plain <script src> on a page Compass does not serve and so cannot import
     // from node_modules (see the header of public/vendor/html-to-image.js).
