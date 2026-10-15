@@ -424,6 +424,7 @@ const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "e2e/functional/specs/pm-interview.spec.ts": 1,
   "lib/solution-tool-handlers.ts": 1,
   "lib/rest/execute.ts": 1,
+  "scripts/seed-demo-intro.ts": 4, // demo-video sample data: every objective/solution create sets workspaceId
 };
 const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   // 071 migration integration test: three objective inserts, each listing workspace_id (seeded after 068 is applied).

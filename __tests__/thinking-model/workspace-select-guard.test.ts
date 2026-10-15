@@ -45,6 +45,7 @@ export const SELECTLESS_WORKSPACE_SITES: Record<string, number> = {
   "lib/workspace.ts": 2,
   // Dev/ops scripts, run by hand; see the PR for whether any runs against a shared schema.
   "scripts/seed-card-sort-demo.ts": 2,
+  "scripts/seed-demo-intro.ts": 2,
   "scripts/verify-geode-document-migration.ts": 1,
   "scripts/verify-geode-documents.ts": 1,
 }
