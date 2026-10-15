@@ -282,7 +282,7 @@ async function ensureParentChain(
     // call replays them instead of creating twins. With NO caller id the id is fresh each time: a
     // fixed one (the old deriveOperationId("doc-fs", path)) made re-creating a deleted parent path
     // replay the receipt of the DELETED doc and hand back its id (parent-not-found on the child).
-    let operationId = randomUUID()
+    let operationId: string = randomUUID()
     if (opts.operationId) {
       const derived = deriveOperationId(opts.operationId, builtPath)
       const prisma = getPrisma()

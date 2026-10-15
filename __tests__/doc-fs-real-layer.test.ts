@@ -44,7 +44,7 @@ vi.mock("@/lib/db", () => {
         return r ? { ...r } : null
       },
       create: async ({ data }: { data: Record<string, unknown> }) => {
-        const row = { id: randomUUID(), createdAt: new Date(), updatedAt: new Date(), metadata: null, icon: null, roadmapItemId: null, docType: "STANDARD", storageProvider: "DATABASE", contentRef: null, sortOrder: 0, ...data } as Row
+        const row = { id: randomUUID(), createdAt: new Date(), updatedAt: new Date(), metadata: null, icon: null, roadmapItemId: null, docType: "STANDARD", storageProvider: "DATABASE", contentRef: null, sortOrder: 0, ...data } as unknown as Row
         docs().push(row)
         return { ...row }
       },
