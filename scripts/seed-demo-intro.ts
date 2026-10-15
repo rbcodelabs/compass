@@ -126,7 +126,7 @@ async function main() {
   const activation = await prisma.keyResult.create({
     data: { objectiveId: onboarding.id, title: "Week-1 activation rate", target: 55, current: 38, unit: "%", sortOrder: 1 },
   })
-  const timeToFirst = await prisma.keyResult.create({
+  await prisma.keyResult.create({
     data: { objectiveId: onboarding.id, title: "Median minutes to first project", target: 10, current: 26, unit: "min", sortOrder: 2 },
   })
   const upgrades = await prisma.keyResult.create({
