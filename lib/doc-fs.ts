@@ -21,7 +21,7 @@
  * (frontmatter + body, spec §1.3).
  */
 import { sanitizeTitleSegment } from "@/lib/doc-path"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { safeMatter, stringifyFrontMatter } from "@/lib/safe-matter"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
 import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
@@ -278,9 +278,23 @@ async function ensureParentChain(
       continue
     }
     const sortOrder = await nextSortOrder(workspaceId, parentId)
+    // A caller-supplied operationId gives its implicit parents a derived id, so a retry of that same
+    // call replays them instead of creating twins. With NO caller id the id is fresh each time: a
+    // fixed one (the old deriveOperationId("doc-fs", path)) made re-creating a deleted parent path
+    // replay the receipt of the DELETED doc and hand back its id (parent-not-found on the child).
+    let operationId = randomUUID()
+    if (opts.operationId) {
+      const derived = deriveOperationId(opts.operationId, builtPath)
+      const prisma = getPrisma()
+      const receipt = await prisma.docOperation.findUnique({ where: { workspaceId_operationId: { workspaceId, operationId: derived } } })
+      // Replaying is right only while the doc that receipt created still exists. If it was deleted
+      // since (a retry after someone removed it), replaying would return a dead id: create fresh.
+      const replayable = !receipt || Boolean(receipt.docId && (await prisma.doc.findUnique({ where: { id: receipt.docId }, select: { id: true } })))
+      if (replayable) operationId = derived
+    }
     const created = await createDocument(
       { workspaceId, parentId, title: segment, content: null, sortOrder },
-      { ...actorOpts(opts), operationId: deriveOperationId(opts.operationId ?? "doc-fs", builtPath) }
+      { ...actorOpts(opts), operationId }
     )
     parentId = created.id
   }

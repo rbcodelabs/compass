@@ -55,6 +55,18 @@ function describeError(error: unknown, path: string): string {
   throw error
 }
 
+/**
+ * resolvePath now throws invalid-path for a path with an empty, dot or whitespace segment; turn that
+ * into the same clean tool error every other doc-fs failure gets instead of letting it escape.
+ */
+async function tryResolve(workspaceId: string, path: string): Promise<{ node: docFs.DocFsNode | null } | { failure: ReturnType<typeof fail> }> {
+  try {
+    return { node: await docFs.resolvePath(workspaceId, path) }
+  } catch (error) {
+    return { failure: fail(describeError(error, path)) }
+  }
+}
+
 async function resolveWorkspaceUrl(workspaceId: string, docId: string): Promise<string | null> {
   const workspace = await getPrisma().workspace.findUnique({
     where: { id: workspaceId },
@@ -122,7 +134,9 @@ export async function deleteDoc({
   operationId?: string
   expectedRevision?: string
 }) {
-  const node = await docFs.resolvePath(workspaceId, path)
+  const resolved = await tryResolve(workspaceId, path)
+  if ("failure" in resolved) return resolved.failure
+  const node = resolved.node
   if (!node) return fail(`No doc found at path "${path}".`)
   try {
     await docFs.deletePath(workspaceId, path, {
@@ -173,7 +187,9 @@ export async function moveDoc({
 // Path-addressed successor to list_doc_versions. Same response shape.
 
 export async function listDocHistory({ workspaceId, path }: { workspaceId: string; path: string }) {
-  const node = await docFs.resolvePath(workspaceId, path)
+  const resolved = await tryResolve(workspaceId, path)
+  if ("failure" in resolved) return resolved.failure
+  const node = resolved.node
   if (!node) return fail(`No doc found at path "${path}".`)
 
   const prisma = getPrisma()
@@ -219,7 +235,9 @@ export async function restoreDocVersion({
   expectedRevision?: string
   operationId?: string
 }) {
-  const node = await docFs.resolvePath(workspaceId, path)
+  const resolved = await tryResolve(workspaceId, path)
+  if ("failure" in resolved) return resolved.failure
+  const node = resolved.node
   if (!node) return fail(`No doc found at path "${path}".`)
 
   const prisma = getPrisma()
@@ -248,9 +266,10 @@ export async function restoreDocVersion({
 // on an already-smaller surface, and reopen is folded into resolve's
 // `resolved: false`.
 
-async function resolveDocIdForPath(workspaceId: string, path: string): Promise<string | null> {
-  const node = await docFs.resolvePath(workspaceId, path)
-  return node?.docId ?? null
+async function resolveDocIdForPath(workspaceId: string, path: string): Promise<{ docId: string | null } | { failure: ReturnType<typeof fail> }> {
+  const resolved = await tryResolve(workspaceId, path)
+  if ("failure" in resolved) return resolved
+  return { docId: resolved.node?.docId ?? null }
 }
 
 export async function addDocComment({
@@ -276,7 +295,9 @@ export async function addDocComment({
   anchorStart?: number
   anchorEnd?: number
 }) {
-  const docId = await resolveDocIdForPath(workspaceId, path)
+  const resolvedDoc = await resolveDocIdForPath(workspaceId, path)
+  if ("failure" in resolvedDoc) return resolvedDoc.failure
+  const docId = resolvedDoc.docId
   if (!docId) return fail(`No doc found at path "${path}".`)
   return addDocCommentById({ docId, body, authorName, parentId, anchorText, anchorPrefix, anchorSuffix, anchorStart, anchorEnd })
 }
@@ -290,7 +311,9 @@ export async function listDocComments({
   path: string
   status?: "OPEN" | "RESOLVED"
 }) {
-  const docId = await resolveDocIdForPath(workspaceId, path)
+  const resolvedDoc = await resolveDocIdForPath(workspaceId, path)
+  if ("failure" in resolvedDoc) return resolvedDoc.failure
+  const docId = resolvedDoc.docId
   if (!docId) return fail(`No doc found at path "${path}".`)
   return listDocCommentsById({ docId, status })
 }
@@ -306,7 +329,9 @@ export async function resolveDocComment({
   commentId: string
   resolved?: boolean
 }) {
-  const docId = await resolveDocIdForPath(workspaceId, path)
+  const resolvedDoc = await resolveDocIdForPath(workspaceId, path)
+  if ("failure" in resolvedDoc) return resolvedDoc.failure
+  const docId = resolvedDoc.docId
   if (!docId) return fail(`No doc found at path "${path}".`)
   const prisma = getPrisma()
   const comment = await prisma.docComment.findUnique({ where: { id: commentId }, select: { docId: true } })

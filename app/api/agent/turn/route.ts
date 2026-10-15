@@ -148,7 +148,7 @@ const DOCS_FILESYSTEM_PROMPT =
   `Your working directory is a local copy of this workspace's docs. Every doc is a directory named after its title, ` +
   `holding one \`_doc.md\` file (YAML frontmatter, then the markdown body) and one subdirectory per child doc. ` +
   `Read, search, create and edit docs with the Read, Write, Edit and Glob tools. To create a doc, write a new \`<Title>/_doc.md\` ` +
-  `(nest it inside its parent's directory; omit \`compass_doc_id\`). To delete or move/rename a doc, use the delete_local_doc and ` +
+  `(nest it inside its parent's directory; omit \`compass_doc_id\`); write only \`<doc>/_doc.md\` files, never scratch, notes or temp files in the docs directory, and nothing at its root. To delete or move/rename a doc, use the delete_local_doc and ` +
   `move_local_doc tools; do not delete or rename files any other way. Never change or invent a \`compass_*\` frontmatter key. ` +
   `Edits are saved to Compass when your turn ends. The mcp__compass__write_doc, delete_doc and move_doc tools are not available to you. ` +
   `Doc comments, version history and restore still use their Compass tools, and edit_doc, edit_canvas, build_canvas_tree and capture_canvas ` +

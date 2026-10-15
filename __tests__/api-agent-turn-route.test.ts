@@ -660,6 +660,9 @@ describe("agent turn route — detached runs", () => {
     expect(JSON.stringify(manifest)).not.toContain("# Vision")
     expect(runCommand.mock.calls[0][0].env.DOCS_ROOT).toBe("/vercel/sandbox/docs")
     expect(runCommand.mock.calls[0][0].env.AGENT_SYSTEM_PROMPT).toContain("_doc.md")
+    // only <doc>/_doc.md files: no scratch files, and nothing at the docs root
+    expect(runCommand.mock.calls[0][0].env.AGENT_SYSTEM_PROMPT).toMatch(/write only .*_doc\.md.* files, never scratch, notes or temp files/)
+    expect(runCommand.mock.calls[0][0].env.AGENT_SYSTEM_PROMPT).toContain("nothing at its root")
   })
 
   it("keeps docs the sandbox could not read back (over 2 MiB) out of both the files and the signed baseline", async () => {
