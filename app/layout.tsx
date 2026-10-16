@@ -1,58 +1,84 @@
 import type { Metadata } from "next";
-import {
-  Plus_Jakarta_Sans,
-  Geist_Mono,
-  Inter,
-  Poppins,
-  Space_Grotesk,
-  Source_Serif_4,
-} from "next/font/google";
+import localFont from "next/font/local";
 import { ProductAnalytics } from "@/components/product-analytics";
 import "./globals.css";
 
-const jakartaSans = Plus_Jakarta_Sans({
+// Fonts are self-hosted from @fontsource packages (latin subset woff2) via
+// next/font/local rather than next/font/google. next/font/google fetches from
+// Google at build time, and a transient failure there broke `next build`
+// ("Can't resolve '@vercel/turbopack-next/internal/font/google/font'").
+// Variable fonts cover the weight range the app uses (300-700); Poppins has no
+// variable build, so each weight is its own static file.
+const jakartaSans = localFont({
   variable: "--font-jakarta",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  src: "../node_modules/@fontsource-variable/plus-jakarta-sans/files/plus-jakarta-sans-latin-wght-normal.woff2",
+  weight: "200 800",
   display: "swap",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  src: "../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2",
+  weight: "100 900",
+  display: "swap",
 });
 
 // ── Curated workspace-branding font presets ──────────────────────────────
 // Each of these is a selectable option in Settings → Branding (see
 // lib/branding-presets.ts). Defining an unused CSS variable costs nothing —
-// this is the standard next/font multi-font pattern — so all four are
+// this is the standard next/font multi-font pattern — so all of them are
 // loaded unconditionally and added to <html> below regardless of which
 // (if any) workspace actually picks them.
-const inter = Inter({
+const inter = localFont({
   variable: "--font-inter",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  src: "../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2",
+  weight: "100 900",
   display: "swap",
 });
 
-const poppins = Poppins({
+const poppins = localFont({
   variable: "--font-poppins",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  src: [
+    {
+      path: "../node_modules/@fontsource/poppins/files/poppins-latin-300-normal.woff2",
+      weight: "300",
+      style: "normal",
+    },
+    {
+      path: "../node_modules/@fontsource/poppins/files/poppins-latin-400-normal.woff2",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "../node_modules/@fontsource/poppins/files/poppins-latin-500-normal.woff2",
+      weight: "500",
+      style: "normal",
+    },
+    {
+      path: "../node_modules/@fontsource/poppins/files/poppins-latin-600-normal.woff2",
+      weight: "600",
+      style: "normal",
+    },
+    {
+      path: "../node_modules/@fontsource/poppins/files/poppins-latin-700-normal.woff2",
+      weight: "700",
+      style: "normal",
+    },
+  ],
   display: "swap",
 });
 
-const spaceGrotesk = Space_Grotesk({
+const spaceGrotesk = localFont({
   variable: "--font-space-grotesk",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  src: "../node_modules/@fontsource-variable/space-grotesk/files/space-grotesk-latin-wght-normal.woff2",
+  weight: "300 700",
   display: "swap",
 });
 
-const sourceSerif = Source_Serif_4({
+const sourceSerif = localFont({
   variable: "--font-source-serif",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  src: "../node_modules/@fontsource-variable/source-serif-4/files/source-serif-4-latin-wght-normal.woff2",
+  weight: "200 900",
   display: "swap",
 });
 

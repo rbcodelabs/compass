@@ -67,7 +67,7 @@ export function getPresetPalette(id: string): BrandPalette | undefined {
 export interface FontPreset {
   id: string;
   label: string;
-  /** CSS variable defined by the matching next/font/google import in app/layout.tsx. */
+  /** CSS variable defined by the matching next/font/local declaration in app/layout.tsx. */
   cssVariable: string;
   /** Fallback font stack used for live preview and as the CSS fallback chain. */
   previewFallback: string;
