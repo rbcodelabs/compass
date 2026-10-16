@@ -29,6 +29,9 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+// The composer-options loader reads the session; these tests never call it.
+vi.mock("@/auth", () => ({ auth: vi.fn() }));
+
 import {
   createExperiment,
   startExperiment,

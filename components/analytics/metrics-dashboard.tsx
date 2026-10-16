@@ -11,6 +11,7 @@ import {
   PencilIcon,
   ArchiveIcon,
   EyeOffIcon,
+  RefreshCwIcon,
 } from "lucide-react";
 import type { DashboardMetricDTO, MetricDTO, MetricInput } from "@/lib/analytics/service";
 import { unwrapAnalyticsAction } from "@/lib/analytics/action-result";
@@ -26,6 +27,8 @@ import {
   createAnalyticsMetric,
   editAnalyticsMetric,
   archiveAnalyticsMetric,
+  getDashboardMetricRow,
+  refreshAnalyticsMeasurement,
 } from "@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions";
 import { usePanelContext, type EntityPanelType } from "@/components/panels/panel-context";
 import { Button } from "@/components/ui/button";
@@ -43,7 +46,7 @@ const PANEL_TYPE_FOR_TARGET: Record<DashboardMetricDTO["bindings"][number]["targ
   KEY_RESULT: "keyResult",
 };
 
-function errorMessage(error: unknown): string {
+function errorMessage(error: unknown, fallback = "The change could not be saved. Try again."): string {
   const code = error instanceof Error ? error.message : "UNKNOWN";
   const known: Record<string, string> = {
     AUTHENTICATION: "Vercel rejected that access token.",
@@ -55,8 +58,16 @@ function errorMessage(error: unknown): string {
     METRIC_ARCHIVED: "This metric is already archived.",
     INVALID_INPUT: "Check the metric fields and try again.",
     NOT_FOUND_OR_ACCESS_DENIED: "This metric is no longer available. Reload the page.",
+    DISCONNECTED: "Reconnect the metric's provider in Settings, then refresh again.",
+    CONNECTION_CHANGED: "The provider connection changed during refresh. Try again.",
+    PROVIDER_UNAVAILABLE: "The provider is temporarily unavailable. Try again later.",
+    RATE_LIMITED: "The provider rate-limited this refresh. Try again later.",
+    DATA_UNAVAILABLE: "The provider no longer has data for this window.",
+    BINDING_INACTIVE: "This metric's link changed elsewhere. Reload the page.",
+    PRODUCTION_ONLY: "This metric can only be refreshed in production.",
+    ACTIVATION_WINDOW: "This metric supports only the current trailing 30-day snapshot.",
   };
-  return known[code] ?? "The change could not be saved. Try again.";
+  return known[code] ?? fallback;
 }
 
 type MetricKind = "pageviews" | "daily_visitors" | "event_count";
@@ -84,6 +95,10 @@ export function MetricsDashboard({
   const [archiving, setArchiving] = useState<DashboardMetricDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  // Ids with a refresh in flight. The ref is the source of truth for the double-click
+  // guard (state is stale inside an async loop); the state copy drives the disabled UI.
+  const refreshingRef = useRef(new Set<string>());
+  const [refreshing, setRefreshing] = useState<ReadonlySet<string>>(new Set());
   const gridRef = useRef<HTMLDivElement>(null);
   const dragIdRef = useRef<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
@@ -92,9 +107,67 @@ export function MetricsDashboard({
   const hidden = useMemo(() => metrics.filter((row) => !row.dashboardVisible), [metrics]);
   const freshCount = useMemo(() => metrics.filter((row) => row.status === "fresh").length, [metrics]);
   const attentionCount = metrics.length - freshCount;
+  const refreshable = useMemo(() => visible.filter((row) => row.refreshBindingId), [visible]);
 
   function patch(id: string, update: Partial<DashboardMetricDTO>) {
     setMetrics((current) => current.map((row) => (row.metric.id === id ? { ...row, ...update } : row)));
+  }
+
+  /**
+   * Captures a fresh measurement for the binding behind the card's headline number, then
+   * re-reads just that card. It re-reads on failure too, because a failed refresh is
+   * recorded server-side and the card should show it. Only the card's computed fields
+   * are patched, so a resize or reorder made while the provider was working is not
+   * rolled back. Resolves to a message naming the metric on failure, or null.
+   */
+  async function refreshMetric(row: DashboardMetricDTO): Promise<string | null> {
+    const id = row.metric.id;
+    const bindingId = row.refreshBindingId;
+    if (!bindingId || refreshingRef.current.has(id)) return null;
+    refreshingRef.current.add(id);
+    setRefreshing(new Set(refreshingRef.current));
+    let failure: string | null = null;
+    try {
+      unwrapAnalyticsAction(await refreshAnalyticsMeasurement(orgSlug, workspaceSlug, bindingId, crypto.randomUUID()));
+    } catch (cause) {
+      failure = `${row.metric.name}: ${errorMessage(cause, "The refresh failed. Try again.")}`;
+    }
+    try {
+      const latest = unwrapAnalyticsAction(await getDashboardMetricRow(orgSlug, workspaceSlug, id));
+      patch(id, {
+        status: latest.status,
+        statusCaption: latest.statusCaption,
+        value: latest.value,
+        delta: latest.delta,
+        sparkline: latest.sparkline,
+        bindings: latest.bindings,
+        refreshBindingId: latest.refreshBindingId,
+      });
+    } catch (cause) {
+      failure ??= `${row.metric.name}: ${errorMessage(cause, "The refreshed value could not be loaded. Reload the page.")}`;
+    } finally {
+      refreshingRef.current.delete(id);
+      setRefreshing(new Set(refreshingRef.current));
+    }
+    return failure;
+  }
+
+  async function refreshOne(row: DashboardMetricDTO) {
+    setError(null);
+    const failure = await refreshMetric(row);
+    if (failure) setError(failure);
+  }
+
+  // One at a time: each refresh is a provider call, and a burst of them is what
+  // trips provider rate limits.
+  async function refreshAll() {
+    setError(null);
+    const failures: string[] = [];
+    for (const row of refreshable) {
+      const failure = await refreshMetric(row);
+      if (failure) failures.push(failure);
+    }
+    if (failures.length > 0) setError(failures.join(" "));
   }
 
   function openCreate() {
@@ -139,6 +212,7 @@ export function MetricsDashboard({
             delta: null,
             sparkline: [],
             bindings: [],
+            refreshBindingId: null,
           };
           setMetrics((current) => [...current.filter((row) => row.metric.id !== created.metric.id), created]);
         }
@@ -271,10 +345,16 @@ export function MetricsDashboard({
         <p className="text-sm text-text-subtle">
           {vercelConnectionId ? "Vercel Web Analytics is connected as this workspace's analytics provider." : "Connect Vercel Web Analytics in Settings to define metrics."}
         </p>
-        <Button onClick={openCreate} disabled={!vercelConnectionId}>
-          <PlusIcon />
-          New metric
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" onClick={refreshAll} disabled={refreshable.length === 0 || refreshing.size > 0}>
+            <RefreshCwIcon className={refreshing.size > 0 ? "animate-spin" : undefined} />
+            Refresh all
+          </Button>
+          <Button onClick={openCreate} disabled={!vercelConnectionId}>
+            <PlusIcon />
+            New metric
+          </Button>
+        </div>
       </div>
 
       {error && <p role="alert" className="rounded-lg border border-status-danger/25 bg-status-danger-surface px-3 py-2 text-sm text-status-danger">{error}</p>}
@@ -306,6 +386,8 @@ export function MetricsDashboard({
               onDragOver={(event) => onDragOver(event, row.metric.id)}
               onDrop={(event) => onDrop(event, row.metric.id)}
               onDragEnd={() => { dragIdRef.current = null; setDropTargetId(null); }}
+              refreshing={refreshing.has(row.metric.id)}
+              onRefresh={() => refreshOne(row)}
               onResizeEnd={(next) => commitResize(row.metric.id, next)}
               onSize={(preset) => applySize(row, preset)}
               onEdit={() => openEdit(row)}
@@ -445,6 +527,8 @@ function MetricCard({
   onDragOver,
   onDrop,
   onDragEnd,
+  refreshing,
+  onRefresh,
   onResizeEnd,
   onSize,
   onEdit,
@@ -458,6 +542,8 @@ function MetricCard({
   onDragOver: (event: React.DragEvent) => void;
   onDrop: (event: React.DragEvent) => void;
   onDragEnd: () => void;
+  refreshing: boolean;
+  onRefresh: () => void;
   onResizeEnd: (next: { col: number; row: number }) => void;
   onSize: (preset: SizeBucket) => void;
   onEdit: () => void;
@@ -524,6 +610,17 @@ function MetricCard({
           <p className="truncate text-sm font-medium text-text-primary" title={row.metric.name}>{row.metric.name}</p>
           <p className="mt-0.5 text-[11px] text-text-subtle">{row.metric.query.metric.replaceAll("_", " ")} · {row.metric.provider === "vercel" ? "Vercel" : "Compass"}</p>
         </div>
+        <div className="flex shrink-0 items-center gap-0.5">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Refresh ${row.metric.name}`}
+          title={row.refreshBindingId ? "Refresh this metric" : "Link this metric to a record to refresh it"}
+          disabled={!row.refreshBindingId || refreshing}
+          onClick={onRefresh}
+        >
+          <RefreshCwIcon className={refreshing ? "animate-spin" : undefined} />
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`${row.metric.name} card options`} />}>
             <MoreHorizontalIcon />
@@ -549,6 +646,7 @@ function MetricCard({
             <DropdownMenuItem variant="destructive" onClick={onArchive}><ArchiveIcon />Archive metric</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
 
       <div className="flex flex-1 flex-col gap-2 px-3 py-2">

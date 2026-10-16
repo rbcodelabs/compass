@@ -42,6 +42,16 @@ export async function refreshAnalyticsMeasurement(orgSlug: string, workspaceSlug
   return analyticsAction(() => analytics.refreshBinding(actor, workspaceId, bindingId, requestId));
 }
 
+/**
+ * Re-reads one dashboard card, so a refresh can update just that card (value, status,
+ * caption) without reloading the page or disturbing layout edits made meanwhile.
+ * A read: org-wide read-only members can see it, like the connections list.
+ */
+export async function getDashboardMetricRow(orgSlug: string, workspaceSlug: string, metricId: string) {
+  const { actor, workspaceId } = await context(orgSlug, workspaceSlug);
+  return analyticsAction(() => analytics.getDashboardMetric(actor, workspaceId, metricId));
+}
+
 export async function listAnalyticsConnections(orgSlug: string, workspaceSlug: string) {
   // Read: intentionally uses the plain (non-writable-asserting) context, so
   // org-wide read-only members can still see connected analytics providers.

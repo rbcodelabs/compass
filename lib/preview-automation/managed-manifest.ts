@@ -153,7 +153,33 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "075_roadmap_item_provenance": "2d4d390790ff8cb20c7918e0b56b2a37ccbc99eddc5216622668ba50602ed0e6",
   // External / manual research studies: five nullable ADD COLUMNs (research_studies and
   // research_sessions), no index, no backfill, no hook. Digest recorded from the shipped SQL; please review it.
-  "076_research_external_studies": "01cc40f387b9171fc6761f598db0ce20e0dae1df9ca58f9755bdbe481bd97cb0"
+  "076_research_external_studies": "01cc40f387b9171fc6761f598db0ce20e0dae1df9ca58f9755bdbe481bd97cb0",
+  // Artifact screenshots: seven nullable ADD COLUMN IF NOT EXISTS statements on artifact_revisions, no DEFAULT, no
+  // index, no backfill. The postcondition hook (lib/migrations/artifact-screenshots.ts) is pinned in
+  // REVIEWED_MIGRATION_CODE_SHA256 below. Digest recorded from the shipped SQL; please review it.
+  "077_artifact_screenshots": "cf897fc83af5b5f42ebb23923717060e45e1c5757f833b36d588d7d38eb98067",
+  // Slide-deck Artifacts (nullable artifacts.kind + comment_element_anchors.slide_index;
+  // no index, no backfill, no hook). Last, matching its MIGRATIONS position.
+  "078_artifact_slide_decks": "aa214ce3c2fcc1ce8055e0e9417bda69189aff99794d3bb3b2c14d0a562b3db9",
+  // Saved roadmap views: one new table plus one non-unique async index, no backfill.
+  // Digest recorded from the shipped SQL; please review it.
+  "079_roadmap_views": "0575ee815ac4c66181d213a7b6f495c77bb62a05271b4fb25d3c92f98df64d5b",
+  // Durable background agent runs: two additive CREATE TABLEs (agent_runs, agent_run_events)
+  // and six ASYNC indexes, two of them unique (worker-token lookup, (run_id, seq) idempotency).
+  // No ALTER, no backfill, no foreign keys. Digest recorded from the shipped SQL; please review it.
+  "069_background_agent_runs": "256c8f3f53066f7ded9c896ce36f0ccb8674729d2debdfea83ebe665367f3301",
+  // Agent SDK session pointer: one new table keyed by conversation_id, no index, no backfill.
+  // Digest recorded from the shipped SQL; please review it.
+  "080_agent_sessions": "f82aa43816ea5e1f5d393c2e244d4e2b0e41f3ce21e42494c99a587ce78f4475",
+  // Audit + per-turn budget for web_search: one new table keyed by (credential_id, seq), no index, no backfill.
+  // Digest recorded from the shipped SQL; please review it.
+  "081_agent_web_searches": "c2e0c3445770c5fb5adf24c4f043af46fa13472895023b4206993800715c3218",
+  // Multi-user agent conversations: one new table, a unique and a non-unique async index, and
+  // a nullable agent_messages.author_user_id. No backfill. Digest recorded from the shipped SQL; please review it.
+  "082_agent_conversation_participants": "0d72de736539ef65fd48f9111b9b3b9f99a7213d08bc123848335319cc67656b",
+  // v0 chat Artifacts: two nullable ADD COLUMNs (artifacts.v0_chat_id, artifact_revisions.v0_version_id),
+  // IF NOT EXISTS, no DEFAULT, no backfill, no index. Digest recorded from the shipped SQL; please review it.
+  "090_v0_chat_artifacts": "1a2098fa1c19b8257200cf0b00c6d7b9da763d9a13afbf7b1486b95ed3c297e3"
 };
 
 /**
@@ -188,9 +214,29 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "075_roadmap_item_provenance": {
     "lib/migrations/roadmap-item-provenance.ts": "6f99f4829eccd6864d7dd476a01299bb3027246f4d6e6d2fdbd255980b88f4f5",
   },
+  // The 077 postcondition (all seven artifact_revisions thumbnail columns present, typed and nullable before the receipt).
+  "077_artifact_screenshots": {
+    "lib/migrations/artifact-screenshots.ts": "0ad4f77ef18ee68fcef5422d2d43040b2ec0ee2ac0c6107c90ac7bff53e05c78",
+  },
+  // The 079 postcondition (table shape plus a valid, ready, non-unique org/workspace index before the receipt).
+  "079_roadmap_views": {
+    "lib/migrations/roadmap-views.ts": "6afd1be2429b929b643e3ab50de8b5fd9b94fe350a4e49f76987e1b80fa9e5eb",
+  },
+  // The 082 postcondition (column shape plus a primary key on conversation_id alone before the receipt).
+  "080_agent_sessions": {
+    "lib/migrations/agent-sessions.ts": "8d4fdc83ab62c345ca0fe00be983904c14495def605ed2e7fc42f4bdcfa6d404",
+  },
+  // The 081 postcondition (column shape plus the composite (credential_id, seq) primary key before the receipt).
+  "081_agent_web_searches": {
+    "lib/migrations/agent-web-searches.ts": "0df81423dd87944c656f88e01ca6b4598f9e6c6fce02974e72819ec3102698c2",
+  },
+  // The 082 postcondition (participants table shape, nullable author column, both indexes valid and ready before the receipt).
+  "082_agent_conversation_participants": {
+    "lib/migrations/agent-conversation-participants.ts": "f7192dade000eae4d957d91711021dda072b0bae7718ec1f29aa1daeae83dbfe",
+  },
 };
 
-export function assertReviewedMigrationCode(name: string, read: (relativePath: string) => Buffer = (relativePath) => readFileSync(path.join(process.cwd(), relativePath))): void {
+export function assertReviewedMigrationCode(name: string, read: (relativePath: string) => Buffer = (relativePath) => readFileSync(path.join(/*turbopackIgnore: true*/ process.cwd(), relativePath))): void {
   for (const [relativePath, expected] of Object.entries(REVIEWED_MIGRATION_CODE_SHA256[name] ?? {})) {
     const digest = createHash("sha256").update(read(relativePath)).digest("hex");
     if (digest !== expected) throw new Error(`Reviewed managed manifest code digest changed: ${name} ${relativePath}`);

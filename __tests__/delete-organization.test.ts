@@ -45,6 +45,7 @@ const mockCapabilityPack = { findMany: vi.fn(), deleteMany: vi.fn() };
 const mockCapabilityPackVersion = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockCanvasNodePosition = { deleteMany: vi.fn() };
 const mockPortalHomeLayout = { deleteMany: vi.fn() };
+const mockRoadmapView = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
 const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) };
@@ -86,10 +87,15 @@ const mockPrisma = {
   workspaceActivationState: { deleteMany: vi.fn() },
   apiKey: { deleteMany: vi.fn() },
   agentMessage: { deleteMany: vi.fn() },
+  agentSession: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
   agentAuditLog: { deleteMany: vi.fn() },
   agentConversation: { deleteMany: vi.fn() },
   agentWorkspaceGrant: { deleteMany: vi.fn() },
   agentToolCall: { deleteMany: vi.fn() },
+  // Deleting an org deletes its workspaces' background agent runs; the
+  // availability probe guarding that step reads both tables.
+  agentRun: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
+  agentRunEvent: { findFirst: vi.fn().mockResolvedValue(null), deleteMany: vi.fn() },
   organization: mockOrganization,
   organizationMember: mockOrganizationMember,
   workspace: mockWorkspace,
@@ -132,6 +138,7 @@ const mockPrisma = {
   capabilityPackVersion: mockCapabilityPackVersion,
   canvasNodePosition: mockCanvasNodePosition,
   portalHomeLayout: mockPortalHomeLayout,
+  roadmapView: mockRoadmapView,
   workspaceMember: mockWorkspaceMember,
   squad: mockSquad,
   doc: mockDoc,
@@ -292,6 +299,7 @@ beforeEach(() => {
     mockCapabilityPackVersion.deleteMany,
     mockCanvasNodePosition.deleteMany,
     mockPortalHomeLayout.deleteMany,
+    mockRoadmapView.deleteMany,
     mockWorkspaceMember.deleteMany,
     mockSquad.deleteMany,
     mockDoc.deleteMany,
@@ -554,6 +562,7 @@ describe("deleteOrganization", () => {
     expect(mockWorkspaceScoringConfig.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockCanvasNodePosition.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockPortalHomeLayout.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockRoadmapView.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
 
     // ── Members / squads / docs / workspace ──
     expect(mockWorkspaceMember.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
@@ -566,6 +575,7 @@ describe("deleteOrganization", () => {
       where: { scoringModelId: { in: ["sm-1"] } },
     });
     expect(mockScoringModel.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-1" } });
+    expect(mockRoadmapView.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-1" } });
     expect(mockOrganizationMember.deleteMany).toHaveBeenCalledWith({ where: { organizationId: "org-1" } });
     expect(mockOrganization.delete).toHaveBeenCalledWith({ where: { id: "org-1" } });
 

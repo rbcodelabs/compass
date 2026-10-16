@@ -212,6 +212,31 @@ describe("immutable document service", () => {
     expect(mocks.putContent).not.toHaveBeenCalled()
   })
 
+  it("guards a legacy (null-revision) doc delete with revisionWhere so its derived revision matches", async () => {
+    const { deleteDocument, documentRevision } = await import("@/lib/document-service")
+    const legacy = { ...current, storageProvider: "DATABASE", contentRef: null, revision: null }
+    mocks.db.doc.findUnique.mockResolvedValue(legacy)
+    mocks.db.doc.findFirst.mockResolvedValue(null) // no children
+    await deleteDocument("doc-a", { authorName: "Agent", expectedRevision: documentRevision(legacy) })
+    expect(mocks.db.doc.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "doc-a", workspaceId: "workspace-a", revision: null, updatedAt: legacy.updatedAt } }))
+    expect(mocks.db.doc.delete).toHaveBeenCalledWith({ where: { id: "doc-a" } })
+  })
+
+  it("refuses a delete whose pinned revision no longer matches, deleting nothing", async () => {
+    const { deleteDocument } = await import("@/lib/document-service")
+    mocks.db.doc.findUnique.mockResolvedValue({ ...current, storageProvider: "DATABASE", contentRef: null, revision: "rev-now" })
+    mocks.db.doc.updateMany.mockResolvedValue({ count: 0 })
+    await expect(deleteDocument("doc-a", { authorName: "Agent", expectedRevision: "rev-old" })).rejects.toThrow("revision-conflict")
+    expect(mocks.db.doc.delete).not.toHaveBeenCalled()
+  })
+
+  it("fails closed on an empty expectedRevision instead of matching any revision", async () => {
+    const { deleteDocument } = await import("@/lib/document-service")
+    mocks.db.doc.findUnique.mockResolvedValue({ ...current, storageProvider: "DATABASE", contentRef: null })
+    await expect(deleteDocument("doc-a", { authorName: "Agent", expectedRevision: "" })).rejects.toThrow("revision-required")
+    expect(mocks.db.doc.delete).not.toHaveBeenCalled()
+  })
+
   it("replays deletion after the doc is gone and rejects a changed actor", async () => {
     const { deleteDocument } = await import("@/lib/document-service")
     mocks.db.doc.findFirst.mockResolvedValue(null)

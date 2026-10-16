@@ -49,10 +49,20 @@ async function mintScopedMcpKey({
   return { token, apiKeyId: row.id }
 }
 
+/** Default key lifetime: the old four-minute turn ceiling plus a minute of grace. */
+export const DEFAULT_AGENT_KEY_TTL_MS = 5 * 60 * 1000
+
 /** Mint an ephemeral per-user MCP key. Returns the raw token (only chance to
- *  read it) and the row id for later revocation. */
-export async function mintAgentMcpKey(userId: string, workspaceId: string, scope?: { scopeConversationId: string; scopeClaimId: string }): Promise<MintedAgentKey> {
-  return mintScopedMcpKey({ userId, name: "agent-turn (ephemeral)", purpose: "AGENT_TURN", scopeWorkspaceId: workspaceId, expiresAt: new Date(Date.now() + 5 * 60 * 1000), ...scope })
+ *  read it) and the row id for later revocation.
+ *
+ *  `expiresAt` is a parameter because a detached run can outlive five
+ *  minutes and its agent would otherwise lose tool access mid-turn. Callers pass
+ *  `deadlineAt + 60s` grace and never longer, and record `apiKeyId` on the run so
+ *  both the result path and the sweeper can revoke it — a key surviving its run
+ *  requires both of those to fail. This is a real weakening of the blast radius,
+ *  bounded by scoping that is otherwise unchanged. */
+export async function mintAgentMcpKey(userId: string, workspaceId: string, scope?: { scopeConversationId: string; scopeClaimId: string }, expiresAt?: Date): Promise<MintedAgentKey> {
+  return mintScopedMcpKey({ userId, name: "agent-turn (ephemeral)", purpose: "AGENT_TURN", scopeWorkspaceId: workspaceId, expiresAt: expiresAt ?? new Date(Date.now() + DEFAULT_AGENT_KEY_TTL_MS), ...scope })
 }
 
 /** Mint a read-only research-agent key locked to exactly one workspace. */

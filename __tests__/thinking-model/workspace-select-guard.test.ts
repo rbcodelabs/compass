@@ -29,7 +29,6 @@ const SKIP = new Set(["node_modules", ".next", ".claude", ".worktrees", "__tests
 
 /** Every site that fails before 073 is applied. Update together with the PR banner. */
 export const SELECTLESS_WORKSPACE_SITES: Record<string, number> = {
-  "app/[orgSlug]/[workspaceSlug]/canvas/page.tsx": 1,
   "app/[orgSlug]/[workspaceSlug]/okrs/[cycleId]/page.tsx": 1,
   "app/[orgSlug]/[workspaceSlug]/okrs/page.tsx": 1,
   "app/[orgSlug]/[workspaceSlug]/reviews/[requestId]/page.tsx": 1,
@@ -46,6 +45,7 @@ export const SELECTLESS_WORKSPACE_SITES: Record<string, number> = {
   "lib/workspace.ts": 2,
   // Dev/ops scripts, run by hand; see the PR for whether any runs against a shared schema.
   "scripts/seed-card-sort-demo.ts": 2,
+  "scripts/seed-demo-intro.ts": 2,
   "scripts/verify-geode-document-migration.ts": 1,
   "scripts/verify-geode-documents.ts": 1,
 }

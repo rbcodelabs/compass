@@ -33,6 +33,8 @@ in `app/globals.css`; keep hex out of the token block.
 
 Product patterns are introduced in phase 2. Do not move domain models or data fetching into the pattern layer.
 
+Pattern guides: [Workspace header](./workspace-header.md) (slot order, overflow menu, narrow-width rules for list/board pages).
+
 ## Application navigation
 
 The authenticated desktop shell uses the shadcn `Sidebar` primitive in icon-collapse mode. Keep application navigation inside `SidebarProvider` and compose it from `SidebarHeader`, `SidebarContent`, `SidebarMenu`, `SidebarFooter`, `SidebarInset`, and `SidebarRail` rather than recreating fixed-width navigation locally.

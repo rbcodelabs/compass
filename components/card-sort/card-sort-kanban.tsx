@@ -80,6 +80,7 @@ import { usePanelContext, type EntityPanelType } from "@/components/panels/panel
 import { ProposeContextMenu, ProposeMenuButton } from "./card-sort-propose-menu"
 import type { CardSortView } from "./card-sort-round-header"
 import { InfoHint } from "./card-sort-info"
+import { CardSortQuickFilter } from "./card-sort-quick-filter"
 import { useCardSortProposals } from "./use-card-sort-proposals"
 import {
   NewEntryCard,
@@ -95,6 +96,7 @@ import {
   type PlacedCard,
   type VacatedSlot,
 } from "@/lib/card-sort-kanban"
+import { cardSearchFields, filterKanbanColumns, matchesQuickFilter } from "@/lib/card-sort-filter"
 import { cn } from "@/lib/utils"
 import type { CardSortBoardProposal } from "@/lib/card-sort"
 import type { CardSortCardMeta } from "@/lib/card-sort-cards"
@@ -443,12 +445,15 @@ function KanbanColumnView({
   ctx,
   entries,
   entryProps,
+  filtering = false,
 }: {
   column: KanbanColumn
   ctx: CardContext
   /** Pending new-entry requests that belong in this column. */
   entries: NewEntryItem[]
   entryProps: NewEntryColumnProps
+  /** A quick filter is narrowing the board. */
+  filtering?: boolean
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
@@ -505,8 +510,15 @@ function KanbanColumnView({
         "min-h-24 md:max-h-none md:min-h-0 md:flex-1 md:overscroll-auto",
         isOver && "rounded-lg bg-primary/5 ring-2 ring-inset ring-ring/25"
       )}
-      emptyState={empty ? <p className="text-xs text-text-subtle">Nothing here yet</p> : undefined}
     >
+      {/*
+        Rendered as a child, not via BoardColumn's emptyState: that prop only shows
+        when children is falsy, and the list below is always an array (truthy).
+      */}
+      {empty && (
+        <p className="text-xs text-text-subtle">{filtering ? "No matches" : "Nothing here yet"}</p>
+      )}
+
       {column.cards.map((card) => (
         <SolidCard key={card.objectId} card={card} ctx={ctx} />
       ))}
@@ -591,6 +603,8 @@ export function CardSortKanban({
     roundId: round.id,
   })
   const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [query, setQuery] = useState("")
+  const filtering = query.trim().length > 0
 
   // Drag is off unless the round is OPEN. The server rejects a proposal on a
   // REVEALED or CLOSED round regardless (lib/card-sort.ts is the authority);
@@ -634,6 +648,29 @@ export function CardSortKanban({
     }
     return map
   }, [columns, newEntries])
+
+  // The quick filter narrows what is drawn and nothing else: columns keep their
+  // officialCount, and drag/drop still resolves against the unfiltered columns.
+  const visibleIds = useMemo(() => {
+    if (!filtering) return null
+    return new Set(
+      rows
+        .filter((row) => matchesQuickFilter(cardSearchFields(row.title, cardMeta[row.objectId]), query))
+        .map((row) => row.objectId)
+    )
+  }, [filtering, rows, cardMeta, query])
+
+  const visibleColumns = useMemo(
+    () => (visibleIds ? filterKanbanColumns(columns, (id) => visibleIds.has(id)) : columns),
+    [columns, visibleIds]
+  )
+
+  const visibleEntries = (value: string | null) => {
+    const entries = entriesByColumn.get(value) ?? []
+    return filtering
+      ? entries.filter((entry) => matchesQuickFilter([entry.title, entry.description], query))
+      : entries
+  }
 
   const entryProps: NewEntryColumnProps = {
     orgSlug,
@@ -736,7 +773,15 @@ export function CardSortKanban({
   return (
     <div ref={rootRef} className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <ZoneKey />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <CardSortQuickFilter
+            value={query}
+            onChange={setQuery}
+            shown={visibleIds?.size ?? rows.length}
+            total={rows.length}
+          />
+          <ZoneKey />
+        </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
             <Button
@@ -792,13 +837,14 @@ export function CardSortKanban({
         onDragEnd={handleDragEnd}
       >
         <Board label={`${factor.name} card sort`} className="min-h-0 flex-1 items-stretch md:snap-none">
-          {columns.map((column) => (
+          {visibleColumns.map((column) => (
             <KanbanColumnView
               key={column.id}
               column={column}
               ctx={ctx}
-              entries={entriesByColumn.get(column.value) ?? []}
+              entries={visibleEntries(column.value)}
               entryProps={entryProps}
+              filtering={filtering}
             />
           ))}
         </Board>

@@ -359,6 +359,12 @@ export type DashboardMetricDTO = DashboardLayoutDTO & {
   delta: CardDelta | null
   sparkline: (number | null)[]
   bindings: DashboardBindingDTO[]
+  /**
+   * The binding behind the card's headline number (the one a refresh must capture
+   * into), or null when the metric is not linked to anything yet. It is the same
+   * choice listDashboardMetrics makes for the value, so a refresh moves what the card shows.
+   */
+  refreshBindingId: string | null
 }
 function layoutDTO(definition: MetricDefinition): DashboardLayoutDTO {
   return {
@@ -439,6 +445,7 @@ export async function listDashboardMetrics(actor: McpActor, workspaceId: string)
       value,
       delta,
       sparkline,
+      refreshBindingId: representative?.id ?? null,
       bindings: myBindings.map(b => ({ id: b.id, targetType: b.targetType as MetricTarget["targetType"], targetId: b.targetId, targetTitle: targetTitle(b.targetType, b.targetId) })),
     }
   })

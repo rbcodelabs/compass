@@ -133,7 +133,7 @@ export interface SquadData {
   color: string
 }
 
-// Assumption picker (create-experiment-form)
+// Assumption picker (experiment composer)
 export interface AssumptionOptionData {
   id: string
   title: string

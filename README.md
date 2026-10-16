@@ -39,6 +39,11 @@ token for the `/api/v1` resource with `api:read` or `api:write` scope. The guide
 documents authorization boundaries, including excluded human decision recording,
 solution-plan approval, decision application, and release dispatch operations.
 
+The custom [API explorer](https://compass.rbcodelabs.com/help/api-explorer)
+browses that live contract and can explicitly execute authenticated GET reads on
+the current deployment. Writes are documentation-only; credentials and results
+remain in page memory. See the [explorer guide](docs/content/09-api-explorer.md).
+
 The opt-in **[Updates](docs/content/22-updates.md)** landing page groups recent
 workspace activity into inspectable stories, with personal catch-up state and
 explicit Mark caught up / Undo controls. It requires the registered
@@ -53,10 +58,16 @@ with [the overview](docs/content/00-overview.md).
 Next.js 16 · React 19 · TypeScript · Prisma 7 · PostgreSQL · Auth.js ·
 Tailwind 4 · Vitest · Playwright
 
-In production Compass runs on Vercel against **Aurora DSQL**, authenticated with
-Vercel OIDC rather than a static connection string. Locally it runs against plain
-PostgreSQL. `lib/db.ts` picks the path: set `DATABASE_URL` and it uses local
-Postgres; set `PGHOST` and it signs DSQL tokens.
+Compass runs on Vercel. Since 2026-10-09 production uses **Supabase Postgres**
+via `DATABASE_URL` (the Aurora DSQL account became unavailable); the DSQL path
+(Vercel OIDC, no static connection string) remains in the code. Locally it runs
+against plain PostgreSQL. `lib/db.ts` picks the path: set `DATABASE_URL` and it
+uses a plain `pg` pool; set `PGHOST` and it signs DSQL tokens.
+
+On the `DATABASE_URL` path each serverless instance keeps at most 3 connections
+(`DATABASE_POOL_MAX` overrides this). Use the pooler's **session** or direct
+connection string, not the transaction pooler, and size the cap so
+`instances × max` stays under the pooler's client limit (15 on Supabase Free).
 
 Because DSQL does not support foreign-key constraints, `prisma/schema.prisma`
 uses `relationMode = "prisma"` — referential integrity is enforced by Prisma at

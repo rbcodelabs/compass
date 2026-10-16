@@ -10,13 +10,15 @@ section: "Core Features"
 
 The Docs section brings Markdown **Docs**, **Diagrams**, and **Artifacts** together in one Library. Use Docs for PRDs and research notes, Diagrams for visual thinking, and Artifacts for prototypes and other solution deliverables.
 
-The Library mixes root items alphabetically, keeping child pages beneath their parents. Search **Find in library** across titles, or use **All**, **Docs**, **Diagrams**, and **Artifacts** to narrow the list. Matching nested items keep their parent context visible. Search, filters, and **New** stay above a single scrolling list, including in the mobile Docs drawer.
+The Library mixes root items alphabetically, keeping child pages beneath their parents. Search **Find in library** across titles, or use **All**, **Docs**, **Diagrams**, and **Artifacts** to narrow the list. Matching nested items keep their parent context visible. Search, filters, and **New** stay above a single scrolling list, including on mobile.
 
 Use **New** to create a doc, create a diagram, import a `.canvas` file, or add an artifact.
 
-![Library component on desktop with mixed documents, diagrams, and artifacts](/screenshots/docs/docs-library-desktop.png)
+The Library lives in the agent sidebar, not in a sidebar of its own. Click the **Show library** button (the library icon) beside the page title in any Docs page, diagram, or artifact to open the agent sidebar on its **Library** view; click it again to close the sidebar. You can also switch to **Library** from the sidebar's own view switcher at any time, from any screen. Opening an item loads it in the main area and leaves the sidebar where it is, and the sidebar keeps your agent conversation running while you browse. Its width, and whether it is open, are remembered in this browser. On narrow screens the sidebar opens as an overlay.
 
-![Library component in the mobile Docs drawer](/screenshots/docs/docs-library-mobile.png)
+![Library in the agent sidebar on desktop with mixed documents, diagrams, and artifacts](/screenshots/docs/docs-library-desktop.png)
+
+![Library in the agent sidebar on mobile](/screenshots/docs/docs-library-mobile.png)
 
 These Library illustrations use synthetic content in an isolated component harness. They show the shared navigation component; full workspace behavior is covered separately by functional tests.
 
@@ -26,7 +28,7 @@ These Library illustrations use synthetic content in an isolated component harne
 
 ## Page Hierarchy
 
-Documents are organised as a tree. Each page can have child pages nested beneath it. The left sidebar in the Docs section shows your full tree. Click any page title to open it, or click the **+** icon next to a parent page to create a child page.
+Documents are organised as a tree. Each page can have child pages nested beneath it. The Library (in the agent sidebar) shows your full tree. Click any page title to open it, or click the **+** icon next to a parent page to create a child page.
 
 Drag a page from the Library onto a diagram to add a live Compass card.
 
@@ -46,6 +48,10 @@ Choose one source when creating an Artifact:
 
 - **Upload HTML** — one self-contained `.html` file up to 2 MB. CSS, images, fonts, and JavaScript must be embedded in the file.
 - **External link** — an `http` or `https` URL. Compass stores the link but never fetches or proxies the external page.
+- **Google Drive link** — an external link to a Google Doc, Sheet, Slides deck, Form, Drive file, or Drive folder is recognised automatically and labelled (for example "Google Doc"). Compass still stores only the URL, never the file's contents. The Artifact page shows a read-only preview in Google's own viewer, running as **you**: you see the file only if your Google account has access, and otherwise Google shows its sign-in or request-access page. Some browsers block third-party cookies in frames and show a sign-in page even when you have access, so an **Open in Google** link is always shown. Google Forms are not previewed in place (a Form's viewer is submittable). Drive links are not screenshotted, because the capture browser cannot sign in to Google.
+- **v0 chat** — a v0 chat link (`https://v0.app/chat/<id>`, or the longer team link copied from the address bar). Compass reads the chat from v0 using **your own** v0 connection (connect v0 first under **Settings → My agents**) and records it as revision 1; the title is optional and defaults to the chat name. On the Artifact page, **Refresh from v0** re-reads the chat and adds a new revision only when v0 has a new version, otherwise it reports that the Artifact is already up to date. Agents can do the same with `create_artifact` (`sourceType: "V0_CHAT"`) and `refresh_artifact_from_v0`.
+
+  When v0 has a running preview of the chat, the Artifact page shows it live above the link card. The preview is served through Compass from a separate preview host (`V0_PREVIEW_HOST`, attached to the same deployment) so the generated app never shares an origin with Compass, and it is readable only with the short-lived, encrypted ticket embedded in that page's frame address (`V0_PREVIEW_TICKET_KEY`, up to one hour). If either setting is missing, or your v0 connection cannot fetch a preview, the page falls back to the link card. An expired preview shows “This preview has expired” — reload the page for a fresh one. Navigation that the previewed app does with client-side routing (without a page load) can lose the ticket; reload to return to the start.
 
 Uploaded HTML runs in an opaque-origin preview with the exact `allow-scripts` sandbox permission. Its injected policy denies fetch/XHR/WebSocket connections, forms, embedded frames, workers, objects, parent-page access, popups, downloads, and top navigation. Before any uploaded byte runs, a non-privileged trusted bootstrap establishes an authenticated readiness and navigation signal with Compass. The iframe stays hidden until readiness is verified; navigation signals or a missing handshake replace the frame with a warning, including parse-time redirects and zero-delay meta refreshes. The bootstrap token grants no parent capability and its script removes itself before uploaded code runs. Files are stored privately. External links are clearly labeled and open in a new tab.
 
@@ -116,7 +122,7 @@ Every page keeps a history of past versions, so you can always see what changed 
 
 **Restoring.** Each version has a **Restore** button. Restoring asks for confirmation, since it overwrites the page's live content — but nothing is ever actually lost: the page's current state is automatically saved as a new version (labeled "Before restore") right before the restore happens, so you can always undo a restore by restoring again.
 
-Version history is also available over MCP — see [MCP API](/help/09-mcp-api) for `create_doc_version`, `list_doc_versions`, `get_doc_version`, and `restore_doc_version`.
+Version history is also available over MCP — see [MCP API](/help/09-mcp-api) for `list_doc_history` and `restore_doc_version`.
 
 ## Pinning Docs panels
 
@@ -146,15 +152,16 @@ Leave Google-Docs-style comments anchored to a specific span of a page, so discu
 
 **Doc-level comments.** A comment doesn't have to be anchored — over MCP you can add a general, page-level comment with no anchored text (see below). In the sidebar these are labelled **general**.
 
-Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api) for `add_doc_comment`, `list_doc_comments`, `get_doc_comment`, `update_doc_comment`, `delete_doc_comment`, `resolve_doc_comment`, and `reopen_doc_comment`. These Doc-specific tools remain domain-friendly compatibility aliases over shared Comment IDs and preserve inline anchor creation and updates. The generic shared-comment tools can also operate on `DOC` targets by Comment ID, but generic `add_comment` creates an unanchored Doc comment; use `add_doc_comment` when creating an inline anchor.
+Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api) for `add_doc_comment`, `list_doc_comments`, and `resolve_doc_comment` (pass `resolved: false` to reopen). These Doc-specific tools are path-addressed (workspace ID plus doc path) and preserve inline anchor creation. The generic shared-comment tools can also operate on `DOC` targets by Comment ID, but generic `add_comment` creates an unanchored Doc comment; use `add_doc_comment` when creating an inline anchor.
 
 ## Canvas docs
 
-A Canvas doc is an infinite, pannable whiteboard that follows the open [JSON Canvas](https://jsoncanvas.org) 1.0 format, so canvases move freely between Compass and tools like Obsidian. (This is separate from the read-only [Canvas](/help/12-canvas) viewer of your OST and roadmap.)
+A Canvas doc is an infinite, pannable whiteboard that follows the open [JSON Canvas](https://jsoncanvas.org) 1.0 format, so canvases move freely between Compass and tools like Obsidian. To draw your OKR, discovery and roadmap tree onto a canvas automatically, see [Canvas](/help/12-canvas).
 
 - **Create one** from the Library's **New** menu: **New diagram**, or **Import .canvas file** to bring in an existing file. Diagrams are Canvas docs underneath, using the JSON Canvas format. Files that are not valid JSON Canvas are rejected with the reason.
 - **Edit**: pan by dragging the background, zoom with the scroll wheel, pinch, or the zoom controls. Add **Text**, **Link**, **File** and **Group** cards from the toolbar; drag cards to move them, drag the handles on a selected card to resize it. Double-click a card to edit it; text cards are markdown. Drag from a dot on one card's side to a dot on another to draw a connection (the chosen sides are saved). With a card or connection selected, pick a color (the six presets or any custom color), and for connections set a label and arrowheads. Press Delete or use the toolbar to remove the selection.
-- **Compass cards**: use **Compass** in the toolbar to search and add a live card for an opportunity, solution, metric, doc, task, experiment, objective or key result, or drag a page from the page tree onto the canvas. The canvas stores only a reference (plus a cached title); the card shows the object's current status, score, progress, or metric value and trend each time you open the canvas, and links to it. Cards are checked against your access every time: if the object was deleted, lives in another workspace, or you cannot see it, the card shows "Unavailable" and reveals nothing about it. In other tools such as Obsidian, a Compass card is an ordinary link card (`compass://<kind>/<id>`) and is preserved when the file goes back to Compass.
+- **Compass cards**: use **Compass** in the toolbar to search and add a live card for an opportunity, solution, assumption, metric, doc, task, experiment, objective, key result or roadmap item, or drag a page from the page tree onto the canvas. The canvas stores only a reference (plus a cached title); the card shows the object's current status, score, progress, or metric value and trend each time you open the canvas, and links to it. Cards are checked against your access every time: if the object was deleted, lives in another workspace, or you cannot see it, the card shows "Unavailable" and reveals nothing about it. In other tools such as Obsidian, a Compass card is an ordinary link card (`compass://<kind>/<id>`) and is preserved when the file goes back to Compass.
+- **Build tree**: use **Tree** ("Build tree from Compass…") in the toolbar to add your Objectives, Key Results, Opportunities, Solutions, Assumptions, Experiments and Roadmap items as laid-out, grouped Compass cards, either for the whole workspace or from one item down. See [Canvas](/help/12-canvas).
 - **Undo / redo** with the toolbar or Cmd/Ctrl+Z and Shift+Cmd/Ctrl+Z.
 - **Autosave and history** work exactly like regular pages, including named versions and restore. Inline comments are not available on canvases.
 - **Export** downloads a `.canvas` file. Fields Compass does not understand are kept as-is on import and export.
@@ -162,13 +169,13 @@ A Canvas doc is an infinite, pannable whiteboard that follows the open [JSON Can
 - **On phones** a canvas opens locked for viewing (pan and zoom); use the lock button to edit.
 - Canvases are limited to roughly 800 KB of JSON.
 
-Agents can create and edit canvases through the MCP `create_doc` / `update_doc` tools with `docType: CANVAS`; see [MCP API](/help/09-mcp-api).
+Agents can create canvases with the MCP `write_doc` tool (`docType: CANVAS`), edit them incrementally with `edit_canvas` (add/move/update/remove cards, text, groups and edges), and draw the Opportunity Solution Tree onto one with `build_canvas_tree`; see [MCP API](/help/09-mcp-api). `edit_canvas`, `edit_doc`, `build_canvas_tree` and `capture_canvas` take a doc ID: read the doc's `docs://` resource and use its `compass_doc_id`.
 
 ## Positioning & Messaging Briefs
 
-A Positioning & Messaging Brief is a Doc linked one-to-one to a Roadmap Item, used to nail down the story before a launch: problem statement, target audience, core message, proof points, and competitive differentiation. Part of the marketing-launch workflow — see [Roadmap](/help/04-roadmap) — so it's only available once a workspace admin turns on **Settings → Marketing launch** (off by default). With it on, create one from the roadmap item's panel Launch section, or via the MCP API's create_doc tool with docType set to GTM_POSITIONING_BRIEF and roadmapItemId set to the roadmap item it belongs to; if you do not pass explicit content, Compass fills in a five-section starter template you can edit like any other doc. Attempting to link a second brief to the same roadmap item is rejected, since the relationship is one-to-one.
+A Positioning & Messaging Brief is a Doc linked one-to-one to a Roadmap Item, used to nail down the story before a launch: problem statement, target audience, core message, proof points, and competitive differentiation. Part of the marketing-launch workflow — see [Roadmap](/help/04-roadmap) — so it's only available once a workspace admin turns on **Settings → Marketing launch** (off by default). With it on, create one from the roadmap item's panel Launch section; Compass fills in a five-section starter template you can edit like any other doc. Attempting to link a second brief to the same roadmap item is rejected, since the relationship is one-to-one.
 
-There is no dedicated UI for briefs yet; they appear in the regular Docs tree like any other page, and get_doc surfaces the linked roadmap item and doc type so an agent can discover the linkage.
+There is no dedicated UI for briefs yet; they appear in the regular Docs tree like any other page, and the doc's frontmatter surfaces the linked roadmap item and doc type so an agent can discover the linkage.
 
 ## Page Titles
 
@@ -176,4 +183,4 @@ Click the title area at the top of the editor to rename a page. Titles are saved
 
 ## Preview: Geode content storage
 
-An explicitly configured synthetic preview workspace can store new document bodies through the packaged Geode Headless SDK. Existing documents keep their current storage. The editor reports save conflicts and retains unsaved changes for retry; MCP callers supply a stable operation ID and the revision returned by `get_doc` for pilot changes. This preview does not enable production storage or desktop sync. See the repository's `docs/testing/geode-documents-pilot.md` for configuration and verification.
+An explicitly configured synthetic preview workspace can store new document bodies through the packaged Geode Headless SDK. Existing documents keep their current storage. The editor reports save conflicts and retains unsaved changes for retry; MCP callers supply a stable operation ID and the revision returned by `write_doc` or the `docs://` resource read (`_meta.revision`) for pilot changes. This preview does not enable production storage or desktop sync. See the repository's `docs/testing/geode-documents-pilot.md` for configuration and verification.

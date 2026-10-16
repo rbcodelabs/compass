@@ -43,6 +43,15 @@ Two views show the same round; the toggle in the header switches between them at
 - **Kanban** — one column per bucket, plus a column for items with no value yet. Drag a card to another column, right-click it, or use its **…** menu. Drag it back, or press **×**, to withdraw. The card left behind is shown as a ghost so you can see where it started.
 - **Table** — one row per item. Right-click a row or use its **…** menu, or tick several rows and propose one move for all of them.
 
+### Filtering the board
+
+Both views have a **Filter cards** box. Type any words to show only the items whose title, description or squad contains all of them, in any order and ignoring case: `export slow` and `slow export` both match "Slow CSV exports". A readout shows how many items match (for example **2 of 8**). Press **Esc** or the **×** to clear it.
+
+The filter only changes what you see:
+
+- Column counts still show how many items are *officially* in each bucket, including ones the filter hides.
+- In the table, **Select all** and the bulk proposal act only on the rows you can see. Selected rows that a new filter hides are deselected, so a bulk move never reaches an item you can't see.
+
 Rules that apply to both:
 
 - Each person has **one proposal per item**. Proposing again replaces your earlier one; it is never counted twice.
@@ -70,6 +79,10 @@ Once a round is revealed or closed (and always for the facilitator), **Tally** s
 - **Flow** — arrows between buckets, weighted by the number of proposals for that move. A column with no outgoing arrows is one nobody asked to change, not one the round endorsed.
 
 Net figures are inflow minus outflow. Every move leaves one bucket and enters another, so they sum to zero unless some proposals came from items with no value yet.
+
+### Exporting the tally
+
+Use **Export CSV** on the tally page to download the tally as a spreadsheet-ready file, one row per proposal: the item, its current value, the proposed value, the proposer, their rationale, how many proposals the item has, and how many different targets were proposed. The export is built from the same data as the tally page, so it follows the same rule: while a round is open, nobody but the facilitator gets the file (the request is refused rather than returning an empty file). Text that starts with `=`, `+`, `-` or `@` is prefixed with an apostrophe so spreadsheets do not run it as a formula.
 
 The tally never changes the official field value. Reconcile the official values yourself, in the usual way, once the team has seen it.
 

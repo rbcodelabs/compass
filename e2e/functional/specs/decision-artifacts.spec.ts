@@ -58,7 +58,7 @@ test.describe("Decision supporting artifacts", () => {
       // so wait for the destination URL before asserting on or acting in it.
       await artifactLink.click()
       await expect(page).toHaveURL(artifactUrl)
-      await page.locator('input[type="file"]').setInputFiles({ name: "checkout-v2.html", mimeType: "text/html", buffer: Buffer.from("<!doctype html><html><body><h1>Checkout exploration: direction B</h1><p>Distinct second revision content</p></body></html>") })
+      await page.locator('input[type="file"][name="file"]').setInputFiles({ name: "checkout-v2.html", mimeType: "text/html", buffer: Buffer.from("<!doctype html><html><body><h1>Checkout exploration: direction B</h1><p>Distinct second revision content</p></body></html>") })
       await page.getByRole("button", { name: "Replace current revision", exact: true }).click()
       await expect(page.frameLocator(`iframe[title="${title} preview"]`).getByRole("heading", { name: "Checkout exploration: direction B", exact: true })).toBeVisible()
       await expect(page.frameLocator(`iframe[title="${title} preview"]`).getByRole("button", { name: "Try direction A" })).toHaveCount(0)

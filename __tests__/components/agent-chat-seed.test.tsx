@@ -44,6 +44,7 @@ function baseProps(overrides: Partial<Parameters<typeof AgentChat>[0]> = {}) {
     activeConversationId: null,
     initialMessages: [],
     userInitials: "RB",
+    userId: "user-1",
     ...overrides,
   }
 }

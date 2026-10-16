@@ -266,8 +266,8 @@ which works from any page in the workspace).
 Tools that return a `URL:` line: `create_opportunity`, `add_solution`,
 `add_assumption`, `create_objective`, `add_key_result`, `create_experiment`,
 `add_to_roadmap`, `promote_to_roadmap`, `promote_feedback_to_roadmap`,
-`create_task`, `create_doc`, `create_feedback` (and the other feedback
-mutations), and the decision/review tools.
+`create_task`, `write_doc`, `move_doc`, `create_feedback` (and the other
+feedback mutations), and the decision/review tools.
 
 The link is **omitted entirely** — the operation still succeeds — when the
 deployment has no configured public URL. Never reconstruct a link yourself from
@@ -326,7 +326,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 | Tool | Description |
 |---|---|
-| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional |
+| `add_comment` | Add a root comment or one-level reply. Requires `workspaceId`, `targetType`, `targetId`, `body`, and `authorName`; `parentId` is optional. For a root `ARTIFACT` comment on a `SLIDE_DECK` Artifact, optional `slideIndex` (zero-based, from `get_artifact` `slides[].index`) anchors it to that whole slide |
 | `list_comments` | List comments for an exact workspace and target, optionally filtered by `OPEN` or `RESOLVED` |
 | `get_comment` | Get one comment and any specialized Doc-anchor or Solution-plan metadata |
 | `update_comment` | Edit a comment body |
@@ -348,6 +348,8 @@ Follow an object to get its status changes and comments in your in-app notificat
 Notification kinds are `STATUS_CHANGED`, `COMMENT_ADDED`, `COMMENT_REPLIED` and, for Tasks only, `ASSIGNED` (sent to the assignee).
 
 ### Workspace
+
+> **Renamed organizations.** An organization's URL slug can be changed in Organization Settings, and the old slug stops working immediately (no redirect, no alias). Tools that take `orgSlug` (`list_workspaces`, `get_workspace_by_slug`, `create_workspace`, scoring and roadmap-view tools, and the REST `/api/v1/organizations/{orgSlug}/…` routes) return "not found" for the old slug, so update any stored slug. Workspace and entity IDs never change.
 
 | Tool | Description |
 |---|---|
@@ -405,7 +407,7 @@ Typed links connect an Opportunity to Objectives and a Solution to Key Results (
 
 | Tool | Description |
 |---|---|
-| `list_opportunities` | Fetch all opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
+| `list_opportunities` | Fetch a page of opportunities in the workspace, including each opportunity's description, status, squad, solution count, and linked Key Result; **paginated** via `limit`/`cursor` (see [Paginating `list_opportunities`](#paginating-list_opportunities)); filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `get_opportunity` | Return full detail for an opportunity: solutions, assumptions per solution, and experiments linked to those assumptions |
 | `list_solutions` | Discover solutions across a workspace by solution status, parent opportunity status/squad, and roadmap-link presence; returns stable Opportunity and Roadmap Item IDs without making a readiness judgment; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
 | `list_assumptions` | Discover assumptions across a workspace by status, risk, parent Solution status, and parent Opportunity status/squad; returns stable ancestry IDs and experiment counts; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`) |
@@ -775,34 +777,86 @@ Promotion is a reviewed, human-directed step. While a synthesis is being generat
 
 ### Docs
 
+Compass's Docs are exposed as a **virtual filesystem**, not an ID-addressed
+API: every doc is a path (e.g. `Product/Roadmap/Q3 Plan`), reads and listing
+go through an MCP **resource**, and mutations are 8 path-addressed tools.
+
+**Reading and listing — the `docs://` resource, not a tool.** Connect any
+MCP client that supports resources (Claude Desktop, for example — see
+[Example: Connecting Claude Desktop](#example-connecting-claude-desktop)
+below) and call the standard `resources/list` and `resources/read` methods:
+
+- `resources/list` returns one `docs://{workspaceId}/{path}` URI per doc, across
+  every workspace you're a member of (or, for a registered agent, every
+  workspace it holds a grant on).
+- `resources/read` on one of those URIs returns the doc's full content:
+  a YAML frontmatter block followed by the markdown body. Frontmatter always
+  carries `compass_doc_id` (the doc's underlying UUID, exposed for reference —
+  never accepted as input), `compass_doc_type`, and — if the doc is linked —
+  `compass_roadmap_item_id`, plus any ordinary user-set properties.
+
+A path segment is the doc's title, lightly sanitized (filesystem-illegal
+characters become `_`); it is **not** a lowercase slug, so renaming a doc's
+title in the UI changes its path the same way renaming a file changes its
+path. Two sibling docs sharing a title are disambiguated with a suffix, e.g.
+`Notes` and `Notes (a1b2c3d4)`.
+
 | Tool | Description |
 |---|---|
-| `list_docs` | List all docs in a workspace as an indented tree; use to discover doc IDs before calling `get_doc` or `update_doc`; filterable by `updatedSince`/`updatedBefore` and orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`). A doc whose parent is excluded by a recency filter is rendered at the top level so it stays reachable |
-| `get_doc` | Return the full content of a single doc, including its parent, children list, complete markdown body (for `docType: CANVAS`, the JSON Canvas 1.0 document as a JSON string), and `docType`/`roadmapItemId` when set |
+| `write_doc` | Create or update a doc by path — a write to a path that already resolves updates it; a write to a new path creates it. Missing parent directories in the path are created implicitly (e.g. writing `Product/Roadmap/Q3 Plan` under an empty workspace creates `Product` and `Product/Roadmap` too). Params: `workspaceId`, `path`, `content` (frontmatter + markdown body), optional `operationId`/`expectedRevision`, and create-only `docType` (`STANDARD` or `CANVAS`; for `CANVAS` the body is a JSON Canvas 1.0 document, validated, with a blank canvas when empty) |
+| `delete_doc` | Delete the doc at a path. Refuses (matching `rmdir` vs `rm -r`) if it has children unless `recursive: true` is passed |
+| `move_doc` | Rename and/or reparent a doc by changing its path — both are just "the path changed." Missing intermediate directories on the destination are created implicitly |
+| `list_doc_history` | List the saved versions of the doc at a path (id, label, author, created date), newest first. Does not include full content — call `restore_doc_version` to apply one |
+| `restore_doc_version` | Restore the doc at a path to a previously saved version (from `list_doc_history`). The doc's current state is snapshotted first (labeled "Before restore"), so restoring never loses data |
+| `capture_canvas` | Returns a PNG picture of a canvas doc (docType `CANVAS`) so an agent can check layout. Takes `docId` (the `compass_doc_id` in the canvas doc's `docs://` frontmatter), and optionally `nodeId` (a node or group id to zoom on) with `padding` (canvas units of context, default 80), or `region` (`x`, `y`, `width`, `height` in canvas coordinates); pass at most one of `nodeId` and `region`. Default is a fit-all overview. `scale` (0.05–4) overrides the automatic fit; output is capped at 2400 px per side. The canvas JSON is rendered to a self-contained page and photographed in a Vercel Sandbox with no network. Nodes, colours, group labels, edges with arrows and labels, and Compass object cards (live title, status, facts; cards outside the doc workspace show as unavailable) are drawn. Returns an MCP image content block plus text and metadata (`view`, `region`, `scale`, `image`, `byteSize`, `counts`, `timings`). The image is not stored. Gate class: `READ` |
 | `prepare_doc_image_upload` | Prepare a signed, short-lived upload for a PNG, JPEG, GIF, or WebP image up to 10 MiB in workspace-private Docs storage; returns the upload pathname/token plus the relative Compass image URL and Markdown |
-| `create_doc` | Create a new doc in a workspace, optionally nested under a parent doc. Pass `roadmapItemId` and `docType: GTM_POSITIONING_BRIEF` to create a Positioning & Messaging Brief linked 1:1 to a roadmap item (auto-fills a starter template if content is omitted); this docType requires the workspace's Marketing launch setting to be on. Pass `docType: CANVAS` to create a JSON Canvas doc: `content` must be a valid JSON Canvas 1.0 JSON string (blank canvas if omitted); invalid payloads are rejected with the validation errors. A Compass object card is a standard `link` node with `url: "compass://<kind>/<id>"` and `compass: {"kind","id","title"?}`; `kind` is one of `opportunity`, `solution`, `metric`, `doc`, `task`, `experiment`, `objective`, `keyResult` and `id` a UUID. Invalid card references are rejected (the card is rendered live and re-authorized for each viewer, so only the reference is stored) |
-| `update_doc` | Update an existing doc's title, content, and/or icon. For a `CANVAS` doc, `content` replaces the whole canvas and must be valid JSON Canvas 1.0 (unknown fields are preserved) |
-| `create_doc_version` | Save a manual, named snapshot of a doc's current content. Params: `docId`, `label` (optional), `authorName`. Always writes a new version, even if one was just saved seconds ago — named snapshots are never coalesced away |
-| `list_doc_versions` | List a doc's saved versions (id, label, author, created date), newest first, alongside the doc's own current title and last-updated time as a reference point. Param: `docId`. Does not include full content — call `get_doc_version` for that |
-| `get_doc_version` | Return the full title/content/metadata/icon snapshot of a single saved doc version. Param: `versionId` |
-| `restore_doc_version` | Restore a doc's live content to a previously saved version. Param: `versionId`. The doc's current state is snapshotted first (labeled "Before restore"), so restoring never loses data |
+| `edit_doc` | Targeted text edit of a doc body without resending it, addressed by `docId` (the `compass_doc_id` in the doc's `docs://` frontmatter): `oldString` → `newString` (must match exactly once unless `replaceAll`), or up to 50 `edits` applied in order, all-or-nothing. Optional `expectedRevision` (the `_meta.revision` of a `docs://` resource read, or a prior `write_doc` result) rejects the edit if the doc changed; without it the edit is re-applied on top of concurrent changes. Edits the body only — change frontmatter properties with `write_doc`. On a CANVAS doc the result must still be valid JSON Canvas |
+| `edit_canvas` | Edit a CANVAS doc (by `docId`, as for `edit_doc`) with domain ops keyed by node id instead of rewriting the JSON: `add_card`, `add_text`, `add_group`, `add_edge`, `move`, `update`, `remove` (up to 200 per call, all-or-nothing; errors name the op index). Ids and placement are automatic; nodes may be referenced by node id or `kind:uuid`; re-adding an existing card or edge is a no-op; removing a node removes its edges. Optional `expectedRevision` |
+| `build_canvas_tree` | Draw the Opportunity Solution Tree onto a CANVAS doc (by `docId`) — the same engine as the editor's "Build tree". `scope`: `{kind:"workspace"}` (default) or `{kind: objective\|keyResult\|opportunity\|solution, id}`. Idempotent merge: existing cards are never duplicated, new content is auto-laid-out to the right, one group per root objective. Capped at 400 cards |
 
-Every `update_doc` call also automatically snapshots the doc's pre-change state before applying the new values (coalesced to one snapshot per 5-minute window per author, so an agent making several quick edits in a row doesn't flood the history) — you don't need to call `create_doc_version` yourself unless you want a deliberately named checkpoint.
+`write_doc` deliberately does not split into separate create/update tools —
+the path already tells you which one it is: writing to a path you just read
+back from `resources/list` is an update, writing to a path you invented is a
+create. There is no `docType`/`roadmapItemId` param on `write_doc` today, so a
+Positioning & Messaging Brief linked to a roadmap item can currently only be
+created from the Compass UI, not via MCP.
 
-In the explicitly enabled Geode preview workspace, `get_doc` also returns `revision` and `storageProvider`. `create_doc` requires an `operationId` UUID. `update_doc`, `create_doc_version`, and `restore_doc_version` require both `operationId` and `expectedRevision` (the current document revision from `get_doc`). Reuse the exact operation ID and payload after a lost response; a changed payload or authenticated actor is rejected. A revision conflict requires a fresh read and a new intentional edit. These parameters remain optional for existing database-backed documents. Content references and private Blob paths are never returned. This pilot does not enable production document storage.
+`write_doc`/`delete_doc`/`move_doc` accept an optional `expectedRevision`
+(the `revision` a prior `resources/read` returned). Supplying it means a
+concurrent edit since that read is refused with a clear error instead of
+silently overwritten, dropped, or moved out from under you — read the doc
+again to get the current revision before retrying. Omitting it keeps
+last-write-wins behavior, matching every other MCP mutation. `operationId` is
+a stable retry ID: reuse it (with the identical payload) after a lost
+response to safely retry without double-applying — required for the Geode
+preview pilot workspace, optional everywhere else.
 
-To add a local screenshot, call `prepare_doc_image_upload` with its exact filename, MIME type, and byte size. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: fileType })` from `@vercel/blob/client`, then place the returned `markdown` in `create_doc` or `update_doc`. The token expires after ten minutes and is bound to one random workspace-prefixed pathname, MIME type, and maximum size; it cannot overwrite an existing blob. The saved Markdown contains only a relative Compass read URL, never the storage pathname or token. Image reads require a signed-in member of the owning workspace.
+Every overwriting `write_doc` call also automatically snapshots the doc's
+pre-change state before applying the new content (coalesced to one snapshot
+per 5-minute window per author, so several quick edits in a row don't flood
+the history) — call `write_doc` once with unchanged content first if you want
+a deliberate pre-rewrite checkpoint.
+
+Content references and private Blob paths are never returned. Compass's
+in-app agent uses a different projection of this same design — it edits real
+`.md` files in a disposable sandbox instead of calling these tools directly —
+see the ADR (docs/design/docs-virtual-filesystem-mcp.md in the repo) if you're
+building an integration and want the full mechanics.
+
+To add a local screenshot, call `prepare_doc_image_upload` with its exact filename, MIME type, and byte size. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: fileType })` from `@vercel/blob/client`, then place the returned `markdown` in the doc's content via `write_doc`. The token expires after ten minutes and is bound to one random workspace-prefixed pathname, MIME type, and maximum size; it cannot overwrite an existing blob. The saved Markdown contains only a relative Compass read URL, never the storage pathname or token. Image reads require a signed-in member of the owning workspace.
 
 This private flow applies to new uploads. Existing documents may contain older absolute `*.public.blob.vercel-storage.com` image URLs; they remain public and continue rendering. Compass does not migrate, delete, or rewrite those legacy blobs automatically.
 
 ### Authoring Canvas docs (agents)
 
-A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one with `create_doc` and `docType: CANVAS`, passing the JSON as the `content` string. `update_doc` **replaces the whole canvas**, so call `get_doc` first, change the JSON, and send the complete result back.
+A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one with `write_doc` and `docType: CANVAS`, passing the JSON as the body of `content` (after any frontmatter). Writing to an existing canvas path **replaces the whole canvas**, so read the `docs://{workspaceId}/{path}` resource first, change the JSON, and send the complete result back.
+
+**Prefer the edit tools to rewriting.** `edit_canvas` applies ops server-side (`add_card`, `add_edge`, `move`, `update`, `remove`, …) with automatic ids and placement, and `build_canvas_tree` draws the OST for you; neither needs the whole canvas in your context. Use `edit_doc` for a precise text replacement. These tools take a `docId`: read it from `compass_doc_id` in the `docs://` resource's frontmatter. Pass `expectedRevision` (the resource read's `_meta.revision`) when you want the edit to fail rather than land on a changed doc.
 
 **Workflow**
-1. Look up real object ids with the `list_*` tools (`list_opportunities`, `list_solutions`, `list_metrics`, `list_tasks`, `list_experiments`, `list_docs`, objectives and key results via the OKR tools). Never invent a UUID: an unknown, foreign-workspace or inaccessible id is shown as "Unavailable" to viewers.
+1. Look up real object ids with the `list_*` tools (`list_opportunities`, `list_solutions`, `list_metrics`, `list_tasks`, `list_experiments`, the `docs://` resource, objectives and key results via the OKR tools). Never invent a UUID: an unknown, foreign-workspace or inaccessible id is shown as "Unavailable" to viewers.
 2. Build the `nodes` and `edges` arrays.
-3. Call `create_doc`. Invalid JSON or invalid Compass card references are rejected with the reasons; fix and retry.
+3. Call `write_doc`. Invalid JSON or invalid Compass card references are rejected with the reasons; fix and retry.
 
 **Nodes** (`nodes[]`). Every node needs a unique string `id`, a `type`, and numeric `x`, `y`, `width`, `height` (pixels; `x` grows right, `y` grows down; the top-left corner is the anchor).
 - `text`: `text` is markdown.
@@ -843,39 +897,52 @@ A Canvas doc is a [JSON Canvas 1.0](https://jsoncanvas.org) document. Create one
 
 ### Artifacts
 
-Artifacts are first-class solution deliverables, separate from Markdown Docs. HTML content creates private immutable revisions; external URLs are stored but never server-fetched. Every mutation returns the stable Artifact identifier on a plain `ID: <uuid>` line.
+Artifacts are first-class solution deliverables, separate from Markdown Docs. HTML content creates private immutable revisions; external URLs are stored but never server-fetched. Every mutation returns the stable Artifact identifier on a plain `ID: <uuid>` line. `list_artifacts`, `get_artifact`, `create_artifact` and `update_artifact` also return the clickable Compass page (`<origin>/{org}/{workspace}/docs/artifacts/{id}`) on a `URL:` line and as `url` in the structured data — relay it to the user instead of the bare ID. `url` is `null` (and the line is omitted) when the public Compass URL is not configured; the write still succeeds.
 
 | Tool | Description |
 |---|---|
 | `list_artifacts` | List active Artifacts in a workspace; pass `includeArchived: true` to include archived records |
-| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML |
-| `create_artifact` | Create `HTML_UPLOAD` from `html` plus an optional `.html` filename, or `EXTERNAL_LINK` from an `http`/`https` `url` |
-| `update_artifact` | Update title/description and optionally create a new immutable HTML or URL revision |
+| `get_artifact` | Return Artifact metadata, revision history, linked `solutions` and `decisions` without exposing private blob paths or uploaded HTML. Includes `kind` (`DOCUMENT` or `SLIDE_DECK`); a `SLIDE_DECK` also returns `slides` as `{ index, title, description }`, split from the current revision at read time |
+| `prepare_artifact_upload` | Prepare a signed, short-lived direct upload for one `.html` file up to 2 MiB; returns the upload pathname, client token, and an `uploadReceipt`. Use this instead of passing `html` inline so the document never enters the conversation |
+| `create_artifact` | Create `HTML_UPLOAD` from an `uploadReceipt` (preferred) or inline `html` plus an optional `.html` filename, `EXTERNAL_LINK` from an `http`/`https` `url` (Google Drive/Docs links are recognised and previewed read-only in the app; only the URL is stored), or `V0_CHAT` from a `https://v0.app/chat/<id>` `url` (read with the caller's own v0 connector grant; `title` may be empty to use the chat name). Optional `kind`: `DOCUMENT` (default) or `SLIDE_DECK`, which is allowed only for `HTML_UPLOAD` |
+| `refresh_artifact_from_v0` | Re-read a `V0_CHAT` Artifact from v0 and add a new revision only when v0 has a new version; returns `changed` |
+| `update_artifact` | Update title/description and optionally create a new immutable HTML revision (from `uploadReceipt` or inline `html`) or URL revision. Optional `kind` switches an `HTML_UPLOAD` between `DOCUMENT` and `SLIDE_DECK` without a new revision |
 | `link_artifact_to_solution` | Idempotently link an Artifact and Solution in the same workspace |
 | `unlink_artifact_from_solution` | Remove an Artifact-to-Solution link |
 | `link_artifact_to_decision` | Idempotently link an active Artifact to an ordinary tracked Decision in the same workspace; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs, `linkId`, and `created` |
 | `unlink_artifact_from_decision` | Idempotently remove a Decision link; takes `workspaceId`, `artifactId`, `requestId` and returns those IDs and `removed` |
 | `archive_artifact` | Archive an Artifact while preserving its revision history and links |
+| `capture_screenshot` | Render an Artifact revision in a sandboxed headless browser and store the PNG as that revision's thumbnail, which the Artifact page then shows. Takes `workspaceId`, `artifactId`, and optional `revisionId` (default: the current revision), `fullPage`, and `viewport` (`width` 320–3840, `height` 240–2160). There is deliberately **no `url` input**. `EXTERNAL_LINK` revisions render the URL stored on the revision, so the tool cannot be used to render arbitrary pages. Google Drive/Docs links are refused, because the capture browser is not signed in to Google. `HTML_UPLOAD` revisions render their stored HTML under the same Content-Security-Policy as the in-app preview, with every network request blocked. Returns `ID: <artifactId>` plus metadata only (`revisionId`, `width`, `height`, `byteSize`, `capturedAt`, `sourceUrl`, `httpStatus`; the last two are `null` for `HTML_UPLOAD`). It never returns the image or its storage key. Gate class: `WRITE` |
 | `create_feedback_source` | Create an [embedded-feedback](/help/24-embedded-feedback) source bound to an active Artifact and mint its first token. Takes `workspaceId`, `artifactId`, `name`, `allowedOrigins` and optional `authMode` (`INTERNAL_SSO` default, or `PORTAL`). Returns `sourceId`, the raw `token` **once**, `tokenPrefix`, a ready-to-paste `snippet`, and the stored `allowedOrigins`/`authMode`. Workspace member (same as `create_artifact`) |
 | `update_feedback_source` | Replace a source's `allowedOrigins` (the full list), enable/disable it, rename it, or change `authMode` (which signs out existing visitors). Scoped by `workspaceId`; returns the stored state, never a token. Workspace member (same as `create_artifact`) |
 
 Feedback-source tools are available to workspace members and registered agents, exactly like the other Artifact write tools, and have no delete, token-mint or token-revoke counterpart — rotate or revoke tokens in **Settings → Embedded feedback**. The raw token appears only in the `create_feedback_source` response and is never stored or logged in readable form. If the deployment has no public Compass URL configured, `snippet` is `null` and the response carries `scriptPath` and a note instead of a broken URL.
 
+#### Uploading HTML without putting it in the conversation
+
+Inline `html` costs the document's full size twice in agent context: once when the agent writes the file and again inside the tool call. For anything beyond a trivial page, upload the file from disk instead:
+
+1. Write the HTML to a local file, then call `prepare_artifact_upload` with the workspace, the `.html` filename, and the exact byte size (1 byte to 2 MiB).
+2. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: "text/html" })` from `@vercel/blob/client`, reading the file from disk rather than pasting it into a tool call.
+3. Call `create_artifact` or `update_artifact` with the returned `uploadReceipt` and no `html`. The filename is taken from the receipt, so omit `filename`.
+
+The client token expires after ten minutes, is bound to one random workspace-prefixed staging pathname, `text/html`, and the declared size, and cannot overwrite an existing blob. The receipt is HMAC-signed and bound to the workspace, staging pathname, filename, size, and expiry. The server re-reads the staged bytes and runs the same validation as the inline path (safe filename, non-empty, UTF-8, HTML document, 2 MiB cap), checks the size against what was signed, and deletes the staging blob once the revision is committed, so a receipt is effectively single-use. If validation or the write fails, the staging blob is not deleted and is not currently swept; it is private and workspace-prefixed, but orphaned until cleaned up out of band. Re-prepare to retry.
+
+Direct upload needs the private Artifact Blob store (`ARTIFACT_BLOB_READ_WRITE_TOKEN`), so it is unavailable in local development; use inline `html` there. Provide exactly one of `html` or `uploadReceipt` on create, and at most one of `html`, `uploadReceipt`, or `url` on update.
+
 Decision–Artifact links are live supporting material, not frozen review evidence. `get_decision` and `get_review_request` include an `artifacts` array with title, type, status, and current revision number; legacy review requests return an empty array. `get_artifact.decisions` includes the same-workspace tracked request ID, current title, and state. The new link tools require write access and validate both objects in the declared workspace. They preserve packets, fingerprints, revisions, cycles, and recorded outcomes. New links to archived Artifacts are rejected, but retrying an existing link and removing it remain supported. Links follow the stable Decision request and the current Artifact revision.
 
 ### Doc inline comments
 
-Google-Docs-style comments anchored to a span of a doc's text (or left as a general, doc-level note). Threads are one level deep: a root comment optionally carries an anchor; replies attach to a root and never carry their own anchor. Anchors are stored separately and never embedded in the doc's markdown.
+Google-Docs-style comments anchored to a span of a doc's text (or left as a general, doc-level note). Threads are one level deep: a root comment optionally carries an anchor; replies attach to a root and never carry their own anchor. Anchors are stored separately and never embedded in the doc's markdown. Like every other doc tool, these are addressed by **path**, not doc ID.
 
 | Tool | Description |
 | --- | --- |
-| `add_doc_comment` | Add a comment to a doc. Params: `docId`, `body`, `authorName`, plus optional `parentId` (reply to a root comment) and optional anchor fields (`anchorText`, `anchorPrefix`, `anchorSuffix`, `anchorStart`, `anchorEnd`). Omit all anchor fields for a doc-level general comment. Replies never anchor. Returns the new comment's `ID:` line |
-| `list_doc_comments` | List a doc's comments grouped into threads (roots with their replies), oldest-first. Params: `docId`, optional `status` (`OPEN` or `RESOLVED`) to filter |
-| `get_doc_comment` | Return a single comment's full body, author, status, anchor context, and timestamps. Param: `commentId` |
-| `update_doc_comment` | Edit a comment's body text (does not change status or anchor). Params: `commentId`, `body` |
-| `delete_doc_comment` | Delete a comment. Deleting a root also deletes all of its replies. Param: `commentId` |
-| `resolve_doc_comment` | Mark a comment `RESOLVED` — it drops out of the doc's default open-only view and stops highlighting. Param: `commentId` |
-| `reopen_doc_comment` | Reopen a resolved comment, setting its status back to `OPEN`. Param: `commentId` |
+| `add_doc_comment` | Add a comment to the doc at a path. Params: `workspaceId`, `path`, `body`, `authorName`, plus optional `parentId` (reply to a root comment) and optional anchor fields (`anchorText`, `anchorPrefix`, `anchorSuffix`, `anchorStart`, `anchorEnd`). Omit all anchor fields for a doc-level general comment. Replies never anchor. Returns the new comment's `ID:` line |
+| `list_doc_comments` | List a doc's comments grouped into threads (roots with their replies), oldest-first. Params: `workspaceId`, `path`, optional `status` (`OPEN` or `RESOLVED`) to filter |
+| `resolve_doc_comment` | Set a comment's status. Params: `workspaceId`, `path`, `commentId`, optional `resolved` (default `true` — marks it `RESOLVED`, dropping it out of the doc's default open-only view and stopping its highlight; pass `resolved: false` to reopen it) |
+
+There is no `get_doc_comment` (`list_doc_comments` already returns full bodies), no `update_doc_comment` (body edits stay off this surface), and no `delete_doc_comment` (a destructive, no-undo hard delete that stays out of agent reach, matching the existing posture on other irreversible tools) — `reopen_doc_comment` is a parameter (`resolved: false`) on `resolve_doc_comment`, not a separate tool.
 
 Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-text projection**, not its raw markdown — the same projection the editor highlights against. In practice agents most often add doc-level or freshly-computed anchored comments; the UI is what captures precise anchors from a live text selection.
 
@@ -906,23 +973,74 @@ Anchor offsets (`anchorStart`/`anchorEnd`) are positions in the doc's **plain-te
 ## Recency filtering and sorting
 
 `list_opportunities`, `list_solutions`, `list_assumptions`, `list_experiments`,
-`list_roadmap_items`, `list_tasks`, `list_docs`, `list_feedback`, and
-`list_release_runs` accept an ISO `updatedSince` and/or `updatedBefore` window.
-Most also accept `sort`, which takes `recentlyUpdated` (most recently updated
-first) or `leastRecentlyUpdated` — the latter is for finding work that has gone
-quiet, such as opportunities still EXPLORING or experiments parked in DESIGNING.
+`list_roadmap_items`, `list_tasks`, `list_feedback`, and `list_release_runs`
+accept an ISO `updatedSince` and/or `updatedBefore` window. Most also accept
+`sort`, which takes `recentlyUpdated` (most recently updated first) or
+`leastRecentlyUpdated` — the latter is for finding work that has gone quiet,
+such as opportunities still EXPLORING or experiments parked in DESIGNING.
+
+Docs are the one entity here **without** a recency filter: the `docs://`
+resource that replaced `list_docs` (see [Docs](#docs) above) takes no
+caller-supplied query parameters at all — `resources/list` in the MCP protocol
+is a plain enumeration, not a filterable query. There is currently no "what
+doc changed recently" digest query over MCP.
 
 Omitting `sort` preserves each tool's own default ordering. Those defaults carry
-meaning — `list_roadmap_items` groups by horizon then rank, `list_docs` renders a
-parent/child tree, `list_tasks` orders by status then manual `sortOrder` — so
-`sort` is an explicit opt-out rather than something to pass by habit. Recency
-orderings always include a stable `id` tiebreaker, because `updatedAt` is not
-unique and equal timestamps would otherwise return in an arbitrary order that can
-differ between identical calls.
+meaning — `list_roadmap_items` groups by horizon then rank, `list_tasks` orders
+by status then manual `sortOrder` — so `sort` is an explicit opt-out rather
+than something to pass by habit. Recency orderings always include a stable
+`id` tiebreaker, because `updatedAt` is not unique and equal timestamps would
+otherwise return in an arbitrary order that can differ between identical
+calls.
 
 `list_feedback` is the exception worth reading closely: there `updatedSince`
 starts a stable keyset scan paged by an opaque `cursor` (see the feedback section
 above), rather than a simple filter.
+
+## Paginating `list_opportunities`
+
+`list_opportunities` returns **one page at a time**, not the whole workspace.
+Pass `limit` (1–200, default 50) and page forward with `cursor`.
+
+Every response reports where the caller is in the listing, in both the text
+block and `structuredContent.data`:
+
+| Field | Meaning |
+|---|---|
+| `count` | Items in *this* page |
+| `total` | Items matching the filters across the **whole** listing |
+| `hasMore` | Whether any matching item has not yet been returned |
+| `nextCursor` | Opaque cursor for the next page, or `null` at the end |
+
+When more remain, the text block ends with an explicit continuation line —
+`Showing 1-50 of 139. 89 not yet listed. To continue, call list_opportunities
+again with cursor: "…"` — and the final page says `End of list - every item has
+now been listed.` **Page until you see that sentence.** A full page is not
+evidence that you have seen everything; `hasMore` is.
+
+To walk the list: call once with no `cursor`, then repeat with the previous
+response's `nextCursor` **and the identical `workspaceId`, filters and `sort`**.
+The cursor pins all of them and a mismatched continuation is rejected rather than
+served, because resuming a differently-filtered listing would silently skip some
+rows and repeat others. A malformed cursor is likewise rejected instead of
+falling back to the first page, so a paging bug cannot masquerade as an endless
+supply of page one.
+
+This is keyset paging, not `OFFSET`. Inserts and deletes elsewhere in the
+workspace do not shift the rows a cursor resumes after — which is also why the
+default ordering carries an `id` tiebreaker (`createdAt desc, id asc`). Bulk
+imports give thousands of opportunities the same `createdAt`, and without the
+tiebreaker those ties come back in an arbitrary order that can differ between
+identical calls, leaving nothing stable for a cursor to name.
+
+A single-page listing that fits inside `limit` gets no footer at all, so callers
+whose workspaces are small see byte-identical output to before.
+
+> **Why this exists.** An unbounded listing of a real workspace was ~124 KB
+> (~31K tokens) in one tool result, with no total and no "more remain" signal.
+> An agent asked to work through every opportunity would process the head of the
+> list, report completion, and on its next turn start over from the same head —
+> indistinguishable, from the inside, from having finished.
 
 ### What `updatedAt` does and does not capture
 
@@ -985,10 +1103,12 @@ Compass Docs → Architecture Decisions.
 Solution comments and plans created with agent credentials use the authenticated
 agent's name and `AGENT` author type, overriding caller-supplied attribution.
 Built-in assistant turns use “Compass assistant.” Agent credentials cannot call
-`update_comment`, `update_doc_comment`, or `update_solution_comment`: existing
-comment records do not have durable agent ownership, so agents must append a new
-comment instead of rewriting one under someone else's name or approval badge.
-Personal and service credential behavior is unchanged.
+`update_comment` or `update_solution_comment`: existing comment records do not
+have durable agent ownership, so agents must append a new comment instead of
+rewriting one under someone else's name or approval badge. Doc comments have no
+body-edit tool at all now (see [Doc inline comments](#doc-inline-comments)), so
+this restriction no longer has a doc-comment analog to name. Personal and
+service credential behavior is unchanged.
 
 ## Example: Connecting Claude Desktop
 

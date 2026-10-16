@@ -6,6 +6,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { usePathname } from "next/navigation";
@@ -74,7 +75,36 @@ export function isAgentPagePath(pathname: string | null): boolean {
   return segments[2] === "agent";
 }
 
+/** The views the rail can show. Add an id here and a row in VIEWS (agent-rail.tsx) to add one. */
+export type RailView = "agent" | "help" | "library";
+
+/** A one-shot request for the Help view to show something. `id` makes repeats distinct. */
+export type DocsIntent = { id: number; slug?: string; anchor?: string; query?: string };
+
+/**
+ * A one-shot "ask the agent about this" hand-off from the Help view.
+ *
+ * Display-only context: unlike the Send-to-agent `seedEntity` (which names a
+ * Compass entity the server resolves), a docs article is not an entity, so the
+ * chip here is a labelled link and the question itself travels in `text`,
+ * which prefills the composer. Nothing is sent until the user sends it.
+ */
+export type AgentSeed = { id: number; label: string; summary: string; sourceUrl: string; text: string };
+
 type AgentRailContextValue = {
+  /** Which view the rail shows. Switching never unmounts the chat. */
+  view: RailView;
+  setView: (view: RailView) => void;
+  docsIntent: DocsIntent | null;
+  /** Open the rail on the Help view, optionally straight to an article or a search. */
+  openDocs: (options?: { slug?: string; anchor?: string; query?: string }) => void;
+  /** Open the rail on the Library view (the Docs tree). */
+  openLibrary: () => void;
+  agentSeed: AgentSeed | null;
+  /** Switch to the Agent view with a context chip and a prefilled, unsent composer. */
+  askAgent: (seed: Omit<AgentSeed, "id">) => void;
+  /** Called by the chat once it has applied a seed, so a later remount cannot replay it. */
+  clearAgentSeed: () => void;
   /**
    * Whether the rail is docked open. Not whether it is currently a column — see
    * AgentRail for the space-driven overlay demote. Always `false` on the
@@ -120,6 +150,10 @@ export function AgentRailProvider({
   const open = available && wantsOpen;
   const [width, setWidth] = useState(() => clampPanelWidth(initialPin.width));
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [view, setView] = useState<RailView>("agent");
+  const [docsIntent, setDocsIntent] = useState<DocsIntent | null>(null);
+  const [agentSeed, setAgentSeed] = useState<AgentSeed | null>(null);
+  const intentCounter = useRef(0);
 
   // Written from event handlers only, never in render and never in a mount
   // effect — the same discipline PanelShell documents. A write during mount
@@ -167,6 +201,39 @@ export function AgentRailProvider({
     [persist],
   );
 
+  const openDocs = useCallback(
+    (options?: { slug?: string; anchor?: string; query?: string }) => {
+      if (!available) return;
+      intentCounter.current += 1;
+      setDocsIntent({ id: intentCounter.current, ...options });
+      setView("help");
+      setOpen(true);
+      persist({ pinned: true, width });
+    },
+    [available, persist, width],
+  );
+
+  const openLibrary = useCallback(() => {
+    if (!available) return;
+    setView("library");
+    setOpen(true);
+    persist({ pinned: true, width });
+  }, [available, persist, width]);
+
+  const askAgent = useCallback(
+    (seed: Omit<AgentSeed, "id">) => {
+      if (!available) return;
+      intentCounter.current += 1;
+      setAgentSeed({ id: intentCounter.current, ...seed });
+      setView("agent");
+      setOpen(true);
+      persist({ pinned: true, width });
+    },
+    [available, persist, width],
+  );
+
+  const clearAgentSeed = useCallback(() => setAgentSeed(null), []);
+
   const selectConversation = useCallback((id: string | null) => {
     setConversationId(id);
   }, []);
@@ -196,8 +263,31 @@ export function AgentRailProvider({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [available, toggleRail]);
 
+  // "?" opens Docs, unless the user is typing somewhere. ("/" is deliberately
+  // not bound: the workspace gallery already owns it.)
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "?" || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.defaultPrevented || !available) return;
+      const el = event.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      event.preventDefault();
+      openDocs();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [available, openDocs]);
+
   const value = useMemo(
     () => ({
+      view,
+      setView,
+      docsIntent,
+      openDocs,
+      openLibrary,
+      agentSeed,
+      askAgent,
+      clearAgentSeed,
       open,
       available,
       openRail,
@@ -209,6 +299,13 @@ export function AgentRailProvider({
       commitWidth,
     }),
     [
+      view,
+      docsIntent,
+      openDocs,
+      openLibrary,
+      agentSeed,
+      askAgent,
+      clearAgentSeed,
       open,
       available,
       openRail,

@@ -13,7 +13,18 @@ import type { EntityLinkType } from "@/lib/entity-links"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 import { TOOL_OUTPUT_SCHEMA, ok, fail } from "@/lib/mcp-output"
 import { recencyOrderBy, recencySortSchema } from "@/lib/mcp-recency"
-import { runWithMcpActor, getMcpActor } from "@/lib/mcp-authz"
+import {
+  KEYSET_PAGE_DEFAULT,
+  decodeKeysetCursor,
+  encodeKeysetCursor,
+  filterFingerprint,
+  keysetAfter,
+  keysetCursorSchema,
+  keysetFooter,
+  keysetLimitSchema,
+  type KeysetCursor,
+} from "@/lib/mcp-keyset"
+import { runWithMcpActor, getMcpActor, isResearchActor, assertWorkspaceMember, McpAuthzError } from "@/lib/mcp-authz"
 import { applyToolGate, AGENT_TOOL_POLICY, scopesSatisfy, type ToolScope } from "@/lib/mcp-tool-gates"
 import { bearerChallenge, requiredScopeForPayload } from "@/lib/mcp-oauth-challenge"
 import { SCOPE_MCP_READ } from "@/lib/oauth/constants"
@@ -45,42 +56,41 @@ import {
   linkEvidence,
   listEvidence,
 } from "@/lib/evidence-tool-handlers"
-import {
-  listDocs,
-  getDoc,
-  createDoc,
-  updateDoc,
-} from "@/lib/doc-tool-handlers"
-import { DOC_TYPES } from "@/lib/doc-types"
+import { editDoc, editCanvas, buildCanvasTree, MAX_TEXT_EDITS } from "@/lib/doc-edit-tool-handlers"
+import { CANVAS_CARD_KINDS } from "@/lib/canvas-cards"
+import { CANVAS_SIDES, CANVAS_ENDS } from "@/lib/json-canvas"
+import { MAX_CANVAS_OPS, type CanvasOp } from "@/lib/canvas-edit"
+import { TREE_SCOPE_KINDS } from "@/lib/canvas-tree"
 import { prepareDocImageUploadTool } from "@/lib/doc-image-tool-handlers"
 import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
 import {
   archiveArtifact,
+  captureArtifactScreenshot,
   createArtifact,
   getArtifact,
   linkArtifactDecision,
   unlinkArtifactDecision,
   linkArtifact,
   listArtifacts,
+  refreshArtifactFromV0,
+  prepareArtifactUploadTool,
   unlinkArtifact,
   updateArtifact,
 } from "@/lib/artifact-tool-handlers"
+import { captureCanvas } from "@/lib/canvas-capture-tool-handlers"
 import { createFeedbackSourceTool, updateFeedbackSourceTool } from "@/lib/feedback-source-tool-handlers"
 import {
-  createDocVersion,
-  listDocVersions,
-  getDocVersion,
+  writeDoc,
+  deleteDoc,
+  moveDoc,
+  listDocHistory,
   restoreDocVersion,
-} from "@/lib/doc-version-tool-handlers"
-import {
   addDocComment,
   listDocComments,
-  getDocComment,
-  updateDocComment,
-  deleteDocComment,
   resolveDocComment,
-  reopenDocComment,
-} from "@/lib/doc-comment-tool-handlers"
+} from "@/lib/doc-fs-tool-handlers"
+import * as docFs from "@/lib/doc-fs"
+import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js"
 import {
   createAssumption,
   updateAssumption,
@@ -295,7 +305,7 @@ const _handler = createMcpHandler(
     register("promote_research_finding_to_evidence", { title: "Promote Research Finding To Evidence", description: "Promote one finding from a stored research synthesis into a linked Evidence record on an opportunity, solution or assumption, carrying its exact source turns. Identify the finding by its index in the synthesis's themes; the excerpt and the cited turns come from the stored document, not from you. Compass re-checks every citation against the saved transcripts first and writes nothing if any no longer resolves. Promoting the same finding again returns the existing evidence; promoting it onto a different target is refused rather than overwriting. Promotion is a reviewed, human-directed step and is unavailable while a synthesis is being generated.", inputSchema: { ...researchScope, researchSynthesisId: z.string().uuid().describe("UUID of the stored CROSS_SESSION synthesis that proposed this finding"), findingIndex: z.number().int().min(0).max(9).describe("Zero-based index of the finding in the synthesis's themes array"), opportunityId: z.string().uuid().optional().describe("UUID of the opportunity to attach to"), solutionId: z.string().uuid().optional().describe("UUID of the solution to attach to"), assumptionId: z.string().uuid().optional().describe("UUID of the assumption to attach to"), confidence: z.enum(["high", "medium", "low"]).optional().describe("Confidence level (default medium)") }, outputSchema: TOOL_OUTPUT_SCHEMA }, promoteResearchFindingToEvidenceTool)
 
     const commentTargetSchema = z.enum(["OBJECTIVE", "KEY_RESULT", "OPPORTUNITY", "SOLUTION", "ASSUMPTION", "EXPERIMENT", "ROADMAP_ITEM", "FEEDBACK_ITEM", "TASK", "DOC", "ARTIFACT", "RESEARCH_STUDY", "REVIEW_REQUEST"])
-    register("add_comment", { title: "Add Comment", description: "Adds discussion to a supported Compass object. Comments never constitute a decision or authorization.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), parentId: z.string().uuid().optional(), body: z.string().min(1), authorName: z.string().min(1) }, outputSchema: TOOL_OUTPUT_SCHEMA }, addComment)
+    register("add_comment", { title: "Add Comment", description: "Adds discussion to a supported Compass object. Comments never constitute a decision or authorization.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), parentId: z.string().uuid().optional(), body: z.string().min(1), authorName: z.string().min(1), slideIndex: z.number().int().min(0).optional().describe("Zero-based slide of a SLIDE_DECK Artifact to anchor a root ARTIFACT comment to (see get_artifact slides[].index). Omit for an unanchored comment.") }, outputSchema: TOOL_OUTPUT_SCHEMA }, addComment)
     register("list_comments", { title: "List Comments", description: "Lists shared comments for one supported object.", inputSchema: { workspaceId: z.string().uuid(), targetType: commentTargetSchema, targetId: z.string().uuid(), status: z.enum(["OPEN", "RESOLVED"]).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listCommentsTool)
     register("get_comment", { title: "Get Comment", description: "Gets one shared comment by ID.", inputSchema: { commentId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA }, getCommentTool)
     register("update_comment", { title: "Update Comment", description: "Updates discussion text without changing any decision record.", inputSchema: { commentId: z.string().uuid(), body: z.string().min(1) }, outputSchema: TOOL_OUTPUT_SCHEMA }, updateComment)
@@ -1036,7 +1046,10 @@ const _handler = createMcpHandler(
       "list_opportunities",
       {
         title: "List Opportunities",
-        description: "Lists opportunities in a workspace, with optional filters by status, squad and last-updated window.",
+        description:
+          "Lists opportunities in a workspace, with optional filters by status, squad and last-updated window. " +
+          "Paginated: returns at most `limit` items (default 50) plus the total and a `nextCursor` when more remain. " +
+          "To walk a whole workspace, keep calling with the returned cursor until `hasMore` is false.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           status: z.enum(["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"]).optional().describe("Filter by status"),
@@ -1044,38 +1057,97 @@ const _handler = createMcpHandler(
           updatedSince: z.string().datetime().optional().describe("Filter to opportunities updated at or after this ISO timestamp"),
           updatedBefore: z.string().datetime().optional().describe("Filter to opportunities updated before this ISO timestamp (useful for stale-work scans)"),
           sort: recencySortSchema,
+          limit: keysetLimitSchema,
+          cursor: keysetCursorSchema,
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      async ({ workspaceId, status, squadId, updatedSince, updatedBefore, sort }) => {
+      async ({ workspaceId, status, squadId, updatedSince, updatedBefore, sort, limit, cursor }) => {
         const prisma = getPrisma()
-        const opportunities = await prisma.opportunity.findMany({
-          where: {
-            workspaceId,
-            ...(status ? { status } : {}),
-            ...(squadId ? { squadId } : {}),
-            ...(updatedSince || updatedBefore
-              ? {
-                  updatedAt: {
-                    ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
-                    ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
-                  },
-                }
-              : {}),
-          },
-          include: {
-            linkedKeyResult: { select: { title: true, objective: { select: { workspaceId: true, title: true } } } },
-            squad: { select: { name: true } },
-            _count: { select: { solutions: { where: { workspaceId } } } },
-          },
-          orderBy: recencyOrderBy(sort) ?? { createdAt: "desc" },
-        })
+        // The cursor is only meaningful under the ordering and filters that
+        // produced it, so both are pinned into it and rechecked here.
+        const fingerprint = filterFingerprint({ status, squadId, updatedSince, updatedBefore, sort })
+        let decodedCursor: KeysetCursor | null = null
+        if (cursor !== undefined) {
+          decodedCursor = decodeKeysetCursor(cursor)
+          if (!decodedCursor) {
+            return fail("Invalid opportunity cursor. Call list_opportunities without a cursor to start again.")
+          }
+          if (decodedCursor.w !== workspaceId || decodedCursor.f !== fingerprint) {
+            return fail(
+              "Opportunity cursor does not match the requested workspace, filters or sort. " +
+                "Repeat the original filters alongside the cursor, or omit the cursor to start again.",
+            )
+          }
+        }
+        // `sort` absent means the default createdAt ordering; the keyset bound has
+        // to be expressed in whichever key the ordering actually uses.
+        const sortKey = sort ? "updatedAt" : "createdAt"
+        const sortDirection = sort === "leastRecentlyUpdated" ? "asc" : "desc"
+        const resolvedLimit = limit ?? KEYSET_PAGE_DEFAULT
+        const where = {
+          workspaceId,
+          ...(status ? { status } : {}),
+          ...(squadId ? { squadId } : {}),
+          ...(updatedSince || updatedBefore
+            ? {
+                updatedAt: {
+                  ...(updatedSince ? { gte: new Date(updatedSince) } : {}),
+                  ...(updatedBefore ? { lt: new Date(updatedBefore) } : {}),
+                },
+              }
+            : {}),
+        }
+        // `total` is counted against the unpaginated filter set: it is the
+        // denominator the caller needs to know the page is not the whole story.
+        const [rows, total] = await Promise.all([
+          prisma.opportunity.findMany({
+            where: decodedCursor ? { ...where, ...keysetAfter(sortKey, sortDirection, decodedCursor) } : where,
+            include: {
+              linkedKeyResult: { select: { title: true, objective: { select: { workspaceId: true, title: true } } } },
+              squad: { select: { name: true } },
+              _count: { select: { solutions: { where: { workspaceId } } } },
+            },
+            // A stable id tiebreaker on the default ordering too — `createdAt` is
+            // not unique, and a keyset cursor over a non-deterministic ordering
+            // both skips and repeats rows.
+            orderBy: recencyOrderBy(sort) ?? [{ createdAt: "desc" }, { id: "asc" }],
+            // One extra row is the cheapest way to learn whether a next page exists.
+            take: resolvedLimit + 1,
+          }),
+          prisma.opportunity.count({ where }),
+        ])
+        const hasMore = rows.length > resolvedLimit
+        const opportunities = hasMore ? rows.slice(0, resolvedLimit) : rows
+        if (!opportunities.length) {
+          // Distinguish an empty workspace from the end of a walk: paging off the
+          // end of a list whose last page was exactly full is success, not a
+          // not-found, and must not read as "this workspace has no opportunities".
+          return decodedCursor
+            ? ok(keysetFooter({ toolName: "list_opportunities", start: decodedCursor.s + 1, end: decodedCursor.s, total, nextCursor: null }), {
+                items: [],
+                count: 0,
+                total,
+                hasMore: false,
+                nextCursor: null,
+              })
+            : fail("No opportunities found.")
+        }
+        const alreadySeen = decodedCursor?.s ?? 0
+        const lastRow = opportunities[opportunities.length - 1]
+        const nextCursor = hasMore
+          ? encodeKeysetCursor({
+              v: 1,
+              w: workspaceId,
+              f: fingerprint,
+              k: new Date(lastRow[sortKey]).toISOString(),
+              i: lastRow.id,
+              s: alreadySeen + opportunities.length,
+            })
+          : null
         // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
         for (const o of opportunities) if (o.linkedKeyResult && o.linkedKeyResult.objective.workspaceId !== workspaceId) o.linkedKeyResult = null
-        if (!opportunities.length) {
-          return fail("No opportunities found.")
-        }
-        // Additive: the typed Opportunity<->Objective links, one workspace-filtered batch for the whole list.
+        // Additive: the typed Opportunity<->Objective links, one workspace-filtered batch for the page.
         // `linkedKeyResult` above stays derived from the legacy column only and is never inferred from these.
         const linkedObjectives = await getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunities.map(o => o.id), { preverified: true })
         const lines = opportunities.map(o => {
@@ -1089,7 +1161,19 @@ const _handler = createMcpHandler(
             `\n  ID: ${o.id}`
           )
         })
-        return ok(lines.join("\n"), {
+        // Appended only when paging is actually in play, so a listing that fits in
+        // one page is byte-identical to what callers got before pagination existed.
+        const footer =
+          hasMore || decodedCursor
+            ? `\n\n${keysetFooter({
+                toolName: "list_opportunities",
+                start: alreadySeen + 1,
+                end: alreadySeen + opportunities.length,
+                total,
+                nextCursor,
+              })}`
+            : ""
+        return ok(lines.join("\n") + footer, {
           items: opportunities.map((o) => ({
             id: o.id,
             title: o.title,
@@ -1103,6 +1187,9 @@ const _handler = createMcpHandler(
             linkedObjectives: linkedObjectives.get(o.id) ?? [],
           })),
           count: opportunities.length,
+          total,
+          hasMore,
+          nextCursor,
         })
       }
     )
@@ -2097,9 +2184,9 @@ const _handler = createMcpHandler(
         })
         if (!items.length) {
           // An empty *recency window* is a successful answer, not a failure —
-          // see the same note in lib/doc-tool-handlers.ts listDocs. An empty
-          // *unfiltered* roadmap keeps its original fail() so existing callers
-          // see no change.
+          // the same convention used throughout this file's list_* tools. An
+          // empty *unfiltered* roadmap keeps its original fail() so existing
+          // callers see no change.
           if (updatedSince || updatedBefore) {
             return ok("No active roadmap items updated in the requested window.", { items: [], count: 0 })
           }
@@ -3084,42 +3171,37 @@ const _handler = createMcpHandler(
     )
 
     // ════════════════════════════════════════════════════════════════
-    // DOCS
+    // DOCS (ADR 0019 — Docs as a Virtual Filesystem)
     // ════════════════════════════════════════════════════════════════
+    // Docs are addressed by path, not ID: read/list go through the
+    // docs://{workspaceId}/{+path} resource (registered below, after every
+    // tool), and write/delete/move/history/comments are the 8 tools here.
+    // This replaces the old 15-tool ID-addressed surface outright, in one
+    // cutover with no compatibility shim -- see
+    // docs/design/docs-virtual-filesystem-mcp.md §3.2 for the full mapping.
 
     register(
-      "list_docs",
+      "capture_canvas",
       {
-        title: "List Docs",
+        title: "Capture Canvas Image",
         description:
-          "Lists all docs in a workspace as an indented tree. " +
-          "Returns each doc's ID, title, icon, and child count. " +
-          "Use this to discover doc IDs before calling get_doc or update_doc. " +
-          "When a recency filter excludes a doc whose child still matches, the child is listed at the top level.",
+          "Returns a PNG picture of a canvas doc (docType CANVAS) so you can see its layout. The canvas JSON is rendered server-side to a self-contained page and photographed in a sandboxed headless browser; nothing is stored. " +
+          "Default is a fit-all overview. Pass `nodeId` (a node or group id) to zoom on that element with `padding` canvas units of context, or `region` {x,y,width,height} in canvas coordinates to look at an area; pass at most one of the two. " +
+          "Shows node text and colours, groups with labels, edges with arrows and labels, and Compass object cards with their live title, status and facts (cards you cannot see render as unavailable). " +
+          "Read the structure from the canvas doc's docs:// resource (its compass_doc_id frontmatter is the docId); use this tool to check how it looks. Output is capped at 2400 px per side; `scale` (0.05-4) overrides the automatic fit.",
         inputSchema: {
-          workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          updatedSince: z.string().datetime().optional().describe("Filter to docs updated at or after this ISO timestamp"),
-          updatedBefore: z.string().datetime().optional().describe("Filter to docs updated before this ISO timestamp (useful for stale-work scans)"),
-          sort: recencySortSchema,
+          docId: z.string().uuid().describe("UUID of the canvas doc"),
+          nodeId: z.string().min(1).max(200).optional().describe("Node or group id to focus on"),
+          padding: z.number().min(0).max(5000).optional().describe("Canvas units of context around nodeId (default 80)"),
+          region: z
+            .object({ x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive() })
+            .optional()
+            .describe("Area to show, in canvas coordinates"),
+          scale: z.number().min(0.05).max(4).optional().describe("Pixels per canvas unit; default fits the view to about 1600 px"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      listDocs
-    )
-
-    register(
-      "get_doc",
-      {
-        title: "Get Doc",
-        description:
-          "Returns the full content of a single doc, including its parent, " +
-          "children list, and the complete markdown body (for docType CANVAS, the JSON Canvas 1.0 document as a JSON string).",
-        inputSchema: {
-          docId: z.string().uuid().describe("UUID of the doc"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      getDoc
+      captureCanvas
     )
 
     register(
@@ -3139,62 +3221,202 @@ const _handler = createMcpHandler(
     )
 
     register(
-      "create_doc",
+      "write_doc",
       {
-        title: "Create Doc",
+        title: "Write Doc",
         description:
-          "Creates a new doc in a workspace. Optionally nest it under a parent doc. " +
-          "Content should be markdown (or, for docType CANVAS, a JSON Canvas 1.0 document as a JSON string). Returns the new doc ID and the docs URL. " +
-          "Pass roadmapItemId and docType: GTM_POSITIONING_BRIEF to create a Positioning & Messaging Brief " +
-          "linked 1:1 to a roadmap item -- if content is omitted, a starter template is used. " +
-          "Pass docType: CANVAS to create a JSON Canvas (infinite-canvas) doc; content is validated and a blank canvas is created when omitted. " +
-          "A Compass object card is a JSON Canvas link node with url \"compass://<kind>/<id>\" and a compass field {kind, id, title?}; kind must be one of opportunity, solution, metric, doc, task, experiment, objective, keyResult and id a UUID (invalid references are rejected).",
+          "Creates or updates a doc, addressed by its path (e.g. \"Product/Roadmap/Q3 Plan\") rather than an ID -- " +
+          "writing to a path that already exists updates it, writing to a new path creates it. Missing parent " +
+          "directories in the path are created implicitly. Content may include a YAML frontmatter block; " +
+          "compass_-prefixed keys are reserved and reflected back on read, never accepted as input. " +
+          "Discover paths via the docs://{workspaceId}/{path} resource.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
-          title: z.string().min(1).describe("Doc title"),
+          path: z.string().min(1).describe("Doc path, e.g. \"Product/Roadmap/Q3 Plan\" (no extension)"),
+          content: z.string().describe("Doc content: optional YAML frontmatter, then the markdown body"),
           operationId: z.string().uuid().optional().describe("Stable retry ID; required for Geode pilot documents"),
-          content: z.string().optional().describe("Doc body in markdown; for docType CANVAS a JSON Canvas 1.0 JSON string ({\"nodes\":[...],\"edges\":[...]})"),
-          parentId: z
-            .string()
-            .uuid()
-            .nullable()
-            .optional()
-            .describe("UUID of a parent doc to nest this under (omit for root)"),
-          icon: z.string().optional().describe("Emoji or icon string, e.g. '📋'"),
-          roadmapItemId: z
-            .string()
-            .uuid()
-            .nullable()
-            .optional()
-            .describe("UUID of a roadmap item to link this doc to as its Positioning & Messaging Brief (1:1 -- fails if that item already has a linked doc)"),
-          docType: z
-            .enum(DOC_TYPES)
-            .optional()
-            .describe("Doc type. GTM_POSITIONING_BRIEF auto-fills a starter template when content is omitted. CANVAS is a JSON Canvas 1.0 document (content must be valid JSON Canvas; blank canvas if omitted). Defaults to STANDARD."),
+          expectedRevision: z.string().optional().describe("Revision from a prior read of this path; when supplied, a concurrent edit since then is refused rather than overwritten"),
+          docType: z.enum(["STANDARD", "CANVAS"]).optional().describe("Create-only; ignored when the path already exists. CANVAS creates a JSON Canvas 1.0 doc: the body (after any frontmatter) must be a JSON Canvas JSON string (blank canvas if empty); Compass object cards are link nodes with url \"compass://<kind>/<id>\" and a compass field {kind, id, title?}. Defaults to STANDARD."),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      createDoc
+      writeDoc
     )
 
     register(
-      "update_doc",
+      "delete_doc",
       {
-        title: "Update Doc",
+        title: "Delete Doc",
         description:
-          "Updates an existing doc's title, content, and/or icon. " +
-          "Only the fields you provide are changed. For a CANVAS doc, content must be a complete, valid JSON Canvas 1.0 JSON string (it replaces the whole canvas; invalid payloads are rejected).",
+          "Deletes the doc at a path. Refuses (matching `rmdir` vs `rm -r`) if it has children unless " +
+          "recursive is set, in which case every descendant is deleted too.",
         inputSchema: {
-          docId: z.string().uuid().describe("UUID of the doc to update"),
-          expectedRevision: z.string().uuid().optional().describe("Revision from get_doc; required for Geode pilot documents"),
-          operationId: z.string().uuid().optional().describe("Stable retry ID; reuse only for the identical request"),
-          title: z.string().min(1).optional().describe("New title"),
-          content: z.string().optional().describe("New markdown content (replaces existing); for CANVAS docs the full JSON Canvas JSON string"),
-          icon: z.string().optional().describe("New emoji or icon string"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          path: z.string().min(1).describe("Doc path to delete"),
+          recursive: z.boolean().optional().describe("Delete child docs too (default false)"),
+          operationId: z.string().uuid().optional().describe("Stable retry ID; required for Geode pilot documents"),
+          expectedRevision: z.string().optional().describe("Revision from a prior read of this path; when supplied, a concurrent edit since then is refused rather than deleted out from under it"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      updateDoc
+      deleteDoc
+    )
+
+    register(
+      "move_doc",
+      {
+        title: "Move Doc",
+        description:
+          "Renames and/or reparents a doc by changing its path -- both are just \"the path changed.\" " +
+          "Missing intermediate directories on the destination are created implicitly.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          fromPath: z.string().min(1).describe("Current doc path"),
+          toPath: z.string().min(1).describe("Destination doc path"),
+          operationId: z.string().uuid().optional().describe("Stable retry ID; required for Geode pilot documents"),
+          expectedRevision: z.string().optional().describe("Revision from a prior read of fromPath; when supplied, a concurrent edit since then is refused rather than moved out from under it"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      moveDoc
+    )
+
+    const editExpectedRevision = z.string().uuid().optional().describe("Revision from the docs:// resource read (_meta.revision) or a prior write_doc result. When given, the edit is rejected if the doc has changed since (re-read and retry). When omitted, the edit is re-applied on top of the latest revision, so it never overwrites a concurrent change.")
+
+    register(
+      "edit_doc",
+      {
+        title: "Edit Doc",
+        description:
+          "Edits a doc's body by exact text replacement instead of re-sending the whole document. " +
+          "Give oldString + newString (oldString must match exactly once unless replaceAll), or an edits array to apply several replacements atomically in order. " +
+          "The server applies the change to the current body and saves it with a revision check. Only the body is edited: frontmatter properties are changed with write_doc. " +
+          "Works on CANVAS docs too (the result must still be valid JSON Canvas), but prefer edit_canvas for canvases.",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the doc to edit (the compass_doc_id in its docs:// frontmatter)"),
+          oldString: z.string().min(1).optional().describe("Exact text to replace. Must be unique in the body unless replaceAll is true"),
+          newString: z.string().optional().describe("Replacement text (may be empty to delete)"),
+          replaceAll: z.boolean().optional().describe("Replace every occurrence of oldString"),
+          edits: z
+            .array(z.object({ oldString: z.string().min(1), newString: z.string(), replaceAll: z.boolean().optional() }))
+            .min(1)
+            .max(MAX_TEXT_EDITS)
+            .optional()
+            .describe("Several replacements applied in order, all-or-nothing. Use instead of oldString/newString"),
+          expectedRevision: editExpectedRevision,
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      editDoc
+    )
+
+    const canvasColor = z.string().describe('Preset "1"-"6" or a hex color like "#aabbcc"')
+    const canvasPlacement = { x: z.number().optional().describe("Left edge; give with y, or omit both to auto-place"), y: z.number().optional().describe("Top edge; give with x, or omit both to auto-place") }
+    const canvasOp = z.discriminatedUnion("op", [
+      z.object({
+        op: z.literal("add_card"),
+        kind: z.enum(CANVAS_CARD_KINDS),
+        id: z.string().uuid().describe("UUID of the Compass object. Re-adding a card already on the canvas is a no-op"),
+        title: z.string().optional().describe("Display title shown on the card"),
+        nodeId: z.string().optional().describe("Optional canvas node id to use; generated when omitted"),
+        color: canvasColor.optional(),
+        ...canvasPlacement,
+      }),
+      z.object({
+        op: z.literal("add_text"),
+        text: z.string().min(1).describe("Markdown text"),
+        nodeId: z.string().optional(),
+        width: z.number().optional(),
+        height: z.number().optional(),
+        color: canvasColor.optional(),
+        ...canvasPlacement,
+      }),
+      z.object({
+        op: z.literal("add_group"),
+        label: z.string().optional(),
+        members: z.array(z.string()).optional().describe("Node ids (or kind:uuid card references) the group should surround; its bounds are computed from them"),
+        nodeId: z.string().optional(),
+        width: z.number().optional().describe("Only used for an empty group"),
+        height: z.number().optional().describe("Only used for an empty group"),
+        color: canvasColor.optional(),
+        ...canvasPlacement,
+      }),
+      z.object({
+        op: z.literal("add_edge"),
+        from: z.string().describe("Node id or kind:uuid card reference"),
+        to: z.string().describe("Node id or kind:uuid card reference"),
+        edgeId: z.string().optional(),
+        label: z.string().optional(),
+        fromSide: z.enum(CANVAS_SIDES as [string, ...string[]]).optional(),
+        toSide: z.enum(CANVAS_SIDES as [string, ...string[]]).optional(),
+        fromEnd: z.enum(CANVAS_ENDS as [string, ...string[]]).optional(),
+        toEnd: z.enum(CANVAS_ENDS as [string, ...string[]]).optional(),
+        color: canvasColor.optional(),
+      }),
+      z.object({ op: z.literal("move"), node: z.string(), x: z.number(), y: z.number() }),
+      z.object({
+        op: z.literal("update"),
+        node: z.string().optional().describe("Node to update (give exactly one of node or edge)"),
+        edge: z.string().optional().describe("Edge id to update"),
+        text: z.string().optional().describe("New text (text nodes)"),
+        label: z.string().optional().describe("New label (groups and edges; empty string clears)"),
+        title: z.string().optional().describe("New display title (Compass cards)"),
+        color: canvasColor.nullable().optional().describe("null clears the color"),
+        width: z.number().optional(),
+        height: z.number().optional(),
+        fromSide: z.enum(CANVAS_SIDES as [string, ...string[]]).optional(),
+        toSide: z.enum(CANVAS_SIDES as [string, ...string[]]).optional(),
+        fromEnd: z.enum(CANVAS_ENDS as [string, ...string[]]).optional(),
+        toEnd: z.enum(CANVAS_ENDS as [string, ...string[]]).optional(),
+      }),
+      z.object({ op: z.literal("remove"), node: z.string().optional().describe("Node to remove, with its edges (give exactly one of node or edge)"), edge: z.string().optional() }),
+    ])
+
+    register(
+      "edit_canvas",
+      {
+        title: "Edit Canvas",
+        description:
+          "Edits a CANVAS doc with small operations instead of re-sending the whole JSON Canvas. The server loads the canvas, applies the ops in order, validates and saves. " +
+          "Node ids and positions are automatic: omit x/y and new nodes are placed in a column to the right of existing content. " +
+          "Ops: add_card {kind, id, title?} (a Compass object card), add_text {text}, add_group {label?, members?}, add_edge {from, to, label?}, move {node, x, y}, update {node|edge, ...}, remove {node|edge}. " +
+          "Anywhere a node is expected you can pass a canvas node id or a card reference like \"opportunity:<uuid>\". " +
+          "The batch is all-or-nothing (the first invalid op rejects it and names its index). Re-adding a card or an edge that exists is a harmless no-op, so retries are safe. " +
+          "The response lists the node/edge id created for each add op.",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the CANVAS doc"),
+          ops: z.array(canvasOp).min(1).max(MAX_CANVAS_OPS).describe("Operations applied in order"),
+          expectedRevision: editExpectedRevision,
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      // The schema restricts sides/ends to the valid literals; the handler re-validates regardless.
+      (args) => editCanvas({ ...args, ops: args.ops as CanvasOp[] })
+    )
+
+    register(
+      "build_canvas_tree",
+      {
+        title: "Build Canvas Tree",
+        description:
+          "Draws the Opportunity Solution Tree onto a CANVAS doc, like the Canvas editor's \"Build tree\" button: objectives, key results, opportunities, solutions and their links, laid out automatically. " +
+          "Scope defaults to the whole workspace; pass { kind, id } to draw just the subtree under one objective, key result, opportunity or solution. " +
+          "It merges into the canvas: cards already on it are never duplicated, only new content is added (to the right of what is there, one group per root objective), so it is safe to run again as the tree grows. " +
+          "Trees larger than 400 cards are truncated; scope to a specific item to see the rest.",
+        inputSchema: {
+          docId: z.string().uuid().describe("UUID of the CANVAS doc to draw onto"),
+          scope: z
+            .union([
+              z.object({ kind: z.literal("workspace") }),
+              z.object({ kind: z.enum(TREE_SCOPE_KINDS), id: z.string().uuid() }),
+            ])
+            .optional()
+            .describe('{ "kind": "workspace" } (default) or { "kind": "objective" | "keyResult" | "opportunity" | "solution", "id": "<uuid>" }'),
+          expectedRevision: editExpectedRevision,
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      buildCanvasTree
     )
 
     register("list_artifacts", {
@@ -3202,17 +3424,32 @@ const _handler = createMcpHandler(
       inputSchema: { workspaceId: z.string().uuid(), includeArchived: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, listArtifacts)
     register("get_artifact", {
-      title: "Get Artifact", description: "Returns artifact metadata, immutable revision history, linked Solutions and Decisions without exposing private storage keys or HTML content.",
+      title: "Get Artifact", description: "Returns artifact metadata (including kind), immutable revision history, linked Solutions and Decisions without exposing private storage keys or HTML content. A SLIDE_DECK also returns its slides as { index, title, description } — index is the zero-based slideIndex add_comment accepts.",
       inputSchema: { artifactId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, getArtifact)
+    const artifactUploadReceipt = z.string().min(1).optional().describe("Signed receipt from prepare_artifact_upload after the file was uploaded. Use instead of html so the document never passes through the conversation.")
+    register("prepare_artifact_upload", {
+      title: "Prepare Artifact HTML Upload",
+      description: "Prepares a short-lived direct upload (up to 2 MiB) to private storage for an HTML artifact so the file never has to be pasted into a tool call. " +
+        "Upload the file from disk with the returned client token, then pass the returned receipt as uploadReceipt to create_artifact or update_artifact. Prefer this over inline html for anything beyond a few KB.",
+      inputSchema: {
+        workspaceId: z.string().uuid().describe("UUID of the workspace that will own the artifact"),
+        filename: z.string().min(1).max(255).describe("Filename ending in .html"),
+        fileSize: z.number().int().min(1).max(2 * 1024 * 1024).describe("Exact file size in bytes"),
+      }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, prepareArtifactUploadTool)
     register("create_artifact", {
-      title: "Create Artifact", description: "Creates a first-class Artifact from self-contained HTML or an external http/https URL.",
-      inputSchema: { workspaceId: z.string().uuid(), title: z.string().min(1), description: z.string().optional(), sourceType: z.enum(["HTML_UPLOAD", "EXTERNAL_LINK"]), html: z.string().optional(), filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+      title: "Create Artifact", description: "Creates a first-class Artifact from self-contained HTML, an external http/https URL, or a v0 chat (sourceType V0_CHAT with url https://v0.app/chat/<id>; read with the caller's own v0 connection, and title may be empty to use the chat name). A Google Drive/Docs URL is kept as a link only (Compass never reads the file) and previewed read-only in the app with the viewer's own Google access. For HTML, pass uploadReceipt (from prepare_artifact_upload) instead of html to avoid embedding the document in the call.",
+      inputSchema: { workspaceId: z.string().uuid(), title: z.string(), description: z.string().optional(), sourceType: z.enum(["HTML_UPLOAD", "EXTERNAL_LINK", "V0_CHAT"]), kind: z.enum(["DOCUMENT", "SLIDE_DECK"]).optional().describe("Presentation kind. SLIDE_DECK (HTML_UPLOAD only) renders the HTML one slide at a time, split by Reveal.js sections, .slide elements, top-level <section>s or <hr> breaks; DOCUMENT (default) renders it as one page."), html: z.string().optional(), uploadReceipt: artifactUploadReceipt, filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, createArtifact)
     register("update_artifact", {
-      title: "Update Artifact", description: "Updates Artifact metadata and optionally creates a new immutable HTML or URL revision.",
-      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid(), title: z.string().min(1).optional(), description: z.string().nullable().optional(), html: z.string().optional(), filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+      title: "Update Artifact", description: "Updates Artifact metadata and optionally creates a new immutable HTML or URL revision. For HTML, pass uploadReceipt (from prepare_artifact_upload) instead of html to avoid embedding the document in the call.",
+      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid(), title: z.string().min(1).optional(), description: z.string().nullable().optional(), kind: z.enum(["DOCUMENT", "SLIDE_DECK"]).optional().describe("Presentation kind. SLIDE_DECK (HTML_UPLOAD only) renders the HTML one slide at a time, split by Reveal.js sections, .slide elements, top-level <section>s or <hr> breaks; DOCUMENT (default) renders it as one page."), html: z.string().optional(), uploadReceipt: artifactUploadReceipt, filename: z.string().optional(), url: z.string().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, updateArtifact)
+    register("refresh_artifact_from_v0", {
+      title: "Refresh Artifact from v0", description: "Re-reads a V0_CHAT Artifact's chat from v0 using the caller's own v0 connection and adds a new immutable revision only if v0 has a new version. Reports changed=false when nothing is new.",
+      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, refreshArtifactFromV0)
     register("create_feedback_source", {
       title: "Create Feedback Source",
       description: "Creates an embedded-feedback source bound to an ACTIVE Artifact in the workspace and mints its first token. Returns the raw token ONCE plus a ready-to-paste <script> snippet for the prototype's root layout. allowedOrigins are exact https origins (no wildcards; http only for localhost); the widget is refused from any other origin, so pass a provisional origin now and call update_feedback_source once the real deploy origin is known (an empty list accepts nothing yet).",
@@ -3243,54 +3480,27 @@ const _handler = createMcpHandler(
       title: "Archive Artifact", description: "Archives an Artifact while preserving its links and immutable revision history.",
       inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, archiveArtifact)
+    register("capture_screenshot", {
+      title: "Capture Artifact Screenshot",
+      description: "Renders an Artifact revision in a sandboxed headless browser and stores the PNG as that revision's thumbnail, shown on the Artifact page. EXTERNAL_LINK revisions render their URL, which is read from the revision and never supplied by the caller; HTML_UPLOAD revisions render their stored HTML with all network access disabled. Returns image metadata, not the image or its storage key.",
+      inputSchema: { artifactId: z.string().uuid(), workspaceId: z.string().uuid(), revisionId: z.string().uuid().optional(), fullPage: z.boolean().optional(), viewport: z.object({ width: z.number().int().min(320).max(3840), height: z.number().int().min(240).max(2160) }).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
+    }, captureArtifactScreenshot)
 
     register(
-      "create_doc_version",
+      "list_doc_history",
       {
-        title: "Create Doc Version",
+        title: "List Doc History",
         description:
-          "Saves a manual, named snapshot of a doc's current content. Unlike the automatic " +
-          "snapshots taken before every overwriting update_doc call, this always writes a new " +
-          "version -- it never gets coalesced away by the 5-minute same-author window.",
-        inputSchema: {
-          docId: z.string().uuid().describe("UUID of the doc to snapshot"),
-          expectedRevision: z.string().uuid().optional().describe("Revision from get_doc; required for Geode pilot documents"),
-          operationId: z.string().uuid().optional().describe("Stable retry ID for this snapshot"),
-          label: z.string().optional().describe("Optional label for this snapshot, e.g. 'Before big rewrite'"),
-          authorName: z.string().min(1).describe("Name to attribute this snapshot to"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      createDocVersion
-    )
-
-    register(
-      "list_doc_versions",
-      {
-        title: "List Doc Versions",
-        description:
-          "Lists all saved versions of a doc (id, label, author, created date), newest first, " +
+          "Lists all saved versions of the doc at a path (id, label, author, created date), newest first, " +
           "alongside the doc's own current title and last-updated time as a reference point. " +
-          "Does not include full content -- call get_doc_version for that.",
+          "Does not include full content -- call restore_doc_version to read/apply one.",
         inputSchema: {
-          docId: z.string().uuid().describe("UUID of the doc"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          path: z.string().min(1).describe("Doc path"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
-      listDocVersions
-    )
-
-    register(
-      "get_doc_version",
-      {
-        title: "Get Doc Version",
-        description: "Returns the full content/title/metadata/icon snapshot of a single saved doc version.",
-        inputSchema: {
-          versionId: z.string().uuid().describe("UUID of the doc version"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      getDocVersion
+      listDocHistory
     )
 
     register(
@@ -3298,11 +3508,13 @@ const _handler = createMcpHandler(
       {
         title: "Restore Doc Version",
         description:
-          "Restores a doc's live content to a previously saved version. The doc's CURRENT state is " +
-          "snapshotted first (labeled 'Before restore'), so restoring never loses data -- you can " +
-          "always restore back to what was there before.",
+          "Restores the doc at a path to a previously saved version (from list_doc_history). The doc's " +
+          "CURRENT state is snapshotted first (labeled 'Before restore'), so restoring never loses data -- " +
+          "you can always restore back to what was there before.",
         inputSchema: {
-          versionId: z.string().uuid().describe("UUID of the doc version to restore"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          path: z.string().min(1).describe("Doc path"),
+          versionId: z.string().uuid().describe("UUID of the doc version to restore, from list_doc_history"),
           expectedRevision: z.string().uuid().optional().describe("Current document revision; required for Geode pilot documents"),
           operationId: z.string().uuid().optional().describe("Stable retry ID for this restore"),
         },
@@ -3312,19 +3524,25 @@ const _handler = createMcpHandler(
     )
 
     // ── Doc inline comments ─────────────────────────────────────────
+    // get_doc_comment, update_doc_comment, delete_doc_comment and
+    // reopen_doc_comment are removed outright: list_doc_comments already
+    // returns full bodies (get was redundant), body edits/hard-delete stay off
+    // this smaller surface (matching the existing agent hard-delete posture),
+    // and reopen is folded into resolve_doc_comment's `resolved: false`.
     register(
       "add_doc_comment",
       {
         title: "Add Doc Comment",
         description:
-          "Adds an inline comment to a doc. Omit all four anchor fields (anchorText, " +
+          "Adds an inline comment to the doc at a path. Omit all four anchor fields (anchorText, " +
           "anchorPrefix, anchorSuffix, anchorStart, anchorEnd) for a doc-level general " +
           "comment, or pass them to anchor the comment to a specific span of the doc's " +
           "plain-text projection. Pass parentId to reply to an existing root comment — " +
           "threads are only one level deep (you can't reply to a reply). Replies never " +
           "carry an anchor.",
         inputSchema: {
-          docId: z.string().uuid().describe("UUID of the doc to comment on"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          path: z.string().min(1).describe("Doc path to comment on"),
           body: z.string().min(1).describe("The comment text"),
           authorName: z.string().min(1).describe("Name to attribute this comment to"),
           parentId: z.string().uuid().optional().describe("UUID of the root comment to reply to (omit for a new thread)"),
@@ -3344,10 +3562,11 @@ const _handler = createMcpHandler(
       {
         title: "List Doc Comments",
         description:
-          "Lists a doc's inline comments grouped into threads (root comments with their " +
+          "Lists inline comments on the doc at a path, grouped into threads (root comments with their " +
           "replies), oldest-first. Optionally filter by status (OPEN or RESOLVED).",
         inputSchema: {
-          docId: z.string().uuid().describe("UUID of the doc"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          path: z.string().min(1).describe("Doc path"),
           status: z.enum(["OPEN", "RESOLVED"]).optional().describe("Only return comments with this status"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
@@ -3356,73 +3575,90 @@ const _handler = createMcpHandler(
     )
 
     register(
-      "get_doc_comment",
-      {
-        title: "Get Doc Comment",
-        description: "Returns a single doc comment's full body, author, status, anchor context, and timestamps.",
-        inputSchema: {
-          commentId: z.string().uuid().describe("UUID of the comment"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      getDocComment
-    )
-
-    register(
-      "update_doc_comment",
-      {
-        title: "Update Doc Comment",
-        description: "Edits a doc comment's body text. Does not change its status or anchor.",
-        inputSchema: {
-          commentId: z.string().uuid().describe("UUID of the comment to edit"),
-          body: z.string().min(1).describe("The new comment text (replaces the existing body)"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      updateDocComment
-    )
-
-    register(
-      "delete_doc_comment",
-      {
-        title: "Delete Doc Comment",
-        description:
-          "Deletes a doc comment. Deleting a root comment also deletes all of its replies " +
-          "(there is no undo).",
-        inputSchema: {
-          commentId: z.string().uuid().describe("UUID of the comment to delete"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
-      },
-      deleteDocComment
-    )
-
-    register(
       "resolve_doc_comment",
       {
         title: "Resolve Doc Comment",
         description:
-          "Marks a doc comment as RESOLVED. Resolved comments are hidden from the doc's " +
-          "default open-only view and their anchors stop highlighting.",
+          "Sets a doc comment's status. Defaults to marking it RESOLVED (hidden from the doc's default " +
+          "open-only view, anchor stops highlighting); pass resolved: false to reopen it instead.",
         inputSchema: {
-          commentId: z.string().uuid().describe("UUID of the comment to resolve"),
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          path: z.string().min(1).describe("Doc path the comment belongs to"),
+          commentId: z.string().uuid().describe("UUID of the comment"),
+          resolved: z.boolean().optional().describe("true (default) resolves; false reopens"),
         },
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       resolveDocComment
     )
 
-    register(
-      "reopen_doc_comment",
-      {
-        title: "Reopen Doc Comment",
-        description: "Reopens a previously resolved doc comment, setting its status back to OPEN.",
-        inputSchema: {
-          commentId: z.string().uuid().describe("UUID of the comment to reopen"),
-        },
-        outputSchema: TOOL_OUTPUT_SCHEMA,
+    // ── docs:// resource — read/list side of ADR 0019's virtual filesystem ──
+    // `{+path}` (reserved-expansion) is required, not `{path}`: a bare
+    // `{path}` percent-encodes `/`, which would make a multi-segment doc path
+    // un-matchable as a single variable. Confirmed against the installed SDK's
+    // UriTemplate implementation (node_modules/@modelcontextprotocol/sdk's
+    // shared/uriTemplate.js): the `+` operator's match pattern is `(.+)`, so it
+    // captures every remaining path segment as one variable. See
+    // __tests__/mcp-doc-resource.test.ts for a regression test locking this in.
+    //
+    // Gated directly through lib/mcp-authz.ts, not lib/mcp-tool-gates.ts: a
+    // resource has no tool name for that table to key on (spec §3.3). Research
+    // actors are denied entirely, matching every doc tool's prior behavior
+    // (RESEARCH_TOOL_ALLOWLIST is empty).
+    const docsResourceTemplate = new ResourceTemplate("docs://{workspaceId}/{+path}", {
+      list: async () => {
+        const actor = getMcpActor()
+        if (isResearchActor(actor)) throw new McpAuthzError("Resource is not available to research interviews.")
+        const workspaces = await getPrisma().workspace.findMany({
+          where: await agentWorkspaceWhere(actor),
+          select: { id: true },
+        })
+        const resources: { uri: string; name: string; mimeType: string }[] = []
+        for (const workspace of workspaces) {
+          const nodes = await docFs.listPaths(workspace.id)
+          for (const node of nodes) {
+            resources.push({ uri: `docs://${workspace.id}/${encodeURI(node.path)}`, name: node.title, mimeType: "text/markdown" })
+          }
+        }
+        return { resources }
       },
-      reopenDocComment
+    })
+
+    server.registerResource(
+      "doc",
+      docsResourceTemplate,
+      {
+        title: "Compass Doc",
+        description:
+          "A single Compass doc, addressed by workspace and path. Frontmatter carries compass_doc_id, " +
+          "compass_doc_type, and (if linked) compass_roadmap_item_id, plus ordinary user metadata.",
+        mimeType: "text/markdown",
+      },
+      async (uri, variables) => {
+        const actor = getMcpActor()
+        if (isResearchActor(actor)) throw new McpAuthzError("Resource is not available to research interviews.")
+        const rawWorkspaceId = Array.isArray(variables.workspaceId) ? variables.workspaceId[0] : variables.workspaceId
+        const rawPath = Array.isArray(variables.path) ? variables.path[0] : variables.path
+        const workspaceId = decodeURIComponent(String(rawWorkspaceId ?? ""))
+        const path = decodeURIComponent(String(rawPath ?? ""))
+        await assertWorkspaceMember(actor, workspaceId)
+        const result = await docFs.readPath(workspaceId, path)
+        if (!result) throw new Error(`No doc found at path "${path}" in this workspace.`)
+        // docId and revision ride in _meta so the docId-addressed tools that
+        // intentionally remain (edit_doc, edit_canvas, build_canvas_tree,
+        // capture_canvas) can be targeted, and expectedRevision pinned, from
+        // a docs:// read without a separate id-lookup tool.
+        return {
+          contents: [
+            {
+              uri: uri.toString(),
+              text: result.content,
+              mimeType: "text/markdown",
+              _meta: { docId: result.docId, revision: result.revision },
+            },
+          ],
+        }
+      }
     )
 
     // ════════════════════════════════════════════════════════════════

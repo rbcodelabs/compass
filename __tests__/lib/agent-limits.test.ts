@@ -18,8 +18,22 @@ describe("checkAgentUsageLimit", () => {
     // Scoped by user + role + a 24h window.
     const arg = mockAgentMessage.aggregate.mock.calls[0][0]
     expect(arg.where.role).toBe("assistant")
-    expect(arg.where.conversation).toEqual({ userId: "user-1" })
+    // Charged to whoever asked; rows from before sharing (no author) fall to the owner.
+    expect(arg.where.OR).toEqual([{ authorUserId: "user-1" }, { authorUserId: null, conversation: { userId: "user-1" } }])
     expect(arg.where.createdAt.gte).toBeInstanceOf(Date)
+  })
+
+  it("falls back to the owner-only query before migration 080 is applied", async () => {
+    mockAgentMessage.aggregate
+      .mockRejectedValueOnce(Object.assign(new Error("column missing"), { code: "P2022" }))
+      .mockResolvedValueOnce({ _count: { _all: 1 }, _sum: { costUsd: 0.1 } })
+    expect(await checkAgentUsageLimit("user-1")).toEqual({ allowed: true })
+    expect(mockAgentMessage.aggregate.mock.calls[1][0].where.conversation).toEqual({ userId: "user-1" })
+  })
+
+  it("does not swallow other database errors", async () => {
+    mockAgentMessage.aggregate.mockRejectedValue(new Error("connection reset"))
+    await expect(checkAgentUsageLimit("user-1")).rejects.toThrow("connection reset")
   })
 
   it("blocks when the turn count cap is reached", async () => {

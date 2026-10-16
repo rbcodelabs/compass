@@ -52,12 +52,34 @@ Open **Organization Settings → Workspaces** and click **Create workspace**. Th
 - **Name** — what the workspace is called, e.g. "Product Team".
 - **URL slug** — the part that appears in the address bar, as in `/your-org/product-team`. It fills in automatically as you type the name, and you can edit it. Slugs may contain lowercase letters, numbers, and hyphens only, and no two workspaces in the same organization can share one.
 - **Description** — optional.
+- **Who starts as a member?** — choose who is added to the workspace when it is created:
+  - **Everyone in the organization** (default) — every member of the organization is added. Organization Owners and Admins become workspace Admins; everyone else becomes a workspace Member.
+  - **Org admins only** — only the organization's Owners and Admins (including you) are added, as workspace Admins. Use this for a sensitive or small-team workspace, then add the people who should have access from that workspace's own **Settings → Members**.
 
-**Every member of the organization is automatically added to the new workspace.** There is no separate step to invite people into it, and nobody in the organization has to be added by hand afterwards. Organization Owners and Admins become workspace Admins; everyone else becomes a workspace Member. You can adjust individual roles afterwards from that workspace's own **Settings → Members**.
+Either way, there is no separate invite step for the people who are seeded, and you can adjust individual roles afterwards from that workspace's own **Settings → Members**. Agents that create a workspace with `create_workspace` always use the default (everyone in the organization).
 
 On success you land directly in the new workspace's OKRs page, and it appears in the workspace switcher at the top of the sidebar.
 
 Your organization's *first* workspace is created for you when you sign up, as part of onboarding — this page is for adding further ones later.
+
+## Changing the Organization URL Slug
+
+The organization's **URL slug** is the first part of every link: `/{slug}/{workspace}/…`. An organization Owner or Admin can change it in **Organization Settings → Organization URL**. Type the new slug (lowercase letters, numbers and hyphens, 2–63 characters; a few words such as `api`, `login` and `portal` are reserved) and click **Change URL slug**. Compass asks you to confirm before it changes anything, then takes you to the new address.
+
+**Old links stop working immediately.** Compass does not redirect from the old slug, so anything that contains it returns a "not found" page or error:
+
+- bookmarks and shared workspace links;
+- links in emails and notifications that were already sent;
+- your public portal links and portal SSO links (update the URLs your own app uses);
+- MCP and API clients that pass the old slug as `orgSlug`: update them to the new slug.
+
+The old slug becomes available for any other organization to claim. Workspace slugs are unaffected; they are changed separately.
+
+## Switching Between Workspaces
+
+Click the workspace name at the top of the sidebar to open the workspace picker. Type to filter by workspace or organization name, use the arrow keys to move through the list, and press Enter to open one. Switching keeps you in the same section (for example, Roadmap stays Roadmap). When you belong to more than four workspaces, the ones you opened most recently appear first in a **Recent** group. Recents are remembered per browser and are not shared across devices.
+
+Choose **All workspaces** at the bottom of the picker to open the full workspace gallery at `/dashboard`. It shows every workspace as a card, grouped by organization, with search (press `/` or ⌘K). Workspaces where you have read-only access are labelled **Read-only**. If you belong to only one workspace, signing in takes you straight to it.
 
 ## Deleting a Workspace
 

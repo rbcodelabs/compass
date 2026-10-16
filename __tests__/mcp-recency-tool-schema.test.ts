@@ -5,7 +5,14 @@
  * Registration is where the contract lives: the handler tests invoke the tool
  * callback directly, so the registered inputSchema never runs there. These
  * assertions pin the wire-level vocabulary agents actually see, and guard
- * against the six tools drifting apart one edit at a time.
+ * against the five tools drifting apart one edit at a time.
+ *
+ * list_docs is NOT here: ADR 0019 replaced it with the docs://{workspaceId}/
+ * {+path} resource, which has no updatedSince/updatedBefore/sort recency
+ * filter at all -- resources/list takes no caller-supplied arguments in the
+ * MCP protocol. That is a real capability gap relative to the old tool
+ * (there is no "what doc changed recently" digest query anymore), not an
+ * oversight in this test.
  */
 import { describe, expect, it, vi } from "vitest"
 import type { ZodType } from "zod"
@@ -14,8 +21,8 @@ type ToolMeta = { inputSchema: Record<string, ZodType> }
 const registeredTools: Record<string, ToolMeta> = {}
 
 vi.mock("mcp-handler", () => ({
-  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: ToolMeta) => void }) => void) => {
-    setup({ registerTool(name, meta) { registeredTools[name] = meta } })
+  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: ToolMeta) => void; registerResource: (...args: unknown[]) => void }) => void) => {
+    setup({ registerTool(name, meta) { registeredTools[name] = meta }, registerResource() {} })
     return () => new Response("ok")
   },
 }))
@@ -29,7 +36,6 @@ const WINDOW_TOOLS = [
   "list_solutions",
   "list_assumptions",
   "list_roadmap_items",
-  "list_docs",
 ] as const
 
 /** list_tasks already had the window; it gained only the sort. */
@@ -70,6 +76,41 @@ describe.each(SORT_TOOLS)("%s recency sort", (tool) => {
 
   it("describes itself so an agent knows omitting it preserves the default order", () => {
     expect(registeredTools[tool].inputSchema.sort.description).toContain("default ordering")
+  })
+})
+
+describe("list_opportunities keyset pagination inputs", () => {
+  it("bounds limit to a sane page size and keeps it optional", () => {
+    const schema = registeredTools.list_opportunities.inputSchema
+    expect(schema.limit.safeParse(undefined).success).toBe(true)
+    expect(schema.limit.safeParse(1).success).toBe(true)
+    expect(schema.limit.safeParse(200).success).toBe(true)
+    // The ceiling is the whole point: `limit` must not be usable to restore the
+    // unbounded response this change exists to remove.
+    expect(schema.limit.safeParse(201).success).toBe(false)
+    expect(schema.limit.safeParse(0).success).toBe(false)
+    expect(schema.limit.safeParse(-5).success).toBe(false)
+    expect(schema.limit.safeParse(25.5).success).toBe(false)
+  })
+
+  it("accepts an opaque string cursor and keeps it optional", () => {
+    const schema = registeredTools.list_opportunities.inputSchema
+    expect(schema.cursor.safeParse(undefined).success).toBe(true)
+    expect(schema.cursor.safeParse("eyJ2IjoxfQ").success).toBe(true)
+    expect(schema.cursor.safeParse(42).success).toBe(false)
+  })
+
+  it("tells the caller in the descriptions how to page and what to repeat", () => {
+    const schema = registeredTools.list_opportunities.inputSchema
+    // An agent only ever sees these strings, so they carry the protocol.
+    expect(schema.limit.description).toContain("default 50")
+    expect(schema.cursor.description).toContain("nextCursor")
+    expect(schema.cursor.description).toContain("same filters and sort")
+  })
+
+  it("announces in the tool description that results are paginated", () => {
+    const meta = registeredTools.list_opportunities as ToolMeta & { description?: string }
+    expect(meta.description).toMatch(/paginated/i)
   })
 })
 

@@ -7,7 +7,8 @@ import { findMetricConfigIssues, type MetricConfigIssue } from "@/lib/scoring";
 import type { ScoringFormulaType, MetricDirection } from "@/lib/types";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { SLUG_PATTERN } from "@/lib/slug";
-import { createWorkspaceInOrg } from "@/lib/workspace-service";
+import { validateOrgSlug } from "@/lib/org-slug";
+import { createWorkspaceInOrg, type WorkspaceMemberSeeding } from "@/lib/workspace-service";
 import { agentsEnabled } from "@/lib/agent-access";
 
 export interface ScoringMetricInput {
@@ -141,7 +142,12 @@ const SCORING_METRIC_KEY_CONFLICT =
  */
 export async function createWorkspace(
   orgSlug: string,
-  input: { name: string; slug: string; description?: string }
+  input: {
+    name: string;
+    slug: string;
+    description?: string;
+    memberSeeding?: WorkspaceMemberSeeding;
+  }
 ): Promise<CreateWorkspaceResult> {
   try {
     await resolveOrgAdmin(orgSlug);
@@ -171,6 +177,9 @@ export async function createWorkspace(
       name,
       slug,
       description: input.description,
+      // Server Action arguments are attacker-controlled: anything other than
+      // the narrowing value falls back to the long-standing default.
+      memberSeeding: input.memberSeeding === "ORG_ADMINS" ? "ORG_ADMINS" : "ALL_ORG_MEMBERS",
     });
     if (!result.ok) {
       return { ok: false, error: result.error };
@@ -192,6 +201,65 @@ export async function createWorkspace(
     // returned above as data, so it does not reach here. This message only
     // covers a P2002 from some *other* unique index on the write path.
     return toFailure(error, `That workspace slug is already taken in ${orgSlug}.`);
+  }
+}
+
+// ─── Organization URL slug (org admin only) ───────────────────────────────────
+
+export type UpdateOrganizationSlugResult =
+  | { ok: true; slug: string; redirectTo: string }
+  | { ok: false; error: string };
+
+const ORG_SLUG_TAKEN = "That URL slug is already taken. Choose another.";
+
+/**
+ * Renames this organization's URL slug (`Organization.slug`, the first segment of
+ * every app URL).
+ *
+ * Org OWNER/ADMIN only (`resolveOrgAdmin`), not workspace admin: the slug is an
+ * org-wide identifier that every workspace's URLs hang off.
+ *
+ * Deliberately simple: the old slug is NOT kept. Every URL containing it (bookmarks,
+ * emails, portal and SSO links, MCP/API clients passing `orgSlug`) stops resolving
+ * immediately, so the UI confirms before calling this. Uniqueness is checked against
+ * current organizations only; a slug another org used to have is free.
+ *
+ * Returns `redirectTo` instead of calling `redirect()` (like `deleteOrganization`)
+ * so the action stays unit-testable and the navigation stays on the client. The
+ * caller's current URL no longer resolves its own org after this, so it MUST
+ * navigate.
+ */
+export async function updateOrganizationSlug(
+  orgSlug: string,
+  newSlugInput: string
+): Promise<UpdateOrganizationSlugResult> {
+  try {
+    const { prisma, organizationId } = await resolveOrgAdmin(orgSlug);
+
+    // Server Action arguments are attacker-controlled; the form's lowercase
+    // normalisation is a convenience, not a boundary.
+    const newSlug = newSlugInput.trim();
+    const invalid = validateOrgSlug(newSlug);
+    if (invalid) return { ok: false, error: invalid };
+    if (newSlug === orgSlug) {
+      return { ok: false, error: "That is already this organization's URL slug." };
+    }
+
+    const holder = await prisma.organization.findUnique({
+      where: { slug: newSlug },
+      select: { id: true },
+    });
+    if (holder && holder.id !== organizationId) return { ok: false, error: ORG_SLUG_TAKEN };
+
+    // A racing rename to the same slug trips the @unique index; toFailure maps it below.
+    await prisma.organization.update({ where: { id: organizationId }, data: { slug: newSlug } });
+
+    // Every org-scoped layout and the sidebar's workspace links embed the slug.
+    revalidatePath("/", "layout");
+
+    return { ok: true, slug: newSlug, redirectTo: `/${newSlug}/settings` };
+  } catch (error) {
+    return toFailure(error, ORG_SLUG_TAKEN);
   }
 }
 
@@ -428,6 +496,9 @@ export async function deleteOrganization(
       });
     }
     await prisma.scoringModel.deleteMany({ where: { organizationId } });
+    // Org-wide saved roadmap views have a null workspaceId, so the per-workspace
+    // cascade above cannot reach them (no FK cascade on DSQL).
+    await prisma.roadmapView.deleteMany({ where: { organizationId } });
     await prisma.organizationMember.deleteMany({ where: { organizationId } });
     await prisma.organization.delete({ where: { id: organizationId } });
 

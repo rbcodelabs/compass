@@ -26,8 +26,8 @@ type ToolMeta = { inputSchema: Record<string, ZodType> }
 const registeredTools: Record<string, { callback: ToolCallback; meta: ToolMeta }> = {}
 
 vi.mock("mcp-handler", () => ({
-  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: ToolMeta, callback: ToolCallback) => void }) => void) => {
-    setup({ registerTool(name, meta, callback) { registeredTools[name] = { callback, meta } } })
+  createMcpHandler: (setup: (server: { registerTool: (name: string, meta: ToolMeta, callback: ToolCallback) => void; registerResource: (...args: unknown[]) => void }) => void) => {
+    setup({ registerTool(name, meta, callback) { registeredTools[name] = { callback, meta } }, registerResource() {} })
     return () => new Response("ok")
   },
 }))
