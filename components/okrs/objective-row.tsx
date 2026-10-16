@@ -25,7 +25,6 @@ import { averageProgress, STATUS_BADGE } from "@/lib/okrs";
 import { KeyResultBar } from "@/components/okrs/key-result-bar";
 import type { SupportingObjectiveOption } from "@/components/okrs/key-result-bar";
 import { AddKeyResultForm } from "@/components/okrs/add-key-result-form";
-import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import {
   Select,
   SelectContent,
@@ -336,17 +335,6 @@ export function ObjectiveRow({
           paceElapsed={paceElapsed}
           hideProgress={hideProgress}
         />
-      )}
-
-      {/* Custom fields */}
-      {objective.customFields && objective.customFields.length > 0 && revalidatePathStr && (
-        <div className="pt-1">
-          <CustomFieldsPanel
-            fields={objective.customFields}
-            objectId={objective.id}
-            revalidatePathStr={revalidatePathStr}
-          />
-        </div>
       )}
 
       {/* Objective alignment — parent KR shown as a compact chip at rest */}

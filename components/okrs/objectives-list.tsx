@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useId } from "react";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   DndContext,
   type DragEndEvent,
@@ -17,6 +17,7 @@ import {
   arrayMove,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
+import { groupableObjectiveFields } from "@/lib/okr-grouping";
 import { ObjectiveRow } from "@/components/okrs/objective-row";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import {
@@ -85,27 +86,15 @@ export function ObjectivesList({
   // Collapsed ids are view state only (not persisted); everything starts expanded.
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [, startTransition] = useTransition();
-  const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  // Groupable = SELECT custom fields on objectives (the same definitions are
-  // attached to every objective, so read them off the first one).
-  const groupableFields = (objectives[0]?.customFields ?? []).filter(
-    (f) => f.fieldType === "SELECT" && (f.options?.length ?? 0) > 0
-  );
+  // The picker lives in the page header (OkrGroupByToggle); this list only reads
+  // the choice from the URL. Same definitions are attached to every objective.
+  const groupableFields = groupableObjectiveFields(objectives[0]?.customFields ?? []);
   const groupByParam = searchParams.get("groupBy");
   const groupField = groupByParam?.startsWith("field:")
     ? groupableFields.find((f) => f.id === groupByParam.slice(6)) ?? null
     : null;
-
-  function setGroupBy(value: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    if (value) params.set("groupBy", value);
-    else params.delete("groupBy");
-    const qs = params.toString();
-    router.push(qs ? `${pathname}?${qs}` : pathname);
-  }
 
   const valueOf = (o: ObjectiveData) =>
     groupField ? o.customFields?.find((f) => f.id === groupField.id)?.currentValue : null;
@@ -192,37 +181,15 @@ export function ObjectivesList({
 
   return (
     <>
-    {(groupableFields.length > 0 || objectives.length > 1) && (
-      <div className="flex items-center justify-between gap-3">
-        {groupableFields.length > 0 ? (
-          <div className="flex items-center gap-2">
-            <label htmlFor="okr-group-by" className="text-xs text-text-subtle font-medium">
-              Group by:
-            </label>
-            <select
-              id="okr-group-by"
-              value={groupField ? `field:${groupField.id}` : ""}
-              onChange={(e) => setGroupBy(e.target.value)}
-              className="rounded-md border border-border-default bg-transparent px-2 py-1 text-xs"
-            >
-              <option value="">None</option>
-              {groupableFields.map((f) => (
-                <option key={f.id} value={`field:${f.id}`}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : <span />}
-        {objectives.length > 1 && (
-          <button
-            type="button"
-            onClick={() => setCollapsedIds(allCollapsed ? new Set() : new Set(objectiveIds))}
-            className="rounded text-xs text-text-subtle hover:text-text-default hover:underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
-          >
-            {toggleAllLabel}
-          </button>
-        )}
+    {objectives.length > 1 && (
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setCollapsedIds(allCollapsed ? new Set() : new Set(objectiveIds))}
+          className="rounded text-xs text-text-subtle hover:text-text-default hover:underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-border-focus"
+        >
+          {toggleAllLabel}
+        </button>
       </div>
     )}
     <DndContext
