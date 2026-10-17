@@ -90,7 +90,7 @@ same context) for `/preview-sample/workspace/...`. Never print the code.
 
 ## Production data migrations
 
-Production schema and data maintenance runs through the registered migrations in `lib/migrations/runner.ts` and the authenticated `/api/admin/migrate` endpoint. Production runs on Supabase Postgres via `DATABASE_URL` (Aurora DSQL is no longer used). Do not run local scripts directly against the production database or use any other credential as an alternate production write path.
+Production schema and data maintenance runs through the registered migrations in `lib/migrations/runner.ts` and the authenticated `/api/admin/migrate` endpoint. Compass supports two database backends, selected by environment: `DATABASE_URL` set means plain Postgres (Supabase for the rbcodelabs production deployment); otherwise `PGHOST` plus AWS/OIDC credentials means Aurora DSQL (still used for the work deployment). Check which backend a deployment uses before assuming DSQL rules (async indexes, no FKs) or plain-Postgres behavior apply. Do not run local scripts directly against a production database or use any other credential as an alternate production write path.
 
 For a targeted migration: deploy the registered migration, use authenticated `GET /api/admin/migrate` to confirm the schema, manifest, preflight, and pending state, then `POST /api/admin/migrate` with `{"script":"<exact migration name>"}`. Do not omit `script` when unrelated migrations are pending. Afterward, repeat the status GET and perform application-level readback. A data migration must finish its postconditions before the runner records a successful receipt; reruns must be idempotent and safely resume unfinished work.
 
@@ -100,7 +100,7 @@ In the agent harness, retrieve the production migration credential as `COMPASS_P
 
 The generic recipe is the `proxmox-devbox` skill. These are the Compass-specific parts:
 
-- **Database:** set `DATABASE_URL` (plain `pg`; without it `lib/db.ts` falls back to the legacy Aurora DSQL/OIDC path, which is no longer available; automation previews still take that path and are being ported to Supabase). In development the app reads the **`compass_dev` schema, not `public`** (`lib/schema.ts`), so create the tables there: `DATABASE_URL="postgres://…/compass?schema=compass_dev" node node_modules/prisma/build/index.js db push --accept-data-loss`. Local-only; never for preview or production (those use the migration runner).
+- **Database:** set `DATABASE_URL` (plain `pg`; without it `lib/db.ts` uses the Aurora DSQL/OIDC path via `PGHOST`, which is a supported backend; automation previews (`PREVIEW_AUTOMATION_ENABLED=1`) still require that path and forbid `DATABASE_URL`, and are being ported to Supabase). In development the app reads the **`compass_dev` schema, not `public`** (`lib/schema.ts`), so create the tables there: `DATABASE_URL="postgres://…/compass?schema=compass_dev" node node_modules/prisma/build/index.js db push --accept-data-loss`. Local-only; never for preview or production (those use the migration runner).
 - **Env:** `.env.local` also needs `AUTH_SECRET`, `AUTH_URL` (the box's origin) and `AUTH_TRUST_HOST=true`. The repo's own `.env.local` only holds a Vercel OIDC token.
 - **Node:** `engines` requires 22.x; the VM default is newer, so `fnm use 22` first.
 - **Sync size:** the checkout can hold ~50 GB in `.worktrees`, `.claude`, `.pnpm-store` and `.npm-cache`. Exclude all four (plus `node_modules`, `.next`, `.git`) from any rsync, or it hangs.
