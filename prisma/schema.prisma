@@ -2826,6 +2826,31 @@ model AgentConversationParticipant {
   @@map("agent_conversation_participants")
 }
 
+/// Generic typed association link between two entities of one workspace (ADR "One generic
+/// entity_links table for association links"). Phase 1: table only, no readers or writers.
+/// `fromType`/`toType` name the entity kinds; the ids are bare UUIDs, so the pair index needs no type.
+/// DSQL: no FKs, no @updatedAt (set explicitly).
+model EntityLink {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  linkType    String   @map("link_type") @db.VarChar(60)
+  fromType    String   @map("from_type") @db.VarChar(40)
+  fromId      String   @map("from_id") @db.Uuid
+  toType      String   @map("to_type") @db.VarChar(40)
+  toId        String   @map("to_id") @db.Uuid
+  origin      String   @default("DIRECT") @db.VarChar(20)
+  source      String   @default("UI") @db.VarChar(20)
+  createdById String?  @map("created_by_id") @db.Uuid
+  attrs       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  @@unique([fromId, linkType, toId], map: "idx_entity_links_pair")
+  @@index([toId, linkType, fromId], map: "idx_entity_links_reverse")
+  @@index([workspaceId, linkType], map: "idx_entity_links_workspace")
+  @@map("entity_links")
+}
+
 /// Pointer to the current Agent SDK session transcript of a conversation (one row per
 /// conversation). The transcript is a private Vercel Blob object at `blobKey`; a new
 /// revision is a NEW blob key, swapped in with a compare-and-set on `revision`.
