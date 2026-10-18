@@ -179,7 +179,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "082_agent_conversation_participants": "0d72de736539ef65fd48f9111b9b3b9f99a7213d08bc123848335319cc67656b",
   // v0 chat Artifacts: two nullable ADD COLUMNs (artifacts.v0_chat_id, artifact_revisions.v0_version_id),
   // IF NOT EXISTS, no DEFAULT, no backfill, no index. Digest recorded from the shipped SQL; please review it.
-  "090_v0_chat_artifacts": "1a2098fa1c19b8257200cf0b00c6d7b9da763d9a13afbf7b1486b95ed3c297e3"
+  "090_v0_chat_artifacts": "1a2098fa1c19b8257200cf0b00c6d7b9da763d9a13afbf7b1486b95ed3c297e3",
+  // Generic entity_links table (ADR phase 1): one new empty table, a unique pair index and two non-unique
+  // async indexes. No backfill, no readers or writers. Digest recorded from the shipped SQL; please review it.
+  "091_entity_links": "35ea5cfb70d4eb7df705c59441638946f209893fca1cfa0b33a17db6fad68b61"
 };
 
 /**
@@ -233,6 +236,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 082 postcondition (participants table shape, nullable author column, both indexes valid and ready before the receipt).
   "082_agent_conversation_participants": {
     "lib/migrations/agent-conversation-participants.ts": "f7192dade000eae4d957d91711021dda072b0bae7718ec1f29aa1daeae83dbfe",
+  },
+  // The 091 postcondition (entity_links table shape and all three indexes valid and ready before the receipt).
+  "091_entity_links": {
+    "lib/migrations/entity-links.ts": "bcf8ffa729fb67b56792f709223c53c630a55a383262d8d3bc27d6e925169c76",
   },
 };
 
