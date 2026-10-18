@@ -65,14 +65,14 @@ function createVercelBlobStorage(token: string | (() => string)): ArtifactStorag
  * ephemeral, and production on plain Postgres also sets DATABASE_URL, so that
  * variable alone cannot mean "local dev".
  */
-export function useLocalStorage(): boolean {
+export function shouldUseLocalStorage(): boolean {
   return Boolean(process.env.DATABASE_URL) && !process.env.VERCEL
 }
 
 /** Local development uses private filesystem storage; deployed environments
  * use authenticated private Vercel Blob. The interface is injected in tests. */
 export function getArtifactStorage(): ArtifactStorage {
-  if (useLocalStorage()) return localStorage
+  if (shouldUseLocalStorage()) return localStorage
   // Resolve only for actual I/O, so deleting a workspace without HTML artifacts
   // does not require Blob configuration. Never inherit the public image token.
   return createVercelBlobStorage(() => {
@@ -84,7 +84,7 @@ export function getArtifactStorage(): ArtifactStorage {
 
 /** Packs must never inherit the project's general (potentially public) store. */
 export function getCapabilityPackArtifactStorage(): ArtifactStorage {
-  if (useLocalStorage()) return localStorage
+  if (shouldUseLocalStorage()) return localStorage
   const token = process.env.CAPABILITY_PACK_BLOB_READ_WRITE_TOKEN?.trim()
   if (!token) throw new Error("Private capability pack storage is not configured")
   // @vercel/blob 2.4.1 prioritizes explicit token over ambient OIDC/store IDs.
@@ -92,7 +92,7 @@ export function getCapabilityPackArtifactStorage(): ArtifactStorage {
 }
 
 export function getResearchArtifactStorage(): ArtifactStorage {
-  if (useLocalStorage()) return localStorage
+  if (shouldUseLocalStorage()) return localStorage
   const token = process.env.RESEARCH_BLOB_READ_WRITE_TOKEN?.trim()
   if (!token) throw new Error("Research Blob storage is not configured")
   return createVercelBlobStorage(token)
@@ -104,7 +104,7 @@ export function getResearchArtifactStorage(): ArtifactStorage {
  * so it must never share a store (or a token's blast radius) with public assets.
  */
 export function getAgentSessionStorage(): ArtifactStorage {
-  if (useLocalStorage()) return localStorage
+  if (shouldUseLocalStorage()) return localStorage
   const token = process.env.AGENT_SESSION_BLOB_READ_WRITE_TOKEN?.trim()
   if (!token) throw new Error("Agent session storage is not configured")
   return createVercelBlobStorage(token)
@@ -112,5 +112,5 @@ export function getAgentSessionStorage(): ArtifactStorage {
 
 /** Whether a session transcript can be stored at all on this deployment. */
 export function agentSessionStorageConfigured(): boolean {
-  return Boolean(useLocalStorage() || process.env.AGENT_SESSION_BLOB_READ_WRITE_TOKEN?.trim())
+  return Boolean(shouldUseLocalStorage() || process.env.AGENT_SESSION_BLOB_READ_WRITE_TOKEN?.trim())
 }
