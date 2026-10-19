@@ -279,6 +279,8 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   await prisma.canvasNodePosition.deleteMany({ where: { workspaceId } });
   await prisma.portalHomeLayout.deleteMany({ where: { workspaceId } });
   await prisma.roadmapView.deleteMany({ where: { workspaceId } });
+  // Work item ID counters (migration 092): no FK reaches this table, so it is deleted explicitly.
+  await prisma.workspaceSequence.deleteMany({ where: { workspaceId } });
 
   // 14. Members + squads + docs, then the workspace itself.
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });

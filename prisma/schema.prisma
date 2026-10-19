@@ -30,7 +30,7 @@ model WorkspaceSequence {
   workspaceId String   @map("workspace_id") @db.Uuid
   entityType  String   @map("entity_type") @db.VarChar(40)
   nextValue   Int      @default(1) @map("next_value")
-  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedAt   DateTime @default(now()) @map("updated_at")
 
   @@id([workspaceId, entityType])
   @@map("workspace_sequences")
