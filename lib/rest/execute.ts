@@ -68,17 +68,17 @@ type Input = { params: Record<string, string>; query: Record<string, unknown>; b
 
 const select = {
   workspace: { id: true, organizationId: true, slug: true, name: true, description: true, createdAt: true, updatedAt: true },
-  opportunity: { id: true, workspaceId: true, title: true, description: true, customerSegment: true, status: true, squadId: true, linkedKeyResultId: true, createdAt: true, updatedAt: true },
-  solution: { id: true, workspaceId: true, opportunityId: true, title: true, description: true, status: true, createdAt: true, updatedAt: true },
-  assumption: { id: true, solutionId: true, title: true, description: true, riskLevel: true, status: true, createdAt: true, updatedAt: true },
-  feedback: { id: true, workspaceId: true, opportunityId: true, title: true, description: true, type: true, status: true, voteCount: true, tags: true, submitterName: true, submitterEmail: true, createdAt: true, updatedAt: true },
-  task: { id: true, workspaceId: true, squadId: true, parentTaskId: true, title: true, description: true, status: true, priority: true, assigneeUserId: true, assigneeAgentId: true, ownerName: true, storyPoints: true, dueDate: true, iteration: true, createdAt: true, updatedAt: true },
-  roadmap: { id: true, workspaceId: true, squadId: true, title: true, description: true, horizon: true, status: true, isPrivate: true, startDate: true, endDate: true, solutionId: true, keyResultId: true, opportunityId: true, experimentId: true, feedbackId: true, createdAt: true, updatedAt: true },
+  opportunity: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, title: true, description: true, customerSegment: true, status: true, squadId: true, linkedKeyResultId: true, createdAt: true, updatedAt: true },
+  solution: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, opportunityId: true, title: true, description: true, status: true, createdAt: true, updatedAt: true },
+  assumption: { id: true, seqPrefix: true, seqNumber: true, solutionId: true, title: true, description: true, riskLevel: true, status: true, createdAt: true, updatedAt: true },
+  feedback: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, opportunityId: true, title: true, description: true, type: true, status: true, voteCount: true, tags: true, submitterName: true, submitterEmail: true, createdAt: true, updatedAt: true },
+  task: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, squadId: true, parentTaskId: true, title: true, description: true, status: true, priority: true, assigneeUserId: true, assigneeAgentId: true, ownerName: true, storyPoints: true, dueDate: true, iteration: true, createdAt: true, updatedAt: true },
+  roadmap: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, squadId: true, title: true, description: true, horizon: true, status: true, isPrivate: true, startDate: true, endDate: true, solutionId: true, keyResultId: true, opportunityId: true, experimentId: true, feedbackId: true, createdAt: true, updatedAt: true },
   cycle: { id: true, workspaceId: true, title: true, startDate: true, endDate: true, status: true, createdAt: true, updatedAt: true },
-  objective: { id: true, workspaceId: true, cycleId: true, squadId: true, parentKeyResultId: true, title: true, description: true, owner: true, status: true, sortOrder: true, createdAt: true, updatedAt: true },
-  keyResult: { id: true, objectiveId: true, title: true, target: true, current: true, unit: true, sortOrder: true, createdAt: true, updatedAt: true },
+  objective: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, cycleId: true, squadId: true, parentKeyResultId: true, title: true, description: true, owner: true, status: true, sortOrder: true, createdAt: true, updatedAt: true },
+  keyResult: { id: true, seqPrefix: true, seqNumber: true, objectiveId: true, title: true, target: true, current: true, unit: true, sortOrder: true, createdAt: true, updatedAt: true },
   checkIn: { id: true, keyResultId: true, value: true, note: true, createdAt: true },
-  experiment: { id: true, workspaceId: true, squadId: true, assumptionId: true, title: true, hypothesis: true, method: true, killCondition: true, status: true, startDate: true, endDate: true, conclusion: true, conclusionReason: true, createdAt: true, updatedAt: true },
+  experiment: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, squadId: true, assumptionId: true, title: true, hypothesis: true, method: true, killCondition: true, status: true, startDate: true, endDate: true, conclusion: true, conclusionReason: true, createdAt: true, updatedAt: true },
   experimentResult: { id: true, experimentId: true, note: true, metric: true, value: true, createdAt: true },
   squad: { id: true, workspaceId: true, name: true, color: true, createdAt: true },
   scoringModel: { id: true, organizationId: true, name: true, description: true, status: true, formulaType: true, version: true, createdAt: true, updatedAt: true, metrics: { select: { key: true, label: true, description: true, minValue: true, maxValue: true, weight: true, direction: true, order: true }, orderBy: { order: "asc" as const } } },
@@ -850,6 +850,13 @@ function pick(source: Record<string, unknown>, keys: string[]): Record<string, u
 function filters(query: Record<string, unknown>, keys: string[]): string { return JSON.stringify(pick(query, keys)) }
 function serialize(value: unknown): unknown {
   const serialized = JSON.parse(JSON.stringify(value)) as unknown
+  if (serialized && typeof serialized === "object" && "seqNumber" in serialized) {
+    // Numbered resources select seqPrefix/seqNumber; the public shape carries the one derived `displayId` (null until numbered).
+    const row = serialized as Record<string, unknown>
+    row.displayId = typeof row.seqPrefix === "string" && typeof row.seqNumber === "number" && row.seqNumber >= 1 ? `${row.seqPrefix}-${row.seqNumber}` : null
+    delete row.seqPrefix
+    delete row.seqNumber
+  }
   if (serialized && typeof serialized === "object" && "tags" in serialized) {
     const row = serialized as Record<string, unknown>
     row.tags = Array.isArray(row.tags) ? row.tags.filter((tag): tag is string => typeof tag === "string") : []
