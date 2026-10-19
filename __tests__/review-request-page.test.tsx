@@ -10,8 +10,9 @@ const { auth, findFirst, findArtifacts, linkedArtifacts, findTaskLinks, eligible
   findTaskLinks: vi.fn(), eligibleAssignees: vi.fn(),
 }))
 
+vi.mock("@/lib/work-item-page", async () => (await import("./helpers/work-item-resolve-mock")).workItemPageMock())
 vi.mock("@/auth", () => ({ auth }))
-vi.mock("@/lib/db", () => ({ default: () => ({ reviewRequest: { findFirst }, artifact: { findMany: findArtifacts }, taskLink: { findMany: findTaskLinks } }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findFirst: async () => ({ id: "workspace-1" }) }, reviewRequest: { findFirst }, artifact: { findMany: findArtifacts }, taskLink: { findMany: findTaskLinks } }) }))
 vi.mock("@/lib/artifacts", () => ({ getDecisionArtifacts: linkedArtifacts }))
 vi.mock("@/lib/task-assignment", () => ({ eligibleTaskAssignees: eligibleAssignees }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", () => ({ linkArtifactDecision: vi.fn(), unlinkArtifactDecision: vi.fn() }))

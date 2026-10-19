@@ -1,3 +1,4 @@
+import { resolveWorkItemPage, type PageSearchParams } from "@/lib/work-item-page"
 import { notFound, redirect } from "next/navigation"
 import Link from "next/link"
 import { auth } from "@/auth"
@@ -25,6 +26,7 @@ import { MeasurementsPanel } from "@/components/analytics/measurements-panel"
 
 interface ExperimentDetailPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string; id: string }>
+  searchParams?: Promise<PageSearchParams>
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -61,6 +63,7 @@ const CONCLUSION_LABELS: Record<string, string> = {
 
 export default async function ExperimentDetailPage({
   params,
+  searchParams,
 }: ExperimentDetailPageProps) {
   const { orgSlug, workspaceSlug, id } = await params
 
@@ -76,9 +79,10 @@ export default async function ExperimentDetailPage({
   }
 
   const prisma = getPrisma()
+  const resolved = await resolveWorkItemPage({ type: "experiment", param: id, workspaceId: workspace.id, basePath: `/${orgSlug}/${workspaceSlug}/experiments`, searchParams: await searchParams })
   const [experiment, rawSquads] = await Promise.all([
     prisma.experiment.findFirst({
-      where: { id, workspaceId: workspace.id },
+      where: { id: resolved.id, workspaceId: workspace.id },
       include: {
         results: { orderBy: { createdAt: "asc" } },
         assumption: true,

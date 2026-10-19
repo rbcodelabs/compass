@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), lookup: vi.fn(), workspace: vi.fn(), doc: vi.fn(), versions: vi.fn(), comments: vi.fn(), cookie: vi.fn(), hydrate: vi.fn() }))
+vi.mock("@/lib/work-item-resolve", async () => (await import("./helpers/work-item-resolve-mock")).workItemResolveMock())
+vi.mock("@/lib/work-item-page", async () => (await import("./helpers/work-item-resolve-mock")).workItemPageMock())
 vi.mock("@/lib/document-service", () => ({ hydrateDocument: mocks.hydrate, documentRevision: (d: { revision?: string | null; updatedAt: Date }) => d.revision ?? `legacy:${d.updatedAt.toISOString()}` }))
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: mocks.cookie }) }))
 vi.mock("@/auth", () => ({ auth: mocks.auth }))

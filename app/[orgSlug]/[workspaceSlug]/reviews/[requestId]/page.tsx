@@ -1,3 +1,4 @@
+import { resolveWorkItemPage } from "@/lib/work-item-page"
 import { notFound } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
@@ -20,11 +21,16 @@ function parsePacket(raw: string): Record<string, unknown> {
   try { return JSON.parse(raw) as Record<string, unknown> } catch { return {} }
 }
 
-export default async function ReviewRequestPage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string; requestId: string }> }) {
-  const { orgSlug, workspaceSlug, requestId } = await params
+export default async function ReviewRequestPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; requestId: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
+  const { orgSlug, workspaceSlug, requestId: requestParam } = await params
   const session = await auth()
   if (!session?.user?.id) notFound()
   const prisma = getPrisma()
+  // The workspace is looked up by slug first so a display ID (DEC-3) resolves inside it; membership is still checked below.
+  const scope = await prisma.workspace.findFirst({ where: { slug: workspaceSlug, organization: { slug: orgSlug } }, select: { id: true } })
+  if (!scope) notFound()
+  const resolvedRequest = await resolveWorkItemPage({ type: "reviewRequest", param: requestParam, workspaceId: scope.id, basePath: `/${orgSlug}/${workspaceSlug}/reviews`, searchParams: await searchParams })
+  const requestId = resolvedRequest.id
   const request = await prisma.reviewRequest.findFirst({
     where: {
       id: requestId,

@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
+import { resolveWorkItem } from "@/lib/work-item-resolve"
 import { allocateOneSeq, allocateSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 import { replayAllMigrations } from "./helpers/replay-migrations"
 
@@ -93,5 +94,22 @@ describe.skipIf(!databaseUrl)("work item sequence allocator on real PostgreSQL",
     expect(range.seqNumbers).toEqual([3, 4, 5])
     const other = await withSequenceTransaction(prisma, (tx) => allocateOneSeq(tx, a, "opportunity"))
     expect(other.seqNumber).toBe(1)
+  })
+
+  it("resolves display IDs and UUIDs inside their own workspace only", async () => {
+    const a = randomUUID()
+    const b = randomUUID()
+    const taskA = await createTask(a)
+    await createTask(b)
+    const db = prisma as unknown as object
+    expect(await resolveWorkItem(db, a, "task", "task-1")).toMatchObject({ ok: true, id: taskA.id, displayId: "TASK-1" })
+    expect(await resolveWorkItem(db, a, "task", taskA.id)).toMatchObject({ ok: true, canonical: "TASK-1" })
+    // The same number in another workspace is a different row; a foreign UUID is not found.
+    const inB = await resolveWorkItem(db, b, "task", "TASK-1")
+    expect(inB).toMatchObject({ ok: true })
+    expect(inB.ok && inB.id).not.toBe(taskA.id)
+    expect(await resolveWorkItem(db, b, "task", taskA.id)).toMatchObject({ ok: false, reason: "not_found" })
+    expect(await resolveWorkItem(db, a, "task", "TASK-2")).toMatchObject({ ok: false, reason: "not_found" })
+    expect(await resolveWorkItem(db, a, "opportunity", "TASK-1")).toEqual({ ok: false, reason: "wrong_type", message: "TASK-1 is a Task" })
   })
 })

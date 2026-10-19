@@ -8,14 +8,16 @@ const auth = vi.hoisted(() => vi.fn())
 const notFound = vi.hoisted(() => vi.fn(() => { throw new Error("NEXT_NOT_FOUND") }))
 const redirect = vi.hoisted(() => vi.fn(() => { throw new Error("NEXT_REDIRECT") }))
 const reconcileAbandonedResearchSessions = vi.hoisted(() => vi.fn())
+const workspace = { findFirst: vi.fn() }
 const researchStudy = { findFirst: vi.fn(), findUnique: vi.fn() }
 const researchParticipantToken = { findFirst: vi.fn() }
 const researchSession = { findMany: vi.fn() }
 const researchTurn = { findFirst: vi.fn() }
 
+vi.mock("@/lib/work-item-page", async () => (await import("./helpers/work-item-resolve-mock")).workItemPageMock())
 vi.mock("@/auth", () => ({ auth }))
 vi.mock("next/navigation", () => ({ notFound, redirect, useRouter: () => ({ refresh: vi.fn() }) }))
-vi.mock("@/lib/db", () => ({ default: () => ({ researchStudy, researchParticipantToken, researchSession, researchTurn }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ workspace, researchStudy, researchParticipantToken, researchSession, researchTurn }) }))
 vi.mock("@/lib/research-session", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/research-session")>(),
   reconcileAbandonedResearchSessions,
@@ -45,6 +47,7 @@ describe("researcher study access", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
+    workspace.findFirst.mockResolvedValue({ id: "workspace-1" })
     reconcileAbandonedResearchSessions.mockResolvedValue({ count: 0 })
     researchSession.findMany.mockResolvedValue([])
   })
@@ -63,7 +66,18 @@ describe("researcher study access", () => {
     vi.unstubAllEnvs()
   })
 
-  it("returns not found when the signed-in user is not a member of the path workspace", async () => {
+  it("returns not found, before any study lookup, when the signed-in user is not a member of the path workspace", async () => {
+    workspace.findFirst.mockResolvedValue(null)
+
+    await expect(StudyPage(props)).rejects.toThrow("NEXT_NOT_FOUND")
+    expect(workspace.findFirst).toHaveBeenCalledWith({
+      where: { slug: "product", organization: { slug: "acme" }, members: { some: { userId: "user-1" } } },
+      select: { id: true },
+    })
+    expect(researchStudy.findFirst).not.toHaveBeenCalled()
+  })
+
+  it("returns not found when the study is not in the member's workspace", async () => {
     researchStudy.findFirst.mockResolvedValue(null)
 
     await expect(StudyPage(props)).rejects.toThrow("NEXT_NOT_FOUND")

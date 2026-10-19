@@ -3,6 +3,13 @@ import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
 import { getEntityDetail, isEntityType } from "@/lib/entity-detail";
 import { updateEntityField } from "@/lib/entity-mutations";
+import getPrisma from "@/lib/db";
+import { resolveWorkItem, type WorkItemResolution } from "@/lib/work-item-resolve";
+
+/** A UUID or a display ID (`TASK-5`) in the URL; anything that does not resolve inside the workspace is the same 404 as before. */
+function refusal(resolved: Extract<WorkItemResolution, { ok: false }>) {
+  return NextResponse.json({ error: resolved.reason === "not_found" ? "Not found" : resolved.message }, { status: resolved.reason === "not_found" ? 404 : 400 });
+}
 
 /**
  * Detail-panel data source for every entity type. GET
@@ -49,12 +56,15 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const detail = await getEntityDetail(type, id, workspace.id);
+  const resolved = await resolveWorkItem(getPrisma(), workspace.id, type, id);
+  if (!resolved.ok) return refusal(resolved);
+
+  const detail = await getEntityDetail(type, resolved.id, workspace.id);
   if (!detail) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json(detail);
+  return NextResponse.json({ ...detail, displayId: resolved.displayId });
 }
 
 /**
@@ -111,9 +121,12 @@ export async function PATCH(
     return NextResponse.json({ error: "field is required" }, { status: 400 });
   }
 
+  const resolved = await resolveWorkItem(getPrisma(), workspace.id, type, id);
+  if (!resolved.ok) return refusal(resolved);
+
   const result = await updateEntityField(
     type,
-    id,
+    resolved.id,
     workspace.id,
     body.field,
     body.value,
@@ -123,7 +136,7 @@ export async function PATCH(
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  const detail = await getEntityDetail(type, id, workspace.id);
+  const detail = await getEntityDetail(type, resolved.id, workspace.id);
   // A solution moving to Building can add it to the roadmap; tell the client so it can offer Undo.
-  return NextResponse.json(result.roadmapSync ? { ...detail, roadmapSync: result.roadmapSync } : detail);
+  return NextResponse.json({ ...detail, displayId: resolved.displayId, ...(result.roadmapSync ? { roadmapSync: result.roadmapSync } : {}) });
 }
