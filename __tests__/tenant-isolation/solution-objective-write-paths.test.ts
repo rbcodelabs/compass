@@ -109,7 +109,9 @@ function objectKeys(text: string, open: number): Keys {
   let segmentStart = 0;
   const flush = (end: number) => {
     const segment = body.slice(segmentStart, end).trim();
-    if (segment.startsWith("...")) hasSpread = true;
+    // The work item ID allocator only returns { seqPrefix, seqNumber }, so spreading it cannot smuggle in a workspaceId.
+    if (/^\.\.\.\s*\(\s*await\s+allocate(?:One)?Seq\s*\(/.test(segment)) { /* allocator columns, not a workspace source */ }
+    else if (segment.startsWith("...")) hasSpread = true;
     else {
       const m = /^(?:\[[^\]]*\]|["'`]?([A-Za-z_$][\w$]*)["'`]?)\s*(?::|$|\()/.exec(segment);
       if (m?.[1]) {

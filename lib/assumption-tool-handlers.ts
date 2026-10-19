@@ -10,12 +10,15 @@ import { getToolPrisma as getPrisma, getToolExpectedWhere } from "@/lib/mcp-tool
 import { ok, fail } from "@/lib/mcp-output"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 export async function createAssumption({ solutionId, title, description, riskLevel = "MEDIUM", source = "MCP" }: { solutionId: string; title: string; description?: string | null; riskLevel?: "HIGH" | "MEDIUM" | "LOW"; source?: ProgrammaticSource }) {
   const prisma = getPrisma()
-  const solution = await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, title: true, opportunityId: true, workspace: { select: { slug: true, organization: { select: { slug: true } } } } } })
+  const solution = await prisma.solution.findUnique({ where: { id: solutionId }, select: { id: true, title: true, opportunityId: true, workspaceId: true, workspace: { select: { slug: true, organization: { select: { slug: true } } } } } })
   if (!solution) return fail(`Solution "${solutionId}" not found.`)
-  const assumption = await captureWorkspaceMutation(getDatabase(), "assumption", "create", workspaceMutationSource(source), undefined, (tx) => tx.assumption.create({ data: { solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED", source } }))
+  const workspaceId = solution.workspaceId
+  if (!workspaceId) return fail(`Solution "${solutionId}" has no workspace.`)
+  const assumption = await captureWorkspaceMutation(getDatabase(), "assumption", "create", workspaceMutationSource(source), undefined, async (tx) => tx.assumption.create({ data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "assumption")), solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED", source } }))
   return ok(withUrlLine(
     `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
     safeEntityUrl({ orgSlug: solution.workspace?.organization.slug, workspaceSlug: solution.workspace?.slug, type: "assumption", id: assumption.id, opportunityId: solution.opportunityId }),

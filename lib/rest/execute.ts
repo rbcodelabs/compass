@@ -55,6 +55,7 @@ import { getDocRaw, getHelpTopic, searchHelp as searchHelpDocs } from "@/lib/doc
 import { createWorkspaceInOrg } from "@/lib/workspace-service"
 import { RoadmapPromotionConflict } from "@/lib/roadmap-promotion"
 import { thinkingModelForMcp } from "@/lib/thinking-model/mcp"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export class RestNotFoundError extends Error {}
 export class RestForbiddenError extends Error {}
@@ -350,7 +351,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "createObjective": {
       await validateObjectiveRefs(prisma, workspaceId, body)
       const scope = found(await prisma.workspace.findFirst({ where: { id: workspaceId }, select: { id: true } }))
-      return serialize(await prisma.objective.create({ data: { workspaceId: scope.id, cycleId: nullable(body.cycleId) ?? null, squadId: nullable(body.squadId) ?? null, parentKeyResultId: nullable(body.parentKeyResultId) ?? null, title: String(body.title), description: nullable(body.description), owner: nullable(body.owner), source: "API" }, select: select.objective }))
+      return serialize(await withSequenceTransaction(prisma, async (tx) => tx.objective.create({ data: { workspaceId: scope.id, ...(await allocateOneSeq(tx, scope.id, "objective")), cycleId: nullable(body.cycleId) ?? null, squadId: nullable(body.squadId) ?? null, parentKeyResultId: nullable(body.parentKeyResultId) ?? null, title: String(body.title), description: nullable(body.description), owner: nullable(body.owner), source: "API" }, select: select.objective })))
     }
     case "updateObjective": {
       if (!(await prisma.objective.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError()
@@ -371,7 +372,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "deleteObjective": { if (!(await prisma.objective.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError(); ensureTool(await deleteObjective({ objectiveId: id })); return undefined }
     case "listKeyResults": { await requireObjective(prisma, workspaceId, id); return listPage(`key-results:${workspaceId}:${id}`, input.query, (cursor, take) => prisma.keyResult.findMany({ where: { objectiveId: id, objective: { workspaceId }, ...cursorWhere(cursor) }, select: select.keyResult, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
     case "getKeyResult": return serialize(found(await prisma.keyResult.findFirst({ where: { id, objective: { workspaceId } }, select: select.keyResult })))
-    case "createKeyResult": { await requireObjective(prisma, workspaceId, id); return serialize(await prisma.keyResult.create({ data: { objectiveId: id, title: String(body.title), target: Number(body.target), unit: nullable(body.unit), source: "API" }, select: select.keyResult })) }
+    case "createKeyResult": { await requireObjective(prisma, workspaceId, id); return serialize(await withSequenceTransaction(prisma, async (tx) => tx.keyResult.create({ data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "keyResult")), objectiveId: id, title: String(body.title), target: Number(body.target), unit: nullable(body.unit), source: "API" }, select: select.keyResult }))) }
     case "updateKeyResult": { if (!(await prisma.keyResult.findFirst({ where: { id, objective: { workspaceId } }, select: { id: true } }))) throw new RestNotFoundError(); ensureTool(await updateKeyResult({ keyResultId: id, ...body })); return serialize(found(await prisma.keyResult.findFirst({ where: { id, objective: { workspaceId } }, select: select.keyResult }))) }
     case "deleteKeyResult": { if (!(await prisma.keyResult.findFirst({ where: { id, objective: { workspaceId } }, select: { id: true } }))) throw new RestNotFoundError(); ensureTool(await deleteKeyResult({ keyResultId: id })); return undefined }
     case "listCheckIns": { await requireKeyResult(prisma, workspaceId, id); return listPage(`check-ins:${workspaceId}:${id}`, input.query, (cursor, take) => prisma.checkIn.findMany({ where: { keyResultId: id, keyResult: { objective: { workspaceId } }, ...cursorWhere(cursor) }, select: select.checkIn, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
@@ -387,7 +388,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
 
     case "listExperiments": return listPage(`experiments:${workspaceId}:${filters(input.query, ["status", "squadId", "assumptionId"])}`, input.query, (cursor, take) => prisma.experiment.findMany({ where: { workspaceId, ...pick(input.query, ["status", "squadId", "assumptionId"]), ...cursorWhere(cursor) }, select: select.experiment, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
     case "getExperiment": return serialize(found(await prisma.experiment.findFirst({ where: { id, workspaceId }, select: select.experiment })))
-    case "createExperiment": { await validateExperimentRefs(prisma, workspaceId, body); return serialize(await prisma.experiment.create({ data: { workspaceId, squadId: nullable(body.squadId) ?? null, assumptionId: nullable(body.assumptionId) ?? null, title: String(body.title), hypothesis: String(body.hypothesis), method: String(body.method), killCondition: String(body.killCondition), source: "API" }, select: select.experiment })) }
+    case "createExperiment": { await validateExperimentRefs(prisma, workspaceId, body); return serialize(await withSequenceTransaction(prisma, async (tx) => tx.experiment.create({ data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "experiment")), squadId: nullable(body.squadId) ?? null, assumptionId: nullable(body.assumptionId) ?? null, title: String(body.title), hypothesis: String(body.hypothesis), method: String(body.method), killCondition: String(body.killCondition), source: "API" }, select: select.experiment }))) }
     case "updateExperiment": {
       if (!(await prisma.experiment.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError()
       await validateExperimentRefs(prisma, workspaceId, body)

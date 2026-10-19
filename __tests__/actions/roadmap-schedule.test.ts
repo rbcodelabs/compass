@@ -32,6 +32,8 @@ import {
   undoRoadmapCreate,
 } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const WS = "ws-1";
 const day = (value: unknown) => (value as Date).toISOString().slice(0, 10);
 

@@ -46,6 +46,7 @@ const mockCapabilityPackVersion = { findMany: vi.fn(), findFirst: vi.fn(), delet
 const mockCanvasNodePosition = { deleteMany: vi.fn() };
 const mockPortalHomeLayout = { deleteMany: vi.fn() };
 const mockRoadmapView = { deleteMany: vi.fn() };
+const mockWorkspaceSequence = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
 const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) };
@@ -141,6 +142,7 @@ const mockPrisma = {
   canvasNodePosition: mockCanvasNodePosition,
   portalHomeLayout: mockPortalHomeLayout,
   roadmapView: mockRoadmapView,
+  workspaceSequence: mockWorkspaceSequence,
   workspaceMember: mockWorkspaceMember,
   squad: mockSquad,
   doc: mockDoc,
@@ -189,6 +191,8 @@ vi.mock("@/auth", () => ({ auth: vi.fn() }));
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import { deleteOrganization } from "@/app/[orgSlug]/settings/actions";
+
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
 
 const mockAuth = vi.mocked(auth);
 
@@ -308,6 +312,7 @@ beforeEach(() => {
     mockCanvasNodePosition.deleteMany,
     mockPortalHomeLayout.deleteMany,
     mockRoadmapView.deleteMany,
+    mockWorkspaceSequence.deleteMany,
     mockWorkspaceMember.deleteMany,
     mockSquad.deleteMany,
     mockDoc.deleteMany,
@@ -585,6 +590,7 @@ describe("deleteOrganization", () => {
     expect(mockCanvasNodePosition.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockPortalHomeLayout.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockRoadmapView.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockWorkspaceSequence.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
 
     // ── Members / squads / docs / workspace ──
     expect(mockWorkspaceMember.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });

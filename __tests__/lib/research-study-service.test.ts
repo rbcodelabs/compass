@@ -6,6 +6,8 @@ vi.mock("@/lib/db", () => ({ default: () => {
   return { ...db, $transaction: async (fn: unknown) => typeof fn === "function" ? fn(db) : Promise.all(fn as Promise<unknown>[]) }
 } }))
 import { createResearchStudy, generateResearchGuide, getResearchStudy, issueResearchLink, listResearchStudies, updateResearchStudy } from "@/lib/research-study-service"
+
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
 const scope = { workspaceId: "00000000-0000-4000-8000-000000000001" }
 const actor = { userId: "member" }
 beforeEach(() => {

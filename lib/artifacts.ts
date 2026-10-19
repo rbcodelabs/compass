@@ -3,6 +3,7 @@ import getPrisma from "@/lib/db"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
 export { ARTIFACT_CSP, buildSandboxedHtml } from "@/lib/artifact-preview-html"
 import { assertKindAllowedForSource, readArtifactKind, storedArtifactKind, type ArtifactKind } from "@/lib/artifact-kind"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export const MAX_ARTIFACT_HTML_BYTES = 2 * 1024 * 1024
 
@@ -77,9 +78,9 @@ export async function createHtmlArtifact(input: {
   const pathname = `artifacts/${input.workspaceId}/${artifactId}/${revisionId}-${safeFilename(input.filename)}`
   const stored = await storage.put(pathname, input.bytes)
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await withSequenceTransaction(prisma, async (tx) => {
       const artifact = await tx.artifact.create({ data: {
-        id: artifactId, workspaceId: input.workspaceId, title, description: input.description?.trim() || null,
+        id: artifactId, workspaceId: input.workspaceId, ...(await allocateOneSeq(tx, input.workspaceId, "artifact")), title, description: input.description?.trim() || null,
         sourceType: "HTML_UPLOAD", kind: storedArtifactKind(input.kind ?? "DOCUMENT"),
         createdById: input.createdById ?? null, updatedById: input.createdById ?? null, source: input.source,
       } })
@@ -104,9 +105,9 @@ export async function createExternalArtifact(input: {
   const externalUrl = validateExternalUrl(input.url)
   await assertWorkspace(input.workspaceId)
   const prisma = getPrisma()
-  return prisma.$transaction(async (tx) => {
+  return withSequenceTransaction(prisma, async (tx) => {
     const artifact = await tx.artifact.create({ data: {
-      workspaceId: input.workspaceId, title, description: input.description?.trim() || null,
+      workspaceId: input.workspaceId, ...(await allocateOneSeq(tx, input.workspaceId, "artifact")), title, description: input.description?.trim() || null,
       sourceType: "EXTERNAL_LINK", createdById: input.createdById ?? null, updatedById: input.createdById ?? null, source: input.source,
     } })
     const revision = await tx.artifactRevision.create({ data: {

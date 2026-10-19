@@ -10,6 +10,7 @@ const { mockAuth, mockGetWorkspace, mockRevalidatePath, prisma } = vi.hoisted(()
     workspaceMember: { findFirst: vi.fn() },
     task: { findFirst: vi.fn(), create: vi.fn() },
     taskLink: { upsert: vi.fn() },
+    $transaction: vi.fn(),
   },
 }));
 
@@ -20,8 +21,12 @@ vi.mock("next/cache", () => ({ revalidatePath: mockRevalidatePath }));
 
 import { addLinkedTask, linkExistingTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // Numbered creates run in a transaction; the fake is its own transaction client.
+  prisma.$transaction.mockImplementation(async (callback: (tx: typeof prisma) => unknown) => callback(prisma));
   mockAuth.mockResolvedValue({ user: { id: "user-1" } });
   mockGetWorkspace.mockResolvedValue({ id: "ws-1" });
   prisma.roadmapItem.findFirst.mockResolvedValue({ id: "roadmap-1" });

@@ -15,6 +15,8 @@ vi.mock("@/lib/mcp-connectors/call", () => ({ callConnectorTool: (...a: unknown[
 import { McpConnectorError } from "@/lib/mcp-connectors/config"
 import { createV0Artifact, extractV0Preview, extractV0Snapshot, fetchV0Preview, parseV0ChatUrl, refreshV0Artifact } from "@/lib/v0-artifacts"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 beforeEach(() => {
   vi.clearAllMocks()
   prisma.$transaction.mockImplementation(async (cb) => cb(prisma))

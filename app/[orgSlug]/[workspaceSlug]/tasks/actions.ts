@@ -8,6 +8,7 @@ import { getWorkspace } from "@/lib/workspace";
 import { assertWorkspaceWritable } from "@/lib/workspace-context";
 import { assignmentUpdate, resolveTaskAssignees, validateTaskLink, validateTaskReferences, type AssignmentInput, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 async function requireTaskWorkspace(workspaceId: string) {
   const session = await auth();
@@ -60,9 +61,10 @@ export async function addTask(
   });
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0;
 
-  const task = await captureWorkspaceMutation(prisma, "task", "create", "UI", undefined, tx => tx.task.create({
+  const task = await captureWorkspaceMutation(prisma, "task", "create", "UI", undefined, async tx => tx.task.create({
     data: {
       workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "task")),
       title: data.title,
       description: data.description,
       status,
@@ -280,9 +282,10 @@ export async function addLinkedTask(
     orderBy: { sortOrder: "desc" },
     select: { sortOrder: true },
   });
-  const task = await captureWorkspaceMutation(getPrisma(), "task", "create", "UI", undefined, tx => tx.task.create({
+  const task = await captureWorkspaceMutation(getPrisma(), "task", "create", "UI", undefined, async tx => tx.task.create({
     data: {
       workspaceId: workspace.id,
+      ...(await allocateOneSeq(tx, workspace.id, "task")),
       title,
       status: "TODO",
       priority: "MEDIUM",

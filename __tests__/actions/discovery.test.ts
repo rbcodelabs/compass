@@ -84,6 +84,8 @@ import {
   moveSolutionStatus,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const mockAuth = vi.mocked(auth);
 
 beforeEach(() => {
@@ -165,7 +167,7 @@ describe("addSolution", () => {
     const result = await addSolution("opp-1", { title: "New Solution" }, "/path");
     expect(mockSolution.create).toHaveBeenCalledWith({
       // workspaceId is derived from the authorized parent Opportunity, never client input.
-      data: { workspaceId: "ws-1", opportunityId: "opp-1", title: "New Solution", description: undefined },
+      data: { workspaceId: "ws-1", seqPrefix: "SOL", seqNumber: expect.any(Number), opportunityId: "opp-1", title: "New Solution", description: undefined },
     });
     expect(result).toEqual({ id: "sol-1", title: "Test Sol" });
   });
@@ -207,8 +209,10 @@ describe("addAssumption", () => {
   it("creates an assumption with riskLevel", async () => {
     await addAssumption("sol-1", { title: "Users will adopt it", riskLevel: "HIGH" }, "/path");
     expect(mockAssumption.create).toHaveBeenCalledWith({
-      data: { solutionId: "sol-1", title: "Users will adopt it", riskLevel: "HIGH" },
+      // workspaceId is derived from the authorized parent Solution, never client input.
+      data: { workspaceId: "ws-1", seqPrefix: "ASM", seqNumber: expect.any(Number), solutionId: "sol-1", title: "Users will adopt it", riskLevel: "HIGH" },
     });
+    expect(requireProductEntity).toHaveBeenCalledWith("solution", "sol-1");
   });
 });
 

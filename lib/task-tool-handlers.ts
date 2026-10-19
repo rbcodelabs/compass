@@ -20,6 +20,7 @@ import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types"
 import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, taskLinkScope, validateTaskLink, validateTaskReferences, type ResolvedTaskAssignee, type TaskAssignee } from "@/lib/task-assignment"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 // Maps each TaskLinkedType to its Prisma model delegate name. Every target
 // table exposes a plain `title` column, so a single resolver works for all
@@ -163,9 +164,10 @@ export async function createTask({
   })
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0
 
-  const task = await captureWorkspaceMutation(prisma, "task", "create", workspaceMutationSource(source), undefined, tx => tx.task.create({
+  const task = await captureWorkspaceMutation(prisma, "task", "create", workspaceMutationSource(source), undefined, async tx => tx.task.create({
     data: {
       workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "task")),
       title: title.trim(),
       description,
       status: resolvedStatus,

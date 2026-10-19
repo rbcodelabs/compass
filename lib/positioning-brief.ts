@@ -11,6 +11,7 @@ import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates";
 import { createDocument } from "@/lib/document-service";
 import { isDocumentPilotWorkspace } from "@/lib/document-storage";
 import { randomUUID } from "node:crypto";
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export type CreatePositioningBriefResult =
   | { ok: true; docId: string; title: string; created: boolean }
@@ -77,7 +78,7 @@ export async function createPositioningBriefCore(
     };
   const doc = isDocumentPilotWorkspace(workspaceId)
     ? await createDocument(data, { operationId: randomUUID(), authorName: "Compass" })
-    : await prisma.doc.create({ data: { ...data, revision: randomUUID() } });
+    : await withSequenceTransaction(prisma, async (tx) => tx.doc.create({ data: { ...data, ...(await allocateOneSeq(tx, workspaceId, "doc")), revision: randomUUID() } }));
 
   return { ok: true, docId: doc.id, title: doc.title, created: true };
 }

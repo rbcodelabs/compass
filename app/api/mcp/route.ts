@@ -200,6 +200,7 @@ import {
   getCardSortBoardTool,
   getCardSortTallyTool,
 } from "@/lib/card-sort-tool-handlers"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -822,10 +823,10 @@ const _handler = createMcpHandler(
               : "The parent KR must belong to an open cycle or to a cycle-less Objective in this workspace.")
           }
         }
-        const objective = await prisma.objective.create({
+        const objective = await withSequenceTransaction(prisma, async (tx) => tx.objective.create({
           // workspaceId comes from the cycle just verified to live in the authorized workspace (or, with no cycle, the gate-authorized workspaceId), never from unverified input.
-          data: { workspaceId: scope.workspaceId, cycleId: cycleId ?? null, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
-        })
+          data: { workspaceId: scope.workspaceId, ...(await allocateOneSeq(tx, scope.workspaceId, "objective")), cycleId: cycleId ?? null, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
+        }))
         return ok(
           withUrlLine(
             `**Objective created** ${cycle ? `in cycle "${cycle.title}"` : `with no cycle (${NO_CYCLE_LABEL})`}\nID: ${objective.id}\nTitle: ${objective.title}\nStatus: ${objective.status}`,
@@ -899,9 +900,10 @@ const _handler = createMcpHandler(
         if (!objective?.workspaceId) {
           return fail(`Objective "${objectiveId}" not found.`)
         }
-        const keyResult = await prisma.keyResult.create({
-          data: { objectiveId, title: title.trim(), target, unit: unit?.trim() },
-        })
+        const keyResultWorkspaceId = objective.workspaceId
+        const keyResult = await withSequenceTransaction(prisma, async (tx) => tx.keyResult.create({
+          data: { workspaceId: keyResultWorkspaceId, ...(await allocateOneSeq(tx, keyResultWorkspaceId, "keyResult")), objectiveId, title: title.trim(), target, unit: unit?.trim() },
+        }))
         return ok(
           withUrlLine(
             `**Key Result created** on "${objective.title}"\nID: ${keyResult.id}\nTitle: ${keyResult.title}\nTarget: ${keyResult.target}${keyResult.unit ? " " + keyResult.unit : ""}\nCurrent: 0`,
@@ -1917,8 +1919,8 @@ const _handler = createMcpHandler(
           const a = await prisma.assumption.findUnique({ where: { id: assumptionId } })
           if (!a) return fail(`Assumption "${assumptionId}" not found.`)
         }
-        const experiment = await captureWorkspaceMutation(prisma, "experiment", "create", "MCP", undefined, tx => tx.experiment.create({
-          data: { workspaceId, title: title.trim(), hypothesis: hypothesis.trim(), method: method.trim(), killCondition: killCondition.trim(), assumptionId: assumptionId ?? null, squadId: squadId ?? null, status: "DESIGNING" },
+        const experiment = await captureWorkspaceMutation(prisma, "experiment", "create", "MCP", undefined, async tx => tx.experiment.create({
+          data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "experiment")), title: title.trim(), hypothesis: hypothesis.trim(), method: method.trim(), killCondition: killCondition.trim(), assumptionId: assumptionId ?? null, squadId: squadId ?? null, status: "DESIGNING" },
         }))
         return ok(
           withUrlLine(

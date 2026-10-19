@@ -22,6 +22,7 @@ import { getMcpActor } from "@/lib/mcp-authz"
 import { createRoadmapItemsFromSolutions } from "@/lib/roadmap/create-from-solution"
 import { addCalendarDays } from "@/lib/roadmap-timeline/calendar-geometry"
 import { durationDaysFor } from "@/lib/roadmap/scheduling"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 export function roadmapCreateData(input: Parameters<typeof createRoadmapItem>[0], sortOrder: number) {
   return {
@@ -42,7 +43,7 @@ export async function createRoadmapItem(input: {
   if (!workspace) return fail(`Workspace "${input.workspaceId}" not found.`)
   if (input.solutionId) return createFromSolution(prisma, workspace, input as typeof input & { solutionId: string })
   const lastItem = await prisma.roadmapItem.findFirst({ where: { workspaceId: input.workspaceId, horizon: input.horizon, status: "ACTIVE" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
-  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, tx => tx.roadmapItem.create({ data: roadmapCreateData(input, lastItem ? lastItem.sortOrder + 1 : 0) }))
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, async tx => tx.roadmapItem.create({ data: { ...roadmapCreateData(input, lastItem ? lastItem.sortOrder + 1 : 0), ...(await allocateOneSeq(tx, input.workspaceId, "roadmapItem")) } }))
   const format = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
   return ok(withUrlLine(
     `**Roadmap item created** (${input.horizon})\nID: ${item.id}\nTitle: ${item.title}` +

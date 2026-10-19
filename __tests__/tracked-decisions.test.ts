@@ -30,6 +30,8 @@ import {
   reviseTrackedDecisionRequest,
 } from "@/lib/tracked-decisions"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const key1 = "00000000-0000-4000-8000-000000000001"
 const key2 = "00000000-0000-4000-8000-000000000002"
 

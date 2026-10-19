@@ -28,6 +28,8 @@ vi.mock("@/lib/portal-auth", () => ({
 import { getPortalSession } from "@/lib/portal-auth";
 import { POST } from "@/app/api/portal/[orgSlug]/[workspaceSlug]/feedback/route";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const mockGetPortalSession = vi.mocked(getPortalSession);
 
 function makeRequest(body: unknown) {

@@ -82,6 +82,8 @@ vi.mock("@/lib/db", () => {
 
 import { createPath, deletePath, listPaths, writePath } from "@/lib/doc-fs"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const WS = "ws-1"
 const author = { authorName: "MCP Agent" }
 

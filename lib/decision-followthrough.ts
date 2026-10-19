@@ -18,6 +18,7 @@ import { workspaceUpdatesAvailable, recordWorkspaceUpdate, retryUpdatesTransacti
 import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
 import { followAfterCreate, sessionFollowActor } from "@/lib/following-hooks"
 import { eligibleTaskAssignees, type TaskAssignee } from "@/lib/task-assignment"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 /** Matches Task.title's column width. */
 const TITLE_LIMIT = 255
@@ -108,6 +109,7 @@ export async function createDecisionFollowUpTask(input: {
     const task = await tx.task.create({
       data: {
         workspaceId: input.workspaceId,
+        ...(await allocateOneSeq(tx, input.workspaceId, "task")),
         title,
         description: input.description || null,
         status: "TODO",
