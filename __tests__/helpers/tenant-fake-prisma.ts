@@ -134,10 +134,29 @@ export function createTenantFakePrisma() {
   // The pair is unique, so a duplicate create throws P2002 the way the real unique index does.
   const opportunityObjectiveLinks: Graph[] = [];
   const solutionKeyResultLinks: Graph[] = [];
+  // Generic links (ADR phase 2): experiments, research studies and the entity_links rows between them. The pair
+  // (fromId, toId) is unique like the real (from_id, link_type, to_id) index; tests use one link type at a time.
+  const experiments: Graph[] = [
+    { id: "exp-a", workspaceId: WS_A.id, title: "A experiment", status: "DESIGNING", updatedAt: new Date(1) },
+    { id: "exp-a2", workspaceId: WS_A.id, title: "A experiment 2", status: "DESIGNING", updatedAt: new Date(1) },
+    { id: "exp-b", workspaceId: WS_B.id, title: "B experiment", status: "DESIGNING", updatedAt: new Date(1) },
+  ];
+  const researchStudies: Graph[] = [
+    { id: "study-a", workspaceId: WS_A.id, name: "A interviews", studyType: "CUSTOMER_INTERVIEW", status: "ACTIVE", updatedAt: new Date(1) },
+    { id: "study-a-usability", workspaceId: WS_A.id, name: "A usability", studyType: "USABILITY_TEST", status: "DRAFT", updatedAt: new Date(1) },
+    { id: "study-a-pm", workspaceId: WS_A.id, name: "A PM interview", studyType: "PM_INTERVIEW", status: "ACTIVE", updatedAt: new Date(1) },
+    { id: "study-a-external", workspaceId: WS_A.id, name: "A external", studyType: "EXTERNAL", status: "ACTIVE", updatedAt: new Date(1) },
+    { id: "study-a-archived", workspaceId: WS_A.id, name: "A archived", studyType: "CUSTOMER_INTERVIEW", status: "ARCHIVED", updatedAt: new Date(1) },
+    { id: "study-b", workspaceId: WS_B.id, name: "B interviews", studyType: "CUSTOMER_INTERVIEW", status: "ACTIVE", updatedAt: new Date(1) },
+  ];
+  const entityLinks: Graph[] = [];
   const workspaceRows = workspaces as unknown as Graph[];
   const tables: Record<string, Graph[]> = {
     opportunityObjectiveLink: opportunityObjectiveLinks,
     solutionKeyResultLink: solutionKeyResultLinks,
+    entityLink: entityLinks,
+    experiment: experiments,
+    researchStudy: researchStudies,
     workspace: workspaceRows,
     opportunity: opportunities as unknown as Graph[],
     squad: squads as unknown as Graph[],
@@ -237,7 +256,9 @@ export function createTenantFakePrisma() {
   const LINK_PAIRS: Record<string, [string, string]> = {
     opportunityObjectiveLink: ["opportunityId", "objectiveId"],
     solutionKeyResultLink: ["solutionId", "keyResultId"],
+    entityLink: ["fromId", "toId"],
   };
+  const PAIR_MODEL_NAMES: Record<string, string> = { opportunityObjectiveLink: "OpportunityObjectiveLink", solutionKeyResultLink: "SolutionKeyResultLink", entityLink: "EntityLink" };
   const writes: string[] = [];
   const delegate = (model: string) => ({
     findFirst: async (args: { where?: Where; select?: Record<string, unknown>; include?: Record<string, unknown> } = {}) => {
@@ -267,11 +288,11 @@ export function createTenantFakePrisma() {
     create: async ({ data, select }: { data: Graph; select?: Record<string, unknown> }) => {
       const pair = LINK_PAIRS[model];
       if (pair && tables[model].some((r) => r[pair[0]] === data[pair[0]] && r[pair[1]] === data[pair[1]])) {
-        throw Object.assign(new Error("Unique constraint failed"), { code: "P2002", meta: { modelName: model === "opportunityObjectiveLink" ? "OpportunityObjectiveLink" : "SolutionKeyResultLink" } });
+        throw Object.assign(new Error("Unique constraint failed"), { code: "P2002", meta: { modelName: PAIR_MODEL_NAMES[model] } });
       }
       linkClock += 1;
       const row: Graph = { id: `${model}-new-${++created}`, createdAt: pair ? new Date(1_000 + linkClock) : new Date(), updatedAt: new Date(), ...data };
-      if (pair) delete row.updatedAt;
+      if (pair && model !== "entityLink") delete row.updatedAt;
       tables[model].push(row);
       writes.push(`${model}.create:${row.id}`);
       return project(model, row, { select });
@@ -437,6 +458,9 @@ export function createTenantFakePrisma() {
     oKRCycle: delegate("okrCycle"),
     opportunityObjectiveLink: delegate("opportunityObjectiveLink"),
     solutionKeyResultLink: delegate("solutionKeyResultLink"),
+    entityLink: delegate("entityLink"),
+    experiment: delegate("experiment"),
+    researchStudy: delegate("researchStudy"),
     $transaction: async (work: (tx: unknown) => unknown) => work(client),
     opportunity: {
       ...delegate("opportunity"),
@@ -462,7 +486,7 @@ export function createTenantFakePrisma() {
       const workspace = workspaces.find((w) => w.id === workspaceId);
       if (workspace && !workspace.members.includes(userId)) workspace.members.push(userId);
     },
-    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks, workspaces },
+    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks, workspaces, experiments, researchStudies, entityLinks },
     /** Snapshot of every feedback row, for before/after "nothing changed" assertions. */
     snapshotFeedback: () => JSON.parse(JSON.stringify(feedback)) as unknown,
   };

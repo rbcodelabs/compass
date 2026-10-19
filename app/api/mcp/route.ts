@@ -172,10 +172,11 @@ import {
 import {
   linkOpportunityToObjectiveTool,
   linkSolutionToKeyResultTool,
-  listLinksTool,
   unlinkOpportunityFromObjectiveTool,
   unlinkSolutionFromKeyResultTool,
 } from "@/lib/typed-link-tool-handlers"
+import { linkEntitiesTool, listLinksTool, unlinkEntitiesTool } from "@/lib/link-tool-handlers"
+import { ENTITY_TYPE_VOCABULARY } from "@/lib/entity-types"
 import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
@@ -1437,7 +1438,8 @@ const _handler = createMcpHandler(
       {
         title: "List Links",
         description:
-          "Lists the typed links on one entity: pass exactly one of opportunityId (its objectives), objectiveId (its opportunities), solutionId (its key results) or keyResultId (its solutions). " +
+          "Lists links on one entity. Pass exactly one of opportunityId (its objectives), objectiveId (its opportunities), solutionId (its key results) or keyResultId (its solutions) for the typed links; " +
+          "or pass entityType plus entityId (optionally linkType) for the generic registry-backed links, e.g. entityType EXPERIMENT lists the research studies that inform it and entityType RESEARCH_STUDY lists the experiments it informs. " +
           "Ordered oldest first; pass the returned nextCursor as cursor for the next page. Links between an Opportunity and an Objective report origin DIRECT (made with the link tools) or LEGACY (derived from the opportunity's linked Key Result).",
         inputSchema: z.object({
           ...typedLinkEnds,
@@ -1445,15 +1447,58 @@ const _handler = createMcpHandler(
           objectiveId: z.string().uuid().optional().describe("UUID of an objective"),
           solutionId: z.string().uuid().optional().describe("UUID of a solution"),
           keyResultId: z.string().uuid().optional().describe("UUID of a Key Result"),
+          entityType: z.enum(ENTITY_TYPE_VOCABULARY).optional().describe("Generic mode: the type of the entity to list links for (use with entityId)"),
+          entityId: z.string().uuid().optional().describe("Generic mode: UUID of the entity (use with entityType)"),
+          linkType: z.string().max(60).optional().describe("Generic mode: restrict to one link type, e.g. EXPERIMENT_INFORMED_BY_STUDY"),
           limit: z.number().int().min(1).max(100).optional().default(50).describe("Page size (default 50)"),
           cursor: z.string().max(512).optional().describe("nextCursor from the previous page"),
         }).strict().refine(
-          (args) => [args.opportunityId, args.objectiveId, args.solutionId, args.keyResultId].filter(Boolean).length === 1,
-          { message: "Provide exactly one of opportunityId, objectiveId, solutionId or keyResultId." },
+          (args) => {
+            const legacy = [args.opportunityId, args.objectiveId, args.solutionId, args.keyResultId].filter(Boolean).length
+            const generic = Boolean(args.entityType) || Boolean(args.entityId) || Boolean(args.linkType)
+            if (generic) return legacy === 0 && Boolean(args.entityType) && Boolean(args.entityId)
+            return legacy === 1
+          },
+          { message: "Provide exactly one of opportunityId, objectiveId, solutionId or keyResultId, or entityType with entityId (and optionally linkType)." },
         ),
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listLinksTool,
+    )
+    register(
+      "link_entities",
+      {
+        title: "Link Entities",
+        description:
+          "Creates a link of a registered link type between two entities of one workspace. linkType decides which entity types go on each end: " +
+          "EXPERIMENT_INFORMED_BY_STUDY links an Experiment (fromId) to a customer-interview or usability-test Research Study (toId); the study must not be archived. " +
+          "Both entities must belong to workspaceId. Idempotent: repeating returns created:false. Linking changes nothing else on either entity. The response ends with an `ID: <link uuid>` line.",
+        inputSchema: {
+          ...typedLinkEnds,
+          linkType: z.string().min(1).max(60).describe("A registered link type key, e.g. EXPERIMENT_INFORMED_BY_STUDY"),
+          fromId: z.string().uuid().describe("UUID of the entity on the `from` end of the link type"),
+          toId: z.string().uuid().describe("UUID of the entity on the `to` end of the link type"),
+          toType: z.enum(ENTITY_TYPE_VOCABULARY).optional().describe("Only for link types that allow several `to` types"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      linkEntitiesTool,
+    )
+    register(
+      "unlink_entities",
+      {
+        title: "Unlink Entities",
+        description:
+          "Removes a link of a registered link type. Only the `from` entity is checked, so a link whose other end has since been deleted can still be removed. Returns removed:0 when there is no such link. Existing links to archived studies stay removable.",
+        inputSchema: {
+          ...typedLinkEnds,
+          linkType: z.string().min(1).max(60).describe("A registered link type key, e.g. EXPERIMENT_INFORMED_BY_STUDY"),
+          fromId: z.string().uuid().describe("UUID of the entity on the `from` end of the link type"),
+          toId: z.string().uuid().describe("UUID of the entity on the `to` end of the link type"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      unlinkEntitiesTool,
     )
 
     register(

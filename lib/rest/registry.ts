@@ -3,13 +3,14 @@ import {
   assumptionSchema, checkInSchema, collectionOf, cursorQuery, customFieldDefinitionSchema, customFieldValueSchema,
   experimentResultSchema, experimentSchema, feedbackSchema, identitySchema, keyResultSchema, metricBindingSchema, metricObservationSchema, metricSchema,
   objectiveSchema, okrCycleSchema, scoreSchema, scoringMetricSchema, scoringModelSchema, squadSchema, typedLinkSchema,
-  opportunityObjectiveRelationshipSchema, opportunitySchema, roadmapItemSchema, solutionKeyResultRelationshipSchema,
+  entityLinkRelationshipSchema, opportunityObjectiveRelationshipSchema, opportunitySchema, roadmapItemSchema, solutionKeyResultRelationshipSchema,
   solutionSchema, taskLinkSchema, taskSchema, uploadPreparationSchema, uuid, workspaceSchema,
 } from "@/lib/rest/schemas"
 import { FEEDBACK_ATTACHMENT_ALLOWED_MIME_TYPES, FEEDBACK_ATTACHMENT_MAX_FILE_BYTES } from "@/lib/feedback-attachment-rules"
 import { FEEDBACK_STATUSES } from "@/lib/feedback-meta"
 import { linkMetricSchema, metricInputSchema, targetSchema, updateMetricBindingSchema } from "@/lib/analytics/service"
 import { COMMENT_TARGET_TYPES } from "@/lib/comments"
+import { ENTITY_TYPE_VOCABULARY } from "@/lib/entity-types"
 import { ACTIVE_FOLLOWABLE_SUBJECT_TYPES } from "@/lib/followable"
 import { DOC_TYPES } from "@/lib/doc-types"
 import { DOC_IMAGE_ALLOWED_MIME_TYPES, DOC_IMAGE_MAX_BYTES } from "@/lib/doc-images"
@@ -131,7 +132,16 @@ const squadCreate = z.object({ name: z.string().trim().min(1).max(255), color: z
 const customObjectType = z.enum(["OPPORTUNITY", "SOLUTION", "EXPERIMENT", "OBJECTIVE", "KEY_RESULT", "ROADMAP_ITEM", "TASK"])
 const customValuePath = z.object({ workspaceId: uuid, objectType: customObjectType, objectId: uuid })
 const customFieldValueCreate = z.object({ fieldId: uuid, value: z.unknown().nullable() }).strict()
-const entityLinksQuery = cursorQuery.extend({ opportunityId: uuid.optional(), objectiveId: uuid.optional(), solutionId: uuid.optional(), keyResultId: uuid.optional() }).strict().refine((value) => [value.opportunityId, value.objectiveId, value.solutionId, value.keyResultId].filter(Boolean).length === 1, { message: "Provide exactly one entity id." })
+const entityLinksQuery = cursorQuery.extend({
+  opportunityId: uuid.optional(), objectiveId: uuid.optional(), solutionId: uuid.optional(), keyResultId: uuid.optional(),
+  entityType: z.enum(ENTITY_TYPE_VOCABULARY).optional(), entityId: uuid.optional(), linkType: z.string().trim().min(1).max(60).optional(),
+}).strict().refine((value) => {
+  const legacy = [value.opportunityId, value.objectiveId, value.solutionId, value.keyResultId].filter(Boolean).length
+  if (value.entityType || value.entityId || value.linkType) return legacy === 0 && Boolean(value.entityType) && Boolean(value.entityId)
+  return legacy === 1
+}, { message: "Provide exactly one entity id, or entityType with entityId (and optionally linkType)." })
+const entityLinkCreate = z.object({ linkType: z.string().trim().min(1).max(60), fromId: uuid, toId: uuid, toType: z.enum(ENTITY_TYPE_VOCABULARY).optional() }).strict()
+const entityLinkPath = z.object({ workspaceId: uuid, linkType: z.string().trim().min(1).max(60), fromId: uuid, toId: uuid })
 const urlBoolean = z.enum(["true", "false"]).transform((value) => value === "true")
 const timestamp = z.string().datetime()
 const commentResponse = z.object({ id: uuid, workspaceId: uuid, targetType: z.enum(COMMENT_TARGET_TYPES), targetId: uuid, parentId: uuid.nullable(), body: z.string(), status: z.enum(["OPEN", "RESOLVED"]), authorId: uuid.nullable(), authorName: z.string(), authorType: z.enum(["AGENT", "HUMAN"]), source: z.string(), createdAt: timestamp, updatedAt: timestamp, docAnchor: z.object({ commentId: uuid, anchorText: z.string(), anchorPrefix: z.string().nullable(), anchorSuffix: z.string().nullable(), anchorStart: z.number().int().nullable(), anchorEnd: z.number().int().nullable() }).nullable().optional(), solutionPlanProposal: z.object({ commentId: uuid, trackedDecisionRequestId: uuid.nullable(), legacyPlanStatus: z.string().nullable() }).nullable().optional(), elementAnchor: z.object({ commentId: uuid, artifactId: uuid, artifactRevisionId: uuid.nullable(), pageUrl: z.string(), pagePath: z.string(), elementSelector: z.string().nullable(), elementFingerprint: z.unknown().nullable(), screenshotUrl: z.string().nullable() }).nullable().optional(), externalAuthor: z.object({ commentId: uuid, submitterEmail: z.string().nullable(), portalAccountId: uuid.nullable(), embedTokenId: uuid.nullable() }).nullable().optional() }).strict()
@@ -330,6 +340,8 @@ export const REST_ROUTES: readonly RestRoute[] = [
   read("listCustomFieldValues", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "List custom-field values in configured display order", collectionOf(customFieldValueSchema), customValuePath, cursorQuery.strict()),
   write("POST", "setCustomFieldValue", "/api/v1/workspaces/{workspaceId}/custom-field-values/{objectType}/{objectId}", "Set a custom-field value", customFieldValueSchema, customValuePath, customFieldValueCreate),
   read("listEntityLinks", "/api/v1/workspaces/{workspaceId}/entity-links", "List typed entity links", collectionOf(typedLinkSchema), workspacePath, entityLinksQuery),
+  write("POST", "linkEntities", "/api/v1/workspaces/{workspaceId}/entity-links", "Create a link of a registered link type between two entities", entityLinkRelationshipSchema, workspacePath, entityLinkCreate, 201),
+  write("DELETE", "unlinkEntities", "/api/v1/workspaces/{workspaceId}/entity-links/{linkType}/{fromId}/{toId}", "Remove a link of a registered link type", z.undefined(), entityLinkPath, undefined, 204),
 
   read("listComments", "/api/v1/workspaces/{workspaceId}/comments/{targetType}/{targetId}", "List comments and replies", collectionOf(commentResponse), commentTargetPath, cursorQuery.extend({ status: z.enum(["OPEN", "RESOLVED"]).optional() }).strict()),
   write("POST", "createComment", "/api/v1/workspaces/{workspaceId}/comments/{targetType}/{targetId}", "Create a comment or reply", z.union([commentResponse, docCommentResponse]), commentTargetPath, commentCreate, 201),

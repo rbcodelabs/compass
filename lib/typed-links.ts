@@ -61,7 +61,7 @@ export function assertSameWorkspacePair(
 /** DSQL's write transaction cap is 3,000 rows and each link is 4 modified rows (row + 3 index entries). */
 export const LINK_WRITE_CHUNK = 500
 
-const chunk = <T>(list: readonly T[], size: number): T[][] => {
+export const chunk = <T>(list: readonly T[], size: number): T[][] => {
   const out: T[][] = []
   for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size))
   return out
@@ -108,7 +108,8 @@ async function loadKeyResultIn(tx: Tx, id: string, workspaceId: string) {
 
 // ── Transactions ────────────────────────────────────────────────────────────
 
-const LINK_NAMES = /idx_(?:opportunity_objective|solution_key_result)_links_pair|opportunity_objective_links|solution_key_result_links|OpportunityObjectiveLink|SolutionKeyResultLink/
+// entity_links (lib/links/service.ts, ADR phase 2) shares this race matcher and runTypedLinkTransaction.
+const LINK_NAMES = /idx_(?:opportunity_objective|solution_key_result)_links_pair|idx_entity_links_pair|opportunity_objective_links|solution_key_result_links|entity_links|OpportunityObjectiveLink|SolutionKeyResultLink|EntityLink\b/
 
 /**
  * A lost race on the unique pair index. Prisma reports it as P2002, but a driver adapter does not necessarily fill `meta.modelName`,
@@ -359,7 +360,7 @@ const MAX_STALLED_PASSES = 3
  * workspace cascade) took those rows first, so the find is simply run again and the loop ends when it is empty. Only repeated
  * stalls, or exceeding the pass cap, throw.
  */
-async function drainByIds(find: LinkRowFinder, remove: (ids: string[]) => Promise<number>): Promise<number> {
+export async function drainByIds(find: LinkRowFinder, remove: (ids: string[]) => Promise<number>): Promise<number> {
   let total = 0
   let stalled = 0
   for (let pass = 0; pass < MAX_DRAIN_PASSES; pass += 1) {
@@ -651,8 +652,8 @@ export type ListedLink =
       createdAt: string
     }
 
-const encodeCursor = (row: { createdAt: Date; id: string }) => Buffer.from(`${row.createdAt.toISOString()}|${row.id}`).toString("base64url")
-function decodeCursor(cursor: string): { createdAt: Date; id: string } {
+export const encodeCursor = (row: { createdAt: Date; id: string }) => Buffer.from(`${row.createdAt.toISOString()}|${row.id}`).toString("base64url")
+export function decodeCursor(cursor: string): { createdAt: Date; id: string } {
   const decoded = Buffer.from(cursor, "base64url").toString("utf8")
   const [iso, id, ...rest] = decoded.split("|")
   const createdAt = new Date(iso ?? "")

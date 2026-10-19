@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 190,
-  sortedToolNamesSha256: "4e3b5e3055bfa0ac1a5379819f4a411e3ec79fc06b000bfdef7bf98125bcdcaa",
+  toolCount: 192,
+  sortedToolNamesSha256: "840ab2961b9845563189364ed1476662554e1c04b281a35096aef85fc828d945",
 } as const
 
 export type McpRestParityDisposition =
@@ -98,6 +98,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   issue_research_link: direct("issueResearchParticipantLink"),
   link_artifact_to_decision: direct("linkArtifactDecision"),
   link_artifact_to_solution: direct("linkArtifactSolution"),
+  link_entities: direct("linkEntities"),
   link_evidence: direct("updateEvidenceTarget"),
   link_feedback_to_opportunity: direct("updateFeedback"),
   link_metric: direct("createMetricBinding"),
@@ -176,6 +177,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   unfollow: direct("unfollowResource"),
   unlink_artifact_from_decision: direct("unlinkArtifactDecision"),
   unlink_artifact_from_solution: direct("unlinkArtifactSolution"),
+  unlink_entities: direct("unlinkEntities"),
   unlink_metric: direct("deleteMetricBinding"),
   unlink_opportunity_from_objective: direct("unlinkOpportunityObjective"),
   unlink_solution_from_key_result: direct("unlinkSolutionKeyResult"),

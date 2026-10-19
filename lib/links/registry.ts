@@ -1,0 +1,174 @@
+/**
+ * The link-type registry for the generic `entity_links` table (ADR "One generic entity_links
+ * table for association links", section 4). A new association link type is ONE entry in
+ * LINK_TYPES below plus (when it replaces a legacy table) a data migration; it needs no new table,
+ * handler, tool or cleanup hook, because lib/links/service.ts, the generic MCP/REST tools and the
+ * delete wiring all read this registry.
+ *
+ * Nothing in this file touches the database. Rules that need a query (eligibility) receive the
+ * caller's transaction.
+ *
+ * A contract test (__tests__/links/registry-contract.test.ts) iterates every entry, so a type that
+ * is missing a label, an authorize rule, a resolvable endpoint, a delete path or a parity entry
+ * fails CI instead of failing in production.
+ */
+import type { z } from "zod"
+import type { AppTransactionClient } from "@/lib/db"
+import { isResearchCaptureEnabled } from "@/lib/research-feature"
+import { ENTITY_TYPE_VOCABULARY, type LinkableEntityType } from "@/lib/entity-types"
+import { TypedLinkError, type LinkContext } from "@/lib/typed-links"
+
+export type LinkOrigin = "DIRECT" | "LEGACY" | "MIGRATION"
+export type LinkOperation = "link" | "unlink" | "list"
+/** What the acting identity must be able to do to one endpoint. "none" means the endpoint is not checked at all. */
+export type AuthAccess = "read" | "write" | "none"
+export type AuthRule = { from: AuthAccess; to: AuthAccess }
+
+/** A verified endpoint row, always loaded with a workspace filter by lib/links/endpoints.ts. */
+export type LinkEndpoint = { type: LinkableEntityType; id: string; workspaceId: string; title: string }
+
+export type LinkEligibilityInput = {
+  tx: AppTransactionClient
+  workspaceId: string
+  from: LinkEndpoint
+  to: LinkEndpoint
+  ctx: LinkContext
+}
+
+/** Declarative description of a reciprocal getter field (wired into get_* tools by the UI phase). */
+export type LinkSummarySpec = { field: string; select: readonly string[] }
+
+/** Dual-write / backfill hooks for a type that replaces a legacy table. Declared here, implemented by phases 4-7. */
+export type LegacyAdapter = { legacyTable: string; backfillMigration: string }
+
+export type LinkTypeDef<A = unknown> = {
+  /** UPPER_SNAKE `<FROM>_<VERB>_<TO>`, at most 60 characters, append-only: never rename or reuse a key. */
+  key: string
+  from: LinkableEntityType
+  to: LinkableEntityType | readonly LinkableEntityType[]
+  direction: "directed" | "symmetric"
+  /**
+   * The most links of this type one entity may hold: `from: "one"` means a `from` entity has at most one
+   * (to-one), `to: "one"` the same for the `to` entity. Not database-enforced (no partial unique index on
+   * DSQL): lib/links/service.ts enforces it and touches the entity row so concurrent writers conflict.
+   */
+  cardinality: { from: "one" | "many"; to: "one" | "many" }
+  /** forward reads from the `from` entity ("Informed by"), inverse from the `to` entity ("Informs"). */
+  labels: { forward: string; inverse: string }
+  origins?: readonly LinkOrigin[]
+  /** Validates the optional TEXT `attrs` column. Absent means the type takes no attrs. Never filtered in SQL. */
+  attrs?: z.ZodType<A>
+  /** "error" is for types whose legacy tool reports an existing link as a failure (link_task today). */
+  duplicatePolicy: "idempotent" | "error"
+  /** Which access the identity needs on each endpoint, per operation. Unlink checks the `from` endpoint only. */
+  authorize(operation: LinkOperation): AuthRule
+  /** Link-specific eligibility (study type, archived state, ...). Runs on link only, so existing links stay removable. */
+  eligible?(input: LinkEligibilityInput): Promise<void>
+  /** Feature flag. When false every mutation is refused and the type is hidden from reads and summaries. */
+  isEnabled?(): boolean
+  lifecycle: { onFromDeleted: "delete" | "block"; onToDeleted: "delete" | "block"; onArchive: "keep" }
+  summaries: { onFrom?: LinkSummarySpec; onTo?: LinkSummarySpec }
+  /** Participant, PM-interview and synthesis contexts. Default (and only value used today) is "deny". */
+  restrictedContexts: "deny" | "allow"
+  legacy?: LegacyAdapter
+  /** Existing per-type tools/operations that stay as thin wrappers over this type. */
+  compat?: { mcpTools: readonly string[]; restOps: readonly string[] }
+}
+
+/** Reads the endpoint types a def may point at as a list. */
+export function toTypesOf(def: LinkTypeDef): readonly LinkableEntityType[] {
+  return Array.isArray(def.to) ? (def.to as readonly LinkableEntityType[]) : [def.to as LinkableEntityType]
+}
+
+/** Write on the `from` entity, read on the `to` entity; unlink checks only `from`; list reads both. */
+export const defaultAuthorize = (operation: LinkOperation): AuthRule =>
+  operation === "link" ? { from: "write", to: "read" } : operation === "unlink" ? { from: "write", to: "none" } : { from: "read", to: "read" }
+
+// ── EXPERIMENT_INFORMED_BY_STUDY (the first type; no legacy data) ───────────
+
+const LINKABLE_STUDY_TYPES: readonly string[] = ["CUSTOMER_INTERVIEW", "USABILITY_TEST"]
+
+/**
+ * An Experiment is informed by research studies. Rules (from the superseded PR #277):
+ * same workspace; many-to-many; only CUSTOMER_INTERVIEW and USABILITY_TEST studies (PM_INTERVIEW is
+ * excluded everywhere and reported as not found, EXTERNAL is not linkable); an archived study cannot get
+ * a NEW link but existing links stay visible and removable; the research feature flag is required for
+ * mutations and hides the type from reads and summaries; link and unlink are idempotent. Linking changes
+ * no experiment status, assumption, study protocol or participant credential: the service writes the
+ * link row and nothing else.
+ */
+const experimentInformedByStudy: LinkTypeDef = {
+  key: "EXPERIMENT_INFORMED_BY_STUDY",
+  from: "EXPERIMENT",
+  to: "RESEARCH_STUDY",
+  direction: "directed",
+  cardinality: { from: "many", to: "many" },
+  labels: { forward: "Informed by", inverse: "Informs" },
+  duplicatePolicy: "idempotent",
+  authorize: defaultAuthorize,
+  isEnabled: isResearchCaptureEnabled,
+  async eligible({ tx, workspaceId, to }) {
+    const study = await tx.researchStudy.findFirst({
+      where: { id: to.id, workspaceId },
+      select: { studyType: true, status: true },
+    })
+    // PM_INTERVIEW studies are invisible to ordinary members everywhere (findMemberStudy), so they are "not found" here too.
+    if (!study || study.studyType === "PM_INTERVIEW") throw new TypedLinkError("Research study not found.")
+    if (!LINKABLE_STUDY_TYPES.includes(study.studyType)) {
+      throw new TypedLinkError("Only customer interview and usability test studies can be linked to an experiment.", "INVALID")
+    }
+    if (study.status === "ARCHIVED") throw new TypedLinkError("Archived research studies cannot be linked to an experiment.", "INVALID")
+  },
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {
+    onFrom: { field: "linkedStudies", select: ["id", "name", "studyType", "status"] },
+    onTo: { field: "linkedExperiments", select: ["id", "title", "status"] },
+  },
+  restrictedContexts: "deny",
+  compat: { mcpTools: [], restOps: [] },
+}
+
+/** Append-only. Add one entry per type; never edit or reuse a key. */
+const DEFINITIONS: readonly LinkTypeDef[] = [experimentInformedByStudy]
+
+export const LINK_TYPES: Readonly<Record<string, LinkTypeDef>> = Object.freeze(
+  Object.fromEntries(DEFINITIONS.map((def) => [def.key, def])),
+)
+
+export const LINK_TYPE_KEYS: readonly string[] = DEFINITIONS.map((def) => def.key)
+
+export function getLinkType(key: string): LinkTypeDef | null {
+  return Object.prototype.hasOwnProperty.call(LINK_TYPES, key) ? LINK_TYPES[key] : null
+}
+
+/** The def or a user-safe INVALID error that lists the known keys. */
+export function requireLinkType(key: string): LinkTypeDef {
+  const def = getLinkType(key)
+  if (!def) throw new TypedLinkError(`Invalid link type "${key}". Known link types: ${LINK_TYPE_KEYS.join(", ")}.`, "INVALID")
+  return def
+}
+
+/** A type behind a flag that is off is invisible to reads and refused for writes. */
+export function isLinkTypeEnabled(def: LinkTypeDef): boolean {
+  return def.isEnabled ? def.isEnabled() : true
+}
+
+/** Every enabled type in which `entityType` is an endpoint, with the side(s) it plays. */
+export function linkTypesForEntity(entityType: LinkableEntityType): { def: LinkTypeDef; asFrom: boolean; asTo: boolean }[] {
+  return DEFINITIONS.filter(isLinkTypeEnabled).flatMap((def) => {
+    const asFrom = def.from === entityType
+    const asTo = toTypesOf(def).includes(entityType)
+    return asFrom || asTo ? [{ def, asFrom, asTo }] : []
+  })
+}
+
+/** Structural checks the contract test also runs, exported so a bad entry names itself in the failure. */
+export function validateLinkTypeDef(def: LinkTypeDef): string[] {
+  const problems: string[] = []
+  if (!/^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(def.key) || def.key.length > 60) problems.push("key must be UPPER_SNAKE and at most 60 characters")
+  const types: readonly string[] = [def.from, ...toTypesOf(def)]
+  for (const type of types) if (!(ENTITY_TYPE_VOCABULARY as readonly string[]).includes(type)) problems.push(`unknown entity type ${type}`)
+  if (!def.labels.forward.trim() || !def.labels.inverse.trim()) problems.push("labels.forward and labels.inverse are required")
+  if (def.restrictedContexts !== "deny") problems.push("restrictedContexts must be deny until a reviewed exception exists")
+  return problems
+}

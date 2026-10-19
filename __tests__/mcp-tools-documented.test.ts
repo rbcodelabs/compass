@@ -26,6 +26,8 @@ const TYPED_LINK_TOOLS = [
   "link_solution_to_key_result",
   "unlink_solution_from_key_result",
   "list_links",
+  "link_entities",
+  "unlink_entities",
 ]
 
 describe("MCP tools are documented", () => {
