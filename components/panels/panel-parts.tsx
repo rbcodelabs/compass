@@ -54,6 +54,7 @@ export function useEntityDetail<T>(
   workspaceSlug: string
 ) {
   const [data, setData] = useState<T | null>(null);
+  const [displayId, setDisplayId] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const generation = useRef(0);
 
@@ -71,6 +72,7 @@ export function useEntityDetail<T>(
       .then((res) => {
         if (requestGeneration !== generation.current) return;
         setData(res.data as T);
+        setDisplayId(typeof res.displayId === "string" ? res.displayId : null);
         setError(false);
       })
       .catch(() => { if (requestGeneration === generation.current) setError(true); });
@@ -80,6 +82,7 @@ export function useEntityDetail<T>(
     // Reset to the loading skeleton when the entity changes, then load. Same
     // pattern as the existing opportunity/experiment panels.
     setData(null);
+    setDisplayId(null);
     setError(false);
     refresh();
     return () => { generation.current += 1; };
@@ -94,7 +97,7 @@ export function useEntityDetail<T>(
     setData(next);
     setError(false);
   }, []);
-  return { data, error, refresh, mutate };
+  return { data, error, refresh, mutate, displayId };
 }
 
 /**
@@ -173,11 +176,14 @@ const LABEL_CLASS =
  */
 export function PanelTitle({
   title,
+  displayId,
   status,
   edit,
   statusEdit,
 }: {
   title: string;
+  /** `TASK-12`, from useEntityDetail; absent until the row is numbered. */
+  displayId?: string | null;
   status?: { value?: string; label: string; className?: string };
   edit?: EditContext;
   statusEdit?: {
@@ -188,6 +194,7 @@ export function PanelTitle({
 }) {
   return (
     <div className="flex flex-col gap-2 items-start">
+      {displayId && <span className="font-mono text-xs text-muted-foreground" data-testid="display-id">{displayId}</span>}
       {edit && statusEdit && status?.value ? (
         <StatusSelect
           value={status.value}

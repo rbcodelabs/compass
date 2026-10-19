@@ -97,7 +97,7 @@ export function SolutionPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error, mutate, refresh } = useEntityDetail<SolutionData>(
+  const { data, error, displayId, mutate, refresh } = useEntityDetail<SolutionData>(
     "solution",
     id,
     orgSlug,
@@ -144,7 +144,7 @@ export function SolutionPanel({
         />
       )}
 
-      <PanelTitle
+      <PanelTitle displayId={displayId}
         title={data.title}
         status={{ value: data.status, ...solutionStatusBadge(data.status) }}
         edit={edit}
