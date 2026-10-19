@@ -31,6 +31,7 @@ import { assertAgentWebSearchesMigration } from "@/lib/migrations/agent-web-sear
 import { assertAgentConversationParticipantsMigration } from "@/lib/migrations/agent-conversation-participants";
 import { assertEntityLinksMigration } from "@/lib/migrations/entity-links";
 import { assertWorkItemIdsMigration, WORK_ITEM_IDS_MIGRATION } from "@/lib/migrations/work-item-ids";
+import { assertWorkItemIdsBackfill, backfillWorkItemIds, getWorkItemIdsBackfillStatus, WORK_ITEM_IDS_BACKFILL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION } from "@/lib/migrations/work-item-ids-backfill";
 import { assertRoadmapItemProvenanceMigration } from "@/lib/migrations/roadmap-item-provenance";
 import { assertMcpConnectorsMigration } from "@/lib/migrations/mcp-connectors";
 import { assertMetricsDashboardMigration } from "@/lib/migrations/metrics-dashboard";
@@ -589,10 +590,23 @@ const MIGRATIONS: readonly MigrationEntry[] = [
   {
     // Human-readable work item IDs, schema half (ADR "Human-readable work item IDs"): nullable seq_prefix and
     // seq_number on 14 tables, nullable workspace_id on key_results and assumptions, the workspace_sequences
-    // counter, and one unique async index per table. Numbering existing rows is migration 093 (explicit-only).
+    // counter, and one unique async index per table. Numbering existing rows is migration 093; 094 is its explicit-only residual pass.
     // The 092 postcondition verifies the columns and that every index is valid, ready and unique.
     name: "092_work_item_ids",
     filePath: path.join(process.cwd(), "prisma/migrations/092_work_item_ids/migration.sql"),
+  },
+  {
+    // No DDL. Fills key_results / assumptions workspace_id from the parent, then numbers every existing row per
+    // (workspace, type) from the workspace_sequences counter. The hook proves zero NULLs, no duplicates and
+    // counters ahead of the highest number before the receipt.
+    name: "093_work_item_ids_backfill",
+    filePath: path.join(process.cwd(), "prisma/migrations/093_work_item_ids_backfill/migration.sql"),
+  },
+  {
+    // No DDL. Re-runs 093's backfill + postconditions for rows the previous deploy's instances inserted without a
+    // number after 093's receipt. POST it only after the deploy that allocates numbers has fully rolled out.
+    name: "094_work_item_ids_residual_backfill",
+    filePath: path.join(process.cwd(), "prisma/migrations/094_work_item_ids_residual_backfill/migration.sql"),
   },
 ];
 
@@ -1784,6 +1798,7 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       legacyDecisionReviewRepair,
       geodeDocumentStorage: await getGeodeDocumentStorageHealth(client, schema, appliedNames.includes("059_geode_document_storage")),
       // Orphan / NULL / parent-drift counts for 068, visible before a human POSTs it.
+      workItemIdsBackfill: await getWorkItemIdsBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       workspaceIdBackfill: await getWorkspaceIdBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       linkIntegrity: "error" in typedLinks ? typedLinks : typedLinks.linkIntegrity,
       typedLinkPreflight: "error" in typedLinks ? typedLinks : typedLinks.preflight,
@@ -1795,7 +1810,7 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION];
 
 /**
  * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072).
@@ -2125,6 +2140,12 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "069_background_agent_runs") await assertBackgroundAgentRunsMigration(client, schema)
       if (migration.name === "091_entity_links") await assertEntityLinksMigration(client, schema)
       if (migration.name === WORK_ITEM_IDS_MIGRATION) await assertWorkItemIdsMigration(client, schema)
+      if (migration.name === WORK_ITEM_IDS_BACKFILL_MIGRATION || migration.name === WORK_ITEM_IDS_RESIDUAL_MIGRATION) {
+        // Data half: fill workspace_id from the parent, number the existing rows from the shared counter, then prove it.
+        // Both run before the receipt below, so a failure leaves an unfinished attempt and the next POST resumes.
+        await backfillWorkItemIds(client, schema, log)
+        await assertWorkItemIdsBackfill(client, schema, migration.name)
+      }
       if (migration.name === "090_v0_chat_artifacts") {
         const columns = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND ((table_name='artifacts' AND column_name='v0_chat_id') OR (table_name='artifact_revisions' AND column_name='v0_version_id'))", [schema])
         if (columns.rows[0]?.count !== "2") throw new Error("Migration 090 postcondition failed: v0 artifact columns missing")

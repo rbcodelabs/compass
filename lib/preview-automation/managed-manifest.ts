@@ -186,7 +186,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Human-readable work item IDs, schema half: nullable ADD COLUMNs (seq_prefix, seq_number on 14 tables; workspace_id on
   // key_results and assumptions), the workspace_sequences counter table and one async index per table. No backfill (093).
   // Digest recorded from the shipped SQL; please review it.
-  "092_work_item_ids": "fc3cdc691a69a668c81ff8afc35fab4558171d25a7ebc4814a4154485a448d8a"
+  "092_work_item_ids": "fc3cdc691a69a668c81ff8afc35fab4558171d25a7ebc4814a4154485a448d8a",
+  // Work item IDs data half: no DDL, the work is the hook (lib/migrations/work-item-ids-backfill.ts). 094 is its explicit-only residual pass.
+  "093_work_item_ids_backfill": "abe86fa984f96be2b172e32910156c6f24c0087a4bda6798eafbdeb0faa5879d",
+  "094_work_item_ids_residual_backfill": "69479580a318817b5c806ce70fbad399dcec1fa2ea8d93e7e02456ec3219d932"
 };
 
 /**
@@ -248,6 +251,14 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 092 postcondition (columns on 14 tables, the counter table and every unique index valid and ready before the receipt).
   "092_work_item_ids": {
     "lib/migrations/work-item-ids.ts": "283438c7811dbb3d2b37970315563beae7069ab8962f347968494b90c3dc214f",
+  },
+  "094_work_item_ids_residual_backfill": {
+    "lib/migrations/work-item-ids-backfill.ts": "bfb0533167f1c9fac0d0ab72da59adb559eccb1c6ac169f83091a69642a46c5a",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  "093_work_item_ids_backfill": {
+    "lib/migrations/work-item-ids-backfill.ts": "bfb0533167f1c9fac0d0ab72da59adb559eccb1c6ac169f83091a69642a46c5a",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };
 

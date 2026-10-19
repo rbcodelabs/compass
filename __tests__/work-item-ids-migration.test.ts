@@ -114,3 +114,20 @@ describe(NAME, () => {
     expect(manifest).toContain(`"lib/migrations/work-item-ids.ts": "${hook}"`)
   })
 })
+
+describe("093/094 backfill registration", () => {
+  const runner = readFileSync(path.join(process.cwd(), "lib/migrations/runner.ts"), "utf8")
+  it("registers 093 and 094 after 092, with DDL-free SQL files", () => {
+    const order = ["092_work_item_ids", "093_work_item_ids_backfill", "094_work_item_ids_residual_backfill"].map((name) => runner.indexOf(`name: "${name}"`))
+    expect(order.every((index) => index > 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    for (const dir of ["093_work_item_ids_backfill", "094_work_item_ids_residual_backfill"]) {
+      const sql = readFileSync(path.join(process.cwd(), `prisma/migrations/${dir}/migration.sql`), "utf8")
+      expect(sql.split("\n").filter((line) => line.trim() && !line.trim().startsWith("--"))).toEqual([])
+    }
+  })
+  it("keeps 094 explicit-only and runs the same hook for both", () => {
+    expect(runner).toMatch(/EXPLICIT_ONLY_MIGRATIONS: readonly string\[\] = \[[^\]]*WORK_ITEM_IDS_RESIDUAL_MIGRATION/)
+    expect(runner).toMatch(/migration\.name === WORK_ITEM_IDS_BACKFILL_MIGRATION \|\| migration\.name === WORK_ITEM_IDS_RESIDUAL_MIGRATION/)
+  })
+})
