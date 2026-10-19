@@ -106,7 +106,7 @@ export const roadmapItemSchema = resourceSchema.extend({
 export const typedLinkSchema = z.object({
   id: uuid,
   source: z.string(),
-  kind: z.enum(["opportunity_objective", "solution_key_result"]),
+  kind: z.enum(["opportunity_objective", "solution_key_result", "entity_link"]),
   opportunityId: uuid.optional(),
   opportunityTitle: z.string().optional(),
   objectiveId: uuid.optional(),
@@ -116,11 +116,22 @@ export const typedLinkSchema = z.object({
   solutionTitle: z.string().optional(),
   keyResultId: uuid.optional(),
   keyResultTitle: z.string().optional(),
+  // Generic registry-backed links (kind "entity_link").
+  linkType: z.string().optional(),
+  side: z.enum(["from", "to"]).optional(),
+  label: z.string().optional(),
+  from: z.object({ type: z.string(), id: uuid, title: z.string() }).optional(),
+  to: z.object({ type: z.string(), id: uuid, title: z.string() }).optional(),
   createdAt: z.string(),
 })
 
 export const opportunityObjectiveRelationshipSchema = z.object({
   id: uuid, workspaceId: uuid, opportunityId: uuid, objectiveId: uuid,
+  origin: z.string(), source: z.string(),
+})
+
+export const entityLinkRelationshipSchema = z.object({
+  id: uuid, workspaceId: uuid, linkType: z.string(), fromType: z.string(), fromId: uuid, toType: z.string(), toId: uuid,
   origin: z.string(), source: z.string(),
 })
 

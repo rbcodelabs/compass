@@ -349,6 +349,24 @@ describe("REST API registry", () => {
     }
   })
 
+  it("publishes the generic entity-link routes with strict bodies and a 204 unlink", () => {
+    const create = REST_ROUTES.find((route) => route.operationId === "linkEntities")!
+    expect([create.method, create.path, create.status]).toEqual(["POST", "/api/v1/workspaces/{workspaceId}/entity-links", 201])
+    const remove = REST_ROUTES.find((route) => route.operationId === "unlinkEntities")!
+    expect([remove.method, remove.path, remove.status]).toEqual(["DELETE", "/api/v1/workspaces/{workspaceId}/entity-links/{linkType}/{fromId}/{toId}", 204])
+    const body = { linkType: "EXPERIMENT_INFORMED_BY_STUDY", fromId: UUID, toId: UUID }
+    expect(create.bodySchema!.safeParse(body).success).toBe(true)
+    // workspace_id is never an input, and unknown fields are refused.
+    expect(create.bodySchema!.safeParse({ ...body, workspaceId: UUID }).success).toBe(false)
+    expect(create.bodySchema!.safeParse({ ...body, toType: "TASK" }).success).toBe(true)
+    expect(create.bodySchema!.safeParse({ ...body, toType: "NOPE" }).success).toBe(false)
+    expect(create.bodySchema!.safeParse({ ...body, fromId: "not-a-uuid" }).success).toBe(false)
+    expect(remove.pathSchema.safeParse({ workspaceId: UUID, linkType: body.linkType, fromId: UUID, toId: UUID }).success).toBe(true)
+    const document = buildOpenApiDocument()
+    expect(document.paths["/api/v1/workspaces/{workspaceId}/entity-links"]).toHaveProperty("post")
+    expect(document.paths["/api/v1/workspaces/{workspaceId}/entity-links/{linkType}/{fromId}/{toId}"]).toHaveProperty("delete")
+  })
+
   it("publishes scoring and binding patch invariants in OpenAPI", () => {
     const document = buildOpenApiDocument()
     const scoringOperation = document.paths["/api/v1/workspaces/{workspaceId}/scoring-models/{id}"].patch as unknown as {

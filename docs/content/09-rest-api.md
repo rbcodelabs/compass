@@ -32,6 +32,15 @@ syntheses and evidence promotion; initiating-owner PM interview reads;
 analytics connections; and card-sort rounds, blind proposals, tallies, and
 new-entry resolution. Consult OpenAPI for the exact route and DTO inventory.
 
+Generic entity links use `/api/v1/workspaces/{workspaceId}/entity-links`: `POST`
+(`linkEntities`, body `linkType`, `fromId`, `toId`) creates a link of a
+registered link type, `DELETE .../entity-links/{linkType}/{fromId}/{toId}`
+(`unlinkEntities`) removes it, and `GET` (`listEntityLinks`) accepts
+`entityType` with `entityId` (and optionally `linkType`) in addition to the
+typed-link ids. They mirror the MCP tools `link_entities`, `unlink_entities` and
+`list_links`; the only registered link type today is
+`EXPERIMENT_INFORMED_BY_STUDY`.
+
 Human judgment and execution boundaries are deliberate. REST clients may
 request a decision or release authorization and read its state, but cannot
 record a human decision, apply a recorded decision, approve or reject a

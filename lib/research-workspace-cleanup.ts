@@ -1,4 +1,5 @@
 import type { AppPrismaClient } from "@/lib/db"
+import { deleteLinksForEntity } from "@/lib/links/service"
 import { deleteParticipantVoiceEvidenceIfPresent } from "@/lib/research-participant-voice-cleanup"
 
 /** Delete the relationMode=prisma research graph children-first. Blob cleanup
@@ -15,5 +16,9 @@ export async function deleteWorkspaceResearchData(prisma: AppPrismaClient, works
   await prisma.researchSession.deleteMany({ where: { study: { workspaceId } } })
   await prisma.researchParticipantToken.deleteMany({ where: { study: { workspaceId } } })
   await prisma.researchSynthesis.deleteMany({ where: { study: { workspaceId } } })
+  // Join rows (experiment <-> study links) go BEFORE the studies: no foreign key reaches entity_links, so a study deleted first
+  // would leave rows pointing at nothing. Both directions, in chunks of 500 links.
+  const studies = await prisma.researchStudy.findMany({ where: { workspaceId }, select: { id: true } })
+  await deleteLinksForEntity(prisma, "RESEARCH_STUDY", studies.map((study) => study.id))
   await prisma.researchStudy.deleteMany({ where: { workspaceId } })
 }

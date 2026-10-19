@@ -203,6 +203,54 @@ describe("deleteWorkspaceCascade typed links: order and row limits", () => {
   });
 });
 
+describe("deleteWorkspaceCascade generic entity links", () => {
+  const first = (calls: Call[], model: string, op: string) => calls.findIndex((c) => c.model === model && c.op === op);
+
+  it("sweeps the workspace's entity_links first, then each experiment's and study's links BEFORE the rows themselves", async () => {
+    const { client, calls } = recordingPrisma({
+      "entityLink.findMany": [[{ id: "w1" }], [], [{ id: "x1" }], [], [{ id: "s1" }], []],
+      "entityLink.deleteMany": [{ count: 1 }, { count: 1 }, { count: 1 }],
+      "experiment.findMany": [[{ id: "exp-1" }]],
+      "researchStudy.findMany": [[{ id: "study-1" }]],
+    });
+    await deleteWorkspaceCascade(client, WS, { skipBlobCleanup: true });
+
+    const links = calls.filter((c) => c.model === "entityLink");
+    // 1. the stamped-workspace sweep is the first thing the cascade does to entity_links, and before any parent delete
+    expect(links[0].args).toMatchObject({ where: { workspaceId: WS }, take: CASCADE_CHUNK_SIZE });
+    expect(first(calls, "entityLink", "deleteMany")).toBeLessThan(first(calls, "researchStudy", "deleteMany"));
+    expect(first(calls, "entityLink", "deleteMany")).toBeLessThan(first(calls, "experiment", "deleteMany"));
+    // 2. endpoint-keyed sweeps name the type and both directions, and run before the study / experiment delete
+    const sweepIndexes = (type: string) =>
+      calls.flatMap((c, i) => (c.model === "entityLink" && c.op === "findMany" && JSON.stringify(c.args).includes(`"fromType":"${type}"`) ? [i] : []));
+    for (const [type, parent] of [["RESEARCH_STUDY", "researchStudy"], ["EXPERIMENT", "experiment"]] as const) {
+      const indexes = sweepIndexes(type);
+      expect(indexes.length, type).toBeGreaterThan(0);
+      expect(calls[indexes[0]].args).toMatchObject({ where: { OR: [{ fromType: type, fromId: { in: [`${type === "EXPERIMENT" ? "exp" : "study"}-1`] } }, { toType: type, toId: { in: [`${type === "EXPERIMENT" ? "exp" : "study"}-1`] } }] } });
+      expect(Math.max(...indexes), type).toBeLessThan(first(calls, parent, "deleteMany"));
+    }
+  });
+
+  it("leaves another workspace's entity links alone (behavioural, where-honouring fake)", async () => {
+    const fake = createTenantFakePrisma();
+    fake.state.entityLinks.push(
+      { id: "a", workspaceId: WS_A.id, linkType: "T", fromType: "EXPERIMENT", fromId: "exp-a", toType: "RESEARCH_STUDY", toId: "study-a", createdAt: new Date(1) },
+      { id: "b", workspaceId: "ws-b", linkType: "T", fromType: "EXPERIMENT", fromId: "exp-b", toType: "RESEARCH_STUDY", toId: "study-b", createdAt: new Date(1) },
+    );
+    const noop = recordingPrisma();
+    const client: unknown = new Proxy({}, {
+      get: (_t, prop: string) => {
+        if (prop === "$transaction") return async (fn: (tx: unknown) => unknown) => fn(client);
+        const real = (fake.client as unknown as Record<string, unknown>)[prop];
+        const fallback = (noop.client as unknown as Record<string, unknown>)[prop];
+        return new Proxy({}, { get: (_m, op: string) => { const fn = real && (real as Record<string, unknown>)[op]; return typeof fn === "function" ? fn : (fallback as Record<string, unknown>)[op]; } });
+      },
+    });
+    await deleteWorkspaceCascade(client as Parameters<typeof deleteWorkspaceCascade>[0], WS_A.id, { skipBlobCleanup: true });
+    expect(fake.state.entityLinks.map((row) => row.id)).toEqual(["b"]);
+  });
+});
+
 describe("deleteWorkspaceCascade Solution / Objective scope", () => {
   it("selects objectives by their own workspaceId, or by cycle only while that is NULL", async () => {
     const { client, calls } = recordingPrisma({ "oKRCycle.findMany": [[{ id: "cycle-1" }]], "objective.findMany": [[{ id: "obj-1" }]] });

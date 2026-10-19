@@ -154,7 +154,9 @@ The API key is stored in the Vercel project settings and in `.env.local` as `MCP
 | `unlink_opportunity_from_objective` | Same inputs. `removed:1`, or `removed:0` when none. `removed:0, stillLinkedViaKeyResult:true` is a **successful no-op**: the opportunity's Key Result is under that Objective so the link stays (see *Links*) |
 | `link_solution_to_key_result` | `workspaceId, solutionId, keyResultId`. Idempotent (`created:false` on repeat). The solution keeps its single parent opportunity |
 | `unlink_solution_from_key_result` | Same inputs. `removed:1`, or `removed:0` when none |
-| `list_links` | `workspaceId` plus exactly one of `opportunityId`, `objectiveId`, `solutionId`, `keyResultId`; `limit` (1-100, default 50) and `cursor`. Returns `{ items, count, nextCursor }`, oldest first; page until `nextCursor` is null (a page can be short without being the last). Opportunity-objective items report `origin` DIRECT or LEGACY |
+| `list_links` | `workspaceId` plus exactly one of `opportunityId`, `objectiveId`, `solutionId`, `keyResultId`; `limit` (1-100, default 50) and `cursor`. Returns `{ items, count, nextCursor }`, oldest first; page until `nextCursor` is null (a page can be short without being the last). Opportunity-objective items report `origin` DIRECT or LEGACY. Generic mode: `workspaceId`, `entityType` + `entityId`, optional `linkType` (not combinable with the four ids); items are `kind:"entity_link"` with `side`, `label`, `from`, `to` |
+| `link_entities` | `workspaceId, linkType, fromId, toId` (`toType` only for multi-target types). Creates a registry-backed link; today `EXPERIMENT_INFORMED_BY_STUDY` (Experiment `fromId` -> customer-interview or usability-test Research Study `toId`, not archived, research capture enabled). Idempotent (`created:false` on repeat). Text ends with `ID: <link uuid>` |
+| `unlink_entities` | `workspaceId, linkType, fromId, toId`. `removed:1`, or `removed:0` when none. Only `fromId` is checked, so a link to a deleted study is still removable |
 | `add_solution` | Propose a solution under an opportunity |
 | `add_assumption` | Add a testable assumption to a solution (HIGH/MEDIUM/LOW risk) |
 | `update_assumption` | Update an assumption's title, risk level, or status (UNTESTED/TESTING/VALIDATED/INVALIDATED) |
@@ -476,6 +478,7 @@ A workspace admin picks a **thinking model** in Settings: `CLASSIC` (the default
 - A solution has exactly one parent opportunity and cannot be moved to another; `link_solution_to_key_result` only adds Key Results it aims at.
 - Humans can make the same links in the app on the Opportunity-first and Torres models: the opportunity's Objectives box and composer Objectives field, and the Solution panel's **Linked Key Results** picker (Key Result panels list **Linked Solutions**, read-only). On Classic there is no such UI, so links there come from you (the tools) and show on Canvas only when `origin` is `DIRECT`. Tool and UI writes are the same data.
 - Cycle-less Objectives link like any other: the cycle is never part of a link or its permission.
+- `link_entities` / `unlink_entities` / generic `list_links` are the registry-backed links (one `entity_links` table; the pairs above still use their own tables and tools). The only registered type so far is `EXPERIMENT_INFORMED_BY_STUDY`; PM-interview studies are never linkable and archived studies take no new links but existing ones stay removable.
 - `list_links` is read-only; the other four need write scope. Deleting an Objective or Key Result removes its links after the delete (a failed cleanup does not fail the delete; a leftover link is hidden from reads).
 
 ---

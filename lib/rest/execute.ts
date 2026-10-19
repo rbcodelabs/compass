@@ -26,7 +26,7 @@ import * as analyticsService from "@/lib/analytics/service"
 import { getCustomFieldValues, setCustomFieldValue } from "@/lib/custom-field-tool-handlers"
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions"
 import type { CustomFieldValue } from "@/lib/types"
-import { listLinksTool } from "@/lib/typed-link-tool-handlers"
+import { linkEntitiesTool, listLinksTool, unlinkEntitiesTool } from "@/lib/link-tool-handlers"
 import { getEligibleParentKeyResults } from "@/lib/okr-hierarchy"
 import { archiveScoringModel, createScoringModel, getOpportunityScore, getSolutionScore, listScoringModels, listTopOpportunities, scoreOpportunity, scoreSolution, setWorkspaceScoringModel, updateScoringModel } from "@/lib/scoring-tool-handlers"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
@@ -483,7 +483,15 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
         })
     }
     case "setCustomFieldValue": { await assertCustomObjectWorkspace(prisma, workspaceId, input.params.objectType, input.params.objectId); await assertCustomField(prisma, workspaceId, input.params.objectType, String(body.fieldId)); ensureTool(await setCustomFieldValue({ objectType: input.params.objectType as never, objectId: input.params.objectId, fieldId: String(body.fieldId), value: body.value as never })); const values = toolItems(await getCustomFieldValues({ objectType: input.params.objectType as never, objectId: input.params.objectId })); return found(values.find((value) => value.id === body.fieldId)) }
-    case "listEntityLinks": return normalizeLinks(ensureTool(await listLinksTool({ workspaceId, ...(input.query as { opportunityId?: string; objectiveId?: string; solutionId?: string; keyResultId?: string; limit?: number; cursor?: string }) })) as Record<string, unknown>)
+    case "listEntityLinks": return normalizeLinks(ensureTool(await listLinksTool({ workspaceId, ...(input.query as { opportunityId?: string; objectiveId?: string; solutionId?: string; keyResultId?: string; entityType?: string; entityId?: string; linkType?: string; limit?: number; cursor?: string }) })) as Record<string, unknown>)
+    case "linkEntities": {
+      const data = ensureTool(await linkEntitiesTool({ workspaceId, linkType: String(body.linkType), fromId: String(body.fromId), toId: String(body.toId), toType: typeof body.toType === "string" ? body.toType : undefined, source: "API" })) as { link: unknown }
+      return serialize(data.link)
+    }
+    case "unlinkEntities": {
+      ensureTool(await unlinkEntitiesTool({ workspaceId, linkType: input.params.linkType, fromId: input.params.fromId, toId: input.params.toId }))
+      return undefined
+    }
 
     case "listComments": {
       await assertCommentTargetWorkspace(input.params.targetType, input.params.targetId, workspaceId)

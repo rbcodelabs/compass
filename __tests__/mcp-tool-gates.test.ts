@@ -31,6 +31,7 @@ const mockPrisma = {
   reviewRequest: { findUnique: vi.fn() },
   decisionRecord: { findUnique: vi.fn() },
   researchStudy: { findUnique: vi.fn() },
+  experiment: { findUnique: vi.fn() },
   agent: { findFirst: vi.fn() },
   agentWorkspaceGrant: { findMany: vi.fn() },
   agentToolCall: { create: vi.fn(), update: vi.fn() },
@@ -885,6 +886,101 @@ describe("typed link tools are classified, gated, and same-workspace", () => {
     for (const tool of [...writeTools, "list_links"]) {
       await expect(applyToolGate(tool, RESEARCH, { workspaceId: "ws-1" })).rejects.toThrow(/not available to research interviews/)
     }
+  })
+})
+
+// ── Generic links (entity_links registry) ───────────────────────────────────
+describe("generic link tools resolve the link type from the registry and apply its rule", () => {
+  const TYPE = "EXPERIMENT_INFORMED_BY_STUDY"
+  const seed = (rows: { experiment?: string | null; researchStudy?: string | null }) => {
+    mockPrisma.experiment.findUnique.mockResolvedValue(rows.experiment ? { workspaceId: rows.experiment } : null)
+    mockPrisma.researchStudy.findUnique.mockResolvedValue(rows.researchStudy ? { workspaceId: rows.researchStudy } : null)
+  }
+  const link = { workspaceId: "ws-1", linkType: TYPE, fromId: "e", toId: "s" }
+
+  it("link_entities and unlink_entities are registered writes (mcp:write, WRITE for agents); list_links stays a read", () => {
+    for (const tool of ["link_entities", "unlink_entities"]) {
+      expect(tool in registeredTools).toBe(true)
+      expect(tool in TOOL_GATES).toBe(true)
+      expect(requiredToolScope(tool)).toBe("mcp:write")
+      expect(AGENT_TOOL_POLICY[tool]).toBe("WRITE")
+    }
+    expect(requiredToolScope("list_links")).toBe("mcp:read")
+  })
+
+  it("link_entities admits a member when both ends are in the declared workspace", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    seed({ experiment: "ws-1", researchStudy: "ws-1" })
+    await expect(applyToolGate("link_entities", MEMBER, link)).resolves.toBeUndefined()
+  })
+
+  it("link_entities denies a non-member", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    seed({ experiment: "ws-1", researchStudy: "ws-1" })
+    await expect(applyToolGate("link_entities", MEMBER, link)).rejects.toThrow(/not found or access denied/)
+  })
+
+  it.each([
+    ["the experiment is in another workspace", { experiment: "ws-2", researchStudy: "ws-1" }],
+    ["the study is in another workspace, even though the experiment is the member's", { experiment: "ws-1", researchStudy: "ws-2" }],
+  ])("link_entities denies when %s", async (_label, rows) => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "member-of-both" })
+    seed(rows)
+    await expect(applyToolGate("link_entities", MEMBER, link)).rejects.toThrow(/does not belong to workspace/)
+  })
+
+  it("link_entities denies a missing study without confirming it exists", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    seed({ experiment: "ws-1", researchStudy: null })
+    await expect(applyToolGate("link_entities", MEMBER, link)).rejects.toThrow(/not found or access denied/)
+  })
+
+  it("an unknown link type is denied before any lookup", async () => {
+    await expect(applyToolGate("link_entities", MEMBER, { ...link, linkType: "NOPE" })).rejects.toThrow(/Unknown link type/)
+    await expect(applyToolGate("unlink_entities", MEMBER, { ...link, linkType: "NOPE" })).rejects.toThrow(/Unknown link type/)
+    expect(mockPrisma.experiment.findUnique).not.toHaveBeenCalled()
+  })
+
+  it("unlink_entities gates the from endpoint ONLY: a link whose study has vanished stays removable", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    seed({ experiment: "ws-1", researchStudy: null })
+    await expect(applyToolGate("unlink_entities", MEMBER, link)).resolves.toBeUndefined()
+    expect(mockPrisma.researchStudy.findUnique).not.toHaveBeenCalled()
+    seed({ experiment: "ws-2", researchStudy: "ws-1" })
+    await expect(applyToolGate("unlink_entities", MEMBER, link)).rejects.toThrow(/does not belong to workspace/)
+  })
+
+  it("list_links in generic mode checks the listed entity against the declared workspace", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    seed({ experiment: "ws-1" })
+    await expect(applyToolGate("list_links", MEMBER, { workspaceId: "ws-1", entityType: "EXPERIMENT", entityId: "e" })).resolves.toBeUndefined()
+    seed({ experiment: "ws-2" })
+    await expect(applyToolGate("list_links", MEMBER, { workspaceId: "ws-1", entityType: "EXPERIMENT", entityId: "e" })).rejects.toThrow(/does not belong to workspace/)
+    await expect(applyToolGate("list_links", MEMBER, { workspaceId: "ws-1", entityType: "NOPE", entityId: "e" })).rejects.toThrow(/Unknown entity type/)
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    seed({ experiment: "ws-1" })
+    await expect(applyToolGate("list_links", MEMBER, { workspaceId: "ws-1", entityType: "EXPERIMENT", entityId: "e" })).rejects.toThrow(/not found or access denied/)
+  })
+
+  it("the service key skips the gate (the service still re-verifies both ends)", async () => {
+    await expect(applyToolGate("link_entities", SERVICE, link)).resolves.toBeUndefined()
+  })
+
+  it("public research credentials get none of them", async () => {
+    for (const tool of ["link_entities", "unlink_entities", "list_links"]) {
+      await expect(applyToolGate(tool, RESEARCH, { ...link })).rejects.toThrow(/not available to research interviews/)
+    }
+  })
+
+  it("agents without a write grant are denied at the workspace gate", async () => {
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    try {
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent" })
+      mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([])
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      seed({ experiment: "ws-1", researchStudy: "ws-1" })
+      await expect(applyToolGate("link_entities", { userId: "user-1", purpose: "AGENT", agentId: "agent" }, link)).rejects.toThrow(/not found or access denied/)
+    } finally { vi.unstubAllEnvs() }
   })
 })
 

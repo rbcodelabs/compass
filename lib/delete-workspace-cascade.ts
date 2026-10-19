@@ -10,6 +10,7 @@ import { deleteWorkspaceResearchData } from "@/lib/research-workspace-cleanup";
 import { assertDocumentPilotCleanupReviewed } from "@/lib/document-cleanup";
 import { deleteWorkspaceAnalytics } from "@/lib/analytics/service";
 import { drainLinksFor, deleteWorkspaceLinks } from "@/lib/typed-links";
+import { deleteLinksForEntity, deleteWorkspaceLinks as deleteWorkspaceEntityLinks } from "@/lib/links/service";
 
 /**
  * Aurora DSQL fails a transaction that modifies more than ~3,000 rows, and the workspace_id indexes on Solution and
@@ -45,6 +46,8 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   //    one step that fails when the link tables do not exist yet (code deployed before migration 071), and failing here mutates nothing,
   //    where failing later would leave the objective parentKeyResultId pointers already nulled.
   await deleteWorkspaceLinks(prisma, workspaceId);
+  // Generic entity_links (ADR phase 2), same reasoning: stamped rows now, endpoint-keyed sweeps for experiments and studies below.
+  await deleteWorkspaceEntityLinks(prisma, workspaceId);
   const ids = async (
     rows: Promise<{ id: string }[]>
   ): Promise<string[]> => (await rows).map((r) => r.id);
@@ -208,6 +211,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await prisma.experimentResult.deleteMany({
       where: { experimentId: { in: experimentIds } },
     });
+    await deleteLinksForEntity(prisma, "EXPERIMENT", experimentIds);
   }
   await prisma.experiment.deleteMany({ where: { workspaceId } });
 

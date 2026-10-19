@@ -36,6 +36,9 @@ const mocks = vi.hoisted(() => ({
     user: { findFirst: vi.fn() },
   },
   createOpportunity: vi.fn(),
+  linkEntitiesTool: vi.fn(),
+  unlinkEntitiesTool: vi.fn(),
+  listEntityLinksTool: vi.fn(),
   createTask: vi.fn(),
   updateRoadmapItem: vi.fn(),
   createRoadmapItem: vi.fn(),
@@ -97,6 +100,7 @@ vi.mock("@/lib/task-tool-handlers", () => ({
 }))
 vi.mock("@/lib/roadmap-tool-handlers", () => ({ updateRoadmapItem: mocks.updateRoadmapItem, createRoadmapItem: mocks.createRoadmapItem, promoteSolutionToRoadmap: mocks.promoteSolutionToRoadmap, createChecklistTemplate: vi.fn(), updateLaunchChecklistItem: mocks.updateLaunchChecklistItem, setLaunchTier: vi.fn(), getLaunchChecklist: vi.fn() }))
 vi.mock("@/lib/feedback-tool-handlers", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/feedback-tool-handlers")>(), promoteFeedbackToRoadmap: mocks.promoteFeedbackToRoadmap }))
+vi.mock("@/lib/link-tool-handlers", () => ({ linkEntitiesTool: mocks.linkEntitiesTool, unlinkEntitiesTool: mocks.unlinkEntitiesTool, listLinksTool: mocks.listEntityLinksTool }))
 vi.mock("@/lib/evidence-tool-handlers", () => ({ addEvidence: mocks.addEvidence, linkEvidence: vi.fn(), listEvidence: vi.fn() }))
 vi.mock("@/lib/doc-tool-handlers", () => ({ getDoc: mocks.getDoc, listDocs: vi.fn(), createDoc: vi.fn(), updateDoc: vi.fn() }))
 vi.mock("@/lib/decision-tool-handlers", () => ({ requestReleaseAuthorization: mocks.requestReleaseAuthorization, requestDecision: vi.fn(), listDecisions: mocks.listDecisions, getDecision: vi.fn(), getReviewRequest: vi.fn(), listReviewRequests: vi.fn() }))
@@ -184,6 +188,49 @@ describe("REST domain execution", () => {
       params: { workspaceId: UUID, entityType: "OPPORTUNITY" }, query: {}, body: { scoringModelId: null },
     })
     expect(mocks.assertWorkspaceAdmin).toHaveBeenCalledWith(mocks.actor.current, UUID, { agentCapability: "SCORING_MODEL_ADMIN" })
+  })
+
+  describe("generic entity links", () => {
+    const linkBody = { linkType: "EXPERIMENT_INFORMED_BY_STUDY", fromId: UUID, toId: FOREIGN }
+    const failure = (message: string) => ({ content: [{ type: "text" as const, text: message }], structuredContent: { ok: false as const, message, data: null } })
+
+    it("linkEntities calls the shared tool with API provenance and returns the link row", async () => {
+      mocks.linkEntitiesTool.mockResolvedValue(success({ created: true, link: { id: THIRD, workspaceId: UUID, linkType: linkBody.linkType } }))
+      const result = await executeRestRoute(route("linkEntities"), { params: { workspaceId: UUID }, query: {}, body: linkBody })
+      expect(mocks.linkEntitiesTool).toHaveBeenCalledWith({ workspaceId: UUID, ...linkBody, toType: undefined, source: "API" })
+      expect(result).toMatchObject({ id: THIRD, linkType: linkBody.linkType })
+    })
+
+    it("maps tool failures to REST errors: not found, ineligible, and conflict", async () => {
+      mocks.linkEntitiesTool.mockResolvedValueOnce(failure("Research study not found."))
+      await expect(executeRestRoute(route("linkEntities"), { params: { workspaceId: UUID }, query: {}, body: linkBody })).rejects.toBeInstanceOf(RestNotFoundError)
+      mocks.linkEntitiesTool.mockResolvedValueOnce(failure("Archived research studies cannot be linked to an experiment."))
+      await expect(executeRestRoute(route("linkEntities"), { params: { workspaceId: UUID }, query: {}, body: linkBody })).rejects.toBeInstanceOf(RestValidationError)
+      mocks.linkEntitiesTool.mockResolvedValueOnce(failure('Invalid link type "NOPE". Known link types: EXPERIMENT_INFORMED_BY_STUDY.'))
+      await expect(executeRestRoute(route("linkEntities"), { params: { workspaceId: UUID }, query: {}, body: { ...linkBody, linkType: "NOPE" } })).rejects.toBeInstanceOf(RestValidationError)
+      mocks.linkEntitiesTool.mockResolvedValueOnce(failure("Already linked (X)."))
+      await expect(executeRestRoute(route("linkEntities"), { params: { workspaceId: UUID }, query: {}, body: linkBody })).rejects.toBeInstanceOf(RestConflictError)
+    })
+
+    it("unlinkEntities passes the path ids and returns no body", async () => {
+      mocks.unlinkEntitiesTool.mockResolvedValue(success({ removed: 0 }))
+      const result = await executeRestRoute(route("unlinkEntities"), { params: { workspaceId: UUID, linkType: linkBody.linkType, fromId: UUID, toId: FOREIGN }, query: {}, body: undefined })
+      expect(mocks.unlinkEntitiesTool).toHaveBeenCalledWith({ workspaceId: UUID, linkType: linkBody.linkType, fromId: UUID, toId: FOREIGN })
+      expect(result).toBeUndefined()
+    })
+
+    it("listEntityLinks forwards the generic query to the shared list tool", async () => {
+      mocks.listEntityLinksTool.mockResolvedValue(success({ items: [], nextCursor: null }))
+      const query = { entityType: "EXPERIMENT", entityId: UUID, linkType: linkBody.linkType, limit: 10 }
+      expect(await executeRestRoute(route("listEntityLinks"), { params: { workspaceId: UUID }, query, body: undefined })).toEqual({ items: [], nextCursor: null })
+      expect(mocks.listEntityLinksTool).toHaveBeenCalledWith({ workspaceId: UUID, ...query })
+    })
+
+    it("requires a workspace writer (the same policy as the other link writes)", () => {
+      expect(route("linkEntities").authorizationPolicy).toBe("workspace-writer")
+      expect(route("unlinkEntities").authorizationPolicy).toBe("workspace-writer")
+      expect(route("listEntityLinks").authorizationPolicy).toBe("workspace-member")
+    })
   })
 
   it("rejects cross-workspace evidence targets before writing", async () => {

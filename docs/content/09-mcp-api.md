@@ -419,7 +419,9 @@ Typed links connect an Opportunity to Objectives and a Solution to Key Results (
 | `unlink_opportunity_from_objective` | Remove an Opportunity–Objective link; returns `removed: 0` when there is none. A link implied by the opportunity's linked Key Result stays until that Key Result is cleared (`removed: 0, stillLinkedViaKeyResult: true` is a successful no-op, not a failure) |
 | `link_solution_to_key_result` | Link a Solution to a Key Result in the same workspace. Idempotent. The Solution keeps its single parent Opportunity |
 | `unlink_solution_from_key_result` | Remove a Solution–Key Result link; returns `removed: 0` when there is none |
-| `list_links` | List the typed links on one Opportunity, Objective, Solution or Key Result (pass exactly one id plus `workspaceId`), oldest first, with `limit` and `cursor` paging |
+| `list_links` | List the typed links on one Opportunity, Objective, Solution or Key Result (pass exactly one id plus `workspaceId`), or the generic registry-backed links on any entity (pass `entityType` plus `entityId`, optionally `linkType`), oldest first, with `limit` and `cursor` paging |
+| `link_entities` | Create a link of a registered link type (`linkType`, `fromId`, `toId`) between two entities of one workspace. Idempotent. See [Generic links](#generic-links-link_entities) |
+| `unlink_entities` | Remove a link of a registered link type; returns `removed: 0` when there is none. Only the `from` entity is checked |
 | `add_solution` | Add a proposed Solution to an Opportunity |
 | `update_solution_status` | Update a Solution's lifecycle status (IDEA/VALIDATED/IN_DELIVERY/SHIPPED/KILLED); any valid status may transition directly to any other valid status. Moving a Solution to IN_DELIVERY also adds it to the roadmap once (flagged auto-created) unless a person already removed its auto-added item; the response then carries the new `Roadmap Item ID` |
 | `update_solution` | Update an existing Solution's title and/or description (pass an empty string to clear the description); at least one field must be provided |
@@ -493,6 +495,31 @@ Output data: `{ items, count, nextCursor }`, oldest link first.
 - A Solution–Key Result item is `{ kind: "solution_key_result", id, solutionId, solutionTitle, keyResultId, keyResultTitle, source, createdAt }`.
 - To read the next page, pass `nextCursor` back as `cursor`; `nextCursor` is `null` on the last page. The cursor is opaque, and an altered one fails with `Invalid cursor.`
 - A page can hold fewer than `limit` items without being the last: a link whose other end is missing or outside the workspace is left out. Keep paging until `nextCursor` is `null`.
+
+### Generic links (`link_entities`)
+
+Association links between two entities are moving to one generic `entity_links` table driven by a registry of link types, so a new relationship is one registry entry rather than a new table and a new set of tools. The per-pair tools above are unchanged and keep reading their own tables; `link_entities`, `unlink_entities` and the generic mode of `list_links` work on the registered link types, of which there is currently one:
+
+| `linkType` | `fromId` (from) | `toId` (to) | Reads as |
+|---|---|---|---|
+| `EXPERIMENT_INFORMED_BY_STUDY` | an Experiment | a Research Study | the experiment is "Informed by" the study; the study "Informs" the experiment |
+
+Rules for `EXPERIMENT_INFORMED_BY_STUDY`:
+
+- Both ends must be in `workspaceId`. The link is stored with the Experiment's workspace; there is no way to pass one.
+- Many-to-many, idempotent: linking twice returns `created: false`, unlinking a missing link returns `removed: 0`.
+- Only `CUSTOMER_INTERVIEW` and `USABILITY_TEST` studies can be linked. A PM interview study is reported as not found; an external study is refused.
+- An archived study cannot get a new link, but its existing links stay listed and removable.
+- Requires research capture to be enabled; when it is off the link type is hidden from `list_links` and both mutations are refused.
+- Linking changes nothing else: not the experiment's status, its assumption, the study's protocol or any participant link.
+
+`link_entities` input: `workspaceId`, `linkType`, `fromId`, `toId` (and `toType` only for link types that allow several `to` types). Output data: `{ created, link: { id, workspaceId, linkType, fromType, fromId, toType, toId, origin, source } }`; the text ends with an `ID: <link uuid>` line.
+
+`unlink_entities` input: `workspaceId`, `linkType`, `fromId`, `toId`. Output data: `{ removed, linkType, fromId, toId }`. Only the `from` entity is checked, so a link whose study has since been deleted can still be removed.
+
+`list_links` in generic mode takes `workspaceId`, `entityType` (for example `EXPERIMENT` or `RESEARCH_STUDY`), `entityId` and optionally `linkType`, `limit` and `cursor`; do not combine it with `opportunityId`, `objectiveId`, `solutionId` or `keyResultId`. Items are `{ kind: "entity_link", id, linkType, side, label, from: { type, id, title }, to: { type, id, title }, origin, source, createdAt }`, where `side` says which end the queried entity is and `label` reads the link from that end. A link whose other end is missing or outside the workspace is left out.
+
+Deleting an Experiment or Research Study removes its generic links, and deleting a workspace removes all of them. `link_entities` and `unlink_entities` need `mcp:write`, are available to delegated agents, and are refused to participant, PM-interview and research-synthesis contexts.
 
 ### Typed links: `DIRECT` and `LEGACY` origins
 
