@@ -50,7 +50,8 @@ test.describe("OKRs", () => {
     await expect(page.getByText(objectiveTitle)).toBeVisible({ timeout: 10_000 });
 
     // ── 5. Add a key result ──────────────────────────────────────────────────
-    await page.getByRole("button", { name: /Add key result/i }).click();
+    await page.getByRole("button", { name: "Card actions" }).first().click();
+    await page.getByRole("menuitem", { name: /Add key result/i }).click();
     await page.getByLabel("Title").fill(krTitle);
     await page.getByLabel("Target").fill("100");
     await page.getByLabel("Unit (optional)").fill("%");
@@ -148,7 +149,8 @@ test.describe("OKRs", () => {
     await expect(page.getByText(annualObjective)).toBeVisible({ timeout: 10_000 });
 
     const annualRow = page.locator(".rounded-xl.border").filter({ hasText: annualObjective });
-    await annualRow.getByRole("button", { name: /Add key result/i }).click();
+    await annualRow.getByRole("button", { name: "Card actions" }).first().click();
+    await page.getByRole("menuitem", { name: /Add key result/i }).click();
     await annualRow.getByLabel("Title").fill(annualKR);
     await annualRow.getByLabel("Target").fill("100");
     await annualRow.getByRole("button", { name: "Add key result" }).click();
@@ -222,7 +224,8 @@ test.describe("OKRs", () => {
     await page.getByRole("button", { name: "Add objective" }).click();
     await expect(page.getByText(objectiveTitle)).toBeVisible({ timeout: 10_000 });
 
-    await page.getByRole("button", { name: /Add key result/i }).click();
+    await page.getByRole("button", { name: "Card actions" }).first().click();
+    await page.getByRole("menuitem", { name: /Add key result/i }).click();
     await page.getByLabel("Title").fill(krTitle);
     await page.getByLabel("Target").fill("10");
     await page.getByRole("button", { name: "Add key result" }).click();

@@ -13,6 +13,13 @@ interface AddKeyResultFormProps {
   objectiveTitle: string;
   orgSlug: string;
   workspaceSlug: string;
+  /**
+   * Controlled open state. When provided, the form renders nothing while closed
+   * (the parent supplies its own trigger, e.g. a ⋯ menu item). When omitted, the
+   * form manages its own state and renders an inline "Add" button.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function AddKeyResultForm({
@@ -20,9 +27,17 @@ export function AddKeyResultForm({
   objectiveTitle,
   orgSlug,
   workspaceSlug,
+  open: controlledOpen,
+  onOpenChange,
 }: AddKeyResultFormProps) {
   const labels = useLabels();
-  const [open, setOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    if (!isControlled) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
@@ -41,6 +56,7 @@ export function AddKeyResultForm({
   }
 
   if (!open) {
+    if (isControlled) return null;
     return (
       <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
         <PlusIcon className="size-3.5" />
