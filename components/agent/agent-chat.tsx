@@ -75,7 +75,7 @@ type Props = {
    * any draft). Never sent automatically, and never forwarded as `seedContext`
    * — a docs article is not a Compass entity the server can resolve.
    */
-  composerSeed?: { id: number; label: string; summary: string; sourceUrl: string; text: string } | null
+  composerSeed?: { id: number; label?: string; summary?: string; sourceUrl?: string; text: string } | null
   onComposerSeedApplied?: () => void
   /**
    * Which surface this chat is rendered on.
@@ -175,7 +175,9 @@ export function AgentChat({
   useEffect(() => {
     if (!composerSeed || appliedSeedId.current === composerSeed.id) return
     appliedSeedId.current = composerSeed.id
-    setDocChip({ label: composerSeed.label, summary: composerSeed.summary, sourceUrl: composerSeed.sourceUrl })
+    if (composerSeed.label && composerSeed.sourceUrl) {
+      setDocChip({ label: composerSeed.label, summary: composerSeed.summary ?? "", sourceUrl: composerSeed.sourceUrl })
+    }
     setInput((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")}\n\n${composerSeed.text}` : composerSeed.text))
     onComposerSeedAppliedRef.current?.()
     requestAnimationFrame(() => composerRef.current?.focus())

@@ -4,9 +4,11 @@ import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const push = vi.fn()
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
+let pathname = "/acme/product/feedback"
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }), usePathname: () => pathname }))
 
 import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
+import { AgentRailProvider, useAgentRail } from "@/components/agent/agent-rail-context"
 import { SidebarProvider } from "@/components/ui/sidebar"
 
 const results = {
@@ -201,5 +203,142 @@ describe("WorkspaceSearchPalette", () => {
     fireEvent.keyDown(input, { key: "Enter" })
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     expect(push).toHaveBeenCalledWith("/help/04-roadmap#not-yet-on-the-roadmap")
+  })
+})
+
+function RailProbe() {
+  const { agentSeed, open } = useAgentRail()
+  return <output data-testid="rail">{JSON.stringify({ open, seed: agentSeed })}</output>
+}
+
+function renderAskPalette() {
+  return render(
+    <AgentRailProvider>
+      <SidebarProvider><WorkspaceSearchPalette orgSlug="acme" workspaceSlug="product" /></SidebarProvider>
+      <RailProbe />
+    </AgentRailProvider>
+  )
+}
+
+const railState = () => JSON.parse(screen.getByTestId("rail").textContent ?? "{}") as { open: boolean; seed: { text: string; label?: string; sourceUrl?: string } | null }
+
+describe("WorkspaceSearchPalette Ask AI", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => results } as Response))
+    Element.prototype.scrollIntoView = vi.fn()
+    push.mockReset()
+    pathname = "/acme/product/feedback"
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    window.getSelection()?.removeAllRanges()
+  })
+
+  const openPalette = () => {
+    fireEvent.keyDown(document, { key: "k", metaKey: true })
+    return screen.getByRole("combobox", { name: "Search workspace" })
+  }
+
+  it("uses the merged placeholder and shows a Search badge by default", () => {
+    renderAskPalette()
+    const input = openPalette()
+    expect(input).toHaveAttribute("placeholder", "Search or ask Compass…")
+    expect(screen.getByTestId("palette-mode")).toHaveTextContent("Search")
+  })
+
+  it("stays search-first for a lookup, with Ask AI as the last row", async () => {
+    renderAskPalette()
+    const input = openPalette()
+    fireEvent.change(input, { target: { value: "plan" } })
+    expect(screen.queryByRole("option", { name: /Ask AI/ })).not.toBeInTheDocument()
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    const options = screen.getAllByRole("option")
+    expect(options).toHaveLength(3)
+    expect(options[2]).toHaveTextContent("Ask AI: “plan”")
+    expect(options[0]).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByTestId("palette-mode")).toHaveTextContent("Search")
+    // Arrow up from the first row wraps to the Ask row.
+    fireEvent.keyDown(input, { key: "ArrowUp" })
+    expect(options[2]).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("leads with Ask AI for a question and Enter hands the query to the rail", async () => {
+    renderAskPalette()
+    const input = openPalette()
+    fireEvent.change(input, { target: { value: "why is onboarding drop-off up?" } })
+    expect(screen.getByTestId("palette-mode")).toHaveTextContent("Ask AI")
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("Ask AI: “why is onboarding drop-off up?”")
+    expect(railState().open).toBe(false)
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    const { open, seed } = railState()
+    expect(open).toBe(true)
+    expect(seed?.text).toBe("why is onboarding drop-off up?")
+    expect(seed?.label).toBeUndefined()
+    expect(push).not.toHaveBeenCalled()
+  })
+
+  it("Tab forces ask mode and Cmd+Enter promotes to the rail from a search-first query", async () => {
+    renderAskPalette()
+    const input = openPalette()
+    fireEvent.change(input, { target: { value: "onboarding" } })
+    fireEvent.keyDown(input, { key: "Tab" })
+    expect(screen.getByTestId("palette-mode")).toHaveTextContent("Ask AI")
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true })
+    expect(railState().seed?.text).toBe("onboarding")
+  })
+
+  it("does not trigger Ask on Enter while search results are still loading", async () => {
+    renderAskPalette()
+    const input = openPalette()
+    fireEvent.change(input, { target: { value: "onboarding" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(railState().open).toBe(false)
+  })
+
+  it("opens in ask mode with selected page text attached as context", () => {
+    renderAskPalette()
+    const p = document.createElement("p")
+    p.textContent = "Step 3 asks for a team invite"
+    document.body.appendChild(p)
+    const range = document.createRange()
+    range.selectNodeContents(p)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+
+    const input = openPalette()
+    expect(screen.getByTestId("palette-mode")).toHaveTextContent("Ask AI")
+    expect(screen.getByRole("dialog")).toHaveTextContent("“Step 3 asks for a team invite”")
+    fireEvent.change(input, { target: { value: "summarise this" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+
+    const { seed } = railState()
+    expect(seed?.text).toBe("summarise this\n\n> Step 3 asks for a team invite")
+    expect(seed?.label).toBe("Selected text")
+    expect(seed?.sourceUrl).toBe(window.location.pathname + window.location.search)
+    p.remove()
+  })
+
+  it("is plain search without an agent rail (no badge, no Ask row)", async () => {
+    renderPalette()
+    const input = openPalette()
+    fireEvent.change(input, { target: { value: "why is onboarding drop-off up?" } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    expect(screen.queryByTestId("palette-mode")).not.toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /Ask AI/ })).not.toBeInTheDocument()
+  })
+
+  it("hides Ask on the full-page agent screen, where the rail is unavailable", () => {
+    pathname = "/acme/product/agent"
+    renderAskPalette()
+    const input = openPalette()
+    fireEvent.change(input, { target: { value: "why is onboarding drop-off up?" } })
+    expect(screen.queryByTestId("palette-mode")).not.toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /Ask AI/ })).not.toBeInTheDocument()
   })
 })

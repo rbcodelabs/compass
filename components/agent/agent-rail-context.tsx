@@ -88,8 +88,10 @@ export type DocsIntent = { id: number; slug?: string; anchor?: string; query?: s
  * Compass entity the server resolves), a docs article is not an entity, so the
  * chip here is a labelled link and the question itself travels in `text`,
  * which prefills the composer. Nothing is sent until the user sends it.
+ * The chip is optional: omit `label`/`sourceUrl` (the Cmd+K palette's plain
+ * questions do) and only the composer is prefilled.
  */
-export type AgentSeed = { id: number; label: string; summary: string; sourceUrl: string; text: string };
+export type AgentSeed = { id: number; label?: string; summary?: string; sourceUrl?: string; text: string };
 
 type AgentRailContextValue = {
   /** Which view the rail shows. Switching never unmounts the chat. */
