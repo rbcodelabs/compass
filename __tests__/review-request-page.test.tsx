@@ -2,17 +2,22 @@
 import { cleanup, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const { auth, findFirst, findArtifacts, linkedArtifacts, findTaskLinks, eligibleAssignees } = vi.hoisted(() => ({
+const { findWorkspace, resolvePage, auth, findFirst, findArtifacts, linkedArtifacts, findTaskLinks, eligibleAssignees } = vi.hoisted(() => ({
   auth: vi.fn(),
+  findWorkspace: vi.fn(),
+  resolvePage: vi.fn(),
   findFirst: vi.fn(),
   findArtifacts: vi.fn(), linkedArtifacts: vi.fn(),
   // Direction B: the decided branch now loads follow-through data.
   findTaskLinks: vi.fn(), eligibleAssignees: vi.fn(),
 }))
 
-vi.mock("@/lib/work-item-page", async () => (await import("./helpers/work-item-resolve-mock")).workItemPageMock())
+vi.mock("@/lib/work-item-page", async () => {
+  const mock = (await import("./helpers/work-item-resolve-mock")).workItemPageMock()
+  return { resolveWorkItemPage: async (args: { type: string; param: string }) => { resolvePage(args); return mock.resolveWorkItemPage(args) } }
+})
 vi.mock("@/auth", () => ({ auth }))
-vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findFirst: async () => ({ id: "workspace-1" }) }, reviewRequest: { findFirst }, artifact: { findMany: findArtifacts }, taskLink: { findMany: findTaskLinks } }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findFirst: findWorkspace }, reviewRequest: { findFirst }, artifact: { findMany: findArtifacts }, taskLink: { findMany: findTaskLinks } }) }))
 vi.mock("@/lib/artifacts", () => ({ getDecisionArtifacts: linkedArtifacts }))
 vi.mock("@/lib/task-assignment", () => ({ eligibleTaskAssignees: eligibleAssignees }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", () => ({ linkArtifactDecision: vi.fn(), unlinkArtifactDecision: vi.fn() }))
@@ -56,16 +61,33 @@ function reviewRequest(gateType: "BUILDING_INVESTMENT" | "TRACKED_DECISION") {
   }
 }
 
+const member = { id: "workspace-1", members: [{ id: "member-1" }], organization: { members: [] } }
+
 describe("review request page eyebrow", () => {
   afterEach(cleanup)
 
   beforeEach(() => {
     vi.clearAllMocks()
     auth.mockResolvedValue({ user: { id: "user-1" } })
+    findWorkspace.mockResolvedValue(member)
     findTaskLinks.mockResolvedValue([])
     eligibleAssignees.mockResolvedValue([])
     findArtifacts.mockResolvedValue([{ id: "new", title: "New prototype" }])
     linkedArtifacts.mockResolvedValue([{ id: "linked", title: "Existing prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }])
+  })
+
+  it("404s a non-member before resolving the reference, so a redirect cannot reveal that a decision exists", async () => {
+    findWorkspace.mockResolvedValue({ id: "workspace-1", members: [], organization: { members: [] } })
+    await expect(ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) })).rejects.toThrow()
+    expect(resolvePage).not.toHaveBeenCalled()
+    expect(findFirst).not.toHaveBeenCalled()
+  })
+
+  it("lets an org admin through and resolves the reference inside the workspace", async () => {
+    findWorkspace.mockResolvedValue({ id: "workspace-1", members: [], organization: { members: [{ role: "OWNER" }] } })
+    findFirst.mockResolvedValue(reviewRequest("TRACKED_DECISION"))
+    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "DEC-3" }) }))
+    expect(resolvePage).toHaveBeenCalledWith(expect.objectContaining({ type: "reviewRequest", param: "DEC-3", workspaceId: "workspace-1" }))
   })
 
   it("renders a historical Building investment review as a read-only legacy record", async () => {

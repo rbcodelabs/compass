@@ -26,9 +26,13 @@ export default async function ReviewRequestPage({ params, searchParams }: { para
   const session = await auth()
   if (!session?.user?.id) notFound()
   const prisma = getPrisma()
-  // The workspace is looked up by slug first so a display ID (DEC-3) resolves inside it; membership is still checked below.
-  const scope = await prisma.workspace.findFirst({ where: { slug: workspaceSlug, organization: { slug: orgSlug } }, select: { id: true } })
-  if (!scope) notFound()
+  // The workspace is looked up by slug first so a display ID (DEC-3) resolves inside it. Membership is checked BEFORE
+  // the reference is resolved: resolving can 308 to the canonical URL, and that must not tell a non-member that a row exists.
+  const scope = await prisma.workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+    select: { id: true, members: { where: { userId: session.user.id }, select: { id: true } }, organization: { select: { members: { where: { userId: session.user.id }, select: { role: true } } } } },
+  })
+  if (!scope || (scope.members.length === 0 && !isOrgAdminRole(scope.organization.members[0]?.role))) notFound()
   const resolvedRequest = await resolveWorkItemPage({ type: "reviewRequest", param: requestParam, workspaceId: scope.id, basePath: `/${orgSlug}/${workspaceSlug}/reviews`, searchParams: await searchParams })
   const requestId = resolvedRequest.id
   const request = await prisma.reviewRequest.findFirst({
