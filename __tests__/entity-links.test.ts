@@ -138,3 +138,30 @@ describe("parseEntityLink — the inverse of entityPath", () => {
     expect(parseEntityLink("/%E0%A4%A/compass/tasks/x")).toBeNull()
   })
 })
+
+describe("display IDs in links", () => {
+  const slugs = { orgSlug: "acme", workspaceSlug: "product" }
+  it("builds readable paths and panel params from a display ID, and falls back to the UUID", () => {
+    const id = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+    expect(entityPath({ ...slugs, type: "task", id, displayId: "TASK-5" })).toBe("/acme/product/tasks/TASK-5")
+    expect(entityPath({ ...slugs, type: "opportunity", id, displayId: "OPP-12" })).toBe("/acme/product/discovery/OPP-12")
+    expect(entityPath({ ...slugs, type: "roadmapItem", id, displayId: "RM-7" })).toBe("/acme/product/roadmap?detail=roadmapItem%3ARM-7")
+    expect(entityPath({ ...slugs, type: "task", id, displayId: null })).toBe(`/acme/product/tasks/${id}`)
+  })
+
+  it("parses display IDs from page paths and ?detail= params, round-tripping what it builds", () => {
+    expect(parseEntityLink("/acme/product/tasks/TASK-5")).toEqual({ ...slugs, type: "task", id: "TASK-5" })
+    expect(parseEntityLink("/acme/product/okrs?detail=keyResult%3AKR-3")).toEqual({ ...slugs, type: "keyResult", id: "KR-3" })
+    for (const type of ["opportunity", "experiment", "task", "doc", "roadmapItem", "solution", "feedback"] as const) {
+      const path = entityPath({ ...slugs, type, id: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", displayId: "XYZ-1".replace("XYZ", { opportunity: "OPP", experiment: "EXP", task: "TASK", doc: "DOC", roadmapItem: "RM", solution: "SOL", feedback: "FB" }[type]) })
+      expect(parseEntityLink(path)).toMatchObject({ type, id: expect.stringMatching(/^[A-Z]+-1$/) })
+    }
+  })
+
+  it("still rejects page names and junk as entities", () => {
+    expect(parseEntityLink("/acme/product/discovery/tree")).toBeNull()
+    expect(parseEntityLink("/acme/product/discovery/card-sort")).toBeNull()
+    expect(parseEntityLink("/acme/product/tasks/TASK-0")).toBeNull()
+    expect(parseEntityLink("/acme/product/tasks/NOPE-5")).toBeNull()
+  })
+})

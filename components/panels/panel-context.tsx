@@ -1,10 +1,11 @@
 "use client";
 
-import React, { createContext, useContext, useCallback, useMemo, useRef, useState } from "react";
+import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import type { Horizon } from "@/lib/types";
 import type { TaskCardData } from "@/components/tasks/task-card";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
+import { classifyWorkItemRef } from "@/lib/work-item-ids";
 import { COMPOSER_PANEL_TYPES, isComposerPanelType, type ComposerPanelType } from "./composer-panel-types";
 
 /**
@@ -173,10 +174,40 @@ export function PanelProvider({
   const searchParams = useSearchParams();
 
   // URL is the single source of truth for what's open.
-  const panel = useMemo(
+  const requested = useMemo(
     () => decodePanel(searchParams.get(PANEL_PARAM)),
     [searchParams]
   );
+
+  // A person or agent may link `?detail=task:TASK-5`. Panels key everything on the UUID, so a display ID is
+  // resolved once (workspace-scoped, by the link-card summary API) and the URL is rewritten to the UUID form with
+  // replace(), which leaves no extra history entry. Until then nothing renders; an unknown ID closes the panel.
+  const needsResolve =
+    requested !== null &&
+    !isComposerPanelType(requested.type) &&
+    requested.type !== "discovery-rail" &&
+    classifyWorkItemRef(requested.id).kind === "display";
+  const panel = needsResolve ? null : requested;
+
+  useEffect(() => {
+    if (!needsResolve || !requested) return;
+    const controller = new AbortController();
+    const query = new URLSearchParams({ orgSlug, workspaceSlug, type: requested.type, id: requested.id });
+    const rewrite = (id: string | null) => {
+      const params = new URLSearchParams(window.location.search);
+      if (id) params.set(PANEL_PARAM, encodePanel(requested.type, id));
+      else params.delete(PANEL_PARAM);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    };
+    fetch(`/api/panels/entity-summary?${query}`, { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((summary: { id?: string } | null) => rewrite(summary?.id ?? null))
+      .catch((error: unknown) => {
+        if ((error as { name?: string })?.name !== "AbortError") rewrite(null);
+      });
+    return () => controller.abort();
+  }, [needsResolve, requested, orgSlug, workspaceSlug, router, pathname]);
 
   // Open via push() so the browser back button removes the param (closes the
   // panel); hopping between related entities in a panel pushes each hop, so

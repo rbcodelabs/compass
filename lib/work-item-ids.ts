@@ -113,6 +113,12 @@ export function displayIdFromRow(
   return `${prefix}-${row.seqNumber}`
 }
 
+/** `"\nDisplay ID: TASK-5"` for a numbered row, `""` otherwise: appended after an `ID:` line in tool output. */
+export function displayLine(type: WorkItemType, row: { seqPrefix?: string | null; seqNumber?: number | null }): string {
+  const displayId = displayIdFromRow(type, row)
+  return displayId ? `\nDisplay ID: ${displayId}` : ""
+}
+
 /**
  * Parses a display ID. Case-insensitive, tolerates leading zeros (`opp-007`),
  * rejects unknown prefixes, zero, and numbers beyond the INT column. Never throws.

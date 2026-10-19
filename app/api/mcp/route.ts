@@ -24,6 +24,7 @@ import {
   keysetLimitSchema,
   type KeysetCursor,
 } from "@/lib/mcp-keyset"
+import { widenRefSchemas, resolveToolRefs } from "@/lib/mcp-work-item-refs"
 import { runWithMcpActor, getMcpActor, isResearchActor, assertWorkspaceMember, McpAuthzError } from "@/lib/mcp-authz"
 import { applyToolGate, AGENT_TOOL_POLICY, scopesSatisfy, type ToolScope } from "@/lib/mcp-tool-gates"
 import { bearerChallenge, requiredScopeForPayload } from "@/lib/mcp-oauth-challenge"
@@ -260,9 +261,13 @@ const _handler = createMcpHandler(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       handler: (args: any, extra?: any) => any
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ) => (server.registerTool as (...a: any[]) => any)(name, meta, async (args: any, extra: any) => {
+    ) => (server.registerTool as (...a: any[]) => any)(name, meta && typeof meta === "object" && meta.inputSchema ? { ...meta, inputSchema: widenRefSchemas(meta.inputSchema) } : meta, async (rawArgs: any, extra: any) => {
       const actor = { ...getMcpActor(), authorizedWorkspaceId: undefined }
-      return runWithMcpActor(actor, () => withAgentActivity(actor, name, AGENT_TOOL_POLICY[name] !== "READ", () => applyToolGate(name, actor, args ?? {}), () => withAnalyticsTool(name, () => withInterviewMutation(name, args ?? {}, () => handler(args, extra)))))
+      return runWithMcpActor(actor, async () => {
+        // Display IDs (TASK-12) become UUIDs here, once, so the gate, the handler and every receipt only ever see UUIDs.
+        const args = await resolveToolRefs(actor, rawArgs ?? {})
+        return withAgentActivity(actor, name, AGENT_TOOL_POLICY[name] !== "READ", () => applyToolGate(name, actor, args), () => withAnalyticsTool(name, () => withInterviewMutation(name, args, () => handler(args, extra))))
+      })
     })
 
     register("get_current_identity", { title: "Current Identity", description: "Returns the authenticated caller and currently accessible workspaces.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, async () => {

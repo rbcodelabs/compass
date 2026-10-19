@@ -1,3 +1,4 @@
+import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
 /** Handler functions for Opportunity MCP tools. */
 
 import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
@@ -32,10 +33,10 @@ export async function createOpportunity(input: {
       return created
     }, { atomic: true })
     return ok(withUrlLine(
-      `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
-      safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "opportunity", id: opportunity.id }),
+      `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}${displayLine("opportunity", opportunity)}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
+      safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "opportunity", id: opportunity.id, displayId: displayIdFromRow("opportunity", opportunity) }),
     ), {
-      id: opportunity.id, title: opportunity.title, status: opportunity.status, workspaceId: input.workspaceId,
+      id: opportunity.id, displayId: displayIdFromRow("opportunity", opportunity), title: opportunity.title, status: opportunity.status, workspaceId: input.workspaceId,
       customerSegment: opportunity.customerSegment, linkedKeyResultId: opportunity.linkedKeyResultId, squadId: opportunity.squadId,
     })
   } catch (error) {

@@ -164,12 +164,12 @@ describe("Decision Artifact mutation boundaries", () => {
         mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
         mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: foreign === "artifact" ? "ws-2" : "ws-1" })
         mockPrisma.reviewRequest.findUnique.mockResolvedValue({ workspaceId: foreign === "reviewRequest" ? "ws-2" : "ws-1" })
-        await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1", artifactId: "art-1", requestId: "req-1" })).rejects.toThrow(/does not belong to workspace/)
+        await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1", artifactId: "art_1", requestId: "req-1" })).rejects.toThrow(/does not belong to workspace/)
       })
     }
     it(`${tool} denies a non-member`, async () => {
       mockPrisma.workspace.findFirst.mockResolvedValue(null)
-      await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1", artifactId: "art-1", requestId: "req-1" })).rejects.toThrow(/not found or access denied/)
+      await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1", artifactId: "art_1", requestId: "req-1" })).rejects.toThrow(/not found or access denied/)
     })
     it(`${tool} excludes read-only agent grants`, async () => {
       vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
@@ -177,7 +177,7 @@ describe("Decision Artifact mutation boundaries", () => {
         mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent" })
         mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([])
         mockPrisma.workspace.findFirst.mockResolvedValue(null)
-        await expect(applyToolGate(tool, { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1", artifactId: "art-1", requestId: "req-1" })).rejects.toThrow(/not found or access denied/)
+        await expect(applyToolGate(tool, { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1", artifactId: "art_1", requestId: "req-1" })).rejects.toThrow(/not found or access denied/)
         expect(mockPrisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith({ where: { agentId: "agent", revokedAt: null, access: "WRITE" }, select: { workspaceId: true } })
       } finally { vi.unstubAllEnvs() }
     })
@@ -246,7 +246,7 @@ describe("research study agent policy", () => {
   })
 
   it("issue_research_link still requires a human identity", async () => {
-    await expect(applyToolGate("issue_research_link", { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1", studyId: "study-1" }))
+    await expect(applyToolGate("issue_research_link", { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1", studyId: "study_1" }))
       .rejects.toThrow("Tool requires a human identity: issue_research_link")
   })
 })
@@ -564,7 +564,7 @@ describe("applyToolGate", () => {
   it("get_opportunity: denies a non-member", async () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null) // not a member
-    await expect(applyToolGate("get_opportunity", MEMBER, { opportunityId: "opp-1" })).rejects.toThrow(
+    await expect(applyToolGate("get_opportunity", MEMBER, { opportunityId: "opp_1" })).rejects.toThrow(
       /not found or access denied/
     )
   })
@@ -572,7 +572,7 @@ describe("applyToolGate", () => {
   it("get_opportunity: allows a member", async () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
-    await expect(applyToolGate("get_opportunity", MEMBER, { opportunityId: "opp-1" })).resolves.toBeUndefined()
+    await expect(applyToolGate("get_opportunity", MEMBER, { opportunityId: "opp_1" })).resolves.toBeUndefined()
   })
 
   it("update_opportunity: denies a cross-workspace caller before the handler writes", async () => {
@@ -580,7 +580,7 @@ describe("applyToolGate", () => {
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
 
     await expect(callTool("update_opportunity", MEMBER, {
-      opportunityId: "opp-1",
+      opportunityId: "opp_1",
       title: "New title",
     })).rejects.toThrow(/not found or access denied/)
 
@@ -594,7 +594,7 @@ describe("applyToolGate", () => {
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
 
     await expect(
-      applyToolGate("update_solution_status", MEMBER, { solutionId: "sol-1", status: "SHIPPED" })
+      applyToolGate("update_solution_status", MEMBER, { solutionId: "sol_1", status: "SHIPPED" })
     ).rejects.toThrow(/not found or access denied/)
   })
 
@@ -610,7 +610,7 @@ describe("applyToolGate", () => {
     mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" }) // member of the real workspace
     await expect(
-      applyToolGate("promote_to_roadmap", MEMBER, { solutionId: "sol-1", workspaceId: "ws-2" })
+      applyToolGate("promote_to_roadmap", MEMBER, { solutionId: "sol_1", workspaceId: "ws-2" })
     ).rejects.toThrow(/does not belong to workspace/)
   })
 
@@ -677,20 +677,20 @@ describe("applyToolGate", () => {
     mockPrisma.solution.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     await expect(applyToolGate("link_artifact_to_solution", MEMBER, {
-      artifactId: "art-1", solutionId: "sol-1", workspaceId: "ws-1",
+      artifactId: "art_1", solutionId: "sol_1", workspaceId: "ws-1",
     })).rejects.toThrow(/does not belong to workspace/)
   })
 
   it("refresh_artifact_from_v0: rejects an artifact from another workspace", async () => {
     mockPrisma.artifact.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
-    await expect(applyToolGate("refresh_artifact_from_v0", MEMBER, { artifactId: "art-1", workspaceId: "ws-1" }))
+    await expect(applyToolGate("refresh_artifact_from_v0", MEMBER, { artifactId: "art_1", workspaceId: "ws-1" }))
       .rejects.toThrow(/does not belong to workspace/)
   })
 
   it("refresh_artifact_from_v0: denies a non-member", async () => {
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
-    await expect(applyToolGate("refresh_artifact_from_v0", MEMBER, { artifactId: "art-1", workspaceId: "ws-1" }))
+    await expect(applyToolGate("refresh_artifact_from_v0", MEMBER, { artifactId: "art_1", workspaceId: "ws-1" }))
       .rejects.toThrow(/not found or access denied/)
   })
 
@@ -703,7 +703,7 @@ describe("applyToolGate", () => {
   it("request_decision rejects a linked entity from another workspace", async () => {
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     mockPrisma.doc.findUnique.mockResolvedValue({ workspaceId: "ws-2" })
-    await expect(applyToolGate("request_decision", MEMBER, { workspaceId: "ws-1", subjectType: "DOC", subjectId: "doc-1" }))
+    await expect(applyToolGate("request_decision", MEMBER, { workspaceId: "ws-1", subjectType: "DOC", subjectId: "doc_1" }))
       .rejects.toThrow(/does not belong to workspace/)
   })
 
@@ -734,7 +734,7 @@ describe("applyToolGate", () => {
         mockPrisma.task.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
         mockPrisma.workspace.findFirst.mockResolvedValue(null)
         await expect(
-          applyToolGate(tool, MEMBER, { objectType: "TASK", objectId: "task-1", fieldId: "field-1", value: "x" })
+          applyToolGate(tool, MEMBER, { objectType: "TASK", objectId: "task_1", fieldId: "field-1", value: "x" })
         ).rejects.toThrow(/not found or access denied/)
       }
     )
@@ -743,7 +743,7 @@ describe("applyToolGate", () => {
       "%s rejects an unknown objectType before touching the database",
       async (tool) => {
         await expect(
-          applyToolGate(tool, MEMBER, { objectType: "NOT_A_TYPE", objectId: "task-1", fieldId: "field-1", value: "x" })
+          applyToolGate(tool, MEMBER, { objectType: "NOT_A_TYPE", objectId: "task_1", fieldId: "field-1", value: "x" })
         ).rejects.toThrow(/Unknown objectType/)
         expect(mockPrisma.task.findUnique).not.toHaveBeenCalled()
       }
@@ -753,7 +753,7 @@ describe("applyToolGate", () => {
       mockPrisma.task.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
       mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
       await expect(
-        applyToolGate("set_custom_field_value", MEMBER, { objectType: "TASK", objectId: "task-1", fieldId: "field-1", value: "x" })
+        applyToolGate("set_custom_field_value", MEMBER, { objectType: "TASK", objectId: "task_1", fieldId: "field-1", value: "x" })
       ).resolves.toBeUndefined()
     })
   })
@@ -768,7 +768,7 @@ describe("register() wrapper enforces gates end-to-end", () => {
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
 
     await expect(callTool("update_solution_status", MEMBER, {
-      solutionId: "sol-1",
+      solutionId: "sol_1",
       status: "SHIPPED",
     })).rejects.toThrow(/not found or access denied/)
 
@@ -779,7 +779,7 @@ describe("register() wrapper enforces gates end-to-end", () => {
   it("denies a non-member calling get_opportunity (gate runs before the handler)", async () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
     mockPrisma.workspace.findFirst.mockResolvedValue(null) // not a member
-    await expect(callTool("get_opportunity", MEMBER, { opportunityId: "opp-1" })).rejects.toThrow(
+    await expect(callTool("get_opportunity", MEMBER, { opportunityId: "opp_1" })).rejects.toThrow(
       /not found or access denied/
     )
     // Handler's own fetch (include-based) is never reached — gate threw first.
@@ -789,7 +789,7 @@ describe("register() wrapper enforces gates end-to-end", () => {
   it("allows a member and reaches the handler", async () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({
       workspaceId: "ws-1",
-      id: "opp-1",
+      id: "opp_1",
       title: "Reduce churn",
       status: "EXPLORING",
       description: null,
@@ -799,9 +799,9 @@ describe("register() wrapper enforces gates end-to-end", () => {
     })
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     // The additive linkedObjectives read: workspace-checked opportunity, then its (empty) link rows.
-    mockPrisma.opportunity.findMany.mockResolvedValue([{ id: "opp-1" }])
+    mockPrisma.opportunity.findMany.mockResolvedValue([{ id: "opp_1" }])
     mockPrisma.opportunityObjectiveLink.findMany.mockResolvedValue([])
-    const result = (await callTool("get_opportunity", MEMBER, { opportunityId: "opp-1" })) as {
+    const result = (await callTool("get_opportunity", MEMBER, { opportunityId: "opp_1" })) as {
       content: { text: string }[]
     }
     expect(result.content[0].text).toContain("Reduce churn")
@@ -1080,7 +1080,7 @@ describe("card sort tool policy", () => {
 // path end-to-end through the real registration captured above.
 describe("docs:// resource — read/list", () => {
   const docRow = {
-    id: "doc-1",
+    id: "doc_1",
     title: "Q3 Plan",
     parentId: null,
     roadmapItemId: null,
@@ -1109,7 +1109,7 @@ describe("docs:// resource — read/list", () => {
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
     const read = registeredResources.doc as (uri: URL, vars: Record<string, string>) => Promise<{ contents: { text: string }[] }>
     const result = await runWithMcpActor(MEMBER, () => read(new URL("docs://ws-1/Q3%20Plan"), { workspaceId: "ws-1", path: "Q3 Plan" }))
-    expect(result.contents[0].text).toContain("compass_doc_id: doc-1")
+    expect(result.contents[0].text).toContain("compass_doc_id: doc_1")
     expect(result.contents[0].text).toContain("Body")
   })
 

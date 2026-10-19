@@ -30,6 +30,7 @@
 // dependency never reaches a client bundle. The `satisfies` check below makes
 // the compiler prove this module still covers every panel entity type.
 import type { EntityType } from "@/lib/entity-detail"
+import { classifyWorkItemRef } from "@/lib/work-item-ids"
 
 /**
  * Every type that has a canonical in-app location. `doc` and `artifact` are
@@ -65,6 +66,12 @@ export type EntityLinkInput = WorkspaceSlugs & {
   type: EntityLinkType
   id: string
   /**
+   * `TASK-5`, when the caller has it. Links carry the display ID instead of the UUID so people and agents share
+   * readable URLs; the UUID still resolves (and is redirected to this form) on every route that accepts either.
+   * Rows that are not numbered yet pass nothing and keep a UUID link.
+   */
+  displayId?: string | null
+  /**
    * The owning Opportunity, for the two types whose panel is shown in the
    * context of a discovery page (`solution`, `assumption`). Optional
    * everywhere: without it those links fall back to the workspace root, which
@@ -90,8 +97,9 @@ function panelQuery(type: EntityLinkType, id: string): string {
  */
 export function entityPath(input: EntityLinkInput): string {
   const base = workspaceBasePath(input)
-  const id = encodeURIComponent(input.id)
-  const panel = panelQuery(input.type, input.id)
+  const ref = input.displayId || input.id
+  const id = encodeURIComponent(ref)
+  const panel = panelQuery(input.type, ref)
   // The discovery page of the owning opportunity, when we know it. Both
   // callers below degrade to the workspace root, where the panel still opens.
   const discoveryContext = input.opportunityId
@@ -134,6 +142,14 @@ export function isEntityId(value: string): boolean {
   return UUID_RE.test(value)
 }
 
+/**
+ * A UUID or a display ID (`TASK-5`). What a link may carry; the server resolves either inside the workspace.
+ * Page names such as `tree` or `card-sort` are neither, so they still do not parse as entities.
+ */
+export function isEntityRef(value: string): boolean {
+  return classifyWorkItemRef(value).kind !== "invalid"
+}
+
 const PANEL_LINK_TYPES: ReadonlySet<string> = new Set<EntityLinkType>([
   "objective",
   "keyResult",
@@ -146,6 +162,7 @@ const PANEL_LINK_TYPES: ReadonlySet<string> = new Set<EntityLinkType>([
   "task",
 ])
 
+/** `id` is the link's reference as written: a UUID or a display ID. Resolve it server-side before using it as a key. */
 export type ParsedEntityLink = WorkspaceSlugs & { type: EntityLinkType; id: string }
 
 function decodeSegment(segment: string): string | null {
@@ -193,7 +210,7 @@ export function parseEntityLink(href: string, currentOrigin?: string | null): Pa
 
   // A page of its own: /{org}/{ws}/{section}/{id}
   const own = (type: EntityLinkType, id: string | undefined): ParsedEntityLink | null =>
-    id && isEntityId(id) && extra.length === 0 ? { ...slugs, type, id } : null
+    id && isEntityRef(id) && extra.length === 0 ? { ...slugs, type, id } : null
 
   // A ?detail=<type>:<id> panel link is valid on any workspace page and names the
   // entity actually shown, so it wins over the page it sits on (a solution link
@@ -203,7 +220,7 @@ export function parseEntityLink(href: string, currentOrigin?: string | null): Pa
   if (detail && sep > 0) {
     const type = detail.slice(0, sep)
     const id = detail.slice(sep + 1)
-    if (PANEL_LINK_TYPES.has(type) && isEntityId(id)) return { ...slugs, type: type as EntityLinkType, id }
+    if (PANEL_LINK_TYPES.has(type) && isEntityRef(id)) return { ...slugs, type: type as EntityLinkType, id }
   }
 
   if (section === "docs" && first === "artifacts") return own("artifact", second)

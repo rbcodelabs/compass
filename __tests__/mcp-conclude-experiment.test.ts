@@ -42,12 +42,12 @@ const callConclude = (args: Record<string, unknown>) =>
 beforeEach(() => {
   vi.clearAllMocks()
   mockExperiment.findUnique.mockResolvedValue({
-    id: "exp-1",
+    id: "exp_1",
     title: "get_workspace_by_slug experiment",
     status: "DESIGNING",
     assumptionId: "ass-1",
   })
-  mockExperiment.update.mockResolvedValue({ id: "exp-1" })
+  mockExperiment.update.mockResolvedValue({ id: "exp_1" })
   mockAssumption.update.mockResolvedValue({ id: "ass-1" })
 })
 
@@ -60,21 +60,21 @@ describe("conclude_experiment schema", () => {
 
 describe("conclude_experiment(NOT_PURSUED)", () => {
   it("requires a reason", async () => {
-    const result = await callConclude({ experimentId: "exp-1", conclusion: "NOT_PURSUED" })
+    const result = await callConclude({ experimentId: "exp_1", conclusion: "NOT_PURSUED" })
     expect(result.structuredContent.ok).toBe(false)
     expect(result.structuredContent.message).toMatch(/reason/i)
     expect(mockExperiment.update).not.toHaveBeenCalled()
   })
 
   it("rejects a blank reason", async () => {
-    const result = await callConclude({ experimentId: "exp-1", conclusion: "NOT_PURSUED", reason: "   " })
+    const result = await callConclude({ experimentId: "exp_1", conclusion: "NOT_PURSUED", reason: "   " })
     expect(result.structuredContent.ok).toBe(false)
     expect(mockExperiment.update).not.toHaveBeenCalled()
   })
 
   it("sets a status distinct from KILLED and persists the reason", async () => {
     const result = await callConclude({
-      experimentId: "exp-1",
+      experimentId: "exp_1",
       conclusion: "NOT_PURSUED",
       reason: "Feature already shipped and works in production; assumption was never disproven.",
     })
@@ -87,7 +87,7 @@ describe("conclude_experiment(NOT_PURSUED)", () => {
   })
 
   it("leaves the linked assumption UNTESTED, not INVALIDATED", async () => {
-    await callConclude({ experimentId: "exp-1", conclusion: "NOT_PURSUED", reason: "Not needed." })
+    await callConclude({ experimentId: "exp_1", conclusion: "NOT_PURSUED", reason: "Not needed." })
     expect(mockAssumption.update).toHaveBeenCalledWith({
       where: { id: "ass-1" },
       data: { status: "UNTESTED" },
@@ -96,12 +96,12 @@ describe("conclude_experiment(NOT_PURSUED)", () => {
 
   it("refuses to re-conclude an already NOT_PURSUED experiment", async () => {
     mockExperiment.findUnique.mockResolvedValue({
-      id: "exp-1",
+      id: "exp_1",
       title: "Already closed",
       status: "NOT_PURSUED",
       assumptionId: "ass-1",
     })
-    const result = await callConclude({ experimentId: "exp-1", conclusion: "NOT_PURSUED", reason: "Again." })
+    const result = await callConclude({ experimentId: "exp_1", conclusion: "NOT_PURSUED", reason: "Again." })
     expect(result.structuredContent.ok).toBe(false)
     expect(result.structuredContent.message).toMatch(/already concluded/i)
   })

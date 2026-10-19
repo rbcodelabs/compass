@@ -1,3 +1,4 @@
+import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
 /**
  * Handler functions for Assumption MCP tools (update_assumption, delete_assumption).
  * Extracted into this module so they can be unit-tested without the MCP server layer.
@@ -20,9 +21,9 @@ export async function createAssumption({ solutionId, title, description, riskLev
   if (!workspaceId) return fail(`Solution "${solutionId}" has no workspace.`)
   const assumption = await captureWorkspaceMutation(getDatabase(), "assumption", "create", workspaceMutationSource(source), undefined, async (tx) => tx.assumption.create({ data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "assumption")), solutionId, title: title.trim(), description: description?.trim() || null, riskLevel, status: "UNTESTED", source } }))
   return ok(withUrlLine(
-    `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
-    safeEntityUrl({ orgSlug: solution.workspace?.organization.slug, workspaceSlug: solution.workspace?.slug, type: "assumption", id: assumption.id, opportunityId: solution.opportunityId }),
-  ), { id: assumption.id, title: assumption.title, description: assumption.description, riskLevel: assumption.riskLevel, status: assumption.status, solutionId })
+    `**Assumption created** on solution "${solution.title}"\nID: ${assumption.id}${displayLine("assumption", assumption)}\nTitle: ${assumption.title}\nRisk: ${assumption.riskLevel}\nStatus: UNTESTED`,
+    safeEntityUrl({ orgSlug: solution.workspace?.organization.slug, workspaceSlug: solution.workspace?.slug, type: "assumption", id: assumption.id, displayId: displayIdFromRow("assumption", assumption), opportunityId: solution.opportunityId }),
+  ), { id: assumption.id, displayId: displayIdFromRow("assumption", assumption), title: assumption.title, description: assumption.description, riskLevel: assumption.riskLevel, status: assumption.status, solutionId })
 }
 
 // ── update_assumption ───────────────────────────────────────────────────────
