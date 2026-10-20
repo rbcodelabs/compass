@@ -42,7 +42,7 @@ describe.skipIf(!databaseUrl)("typed links against a real Prisma client and uniq
     if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/compass_e2e") throw new Error("Requires the local compass_e2e database");
     process.env.DATABASE_URL = databaseUrl;
     await pool.query(`CREATE SCHEMA "${schema}"`);
-    for (const name of ["001_init", "034_artifacts", "068_workspace_id_on_solution_objective", "071_typed_link_tables"]) {
+    for (const name of ["001_init", "034_artifacts", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "091_entity_links"]) {
       const applied = await applyMigrations(pool, schema, name);
       expect(applied.status, `${name}: ${JSON.stringify(await applied.json())}`).toBe(200);
     }
@@ -149,8 +149,10 @@ describe.skipIf(!databaseUrl)("typed links against a real Prisma client and uniq
     expect(before).toBe(total + 1);
 
     statements.length = 0;
+    // The count also includes the entity_links mirror rows (flag on outside production) that name this objective.
+    const mirrored = Number((await q(`SELECT count(*)::int AS n FROM {S}.entity_links WHERE to_type = 'OBJECTIVE' AND to_id = $1`, [objective])).rows[0].n);
     const removed = await drainLinksFor(prisma, "objective", [objective]);
-    expect(removed).toBe(before);
+    expect(removed).toBe(before + mirrored);
     expect(await count("opportunity_objective_links")).toBe(0);
     const deletes = statements.filter((s) => /DELETE FROM/.test(s.query) && /opportunity_objective_links/.test(s.query));
     // 1,151 links need at least three passes, and no DELETE can name more than one chunk of ids (the highest bind parameter is the id count).
