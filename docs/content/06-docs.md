@@ -160,6 +160,8 @@ Leave Google-Docs-style comments anchored to a specific span of a page, so discu
 - The first time an agent is assigned from a comment in a page, you confirm what it will receive. In this release an assigned agent simply finds the task in its queue (the same queue its MCP tools read); nothing starts running on its own. The card shows **Queued**, **Working** or **Needs review** from the task's status.
 - Viewers (read-only access) cannot comment or create tasks.
 
+![A Doc comment with a task card, and the pin on the commented passage](/screenshots/docs/docs-comment-task-mention.png)
+
 **Doc-level comments.** A comment doesn't have to be anchored — over MCP you can add a general, page-level comment with no anchored text (see below). In the sidebar these are labelled **general**.
 
 Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api) for `add_doc_comment`, `list_doc_comments`, and `resolve_doc_comment` (pass `resolved: false` to reopen). These Doc-specific tools are path-addressed (workspace ID plus doc path) and preserve inline anchor creation. The generic shared-comment tools can also operate on `DOC` targets by Comment ID, but generic `add_comment` creates an unanchored Doc comment; use `add_doc_comment` when creating an inline anchor.

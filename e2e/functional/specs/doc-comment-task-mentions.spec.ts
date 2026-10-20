@@ -446,4 +446,28 @@ test.describe("Doc comment @mention -> task", () => {
     await expect(page.getByTestId("agent-scope-confirm")).toHaveCount(0);
     expect(consoleErrors, "no console errors during the flow").toEqual([]);
   });
+
+  test("phone viewport: the composer, picker and task row stay inside the screen", async ({ page, base }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openDocWithSelection(page, base, `Mobile ${suffix}`, "MOBILE");
+    const editor = await startComment(page);
+    await editor.click();
+    await page.keyboard.type("Please look @Quinn");
+    const picker = page.getByTestId("mention-picker");
+    await expect(picker).toBeVisible();
+    const inside = async (locator: ReturnType<Page["locator"]>) => {
+      const box = (await locator.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(390);
+    };
+    await inside(picker);
+    await inside(page.getByTestId("new-comment-popover"));
+    await shot(page, "mobile-picker");
+    await page.keyboard.press("Enter");
+    await inside(page.getByTestId("new-comment-popover"));
+    await inside(page.getByTestId("comment-task-box"));
+    await shot(page, "mobile-task-row");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
 });
