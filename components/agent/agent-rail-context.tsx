@@ -88,8 +88,10 @@ export type DocsIntent = { id: number; slug?: string; anchor?: string; query?: s
  * Compass entity the server resolves), a docs article is not an entity, so the
  * chip here is a labelled link and the question itself travels in `text`,
  * which prefills the composer. Nothing is sent until the user sends it.
+ * The chip is optional: omit `label`/`sourceUrl` (the Cmd+K palette's plain
+ * questions do) and only the composer is prefilled.
  */
-export type AgentSeed = { id: number; label: string; summary: string; sourceUrl: string; text: string };
+export type AgentSeed = { id: number; label?: string; summary?: string; sourceUrl?: string; text: string };
 
 type AgentRailContextValue = {
   /** Which view the rail shows. Switching never unmounts the chat. */
@@ -98,6 +100,11 @@ type AgentRailContextValue = {
   docsIntent: DocsIntent | null;
   /** Open the rail on the Help view, optionally straight to an article or a search. */
   openDocs: (options?: { slug?: string; anchor?: string; query?: string }) => void;
+  /**
+   * The workspace this rail serves. Lets other surfaces (the Cmd+K palette's
+   * inline ask) start agent turns without being told the id separately.
+   */
+  workspaceId: string | null;
   /** Open the rail on the Library view (the Docs tree). */
   openLibrary: () => void;
   agentSeed: AgentSeed | null;
@@ -133,8 +140,10 @@ const AgentRailContext = createContext<AgentRailContextValue | null>(null);
 export function AgentRailProvider({
   children,
   initialPin = DEFAULT_PANEL_PIN,
+  workspaceId = null,
 }: {
   children: React.ReactNode;
+  workspaceId?: string | null;
   /**
    * Read from the `compass_panel_agent` cookie by the workspace layout. Seeding
    * on the server is what keeps a returning user from watching the rail pop in
@@ -284,6 +293,7 @@ export function AgentRailProvider({
       setView,
       docsIntent,
       openDocs,
+      workspaceId,
       openLibrary,
       agentSeed,
       askAgent,
@@ -302,6 +312,7 @@ export function AgentRailProvider({
       view,
       docsIntent,
       openDocs,
+      workspaceId,
       openLibrary,
       agentSeed,
       askAgent,
