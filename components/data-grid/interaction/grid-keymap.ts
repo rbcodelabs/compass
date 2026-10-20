@@ -21,6 +21,11 @@ export type GridKeyAction =
   | { type: "startEdit"; text?: string }
   | { type: "space" }
   | { type: "clear" }
+  /** Shift+Arrow: move the far corner of the range, keeping the active cell. */
+  | { type: "extend"; rows: number; cols: number }
+  | { type: "fillDown" }
+  /** Esc in nav mode: collapse a multi-cell range back to the active cell. */
+  | { type: "collapse" }
   | { type: "openDetail" }
   | { type: "commit"; move: "down" | "up" | "right" | "left" }
   | { type: "cancel" };
@@ -40,7 +45,19 @@ export function resolveGridKey(
     return null;
   }
 
+  if (chord && !altKey && !shiftKey && key.toLowerCase() === "d") {
+    return { type: "fillDown" };
+  }
+  if (shiftKey && !chord && !altKey) {
+    if (key === "ArrowUp") return { type: "extend", rows: -1, cols: 0 };
+    if (key === "ArrowDown") return { type: "extend", rows: 1, cols: 0 };
+    if (key === "ArrowLeft") return { type: "extend", rows: 0, cols: -1 };
+    if (key === "ArrowRight") return { type: "extend", rows: 0, cols: 1 };
+  }
+
   switch (key) {
+    case "Escape":
+      return { type: "collapse" };
     case "ArrowUp":
       return chord || altKey ? null : { type: "move", rows: -1, cols: 0 };
     case "ArrowDown":

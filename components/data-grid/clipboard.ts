@@ -80,3 +80,42 @@ export function parseTsv(input: string): string[][] {
   if (rowHasContent || field !== "" || row.length > 0) endRow();
   return rows;
 }
+
+/**
+ * Serialises a matrix of cell text as Google-Sheets-compatible TSV.
+ *
+ * A cell is wrapped in quotes when it holds a tab, a newline or a quote (a quote
+ * is doubled), the same rule Sheets applies, so `parseTsv(formatTsv(m))` returns
+ * `m`. Rows are joined with `\n` with no trailing newline; a lone empty cell in
+ * the last row of a multi-row matrix is written as `""` so it survives the
+ * parser's "a trailing newline is not a row" rule.
+ */
+export function formatTsv(matrix: readonly (readonly string[])[]): string {
+  const lines = matrix.map((row, rowIndex) => {
+    const cells = row.map((cell) =>
+      /[\t\n\r"]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell,
+    );
+    const loneEmptyLast =
+      rowIndex > 0 && rowIndex === matrix.length - 1 && cells.length === 1 && cells[0] === "";
+    return loneEmptyLast ? '""' : cells.join("\t");
+  });
+  return lines.join("\n");
+}
+
+/**
+ * Builds the copy matrix for a rectangular range. `textAt` supplies each cell's
+ * text (a column's `format`, or its displayed text), so this stays free of rows
+ * and columns.
+ */
+export function rangeToMatrix(
+  range: { top: number; left: number; bottom: number; right: number },
+  textAt: (row: number, col: number) => string,
+): string[][] {
+  const matrix: string[][] = [];
+  for (let row = range.top; row <= range.bottom; row += 1) {
+    const line: string[] = [];
+    for (let col = range.left; col <= range.right; col += 1) line.push(textAt(row, col));
+    matrix.push(line);
+  }
+  return matrix;
+}

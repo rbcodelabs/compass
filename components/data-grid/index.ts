@@ -1,5 +1,11 @@
 export { DataGrid, SELECTION_COLUMN_ID, type DataGridProps } from "./data-grid";
 export {
+  DEFAULT_RANGE_OP_LIMIT,
+  type GridCellChange,
+  type GridChangeSet,
+  type GridChangeSource,
+} from "./interaction/range-ops";
+export {
   DataGridHeaderCell,
   STICKY_HEADER_CELL_CLASS,
   type DataGridHeaderCellProps,
