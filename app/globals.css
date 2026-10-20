@@ -99,6 +99,10 @@
   --status-warning-surface: oklch(0.9506 0.0253 86.9); /* #F6EEDC */
   --status-danger: var(--destructive);                 /* #A32C22 */
   --status-danger-surface: oklch(0.9451 0.0169 31.1);  /* #F8E9E6 */
+  /* Agent identity (mention chips, task pins, Agent badges). Distinct from the
+     info blue used for people so an agent reads as an agent at a glance. */
+  --agent-accent: oklch(0.4733 0.1672 295);
+  --agent-accent-surface: oklch(0.9468 0.0268 300);
 
   /* Product density and elevation conventions */
   --control-height-sm: 1.75rem;
@@ -156,6 +160,8 @@ html.dark:has(.workspace-theme-scope) {
   --status-warning-surface: oklch(0.29 0.05 71.2);
   --status-danger: var(--destructive);
   --status-danger-surface: oklch(0.28 0.06 29);
+  --agent-accent: oklch(0.76 0.12 295);
+  --agent-accent-surface: oklch(0.29 0.06 295);
   --shadow-card: none;
   --shadow-panel: 0 10px 30px oklch(0.08 0.002 67.7 / 0.55);
 }
@@ -216,6 +222,8 @@ html.dark:has(.workspace-theme-scope) {
   --color-status-warning-surface: var(--status-warning-surface);
   --color-status-danger: var(--status-danger);
   --color-status-danger-surface: var(--status-danger-surface);
+  --color-agent-accent: var(--agent-accent);
+  --color-agent-accent-surface: var(--agent-accent-surface);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -418,6 +426,62 @@ html[data-panel-resizing] * {
 .doc-comment-highlight-active {
   background-color: var(--status-info-surface);
   border-bottom-color: var(--status-info);
+}
+/* A comment with a task: the passage turns from the "open comment" warning tint
+   to the task's colour (info for a person, agent accent for an agent), and a
+   small pin trails it. Same view-layer-only rule as the highlight above. */
+.doc-comment-highlight-task {
+  background-color: var(--status-info-surface);
+  border-bottom-color: var(--status-info);
+}
+.doc-comment-highlight-task-agent {
+  background-color: var(--agent-accent-surface);
+  border-bottom-color: var(--agent-accent);
+}
+.doc-comment-pin {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background-color: var(--status-info);
+  color: var(--text-inverse);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.1rem;
+  vertical-align: middle;
+  user-select: none;
+  cursor: pointer;
+}
+.doc-comment-pin-agent {
+  background-color: var(--agent-accent);
+}
+/* @mention chips in the comment composer and in posted comments. */
+.mention-chip {
+  display: inline;
+  max-width: 100%;
+  padding: 0 0.375rem;
+  border-radius: 0.375rem;
+  background-color: var(--status-info-surface);
+  color: var(--status-info);
+  font-weight: 600;
+  /* A very long name wraps (and breaks mid-word if it must) rather than pushing the layout sideways. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+/* A chip inside the composer is an atom: clicking it puts the caret beside it, never inside its text. */
+.mention-chip[contenteditable="false"] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.mention-chip-agent {
+  background-color: var(--agent-accent-surface);
+  color: var(--agent-accent);
+}
+.mention-chip-outside {
+  background-color: var(--status-warning-surface);
+  color: var(--status-warning);
 }
 
 /* ── Docs prose content (/help) ────────────────────────────────────────

@@ -108,7 +108,7 @@ describe("autoFollow", () => {
 
   it("never overrides MUTED, including after the user's own comment (open question 7)", async () => {
     await unfollowSubject({ userId: USER, ...subject }, fake.db)
-    for (const source of ["AUTO_CREATE", "AUTO_COMMENT", "AUTO_ASSIGN"] as const) {
+    for (const source of ["AUTO_CREATE", "AUTO_COMMENT", "AUTO_ASSIGN", "AUTO_MENTION"] as const) {
       const result = await autoFollow({ userId: USER, ...subject, source }, fake.db)
       expect(result).toEqual({ status: "skipped", reason: "already_exists" })
     }

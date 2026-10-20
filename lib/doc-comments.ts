@@ -184,6 +184,8 @@ export async function deleteDocCommentCore(
     await tx.solutionPlanProposal.deleteMany({ where: { commentId: { in: ids } } })
     await tx.commentElementAnchor.deleteMany({ where: { commentId: { in: ids } } })
     await tx.commentExternalAuthor.deleteMany({ where: { commentId: { in: ids } } })
+    // Tasks made from these comments keep living; only their pointer to the deleted comment goes.
+    await tx.taskLink.deleteMany({ where: { linkedType: "COMMENT", linkedId: { in: ids } } })
     if (wasRoot) await tx.comment.deleteMany({ where: { parentId: commentId } })
     await tx.comment.deleteMany({ where: { id: commentId } })
     if (wasRoot) await tx.docComment.deleteMany({ where: { parentId: commentId } })

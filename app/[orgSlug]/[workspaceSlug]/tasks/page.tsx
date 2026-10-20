@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { commentLinkTitles } from "@/lib/comment-link-titles";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
@@ -142,6 +143,10 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   const titleById = new Map<string, string>();
   await Promise.all(
     Array.from(linksByType.entries()).map(async ([linkedType, ids]) => {
+      if (linkedType === "COMMENT") {
+        for (const [key, title] of await commentLinkTitles(workspace.id, ids)) titleById.set(key, title);
+        return;
+      }
       const delegate = LINK_MODEL[linkedType as keyof typeof LINK_MODEL];
       if (!delegate) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

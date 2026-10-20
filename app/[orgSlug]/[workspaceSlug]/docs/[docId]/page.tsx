@@ -13,6 +13,7 @@ import { DocDecisionAction } from "@/components/docs/doc-decision-action";
 import { FollowButton } from "@/components/following/follow-button";
 import { listDocDecisions } from "@/lib/tracked-decisions";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
+import { agentIdsAssignedInDoc, loadCommentTaskCards, loadMentionCandidates } from "@/lib/doc-comment-tasks";
 import { documentRevision, hydrateDocument } from "@/lib/document-service";
 
 type Props = {
@@ -78,6 +79,14 @@ export default async function DocPage({ params, searchParams }: Props) {
   // the open/anchored ones and the sidebar filters resolved behind a toggle.
   const comments = await listDocCommentsCore(docId);
 
+  // @mention picker, the task card under each comment, and which agents are already
+  // confirmed in this doc (skips the first-assignment scope step).
+  const [mentionOptions, taskCards, confirmedAgentIds] = await Promise.all([
+    loadMentionCandidates(workspace.id),
+    loadCommentTaskCards(workspace.id, comments.map((comment) => comment.id)),
+    agentIdsAssignedInDoc(workspace.id, doc.id),
+  ]);
+
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/docs/${resolvedDoc.canonical}`;
 
   const linkedTasks = await fetchLinkedTasksBundle(workspace.id, "DOC", doc.id);
@@ -109,8 +118,11 @@ export default async function DocPage({ params, searchParams }: Props) {
       workspaceSlug={workspaceSlug}
       workspaceId={workspace.id}
       linkedTasks={linkedTasks}
-      followAction={<FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="DOC" subjectId={doc.id} />}
-      decisionAction={<DocDecisionAction orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
+      mentionOptions={mentionOptions}
+      taskCards={taskCards}
+      confirmedAgentIds={confirmedAgentIds}
+      followAction={<FollowButton key="follow" orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="DOC" subjectId={doc.id} />}
+      decisionAction={<DocDecisionAction key="decision" orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
     />
   );
 }

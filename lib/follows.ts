@@ -14,9 +14,9 @@ import { getFollowable, isSubjectTypeActive } from "@/lib/followable"
  * enforcement, since the schema has no foreign keys to do it.
  */
 export type FollowState = "FOLLOWING" | "MUTED"
-export type FollowSource = "MANUAL" | "AUTO_CREATE" | "AUTO_COMMENT" | "AUTO_ASSIGN"
+export type FollowSource = "MANUAL" | "AUTO_CREATE" | "AUTO_COMMENT" | "AUTO_ASSIGN" | "AUTO_MENTION"
 export type AutoFollowSource = Exclude<FollowSource, "MANUAL">
-const AUTO_SOURCES: readonly string[] = ["AUTO_CREATE", "AUTO_COMMENT", "AUTO_ASSIGN"]
+const AUTO_SOURCES: readonly string[] = ["AUTO_CREATE", "AUTO_COMMENT", "AUTO_ASSIGN", "AUTO_MENTION"]
 
 export type FollowErrorCode =
   | "FOLLOWING_DISABLED"

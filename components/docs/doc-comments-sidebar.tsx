@@ -5,9 +5,24 @@ import { Check, RotateCcw, Trash2, MessageSquare, CornerDownRight } from "lucide
 import { DocPanelShell } from "@/components/docs/doc-panel-shell"
 import type { PanelPin } from "@/lib/panel-pin"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { relativeTime } from "@/lib/relative-time"
 import { cn } from "@/lib/utils"
+import { bodySegments } from "@/lib/comment-mentions"
+import type { CommentTaskCardData } from "@/lib/comment-task-card"
+import { CommentTaskCard } from "@/components/docs/comment-task-card"
+import { DocCommentComposer, type ComposerPayload, type ComposerResult } from "@/components/docs/doc-comment-composer"
+import type { MentionOption, MentionOptions } from "@/components/docs/mention-editor"
+
+const NO_MENTION_OPTIONS: MentionOptions = { people: [], agents: [], outside: [] }
+
+/** What the thread UI needs to render mentions and task cards and to compose replies. */
+interface MentionContext {
+  options: MentionOptions
+  confirmedAgentIds: string[]
+  docTitle: string
+  taskCards: Record<string, CommentTaskCardData>
+  taskHrefBase: string
+}
 
 /** Serializable comment shape passed from the doc page → editor → sidebar. */
 export interface DocCommentItem {
@@ -32,10 +47,18 @@ interface DocCommentsSidebarProps {
   comments: DocCommentItem[]
   /** IDs of root comments whose anchor no longer resolves in the current text. */
   orphanedIds: Set<string>
-  onAddReply: (parentId: string, body: string) => Promise<void>
+  onAddReply: (parentId: string, payload: ComposerPayload) => Promise<ComposerResult | void>
   onResolve: (commentId: string, resolved: boolean) => Promise<void>
   onDelete: (commentId: string) => Promise<void>
   onFocusComment: (commentId: string) => void
+  /** Pickable people and agents for @mentions. Omit to render replies without a picker. */
+  mentionOptions?: MentionOptions
+  confirmedAgentIds?: string[]
+  docTitle?: string
+  /** Task card per comment id. */
+  taskCards?: Record<string, CommentTaskCardData>
+  /** e.g. /org/workspace/tasks; the card links to taskHrefBase/taskId. */
+  taskHrefBase?: string
 }
 
 export function DocCommentsSidebar({
@@ -48,8 +71,14 @@ export function DocCommentsSidebar({
   onResolve,
   onDelete,
   onFocusComment,
+  mentionOptions = NO_MENTION_OPTIONS,
+  confirmedAgentIds = [],
+  docTitle = "",
+  taskCards = {},
+  taskHrefBase = "/tasks",
 }: DocCommentsSidebarProps) {
   const [showResolved, setShowResolved] = useState(false)
+  const mention: MentionContext = { options: mentionOptions, confirmedAgentIds, docTitle, taskCards, taskHrefBase }
 
   const { roots, repliesByParent } = useMemo(() => {
     const roots = comments
@@ -89,6 +118,7 @@ export function DocCommentsSidebar({
                   root={root}
                   replies={repliesByParent.get(root.id) ?? []}
                   orphaned={orphanedIds.has(root.id)}
+                  mention={mention}
                   onAddReply={onAddReply}
                   onResolve={onResolve}
                   onDelete={onDelete}
@@ -120,6 +150,7 @@ function CommentThread({
   root,
   replies,
   orphaned,
+  mention,
   onAddReply,
   onResolve,
   onDelete,
@@ -128,27 +159,15 @@ function CommentThread({
   root: DocCommentItem
   replies: DocCommentItem[]
   orphaned: boolean
-  onAddReply: (parentId: string, body: string) => Promise<void>
+  mention: MentionContext
+  onAddReply: (parentId: string, payload: ComposerPayload) => Promise<ComposerResult | void>
   onResolve: (commentId: string, resolved: boolean) => Promise<void>
   onDelete: (commentId: string) => Promise<void>
   onFocusComment: (commentId: string) => void
 }) {
-  const [replyBody, setReplyBody] = useState("")
   const [busy, setBusy] = useState(false)
   const isResolved = root.status === "RESOLVED"
   const hasAnchor = Boolean(root.anchorText)
-
-  async function submitReply() {
-    const body = replyBody.trim()
-    if (!body || busy) return
-    setBusy(true)
-    try {
-      await onAddReply(root.id, body)
-      setReplyBody("")
-    } finally {
-      setBusy(false)
-    }
-  }
 
   async function run(fn: () => Promise<void>) {
     if (busy) return
@@ -202,7 +221,7 @@ function CommentThread({
         )}
       </div>
 
-      <CommentBody comment={root} />
+      <CommentBody comment={root} mention={mention} />
 
       {/* Replies */}
       {replies.length > 0 && (
@@ -211,11 +230,18 @@ function CommentThread({
             <li key={reply.id} className="flex gap-1.5">
               <CornerDownRight className="w-3 h-3 mt-1 text-text-subtle shrink-0" />
               <div className="flex-1">
-                <CommentBody comment={reply} />
+                <CommentBody comment={reply} mention={mention} />
               </div>
             </li>
           ))}
         </ul>
+      )}
+
+      {!isResolved && [root, ...replies].some((c) => mention.taskCards[c.id]) && (
+        <p className="mt-2 rounded-md bg-status-success-surface px-2 py-1 text-xs text-status-success" data-testid="thread-auto-resolve-note">
+          <Check className="mr-1 inline size-3" aria-hidden />
+          When the task is marked <b>Done</b>, this thread resolves automatically. Reopening the task reopens the thread.
+        </p>
       )}
 
       {/* Actions */}
@@ -254,45 +280,64 @@ function CommentThread({
       {/* Reply composer */}
       {!isResolved && (
         <div className="mt-2">
-          <Textarea
-            value={replyBody}
-            onChange={(e) => setReplyBody(e.target.value)}
+          <DocCommentComposer
+            compact
+            options={mention.options}
+            confirmedAgentIds={mention.confirmedAgentIds}
+            docTitle={mention.docTitle}
+            anchorText={root.anchorText}
             placeholder="Reply…"
-            rows={2}
-            className="text-xs min-h-0"
-            disabled={busy}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault()
-                void submitReply()
-              }
-            }}
+            ariaLabel="Reply"
+            idleLabel="Reply"
+            onSubmit={async (payload) => (await onAddReply(root.id, payload)) ?? { ok: true }}
           />
-          <div className="flex justify-end mt-1">
-            <Button
-              type="button"
-              size="sm"
-              className="h-7 text-xs"
-              disabled={busy || replyBody.trim().length === 0}
-              onClick={() => void submitReply()}
-            >
-              Reply
-            </Button>
-          </div>
         </div>
       )}
     </li>
   )
 }
 
-function CommentBody({ comment }: { comment: DocCommentItem }) {
+function MentionChips({ body, options }: { body: string; options: MentionOptions }) {
+  const live = new Map<string, MentionOption>()
+  for (const option of [...options.people, ...options.agents, ...options.outside]) live.set(kindKey(option.kind, option.id), option)
+  return (
+    <>
+      {bodySegments(body).map((segment, index) => {
+        if (segment.type === "text") return <span key={index}>{segment.text}</span>
+        const { kind, id, label } = segment.mention
+        const option = live.get(kindKey(kind, id))
+        // Resolve the id to the current name so renames never leave a stale label.
+        return (
+          <span
+            key={index}
+            data-testid="comment-mention"
+            data-mention-id={id}
+            className={cn("mention-chip", kind === "agent" && "mention-chip-agent", option?.outsideWorkspace && "mention-chip-outside")}
+          >
+            @{option?.name ?? label}
+          </span>
+        )
+      })}
+    </>
+  )
+}
+
+function kindKey(kind: string, id: string): string {
+  return kind + ":" + id
+}
+
+function CommentBody({ comment, mention }: { comment: DocCommentItem; mention: MentionContext }) {
+  const card = mention.taskCards[comment.id]
   return (
     <div>
-      <p className="text-xs text-text-secondary whitespace-pre-wrap break-words">{comment.body}</p>
+      <p className="text-xs text-text-secondary whitespace-pre-wrap break-words">
+        <MentionChips body={comment.body} options={mention.options} />
+      </p>
       <p className="text-[11px] text-text-subtle mt-0.5">
         {comment.authorName}
         {comment.authorType === "AGENT" && " (agent)"} — {relativeTime(comment.createdAt)}
       </p>
+      {card && <CommentTaskCard card={card} taskHref={mention.taskHrefBase + "/" + card.taskId} />}
     </div>
   )
 }

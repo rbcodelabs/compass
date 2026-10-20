@@ -3612,7 +3612,7 @@ model SolutionKeyResultLink {
 /// enforces no foreign keys; integrity lives in lib/followable.ts. `userId` is
 /// always a Compass User with a WorkspaceMember row, never an Agent.
 /// state: FOLLOWING | MUTED (an unfollow tombstone that auto-follow never
-/// overrides). source: MANUAL | AUTO_CREATE | AUTO_COMMENT | AUTO_ASSIGN.
+/// overrides). source: MANUAL | AUTO_CREATE | AUTO_COMMENT | AUTO_ASSIGN | AUTO_MENTION.
 model Follow {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId String   @map("workspace_id") @db.Uuid
@@ -3634,7 +3634,7 @@ model Follow {
 /// never updated after insert except `readAt`. `payload` holds machine facts
 /// only (no titles or comment excerpts); display data is resolved at read time
 /// behind an access check. `dedupeKey` + recipient is unique so a replayed emit
-/// is harmless. kind: STATUS_CHANGED | COMMENT_ADDED | COMMENT_REPLIED | ASSIGNED.
+/// is harmless. kind: STATUS_CHANGED | COMMENT_ADDED | COMMENT_REPLIED | ASSIGNED | MENTIONED.
 /// actorType: USER | AGENT | EXTERNAL | SYSTEM.
 model Notification {
   id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid

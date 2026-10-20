@@ -1,6 +1,6 @@
 import getPrisma from "@/lib/db";
 import { UNASSIGNED_ASSIGNEE_FILTER } from "@/lib/task-assignee-display";
-import type { TaskLinkedType } from "@/lib/types";
+import type { TaskLinkRecordType } from "@/lib/types";
 
 export type TaskAssignee = { type: "USER" | "AGENT"; id: string } | null;
 export type ResolvedTaskAssignee = NonNullable<TaskAssignee> & { displayName: string; available: boolean; ownerName?: string };
@@ -87,7 +87,7 @@ export async function validateTaskReferences(workspaceId: string, input: { squad
   if (input.parentTaskId && !await prisma.task.findFirst({ where: { id: input.parentTaskId, workspaceId }, select: { id: true } })) throw new Error("Parent task belongs to a different workspace or does not exist");
 }
 
-export async function validateTaskLink(workspaceId: string, linkedType: TaskLinkedType, linkedId: string) {
+export async function validateTaskLink(workspaceId: string, linkedType: TaskLinkRecordType, linkedId: string) {
   const prisma = getPrisma();
   const where = { id: linkedId, workspaceId };
   const target = await (linkedType === "OPPORTUNITY" ? prisma.opportunity.findFirst({ where })
@@ -98,6 +98,8 @@ export async function validateTaskLink(workspaceId: string, linkedType: TaskLink
     : linkedType === "DOC" ? prisma.doc.findFirst({ where, select: { id: true } })
     : linkedType === "EXPERIMENT" ? prisma.experiment.findFirst({ where })
     : linkedType === "DECISION" ? prisma.reviewRequest.findFirst({ where })
+    // Only Doc comments are linkable; the Comment row carries its own workspaceId.
+    : linkedType === "COMMENT" ? prisma.comment.findFirst({ where: { id: linkedId, workspaceId, targetType: "DOC" }, select: { id: true } })
     : prisma.feedbackItem.findFirst({ where }));
   if (!target) throw new Error("Linked object belongs to a different workspace or does not exist");
   return target;
