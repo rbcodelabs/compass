@@ -46,6 +46,7 @@ import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
 import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
+import { resolveGatewayCredential, opencodeModel, resolveAgentHarness, type AgentHarness } from "@/lib/agent-harness"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
 import { prepareCapabilityPacksForTurn, type ActiveCapabilityPack } from "@/lib/capability-pack-runtime"
@@ -95,7 +96,10 @@ const MAX_HISTORY_MESSAGES = 20
  */
 const RUN_INFRA_GRACE_MS = 60_000
 
-function readEntryScript(): string {
+function readEntryScript(harness: AgentHarness): string {
+  // EXPERIMENTAL opencode harness (AGENT_HARNESS=opencode; default claude). Literal paths
+  // in both branches so the file tracer sees them.
+  if (harness === "opencode") return readFileSync(path.join(process.cwd(), "scripts/agent/opencode-turn-entry.ts"), "utf8")
   return readFileSync(path.join(process.cwd(), "scripts/agent/turn-entry.ts"), "utf8")
 }
 
@@ -106,8 +110,15 @@ function readEntryScript(): string {
  * next.config.ts also lists scripts/agent/** for this route. A file missing from the
  * lambda would make every agent turn fail with ENOENT.
  */
-function readEntryModules(): { path: string; content: string }[] {
+function readEntryModules(harness: AgentHarness): { path: string; content: string }[] {
+  if (harness === "opencode") {
+    return [
+      { path: "opencode-adapter.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/opencode-adapter.ts"), "utf8") },
+      { path: "run-reporter.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/run-reporter.ts"), "utf8") },
+    ]
+  }
   return [
+    { path: "run-reporter.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/run-reporter.ts"), "utf8") },
     { path: "docs-path-guard.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/docs-path-guard.ts"), "utf8") },
     { path: "docs-final-state.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/docs-final-state.ts"), "utf8") },
   ]
@@ -162,7 +173,11 @@ const DOCS_FILESYSTEM_PROMPT =
  * stdout, which is exactly what the fallback path drains.
  */
 function buildAgentEnv(opts: {
+  /** Which harness's credential to forward: Claude gets ANTHROPIC_API_KEY, opencode only the AI Gateway key. */
+  harness?: AgentHarness
   anthropicApiKey: string
+  /** Required for `harness: "opencode"`; never forwarded on the Claude path. */
+  gatewayApiKey?: string
   connectors: ConnectorDefinition[]
   /**
    * The scope each connected grant was issued with, by slug. It selects the
@@ -195,7 +210,9 @@ function buildAgentEnv(opts: {
   docs?: boolean
 }): Record<string, string> {
   return {
-    ANTHROPIC_API_KEY: opts.anthropicApiKey,
+    ...(opts.harness === "opencode"
+      ? { AI_GATEWAY_API_KEY: opts.gatewayApiKey ?? "", AGENT_MODEL: opencodeModel(process.env.AGENT_OPENCODE_MODEL) }
+      : { ANTHROPIC_API_KEY: opts.anthropicApiKey }),
     MCP_BASE_URL: opts.mcpBaseUrl,
     MCP_TOKEN: opts.mcpToken,
     AGENT_PROMPT: opts.prompt,
@@ -407,10 +424,17 @@ export async function POST(request: NextRequest) {
   // truthiness check. Either would be forwarded into the sandbox as a credential
   // and only fail after a sandbox boot and an MCP key mint, as an opaque
   // authentication error from the Agent SDK. Reject it here, where it is free.
+  const harness = resolveAgentHarness(process.env.AGENT_HARNESS)
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY
-  if (!anthropicApiKey?.trim()) {
+  if (harness === "claude" && !anthropicApiKey?.trim()) {
     await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
     return new Response("ANTHROPIC_API_KEY is not configured on this deployment.", { status: 500 })
+  }
+  // opencode needs only the gateway credential; the Anthropic key is not forwarded to it.
+  const gatewayApiKey = harness === "opencode" ? await resolveGatewayCredential(process.env) : undefined
+  if (harness === "opencode" && !gatewayApiKey) {
+    await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
+    return new Response("No AI Gateway credential available (set AI_GATEWAY_API_KEY, or enable Vercel OIDC) for AGENT_HARNESS=opencode.", { status: 500 })
   }
 
   // Detached or synchronous? Decided here, before the claim, because the claim's
@@ -488,9 +512,10 @@ export async function POST(request: NextRequest) {
   // it: they are machine-driven, scoped to a claim, and must stay reproducible.
   // Every failure inside planAgentSession degrades to `enabled: false`, i.e. the
   // text prompt above — the turn is never worse off than before this feature.
+  // A stored session from the other harness is not resumed (planAgentSession checks the tag).
   const sessionPlan = interviewClaim?.claimed
     ? ({ enabled: false } as const)
-    : await planAgentSession({ prisma, conversationId: conversationIdResolved, workspaceId, currentMessageId: savedMessage.id, attribution })
+    : await planAgentSession({ prisma, conversationId: conversationIdResolved, workspaceId, currentMessageId: savedMessage.id, attribution, harness })
   const sessionFiles: { path: string; content: Buffer }[] = []
   let turnPrompt = prompt
   let sessionEnv: { sessionId: string; mode: "new" | "resume" } | undefined
@@ -542,8 +567,8 @@ export async function POST(request: NextRequest) {
   const connectors = connectorSlugs
     .map(slug => connectorDefinition(slug))
     .filter((definition): definition is NonNullable<typeof definition> => definition !== null)
-  const entryScript = readEntryScript()
-  const entryModules = readEntryModules()
+  const entryScript = readEntryScript(harness)
+  const entryModules = readEntryModules(harness)
 
   // Hoisted above both paths: the MCP key's scope, the run's `claimId`, and the
   // synchronous path's audit redaction all key off the same claim.
@@ -616,7 +641,8 @@ export async function POST(request: NextRequest) {
       // finishes, so the manifest is what lets the sandbox's own post-turn call to
       // /api/internal/agent/runs/:runId/docs be reconciled without any server-side
       // baseline storage. Skipped for claim-scoped runs (see buildAgentEnv).
-      const docMaterial = scope ? undefined : await materializeDocTree(workspaceId)
+      // opencode has no file tools, so it gets no materialized tree (docs stay reachable through the MCP tools).
+      const docMaterial = scope || harness === "opencode" ? undefined : await materializeDocTree(workspaceId)
       const manifestFiles = docMaterial
         ? [{ path: DOC_MANIFEST_FILE, content: JSON.stringify(signDocManifest(run.id, workspaceId, docMaterial.baseline)) }]
         : []
@@ -626,7 +652,8 @@ export async function POST(request: NextRequest) {
         ...(docMaterial?.files ?? []),
         ...manifestFiles,
         ...sessionFiles,
-        ...preparedPacks.files,
+        // Pack plugin dirs are Claude SDK plugins; opencode gets pack skills via the system prompt only.
+        ...(harness === "opencode" ? [] : preparedPacks.files),
       ])
       // Never awaited, by design. `timeoutMs` is enforced sandbox-side, so the
       // command is bounded whether or not anyone is listening.
@@ -634,7 +661,9 @@ export async function POST(request: NextRequest) {
         cmd: "node",
         args: ["entry.ts"],
         env: buildAgentEnv({
-          anthropicApiKey,
+          harness,
+          anthropicApiKey: anthropicApiKey ?? "",
+          gatewayApiKey,
           connectors,
           connectorScopes,
           mcpBaseUrl,
@@ -722,10 +751,10 @@ export async function POST(request: NextRequest) {
         // against reflects exactly what the agent was shown, not a state a
         // concurrent human edit could have already moved past. Not for
         // claim-scoped runs (see buildAgentEnv).
-        const docMaterial = scope ? undefined : await step(() => materializeDocTree(workspaceId))
+        const docMaterial = scope || harness === "opencode" ? undefined : await step(() => materializeDocTree(workspaceId))
         baseline = docMaterial?.baseline ?? []
 
-        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, ...entryModules, ...(docMaterial?.files ?? []), ...sessionFiles, ...preparedPacks.files]))
+        await step(() => sandbox!.writeFiles([{ path: "entry.ts", content: entryScript }, ...entryModules, ...(docMaterial?.files ?? []), ...sessionFiles, ...(harness === "opencode" ? [] : preparedPacks.files)]))
         sse("status", { phase: "running" })
 
         const run = await step(() => sandbox!.runCommand({
@@ -735,7 +764,9 @@ export async function POST(request: NextRequest) {
           // the callback channel entirely and stdout is its only product, which is
           // exactly what this path drains below.
           env: buildAgentEnv({
-            anthropicApiKey,
+            harness,
+            anthropicApiKey: anthropicApiKey ?? "",
+            gatewayApiKey,
             connectors,
             connectorScopes,
             mcpBaseUrl,
@@ -859,7 +890,7 @@ export async function POST(request: NextRequest) {
             conversationId: conversationIdResolved,
             role: "assistant",
             content: assistantText ?? "",
-            model: "claude-sonnet-5",
+            model: harness === "opencode" ? opencodeModel(process.env.AGENT_OPENCODE_MODEL) : "claude-sonnet-5",
             inputTokens: usage?.usage?.input_tokens ?? null,
             outputTokens: usage?.usage?.output_tokens ?? null,
             numTurns: usage?.numTurns ?? null,
@@ -890,6 +921,7 @@ export async function POST(request: NextRequest) {
                 sessionId: endedSessionId,
                 throughMessageId: savedMessage.id,
                 bytes,
+                harness,
               })
             }
           } catch (error) {

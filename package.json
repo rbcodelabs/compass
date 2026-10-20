@@ -118,6 +118,7 @@
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.224",
     "@aws/aurora-dsql-prisma-tools": "^0.1.0",
+    "@opencode-ai/sdk": "1.19.3",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",

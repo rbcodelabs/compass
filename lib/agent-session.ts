@@ -69,11 +69,23 @@ export function resetAgentSessionsAvailabilityCache() {
   availabilityCache = null
 }
 
-export function agentSessionBlobKey(workspaceId: string, conversationId: string): string {
+/**
+ * Which agent harness wrote a stored transcript. Transcripts are NOT portable between
+ * harnesses (Claude SessionStore JSONL vs `opencode export` JSON), so the tag travels in
+ * the blob key, which needs no schema change: Claude keys are exactly what they always
+ * were, opencode keys carry an `.opencode` infix.
+ */
+export type SessionHarness = "claude" | "opencode"
+
+export function agentSessionBlobKey(workspaceId: string, conversationId: string, harness: SessionHarness = "claude"): string {
   if (!isSessionUuid(workspaceId) || !isSessionUuid(conversationId)) throw new Error("Invalid agent session scope")
   // A fresh object per revision: the pointer swap is the commit, so a half-written or
   // losing upload can never be observed under the key a reader is following.
-  return `agent-sessions/${workspaceId}/${conversationId}/${randomUUID()}.jsonl.gz`
+  return `agent-sessions/${workspaceId}/${conversationId}/${randomUUID()}${harness === "opencode" ? ".opencode" : ""}.jsonl.gz`
+}
+
+export function harnessOfSessionBlobKey(blobKey: string): SessionHarness {
+  return blobKey.endsWith(".opencode.jsonl.gz") ? "opencode" : "claude"
 }
 
 /** True for a gzip stream of a plausible size. Content is validated by the sandbox on load. */
@@ -105,11 +117,14 @@ export async function planAgentSession({
   currentMessageId,
   storage,
   attribution,
+  harness = "claude",
 }: {
   prisma: AppPrismaClient
   conversationId: string
   workspaceId: string
   currentMessageId: string
+  /** The harness that will run this turn; a stored session from another harness is not resumed. */
+  harness?: SessionHarness
   storage?: () => ArtifactStorage
   /** When shared, the gap is labelled by sender. Only then is `author_user_id` selected. */
   attribution?: ConversationAttribution
@@ -123,6 +138,9 @@ export async function planAgentSession({
     const pointer = await prisma.agentSession.findUnique({ where: { conversationId } })
     const fresh: AgentSessionPlan = { enabled: true, sessionId: randomUUID(), resume: null }
     if (!pointer || pointer.workspaceId !== workspaceId) return fresh
+    // Not portable across harnesses: start a new session (full text replay); the commit at
+    // the end of this turn replaces the pointer with this harness's transcript.
+    if (harnessOfSessionBlobKey(pointer.blobKey) !== harness) return fresh
 
     const through = await prisma.agentMessage.findFirst({
       where: { id: pointer.throughMessageId, conversationId },
@@ -214,6 +232,7 @@ export async function commitAgentSession({
   throughMessageId,
   bytes,
   storage,
+  harness = "claude",
 }: {
   prisma: AppPrismaClient
   conversationId: string
@@ -221,6 +240,7 @@ export async function commitAgentSession({
   sessionId: string
   throughMessageId: string
   bytes: Uint8Array
+  harness?: SessionHarness
   storage?: () => ArtifactStorage
 }): Promise<CommitResult> {
   if (!isSessionUuid(sessionId) || !looksLikeSessionBlob(bytes)) return { committed: false, reason: "INVALID" }
@@ -232,7 +252,7 @@ export async function commitAgentSession({
   })
   if (!through) return { committed: false, reason: "INVALID" }
 
-  const blobKey = agentSessionBlobKey(workspaceId, conversationId)
+  const blobKey = agentSessionBlobKey(workspaceId, conversationId, harness)
   await blobs.put(blobKey, bytes, "application/gzip")
   const discard = () => blobs.del(blobKey).catch((error) => log("could not delete an unused transcript", error))
 

@@ -553,7 +553,7 @@ Deleting an Objective removes every link that names it, deleting a Key Result re
 | Tool | Description |
 |---|---|
 | `list_experiments` | Fetch experiments with optional status, squad, logged-result-presence, `updatedSince`, and recorded `endBefore` filters; summaries include dates, timestamps, result count/latest-result time, and stable Assumption/Solution/Opportunity IDs |
-| `get_experiment` | Return full details for a single experiment: hypothesis, method, kill condition, linked assumption, all logged results, and conclusion |
+| `get_experiment` | Return full details for a single experiment: hypothesis, method, kill condition, linked assumption, all logged results, conclusion, and `linkedStudies` (`{ id, name, studyType, status }`, from `EXPERIMENT_INFORMED_BY_STUDY` links; omitted when Research Capture is off or for scoped research contexts) |
 | `create_experiment` | Create a new experiment with hypothesis and method (starts in DESIGNING status) |
 | `log_experiment_result` | Record an observation or data point for a running experiment |
 | `conclude_experiment` | Conclude an experiment with PROCEED, KILL, ITERATE, or NOT_PURSUED (deliberately never run — e.g. the feature already shipped); automatically updates the linked Assumption's status (PROCEED → VALIDATED, KILL → INVALIDATED, ITERATE → UNTESTED, NOT_PURSUED → UNTESTED). NOT_PURSUED requires a `reason` and lands on its own terminal status distinct from KILLED, so a deliberate non-pursuit is never mistaken for an evidence-based kill |
@@ -768,7 +768,7 @@ Research tools use the same validation, protocol-locking and link transactions a
 | `generate_research_guide` | Draft 5–8 editable questions or usability tasks from a goal, study type and duration; does not create a study. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
 | `create_research_study` | Create a study with a reviewed guide; defaults to ACTIVE and returns its new participant link once, or pass `status: "DRAFT"` to stage it — protocol fields stay editable — with no link issued. For a guided usability test, accepts an optional `artifactId` (Compass Artifact target) as an alternative to `appUrl` |
 | `list_research_studies` | Page through study settings and session counts in one workspace; no transcripts or participant identities |
-| `get_research_study` | Read one study’s settings, guide and session count in its declared workspace |
+| `get_research_study` | Read one study’s settings, guide and session count in its declared workspace, plus `linkedExperiments` (`{ id, title, status }`; omitted for scoped PM-interview and synthesis contexts) |
 | `update_research_study` | Update the name and supplied settings; omitted protocol fields are preserved, and protocol changes are locked after the first session |
 | `activate_research_study` | Activate a draft or closed study and return a fresh participant link once |
 | `close_research_study` | Close an active study and revoke PRIMARY participant links |

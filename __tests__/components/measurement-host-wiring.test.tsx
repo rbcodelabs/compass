@@ -25,6 +25,7 @@ vi.mock("@/components/tasks/linked-tasks-section", () => ({ LinkedTasksSection: 
 vi.mock("@/components/panels/launch-tier-picker", () => ({ LaunchTierPicker: () => null }));
 vi.mock("@/components/panels/launch-checklist", () => ({ LaunchChecklist: () => null }));
 vi.mock("@/components/panels/positioning-brief-row", () => ({ PositioningBriefRow: () => null }));
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/links/actions", () => ({ changeEntityLink: vi.fn(), readEntityLinks: vi.fn() }));
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({ archiveItem: vi.fn() }));
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/okrs/actions", () => ({ listKeyResultMoveTargets: vi.fn(), moveKeyResult: vi.fn() }));
 vi.mock("@/components/custom-fields/custom-fields-panel", () => ({ CustomFieldsPanel: () => null }));
