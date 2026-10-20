@@ -11,6 +11,12 @@ const prisma = {
 }
 
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
+// The legacy write and its entity_links mirror share ONE transaction (ADR phase 6); the mirror has its own tests (links/artifact-link-mirror.test.ts).
+vi.mock("@/lib/workspace-updates-capture", () => ({
+  withWorkspaceUpdates: async (client: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(client, false),
+}))
+vi.mock("@/lib/links/legacy-mirror", () => ({ mirrorArtifactLink: vi.fn(), unmirrorArtifactLink: vi.fn() }))
+vi.mock("@/lib/links/service", () => ({ deleteLinksForEntity: vi.fn() }))
 
 import {
   MAX_ARTIFACT_HTML_BYTES,
@@ -237,7 +243,7 @@ describe("artifact lifecycle", () => {
     prisma.artifact.findFirst.mockResolvedValue({ id: "art-1", workspaceId: "ws-1" })
     prisma.solution.findFirst.mockResolvedValue({ id: "sol-1" })
     prisma.artifactLink.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "link-winner" })
-    prisma.artifactLink.create.mockRejectedValue(Object.assign(new Error("unique"), { code: "P2002" }))
+    prisma.artifactLink.create.mockRejectedValue(Object.assign(new Error("Unique constraint failed on artifact_links"), { code: "P2002" }))
     await expect(linkArtifactToSolution({ artifactId: "art-1", solutionId: "sol-1", workspaceId: "ws-1" }))
       .resolves.toEqual(expect.objectContaining({ id: "link-winner", created: false }))
   })

@@ -440,6 +440,7 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   // INSERT INTO ${schema}.${WORKSPACE_SEQUENCES_TABLE}: the work item counter (see DYNAMIC_INSERT_ALLOWED); counted so a second one is noticed.
   "lib/migrations/work-item-ids-backfill.ts": 1,
   "__tests__/entity-links-opportunity-backfill.integration.test.ts": 1, // legacy objective fixtures (one with no workspace) for the 095 backfill
+  "__tests__/entity-links-artifact-backfill.integration.test.ts": 1, // legacy solution fixtures (one with no workspace) for the 096 backfill
   "__tests__/work-item-ids-backfill.integration.test.ts": 3, // legacy objective/solution/task fixtures for the 093 backfill; one objective deliberately has no workspace
   "e2e/functional/fixtures/seed-e2e.ts": 2,
   "e2e/functional/specs/link-authoring.spec.ts": 2, // one objective and one solution for the synthetic workspace, each listing workspace_id
@@ -460,6 +461,7 @@ const INTENTIONAL_NULL_CREATES: Record<string, string> = {
 /** Raw inserts that deliberately omit workspace_id (they simulate rows written by pre-068 code). Same marker rule. */
 const INTENTIONAL_NULL_RAW_INSERTS: Record<string, string> = {
   "__tests__/entity-links-opportunity-backfill.integration.test.ts": "seeds a legacy objective with no workspace so 095 has a crossWorkspace orphan to quarantine and report",
+  "__tests__/entity-links-artifact-backfill.integration.test.ts": "seeds a legacy solution with no workspace so 096 has a crossWorkspace orphan to quarantine and report",
   "__tests__/work-item-ids-backfill.integration.test.ts": "seeds a legacy objective with no workspace so the 093 postcondition has a row to refuse",
   "__tests__/workspace-id-on-solution-objective-migration.integration.test.ts": "simulates pre-068 rows and late rows inserted by old instances so the backfill has something to fill",
 };

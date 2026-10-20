@@ -267,7 +267,9 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   await prisma.feedbackSource.deleteMany({ where: { workspaceId } });
 
   // 12. Artifacts: links → current pointer → revisions → stable identity,
-  // followed by best-effort private Blob cleanup.
+  // followed by best-effort private Blob cleanup. The entity_links mirror of artifact_links (ADR phase 6) is swept by endpoint first, so
+  // rows whose workspaceId drifted go too; the stamped ones are already gone with step 0.
+  await deleteLinksForEntity(prisma, "ARTIFACT", await ids(prisma.artifact.findMany({ where: { workspaceId }, select: { id: true } })));
   await deleteWorkspaceArtifacts(prisma, workspaceId, getArtifactStorage(), !options.skipBlobCleanup);
 
   // 13. Workspace-scoped singletons (both Restrict toward Workspace).

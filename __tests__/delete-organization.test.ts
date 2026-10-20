@@ -64,7 +64,7 @@ const mockDecisionEvidenceRef = { deleteMany: vi.fn() };
 const mockDecisionRecord = { deleteMany: vi.fn() };
 const mockReviewOption = { deleteMany: vi.fn() };
 const mockReviewRevision = { deleteMany: vi.fn() };
-const mockReviewRequest = { updateMany: vi.fn(), deleteMany: vi.fn() };
+const mockReviewRequest = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
 const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
@@ -215,6 +215,7 @@ function seedNonEmptyFindMany() {
   mockKeyResult.findMany.mockResolvedValue([{ id: "kr-1" }]);
   mockScoringModel.findMany.mockResolvedValue([{ id: "sm-1" }]);
   mockArtifact.findMany.mockResolvedValue([{ id: "art-1" }]);
+  mockReviewRequest.findMany.mockResolvedValue([{ id: "rr-1" }]);
   mockArtifactRevision.findMany.mockResolvedValue([{ blobPathname: null }]);
   mockFeedbackSourceToken.findMany.mockResolvedValue([{ id: "token-1" }]);
   mockResearchStudy.findMany.mockResolvedValue([{ id: "study-1" }]);
@@ -474,6 +475,15 @@ describe("deleteOrganization", () => {
     expect(mockEntityLink.findMany.mock.invocationCallOrder[0]).toBeLessThan(mockOpportunity.deleteMany.mock.invocationCallOrder[0]);
     expect(orderOf(sweptFor("RESEARCH_STUDY"))).toBeLessThan(mockResearchStudy.deleteMany.mock.invocationCallOrder[0]);
     expect(orderOf(sweptFor("EXPERIMENT"))).toBeLessThan(mockExperiment.deleteMany.mock.invocationCallOrder[0]);
+    // ArtifactLink mirror (ADR phase 6): swept by endpoint before the artifacts and the review requests go.
+    expect(mockEntityLink.findMany).toHaveBeenCalledWith({
+      where: { OR: [{ fromType: "ARTIFACT", fromId: { in: ["art-1"] } }, { toType: "ARTIFACT", toId: { in: ["art-1"] } }] }, ...drain,
+    });
+    expect(mockEntityLink.findMany).toHaveBeenCalledWith({
+      where: { OR: [{ fromType: "REVIEW_REQUEST", fromId: { in: ["rr-1"] } }, { toType: "REVIEW_REQUEST", toId: { in: ["rr-1"] } }] }, ...drain,
+    });
+    expect(orderOf(sweptFor("ARTIFACT"))).toBeLessThan(mockArtifact.deleteMany.mock.invocationCallOrder[0]);
+    expect(orderOf((call) => JSON.stringify(call[0]).includes('"fromType":"REVIEW_REQUEST"'))).toBeLessThan(mockReviewRequest.deleteMany.mock.invocationCallOrder[0]);
 
     // ── Tasks / TaskLinks ──
     expect(mockTaskLink.deleteMany).toHaveBeenCalledWith({ where: { taskId: { in: ["task-1"] } } });

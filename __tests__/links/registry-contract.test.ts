@@ -137,6 +137,9 @@ describe("delete paths and the workspace cascade cover every type", () => {
     research: read("lib/research-workspace-cleanup.ts"),
     // The legacy-mirrored Solution and Key Result sweeps live in the typed-link drains the UI, MCP and cascade deletes call.
     typedLinks: read("lib/typed-links.ts"),
+    // Artifact links (phase 6): a single Artifact delete, and the workspace Decision teardown for the Review request end.
+    artifacts: read("lib/artifacts.ts"),
+    decisionData: read("lib/delete-workspace-decision-data.ts"),
   };
   const all = Object.values(sources).join("\n");
 

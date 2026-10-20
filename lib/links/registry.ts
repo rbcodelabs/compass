@@ -277,8 +277,77 @@ const opportunityTargetsKeyResult: LinkTypeDef = {
   compat: { mcpTools: ["link_opportunity_to_kr"], restOps: ["updateOpportunity"] },
 }
 
+// ── ARTIFACT_ATTACHED_TO_SOLUTION / ARTIFACT_SUPPORTS_DECISION (phase 6: mirror of the legacy artifact_links table) ──
+
+/** Outside production the mirror is on so tests and E2E cover it; production needs COMPASS_ENTITY_LINKS_ARTIFACT_MIRROR=1. */
+export function isArtifactLinkMirrorEnabled(): boolean {
+  if (process.env.NODE_ENV !== "production") return process.env.COMPASS_ENTITY_LINKS_ARTIFACT_MIRROR !== "0"
+  return process.env.COMPASS_ENTITY_LINKS_ARTIFACT_MIRROR === "1"
+}
+
+/** The explicit-only backfill for both Artifact types (lib/migrations/entity-links-artifact-backfill.ts). */
+export const ARTIFACT_LINKS_BACKFILL_MIGRATION = "096_entity_links_backfill_artifact"
+
+/**
+ * An Artifact attached to a Solution (artifact_links.linked_type = SOLUTION). The legacy table stays the source of truth and every
+ * read stays on it; lib/artifacts.ts mirrors each link and unlink into entity_links in the same transaction while the flag is on
+ * (lib/links/legacy-mirror.ts). Same workspace, many-to-many, idempotent, matching the legacy rules. Migration 096 backfills the
+ * existing rows with their source, actor and created_at.
+ */
+const artifactAttachedToSolution: LinkTypeDef = {
+  key: "ARTIFACT_ATTACHED_TO_SOLUTION",
+  from: "ARTIFACT",
+  to: "SOLUTION",
+  direction: "directed",
+  cardinality: { from: "many", to: "many" },
+  labels: { forward: "Attached to", inverse: "Artifacts" },
+  duplicatePolicy: "idempotent",
+  authorize: defaultAuthorize,
+  isEnabled: isArtifactLinkMirrorEnabled,
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {},
+  restrictedContexts: "deny",
+  legacy: { legacyModule: "lib/artifacts.ts", backfillMigration: ARTIFACT_LINKS_BACKFILL_MIGRATION, mode: "mirror" },
+  compat: { mcpTools: ["link_artifact_to_solution", "unlink_artifact_from_solution"], restOps: ["linkArtifactSolution", "unlinkArtifactSolution"] },
+}
+
+/**
+ * An Artifact supporting a Decision (artifact_links.linked_type = REVIEW_REQUEST). Per ADR-0010 this is LIVE supporting material, not
+ * frozen review evidence: the link points at the Artifact itself, never at a revision, and says nothing about which revision any approval
+ * covered. Only TRACKED_DECISION review requests take one (every other gate type is reported as not found, as in the legacy writer).
+ * The legacy writer additionally refuses a NEW link for an archived Artifact while keeping existing links replayable; that rule stays in
+ * lib/artifacts.ts, because this hook also runs for the idempotent replay of an existing legacy link.
+ */
+const artifactSupportsDecision: LinkTypeDef = {
+  key: "ARTIFACT_SUPPORTS_DECISION",
+  from: "ARTIFACT",
+  to: "REVIEW_REQUEST",
+  direction: "directed",
+  cardinality: { from: "many", to: "many" },
+  labels: { forward: "Supports decision", inverse: "Supporting artifacts" },
+  duplicatePolicy: "idempotent",
+  authorize: defaultAuthorize,
+  isEnabled: isArtifactLinkMirrorEnabled,
+  async eligible({ tx, workspaceId, to }) {
+    const request = await tx.reviewRequest.findFirst({ where: { id: to.id, workspaceId, gateType: "TRACKED_DECISION" }, select: { id: true } })
+    if (!request) throw new TypedLinkError("Review request not found in this workspace.")
+  },
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {},
+  restrictedContexts: "deny",
+  legacy: { legacyModule: "lib/artifacts.ts", backfillMigration: ARTIFACT_LINKS_BACKFILL_MIGRATION, mode: "mirror" },
+  compat: { mcpTools: ["link_artifact_to_decision", "unlink_artifact_from_decision"], restOps: ["linkArtifactDecision", "unlinkArtifactDecision"] },
+}
+
 /** Append-only. Add one entry per type; never edit or reuse a key. */
-const DEFINITIONS: readonly LinkTypeDef[] = [experimentInformedByStudy, solutionTargetsKeyResult, opportunityTargetsObjective, opportunityTargetsKeyResult]
+const DEFINITIONS: readonly LinkTypeDef[] = [
+  experimentInformedByStudy,
+  solutionTargetsKeyResult,
+  opportunityTargetsObjective,
+  opportunityTargetsKeyResult,
+  artifactAttachedToSolution,
+  artifactSupportsDecision,
+]
 
 export const LINK_TYPES: Readonly<Record<string, LinkTypeDef>> = Object.freeze(
   Object.fromEntries(DEFINITIONS.map((def) => [def.key, def])),

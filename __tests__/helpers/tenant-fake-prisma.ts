@@ -150,11 +150,34 @@ export function createTenantFakePrisma() {
     { id: "study-b", workspaceId: WS_B.id, name: "B interviews", studyType: "CUSTOMER_INTERVIEW", status: "ACTIVE", updatedAt: new Date(1) },
   ];
   const entityLinks: Graph[] = [];
+  // Artifact links (ADR phase 6): artifacts, review requests (only rr-a is a TRACKED_DECISION in workspace A), their revisions and the legacy
+  // artifact_links rows. The pair (artifactId, linkedId) is unique like the real (artifact_id, linked_type, linked_id) index.
+  const artifacts: Graph[] = [
+    { id: "art-a", workspaceId: WS_A.id, title: "A artifact", status: "ACTIVE", updatedAt: new Date(1) },
+    { id: "art-a2", workspaceId: WS_A.id, title: "A artifact 2", status: "ACTIVE", updatedAt: new Date(1) },
+    { id: "art-a-archived", workspaceId: WS_A.id, title: "A archived artifact", status: "ARCHIVED", updatedAt: new Date(1) },
+    { id: "art-b", workspaceId: WS_B.id, title: "B artifact", status: "ACTIVE", updatedAt: new Date(1) },
+  ];
+  const reviewRevisions: Graph[] = [
+    { id: "rev-a", title: "A decision" },
+    { id: "rev-a-system", title: "A system review" },
+    { id: "rev-b", title: "B decision" },
+  ];
+  const reviewRequests: Graph[] = [
+    { id: "rr-a", workspaceId: WS_A.id, gateType: "TRACKED_DECISION", currentRevisionId: "rev-a" },
+    { id: "rr-a-system", workspaceId: WS_A.id, gateType: "PRODUCT_LAUNCH", currentRevisionId: "rev-a-system" },
+    { id: "rr-b", workspaceId: WS_B.id, gateType: "TRACKED_DECISION", currentRevisionId: "rev-b" },
+  ];
+  const artifactLinks: Graph[] = [];
   const workspaceRows = workspaces as unknown as Graph[];
   const tables: Record<string, Graph[]> = {
     opportunityObjectiveLink: opportunityObjectiveLinks,
     solutionKeyResultLink: solutionKeyResultLinks,
     entityLink: entityLinks,
+    artifact: artifacts,
+    reviewRequest: reviewRequests,
+    reviewRevision: reviewRevisions,
+    artifactLink: artifactLinks,
     experiment: experiments,
     researchStudy: researchStudies,
     workspace: workspaceRows,
@@ -176,6 +199,7 @@ export function createTenantFakePrisma() {
     keyResult: { objective: { model: "objective", fk: "objectiveId" } },
     assumption: { solution: { model: "solution", fk: "solutionId" } },
     solutionComment: { solution: { model: "solution", fk: "solutionId" } },
+    reviewRequest: { currentRevision: { model: "reviewRevision", fk: "currentRevisionId" } },
   };
   const relatedRow = (model: string, row: Graph, relation: string): { model: string; row: Graph | null } | null => {
     const rel = relations[model]?.[relation];
@@ -258,8 +282,9 @@ export function createTenantFakePrisma() {
     opportunityObjectiveLink: ["opportunityId", "objectiveId"],
     solutionKeyResultLink: ["solutionId", "keyResultId"],
     entityLink: ["fromId", "toId"],
+    artifactLink: ["artifactId", "linkedId"],
   };
-  const PAIR_MODEL_NAMES: Record<string, string> = { opportunityObjectiveLink: "OpportunityObjectiveLink", solutionKeyResultLink: "SolutionKeyResultLink", entityLink: "EntityLink" };
+  const PAIR_MODEL_NAMES: Record<string, string> = { opportunityObjectiveLink: "OpportunityObjectiveLink", solutionKeyResultLink: "SolutionKeyResultLink", entityLink: "EntityLink", artifactLink: "ArtifactLink" };
   const writes: string[] = [];
   const delegate = (model: string) => ({
     findFirst: async (args: { where?: Where; select?: Record<string, unknown>; include?: Record<string, unknown> } = {}) => {
@@ -460,6 +485,9 @@ export function createTenantFakePrisma() {
     opportunityObjectiveLink: delegate("opportunityObjectiveLink"),
     solutionKeyResultLink: delegate("solutionKeyResultLink"),
     entityLink: delegate("entityLink"),
+    artifact: delegate("artifact"),
+    reviewRequest: delegate("reviewRequest"),
+    artifactLink: delegate("artifactLink"),
     experiment: delegate("experiment"),
     researchStudy: delegate("researchStudy"),
     $transaction: async (work: (tx: unknown) => unknown) => work(client),
@@ -487,7 +515,7 @@ export function createTenantFakePrisma() {
       const workspace = workspaces.find((w) => w.id === workspaceId);
       if (workspace && !workspace.members.includes(userId)) workspace.members.push(userId);
     },
-    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks, workspaces, experiments, researchStudies, entityLinks },
+    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks, workspaces, experiments, researchStudies, entityLinks, artifacts, reviewRequests, artifactLinks },
     /** Snapshot of every feedback row, for before/after "nothing changed" assertions. */
     snapshotFeedback: () => JSON.parse(JSON.stringify(feedback)) as unknown,
   };
