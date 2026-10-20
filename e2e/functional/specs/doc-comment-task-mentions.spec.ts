@@ -471,7 +471,7 @@ test.describe("Doc comment @mention -> task", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   });
 
-  for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }]) {
+  for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }, { width: 667, height: 375 }, { width: 360, height: 420 }, { width: 1280, height: 720 }]) {
     test(`phone ${viewport.width}x${viewport.height}: with two mentions (and a third picker open) the submit button is reachable by scrolling the popover`, async ({ page, base }) => {
       test.setTimeout(120_000);
       const longName = `Wolfeschlegelsteinhausenbergerdorff ${suffix}`.padEnd(70, "x");
@@ -490,7 +490,9 @@ test.describe("Doc comment @mention -> task", () => {
 
         // The popover is bounded to the viewport and scrolls; the button is reached by scrolling it.
         const metrics = await popover.evaluate((el) => ({ maxH: getComputedStyle(el).maxHeight, overflowY: getComputedStyle(el).overflowY, top: el.getBoundingClientRect().top, client: el.clientHeight, scroll: el.scrollHeight, bottom: el.getBoundingClientRect().bottom, vh: window.innerHeight }));
-        expect(metrics.bottom, `popover stays above the bottom nav: ${JSON.stringify(metrics)}`).toBeLessThanOrEqual(metrics.vh - 56);
+        // Whole popover inside the viewport, whatever the width or height.
+        expect(metrics.top, `popover top inside the viewport: ${JSON.stringify(metrics)}`).toBeGreaterThanOrEqual(0);
+        expect(metrics.bottom, `popover bottom inside the viewport: ${JSON.stringify(metrics)}`).toBeLessThanOrEqual(metrics.vh);
         await submit.scrollIntoViewIfNeeded();
         const hit = async () => submit.evaluate((el) => {
           const r = el.getBoundingClientRect();
@@ -499,7 +501,10 @@ test.describe("Doc comment @mention -> task", () => {
         });
         let reach = await hit();
         expect(reach.reachable, `submit button is the element under its own centre (not covered): ${JSON.stringify(reach)}`).toBe(true);
-        expect(reach.bottom, "button sits above the bottom nav").toBeLessThanOrEqual(reach.vh - 56);
+        expect(reach.bottom, "button inside the viewport").toBeLessThanOrEqual(reach.vh);
+        // The action row is pinned: it did not move when the middle region scrolled.
+        const pinned = await page.getByTestId("composer-actions").boundingBox();
+        expect(pinned!.y + pinned!.height).toBeLessThanOrEqual(reach.vh);
         // The 70-character name in the toggle label wraps inside the popover.
         const label = page.getByText(/Assign as task to @/);
         const lb = (await label.boundingBox())!;
@@ -526,6 +531,33 @@ test.describe("Doc comment @mention -> task", () => {
       }
     });
   }
+
+  test("rotating or resizing while the popover is open keeps it inside the screen with the action row visible", async ({ page, base }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openDocWithSelection(page, base, `Rotate ${suffix}`, "ROTATE");
+    const editor = await startComment(page);
+    await editor.click();
+    await page.keyboard.type("hi @Quinn");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type(" and @");
+    for (const size of [{ width: 667, height: 375 }, { width: 844, height: 390 }, { width: 360, height: 420 }, { width: 390, height: 844 }, { width: 1024, height: 400 }]) {
+      await page.setViewportSize(size);
+      await expect(async () => {
+        const g = await page.evaluate(() => {
+          const pop = document.querySelector('[data-testid="new-comment-popover"]')!.getBoundingClientRect();
+          const actions = document.querySelector('[data-testid="composer-actions"]')!.getBoundingClientRect();
+          return { top: pop.top, bottom: pop.bottom, left: pop.left, right: pop.right, actionsBottom: actions.bottom, actionsTop: actions.top, vw: window.innerWidth, vh: window.innerHeight };
+        });
+        expect(g.top).toBeGreaterThanOrEqual(0);
+        expect(g.bottom).toBeLessThanOrEqual(g.vh);
+        expect(g.left).toBeGreaterThanOrEqual(0);
+        expect(g.right).toBeLessThanOrEqual(g.vw);
+        expect(g.actionsTop).toBeGreaterThanOrEqual(0);
+        expect(g.actionsBottom).toBeLessThanOrEqual(g.vh);
+      }).toPass({ timeout: 5000 });
+    }
+  });
 
   test("paste uses the native path where the browser allows it, so Ctrl+Z takes a paste back", async ({ page, base, context }) => {
     test.setTimeout(120_000);

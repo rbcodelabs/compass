@@ -496,7 +496,7 @@ test.describe("Re-QA a022c39e", () => {
     await expect(confirm).toContainText(readAgentName);
     await expect(confirm).toContainText("read-only");
     // (d) Cancel keeps the text and returns the buttons.
-    await confirm.getByRole("button", { name: "Cancel" }).click();
+    await page.getByTestId("composer-actions").getByRole("button", { name: "Cancel" }).click(); // pinned action row, outside the scroll region
     await expect(confirm).toBeHidden();
     await expect(page.getByRole("button", { name: "Comment & create task" })).toBeVisible();
     expect((await taskRows(docId)).length, "nothing posted while cancelling").toBe(0);

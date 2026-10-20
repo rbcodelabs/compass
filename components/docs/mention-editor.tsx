@@ -97,6 +97,14 @@ function filterGroup(group: MentionOption[], query: string): MentionOption[] {
     .map(entry => entry.option)
 }
 
+function groupsFor(options: MentionOptions, query: string) {
+  return [
+    { id: "people", title: "People", items: filterGroup(options.people, query) },
+    { id: "agents", title: "Agents", items: filterGroup(options.agents, query) },
+    { id: "outside", title: "Not in this workspace", items: filterGroup(options.outside, query) },
+  ].filter(group => group.items.length > 0)
+}
+
 function HighlightedName({ name, query }: { name: string; query: string }): ReactNode {
   const index = query ? name.toLowerCase().indexOf(query.toLowerCase()) : -1
   if (index < 0) return name
@@ -120,19 +128,21 @@ export function MentionEditor({
   const [query, setQuery] = useState<string | null>(null)
   const [active, setActive] = useState(0)
 
+  // What the keyboard handlers act on, updated synchronously with the DOM. State is one render behind a fast typist
+  // ("@Adv Agent" then Enter in the same tick), so reading it in onKeyDown could miss an open picker and insert a
+  // line break instead of selecting.
+  const liveRef = useRef<{ flat: MentionOption[]; active: number } | null>(null)
+
   const groups = useMemo(() => {
     if (query === null) return []
-    return [
-      { id: "people", title: "People", items: filterGroup(options.people, query) },
-      { id: "agents", title: "Agents", items: filterGroup(options.agents, query) },
-      { id: "outside", title: "Not in this workspace", items: filterGroup(options.outside, query) },
-    ].filter(group => group.items.length > 0)
+    return groupsFor(options, query)
   }, [options, query])
   const flat = useMemo(() => groups.flatMap(group => group.items), [groups])
   const open = query !== null && flat.length > 0
 
   const close = useCallback(() => {
     triggerRef.current = null
+    liveRef.current = null
     setQuery(null)
     setActive(0)
   }, [])
@@ -157,9 +167,12 @@ export function MentionEditor({
     if (!match) return close()
     const start = match.index + match[1].length
     triggerRef.current = { node: anchorNode as Text, start, end: anchorOffset }
-    setQuery(match[2] ?? "")
+    const q = match[2] ?? ""
+    const flatNow = groupsFor(options, q).flatMap(group => group.items)
+    liveRef.current = flatNow.length > 0 ? { flat: flatNow, active: 0 } : null
+    setQuery(q)
     setActive(0)
-  }, [close])
+  }, [close, options])
 
   const select = useCallback((option: MentionOption) => {
     const root = editorRef.current
@@ -207,10 +220,15 @@ export function MentionEditor({
   }, [open, active, listId])
 
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (open) {
-      if (event.key === "ArrowDown") { event.preventDefault(); setActive(i => (i + 1) % flat.length); return }
-      if (event.key === "ArrowUp") { event.preventDefault(); setActive(i => (i - 1 + flat.length) % flat.length); return }
-      if (event.key === "Enter" || event.key === "Tab") { event.preventDefault(); select(flat[active]); return }
+    const live = liveRef.current
+    if (live) {
+      const move = (delta: number) => {
+        live.active = (live.active + delta + live.flat.length) % live.flat.length
+        setActive(live.active)
+      }
+      if (event.key === "ArrowDown") { event.preventDefault(); move(1); return }
+      if (event.key === "ArrowUp") { event.preventDefault(); move(-1); return }
+      if (event.key === "Enter" || event.key === "Tab") { event.preventDefault(); select(live.flat[live.active]); return }
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); return }
     }
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -266,7 +284,9 @@ export function MentionEditor({
     emit()
   }
 
-  let flatIndex = -1
+  // Each option's position in the flat keyboard order, without mutating anything during render.
+  const startOf = new Map<string, number>()
+  groups.reduce((offset, group) => { startOf.set(group.id, offset); return offset + group.items.length }, 0)
   return (
     <div className="relative">
       <div
@@ -312,9 +332,8 @@ export function MentionEditor({
           {groups.map(group => (
             <div key={group.id}>
               <div className="px-2 pb-0.5 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-text-subtle">{group.title}</div>
-              {group.items.map(option => {
-                flatIndex += 1
-                const index = flatIndex
+              {group.items.map((option, itemIndex) => {
+                const index = (startOf.get(group.id) ?? 0) + itemIndex
                 const agent = option.kind === "agent"
                 return (
                   <div
@@ -324,7 +343,7 @@ export function MentionEditor({
                     aria-selected={index === active}
                     data-testid="mention-option"
                     data-mention-name={option.name}
-                    onMouseEnter={() => setActive(index)}
+                    onMouseEnter={() => { if (liveRef.current) liveRef.current.active = index; setActive(index) }}
                     onClick={() => select(option)}
                     className={cn("flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5", index === active && "bg-status-info-surface")}
                   >

@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import { type MarkdownStorage } from "tiptap-markdown";
@@ -161,24 +162,45 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [pendingAnchor, setPendingAnchor] = useState<PendingAnchor | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const commentAnchorRef = useRef<HTMLDivElement>(null);
 
-  // On phones the new-comment popover is bounded to what is left of the screen below it, leaving room for the
-  // bottom nav, and scrolls inside that. Measured rather than calculated in CSS: an ancestor can be the
-  // containing block of a fixed popover, so its real top is not a fixed number.
+  // The new-comment popover is a body-level, viewport-fixed panel (so no ancestor can be its containing block or
+  // clip it) laid out as a flex column: the editor, picker and task fields scroll in the middle while the action
+  // row stays pinned. Its box is kept inside the VISUAL viewport (which shrinks under an on-screen keyboard) at
+  // every width, and recomputed whenever the viewport changes. It sits above the bottom nav (z 45 vs 40).
   useLayoutEffect(() => {
     const el = popoverRef.current;
-    if (!pendingAnchor || !el) return;
-    const fit = () => {
-      if (!window.matchMedia("(max-width: 639px)").matches) {
-        el.style.maxHeight = "";
-        return;
-      }
-      const reserve = 96; // bottom nav plus breathing room
-      el.style.maxHeight = `${Math.max(160, window.innerHeight - el.getBoundingClientRect().top - reserve)}px`;
+    const anchor = commentAnchorRef.current;
+    if (!pendingAnchor || !el || !anchor) return;
+    const place = () => {
+      const vv = window.visualViewport;
+      const vw = vv?.width ?? window.innerWidth;
+      const vh = vv?.height ?? window.innerHeight;
+      const ox = vv?.offsetLeft ?? 0;
+      const oy = vv?.offsetTop ?? 0;
+      const margin = 8;
+      const width = Math.min(352, vw - margin * 2);
+      const rect = anchor.getBoundingClientRect();
+      // Prefer opening under the toolbar button, but never so low that fewer than ~240px remain.
+      const top = Math.max(oy + margin, Math.min(rect.bottom + 4, oy + vh - 240 - margin));
+      const left = Math.min(Math.max(rect.left, ox + margin), ox + vw - width - margin);
+      el.style.top = `${top}px`;
+      el.style.left = `${left}px`;
+      el.style.width = `${width}px`;
+      el.style.maxHeight = `${Math.max(120, oy + vh - top - margin)}px`;
     };
-    fit();
-    window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
+    place();
+    const vv = window.visualViewport;
+    window.addEventListener("resize", place);
+    window.addEventListener("orientationchange", place);
+    vv?.addEventListener("resize", place);
+    vv?.addEventListener("scroll", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("orientationchange", place);
+      vv?.removeEventListener("resize", place);
+      vv?.removeEventListener("scroll", place);
+    };
   }, [pendingAnchor]);
   const [selectionEmpty, setSelectionEmpty] = useState(true);
   const [taskCards, setTaskCards] = useState<Record<string, CommentTaskCardData>>(initialTaskCards);
@@ -592,7 +614,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             overflow-x-auto ancestor, so they're pinned here instead of scrolling. */}
         <div className="w-px h-5 bg-border-default mx-1 shrink-0" />
         {/* Comment on the current selection */}
-        <div className="relative shrink-0">
+        <div className="relative shrink-0" ref={commentAnchorRef}>
           <ToolbarButton
             onClick={handleStartComment}
             disabled={selectionEmpty}
@@ -601,9 +623,10 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             <MessageSquarePlus className="w-4 h-4" />
           </ToolbarButton>
           {pendingAnchor && (
+            <PortalToBody>
             <div
               ref={popoverRef}
-              className="absolute z-20 mt-1 w-[22rem] p-3 bg-surface-card border border-border-default rounded-lg shadow-md max-sm:fixed max-sm:inset-x-3 max-sm:top-44 max-sm:mt-0 max-sm:w-auto max-sm:overflow-y-auto max-sm:overscroll-contain"
+              className="fixed z-[45] flex flex-col p-3 bg-surface-card border border-border-default rounded-lg shadow-md"
               data-testid="new-comment-popover"
               onKeyDown={(e) => {
                 if (e.key === "Escape") setPendingAnchor(null);
@@ -622,6 +645,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
                 onCancel={() => setPendingAnchor(null)}
               />
             </div>
+            </PortalToBody>
           )}
         </div>
         {/* Open comments sidebar */}
@@ -766,6 +790,11 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       />
     </div>
   );
+}
+
+/** Render children into document.body so fixed positioning is always relative to the viewport. */
+function PortalToBody({ children }: { children: React.ReactNode }) {
+  return createPortal(children, document.body);
 }
 
 /** Map open, anchored root comments to the minimal data the highlighter needs. */

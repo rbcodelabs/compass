@@ -143,7 +143,9 @@ export function DocCommentComposer({
   }
 
   return (
-    <div data-testid="doc-comment-composer" className="space-y-2">
+    <div data-testid="doc-comment-composer" className="flex min-h-0 flex-col gap-2">
+      {/* Everything that can grow lives in the scroll region; the action row below it never scrolls away. */}
+      <div className="-mx-0.5 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-0.5" data-testid="composer-scroll">
       {anchorText && !compact && (
         <p className="truncate border-l-[3px] border-status-warning pl-2 text-[11px] text-text-subtle" title={anchorText}>
           Commenting on: “{anchorText}”
@@ -271,17 +273,21 @@ export function DocCommentComposer({
             )}
           </ul>
           <p className="text-xs text-text-subtle">Nothing runs on its own: the agent picks the task up from its queue.</p>
-          <div className="flex gap-2">
-            <Button type="button" size="sm" disabled={busy} onClick={() => void post(true)} data-testid="confirm-agent-assign">Assign to agent</Button>
-            <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setConfirmingFor(null)}>Cancel</Button>
-          </div>
         </div>
       )}
 
       {error && <p role="alert" className="text-xs text-status-danger" data-testid="composer-error">{error}</p>}
+      </div>
+
+      {confirmingAgent && (
+        <div className="flex shrink-0 justify-end gap-2" data-testid="composer-actions">
+          <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setConfirmingFor(null)}>Cancel</Button>
+          <Button type="button" size="sm" disabled={busy} onClick={() => void post(true)} data-testid="confirm-agent-assign">Assign to agent</Button>
+        </div>
+      )}
 
       {!confirmingAgent && (
-        <div className="flex justify-end gap-1.5">
+        <div className="flex shrink-0 justify-end gap-1.5" data-testid="composer-actions">
           {onCancel && (
             <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Cancel</Button>
           )}
