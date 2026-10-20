@@ -25,14 +25,18 @@ export function pillPosition(rect: Box, viewport: { width: number; height: numbe
   return { left, top: Math.max(top, MARGIN) }
 }
 
-const EXCLUDED_ANCESTORS = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="dialog"], [data-selection-pill]'
+// Form fields and editable regions own their own selection behaviour. Dialogs are
+// deliberately NOT excluded: the unpinned detail panel is a modal Sheet, and the
+// pill has to work there. Only the palette itself (data-selection-pill-ignore)
+// and the pill are off limits.
+const EXCLUDED_ANCESTORS = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [data-selection-pill-ignore], [data-selection-pill]'
 
 /**
- * Whether the pill should be offered for this selection. Not inside a form
- * field, an editable region, a dialog (the palette itself included) or the
- * pill; and long enough to mean something.
+ * Whether the pill should be offered for this selection: long enough to mean
+ * something and not inside a form field, an editable region, the palette or the
+ * pill. `anchor` is the element the selection sits in, for context resolution.
  */
-export function isPillSelection(selection: Selection | null, activeElement: Element | null): { text: string; rect: DOMRect } | null {
+export function isPillSelection(selection: Selection | null, activeElement: Element | null): { text: string; rect: DOMRect; anchor: Element } | null {
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null
   const text = selection.toString().trim()
   if (text.length <= PILL_MIN_CHARS) return null
@@ -43,7 +47,7 @@ export function isPillSelection(selection: Selection | null, activeElement: Elem
   if (!element || element.closest(EXCLUDED_ANCESTORS)) return null
   const rect = range.getBoundingClientRect()
   if (rect.width === 0 && rect.height === 0) return null
-  return { text, rect }
+  return { text, rect, anchor: element }
 }
 
 /** A search query (<= 100 chars, cut at a word boundary) derived from selected text. */

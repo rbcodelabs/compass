@@ -87,7 +87,7 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
   const availableTabs = ["solutions", "evidence", "tree", ...(scoringModel ? ["scoring"] : []), ...(customFields.length ? ["details"] : [])];
   const requestedTab = initialTab === "ost" ? "tree" : initialTab;
   return (
-    <div data-slot="opportunity-detail" data-variant={variant} className={`@container min-w-0 break-words pb-8 ${variant === "panel" ? "px-5" : ""}`}>
+    <div data-slot="opportunity-detail" data-variant={variant} data-ctx-entity-type="opportunity" data-ctx-entity-id={opportunityId} data-ctx-entity-title={data.title} className={`@container min-w-0 break-words pb-8 ${variant === "panel" ? "px-5" : ""}`}>
       <div className="flex min-w-0 flex-col gap-5">
         {error && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">{`Could not refresh ${labels.opportunity.lower}. Showing the last loaded details.`}<Button variant="outline" size="sm" onClick={refresh}>Retry refresh</Button></div>}
         <OpportunityHeader opportunity={data} squads={data.squads ?? []} availableKeyResults={data.availableKeyResults ?? []} linkedObjectives={data.linkedObjectives} availableObjectives={data.availableObjectives} revalidatePathStr={detailPath} edit={edit} onChanged={refresh} />

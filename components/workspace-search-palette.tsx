@@ -14,6 +14,12 @@ import { PaletteAskAnswer } from "@/components/palette-ask-answer"
 import { SelectionAskPill } from "@/components/selection-ask-pill"
 import { buildAskText, normalizeSelection, paletteMode } from "@/lib/palette-ask-intent"
 import { similarQuery } from "@/lib/selection-pill"
+import {
+  resolveSelectionContext,
+  selectionChipLabel,
+  selectionSourceLine,
+  type SelectionContext,
+} from "@/lib/selection-context"
 import type { WorkspaceSearchItem, WorkspaceSearchResponse } from "@/lib/workspace-search"
 
 type SearchState = "idle" | "loading" | "ready" | "error"
@@ -46,6 +52,9 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
   const [forceAsk, setForceAsk] = useState(false)
   const [forceSearch, setForceSearch] = useState(false)
   const [selection, setSelection] = useState("")
+  // Which entity and field the selection came from, when the page says so.
+  const [selectionContext, setSelectionContext] = useState<SelectionContext | null>(null)
+  const typeLabels = { opportunity: labels.opportunity.singular, solution: labels.solution.singular }
   const openRef = useRef(false)
   const skipFinalFocusRef = useRef(false)
 
@@ -81,7 +90,7 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
   }, [open])
 
   // The shortcut listener is bound once; it reaches the latest `openPalette` through this ref.
-  const openPaletteRef = useRef<(selectedText: string) => void>(() => {})
+  const openPaletteRef = useRef<(selectedText: string, context: SelectionContext | null) => void>(() => {})
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -89,7 +98,13 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
       event.preventDefault()
       // Text selected on the page becomes Ask context. Not re-read while the
       // palette is open, where the selection is inside its own input.
-      openPaletteRef.current(openRef.current ? "" : normalizeSelection(window.getSelection()?.toString() ?? ""))
+      if (openRef.current) return openPaletteRef.current("", null)
+      const selected = window.getSelection()
+      const text = normalizeSelection(selected?.toString() ?? "")
+      const context = text && selected?.rangeCount
+        ? resolveSelectionContext(selected.getRangeAt(0).commonAncestorContainer, { pathname: window.location.pathname, search: window.location.search }, { orgSlug, workspaceSlug })
+        : null
+      openPaletteRef.current(text, context)
     }
     document.addEventListener("keydown", onKeyDown)
     return () => document.removeEventListener("keydown", onKeyDown)
@@ -172,7 +187,7 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
     turn.reset()
   }
 
-  const openPalette = (selectedText: string) => {
+  const openPalette = (selectedText: string, context: SelectionContext | null) => {
     if (!openRef.current) {
       resetAskView()
       setForceAsk(false)
@@ -182,6 +197,7 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
       // palette opens in ask mode rather than on a stale search.
       if (selectedText) handleQueryChange("")
       setSelection(selectedText)
+      setSelectionContext(selectedText ? context : null)
     }
     setOpen(true)
   }
@@ -193,6 +209,7 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
     resetAskView()
     skipFinalFocusRef.current = false
     setSelection("")
+    setSelectionContext(null)
     handleQueryChange(similarQuery(text))
     setForceSearch(true)
     setOpen(true)
@@ -237,7 +254,7 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
   // (no id, or nothing typed) seed the rail's composer and let the user send it there.
   const askAgent = () => {
     if (!rail) return
-    const text = buildAskText(query, selection)
+    const text = buildAskText(query, selection, selectionContext && selectionSourceLine(selectionContext, typeLabels))
     if (text && inlineAvailable) {
       startInlineAsk(text)
       return
@@ -251,13 +268,19 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
     }
     rail.askAgent({
       text,
-      ...(selection
+      ...(selectionContext
         ? {
-            label: "Selected text",
-            summary: selection.replace(/\s+/g, " ").slice(0, 160),
-            sourceUrl: window.location.pathname + window.location.search,
+            label: selectionChipLabel(selectionContext, typeLabels),
+            summary: selectionContext.entityTitle ?? selection.replace(/\s+/g, " ").slice(0, 160),
+            sourceUrl: selectionContext.url,
           }
-        : {}),
+        : selection
+          ? {
+              label: "Selected text",
+              summary: selection.replace(/\s+/g, " ").slice(0, 160),
+              sourceUrl: window.location.pathname + window.location.search,
+            }
+          : {}),
     })
   }
 
@@ -328,13 +351,13 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
         tooltip="Search"
         className="h-9 rounded-lg text-text-secondary"
         aria-label="Search workspace"
-        onClick={() => openPalette("")}
+        onClick={() => openPalette("", null)}
       >
         <Search className="text-text-subtle" aria-hidden="true" />
         <span>Search</span>
         <kbd className="ml-auto text-[10px] text-text-disabled group-data-[collapsible=icon]:hidden">⌘K</kbd>
       </SidebarMenuButton>
-      <SelectionAskPill disabled={open || !askAvailable} onAsk={openPalette} onFindSimilar={openFindSimilar} />
+      <SelectionAskPill disabled={open || !askAvailable} slugs={{ orgSlug, workspaceSlug }} onAsk={(text, context) => openPalette(normalizeSelection(text), context)} onFindSimilar={openFindSimilar} />
       <Dialog
         open={open}
         onOpenChange={(next, details) => {
@@ -349,6 +372,8 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
       >
         <DialogContent
           showCloseButton={false}
+          // The selection pill must not offer itself over the palette's own text.
+          data-selection-pill-ignore=""
           // No z-index override: DialogContent already sits on the dialog
           // layer (70), which clears the entity detail panel layer (60).
           // This used to carry a local z-[70]/z-[80] pair, which is what
@@ -393,13 +418,16 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
           </div>
           {selection && (
             <div className="flex items-center gap-2 border-b px-4 py-2 text-xs text-muted-foreground">
-              <span className="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-primary">Context</span>
+              <span className="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-primary">
+                {selectionContext ? selectionChipLabel(selectionContext, typeLabels) : "Context"}
+              </span>
+              {selectionContext?.entityTitle && <span className="max-w-[10rem] shrink-0 truncate font-medium text-foreground">{selectionContext.entityTitle}</span>}
               <span className="min-w-0 flex-1 truncate">“{selection.replace(/\s+/g, " ")}”</span>
               <button
                 type="button"
                 aria-label="Remove selected text context"
                 className="shrink-0 rounded p-0.5 hover:bg-accent"
-                onClick={() => { setSelection(""); inputRef.current?.focus() }}
+                onClick={() => { setSelection(""); setSelectionContext(null); inputRef.current?.focus() }}
               >
                 <XIcon className="size-3" aria-hidden="true" />
               </button>

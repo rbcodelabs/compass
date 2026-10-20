@@ -40,10 +40,14 @@ export function normalizeSelection(raw: string): string {
   return text.length > MAX_SELECTION_CHARS ? `${text.slice(0, MAX_SELECTION_CHARS)}…` : text
 }
 
-/** Composer text for the agent: the question, with any selection quoted beneath it. */
-export function buildAskText(query: string, selection: string): string {
+/**
+ * Composer text for the agent: the question, then (when there is a selection) an
+ * optional "Selected from: ..." source line and the quoted selection.
+ */
+export function buildAskText(query: string, selection: string, sourceLine?: string | null): string {
   const question = query.trim()
   if (!selection) return question
   const quoted = selection.split("\n").map((line) => `> ${line}`).join("\n")
-  return question ? `${question}\n\n${quoted}` : `About this selection:\n\n${quoted}`
+  const quote = sourceLine ? `${sourceLine}\n${quoted}` : quoted
+  return question ? `${question}\n\n${quote}` : `About this selection:\n\n${quote}`
 }
