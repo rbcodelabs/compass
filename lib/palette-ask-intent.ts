@@ -24,8 +24,10 @@ export function looksLikeQuestion(query: string): boolean {
   return ASK_VERBS.has(words[0].toLowerCase().replace(/[^a-z]/g, ""))
 }
 
-export function paletteMode(input: { query: string; forceAsk?: boolean; hasSelection?: boolean }): PaletteMode {
+export function paletteMode(input: { query: string; forceAsk?: boolean; forceSearch?: boolean; hasSelection?: boolean }): PaletteMode {
   if (input.forceAsk) return "ask"
+  // e.g. "Find similar" prefills a long query that must still be a lookup.
+  if (input.forceSearch) return "search"
   const trimmed = input.query.trim()
   // A selection with nothing typed yet is a request to ask about it.
   if (!trimmed) return input.hasSelection ? "ask" : "search"

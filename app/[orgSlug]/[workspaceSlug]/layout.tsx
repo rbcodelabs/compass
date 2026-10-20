@@ -98,7 +98,7 @@ export default async function WorkspaceLayout({
             navigation between workspace screens — which is the entire point of
             the rail over the full-page agent screen. A streaming turn keeps
             streaming while the user moves to the Roadmap. */}
-        <AgentRailProvider initialPin={initialAgentPin}>
+        <AgentRailProvider initialPin={initialAgentPin} workspaceId={workspace.id}>
         {/* Mobile header — shown on small screens only (hidden on md+) */}
         <MobileHeader
           orgSlug={orgSlug}

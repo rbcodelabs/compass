@@ -9,7 +9,11 @@ import { Search, Sparkles, XIcon } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { SidebarMenuButton } from "@/components/ui/sidebar"
 import { useAgentRailOptional } from "@/components/agent/agent-rail-context"
+import { useAgentTurn } from "@/components/agent/use-agent-turn"
+import { PaletteAskAnswer } from "@/components/palette-ask-answer"
+import { SelectionAskPill } from "@/components/selection-ask-pill"
 import { buildAskText, normalizeSelection, paletteMode } from "@/lib/palette-ask-intent"
+import { similarQuery } from "@/lib/selection-pill"
 import type { WorkspaceSearchItem, WorkspaceSearchResponse } from "@/lib/workspace-search"
 
 type SearchState = "idle" | "loading" | "ready" | "error"
@@ -40,12 +44,27 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
   const rail = useAgentRailOptional()
   const askAvailable = Boolean(rail?.available)
   const [forceAsk, setForceAsk] = useState(false)
+  const [forceSearch, setForceSearch] = useState(false)
   const [selection, setSelection] = useState("")
   const openRef = useRef(false)
   const skipFinalFocusRef = useRef(false)
 
+  // Inline ask: the answer streams inside the palette through the same turn
+  // lifecycle the rail's chat uses (useAgentTurn). It needs the workspace id the
+  // rail provider carries; without one, Ask falls back to seeding the rail.
+  const inlineAvailable = askAvailable && Boolean(rail?.workspaceId)
+  const [asked, setAsked] = useState<{ question: string } | null>(null)
+  const [answer, setAnswer] = useState<string | null>(null)
+  const [askConversationId, setAskConversationId] = useState<string | null>(null)
+  const lastAskTextRef = useRef("")
+  const turn = useAgentTurn({
+    workspaceId: rail?.workspaceId ?? "",
+    onConversationCreated: (conversationId) => setAskConversationId(conversationId),
+    onSettled: ({ assistant }) => setAnswer(assistant?.content ?? null),
+  })
+
   const trimmedQuery = query.trim()
-  const mode = askAvailable ? paletteMode({ query, forceAsk, hasSelection: Boolean(selection) }) : "search"
+  const mode = askAvailable ? paletteMode({ query, forceAsk, forceSearch, hasSelection: Boolean(selection) }) : "search"
   const askFirst = mode === "ask"
 
   const currentResponse = response?.scope === workspaceScope ? response.data : null
@@ -61,18 +80,16 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
     openRef.current = open
   }, [open])
 
+  // The shortcut listener is bound once; it reaches the latest `openPalette` through this ref.
+  const openPaletteRef = useRef<(selectedText: string) => void>(() => {})
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== "k" || (!event.metaKey && !event.ctrlKey) || event.altKey || event.shiftKey) return
       event.preventDefault()
       // Text selected on the page becomes Ask context. Not re-read while the
       // palette is open, where the selection is inside its own input.
-      if (!openRef.current) {
-        setSelection(normalizeSelection(window.getSelection()?.toString() ?? ""))
-        setForceAsk(false)
-        skipFinalFocusRef.current = false
-      }
-      setOpen(true)
+      openPaletteRef.current(openRef.current ? "" : normalizeSelection(window.getSelection()?.toString() ?? ""))
     }
     document.addEventListener("keydown", onKeyDown)
     return () => document.removeEventListener("keydown", onKeyDown)
@@ -125,19 +142,106 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
     router.push(item.href)
   }
 
-  const openFromTrigger = () => {
-    setSelection("")
+  const handleQueryChange = (value: string) => {
     setForceAsk(false)
+    setForceSearch(false)
+    // Typing again leaves a finished answer; a running turn keeps the input read-only.
+    if (asked && !turn.isStreaming) {
+      setAsked(null)
+      setAnswer(null)
+      setAskConversationId(null)
+      turn.reset()
+    }
+    abortRef.current?.abort()
+    requestIdRef.current += 1
+    setResponse(null)
+    setActiveIndex(0)
+    setQuery(value)
+    const normalized = value.trim()
+    setState(
+      normalized.length > SEARCH_QUERY_MAX ? (askAvailable ? "idle" : "error") : normalized.length >= 2 ? "loading" : "idle",
+    )
+  }
+
+  /** Leave a finished answer behind when the palette is reopened; a turn still running is kept. */
+  const resetAskView = () => {
+    if (turn.sending.current) return
+    setAsked(null)
+    setAnswer(null)
+    setAskConversationId(null)
+    turn.reset()
+  }
+
+  const openPalette = (selectedText: string) => {
+    if (!openRef.current) {
+      resetAskView()
+      setForceAsk(false)
+      setForceSearch(false)
+      skipFinalFocusRef.current = false
+      // A selection means "ask about this": start from an empty query so the
+      // palette opens in ask mode rather than on a stale search.
+      if (selectedText) handleQueryChange("")
+      setSelection(selectedText)
+    }
+    setOpen(true)
+  }
+  useEffect(() => {
+    openPaletteRef.current = openPalette
+  })
+
+  const openFindSimilar = (text: string) => {
+    resetAskView()
     skipFinalFocusRef.current = false
+    setSelection("")
+    handleQueryChange(similarQuery(text))
+    setForceSearch(true)
     setOpen(true)
   }
 
-  // v1 hand-off: seed the rail's composer with the question (and any selection)
-  // and let the user send it there. Inline streaming would mean re-implementing
-  // AgentChat's turn/stream/detached-run handling inside the palette.
+  const startInlineAsk = (text: string) => {
+    lastAskTextRef.current = text
+    setAsked({ question: trimmedQuery || "About the selected text" })
+    setAnswer(null)
+    setAskConversationId(null)
+    void turn.start({ message: text, pageUrl: window.location.pathname + window.location.search })
+  }
+
+  // Cmd+Enter in the answer view: continue the same conversation in the rail.
+  // The palette only hangs up its viewer; the run carries on server-side and the
+  // rail reattaches to it, so nothing is sent twice. An inline-stream turn (the
+  // non-detached fallback) lives and dies with this request, so it can only be
+  // promoted once it has finished.
+  const canPromote = Boolean(askConversationId) && (turn.transport === "run" || !turn.isStreaming)
+  const promoteToRail = () => {
+    if (!rail || !askConversationId || !canPromote) return
+    skipFinalFocusRef.current = true
+    turn.reset()
+    setAsked(null)
+    setAnswer(null)
+    setOpen(false)
+    rail.setView("agent")
+    rail.openRail({ conversationId: askConversationId })
+    setAskConversationId(null)
+  }
+
+  const leaveAnswerView = () => {
+    if (turn.isStreaming) return
+    setAsked(null)
+    setAnswer(null)
+    setAskConversationId(null)
+    turn.reset()
+    inputRef.current?.focus()
+  }
+
+  // Ask: stream the answer inline when the workspace id is known; otherwise
+  // (no id, or nothing typed) seed the rail's composer and let the user send it there.
   const askAgent = () => {
     if (!rail) return
     const text = buildAskText(query, selection)
+    if (text && inlineAvailable) {
+      startInlineAsk(text)
+      return
+    }
     skipFinalFocusRef.current = true
     setOpen(false)
     if (!text) {
@@ -157,23 +261,21 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
     })
   }
 
-  const handleQueryChange = (value: string) => {
-    setForceAsk(false)
-    abortRef.current?.abort()
-    requestIdRef.current += 1
-    setResponse(null)
-    setActiveIndex(0)
-    setQuery(value)
-    const normalized = value.trim()
-    setState(
-      normalized.length > SEARCH_QUERY_MAX ? (askAvailable ? "idle" : "error") : normalized.length >= 2 ? "loading" : "idle",
-    )
-  }
-
   const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (asked) {
+      // Answer view: the list is gone, so only promotion is bound (Esc is the dialog's).
+      if (event.key === "Enter") {
+        event.preventDefault()
+        if (event.metaKey || event.ctrlKey) promoteToRail()
+      } else if (event.key === "Tab") {
+        event.preventDefault()
+      }
+      return
+    }
     if (askAvailable && event.key === "Tab" && !event.shiftKey) {
       event.preventDefault()
       setForceAsk(true)
+      setForceSearch(false)
       setActiveIndex(0)
       return
     }
@@ -226,13 +328,25 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
         tooltip="Search"
         className="h-9 rounded-lg text-text-secondary"
         aria-label="Search workspace"
-        onClick={openFromTrigger}
+        onClick={() => openPalette("")}
       >
         <Search className="text-text-subtle" aria-hidden="true" />
         <span>Search</span>
         <kbd className="ml-auto text-[10px] text-text-disabled group-data-[collapsible=icon]:hidden">⌘K</kbd>
       </SidebarMenuButton>
-      <Dialog open={open} onOpenChange={setOpen}>
+      <SelectionAskPill disabled={open || !askAvailable} onAsk={openPalette} onFindSimilar={openFindSimilar} />
+      <Dialog
+        open={open}
+        onOpenChange={(next, details) => {
+          // Esc while the agent is answering stops the turn; the palette stays for the outcome.
+          if (!next && details.reason === "escape-key" && asked && turn.isStreaming) {
+            details.cancel()
+            void turn.cancel()
+            return
+          }
+          setOpen(next)
+        }}
+      >
         <DialogContent
           showCloseButton={false}
           // No z-index override: DialogContent already sits on the dialog
@@ -268,6 +382,7 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
               aria-activedescendant={rowCount ? `${listboxId}-${activeIndex}` : undefined}
               autoComplete="off"
               maxLength={askAvailable ? ASK_INPUT_MAX : SEARCH_QUERY_MAX + 1}
+              readOnly={Boolean(asked && turn.isStreaming)}
               value={query}
               onChange={(event) => handleQueryChange(event.target.value)}
               onKeyDown={handleInputKeyDown}
@@ -290,6 +405,21 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
               </button>
             </div>
           )}
+          {asked ? (
+            <PaletteAskAnswer
+              question={asked.question}
+              phase={turn.phase}
+              streamingText={turn.streamingText}
+              steps={turn.liveToolSteps}
+              answer={answer}
+              error={turn.error}
+              canPromote={canPromote}
+              onStop={() => void turn.cancel()}
+              onPromote={promoteToRail}
+              onRetry={() => startInlineAsk(lastAskTextRef.current)}
+              onBack={leaveAnswerView}
+            />
+          ) : (
           <div id={listboxId} role="listbox" aria-label="Workspace search results" className="max-h-[calc(70vh-3.5rem)] overflow-y-auto p-2">
             {showAskRow && askFirst && askRow}
             {state === "idle" && trimmedQuery.length <= SEARCH_QUERY_MAX && <p className="px-3 py-8 text-center text-sm text-muted-foreground">Type at least 2 characters to search.</p>}
@@ -324,7 +454,8 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
             })}
             {showAskRow && !askFirst && askRow}
           </div>
-          {askAvailable && (
+          )}
+          {askAvailable && !asked && (
             <div className="flex gap-4 border-t px-4 py-2 text-[11px] text-muted-foreground">
               <span><kbd>↵</kbd> select</span>
               <span><kbd>Tab</kbd> ask AI</span>

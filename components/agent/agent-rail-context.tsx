@@ -100,6 +100,11 @@ type AgentRailContextValue = {
   docsIntent: DocsIntent | null;
   /** Open the rail on the Help view, optionally straight to an article or a search. */
   openDocs: (options?: { slug?: string; anchor?: string; query?: string }) => void;
+  /**
+   * The workspace this rail serves. Lets other surfaces (the Cmd+K palette's
+   * inline ask) start agent turns without being told the id separately.
+   */
+  workspaceId: string | null;
   /** Open the rail on the Library view (the Docs tree). */
   openLibrary: () => void;
   agentSeed: AgentSeed | null;
@@ -135,8 +140,10 @@ const AgentRailContext = createContext<AgentRailContextValue | null>(null);
 export function AgentRailProvider({
   children,
   initialPin = DEFAULT_PANEL_PIN,
+  workspaceId = null,
 }: {
   children: React.ReactNode;
+  workspaceId?: string | null;
   /**
    * Read from the `compass_panel_agent` cookie by the workspace layout. Seeding
    * on the server is what keeps a returning user from watching the rail pop in
@@ -286,6 +293,7 @@ export function AgentRailProvider({
       setView,
       docsIntent,
       openDocs,
+      workspaceId,
       openLibrary,
       agentSeed,
       askAgent,
@@ -304,6 +312,7 @@ export function AgentRailProvider({
       view,
       docsIntent,
       openDocs,
+      workspaceId,
       openLibrary,
       agentSeed,
       askAgent,

@@ -29,6 +29,10 @@ describe("paletteMode", () => {
   it("lets a typed lookup override the selection default", () => {
     expect(paletteMode({ query: "pricing", hasSelection: true })).toBe("search")
   })
+  it("forceSearch keeps a long prefilled query a lookup", () => {
+    expect(paletteMode({ query: "one two three four five six", forceSearch: true })).toBe("search")
+    expect(paletteMode({ query: "x", forceSearch: true, forceAsk: true })).toBe("ask")
+  })
   it("forceAsk wins", () => {
     expect(paletteMode({ query: "pricing", forceAsk: true })).toBe("ask")
   })
