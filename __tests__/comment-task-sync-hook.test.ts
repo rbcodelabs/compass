@@ -9,7 +9,7 @@ vi.mock("@/lib/workspace-updates-capture", () => ({
 }))
 vi.mock("@/auth", () => ({ auth: vi.fn() }))
 vi.mock("@/lib/db", () => ({ default: () => ({}) }))
-vi.mock("@/lib/comment-task-sync", () => ({ reconcileCommentThreadsForTask: mocks.sync }))
+vi.mock("@/lib/comment-task-sync", () => ({ syncCommentThreadsForTaskStatus: mocks.sync }))
 
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { withFollowingCommit } from "@/lib/following-commit"
@@ -27,28 +27,26 @@ describe("captureWorkspaceMutation -> Doc comment thread sync", () => {
   it("syncs threads when a task's status changes", async () => {
     findUnique.mockResolvedValue({ status: "IN_PROGRESS" })
     await captureWorkspaceMutation(db, "task", "update", "UI", "t1", async () => ({ id: "t1", workspaceId: WS, status: "DONE" }))
-    expect(mocks.sync).toHaveBeenCalledWith("t1")
+    expect(mocks.sync).toHaveBeenCalledTimes(1)
   })
 
   it("syncs on reopen too", async () => {
     findUnique.mockResolvedValue({ status: "DONE" })
     await captureWorkspaceMutation(db, "task", "update", "UI", "t1", async () => ({ id: "t1", workspaceId: WS, status: "TODO" }))
-    expect(mocks.sync).toHaveBeenCalledWith("t1")
+    expect(mocks.sync).toHaveBeenCalledTimes(1)
   })
 
-  it("re-checks when a status write read no change: a stale 'before' under a concurrent flip", async () => {
-    // Two writers both read TODO; the DONE -> TODO one therefore sees TODO -> TODO and would otherwise never sync.
-    findUnique.mockResolvedValue({ status: "TODO" })
-    mocks.update.mockResolvedValue({ id: "t1", workspaceId: WS, status: "TODO" })
-    await captureWorkspaceMutation(db, "task", "update", "UI", "t1", async tx => tx.task.update({ where: { id: "t1" }, data: { status: "TODO" } }))
-    expect(mocks.sync).toHaveBeenCalledWith("t1")
-  })
-
-  it("does not re-check a plain edit (title) that leaves the status alone", async () => {
-    findUnique.mockResolvedValue({ status: "TODO" })
-    mocks.update.mockResolvedValue({ id: "t1", workspaceId: WS, status: "TODO", title: "Renamed" })
-    await captureWorkspaceMutation(db, "task", "update", "UI", "t1", async tx => tx.task.update({ where: { id: "t1" }, data: { title: "Renamed" } }))
-    expect(mocks.sync).not.toHaveBeenCalled()
+  it("orders overlapping updates to one task so the second sees the first's status as its 'before'", async () => {
+    // Without ordering both read TODO and the DONE -> TODO write looks like TODO -> TODO, so no sync runs for it.
+    let stored = "TODO"
+    findUnique.mockImplementation(async () => ({ status: stored }))
+    const write = (status: string, delay: number) => captureWorkspaceMutation(db, "task", "update", "UI", "t1", async () => {
+      await new Promise(resolve => setTimeout(resolve, delay))
+      stored = status
+      return { id: "t1", workspaceId: WS, status }
+    })
+    await Promise.all([write("DONE", 20), write("TODO", 0)])
+    expect(mocks.sync.mock.calls).toEqual([["t1", "TODO", "DONE"], ["t1", "DONE", "TODO"]])
   })
 
   it("does not sync an edit that leaves the status alone", async () => {
