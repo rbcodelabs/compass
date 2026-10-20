@@ -66,6 +66,17 @@ const solutionPatch = z.union([
   z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional() }).strict(),
   z.object({ status: solutionSchema.shape.status }).strict(),
 ])
+// Batch create. Item fields stay loose on purpose: lengths and blanks are judged per item by the shared core
+// (lib/opportunity-batch-create.ts), so one bad row yields one INVALID result instead of a 400 for the whole request.
+const batchOpportunityItem = z.object({ clientId: uuid.optional(), title: z.string(), description: z.string().nullable().optional(), customerSegment: z.string().nullable().optional(), status: z.string().optional(), squadId: uuid.nullable().optional() }).strict()
+const batchSolutionItem = z.object({ clientId: uuid.optional(), opportunityId: uuid, title: z.string(), description: z.string().nullable().optional() }).strict()
+const opportunityBatchCreate = z.object({ items: z.array(batchOpportunityItem).min(1).max(100) }).strict()
+const solutionBatchCreate = z.object({ items: z.array(batchSolutionItem).min(1).max(100) }).strict()
+const batchItemResult = z.union([
+  z.object({ clientId: uuid, ok: z.literal(true), id: uuid, deduped: z.literal(true).optional() }).strict(),
+  z.object({ clientId: z.string(), ok: z.literal(false), code: z.enum(["INVALID", "PARENT_FAILED", "NOT_FOUND", "FORBIDDEN", "CONFLICT", "INTERNAL"]), error: z.string(), field: z.string().optional() }).strict(),
+])
+const batchCreateResponse = z.object({ results: z.array(batchItemResult) }).strict()
 const assumptionCreate = z.object({ solutionId: uuid, title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), riskLevel: assumptionSchema.shape.riskLevel.optional() }).strict()
 const assumptionPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), description: z.string().trim().nullable().optional(), riskLevel: assumptionSchema.shape.riskLevel.optional(), status: assumptionSchema.shape.status.optional() }).strict()
 const feedbackCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), type: z.enum(["BUG", "IDEA"]).optional(), submitterName: z.string().trim().max(255).nullable().optional(), submitterEmail: z.string().email().nullable().optional() }).strict()
@@ -253,12 +264,14 @@ export const REST_ROUTES: readonly RestRoute[] = [
   read("getWorkspace", "/api/v1/workspaces/{workspaceId}", "Get a workspace", workspaceSchema, workspacePath),
   read("listOpportunities", "/api/v1/workspaces/{workspaceId}/opportunities", "List opportunities", collectionOf(opportunitySchema), workspacePath, opportunityQuery),
   write("POST", "createOpportunity", "/api/v1/workspaces/{workspaceId}/opportunities", "Create an opportunity", opportunitySchema, workspacePath, opportunityCreate, 201),
+  write("POST", "createOpportunitiesBatch", "/api/v1/workspaces/{workspaceId}/opportunity-batches", "Create up to 100 opportunities (25 for agent callers) with a per-item result; resending a clientId is idempotent", batchCreateResponse, workspacePath, opportunityBatchCreate, 200),
   read("getOpportunity", "/api/v1/workspaces/{workspaceId}/opportunities/{id}", "Get an opportunity", opportunitySchema, itemPath),
   write("PATCH", "updateOpportunity", "/api/v1/workspaces/{workspaceId}/opportunities/{id}", "Update an opportunity", opportunitySchema, itemPath, opportunityPatch),
   write("POST", "linkOpportunityObjective", "/api/v1/workspaces/{workspaceId}/opportunities/{id}/objective-links", "Link an opportunity to an objective", opportunityObjectiveRelationshipSchema, itemPath, z.object({ objectiveId: uuid }).strict(), 201),
   write("DELETE", "unlinkOpportunityObjective", "/api/v1/workspaces/{workspaceId}/opportunities/{id}/objective-links/{relatedId}", "Unlink an opportunity from an objective", z.undefined(), relatedItemPath, undefined, 204),
   read("listSolutions", "/api/v1/workspaces/{workspaceId}/solutions", "List solutions", collectionOf(solutionSchema), workspacePath, solutionQuery),
   write("POST", "createSolution", "/api/v1/workspaces/{workspaceId}/solutions", "Create a solution", solutionSchema, workspacePath, solutionCreate, 201),
+  write("POST", "createSolutionsBatch", "/api/v1/workspaces/{workspaceId}/solution-batches", "Create up to 100 solutions (25 for agent callers) under existing opportunities with a per-item result; resending a clientId is idempotent", batchCreateResponse, workspacePath, solutionBatchCreate, 200),
   read("getSolution", "/api/v1/workspaces/{workspaceId}/solutions/{id}", "Get a solution", solutionSchema, itemPath),
   write("PATCH", "updateSolution", "/api/v1/workspaces/{workspaceId}/solutions/{id}", "Update a solution", solutionSchema, itemPath, solutionPatch),
   write("POST", "linkSolutionKeyResult", "/api/v1/workspaces/{workspaceId}/solutions/{id}/key-result-links", "Link a solution to a key result", solutionKeyResultRelationshipSchema, itemPath, z.object({ keyResultId: uuid }).strict(), 201),

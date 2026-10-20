@@ -7,14 +7,53 @@ import { fail, ok } from "@/lib/mcp-output"
 import { z } from "zod"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { getMcpActor } from "@/lib/mcp-authz"
-import { assertKeyResultInWorkspace, setOpportunityKeyResult, syncLegacyLink, TypedLinkError } from "@/lib/typed-links"
+import { setOpportunityKeyResult } from "@/lib/typed-links"
+import {
+  BatchRequestError, createOpportunityBatch, type BatchContext, type BatchItemResult, type OpportunityBatchItem,
+} from "@/lib/opportunity-batch-create"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
-import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 function linkContext(source: ProgrammaticSource = "MCP") {
   const actor = getMcpActor()
   return { source, createdById: actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN" ? null : actor.userId }
+}
+
+/** Batch context for an MCP/REST caller: membership was proven by the tool gate, so the workspace is writable. */
+export function programmaticBatchContext(workspaceId: string, source: ProgrammaticSource = "MCP"): BatchContext {
+  const actor = getMcpActor()
+  const agent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"
+  return {
+    workspace: { id: workspaceId, isReadOnly: false },
+    caller: agent ? "agent" : "human",
+    source,
+    mutationSource: workspaceMutationSource(source),
+    createdById: agent ? null : actor.userId,
+  }
+}
+
+/** Renders per-item results for the bulk tools; a partial failure is a successful call with failed items. */
+export function batchResultOutput(noun: string, workspaceName: string, results: BatchItemResult[]) {
+  const created = results.filter((r) => r.ok && !r.deduped).length
+  const deduped = results.filter((r) => r.ok && r.deduped).length
+  const failed = results.length - created - deduped
+  const lines = results.map((r, i) => (r.ok ? `${i + 1}. ${r.deduped ? "already created" : "created"}: ${r.id}` : `${i + 1}. ${r.code}: ${r.error}`))
+  return ok(`**${created} ${noun}${created === 1 ? "" : "s"} created** in "${workspaceName}"${deduped ? `, ${deduped} already existed` : ""}${failed ? `, ${failed} failed` : ""}\n${lines.join("\n")}`, { results, created, deduped, failed })
+}
+
+export async function createOpportunities(input: {
+  workspaceId: string; items: OpportunityBatchItem[]; source?: ProgrammaticSource
+}) {
+  const prisma = getPrisma()
+  const workspace = await prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { id: true, name: true } })
+  if (!workspace) return fail(`Workspace "${input.workspaceId}" not found.`)
+  try {
+    const { results } = await createOpportunityBatch(prisma, programmaticBatchContext(input.workspaceId, input.source), input.items)
+    return batchResultOutput("opportunity", workspace.name, results)
+  } catch (error) {
+    if (error instanceof BatchRequestError) return fail(error.message)
+    throw error
+  }
 }
 
 export async function createOpportunity(input: {
@@ -24,25 +63,21 @@ export async function createOpportunity(input: {
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { id: true, name: true, slug: true, organization: { select: { slug: true } } } })
   if (!workspace) return fail(`Workspace "${input.workspaceId}" not found.`)
-  if (input.squadId && !(await prisma.squad.findFirst({ where: { id: input.squadId, workspaceId: input.workspaceId }, select: { id: true } }))) return fail(`Squad "${input.squadId}" not found in workspace.`)
-  try {
-    const opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", workspaceMutationSource(input.source), undefined, async (tx) => {
-      if (input.keyResultId) await assertKeyResultInWorkspace(tx, input.keyResultId, input.workspaceId)
-      const created = await tx.opportunity.create({ data: { workspaceId: input.workspaceId, ...(await allocateOneSeq(tx, input.workspaceId, "opportunity")), title: input.title.trim(), description: input.description?.trim() || null, customerSegment: input.customerSegment?.trim() || null, status: input.status ?? "EXPLORING", linkedKeyResultId: input.keyResultId ?? null, squadId: input.squadId ?? null, source: input.source ?? "MCP" } })
-      if (input.keyResultId) await syncLegacyLink(tx, { opportunityId: created.id, workspaceId: input.workspaceId, keyResultId: input.keyResultId, ctx: linkContext(input.source) })
-      return created
-    }, { atomic: true })
-    return ok(withUrlLine(
-      `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}${displayLine("opportunity", opportunity)}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
-      safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "opportunity", id: opportunity.id, displayId: displayIdFromRow("opportunity", opportunity) }),
-    ), {
-      id: opportunity.id, displayId: displayIdFromRow("opportunity", opportunity), title: opportunity.title, status: opportunity.status, workspaceId: input.workspaceId,
-      customerSegment: opportunity.customerSegment, linkedKeyResultId: opportunity.linkedKeyResultId, squadId: opportunity.squadId,
-    })
-  } catch (error) {
-    if (error instanceof TypedLinkError) return fail(error.message)
-    throw error
-  }
+  const { results } = await createOpportunityBatch(prisma, programmaticBatchContext(input.workspaceId, input.source), [{
+    title: input.title, description: input.description, customerSegment: input.customerSegment, status: input.status,
+    squadId: input.squadId, linkedKeyResultId: input.keyResultId,
+  }])
+  const result = results[0]
+  if (!result.ok) return fail(result.error)
+  const opportunity = await prisma.opportunity.findFirst({ where: { id: result.id, workspaceId: input.workspaceId }, select: { id: true, seqPrefix: true, seqNumber: true, title: true, status: true, customerSegment: true, linkedKeyResultId: true, squadId: true } })
+  if (!opportunity) return fail("The opportunity was created but could not be read back.")
+  return ok(withUrlLine(
+    `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}${displayLine("opportunity", opportunity)}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
+    safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "opportunity", id: opportunity.id, displayId: displayIdFromRow("opportunity", opportunity) }),
+  ), {
+    id: opportunity.id, displayId: displayIdFromRow("opportunity", opportunity), title: opportunity.title, status: opportunity.status, workspaceId: input.workspaceId,
+    customerSegment: opportunity.customerSegment, linkedKeyResultId: opportunity.linkedKeyResultId, squadId: opportunity.squadId,
+  })
 }
 
 export async function updateOpportunityStatus(input: { opportunityId: string; status: "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | "ARCHIVED"; source?: ProgrammaticSource }) {

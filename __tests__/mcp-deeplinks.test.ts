@@ -19,7 +19,7 @@ vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-it
 
 const mockPrisma = {
   workspace: { findUnique: vi.fn() },
-  opportunity: { findUnique: vi.fn(), create: vi.fn() },
+  opportunity: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
   solution: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
   squad: { findMany: vi.fn() },
   assumption: { findUnique: vi.fn(), create: vi.fn() },
@@ -38,6 +38,8 @@ vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 type ToolCallback = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>
 const registeredTools: Record<string, ToolCallback> = {}
 
+// Membership is proven by the tool gate; the batch core's read-only check would load the session.
+vi.mock("@/lib/workspace-context", () => ({ assertWorkspaceWritable: vi.fn() }))
 vi.mock("mcp-handler", () => ({
   createMcpHandler: (setup: (server: { registerTool: (name: string, meta: unknown, cb: ToolCallback) => void; registerResource: (...args: unknown[]) => void }) => void) => {
     setup({ registerTool(name, _meta, cb) { registeredTools[name] = cb }, registerResource() {} })
@@ -84,7 +86,10 @@ describe("create_opportunity deeplink", () => {
   const args = { workspaceId: "ws-1", title: "Setup is confusing" }
 
   beforeEach(() => {
-    mockPrisma.opportunity.create.mockResolvedValue({ id: "opp_1", title: "Setup is confusing", status: "EXPLORING" })
+    // The create goes through the batch core: nothing exists until the insert, and the handler then reads the row back.
+    mockPrisma.opportunity.create.mockResolvedValue({ id: "opp_1" })
+    mockPrisma.opportunity.findFirst.mockImplementation(async () =>
+      mockPrisma.opportunity.create.mock.calls.length ? { id: "opp_1", title: "Setup is confusing", status: "EXPLORING" } : null)
   })
 
   it("links to the opportunity's own discovery page", async () => {
@@ -113,20 +118,28 @@ describe("create_opportunity deeplink", () => {
 })
 
 describe("add_solution deeplink", () => {
+  const OPP = "7d1c2a5e-0b1f-4c63-9a52-3f1e0c4b8a11"
+  const arrangeCreate = () => {
+    mockPrisma.opportunity.findFirst.mockResolvedValue({ id: OPP }) // parent verification inside the item's transaction
+    mockPrisma.solution.findFirst.mockImplementation(async () =>
+      mockPrisma.solution.create.mock.calls.length ? { id: "sol-1", title: "Guided setup", status: "IDEA" } : null)
+    mockPrisma.solution.create.mockResolvedValue({ id: "sol-1" })
+  }
+
   it("opens the solution panel on its owning opportunity page", async () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({
-      id: "opp_1", title: "Setup is confusing", workspaceId: "ws-1", workspace: SLUGGED,
+      id: OPP, title: "Setup is confusing", workspaceId: "ws-1", workspace: SLUGGED,
     })
-    mockPrisma.solution.create.mockResolvedValue({ id: "sol_1", title: "Guided setup", status: "IDEA" })
-    const text = (await call("add_solution", { opportunityId: "opp_1", title: "Guided setup" })).content[0].text
-    expect(text).toContain(`URL: ${BASE}/discovery/opp_1?detail=solution%3Asol_1`)
+    arrangeCreate()
+    const text = (await call("add_solution", { opportunityId: OPP, title: "Guided setup" })).content[0].text
+    expect(text).toContain(`URL: ${BASE}/discovery/${OPP}?detail=solution%3Asol-1`)
   })
 
   it("omits the URL line when the opportunity carries no workspace slugs", async () => {
-    mockPrisma.opportunity.findUnique.mockResolvedValue({ id: "opp_1", title: "Setup is confusing", workspaceId: "ws-1" })
-    mockPrisma.solution.create.mockResolvedValue({ id: "sol_1", title: "Guided setup", status: "IDEA" })
-    const text = (await call("add_solution", { opportunityId: "opp_1", title: "Guided setup" })).content[0].text
-    expect(text).toContain("ID: sol_1")
+    mockPrisma.opportunity.findUnique.mockResolvedValue({ id: OPP, title: "Setup is confusing", workspaceId: "ws-1" })
+    arrangeCreate()
+    const text = (await call("add_solution", { opportunityId: OPP, title: "Guided setup" })).content[0].text
+    expect(text).toContain("ID: sol-1")
     expect(text).not.toContain("URL:")
   })
 })
