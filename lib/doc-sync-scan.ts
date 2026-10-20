@@ -27,7 +27,7 @@
  * Cursor format: base64url("dsc1:<epochTag>:<seq>"). epochTag = hash(counter epoch, DOCS_SYNC_EPOCH),
  * so it is bound to one workspace's log. Continuation: base64url(JSON {e, h, a}) = epochTag, head, last path.
  */
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import getPrisma from "@/lib/db"
 import { DocumentError, hydrateDocument } from "@/lib/document-service"
 import { buildTree, syncScopeRows } from "@/lib/doc-virtual-paths"
@@ -73,14 +73,12 @@ export const DOC_SYNC_DEFAULT_LIMIT = 500
 export const DOC_SYNC_MAX_LIMIT = 1000
 const CURSOR_PREFIX = "dsc1:"
 const HYDRATE_BATCH = 16
-const NO_LOG = "none"
 
-export function epochTag(counterEpoch: string | null): string {
-  if (!counterEpoch) return NO_LOG
+export function epochTag(counterEpoch: string): string {
   return createHash("sha256").update(`${counterEpoch}:${configuredSyncEpoch()}`).digest("hex").slice(0, 12)
 }
 
-export function encodeSyncCursor(seq: number, tag: string = NO_LOG): string {
+export function encodeSyncCursor(seq: number, tag: string): string {
   return Buffer.from(`${CURSOR_PREFIX}${tag}:${seq}`).toString("base64url")
 }
 
@@ -88,7 +86,7 @@ export function encodeSyncCursor(seq: number, tag: string = NO_LOG): string {
 export function decodeSyncCursor(cursor: string): { tag: string; seq: number } | null {
   let text: string
   try { text = Buffer.from(cursor, "base64url").toString("utf8") } catch { return null }
-  const match = /^dsc1:([0-9a-f]{12}|none):(\d{1,9})$/.exec(text)
+  const match = /^dsc1:([0-9a-f]{12}):(\d{1,9})$/.exec(text)
   return match ? { tag: match[1], seq: Number(match[2]) } : null
 }
 
@@ -148,13 +146,14 @@ export async function scanDocs(workspaceId: string, opts: { cursor?: string | nu
 
   // The counter is read BEFORE the docs, so a change landing mid-scan is re-delivered by the next
   // delta (entries are idempotent upserts) rather than skipped.
-  const counter = await prisma.docChangeCounter.findUnique({ where: { workspaceId } })
-  const head = counter?.lastSeq ?? 0
-  const tag = epochTag(counter?.epoch ?? null)
+  const counter = await ensureCounter(workspaceId)
+  const head = counter.lastSeq
+  const tag = epochTag(counter.epoch)
 
   if (opts.continuation) {
     const continuation = decodeContinuation(opts.continuation)
     if (!continuation || continuation.tag !== tag) throw new DocSyncContinuationStaleError()
+    await acknowledgeCheckpoint(workspaceId, counter.epoch)
     return snapshotPage(workspaceId, tag, continuation.head, continuation.afterPath, limit, continuation.skippedSoFar)
   }
 
@@ -165,8 +164,39 @@ export async function scanDocs(workspaceId: string, opts: { cursor?: string | nu
     // The log was pruned past the client's position: it cannot be replayed without gaps.
     stale = !oldest || oldest.seq > requested!.seq + 1
   }
+  await acknowledgeCheckpoint(workspaceId, counter.epoch)
   if (stale) return snapshotPage(workspaceId, tag, head, null, limit)
   return deltaPage(workspaceId, tag, requested!.seq, limit)
+}
+
+/**
+ * Every scan answer that carries a cursor (or lets one be used) first clears the counter's `dirty`
+ * marker for the epoch it is about to issue, so the NEXT doc write made while sync is off rotates the
+ * epoch again and invalidates this checkpoint. Conditional on the epoch: a rotation that raced in
+ * (a flag-off instance during a rolling deploy) is not undone, and our now-stale cursor simply fails
+ * the epoch check on its next use.
+ */
+async function acknowledgeCheckpoint(workspaceId: string, epoch: string): Promise<void> {
+  await getPrisma().docChangeCounter.updateMany({ where: { workspaceId, epoch, dirty: true }, data: { dirty: false } })
+}
+
+/**
+ * The counter row always exists before a cursor is issued, so every cursor carries a real epoch (an
+ * epoch-less checkpoint could not be invalidated by flag-off writes). Insert-if-absent; the loser of a
+ * race re-reads the winner's row. A new row is seeded from the highest existing seq like lockCounter does.
+ */
+async function ensureCounter(workspaceId: string) {
+  const prisma = getPrisma()
+  const existing = await prisma.docChangeCounter.findUnique({ where: { workspaceId } })
+  if (existing) return existing
+  const top = await prisma.docChange.findFirst({ where: { workspaceId }, orderBy: { seq: "desc" }, select: { seq: true } })
+  try {
+    return await prisma.docChangeCounter.create({ data: { workspaceId, lastSeq: top?.seq ?? 0, epoch: randomUUID(), dirty: false } })
+  } catch (error) {
+    const winner = await prisma.docChangeCounter.findUnique({ where: { workspaceId } })
+    if (winner) return winner
+    throw error
+  }
 }
 
 async function snapshotPage(workspaceId: string, tag: string, head: number, afterPath: string | null, limit: number, skippedBefore = 0): Promise<DocSyncScan> {

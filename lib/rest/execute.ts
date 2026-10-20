@@ -61,6 +61,8 @@ export class RestNotFoundError extends Error {}
 export class RestForbiddenError extends Error {}
 export class RestBadRequestError extends Error {}
 export class RestConflictError extends Error {}
+/** 409 with problem code `continuation_stale`: restart the snapshot without a continuation. */
+export class RestContinuationStaleError extends RestConflictError {}
 export class RestCursorError extends Error {}
 export class RestValidationError extends Error {}
 
@@ -531,7 +533,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
       try { return await scanDocs(workspaceId, { cursor: input.query.cursor as string | undefined, continuation: input.query.continuation as string | undefined, limit: Number(input.query.limit) }) }
       catch (error) {
         if (error instanceof DocSyncDisabledError) throw new RestNotFoundError()
-        if (error instanceof DocSyncContinuationStaleError) throw new RestConflictError(error.message)
+        if (error instanceof DocSyncContinuationStaleError) throw new RestContinuationStaleError(error.message)
         throw error
       }
     }

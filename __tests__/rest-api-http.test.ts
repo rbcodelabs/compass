@@ -13,7 +13,7 @@ vi.mock("@/lib/rest/execute", async (importOriginal) => {
 
 import { handleRestRequest } from "@/lib/rest/http"
 import { McpAuthzError } from "@/lib/mcp-authz"
-import { RestBadRequestError, RestCursorError, RestForbiddenError, RestNotFoundError } from "@/lib/rest/execute"
+import { RestBadRequestError, RestContinuationStaleError, RestCursorError, RestForbiddenError, RestNotFoundError } from "@/lib/rest/execute"
 import { AnalyticsError } from "@/lib/analytics/providers"
 import { DocumentError } from "@/lib/document-service"
 import { CommentHttpError } from "@/lib/comment-http-error"
@@ -43,6 +43,13 @@ describe("REST HTTP adapter", () => {
     const response = await handleRestRequest(new Request(`http://localhost/api/v1/workspaces/${UUID}/opportunities`), "GET")
     expect(response.status).toBe(403)
     expect(await response.json()).toMatchObject({ code: "insufficient_scope" })
+  })
+
+  it("maps a stale doc-sync continuation to 409 with the machine-readable code continuation_stale", async () => {
+    executeRestRoute.mockRejectedValue(new RestContinuationStaleError("continuation-stale: restart without a continuation."))
+    const response = await handleRestRequest(new Request(`http://localhost/api/v1/workspaces/${UUID}/sync/docs/scan?continuation=x`), "GET")
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ code: "continuation_stale", status: 409 })
   })
 
   it("denies AGENT_TURN credentials before REST execution", async () => {

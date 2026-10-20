@@ -55,8 +55,13 @@ function payload(type: string, id: string, data: unknown, opts: DocumentMutation
   return digest({ type, id, data, expectedRevision: opts.expectedRevision, actorKey: opts.actorKey ?? `user:${opts.authorId ?? "unknown"}`, label: opts.label, restoreVersionId: opts.restoreVersionId })
 }
 /** A transaction that, while doc sync is on, is re-run when it loses a write conflict on the change counter. */
-function inTx<T>(db: AppPrismaClient, fn: (tx: AppTransactionClient) => Promise<T>): Promise<T> {
-  return withDocChangeRetry(() => db.$transaction(fn))
+function inTx<T>(db: AppPrismaClient, workspaceId: string, fn: (tx: AppTransactionClient) => Promise<T>): Promise<T> {
+  // With sync on, the counter row is locked FIRST in every doc transaction, so all writers take the
+  // locks in the same order (counter, then doc rows) and cannot deadlock against each other.
+  return withDocChangeRetry(() => db.$transaction(async (tx) => {
+    if (isDocsSyncEnabled()) await lockCounter(tx, workspaceId)
+    return fn(tx)
+  }))
 }
 export function documentRevision(doc: Pick<Doc, "revision" | "updatedAt">): string {
   return doc.revision ?? `legacy:${doc.updatedAt.toISOString()}`
@@ -130,7 +135,7 @@ export async function createDocument(input: Prisma.DocUncheckedCreateInput, opts
   await noteDocWriteWhileSyncOff(db, data.workspaceId)
   const contentRef = pilot ? await upload(data.workspaceId, data.content ?? "") : null
   try {
-    return await inTx(db, async tx => {
+    return await inTx(db, data.workspaceId, async tx => {
       const doc = await tx.doc.create({ data: pilot
         ? { ...data, storageProvider: "GEODE", content: null, contentRef, revision: randomUUID() }
         : { ...data, revision: randomUUID() } })
@@ -161,7 +166,7 @@ export async function updateDocument(docId: string, change: DocumentChange, opts
     // behavior -- additive, not breaking. doc-fs.ts is the first caller that
     // always supplies it.
     if (opts.expectedRevision !== undefined) {
-      return inTx(db, async tx => {
+      return inTx(db, doc.workspaceId, async tx => {
         if (Object.keys(data).length) await snapshot(tx, doc, opts)
         const revision = randomUUID()
         const changed = await tx.doc.updateMany({
@@ -175,10 +180,9 @@ export async function updateDocument(docId: string, change: DocumentChange, opts
         return updated
       })
     }
-    return inTx(db, async tx => {
+    return inTx(db, doc.workspaceId, async tx => {
       // Last-write-wins has no revision guard, so a retried transaction must not diff against the
       // title/parent read before the conflict: re-read them inside the closure (sync only).
-      if (isDocsSyncEnabled()) await lockCounter(tx, doc.workspaceId)
       const current = isDocsSyncEnabled() ? await tx.doc.findUnique({ where: { id: docId } }) ?? doc : doc
       if (Object.keys(data).length) await snapshot(tx, current, opts)
       const updated = await tx.doc.update({ where: { id: docId }, data: { ...data, revision: randomUUID(), updatedAt: new Date() } })
@@ -193,7 +197,7 @@ export async function updateDocument(docId: string, change: DocumentChange, opts
   if (documentRevision(doc) !== opts.expectedRevision) throw new DocumentError("revision-conflict")
   const contentRef = doc.storageProvider === "GEODE" && data.content !== undefined ? await upload(doc.workspaceId, data.content ?? "") : doc.contentRef
   try {
-    return await inTx(db, async tx => {
+    return await inTx(db, doc.workspaceId, async tx => {
       const revision = randomUUID()
       const changed = await tx.doc.updateMany({ where: { id: docId, workspaceId: doc.workspaceId, ...revisionWhere(doc, opts.expectedRevision!) }, data: doc.storageProvider === "GEODE"
         ? { ...data, content: null, contentRef, revision, updatedAt: new Date() }
@@ -223,7 +227,7 @@ export async function snapshotDocument(docId: string, opts: DocumentMutationOpti
   const previous = await replay(doc.workspaceId, opts.operationId!, hash)
   if (previous) return previous
   if (documentRevision(doc) !== opts.expectedRevision) throw new DocumentError("revision-conflict")
-  try { return await inTx(db, async tx => {
+  try { return await inTx(db, doc.workspaceId, async tx => {
     // Touch the same revision to participate in DSQL's write-conflict detection.
     const changed = await tx.doc.updateMany({ where: { id: docId, workspaceId: doc.workspaceId, ...revisionWhere(doc, opts.expectedRevision!) }, data: { revision: doc.revision ?? randomUUID() } })
     if (changed.count !== 1) throw new DocumentError("revision-conflict")
@@ -266,7 +270,7 @@ export async function deleteDocument(docId: string, opts: DocumentMutationOption
   if (!doc) throw new DocumentError("not-found")
   if (doc.storageProvider === "GEODE") requireOperation(opts)
   await noteDocWriteWhileSyncOff(db, workspaceId)
-  try { await inTx(db, async tx => {
+  try { await inTx(db, workspaceId, async tx => {
     // ADR 0019 §2.1: same expectedRevision extension as updateDocument -- GEODE
     // always supplies one (requireOperation above enforces that); any other
     // caller only pays the guard when it actually asks for one.

@@ -88,11 +88,17 @@ function delegate(rows: Row[], journal: Journal, defaults?: () => Row, beforeWri
 function client(journal: Journal, txId: symbol | null): Row {
   const docDefaults = () => ({ id: `00000000-0000-4000-8000-${String(++store.ids).padStart(12, "0")}`, parentId: null, content: null, metadata: null, roadmapItemId: null, docType: "STANDARD", sortOrder: 0, storageProvider: null, contentRef: null, icon: null, createdAt: new Date("2026-01-01"), updatedAt: new Date("2026-01-01") })
   const counters = delegate(store.counters, journal)
+  const createCounter = counters.create
+  counters.create = async (args: Row) => {
+    if (store.counters.some((c) => c.workspaceId === args.data.workspaceId)) throw Object.assign(new Error("Unique constraint failed on doc_change_counters_pkey"), { code: "P2002", meta: { modelName: "DocChangeCounter" } })
+    return createCounter(args)
+  }
   return {
     doc: (() => {
       const d = delegate(store.docs, journal, docDefaults)
       const findMany = d.findMany
-      return { ...d, findMany: async (args: Row = {}) => { store.docFindManyArgs.push(args); if (journal) store.trace.push("tree"); return findMany(args) } }
+      const traced = <A extends unknown[], T>(fn: (...a: A) => Promise<T>) => async (...a: A) => { if (journal) store.trace.push("doc-write"); return fn(...a) }
+      return { ...d, create: traced(d.create), updateMany: traced(d.updateMany), update: traced(d.update), delete: traced(d.delete), findMany: async (args: Row = {}) => { store.docFindManyArgs.push(args); if (journal) store.trace.push("tree"); return findMany(args) } }
     })(),
     docChange: (() => {
       const d = delegate(store.changes, journal)
