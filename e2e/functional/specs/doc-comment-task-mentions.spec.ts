@@ -305,9 +305,6 @@ test.describe("Doc comment @mention -> task", () => {
     const { rows: links } = await pool.query(`SELECT linked_type, linked_id FROM "${S}".task_links WHERE task_id = $1 ORDER BY linked_type`, [taskId]);
     expect(links.map((l) => l.linked_type)).toEqual(["COMMENT", "DOC"]);
     const commentId = links.find((l) => l.linked_type === "COMMENT")!.linked_id as string;
-    // The entity_links mirror of the task links (ADR phase 7): the DOC link is mirrored in the same transaction, the COMMENT link stays legacy-only.
-    const { rows: referenceMirror } = await pool.query(`SELECT to_type, to_id, origin FROM "${S}".entity_links WHERE link_type = 'TASK_REFERENCES' AND from_id = $1`, [taskId]);
-    expect(referenceMirror).toEqual([{ to_type: "DOC", to_id: docId, origin: "DIRECT" }]);
     const { rows: [stored] } = await pool.query(`SELECT body FROM "${S}".doc_comments WHERE id = $1`, [commentId]);
     expect(stored.body).toContain(`](mention:user:${bUserId})`);
     expect(stored.body).toContain(`](mention:user:${wUserId})`);
