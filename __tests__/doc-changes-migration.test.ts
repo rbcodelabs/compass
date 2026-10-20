@@ -27,7 +27,7 @@ describe(NAME, () => {
   it("is two idempotent tables then one async unique index", () => {
     expect(statements).toHaveLength(3)
     expect(statements[0]).toMatch(/^CREATE TABLE IF NOT EXISTS doc_changes\s*\(/i)
-    expect(statements[1]).toMatch(/^CREATE TABLE IF NOT EXISTS doc_change_counters\s*\(\s*workspace_id UUID PRIMARY KEY,\s*last_seq INTEGER NOT NULL\s*\)$/i)
+    expect(statements[1]).toMatch(/^CREATE TABLE IF NOT EXISTS doc_change_counters\s*\(\s*workspace_id UUID PRIMARY KEY,\s*last_seq INTEGER NOT NULL,\s*epoch VARCHAR\(36\) NOT NULL\s*\)$/i)
     expect(statements[2]).toMatch(/^CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_doc_changes_workspace_seq ON doc_changes\(workspace_id, seq\)$/i)
   })
 

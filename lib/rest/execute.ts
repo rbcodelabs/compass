@@ -528,7 +528,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "listDocs": return listPage(`docs:${workspaceId}`, input.query, async (cursor, take) => (await prisma.doc.findMany({ where: { workspaceId, ...cursorWhere(cursor) }, select: { id: true, workspaceId: true, title: true, parentId: true, icon: true, docType: true, roadmapItemId: true, revision: true, createdAt: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })).map(doc => ({ ...doc, revision: documentRevision(doc) })))
     case "scanSyncDocs": {
       // Flag off behaves as if the route does not exist.
-      try { return await scanDocs(workspaceId, { cursor: input.query.cursor as string | undefined, limit: Number(input.query.limit) }) }
+      try { return await scanDocs(workspaceId, { cursor: input.query.cursor as string | undefined, continuation: input.query.continuation as string | undefined, limit: Number(input.query.limit) }) }
       catch (error) { if (error instanceof DocSyncDisabledError) throw new RestNotFoundError(); throw error }
     }
     case "getDoc": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getDoc({ docId: id }))) }

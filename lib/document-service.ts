@@ -4,7 +4,7 @@ import { Prisma, type Doc } from "@prisma/client"
 import getPrisma, { type AppPrismaClient, type AppTransactionClient } from "@/lib/db"
 import { getDocumentStore, isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
-import { changeKindFor, recordDocChange, withDocChangeRetry } from "@/lib/doc-sync"
+import { changeKindFor, isDocsSyncEnabled, recordDocChange, withDocChangeRetry } from "@/lib/doc-sync"
 
 export type DocumentMutationOptions = {
   expectedRevision?: string
@@ -133,7 +133,7 @@ export async function createDocument(input: Prisma.DocUncheckedCreateInput, opts
       const doc = await tx.doc.create({ data: pilot
         ? { ...data, storageProvider: "GEODE", content: null, contentRef, revision: randomUUID() }
         : { ...data, revision: randomUUID() } })
-      await recordDocChange(tx, doc.workspaceId, doc.id, "UPSERT")
+      await recordDocChange(tx, doc.workspaceId, doc.id, "UPSERT", null)
       if (guarded) await record(tx, doc, opts.operationId!, hash, doc)
       return doc
     })
@@ -174,9 +174,12 @@ export async function updateDocument(docId: string, change: DocumentChange, opts
       })
     }
     return inTx(db, async tx => {
-      if (Object.keys(data).length) await snapshot(tx, doc, opts)
+      // Last-write-wins has no revision guard, so a retried transaction must not diff against the
+      // title/parent read before the conflict: re-read them inside the closure (sync only).
+      const current = isDocsSyncEnabled() ? await tx.doc.findUnique({ where: { id: docId } }) ?? doc : doc
+      if (Object.keys(data).length) await snapshot(tx, current, opts)
       const updated = await tx.doc.update({ where: { id: docId }, data: { ...data, revision: randomUUID(), updatedAt: new Date() } })
-      await recordDocChange(tx, doc.workspaceId, docId, changeKindFor(doc, data), doc)
+      await recordDocChange(tx, doc.workspaceId, docId, changeKindFor(current, data), current)
       return updated
     })
   }
@@ -222,6 +225,8 @@ export async function snapshotDocument(docId: string, opts: DocumentMutationOpti
     const changed = await tx.doc.updateMany({ where: { id: docId, workspaceId: doc.workspaceId, ...revisionWhere(doc, opts.expectedRevision!) }, data: { revision: doc.revision ?? randomUUID() } })
     if (changed.count !== 1) throw new DocumentError("revision-conflict")
     const version = await snapshot(tx, doc, { ...opts, label: opts.label || "Snapshot" })
+    // A pre-revision doc just got its first stored revision, which differs from the derived `legacy:<updatedAt>` one.
+    if (doc.revision === null) await recordDocChange(tx, doc.workspaceId, docId, "UPSERT")
     await record(tx, doc, opts.operationId!, hash, version)
     return version
   }) } catch (error) {

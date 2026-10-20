@@ -346,7 +346,7 @@ export async function createDoc({
     }
   const doc = pilot || operationId
     ? await createDocument(data, { operationId, ...documentMcpActor() })
-    : await writeDocWithChange(prisma, { workspaceId, kind: "UPSERT" }, (client) => client.doc.create({ data: { ...data, revision: randomUUID() } }))
+    : await writeDocWithChange(prisma, { workspaceId, kind: "UPSERT", before: null }, (client) => client.doc.create({ data: { ...data, revision: randomUUID() } }))
   await followAfterCreate({ model: "doc", workspaceId, row: { id: doc.id }, actor: async () => mcpFollowActor() ?? { type: "SYSTEM", id: null } })
 
   // This used to emit a *relative* `/{org}/{ws}/docs` — the docs index, not the

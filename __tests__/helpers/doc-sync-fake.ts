@@ -17,6 +17,11 @@ export const store = {
   ids: 0,
   counterOwner: null as symbol | null,
   conflicts: 0,
+  trace: [] as string[],
+  docFindManyArgs: [] as Row[],
+  /** Runs once, inside the first counter lock of the next transaction, then that lock fails with a write conflict. */
+  onFirstLock: null as null | (() => void | (() => void)),
+  afterRollback: null as null | (() => void),
 }
 
 export function resetStore() {
@@ -28,10 +33,15 @@ export function resetStore() {
   store.ids = 0
   store.counterOwner = null
   store.conflicts = 0
+  store.trace.length = 0
+  store.docFindManyArgs.length = 0
+  store.onFirstLock = null
+  store.afterRollback = null
 }
 
 function matches(row: Row, where: Row = {}): boolean {
   return Object.entries(where).every(([key, want]) => {
+    if (want && typeof want === "object" && "in" in (want as Row)) return (want as { in: unknown[] }).in.includes(row[key])
     if (want && typeof want === "object" && "gt" in (want as Row)) return row[key] > (want as Row).gt
     return row[key] === want
   })
@@ -77,12 +87,23 @@ function client(journal: Journal, txId: symbol | null): Row {
   const docDefaults = () => ({ id: `00000000-0000-4000-8000-${String(++store.ids).padStart(12, "0")}`, parentId: null, content: null, metadata: null, roadmapItemId: null, docType: "STANDARD", sortOrder: 0, storageProvider: null, contentRef: null, icon: null, createdAt: new Date("2026-01-01"), updatedAt: new Date("2026-01-01") })
   const counters = delegate(store.counters, journal)
   return {
-    doc: delegate(store.docs, journal, docDefaults),
+    doc: (() => {
+      const d = delegate(store.docs, journal, docDefaults)
+      const findMany = d.findMany
+      return { ...d, findMany: async (args: Row = {}) => { store.docFindManyArgs.push(args); if (journal) store.trace.push("tree"); return findMany(args) } }
+    })(),
     docChange: delegate(store.changes, journal),
     docChangeCounter: {
       ...counters,
+      update: async ({ where, data }: Row) => {
+        const row = store.counters.find((r) => matches(r, where))!
+        counters._patch(row, { lastSeq: row.lastSeq + data.lastSeq.increment })
+        return { ...row }
+      },
       upsert: async ({ where, create, update }: Row) => {
         if (txId) {
+          store.trace.push("lock")
+          if (store.onFirstLock) { const hook = store.onFirstLock; store.onFirstLock = null; store.afterRollback = hook() ?? null; store.conflicts++; throw Object.assign(new Error("Transaction failed due to a write conflict"), { code: "P2034" }) }
           if (store.counterOwner && store.counterOwner !== txId) { store.conflicts++; throw Object.assign(new Error("Transaction failed due to a write conflict"), { code: "P2034" }) }
           store.counterOwner = txId
         }
@@ -106,6 +127,6 @@ export const fake: Row = {
   $transaction: async (fn: (tx: Row) => Promise<unknown>) => {
     const txId = Symbol("tx")
     const journal: Array<() => void> = []
-    try { return await fn(client(journal, txId)) } catch (error) { for (const undo of journal.reverse()) undo(); throw error } finally { if (store.counterOwner === txId) store.counterOwner = null }
+    try { return await fn(client(journal, txId)) } catch (error) { for (const undo of journal.reverse()) undo(); store.afterRollback?.(); store.afterRollback = null; throw error } finally { if (store.counterOwner === txId) store.counterOwner = null }
   },
 }

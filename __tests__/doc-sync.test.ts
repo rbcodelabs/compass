@@ -13,12 +13,14 @@ vi.mock("@/lib/following-hooks", () => ({ followAfterCreate: vi.fn(), mcpFollowA
 import { createDocument, deleteDocument, updateDocument } from "@/lib/document-service"
 import { moveDocById } from "@/lib/doc-fs"
 import { isDocChangeConflict, withDocChangeRetry } from "@/lib/doc-sync"
-import { decodeSyncCursor, encodeSyncCursor, scanDocs, DocSyncDisabledError } from "@/lib/doc-sync-scan"
+import { decodeSyncCursor, encodeSyncCursor, epochTag, scanDocs, DocSyncDisabledError } from "@/lib/doc-sync-scan"
 
 const WS = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const OTHER_WS = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const author = { authorName: "Tester" }
 const changesFor = (workspaceId: string) => store.changes.filter((c) => c.workspaceId === workspaceId)
+const tagOf = (workspaceId: string) => epochTag(store.counters.find((c) => c.workspaceId === workspaceId)?.epoch ?? null)
+const cursorAt = (seq: number, workspaceId = WS) => encodeSyncCursor(seq, tagOf(workspaceId))
 const create = (workspaceId: string, title: string, extra: Row = {}) => createDocument({ workspaceId, title, content: `# ${title}`, ...extra } as never, author)
 
 beforeEach(() => {
@@ -45,7 +47,7 @@ describe("change-log writes", () => {
     store.changes.length = 0
     await updateDocument(parent.id, { title: "Renamed" }, { ...author, expectedRevision: parent.revision! })
     expect(store.changes.map((c) => [c.docId, c.kind, c.path])).toEqual([[parent.id, "MOVE", "Renamed"], [child.id, "MOVE", "Renamed/Child"]])
-    expect(store.changes.map((c) => c.seq)).toEqual([3, 4]) // the counter is not reset by clearing the log
+    expect(store.changes.map((c) => c.seq)).toEqual([4, 5]) // 1 parent, 2 child, 3 parent file->folder flip
   })
 
   it("records a doc-fs move (reparent) as MOVE at the new path", async () => {
@@ -53,9 +55,8 @@ describe("change-log writes", () => {
     const folder = await create(WS, "Folder")
     store.changes.length = 0
     await moveDocById(WS, a.id, "Folder/A", { ...author, expectedRevision: a.revision! })
-    expect(store.changes).toHaveLength(1)
-    expect(store.changes[0]).toMatchObject({ docId: a.id, kind: "MOVE", path: "Folder/A" })
-    expect(folder.id).toBeDefined()
+    // A moves; Folder becomes a parent, so it is re-reported too (its file/folder kind flipped).
+    expect(store.changes.map((c) => [c.docId, c.kind, c.path])).toEqual([[folder.id, "UPSERT", "Folder"], [a.id, "MOVE", "Folder/A"]])
   })
 
   it("writes the change in the same transaction as the mutation", async () => {
@@ -184,7 +185,7 @@ describe("scan", () => {
     expect(scan.entries[0]).toMatchObject({ id: a.id, path: "Alpha", kind: "file", revision: a.revision })
     expect(scan.entries[0].size).toBeGreaterThan("# Alpha".length) // includes the compass_ frontmatter
     expect(scan.entries[0].hash).toMatch(/^[0-9a-f]{64}$/)
-    expect(decodeSyncCursor(scan.cursor)).toBe(1)
+    expect(decodeSyncCursor(scan.cursor)?.seq).toBe(1)
   })
 
   it("marks a body-less parent as a folder", async () => {
@@ -203,7 +204,7 @@ describe("scan", () => {
     expect(delta.mode).toBe("delta")
     expect(delta.entries.map((e) => e.id)).toEqual([b.id])
     expect(delta.entries[0].path).toBe("Beta")
-    expect(decodeSyncCursor(delta.cursor)).toBe(3)
+    expect(decodeSyncCursor(delta.cursor)?.seq).toBe(3)
     expect(a.id).toBeDefined()
     // Resuming from the new cursor yields nothing.
     expect(await scanDocs(WS, { cursor: delta.cursor })).toMatchObject({ mode: "delta", entries: [], hasMore: false })
@@ -215,7 +216,8 @@ describe("scan", () => {
     const { cursor } = await scanDocs(WS, {})
     await moveDocById(WS, a.id, "Folder/A", { ...author, expectedRevision: a.revision! })
     const delta = await scanDocs(WS, { cursor })
-    expect(delta.entries.map((e) => [e.id, e.path])).toEqual([[a.id, "Folder/A"]])
+    expect(delta.entries.map((e) => [e.path, e.kind])).toEqual([["Folder", "file"], ["Folder/A", "file"]])
+    expect(delta.entries.map((e) => e.id)).toContain(a.id)
   })
 
   it("emits a tombstone with the last path for a deleted doc", async () => {
@@ -229,6 +231,7 @@ describe("scan", () => {
   })
 
   it("a doc created then deleted inside one delta window is just a tombstone", async () => {
+    await create(WS, "Seed")
     const { cursor } = await scanDocs(WS, {})
     const a = await create(WS, "Fleeting")
     await deleteDocument(a.id, { ...author, workspaceId: WS })
@@ -236,6 +239,7 @@ describe("scan", () => {
   })
 
   it("pages a delta with hasMore and resumes from the returned cursor", async () => {
+    await create(WS, "Seed")
     const { cursor } = await scanDocs(WS, {})
     for (const t of ["A", "B", "C"]) await create(WS, t)
     const first = await scanDocs(WS, { cursor, limit: 2 })
@@ -250,9 +254,12 @@ describe("scan", () => {
     it.each([
       ["garbage", "not-a-cursor"],
       ["well-formed but foreign", Buffer.from("other:5").toString("base64url")],
-      ["ahead of the log", encodeSyncCursor(999)],
-    ])("%s", async (_name, cursor) => {
+      ["ahead of the log", "AHEAD"],
+      ["from another workspace's log", "OTHER"],
+    ])("%s", async (_name, kind) => {
       await create(WS, "Alpha")
+      await create(OTHER_WS, "Elsewhere")
+      const cursor = kind === "AHEAD" ? cursorAt(999) : kind === "OTHER" ? cursorAt(1, OTHER_WS) : kind
       const scan = await scanDocs(WS, { cursor })
       expect(scan.mode).toBe("snapshot")
       expect(scan.entries).toHaveLength(1)
@@ -261,8 +268,8 @@ describe("scan", () => {
     it("older than the oldest retained change (pruned log)", async () => {
       await create(WS, "A"); await create(WS, "B"); await create(WS, "C")
       store.changes.splice(0, 2) // retention dropped seq 1 and 2
-      expect((await scanDocs(WS, { cursor: encodeSyncCursor(1) })).mode).toBe("snapshot")
-      expect((await scanDocs(WS, { cursor: encodeSyncCursor(2) })).mode).toBe("delta")
+      expect((await scanDocs(WS, { cursor: cursorAt(1) })).mode).toBe("snapshot")
+      expect((await scanDocs(WS, { cursor: cursorAt(2) })).mode).toBe("delta")
     })
   })
 
@@ -272,9 +279,10 @@ describe("scan", () => {
     await deleteDocument(theirs.id, { ...author, workspaceId: OTHER_WS })
     const snapshot = await scanDocs(WS, {})
     expect(snapshot.entries.map((e) => e.id)).toEqual([mine.id])
-    // A cursor minted for the other workspace's position is "ahead" here and cannot read its log.
-    const delta = await scanDocs(WS, { cursor: encodeSyncCursor(0) })
-    expect(delta.entries.map((e) => e.id)).toEqual([mine.id])
-    expect(delta.entries.every((e) => e.kind !== "tombstone")).toBe(true)
+    // A cursor minted for the other workspace carries its epoch, so it cannot read this log: full snapshot.
+    const foreign = await scanDocs(WS, { cursor: cursorAt(0, OTHER_WS) })
+    expect(foreign.mode).toBe("snapshot")
+    expect(foreign.entries.map((e) => e.id)).toEqual([mine.id])
+    expect(foreign.entries.every((e) => e.kind !== "tombstone")).toBe(true)
   })
 })

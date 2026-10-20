@@ -2872,11 +2872,13 @@ model DocChange {
   @@map("doc_changes")
 }
 
-/// One row per workspace holding the last allocated doc_changes.seq. Incremented with an atomic
-/// upsert inside the mutating transaction (see lib/doc-sync.ts). No FK; swept with the workspace.
+/// One row per workspace: the last allocated doc_changes.seq plus the log epoch. Locked FIRST and
+/// incremented inside the mutating transaction (see lib/doc-sync.ts). No FK; swept with the workspace.
 model DocChangeCounter {
   workspaceId String @id @map("workspace_id") @db.Uuid
   lastSeq     Int    @map("last_seq")
+  /// Random per counter row; embedded (with DOCS_SYNC_EPOCH) in scan cursors so a rebuilt log invalidates them.
+  epoch       String @db.VarChar(36)
 
   @@map("doc_change_counters")
 }

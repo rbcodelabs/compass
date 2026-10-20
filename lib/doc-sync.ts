@@ -1,27 +1,44 @@
 /**
  * Geode doc sync: per-workspace change log (ADR "Compass as a Geode Sync Provider", spike).
  *
- * `recordDocChange` is called INSIDE the same transaction as every STANDARD-doc mutation, so a
- * change row exists if and only if the mutation committed. Everything here is a no-op unless
- * DOCS_SYNC_ENABLED is on, so flag-off behaviour is unchanged. The scan (read) side lives in
- * lib/doc-sync-scan.ts, which needs doc-fs and so cannot be imported here.
+ * `recordDocChange` is called INSIDE the same transaction as every doc mutation, so a change row
+ * exists if and only if the mutation committed. Everything here is a no-op unless DOCS_SYNC_ENABLED
+ * is on, so flag-off behaviour is unchanged. The scan (read) side lives in lib/doc-sync-scan.ts,
+ * which needs doc-fs and so cannot be imported here.
  *
- * Sequence allocation: one counter row per workspace (doc_change_counters) is incremented with an
- * atomic upsert inside the mutation's transaction. On plain Postgres the row lock serializes
- * writers and releases in commit order, so seq order equals commit order. On Aurora DSQL
- * (optimistic concurrency, no row locks) a concurrent writer fails at commit/with a serialization
- * error instead; `withDocChangeRetry` re-runs the whole transaction a bounded number of times.
- * A rolled-back mutation rolls its increment back too, so seqs have no gaps.
+ * Scope (v1): STANDARD docs with no CANVAS / GTM ancestor (see syncScopeRows). Changes are computed
+ * by diffing the in-scope path tree before and after the mutation, so a doc entering or leaving
+ * scope (moved under / out of a canvas), a descendant whose prefix changed, a sibling whose
+ * "(suffix)" collision name changed, and a parent that flipped between file and folder are all
+ * logged without per-case code.
+ *
+ * Sequence allocation: one counter row per workspace (doc_change_counters). The FIRST step of
+ * recordDocChange locks it (upsert with increment 0); only then is the doc tree read, and the seq
+ * range is reserved at the end. Locking before reading matters on Postgres READ COMMITTED: a writer
+ * that waited for the lock reads the tree the previous writer committed, so two concurrent
+ * mutations cannot each diff against a stale tree. Aurora DSQL has no row locks; a concurrent writer
+ * fails with a serialization error instead, and `withDocChangeRetry` re-runs the whole
+ * transaction (bounded). A rolled-back mutation rolls its increment back, so seqs have no gaps.
+ *
+ * Log epoch: the counter row carries a random `epoch` generated when the row is created. Scan cursors
+ * embed a tag of (epoch, DOCS_SYNC_EPOCH); a mismatch makes the scan answer with a full snapshot.
+ * The flag cannot observe writes made while it was off, so an operator re-enabling sync (or rebuilding
+ * the log) MUST change DOCS_SYNC_EPOCH; deleting the counter row has the same effect.
  */
+import { randomUUID } from "node:crypto"
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
-import { sanitizeTitleSegment } from "@/lib/doc-path"
-import { buildTree } from "@/lib/doc-virtual-paths"
+import { buildTree, syncScopeRows } from "@/lib/doc-virtual-paths"
 
 export type DocChangeKind = "UPSERT" | "MOVE" | "DELETE"
 
 export function isDocsSyncEnabled(): boolean {
   const value = (process.env.DOCS_SYNC_ENABLED ?? "").trim().toLowerCase()
   return value === "1" || value === "true"
+}
+
+/** Operator-controlled generation of the log; change it whenever sync is re-enabled after being off. */
+export function configuredSyncEpoch(): string {
+  return (process.env.DOCS_SYNC_EPOCH ?? "0").trim() || "0"
 }
 
 export function docRevisionOf(doc: { revision: string | null; updatedAt: Date }): string {
@@ -32,19 +49,21 @@ type ChangeClient = Pick<AppTransactionClient, "doc" | "docChange" | "docChangeC
 
 const MAX_ATTEMPTS = 6
 
-/** Serialization / write-conflict failures from Postgres (40001, 40P01) and Aurora DSQL (OC000, OC001). */
+/** Serialization / write-conflict failures from Postgres (40001, 40P01), Aurora DSQL (OC000, OC001), and a lost counter-row insert race. */
 export function isDocChangeConflict(error: unknown): boolean {
   if (!error || typeof error !== "object") return false
-  const e = error as { code?: unknown; message?: unknown; cause?: unknown; meta?: { code?: unknown } }
+  const e = error as { code?: unknown; message?: unknown; cause?: unknown; meta?: { code?: unknown; modelName?: unknown; target?: unknown } }
   const code = String(e.code ?? e.meta?.code ?? "")
   if (code === "P2034" || code === "40001" || code === "40P01" || code === "OC000" || code === "OC001") return true
+  // Two first-ever writers racing to create the counter row: the loser sees a unique violation on it.
+  if (code === "P2002" && (e.meta?.modelName === "DocChangeCounter" || /doc_change_counters/.test(String(e.meta?.target ?? "")))) return true
   if (typeof e.message === "string" && /\b(OC000|OC001|40001|40P01)\b|could not serialize|deadlock detected/i.test(e.message)) return true
   return e.cause !== undefined && e.cause !== error ? isDocChangeConflict(e.cause) : false
 }
 
 /**
- * Re-runs `run` (which must be a WHOLE transaction) when it loses a write conflict. With the flag
- * off it is a plain call, so existing behaviour (including how conflicts surface) is unchanged.
+ * Re-runs `run` (which must be a WHOLE transaction, re-reading anything it depends on) when it loses a
+ * write conflict. With the flag off it is a plain call, so existing behaviour is unchanged.
  */
 export async function withDocChangeRetry<T>(run: () => Promise<T>): Promise<T> {
   if (!isDocsSyncEnabled()) return run()
@@ -58,11 +77,11 @@ export async function withDocChangeRetry<T>(run: () => Promise<T>): Promise<T> {
 
 /**
  * For writers that bypass document-service (legacy direct-Prisma paths): runs `write` and the change
- * row in one transaction when sync is on; a plain call against `db` when it is off.
+ * rows in one transaction when sync is on; a plain call against `db` when it is off.
  */
 export async function writeDocWithChange<T extends { id: string; workspaceId?: string }>(
   db: AppPrismaClient,
-  opts: { workspaceId: string; kind: DocChangeKind | ((result: T) => DocChangeKind); before?: DocBefore },
+  opts: { workspaceId: string; kind: DocChangeKind | ((result: T) => DocChangeKind); before?: DocBefore | null },
   write: (client: Pick<AppTransactionClient, "doc">) => Promise<T>,
 ): Promise<T> {
   if (!isDocsSyncEnabled()) return write(db)
@@ -73,7 +92,7 @@ export async function writeDocWithChange<T extends { id: string; workspaceId?: s
   }))
 }
 
-/** The title/parent a doc had BEFORE the mutation, so path changes of colliding siblings can be found. */
+/** The title/parent a doc had BEFORE the mutation. */
 export type DocBefore = { parentId: string | null; title: string }
 
 /** UPSERT, or MOVE when the title or parent changes (either changes the virtual path). */
@@ -83,74 +102,71 @@ export function changeKindFor(before: DocBefore, after: { title?: string; parent
   return reparented || renamed ? "MOVE" : "UPSERT"
 }
 
+type TreeRow = { id: string; title: string; parentId: string | null; roadmapItemId: string | null; docType: string; updatedAt: Date; revision: string | null; sortOrder: number; createdAt: Date }
+
+/** Locks (creating if needed) the workspace's counter row. Must be the first statement of the sync step. */
+async function lockCounter(tx: ChangeClient, workspaceId: string) {
+  return tx.docChangeCounter.upsert({
+    where: { workspaceId },
+    create: { workspaceId, lastSeq: 0, epoch: randomUUID() },
+    update: { lastSeq: { increment: 0 } },
+  })
+}
+
 /**
  * Appends change rows for `docId`. Call after the write for UPSERT/MOVE (so path and revision are
- * the new ones) and BEFORE the row is removed for DELETE.
- *
- * Extra MOVE rows are written for docs whose path changed as a consequence:
- *   - a MOVE: the doc's descendants (their prefix changed);
- *   - a MOVE or DELETE: siblings that share the sanitized title with the doc under its old or new
- *     parent (the "Title (abcd1234)" collision suffix is derived, so one doc leaving or arriving can
- *     rename another), plus their descendants.
- * Non-STANDARD docs (CANVAS, GTM briefs) are never logged: the sync surface is markdown only.
+ * the new ones) and BEFORE the row is removed for DELETE. `before` is the doc's title/parent before
+ * the mutation; pass `null` for a create; omit it when neither changed.
  */
-export async function recordDocChange(tx: ChangeClient, workspaceId: string, docId: string, kind: DocChangeKind, before?: DocBefore): Promise<void> {
+export async function recordDocChange(tx: ChangeClient, workspaceId: string, docId: string, kind: DocChangeKind, before?: DocBefore | null): Promise<void> {
   if (!isDocsSyncEnabled()) return
-  const rows = await tx.doc.findMany({
+  await lockCounter(tx, workspaceId) // lock FIRST, then read the tree (see header)
+  const rows: TreeRow[] = await tx.doc.findMany({
     where: { workspaceId },
     select: { id: true, title: true, parentId: true, roadmapItemId: true, docType: true, updatedAt: true, revision: true, sortOrder: true, createdAt: true },
     orderBy: [{ parentId: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
   })
-  const row = rows.find((r) => r.id === docId)
-  if (!row) return
-  const mutated = buildTree(rows).find((n) => n.docId === docId)
-  if (!mutated || mutated.docType !== "STANDARD") return
+  const mutated = rows.find((r) => r.id === docId)
+  if (!mutated) return
 
-  // Paths other docs have AFTER the mutation (for DELETE: with the doc gone).
-  const afterNodes = kind === "DELETE" ? buildTree(rows.filter((r) => r.id !== docId)) : buildTree(rows)
+  let beforeRows: TreeRow[]
+  let afterRows: TreeRow[]
+  if (kind === "DELETE") { beforeRows = rows; afterRows = rows.filter((r) => r.id !== docId) }
+  else if (before === null) { beforeRows = rows.filter((r) => r.id !== docId); afterRows = rows }
+  else { afterRows = rows; beforeRows = before ? rows.map((r) => (r.id === docId ? { ...r, parentId: before.parentId, title: before.title } : r)) : rows }
+
+  const beforeNodes = new Map(buildTree(syncScopeRows(beforeRows)).map((n) => [n.docId, n]))
+  const afterTree = buildTree(syncScopeRows(afterRows))
+  const afterNodes = new Map(afterTree.map((n) => [n.docId, n]))
   const revisions = new Map(rows.map((r) => [r.id, docRevisionOf(r)]))
-
-  const affected = new Map<string, { kind: DocChangeKind; path: string }>()
-  const mark = (n: { docId: string; path: string }, k: DocChangeKind) => { if (!affected.has(n.docId)) affected.set(n.docId, { kind: k, path: n.path }) }
-  mark(mutated, kind)
-  const withDescendants = (root: { path: string }) => afterNodes.filter((n) => n.docType === "STANDARD" && n.docId !== docId && n.path.startsWith(`${root.path}/`))
-
-  if (kind === "MOVE") for (const n of withDescendants(afterNodes.find((a) => a.docId === docId)!)) mark(n, "MOVE")
-
-  if (kind === "MOVE" || kind === "DELETE") {
-    const old = before ?? { parentId: row.parentId, title: row.title }
-    const parents = new Set<string | null>([old.parentId, row.parentId])
-    const titles = new Set([sanitizeTitleSegment(old.title), sanitizeTitleSegment(row.title)])
-    const siblings = afterNodes.filter((n) => n.docType === "STANDARD" && n.docId !== docId && parents.has(n.parentId) && titles.has(sanitizeTitleSegment(n.title)))
-    for (const sibling of siblings) {
-      mark(sibling, "MOVE")
-      for (const d of withDescendants(sibling)) mark(d, "MOVE")
-    }
-  }
-
-  const ordered = [...affected.entries()]
-  const base = await allocateSeq(tx, workspaceId, ordered.length)
   const now = new Date()
+
+  const changes: Array<{ docId: string; kind: DocChangeKind; path: string; revision: string | null; deleted: boolean }> = []
+  for (const node of afterTree) {
+    const prior = beforeNodes.get(node.docId)
+    const revision = revisions.get(node.docId) ?? null
+    if (node.docId === docId) changes.push({ docId, kind, path: node.path, revision, deleted: false })
+    else if (!prior) changes.push({ docId: node.docId, kind: "UPSERT", path: node.path, revision, deleted: false }) // entered scope
+    else if (prior.path !== node.path) changes.push({ docId: node.docId, kind: "MOVE", path: node.path, revision, deleted: false }) // prefix or collision suffix changed
+    else if (prior.hasChildren !== node.hasChildren) changes.push({ docId: node.docId, kind: "UPSERT", path: node.path, revision, deleted: false }) // file <-> folder flip
+  }
+  for (const [id, prior] of beforeNodes) {
+    if (!afterNodes.has(id)) changes.push({ docId: id, kind: "DELETE", path: prior.path, revision: revisions.get(id) ?? null, deleted: true }) // deleted or left scope
+  }
+  if (changes.length === 0) return
+
+  const bumped = await tx.docChangeCounter.update({ where: { workspaceId }, data: { lastSeq: { increment: changes.length } } })
+  const base = bumped.lastSeq - changes.length
   await tx.docChange.createMany({
-    data: ordered.map(([id, change], index) => ({
+    data: changes.map((change, index) => ({
       workspaceId,
-      docId: id,
+      docId: change.docId,
       seq: base + index + 1,
       kind: change.kind,
-      revision: revisions.get(id) ?? null,
-      path: id === docId ? mutated.path : change.path,
-      deletedAt: kind === "DELETE" && id === docId ? now : null,
+      revision: change.revision,
+      path: change.path,
+      deletedAt: change.deleted ? now : null,
       createdAt: now,
     })),
   })
-}
-
-/** Reserves `count` consecutive seqs for the workspace and returns the last one used before them. */
-async function allocateSeq(tx: ChangeClient, workspaceId: string, count: number): Promise<number> {
-  const counter = await tx.docChangeCounter.upsert({
-    where: { workspaceId },
-    create: { workspaceId, lastSeq: count },
-    update: { lastSeq: { increment: count } },
-  })
-  return counter.lastSeq - count
 }

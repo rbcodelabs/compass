@@ -76,3 +76,23 @@ export function buildTree(docs: DocRow[]): DocFsNode[] {
   return results
 }
 
+/**
+ * The docs the Geode sync surface exposes: STANDARD docs with no non-STANDARD (CANVAS / GTM brief)
+ * ancestor. A STANDARD doc under a canvas is excluded in v1. Build the sync path tree from THIS
+ * subset (`buildTree(syncScopeRows(rows))`) so collision suffixes only ever depend on in-scope siblings.
+ */
+export function syncScopeRows<T extends { id: string; parentId: string | null; docType: string }>(rows: T[]): T[] {
+  const byId = new Map(rows.map((r) => [r.id, r]))
+  const memo = new Map<string, boolean>()
+  const inScope = (row: T): boolean => {
+    const known = memo.get(row.id)
+    if (known !== undefined) return known
+    memo.set(row.id, false) // a parent cycle resolves to out of scope instead of recursing forever
+    const parent = row.parentId ? byId.get(row.parentId) : undefined
+    const result = row.docType === "STANDARD" && (!parent || inScope(parent))
+    memo.set(row.id, result)
+    return result
+  }
+  return rows.filter(inScope)
+}
+

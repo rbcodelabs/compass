@@ -5,10 +5,11 @@
 --
 -- One row is a change to a STANDARD doc:
 --   seq      -> per-workspace monotonic sequence, taken from doc_change_counters (one row per
---               workspace, incremented by an atomic upsert in the mutation's transaction); the
+--               workspace, locked then incremented in the mutation's transaction); the
 --               unique index is a backstop against duplicates
 --   kind     -> UPSERT | MOVE | DELETE
 --   revision -> the doc revision after the change
+--   epoch (counter) -> random per workspace log; scan cursors embed it so a rebuilt log invalidates them
 --   path     -> the doc's virtual path when recorded (last path for DELETE)
 --
 -- Aurora DSQL rules followed:
@@ -31,7 +32,8 @@ CREATE TABLE IF NOT EXISTS doc_changes (
 
 CREATE TABLE IF NOT EXISTS doc_change_counters (
   workspace_id UUID PRIMARY KEY,
-  last_seq INTEGER NOT NULL
+  last_seq INTEGER NOT NULL,
+  epoch VARCHAR(36) NOT NULL
 );
 
 CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_doc_changes_workspace_seq ON doc_changes(workspace_id, seq);

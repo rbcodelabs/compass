@@ -284,7 +284,12 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
   await prisma.squad.deleteMany({ where: { workspaceId } });
   // Sync change log (no FK reaches it): rows go with the docs they describe.
-  await prisma.docChange.deleteMany({ where: { workspaceId } });
+  // Passes of at most 500 rows: DSQL bounds the rows one transaction may modify.
+  for (;;) {
+    const batch = await prisma.docChange.findMany({ where: { workspaceId }, select: { id: true }, take: 500 });
+    if (batch.length === 0) break;
+    await prisma.docChange.deleteMany({ where: { id: { in: batch.map((row) => row.id) } } });
+  }
   await prisma.docChangeCounter.deleteMany({ where: { workspaceId } });
   await prisma.doc.deleteMany({ where: { workspaceId } });
   await prisma.$transaction(async tx => {
