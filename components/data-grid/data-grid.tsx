@@ -40,6 +40,7 @@ import {
 } from "./data-grid-header-cell";
 import { DataGridPagination } from "./data-grid-pagination";
 import { DataGridToolbar } from "./data-grid-toolbar";
+import { DraftArea } from "./draft-area";
 import { CellDisplay } from "./cells/cell-display";
 import { CellEditor } from "./cells/cell-editor";
 import { formatCellValue, parseCellText } from "./cells/cell-values";
@@ -61,6 +62,7 @@ import {
   type GridCellValue,
   type GridColumnDef,
   type GridColumnMeta,
+  type GridCreation,
   type GridEdit,
   type GridRowData,
   type GridRowState,
@@ -181,6 +183,14 @@ export type DataGridProps<TRow extends GridRowData> = {
   readOnly?: boolean;
 
   /**
+   * Opt-in draft area under the rows for creating rows in bulk: type or paste N
+   * rows, then submit once. Drafts live in the area's own state (not the
+   * optimistic overlay), so a server re-delivery of `rows` never clears them.
+   * Hidden below `md` and when `readOnly`.
+   */
+  creation?: GridCreation;
+
+  /**
    * How the grid claims vertical space.
    *
    *  - `"fill"`    — the grid IS the scroll viewport and consumes the height its
@@ -272,6 +282,7 @@ export function DataGrid<TRow extends GridRowData>({
   interaction,
   onOpenRow,
   readOnly = false,
+  creation,
   height = "natural",
   maxHeight,
   pagination = true,
@@ -1389,6 +1400,10 @@ export function DataGrid<TRow extends GridRowData>({
           </TableBody>
         </Table>
       </DndContext>
+
+      {creation && !readOnly && !isMobile && (
+        <DraftArea creation={creation} announce={setLiveMessage} />
+      )}
 
       {pagination && (
         <DataGridPagination
