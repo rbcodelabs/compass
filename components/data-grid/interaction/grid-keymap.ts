@@ -24,6 +24,10 @@ export type GridKeyAction =
   /** Shift+Arrow: move the far corner of the range, keeping the active cell. */
   | { type: "extend"; rows: number; cols: number }
   | { type: "fillDown" }
+  /** Ctrl/Cmd+Z. Only in nav mode: an open editor keeps its native text undo. */
+  | { type: "undo" }
+  /** Ctrl/Cmd+Shift+Z or Ctrl+Y. */
+  | { type: "redo" }
   /** Esc in nav mode: collapse a multi-cell range back to the active cell. */
   | { type: "collapse" }
   | { type: "openDetail" }
@@ -47,6 +51,13 @@ export function resolveGridKey(
 
   if (chord && !altKey && !shiftKey && key.toLowerCase() === "d") {
     return { type: "fillDown" };
+  }
+  if (chord && !altKey && key.toLowerCase() === "z") {
+    return shiftKey ? { type: "redo" } : { type: "undo" };
+  }
+  // Ctrl+Y only: Cmd+Y is "History" in browsers on macOS and is not ours to take.
+  if (ctrlKey && !metaKey && !altKey && !shiftKey && key.toLowerCase() === "y") {
+    return { type: "redo" };
   }
   if (shiftKey && !chord && !altKey) {
     if (key === "ArrowUp") return { type: "extend", rows: -1, cols: 0 };

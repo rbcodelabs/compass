@@ -84,6 +84,13 @@ export type FeedbackGridProps = {
    * full "no feedback yet" empty state vs. the compact "nothing matches" one.
    */
   hasAnyFeedback: boolean;
+  /**
+   * Present: the grid runs in sheet mode (keyboard navigation, type-to-edit,
+   * range copy / paste / fill, undo / redo) over the Type and Status columns.
+   * Absent: the original always-mounted pickers. `readOnly` is the workspace
+   * context's `isReadOnly`, a UX affordance only (the server enforces writes).
+   */
+  sheet?: { readOnly: boolean };
 };
 
 export function FeedbackGrid({
@@ -95,6 +102,7 @@ export function FeedbackGrid({
   total,
   query,
   hasAnyFeedback,
+  sheet,
 }: FeedbackGridProps) {
   const router = useRouter();
   const { openPanel } = usePanelContext();
@@ -296,6 +304,9 @@ export function FeedbackGrid({
       ]}
       onClearFilters={() => applyPatch({ status: null, type: null })}
       renderMobileRow={renderMobileRow}
+      interaction={sheet ? "sheet" : undefined}
+      readOnly={sheet?.readOnly}
+      onOpenRow={sheet ? (row) => openPanel("feedback", row.id) : undefined}
       rowMatchesFilters={rowMatchesFilters}
       onRefresh={() => router.refresh()}
       emptyState={

@@ -6,6 +6,15 @@ export {
   type GridChangeSource,
 } from "./interaction/range-ops";
 export {
+  GridHistoryControls,
+  type GridHistoryControl,
+} from "./history-controls";
+export {
+  EMPTY_HISTORY,
+  HISTORY_LIMIT,
+  type GridHistory,
+} from "./interaction/history";
+export {
   DataGridHeaderCell,
   STICKY_HEADER_CELL_CLASS,
   type DataGridHeaderCellProps,

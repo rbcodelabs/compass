@@ -20,6 +20,8 @@ import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 import { syncRoadmapOnSolutionChange, type SolutionSyncResult } from "@/lib/roadmap/solution-sync";
 import { assignmentUpdate, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
+import { BATCH_DESCRIPTION_MAX_LENGTH } from "@/lib/batch-create-limits";
+import { OPPORTUNITY_SEGMENT_MAX_LENGTH } from "@/lib/opportunity-draft";
 
 type MutationActor = { kind: "USER" | "SERVICE" | "ANONYMOUS" | "SYSTEM"; id: string | null };
 
@@ -166,7 +168,22 @@ export async function updateEntityField(
       return { ok: false, status: 400, error: "Description must be text" };
     }
     const trimmed = typeof value === "string" ? value.trim() : "";
+    // Same cap the batch-create core applies to these two entities, so a cell
+    // edit cannot store what a create would refuse.
+    if ((type === "opportunity" || type === "solution") && trimmed.length > BATCH_DESCRIPTION_MAX_LENGTH) {
+      return { ok: false, status: 400, error: `Description must be ${BATCH_DESCRIPTION_MAX_LENGTH} characters or fewer` };
+    }
     data = { description: trimmed.length > 0 ? trimmed : null };
+  } else if (type === "opportunity" && field === "customerSegment") {
+    // Mirrors normalizeNewOpportunityInput: trimmed, blank clears, capped at the column width.
+    if (value !== null && typeof value !== "string") {
+      return { ok: false, status: 400, error: "Customer segment must be text" };
+    }
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (trimmed.length > OPPORTUNITY_SEGMENT_MAX_LENGTH) {
+      return { ok: false, status: 400, error: `Customer segment must be ${OPPORTUNITY_SEGMENT_MAX_LENGTH} characters or fewer` };
+    }
+    data = { customerSegment: trimmed.length > 0 ? trimmed : null };
   } else if (type === "opportunity" && (field === "squadId" || field === "linkedKeyResultId")) {
     if (value !== null && (typeof value !== "string" || !value.trim())) {
       return { ok: false, status: 400, error: `${field} must be a nonempty string or null` };

@@ -157,4 +157,40 @@ describe("PATCH /api/panels/entity/[type]/[id]", () => {
       { kind: "USER", id: "user-1" }
     );
   });
+  it("403s a read-only member editing customerSegment or description, writing nothing", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: true } as never);
+    for (const field of ["customerSegment", "description"]) {
+      const res = await patch("opportunity", "opp-1", { field, value: "x" });
+      expect(res.status).toBe(403);
+    }
+    expect(mockUpdateEntityField).not.toHaveBeenCalled();
+  });
+
+  it("404s a non-member editing customerSegment before touching the entity", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue(null as never);
+    const res = await patch("opportunity", "opp-1", { field: "customerSegment", value: "SMB" });
+    expect(res.status).toBe(404);
+    expect(mockUpdateEntityField).not.toHaveBeenCalled();
+  });
+
+  it("passes a customerSegment edit to the workspace-scoped mutation", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: false } as never);
+    mockUpdateEntityField.mockResolvedValue({ ok: true } as never);
+    mockGetEntityDetail.mockResolvedValue({ type: "opportunity", data: { id: "opp-1" } } as never);
+    const res = await patch("opportunity", "opp-1", { field: "customerSegment", value: "SMB" });
+    expect(res.status).toBe(200);
+    expect(mockUpdateEntityField).toHaveBeenCalledWith("opportunity", "opp-1", "ws-1", "customerSegment", "SMB", { kind: "USER", id: "user-1" });
+  });
+
+  it("surfaces a validation failure from the mutation as a 400 body", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: false } as never);
+    mockUpdateEntityField.mockResolvedValue({ ok: false, status: 400, error: "Customer segment must be 255 characters or fewer" } as never);
+    const res = await patch("opportunity", "opp-1", { field: "customerSegment", value: "x".repeat(300) });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Customer segment must be 255 characters or fewer" });
+  });
 });

@@ -233,9 +233,18 @@ export function planClear<TRow extends GridRowData>(
   return plan;
 }
 
-// ── Change sets (the unit PR5b's undo/redo will reuse) ──────────────────────
+// ── Change sets (the unit undo/redo replays) ──────────────────────
 
-export type GridChangeSource = "paste" | "fill" | "clear" | "cut";
+export type GridChangeSource =
+  | "paste"
+  | "fill"
+  | "clear"
+  | "cut"
+  /** A single-cell edit (typed, picked, toggled or Delete). */
+  | "edit"
+  /** The inverse of an earlier set, produced by undo / redo. */
+  | "undo"
+  | "redo";
 
 /** One cell's outcome inside a change set. */
 export type GridCellChange = {
