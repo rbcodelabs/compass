@@ -123,6 +123,8 @@ export type LinkEntitiesInput = {
   ctx: LinkContext
   /** Set only by lib/links/legacy-mirror.ts, the single writer of a legacy-mirrored type. */
   viaLegacyWriter?: boolean
+  /** With viaLegacyWriter only: an existing row takes `origin` (and, when it becomes DIRECT, this call's source and actor), because the legacy row is the truth. */
+  reconcileOrigin?: boolean
 }
 
 export type LinkEntitiesResult = { link: EntityLinkRow; created: boolean; from: LinkEndpoint; to: LinkEndpoint; def: LinkTypeDef }
@@ -156,9 +158,17 @@ export async function linkEntities(tx: Tx, input: LinkEntitiesInput): Promise<Li
   const existing = (await tx.entityLink.findFirst({ where: { fromId: first.id, linkType: def.key, toId: second.id } })) as EntityLinkRow | null
   if (existing) {
     if (def.duplicatePolicy === "error") throw new TypedLinkError(`Already linked (${def.key}).`, "INVALID")
-    if (existing.workspaceId === workspaceId) return { link: existing, created: false, from: fromEndpoint, to: toEndpoint, def }
+    const originDrift = Boolean(input.viaLegacyWriter && input.reconcileOrigin && existing.origin !== origin)
+    if (existing.workspaceId === workspaceId && !originDrift) return { link: existing, created: false, from: fromEndpoint, to: toEndpoint, def }
     // A drifted workspaceId is repaired to the verified one: both endpoints were just checked there.
-    const link = (await tx.entityLink.update({ where: { id: existing.id }, data: { workspaceId, updatedAt: new Date() } })) as EntityLinkRow
+    const link = (await tx.entityLink.update({
+      where: { id: existing.id },
+      data: {
+        workspaceId,
+        updatedAt: new Date(),
+        ...(originDrift ? { origin, ...(origin === "DIRECT" ? { source: input.ctx.source, createdById: input.ctx.createdById ?? null } : {}) } : {}),
+      },
+    })) as EntityLinkRow
     return { link, created: false, from: fromEndpoint, to: toEndpoint, def }
   }
 
@@ -227,7 +237,53 @@ export async function unlinkEntities(tx: Tx, input: UnlinkEntitiesInput): Promis
   return { removed: count, removedIds: ids, def }
 }
 
+/**
+ * Removes the links of one type that start at `fromId`, optionally keeping the one that ends at `exceptToId` and optionally only
+ * those of one origin. For the legacy writer only (a pointer that moved replaces its row; LEGACY objective links go stale when the
+ * pointer does). The `from` endpoint is verified in `expectedWorkspaceId`; the delete is by `fromId` and type, so a row whose
+ * workspace_id has drifted is removed too. `removed: 0` is success.
+ */
+export async function unlinkFromEntity(
+  tx: Tx,
+  input: { linkType: string; fromId: string; expectedWorkspaceId: string; exceptToId?: string; origin?: LinkOrigin },
+): Promise<{ removed: number }> {
+  const def = requireLinkType(input.linkType)
+  assertWritableHere(def, true)
+  await requireEndpoint(tx, def.from, input.expectedWorkspaceId, input.fromId)
+  const { count } = await tx.entityLink.deleteMany({
+    where: {
+      linkType: def.key,
+      fromId: input.fromId,
+      ...(input.exceptToId ? { toId: { not: input.exceptToId } } : {}),
+      ...(input.origin ? { origin: input.origin } : {}),
+    },
+  })
+  return { removed: count }
+}
+
 // ── Deletes ─────────────────────────────────────────────────────────────────
+
+/**
+ * Drains the links of one type that start at any of `fromIds` (optionally only one origin and only those that end at `toId`), in
+ * committed passes of at most LINK_WRITE_CHUNK links. For the legacy writer only: the mirror counterpart of the legacy LEGACY-link
+ * drain after a Key Result is deleted. Idempotent.
+ */
+export async function drainLinksFromEntities(
+  db: Tx,
+  input: { linkType: string; fromIds: readonly string[]; origin?: LinkOrigin; toId?: string },
+): Promise<number> {
+  const def = requireLinkType(input.linkType)
+  assertWritableHere(def, true)
+  let removed = 0
+  for (const part of chunk([...new Set(input.fromIds)], LINK_WRITE_CHUNK)) {
+    const where = { linkType: def.key, fromId: { in: part }, ...(input.origin ? { origin: input.origin } : {}), ...(input.toId ? { toId: input.toId } : {}) }
+    removed += await drainByIds(
+      (take) => db.entityLink.findMany({ where, select: { id: true }, take }),
+      async (rowIds) => (await db.entityLink.deleteMany({ where: { id: { in: rowIds } } })).count,
+    )
+  }
+  return removed
+}
 
 /**
  * Removes every link that names any of `ids` as an endpoint of `type`, in BOTH directions (there are no

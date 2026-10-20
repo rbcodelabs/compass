@@ -173,16 +173,24 @@ async function upsertOpportunityObjectiveLink(
   input: { workspaceId: string; opportunityId: string; objectiveId: string; origin: "DIRECT" | "LEGACY"; ctx: LinkContext },
 ): Promise<{ link: LinkRow; created: boolean; originFlipped: boolean }> {
   const { workspaceId, opportunityId, objectiveId, origin, ctx } = input
+  // The legacy row is written first and stays the source of truth; the entity_links mirror (flagged) joins the same transaction
+  // with the legacy row's FINAL origin, so a kept DIRECT stays DIRECT in the mirror too.
+  const mirror = async (final: LinkRow) =>
+    (await legacyMirror()).mirrorOpportunityTargetsObjective(tx, { opportunityId, objectiveId, workspaceId, origin: final.origin === "DIRECT" ? "DIRECT" : "LEGACY", ctx })
   const existing = (await tx.opportunityObjectiveLink.findFirst({ where: { opportunityId, objectiveId } })) as LinkRow | null
   if (!existing) {
     const link = (await tx.opportunityObjectiveLink.create({
       data: { workspaceId, opportunityId, objectiveId, origin, source: ctx.source, createdById: ctx.createdById ?? null },
     })) as LinkRow
+    await mirror(link)
     return { link, created: true, originFlipped: false }
   }
   const flip = origin === "DIRECT" && existing.origin !== "DIRECT"
   const repair = existing.workspaceId !== workspaceId
-  if (!flip && !repair) return { link: existing, created: false, originFlipped: false }
+  if (!flip && !repair) {
+    await mirror(existing)
+    return { link: existing, created: false, originFlipped: false }
+  }
   const link = (await tx.opportunityObjectiveLink.update({
     where: { id: existing.id },
     data: {
@@ -190,6 +198,7 @@ async function upsertOpportunityObjectiveLink(
       ...(flip ? { origin: "DIRECT", source: ctx.source, createdById: ctx.createdById ?? null } : {}),
     },
   })) as LinkRow
+  await mirror(link)
   return { link, created: false, originFlipped: flip }
 }
 
@@ -211,7 +220,11 @@ export async function unlinkOpportunityFromObjective(
   const opportunity = await loadOpportunity(tx, input.opportunityId, input.expectedWorkspaceId)
   const where = { opportunityId: opportunity.id, objectiveId: input.objectiveId, workspaceId: opportunity.workspaceId }
   const existing = (await tx.opportunityObjectiveLink.findFirst({ where })) as LinkRow | null
-  if (!existing) return { removed: 0 }
+  // The mirror row (if any) goes whatever the flag says, so a legacy unlink never strands one.
+  if (!existing) {
+    await (await legacyMirror()).unmirrorOpportunityTargetsObjective(tx, { opportunityId: opportunity.id, objectiveId: input.objectiveId, workspaceId: opportunity.workspaceId })
+    return { removed: 0 }
+  }
 
   // This function READS the opportunity's pointer to decide what to do. Touching the opportunity row makes that read part of the
   // write set, so a concurrent pointer change conflicts (DSQL detects write-write conflicts only) instead of write-skewing.
@@ -225,11 +238,15 @@ export async function unlinkOpportunityFromObjective(
       select: { objectiveId: true },
     })
     if (pointer?.objectiveId === input.objectiveId) {
-      if (existing.origin === "DIRECT") await tx.opportunityObjectiveLink.update({ where: { id: existing.id }, data: { origin: "LEGACY" } })
+      if (existing.origin === "DIRECT") {
+        await tx.opportunityObjectiveLink.update({ where: { id: existing.id }, data: { origin: "LEGACY" } })
+        await (await legacyMirror()).mirrorOpportunityTargetsObjective(tx, { opportunityId: opportunity.id, objectiveId: input.objectiveId, workspaceId: opportunity.workspaceId, origin: "LEGACY", ctx: { source: existing.source as LinkSource } })
+      }
       return { removed: 0, stillLinkedViaKeyResult: true }
     }
   }
   const { count } = await tx.opportunityObjectiveLink.deleteMany({ where: { id: existing.id, workspaceId: opportunity.workspaceId } })
+  await (await legacyMirror()).unmirrorOpportunityTargetsObjective(tx, { opportunityId: opportunity.id, objectiveId: input.objectiveId, workspaceId: opportunity.workspaceId })
   return { removed: count }
 }
 
@@ -254,7 +271,10 @@ export async function syncLegacyLink(
       ...(keyResult ? { objectiveId: { not: keyResult.objectiveId } } : {}),
     },
   })
+  const mirror = await legacyMirror()
+  await mirror.unmirrorStaleLegacyObjectiveLinks(tx, { opportunityId: input.opportunityId, workspaceId: input.workspaceId, exceptObjectiveId: keyResult?.objectiveId })
   if (keyResult) {
+    // Mirrors the Opportunity <-> Objective link too (inside upsert).
     await upsertOpportunityObjectiveLink(tx, {
       workspaceId: input.workspaceId,
       opportunityId: input.opportunityId,
@@ -263,6 +283,8 @@ export async function syncLegacyLink(
       ctx: input.ctx,
     })
   }
+  // The pointer itself (OPPORTUNITY_TARGETS_KEY_RESULT) carries the Key Result granularity the Objective link cannot.
+  await mirror.mirrorOpportunityKeyResultPointer(tx, { opportunityId: input.opportunityId, keyResultId: keyResult?.id ?? null, workspaceId: input.workspaceId, ctx: input.ctx })
 }
 
 /**
@@ -358,8 +380,10 @@ export async function deleteLinksFor(tx: Tx, kind: LinkParentKind, ids: readonly
     else removed += (await tx.solutionKeyResultLink.deleteMany({ where: { keyResultId: { in: part } } })).count
   }
   // The entity_links mirror is swept whatever the flag says: rows written while it was on must not outlive their endpoints.
-  if (kind === "solution") removed += await (await entityLinkService()).deleteLinksForEntity(tx, "SOLUTION", ids)
-  else if (kind === "keyResult") removed += await (await entityLinkService()).deleteLinksForEntity(tx, "KEY_RESULT", ids)
+  if (kind === "opportunity") removed += await (await entityLinkService()).deleteLinksForEntity(tx, "OPPORTUNITY", ids)
+  else if (kind === "objective") removed += await (await entityLinkService()).deleteLinksForEntity(tx, "OBJECTIVE", ids)
+  else if (kind === "solution") removed += await (await entityLinkService()).deleteLinksForEntity(tx, "SOLUTION", ids)
+  else removed += await (await entityLinkService()).deleteLinksForEntity(tx, "KEY_RESULT", ids)
   return removed
 }
 
@@ -430,8 +454,10 @@ export async function drainLinksFor(db: Tx, kind: LinkParentKind, ids: readonly 
     }
   }
   // Mirror rows (entity_links) for the same parents, in the same committed passes.
-  if (kind === "solution") removed += await (await entityLinkService()).deleteLinksForEntity(db, "SOLUTION", ids)
-  else if (kind === "keyResult") removed += await (await entityLinkService()).deleteLinksForEntity(db, "KEY_RESULT", ids)
+  if (kind === "opportunity") removed += await (await entityLinkService()).deleteLinksForEntity(db, "OPPORTUNITY", ids)
+  else if (kind === "objective") removed += await (await entityLinkService()).deleteLinksForEntity(db, "OBJECTIVE", ids)
+  else if (kind === "solution") removed += await (await entityLinkService()).deleteLinksForEntity(db, "SOLUTION", ids)
+  else removed += await (await entityLinkService()).deleteLinksForEntity(db, "KEY_RESULT", ids)
   return removed
 }
 
@@ -446,6 +472,8 @@ export async function drainLegacyLinksForOpportunities(db: Tx, opportunityIds: r
       async (rowIds) => (await db.opportunityObjectiveLink.deleteMany({ where: { id: { in: rowIds } } })).count,
     )
   }
+  // The same LEGACY rows in the mirror (not counted: the return value is the legacy table's, as before).
+  await (await legacyMirror()).drainMirroredLegacyObjectiveLinks(db, opportunityIds, objectiveId)
   return removed
 }
 
@@ -458,6 +486,7 @@ export async function deleteLegacyLinksForOpportunities(tx: Tx, opportunityIds: 
   for (const part of chunk(opportunityIds, LINK_WRITE_CHUNK)) {
     removed += (await tx.opportunityObjectiveLink.deleteMany({ where: { opportunityId: { in: part }, origin: "LEGACY" } })).count
   }
+  await (await legacyMirror()).drainMirroredLegacyObjectiveLinks(tx, opportunityIds)
   return removed
 }
 
