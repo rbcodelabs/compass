@@ -49,6 +49,7 @@ const mockRoadmapView = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
 const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) };
+const mockDocChange = { deleteMany: vi.fn() };
 const mockArtifact = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactRevision = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactLink = { deleteMany: vi.fn() };
@@ -143,6 +144,7 @@ const mockPrisma = {
   roadmapView: mockRoadmapView,
   workspaceMember: mockWorkspaceMember,
   squad: mockSquad,
+  docChange: mockDocChange,
   doc: mockDoc,
   artifact: mockArtifact,
   artifactRevision: mockArtifactRevision,
@@ -310,6 +312,7 @@ beforeEach(() => {
     mockRoadmapView.deleteMany,
     mockWorkspaceMember.deleteMany,
     mockSquad.deleteMany,
+    mockDocChange.deleteMany,
     mockDoc.deleteMany,
     mockArtifact.updateMany,
     mockArtifact.deleteMany,
@@ -589,6 +592,7 @@ describe("deleteOrganization", () => {
     // ── Members / squads / docs / workspace ──
     expect(mockWorkspaceMember.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockSquad.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockDocChange.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockDoc.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockWorkspace.delete).toHaveBeenCalledWith({ where: { id: "ws-1" } });
 
