@@ -132,6 +132,7 @@ async function pruneStaleMirrorRows(client: PoolClient, schema: string, key: str
 
 async function repairDriftedMirrorRows(client: PoolClient, schema: string, sleep?: Sleep): Promise<number> {
   let repaired = 0
+  let stalls = 0
   while (true) {
     const batch = await client.query<{ id: string; workspace_id: string }>(
       `SELECT e.id AS id, l.workspace_id AS workspace_id
@@ -152,7 +153,13 @@ async function repairDriftedMirrorRows(client: PoolClient, schema: string, sleep
       )
       changed += result.rowCount ?? 0
     }
-    if (changed === 0) throw refuse(`repair made no progress on ${batch.rows.length} selected rows`)
+    if (changed === 0) {
+      // Same tolerance as drain(): a concurrent writer can make selected rows stop qualifying; the re-select then excludes them.
+      stalls += 1
+      if (stalls > 3) throw refuse(`repair made no progress on ${batch.rows.length} selected rows`)
+      continue
+    }
+    stalls = 0
     repaired += changed
   }
 }

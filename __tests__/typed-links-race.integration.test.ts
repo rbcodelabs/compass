@@ -42,7 +42,7 @@ describe.skipIf(!databaseUrl)("typed links against a real Prisma client and uniq
     if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/compass_e2e") throw new Error("Requires the local compass_e2e database");
     process.env.DATABASE_URL = databaseUrl;
     await pool.query(`CREATE SCHEMA "${schema}"`);
-    for (const name of ["001_init", "068_workspace_id_on_solution_objective", "071_typed_link_tables"]) {
+    for (const name of ["001_init", "034_artifacts", "068_workspace_id_on_solution_objective", "071_typed_link_tables"]) {
       const applied = await applyMigrations(pool, schema, name);
       expect(applied.status, `${name}: ${JSON.stringify(await applied.json())}`).toBe(200);
     }
@@ -110,6 +110,30 @@ describe.skipIf(!databaseUrl)("typed links against a real Prisma client and uniq
     );
     expect(results.filter((r) => r.created)).toHaveLength(1);
     expect(await count("solution_key_result_links")).toBe(1);
+  });
+
+  it("a duplicate artifact_links insert is recognised by isLinkUniqueRace, and concurrent identical ArtifactLink writes all succeed with one creator", async () => {
+    const artifact = randomUUID();
+    await q(`INSERT INTO {S}.artifacts (id, workspace_id, title, source_type) VALUES ($1,$2,'art','EXTERNAL_LINK')`, [artifact, WS]);
+    const data = { workspaceId: WS, artifactId: artifact, linkedType: "SOLUTION", linkedId: solution };
+    await prisma.artifactLink.create({ data });
+    const error = await prisma.artifactLink.create({ data }).then(() => null, (e: unknown) => e);
+    expect(error, "second create must fail on the unique index").not.toBeNull();
+    expect(isLinkUniqueRace(error), JSON.stringify({ code: (error as { code?: string }).code, meta: (error as { meta?: unknown }).meta, message: (error as Error).message })).toBe(true);
+    await prisma.artifactLink.deleteMany({});
+    // The same read-then-create shape as lib/artifacts.ts linkArtifactToSolution, under the shared retry.
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        runTypedLinkTransaction(prisma, async (tx) => {
+          const existing = await tx.artifactLink.findFirst({ where: { artifactId: artifact, linkedType: "SOLUTION", linkedId: solution } });
+          if (existing) return { created: false };
+          await tx.artifactLink.create({ data });
+          return { created: true };
+        }),
+      ),
+    );
+    expect(results.filter((r) => r.created)).toHaveLength(1);
+    expect(await count("artifact_links")).toBe(1);
   });
 
   it("drainLinksFor deletes a parent's links in committed statements of at most 500 links", async () => {

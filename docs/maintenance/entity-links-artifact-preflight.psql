@@ -60,6 +60,7 @@ SELECT l.id AS link_id,
 \echo '== 4. Solutions with no workspace_id (their artifact links are crossWorkspace orphans until 068/069 fills them) =='
 SELECT count(*) AS solutions_without_workspace FROM :"schema".solutions WHERE workspace_id IS NULL;
 
+-- Section 5 is last on purpose: it needs migration 091, and with ON_ERROR_STOP off a missing entity_links table only costs this section.
 \echo '== 5. entity_links state of the two types (needs migration 091) =='
 SELECT link_type, origin, count(*) AS rows FROM :"schema".entity_links
  WHERE link_type IN ('ARTIFACT_ATTACHED_TO_SOLUTION', 'ARTIFACT_SUPPORTS_DECISION') GROUP BY 1, 2 ORDER BY 1, 2;

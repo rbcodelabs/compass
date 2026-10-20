@@ -52,10 +52,12 @@ describe("Decision supporting Artifacts", () => {
   it("mirrors a new link, an idempotent replay and an unlink into entity_links in the same transaction", async () => {
     await artifacts.linkArtifactToDecision(input)
     expect(mirror.link).toHaveBeenCalledWith(prisma, { linkedType: "REVIEW_REQUEST", artifactId: "artifact", linkedId: "decision", workspaceId: "workspace", ctx: { source: "UI", createdById: "user" } })
-    prisma.artifactLink.findFirst.mockResolvedValue({ id: "link" })
+    prisma.artifactLink.findFirst.mockResolvedValue({ id: "link", source: "MCP", createdById: "original-actor" })
     mirror.link.mockClear()
     expect(await artifacts.linkArtifactToDecision(input)).toMatchObject({ created: false })
     expect(mirror.link).toHaveBeenCalledTimes(1)
+    // A replay heals the mirror with the LEGACY row's source and actor (as the backfill copies), not the replaying caller's.
+    expect(mirror.link.mock.calls[0][1].ctx).toEqual({ source: "MCP", createdById: "original-actor" })
     await artifacts.unlinkArtifactFromDecision(input)
     expect(mirror.unlink).toHaveBeenCalledWith(prisma, { linkedType: "REVIEW_REQUEST", artifactId: "artifact", linkedId: "decision", workspaceId: "workspace" })
   })
