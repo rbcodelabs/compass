@@ -43,6 +43,7 @@ test.describe("Doc comment @mention -> task", () => {
   let bUserId = "";
   let wUserId = "";
   let dUserId = "";
+  const seededDocIds: string[] = [];
   const contexts: BrowserContext[] = [];
   const apis: APIRequestContext[] = [];
   let bApi: APIRequestContext;
@@ -72,38 +73,78 @@ test.describe("Doc comment @mention -> task", () => {
     return ((await response.json()) as { count: number }).count;
   }
 
-  /** New doc with one sentence, REVIEW selected, ready for the comment button. */
+  /** Select the first word of the first paragraph. Keyboard selection drops keys while the editor is still settling. */
+  async function selectLeadingWord(page: Page, word: string) {
+    // Re-applied until it sticks: the editor re-renders its highlights right after a comment is posted
+    // and can reset the DOM selection once.
+    await expect(async () => {
+      await page.evaluate((w) => {
+        // Comment highlights split the paragraph into several text nodes; walk them.
+        const walker = document.createTreeWalker(document.querySelector(".ProseMirror p")!, NodeFilter.SHOW_TEXT);
+        const first = walker.nextNode() as Text;
+        const range = document.createRange();
+        range.setStart(first, 0);
+        let remaining = w.length;
+        for (let node: Text | null = first; node; node = walker.nextNode() as Text | null) {
+          if (node.length >= remaining) { range.setEnd(node, remaining); break; }
+          remaining -= node.length;
+        }
+        const selection = window.getSelection()!;
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }, word);
+      expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe(word);
+      await expect(page.getByTitle("Comment on selection")).toBeEnabled({ timeout: 1000 });
+    }).toPass({ timeout: 20_000 });
+  }
+
+  /**
+   * A doc with one sentence, its first word selected, ready for the comment button.
+   * The doc is inserted directly: the seeded workspace already has a doc, so /docs
+   * redirects to it instead of offering a "New" button.
+   */
   async function openDocWithSelection(page: Page, base: string, title: string, word = "REVIEW") {
-    await page.goto(`${base}/docs`);
-    await page.waitForLoadState("networkidle");
-    const previousDocUrl = page.url();
-    await page.getByRole("button", { name: "New" }).click();
-    await page.waitForURL((url) => url.href !== previousDocUrl && /\/docs\/[0-9a-f-]+$/.test(url.pathname), { timeout: 15_000 });
+    const docId = randomUUID();
+    await pool.query(
+      `INSERT INTO "${S}".docs (id, workspace_id, title, content, sort_order, doc_type, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 9000, 'STANDARD', NOW(), NOW())`,
+      [docId, workspaceId, title, `${word} the rollout checklist needs an owner and a rollback criterion`],
+    );
+    seededDocIds.push(docId);
+    await page.goto(`${base}/docs/${docId}`);
     const editor = page.locator(".ProseMirror");
-    await expect(editor).toBeVisible({ timeout: 10_000 });
-    const titleInput = page.getByPlaceholder("Untitled");
-    await titleInput.fill(title);
-    await titleInput.blur();
+    await expect(editor).toContainText(word, { timeout: 60_000 });
     await editor.click();
-    await page.keyboard.type(`${word} the rollout checklist needs an owner and a rollback criterion`);
-    await page.waitForTimeout(1800); // past the autosave debounce
-    await page.keyboard.press("Home");
-    for (let i = 0; i < word.length; i++) await page.keyboard.press("Shift+ArrowRight");
+    await selectLeadingWord(page, word);
     await expect(page.getByTitle("Comment on selection")).toBeEnabled({ timeout: 10_000 });
-    return new URL(page.url()).pathname.split("/").pop()!;
+    return docId;
+  }
+
+  /** Console errors and uncaught exceptions, so a hidden runtime problem fails the flow instead of hiding behind the dev overlay. */
+  function watchConsoleErrors(page: Page): string[] {
+    const errors: string[] = [];
+    page.on("console", (message) => {
+      // Dev-only noise: four resource 404s on authenticated pages (also on main), and one React "unique key" warning
+      // attributed to DocEditor that showed up in a single run and did not reproduce in the next two. Its source was
+      // not isolated, so it is excluded here rather than claimed fixed.
+      const text = message.text();
+      if (message.type() === "error" && !text.startsWith("Failed to load resource") && !text.includes("Each child in a list should have a unique")) errors.push(text);
+    });
+    page.on("pageerror", (error) => errors.push(error.message));
+    return errors;
   }
 
   /** The Comments panel is a sheet unless pinned; close it so the editor and toolbar are reachable. */
   async function closeCommentsPanel(page: Page) {
-    const panel = page.getByRole("complementary", { name: "Comments" });
-    if (await panel.isVisible().catch(() => false)) {
+    const overlay = page.locator('[data-slot="sheet-overlay"]');
+    if ((await overlay.count()) > 0) {
       await page.keyboard.press("Escape");
-      await expect(panel).toBeHidden({ timeout: 10_000 });
+      await expect(overlay).toHaveCount(0, { timeout: 10_000 });
     }
   }
 
   async function openCommentsPanel(page: Page) {
-    await page.getByTitle("Comments").click();
+    await page.getByTitle("Comments", { exact: true }).click();
     await expect(page.getByTestId("doc-comments-list")).toBeVisible({ timeout: 10_000 });
   }
 
@@ -153,6 +194,13 @@ test.describe("Doc comment @mention -> task", () => {
 
   test.afterAll(async () => {
     if (pool) {
+      for (const docId of seededDocIds) {
+        await pool.query(
+          `DELETE FROM "${S}".tasks WHERE id IN (SELECT task_id FROM "${S}".task_links WHERE linked_type = 'DOC' AND linked_id = $1)`,
+          [docId],
+        ).catch(() => undefined);
+        await pool.query(`DELETE FROM "${S}".task_links WHERE linked_type = 'DOC' AND linked_id = $1`, [docId]).catch(() => undefined);
+      }
       await pool.query(`DELETE FROM "${S}".agent_workspace_grants WHERE agent_id = $1`, [agentId]).catch(() => undefined);
       await pool.query(`DELETE FROM "${S}".agents WHERE id = $1`, [agentId]).catch(() => undefined);
       await pool.end();
@@ -163,7 +211,11 @@ test.describe("Doc comment @mention -> task", () => {
 
   test("person: pick, task row, post, card + pin, notifications, Done resolves and reopen reopens the thread", async ({ page, base }) => {
     test.setTimeout(240_000);
+    const consoleErrors = watchConsoleErrors(page);
     const docTitle = `Launch plan ${suffix}`;
+    // Dock the Comments panel beside the editor (the pinned layout) so the passage pin and the
+    // thread are visible together, as in the mockup.
+    await page.context().addCookies([{ name: "compass_panel_docsComments", value: "1:440", url: test.info().project.use.baseURL as string }]);
     const docId = await openDocWithSelection(page, base, docTitle);
 
     // ── Frame 1: type "@" -> one grouped picker of people and agents ─────────
@@ -235,6 +287,8 @@ test.describe("Doc comment @mention -> task", () => {
     await expect(page.locator(".doc-comment-highlight-task")).toContainText("REVIEW");
     await expect(page.getByTestId("thread-auto-resolve-note")).toBeVisible();
     await expect(page.getByTestId("comment-mention").first()).toContainText(bName);
+    await expect(page.getByRole("complementary", { name: "Comments" })).toBeVisible();
+    await page.mouse.move(0, 0);
     await shot(page, "frame-3-posted");
 
     // ── What was stored ──────────────────────────────────────────────────────
@@ -298,6 +352,7 @@ test.describe("Doc comment @mention -> task", () => {
     await page.getByRole("button", { name: "Resolve", exact: true }).click();
     await expect(page.getByTestId("doc-comment-thread")).toHaveCount(0);
     expect((await pool.query(`SELECT status FROM "${S}".tasks WHERE id = $1`, [taskId])).rows[0].status).toBe("IN_PROGRESS");
+    expect(consoleErrors, "no console errors during the flow").toEqual([]);
 
     // The task side names the comment it came from instead of showing "(deleted)".
     const panel = await page.request.get(`/api/panels/entity/task/${taskId}?${query}`);
@@ -307,6 +362,9 @@ test.describe("Doc comment @mention -> task", () => {
 
   test("edge cases: mention only, someone outside the workspace, an agent's first assignment", async ({ page, base }) => {
     test.setTimeout(240_000);
+    const consoleErrors = watchConsoleErrors(page);
+    // Docked panel again: the thread and the passage pin read together without the sheet's blur.
+    await page.context().addCookies([{ name: "compass_panel_docsComments", value: "1:440", url: test.info().project.use.baseURL as string }]);
     const docId = await openDocWithSelection(page, base, `Edge cases ${suffix}`, "NOTE");
     const taskCount = async () => Number((await pool.query(`SELECT COUNT(*)::int AS n FROM "${S}".task_links WHERE linked_type = 'DOC' AND linked_id = $1`, [docId])).rows[0].n);
 
@@ -326,8 +384,7 @@ test.describe("Doc comment @mention -> task", () => {
     // ── Someone outside the workspace: warning, no task, "Mention only" ─────
     await closeCommentsPanel(page);
     await page.locator(".ProseMirror").click();
-    await page.keyboard.press("Home");
-    await page.keyboard.press("Shift+End");
+    await selectLeadingWord(page, "NOTE");
     editor = await startComment(page);
     await editor.click();
     await page.keyboard.type(`@Dana`);
@@ -350,8 +407,7 @@ test.describe("Doc comment @mention -> task", () => {
     // ── Agent: first assignment asks for scope, second does not ─────────────
     await closeCommentsPanel(page);
     await page.locator(".ProseMirror").click();
-    await page.keyboard.press("Home");
-    await page.keyboard.press("Shift+End");
+    await selectLeadingWord(page, "NOTE");
     editor = await startComment(page);
     await editor.click();
     await page.keyboard.type("Pull baseline numbers @QA Agent");
@@ -361,6 +417,7 @@ test.describe("Doc comment @mention -> task", () => {
     const confirm = page.getByTestId("agent-scope-confirm");
     await expect(confirm).toContainText(`${agentName} will receive`);
     expect(await taskCount()).toBe(0);
+    await page.waitForTimeout(300);
     await shot(page, "frame-4-agent-scope");
     await page.getByTestId("confirm-agent-assign").click();
     const agentCard = page.getByTestId("comment-task-card").filter({ hasText: agentName });
@@ -374,12 +431,12 @@ test.describe("Doc comment @mention -> task", () => {
       [docId],
     );
     expect(agentTasks).toEqual([{ assignee_user_id: null, assignee_agent_id: agentId }]);
+    await page.waitForTimeout(600); // let the sheet finish sliding in
     await shot(page, "frame-3-agent-card");
 
     await closeCommentsPanel(page);
     await page.locator(".ProseMirror").click();
-    await page.keyboard.press("Home");
-    await page.keyboard.press("Shift+End");
+    await selectLeadingWord(page, "NOTE");
     editor = await startComment(page);
     await editor.click();
     await page.keyboard.type("And again @QA Agent");
@@ -387,5 +444,6 @@ test.describe("Doc comment @mention -> task", () => {
     await page.getByRole("button", { name: "Comment & create task" }).click();
     await expect(page.getByTestId("comment-task-card")).toHaveCount(2, { timeout: 15_000 });
     await expect(page.getByTestId("agent-scope-confirm")).toHaveCount(0);
+    expect(consoleErrors, "no console errors during the flow").toEqual([]);
   });
 });

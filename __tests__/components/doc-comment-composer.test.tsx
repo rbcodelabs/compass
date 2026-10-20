@@ -17,7 +17,7 @@ const options: MentionOptions = {
     { kind: "user", id: QUINN, name: "Quinn Morales", detail: "quinn@example.com" },
     { kind: "user", id: QUENTIN, name: "Quentin Okafor", detail: "quentin@example.com" },
   ],
-  agents: [{ kind: "agent", id: BOT, name: "QA Agent", detail: "Test plans" }],
+  agents: [{ kind: "agent", id: BOT, name: "QA Agent", detail: "Test plans", access: "WRITE" }],
   outside: [{ kind: "user", id: DANA, name: "Dana Whitfield", detail: "dana@example.com", outsideWorkspace: true }],
 }
 
@@ -86,6 +86,14 @@ describe("@ picker", () => {
     const option = screen.getByTestId("mention-option")
     expect(option).toHaveTextContent("QA Agent")
     expect(option).toHaveTextContent("Agent")
+  })
+
+  it("keeps matching across spaces so multi-word names can be typed out", () => {
+    renderComposer()
+    type("Pull baselines @QA Ag")
+    expect(screen.getByTestId("mention-option")).toHaveTextContent("QA Agent")
+    type("see you @ home")
+    expect(screen.queryByRole("listbox")).toBeNull()
   })
 
   it("Escape dismisses the picker and leaves the literal @", () => {
@@ -189,7 +197,8 @@ describe("edge cases", () => {
     expect(onSubmit).not.toHaveBeenCalled()
     const confirm = screen.getByTestId("agent-scope-confirm")
     expect(confirm).toHaveTextContent("QA Agent will receive")
-    expect(confirm).toHaveTextContent("Cannot publish or delete without human approval")
+    expect(confirm).toHaveTextContent("Its Write grant lets it reply in the thread")
+    expect(confirm).toHaveTextContent("Nothing runs on its own")
     await act(async () => { fireEvent.click(screen.getByTestId("confirm-agent-assign")) })
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ assignee: { kind: "agent", id: BOT }, agentScopeConfirmed: true, task: expect.any(Object) })
   })

@@ -22,6 +22,8 @@ export interface MentionOption {
   detail: string | null
   /** An org member with no access to this workspace. */
   outsideWorkspace?: boolean
+  /** Agents only: access level of the active grant in this workspace. */
+  access?: "READ" | "WRITE"
 }
 
 export interface MentionOptions {
@@ -46,7 +48,7 @@ interface MentionEditorProps {
   testId?: string
 }
 
-const TRIGGER = /(^|[\s(])@([^\s@]{0,30})$/
+const TRIGGER = /(^|[\s(])@([^\s@][^@\n]{0,29})?$/
 const MAX_PER_GROUP = 8
 
 /** Serialize the editor DOM: text as-is, <br> as a newline, each chip as its token. */
@@ -156,7 +158,7 @@ export function MentionEditor({
     if (!match) return close()
     const start = match.index + match[1].length
     triggerRef.current = { node: anchorNode as Text, start, end: anchorOffset }
-    setQuery(match[2])
+    setQuery(match[2] ?? "")
     setActive(0)
   }, [close])
 

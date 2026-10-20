@@ -8,6 +8,11 @@ const mocks = vi.hoisted(() => ({
     docComment: { findMany: vi.fn() },
     task: { findMany: vi.fn() },
     taskLink: { findMany: vi.fn() },
+    user: { findMany: vi.fn() },
+    agent: { findMany: vi.fn() },
+    agentWorkspaceGrant: { findMany: vi.fn() },
+    workspace: { findUnique: vi.fn() },
+    organizationMember: { findMany: vi.fn() },
   },
   createComment: vi.fn(),
   deleteComment: vi.fn(),
@@ -25,7 +30,7 @@ vi.mock("@/lib/task-assignment", () => ({ eligibleTaskAssignees: mocks.eligible,
 vi.mock("@/lib/follows", () => ({ autoFollow: mocks.autoFollow }))
 vi.mock("@/lib/notifications", () => ({ emitSubjectEvent: mocks.emit }))
 
-import { agentIdsAssignedInDoc, loadCommentTaskCards, postDocCommentWithOptionalTask } from "@/lib/doc-comment-tasks"
+import { agentIdsAssignedInDoc, loadCommentTaskCards, loadMentionCandidates, postDocCommentWithOptionalTask } from "@/lib/doc-comment-tasks"
 
 const WS = "00000000-0000-4000-8000-000000000001"
 const DOC = "00000000-0000-4000-8000-0000000000d1"
@@ -250,5 +255,35 @@ describe("loadCommentTaskCards", () => {
   it("does no query for no comments", async () => {
     expect(await loadCommentTaskCards(WS, [])).toEqual({})
     expect(mocks.db.taskLink.findMany).not.toHaveBeenCalled()
+  })
+})
+
+describe("loadMentionCandidates", () => {
+  it("offers members and granted agents, and lists org members outside the workspace separately", async () => {
+    mocks.db.user.findMany.mockResolvedValue([{ id: QUINN, email: "quinn@example.com" }, { id: QUENTIN, email: "quentin@example.com" }])
+    mocks.db.agent.findMany.mockResolvedValue([{ id: BOT, description: "Test plans" }])
+    mocks.db.agentWorkspaceGrant.findMany.mockResolvedValue([{ agentId: BOT, access: "READ" }])
+    mocks.db.workspace.findUnique.mockResolvedValue({ organizationId: "org-1" })
+    mocks.db.organizationMember.findMany.mockResolvedValue([
+      { userId: QUINN, user: { id: QUINN, name: "Quinn Morales", email: "quinn@example.com" } },
+      { userId: DANA, user: { id: DANA, name: null, email: "dana@example.com" } },
+    ])
+    const result = await loadMentionCandidates(WS)
+    expect(result.people.map(p => [p.id, p.detail])).toEqual([[QUINN, "quinn@example.com"], [QUENTIN, "quentin@example.com"]])
+    expect(result.agents).toEqual([{ kind: "agent", id: BOT, name: "QA Agent", detail: "Test plans", access: "READ" }])
+    // Only the non-member appears outside, falling back to email when there is no name.
+    expect(result.outside).toEqual([{ kind: "user", id: DANA, name: "dana@example.com", detail: "dana@example.com", outsideWorkspace: true }])
+    // Grants are read for this workspace and only while active.
+    expect(mocks.db.agentWorkspaceGrant.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workspaceId: WS, revokedAt: null }) }))
+  })
+
+  it("has no agents when none is eligible", async () => {
+    mocks.eligible.mockResolvedValue([{ type: "USER", id: QUINN, displayName: "Quinn Morales", available: true }])
+    mocks.db.user.findMany.mockResolvedValue([{ id: QUINN, email: "quinn@example.com" }])
+    mocks.db.workspace.findUnique.mockResolvedValue({ organizationId: "org-1" })
+    mocks.db.organizationMember.findMany.mockResolvedValue([])
+    const result = await loadMentionCandidates(WS)
+    expect(result.agents).toEqual([])
+    expect(mocks.db.agent.findMany).not.toHaveBeenCalled()
   })
 })

@@ -258,11 +258,15 @@ export function DocCommentComposer({
             <b>{name(assignee)}</b> will receive:
           </p>
           <ul className="space-y-1 text-[13px]">
-            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> This doc (read) and the highlighted passage</li>
-            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> Linked items and the comment thread</li>
-            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> A task in its queue, to work and report back on</li>
-            <li className="flex gap-1.5"><X className="mt-0.5 size-3.5 shrink-0 text-status-danger" aria-hidden /> Cannot publish or delete without human approval</li>
+            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> A task in its queue, naming this doc and the highlighted passage</li>
+            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> This doc, its comment thread and linked items, read through its workspace access</li>
+            {known.get("agent:" + assignee.id)?.access === "WRITE" ? (
+              <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> Its Write grant lets it reply in the thread and change content in this workspace</li>
+            ) : (
+              <li className="flex gap-1.5"><X className="mt-0.5 size-3.5 shrink-0 text-status-danger" aria-hidden /> Its grant is read-only: it cannot change content in this workspace</li>
+            )}
           </ul>
+          <p className="text-xs text-text-subtle">Nothing runs on its own: the agent picks the task up from its queue.</p>
           <div className="flex gap-2">
             <Button type="button" size="sm" disabled={busy} onClick={() => void post(true)} data-testid="confirm-agent-assign">Assign to agent</Button>
             <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setConfirmingAgent(false)}>Cancel</Button>

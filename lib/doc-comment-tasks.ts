@@ -39,6 +39,8 @@ export interface MentionCandidate {
   detail: string | null
   /** True for org members with no access to this workspace: mentionable, never assignable. */
   outsideWorkspace?: boolean
+  /** Agents only: the access level of their active grant in this workspace. */
+  access?: "READ" | "WRITE"
 }
 
 export interface MentionCandidates {
@@ -53,11 +55,13 @@ export async function loadMentionCandidates(workspaceId: string): Promise<Mentio
   const userIds = eligible.filter(a => a.type === "USER").map(a => a.id)
   const agentIds = eligible.filter(a => a.type === "AGENT").map(a => a.id)
 
-  const [users, agents, workspace] = await Promise.all([
+  const [users, agents, grants, workspace] = await Promise.all([
     userIds.length ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, email: true } }) : [],
     agentIds.length ? prisma.agent.findMany({ where: { id: { in: agentIds } }, select: { id: true, description: true } }) : [],
+    agentIds.length ? prisma.agentWorkspaceGrant.findMany({ where: { workspaceId, agentId: { in: agentIds }, revokedAt: null }, select: { agentId: true, access: true } }) : [],
     prisma.workspace.findUnique({ where: { id: workspaceId }, select: { organizationId: true } }),
   ])
+  const access = new Map(grants.map(g => [g.agentId, g.access === "WRITE" ? ("WRITE" as const) : ("READ" as const)]))
   const email = new Map(users.map(u => [u.id, u.email]))
   const description = new Map(agents.map(a => [a.id, a.description]))
 
@@ -68,7 +72,7 @@ export async function loadMentionCandidates(workspaceId: string): Promise<Mentio
 
   return {
     people: eligible.filter(a => a.type === "USER").map(a => ({ kind: "user", id: a.id, name: a.displayName, detail: email.get(a.id) ?? null })),
-    agents: eligible.filter(a => a.type === "AGENT").map(a => ({ kind: "agent", id: a.id, name: a.displayName, detail: description.get(a.id) ?? null })),
+    agents: eligible.filter(a => a.type === "AGENT").map(a => ({ kind: "agent", id: a.id, name: a.displayName, detail: description.get(a.id) ?? null, access: access.get(a.id) })),
     outside: orgMembers
       .filter(m => !members.has(m.userId))
       .map(m => ({ kind: "user" as const, id: m.userId, name: m.user.name?.trim() || m.user.email, detail: m.user.email, outsideWorkspace: true })),
