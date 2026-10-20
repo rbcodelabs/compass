@@ -7,24 +7,41 @@ import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
 
 import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import { getToolExpectedWhere } from "@/lib/mcp-tool-db"
-import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { syncRoadmapOnSolutionChange } from "@/lib/roadmap/solution-sync"
+import { BatchRequestError, createSolutionBatch, type SolutionBatchItem } from "@/lib/opportunity-batch-create"
+import { batchResultOutput, programmaticBatchContext } from "@/lib/opportunity-tool-handlers"
+
+export async function createSolutions({ workspaceId, items, source = "MCP" }: { workspaceId: string; items: SolutionBatchItem[]; source?: ProgrammaticSource }) {
+  const prisma = getPrisma()
+  const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true, name: true } })
+  if (!workspace) return fail(`Workspace "${workspaceId}" not found.`)
+  try {
+    const { results } = await createSolutionBatch(prisma, programmaticBatchContext(workspace.id, source), items)
+    return batchResultOutput("solution", workspace.name, results)
+  } catch (error) {
+    if (error instanceof BatchRequestError) return fail(error.message)
+    throw error
+  }
+}
 
 export async function createSolution({ opportunityId, title, description, source = "MCP" }: { opportunityId: string; title: string; description?: string | null; source?: ProgrammaticSource }) {
   const prisma = getPrisma()
   const opportunity = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { id: true, title: true, workspaceId: true, workspace: { select: { slug: true, organization: { select: { slug: true } } } } } })
   if (!opportunity) return fail(`Opportunity "${opportunityId}" not found.`)
-  const solution = await captureWorkspaceMutation(prisma, "solution", "create", workspaceMutationSource(source), undefined, async (tx) => tx.solution.create({ data: { workspaceId: opportunity.workspaceId, ...(await allocateOneSeq(tx, opportunity.workspaceId, "solution")), opportunityId, title: title.trim(), description: description?.trim() || null, source } }))
+  const { results } = await createSolutionBatch(prisma, programmaticBatchContext(opportunity.workspaceId, source), [{ parent: { id: opportunityId }, title, description }])
+  const result = results[0]
+  if (!result.ok) return fail(result.error)
+  const solution = await prisma.solution.findFirst({ where: { id: result.id, workspaceId: opportunity.workspaceId }, select: { id: true, seqPrefix: true, seqNumber: true, title: true, status: true } })
+  if (!solution) return fail("The solution was created but could not be read back.")
   return ok(withUrlLine(
     `**Solution created** for "${opportunity.title}"\nID: ${solution.id}${displayLine("solution", solution)}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
     safeEntityUrl({ orgSlug: opportunity.workspace?.organization?.slug, workspaceSlug: opportunity.workspace?.slug, type: "solution", id: solution.id, displayId: displayIdFromRow("solution", solution), opportunityId }),
   ), { id: solution.id, displayId: displayIdFromRow("solution", solution), title: solution.title, status: solution.status, opportunityId })
 }
 import { ok, fail } from "@/lib/mcp-output"
-import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 // ── update_solution ──────────────────────────────────────────────────────────
 

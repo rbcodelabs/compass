@@ -104,7 +104,7 @@ async function prepareScreenshot(
   }
   if (entry.prepare === "expand-first-opportunity") {
     const disclosure = page
-      .getByRole("table", { name: "Discovery opportunities" })
+      .getByRole("grid", { name: "Discovery opportunities" })
       .locator('button[aria-expanded]')
       .first();
     await expect(disclosure).toHaveAttribute("aria-expanded", "false");

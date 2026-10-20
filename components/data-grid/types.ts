@@ -256,3 +256,80 @@ export type GridSearch = {
   label?: string;
   debounceMs?: number;
 };
+
+// ── Draft-row creation ──────────────────────────────────────────────────────
+
+/** Draft cell values, keyed by `GridCreationField.id`. Select fields hold the option value. */
+export type GridDraftValues = Record<string, string>;
+
+/** One input in the draft area. Field order is also the paste column order. */
+export type GridCreationField = {
+  id: string;
+  label: string;
+  kind: "text" | "select";
+  /** Required for `select`. */
+  options?: readonly GridEditOption[];
+  maxLength?: number;
+  /** Fixed column width, e.g. `"9rem"`; fields without one share the remainder. */
+  width?: string;
+};
+
+/** What `submit` receives for each draft. `clientId` is the idempotency key and the new row's id. */
+export type GridDraftSubmitItem = { clientId: string; values: GridDraftValues };
+
+/** One draft's outcome, mirroring the server's batch result. */
+export type GridBatchItemResult =
+  | { clientId: string; ok: true; id: string; deduped?: true }
+  | {
+      clientId: string;
+      ok: false;
+      code: string;
+      error: string;
+      /** A field id from `GridCreation.fields` is shown on that cell; anything else lands on the row. */
+      field?: string;
+    };
+
+/** A refused request is `ok: false`; per-item failures live inside `results`. */
+export type GridBatchResult =
+  | { ok: true; results: readonly GridBatchItemResult[] }
+  | { ok: false; error: string };
+
+export type GridDraftRow = {
+  /** Stable across retries; sent as the server-side primary key. */
+  clientId: string;
+  values: GridDraftValues;
+  status: "draft" | "pending" | "error";
+  fieldErrors: Record<string, string>;
+  rowError?: string;
+};
+
+/**
+ * Opt-in draft area under the rows: type or paste rows, then create them with
+ * one explicit submit. Hidden below `md` and when the grid is `readOnly`.
+ *
+ * Callers pass a stable reference (module constant or `useMemo`).
+ */
+export type GridCreation = {
+  fields: readonly GridCreationField[];
+  /** A fresh row's values, including defaults (e.g. the initial status). */
+  makeValues: () => GridDraftValues;
+  /** Field id to message. The same rules the server applies; the server stays the authority. */
+  validate: (values: GridDraftValues) => Record<string, string>;
+  /**
+   * Sends one chunk. The grid splits drafts into chunks by `limits` and calls
+   * this sequentially, so it must tolerate several calls per click. Re-sending
+   * a chunk with the same `clientId`s is safe by contract (idempotent).
+   */
+  submit: (items: GridDraftSubmitItem[]) => Promise<GridBatchResult>;
+  /**
+   * Per-request limits. `maxItems` mirrors the server's cap; `maxBytes` is a
+   * budget on the UTF-8 size of the JSON items, kept well under Next's 1 MB
+   * server-action body limit.
+   */
+  limits: { maxItems: number; maxBytes: number };
+  /** Most drafts the area holds at once (also the paste cap). */
+  maxRows: number;
+  noun: { singular: string; plural: string };
+  /** Placeholder for the always-present blank row. */
+  addLabel?: string;
+};

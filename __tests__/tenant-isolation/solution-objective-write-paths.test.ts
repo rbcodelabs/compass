@@ -424,7 +424,7 @@ const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "e2e/functional/specs/canvas-doc.spec.ts": 3, // three solution fixtures (one card test, two for the tree builder), each created with the e2e workspace's workspaceId
   "e2e/functional/specs/decisions.spec.ts": 1,
   "e2e/functional/specs/pm-interview.spec.ts": 1,
-  "lib/solution-tool-handlers.ts": 1,
+  "lib/opportunity-batch-create.ts": 1, // the shared Solution create core; workspaceId comes from the authorized workspace
   "lib/rest/execute.ts": 1,
   "scripts/seed-demo-intro.ts": 4, // demo-video sample data: every objective/solution create sets workspaceId
 };
