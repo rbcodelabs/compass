@@ -1,4 +1,5 @@
 import { defineConfig } from "prisma/config";
+import { getMigrationDatabaseUrl } from "./lib/db-url";
 
 // This URL is ONLY used by Prisma CLI tooling (prisma migrate diff /
 // aurora-dsql-prisma migrate) for SQL dialect detection.
@@ -6,6 +7,6 @@ import { defineConfig } from "prisma/config";
 export default defineConfig({
   schema: "prisma/schema.prisma",
   datasource: {
-    url: process.env.DATABASE_URL ?? "postgresql://localhost/prisma",
+    url: getMigrationDatabaseUrl(process.env) ?? "postgresql://localhost/prisma",
   },
 });

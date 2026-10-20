@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { getActiveSchema } from "./schema";
+import { getPoolerMode, getRuntimeDatabaseUrl } from "./db-url";
 import { injectUpdatedAtExtension } from "./prisma-updated-at";
 import { getManagedPilotContext } from "./preview-automation/managed-context";
 
@@ -15,20 +16,29 @@ export function getDatabaseUser(): string {
 }
 
 /**
- * Pool options for the plain-Postgres (`DATABASE_URL`) path.
+ * Pool options for the plain-Postgres (`DATABASE_URL` / `POSTGRES_URL`) path.
  *
  * `pg` defaults to 10 connections per Pool, and every serverless instance owns
- * its own Pool. Against a small pooler (e.g. Supabase Free, session mode:
- * pool_size 15) a handful of instances exhausts it and requests fail with
- * EMAXCONNSESSION. Keep the per-instance cap low and recycle idle connections
- * quickly; `DATABASE_POOL_MAX` overrides the cap (e.g. after a plan upgrade).
+ * its own Pool.
+ *
+ * Session-mode pooler (port 5432, pool_size 15 on Supabase Free): every client
+ * connection pins a backend slot, so a handful of instances exhausts it and
+ * requests fail with EMAXCONNSESSION. Keep the cap at 3.
+ *
+ * Transaction-mode pooler (port 6543): a backend slot is held only while a
+ * transaction runs; the limit that matters is the much larger client-connection
+ * limit. A per-instance cap of 5 absorbs parallel queries within one request.
+ *
+ * Idle connections are recycled quickly in both modes. `DATABASE_POOL_MAX`
+ * overrides the cap.
  */
 export function getPlainPoolOptions(
   connectionString: string,
   env: Record<string, string | undefined>,
 ): { connectionString: string; max: number; idleTimeoutMillis: number } {
   const requested = Number(env.DATABASE_POOL_MAX?.trim() || Number.NaN);
-  const max = Number.isInteger(requested) && requested > 0 ? requested : 3;
+  const defaultMax = getPoolerMode(connectionString, env) === "transaction" ? 5 : 3;
+  const max = Number.isInteger(requested) && requested > 0 ? requested : defaultMax;
   return { connectionString, max, idleTimeoutMillis: 10_000 };
 }
 
@@ -50,8 +60,13 @@ export function createBasePrismaClient(): PrismaClient {
   }
 
   // ── Plain Postgres path (local dev, Supabase, any DATABASE_URL) ──────────
-  if (process.env.DATABASE_URL) {
-    const pool = new Pool(getPlainPoolOptions(process.env.DATABASE_URL, process.env));
+  // Transaction-pooler safe: PrismaPg applies `schema` as schema-qualified table
+  // names in each generated statement (no session-level search_path), statements
+  // are unnamed (no server-side prepared statements), and interactive
+  // transactions pin one connection for their whole BEGIN..COMMIT.
+  const runtimeUrl = getRuntimeDatabaseUrl(process.env);
+  if (runtimeUrl) {
+    const pool = new Pool(getPlainPoolOptions(runtimeUrl, process.env));
     // On Vercel, let the platform close idle connections before an instance
     // is suspended so they don't linger against a small pooler limit.
     if (process.env.VERCEL) {
@@ -66,7 +81,7 @@ export function createBasePrismaClient(): PrismaClient {
   const host = process.env.PGHOST;
   if (!host) {
     throw new Error(
-      "Neither DATABASE_URL nor PGHOST is set. " +
+      "Neither DATABASE_URL (or POSTGRES_URL) nor PGHOST is set. " +
         "For local dev set DATABASE_URL; for Vercel set PGHOST + AWS credentials."
     );
   }

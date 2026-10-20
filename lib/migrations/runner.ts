@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { Pool, PoolClient } from "pg";
+import { usesPlainPostgres } from "@/lib/db-url";
 import { readFileSync } from "fs";
 import path from "path";
 import { createHash, randomUUID } from "node:crypto";
@@ -1372,11 +1373,11 @@ async function advanceDecisionMigration(client: PoolClient, schema: string, migr
       if (skipped.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim while skipping a verified step.`)
       return { status: 202, state: "ADVANCED", attemptId: run.attempt_id, nextStep: run.next_step + 1 }
     }
-    const executableSql = process.env.DATABASE_URL ? step.sql!.replace(/\bINDEX ASYNC\b/gi, "INDEX").replace(/ALTER\s+TABLE\s+ASYNC/gi, "ALTER TABLE") : step.sql!
+    const executableSql = usesPlainPostgres(process.env) ? step.sql!.replace(/\bINDEX ASYNC\b/gi, "INDEX").replace(/ALTER\s+TABLE\s+ASYNC/gi, "ALTER TABLE") : step.sql!
     const intent = await client.query(`UPDATE "${schema}"._migration_execution_state SET executing_step=$4, executing_started_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, run.next_step])
     if (intent.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim before executing step ${step.id}.`)
     const result = await client.query<{ job_id?: string }>(executableSql)
-    if (step.async && !process.env.DATABASE_URL) {
+    if (step.async && !usesPlainPostgres(process.env)) {
       const jobId = result.rows[0]?.job_id
       if (!jobId) throw new Error(`Migration ${migration.name} async step ${step.id} returned no job_id.`)
       const persisted = await client.query(`UPDATE "${schema}"._migration_execution_state SET pending_step=$4, pending_job_id=$5, executing_step=NULL, executing_started_at=NULL, last_error=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, run.next_step, jobId])
@@ -2040,7 +2041,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
           }
           // ASYNC is mandatory on DSQL and unsupported by local PostgreSQL.
           // DATABASE_URL is the worktree-bootstrap local-mode signal.
-          const executableStmt = process.env.DATABASE_URL
+          const executableStmt = usesPlainPostgres(process.env)
             ? stmt.replace(/\bINDEX ASYNC\b/gi, "INDEX").replace(/ALTER\s+TABLE\s+ASYNC/gi, "ALTER TABLE")
             : stmt;
           const voiceCounterBackfill = migration.name === "047_research_voice_control_plane"
@@ -2059,7 +2060,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
             continue
           }
           const result = await client.query<{ job_id?: string }>(executableStmt);
-          if (!process.env.DATABASE_URL && ASYNC_WAIT_MIGRATIONS.includes(migration.name as typeof ASYNC_WAIT_MIGRATIONS[number]) && /(?:CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC|ALTER\s+TABLE\s+ASYNC)/i.test(stmt)) {
+          if (!usesPlainPostgres(process.env) && ASYNC_WAIT_MIGRATIONS.includes(migration.name as typeof ASYNC_WAIT_MIGRATIONS[number]) && /(?:CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC|ALTER\s+TABLE\s+ASYNC)/i.test(stmt)) {
             const jobId = result.rows[0]?.job_id
             // IF NOT EXISTS returns no job for an already-created agent index.
             // Its validity is checked before a completion receipt is written.
@@ -2075,7 +2076,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
             pendingRoadmapCommitmentProvenanceBackfill = false;
             await backfillRoadmapCommitmentProvenance(client, schema, log);
           }
-          if (!process.env.DATABASE_URL && /CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC/i.test(stmt)) {
+          if (!usesPlainPostgres(process.env) && /CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC/i.test(stmt)) {
             const jobId = result.rows[0]?.job_id;
             if (jobId && migration.name === "036_research_capture_hardening") {
               researchCaptureAsyncIndexJobIds.push(jobId);
