@@ -120,7 +120,7 @@ describe("tenant isolation for every from/to pair", () => {
   it.each(pairs.map((pair) => [`${pair.key}: ${pair.from} -> ${pair.to}`, pair] as const))("%s: only same-workspace endpoints link", async (_label, pair) => {
     const create = vi.fn();
     const guarded = { entityLink: { findFirst: vi.fn(), create, count: vi.fn() } } as unknown as AppTransactionClient;
-    const base = { linkType: pair.key, toType: pair.to, ctx };
+    const base = { linkType: pair.key, toType: pair.to, ctx, viaLegacyWriter: true };
     // from in A, to in A, but the caller declares workspace B
     await expect(linkEntities(guarded, { ...base, fromId: `${pair.from}-A`, toId: `${pair.to}-A`, expectedWorkspaceId: "ws-B" })).rejects.toThrow(/not found/);
     // declared workspace A, but the to end is not A's
@@ -135,6 +135,8 @@ describe("delete paths and the workspace cascade cover every type", () => {
   const sources = {
     cascade: read("lib/delete-workspace-cascade.ts"),
     research: read("lib/research-workspace-cleanup.ts"),
+    // The legacy-mirrored Solution and Key Result sweeps live in the typed-link drains the UI, MCP and cascade deletes call.
+    typedLinks: read("lib/typed-links.ts"),
   };
   const all = Object.values(sources).join("\n");
 
@@ -148,7 +150,7 @@ describe("delete paths and the workspace cascade cover every type", () => {
     ...(def.lifecycle.onFromDeleted === "delete" ? [[def.key, def.from] as const] : []),
     ...(def.lifecycle.onToDeleted === "delete" ? toTypesOf(def).map((type) => [def.key, type] as const) : []),
   ]))("%s: deleting a %s removes its links (deleteLinksForEntity is called in a delete path)", (_key, type) => {
-    expect(all).toContain(`deleteLinksForEntity(prisma, "${type}"`);
+    expect(all).toMatch(new RegExp(`deleteLinksForEntity\\((?:prisma|db|tx), "${type}"`));
   });
 
   it("studies' links go before the studies themselves", () => {

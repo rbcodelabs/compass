@@ -57,7 +57,17 @@ export type LinkCandidatesInput = {
 export type LinkCandidates = { canLink: boolean; items: LinkPickerItem[] } | null
 
 /** Dual-write / backfill hooks for a type that replaces a legacy table. Declared here, implemented by phases 4-7. */
-export type LegacyAdapter = { legacyTable: string; backfillMigration: string }
+export type LegacyAdapter = {
+  legacyTable: string
+  /** The explicit-only backfill migration, or null for a new-only type (phase 4: no backfill, legacy stays the source of truth). */
+  backfillMigration: string | null
+  /**
+   * "mirror": the legacy writer module writes this table first and mirrors into entity_links in the same transaction.
+   * The generic service refuses direct writes and reads hide the type, because the table is a partial shadow
+   * until a later phase backfills and flips reads.
+   */
+  mode: "mirror"
+}
 
 export type LinkTypeDef<A = unknown> = {
   /** UPPER_SNAKE `<FROM>_<VERB>_<TO>`, at most 60 characters, append-only: never rename or reuse a key. */
@@ -174,8 +184,40 @@ const experimentInformedByStudy: LinkTypeDef = {
   compat: { mcpTools: [], restOps: [] },
 }
 
+// ── SOLUTION_TARGETS_KEY_RESULT (phase 4: new-only mirror of solution_key_result_links) ───────
+
+/** Outside production the mirror is on so tests and E2E cover it; production needs COMPASS_ENTITY_LINKS_SOLUTION_KR_MIRROR=1. */
+export function isSolutionKeyResultMirrorEnabled(): boolean {
+  if (process.env.NODE_ENV !== "production") return process.env.COMPASS_ENTITY_LINKS_SOLUTION_KR_MIRROR !== "0"
+  return process.env.COMPASS_ENTITY_LINKS_SOLUTION_KR_MIRROR === "1"
+}
+
+/**
+ * A Solution targets Key Results. solution_key_result_links stays the source of truth and every read stays on
+ * it: the legacy writer (linkSolutionToKeyResult / unlinkSolutionFromKeyResult in lib/typed-links.ts) mirrors
+ * each link and unlink into entity_links inside its own transaction while the flag is on (lib/links/legacy-mirror.ts).
+ * New-only: nothing is backfilled, so the mirror is a partial shadow and is not offered by reads, summaries or the
+ * generic link tools. Same workspace, many-to-many, idempotent, matching the legacy rules.
+ */
+const solutionTargetsKeyResult: LinkTypeDef = {
+  key: "SOLUTION_TARGETS_KEY_RESULT",
+  from: "SOLUTION",
+  to: "KEY_RESULT",
+  direction: "directed",
+  cardinality: { from: "many", to: "many" },
+  labels: { forward: "Targets", inverse: "Targeted by" },
+  duplicatePolicy: "idempotent",
+  authorize: defaultAuthorize,
+  isEnabled: isSolutionKeyResultMirrorEnabled,
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {},
+  restrictedContexts: "deny",
+  legacy: { legacyTable: "solution_key_result_links", backfillMigration: null, mode: "mirror" },
+  compat: { mcpTools: ["link_solution_to_key_result", "unlink_solution_from_key_result"], restOps: ["linkSolutionKeyResult", "unlinkSolutionKeyResult"] },
+}
+
 /** Append-only. Add one entry per type; never edit or reuse a key. */
-const DEFINITIONS: readonly LinkTypeDef[] = [experimentInformedByStudy]
+const DEFINITIONS: readonly LinkTypeDef[] = [experimentInformedByStudy, solutionTargetsKeyResult]
 
 export const LINK_TYPES: Readonly<Record<string, LinkTypeDef>> = Object.freeze(
   Object.fromEntries(DEFINITIONS.map((def) => [def.key, def])),
@@ -201,7 +243,8 @@ export function isLinkTypeEnabled(def: LinkTypeDef): boolean {
 
 /** Every enabled type in which `entityType` is an endpoint, with the side(s) it plays. */
 export function linkTypesForEntity(entityType: LinkableEntityType): { def: LinkTypeDef; asFrom: boolean; asTo: boolean }[] {
-  return DEFINITIONS.filter(isLinkTypeEnabled).flatMap((def) => {
+  // A legacy-mirrored type is invisible to reads: the legacy table is still the source of truth.
+  return DEFINITIONS.filter((def) => isLinkTypeEnabled(def) && !def.legacy).flatMap((def) => {
     const asFrom = def.from === entityType
     const asTo = toTypesOf(def).includes(entityType)
     return asFrom || asTo ? [{ def, asFrom, asTo }] : []

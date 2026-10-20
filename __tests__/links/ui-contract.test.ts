@@ -14,7 +14,8 @@ vi.mock("@/lib/workspace-updates-capture", () => ({
 import { changeEntityLink, readEntityLinks } from "@/app/[orgSlug]/[workspaceSlug]/links/actions";
 
 describe("every registry type with a UI is fully described", () => {
-  it.each(Object.values(LINK_TYPES))("$key has candidates and summary loaders for its endpoints", (def) => {
+  // Legacy-mirrored types have no UI: reads stay on the legacy table until a later phase flips them.
+  it.each(Object.values(LINK_TYPES).filter((def) => !def.legacy))("$key has candidates and summary loaders for its endpoints", (def) => {
     expect(typeof def.candidates).toBe("function");
     const specs = [def.summaries.onFrom ? toTypesOf(def)[0] : null, def.summaries.onTo ? def.from : null].filter(Boolean);
     for (const type of specs) expect(SUMMARISED_ENTITY_TYPES).toContain(type);

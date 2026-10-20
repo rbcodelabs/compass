@@ -65,6 +65,14 @@ export type EntityLinkRow = {
 
 const FEATURE_OFF = "This link type cannot be used: it is not enabled for this deployment."
 
+/** A legacy-mirrored type is written only by its legacy writer (lib/links/legacy-mirror.ts), which passes viaLegacyWriter. */
+function assertWritableHere(def: LinkTypeDef, viaLegacyWriter: boolean | undefined) {
+  if (def.legacy && !viaLegacyWriter) {
+    const tool = def.compat?.mcpTools[0]
+    throw new TypedLinkError(`${def.key} is written through ${tool ?? "its existing link tool"}, not the generic link tools.`, "INVALID")
+  }
+}
+
 function assertEnabled(def: LinkTypeDef) {
   if (!isLinkTypeEnabled(def)) throw new TypedLinkError(FEATURE_OFF, "INVALID")
 }
@@ -113,6 +121,8 @@ export type LinkEntitiesInput = {
   attrs?: unknown
   origin?: LinkOrigin
   ctx: LinkContext
+  /** Set only by lib/links/legacy-mirror.ts, the single writer of a legacy-mirrored type. */
+  viaLegacyWriter?: boolean
 }
 
 export type LinkEntitiesResult = { link: EntityLinkRow; created: boolean; from: LinkEndpoint; to: LinkEndpoint; def: LinkTypeDef }
@@ -123,6 +133,7 @@ export type LinkEntitiesResult = { link: EntityLinkRow; created: boolean; from: 
  */
 export async function linkEntities(tx: Tx, input: LinkEntitiesInput): Promise<LinkEntitiesResult> {
   const def = requireLinkType(input.linkType)
+  assertWritableHere(def, input.viaLegacyWriter)
   assertEnabled(def)
   const origin = input.origin ?? "DIRECT"
   if (def.origins && !def.origins.includes(origin)) throw new TypedLinkError(`${def.key} does not allow origin ${origin}.`, "INVALID")
@@ -191,7 +202,7 @@ async function enforceCardinality(tx: Tx, def: LinkTypeDef, workspaceId: string,
   }
 }
 
-export type UnlinkEntitiesInput = { linkType: string; fromId: string; toId: string; expectedWorkspaceId: string }
+export type UnlinkEntitiesInput = { linkType: string; fromId: string; toId: string; expectedWorkspaceId: string; viaLegacyWriter?: boolean }
 
 /**
  * Removes the link (a hard delete; the audit trail is the workspace update capture). Only the `from`
@@ -200,7 +211,9 @@ export type UnlinkEntitiesInput = { linkType: string; fromId: string; toId: stri
  */
 export async function unlinkEntities(tx: Tx, input: UnlinkEntitiesInput): Promise<{ removed: number; removedIds: string[]; def: LinkTypeDef }> {
   const def = requireLinkType(input.linkType)
-  assertEnabled(def)
+  assertWritableHere(def, input.viaLegacyWriter)
+  // A mirror row must stay removable after the flag is turned off, or the legacy unlink would strand it.
+  if (!input.viaLegacyWriter) assertEnabled(def)
   const from = await requireEndpoint(tx, def.from, input.expectedWorkspaceId, input.fromId)
   const pair = { linkType: def.key, workspaceId: from.workspaceId }
   const where =
