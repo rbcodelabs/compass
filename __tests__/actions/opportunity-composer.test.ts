@@ -12,8 +12,9 @@ const m = vi.hoisted(() => {
     keyResult: { findFirst: vi.fn(), findMany: vi.fn() },
     objective: { findFirst: vi.fn(), findMany: vi.fn() },
     feedbackItem: { findMany: vi.fn(), updateMany: vi.fn() },
-    opportunity: { create: vi.fn(), findFirst: vi.fn() },
-    opportunityObjectiveLink: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
+    opportunity: { create: vi.fn(), findFirst: vi.fn(), findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id })), },
+    opportunityObjectiveLink: { findFirst: vi.fn(), findMany: async () => [], create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
+    entityLink: { deleteMany: async () => ({ count: 0 }) },
     $transaction: vi.fn(),
   };
   return { db, auth: vi.fn(), revalidatePath: vi.fn() };
@@ -27,6 +28,9 @@ import {
   createOpportunityFromComposer,
   loadOpportunityComposerOptions,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
+
+// The entity_links mirror (ADR phase 5) has its own tests; this file pins the legacy writes against hand-written fakes.
+process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR = "0";
 
 vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
 

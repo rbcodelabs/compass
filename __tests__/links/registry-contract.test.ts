@@ -120,7 +120,7 @@ describe("tenant isolation for every from/to pair", () => {
   it.each(pairs.map((pair) => [`${pair.key}: ${pair.from} -> ${pair.to}`, pair] as const))("%s: only same-workspace endpoints link", async (_label, pair) => {
     const create = vi.fn();
     const guarded = { entityLink: { findFirst: vi.fn(), create, count: vi.fn() } } as unknown as AppTransactionClient;
-    const base = { linkType: pair.key, toType: pair.to, ctx, viaLegacyWriter: true };
+    const base = { linkType: pair.key, toType: pair.to, ctx, viaLegacyWriter: true, origin: getLinkType(pair.key)?.origins?.[0] };
     // from in A, to in A, but the caller declares workspace B
     await expect(linkEntities(guarded, { ...base, fromId: `${pair.from}-A`, toId: `${pair.to}-A`, expectedWorkspaceId: "ws-B" })).rejects.toThrow(/not found/);
     // declared workspace A, but the to end is not A's

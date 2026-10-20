@@ -1,0 +1,84 @@
+-- READ-ONLY preflight for migration 095_entity_links_backfill_opportunity (entity_links ADR phase 5).
+-- Counts the legacy rows the backfill would mirror and the orphans it would quarantine and report, so the owner can read the
+-- production numbers BEFORE deciding to POST 095 and who resolves the quarantined rows. It changes nothing: the transaction is
+-- READ ONLY and ends in ROLLBACK, and it selects counts and ids only (no titles, no content).
+--
+-- Usage (psql, as a read-only role; the schema is the deployment's, e.g. compass_prod):
+--   psql "$READONLY_DATABASE_URL" -v schema=compass_prod -f docs/maintenance/entity-links-opportunity-preflight.psql
+-- It needs tables from migrations 068 and 071 (objectives.workspace_id, opportunity_objective_links). The entity_links section at the
+-- end needs 091 and is skipped by psql's ON_ERROR_STOP=off default if the table is missing; the same numbers (plus these) are served by
+-- GET /api/admin/migrate under entityLinksOpportunityBackfill once the code is deployed.
+--
+-- Classes, identical to lib/migrations/entity-links-opportunity-backfill.ts:
+--   ok                  both endpoints exist, Opportunity and Objective share a workspace, the link row agrees, origin is DIRECT/LEGACY
+--   dangling            an endpoint row is gone
+--   crossWorkspace      the Opportunity and the Objective are in different workspaces, or the Objective has no workspace
+--   linkWorkspaceDrift  (links only) the link row's workspace_id differs from its endpoints'
+--   invalidOrigin       (links only) origin is neither DIRECT nor LEGACY
+
+\set ON_ERROR_STOP off
+BEGIN READ ONLY;
+
+\echo '== 1. Legacy opportunity_objective_links by origin =='
+SELECT origin, count(*) AS rows FROM :"schema".opportunity_objective_links GROUP BY origin ORDER BY origin;
+
+\echo '== 2. Opportunities with a linked_key_result_id (the Opportunity -> Key Result pointer) =='
+SELECT count(*) AS opportunities_with_pointer FROM :"schema".opportunities WHERE linked_key_result_id IS NOT NULL;
+
+\echo '== 3. opportunity_objective_links by class (everything but ok is quarantined and reported by 095) =='
+SELECT CASE
+         WHEN o.id IS NULL OR obj.id IS NULL THEN 'dangling'
+         WHEN o.workspace_id IS NULL OR obj.workspace_id IS NULL OR o.workspace_id <> obj.workspace_id THEN 'crossWorkspace'
+         WHEN l.workspace_id <> o.workspace_id THEN 'linkWorkspaceDrift'
+         WHEN l.origin NOT IN ('DIRECT', 'LEGACY') THEN 'invalidOrigin'
+         ELSE 'ok' END AS class,
+       count(*) AS rows
+  FROM :"schema".opportunity_objective_links AS l
+  LEFT JOIN :"schema".opportunities AS o ON o.id = l.opportunity_id
+  LEFT JOIN :"schema".objectives AS obj ON obj.id = l.objective_id
+ GROUP BY 1 ORDER BY 1;
+
+\echo '== 4. linked_key_result_id pointers by class =='
+SELECT CASE
+         WHEN kr.id IS NULL OR obj.id IS NULL THEN 'dangling'
+         WHEN obj.workspace_id IS NULL OR o.workspace_id <> obj.workspace_id THEN 'crossWorkspace'
+         ELSE 'ok' END AS class,
+       count(*) AS pointers
+  FROM :"schema".opportunities AS o
+  LEFT JOIN :"schema".key_results AS kr ON kr.id = o.linked_key_result_id
+  LEFT JOIN :"schema".objectives AS obj ON obj.id = kr.objective_id
+ WHERE o.linked_key_result_id IS NOT NULL
+ GROUP BY 1 ORDER BY 1;
+
+\echo '== 5. Expected orphans, ids only: opportunity_objective_links.id with its class (first 200) =='
+SELECT l.id AS link_id,
+       CASE
+         WHEN o.id IS NULL OR obj.id IS NULL THEN 'dangling'
+         WHEN o.workspace_id IS NULL OR obj.workspace_id IS NULL OR o.workspace_id <> obj.workspace_id THEN 'crossWorkspace'
+         WHEN l.workspace_id <> o.workspace_id THEN 'linkWorkspaceDrift'
+         ELSE 'invalidOrigin' END AS class
+  FROM :"schema".opportunity_objective_links AS l
+  LEFT JOIN :"schema".opportunities AS o ON o.id = l.opportunity_id
+  LEFT JOIN :"schema".objectives AS obj ON obj.id = l.objective_id
+ WHERE o.id IS NULL OR obj.id IS NULL OR o.workspace_id IS NULL OR obj.workspace_id IS NULL OR o.workspace_id <> obj.workspace_id
+    OR l.workspace_id <> o.workspace_id OR l.origin NOT IN ('DIRECT', 'LEGACY')
+ ORDER BY l.id LIMIT 200;
+
+\echo '== 6. Expected orphan pointers, ids only: opportunities.id with its class (first 200) =='
+SELECT o.id AS opportunity_id,
+       CASE WHEN kr.id IS NULL OR obj.id IS NULL THEN 'dangling' ELSE 'crossWorkspace' END AS class
+  FROM :"schema".opportunities AS o
+  LEFT JOIN :"schema".key_results AS kr ON kr.id = o.linked_key_result_id
+  LEFT JOIN :"schema".objectives AS obj ON obj.id = kr.objective_id
+ WHERE o.linked_key_result_id IS NOT NULL
+   AND (kr.id IS NULL OR obj.id IS NULL OR obj.workspace_id IS NULL OR o.workspace_id <> obj.workspace_id)
+ ORDER BY o.id LIMIT 200;
+
+\echo '== 7. Objectives with no workspace_id (their links and pointers are crossWorkspace orphans until 068/069 fills them) =='
+SELECT count(*) AS objectives_without_workspace FROM :"schema".objectives WHERE workspace_id IS NULL;
+
+\echo '== 8. entity_links state of the two types (needs migration 091) =='
+SELECT link_type, origin, count(*) AS rows FROM :"schema".entity_links
+ WHERE link_type IN ('OPPORTUNITY_TARGETS_OBJECTIVE', 'OPPORTUNITY_TARGETS_KEY_RESULT') GROUP BY 1, 2 ORDER BY 1, 2;
+
+ROLLBACK;

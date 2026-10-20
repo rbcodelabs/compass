@@ -744,7 +744,7 @@ describe("072_typed_links_residual_backfill", () => {
 
   it("is explicit-only (an untargeted POST never runs it), like 069", () => {
     const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8");
-    expect(runner).toMatch(/EXPLICIT_ONLY_MIGRATIONS: readonly string\[\] = \[WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION\]/);
+    expect(runner).toMatch(/EXPLICIT_ONLY_MIGRATIONS: readonly string\[\] = \[WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION\]/);
   });
 
   it("runs the same precondition, backfill and postconditions as 071 before its receipt, and needs no async index wait", () => {

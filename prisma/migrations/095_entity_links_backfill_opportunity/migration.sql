@@ -1,0 +1,18 @@
+-- Migration 095: backfill entity_links for Opportunity <-> Objective and the Opportunity -> Key Result pointer
+-- (ADR "One generic entity_links table for association links", phase 5).
+--
+-- NO DDL, and EXPLICIT-ONLY: an untargeted POST never runs it. POST it by name
+-- ({"script":"095_entity_links_backfill_opportunity"}) after the mirroring code is deployed and
+-- COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR=1 is live. The legacy opportunity_objective_links table and the
+-- opportunities.linked_key_result_id column stay the source of truth; nothing here changes or deletes them.
+--
+--   OPPORTUNITY_TARGETS_OBJECTIVE   <- opportunity_objective_links (origin DIRECT/LEGACY, source, actor and created_at copied)
+--   OPPORTUNITY_TARGETS_KEY_RESULT  <- opportunities.linked_key_result_id (origin LEGACY, source MIGRATION)
+--
+-- Batched at 500 rows with an anti-join and no ON CONFLICT. Cross-workspace, dangling and otherwise inconsistent legacy
+-- rows are quarantined: never linked, never deleted, REPORTED. Before the receipt the hook proves zero unmatched
+-- non-quarantined legacy rows, zero duplicate pairs, mirror workspace_id equal to both endpoints', and no dangling
+-- endpoint other than the reported ones.
+--
+-- This file intentionally contains no executable statement; the work is the hook
+-- (lib/migrations/entity-links-opportunity-backfill.ts).

@@ -58,7 +58,7 @@ describe("linkOpportunityToObjective", () => {
     expect(result.created).toBe(true);
     expect(links).toHaveLength(1);
     expect(links[0]).toMatchObject({ workspaceId: WS_A.id, opportunityId: "opp-a", objectiveId: "obj-a", origin: "DIRECT", source: "MCP" });
-    expect(fake.state.writes.filter((w) => w.includes("Link"))).toHaveLength(1);
+    expect(fake.state.writes.filter((w) => w.startsWith("opportunityObjectiveLink"))).toHaveLength(1);
   });
 
   it("is idempotent: a repeat reports created:false and writes nothing", async () => {

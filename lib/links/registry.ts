@@ -217,8 +217,68 @@ const solutionTargetsKeyResult: LinkTypeDef = {
   compat: { mcpTools: ["link_solution_to_key_result", "unlink_solution_from_key_result"], restOps: ["linkSolutionKeyResult", "unlinkSolutionKeyResult"] },
 }
 
+// ── OPPORTUNITY_TARGETS_OBJECTIVE / OPPORTUNITY_TARGETS_KEY_RESULT (phase 5: mirror of the legacy Opportunity-Objective table and the KR pointer) ──
+
+/** Outside production the mirror is on so tests and E2E cover it; production needs COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR=1. */
+export function isOpportunityLinkMirrorEnabled(): boolean {
+  if (process.env.NODE_ENV !== "production") return process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR !== "0"
+  return process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR === "1"
+}
+
+/** The explicit-only backfill for both Opportunity types (lib/migrations/entity-links-opportunity-backfill.ts). */
+export const OPPORTUNITY_LINKS_BACKFILL_MIGRATION = "095_entity_links_backfill_opportunity"
+
+/**
+ * An Opportunity targets Objectives. The legacy Opportunity-Objective table stays the source of truth and every read stays on it;
+ * lib/typed-links.ts mirrors each write (link, unlink, and the origin changes between DIRECT and LEGACY) into entity_links in the
+ * same transaction while the flag is on (lib/links/legacy-mirror.ts). `origin` keeps the legacy meaning: DIRECT is a link a person or
+ * agent made, LEGACY is one derived from the opportunity's Key Result pointer. Migration 095 backfills the existing rows with their
+ * origin, source, actor and created_at. Reads, summaries and the generic link tools ignore the type until a later phase flips reads.
+ */
+const opportunityTargetsObjective: LinkTypeDef = {
+  key: "OPPORTUNITY_TARGETS_OBJECTIVE",
+  from: "OPPORTUNITY",
+  to: "OBJECTIVE",
+  direction: "directed",
+  cardinality: { from: "many", to: "many" },
+  labels: { forward: "Targets", inverse: "Targeted by" },
+  origins: ["DIRECT", "LEGACY"],
+  duplicatePolicy: "idempotent",
+  authorize: defaultAuthorize,
+  isEnabled: isOpportunityLinkMirrorEnabled,
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {},
+  restrictedContexts: "deny",
+  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: OPPORTUNITY_LINKS_BACKFILL_MIGRATION, mode: "mirror" },
+  compat: { mcpTools: ["link_opportunity_to_objective", "unlink_opportunity_from_objective"], restOps: ["linkOpportunityObjective", "unlinkOpportunityObjective"] },
+}
+
+/**
+ * The Key Result an Opportunity is expected to move: the granularity opportunities.linked_key_result_id carries and the
+ * Objective link cannot. The column stays the source of truth; every pointer write (set, clear, create, move of the Key Result)
+ * mirrors here in the same transaction. An Opportunity has at most one (to-one on the `from` side), so a changed pointer replaces
+ * the row. All rows are origin LEGACY: they are derived from the pointer, never made directly.
+ */
+const opportunityTargetsKeyResult: LinkTypeDef = {
+  key: "OPPORTUNITY_TARGETS_KEY_RESULT",
+  from: "OPPORTUNITY",
+  to: "KEY_RESULT",
+  direction: "directed",
+  cardinality: { from: "one", to: "many" },
+  labels: { forward: "Targets", inverse: "Targeted by" },
+  origins: ["LEGACY"],
+  duplicatePolicy: "idempotent",
+  authorize: defaultAuthorize,
+  isEnabled: isOpportunityLinkMirrorEnabled,
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {},
+  restrictedContexts: "deny",
+  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: OPPORTUNITY_LINKS_BACKFILL_MIGRATION, mode: "mirror" },
+  compat: { mcpTools: ["link_opportunity_to_kr"], restOps: ["updateOpportunity"] },
+}
+
 /** Append-only. Add one entry per type; never edit or reuse a key. */
-const DEFINITIONS: readonly LinkTypeDef[] = [experimentInformedByStudy, solutionTargetsKeyResult]
+const DEFINITIONS: readonly LinkTypeDef[] = [experimentInformedByStudy, solutionTargetsKeyResult, opportunityTargetsObjective, opportunityTargetsKeyResult]
 
 export const LINK_TYPES: Readonly<Record<string, LinkTypeDef>> = Object.freeze(
   Object.fromEntries(DEFINITIONS.map((def) => [def.key, def])),

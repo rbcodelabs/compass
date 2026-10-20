@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// The entity_links mirror (ADR phase 5) has its own tests; this file pins the legacy writes against hand-written fakes.
+process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR = "0";
+
 // Membership/foreign-entity denial uses real helpers in product-analytics-auth.test.ts.
 vi.mock("@/lib/product-action-auth", () => ({
   requireProductWorkspace: vi.fn().mockResolvedValue("ws-1"),
@@ -13,6 +16,7 @@ const mockOpportunity = {
   update: vi.fn(),
   findFirst: vi.fn(),
   delete: vi.fn(),
+  findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id })),
 };
 const mockSolution = {
   create: vi.fn(),
@@ -40,7 +44,8 @@ const mockPrisma = {
   solutionScore: mockSolutionScore,
   squad: { findFirst: vi.fn().mockResolvedValue({ id: "squad-1" }) },
   keyResult: { findFirst: vi.fn() },
-  opportunityObjectiveLink: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
+  opportunityObjectiveLink: { findFirst: vi.fn(), findMany: async () => [], create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
+  entityLink: { deleteMany: async () => ({ count: 0 }) },
 };
 // createOpportunity writes the opportunity and its links in one transaction.
 const mockTransaction = vi.fn(async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma));
