@@ -178,7 +178,7 @@ async function repairDriftedMirrorRows(client: PoolClient, schema: string, targe
   }
 }
 
-/** Legacy rows of one target type that have no mirror row. Select the ids, then copy the columns in SQL so timestamps never round-trip through the driver. */
+/** Legacy rows of one target type that have no mirror row. The INSERT re-checks the task and the target (class ok) so a row that went bad since the select is not linked. Select the ids, then copy the columns in SQL so timestamps never round-trip through the driver. */
 async function insertMissingMirrorRows(client: PoolClient, schema: string, target: Target, sleep?: Sleep): Promise<number> {
   return pagedBatches(
     async (after) =>
@@ -194,8 +194,8 @@ async function insertMissingMirrorRows(client: PoolClient, schema: string, targe
           () => client.query(
             `INSERT INTO "${schema}"."entity_links" (workspace_id, link_type, from_type, from_id, to_type, to_id, origin, source, created_by_id, created_at, updated_at)
              SELECT t.workspace_id, '${TASK_REFERENCES_KEY}', 'TASK', l.task_id, '${target.stored}', l.linked_id, 'DIRECT', l.source, l.created_by_id, l.created_at, CURRENT_TIMESTAMP
-             FROM "${schema}"."task_links" AS l JOIN "${schema}"."tasks" AS t ON t.id = l.task_id
-             WHERE l.id = ANY($1::uuid[]) AND l.linked_type = '${target.legacy}'`,
+             FROM ${source(schema, target)}
+             WHERE l.id = ANY($1::uuid[]) AND l.linked_type = '${target.legacy}' AND (${classOf(target)}) = 'ok'`,
             [ids],
           ),
           sleep,

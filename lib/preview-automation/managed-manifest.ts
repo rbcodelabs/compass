@@ -280,7 +280,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 097 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
   "097_entity_links_backfill_task": {
-    "lib/migrations/entity-links-task-backfill.ts": "8410412838f01033928cc63cf74a513217ab4f2619465e05118028ca28393189",
+    "lib/migrations/entity-links-task-backfill.ts": "761445d5aafdfafe2d6294dfde95b36e4d1da608cf78758341d716116362196b",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };

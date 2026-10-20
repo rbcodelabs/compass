@@ -66,7 +66,18 @@ pattern). It is not built here because nothing yet calls for it.
 ## Known mirror gaps the backfill covers
 
 - A Key Result / Objective delete removes the legacy links in its own transaction; the mirror rows go in a best-effort drain after it
-  (logged and swallowed on failure). A failed drain leaves rows 097 reports as kept (their legacy row is gone, so they are pruned).
+  (logged and swallowed on failure). The typed-link drain that runs just before it (`drainLinksFor`) already removes every `entity_links` row
+  naming that Objective or Key Result, so the task-reference drain is a second, narrower pass for the case where that one failed. A failed
+  drain leaves rows 097 prunes or reports as kept.
 - Links written while the flag is off are not mirrored; 097 inserts them.
 - A live writer inserting a pair between 097's select and insert makes the unique index refuse that batch; the hook re-selects (bounded) and
-  a re-POST resumes anyway.
+  a re-POST resumes anyway. The insert itself re-checks the task and the target, so a row that went bad since the select is not linked.
+- MCP `unlink_task` for a task row that has vanished deletes only the legacy link (the service verifies the task); 097 prunes that mirror row.
+
+## Required before the read flip: legacy-dangling is absent
+
+The UI Objective/Key Result delete (`okrs/actions.ts`), `deleteDocument` and the feedback purge route drop the mirror rows of the deleted
+target but have never removed its legacy `task_links` (the legacy tables simply keep a dangling row). 097 therefore reports those legacy rows
+as `dangling`, and they have no mirror row. A reader flipped to `entity_links` is consistent with that only if the legacy reader also treats a
+link to a missing target as absent (the workspace-filtered endpoint reads already do). Verify this on the legacy read paths before flipping,
+or clean the dangling `task_links` rows as a separate, owner-approved step. This PR does not change those delete paths.

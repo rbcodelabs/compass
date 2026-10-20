@@ -595,6 +595,7 @@ export async function unlinkTask({
   }
 
   const task = await prisma.task.findUnique({ where: { id: taskId }, select: { workspaceId: true } })
+  // A task row that vanished cannot be unmirrored through the service (it verifies the task); migration 097 prunes that mirror row.
   if (task) await deleteTaskLink(prisma, { link, workspaceId: task.workspaceId })
   else await prisma.taskLink.delete({ where: { id: link.id } })
 

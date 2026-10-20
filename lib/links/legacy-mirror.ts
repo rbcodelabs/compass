@@ -18,7 +18,6 @@
  * This module is the only caller that passes `viaLegacyWriter` to lib/links/service.ts.
  */
 import type { AppTransactionClient } from "@/lib/db"
-import { normalizeEntityType } from "@/lib/entity-types"
 import { TASK_REFERENCE_TARGET_TYPES, isLinkTypeEnabled, requireLinkType } from "@/lib/links/registry"
 import { drainLinksFromEntities, drainLinksToEntities, linkEntities, unlinkEntities, unlinkFromEntity } from "@/lib/links/service"
 import type { LinkContext } from "@/lib/typed-links"
@@ -170,9 +169,15 @@ type TaskLinkRow = { taskId: string; linkedType: string; linkedId: string; sourc
  * The entity_links target type of a legacy `linked_type`, or null when the row is not mirrored: `DECISION` is a review request, and
  * `COMMENT` (the Doc comment a task was made from) or anything unknown stays legacy-only.
  */
-function taskReferenceTargetType(linkedType: string) {
-  const normalized = normalizeEntityType(linkedType)
-  return normalized && (TASK_REFERENCE_TARGET_TYPES as readonly string[]).includes(normalized) ? normalized : null
+const TASK_LINKED_TYPE_TO_STORED = {
+  OPPORTUNITY: "OPPORTUNITY", SOLUTION: "SOLUTION", ROADMAP_ITEM: "ROADMAP_ITEM", OBJECTIVE: "OBJECTIVE", KEY_RESULT: "KEY_RESULT",
+  DOC: "DOC", EXPERIMENT: "EXPERIMENT", FEEDBACK_ITEM: "FEEDBACK_ITEM", DECISION: "REVIEW_REQUEST",
+} as const satisfies Record<string, (typeof TASK_REFERENCE_TARGET_TYPES)[number]>
+
+function taskReferenceTargetType(linkedType: string): (typeof TASK_REFERENCE_TARGET_TYPES)[number] | null {
+  // An explicit map, the same one migration 097 (TARGETS) uses, so the writer and the backfill agree: only these nine legacy spellings are
+  // mirrored. A stored spelling such as REVIEW_REQUEST, COMMENT or anything unknown is not a legacy linked_type and is not mirrored.
+  return Object.prototype.hasOwnProperty.call(TASK_LINKED_TYPE_TO_STORED, linkedType) ? TASK_LINKED_TYPE_TO_STORED[linkedType as keyof typeof TASK_LINKED_TYPE_TO_STORED] : null
 }
 
 const asLinkSource = (source: string | null | undefined): LinkContext["source"] => (source === "MCP" || source === "API" ? source : "UI")

@@ -169,6 +169,18 @@ describe("createTaskLink", () => {
     expect(mirrorRows()).toHaveLength(0);
   });
 
+  it("mirrors only the nine legacy spellings: the stored spelling REVIEW_REQUEST, lowercase and unknown types are not mirrored", async () => {
+    await mirrorTaskLinks(prisma() as unknown as AppTransactionClient, {
+      workspaceId: WS_A.id,
+      links: [
+        { taskId: "task-a", linkedType: "REVIEW_REQUEST", linkedId: "rr-a" },
+        { taskId: "task-a", linkedType: "doc", linkedId: "doc-a" },
+        { taskId: "task-a", linkedType: "TASK", linkedId: "task-a2" },
+      ],
+    });
+    expect(mirrorRows()).toHaveLength(0);
+  });
+
   it("a target in another workspace is refused and nothing is mirrored (the legacy transaction is the caller's to roll back)", async () => {
     await expect(createTaskLink(prisma(), { taskId: "task-a", linkedType: "DOC", linkedId: "doc-b", workspaceId: WS_A.id })).rejects.toThrow(/not found in this workspace/);
     expect(mirrorRows()).toHaveLength(0);
