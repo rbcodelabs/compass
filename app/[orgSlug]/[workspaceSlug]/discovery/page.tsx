@@ -255,6 +255,16 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     };
   }
 
+  // "Add solutions" offers every live Opportunity of the workspace as a parent, not just the filtered rows.
+  const solutionParents =
+    view === "table"
+      ? await prisma.opportunity.findMany({
+          where: { workspaceId: workspace.id, status: { not: "ARCHIVED" } },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          select: { id: true, title: true },
+        })
+      : [];
+
   const opportunitiesByStatus = ACTIVE_STATUSES.reduce(
     (acc, status) => {
       acc[status] = opportunities.filter((o) => o.status === status).map(toCardData);
@@ -352,6 +362,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
             orgSlug,
             workspaceSlug,
             squads: squads.map((s) => ({ id: s.id, name: s.name, color: s.color })),
+            solutionParents,
             readOnly: workspaceAccess?.isReadOnly ?? true,
           }}
         />

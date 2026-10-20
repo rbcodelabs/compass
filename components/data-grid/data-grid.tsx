@@ -63,6 +63,8 @@ import {
   type GridColumnDef,
   type GridColumnMeta,
   type GridCreation,
+  type GridCreationMode,
+  type GridCreationRequest,
   type GridEdit,
   type GridRowData,
   type GridRowState,
@@ -189,6 +191,14 @@ export type DataGridProps<TRow extends GridRowData> = {
    * Hidden below `md` and when `readOnly`.
    */
   creation?: GridCreation;
+  /**
+   * Several ways of adding rows with a switch between them (Discovery: "Add
+   * opportunities" / "Add solutions"). Takes the place of `creation`; the first
+   * mode is the default. Pass a stable reference.
+   */
+  creationModes?: readonly GridCreationMode[];
+  /** Switches `creationModes` to a mode and preselects its parent, e.g. from a row action. */
+  creationRequest?: GridCreationRequest;
 
   /**
    * How the grid claims vertical space.
@@ -283,6 +293,8 @@ export function DataGrid<TRow extends GridRowData>({
   onOpenRow,
   readOnly = false,
   creation,
+  creationModes,
+  creationRequest,
   height = "natural",
   maxHeight,
   pagination = true,
@@ -292,6 +304,15 @@ export function DataGrid<TRow extends GridRowData>({
   className,
 }: DataGridProps<TRow>) {
   const isMobile = useIsMobile();
+  const drafting = React.useMemo<readonly GridCreationMode[] | undefined>(
+    () =>
+      creationModes && creationModes.length > 0
+        ? creationModes
+        : creation
+          ? [{ id: "default", label: "", creation }]
+          : undefined,
+    [creation, creationModes],
+  );
   const mobileMode = isMobile && Boolean(renderMobileRow);
 
   // An unpaginated grid still needs coherent page math for the live region and
@@ -1401,8 +1422,8 @@ export function DataGrid<TRow extends GridRowData>({
         </Table>
       </DndContext>
 
-      {creation && !readOnly && !isMobile && (
-        <DraftArea creation={creation} announce={setLiveMessage} />
+      {drafting && !readOnly && !isMobile && (
+        <DraftArea modes={drafting} request={creationRequest} announce={setLiveMessage} />
       )}
 
       {pagination && (

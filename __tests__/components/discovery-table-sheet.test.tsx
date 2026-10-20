@@ -11,12 +11,14 @@ import {
 
 const openPanel = vi.fn();
 const createOpportunitiesBatch = vi.fn();
+const createSolutionsBatch = vi.fn();
 
 vi.mock("@/components/panels/panel-context", () => ({
   usePanelContext: () => ({ openPanel }),
 }));
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({
   createOpportunitiesBatch: (...args: unknown[]) => createOpportunitiesBatch(...args),
+  createSolutionsBatch: (...args: unknown[]) => createSolutionsBatch(...args),
 }));
 
 const opportunities: DiscoveryTableOpportunity[] = [
@@ -35,6 +37,12 @@ const opportunities: DiscoveryTableOpportunity[] = [
 const workspace: DiscoveryTableWorkspace = {
   orgSlug: "acme",
   workspaceSlug: "product",
+  solutionParents: [
+    { id: "opp-1", title: "Understand onboarding friction" },
+    { id: "opp-2", title: "Reduce churn" },
+    { id: "opp-3", title: "Twin" },
+    { id: "opp-4", title: "Twin" },
+  ],
   squads: [
     { id: "squad-1", name: "Growth", color: "#ff6600" },
     { id: "squad-2", name: "Platform", color: "#0066ff" },
@@ -71,6 +79,7 @@ afterEach(() => {
   cleanup();
   openPanel.mockReset();
   createOpportunitiesBatch.mockReset();
+  createSolutionsBatch.mockReset();
   vi.unstubAllGlobals();
 });
 
@@ -199,5 +208,117 @@ describe("DiscoveryTableView in sheet mode", () => {
     render(<DiscoveryTableView opportunities={[]} workspace={{ ...workspace, readOnly: true }} />);
     expect(screen.queryByTestId("grid-draft-area")).not.toBeInTheDocument();
     expect(screen.getByText(/match the current filters/)).toBeInTheDocument();
+  });
+
+  describe("Add solutions mode", () => {
+    const useSolutionsMode = () => fireEvent.click(screen.getByTestId("draft-mode-solutions"));
+
+    it("offers a mode switch and a parent picker with every live opportunity (not only the filtered rows)", () => {
+      render(<DiscoveryTableView opportunities={opportunities} workspace={workspace} />);
+      expect(screen.getByTestId("draft-mode-opportunities")).toHaveAttribute("aria-pressed", "true");
+      useSolutionsMode();
+      expect(screen.getByTestId("draft-mode-solutions")).toHaveAttribute("aria-pressed", "true");
+      const picker = screen.getByLabelText("Opportunity", { selector: "select" });
+      expect(within(picker).getAllByRole("option").map((option) => option.textContent)).toEqual([
+        "Choose an opportunity",
+        "Understand onboarding friction",
+        "Reduce churn",
+        "Twin",
+        "Twin",
+      ]);
+    });
+
+    it("sends pasted solutions under the chosen parent, once per batch", async () => {
+      createSolutionsBatch.mockImplementation(async (_o: string, _w: string, items: { clientId: string }[]) => ({
+        ok: true,
+        results: items.map((item) => ({ clientId: item.clientId, ok: true, id: item.clientId })),
+      }));
+      render(<DiscoveryTableView opportunities={opportunities} workspace={workspace} />);
+      useSolutionsMode();
+      fireEvent.change(screen.getByLabelText("Opportunity", { selector: "select" }), { target: { value: "opp-2" } });
+      paste('Win-back email\t\t"Line 1\nLine 2"\r\nExit survey\r\n', /^Title for solution draft \d+$/);
+      expect(screen.getAllByTestId("draft-row")).toHaveLength(2);
+      fireEvent.click(screen.getByTestId("draft-create"));
+      await waitFor(() => expect(screen.queryAllByTestId("draft-row")).toHaveLength(0));
+      expect(createOpportunitiesBatch).not.toHaveBeenCalled();
+      expect(createSolutionsBatch).toHaveBeenCalledWith("acme", "product", [
+        { clientId: expect.any(String), title: "Win-back email", description: "Line 1\nLine 2", parent: { id: "opp-2" } },
+        { clientId: expect.any(String), title: "Exit survey", description: null, parent: { id: "opp-2" } },
+      ]);
+    });
+
+    it("flags every row inline when no parent is chosen, without calling the server", async () => {
+      render(<DiscoveryTableView opportunities={opportunities} workspace={workspace} />);
+      useSolutionsMode();
+      fireEvent.change(screen.getAllByLabelText(/^Title for solution/)[0], { target: { value: "Orphan" } });
+      fireEvent.click(screen.getByTestId("draft-create"));
+      await waitFor(() => expect(screen.getByTestId("draft-field-error")).toHaveTextContent(/Choose an opportunity above/));
+      expect(createSolutionsBatch).not.toHaveBeenCalled();
+    });
+
+    it("matches a pasted Opportunity column by exact title; missing and ambiguous titles are per-row errors", async () => {
+      createSolutionsBatch.mockImplementation(async (_o: string, _w: string, items: { clientId: string }[]) => ({
+        ok: true,
+        results: items.map((item) => ({ clientId: item.clientId, ok: true, id: item.clientId })),
+      }));
+      render(<DiscoveryTableView opportunities={opportunities} workspace={workspace} />);
+      useSolutionsMode();
+      paste("Good\tReduce churn\r\nMissing\tReduce chur\r\nAmbiguous\tTwin\r\n", /^Title for solution draft \d+$/);
+      fireEvent.click(screen.getByTestId("draft-create"));
+      await waitFor(() => expect(screen.getAllByTestId("draft-field-error")).toHaveLength(2));
+      const errors = screen.getAllByTestId("draft-field-error").map((node) => node.textContent);
+      expect(errors[0]).toMatch(/No opportunity titled "Reduce chur"/);
+      expect(errors[1]).toMatch(/2 opportunities are titled "Twin"/);
+      // Only the row that resolved was sent.
+      expect(createSolutionsBatch).toHaveBeenCalledTimes(1);
+      expect(createSolutionsBatch.mock.calls[0][2]).toEqual([
+        { clientId: expect.any(String), title: "Good", description: null, parent: { id: "opp-2" } },
+      ]);
+    });
+
+    it("shows a parent-not-found result from the server on that row", async () => {
+      createSolutionsBatch.mockImplementation(async (_o: string, _w: string, items: { clientId: string }[]) => ({
+        ok: true,
+        results: items.map((item) => ({
+          clientId: item.clientId,
+          ok: false,
+          code: "NOT_FOUND",
+          error: "That opportunity was not found in this workspace.",
+          field: "parent",
+        })),
+      }));
+      render(<DiscoveryTableView opportunities={opportunities} workspace={workspace} />);
+      useSolutionsMode();
+      fireEvent.change(screen.getByLabelText("Opportunity", { selector: "select" }), { target: { value: "opp-1" } });
+      fireEvent.change(screen.getAllByLabelText(/^Title for solution/)[0], { target: { value: "Gone parent" } });
+      fireEvent.click(screen.getByTestId("draft-create"));
+      await waitFor(() =>
+        expect(screen.getByTestId("draft-field-error")).toHaveTextContent("That opportunity was not found in this workspace."),
+      );
+      expect(screen.getAllByTestId("draft-row")).toHaveLength(1);
+    });
+
+    it("locks the mode switch while drafts exist", () => {
+      render(<DiscoveryTableView opportunities={opportunities} workspace={workspace} />);
+      fireEvent.change(screen.getAllByLabelText(/^Title for opportunity/)[0], { target: { value: "Draft" } });
+      expect(screen.getByTestId("draft-mode-solutions")).toBeDisabled();
+      fireEvent.click(screen.getByTestId("draft-discard"));
+      expect(screen.getByTestId("draft-mode-solutions")).toBeEnabled();
+    });
+
+    it("the Add button in an expanded row switches to Add solutions with that parent preselected", () => {
+      render(<DiscoveryTableView opportunities={opportunities} workspace={workspace} />);
+      expect(screen.queryByRole("button", { name: /^Add solution to/ })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Expand Understand onboarding friction" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add solution to Understand onboarding friction" }));
+      expect(screen.getByTestId("draft-mode-solutions")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByLabelText("Opportunity", { selector: "select" })).toHaveValue("opp-1");
+    });
+
+    it("hides the row Add button when read-only", () => {
+      render(<DiscoveryTableView opportunities={opportunities} workspace={{ ...workspace, readOnly: true }} />);
+      fireEvent.click(screen.getByRole("button", { name: "Expand Understand onboarding friction" }));
+      expect(screen.queryByRole("button", { name: /^Add solution to/ })).not.toBeInTheDocument();
+    });
   });
 });

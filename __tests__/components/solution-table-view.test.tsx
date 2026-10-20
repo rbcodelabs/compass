@@ -11,6 +11,8 @@ vi.mock("@/components/panels/panel-context", () => ({
   usePanelContext: () => ({ openPanel }),
 }));
 
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({ createSolutionsBatch: vi.fn() }));
+
 afterEach(() => {
   cleanup();
   openPanel.mockClear();

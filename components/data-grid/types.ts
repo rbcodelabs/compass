@@ -332,4 +332,30 @@ export type GridCreation = {
   noun: { singular: string; plural: string };
   /** Placeholder for the always-present blank row. */
   addLabel?: string;
+  /**
+   * A parent chosen once for the whole batch (e.g. the Opportunity new Solutions
+   * belong to). The area renders the picker and adds the chosen id to every
+   * draft's values as `values.parent` before `validate` and `submit` see them
+   * (empty string when nothing is chosen), so a row can still carry its own
+   * parent in a field of its own.
+   */
+  parent?: GridCreationParent;
 };
+
+export type GridCreationParent = {
+  /** Accessible name of the picker, e.g. "Opportunity". */
+  label: string;
+  options: readonly GridEditOption[];
+  /** Text of the empty option, e.g. "Choose an opportunity". */
+  placeholder: string;
+};
+
+/** One way of adding rows ("Add opportunities", "Add solutions"). */
+export type GridCreationMode = { id: string; label: string; creation: GridCreation };
+
+/**
+ * Asks the draft area to switch to a mode and optionally preselect its parent,
+ * e.g. from an "Add solution" button inside an expanded row. Bump `nonce` for
+ * every request; the area acts when it changes.
+ */
+export type GridCreationRequest = { modeId: string; parentId?: string; nonce: number };

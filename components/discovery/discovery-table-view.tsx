@@ -2,7 +2,7 @@
 
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Plus } from "lucide-react";
 import { EvidenceBadge } from "@/components/discovery/evidence-badge";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { Badge } from "@/components/ui/badge";
@@ -14,10 +14,14 @@ import {
   type GridCellValue,
   type GridColumnDef,
   type GridCreation,
+  type GridCreationMode,
+  type GridCreationRequest,
   type GridDraftSubmitItem,
   type GridDraftValues,
   type GridEditOption,
 } from "@/components/data-grid";
+import { buildSolutionCreation, submitSolutionDrafts, useSolutionCreationTerms } from "@/components/solutions/solution-creation";
+import { savePanelEntityField } from "@/lib/panel-entity-save";
 import { createOpportunitiesBatch } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { BATCH_DESCRIPTION_MAX_LENGTH, BATCH_MAX_ITEMS, BATCH_REQUEST_MAX_BYTES } from "@/lib/batch-create-limits";
 import { OPPORTUNITY_STATUS_BADGE } from "@/lib/discovery";
@@ -58,6 +62,11 @@ export type DiscoveryTableWorkspace = {
   orgSlug: string;
   workspaceSlug: string;
   squads: { id: string; name: string; color: string }[];
+  /**
+   * Every live Opportunity of the workspace, offered as the parent in "Add
+   * solutions" (the table's own rows are filtered). Falls back to the rows.
+   */
+  solutionParents?: { id: string; title: string }[];
   /** The workspace context's `isReadOnly`. A UX affordance; the server enforces writes. */
   readOnly: boolean;
 };
@@ -102,34 +111,12 @@ const STATUS_OPTIONS: readonly GridEditOption[] = NEW_OPPORTUNITY_STATUSES.map((
   label: OPPORTUNITY_STATUS_BADGE[value].label,
 }));
 
-/**
- * Saves one field through the same endpoint the detail panel uses
- * (`PATCH /api/panels/entity/opportunity/:id`, see lib/entity-mutations.ts), so
- * validation, workspace scoping and update capture are unchanged. Resolves,
- * never rejects: the grid rolls the cell back on `ok: false`.
- */
-async function saveOpportunityField(
+const saveOpportunityField = (
   slugs: { orgSlug: string; workspaceSlug: string },
   opportunityId: string,
   field: string,
   value: GridCellValue,
-): Promise<GridActionResult> {
-  try {
-    const response = await fetch(
-      `/api/panels/entity/opportunity/${encodeURIComponent(opportunityId)}?orgSlug=${encodeURIComponent(slugs.orgSlug)}&workspaceSlug=${encodeURIComponent(slugs.workspaceSlug)}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ field, value }),
-      },
-    );
-    if (response.ok) return { ok: true };
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    return { ok: false, error: body?.error ?? "Couldn't save that change." };
-  } catch {
-    return { ok: false, error: "Couldn't save that change." };
-  }
-}
+): Promise<GridActionResult> => savePanelEntityField("opportunity", slugs, opportunityId, field, value);
 
 /** Server field names (OpportunityBatchItem) to draft field ids, so a server field error lands on its cell. */
 const DRAFT_FIELD_BY_SERVER_FIELD: Record<string, string> = {
@@ -153,8 +140,8 @@ export function toOpportunityBatchItem({ clientId, values }: GridDraftSubmitItem
 }
 
 /**
- * The draft-area config for Opportunities ("add" mode; Solutions mode is a
- * later change). The caller adds `submit`, so this stays free of the server action.
+ * The draft-area config for Opportunities ("Add opportunities" mode; see
+ * components/solutions/solution-creation.ts for the other). The caller adds `submit`, so this stays free of the server action.
  */
 export function buildOpportunityCreation(
   squads: readonly { id: string; name: string }[],
@@ -231,6 +218,16 @@ export function DiscoveryTableView({
     () => ({ singular: labels.opportunity.lower, plural: labels.opportunity.lowerPlural }),
     [labels.opportunity.lower, labels.opportunity.lowerPlural],
   );
+  const solutionTerms = useSolutionCreationTerms();
+
+  // Same content-keying as squads: a revalidation hands over a fresh array.
+  const parentsKey = JSON.stringify(
+    workspace?.solutionParents ?? opportunities.map(({ id, title }) => ({ id, title })),
+  );
+  const solutionParents = useMemo(
+    () => (JSON.parse(parentsKey) as { id: string; title: string }[]).map((parent) => ({ value: parent.id, label: parent.title })),
+    [parentsKey],
+  );
 
   const squadEditOptions = useMemo<GridEditOption[]>(
     () => [{ value: NO_SQUAD, label: "No squad" }, ...squads.map((squad) => ({ value: squad.id, label: squad.name }))],
@@ -252,10 +249,34 @@ export function DiscoveryTableView({
     };
   }, []);
 
-  const creation = useMemo<GridCreation | undefined>(
-    () => (interactive ? { ...buildOpportunityCreation(squads, noun), submit: submitBatch } : undefined),
-    [interactive, squads, submitBatch, noun],
+  const parentsRef = useRef(solutionParents);
+  useEffect(() => {
+    parentsRef.current = solutionParents;
+  }, [solutionParents]);
+  const submitSolutions = useCallback(
+    (items: GridDraftSubmitItem[]): Promise<GridBatchResult> => submitSolutionDrafts(slugsRef.current, parentsRef.current, items),
+    [],
   );
+
+  const creationModes = useMemo<readonly GridCreationMode[] | undefined>(() => {
+    if (!interactive) return undefined;
+    const opportunityMode: GridCreation = { ...buildOpportunityCreation(squads, noun), submit: submitBatch };
+    const solutionMode: GridCreation = {
+      ...buildSolutionCreation(solutionParents, solutionTerms),
+      submit: submitSolutions,
+    };
+    return [
+      { id: "opportunities", label: `Add ${noun.plural}`, creation: opportunityMode },
+      { id: "solutions", label: `Add ${solutionTerms.solution.plural}`, creation: solutionMode },
+    ];
+  }, [interactive, squads, noun, submitBatch, solutionParents, solutionTerms, submitSolutions]);
+
+  // "Add solution" on a row asks the draft area to switch modes and preselect that parent.
+  const [creationRequest, setCreationRequest] = useState<GridCreationRequest>();
+  const requestSolutions = useCallback((opportunityId: string) => {
+    setCreationRequest((previous) => ({ modeId: "solutions", parentId: opportunityId, nonce: (previous?.nonce ?? 0) + 1 }));
+  }, []);
+  const canCreate = interactive && !readOnly;
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
 
   // Stable identity (a functional setState needs no dependencies), so the
@@ -387,6 +408,17 @@ export function DiscoveryTableView({
               >
                 {opportunity.title}
               </button>
+              {canCreate && (isExpanded || opportunity.solutions.length === 0) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Add ${labels.solution.lower} to ${opportunity.title}`}
+                  onClick={() => requestSolutions(opportunity.id)}
+                >
+                  <Plus />
+                </Button>
+              )}
             </div>
           );
         },
@@ -513,14 +545,13 @@ export function DiscoveryTableView({
     // Both dependencies are stable across a toggle, so expanding a row updates
     // the affected cells in place instead of remounting every cell in the
     // table — see the note on `DiscoveryGridRow.isExpanded`.
-    [interactive, squads, squadEditOptions, toggleOpportunity, labels],
+    [interactive, canCreate, requestSolutions, squads, squadEditOptions, toggleOpportunity, labels],
   );
 
   // The "no opportunities at all" case keeps its own dashed box instead of the
   // grid's `emptyState`, which would nest it inside the grid's panel chrome.
   // With the draft area available (not read-only) an empty list must still render the grid, or a workspace's
   // first opportunities could never be created here.
-  const canCreate = interactive && !readOnly;
   if (opportunities.length === 0 && !canCreate) {
     return (
       <div className="rounded-xl border border-dashed border-border-default px-4 py-12 text-center text-sm text-text-secondary">
@@ -557,7 +588,8 @@ export function DiscoveryTableView({
                 : openPanelRef.current("opportunity", row.opportunity.id)
           : undefined
       }
-      creation={creation}
+      creationModes={creationModes}
+      creationRequest={creationRequest}
       rowClassName={(row) => (row.kind === "solution" ? "bg-surface-inset/50" : undefined)}
       className="overflow-hidden rounded-xl border border-border-default bg-surface-panel"
     />
