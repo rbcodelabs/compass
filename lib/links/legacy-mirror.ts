@@ -18,8 +18,8 @@
  * This module is the only caller that passes `viaLegacyWriter` to lib/links/service.ts.
  */
 import type { AppTransactionClient } from "@/lib/db"
-import { isLinkTypeEnabled, requireLinkType } from "@/lib/links/registry"
-import { drainLinksFromEntities, linkEntities, unlinkEntities, unlinkFromEntity } from "@/lib/links/service"
+import { TASK_REFERENCE_TARGET_TYPES, isLinkTypeEnabled, requireLinkType } from "@/lib/links/registry"
+import { drainLinksFromEntities, drainLinksToEntities, linkEntities, unlinkEntities, unlinkFromEntity } from "@/lib/links/service"
 import type { LinkContext } from "@/lib/typed-links"
 
 const KEY = "SOLUTION_TARGETS_KEY_RESULT"
@@ -156,4 +156,63 @@ export async function mirrorArtifactLink(tx: AppTransactionClient, input: Artifa
 /** Removes the mirror row regardless of the flag, so a legacy unlink never strands a row written while it was on. Only the Artifact is verified. */
 export async function unmirrorArtifactLink(tx: AppTransactionClient, input: ArtifactPair): Promise<void> {
   await unlinkEntities(tx, { linkType: ARTIFACT_LINK_KEYS[input.linkedType], fromId: input.artifactId, toId: input.linkedId, expectedWorkspaceId: input.workspaceId, viaLegacyWriter: true })
+}
+
+// ── Task <-> any target (the TASK_REFERENCES type, phase 7) ─────────────────
+
+const TASK_REFERENCES = "TASK_REFERENCES"
+
+/** A legacy task_links row, as the legacy writer holds it right after the write. */
+type TaskLinkRow = { taskId: string; linkedType: string; linkedId: string; source?: string | null; createdById?: string | null }
+
+/**
+ * The entity_links target type of a legacy `linked_type`, or null when the row is not mirrored: `DECISION` is a review request, and
+ * `COMMENT` (the Doc comment a task was made from) or anything unknown stays legacy-only.
+ */
+const TASK_LINKED_TYPE_TO_STORED = {
+  OPPORTUNITY: "OPPORTUNITY", SOLUTION: "SOLUTION", ROADMAP_ITEM: "ROADMAP_ITEM", OBJECTIVE: "OBJECTIVE", KEY_RESULT: "KEY_RESULT",
+  DOC: "DOC", EXPERIMENT: "EXPERIMENT", FEEDBACK_ITEM: "FEEDBACK_ITEM", DECISION: "REVIEW_REQUEST",
+} as const satisfies Record<string, (typeof TASK_REFERENCE_TARGET_TYPES)[number]>
+
+function taskReferenceTargetType(linkedType: string): (typeof TASK_REFERENCE_TARGET_TYPES)[number] | null {
+  // An explicit map, the same one migration 097 (TARGETS) uses, so the writer and the backfill agree: only these nine legacy spellings are
+  // mirrored. A stored spelling such as REVIEW_REQUEST, COMMENT or anything unknown is not a legacy linked_type and is not mirrored.
+  return Object.prototype.hasOwnProperty.call(TASK_LINKED_TYPE_TO_STORED, linkedType) ? TASK_LINKED_TYPE_TO_STORED[linkedType as keyof typeof TASK_LINKED_TYPE_TO_STORED] : null
+}
+
+const asLinkSource = (source: string | null | undefined): LinkContext["source"] => (source === "MCP" || source === "API" ? source : "UI")
+
+/**
+ * Mirrors a legacy task link (idempotent) while the flag is on. `link` is the legacy row as just written, so source and actor are copied
+ * from it. The task and the target were verified by the legacy writer in this transaction and are re-verified by the service.
+ */
+export async function mirrorTaskReference(tx: AppTransactionClient, input: { link: TaskLinkRow; workspaceId: string }): Promise<void> {
+  const toType = taskReferenceTargetType(input.link.linkedType)
+  if (!toType || !isLinkTypeEnabled(requireLinkType(TASK_REFERENCES))) return
+  await linkEntities(tx, {
+    linkType: TASK_REFERENCES,
+    fromId: input.link.taskId,
+    toId: input.link.linkedId,
+    toType,
+    expectedWorkspaceId: input.workspaceId,
+    origin: "DIRECT",
+    ctx: { source: asLinkSource(input.link.source), createdById: input.link.createdById ?? null },
+    viaLegacyWriter: true,
+  })
+}
+
+/** Removes the mirror row regardless of the flag, so a legacy unlink never strands a row written while it was on. Only the task is verified. */
+export async function unmirrorTaskReference(tx: AppTransactionClient, input: { link: Pick<TaskLinkRow, "taskId" | "linkedType" | "linkedId">; workspaceId: string }): Promise<void> {
+  if (!taskReferenceTargetType(input.link.linkedType)) return
+  await unlinkEntities(tx, { linkType: TASK_REFERENCES, fromId: input.link.taskId, toId: input.link.linkedId, expectedWorkspaceId: input.workspaceId, viaLegacyWriter: true })
+}
+
+/**
+ * The mirror of a legacy delete that removes every task link to one deleted target (deleteObjective / deleteKeyResult). Committed passes of
+ * at most 500 links; run it after the delete commits (drainAfterParentDelete). Removal never depends on the flag.
+ */
+export async function drainMirroredTaskReferencesTo(db: AppTransactionClient, input: { linkedType: string; linkedIds: readonly string[] }): Promise<number> {
+  const toType = taskReferenceTargetType(input.linkedType)
+  if (!toType) return 0
+  return drainLinksToEntities(db, { linkType: TASK_REFERENCES, toType, toIds: input.linkedIds })
 }

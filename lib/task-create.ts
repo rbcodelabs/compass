@@ -2,6 +2,7 @@ import getPrisma from "@/lib/db"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { assignmentUpdate, validateTaskLink, validateTaskReferences, type TaskAssignee } from "@/lib/task-assignment"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
+import { mirrorTaskLinks } from "@/lib/task-link-writes"
 import type { TaskLinkRecordType, TaskPriority, TaskStatus } from "@/lib/types"
 
 export type NewTaskInput = {
@@ -44,23 +45,28 @@ export async function createWorkspaceTask(workspaceId: string, data: NewTaskInpu
   })
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0
 
-  return captureWorkspaceMutation(prisma, "task", "create", "UI", undefined, async tx => tx.task.create({
-    data: {
-      workspaceId,
-      ...(await allocateOneSeq(tx, workspaceId, "task")),
-      title: data.title,
-      description: data.description,
-      status,
-      priority: data.priority ?? "MEDIUM",
-      squadId: data.squadId,
-      parentTaskId: data.parentTaskId,
-      ...assignment,
-      ownerName: data.ownerName,
-      storyPoints: data.storyPoints,
-      dueDate: data.dueDate,
-      iteration: data.iteration,
-      sortOrder,
-      ...(data.links?.length ? { links: { create: data.links.map(link => ({ linkedType: link.linkedType, linkedId: link.linkedId })) } } : {}),
-    },
-  }))
+  return captureWorkspaceMutation(prisma, "task", "create", "UI", undefined, async tx => {
+    const created = await tx.task.create({
+      data: {
+        workspaceId,
+        ...(await allocateOneSeq(tx, workspaceId, "task")),
+        title: data.title,
+        description: data.description,
+        status,
+        priority: data.priority ?? "MEDIUM",
+        squadId: data.squadId,
+        parentTaskId: data.parentTaskId,
+        ...assignment,
+        ownerName: data.ownerName,
+        storyPoints: data.storyPoints,
+        dueDate: data.dueDate,
+        iteration: data.iteration,
+        sortOrder,
+        ...(data.links?.length ? { links: { create: data.links.map(link => ({ linkedType: link.linkedType, linkedId: link.linkedId })) } } : {}),
+      },
+    })
+    // The nested legacy links are mirrored in the same transaction (flagged); COMMENT links stay legacy-only.
+    if (data.links?.length) await mirrorTaskLinks(tx, { workspaceId, links: data.links.map(link => ({ taskId: created.id, linkedType: link.linkedType, linkedId: link.linkedId })) })
+    return created
+  })
 }

@@ -4,6 +4,7 @@ import getPrisma from "@/lib/db";
 import { getEligibleParentKeyResults } from "@/lib/okr-hierarchy";
 import { ok, fail } from "@/lib/mcp-output";
 import { drainAfterParentDelete, drainLegacyLinksForOpportunities, drainLinksFor } from "@/lib/typed-links";
+import { drainMirroredTaskLinksTo } from "@/lib/task-link-writes";
 
 type ObjectiveStatus = "ON_TRACK" | "AT_RISK" | "OFF_TRACK" | "COMPLETE";
 
@@ -81,6 +82,8 @@ export async function deleteObjective({ objectiveId }: { objectiveId: string }) 
 
   // No foreign keys reach the typed link tables, so the links to the deleted objective are removed explicitly, after the delete.
   await drainAfterParentDelete("mcp.deleteObjective", () => drainLinksFor(prisma, "objective", [objectiveId]));
+  // The task links to this objective went in the delete transaction; their entity_links mirror rows go now, whatever the flag says.
+  await drainAfterParentDelete("mcp.deleteObjective.taskLinks", () => drainMirroredTaskLinksTo(prisma, { linkedType: "OBJECTIVE", linkedIds: [objectiveId] }));
 
   return ok(`**Objective deleted**\nID: ${outcome.existing.id}\nTitle: ${outcome.existing.title}`, {
     id: outcome.existing.id,
@@ -177,6 +180,8 @@ export async function deleteKeyResult({ keyResultId }: { keyResultId: string }) 
   // result's objective (DIRECT links are the user's own, objective-level, and stay), and every link from a solution to this key result.
   const legacy = await drainAfterParentDelete("mcp.deleteKeyResult.legacy", () => drainLegacyLinksForOpportunities(prisma, pointing.map((o) => o.id), existing.objectiveId));
   const solution = await drainAfterParentDelete("mcp.deleteKeyResult.solution", () => drainLinksFor(prisma, "keyResult", [keyResultId]));
+  // The task links to this key result went in the delete transaction; their entity_links mirror rows go now, whatever the flag says.
+  await drainAfterParentDelete("mcp.deleteKeyResult.taskLinks", () => drainMirroredTaskLinksTo(prisma, { linkedType: "KEY_RESULT", linkedIds: [keyResultId] }));
 
   const data = {
     id: existing.id,
