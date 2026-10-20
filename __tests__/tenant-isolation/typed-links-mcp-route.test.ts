@@ -19,6 +19,8 @@ vi.mock("@/lib/db", () => ({ default: () => fake.current!.client }));
 type ToolResult = { content: Array<{ text: string }>; structuredContent: { ok: boolean; data: Record<string, unknown> } };
 type ToolCallback = (args: Record<string, unknown>) => Promise<ToolResult>;
 const registeredTools: Record<string, ToolCallback> = {};
+// Membership is proven by the tool gate; the batch core's read-only check would load the session.
+vi.mock("@/lib/workspace-context", () => ({ assertWorkspaceWritable: vi.fn() }))
 vi.mock("mcp-handler", () => ({
   createMcpHandler: (setup: (server: { registerTool: (name: string, meta: unknown, cb: ToolCallback) => void; registerResource: (...args: unknown[]) => void }) => void) => {
     setup({ registerTool(name, _meta, cb) { registeredTools[name] = cb; }, registerResource() {} });

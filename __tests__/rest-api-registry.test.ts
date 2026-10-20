@@ -349,6 +349,22 @@ describe("REST API registry", () => {
     }
   })
 
+  it("publishes the batch-create routes with a 100-item bound and per-item bodies", () => {
+    const opportunities = REST_ROUTES.find((route) => route.operationId === "createOpportunitiesBatch")!
+    const solutions = REST_ROUTES.find((route) => route.operationId === "createSolutionsBatch")!
+    expect([opportunities.method, opportunities.path, opportunities.status]).toEqual(["POST", "/api/v1/workspaces/{workspaceId}/opportunity-batches", 200])
+    expect([solutions.method, solutions.path, solutions.status]).toEqual(["POST", "/api/v1/workspaces/{workspaceId}/solution-batches", 200])
+    const item = (n: number) => ({ clientId: UUID, title: `T${n}` })
+    expect(opportunities.bodySchema!.safeParse({ items: Array.from({ length: 100 }, (_, n) => item(n)) }).success).toBe(true)
+    expect(opportunities.bodySchema!.safeParse({ items: Array.from({ length: 101 }, (_, n) => item(n)) }).success).toBe(false)
+    expect(opportunities.bodySchema!.safeParse({ items: [] }).success).toBe(false)
+    // A blank title is judged per item by the core, not by a whole-request 400.
+    expect(opportunities.bodySchema!.safeParse({ items: [{ title: "" }] }).success).toBe(true)
+    expect(opportunities.bodySchema!.safeParse({ items: [{ title: "x", workspaceId: UUID }] }).success).toBe(false)
+    expect(solutions.bodySchema!.safeParse({ items: [{ opportunityId: UUID, title: "x" }] }).success).toBe(true)
+    expect(solutions.bodySchema!.safeParse({ items: [{ title: "x" }] }).success).toBe(false)
+  })
+
   it("publishes the generic entity-link routes with strict bodies and a 204 unlink", () => {
     const create = REST_ROUTES.find((route) => route.operationId === "linkEntities")!
     expect([create.method, create.path, create.status]).toEqual(["POST", "/api/v1/workspaces/{workspaceId}/entity-links", 201])

@@ -96,7 +96,7 @@ import {
   updateAssumption,
   deleteAssumption,
 } from "@/lib/assumption-tool-handlers"
-import { createSolution, updateSolution } from "@/lib/solution-tool-handlers"
+import { createSolution, createSolutions, updateSolution } from "@/lib/solution-tool-handlers"
 import {
   addSolutionPlan,
   addSolutionComment,
@@ -108,7 +108,7 @@ import {
   rejectSolutionPlan,
 } from "@/lib/solution-comment-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
-import { createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
+import { createOpportunities, createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
 import { listAssumptions, listSolutions } from "@/lib/discovery-query-tool-handlers"
 import {
   listScoringModels,
@@ -1337,6 +1337,52 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       createOpportunity,
+    )
+
+    register(
+      "create_opportunities",
+      {
+        title: "Create Opportunities (bulk)",
+        description:
+          "Creates several Opportunities in one call: up to 25 items for agent callers (100 for human API keys). Each item is created in its own transaction and reported separately, so one invalid item never blocks the others; the call succeeds even when some items fail, so read data.results. " +
+          "Pass your own `clientId` (a UUID) per item to make retries safe: resending an item that was already created returns { ok: true, deduped: true } instead of a duplicate, and an id that is taken by different content returns CONFLICT. Omit it only if you will not retry. " +
+          "Items take title, description, customerSegment, status (EXPLORING, VALIDATING, PRIORITIZED or ACTIVE) and squadId; use create_opportunity to link a Key Result.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          items: z.array(z.object({
+            clientId: z.string().uuid().optional().describe("Idempotency key and the new Opportunity's id"),
+            title: z.string().describe("Short title (at most 255 characters)"),
+            description: z.string().nullable().optional(),
+            customerSegment: z.string().nullable().optional(),
+            status: z.string().optional().describe("EXPLORING (default), VALIDATING, PRIORITIZED or ACTIVE"),
+            squadId: z.string().uuid().nullable().optional(),
+          }).strict()).min(1).max(100),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      createOpportunities,
+    )
+
+    register(
+      "create_solutions",
+      {
+        title: "Create Solutions (bulk)",
+        description:
+          "Creates several Solutions under existing Opportunities in one call: up to 25 items for agent callers (100 for human API keys). Each item names its parent `opportunityId`, is created in its own transaction (status IDEA) and is reported separately; read data.results. " +
+          "A parent that is missing or in another workspace returns NOT_FOUND for that item. Pass your own `clientId` (a UUID) per item to make retries safe: a repeat returns { ok: true, deduped: true }.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          items: z.array(z.object({
+            clientId: z.string().uuid().optional().describe("Idempotency key and the new Solution's id"),
+            opportunityId: z.string().uuid().describe("UUID of the parent Opportunity"),
+            title: z.string().describe("Title (at most 255 characters)"),
+            description: z.string().nullable().optional(),
+          }).strict()).min(1).max(100),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      async ({ items, ...rest }: { workspaceId: string; items: Array<{ clientId?: string; opportunityId: string; title: string; description?: string | null }> }) =>
+        createSolutions({ ...rest, items: items.map(({ opportunityId, ...item }) => ({ ...item, parent: { id: opportunityId } })) }),
     )
 
     register(

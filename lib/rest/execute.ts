@@ -3,7 +3,8 @@ import { agentWorkspaceWhere } from "@/lib/agent-access"
 import { assertOrgAdminBySlug, assertOrgMemberBySlug, assertScoringModelAccess, assertWorkspaceAdmin, assertWorkspaceMember, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { decodeCursor, decodeOrderedCursor, encodeCursor, encodeOrderedCursor, type OrderedCursorPayload } from "@/lib/rest/cursor"
 import type { RestAuthorizationPolicy, RestRoute } from "@/lib/rest/registry"
-import { createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
+import { BatchRequestError, createOpportunityBatch, createSolutionBatch } from "@/lib/opportunity-batch-create"
+import { createOpportunity, programmaticBatchContext, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
 import { createSolution, updateSolution } from "@/lib/solution-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
 import { createAssumption, deleteAssumption, updateAssumption } from "@/lib/assumption-tool-handlers"
@@ -257,6 +258,18 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "listOpportunities": return listPage(`opportunities:${workspaceId}:${filters(input.query, ["status", "squadId"])}`, input.query, (cursor, take) => prisma.opportunity.findMany({ where: { workspaceId, ...pick(input.query, ["status", "squadId"]), ...cursorWhere(cursor) }, select: select.opportunity, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
     case "getOpportunity": return serialize(found(await prisma.opportunity.findFirst({ where: { id, workspaceId }, select: select.opportunity })))
     case "createOpportunity": { await validateOpportunityRefs(prisma, workspaceId, body); const result = ensureTool(await createOpportunity({ workspaceId, title: String(body.title), description: nullable(body.description), customerSegment: nullable(body.customerSegment), status: body.status as "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | undefined, squadId: nullable(body.squadId), keyResultId: nullable(body.linkedKeyResultId), source: "API" })); return serialize(found(await prisma.opportunity.findFirst({ where: { workspaceId, id: String((result as { id: string }).id) }, select: select.opportunity }))) }
+    case "createOpportunitiesBatch": case "createSolutionsBatch": {
+      const items = (body.items ?? []) as Record<string, unknown>[]
+      try {
+        const context = programmaticBatchContext(workspaceId, "API")
+        if (route.operationId === "createOpportunitiesBatch") return await createOpportunityBatch(prisma, context, items as never)
+        // Parents are verified against workspaceId inside each item's transaction; a foreign id reads as NOT_FOUND.
+        return await createSolutionBatch(prisma, context, items.map(({ opportunityId, ...rest }) => ({ ...rest, parent: { id: String(opportunityId) } })) as never)
+      } catch (error) {
+        if (error instanceof BatchRequestError) throw new RestValidationError(error.message)
+        throw error
+      }
+    }
     case "updateOpportunity": {
       await validateOpportunityRefs(prisma, workspaceId, body)
       const existing = await prisma.opportunity.findFirst({ where: { id, workspaceId }, select: { id: true } }); if (!existing) throw new RestNotFoundError()
