@@ -19,8 +19,9 @@ export function DiscoveryShell({
   const pathname = usePathname();
   const base = `/${orgSlug}/${workspaceSlug}/discovery`;
   const afterBase = pathname.startsWith(base) ? pathname.slice(base.length) : null;
-  // Matches exactly one more path segment, e.g. "/abc123" — the opportunity detail route.
-  const detailMatch = afterBase ? /^\/([^/]+)\/?$/.exec(afterBase) : null;
+  // Matches one more path segment, e.g. "/abc123" — the opportunity detail route — optionally followed by
+  // "/spec", the same opportunity's Product Spec, which keeps the rail like the detail page does.
+  const detailMatch = afterBase ? /^\/([^/]+)(?:\/spec)?\/?$/.exec(afterBase) : null;
 
   // /discovery/tree is the workspace tree (TORRES_OST / OPPORTUNITY_FIRST_OKR), not an opportunity id.
   if (!detailMatch || detailMatch[1] === "tree") {

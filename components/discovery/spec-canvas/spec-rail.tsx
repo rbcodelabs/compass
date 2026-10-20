@@ -35,7 +35,7 @@ export function SpecRail({ items, ariaLabel }: { items: RailItem[]; ariaLabel: s
   }, [items])
 
   return (
-    <nav aria-label={ariaLabel} data-slot="spec-rail" className="sticky top-24 hidden self-start lg:block">
+    <nav aria-label={ariaLabel} data-slot="spec-rail" className="sticky top-20 hidden self-start @[880px]:block">
       <ol className="relative flex flex-col gap-1 border-l border-border-default">
         {items.map((item) => {
           const active = item.anchorId === activeId

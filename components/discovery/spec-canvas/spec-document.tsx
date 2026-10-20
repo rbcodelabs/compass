@@ -106,14 +106,16 @@ export function SpecDocument({ spec: initial, labels, backHref, context, readOnl
   const experimentGroups = groupByParent(spec.assumptions, spec.experiments, (e) => e.assumptionId)
 
   return (
-    <div data-slot="spec-canvas" className="min-h-full bg-surface-app">
+    <div data-slot="spec-canvas" className="@container min-h-full min-w-0">
       <header className="sticky top-0 z-20 border-b border-border-default bg-surface-app/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 sm:px-6">
-          <Link href={backHref} className="flex w-fit shrink-0 items-center gap-1 text-sm text-text-secondary hover:text-text-primary">
-            <ChevronLeftIcon className="size-4" aria-hidden /> {labels.opportunity.singular}
-          </Link>
-          <span aria-hidden className="text-text-disabled">/</span>
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">Spec: {opportunity.title}</span>
+        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 md:px-8">
+          <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+            <Link href={backHref} className="flex w-fit shrink-0 items-center gap-1 text-text-secondary hover:text-text-primary">
+              <ChevronLeftIcon className="size-4" aria-hidden /> {labels.opportunity.singular}
+            </Link>
+            <span aria-hidden className="text-text-disabled">/</span>
+            <span aria-current="page" className="min-w-0 truncate font-medium text-text-primary">Spec: {opportunity.title}</span>
+          </nav>
           <SaveIndicator save={save} />
           {!readOnly && (
             <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -130,10 +132,10 @@ export function SpecDocument({ spec: initial, labels, backHref, context, readOnl
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-8 sm:px-6 lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-12">
+      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-8 sm:px-6 md:px-8 @[880px]:grid-cols-[190px_minmax(0,1fr)] @[880px]:gap-12">
         <SpecRail items={rail} ariaLabel="Spec traceability" />
 
-        <main className="flex min-w-0 max-w-3xl flex-col gap-12 pl-6">
+        <main className="flex min-w-0 max-w-4xl flex-col gap-12 pl-6">
           <div>
             <div className="mb-1 text-xs font-medium text-text-subtle">Product spec{opportunity.displayId && <> · <span className="font-mono">{opportunity.displayId}</span></>}</div>
             <h1 className="text-3xl font-semibold tracking-tight text-text-primary">

@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: Props) {
   return { title: `${resolveThinkingModel(workspace).labels.opportunity.singular} spec` }
 }
 
-// Full-screen, editable spec for one opportunity. The segment is a UUID or a display ID (OPP-4); like the
+// Editable spec for one opportunity. The segment is a UUID or a display ID (OPP-4); like the
 // detail page, anything that does not resolve inside this workspace is a 404.
 export default async function OpportunitySpecPage({ params }: Props) {
   const { orgSlug, workspaceSlug, opportunityId } = await params
@@ -33,17 +33,15 @@ export default async function OpportunitySpecPage({ params }: Props) {
   const spec = await loadSpecCanvas({ workspaceId: workspace.id, opportunityId: resolved.id, orgSlug, workspaceSlug })
   if (!spec) notFound()
 
+  // A normal page inside the workspace shell (nav, agent rail, panels all stay); the shell's scroll
+  // container is what the sticky header and traceability rail stick to.
   return (
-    // fixed + inset-0 lifts the canvas out of the workspace shell (sidebar/header), the same
-    // full-screen treatment the artifact viewer uses; the back link is the way out.
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-surface-app">
-      <SpecDocument
-        spec={spec}
-        labels={resolveThinkingModel(workspace).labels}
-        backHref={`${basePath}/${encodeURIComponent(resolved.canonical)}`}
-        context={{ orgSlug, workspaceSlug, workspaceId: workspace.id, opportunityId: resolved.id }}
-        readOnly={isReadOnly}
-      />
-    </div>
+    <SpecDocument
+      spec={spec}
+      labels={resolveThinkingModel(workspace).labels}
+      backHref={`${basePath}/${encodeURIComponent(resolved.canonical)}`}
+      context={{ orgSlug, workspaceSlug, workspaceId: workspace.id, opportunityId: resolved.id }}
+      readOnly={isReadOnly}
+    />
   )
 }

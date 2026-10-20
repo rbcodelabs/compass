@@ -60,6 +60,23 @@ describe("resolveAgentPageContext", () => {
     expect(ctx?.path).not.toContain("sort")
   })
 
+  it("knows the opportunity behind its Product Spec page, by UUID or display ID, and says which view it is", async () => {
+    getEntitySummary.mockResolvedValue({
+      type: "opportunity", id: OPP, title: "Checkout drop-off", typeLabel: "Opportunity",
+      status: "EXPLORING", meta: null, description: null,
+    })
+    const byUuid = await resolve(`/acme/growth/discovery/${OPP}/spec`)
+    expect(getEntitySummary).toHaveBeenCalledWith("opportunity", OPP, "ws-1", expect.anything())
+    expect(byUuid?.entity?.type).toBe("opportunity")
+    expect(byUuid?.promptBlock).toContain("Product Spec canvas")
+    expect(byUuid?.path).toBe(`/acme/growth/discovery/${OPP}/spec`)
+    expect((await resolve("/acme/growth/discovery/OPP-4/spec"))?.entity?.type).toBe("opportunity")
+  })
+
+  it("does not treat other deeper discovery paths as an entity", async () => {
+    expect((await resolve(`/acme/growth/discovery/${OPP}/other`))?.entity).toBeNull()
+  })
+
   it("keeps the section but drops the entity when the row is not found", async () => {
     const ctx = await resolve(`/acme/growth/tasks/${OPP}`)
     expect(ctx?.section).toBe("Tasks")
