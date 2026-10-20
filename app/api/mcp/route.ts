@@ -263,11 +263,22 @@ const _handler = createMcpHandler(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ) => (server.registerTool as (...a: any[]) => any)(name, meta && typeof meta === "object" && meta.inputSchema ? { ...meta, inputSchema: widenRefSchemas(meta.inputSchema) } : meta, async (rawArgs: any, extra: any) => {
       const actor = { ...getMcpActor(), authorizedWorkspaceId: undefined }
-      return runWithMcpActor(actor, async () => {
-        // Display IDs (TASK-12) become UUIDs here, once, so the gate, the handler and every receipt only ever see UUIDs.
-        const args = await resolveToolRefs(actor, rawArgs ?? {})
-        return withAgentActivity(actor, name, AGENT_TOOL_POLICY[name] !== "READ", () => applyToolGate(name, actor, args), () => withAnalyticsTool(name, () => withInterviewMutation(name, args, () => handler(args, extra))))
-      })
+      // Display IDs (TASK-12) become UUIDs exactly once, inside the gate and after its actor-type/policy checks, so the
+      // tool's own gate, the handler and every receipt only ever see UUIDs, and a denied call resolves nothing.
+      let args: any = rawArgs ?? {}
+      let resolved = false
+      const resolveOnce = async () => {
+        if (!resolved) {
+          args = await resolveToolRefs(actor, args)
+          resolved = true
+        }
+        return args
+      }
+      return runWithMcpActor(actor, () => withAgentActivity(actor, name, AGENT_TOOL_POLICY[name] !== "READ", async () => {
+        await applyToolGate(name, actor, args, resolveOnce)
+        // A service actor returns from the gate early; its handler still needs UUIDs.
+        await resolveOnce()
+      }, () => withAnalyticsTool(name, () => withInterviewMutation(name, args, () => handler(args, extra)))))
     })
 
     register("get_current_identity", { title: "Current Identity", description: "Returns the authenticated caller and currently accessible workspaces.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, async () => {

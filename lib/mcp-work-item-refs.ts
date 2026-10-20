@@ -66,6 +66,7 @@ function refSchema(type: WorkItemType, wrap: "none" | "optional" | "nullable" | 
   const label = WORK_ITEM_REGISTRY[type].label
   let schema: AnyZod = z
     .string()
+    .trim()
     .refine((value) => classifyWorkItemRef(value).kind !== "invalid", { message: `Expected a ${label} UUID or a display ID like ${WORK_ITEM_REGISTRY[type].prefix}-12` })
   const base = description ? description.replace(/^UUID of /i, "") : label
   schema = schema.describe(`${base} (${REF_HINT})`)

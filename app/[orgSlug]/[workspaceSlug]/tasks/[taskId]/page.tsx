@@ -71,7 +71,7 @@ export default async function TaskDetailPage({ params, searchParams }: Props) {
           )}
         </div>
 
-        <TaskDetail taskId={taskId} orgSlug={orgSlug} workspaceSlug={workspaceSlug} variant="page" />
+        <TaskDetail taskId={resolved.id} orgSlug={orgSlug} workspaceSlug={workspaceSlug} variant="page" />
       </div>
     </div>
   );

@@ -786,6 +786,30 @@ describe("register() wrapper enforces gates end-to-end", () => {
     expect(mockPrisma.opportunity.findUnique).toHaveBeenCalledTimes(1)
   })
 
+  it("resolves a display ID to its UUID before the tool's own gate and handler run", async () => {
+    const uuid = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "11111111-1111-4111-8111-111111111111" })
+    mockPrisma.opportunity.findFirst.mockResolvedValue({ id: uuid, seqPrefix: "OPP", seqNumber: 1 })
+    mockPrisma.opportunity.findUnique.mockResolvedValue({
+      workspaceId: "11111111-1111-4111-8111-111111111111", id: uuid, title: "Reduce churn", status: "EXPLORING", description: null, squad: null, linkedKeyResult: null, solutions: [],
+    })
+    mockPrisma.opportunity.findMany.mockResolvedValue([{ id: uuid }])
+    mockPrisma.opportunityObjectiveLink.findMany.mockResolvedValue([])
+    const result = (await callTool("get_opportunity", MEMBER, { workspaceId: "11111111-1111-4111-8111-111111111111", opportunityId: "opp-1" })) as { content: { text: string }[] }
+    expect(result.content[0].text).toContain("Reduce churn")
+    expect(mockPrisma.opportunity.findFirst.mock.calls[0][0].where).toEqual({ workspaceId: "11111111-1111-4111-8111-111111111111", seqPrefix: "OPP", seqNumber: 1 })
+    // Both the gate and the handler were handed the UUID, never the display ID.
+    for (const [query] of mockPrisma.opportunity.findUnique.mock.calls) expect(query.where.id).toBe(uuid)
+  })
+
+  it("resolves nothing for an actor the tool's policy denies, so a denied call cannot probe for rows", async () => {
+    await expect(
+      callTool("approve_solution_plan", { userId: "user-1", purpose: "AGENT", agentId: "agent-1", credentialId: "credential-1" } as never, { workspaceId: "11111111-1111-4111-8111-111111111111", solutionId: "SOL-1" }),
+    ).rejects.toThrow(/requires a human identity/)
+    expect(mockPrisma.solution.findFirst).not.toHaveBeenCalled()
+    expect(mockPrisma.workspace.findFirst).not.toHaveBeenCalled()
+  })
+
   it("allows a member and reaches the handler", async () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({
       workspaceId: "ws-1",

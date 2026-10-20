@@ -83,7 +83,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
   // Completed transcripts are immutable. Guide + completed IDs detect staleness without
   // rereading all turns; 501 is necessarily stale against any valid <=500-session snapshot.
   const completedSessions = await prisma.researchSession.findMany({ where: { studyId: study.id, status: "COMPLETED" }, select: { id: true }, take: 501 })
-  const studyUrl = `/${orgSlug}/${workspaceSlug}/capture/studies/${study.id}`
+  const studyUrl = `/${orgSlug}/${workspaceSlug}/capture/studies/${resolvedStudy.canonical}`
   const guide = deserializeResearchGuide(study.guide)
   const displayedToken = token ? await prisma.researchParticipantToken.findFirst({
     where: {

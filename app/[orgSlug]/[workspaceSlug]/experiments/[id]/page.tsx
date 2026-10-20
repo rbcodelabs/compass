@@ -104,7 +104,7 @@ export default async function ExperimentDetailPage({
     color: s.color,
   }))
   const pmInterviews = isPmInterviewEnabled() ? await prisma.pMInterview.findMany({
-    where: { workspaceId: workspace.id, targetType: "EXPERIMENT", targetId: id },
+    where: { workspaceId: workspace.id, targetType: "EXPERIMENT", targetId: resolved.id },
     orderBy: { createdAt: "desc" }, take: 20,
     select: { id: true, disposition: true, generationState: true, agentConversationId: true, createdAt: true },
   }) : []
@@ -117,7 +117,7 @@ export default async function ExperimentDetailPage({
   })
   const fieldValues = fieldDefs.length > 0
     ? await prisma.customFieldValue.findMany({
-        where: { fieldId: { in: fieldDefs.map((f) => f.id) }, objectId: id },
+        where: { fieldId: { in: fieldDefs.map((f) => f.id) }, objectId: resolved.id },
       })
     : []
   const valueByFieldId = new Map(fieldValues.map((v) => [v.fieldId, v.value]))
@@ -128,7 +128,7 @@ export default async function ExperimentDetailPage({
       currentValue: (valueByFieldId.get(f.id) ?? null) as CustomFieldValue,
     }))
 
-  const experimentDetailPath = `/${orgSlug}/${workspaceSlug}/experiments/${id}`
+  const experimentDetailPath = `/${orgSlug}/${workspaceSlug}/experiments/${resolved.canonical}`
 
   const statusLabel = STATUS_LABELS[experiment.status] ?? experiment.status
   const statusTone = STATUS_TONE[experiment.status as keyof typeof STATUS_TONE] ?? "neutral"
@@ -182,7 +182,7 @@ export default async function ExperimentDetailPage({
             </>
           )}
         />
-        {isPmInterviewEnabled() && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="EXPERIMENT" targetId={id} />}
+        {isPmInterviewEnabled() && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="EXPERIMENT" targetId={resolved.id} />}
 
         {/* Conclusion rationale — the durable "why" behind the conclusion,
             most important for NOT_PURSUED where no evidence was generated. */}
@@ -236,7 +236,7 @@ export default async function ExperimentDetailPage({
         {squads.length > 0 && (
           <SquadPicker
             objectType="experiment"
-            objectId={id}
+            objectId={resolved.id}
             currentSquadId={experiment.squadId}
             squads={squads}
             revalidatePathStr={experimentDetailPath}
@@ -285,7 +285,7 @@ export default async function ExperimentDetailPage({
             </h2>
             <CustomFieldsPanel
               fields={customFields}
-              objectId={id}
+              objectId={resolved.id}
               revalidatePathStr={experimentDetailPath}
             />
           </section>
@@ -297,7 +297,7 @@ export default async function ExperimentDetailPage({
       <MeasurementsPanel
         orgSlug={orgSlug}
         workspaceSlug={workspaceSlug}
-        target={{ targetType: "EXPERIMENT", targetId: id }}
+        target={{ targetType: "EXPERIMENT", targetId: resolved.id }}
       />
 
       <Separator />
