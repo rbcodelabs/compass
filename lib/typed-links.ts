@@ -114,7 +114,7 @@ async function loadKeyResultIn(tx: Tx, id: string, workspaceId: string) {
 // ── Transactions ────────────────────────────────────────────────────────────
 
 // entity_links (lib/links/service.ts, ADR phase 2) shares this race matcher and runTypedLinkTransaction.
-const LINK_NAMES = /idx_(?:opportunity_objective|solution_key_result)_links_pair|idx_entity_links_pair|opportunity_objective_links|solution_key_result_links|entity_links|OpportunityObjectiveLink|SolutionKeyResultLink|EntityLink\b/
+const LINK_NAMES = /idx_(?:opportunity_objective|solution_key_result)_links_pair|idx_entity_links_pair|opportunity_objective_links|solution_key_result_links|entity_links|OpportunityObjectiveLink|SolutionKeyResultLink|artifact_links|ArtifactLink\b|EntityLink\b/
 
 /**
  * A lost race on the unique pair index. Prisma reports it as P2002, but a driver adapter does not necessarily fill `meta.modelName`,

@@ -19,7 +19,7 @@
  * Entry points covered: MCP authz + tool gates, server actions, comments,
  * workspace search, discovery listing, scoring, artifacts, tasks, entity detail.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { USERS, WS_A, WS_B, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
 
 const fake = vi.hoisted(() => ({ current: null as null | ReturnType<typeof createTenantFakePrisma>, extra: {} as Record<string, unknown> }));
@@ -311,6 +311,9 @@ describe("scoring", () => {
 });
 
 describe("artifacts", () => {
+  // The entity_links mirror (ADR phase 6) has its own tests; this block pins the legacy writes against a hand-written fake.
+  beforeEach(() => { vi.stubEnv("COMPASS_ENTITY_LINKS_ARTIFACT_MIRROR", "0"); });
+  afterEach(() => { vi.unstubAllEnvs(); });
   const artifacts = () => ({
     artifact: { findFirst: async ({ where }: { where: { id: string; workspaceId: string } }) => (where.id === "art-a" && where.workspaceId === WS_A.id ? { id: "art-a", workspaceId: WS_A.id } : null) },
     artifactLink: { findFirst: async () => null, create: async ({ data }: { data: Record<string, unknown> }) => ({ id: "link-1", ...data }) },
