@@ -232,20 +232,36 @@ export function MentionEditor({
     const text = event.clipboardData.getData("text/plain")
     const root = editorRef.current
     if (!root || !text) return
-    // Insert plain text through the Range API rather than execCommand: it works whatever the browser decides
-    // about the selection, and never lets pasted markup in. With no caret in the editor the text goes at the end.
+    // Keep the caret inside the editor; with none there, paste at the end.
     const selection = window.getSelection()
-    const range = selection && selection.rangeCount > 0 && root.contains(selection.getRangeAt(0).commonAncestorContainer)
-      ? selection.getRangeAt(0)
-      : (() => { const r = document.createRange(); r.selectNodeContents(root); r.collapse(false); return r })()
-    range.deleteContents()
-    const node = document.createTextNode(text)
-    range.insertNode(node)
-    const caret = document.createRange()
-    caret.setStartAfter(node)
-    caret.collapse(true)
-    selection?.removeAllRanges()
-    selection?.addRange(caret)
+    if (!selection || selection.rangeCount === 0 || !root.contains(selection.getRangeAt(0).commonAncestorContainer)) {
+      const atEnd = document.createRange()
+      atEnd.selectNodeContents(root)
+      atEnd.collapse(false)
+      selection?.removeAllRanges()
+      selection?.addRange(atEnd)
+    }
+    // Prefer execCommand("insertText"): it is the only insertion that joins the browser's native undo stack, so
+    // Ctrl+Z takes a paste back. It inserts plain text only, so no pasted markup gets in. Where the browser
+    // declines it (nothing changed), fall back to inserting through the Range API, which always works.
+    const before = root.textContent
+    let inserted = false
+    try {
+      inserted = typeof document.execCommand === "function" && document.execCommand("insertText", false, text) && root.textContent !== before
+    } catch {
+      inserted = false
+    }
+    if (!inserted && selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0)
+      range.deleteContents()
+      const node = document.createTextNode(text)
+      range.insertNode(node)
+      const caret = document.createRange()
+      caret.setStartAfter(node)
+      caret.collapse(true)
+      selection.removeAllRanges()
+      selection.addRange(caret)
+    }
     close()
     emit()
   }

@@ -112,7 +112,32 @@ export async function loadCommentTaskCards(workspaceId: string, commentIds: stri
     const task = byTask.get(link.taskId)
     if (task) cards[link.linkedId] = toCard({ ...task, assignee: task.assignee ? { type: task.assignee.type, id: task.assignee.id, displayName: task.assignee.displayName, available: task.assignee.available } : null })
   }
+  await restoreLastKnownNames(Object.values(cards))
   return cards
+}
+
+/**
+ * An assignee who left the workspace (or an agent that lost its grant) resolves to a placeholder name. The card
+ * keeps their last known name, looked up on the User / Agent row, next to the "Unavailable" cue.
+ */
+async function restoreLastKnownNames(cards: CommentTaskCardData[]): Promise<void> {
+  const gone = cards.flatMap(card => (card.assignee && !card.assignee.available ? [card.assignee] : []))
+  if (gone.length === 0) return
+  const prisma = getPrisma()
+  const userIds = gone.filter(a => a.type === "USER").map(a => a.id)
+  const agentIds = gone.filter(a => a.type === "AGENT").map(a => a.id)
+  const [users, agents] = await Promise.all([
+    userIds.length ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, email: true } }) : [],
+    agentIds.length ? prisma.agent.findMany({ where: { id: { in: agentIds } }, select: { id: true, name: true } }) : [],
+  ])
+  const names = new Map<string, string>([
+    ...users.map(u => [u.id, u.name?.trim() || u.email] as [string, string]),
+    ...agents.map(a => [a.id, a.name] as [string, string]),
+  ])
+  for (const assignee of gone) {
+    const name = names.get(assignee.id)
+    if (name) assignee.displayName = name
+  }
 }
 
 /** Agent ids that already hold a task created from a comment in this doc (the scope-confirm step is skipped for them). */

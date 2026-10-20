@@ -470,4 +470,76 @@ test.describe("Doc comment @mention -> task", () => {
     await shot(page, "mobile-task-row");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   });
+
+  for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }]) {
+    test(`phone ${viewport.width}x${viewport.height}: with two mentions (and a third picker open) the submit button is reachable by scrolling the popover`, async ({ page, base }) => {
+      test.setTimeout(120_000);
+      const longName = `Wolfeschlegelsteinhausenbergerdorff ${suffix}`.padEnd(70, "x");
+      await pool.query(`UPDATE "${S}".users SET name = $1 WHERE id = $2`, [longName, wUserId]);
+      try {
+        await page.setViewportSize(viewport);
+        await openDocWithSelection(page, base, `Reach ${viewport.width} ${suffix}`, "REACH");
+        const editor = await startComment(page);
+        await editor.click();
+        await page.keyboard.type("please @Quinn");
+        await page.keyboard.press("Enter");
+        await page.keyboard.type("and @Wolfe");
+        await page.keyboard.press("Enter");
+        const popover = page.getByTestId("new-comment-popover");
+        const submit = page.getByRole("button", { name: "Comment & create task" });
+
+        // The popover is bounded to the viewport and scrolls; the button is reached by scrolling it.
+        const metrics = await popover.evaluate((el) => ({ client: el.clientHeight, scroll: el.scrollHeight, bottom: el.getBoundingClientRect().bottom, vh: window.innerHeight }));
+        expect(metrics.bottom, "popover stays above the bottom nav").toBeLessThanOrEqual(metrics.vh - 56);
+        await submit.scrollIntoViewIfNeeded();
+        const hit = async () => submit.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return { reachable: top === el || el.contains(top), bottom: r.bottom, vh: window.innerHeight };
+        });
+        let reach = await hit();
+        expect(reach.reachable, `submit button is the element under its own centre (not covered): ${JSON.stringify(reach)}`).toBe(true);
+        expect(reach.bottom, "button sits above the bottom nav").toBeLessThanOrEqual(reach.vh - 56);
+        // The 70-character name in the toggle label wraps inside the popover.
+        const label = page.getByText(/Assign as task to @/);
+        const lb = (await label.boundingBox())!;
+        expect(lb.x + lb.width, "toggle label inside the screen").toBeLessThanOrEqual(viewport.width);
+        await shot(page, `reach-${viewport.width}-two-mentions`);
+
+        // A third picker open inside the same popover: still scrollable to the button, and the picker stays usable.
+        await editor.click();
+        await page.keyboard.press("End");
+        await page.keyboard.type(" cc @");
+        await expect(page.getByTestId("mention-picker")).toBeVisible();
+        await shot(page, `reach-${viewport.width}-picker-open`);
+        await page.keyboard.press("Escape");
+        await expect(page.getByTestId("mention-picker")).toBeHidden();
+        await submit.scrollIntoViewIfNeeded();
+        reach = await hit();
+        expect(reach.reachable, "submit reachable after the picker closes").toBe(true);
+
+        // A real tap submits (no keyboard shortcut needed).
+        await submit.click();
+        await expect(page.getByTestId("comment-task-card")).toHaveCount(1, { timeout: 20_000 });
+      } finally {
+        await pool.query(`UPDATE "${S}".users SET name = $1 WHERE id = $2`, [wName, wUserId]);
+      }
+    });
+  }
+
+  test("paste uses the native path where the browser allows it, so Ctrl+Z takes a paste back", async ({ page, base, context }) => {
+    test.setTimeout(120_000);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await openDocWithSelection(page, base, `Undo ${suffix}`, "UNDO");
+    const editor = await startComment(page);
+    await editor.click();
+    await page.keyboard.type("before ");
+    await page.evaluate(() => navigator.clipboard.writeText("pasted <b>text</b>"));
+    await page.keyboard.press("Control+V");
+    await expect(editor).toContainText("pasted <b>text</b>");
+    expect(await editor.evaluate((el) => el.querySelectorAll("b").length)).toBe(0);
+    await page.keyboard.press("Control+Z");
+    await expect(editor).not.toContainText("pasted <b>text</b>");
+    await expect(editor).toContainText("before");
+  });
 });

@@ -270,6 +270,17 @@ describe("loadCommentTaskCards", () => {
     expect(cards[COMMENT]).toMatchObject({ taskId: TASK, displayId: "TASK-5", status: "IN_PROGRESS", priority: "HIGH", dueDate: "2026-10-23T00:00:00.000Z" })
   })
 
+  it("keeps the last known name for an assignee who is no longer available", async () => {
+    mocks.db.taskLink.findMany.mockResolvedValue([
+      { taskId: TASK, linkedId: COMMENT, task: { id: TASK, seqPrefix: "TASK", seqNumber: 5, title: "Draft", status: "TODO", priority: "HIGH", dueDate: null, assigneeUserId: QUINN, assigneeAgentId: null } },
+    ])
+    mocks.resolveAssignees.mockImplementation(async (_ws: string, tasks: Array<Record<string, unknown>>) =>
+      tasks.map(t => ({ ...t, assignee: { type: "USER", id: QUINN, displayName: "Unavailable person", available: false } })))
+    mocks.db.user.findMany.mockResolvedValue([{ id: QUINN, name: "Quinn Morales", email: "quinn@example.com" }])
+    const cards = await loadCommentTaskCards(WS, [COMMENT])
+    expect(cards[COMMENT].assignee).toMatchObject({ displayName: "Quinn Morales", available: false })
+  })
+
   it("does no query for no comments", async () => {
     expect(await loadCommentTaskCards(WS, [])).toEqual({})
     expect(mocks.db.taskLink.findMany).not.toHaveBeenCalled()

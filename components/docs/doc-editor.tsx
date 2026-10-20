@@ -582,7 +582,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           </ToolbarButton>
           {pendingAnchor && (
             <div
-              className="absolute z-20 mt-1 w-[22rem] p-3 bg-surface-card border border-border-default rounded-lg shadow-md max-sm:fixed max-sm:inset-x-3 max-sm:top-44 max-sm:mt-0 max-sm:w-auto"
+              className="absolute z-20 mt-1 w-[22rem] p-3 bg-surface-card border border-border-default rounded-lg shadow-md max-sm:fixed max-sm:inset-x-3 max-sm:top-44 max-sm:mt-0 max-sm:w-auto max-sm:max-h-[calc(100dvh-11rem-5.5rem-env(safe-area-inset-bottom))] max-sm:overflow-y-auto max-sm:overscroll-contain"
               data-testid="new-comment-popover"
               onKeyDown={(e) => {
                 if (e.key === "Escape") setPendingAnchor(null);

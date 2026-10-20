@@ -277,6 +277,11 @@ test.describe("Doc comment mentions: adversarial", () => {
         await pool.query(`DELETE FROM "${S}".agent_workspace_grants WHERE agent_id = $1`, [id]).catch(() => undefined);
         await pool.query(`DELETE FROM "${S}".agents WHERE id = $1`, [id]).catch(() => undefined);
       }
+      // Leave no "Rowan"/"Wren"-style members behind: the next spec's "@Rowan" must resolve to its own user.
+      for (const userId of [bUserId, wUserId, dUserId, xUserId].filter(Boolean)) {
+        await pool.query(`DELETE FROM "${S}".workspace_members WHERE user_id = $1`, [userId]).catch(() => undefined);
+        await pool.query(`DELETE FROM "${S}".organization_members WHERE user_id = $1`, [userId]).catch(() => undefined);
+      }
       await pool.end();
     }
     for (const context of contexts) await context.close();

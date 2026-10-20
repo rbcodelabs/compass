@@ -187,8 +187,8 @@ export function DocCommentComposer({
                   data-testid="create-task-toggle"
                   className="mt-0.5"
                 />
-                <span className="text-sm leading-tight">
-                  <b className="block text-text-primary">Assign as task to @{assignee ? name(assignee) : ""}</b>
+                <span className="min-w-0 text-sm leading-tight">
+                  <b className="block break-words text-text-primary [overflow-wrap:anywhere]">Assign as task to @{assignee ? name(assignee) : ""}</b>
                   <small className="text-xs text-text-subtle">Uncheck to send a plain mention (notification only)</small>
                 </span>
               </label>
