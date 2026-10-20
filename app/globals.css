@@ -469,7 +469,11 @@ html[data-panel-resizing] * {
   overflow-wrap: anywhere;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  user-select: all;
+}
+/* A chip inside the composer is an atom: clicking it puts the caret beside it, never inside its text. */
+.mention-chip[contenteditable="false"] {
+  user-select: none;
+  -webkit-user-select: none;
 }
 .mention-chip-agent {
   background-color: var(--agent-accent-surface);
