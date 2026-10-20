@@ -52,28 +52,84 @@ export type GridEditOption = {
   icon?: ReactNode;
 };
 
+/** The primitive values a typed cell can hold. */
+export type GridCellValue = string | number | boolean | null;
+
+/** Result of parsing pasted or typed text into a cell value. */
+export type GridParseResult<V> =
+  | { ok: true; value: V }
+  | { ok: false; error: string };
+
+/** One assignable person in a `person` editor. `value` is the user id. */
+export type GridPersonOption = {
+  value: string;
+  label: string;
+  /** Extra text used when matching typed input, e.g. the email address. */
+  email?: string;
+};
+
 /**
- * Inline edit config for a column.
+ * Fields shared by every edit kind.
  *
  * `field` is the property the optimistic overlay writes on the row, so the
- * merged row reflects the edit before the server confirms it.
+ * merged row reflects the edit before the server confirms it. Rows that nest
+ * their data (Discovery's `{ kind, opportunity }`) supply `applyOptimistic`
+ * instead, because a top-level `{ ...row, [field]: next }` would write the
+ * wrong place.
  */
-export type GridEdit<TRow extends GridRowData> = {
-  kind: "select";
-  options: readonly GridEditOption[];
+type GridEditBase<TRow extends GridRowData, V extends GridCellValue> = {
   /** Current value for a row. */
-  getValue: (row: TRow) => string;
+  getValue: (row: TRow) => V;
   /** Row property the optimistic value is written to. */
   field: keyof TRow & string;
+  /** Overrides the default `{ ...row, [field]: next }` optimistic merge. */
+  applyOptimistic?: (row: TRow, next: V) => TRow;
   /** Persist the change. Must resolve, never reject, with a result object. */
-  save: (row: TRow, next: string) => Promise<GridActionResult>;
+  save: (row: TRow, next: V) => Promise<GridActionResult>;
   /** Accessible name for the trigger, e.g. `(row) => \`Status for ${row.title}\``. */
   triggerLabel?: (row: TRow) => string;
-  /** Custom trigger content; defaults to the option's label. */
-  renderTrigger?: (option: GridEditOption | undefined, row: TRow) => ReactNode;
   /** Disable editing for particular rows. */
   isDisabled?: (row: TRow) => boolean;
+  /** Typed text to a value. Defaults per kind (see `cells/cell-values.ts`). */
+  parse?: (text: string, row?: TRow) => GridParseResult<V>;
+  /** A value to editable text. Defaults per kind. */
+  format?: (value: V, row: TRow) => string;
 };
+
+/** The original (and still source-compatible) inline select. */
+export type GridSelectEdit<TRow extends GridRowData> = GridEditBase<TRow, string> & {
+  kind: "select";
+  options: readonly GridEditOption[];
+  /** Custom trigger content; defaults to the option's label. */
+  renderTrigger?: (option: GridEditOption | undefined, row: TRow) => ReactNode;
+};
+
+/**
+ * Inline edit config for a column, discriminated on `kind`.
+ *
+ * `select` works in every grid. The other kinds are only editable in
+ * `interaction="sheet"` mode; a legacy grid renders the column's normal
+ * display cell for them.
+ */
+export type GridEdit<TRow extends GridRowData> =
+  | GridSelectEdit<TRow>
+  | (GridEditBase<TRow, string | null> & { kind: "text"; maxLength?: number })
+  | (GridEditBase<TRow, number | null> & {
+      kind: "number";
+      min?: number;
+      max?: number;
+      integer?: boolean;
+    })
+  /** Date-only `YYYY-MM-DD`, UTC, matching `inline-date-field`. */
+  | (GridEditBase<TRow, string | null> & { kind: "date" })
+  /** http(s) only. */
+  | (GridEditBase<TRow, string | null> & { kind: "url" })
+  | (GridEditBase<TRow, boolean> & { kind: "checkbox" })
+  | (GridEditBase<TRow, string | null> & {
+      kind: "person";
+      options: readonly GridPersonOption[];
+      allowUnassigned?: boolean;
+    });
 
 /** Compass metadata attached to a column definition. */
 export type GridColumnMeta<TRow extends GridRowData> = {
