@@ -130,6 +130,7 @@ export function ObjectiveRow({
   const [isParentKRPending, startParentKRTransition] = useTransition();
   const [parentKRError, setParentKRError] = useState<string | null>(null);
   const [isParentLinkOpen, setIsParentLinkOpen] = useState(false);
+  const [isAddKROpen, setIsAddKROpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const { openPanel } = usePanelContext();
   const [localParentKRId, setLocalParentKRId] = useState<string | null>(
@@ -194,6 +195,11 @@ export function ObjectiveRow({
   const selectableKRs = availableKRs?.filter((kr) => kr.objectiveId !== objective.id);
   const canLinkParent = !!selectableKRs && !localParentKRId && selectableKRs.length > 0;
   const menuItems: CardMenuItem[] = [
+    {
+      label: `Add ${labels.keyResult.lower}`,
+      // Defer until the dropdown has closed so the form's autofocus isn't stolen back.
+      onClick: () => requestAnimationFrame(() => setIsAddKROpen(true)),
+    },
     ...(canLinkParent
       ? [
           {
@@ -207,7 +213,7 @@ export function ObjectiveRow({
       label: `Delete ${labels.objective.singular}`,
       onClick: () => handleDelete(),
       destructive: true,
-      separator: canLinkParent,
+      separator: true,
     },
   ];
 
@@ -380,16 +386,18 @@ export function ObjectiveRow({
         </div>
       )}
 
-      {/* Add key result */}
-      <div>
-        <AddKeyResultForm
-          objectiveId={objective.id}
-          objectiveTitle={objective.title}
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-        />
       </div>
-      </div>
+
+      {/* Add key result — opened from the ⋯ menu, renders nothing until opened.
+          Outside the collapsible body so it stays visible if the card is collapsed. */}
+      <AddKeyResultForm
+        objectiveId={objective.id}
+        objectiveTitle={objective.title}
+        orgSlug={orgSlug}
+        workspaceSlug={workspaceSlug}
+        open={isAddKROpen}
+        onOpenChange={setIsAddKROpen}
+      />
     </EntityCard>
   );
 }
