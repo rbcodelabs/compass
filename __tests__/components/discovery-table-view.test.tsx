@@ -8,6 +8,8 @@ import { expectEveryGridCellClipped } from "../helpers/grid-cells";
 
 const openPanel = vi.fn();
 
+vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({ createOpportunitiesBatch: vi.fn() }));
+
 vi.mock("@/components/panels/panel-context", () => ({
   usePanelContext: () => ({ openPanel }),
 }));

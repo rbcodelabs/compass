@@ -23,7 +23,7 @@ test.describe("Discovery table", () => {
 
     await page.getByRole("tab", { name: "Table" }).click();
     await expect(page).toHaveURL(/view=table/);
-    await expect(page.getByRole("table", { name: "Discovery opportunities" })).toBeVisible();
+    await expect(page.getByRole("grid", { name: "Discovery opportunities" })).toBeVisible();
 
     const opportunityRow = page
       .getByRole("row")

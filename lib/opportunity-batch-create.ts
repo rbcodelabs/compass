@@ -29,14 +29,12 @@ import {
 } from "@/lib/opportunity-create"
 import { OPPORTUNITY_TITLE_MAX_LENGTH } from "@/lib/opportunity-draft"
 import { assertKeyResultInWorkspace, syncLegacyLink, TypedLinkError, type LinkSource } from "@/lib/typed-links"
+import { BATCH_DESCRIPTION_MAX_LENGTH, BATCH_MAX_ITEMS } from "@/lib/batch-create-limits"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
 
-/** Items per call. Agents get a quarter of the human cap. */
-export const BATCH_MAX_ITEMS = { human: 100, agent: 25 } as const
+export { BATCH_DESCRIPTION_MAX_LENGTH, BATCH_MAX_ITEMS }
 export const SOLUTION_TITLE_MAX_LENGTH = OPPORTUNITY_TITLE_MAX_LENGTH
-/** Characters. A text column has no limit of its own; 100 items must still fit one request. */
-export const BATCH_DESCRIPTION_MAX_LENGTH = 10_000
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
