@@ -156,7 +156,12 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
       pending = [];
       taskBefore.status = null;
       if (model === "task" && operation === "update" && id) {
-        taskBefore.status = (await tx.task.findUnique({ where: { id }, select: { status: true } }))?.status ?? null;
+        // Best-effort: the thread sync is a side effect and must never block the task edit itself.
+        try {
+          taskBefore.status = (await tx.task.findUnique({ where: { id }, select: { status: true } }))?.status ?? null;
+        } catch (error) {
+          console.error("[comment-task-sync] could not read previous task status", error);
+        }
       }
       if (!enabled && !following) return mutate(tx);
       const updateActor = enabled ? await workspaceMutationActor(source) : null;
@@ -195,7 +200,7 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
       ? { ...options, atomic: true }
       : options,
   );
-  const statusAfter = (result as { status?: string }).status;
+  const statusAfter = (result as { status?: string } | undefined)?.status;
   if (model === "task" && taskBefore.status !== null && statusAfter !== undefined && statusAfter !== taskBefore.status) {
     const [from, to] = [taskBefore.status, statusAfter];
     // Lazy import: the sync reaches lib/comments, which imports this module.

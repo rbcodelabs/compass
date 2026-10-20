@@ -150,6 +150,16 @@ Leave Google-Docs-style comments anchored to a specific span of a page, so discu
 
 **Resolving.** Click **Resolve** on a thread to mark it done — it drops out of the default open-only view and its highlight disappears. A **Show resolved** toggle at the bottom of the sidebar brings resolved threads back if you need them, and each has a **Reopen** button. You can also delete a thread outright (deleting a comment removes its replies too).
 
+**Mentioning someone and assigning a task.** Type `@` in a comment or reply to open one list of **People** (workspace members) and **Agents** (agents enabled in this workspace); keep typing to filter, use ↑ ↓ and Enter to pick, and Esc to leave a literal `@`. The pick becomes a chip, and a **Create task** row appears with the title (prefilled from your comment), a due date and a priority. It is on by default; switch it off to send a plain mention that only notifies. The button reads **Comment & create task** or **Comment** to match.
+
+- The **first** mention is the assignee; any further mentions are **watchers** — they are notified and follow the task. Use **Make assignee** to promote a different one. A comment creates at most one task.
+- The task links back to the comment (and to the page), so it appears under the page's linked tasks. The comment shows a live **task card** — status, ID, assignee, due date, priority and an **Open task** link — and the commented passage shows a small pin (✓ for a person, ⚙ for an agent).
+- Marking the task **Done** resolves the comment thread; moving a Done task back to active work reopens it. Resolving a thread by hand does not change the task.
+- Mentions are stored by id, not by name, so renaming a person or agent never breaks them.
+- Someone who is in your organization but not in this workspace can be mentioned (listed under **Not in this workspace**) but never assigned: no task is created and the comment is a mention only.
+- The first time an agent is assigned from a comment in a page, you confirm what it will receive. In this release an assigned agent simply finds the task in its queue (the same queue its MCP tools read); nothing starts running on its own. The card shows **Queued**, **Working** or **Needs review** from the task's status.
+- Viewers (read-only access) cannot comment or create tasks.
+
 **Doc-level comments.** A comment doesn't have to be anchored — over MCP you can add a general, page-level comment with no anchored text (see below). In the sidebar these are labelled **general**.
 
 Inline comments are fully available over MCP — see [MCP API](/help/09-mcp-api) for `add_doc_comment`, `list_doc_comments`, and `resolve_doc_comment` (pass `resolved: false` to reopen). These Doc-specific tools are path-addressed (workspace ID plus doc path) and preserve inline anchor creation. The generic shared-comment tools can also operate on `DOC` targets by Comment ID, but generic `add_comment` creates an unanchored Doc comment; use `add_doc_comment` when creating an inline anchor.
