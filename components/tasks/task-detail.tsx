@@ -217,7 +217,7 @@ type Props = {
 
 export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
   const { openPanel, notifyEntityMutated } = usePanelContext();
-  const { data, error, mutate, refresh } = useEntityDetail<TaskDetailData>(
+  const { data, error, displayId, mutate, refresh } = useEntityDetail<TaskDetailData>(
     "task",
     taskId,
     orgSlug,
@@ -243,7 +243,7 @@ export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
 
   return (
     <div data-slot="task-detail" data-ctx-entity-type="task" data-ctx-entity-id={taskId} data-ctx-entity-title={data.title} className={`flex min-w-0 flex-col gap-3 break-words pb-8 ${variant === "panel" ? "px-5" : ""}`}>
-      <PanelTitle
+      <PanelTitle displayId={displayId}
         title={data.title}
         edit={edit}
       />

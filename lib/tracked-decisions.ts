@@ -6,6 +6,7 @@ import getPrisma from "@/lib/db"
 // `./tracked-decision-types` without pulling Prisma/`pg` into their bundle.
 export { TRACKED_SUBJECT_TYPES, TRACKED_SUBJECT_LABELS, TRACKED_SOURCE_TYPES, TRACKED_OPTION_LIMITS, TRACKED_QUESTION_LIMITS, SUBMIT_ANSWERS_ACTION_KEY,type TrackedSubjectType, type TrackedSourceType, type TrackedDecisionOptionInput, type TrackedDecisionPacketOption, type TrackedDecisionQuestionInput, type TrackedDecisionPacketQuestion, type TrackedDecisionAnswerInput, type TrackedDecisionAnswer } from "./tracked-decision-types"
 import { TRACKED_SOURCE_TYPES, TRACKED_OPTION_LIMITS, TRACKED_QUESTION_LIMITS, SUBMIT_ANSWERS_ACTION_KEY,RESERVED_OPTION_LABELS, CHOICE_ACTION_KEY_PREFIX, type TrackedSubjectType, type TrackedSourceType, type TrackedDecisionOptionInput, type TrackedDecisionPacketOption, type TrackedDecisionQuestionInput, type TrackedDecisionPacketQuestion } from "./tracked-decision-types"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 export type TrackedDecisionSourceInput = { type: TrackedSourceType; id: string }
 const TRACKED_GATE = "TRACKED_DECISION"
 
@@ -166,8 +167,8 @@ export async function createTrackedDecisionRequest(input: { workspaceId: string;
   const existing = await prisma.reviewRequest.findFirst({ where: identityWhere, include: { currentRevision: true } })
   if (existing) return replay()
   try {
-    return await prisma.$transaction(async tx => {
-      const request = await tx.reviewRequest.create({ data: { ...identityWhere, state: "DRAFT", requestedById: input.requestedById ?? null, requestedByAgentId: input.requestedByAgentId ?? null, assignedToId: input.assignedToId ?? null } })
+    return await withSequenceTransaction(prisma, async tx => {
+      const request = await tx.reviewRequest.create({ data: { ...identityWhere, ...(await allocateOneSeq(tx, input.workspaceId, "reviewRequest")), state: "DRAFT", requestedById: input.requestedById ?? null, requestedByAgentId: input.requestedByAgentId ?? null, assignedToId: input.assignedToId ?? null } })
       const revisionNumber = 1, decisionCycle = 1
       const fingerprint = createHash("sha256").update(JSON.stringify({ requestId: request.id, decisionCycle, revisionNumber, packet })).digest("hex")
       const revision = await tx.reviewRevision.create({ data: { requestId: request.id, revisionNumber, fingerprint, title: question, summary: context, packetJson: JSON.stringify(packet), requiredRole: "ADMIN", options: { create: reviewOptionRows(customOptions, Boolean(customQuestions)) } } })

@@ -1,3 +1,4 @@
+import { resolveWorkItemPage } from "@/lib/work-item-page"
 import { notFound, redirect } from "next/navigation"
 import getPrisma from "@/lib/db"
 import { auth } from "@/auth"
@@ -25,14 +26,21 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
   if (!isResearchCaptureEnabled()) notFound()
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
-  const { orgSlug, workspaceSlug, studyId } = await params
-  const { token, page: requestedPage, synthesisPage: requestedSynthesisPage, turnId } = await searchParams
+  const { orgSlug, workspaceSlug, studyId: studyParam } = await params
+  const query = await searchParams
+  const { token, page: requestedPage, synthesisPage: requestedSynthesisPage, turnId } = query
   const page = parseResearchPage(requestedPage)
   const synthesisPage = parseResearchPage(requestedSynthesisPage)
   const prisma = getPrisma()
+  const member = await prisma.workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } },
+    select: { id: true },
+  })
+  if (!member) notFound()
+  const resolvedStudy = await resolveWorkItemPage({ type: "researchStudy", param: studyParam, workspaceId: member.id, basePath: `/${orgSlug}/${workspaceSlug}/capture/studies`, searchParams: query })
   const access = await prisma.researchStudy.findFirst({
     where: {
-      id: studyId,
+      id: resolvedStudy.id,
       workspace: {
         slug: workspaceSlug,
         organization: { slug: orgSlug },
@@ -75,7 +83,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
   // Completed transcripts are immutable. Guide + completed IDs detect staleness without
   // rereading all turns; 501 is necessarily stale against any valid <=500-session snapshot.
   const completedSessions = await prisma.researchSession.findMany({ where: { studyId: study.id, status: "COMPLETED" }, select: { id: true }, take: 501 })
-  const studyUrl = `/${orgSlug}/${workspaceSlug}/capture/studies/${study.id}`
+  const studyUrl = `/${orgSlug}/${workspaceSlug}/capture/studies/${resolvedStudy.canonical}`
   const guide = deserializeResearchGuide(study.guide)
   const displayedToken = token ? await prisma.researchParticipantToken.findFirst({
     where: {

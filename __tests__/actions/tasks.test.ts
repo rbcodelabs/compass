@@ -40,6 +40,8 @@ import {
   unlinkTask,
 } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockAuth.mockResolvedValue({ user: { id: "user-1" } });

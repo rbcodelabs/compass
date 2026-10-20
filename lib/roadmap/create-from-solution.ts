@@ -22,6 +22,7 @@ import {
   type ScheduleHorizon,
   type SlotRange,
 } from "@/lib/roadmap/scheduling";
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 type CaptureSource = Parameters<typeof captureWorkspaceMutation>[3];
 export type RoadmapCreateHorizon = ScheduleHorizon | "SHIPPED";
@@ -208,6 +209,7 @@ export async function createRoadmapItemsFromSolutions(
           data: {
             ...(request.id ? { id: request.id } : {}),
             workspaceId,
+            ...(await allocateOneSeq(tx, workspaceId, "roadmapItem")),
             title: request.title ?? solution.title,
             description: request.description ?? null,
             horizon,

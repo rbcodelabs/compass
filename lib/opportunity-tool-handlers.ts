@@ -1,3 +1,4 @@
+import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
 /** Handler functions for Opportunity MCP tools. */
 
 import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
@@ -68,13 +69,13 @@ export async function createOpportunity(input: {
   }])
   const result = results[0]
   if (!result.ok) return fail(result.error)
-  const opportunity = await prisma.opportunity.findFirst({ where: { id: result.id, workspaceId: input.workspaceId }, select: { id: true, title: true, status: true, customerSegment: true, linkedKeyResultId: true, squadId: true } })
+  const opportunity = await prisma.opportunity.findFirst({ where: { id: result.id, workspaceId: input.workspaceId }, select: { id: true, seqPrefix: true, seqNumber: true, title: true, status: true, customerSegment: true, linkedKeyResultId: true, squadId: true } })
   if (!opportunity) return fail("The opportunity was created but could not be read back.")
   return ok(withUrlLine(
-    `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
-    safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "opportunity", id: opportunity.id }),
+    `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}${displayLine("opportunity", opportunity)}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
+    safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "opportunity", id: opportunity.id, displayId: displayIdFromRow("opportunity", opportunity) }),
   ), {
-    id: opportunity.id, title: opportunity.title, status: opportunity.status, workspaceId: input.workspaceId,
+    id: opportunity.id, displayId: displayIdFromRow("opportunity", opportunity), title: opportunity.title, status: opportunity.status, workspaceId: input.workspaceId,
     customerSegment: opportunity.customerSegment, linkedKeyResultId: opportunity.linkedKeyResultId, squadId: opportunity.squadId,
   })
 }

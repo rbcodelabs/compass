@@ -1,3 +1,4 @@
+import { resolveWorkItemPage } from "@/lib/work-item-page"
 import { notFound } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
@@ -20,11 +21,20 @@ function parsePacket(raw: string): Record<string, unknown> {
   try { return JSON.parse(raw) as Record<string, unknown> } catch { return {} }
 }
 
-export default async function ReviewRequestPage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string; requestId: string }> }) {
-  const { orgSlug, workspaceSlug, requestId } = await params
+export default async function ReviewRequestPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; requestId: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
+  const { orgSlug, workspaceSlug, requestId: requestParam } = await params
   const session = await auth()
   if (!session?.user?.id) notFound()
   const prisma = getPrisma()
+  // The workspace is looked up by slug first so a display ID (DEC-3) resolves inside it. Membership is checked BEFORE
+  // the reference is resolved: resolving can 308 to the canonical URL, and that must not tell a non-member that a row exists.
+  const scope = await prisma.workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug } },
+    select: { id: true, members: { where: { userId: session.user.id }, select: { id: true } }, organization: { select: { members: { where: { userId: session.user.id }, select: { role: true } } } } },
+  })
+  if (!scope || (scope.members.length === 0 && !isOrgAdminRole(scope.organization.members[0]?.role))) notFound()
+  const resolvedRequest = await resolveWorkItemPage({ type: "reviewRequest", param: requestParam, workspaceId: scope.id, basePath: `/${orgSlug}/${workspaceSlug}/reviews`, searchParams: await searchParams })
+  const requestId = resolvedRequest.id
   const request = await prisma.reviewRequest.findFirst({
     where: {
       id: requestId,

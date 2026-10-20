@@ -19,6 +19,7 @@ import {
 } from "@/lib/opportunity-draft"
 import { TypedLinkError, linkOpportunityToObjective, syncLegacyLink } from "@/lib/typed-links"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 export type NewOpportunityInput = {
   title: string
@@ -156,7 +157,7 @@ export async function createOpportunityWithLinks(
         }
       }
 
-      const opportunity = await tx.opportunity.create({ data: { workspaceId, ...fields } })
+      const opportunity = await tx.opportunity.create({ data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "opportunity")), ...fields } })
 
       // Dual-write: the legacy pointer's LEGACY Opportunity<->Objective link, in this same transaction.
       if (fields.linkedKeyResultId) {

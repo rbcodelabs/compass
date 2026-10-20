@@ -65,7 +65,7 @@ export function OpportunityDetail(props: Props) {
 
 function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant, initialTab, onRetry }: Props & { onRetry: () => void }) {
   const labels = useLabels();
-  const { data, error, mutate, refresh } = useEntityDetail<OpportunityData>("opportunity", opportunityId, orgSlug, workspaceSlug);
+  const { data, error, displayId, mutate, refresh } = useEntityDetail<OpportunityData>("opportunity", opportunityId, orgSlug, workspaceSlug);
   const { panel } = usePanelContext();
   const panelKey = panel ? `${panel.type}:${panel.id}` : null;
   const previousPanel = useRef(panelKey);
@@ -90,6 +90,7 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
     <div data-slot="opportunity-detail" data-variant={variant} data-ctx-entity-type="opportunity" data-ctx-entity-id={opportunityId} data-ctx-entity-title={data.title} className={`@container min-w-0 break-words pb-8 ${variant === "panel" ? "px-5" : ""}`}>
       <div className="flex min-w-0 flex-col gap-5">
         {error && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">{`Could not refresh ${labels.opportunity.lower}. Showing the last loaded details.`}<Button variant="outline" size="sm" onClick={refresh}>Retry refresh</Button></div>}
+        {displayId && <span className="-mb-3 font-mono text-xs text-muted-foreground" data-testid="display-id">{displayId}</span>}
         <OpportunityHeader opportunity={data} squads={data.squads ?? []} availableKeyResults={data.availableKeyResults ?? []} linkedObjectives={data.linkedObjectives} availableObjectives={data.availableObjectives} revalidatePathStr={detailPath} edit={edit} onChanged={refresh} />
         <div className="flex flex-wrap items-center gap-3">
           {scoringModel && <ScoreBadge score={toScoreSummary(data.score, scoringModel)} scoringHref={`${detailPath}?tab=scoring`} />}

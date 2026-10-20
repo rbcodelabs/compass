@@ -32,6 +32,8 @@ import {
   type ReleaseSourceRevalidator,
 } from "@/lib/release-authorization"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const scope: ReleaseScope = {
   workspaceId: "00000000-0000-4000-8000-000000000001",
   provider: "GITHUB",

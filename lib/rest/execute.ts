@@ -56,6 +56,7 @@ import { getDocRaw, getHelpTopic, searchHelp as searchHelpDocs } from "@/lib/doc
 import { createWorkspaceInOrg } from "@/lib/workspace-service"
 import { RoadmapPromotionConflict } from "@/lib/roadmap-promotion"
 import { thinkingModelForMcp } from "@/lib/thinking-model/mcp"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export class RestNotFoundError extends Error {}
 export class RestForbiddenError extends Error {}
@@ -68,17 +69,17 @@ type Input = { params: Record<string, string>; query: Record<string, unknown>; b
 
 const select = {
   workspace: { id: true, organizationId: true, slug: true, name: true, description: true, createdAt: true, updatedAt: true },
-  opportunity: { id: true, workspaceId: true, title: true, description: true, customerSegment: true, status: true, squadId: true, linkedKeyResultId: true, createdAt: true, updatedAt: true },
-  solution: { id: true, workspaceId: true, opportunityId: true, title: true, description: true, status: true, createdAt: true, updatedAt: true },
-  assumption: { id: true, solutionId: true, title: true, description: true, riskLevel: true, status: true, createdAt: true, updatedAt: true },
-  feedback: { id: true, workspaceId: true, opportunityId: true, title: true, description: true, type: true, status: true, voteCount: true, tags: true, submitterName: true, submitterEmail: true, createdAt: true, updatedAt: true },
-  task: { id: true, workspaceId: true, squadId: true, parentTaskId: true, title: true, description: true, status: true, priority: true, assigneeUserId: true, assigneeAgentId: true, ownerName: true, storyPoints: true, dueDate: true, iteration: true, createdAt: true, updatedAt: true },
-  roadmap: { id: true, workspaceId: true, squadId: true, title: true, description: true, horizon: true, status: true, isPrivate: true, startDate: true, endDate: true, solutionId: true, keyResultId: true, opportunityId: true, experimentId: true, feedbackId: true, createdAt: true, updatedAt: true },
+  opportunity: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, title: true, description: true, customerSegment: true, status: true, squadId: true, linkedKeyResultId: true, createdAt: true, updatedAt: true },
+  solution: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, opportunityId: true, title: true, description: true, status: true, createdAt: true, updatedAt: true },
+  assumption: { id: true, seqPrefix: true, seqNumber: true, solutionId: true, title: true, description: true, riskLevel: true, status: true, createdAt: true, updatedAt: true },
+  feedback: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, opportunityId: true, title: true, description: true, type: true, status: true, voteCount: true, tags: true, submitterName: true, submitterEmail: true, createdAt: true, updatedAt: true },
+  task: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, squadId: true, parentTaskId: true, title: true, description: true, status: true, priority: true, assigneeUserId: true, assigneeAgentId: true, ownerName: true, storyPoints: true, dueDate: true, iteration: true, createdAt: true, updatedAt: true },
+  roadmap: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, squadId: true, title: true, description: true, horizon: true, status: true, isPrivate: true, startDate: true, endDate: true, solutionId: true, keyResultId: true, opportunityId: true, experimentId: true, feedbackId: true, createdAt: true, updatedAt: true },
   cycle: { id: true, workspaceId: true, title: true, startDate: true, endDate: true, status: true, createdAt: true, updatedAt: true },
-  objective: { id: true, workspaceId: true, cycleId: true, squadId: true, parentKeyResultId: true, title: true, description: true, owner: true, status: true, sortOrder: true, createdAt: true, updatedAt: true },
-  keyResult: { id: true, objectiveId: true, title: true, target: true, current: true, unit: true, sortOrder: true, createdAt: true, updatedAt: true },
+  objective: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, cycleId: true, squadId: true, parentKeyResultId: true, title: true, description: true, owner: true, status: true, sortOrder: true, createdAt: true, updatedAt: true },
+  keyResult: { id: true, seqPrefix: true, seqNumber: true, objectiveId: true, title: true, target: true, current: true, unit: true, sortOrder: true, createdAt: true, updatedAt: true },
   checkIn: { id: true, keyResultId: true, value: true, note: true, createdAt: true },
-  experiment: { id: true, workspaceId: true, squadId: true, assumptionId: true, title: true, hypothesis: true, method: true, killCondition: true, status: true, startDate: true, endDate: true, conclusion: true, conclusionReason: true, createdAt: true, updatedAt: true },
+  experiment: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, squadId: true, assumptionId: true, title: true, hypothesis: true, method: true, killCondition: true, status: true, startDate: true, endDate: true, conclusion: true, conclusionReason: true, createdAt: true, updatedAt: true },
   experimentResult: { id: true, experimentId: true, note: true, metric: true, value: true, createdAt: true },
   squad: { id: true, workspaceId: true, name: true, color: true, createdAt: true },
   scoringModel: { id: true, organizationId: true, name: true, description: true, status: true, formulaType: true, version: true, createdAt: true, updatedAt: true, metrics: { select: { key: true, label: true, description: true, minValue: true, maxValue: true, weight: true, direction: true, order: true }, orderBy: { order: "asc" as const } } },
@@ -363,7 +364,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "createObjective": {
       await validateObjectiveRefs(prisma, workspaceId, body)
       const scope = found(await prisma.workspace.findFirst({ where: { id: workspaceId }, select: { id: true } }))
-      return serialize(await prisma.objective.create({ data: { workspaceId: scope.id, cycleId: nullable(body.cycleId) ?? null, squadId: nullable(body.squadId) ?? null, parentKeyResultId: nullable(body.parentKeyResultId) ?? null, title: String(body.title), description: nullable(body.description), owner: nullable(body.owner), source: "API" }, select: select.objective }))
+      return serialize(await withSequenceTransaction(prisma, async (tx) => tx.objective.create({ data: { workspaceId: scope.id, ...(await allocateOneSeq(tx, scope.id, "objective")), cycleId: nullable(body.cycleId) ?? null, squadId: nullable(body.squadId) ?? null, parentKeyResultId: nullable(body.parentKeyResultId) ?? null, title: String(body.title), description: nullable(body.description), owner: nullable(body.owner), source: "API" }, select: select.objective })))
     }
     case "updateObjective": {
       if (!(await prisma.objective.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError()
@@ -384,7 +385,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "deleteObjective": { if (!(await prisma.objective.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError(); ensureTool(await deleteObjective({ objectiveId: id })); return undefined }
     case "listKeyResults": { await requireObjective(prisma, workspaceId, id); return listPage(`key-results:${workspaceId}:${id}`, input.query, (cursor, take) => prisma.keyResult.findMany({ where: { objectiveId: id, objective: { workspaceId }, ...cursorWhere(cursor) }, select: select.keyResult, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
     case "getKeyResult": return serialize(found(await prisma.keyResult.findFirst({ where: { id, objective: { workspaceId } }, select: select.keyResult })))
-    case "createKeyResult": { await requireObjective(prisma, workspaceId, id); return serialize(await prisma.keyResult.create({ data: { objectiveId: id, title: String(body.title), target: Number(body.target), unit: nullable(body.unit), source: "API" }, select: select.keyResult })) }
+    case "createKeyResult": { await requireObjective(prisma, workspaceId, id); return serialize(await withSequenceTransaction(prisma, async (tx) => tx.keyResult.create({ data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "keyResult")), objectiveId: id, title: String(body.title), target: Number(body.target), unit: nullable(body.unit), source: "API" }, select: select.keyResult }))) }
     case "updateKeyResult": { if (!(await prisma.keyResult.findFirst({ where: { id, objective: { workspaceId } }, select: { id: true } }))) throw new RestNotFoundError(); ensureTool(await updateKeyResult({ keyResultId: id, ...body })); return serialize(found(await prisma.keyResult.findFirst({ where: { id, objective: { workspaceId } }, select: select.keyResult }))) }
     case "deleteKeyResult": { if (!(await prisma.keyResult.findFirst({ where: { id, objective: { workspaceId } }, select: { id: true } }))) throw new RestNotFoundError(); ensureTool(await deleteKeyResult({ keyResultId: id })); return undefined }
     case "listCheckIns": { await requireKeyResult(prisma, workspaceId, id); return listPage(`check-ins:${workspaceId}:${id}`, input.query, (cursor, take) => prisma.checkIn.findMany({ where: { keyResultId: id, keyResult: { objective: { workspaceId } }, ...cursorWhere(cursor) }, select: select.checkIn, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
@@ -400,7 +401,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
 
     case "listExperiments": return listPage(`experiments:${workspaceId}:${filters(input.query, ["status", "squadId", "assumptionId"])}`, input.query, (cursor, take) => prisma.experiment.findMany({ where: { workspaceId, ...pick(input.query, ["status", "squadId", "assumptionId"]), ...cursorWhere(cursor) }, select: select.experiment, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
     case "getExperiment": return serialize(found(await prisma.experiment.findFirst({ where: { id, workspaceId }, select: select.experiment })))
-    case "createExperiment": { await validateExperimentRefs(prisma, workspaceId, body); return serialize(await prisma.experiment.create({ data: { workspaceId, squadId: nullable(body.squadId) ?? null, assumptionId: nullable(body.assumptionId) ?? null, title: String(body.title), hypothesis: String(body.hypothesis), method: String(body.method), killCondition: String(body.killCondition), source: "API" }, select: select.experiment })) }
+    case "createExperiment": { await validateExperimentRefs(prisma, workspaceId, body); return serialize(await withSequenceTransaction(prisma, async (tx) => tx.experiment.create({ data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "experiment")), squadId: nullable(body.squadId) ?? null, assumptionId: nullable(body.assumptionId) ?? null, title: String(body.title), hypothesis: String(body.hypothesis), method: String(body.method), killCondition: String(body.killCondition), source: "API" }, select: select.experiment }))) }
     case "updateExperiment": {
       if (!(await prisma.experiment.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError()
       await validateExperimentRefs(prisma, workspaceId, body)
@@ -862,6 +863,13 @@ function pick(source: Record<string, unknown>, keys: string[]): Record<string, u
 function filters(query: Record<string, unknown>, keys: string[]): string { return JSON.stringify(pick(query, keys)) }
 function serialize(value: unknown): unknown {
   const serialized = JSON.parse(JSON.stringify(value)) as unknown
+  if (serialized && typeof serialized === "object" && "seqNumber" in serialized) {
+    // Numbered resources select seqPrefix/seqNumber; the public shape carries the one derived `displayId` (null until numbered).
+    const row = serialized as Record<string, unknown>
+    row.displayId = typeof row.seqPrefix === "string" && typeof row.seqNumber === "number" && row.seqNumber >= 1 ? `${row.seqPrefix}-${row.seqNumber}` : null
+    delete row.seqPrefix
+    delete row.seqNumber
+  }
   if (serialized && typeof serialized === "object" && "tags" in serialized) {
     const row = serialized as Record<string, unknown>
     row.tags = Array.isArray(row.tags) ? row.tags.filter((tag): tag is string => typeof tag === "string") : []

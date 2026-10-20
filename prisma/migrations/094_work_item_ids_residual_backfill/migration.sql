@@ -1,0 +1,10 @@
+-- Migration 094: residual numbering pass for work item IDs.
+--
+-- NO DDL. 093 numbered every row that existed when it was POSTed, but the runner never
+-- re-runs a migration once its receipt is written, and instances of the previous deploy
+-- keep inserting rows without a seq_number until they drain. This is the second, later
+-- pass: explicit-only, POST it after the deploy that allocates numbers on create has fully
+-- rolled out. It re-runs the same idempotent hook and the same postconditions as 093.
+--
+-- This file intentionally contains no executable statement; the work is the hook
+-- (lib/migrations/work-item-ids-backfill.ts).

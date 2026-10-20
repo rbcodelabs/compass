@@ -52,6 +52,8 @@ import { requireProductEntity } from "@/lib/product-action-auth";
 import * as discoveryActions from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import * as okrActions from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const alice: McpActor = { userId: USERS.alice, purpose: "USER" };
 const service: McpActor = { userId: null, purpose: "SERVICE" };
 

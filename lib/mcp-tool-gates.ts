@@ -825,7 +825,7 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
  * Run the authorization gate for `toolName`. Fail-closed: a tool with no
  * policy entry is denied.
  */
-export async function applyToolGate(toolName: string, actor: McpActor, args: Args): Promise<void> {
+export async function applyToolGate(toolName: string, actor: McpActor, args: Args, resolveRefs?: () => Promise<Args>): Promise<void> {
   await gateInterviewTool(actor, toolName, args)
   // The shared service key is trusted/global — skip gating entirely. Gates
   // (and fail-closed denial of unmapped tools) apply only to per-user keys,
@@ -843,5 +843,7 @@ export async function applyToolGate(toolName: string, actor: McpActor, args: Arg
   if (!gate) {
     throw new McpAuthzError(`No authorization policy registered for tool "${toolName}".`)
   }
-  await gate(actor, args)
+  // Display IDs (TASK-12) become UUIDs only now, after the actor-type and policy checks above: an actor that may not
+  // call this tool at all must not be able to probe which rows exist by watching how a reference resolves.
+  await gate(actor, resolveRefs ? await resolveRefs() : args)
 }

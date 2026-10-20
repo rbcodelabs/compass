@@ -14,6 +14,7 @@ import getPrisma from "@/lib/db"
 import { callConnectorTool, listConnectorToolNames } from "@/lib/mcp-connectors/call"
 import { validateArtifactTitle } from "@/lib/artifacts"
 import { V0_PREVIEW_UPSTREAM_HOST } from "@/lib/v0-preview-proxy"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 type Source = "UI" | "MCP"
 
@@ -167,9 +168,9 @@ export async function createV0Artifact(input: {
   // they cannot see, must not leave a half-made Artifact behind.
   const snapshot = await fetchV0Snapshot(userId, chatId)
   const title = validateArtifactTitle(explicit || snapshot.title || `v0 chat ${chatId}`)
-  return prisma.$transaction(async (tx) => {
+  return withSequenceTransaction(prisma, async (tx) => {
     const artifact = await tx.artifact.create({ data: {
-      workspaceId: input.workspaceId, title, description: input.description?.trim() || null,
+      workspaceId: input.workspaceId, ...(await allocateOneSeq(tx, input.workspaceId, "artifact")), title, description: input.description?.trim() || null,
       sourceType: "V0_CHAT", v0ChatId: chatId, createdById: userId, updatedById: userId, source: input.source,
     } })
     const revision = await tx.artifactRevision.create({ data: {

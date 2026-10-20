@@ -472,7 +472,10 @@ export function WorkspaceSearchPalette({ orgSlug, workspaceSlug }: { orgSlug: st
                         onClick={() => setOpen(false)}
                         className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-accent aria-selected:bg-accent"
                       >
-                        <span className="min-w-0 truncate font-medium">{item.title}</span>
+                        <span className="flex min-w-0 items-baseline gap-2">
+                          {item.displayId && <span className="shrink-0 font-mono text-xs text-muted-foreground">{item.displayId}</span>}
+                          <span className="min-w-0 truncate font-medium">{item.title}</span>
+                        </span>
                         {item.context && <span className="shrink-0 text-xs text-muted-foreground">{item.context}</span>}
                       </Link>
                     )

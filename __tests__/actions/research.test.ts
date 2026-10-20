@@ -35,6 +35,8 @@ import {
   updateResearchStudy,
 } from "@/app/[orgSlug]/[workspaceSlug]/capture/actions"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 function form() {
   const data = new FormData()
   data.set("name", "Planning interviews")

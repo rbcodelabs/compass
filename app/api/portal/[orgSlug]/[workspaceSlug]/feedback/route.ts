@@ -5,6 +5,7 @@ import {
   type FeedbackAttachmentMetadata,
   validateFeedbackAttachmentMetadata,
 } from "@/lib/feedback-attachments";
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 type Params = { orgSlug: string; workspaceSlug: string };
 
@@ -162,9 +163,10 @@ export async function POST(
     effectiveSubmitterEmail = session.email;
   }
 
-  const item = await prisma.feedbackItem.create({
+  const item = await withSequenceTransaction(prisma, async (tx) => tx.feedbackItem.create({
     data: {
       workspaceId: workspace.id,
+      ...(await allocateOneSeq(tx, workspace.id, "feedback")),
       title: title.trim(),
       description: typeof description === "string" && description.trim() ? description.trim() : null,
       type: feedbackType,
@@ -184,7 +186,7 @@ export async function POST(
         select: { id: true, url: true, filename: true, fileType: true },
       },
     },
-  });
+  }));
 
   return NextResponse.json({
     id: item.id,

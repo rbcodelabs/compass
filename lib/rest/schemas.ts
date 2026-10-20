@@ -12,6 +12,11 @@ export const resourceSchema = z.object({
   updatedAt: z.string(),
 })
 
+/** Resources that carry a human-readable ID such as `TASK-12` (null until the row is numbered). */
+export const numberedResourceSchema = resourceSchema.extend({
+  displayId: z.string().nullable().optional().describe("Human-readable ID, unique within the workspace, e.g. TASK-12. Accepted wherever the UUID id is."),
+})
+
 export const collectionOf = (item: z.ZodType) => z.object({ items: z.array(item), nextCursor: z.string().nullable() })
 
 export const problemSchema = z.object({
@@ -31,7 +36,7 @@ export const workspaceSchema = resourceSchema.extend({
   description: z.string().nullable(),
 })
 
-export const opportunitySchema = resourceSchema.extend({
+export const opportunitySchema = numberedResourceSchema.extend({
   workspaceId: uuid,
   title: z.string(),
   description: z.string().nullable(),
@@ -41,7 +46,7 @@ export const opportunitySchema = resourceSchema.extend({
   linkedKeyResultId: uuid.nullable(),
 })
 
-export const solutionSchema = resourceSchema.extend({
+export const solutionSchema = numberedResourceSchema.extend({
   workspaceId: uuid,
   opportunityId: uuid,
   title: z.string(),
@@ -49,7 +54,7 @@ export const solutionSchema = resourceSchema.extend({
   status: z.enum(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"]),
 })
 
-export const assumptionSchema = resourceSchema.extend({
+export const assumptionSchema = numberedResourceSchema.extend({
   solutionId: uuid,
   title: z.string(),
   description: z.string().nullable(),
@@ -57,7 +62,7 @@ export const assumptionSchema = resourceSchema.extend({
   status: z.enum(["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"]),
 })
 
-export const feedbackSchema = resourceSchema.extend({
+export const feedbackSchema = numberedResourceSchema.extend({
   workspaceId: uuid,
   opportunityId: uuid.nullable(),
   title: z.string(),
@@ -70,7 +75,7 @@ export const feedbackSchema = resourceSchema.extend({
   submitterEmail: z.string().nullable(),
 })
 
-export const taskSchema = resourceSchema.extend({
+export const taskSchema = numberedResourceSchema.extend({
   workspaceId: uuid,
   squadId: uuid.nullable(),
   parentTaskId: uuid.nullable(),
@@ -86,7 +91,7 @@ export const taskSchema = resourceSchema.extend({
   iteration: z.string().nullable(),
 })
 
-export const roadmapItemSchema = resourceSchema.extend({
+export const roadmapItemSchema = numberedResourceSchema.extend({
   workspaceId: uuid,
   squadId: uuid.nullable(),
   title: z.string(),
@@ -142,17 +147,17 @@ export const solutionKeyResultRelationshipSchema = z.object({
 export const okrCycleSchema = resourceSchema.extend({
   workspaceId: uuid, title: z.string(), startDate: z.string(), endDate: z.string(), status: z.enum(["DRAFT", "ACTIVE", "COMPLETED"]),
 })
-export const objectiveSchema = resourceSchema.extend({
+export const objectiveSchema = numberedResourceSchema.extend({
   workspaceId: uuid, cycleId: uuid.nullable(), squadId: uuid.nullable(), parentKeyResultId: uuid.nullable(),
   title: z.string(), description: z.string().nullable(), owner: z.string().nullable(),
   status: z.enum(["ON_TRACK", "AT_RISK", "OFF_TRACK", "COMPLETE"]), sortOrder: z.number().int(),
 })
-export const keyResultSchema = resourceSchema.extend({
+export const keyResultSchema = numberedResourceSchema.extend({
   objectiveId: uuid, title: z.string(), target: z.number(), current: z.number(), unit: z.string().nullable(), sortOrder: z.number().int(),
 })
 export const checkInSchema = z.object({ id: uuid, keyResultId: uuid, value: z.number(), note: z.string().nullable(), createdAt: z.string() })
 export const experimentResultSchema = z.object({ id: uuid, experimentId: uuid, note: z.string(), metric: z.string().nullable(), value: z.number().nullable(), createdAt: z.string() })
-export const experimentSchema = resourceSchema.extend({
+export const experimentSchema = numberedResourceSchema.extend({
   workspaceId: uuid, squadId: uuid.nullable(), assumptionId: uuid.nullable(), title: z.string(), hypothesis: z.string(), method: z.string(),
   killCondition: z.string(), status: z.enum(["DESIGNING", "RUNNING", "COMPLETE", "KILLED", "NOT_PURSUED"]),
   startDate: z.string().nullable(), endDate: z.string().nullable(), conclusion: z.string().nullable(), conclusionReason: z.string().nullable(),

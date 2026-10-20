@@ -19,6 +19,7 @@ import {
 import { isPmInterviewEnabled } from "@/lib/research-feature"
 import { instrumentActivityClient } from "@/lib/analytics/activity"
 import { getLinkedObjectivesByOpportunity } from "@/lib/typed-links"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export class PmInterviewError extends Error {
   constructor(message: string, readonly status = 422) { super(message) }
@@ -181,13 +182,13 @@ export async function createPmInterview(scope: PmInterviewScope, actor: PmInterv
   const participantTokenHash = createHash("sha256").update(randomUUID()).digest("hex")
   const resumeTokenHash = hashResearchResumeToken(internalResumeToken(id, participantTokenHash))
   const guide = guideByType[targetType].map((text, index) => ({ id: `pm-${index + 1}`, text }))
-  await prisma.$transaction([
-    prisma.researchStudy.create({ data: { id: studyId, workspaceId, name: `PM interview: ${snapshot.target.fields.title}`, goal: `Clarify this ${targetType.toLowerCase()} without treating PM statements as customer evidence.`, studyType: "PM_INTERVIEW", guide: JSON.stringify(guide), targetMinutes: 15, status: "ACTIVE", source: "UI", createdById: actor.userId, updatedById: actor.userId, updatedAt: now } }),
-    prisma.researchParticipantToken.create({ data: { id: participantTokenId, studyId, tokenHash: participantTokenHash, kind: "PM_INTERNAL", expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000), createdById: actor.userId } }),
-    prisma.researchSession.create({ data: { id: sessionId, studyId, participantTokenId, resumeTokenHash, modality: "CHAT", status: "IN_PROGRESS", startedAt: now, lastActiveAt: now, nextSequence: 1, updatedAt: now } }),
-    prisma.pMInterview.create({ data: { id, workspaceId, studyId, sessionId, initiatingUserId: actor.userId, targetType, targetId: input.targetId, contextSnapshotJson: JSON.stringify(snapshot), fieldBaselineJson: JSON.stringify(baseline), updatedAt: now } }),
-    prisma.researchTurn.create({ data: { sessionId, role: "INTERVIEWER", sequence: 0, content: `Let’s refine this. ${guide[0].text}` } }),
-  ])
+  await withSequenceTransaction(prisma, async (tx) => {
+    await tx.researchStudy.create({ data: { id: studyId, workspaceId, ...(await allocateOneSeq(tx, workspaceId, "researchStudy")), name: `PM interview: ${snapshot.target.fields.title}`, goal: `Clarify this ${targetType.toLowerCase()} without treating PM statements as customer evidence.`, studyType: "PM_INTERVIEW", guide: JSON.stringify(guide), targetMinutes: 15, status: "ACTIVE", source: "UI", createdById: actor.userId, updatedById: actor.userId, updatedAt: now } });
+    await tx.researchParticipantToken.create({ data: { id: participantTokenId, studyId, tokenHash: participantTokenHash, kind: "PM_INTERNAL", expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000), createdById: actor.userId } });
+    await tx.researchSession.create({ data: { id: sessionId, studyId, participantTokenId, resumeTokenHash, modality: "CHAT", status: "IN_PROGRESS", startedAt: now, lastActiveAt: now, nextSequence: 1, updatedAt: now } });
+    await tx.pMInterview.create({ data: { id, workspaceId, studyId, sessionId, initiatingUserId: actor.userId, targetType, targetId: input.targetId, contextSnapshotJson: JSON.stringify(snapshot), fieldBaselineJson: JSON.stringify(baseline), updatedAt: now } });
+    await tx.researchTurn.create({ data: { sessionId, role: "INTERVIEWER", sequence: 0, content: `Let’s refine this. ${guide[0].text}` } });
+  })
   return { id, studyId, sessionId }
 }
 

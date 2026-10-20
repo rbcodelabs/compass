@@ -30,6 +30,7 @@ import {
 import { OPPORTUNITY_TITLE_MAX_LENGTH } from "@/lib/opportunity-draft"
 import { assertKeyResultInWorkspace, syncLegacyLink, TypedLinkError, type LinkSource } from "@/lib/typed-links"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 /** Items per call. Agents get a quarter of the human cap. */
 export const BATCH_MAX_ITEMS = { human: 100, agent: 25 } as const
@@ -263,6 +264,7 @@ async function createOneOpportunity(
         const created = await tx.opportunity.create({
           data: {
             id,
+            ...(await allocateOneSeq(tx, workspaceId, "opportunity")),
             workspaceId,
             title: data.title,
             description: data.description,
@@ -387,6 +389,7 @@ async function createOneSolution(
         return tx.solution.create({
           data: {
             id,
+            ...(await allocateOneSeq(tx, workspaceId, "solution")),
             workspaceId, // from the authorized workspace, never from input: the column is nullable and every reader treats NULL as deny
             opportunityId: parent.id,
             title: data.title,

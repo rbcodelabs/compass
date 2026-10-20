@@ -1,3 +1,4 @@
+import { resolveWorkItemPage } from "@/lib/work-item-page"
 import { auth } from "@/auth"
 import { cookies } from "next/headers"
 import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin"
@@ -20,11 +21,13 @@ function initialSlideFromParam(value: string | string[] | undefined): number {
 export default async function ArtifactPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; artifactId: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
-  const { orgSlug, workspaceSlug, artifactId } = await params
+  const { orgSlug, workspaceSlug, artifactId: artifactParam } = await params
   const prisma = getPrisma()
   const access = await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id)
   if (!access) notFound()
   const workspace = { id: access.workspaceId }
+  const resolvedArtifact = await resolveWorkItemPage({ type: "artifact", param: artifactParam, workspaceId: workspace.id, basePath: `/${orgSlug}/${workspaceSlug}/docs/artifacts`, searchParams: await searchParams })
+  const artifactId = resolvedArtifact.id
   const artifact = await prisma.artifact.findFirst({ where: { id: artifactId, workspaceId: workspace.id }, include: { currentRevision: true, revisions: { orderBy: { revisionNumber: "desc" } }, links: { where: { linkedType: "SOLUTION" }, select: { linkedId: true } } } })
   if (!artifact) notFound()
   let html: string | undefined

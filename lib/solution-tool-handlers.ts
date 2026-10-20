@@ -1,3 +1,4 @@
+import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
 /**
  * Handler functions for Solution MCP tools (update_solution).
  * Extracted into this module so it can be unit-tested without the MCP server layer.
@@ -33,12 +34,12 @@ export async function createSolution({ opportunityId, title, description, source
   const { results } = await createSolutionBatch(prisma, programmaticBatchContext(opportunity.workspaceId, source), [{ parent: { id: opportunityId }, title, description }])
   const result = results[0]
   if (!result.ok) return fail(result.error)
-  const solution = await prisma.solution.findFirst({ where: { id: result.id, workspaceId: opportunity.workspaceId }, select: { id: true, title: true, status: true } })
+  const solution = await prisma.solution.findFirst({ where: { id: result.id, workspaceId: opportunity.workspaceId }, select: { id: true, seqPrefix: true, seqNumber: true, title: true, status: true } })
   if (!solution) return fail("The solution was created but could not be read back.")
   return ok(withUrlLine(
-    `**Solution created** for "${opportunity.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
-    safeEntityUrl({ orgSlug: opportunity.workspace?.organization?.slug, workspaceSlug: opportunity.workspace?.slug, type: "solution", id: solution.id, opportunityId }),
-  ), { id: solution.id, title: solution.title, status: solution.status, opportunityId })
+    `**Solution created** for "${opportunity.title}"\nID: ${solution.id}${displayLine("solution", solution)}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
+    safeEntityUrl({ orgSlug: opportunity.workspace?.organization?.slug, workspaceSlug: opportunity.workspace?.slug, type: "solution", id: solution.id, displayId: displayIdFromRow("solution", solution), opportunityId }),
+  ), { id: solution.id, displayId: displayIdFromRow("solution", solution), title: solution.title, status: solution.status, opportunityId })
 }
 import { ok, fail } from "@/lib/mcp-output"
 

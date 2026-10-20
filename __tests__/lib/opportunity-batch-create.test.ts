@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Prisma } from "@prisma/client"
 
 vi.mock("@/lib/db", () => ({ default: vi.fn() }))
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
 vi.mock("@/auth", () => ({ auth: vi.fn(async () => ({ user: { id: "user-1" } })) }))
 
 import type { AppPrismaClient } from "@/lib/db"

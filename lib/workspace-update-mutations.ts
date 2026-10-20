@@ -28,6 +28,8 @@ const types = {
   evidence: "EVIDENCE",
 } as const;
 type Model = keyof typeof types;
+/** Models whose rows carry a human-readable work item ID (lib/work-item-ids.ts). */
+const NUMBERED_MODELS: ReadonlySet<Model> = new Set<Model>(["task", "opportunity", "solution", "assumption", "roadmapItem", "experiment"]);
 type Row = {
   id: string;
   workspaceId?: string;
@@ -181,7 +183,11 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
       const actor = updateActor!;
       return recordUpdates(tx, model, operation, actor, before, after, changed, result);
     },
-    options,
+    // A numbered create allocates its work item ID from the workspace counter in the same transaction as the
+    // insert (lib/work-item-sequence.ts), so it must always run in a replayable transaction, capture or not.
+    operation === "create" && NUMBERED_MODELS.has(model)
+      ? { ...options, atomic: true }
+      : options,
   );
   if (pending.length > 0) {
     const effects = pending;

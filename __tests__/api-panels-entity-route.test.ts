@@ -9,6 +9,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.mock("@/lib/db", () => ({ default: () => ({}) }));
+vi.mock("@/lib/work-item-resolve", async () => (await import("./helpers/work-item-resolve-mock")).workItemResolveMock())
 vi.mock("@/auth", () => ({ auth: vi.fn() }));
 vi.mock("@/lib/workspace", () => ({ getWorkspace: vi.fn() }));
 vi.mock("@/lib/entity-detail", async () => {
@@ -106,7 +108,7 @@ describe("GET /api/panels/entity/[type]/[id]", () => {
     mockGetEntityDetail.mockResolvedValue(detail as never);
     const res = await call("experiment", "exp-1");
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual(detail);
+    await expect(res.json()).resolves.toEqual({ ...detail, displayId: null });
     // scoped to the workspace getWorkspace resolved, not anything client-supplied
     expect(mockGetEntityDetail).toHaveBeenCalledWith("experiment", "exp-1", "ws-1");
   });
@@ -128,7 +130,7 @@ describe("PATCH /api/panels/entity/[type]/[id]", () => {
     mockUpdateEntityField.mockResolvedValue({ ok: true, roadmapSync } as never);
     mockGetEntityDetail.mockResolvedValue({ type: "solution", data: { id: "sol-1" } } as never);
     const body = await (await patch("solution", "sol-1", { field: "status", value: "IN_DELIVERY" })).json();
-    expect(body).toEqual({ type: "solution", data: { id: "sol-1" }, roadmapSync });
+    expect(body).toEqual({ type: "solution", data: { id: "sol-1" }, displayId: null, roadmapSync });
   });
 
   it("returns the plain detail when nothing reached the roadmap", async () => {
@@ -136,7 +138,7 @@ describe("PATCH /api/panels/entity/[type]/[id]", () => {
     mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: false } as never);
     mockUpdateEntityField.mockResolvedValue({ ok: true } as never);
     mockGetEntityDetail.mockResolvedValue({ type: "solution", data: { id: "sol-1" } } as never);
-    expect(await (await patch("solution", "sol-1", { field: "title", value: "x" })).json()).toEqual({ type: "solution", data: { id: "sol-1" } });
+    expect(await (await patch("solution", "sol-1", { field: "title", value: "x" })).json()).toEqual({ type: "solution", data: { id: "sol-1" }, displayId: null });
   });
 
   it("succeeds for a real member (isReadOnly: false)", async () => {
