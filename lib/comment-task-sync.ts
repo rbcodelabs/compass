@@ -65,6 +65,11 @@ export function syncCommentThreadsForTaskStatus(
   to: string,
 ): Promise<ThreadSyncResult> {
   if (!transitionTouchesThreads(from, to)) return Promise.resolve({ resolved: [], reopened: [] })
+  return reconcileCommentThreadsForTask(taskId)
+}
+
+/** Bring the task's comment threads in line with its CURRENT status, one task at a time. */
+export function reconcileCommentThreadsForTask(taskId: string): Promise<ThreadSyncResult> {
   return serialize(taskId, () => reconcile(taskId))
 }
 

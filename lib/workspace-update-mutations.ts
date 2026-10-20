@@ -134,6 +134,31 @@ async function followingActiveFor(model: Model): Promise<boolean> {
   return followingAvailable(getPrisma());
 }
 
+/**
+ * Watch a task update for a `status` write. The "before" status is read outside any row lock, so two
+ * concurrent writers can both read the same stale value and one real DONE <-> active flip then looks like
+ * "no change". Knowing the write itself touched status lets the Doc comment thread sync re-check the task
+ * instead of trusting that comparison.
+ */
+function trackTaskStatusWrites(tx: AppTransactionClient, written: { status: boolean }): AppTransactionClient {
+  const task = tx.task as unknown as Record<string, unknown>;
+  const wrapped = new Proxy(task, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target);
+      if ((prop === "update" || prop === "updateMany") && typeof value === "function") {
+        return (args?: { data?: Record<string, unknown> }) => {
+          if (args?.data && "status" in args.data) written.status = true;
+          return (value as (a: unknown) => unknown).call(target, args);
+        };
+      }
+      return value;
+    },
+  });
+  return new Proxy(tx as unknown as Record<string, unknown>, {
+    get: (target, prop) => (prop === "task" ? wrapped : Reflect.get(target, prop, target)),
+  }) as unknown as AppTransactionClient;
+}
+
 /** Explicit call-site adapter: ordinary edits and ordering emit no events. */
 export async function captureWorkspaceMutation<T extends { id: string }>(
   prisma: AppPrismaClient,
@@ -148,6 +173,8 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
   let pending: FollowingEffect[] = [];
   // Status a task held before this write, for the Doc comment thread sync below.
   const taskBefore: { status: string | null } = { status: null };
+  const statusWrite = { status: false };
+  const track = (tx: AppTransactionClient) => (model === "task" && operation === "update" ? trackTaskStatusWrites(tx, statusWrite) : tx);
   const result = await withWorkspaceUpdates(
     prisma,
     async (tx, enabled) => {
@@ -155,6 +182,7 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
       // that commits may leave effects behind.
       pending = [];
       taskBefore.status = null;
+      statusWrite.status = false;
       if (model === "task" && operation === "update" && id) {
         // Best-effort: the thread sync is a side effect and must never block the task edit itself.
         try {
@@ -163,14 +191,14 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
           console.error("[comment-task-sync] could not read previous task status", error);
         }
       }
-      if (!enabled && !following) return mutate(tx);
+      if (!enabled && !following) return mutate(track(tx));
       const updateActor = enabled ? await workspaceMutationActor(source) : null;
       const followActor = following
         ? await followActorFor(source, updateActor)
         : null;
       const before =
         operation === "update" && id ? await readRow(tx, model, id) : null;
-      const result = await mutate(tx);
+      const result = await mutate(track(tx));
       const after = result as Row;
       const changed = detectFieldTransitions(model, before, after);
       if (followActor) {
@@ -201,10 +229,13 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
       : options,
   );
   const statusAfter = (result as { status?: string } | undefined)?.status;
-  if (model === "task" && taskBefore.status !== null && statusAfter !== undefined && statusAfter !== taskBefore.status) {
+  if (model === "task" && taskBefore.status !== null && statusAfter !== undefined) {
     const [from, to] = [taskBefore.status, statusAfter];
-    // Lazy import: the sync reaches lib/comments, which imports this module.
-    await runAfterCommit(async () => (await import("@/lib/comment-task-sync")).syncCommentThreadsForTaskStatus(result.id, from, to));
+    // A visible DONE crossing, or a status write that read no change (a stale "before" under a concurrent flip).
+    if ((from !== to && (from === "DONE" || to === "DONE")) || (from === to && statusWrite.status)) {
+      // Lazy import: the sync reaches lib/comments, which imports this module.
+      await runAfterCommit(async () => (await import("@/lib/comment-task-sync")).reconcileCommentThreadsForTask(result.id));
+    }
   }
   if (pending.length > 0) {
     const effects = pending;
