@@ -16,6 +16,7 @@
  * One explicit branch per type: model delegates are never looked up by a computed name.
  */
 import type { AppTransactionClient } from "@/lib/db"
+import { isDocsSyncEnabled, recordDocChange } from "@/lib/doc-sync"
 import type { LinkableEntityType } from "@/lib/entity-types"
 import type { LinkEndpoint } from "@/lib/links/registry"
 
@@ -121,6 +122,12 @@ export async function touchEndpoint(tx: Tx, type: LinkableEntityType, workspaceI
       return true
     case "DOC":
       await tx.doc.updateMany({ where: { id, workspaceId }, data: { updatedAt: new Date() } })
+      // The touch changes no content, title, parent or stored revision, so a doc with a revision needs no sync row.
+      // A pre-revision doc derives its revision from updatedAt (`legacy:<updatedAt>`), which the touch did change.
+      if (isDocsSyncEnabled()) {
+        const touched = await tx.doc.findFirst({ where: { id, workspaceId }, select: { revision: true } })
+        if (touched && touched.revision === null) await recordDocChange(tx, workspaceId, id, "UPSERT")
+      }
       return true
     case "ARTIFACT":
       await tx.artifact.updateMany({ where: { id, workspaceId }, data: { updatedAt: new Date() } })

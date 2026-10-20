@@ -2853,8 +2853,8 @@ model EntityLink {
 
 /// Per-workspace monotonic change log for Geode doc sync (ADR "Compass as a Geode Sync Provider",
 /// spike). One row per STANDARD-doc mutation, written in the same transaction as the mutation
-/// and only while DOCS_SYNC_ENABLED is on. `seq` is allocated as max(seq)+1 per workspace; the
-/// unique (workspace_id, seq) index makes a concurrent allocation fail instead of duplicating.
+/// and only while DOCS_SYNC_ENABLED is on. `seq` comes from DocChangeCounter; the unique
+/// (workspace_id, seq) index is a backstop against duplicates.
 /// kind: UPSERT | MOVE | DELETE. `path` is the doc's virtual path when the change was recorded
 /// (for DELETE, the last path). DSQL: no FKs, so rows are swept with the workspace explicitly.
 model DocChange {
@@ -2870,6 +2870,15 @@ model DocChange {
 
   @@unique([workspaceId, seq], map: "idx_doc_changes_workspace_seq")
   @@map("doc_changes")
+}
+
+/// One row per workspace holding the last allocated doc_changes.seq. Incremented with an atomic
+/// upsert inside the mutating transaction (see lib/doc-sync.ts). No FK; swept with the workspace.
+model DocChangeCounter {
+  workspaceId String @id @map("workspace_id") @db.Uuid
+  lastSeq     Int    @map("last_seq")
+
+  @@map("doc_change_counters")
 }
 
 /// Pointer to the current Agent SDK session transcript of a conversation (one row per

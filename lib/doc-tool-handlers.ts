@@ -25,6 +25,7 @@ import { createDocument, documentRevision, hydrateDocument, updateDocument } fro
 import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
 import { isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { documentMcpActor } from "@/lib/document-mcp-actor"
+import { changeKindFor, writeDocWithChange } from "@/lib/doc-sync"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
 import type { DocType } from "@/lib/doc-types"
 
@@ -345,7 +346,7 @@ export async function createDoc({
     }
   const doc = pilot || operationId
     ? await createDocument(data, { operationId, ...documentMcpActor() })
-    : await prisma.doc.create({ data: { ...data, revision: randomUUID() } })
+    : await writeDocWithChange(prisma, { workspaceId, kind: "UPSERT" }, (client) => client.doc.create({ data: { ...data, revision: randomUUID() } }))
   await followAfterCreate({ model: "doc", workspaceId, row: { id: doc.id }, actor: async () => mcpFollowActor() ?? { type: "SYSTEM", id: null } })
 
   // This used to emit a *relative* `/{org}/{ws}/docs` — the docs index, not the
@@ -401,7 +402,7 @@ export async function updateDoc({
 
   const existing = await prisma.doc.findUnique({
     where: { id: docId },
-    select: { title: true, storageProvider: true, docType: true },
+    select: { title: true, storageProvider: true, docType: true, workspaceId: true, parentId: true },
   })
   if (!existing) {
     return fail(`Doc "${docId}" not found.`)
@@ -441,10 +442,11 @@ export async function updateDoc({
     ...(body !== undefined ? { content: body } : {}),
     ...(metadata !== undefined ? { metadata: metadata === null ? Prisma.JsonNull : toJsonInput(metadata) } : {}),
     ...(icon !== undefined ? { icon: icon.trim() } : {}),
-  }, { expectedRevision, operationId, ...documentMcpActor() }) : await prisma.doc.update({
-    where: { id: docId },
-    data: { ...updateData, revision: randomUUID() },
-  })
+  }, { expectedRevision, operationId, ...documentMcpActor() }) : await writeDocWithChange(
+    prisma,
+    { workspaceId: existing.workspaceId, kind: changeKindFor(existing, updateData), before: existing },
+    (client) => client.doc.update({ where: { id: docId }, data: { ...updateData, revision: randomUUID() } }),
+  )
 
   return ok(
     `**Doc updated**\n` +
@@ -479,7 +481,7 @@ export async function updateDocMetadata({
 
   const existing = await prisma.doc.findUnique({
     where: { id: docId },
-    select: { title: true, storageProvider: true },
+    select: { title: true, storageProvider: true, workspaceId: true },
   })
   if (!existing) {
     return fail(`Doc "${docId}" not found.`)
@@ -487,10 +489,11 @@ export async function updateDocMetadata({
 
   const updated = existing.storageProvider === "GEODE"
     ? await updateDocument(docId, { metadata: toJsonInput(metadata) }, { expectedRevision, operationId, ...documentMcpActor() })
-    : await prisma.doc.update({
-    where: { id: docId },
-    data: { metadata: toJsonInput(metadata), revision: randomUUID(), updatedAt: new Date() },
-  })
+    : await writeDocWithChange(
+      prisma,
+      { workspaceId: existing.workspaceId, kind: "UPSERT" },
+      (client) => client.doc.update({ where: { id: docId }, data: { metadata: toJsonInput(metadata), revision: randomUUID(), updatedAt: new Date() } }),
+    )
 
   return ok(
     `**Doc metadata updated**\n` +

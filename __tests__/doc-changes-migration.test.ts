@@ -24,10 +24,11 @@ describe(NAME, () => {
     expect([...runner.matchAll(new RegExp(`"${NAME}"`, "g"))].length).toBeGreaterThanOrEqual(3)
   })
 
-  it("is one idempotent table then one async unique index", () => {
-    expect(statements).toHaveLength(2)
+  it("is two idempotent tables then one async unique index", () => {
+    expect(statements).toHaveLength(3)
     expect(statements[0]).toMatch(/^CREATE TABLE IF NOT EXISTS doc_changes\s*\(/i)
-    expect(statements[1]).toMatch(/^CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_doc_changes_workspace_seq ON doc_changes\(workspace_id, seq\)$/i)
+    expect(statements[1]).toMatch(/^CREATE TABLE IF NOT EXISTS doc_change_counters\s*\(\s*workspace_id UUID PRIMARY KEY,\s*last_seq INTEGER NOT NULL\s*\)$/i)
+    expect(statements[2]).toMatch(/^CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_doc_changes_workspace_seq ON doc_changes\(workspace_id, seq\)$/i)
   })
 
   it("uses no foreign keys, sequences, enums, triggers, partial indexes, ASC/DESC or data statements", () => {
@@ -43,5 +44,9 @@ describe(NAME, () => {
     expect(block).toContain('@@map("doc_changes")')
     expect(block).toContain('@@unique([workspaceId, seq], map: "idx_doc_changes_workspace_seq")')
     expect(block).not.toContain("@relation")
+    const counter = schema.slice(schema.indexOf("model DocChangeCounter {"))
+    const counterBlock = counter.slice(0, counter.indexOf("\n}"))
+    expect(counterBlock).toContain('workspaceId String @id @map("workspace_id") @db.Uuid')
+    expect(counterBlock).toContain('@@map("doc_change_counters")')
   })
 })

@@ -183,9 +183,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Generic entity_links table (ADR phase 1): one new empty table, a unique pair index and two non-unique
   // async indexes. No backfill, no readers or writers. Digest recorded from the shipped SQL; please review it.
   "091_entity_links": "35ea5cfb70d4eb7df705c59441638946f209893fca1cfa0b33a17db6fad68b61",
-  // Doc change log for Geode doc sync (spike): one new empty table and a unique (workspace_id, seq) async index.
+  // Doc change log + seq counter for Geode doc sync (spike): two new empty tables and a unique (workspace_id, seq) async index.
   // No backfill. Digest recorded from the shipped SQL; please review it.
-  "092_doc_changes": "165ce42cb30e9f5b786af5f9b8420cb61af6040f18aaeb66e41aae051ae35e2f"
+  "092_doc_changes": "7febd8651e6d0f522a3f305333e93f0b7d57b3a8c848eb0d3f99843a31cde650"
 };
 
 /**
@@ -246,7 +246,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 092 postcondition (doc_changes table shape and the unique (workspace_id, seq) index valid and ready before the receipt).
   "092_doc_changes": {
-    "lib/migrations/doc-changes.ts": "280d44df72471da42a021125ddaf9348c5254de625ff19225a886a6681777b2f",
+    "lib/migrations/doc-changes.ts": "f3b8337d69ce3907cf8ac2ac527c775b76cdfb531e6bddc746a1bd8f3eb20f9b",
   },
 };
 

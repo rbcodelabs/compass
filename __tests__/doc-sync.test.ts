@@ -4,63 +4,15 @@
  * Runs the REAL document-service and doc-sync code against a small in-memory Prisma fake.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import * as syncFake from "./helpers/doc-sync-fake"
+import { resetStore, store, type Row } from "./helpers/doc-sync-fake"
 
-type Row = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
-
-const store = vi.hoisted(() => ({ docs: [] as Row[], changes: [] as Row[], failChangeWrite: false, ids: 0 }))
-
-function matches(row: Row, where: Row = {}): boolean {
-  return Object.entries(where).every(([key, want]) => {
-    if (want && typeof want === "object" && "gt" in (want as Row)) return row[key] > (want as Row).gt
-    return row[key] === want
-  })
-}
-function ordered(rows: Row[], orderBy?: Row | Row[]) {
-  const keys = (Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : []).map((o) => Object.entries(o)[0])
-  return [...rows].sort((a, b) => {
-    for (const [key, dir] of keys) {
-      const av = a[key] ?? null, bv = b[key] ?? null
-      if (av === bv) continue
-      return (av! < bv! ? -1 : 1) * (dir === "desc" ? -1 : 1)
-    }
-    return 0
-  })
-}
-const fake = vi.hoisted(() => {
-  const delegate = (rows: () => Row[], opts: { defaults?: () => Row } = {}) => ({
-    findMany: async ({ where, orderBy, take }: Row = {}) => ordered(rows().filter((r) => matches(r, where)), orderBy).slice(0, take ?? undefined).map((r) => ({ ...r })),
-    findFirst: async ({ where, orderBy }: Row = {}) => { const r = ordered(rows().filter((x) => matches(x, where)), orderBy)[0]; return r ? { ...r } : null },
-    findUnique: async ({ where }: Row) => { const r = rows().find((x) => matches(x, where)); return r ? { ...r } : null },
-    create: async ({ data }: Row) => { const row = { ...opts.defaults?.(), ...data }; rows().push(row); return { ...row } },
-    createMany: async ({ data }: Row) => {
-      if (store.failChangeWrite) throw new Error("change write failed")
-      rows().push(...data.map((d: Row) => ({ ...opts.defaults?.(), ...d }))); return { count: data.length }
-    },
-    updateMany: async ({ where, data }: Row) => { const hit = rows().filter((r) => matches(r, where)); hit.forEach((r) => Object.assign(r, data)); return { count: hit.length } },
-    update: async ({ where, data }: Row) => { const r = rows().find((x) => matches(x, where))!; Object.assign(r, data); return r },
-    delete: async ({ where }: Row) => { const i = rows().findIndex((x) => matches(x, where)); const [r] = rows().splice(i, 1); return r },
-    deleteMany: async () => ({ count: 0 }),
-  })
-  const db: Row = {
-    doc: delegate(() => store.docs, { defaults: () => ({ id: `00000000-0000-4000-8000-${String(++store.ids).padStart(12, "0")}`, parentId: null, content: null, metadata: null, roadmapItemId: null, docType: "STANDARD", sortOrder: 0, storageProvider: null, contentRef: null, createdAt: new Date("2026-01-01"), updatedAt: new Date("2026-01-01") }) }),
-    docChange: delegate(() => store.changes),
-    docVersion: { findFirst: async () => null, create: async () => ({}), deleteMany: async () => ({ count: 0 }) },
-    docComment: { deleteMany: async () => ({ count: 0 }) },
-    docOperation: { findUnique: async () => null, create: async () => ({}) },
-    roadmapItem: { findFirst: async () => null },
-  }
-  db.$transaction = async (fn: (tx: Row) => Promise<unknown>) => {
-    // Real transactions roll back; emulate it so "same transaction" is observable.
-    const snapshot = { docs: store.docs.map((r) => ({ ...r })), changes: store.changes.map((r) => ({ ...r })) }
-    try { return await fn(db) } catch (error) { store.docs.splice(0, store.docs.length, ...snapshot.docs); store.changes.splice(0, store.changes.length, ...snapshot.changes); throw error }
-  }
-  return db
-})
-vi.mock("@/lib/db", () => ({ default: () => fake }))
+vi.mock("@/lib/db", () => ({ default: () => syncFake.fake }))
 vi.mock("@/lib/following-hooks", () => ({ followAfterCreate: vi.fn(), mcpFollowActor: vi.fn() }))
 
 import { createDocument, deleteDocument, updateDocument } from "@/lib/document-service"
 import { moveDocById } from "@/lib/doc-fs"
+import { isDocChangeConflict, withDocChangeRetry } from "@/lib/doc-sync"
 import { decodeSyncCursor, encodeSyncCursor, scanDocs, DocSyncDisabledError } from "@/lib/doc-sync-scan"
 
 const WS = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -70,10 +22,7 @@ const changesFor = (workspaceId: string) => store.changes.filter((c) => c.worksp
 const create = (workspaceId: string, title: string, extra: Row = {}) => createDocument({ workspaceId, title, content: `# ${title}`, ...extra } as never, author)
 
 beforeEach(() => {
-  store.docs.length = 0
-  store.changes.length = 0
-  store.failChangeWrite = false
-  store.ids = 0
+  resetStore()
   vi.stubEnv("DOCS_SYNC_ENABLED", "1")
 })
 afterEach(() => vi.unstubAllEnvs())
@@ -96,7 +45,7 @@ describe("change-log writes", () => {
     store.changes.length = 0
     await updateDocument(parent.id, { title: "Renamed" }, { ...author, expectedRevision: parent.revision! })
     expect(store.changes.map((c) => [c.docId, c.kind, c.path])).toEqual([[parent.id, "MOVE", "Renamed"], [child.id, "MOVE", "Renamed/Child"]])
-    expect(store.changes.map((c) => c.seq)).toEqual([1, 2])
+    expect(store.changes.map((c) => c.seq)).toEqual([3, 4]) // the counter is not reset by clearing the log
   })
 
   it("records a doc-fs move (reparent) as MOVE at the new path", async () => {
@@ -132,6 +81,87 @@ describe("change-log writes", () => {
   })
 })
 
+describe("seq allocation under concurrent writers", () => {
+  it("never fails either mutation and hands out distinct, gap-free, monotonic seqs", async () => {
+    const a = await create(WS, "A")
+    const b = await create(WS, "B")
+    store.conflicts = 0
+    const [ua, ub] = await Promise.all([
+      updateDocument(a.id, { content: "a2" }, { ...author, expectedRevision: a.revision! }),
+      updateDocument(b.id, { content: "b2" }, { ...author, expectedRevision: b.revision! }),
+    ])
+    expect(store.conflicts).toBeGreaterThanOrEqual(1) // the simulated optimistic-concurrency conflict really happened
+    expect([ua.content, ub.content]).toEqual(["a2", "b2"])
+    expect(changesFor(WS).map((c) => c.seq)).toEqual([1, 2, 3, 4])
+    expect(new Set(changesFor(WS).map((c) => c.seq)).size).toBe(4)
+    expect(store.counters.find((c) => c.workspaceId === WS)!.lastSeq).toBe(4)
+    // A retried transaction must not leave a duplicate change row behind.
+    expect(changesFor(WS).filter((c) => c.docId === a.id)).toHaveLength(2)
+  })
+
+  it("survives several simultaneous creators", async () => {
+    const docs = await Promise.all(["A", "B", "C", "D"].map((t) => create(WS, t)))
+    expect(docs).toHaveLength(4)
+    expect(changesFor(WS).map((c) => c.seq).sort()).toEqual([1, 2, 3, 4])
+  })
+
+  it("does not retry conflicts when sync is off, and never retries other errors", async () => {
+    const conflict = Object.assign(new Error("boom"), { code: "P2034" })
+    vi.stubEnv("DOCS_SYNC_ENABLED", "")
+    let calls = 0
+    await expect(withDocChangeRetry(async () => { calls++; throw conflict })).rejects.toBe(conflict)
+    expect(calls).toBe(1)
+    vi.stubEnv("DOCS_SYNC_ENABLED", "1")
+    calls = 0
+    await expect(withDocChangeRetry(async () => { calls++; throw new Error("plain") })).rejects.toThrow("plain")
+    expect(calls).toBe(1)
+    calls = 0
+    await expect(withDocChangeRetry(async () => { calls++; throw conflict })).rejects.toBe(conflict) // bounded
+    expect(calls).toBe(6)
+  })
+
+  it("recognises Postgres and DSQL conflict signals", () => {
+    expect(isDocChangeConflict({ code: "P2034" })).toBe(true)
+    expect(isDocChangeConflict({ code: "40001" })).toBe(true)
+    expect(isDocChangeConflict(new Error("ERROR: OC000 change conflicts with another transaction"))).toBe(true)
+    expect(isDocChangeConflict({ cause: { code: "40001" } })).toBe(true)
+    expect(isDocChangeConflict(new Error("revision-conflict"))).toBe(false)
+    expect(isDocChangeConflict(new Error("unique constraint"))).toBe(false)
+  })
+})
+
+describe("sibling collision-suffix path changes", () => {
+  it("logs the sibling whose '(suffix)' disappears when the doc ahead of it is renamed", async () => {
+    const first = await create(WS, "Same")
+    const second = await create(WS, "Same")
+    const before = (await scanDocs(WS, {})).entries.map((e) => e.path).sort()
+    expect(before).toEqual(["Same", expect.stringMatching(/^Same \([0-9a-f]{8}\)$/)].sort())
+    const { cursor } = await scanDocs(WS, {})
+    await updateDocument(first.id, { title: "Other" }, { ...author, expectedRevision: first.revision! })
+    const delta = await scanDocs(WS, { cursor })
+    expect(Object.fromEntries(delta.entries.map((e) => [e.id, e.path]))).toEqual({ [first.id]: "Other", [second.id]: "Same" })
+  })
+
+  it("logs the surviving sibling (and its children) when the bare-titled doc is deleted", async () => {
+    const first = await create(WS, "Same")
+    const second = await create(WS, "Same")
+    const child = await create(WS, "Kid", { parentId: second.id })
+    const { cursor } = await scanDocs(WS, {})
+    await deleteDocument(first.id, { ...author, workspaceId: WS })
+    const delta = await scanDocs(WS, { cursor })
+    const byId = Object.fromEntries(delta.entries.map((e) => [e.id, [e.kind, e.path]]))
+    expect(byId).toEqual({ [first.id]: ["tombstone", "Same"], [second.id]: ["file", "Same"], [child.id]: ["file", "Same/Kid"] })
+  })
+
+  it("writes nothing extra when no sibling shares the title", async () => {
+    await create(WS, "Solo")
+    const other = await create(WS, "Other")
+    store.changes.length = 0
+    await updateDocument(other.id, { title: "Renamed" }, { ...author, expectedRevision: other.revision! })
+    expect(store.changes).toHaveLength(1)
+  })
+})
+
 describe("flag off", () => {
   it.each(["", "0", "false"])("writes no change rows and the scan is disabled (DOCS_SYNC_ENABLED=%j)", async (value) => {
     vi.stubEnv("DOCS_SYNC_ENABLED", value)
@@ -139,6 +169,7 @@ describe("flag off", () => {
     await updateDocument(a.id, { title: "Beta" }, { ...author, expectedRevision: a.revision! })
     await deleteDocument(a.id, { ...author, workspaceId: WS })
     expect(store.changes).toHaveLength(0)
+    expect(store.counters).toHaveLength(0)
     await expect(scanDocs(WS, {})).rejects.toBeInstanceOf(DocSyncDisabledError)
   })
 })
