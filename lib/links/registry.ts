@@ -58,7 +58,8 @@ export type LinkCandidates = { canLink: boolean; items: LinkPickerItem[] } | nul
 
 /** Dual-write / backfill hooks for a type that replaces a legacy table. Declared here, implemented by phases 4-7. */
 export type LegacyAdapter = {
-  legacyTable: string
+  /** The module that owns the legacy table (the only place allowed to name it). */
+  legacyModule: string
   /** The explicit-only backfill migration, or null for a new-only type (phase 4: no backfill, legacy stays the source of truth). */
   backfillMigration: string | null
   /**
@@ -184,7 +185,7 @@ const experimentInformedByStudy: LinkTypeDef = {
   compat: { mcpTools: [], restOps: [] },
 }
 
-// ── SOLUTION_TARGETS_KEY_RESULT (phase 4: new-only mirror of solution_key_result_links) ───────
+// ── SOLUTION_TARGETS_KEY_RESULT (phase 4: new-only mirror of the legacy table) ───────
 
 /** Outside production the mirror is on so tests and E2E cover it; production needs COMPASS_ENTITY_LINKS_SOLUTION_KR_MIRROR=1. */
 export function isSolutionKeyResultMirrorEnabled(): boolean {
@@ -193,7 +194,7 @@ export function isSolutionKeyResultMirrorEnabled(): boolean {
 }
 
 /**
- * A Solution targets Key Results. solution_key_result_links stays the source of truth and every read stays on
+ * A Solution targets Key Results. the legacy Solution-Key Result table stays the source of truth and every read stays on
  * it: the legacy writer (linkSolutionToKeyResult / unlinkSolutionFromKeyResult in lib/typed-links.ts) mirrors
  * each link and unlink into entity_links inside its own transaction while the flag is on (lib/links/legacy-mirror.ts).
  * New-only: nothing is backfilled, so the mirror is a partial shadow and is not offered by reads, summaries or the
@@ -212,7 +213,7 @@ const solutionTargetsKeyResult: LinkTypeDef = {
   lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
   summaries: {},
   restrictedContexts: "deny",
-  legacy: { legacyTable: "solution_key_result_links", backfillMigration: null, mode: "mirror" },
+  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: null, mode: "mirror" },
   compat: { mcpTools: ["link_solution_to_key_result", "unlink_solution_from_key_result"], restOps: ["linkSolutionKeyResult", "unlinkSolutionKeyResult"] },
 }
 

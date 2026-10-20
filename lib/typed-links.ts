@@ -306,7 +306,7 @@ export async function linkSolutionToKeyResult(
   const existing = (await tx.solutionKeyResultLink.findFirst({ where: { solutionId: solution.id, keyResultId: keyResult.id } })) as SolutionLinkRow | null
   const shared = { solution: { id: solution.id, title: solution.title, workspaceId }, keyResult: { id: keyResult.id, title: keyResult.title } }
   // The legacy row is written first and stays the source of truth; the entity_links mirror (flagged) joins the same transaction.
-  const mirror = async () => (await legacyMirror()).mirrorSolutionKeyResultLink(tx, { solutionId: solution.id, keyResultId: keyResult.id, workspaceId, ctx: input.ctx })
+  const mirror = async () => (await legacyMirror()).mirrorSolutionTargetsKeyResult(tx, { solutionId: solution.id, keyResultId: keyResult.id, workspaceId, ctx: input.ctx })
   if (existing) {
     if (existing.workspaceId === workspaceId) {
       await mirror()
@@ -331,7 +331,7 @@ export async function unlinkSolutionFromKeyResult(
   const { count } = await tx.solutionKeyResultLink.deleteMany({
     where: { solutionId: solution.id, keyResultId: input.keyResultId, workspaceId: solution.workspaceId },
   })
-  await (await legacyMirror()).mirrorSolutionKeyResultUnlink(tx, { solutionId: solution.id, keyResultId: input.keyResultId, workspaceId: solution.workspaceId })
+  await (await legacyMirror()).unmirrorSolutionTargetsKeyResult(tx, { solutionId: solution.id, keyResultId: input.keyResultId, workspaceId: solution.workspaceId })
   return { removed: count }
 }
 
