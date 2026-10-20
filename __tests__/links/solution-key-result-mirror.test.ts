@@ -83,10 +83,20 @@ describe("mirror on legacy write", () => {
     expect(state().entityLinks).toHaveLength(0);
   });
 
-  it("rolls the legacy write back with a failed mirror: they share the transaction's fate", async () => {
+  it("propagates a mirror failure to the caller, so the shared transaction rolls back (the fake does not model rollback)", async () => {
     const failing = vi.spyOn(fake.current!.client.entityLink, "create").mockRejectedValueOnce(new Error("boom"));
     await expect(link()).rejects.toThrow("boom");
     failing.mockRestore();
+  });
+
+  it("listLinks with the mirrored type named explicitly returns an empty page, flag on or off", async () => {
+    await link();
+    for (const flag of ["1", "0"]) {
+      vi.stubEnv("COMPASS_ENTITY_LINKS_SOLUTION_KR_MIRROR", flag);
+      for (const [entityType, entityId] of [["SOLUTION", "sol-a"], ["KEY_RESULT", "kr-a"]]) {
+        expect(await listLinks(tx(), { workspaceId: WS_A.id, entityType, entityId, linkType: KEY, limit: 10 })).toEqual({ items: [], nextCursor: null });
+      }
+    }
   });
 });
 

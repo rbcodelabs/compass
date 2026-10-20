@@ -303,7 +303,8 @@ export async function listLinks(db: Tx, input: ListEntityLinksInput): Promise<{ 
   if (input.linkType !== undefined) {
     const def = requireLinkType(input.linkType)
     scoped = applicable.filter((entry) => entry.def.key === def.key)
-    if (scoped.length === 0 && !isLinkTypeEnabled(def)) return { items: [], nextCursor: null }
+    // Disabled, or legacy-mirrored (reads stay on the legacy table): nothing to list, and not an error.
+    if (scoped.length === 0 && (def.legacy || !isLinkTypeEnabled(def))) return { items: [], nextCursor: null }
     if (scoped.length === 0) throw new TypedLinkError(`${def.key} does not link ${entityType} entities.`, "INVALID")
   }
   if (scoped.length === 0) return { items: [], nextCursor: null }
