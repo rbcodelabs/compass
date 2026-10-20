@@ -204,6 +204,9 @@ importers:
       '@aws/aurora-dsql-prisma-tools':
         specifier: ^0.1.0
         version: 0.1.2
+      '@opencode-ai/sdk':
+        specifier: 1.19.3
+        version: 1.19.3
       '@playwright/test':
         specifier: ^1.60.0
         version: 1.61.0
@@ -1400,6 +1403,9 @@ packages:
   '@nolyfill/is-core-module@1.0.39':
     resolution: {integrity: sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA==}
     engines: {node: '>=12.4.0'}
+
+  '@opencode-ai/sdk@1.19.3':
+    resolution: {integrity: sha512-G63bZD2r6plqgjFdenWVj3HBFWmLQSVuG9CXMQuTjakzA5aL6wFLmI23Biz5ESE4lQQ08UTHcY2N4NOShJFb2w==}
 
   '@oxc-project/types@0.133.0':
     resolution: {integrity: sha512-KzkdCd6Uxqnf6l3HOw1xfatAlUURA0g14cvBYFyJ5SaNOQbOUvBr9PKArcPcrNIeRsBdgcUzOGrhKveVpvOIGA==}
@@ -7287,6 +7293,10 @@ snapshots:
       fastq: 1.20.1
 
   '@nolyfill/is-core-module@1.0.39': {}
+
+  '@opencode-ai/sdk@1.19.3':
+    dependencies:
+      cross-spawn: 7.0.6
 
   '@oxc-project/types@0.133.0': {}
 

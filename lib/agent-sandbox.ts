@@ -43,6 +43,7 @@
 
 import { createHash } from "node:crypto"
 import { Sandbox, Snapshot } from "@vercel/sandbox"
+import { OPENCODE_PINNED_VERSION } from "@/lib/agent-harness"
 
 export const SANDBOX_RUNTIME = "node24"
 const SANDBOX_TIMEOUT_MS = 5 * 60_000
@@ -111,6 +112,12 @@ export const SANDBOX_DEPENDENCIES: Record<string, string> = {
   // mechanics. Pinned to the exact version Compass already depends on
   // host-side (package.json) so both sides of the pilot stay in lockstep.
   "@rbcodelabs/geode-headless": "0.1.0",
+  // EXPERIMENTAL opencode harness (AGENT_HARNESS=opencode; lib/agent-harness.ts): the CLI
+  // (platform binary arrives via its optionalDependencies, resolved for linux-x64 at
+  // install) and the SDK client used by scripts/agent/opencode-turn-entry.ts. Baked in so
+  // one golden snapshot serves both harnesses; the Claude path never loads them.
+  "opencode-ai": OPENCODE_PINNED_VERSION,
+  "@opencode-ai/sdk": OPENCODE_PINNED_VERSION,
   "@playwright/browser-chromium": PLAYWRIGHT_VERSION,
   "playwright-core": PLAYWRIGHT_VERSION,
   zod: "^4.0.0",
@@ -156,6 +163,21 @@ export function computeDepsFingerprint(): string {
 
 /** Written, run, and deleted during the build; never part of the snapshot. */
 const BROWSER_SMOKE_PATH = "browser-smoke.mjs"
+const OPENCODE_SMOKE_PATH = "opencode-smoke.mjs"
+
+/**
+ * Proves the opencode CLI binary (a platform-specific download) runs in this
+ * environment at the pinned version, and that the SDK client resolves. Same two-phase
+ * use as the browser smoke: before snapshotting and again after a warm boot.
+ */
+const OPENCODE_SMOKE_SCRIPT = `import { execFileSync } from "node:child_process"
+const expected = ${JSON.stringify(OPENCODE_PINNED_VERSION)}
+const version = execFileSync("./node_modules/.bin/opencode", ["--version"], { encoding: "utf8" }).trim()
+if (version !== expected) throw new Error("opencode version " + version + " != pinned " + expected)
+const sdk = await import("@opencode-ai/sdk/v2/client")
+if (typeof sdk.createOpencodeClient !== "function") throw new Error("@opencode-ai/sdk/v2/client has no createOpencodeClient")
+console.log("opencode ok version=" + version)
+`
 
 /**
  * Launches the baked Chromium and takes a real screenshot. Run before the
@@ -281,8 +303,11 @@ export async function buildGoldenSnapshot(opts?: {
     const browserVersion = parseBrowserVersion(smokeOutput)
     emit(`Chromium works: version ${browserVersion} (${smokeMs}ms)`)
 
+    emit("smoke-checking opencode before snapshotting...")
+    emit(await runOpencodeSmokeCheck(sandbox, "opencode-smoke", emit))
+
     // Keep the snapshot dependencies-only, per the design note above.
-    await runStep(sandbox, "rm", { cmd: "rm", args: ["-f", BROWSER_SMOKE_PATH] }, emit)
+    await runStep(sandbox, "rm", { cmd: "rm", args: ["-f", BROWSER_SMOKE_PATH, OPENCODE_SMOKE_PATH] }, emit)
 
     const snapStart = Date.now()
     const snap = await sandbox.currentSession().snapshot()
@@ -331,6 +356,15 @@ async function runBrowserSmokeCheck(
   return runStep(sandbox, label, { cmd: "node", args: [BROWSER_SMOKE_PATH] }, emit)
 }
 
+async function runOpencodeSmokeCheck(
+  sandbox: Sandbox,
+  label: string,
+  emit: (line: string) => void
+): Promise<string> {
+  await sandbox.writeFiles([{ path: OPENCODE_SMOKE_PATH, content: OPENCODE_SMOKE_SCRIPT }])
+  return runStep(sandbox, label, { cmd: "node", args: [OPENCODE_SMOKE_PATH] }, emit)
+}
+
 /**
  * Boot the freshly built snapshot and confirm Chromium still launches from it.
  * The browser lives in playwright-core's cache directory, and whether the
@@ -344,6 +378,7 @@ async function verifySnapshotBrowser(
   const sandbox = await bootSandboxFromSnapshot(snapshotId, { timeoutMs: 2 * 60_000 })
   try {
     await runBrowserSmokeCheck(sandbox, "verify", emit)
+    await runOpencodeSmokeCheck(sandbox, "verify-opencode", emit)
   } catch (error) {
     throw new Error(
       `snapshot ${snapshotId} was created but Chromium does not launch when booted from it ` +

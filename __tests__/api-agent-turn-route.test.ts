@@ -692,6 +692,94 @@ describe("agent turn route — detached runs", () => {
     expect(paths).toEqual(expect.arrayContaining(["entry.ts", "docs-path-guard.ts", "docs-final-state.ts"]))
   })
 
+  describe("harness selection (EXPERIMENTAL opencode, default off)", () => {
+    const savedEnv = { harness: process.env.AGENT_HARNESS, gateway: process.env.AI_GATEWAY_API_KEY, model: process.env.AGENT_OPENCODE_MODEL }
+    afterEach(() => {
+      for (const [key, value] of [["AGENT_HARNESS", savedEnv.harness], ["AI_GATEWAY_API_KEY", savedEnv.gateway], ["AGENT_OPENCODE_MODEL", savedEnv.model]] as const) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    })
+
+    function bootstrappableSandbox() {
+      const writeFiles = vi.fn().mockResolvedValue(undefined)
+      const runCommand = vi.fn().mockResolvedValue({ exitCode: 0 })
+      mockBootSandbox.mockResolvedValue({ writeFiles, runCommand, stop: vi.fn() })
+      return { writeFiles, runCommand }
+    }
+
+    it("runs the Claude entry with only the Anthropic credential when AGENT_HARNESS is unset", async () => {
+      delete process.env.AGENT_HARNESS
+      process.env.AI_GATEWAY_API_KEY = "gateway-key-must-not-leak"
+      const { writeFiles, runCommand } = bootstrappableSandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      const files = writeFiles.mock.calls[0][0] as { path: string; content: string }[]
+      expect(files.find(f => f.path === "entry.ts")?.content).toContain("[turn-entry]")
+      expect(files.map(f => f.path)).toEqual(expect.arrayContaining(["run-reporter.ts", "docs-path-guard.ts"]))
+      expect(runCommand).toHaveBeenCalledTimes(1)
+      const env = runCommand.mock.calls[0][0].env as Record<string, string>
+      expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test")
+      expect(env).not.toHaveProperty("AI_GATEWAY_API_KEY")
+    })
+
+    it("treats an unrecognized AGENT_HARNESS value as Claude", async () => {
+      process.env.AGENT_HARNESS = "opencod"
+      const { writeFiles } = bootstrappableSandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect((writeFiles.mock.calls[0][0] as { path: string; content: string }[]).find(f => f.path === "entry.ts")?.content).toContain("[turn-entry]")
+    })
+
+    it("500s before booting a sandbox when opencode is selected without a gateway key", async () => {
+      process.env.AGENT_HARNESS = "opencode"
+      delete process.env.AI_GATEWAY_API_KEY
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(response.status).toBe(500)
+      expect(await response.text()).toMatch(/AI_GATEWAY_API_KEY/)
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+      expect(mockMintKey).not.toHaveBeenCalled()
+    })
+
+    it("ships the opencode entry (no per-turn install: opencode is in the snapshot) and forwards only the gateway credential", async () => {
+      process.env.AGENT_HARNESS = "opencode"
+      process.env.AI_GATEWAY_API_KEY = "gw-key"
+      process.env.AGENT_OPENCODE_MODEL = "anthropic/claude-sonnet-5.5"
+      const { writeFiles, runCommand } = bootstrappableSandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(response.status).toBe(202)
+
+      expect(runCommand).toHaveBeenCalledTimes(1)
+      const entry = runCommand.mock.calls[0][0]
+      expect(entry).toMatchObject({ cmd: "node", args: ["entry.ts"], detached: true })
+      expect(entry.env).toMatchObject({ AI_GATEWAY_API_KEY: "gw-key", AGENT_MODEL: "anthropic/claude-sonnet-5.5" })
+      expect(entry.env).not.toHaveProperty("ANTHROPIC_API_KEY")
+      expect(entry.env).not.toHaveProperty("DOCS_ROOT")
+
+      const files = writeFiles.mock.calls[0][0] as { path: string; content: string }[]
+      expect(files.find(f => f.path === "entry.ts")?.content).toContain("[opencode-turn-entry]")
+      expect(files.map(f => f.path)).toEqual(expect.arrayContaining(["opencode-adapter.ts", "run-reporter.ts"]))
+      expect(files.some(f => f.path.startsWith("docs/"))).toBe(false)
+    })
+
+    it("opencode: forwards connector slugs, carries pack instructions in the system prompt, ships no pack plugin files", async () => {
+      process.env.AGENT_HARNESS = "opencode"
+      process.env.AI_GATEWAY_API_KEY = "gw-key"
+      mockListConnectedGrants.mockResolvedValue([{ slug: "v0", scope: "mcp" }])
+      mockPreparePacks.mockResolvedValue({
+        files: [{ path: "packs/p/plugin.json", content: Buffer.from("{}") }],
+        pluginPaths: ["packs/p"],
+        skillIds: ["p:on"],
+        provenanceJson: "[]",
+        systemPromptAppendices: ["PACK-SKILL-INSTRUCTIONS"],
+      })
+      const { writeFiles, runCommand } = bootstrappableSandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      const env = runCommand.mock.calls[0][0].env as Record<string, string>
+      expect(JSON.parse(env.AGENT_MCP_CONNECTORS).map((c: { slug: string }) => c.slug)).toEqual(["v0"])
+      expect(env.AGENT_SYSTEM_PROMPT).toContain("PACK-SKILL-INSTRUCTIONS")
+      expect((writeFiles.mock.calls[0][0] as { path: string }[]).some(f => f.path.startsWith("packs/"))).toBe(false)
+    })
+  })
+
   it("gives a claim-scoped handoff run no docs at all: no files, no manifest, no DOCS_ROOT", async () => {
     // Their MCP key is narrower than "act as the user"; a host-applied file edit
     // would sidestep that, so the doc tree is neither materialized nor reconciled.
