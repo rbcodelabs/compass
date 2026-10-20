@@ -46,9 +46,14 @@ describe.skipIf(!databaseUrl)("doc change log against real Postgres", () => {
       created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       created_by_id UUID, updated_by_id UUID, source VARCHAR(20) NOT NULL DEFAULT 'UI')`)
     const sql = readFileSync(path.join(process.cwd(), "prisma/migrations/092_doc_changes/migration.sql"), "utf-8")
-    for (const statement of sql.split("\n").map((l) => l.replace(/--.*$/, "")).join("\n").split(";").map((s) => s.trim()).filter(Boolean)) {
-      await q(statement.replace(/\bINDEX ASYNC\b/gi, "INDEX"))
-    }
+    // The migration's statements are unqualified, so run them on one connection whose search_path is the throwaway schema.
+    const migrationClient = await pool.connect()
+    try {
+      await migrationClient.query(`SET search_path TO "${schema}"`)
+      for (const statement of sql.split("\n").map((l) => l.replace(/--.*$/, "")).join("\n").split(";").map((s) => s.trim()).filter(Boolean)) {
+        await migrationClient.query(statement.replace(/\bINDEX ASYNC\b/gi, "INDEX"))
+      }
+    } finally { migrationClient.release() }
     const { PrismaClient } = await import("@prisma/client")
     const { PrismaPg } = await import("@prisma/adapter-pg")
     const { injectUpdatedAtExtension } = await import("@/lib/prisma-updated-at")
