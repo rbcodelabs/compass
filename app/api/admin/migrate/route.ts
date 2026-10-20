@@ -27,7 +27,7 @@ async function getPool(): Promise<Pool> {
   const migrationUrl = getMigrationDatabaseUrl(process.env);
   if (migrationUrl) {
     if (getPoolerMode(migrationUrl, process.env) === "transaction") {
-      throw new Error("Migrations require a session-mode or direct connection (port 5432); set DATABASE_MIGRATION_URL.");
+      throw new Error("Migrations require a session-mode or direct connection (port 5432); set DATABASE_MIGRATION_URL to the session pooler (port 5432).");
     }
     return new Pool({ connectionString: migrationUrl, max: 3, query_timeout: 40_000 });
   }

@@ -66,7 +66,8 @@ uses a plain `pg` pool; set `PGHOST` and it signs DSQL tokens.
 
 On the `DATABASE_URL` path the pooler mode is detected from the port:
 
-- **Runtime (`DATABASE_URL`) should be Supabase's transaction pooler (port
+- **Runtime (`DATABASE_URL`, falling back to the Vercel Supabase integration's
+  `POSTGRES_URL`) should be Supabase's transaction pooler (port
   6543).** A backend connection is held only while a transaction runs, so many
   serverless instances no longer exhaust the 15-slot session pool
   (`EMAXCONNSESSION`). Each instance keeps at most 5 connections; the limit that
@@ -75,9 +76,30 @@ On the `DATABASE_URL` path the pooler mode is detected from the port:
   `search_path`), statements are unnamed (no server-side prepared statements)
   and interactive `$transaction`s pin one connection until commit. Do not add
   session state (`SET`, advisory locks, `LISTEN`, temp tables) to runtime code.
-- **Migrations use `DATABASE_MIGRATION_URL`** (session pooler or direct, port
-  5432). `/api/admin/migrate` and the Prisma CLI prefer it and fall back to
-  `DATABASE_URL`; the migrate route refuses to run over a transaction-mode URL.
+- **Migrations use `DATABASE_MIGRATION_URL`** (session pooler, port 5432),
+  then `POSTGRES_URL_NON_POOLING`, then the runtime URL. `/api/admin/migrate`
+  and the Prisma CLI use this order; the migrate route refuses to run over a
+  transaction-mode URL. The integration's `POSTGRES_URL_NON_POOLING` is the
+  direct host (`db.<ref>.supabase.co`), which is IPv6-only and unreachable from
+  Vercel, so set `DATABASE_MIGRATION_URL` to the **session pooler** string
+  instead.
+- Integration URLs (`?sslmode=require&supa=base-pooler.x`) are normalized when
+  used as fallbacks: `supa` is dropped, and `uselibpqcompat=true` is added
+  because `pg-connection-string` otherwise treats `sslmode=require` as
+  `verify-full`, which fails against the Supabase pooler's CA chain. The result
+  is an encrypted but unverified connection; use an explicit `DATABASE_URL`
+  with `sslrootcert` for full verification. Explicit `DATABASE_URL` values are
+  never rewritten.
+- Automation previews ignore `POSTGRES_*` and `DATABASE_MIGRATION_URL`, and
+  still forbid `DATABASE_URL`.
+
+**Production cutover (Supabase integration):** (1) set `DATABASE_MIGRATION_URL`
+to the session-pooler string (port 5432) in production; (2) merge and deploy
+this change; (3) delete production `DATABASE_URL` so runtime falls through to
+`POSTGRES_URL` (6543); (4) redeploy (env changes need a new deployment);
+(5) verify authenticated `GET /api/admin/migrate` and watch for
+`EMAXCONNSESSION`. **Rollback:** re-add `DATABASE_URL` with the 5432 string and
+redeploy.
 - On a session-mode URL (port 5432, or only `DATABASE_URL` set to such a URL)
   each instance keeps at most 3 connections, as before. `DATABASE_POOL_MAX`
   overrides the cap in either mode and `DATABASE_POOLER_MODE=transaction|session`

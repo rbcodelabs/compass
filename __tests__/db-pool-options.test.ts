@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getPlainPoolOptions } from "@/lib/db";
-import { getMigrationDatabaseUrl, getPoolerMode, getRuntimeDatabaseUrl } from "@/lib/db-url";
+import { getMigrationDatabaseUrl, getPoolerMode, getRuntimeDatabaseUrl, normalizeIntegrationUrl, usesPlainPostgres } from "@/lib/db-url";
 
 describe("getPlainPoolOptions", () => {
   const url = "postgres://u:p@host:5432/postgres";
@@ -46,6 +46,58 @@ describe("database URL selection", () => {
     const env = { DATABASE_URL: " ", DATABASE_MIGRATION_URL: "" };
     expect(getRuntimeDatabaseUrl(env)).toBeUndefined();
     expect(getMigrationDatabaseUrl(env)).toBeUndefined();
+  });
+});
+
+describe("Vercel Supabase integration fallbacks", () => {
+  const pooled = "postgres://u:p@aws-0.pooler.supabase.com:6543/postgres?sslmode=require&supa=base-pooler.x";
+  const direct = "postgres://u:p@db.ref.supabase.co:5432/postgres?sslmode=require";
+
+  it("runtime prefers DATABASE_URL over POSTGRES_URL", () => {
+    expect(getRuntimeDatabaseUrl({ DATABASE_URL: "postgres://x:5432/db", POSTGRES_URL: pooled })).toBe("postgres://x:5432/db");
+  });
+
+  it("runtime falls through to a normalized POSTGRES_URL", () => {
+    const url = getRuntimeDatabaseUrl({ POSTGRES_URL: pooled })!;
+    expect(url).toContain(":6543/");
+    expect(url).not.toContain("supa=");
+    expect(url).toContain("sslmode=require");
+    expect(url).toContain("uselibpqcompat=true");
+    expect(getPoolerMode(url, {})).toBe("transaction");
+  });
+
+  it("migrations prefer DATABASE_MIGRATION_URL, then POSTGRES_URL_NON_POOLING, then the runtime URL", () => {
+    const base = { DATABASE_URL: "postgres://rt:5432/db", POSTGRES_URL: pooled, POSTGRES_URL_NON_POOLING: direct };
+    expect(getMigrationDatabaseUrl({ ...base, DATABASE_MIGRATION_URL: "postgres://m:5432/db" })).toBe("postgres://m:5432/db");
+    expect(getMigrationDatabaseUrl(base)).toContain("db.ref.supabase.co");
+    expect(getMigrationDatabaseUrl({ DATABASE_URL: "postgres://rt:5432/db" })).toBe("postgres://rt:5432/db");
+    expect(getPoolerMode(getMigrationDatabaseUrl({ POSTGRES_URL: pooled })!, {})).toBe("transaction");
+  });
+
+  it("does not alter an explicit DATABASE_URL", () => {
+    const explicit = "postgres://x:5432/db?sslmode=require";
+    expect(getRuntimeDatabaseUrl({ DATABASE_URL: explicit })).toBe(explicit);
+  });
+
+  it("only adds libpq semantics for bare sslmode=require", () => {
+    expect(normalizeIntegrationUrl("postgres://h:6543/d?sslmode=verify-full")).not.toContain("uselibpqcompat");
+    expect(normalizeIntegrationUrl("postgres://h:6543/d?sslmode=require&sslrootcert=/ca.pem")).not.toContain("uselibpqcompat");
+    expect(normalizeIntegrationUrl("not a url")).toBe("not a url");
+  });
+
+  it("ignores integration and migration variables in automation previews", () => {
+    for (const env of [{ PREVIEW_AUTOMATION_ENABLED: "1" }, { PREVIEW_DATABASE_MODE: "vercel-managed" }]) {
+      const withVars = { ...env, POSTGRES_URL: pooled, POSTGRES_URL_NON_POOLING: direct, DATABASE_MIGRATION_URL: direct };
+      expect(getRuntimeDatabaseUrl(withVars)).toBeUndefined();
+      expect(getMigrationDatabaseUrl(withVars)).toBeUndefined();
+      expect(usesPlainPostgres(withVars)).toBe(false);
+    }
+  });
+
+  it("usesPlainPostgres is true for DATABASE_URL or integration vars, false otherwise", () => {
+    expect(usesPlainPostgres({ DATABASE_URL: "postgres://x/db" })).toBe(true);
+    expect(usesPlainPostgres({ POSTGRES_URL: pooled })).toBe(true);
+    expect(usesPlainPostgres({ PGHOST: "dsql" })).toBe(false);
   });
 });
 

@@ -16,7 +16,7 @@ export function getDatabaseUser(): string {
 }
 
 /**
- * Pool options for the plain-Postgres (`DATABASE_URL`) path.
+ * Pool options for the plain-Postgres (`DATABASE_URL` / `POSTGRES_URL`) path.
  *
  * `pg` defaults to 10 connections per Pool, and every serverless instance owns
  * its own Pool.
@@ -81,7 +81,7 @@ export function createBasePrismaClient(): PrismaClient {
   const host = process.env.PGHOST;
   if (!host) {
     throw new Error(
-      "Neither DATABASE_URL nor PGHOST is set. " +
+      "Neither DATABASE_URL (or POSTGRES_URL) nor PGHOST is set. " +
         "For local dev set DATABASE_URL; for Vercel set PGHOST + AWS credentials."
     );
   }

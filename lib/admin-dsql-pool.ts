@@ -2,11 +2,14 @@ import { DsqlSigner } from "@aws-sdk/dsql-signer"
 import { awsCredentialsProvider } from "@vercel/functions/oidc"
 import { Pool, type PoolClient } from "pg"
 import { getActiveSchema } from "@/lib/schema"
+import { getMigrationDatabaseUrl } from "@/lib/db-url"
 
 async function createAdminPool() {
-  if (process.env.DATABASE_URL) return new Pool({ connectionString: process.env.DATABASE_URL, max: 3 })
+  // Runs `SET search_path`, so it needs a session-capable URL (not the transaction pooler).
+  const plainUrl = getMigrationDatabaseUrl(process.env)
+  if (plainUrl) return new Pool({ connectionString: plainUrl, max: 3 })
   const host = process.env.PGHOST
-  if (!host) throw new Error("Neither DATABASE_URL nor PGHOST is configured.")
+  if (!host) throw new Error("Neither DATABASE_URL (or POSTGRES_URL) nor PGHOST is configured.")
   const signer = new DsqlSigner({
     credentials: awsCredentialsProvider({
       roleArn: process.env.AWS_ROLE_ARN!,

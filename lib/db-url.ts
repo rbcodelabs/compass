@@ -10,9 +10,18 @@
  *   LISTEN, long multi-statement DDL) must use a SESSION-mode or direct
  *   connection (port 5432).
  *
- * `DATABASE_URL` is the runtime URL. `DATABASE_MIGRATION_URL` is optional and
- * falls back to `DATABASE_URL`, so a deployment with only `DATABASE_URL` set
- * behaves exactly as before.
+ * Resolution order (first non-blank wins):
+ * - runtime:    DATABASE_URL, then POSTGRES_URL (Vercel Supabase integration,
+ *               transaction pooler)
+ * - migrations: DATABASE_MIGRATION_URL, then POSTGRES_URL_NON_POOLING, then the
+ *               runtime URL
+ *
+ * A deployment with only `DATABASE_URL` set behaves exactly as before.
+ *
+ * Automation previews (PREVIEW_AUTOMATION_ENABLED / vercel-managed) ignore the
+ * integration and migration variables entirely, so an integration that injects
+ * POSTGRES_* into preview environments cannot turn them into plain-Postgres
+ * deployments. `DATABASE_URL` stays forbidden there (see lib/db.ts).
  */
 type Env = Record<string, string | undefined>;
 
@@ -25,12 +34,57 @@ function clean(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function isAutomationPreview(env: Env): boolean {
+  return env.PREVIEW_AUTOMATION_ENABLED === "1" || env.PREVIEW_DATABASE_MODE === "vercel-managed";
+}
+
+/**
+ * Integration URLs look like `...:6543/postgres?sslmode=require&supa=base-pooler.x`.
+ * - `supa` is a Supabase-internal marker; drop it.
+ * - pg-connection-string >= 2.9 treats `sslmode=require` as `verify-full`, but the
+ *   Supabase pooler presents a certificate chain rooted in Supabase's own CA, so
+ *   the handshake fails with "self-signed certificate in certificate chain".
+ *   Opt in to libpq semantics (`uselibpqcompat=true`), under which `require`
+ *   means "encrypt, do not verify" - what the integration URL intends. Supply
+ *   `sslrootcert` (and use `verify-full`) in an explicit URL for full verification.
+ */
+export function normalizeIntegrationUrl(connectionString: string): string {
+  try {
+    const url = new URL(connectionString);
+    url.searchParams.delete("supa");
+    if (url.searchParams.get("sslmode") === "require" && !url.searchParams.has("uselibpqcompat") && !url.searchParams.has("sslrootcert")) {
+      url.searchParams.set("uselibpqcompat", "true");
+    }
+    return url.toString();
+  } catch {
+    return connectionString;
+  }
+}
+
 export function getRuntimeDatabaseUrl(env: Env): string | undefined {
-  return clean(env.DATABASE_URL);
+  const explicit = clean(env.DATABASE_URL);
+  if (explicit) return explicit;
+  if (isAutomationPreview(env)) return undefined;
+  const integration = clean(env.POSTGRES_URL);
+  return integration ? normalizeIntegrationUrl(integration) : undefined;
 }
 
 export function getMigrationDatabaseUrl(env: Env): string | undefined {
-  return clean(env.DATABASE_MIGRATION_URL) ?? getRuntimeDatabaseUrl(env);
+  if (!isAutomationPreview(env)) {
+    const explicit = clean(env.DATABASE_MIGRATION_URL);
+    if (explicit) return explicit;
+    const nonPooling = clean(env.POSTGRES_URL_NON_POOLING);
+    if (nonPooling) return normalizeIntegrationUrl(nonPooling);
+  }
+  return getRuntimeDatabaseUrl(env);
+}
+
+/**
+ * True when this deployment talks to plain Postgres rather than Aurora DSQL.
+ * Replaces ad-hoc `process.env.DATABASE_URL` truthiness checks.
+ */
+export function usesPlainPostgres(env: Env): boolean {
+  return getMigrationDatabaseUrl(env) !== undefined;
 }
 
 /**
