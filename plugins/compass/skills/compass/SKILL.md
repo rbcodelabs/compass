@@ -158,6 +158,8 @@ The API key is stored in the Vercel project settings and in `.env.local` as `MCP
 | `link_entities` | `workspaceId, linkType, fromId, toId` (`toType` only for multi-target types). Creates a registry-backed link; today `EXPERIMENT_INFORMED_BY_STUDY` (Experiment `fromId` -> customer-interview or usability-test Research Study `toId`, not archived, research capture enabled). Idempotent (`created:false` on repeat). Text ends with `ID: <link uuid>` |
 | `unlink_entities` | `workspaceId, linkType, fromId, toId`. `removed:1`, or `removed:0` when none. Only `fromId` is checked, so a link to a deleted study is still removable |
 | `add_solution` | Propose a solution under an opportunity |
+| `create_opportunities` | Bulk-create up to 25 opportunities; per-item results; pass `clientId` per item so retries are safe |
+| `create_solutions` | Bulk-create up to 25 solutions, each under an existing opportunity; per-item results; pass `clientId` per item |
 | `add_assumption` | Add a testable assumption to a solution (HIGH/MEDIUM/LOW risk) |
 | `update_assumption` | Update an assumption's title, risk level, or status (UNTESTED/TESTING/VALIDATED/INVALIDATED) |
 | `delete_assumption` | Permanently delete an assumption; unlinks (does not delete) any Experiments or Evidence that referenced it |

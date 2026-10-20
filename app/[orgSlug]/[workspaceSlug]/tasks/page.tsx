@@ -182,7 +182,13 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       )}
     >
       {view === "list" ? (
-        <TaskListView tasks={tasks} orgSlug={orgSlug} workspaceSlug={workspaceSlug} members={members} />
+        <TaskListView
+          tasks={tasks}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          members={members}
+          readOnly={workspace.isReadOnly}
+        />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           {/*

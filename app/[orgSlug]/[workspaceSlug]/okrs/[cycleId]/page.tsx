@@ -7,6 +7,8 @@ import { ObjectivesList } from "@/components/okrs/objectives-list";
 import { AddObjectiveForm } from "@/components/okrs/add-objective-form";
 import { CycleSummary } from "@/components/okrs/cycle-summary";
 import { cycleTiming, rollupObjectives } from "@/lib/okr-cycle-rollup";
+import { OkrGroupByToggle } from "@/components/okrs/okr-group-by-toggle";
+import { groupableObjectiveFields } from "@/lib/okr-grouping";
 import { SquadFilterBar } from "@/components/squads/squad-filter-bar";
 import {
   getEligibleParentKeyResults,
@@ -33,7 +35,7 @@ import {
 
 interface CyclePageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string; cycleId: string }>;
-  searchParams: Promise<{ squad?: string }>;
+  searchParams: Promise<{ squad?: string; groupBy?: string }>;
 }
 
 export async function generateMetadata({ params }: CyclePageProps) {
@@ -252,19 +254,30 @@ export default async function CyclePage({ params, searchParams }: CyclePageProps
 
   const cyclePath = `/${orgSlug}/${workspaceSlug}/okrs/${cycleId}`;
 
+  const groupableFields = groupableObjectiveFields(objFieldDefs.map((f) => toCustomFieldDefinitionData(f)));
+  const requestedGroupBy = (await searchParams).groupBy;
+  const groupBy = groupableFields.some((f) => `field:${f.id}` === requestedGroupBy) ? requestedGroupBy! : "none";
+  const headerActions = (
+    <Suspense>
+      {groupableFields.length > 0 && (
+        <OkrGroupByToggle
+          groupBy={groupBy}
+          fieldOptions={groupableFields.map((f) => ({ id: f.id, label: f.name }))}
+        />
+      )}
+      <SquadFilterBar squads={squads} />
+    </Suspense>
+  );
+
   return (
     <main className="okx flex flex-col flex-1 p-4 sm:p-6 md:p-8 gap-6">
       {cycle && cycleStatus ? (
-        <PageHeader title={<span className="flex items-center gap-2">{cycle.title}<StatusBadge status={CYCLE_STATUS_TONE[cycleStatus]}>{CYCLE_STATUS_LABELS[cycleStatus]}</StatusBadge></span>} description={`${formatDate(cycle.startDate)} – ${formatDate(cycle.endDate)}`} />
+        <PageHeader actions={headerActions} title={<span className="flex items-center gap-2">{cycle.title}<StatusBadge status={CYCLE_STATUS_TONE[cycleStatus]}>{CYCLE_STATUS_LABELS[cycleStatus]}</StatusBadge></span>} description={`${formatDate(cycle.startDate)} – ${formatDate(cycle.endDate)}`} />
       ) : (
-        <PageHeader title={noCycleTitle} description={`${labels.objective.plural} that are not tied to a planning period. They can support, and be supported by, ${labels.keyResult.plural} in any open ${labels.cycle.lower}.`} />
+        <PageHeader actions={headerActions} title={noCycleTitle} description={`${labels.objective.plural} that are not tied to a planning period. They can support, and be supported by, ${labels.keyResult.plural} in any open ${labels.cycle.lower}.`} />
       )}
 
       {!upcoming && <CycleSummary rollup={rollup} timing={timing} />}
-
-      <Suspense>
-        <SquadFilterBar squads={squads} />
-      </Suspense>
 
       {/* Objectives list + inline add */}
       <div className="flex flex-col gap-4">

@@ -128,7 +128,8 @@ async function fetchObjective(id: string, workspaceId: string) {
   if (!item) return null;
   // The parent KR's objective must be in this workspace too; otherwise the link is hidden, not followed.
   const parentKeyResult = item.parentKeyResult && item.parentKeyResult.objective.workspaceId === workspaceId ? item.parentKeyResult : null;
-  return { ...item, parentKeyResult, ...(await fetchLinkedTasksBundle(workspaceId, "OBJECTIVE", id)) };
+  const customFields = await loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OBJECTIVE", objectId: id });
+  return { ...item, parentKeyResult, customFields, ...(await fetchLinkedTasksBundle(workspaceId, "OBJECTIVE", id)) };
 }
 
 async function fetchKeyResult(id: string, workspaceId: string) {

@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 192,
-  sortedToolNamesSha256: "840ab2961b9845563189364ed1476662554e1c04b281a35096aef85fc828d945",
+  toolCount: 194,
+  sortedToolNamesSha256: "028f07e4e2f9e576c3d3ac1b3171d71af8b00bd157522241fa813c112526b17e",
 } as const
 
 export type McpRestParityDisposition =
@@ -50,7 +50,9 @@ export const MCP_REST_PARITY_MANIFEST = {
   create_metric: direct("createMetric"),
   create_objective: direct("createObjective"),
   create_okr_cycle: direct("createOkrCycle"),
+  create_opportunities: direct("createOpportunitiesBatch"),
   create_opportunity: direct("createOpportunity"),
+  create_solutions: direct("createSolutionsBatch"),
   create_research_study: composition(["createResearchStudy", "activateResearchStudy"], "Create the draft resource, then use the explicit human activation action when the MCP call requests its default ACTIVE state and one-time participant link."),
   create_scoring_model: direct("createScoringModel"),
   create_squad: direct("createSquad"),

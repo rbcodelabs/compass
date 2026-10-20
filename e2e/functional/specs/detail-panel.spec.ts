@@ -65,7 +65,8 @@ test.describe("Entity detail panel", () => {
     await expect(page.getByText(objectiveTitle)).toBeVisible({ timeout: 30_000 });
 
     const objRow = page.locator(".rounded-xl.border").filter({ hasText: objectiveTitle });
-    await objRow.getByRole("button", { name: /Add key result/i }).click();
+    await objRow.getByRole("button", { name: "Card actions" }).first().click();
+    await page.getByRole("menuitem", { name: /Add key result/i }).click();
     await objRow.getByLabel("Title").fill(krTitle);
     await objRow.getByLabel("Target").fill("100");
     await objRow.getByLabel("Unit (optional)").fill("%");

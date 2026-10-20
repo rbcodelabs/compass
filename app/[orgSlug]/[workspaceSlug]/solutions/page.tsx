@@ -10,6 +10,7 @@ import { SolutionTableView } from "@/components/solutions/solution-table-view";
 import { SolutionGroupByToggle } from "@/components/solutions/solution-group-by-toggle";
 import { NewSolutionDialog } from "@/components/solutions/new-solution-dialog";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
+import { resolveWorkspaceAccess } from "@/lib/workspace-context";
 import { loadCustomFieldDefinitions } from "@/lib/custom-field-definitions";
 import {
   buildCustomFieldFilterGroups,
@@ -70,6 +71,7 @@ export default async function SolutionsPage({ params, searchParams }: Props) {
     select: { id: true },
   });
   if (!workspace) notFound();
+  const workspaceAccess = session.user?.id ? await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id) : null;
 
   const thinkingModel = await getThinkingModelForSlugs(orgSlug, workspaceSlug);
 
@@ -180,6 +182,7 @@ export default async function SolutionsPage({ params, searchParams }: Props) {
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           hasActiveScoringModel={hasActiveScoringModel}
+          editing={{ parents: parentOpportunities, readOnly: workspaceAccess?.isReadOnly ?? true }}
         />
       ) : (
         <SolutionBacklogBoard
