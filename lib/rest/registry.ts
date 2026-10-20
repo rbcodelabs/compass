@@ -150,6 +150,9 @@ const notificationResponse = z.object({ id: uuid, kind: z.string(), subjectType:
 const notificationCollection = z.object({ items: z.array(notificationResponse), nextCursor: z.string().nullable(), unreadCount: z.number().int().nonnegative(), unreadOverflow: z.boolean() }).strict()
 const followResponse = z.object({ subjectType: z.enum(ACTIVE_FOLLOWABLE_SUBJECT_TYPES), subjectId: uuid, status: z.enum(["followed", "already_following", "unfollowed"]) }).strict()
 const markReadResponse = z.object({ marked: z.number().int().nonnegative() }).strict()
+const docSyncScanQuery = z.object({ cursor: z.string().max(2048).optional(), limit: z.coerce.number().int().min(1).max(1000).default(500) }).strict()
+const docSyncEntry = z.object({ id: uuid, path: z.string(), kind: z.enum(["file", "folder", "tombstone"]), revision: z.string().nullable(), size: z.number().int().nonnegative(), hash: z.string().nullable() }).strict()
+const docSyncScanResponse = z.object({ mode: z.enum(["snapshot", "delta"]), cursor: z.string(), hasMore: z.boolean(), entries: z.array(docSyncEntry) }).strict()
 const docSummary = z.object({ id: uuid, workspaceId: uuid, title: z.string(), parentId: uuid.nullable(), icon: z.string().nullable(), docType: z.enum(DOC_TYPES), roadmapItemId: uuid.nullable(), revision: z.union([z.string(), z.number()]), createdAt: timestamp, updatedAt: timestamp }).strict()
 const docCreateResponse = z.object({ id: uuid, title: z.string(), url: z.string().url().nullable(), revision: z.union([z.string(), z.number()]), storageProvider: z.string() }).strict()
 const docUpdateResponse = z.object({ id: uuid, title: z.string(), icon: z.string().nullable(), updatedAt: timestamp, revision: z.union([z.string(), z.number()]) }).strict()
@@ -357,6 +360,7 @@ export const REST_ROUTES: readonly RestRoute[] = [
 
   read("listDocs", "/api/v1/workspaces/{workspaceId}/docs", "List documents", collectionOf(docSummary), workspacePath, cursorQuery.strict()),
   write("POST", "createDoc", "/api/v1/workspaces/{workspaceId}/docs", "Create a document with an idempotent operation token", docCreateResponse, workspacePath, docCreate, 201),
+  read("scanSyncDocs", "/api/v1/workspaces/{workspaceId}/sync/docs/scan", "Scan STANDARD docs for Geode sync: snapshot or delta since an opaque cursor (requires DOCS_SYNC_ENABLED)", docSyncScanResponse, workspacePath, docSyncScanQuery),
   read("getDoc", "/api/v1/workspaces/{workspaceId}/docs/{id}", "Get a document", docDetailResponse, itemPath),
   write("PATCH", "updateDoc", "/api/v1/workspaces/{workspaceId}/docs/{id}", "Update a document with required optimistic concurrency and operation tokens", docUpdateResponse, itemPath, docPatch),
   write("POST", "prepareDocImageUpload", "/api/v1/workspaces/{workspaceId}/docs/{id}/image-uploads", "Prepare a private document image upload", docImagePreparation, itemPath, docUpload, 201),

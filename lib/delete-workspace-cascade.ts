@@ -283,6 +283,8 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   // 14. Members + squads + docs, then the workspace itself.
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
   await prisma.squad.deleteMany({ where: { workspaceId } });
+  // Sync change log (no FK reaches it): rows go with the docs they describe.
+  await prisma.docChange.deleteMany({ where: { workspaceId } });
   await prisma.doc.deleteMany({ where: { workspaceId } });
   await prisma.$transaction(async tx => {
     await tx.workspace.delete({ where: { id: workspaceId } });

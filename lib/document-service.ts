@@ -4,6 +4,7 @@ import { Prisma, type Doc } from "@prisma/client"
 import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { getDocumentStore, isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
+import { recordDocChange } from "@/lib/doc-sync"
 
 export type DocumentMutationOptions = {
   expectedRevision?: string
@@ -46,6 +47,12 @@ function canonical(value: unknown): string {
   return `{${Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(",")}}`
 }
 function digest(value: unknown) { return createHash("sha256").update(canonical(value)).digest("hex") }
+/** A reparent or rename changes the doc's virtual path (and its descendants'), which sync sees as a MOVE. */
+function changeKindFor(doc: Pick<Doc, "title" | "parentId">, data: DocumentChange): "UPSERT" | "MOVE" {
+  const reparented = data.parentId !== undefined && data.parentId !== doc.parentId
+  const renamed = data.title !== undefined && data.title !== doc.title
+  return reparented || renamed ? "MOVE" : "UPSERT"
+}
 function requireOperation(opts: DocumentMutationOptions, requireRevision = true) {
   if (!opts.operationId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(opts.operationId)) throw new DocumentError("operation-id-required")
   if (requireRevision && !opts.expectedRevision) throw new DocumentError("revision-required")
@@ -128,6 +135,7 @@ export async function createDocument(input: Prisma.DocUncheckedCreateInput, opts
       const doc = await tx.doc.create({ data: pilot
         ? { ...data, storageProvider: "GEODE", content: null, contentRef, revision: randomUUID() }
         : { ...data, revision: randomUUID() } })
+      await recordDocChange(tx, doc.workspaceId, doc.id, "UPSERT")
       if (guarded) await record(tx, doc, opts.operationId!, hash, doc)
       return doc
     })
@@ -163,12 +171,15 @@ export async function updateDocument(docId: string, change: DocumentChange, opts
         if (changed.count !== 1) throw new DocumentError("revision-conflict")
         const updated = await tx.doc.findUnique({ where: { id: docId } })
         if (!updated) throw new DocumentError("not-found")
+        await recordDocChange(tx, doc.workspaceId, docId, changeKindFor(doc, data))
         return updated
       })
     }
     return db.$transaction(async tx => {
       if (Object.keys(data).length) await snapshot(tx, doc, opts)
-      return tx.doc.update({ where: { id: docId }, data: { ...data, revision: randomUUID(), updatedAt: new Date() } })
+      const updated = await tx.doc.update({ where: { id: docId }, data: { ...data, revision: randomUUID(), updatedAt: new Date() } })
+      await recordDocChange(tx, doc.workspaceId, docId, changeKindFor(doc, data))
+      return updated
     })
   }
   requireOperation(opts)
@@ -187,6 +198,7 @@ export async function updateDocument(docId: string, change: DocumentChange, opts
       await snapshot(tx, doc, opts)
       const updated = await tx.doc.findUnique({ where: { id: docId } })
       if (!updated) throw new DocumentError("not-found")
+      await recordDocChange(tx, doc.workspaceId, docId, changeKindFor(doc, data))
       await record(tx, doc, opts.operationId!, hash, updated)
       return updated
     })
@@ -263,6 +275,7 @@ export async function deleteDocument(docId: string, opts: DocumentMutationOption
     if (await tx.doc.findFirst({ where: { parentId: docId } })) throw new DocumentError("has-children")
     await tx.docVersion.deleteMany({ where: { docId } })
     await tx.docComment.deleteMany({ where: { docId } })
+    await recordDocChange(tx, workspaceId, docId, "DELETE")
     await tx.doc.delete({ where: { id: docId } })
     if (doc.storageProvider === "GEODE") await record(tx, doc, opts.operationId!, hash, { deleted: true })
   }) } catch (error) {
