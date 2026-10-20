@@ -15,6 +15,7 @@ const mockKeyResult = {
 const mockOpportunity = { updateMany: vi.fn(), findMany: vi.fn() }
 const mockOpportunityObjectiveLink = { findMany: vi.fn(), deleteMany: vi.fn() }
 const mockSolutionKeyResultLink = { findMany: vi.fn(), deleteMany: vi.fn() }
+const mockEntityLink = { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) }
 const mockRoadmapItem = { updateMany: vi.fn() }
 const mockCheckIn = { deleteMany: vi.fn() }
 const mockTaskLink = { deleteMany: vi.fn() }
@@ -27,6 +28,7 @@ const mockPrisma = {
   opportunity: mockOpportunity,
   opportunityObjectiveLink: mockOpportunityObjectiveLink,
   solutionKeyResultLink: mockSolutionKeyResultLink,
+  entityLink: mockEntityLink,
   roadmapItem: mockRoadmapItem,
   checkIn: mockCheckIn,
   taskLink: mockTaskLink,

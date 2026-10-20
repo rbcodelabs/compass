@@ -28,6 +28,11 @@
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
 import { withWorkspaceUpdates } from "@/lib/workspace-updates-capture"
 
+// lib/links/* imports this module, so its functions are loaded lazily at call time: a static import would be a cycle
+// (and would pull the registry into modules that only need the legacy tables).
+const legacyMirror = () => import("@/lib/links/legacy-mirror")
+const entityLinkService = () => import("@/lib/links/service")
+
 export type LinkSource = "UI" | "MCP" | "API"
 export type LinkContext = { source: LinkSource; createdById?: string | null }
 
@@ -300,14 +305,21 @@ export async function linkSolutionToKeyResult(
   const workspaceId = assertSameWorkspacePair(solution, keyResult.objective)
   const existing = (await tx.solutionKeyResultLink.findFirst({ where: { solutionId: solution.id, keyResultId: keyResult.id } })) as SolutionLinkRow | null
   const shared = { solution: { id: solution.id, title: solution.title, workspaceId }, keyResult: { id: keyResult.id, title: keyResult.title } }
+  // The legacy row is written first and stays the source of truth; the entity_links mirror (flagged) joins the same transaction.
+  const mirror = async () => (await legacyMirror()).mirrorSolutionTargetsKeyResult(tx, { solutionId: solution.id, keyResultId: keyResult.id, workspaceId, ctx: input.ctx })
   if (existing) {
-    if (existing.workspaceId === workspaceId) return { link: existing, created: false, ...shared }
+    if (existing.workspaceId === workspaceId) {
+      await mirror()
+      return { link: existing, created: false, ...shared }
+    }
     const link = (await tx.solutionKeyResultLink.update({ where: { id: existing.id }, data: { workspaceId } })) as SolutionLinkRow
+    await mirror()
     return { link, created: false, ...shared }
   }
   const link = (await tx.solutionKeyResultLink.create({
     data: { workspaceId, solutionId: solution.id, keyResultId: keyResult.id, source: input.ctx.source, createdById: input.ctx.createdById ?? null },
   })) as SolutionLinkRow
+  await mirror()
   return { link, created: true, ...shared }
 }
 
@@ -319,6 +331,7 @@ export async function unlinkSolutionFromKeyResult(
   const { count } = await tx.solutionKeyResultLink.deleteMany({
     where: { solutionId: solution.id, keyResultId: input.keyResultId, workspaceId: solution.workspaceId },
   })
+  await (await legacyMirror()).unmirrorSolutionTargetsKeyResult(tx, { solutionId: solution.id, keyResultId: input.keyResultId, workspaceId: solution.workspaceId })
   return { removed: count }
 }
 
@@ -344,6 +357,9 @@ export async function deleteLinksFor(tx: Tx, kind: LinkParentKind, ids: readonly
     else if (kind === "solution") removed += (await tx.solutionKeyResultLink.deleteMany({ where: { solutionId: { in: part } } })).count
     else removed += (await tx.solutionKeyResultLink.deleteMany({ where: { keyResultId: { in: part } } })).count
   }
+  // The entity_links mirror is swept whatever the flag says: rows written while it was on must not outlive their endpoints.
+  if (kind === "solution") removed += await (await entityLinkService()).deleteLinksForEntity(tx, "SOLUTION", ids)
+  else if (kind === "keyResult") removed += await (await entityLinkService()).deleteLinksForEntity(tx, "KEY_RESULT", ids)
   return removed
 }
 
@@ -413,6 +429,9 @@ export async function drainLinksFor(db: Tx, kind: LinkParentKind, ids: readonly 
       )
     }
   }
+  // Mirror rows (entity_links) for the same parents, in the same committed passes.
+  if (kind === "solution") removed += await (await entityLinkService()).deleteLinksForEntity(db, "SOLUTION", ids)
+  else if (kind === "keyResult") removed += await (await entityLinkService()).deleteLinksForEntity(db, "KEY_RESULT", ids)
   return removed
 }
 
