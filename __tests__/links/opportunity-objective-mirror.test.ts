@@ -162,11 +162,23 @@ describe("Opportunity -> Key Result pointer", () => {
     expect(objectiveRows(KR)[0]).toMatchObject({ toId: "kr-a2", origin: "LEGACY" });
   });
 
-  it("with the flag off the pointer sync touches neither the existing mirror rows nor creates any (095 prunes them later)", async () => {
+  it("with the flag off the pointer sync still removes stale rows but creates none", async () => {
     await setPointer("kr-a");
     vi.stubEnv("COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR", "0");
     await setPointer("kr-a2");
-    expect(objectiveRows(KR).map((row) => row.toId)).toEqual(["kr-a"]);
+    expect(objectiveRows(KR)).toHaveLength(0);
+    await setPointer("kr-a3");
+    expect(objectiveRows(KR)).toHaveLength(0);
+    // the stale LEGACY objective row (obj-a) is gone too; the new one (obj-a2) is not created while the flag is off
+    expect(objectiveRows()).toHaveLength(0);
+  });
+
+  it("a stale mirror row is not removed while its legacy row still exists as DIRECT", async () => {
+    await direct("opp-a", "obj-a2");
+    // drift: the mirror says LEGACY although the legacy row is DIRECT
+    state().entityLinks.find((row) => row.toId === "obj-a2")!.origin = "LEGACY";
+    await setPointer("kr-a");
+    expect(objectiveRows().map((row) => row.toId).sort()).toEqual(["obj-a", "obj-a2"]);
   });
 
   it("a Key Result in another workspace is refused before either table is written", async () => {

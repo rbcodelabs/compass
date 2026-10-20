@@ -272,7 +272,9 @@ export async function syncLegacyLink(
     },
   })
   const mirror = await legacyMirror()
-  await mirror.unmirrorStaleLegacyObjectiveLinks(tx, { opportunityId: input.opportunityId, workspaceId: input.workspaceId, exceptObjectiveId: keyResult?.objectiveId })
+  // Mirror rows go unless their legacy row survived the delete above (the pointer's own, or a DIRECT one).
+  const surviving = await tx.opportunityObjectiveLink.findMany({ where: { opportunityId: input.opportunityId }, select: { objectiveId: true } })
+  await mirror.unmirrorStaleLegacyObjectiveLinks(tx, { opportunityId: input.opportunityId, workspaceId: input.workspaceId, keepObjectiveIds: surviving.map((row: { objectiveId: string }) => row.objectiveId) })
   if (keyResult) {
     // Mirrors the Opportunity <-> Objective link too (inside upsert).
     await upsertOpportunityObjectiveLink(tx, {

@@ -16,6 +16,7 @@ const mockOpportunity = {
   update: vi.fn(),
   findFirst: vi.fn(),
   delete: vi.fn(),
+  findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id })),
 };
 const mockSolution = {
   create: vi.fn(),
@@ -43,7 +44,8 @@ const mockPrisma = {
   solutionScore: mockSolutionScore,
   squad: { findFirst: vi.fn().mockResolvedValue({ id: "squad-1" }) },
   keyResult: { findFirst: vi.fn() },
-  opportunityObjectiveLink: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
+  opportunityObjectiveLink: { findFirst: vi.fn(), findMany: async () => [], create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
+  entityLink: { deleteMany: async () => ({ count: 0 }) },
 };
 // createOpportunity writes the opportunity and its links in one transaction.
 const mockTransaction = vi.fn(async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma));

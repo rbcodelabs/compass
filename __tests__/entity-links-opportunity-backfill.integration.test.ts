@@ -220,4 +220,23 @@ describe.skipIf(!databaseUrl)("095 entity_links opportunity backfill through the
     await withClient((client) => backfillEntityLinksOpportunity(client, schema, []))
     await withClient((client) => assertEntityLinksOpportunityBackfill(client, schema))
   }, 120_000)
+
+  it("mirror rows whose legacy row became quarantined are kept and reported, never deleted, and the postconditions still pass", async () => {
+    const before = await count(`SELECT count(*)::text AS n FROM $S.entity_links WHERE link_type IN ($1,$2)`, [OBJ, KR])
+    expect(before).toBeGreaterThan(0)
+    await q(`DELETE FROM $S.objectives WHERE id=$1`, [seeded.obj1])
+    const log: string[] = []
+    const result = await withClient(async (client) => {
+      const done = await backfillEntityLinksOpportunity(client, schema, log)
+      await assertEntityLinksOpportunityBackfill(client, schema)
+      return done
+    })
+    expect(result.pruned).toBe(0)
+    expect(await count(`SELECT count(*)::text AS n FROM $S.entity_links WHERE link_type IN ($1,$2)`, [OBJ, KR])).toBe(before)
+    expect(result.keptMirrorRows.objectiveLinks.count).toBe(before - result.keptMirrorRows.keyResultPointers.count)
+    expect(result.keptMirrorRows.objectiveLinks.ids).toHaveLength(50)
+    expect(log.join("\n")).toContain("mirror row(s) whose legacy row is quarantined, not deleted")
+    const status = await withClient((client) => getEntityLinksOpportunityStatus(client, schema))
+    expect(status.mirrorRowsKeptForQuarantine.objectiveLinks.count).toBe(result.keptMirrorRows.objectiveLinks.count)
+  }, 120_000)
 })

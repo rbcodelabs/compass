@@ -238,14 +238,14 @@ export async function unlinkEntities(tx: Tx, input: UnlinkEntitiesInput): Promis
 }
 
 /**
- * Removes the links of one type that start at `fromId`, optionally keeping the one that ends at `exceptToId` and optionally only
+ * Removes the links of one type that start at `fromId`, optionally keeping those that end at `exceptToIds` and optionally only
  * those of one origin. For the legacy writer only (a pointer that moved replaces its row; LEGACY objective links go stale when the
  * pointer does). The `from` endpoint is verified in `expectedWorkspaceId`; the delete is by `fromId` and type, so a row whose
  * workspace_id has drifted is removed too. `removed: 0` is success.
  */
 export async function unlinkFromEntity(
   tx: Tx,
-  input: { linkType: string; fromId: string; expectedWorkspaceId: string; exceptToId?: string; origin?: LinkOrigin },
+  input: { linkType: string; fromId: string; expectedWorkspaceId: string; exceptToIds?: readonly string[]; origin?: LinkOrigin },
 ): Promise<{ removed: number }> {
   const def = requireLinkType(input.linkType)
   assertWritableHere(def, true)
@@ -254,7 +254,7 @@ export async function unlinkFromEntity(
     where: {
       linkType: def.key,
       fromId: input.fromId,
-      ...(input.exceptToId ? { toId: { not: input.exceptToId } } : {}),
+      ...(input.exceptToIds?.length ? { toId: { notIn: [...input.exceptToIds] } } : {}),
       ...(input.origin ? { origin: input.origin } : {}),
     },
   })

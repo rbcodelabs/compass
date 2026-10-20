@@ -78,14 +78,16 @@ export async function unmirrorOpportunityTargetsObjective(tx: AppTransactionClie
   await unlinkEntities(tx, { linkType: OPPORTUNITY_OBJECTIVE, fromId: input.opportunityId, toId: input.objectiveId, expectedWorkspaceId: input.workspaceId, viaLegacyWriter: true })
 }
 
-/** The LEGACY mirror rows of one opportunity that the pointer no longer implies (all of them when `exceptObjectiveId` is absent). DIRECT rows stay. */
+/**
+ * The LEGACY mirror rows of one opportunity that the pointer no longer implies. `keepObjectiveIds` are the objectives whose legacy row
+ * still exists after the legacy delete (the pointer's own, and any DIRECT one): their mirror rows stay whatever their mirrored origin.
+ * Removal runs whatever the flag says, so a flag turned off never strands a stale row.
+ */
 export async function unmirrorStaleLegacyObjectiveLinks(
   tx: AppTransactionClient,
-  input: { opportunityId: string; workspaceId: string; exceptObjectiveId?: string },
+  input: { opportunityId: string; workspaceId: string; keepObjectiveIds: readonly string[] },
 ): Promise<void> {
-  // With the flag off nothing is mirrored and nothing reads the mirror; rows left by an earlier "on" period are pruned by migration 095.
-  if (!isLinkTypeEnabled(requireLinkType(OPPORTUNITY_OBJECTIVE))) return
-  await unlinkFromEntity(tx, { linkType: OPPORTUNITY_OBJECTIVE, fromId: input.opportunityId, expectedWorkspaceId: input.workspaceId, exceptToId: input.exceptObjectiveId, origin: "LEGACY" })
+  await unlinkFromEntity(tx, { linkType: OPPORTUNITY_OBJECTIVE, fromId: input.opportunityId, expectedWorkspaceId: input.workspaceId, exceptToIds: input.keepObjectiveIds, origin: "LEGACY" })
 }
 
 /**
@@ -99,17 +101,16 @@ export async function drainMirroredLegacyObjectiveLinks(db: AppTransactionClient
 // ── Opportunity -> Key Result (the linked_key_result_id pointer, phase 5) ───
 
 /**
- * Brings the pointer mirror in line with the column while the flag is on: any row to another Key Result (all rows when the pointer is
- * cleared) is removed, then the current pointer's row is written (idempotent). With the flag off it does nothing (rows left by an earlier
- * "on" period are pruned by migration 095). The Key Result was verified in the workspace by the legacy writer in this transaction.
+ * Brings the pointer mirror in line with the column: any row to another Key Result (all rows when the pointer is cleared) is removed
+ * whatever the flag says, so a pointer that moved while the flag was off cannot leave a stale row; the current pointer's row is written
+ * (idempotent) only while the flag is on. The Key Result was verified in the workspace by the legacy writer in this transaction.
  */
 export async function mirrorOpportunityKeyResultPointer(
   tx: AppTransactionClient,
   input: { opportunityId: string; keyResultId: string | null; workspaceId: string; ctx: LinkContext },
 ): Promise<void> {
-  if (!isLinkTypeEnabled(requireLinkType(OPPORTUNITY_KEY_RESULT))) return
-  await unlinkFromEntity(tx, { linkType: OPPORTUNITY_KEY_RESULT, fromId: input.opportunityId, expectedWorkspaceId: input.workspaceId, exceptToId: input.keyResultId ?? undefined })
-  if (!input.keyResultId) return
+  await unlinkFromEntity(tx, { linkType: OPPORTUNITY_KEY_RESULT, fromId: input.opportunityId, expectedWorkspaceId: input.workspaceId, exceptToIds: input.keyResultId ? [input.keyResultId] : undefined })
+  if (!input.keyResultId || !isLinkTypeEnabled(requireLinkType(OPPORTUNITY_KEY_RESULT))) return
   await linkEntities(tx, {
     linkType: OPPORTUNITY_KEY_RESULT,
     fromId: input.opportunityId,
