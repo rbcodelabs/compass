@@ -9,6 +9,9 @@ import { assertIsolatedE2EDatabase, isolatedE2EConnectionString } from "../fixtu
 async function seedRelationshipFixtures(prefix: string, hasParticipation = false) {
   await assertIsolatedE2EDatabase()
   const pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() })
+  // Unique per call so reruns against the same database (retries, --repeat-each)
+  // never see another run's rows in the picker search.
+  prefix = `${prefix} ${randomUUID().slice(0, 8)}`
   const experiment = { id: randomUUID(), title: `${prefix} — improve plan selection` }
   const secondExperiment = { id: randomUUID(), title: `${prefix} — clarify billing` }
   const study = { id: randomUUID(), name: `${prefix} — plan selection study` }
