@@ -185,7 +185,7 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "091_entity_links": "35ea5cfb70d4eb7df705c59441638946f209893fca1cfa0b33a17db6fad68b61",
   // Doc change log + seq counter for Geode doc sync (spike): two new empty tables and a unique (workspace_id, seq) async index.
   // No backfill. Digest recorded from the shipped SQL; please review it.
-  "092_doc_changes": "1702200b1255056ac4d62c426c82cc9b1ed3065617904ac72a53ae3e3d575569"
+  "092_doc_changes": "f5fcc91f016ce51f825d708a49697f90618418695cbcb09f97ce1ecfae8b4c1e"
 };
 
 /**
@@ -246,7 +246,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 092 postcondition (doc_changes table shape and the unique (workspace_id, seq) index valid and ready before the receipt).
   "092_doc_changes": {
-    "lib/migrations/doc-changes.ts": "85462d9d0d602b8984a760757ffcc7476781c5e04758196ead66581d7b92ea2a",
+    "lib/migrations/doc-changes.ts": "73021f823298fad226a244f730f2e77b49d0ad8588b54481acdf9f51d19c60fc",
   },
 };
 

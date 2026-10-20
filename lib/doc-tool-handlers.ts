@@ -444,7 +444,7 @@ export async function updateDoc({
     ...(icon !== undefined ? { icon: icon.trim() } : {}),
   }, { expectedRevision, operationId, ...documentMcpActor() }) : await writeDocWithChange(
     prisma,
-    { workspaceId: existing.workspaceId, kind: changeKindFor(existing, updateData), before: existing },
+    { workspaceId: existing.workspaceId, docId, kind: (_result, before) => (before ? changeKindFor(before, updateData) : "UPSERT") },
     (client) => client.doc.update({ where: { id: docId }, data: { ...updateData, revision: randomUUID() } }),
   )
 
@@ -491,7 +491,7 @@ export async function updateDocMetadata({
     ? await updateDocument(docId, { metadata: toJsonInput(metadata) }, { expectedRevision, operationId, ...documentMcpActor() })
     : await writeDocWithChange(
       prisma,
-      { workspaceId: existing.workspaceId, kind: "UPSERT" },
+      { workspaceId: existing.workspaceId, docId, kind: "UPSERT" },
       (client) => client.doc.update({ where: { id: docId }, data: { metadata: toJsonInput(metadata), revision: randomUUID(), updatedAt: new Date() } }),
     )
 

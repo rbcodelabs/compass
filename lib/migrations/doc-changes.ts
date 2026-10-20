@@ -21,6 +21,7 @@ const EXPECTED_COUNTER_COLUMNS: { column: string; nullable: boolean }[] = [
   { column: "workspace_id", nullable: false },
   { column: "last_seq", nullable: false },
   { column: "epoch", nullable: false },
+  { column: "dirty", nullable: false },
 ]
 
 /**

@@ -2879,6 +2879,8 @@ model DocChangeCounter {
   lastSeq     Int    @map("last_seq")
   /// Random per counter row; embedded (with DOCS_SYNC_EPOCH) in scan cursors so a rebuilt log invalidates them.
   epoch       String @db.VarChar(36)
+  /// True once a doc was written while sync was OFF (epoch rotated then); cleared by the next logged write.
+  dirty       Boolean @default(false)
 
   @@map("doc_change_counters")
 }

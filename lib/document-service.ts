@@ -4,7 +4,7 @@ import { Prisma, type Doc } from "@prisma/client"
 import getPrisma, { type AppPrismaClient, type AppTransactionClient } from "@/lib/db"
 import { getDocumentStore, isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
-import { changeKindFor, isDocsSyncEnabled, recordDocChange, withDocChangeRetry } from "@/lib/doc-sync"
+import { changeKindFor, isDocsSyncEnabled, lockCounter, noteDocWriteWhileSyncOff, recordDocChange, withDocChangeRetry } from "@/lib/doc-sync"
 
 export type DocumentMutationOptions = {
   expectedRevision?: string
@@ -127,6 +127,7 @@ export async function createDocument(input: Prisma.DocUncheckedCreateInput, opts
   // Validate references before any external storage write, including MCP calls.
   if (data.parentId && !await db.doc.findFirst({ where: { id: data.parentId, workspaceId: data.workspaceId } })) throw new DocumentError("parent-not-found")
   if (data.roadmapItemId && !await db.roadmapItem.findFirst({ where: { id: data.roadmapItemId, workspaceId: data.workspaceId } })) throw new DocumentError("roadmap-item-not-found")
+  await noteDocWriteWhileSyncOff(db, data.workspaceId)
   const contentRef = pilot ? await upload(data.workspaceId, data.content ?? "") : null
   try {
     return await inTx(db, async tx => {
@@ -151,6 +152,7 @@ export async function updateDocument(docId: string, change: DocumentChange, opts
   const doc = await db.doc.findUnique({ where: { id: docId } })
   if (!doc) throw new DocumentError("not-found")
   const data = doc.docType === "CANVAS" && typeof change.content === "string" ? { ...change, content: canonicalCanvasContent(change.content) } : change
+  await noteDocWriteWhileSyncOff(db, doc.workspaceId)
   if (doc.storageProvider !== "GEODE" && !opts.operationId) {
     // ADR 0019 §2.1: extend the GEODE-only optimistic-concurrency check to
     // every doc, but only when the caller actually supplies expectedRevision.
@@ -176,6 +178,7 @@ export async function updateDocument(docId: string, change: DocumentChange, opts
     return inTx(db, async tx => {
       // Last-write-wins has no revision guard, so a retried transaction must not diff against the
       // title/parent read before the conflict: re-read them inside the closure (sync only).
+      if (isDocsSyncEnabled()) await lockCounter(tx, doc.workspaceId)
       const current = isDocsSyncEnabled() ? await tx.doc.findUnique({ where: { id: docId } }) ?? doc : doc
       if (Object.keys(data).length) await snapshot(tx, current, opts)
       const updated = await tx.doc.update({ where: { id: docId }, data: { ...data, revision: randomUUID(), updatedAt: new Date() } })
@@ -262,6 +265,7 @@ export async function deleteDocument(docId: string, opts: DocumentMutationOption
   if (opts.operationId && await replay(workspaceId, opts.operationId, hash)) return
   if (!doc) throw new DocumentError("not-found")
   if (doc.storageProvider === "GEODE") requireOperation(opts)
+  await noteDocWriteWhileSyncOff(db, workspaceId)
   try { await inTx(db, async tx => {
     // ADR 0019 §2.1: same expectedRevision extension as updateDocument -- GEODE
     // always supplies one (requireOperation above enforces that); any other

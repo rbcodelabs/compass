@@ -10,7 +10,7 @@ vi.mock("@/lib/db", () => ({ default: () => syncFake.fake }))
 vi.mock("@/lib/following-hooks", () => ({ followAfterCreate: vi.fn(), mcpFollowActor: vi.fn() }))
 
 import { createDocument, deleteDocument, snapshotDocument, updateDocument } from "@/lib/document-service"
-import { encodeSyncCursor, epochTag, scanDocs } from "@/lib/doc-sync-scan"
+import { DocSyncContinuationStaleError, encodeSyncCursor, epochTag, scanDocs } from "@/lib/doc-sync-scan"
 
 const WS = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const author = { authorName: "Tester" }
@@ -162,12 +162,13 @@ describe("snapshot paging and read cost", () => {
     expect(delta.entries.map((e) => e.id)).toEqual([a.id])
   })
 
-  it("a continuation from another log epoch restarts the snapshot", async () => {
+  it("a continuation from another log epoch is rejected, never silently restarted", async () => {
     await create("A"); await create("B")
     const first = await scanDocs(WS, { limit: 1 })
     vi.stubEnv("DOCS_SYNC_EPOCH", "next")
-    const restarted = await scanDocs(WS, { continuation: first.continuation!, limit: 1 })
-    expect(restarted.entries.map((e) => e.path)).toEqual(["A"])
+    await expect(scanDocs(WS, { continuation: first.continuation!, limit: 1 })).rejects.toBeInstanceOf(DocSyncContinuationStaleError)
+    // The explicit restart (no continuation) works.
+    expect((await scanDocs(WS, { limit: 1 })).mode).toBe("snapshot")
   })
 
   it("builds the tree from narrow rows and loads bodies only for the emitted page", async () => {

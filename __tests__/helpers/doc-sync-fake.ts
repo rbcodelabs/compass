@@ -18,6 +18,7 @@ export const store = {
   counterOwner: null as symbol | null,
   conflicts: 0,
   trace: [] as string[],
+  createManySizes: [] as number[],
   docFindManyArgs: [] as Row[],
   /** Runs once, inside the first counter lock of the next transaction, then that lock fails with a write conflict. */
   onFirstLock: null as null | (() => void | (() => void)),
@@ -34,6 +35,7 @@ export function resetStore() {
   store.counterOwner = null
   store.conflicts = 0
   store.trace.length = 0
+  store.createManySizes.length = 0
   store.docFindManyArgs.length = 0
   store.onFirstLock = null
   store.afterRollback = null
@@ -92,12 +94,26 @@ function client(journal: Journal, txId: symbol | null): Row {
       const findMany = d.findMany
       return { ...d, findMany: async (args: Row = {}) => { store.docFindManyArgs.push(args); if (journal) store.trace.push("tree"); return findMany(args) } }
     })(),
-    docChange: delegate(store.changes, journal),
+    docChange: (() => {
+      const d = delegate(store.changes, journal)
+      return {
+        ...d,
+        createMany: async (args: Row) => {
+          for (const row of args.data as Row[]) {
+            if (store.changes.some((c) => c.workspaceId === row.workspaceId && c.seq === row.seq)) {
+              throw Object.assign(new Error("Unique constraint failed on idx_doc_changes_workspace_seq"), { code: "P2002" })
+            }
+          }
+          store.createManySizes.push((args.data as Row[]).length)
+          return d.createMany(args)
+        },
+      }
+    })(),
     docChangeCounter: {
       ...counters,
       update: async ({ where, data }: Row) => {
         const row = store.counters.find((r) => matches(r, where))!
-        counters._patch(row, { lastSeq: row.lastSeq + data.lastSeq.increment })
+        counters._patch(row, { lastSeq: typeof data.lastSeq === "number" ? data.lastSeq : row.lastSeq + data.lastSeq.increment })
         return { ...row }
       },
       upsert: async ({ where, create, update }: Row) => {
@@ -110,7 +126,7 @@ function client(journal: Journal, txId: symbol | null): Row {
         await Promise.resolve()
         const row = store.counters.find((r) => matches(r, where))
         if (!row) return { ...counters._insert(create) }
-        counters._patch(row, { lastSeq: row.lastSeq + update.lastSeq.increment })
+        counters._patch(row, { lastSeq: row.lastSeq + update.lastSeq.increment, ...(update.dirty !== undefined ? { dirty: update.dirty } : {}) })
         return { ...row }
       },
     },

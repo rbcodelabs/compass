@@ -14,7 +14,15 @@
  *
  * `status` mirrors Geode's SyncScanResult: "partial" means at least one doc could not be read and
  * was reported in `skipped` instead of `entries`. A client MUST NOT infer deletions from a partial
- * result. A partial delta does not advance the cursor past the first skipped change.
+ * result. Partial is STICKY across snapshot pages (the skipped count rides in the continuation): once
+ * any page skipped a doc, every later page, including the last, is partial and carries `cursor: null`,
+ * so a snapshot with a hole can never be adopted as a clean checkpoint. A partial delta does not
+ * advance the cursor past the first skipped change; if that means the cursor did not move at all,
+ * `hasMore` is false and `reason` is "unreadable-doc-blocks-cursor" so the client stops looping.
+ *
+ * A continuation that is malformed or belongs to another log epoch is REJECTED with
+ * DocSyncContinuationStaleError (HTTP 409 "continuation-stale"); the client restarts the snapshot
+ * explicitly by calling again without a continuation. It never silently starts a new snapshot.
  *
  * Cursor format: base64url("dsc1:<epochTag>:<seq>"). epochTag = hash(counter epoch, DOCS_SYNC_EPOCH),
  * so it is bound to one workspace's log. Continuation: base64url(JSON {e, h, a}) = epochTag, head, last path.
@@ -39,17 +47,26 @@ export type DocSyncScan = {
   mode: "snapshot" | "delta"
   /** "partial": some docs were skipped (see `skipped`); absence from `entries` does NOT mean deletion. */
   status: "complete" | "partial"
-  /** Where to resume a delta. For a snapshot, valid only after the last page (`hasMore` false). */
-  cursor: string
+  /**
+   * Where to resume a delta. For a snapshot, valid only after the last page (`hasMore` false).
+   * null when the snapshot skipped any doc: do not adopt it as a checkpoint.
+   */
+  cursor: string | null
   /** More pages remain: pass `continuation` (snapshot) or call again with `cursor` (delta). */
   hasMore: boolean
   continuation: string | null
   entries: DocSyncEntry[]
   skipped: DocSyncSkipped[]
+  /** Why the result is partial or why the client should stop paging; null otherwise. */
+  reason: "unreadable-doc" | "unreadable-doc-blocks-cursor" | null
 }
 
 export class DocSyncDisabledError extends Error {
   constructor() { super("Doc sync is not enabled."); this.name = "DocSyncDisabledError" }
+}
+
+export class DocSyncContinuationStaleError extends Error {
+  constructor() { super("continuation-stale: the snapshot continuation is malformed or from another log epoch; restart without a continuation."); this.name = "DocSyncContinuationStaleError" }
 }
 
 export const DOC_SYNC_DEFAULT_LIMIT = 500
@@ -75,14 +92,15 @@ export function decodeSyncCursor(cursor: string): { tag: string; seq: number } |
   return match ? { tag: match[1], seq: Number(match[2]) } : null
 }
 
-function encodeContinuation(tag: string, head: number, afterPath: string): string {
-  return Buffer.from(JSON.stringify({ e: tag, h: head, a: afterPath })).toString("base64url")
+function encodeContinuation(tag: string, head: number, afterPath: string, skippedSoFar: number): string {
+  return Buffer.from(JSON.stringify({ e: tag, h: head, a: afterPath, k: skippedSoFar })).toString("base64url")
 }
-function decodeContinuation(token: string): { tag: string; head: number; afterPath: string } | null {
+function decodeContinuation(token: string): { tag: string; head: number; afterPath: string; skippedSoFar: number } | null {
   try {
-    const value = JSON.parse(Buffer.from(token, "base64url").toString("utf8")) as { e?: unknown; h?: unknown; a?: unknown }
+    const value = JSON.parse(Buffer.from(token, "base64url").toString("utf8")) as { e?: unknown; h?: unknown; a?: unknown; k?: unknown }
     if (typeof value.e !== "string" || typeof value.a !== "string" || typeof value.h !== "number" || !Number.isInteger(value.h) || value.h < 0) return null
-    return { tag: value.e, head: value.h, afterPath: value.a }
+    const skippedSoFar = typeof value.k === "number" && Number.isInteger(value.k) && value.k >= 0 ? value.k : 0
+    return { tag: value.e, head: value.h, afterPath: value.a, skippedSoFar }
   } catch { return null }
 }
 
@@ -123,7 +141,7 @@ async function toEntries(workspaceId: string, treeRows: TreeRows, nodes: Node[])
   return { entries, skipped }
 }
 
-export async function scanDocs(workspaceId: string, opts: { cursor?: string; continuation?: string; limit?: number }): Promise<DocSyncScan> {
+export async function scanDocs(workspaceId: string, opts: { cursor?: string | null; continuation?: string | null; limit?: number }): Promise<DocSyncScan> {
   if (!isDocsSyncEnabled()) throw new DocSyncDisabledError()
   const prisma = getPrisma()
   const limit = Math.max(1, Math.min(opts.limit ?? DOC_SYNC_DEFAULT_LIMIT, DOC_SYNC_MAX_LIMIT))
@@ -134,8 +152,11 @@ export async function scanDocs(workspaceId: string, opts: { cursor?: string; con
   const head = counter?.lastSeq ?? 0
   const tag = epochTag(counter?.epoch ?? null)
 
-  const continuation = opts.continuation ? decodeContinuation(opts.continuation) : null
-  if (continuation && continuation.tag === tag) return snapshotPage(workspaceId, tag, continuation.head, continuation.afterPath, limit)
+  if (opts.continuation) {
+    const continuation = decodeContinuation(opts.continuation)
+    if (!continuation || continuation.tag !== tag) throw new DocSyncContinuationStaleError()
+    return snapshotPage(workspaceId, tag, continuation.head, continuation.afterPath, limit, continuation.skippedSoFar)
+  }
 
   const requested = opts.cursor ? decodeSyncCursor(opts.cursor) : null
   let stale = requested === null || requested.tag !== tag || requested.seq > head
@@ -148,21 +169,23 @@ export async function scanDocs(workspaceId: string, opts: { cursor?: string; con
   return deltaPage(workspaceId, tag, requested!.seq, limit)
 }
 
-async function snapshotPage(workspaceId: string, tag: string, head: number, afterPath: string | null, limit: number): Promise<DocSyncScan> {
+async function snapshotPage(workspaceId: string, tag: string, head: number, afterPath: string | null, limit: number, skippedBefore = 0): Promise<DocSyncScan> {
   const treeRows = await loadTreeRows(workspaceId)
   const all = buildTree(syncScopeRows(treeRows)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
   const remaining = afterPath === null ? all : all.filter((n) => n.path > afterPath)
   const page = remaining.slice(0, limit)
   const hasMore = remaining.length > page.length
   const { entries, skipped } = await toEntries(workspaceId, treeRows, page)
+  const skippedTotal = skippedBefore + skipped.length
   return {
     mode: "snapshot",
-    status: skipped.length ? "partial" : "complete",
-    cursor: encodeSyncCursor(head, tag),
+    status: skippedTotal ? "partial" : "complete",
+    cursor: skippedTotal ? null : encodeSyncCursor(head, tag),
     hasMore,
-    continuation: hasMore ? encodeContinuation(tag, head, page[page.length - 1].path) : null,
+    continuation: hasMore ? encodeContinuation(tag, head, page[page.length - 1].path, skippedTotal) : null,
     entries,
     skipped,
+    reason: skippedTotal ? "unreadable-doc" : null,
   }
 }
 
@@ -198,13 +221,15 @@ async function deltaPage(workspaceId: string, tag: string, fromSeq: number, limi
     const firstSkipped = Math.min(...[...latest.values()].filter((r) => skippedIds.has(r.docId)).map((r) => r.seq))
     resumeSeq = Math.max(fromSeq, firstSkipped - 1)
   }
+  const stuck = skipped.length > 0 && resumeSeq === fromSeq
   return {
     mode: "delta",
     status: skipped.length ? "partial" : "complete",
     cursor: encodeSyncCursor(resumeSeq, tag),
-    hasMore,
+    hasMore: stuck ? false : hasMore,
     continuation: null,
     entries: [...upserts, ...tombstones],
     skipped,
+    reason: stuck ? "unreadable-doc-blocks-cursor" : skipped.length ? "unreadable-doc" : null,
   }
 }

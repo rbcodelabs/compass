@@ -10,6 +10,7 @@
 --   kind     -> UPSERT | MOVE | DELETE
 --   revision -> the doc revision after the change
 --   epoch (counter) -> random per workspace log; scan cursors embed it so a rebuilt log invalidates them
+--   dirty (counter) -> a doc was written while sync was off (epoch rotated); cleared by the next logged write
 --   path     -> the doc's virtual path when recorded (last path for DELETE)
 --
 -- Aurora DSQL rules followed:
@@ -33,7 +34,8 @@ CREATE TABLE IF NOT EXISTS doc_changes (
 CREATE TABLE IF NOT EXISTS doc_change_counters (
   workspace_id UUID PRIMARY KEY,
   last_seq INTEGER NOT NULL,
-  epoch VARCHAR(36) NOT NULL
+  epoch VARCHAR(36) NOT NULL,
+  dirty BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_doc_changes_workspace_seq ON doc_changes(workspace_id, seq);

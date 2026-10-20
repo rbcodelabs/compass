@@ -93,7 +93,7 @@ export async function restoreDocVersionCore(
   const version = await prisma.docVersion.findUnique({ where: { id: versionId } })
   if (!version) return null
 
-  const doc = await prisma.doc.findUnique({ where: { id: version.docId }, select: { id: true, workspaceId: true, title: true, parentId: true } })
+  const doc = await prisma.doc.findUnique({ where: { id: version.docId }, select: { id: true, workspaceId: true } })
   if (!doc) return null
 
   // Snapshot the doc's CURRENT state first (uncoalesced -- always writes,
@@ -106,7 +106,7 @@ export async function restoreDocVersionCore(
 
   const restored = await writeDocWithChange(
     prisma,
-    { workspaceId: doc.workspaceId, kind: changeKindFor(doc, { title: version.title }), before: doc },
+    { workspaceId: doc.workspaceId, docId: version.docId, kind: (_result, before) => (before ? changeKindFor(before, { title: version.title }) : "UPSERT") },
     (client) => client.doc.update({
     where: { id: version.docId },
     data: {

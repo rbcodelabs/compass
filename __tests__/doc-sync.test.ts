@@ -185,7 +185,7 @@ describe("scan", () => {
     expect(scan.entries[0]).toMatchObject({ id: a.id, path: "Alpha", kind: "file", revision: a.revision })
     expect(scan.entries[0].size).toBeGreaterThan("# Alpha".length) // includes the compass_ frontmatter
     expect(scan.entries[0].hash).toMatch(/^[0-9a-f]{64}$/)
-    expect(decodeSyncCursor(scan.cursor)?.seq).toBe(1)
+    expect(decodeSyncCursor(scan.cursor!)?.seq).toBe(1)
   })
 
   it("marks a body-less parent as a folder", async () => {
@@ -204,7 +204,7 @@ describe("scan", () => {
     expect(delta.mode).toBe("delta")
     expect(delta.entries.map((e) => e.id)).toEqual([b.id])
     expect(delta.entries[0].path).toBe("Beta")
-    expect(decodeSyncCursor(delta.cursor)?.seq).toBe(3)
+    expect(decodeSyncCursor(delta.cursor!)?.seq).toBe(3)
     expect(a.id).toBeDefined()
     // Resuming from the new cursor yields nothing.
     expect(await scanDocs(WS, { cursor: delta.cursor })).toMatchObject({ mode: "delta", entries: [], hasMore: false })
