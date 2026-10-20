@@ -21,7 +21,7 @@ const KEY = "SOLUTION_TARGETS_KEY_RESULT";
 const ctx = { source: "MCP" as const, createdById: "user-alice" };
 const tx = () => fake.current!.client as unknown as AppTransactionClient;
 const state = () => fake.current!.state;
-const link = (solutionId = "sol-a", keyResultId = "kr-a", expectedWorkspaceId = WS_A.id) =>
+const link = (solutionId = "sol-a", keyResultId = "kr-a", expectedWorkspaceId: string = WS_A.id) =>
   linkSolutionToKeyResult(tx(), { solutionId, keyResultId, expectedWorkspaceId, ctx });
 
 beforeEach(() => {
