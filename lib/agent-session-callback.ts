@@ -89,6 +89,7 @@ export async function handleAgentSessionUpload(
       throughMessageId,
       bytes,
       storage,
+      harness: request.headers.get("x-agent-session-harness") === "opencode" ? "opencode" : "claude",
     })
     if (!result.committed) {
       return respond({ committed: false, code: result.reason }, result.reason === "INVALID" ? 422 : 200)

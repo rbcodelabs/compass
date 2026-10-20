@@ -17,6 +17,7 @@ import {
   commitAgentSession,
   deleteWorkspaceAgentSessions,
   findRunUserMessageId,
+  harnessOfSessionBlobKey,
   looksLikeSessionBlob,
   planAgentSession,
   resetAgentSessionsAvailabilityCache,
@@ -297,6 +298,48 @@ describe("planAgentSession", () => {
     expect(await plan(w, "u2")).toMatchObject({ enabled: true, resume: null })
     w.objects.delete(key)
     expect(await plan(w, "u2")).toMatchObject({ enabled: true, resume: null })
+  })
+
+  describe("harness tagging (transcripts are not portable between harnesses)", () => {
+    it("keeps Claude blob keys unchanged and tags opencode keys", () => {
+      expect(agentSessionBlobKey(WS, CONV)).toMatch(/\/[0-9a-f-]{36}\.jsonl\.gz$/)
+      expect(harnessOfSessionBlobKey(agentSessionBlobKey(WS, CONV))).toBe("claude")
+      expect(agentSessionBlobKey(WS, CONV, "opencode")).toMatch(/\.opencode\.jsonl\.gz$/)
+      expect(harnessOfSessionBlobKey(agentSessionBlobKey(WS, CONV, "opencode"))).toBe("opencode")
+    })
+
+    async function storedFor(harness: "claude" | "opencode") {
+      const w = world()
+      w.say("u1", "user", "first question")
+      w.say("a1", "assistant", "first answer")
+      await commitAgentSession({ prisma: w.prisma, conversationId: CONV, workspaceId: WS, sessionId: SESSION, throughMessageId: "u1", bytes: blob(), storage: w.storage, harness })
+      w.say("u2", "user", "follow up")
+      return w
+    }
+    const planFor = (w: ReturnType<typeof world>, harness: "claude" | "opencode") =>
+      planAgentSession({ prisma: w.prisma, conversationId: CONV, workspaceId: WS, currentMessageId: "u2", storage: w.storage, harness })
+
+    it("resumes an opencode transcript only for the opencode harness", async () => {
+      const w = await storedFor("opencode")
+      expect(await planFor(w, "opencode")).toMatchObject({ enabled: true, sessionId: SESSION })
+      const other = await planFor(w, "claude")
+      expect(other).toMatchObject({ enabled: true, resume: null })
+      expect(other.enabled && other.sessionId).not.toBe(SESSION)
+    })
+
+    it("does not feed a Claude transcript to opencode", async () => {
+      const w = await storedFor("claude")
+      expect(await planFor(w, "claude")).toMatchObject({ enabled: true, sessionId: SESSION })
+      expect(await planFor(w, "opencode")).toMatchObject({ enabled: true, resume: null })
+    })
+
+    it("replaces the pointer when the other harness commits, so each switch costs one replay", async () => {
+      const w = await storedFor("claude")
+      const first = w.sessions.get(CONV).blobKey
+      await commitAgentSession({ prisma: w.prisma, conversationId: CONV, workspaceId: WS, sessionId: OTHER_SESSION, throughMessageId: "u2", bytes: blob("x"), storage: w.storage, harness: "opencode" })
+      expect(w.sessions.get(CONV).blobKey).toMatch(/\.opencode\.jsonl\.gz$/)
+      expect(w.dels).toContain(first)
+    })
   })
 
   it("does not resume a pointer belonging to a different workspace", async () => {
