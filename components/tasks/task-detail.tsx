@@ -242,7 +242,7 @@ export function TaskDetail({ taskId, orgSlug, workspaceSlug, variant }: Props) {
   };
 
   return (
-    <div data-slot="task-detail" className={`flex min-w-0 flex-col gap-3 break-words pb-8 ${variant === "panel" ? "px-5" : ""}`}>
+    <div data-slot="task-detail" data-ctx-entity-type="task" data-ctx-entity-id={taskId} data-ctx-entity-title={data.title} className={`flex min-w-0 flex-col gap-3 break-words pb-8 ${variant === "panel" ? "px-5" : ""}`}>
       <PanelTitle displayId={displayId}
         title={data.title}
         edit={edit}

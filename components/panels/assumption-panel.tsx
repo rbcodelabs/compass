@@ -96,7 +96,7 @@ export function AssumptionPanel({
   }));
 
   return (
-    <PanelContainer>
+    <PanelContainer entity={{ type: edit.type, id: edit.id, title: data.title }}>
       {data.solution?.opportunity && (
         <FullPageLink
           href={`/${orgSlug}/${workspaceSlug}/discovery/${data.solution.opportunity.id}`}

@@ -27,16 +27,8 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { parseSseFrames } from "@/lib/sse-frames"
-import {
-  applyAgentSdkEvent,
-  emptyAgentTurnState,
-  runFailureText,
-  settleSteps,
-  type AgentTurnState,
-  type SerializedRun,
-  type ToolStep,
-} from "@/lib/agent-run-stream"
+import { type SerializedRun, type ToolStep } from "@/lib/agent-run-stream"
+import { useAgentTurn } from "@/components/agent/use-agent-turn"
 import { Markdown } from "@/components/agent/markdown"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
@@ -75,7 +67,7 @@ type Props = {
    * any draft). Never sent automatically, and never forwarded as `seedContext`
    * — a docs article is not a Compass entity the server can resolve.
    */
-  composerSeed?: { id: number; label: string; summary: string; sourceUrl: string; text: string } | null
+  composerSeed?: { id: number; label?: string; summary?: string; sourceUrl?: string; text: string } | null
   onComposerSeedApplied?: () => void
   /**
    * Which surface this chat is rendered on.
@@ -119,7 +111,6 @@ type Props = {
   onStreamingChange?: (streaming: boolean) => void
 }
 
-type StreamPhase = "idle" | "booting" | "running"
 type Processing = {
   status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "INTERRUPTED"
   /** Absent from an older server response, which only ever meant PM_INTERVIEW. */
@@ -175,17 +166,45 @@ export function AgentChat({
   useEffect(() => {
     if (!composerSeed || appliedSeedId.current === composerSeed.id) return
     appliedSeedId.current = composerSeed.id
-    setDocChip({ label: composerSeed.label, summary: composerSeed.summary, sourceUrl: composerSeed.sourceUrl })
+    if (composerSeed.label && composerSeed.sourceUrl) {
+      setDocChip({ label: composerSeed.label, summary: composerSeed.summary ?? "", sourceUrl: composerSeed.sourceUrl })
+    }
     setInput((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")}\n\n${composerSeed.text}` : composerSeed.text))
     onComposerSeedAppliedRef.current?.()
     requestAnimationFrame(() => composerRef.current?.focus())
   }, [composerSeed])
-  const [phase, setPhase] = useState<StreamPhase>("idle")
-  const [streamingText, setStreamingText] = useState("")
-  const [liveToolSteps, setLiveToolSteps] = useState<ToolStep[]>([])
-  const [error, setError] = useState<string | null>(null)
-  /** The detached run this tab is currently viewing, if any. */
-  const [activeRun, setActiveRun] = useState<SerializedRun | null>(null)
+  // The turn lifecycle (POST, detached-run viewer, inline stream fallback) lives
+  // in useAgentTurn so the Cmd+K palette's quick ask runs the very same code.
+  // This component only decides what a finished reply does to *its* transcript.
+  const turn = useAgentTurn({
+    workspaceId,
+    onConversationCreated: (createdId) => {
+      selfCreated.current.add(createdId)
+      onConversationCreatedRef.current?.(createdId)
+      // Rewrite `?c=` immediately so a reload — or a tab closed now and
+      // reopened in an hour — lands on the conversation that owns this run and
+      // reattaches to it. `router.refresh()` waits until the turn is done.
+      // Page-only: the rail is mounted in the workspace layout, above whichever
+      // route the user is on, and `router.replace` from there would navigate
+      // them to the agent screen mid-stream — the interruption the rail exists
+      // to remove. The rail keeps its list current by refetching (see AgentRail).
+      if (!isRail) router.replace(`${basePath}/agent?c=${createdId}`)
+    },
+    onSettled: ({ assistant, detached }) => {
+      if (assistant) {
+        setMessages((m) => [...m, { id: assistant.id, role: "assistant", content: assistant.content, toolCalls: assistant.toolCalls }])
+      }
+      // In a shared conversation the server also stored this reply under its own id,
+      // and other people's turns are in the history too, so take the stored
+      // transcript instead of leaving this tab's provisional copy on screen.
+      if (detached && sharedRef.current) void reconcileRef.current(true)
+      // Deferred to here on purpose: `router.refresh()` re-renders the server
+      // component that supplies `initialMessages`, and doing that mid-run would
+      // re-seed the transcript out from under the stream the user is reading.
+      if (!isRail) router.refresh()
+    },
+  })
+  const { phase, streamingText, liveToolSteps, error, setError, activeRun, isStreaming, cancelRun, attachToRun, abortViewers, reset: resetTurn, sending, start: startTurn } = turn
   const bottomRef = useRef<HTMLDivElement>(null)
   /** Who is in this conversation; null until loaded, or when unavailable. */
   const [roster, setRoster] = useState<Roster | null>(null)
@@ -194,19 +213,6 @@ export function AgentChat({
   const [processing, setProcessing] = useState<Processing | null>(null)
   const [processingLoading, setProcessingLoading] = useState(Boolean(activeConversationId))
   const started = useRef(new Set<string>())
-  const sending = useRef(false)
-  const streamController = useRef<AbortController | null>(null)
-  /**
-   * Aborts the *viewer* of a detached run — never the run itself, which lives in
-   * a sandbox and is stopped only by DELETE or by the sweeper.
-   */
-  const runController = useRef<AbortController | null>(null)
-  /**
-   * Runs with a live reader in this tab. The tab that started a run is already
-   * watching it, so the reattach effect must not open a second reader that
-   * replays the same events into the same transcript.
-   */
-  const watchedRuns = useRef(new Set<string>())
   // Kept in a ref so a parent passing an inline arrow can't change `send`'s
   // identity on every render — `send` is what the handoff auto-dispatch effect
   // reads through `sendRef`, and churning it there is how you get a double
@@ -219,7 +225,6 @@ export function AgentChat({
   // the re-seed effect below for what that is protecting.
   const selfCreated = useRef(new Set<string>())
 
-  const isStreaming = phase !== "idle"
   const shared = Boolean(roster?.available && roster.participants.length > 1)
   const sharedRef = useRef(shared)
   useEffect(() => {
@@ -246,18 +251,6 @@ export function AgentChat({
   }, [isStreaming])
   const composerBlocked = processingLoading || Boolean(processing && (!processing.canContinue || processing.status === "RUNNING" || processing.status === "PENDING"))
 
-  // Unmount only — deliberately NOT keyed on `activeConversationId`.
-  //
-  // Turn 1 of a brand-new chat adopts the server's conversation id while its run
-  // is still going, so a cleanup keyed on that id would hang up on the run it had
-  // just started. A genuine thread switch aborts in the re-seed effect below,
-  // which is the one place that can tell adoption and switching apart.
-  useEffect(() => () => {
-    streamController.current?.abort()
-    runController.current?.abort()
-    sending.current = false
-  }, [])
-
   // Re-seed the transcript whenever the selected conversation changes — with one
   // exception, consumed exactly once.
   //
@@ -281,194 +274,14 @@ export function AgentChat({
     }
     // A real thread switch: stop reading the previous thread's run. The run keeps
     // going server-side, and coming back to that thread reattaches to it.
-    streamController.current?.abort()
-    runController.current?.abort()
-    runController.current = null
-    sending.current = false
-    setActiveRun(null)
+    resetTurn()
     setAccessLost(null)
     setMessages(initialMessages)
-    setStreamingText("")
-    setLiveToolSteps([])
-    setError(null)
-    setPhase("idle")
-  }, [activeConversationId, initialMessages])
+  }, [activeConversationId, initialMessages, resetTurn])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
   }, [messages, streamingText, liveToolSteps, phase])
-
-  /**
-   * View a detached run to completion.
-   *
-   * Everything here is a *read*: the SSE tail and the snapshot route both only
-   * query rows the sandbox writes, so this can be started, abandoned and started
-   * again — on a different day, in a different tab — and it converges on the same
-   * transcript. That is why the fallbacks below are allowed to be as blunt as
-   * "start over from `afterSeq`".
-   */
-  const watchRun = useCallback(async (runId: string, controller: AbortController) => {
-    if (watchedRuns.current.has(runId)) return
-    watchedRuns.current.add(runId)
-
-    let turn: AgentTurnState = emptyAgentTurnState
-    let afterSeq = 0
-    let run: SerializedRun | null = null
-    let resultText: string | null = null
-    let reportedFailure: string | null = null
-    let consecutiveFailures = 0
-
-    const apply = (next: AgentTurnState) => {
-      if (next === turn) return
-      turn = next
-      setStreamingText(turn.text)
-      setLiveToolSteps(turn.steps)
-    }
-    const ingest = (event: { seq: number; type: string; payload: unknown }) => {
-      // Monotonic, and never trusted to arrive in order: `afterSeq` is the cursor
-      // every resume is built on, so moving it backwards would replay events.
-      if (event.seq > afterSeq) afterSeq = event.seq
-      const payload = (event.payload ?? {}) as Record<string, unknown>
-      if (event.type === "agent") apply(applyAgentSdkEvent(event.payload, turn))
-      else if (event.type === "status") setPhase(payload.phase === "running" ? "running" : "booting")
-      else if (event.type === "result") { if (typeof payload.text === "string") resultText = payload.text }
-      else if (event.type === "error") reportedFailure = typeof payload.message === "string" ? payload.message : "The agent hit an error."
-    }
-    const adoptRun = (next: SerializedRun) => {
-      run = next
-      setActiveRun(next)
-      if (!next.done) setPhase(next.status === "QUEUED" ? "booting" : "running")
-    }
-    /** Polling fallback for when the tail is unavailable but the run is fine. */
-    const snapshot = async (): Promise<SerializedRun | null> => {
-      let latest: SerializedRun | null = null
-      for (let page = 0; page < 20; page += 1) {
-        const res = await fetch(`/api/agent/runs/${runId}?afterSeq=${afterSeq}`, { signal: controller.signal })
-        if (!res.ok) return latest
-        const body = await res.json() as { run: SerializedRun; events: { seq: number; type: string; payload: unknown }[]; hasMore: boolean }
-        for (const event of body.events) ingest(event)
-        latest = body.run
-        if (!body.hasMore) break
-      }
-      return latest
-    }
-
-    try {
-      for (;;) {
-        if (controller.signal.aborted) return
-        try {
-          const res = await fetch(`/api/agent/runs/${runId}/stream?afterSeq=${afterSeq}`, {
-            signal: controller.signal,
-            headers: { accept: "text/event-stream" },
-          })
-          if (res.status === 404) throw new Error("This run is no longer available.")
-          if (!res.ok || !res.body) throw new Error(`Run stream failed (${res.status}).`)
-          consecutiveFailures = 0
-          const reader = res.body.getReader()
-          const decoder = new TextDecoder()
-          let buffer = ""
-          let finished = false
-          let hungUp = false
-          for (;;) {
-            const { value, done } = await reader.read()
-            if (controller.signal.aborted) return
-            if (done) break
-            buffer += decoder.decode(value, { stream: true })
-            const { frames, rest } = parseSseFrames(buffer)
-            buffer = rest
-            for (const { event, data } of frames) {
-              let payload: unknown
-              try {
-                payload = JSON.parse(data)
-              } catch {
-                continue
-              }
-              if (event === "run") adoptRun(payload as SerializedRun)
-              else if (event === "event") ingest(payload as { seq: number; type: string; payload: unknown })
-              else if (event === "done") finished = true
-              // `reconnect` is the server hanging up before its function times
-              // out, and `error` is its tail failing — both mean "ask again from
-              // afterSeq", which is what falling out of this loop does.
-              else if (event === "reconnect" || event === "error") hungUp = true
-            }
-            if (finished || hungUp) break
-          }
-          if (finished) break
-        } catch (caught) {
-          if (controller.signal.aborted) return
-          consecutiveFailures += 1
-          if (consecutiveFailures > 5) throw caught
-          // The run outlives its readers, so a dead connection is not a dead run.
-          // Ask the snapshot route, which both advances the transcript and reveals
-          // whether the thing we lost contact with has already finished.
-          const recovered = await snapshot().catch(() => null)
-          if (recovered) {
-            adoptRun(recovered)
-            if (recovered.done) break
-          }
-          await new Promise((resolve) => setTimeout(resolve, Math.min(1_000 * consecutiveFailures, 5_000)))
-        }
-      }
-
-      if (controller.signal.aborted) return
-      // Re-widened deliberately: `run` is only ever assigned inside `adoptRun`, and
-      // TypeScript's flow analysis does not look into that closure — so without this
-      // it narrows to `null` here and the status checks below become unreachable.
-      const finalRun = run as SerializedRun | null
-      const text = (resultText ?? turn.text).trim()
-      const succeeded = !finalRun || finalRun.status === "SUCCEEDED"
-      if (text || succeeded) {
-        // Keyed on the run id, so a reattach that lands after the server already
-        // wrote its own assistant message is at worst a duplicate on screen until
-        // the next server render — never a lost reply.
-        setMessages((m) => [
-          ...m,
-          { id: `run-${runId}`, role: "assistant", content: text || "(no response)", toolCalls: settleSteps(turn.steps) },
-        ])
-      }
-      // In a shared conversation the server also stored this reply under its own id,
-      // and other people's turns are in the history too, so take the stored
-      // transcript instead of leaving this tab's provisional copy on screen.
-      if (sharedRef.current) void reconcileRef.current(true)
-      if (reportedFailure) setError(reportedFailure)
-      else if (finalRun && !succeeded) setError(runFailureText(finalRun.status, finalRun.error))
-      setStreamingText("")
-      setLiveToolSteps([])
-      setPhase("idle")
-      setActiveRun(null)
-      // Deferred to here on purpose: `router.refresh()` re-renders the server
-      // component that supplies `initialMessages`, and doing that mid-run would
-      // re-seed the transcript out from under the stream the user is reading.
-      if (!isRail) router.refresh()
-    } catch (caught) {
-      if (controller.signal.aborted) return
-      setError(caught instanceof Error ? caught.message : "Lost contact with the agent run.")
-      setStreamingText("")
-      setLiveToolSteps([])
-      setPhase("idle")
-    } finally {
-      // Dropped even on abort: an abandoned viewer must not stop the next one from
-      // reattaching to the same run.
-      watchedRuns.current.delete(runId)
-      if (runController.current === controller) {
-        runController.current = null
-        sending.current = false
-      }
-    }
-  }, [isRail, router])
-
-  /**
-   * Stop a run server-side. No local state change: the watcher sees the terminal
-   * status and reports whatever actually happened, which may be a result that
-   * landed while the request was in flight.
-   */
-  const cancelRun = useCallback(async (runId: string) => {
-    try {
-      await fetch(`/api/agent/runs/${runId}`, { method: "DELETE" })
-    } catch {
-      setError("Could not reach the server to stop this run.")
-    }
-  }, [])
 
   // `handoffKind` is passed in rather than read from `processing` because the
   // auto-dispatch below fires from the same tick as its `setProcessing`, so this
@@ -480,18 +293,8 @@ export function AgentChat({
       ? handoffKind === "RESEARCH_SYNTHESIS" ? "Synthesize my saved research for this study." : "Use my saved interview to update the item."
       : input.trim()
     if (!text || sending.current) return
-    sending.current = true
-    const controller = new AbortController()
-    streamController.current = controller
-    // The same controller covers the POST and, on the detached path, the viewer it
-    // hands off to — so the two abort points (unmount, thread switch) stop both.
-    runController.current = controller
     setInput("")
-    setError(null)
     setMessages((m) => [...m, { id: `local-${Date.now()}`, role: "user", content: text }])
-    setPhase("booting")
-    setStreamingText("")
-    setLiveToolSteps([])
 
     // Only turn 1 of a brand-new conversation carries seedContext — never a
     // resumed thread. Clear it immediately so a second send() in this same
@@ -504,148 +307,18 @@ export function AgentChat({
     if (seedContextForThisTurn) setPendingSeedEntity(undefined)
     setDocChip(null)
 
-    let turn: AgentTurnState = emptyAgentTurnState
-    let assembled = ""
-    let newConversationId: string | null = null
-    try {
-      const res = await fetch("/api/agent/turn", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          workspaceId,
-          message: text,
-          conversationId: activeConversationId ?? undefined,
-          ...(seedContextForThisTurn ? { seedContext: seedContextForThisTurn } : {}),
-          // The rail floats over whatever page the user is on, so tell the server which one.
-          // Read at send time (not from render state) so it is the page NOW, not when the
-          // component last rendered. The full-page agent screen has no page behind it.
-          ...(isRail ? { pageUrl: window.location.pathname + window.location.search } : {}),
-          ...(retry ? { retry: true } : {}),
-          ...(!handoff && processing?.canContinue ? { continue: true } : {}),
-        }),
-      })
-      if (controller.signal.aborted) return
-      if (!res.ok || !res.body) {
-        const serverMsg = await res.text().catch(() => "")
-        throw new Error(
-          res.status === 401
-            ? "Your session expired — reload and sign in."
-            : serverMsg || `Request failed (${res.status}).`
-        )
-      }
-      // 202 Accepted = the turn is a detached run. The POST is already over; the
-      // agent is not attached to it, and neither is this tab's survival. From here
-      // on this component is only a viewer.
-      if (res.status === 202) {
-        const accepted = await res.json() as { runId: string; conversationId: string }
-        const createdId = accepted.conversationId && accepted.conversationId !== activeConversationId ? accepted.conversationId : null
-        if (createdId) {
-          selfCreated.current.add(createdId)
-          onConversationCreatedRef.current?.(createdId)
-          // Rewrite `?c=` immediately so a reload — or a tab closed now and
-          // reopened in an hour — lands on the conversation that owns this run and
-          // reattaches to it. `router.refresh()` waits until the run is done; see
-          // watchRun.
-          if (!isRail) router.replace(`${basePath}/agent?c=${createdId}`)
-        }
-        await watchRun(accepted.runId, controller)
-        return
-      }
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ""
-      for (;;) {
-        const { value, done } = await reader.read()
-        if (controller.signal.aborted) return
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const { frames, rest } = parseSseFrames(buffer)
-        buffer = rest
-        for (const { event, data } of frames) {
-          let payload: unknown
-          try {
-            payload = JSON.parse(data)
-          } catch {
-            continue
-          }
-          const p = payload as Record<string, unknown>
-          if (event === "status") {
-            setPhase(p.phase === "running" ? "running" : "booting")
-            if (typeof p.conversationId === "string") newConversationId = p.conversationId
-          } else if (event === "agent") {
-            // Same reducer the detached viewer uses — the payload shape is
-            // identical because both originate in scripts/agent/turn-entry.ts.
-            const next = applyAgentSdkEvent(p, turn)
-            if (next !== turn) {
-              turn = next
-              assembled = turn.text
-              setStreamingText(turn.text)
-              setLiveToolSteps(turn.steps)
-            }
-          } else if (event === "result") {
-            if (typeof p.text === "string" && p.text) assembled = p.text
-            if (typeof p.conversationId === "string") newConversationId = p.conversationId
-          } else if (event === "error") {
-            throw new Error(typeof p.message === "string" ? p.message : "The agent hit an error.")
-          }
-        }
-      }
-
-      setMessages((m) => [
-        ...m,
-        { id: `a-${Date.now()}`, role: "assistant", content: assembled || "(no response)", toolCalls: settleSteps(turn.steps) },
-      ])
-      setStreamingText("")
-      setLiveToolSteps([])
-      setPhase("idle")
-      const createdId = newConversationId && newConversationId !== activeConversationId ? newConversationId : null
-      if (createdId) {
-        selfCreated.current.add(createdId)
-        onConversationCreatedRef.current?.(createdId)
-      }
-      // Both router calls are page-only, and for the same underlying reason: the
-      // page *is* the route, so re-rendering it is how its server-loaded
-      // conversation list and `?c=` selection stay true. The rail is mounted in
-      // the workspace layout, above whichever route the user happens to be on.
-      // `router.replace` from there would navigate them to the agent screen
-      // mid-stream — the precise interruption the rail exists to remove — and
-      // `router.refresh()` would re-render a screen they are reading to refresh
-      // data the rail does not consume. The rail keeps its own list current by
-      // refetching it (see AgentRail), which costs one query instead of a
-      // whole route.
-      if (!isRail) {
-        if (createdId) router.replace(`${basePath}/agent?c=${createdId}`)
-        router.refresh()
-      }
-    } catch (err) {
-      if (controller.signal.aborted) return
-      setError(err instanceof Error ? err.message : "Something went wrong.")
-      setStreamingText("")
-      setLiveToolSteps([])
-      setPhase("idle")
-    } finally {
-      if (streamController.current === controller) sending.current = false
-    }
-  }, [input, workspaceId, activeConversationId, basePath, router, isRail, processing?.canContinue, pendingSeedEntity, watchRun])
-
-  /**
-   * Become a viewer of a run that is already in flight. The run may be
-   * one this user started in another tab, or — in a shared conversation — one
-   * another participant started.
-   */
-  const attachToRun = useCallback(async (run: SerializedRun) => {
-    if (watchedRuns.current.has(run.id)) return
-    const controller = new AbortController()
-    runController.current = controller
-    // Block the composer for the duration: one conversation may have only one
-    // run in flight, and the server would 409 a second turn anyway.
-    sending.current = true
-    setActiveRun(run)
-    setPhase(run.status === "QUEUED" ? "booting" : "running")
-    await watchRun(run.id, controller)
-  }, [watchRun])
+    await startTurn({
+      message: text,
+      conversationId: activeConversationId,
+      seedContext: seedContextForThisTurn,
+      // The rail floats over whatever page the user is on, so tell the server which one.
+      // Read at send time (not from render state) so it is the page NOW, not when the
+      // component last rendered. The full-page agent screen has no page behind it.
+      pageUrl: isRail ? window.location.pathname + window.location.search : undefined,
+      retry,
+      continueTurn: !handoff && Boolean(processing?.canContinue),
+    })
+  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, sending, startTurn])
 
   // Reattach to a run already in flight for this conversation.
   //
@@ -765,17 +438,16 @@ export function AgentChat({
       cancelled = true
       clearInterval(timer)
     }
-  }, [activeConversationId, workspaceId, shared, accessLost, phase, reconcile, attachToRun])
+  }, [activeConversationId, workspaceId, shared, accessLost, phase, reconcile, attachToRun, sending])
 
   const handleAccessLost = useCallback(
     (reason: "left" | "removed") => {
-      streamController.current?.abort()
-      runController.current?.abort()
+      abortViewers()
       setAccessLost(reason)
       // Leaving on the full page drops the now-inaccessible thread from the URL.
       if (reason === "left" && !isRail) router.replace(`${basePath}/agent`)
     },
-    [isRail, router, basePath],
+    [isRail, router, basePath, abortViewers],
   )
 
   const sendRef = useRef(send)
@@ -807,7 +479,7 @@ export function AgentChat({
     }
     void refreshProcessing()
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [activeConversationId, workspaceId, phase])
+  }, [activeConversationId, workspaceId, phase, setError])
 
   const phaseLabel = useMemo(() => {
     if (phase === "booting") return "Starting the agent…"

@@ -254,7 +254,7 @@ html.dark:has(.workspace-theme-scope) {
             "Link existing task", discovery/add-evidence-dialog), and a
             dialog opened from a panel has to cover the panel it came from.
      80     transient popup positioners — select, combobox, dropdown menu,
-            tooltip. Above every surface, because any of them can be opened
+            tooltip, and the selection pill (components/selection-ask-pill.tsx). Above every surface, because any of them can be opened
             from inside any surface, and a transient popup is always
             dismissed before the user can interact with what it covers.
 

@@ -111,7 +111,7 @@ export function ObjectivePanel({
     : [];
 
   return (
-    <PanelContainer>
+    <PanelContainer entity={{ type: edit.type, id: edit.id, title: data.title }}>
       <FullPageLink href={`/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.cycle?.id)}`} />
 
       <PanelTitle displayId={displayId}

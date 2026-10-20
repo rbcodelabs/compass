@@ -222,7 +222,7 @@ export function KeyResultPanel({
   });
 
   return (
-    <PanelContainer>
+    <PanelContainer entity={{ type: edit.type, id: edit.id, title: data.title }}>
       {data.objective && (
         <FullPageLink
           href={`/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.objective.cycleId)}`}

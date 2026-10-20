@@ -91,7 +91,7 @@ export function FeedbackPanel({
     : [];
 
   return (
-    <PanelContainer>
+    <PanelContainer entity={{ type: edit.type, id: edit.id, title: data.title }}>
       <FullPageLink href={`/${orgSlug}/${workspaceSlug}/feedback`} />
 
       <PanelTitle displayId={displayId}

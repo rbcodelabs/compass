@@ -31,6 +31,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { usePanelContext, type EntityPanelType } from "./panel-context";
+import { humanizeFieldKey } from "@/lib/selection-context";
 
 /** The context an editable control needs to persist a change. */
 export type EditContext = {
@@ -146,9 +147,23 @@ export function PanelError({ label }: { label: string }) {
   );
 }
 
-export function PanelContainer({ children }: { children: React.ReactNode }) {
+export function PanelContainer({
+  children,
+  entity,
+}: {
+  children: React.ReactNode;
+  /** Names the entity this panel shows, for the Cmd+K selection pill (lib/selection-context.ts). */
+  entity?: { type: EntityPanelType; id: string; title?: string };
+}) {
   return (
-    <div className="flex flex-col gap-5 px-5 pb-8 overflow-y-auto">{children}</div>
+    <div
+      className="flex flex-col gap-5 px-5 pb-8 overflow-y-auto"
+      data-ctx-entity-type={entity?.type}
+      data-ctx-entity-id={entity?.id}
+      data-ctx-entity-title={entity?.title}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -386,7 +401,36 @@ export function RelationList({
  * Compact fields save on Enter/blur. Descriptions own an explicit Save/Cancel
  * transaction and preserve a rejected draft for retry.
  */
-export function EditableText({
+export function EditableText(props: EditableTextProps) {
+  // `display: contents` + data attributes only: tells the Cmd+K selection pill
+  // which entity and field a selection came from (lib/selection-context.ts)
+  // without adding a box or touching editing behaviour.
+  return (
+    <span
+      className="contents"
+      data-ctx-entity-type={props.edit.type}
+      data-ctx-entity-id={props.edit.id}
+      data-ctx-field={humanizeFieldKey(props.field)}
+    >
+      <EditableTextBody {...props} />
+    </span>
+  );
+}
+
+type EditableTextProps = {
+  value: string | null;
+  field: string;
+  edit: EditContext;
+  multiline?: boolean;
+  placeholder?: string;
+  className?: string;
+  /** "number" renders a numeric input and sends a parsed number (or null) to
+   * the server instead of a raw string — used by task story points. The
+   * other 8 panels never pass this, so they're unaffected. */
+  type?: "text" | "number";
+};
+
+function EditableTextBody({
   value,
   field,
   edit,

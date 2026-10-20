@@ -47,6 +47,8 @@ const LAYER_OWNERS = {
     "components/ui/popover.tsx",
     "components/ui/context-menu.tsx",
     "components/ui/tooltip.tsx",
+    // Transient floating actions beside a text selection; may sit over the detail panel (60) and dialogs (70).
+    "components/selection-ask-pill.tsx",
   ],
 };
 

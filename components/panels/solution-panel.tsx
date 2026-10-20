@@ -137,7 +137,7 @@ export function SolutionPanel({
   const canPromote = data.status === "VALIDATED" || data.status === "IN_DELIVERY";
 
   return (
-    <PanelContainer>
+    <PanelContainer entity={{ type: edit.type, id: edit.id, title: data.title }}>
       {data.opportunity && (
         <FullPageLink
           href={`/${orgSlug}/${workspaceSlug}/discovery/${data.opportunity.id}`}
