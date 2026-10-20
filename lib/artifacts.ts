@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto"
-import getPrisma from "@/lib/db"
+import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
 export { ARTIFACT_CSP, buildSandboxedHtml } from "@/lib/artifact-preview-html"
 import { assertKindAllowedForSource, readArtifactKind, storedArtifactKind, type ArtifactKind } from "@/lib/artifact-kind"
+import { runTypedLinkTransaction } from "@/lib/typed-links"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export const MAX_ARTIFACT_HTML_BYTES = 2 * 1024 * 1024
@@ -289,49 +290,60 @@ export async function setArtifactRevisionThumbnail(
   }
 }
 
+// ── Artifact links ──────────────────────────────────────────────────────────
+// artifact_links is the source of truth. Every write below runs in ONE transaction with its entity_links mirror (ADR "One generic
+// entity_links table", phase 6; lib/links/legacy-mirror.ts), so the legacy row and the mirror row commit or roll back together. A lost race on the
+// unique pair aborts the transaction, so runTypedLinkTransaction re-runs it and the repeat read returns the winner.
+// These are never called inside an MCP tool receipt transaction (hasToolTransaction): that wrapper exists only for the PM-interview update
+// tools, and link_artifact_* are not among them (they are denied in interview contexts). Were one ever wrapped, withWorkspaceUpdates would
+// reuse the outer transaction and a pair race could not be retried here; the caller's own retry would then see the winner.
+
+const legacyMirror = () => import("@/lib/links/legacy-mirror")
+const entityLinkService = () => import("@/lib/links/service")
+
 export async function linkArtifactToSolution(input: {
   artifactId: string; solutionId: string; workspaceId: string; createdById?: string | null; source?: Source
 }) {
-  const prisma = getPrisma()
-  const [artifact, solution] = await Promise.all([
-    prisma.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true, workspaceId: true } }),
-    prisma.solution.findFirst({ where: { id: input.solutionId, workspaceId: input.workspaceId }, select: { id: true } }),
-  ])
-  if (!artifact || !solution) throw new Error("Artifact and Solution must exist in the same workspace")
-  const existing = await prisma.artifactLink.findFirst({ where: { artifactId: artifact.id, linkedType: "SOLUTION", linkedId: solution.id } })
-  if (existing) return { ...existing, created: false }
-  try {
-    const link = await prisma.artifactLink.create({ data: {
-      workspaceId: input.workspaceId, artifactId: artifact.id, linkedType: "SOLUTION", linkedId: solution.id,
+  return runTypedLinkTransaction(getPrisma(), async (tx) => {
+    const artifact = await tx.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true, workspaceId: true } })
+    const solution = await tx.solution.findFirst({ where: { id: input.solutionId, workspaceId: input.workspaceId }, select: { id: true } })
+    if (!artifact || !solution) throw new Error("Artifact and Solution must exist in the same workspace")
+    const where = { artifactId: artifact.id, linkedType: "SOLUTION", linkedId: solution.id }
+    const mirror = async (ctx: { source: Source; createdById: string | null }) => (await legacyMirror()).mirrorArtifactLink(tx, {
+      linkedType: "SOLUTION", artifactId: artifact.id, linkedId: solution.id, workspaceId: input.workspaceId, ctx,
+    })
+    const existing = await tx.artifactLink.findFirst({ where })
+    if (existing) {
+      // A replay heals a missing mirror row with the LEGACY row's source and actor (what the backfill copies), not the replaying caller's.
+      await mirror({ source: existing.source as Source, createdById: existing.createdById ?? null })
+      return { ...existing, created: false }
+    }
+    const link = await tx.artifactLink.create({ data: {
+      workspaceId: input.workspaceId, ...where,
       createdById: input.createdById ?? null, source: input.source ?? "UI",
     } })
+    await mirror({ source: input.source ?? "UI", createdById: input.createdById ?? null })
     return { ...link, created: true }
-  } catch (error) {
-    if ((error as { code?: string }).code !== "P2002") throw error
-    const winner = await prisma.artifactLink.findFirst({ where: { artifactId: artifact.id, linkedType: "SOLUTION", linkedId: solution.id } })
-    if (!winner) throw error
-    return { ...winner, created: false }
-  }
+  })
 }
 
 export async function unlinkArtifactFromSolution(input: { artifactId: string; solutionId: string; workspaceId: string }) {
-  const prisma = getPrisma()
-  const artifact = await prisma.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true } })
-  if (!artifact) throw new Error("Artifact not found")
-  const link = await prisma.artifactLink.findFirst({ where: { artifactId: input.artifactId, linkedType: "SOLUTION", linkedId: input.solutionId, workspaceId: input.workspaceId } })
-  if (!link) return { removed: false }
-  await prisma.artifactLink.delete({ where: { id: link.id } })
-  return { removed: true }
+  return runTypedLinkTransaction(getPrisma(), async (tx) => {
+    const artifact = await tx.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true } })
+    if (!artifact) throw new Error("Artifact not found")
+    const link = await tx.artifactLink.findFirst({ where: { artifactId: input.artifactId, linkedType: "SOLUTION", linkedId: input.solutionId, workspaceId: input.workspaceId } })
+    if (link) await tx.artifactLink.delete({ where: { id: link.id } })
+    // The mirror row goes whatever the flag says (and even when the legacy row was already gone), so an unlink never strands one.
+    await (await legacyMirror()).unmirrorArtifactLink(tx, { linkedType: "SOLUTION", artifactId: artifact.id, linkedId: input.solutionId, workspaceId: input.workspaceId })
+    return { removed: Boolean(link) }
+  })
 }
 
 type DecisionArtifactInput = { artifactId: string; requestId: string; workspaceId: string }
 
-async function assertDecisionArtifactTargets(input: DecisionArtifactInput) {
-  const prisma = getPrisma()
-  const [artifact, request] = await Promise.all([
-    prisma.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true, status: true } }),
-    prisma.reviewRequest.findFirst({ where: { id: input.requestId, workspaceId: input.workspaceId, gateType: "TRACKED_DECISION" }, select: { id: true } }),
-  ])
+async function assertDecisionArtifactTargets(tx: AppTransactionClient, input: DecisionArtifactInput) {
+  const artifact = await tx.artifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId }, select: { id: true, status: true } })
+  const request = await tx.reviewRequest.findFirst({ where: { id: input.requestId, workspaceId: input.workspaceId, gateType: "TRACKED_DECISION" }, select: { id: true } })
   if (!artifact || !request) throw new Error("Artifact and Decision must exist in the same workspace")
   return artifact
 }
@@ -341,27 +353,31 @@ function decisionArtifactLinkWhere(input: DecisionArtifactInput) {
 }
 
 export async function linkArtifactToDecision(input: DecisionArtifactInput & { createdById?: string | null; source?: Source }) {
-  const artifact = await assertDecisionArtifactTargets(input)
-  const prisma = getPrisma()
-  const where = decisionArtifactLinkWhere(input)
-  const existing = await prisma.artifactLink.findFirst({ where })
-  if (existing) return { ...existing, created: false }
-  if (artifact.status === "ARCHIVED") throw new Error("Archived Artifacts cannot be linked to a Decision")
-  try {
-    const link = await prisma.artifactLink.create({ data: { ...where, createdById: input.createdById ?? null, source: input.source ?? "UI" } })
+  return runTypedLinkTransaction(getPrisma(), async (tx) => {
+    const artifact = await assertDecisionArtifactTargets(tx, input)
+    const where = decisionArtifactLinkWhere(input)
+    const mirror = async (ctx: { source: Source; createdById: string | null }) => (await legacyMirror()).mirrorArtifactLink(tx, {
+      linkedType: "REVIEW_REQUEST", artifactId: input.artifactId, linkedId: input.requestId, workspaceId: input.workspaceId, ctx,
+    })
+    const existing = await tx.artifactLink.findFirst({ where })
+    if (existing) {
+      await mirror({ source: existing.source as Source, createdById: existing.createdById ?? null })
+      return { ...existing, created: false }
+    }
+    if (artifact.status === "ARCHIVED") throw new Error("Archived Artifacts cannot be linked to a Decision")
+    const link = await tx.artifactLink.create({ data: { ...where, createdById: input.createdById ?? null, source: input.source ?? "UI" } })
+    await mirror({ source: input.source ?? "UI", createdById: input.createdById ?? null })
     return { ...link, created: true }
-  } catch (error) {
-    if ((error as { code?: string }).code !== "P2002") throw error
-    const winner = await prisma.artifactLink.findFirst({ where })
-    if (!winner) throw error
-    return { ...winner, created: false }
-  }
+  })
 }
 
 export async function unlinkArtifactFromDecision(input: DecisionArtifactInput) {
-  await assertDecisionArtifactTargets(input)
-  const result = await getPrisma().artifactLink.deleteMany({ where: decisionArtifactLinkWhere(input) })
-  return { removed: result.count > 0 }
+  return runTypedLinkTransaction(getPrisma(), async (tx) => {
+    await assertDecisionArtifactTargets(tx, input)
+    const result = await tx.artifactLink.deleteMany({ where: decisionArtifactLinkWhere(input) })
+    await (await legacyMirror()).unmirrorArtifactLink(tx, { linkedType: "REVIEW_REQUEST", artifactId: input.artifactId, linkedId: input.requestId, workspaceId: input.workspaceId })
+    return { removed: result.count > 0 }
+  })
 }
 
 export async function getDecisionArtifacts(workspaceId: string, requestId: string) {
@@ -557,6 +573,9 @@ export async function deleteArtifact(input: { artifactId: string; workspaceId: s
   // thumbnail bytes outlive the artifact forever (nothing else references them).
   const pathnames = artifact.revisions.flatMap((revision) => [revision.blobPathname, revision.thumbnailPathname].filter((p): p is string => Boolean(p)))
   await enqueueBlobCleanup(prisma, pathnames, "ARTIFACT_DELETE")
+  // The entity_links mirror is swept FIRST and whatever the flag says: a failed sweep then leaves the Artifact and its legacy links untouched
+  // (the delete is simply retried), while a failed LATER legacy delete leaves a legacy row that a replay or 096 re-mirrors.
+  await (await entityLinkService()).deleteLinksForEntity(prisma, "ARTIFACT", [artifact.id])
   await prisma.artifactLink.deleteMany({ where: { artifactId: artifact.id } })
   await prisma.artifact.update({ where: { id: artifact.id }, data: { currentRevisionId: null, updatedAt: new Date() } })
   await prisma.artifactRevision.deleteMany({ where: { artifactId: artifact.id } })

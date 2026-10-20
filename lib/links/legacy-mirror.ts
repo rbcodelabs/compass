@@ -1,6 +1,8 @@
 /**
  * The single writer of legacy-mirrored link types (ADR "One generic entity_links table", section 6, phases 4 and 5).
  *
+ * Phase 6 adds the two Artifact link types (Solution, Decision) the same way; migration 096 backfills them.
+ *
  * Phase 5 adds Opportunity <-> Objective (origin DIRECT/LEGACY preserved) and the Opportunity -> Key Result pointer. Unlike phase 4 they
  * are backfilled by the explicit-only migration 095 (lib/migrations/entity-links-opportunity-backfill.ts), and the same rules apply:
  * the legacy table / column is the source of truth, the mirror joins the legacy transaction, removal never depends on the flag, and
@@ -120,4 +122,38 @@ export async function mirrorOpportunityKeyResultPointer(
     ctx: input.ctx,
     viaLegacyWriter: true,
   })
+}
+
+// ── Artifact links (phase 6) ────────────────────────────────────────────────
+
+const ARTIFACT_SOLUTION = "ARTIFACT_ATTACHED_TO_SOLUTION"
+const ARTIFACT_DECISION = "ARTIFACT_SUPPORTS_DECISION"
+
+/** artifact_links.linked_type -> the registry type that mirrors it. */
+const ARTIFACT_LINK_KEYS = { SOLUTION: ARTIFACT_SOLUTION, REVIEW_REQUEST: ARTIFACT_DECISION } as const
+export type ArtifactLinkedType = keyof typeof ARTIFACT_LINK_KEYS
+
+type ArtifactPair = { linkedType: ArtifactLinkedType; artifactId: string; linkedId: string; workspaceId: string }
+
+/**
+ * Mirrors an artifact_links row (idempotent) while the flag is on. The legacy writer verified both endpoints (and, for a Decision, the
+ * TRACKED_DECISION gate) in this transaction; the service re-verifies them. A Decision link points at the Artifact itself, never at a
+ * revision (ADR-0010: live supporting material).
+ */
+export async function mirrorArtifactLink(tx: AppTransactionClient, input: ArtifactPair & { ctx: LinkContext }): Promise<void> {
+  const key = ARTIFACT_LINK_KEYS[input.linkedType]
+  if (!isLinkTypeEnabled(requireLinkType(key))) return
+  await linkEntities(tx, {
+    linkType: key,
+    fromId: input.artifactId,
+    toId: input.linkedId,
+    expectedWorkspaceId: input.workspaceId,
+    ctx: input.ctx,
+    viaLegacyWriter: true,
+  })
+}
+
+/** Removes the mirror row regardless of the flag, so a legacy unlink never strands a row written while it was on. Only the Artifact is verified. */
+export async function unmirrorArtifactLink(tx: AppTransactionClient, input: ArtifactPair): Promise<void> {
+  await unlinkEntities(tx, { linkType: ARTIFACT_LINK_KEYS[input.linkedType], fromId: input.artifactId, toId: input.linkedId, expectedWorkspaceId: input.workspaceId, viaLegacyWriter: true })
 }

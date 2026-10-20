@@ -449,6 +449,8 @@ captures a v0 chat as an Artifact. `title` may be empty to use the chat name.
   `V0_PREVIEW_HOST` / `V0_PREVIEW_TICKET_KEY`), the Artifact falls back to a link
   card rather than an embedded preview.
 
+**Linking an Artifact.** Always use `link_artifact_to_solution` / `unlink_artifact_from_solution` and `link_artifact_to_decision` / `unlink_artifact_from_decision`; the generic `link_entities` refuses `ARTIFACT_ATTACHED_TO_SOLUTION` and `ARTIFACT_SUPPORTS_DECISION`, which are only flagged mirrors of those links in `entity_links`. A Decision link is live supporting material (it names the Artifact, not a revision, and implies nothing about what an approval covered) and is accepted only for tracked Decisions.
+
 #### Feedback
 
 | Tool | Description |

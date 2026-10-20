@@ -1,4 +1,5 @@
 import getPrisma from "@/lib/db"
+import { deleteLinksForEntity } from "@/lib/links/service"
 
 type Prisma = ReturnType<typeof getPrisma>
 
@@ -35,6 +36,8 @@ export async function deleteWorkspaceDecisionData(prisma: Prisma, workspaceId: s
 
   // Break ReviewRequest.currentRevisionId before deleting immutable revisions.
   await prisma.artifactLink.deleteMany({ where: { workspaceId, linkedType: "REVIEW_REQUEST" } })
+  // The entity_links mirror of those links (ADR phase 6), by endpoint, whatever the mirror flag says.
+  await deleteLinksForEntity(prisma, "REVIEW_REQUEST", (await prisma.reviewRequest.findMany({ where: { workspaceId }, select: { id: true } })).map((request) => request.id))
   await prisma.reviewRequest.updateMany({
     where: { workspaceId },
     data: { currentRevisionId: null, updatedAt: new Date() },

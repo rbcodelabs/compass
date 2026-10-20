@@ -1,0 +1,20 @@
+-- Migration 096: backfill entity_links for ArtifactLink (Artifact -> Solution and Artifact -> Decision)
+-- (ADR "One generic entity_links table for association links", phase 6).
+--
+-- NO DDL, and EXPLICIT-ONLY: an untargeted POST never runs it. POST it by name
+-- ({"script":"096_entity_links_backfill_artifact"}) after the mirroring code is deployed and
+-- COMPASS_ENTITY_LINKS_ARTIFACT_MIRROR=1 is live. The legacy artifact_links table stays the source of truth;
+-- nothing here changes or deletes it.
+--
+--   ARTIFACT_ATTACHED_TO_SOLUTION  <- artifact_links WHERE linked_type = 'SOLUTION'
+--   ARTIFACT_SUPPORTS_DECISION     <- artifact_links WHERE linked_type = 'REVIEW_REQUEST' (TRACKED_DECISION only; live
+--                                     supporting material per ADR-0010: the link names the Artifact, never a revision)
+--   (origin DIRECT; source, actor and created_at copied)
+--
+-- Batched at 500 rows with an anti-join and no ON CONFLICT. Cross-workspace, dangling, non-TRACKED_DECISION and
+-- otherwise inconsistent legacy rows are quarantined: never linked, never deleted, REPORTED. Before the receipt the hook
+-- proves zero unmatched non-quarantined legacy rows, zero duplicate pairs, mirror workspace_id equal to both endpoints',
+-- and no dangling endpoint other than the reported ones.
+--
+-- This file intentionally contains no executable statement; the work is the hook
+-- (lib/migrations/entity-links-artifact-backfill.ts).
