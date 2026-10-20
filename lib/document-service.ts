@@ -4,6 +4,7 @@ import { Prisma, type Doc } from "@prisma/client"
 import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { getDocumentStore, isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export type DocumentMutationOptions = {
   expectedRevision?: string
@@ -124,10 +125,10 @@ export async function createDocument(input: Prisma.DocUncheckedCreateInput, opts
   if (data.roadmapItemId && !await db.roadmapItem.findFirst({ where: { id: data.roadmapItemId, workspaceId: data.workspaceId } })) throw new DocumentError("roadmap-item-not-found")
   const contentRef = pilot ? await upload(data.workspaceId, data.content ?? "") : null
   try {
-    return await db.$transaction(async tx => {
+    return await withSequenceTransaction(db, async tx => {
       const doc = await tx.doc.create({ data: pilot
-        ? { ...data, storageProvider: "GEODE", content: null, contentRef, revision: randomUUID() }
-        : { ...data, revision: randomUUID() } })
+        ? { ...data, ...(await allocateOneSeq(tx, data.workspaceId, "doc")), storageProvider: "GEODE", content: null, contentRef, revision: randomUUID() }
+        : { ...data, ...(await allocateOneSeq(tx, data.workspaceId, "doc")), revision: randomUUID() } })
       if (guarded) await record(tx, doc, opts.operationId!, hash, doc)
       return doc
     })

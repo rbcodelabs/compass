@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import getPrisma from "@/lib/db"
 import { recordDecision } from "@/lib/decision-service"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 const RELEASE_CONTINUATION = "DISPATCH_RELEASE_RUN" as const
 
@@ -164,7 +165,7 @@ export async function prepareReleaseRun(input: PrepareReleaseInput): Promise<Pre
   const sourceFingerprint = releaseSourceFingerprint({ ...input, taskIds })
 
   try {
-    return await prisma.$transaction(async (tx): Promise<PrepareReleaseResult> => {
+    return await withSequenceTransaction(prisma, async (tx): Promise<PrepareReleaseResult> => {
     const coveredTasks = await tx.task.findMany({
       where: { workspaceId: input.workspaceId, id: { in: taskIds } },
       select: { id: true },
@@ -237,6 +238,7 @@ export async function prepareReleaseRun(input: PrepareReleaseInput): Promise<Pre
         subjectId: releaseRun.id,
         state: "DRAFT",
         requestedById: input.requestedById ?? null,
+        ...(await allocateOneSeq(tx, input.workspaceId, "reviewRequest")),
       },
     })
     const revisionNumber = request.revisionCount + 1

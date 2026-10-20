@@ -1,0 +1,17 @@
+-- Migration 093: number the rows that existed before human-readable work item IDs.
+--
+-- NO DDL. 092 added seq_prefix / seq_number on 14 tables, workspace_id on key_results and
+-- assumptions, the workspace_sequences counter and the unique (workspace_id, seq_prefix,
+-- seq_number) indexes. This migration (a) fills key_results.workspace_id and
+-- assumptions.workspace_id from the parent objective / solution, then (b) numbers every
+-- row that has no seq_number, per (workspace, type), oldest first, by taking ranges from
+-- the same workspace_sequences counter live creators use.
+--
+-- Batched at 500 rows, one short transaction per workspace slice, idempotent and
+-- resumable (only NULL rows are touched). Before the receipt is recorded the hook proves:
+-- no NULL workspace_id on key_results / assumptions, every row numbered with its registry
+-- prefix, no duplicate number, and every counter ahead of the highest number in use.
+-- It fails closed on an orphan or on a row that has no workspace.
+--
+-- This file intentionally contains no executable statement; the work is the hook
+-- (lib/migrations/work-item-ids-backfill.ts).

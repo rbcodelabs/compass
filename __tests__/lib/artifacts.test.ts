@@ -26,6 +26,8 @@ import {
   validateHtmlUpload,
 } from "@/lib/artifacts"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 describe("artifact validation", () => {
   it("accepts a self-contained HTML document", () => {
     const body = new TextEncoder().encode("<!doctype html><html><body>Prototype</body></html>")

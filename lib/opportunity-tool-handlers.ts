@@ -1,3 +1,4 @@
+import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
 /** Handler functions for Opportunity MCP tools. */
 
 import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
@@ -9,6 +10,7 @@ import { getMcpActor } from "@/lib/mcp-authz"
 import { assertKeyResultInWorkspace, setOpportunityKeyResult, syncLegacyLink, TypedLinkError } from "@/lib/typed-links"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 function linkContext(source: ProgrammaticSource = "MCP") {
   const actor = getMcpActor()
@@ -26,15 +28,15 @@ export async function createOpportunity(input: {
   try {
     const opportunity = await captureWorkspaceMutation(prisma, "opportunity", "create", workspaceMutationSource(input.source), undefined, async (tx) => {
       if (input.keyResultId) await assertKeyResultInWorkspace(tx, input.keyResultId, input.workspaceId)
-      const created = await tx.opportunity.create({ data: { workspaceId: input.workspaceId, title: input.title.trim(), description: input.description?.trim() || null, customerSegment: input.customerSegment?.trim() || null, status: input.status ?? "EXPLORING", linkedKeyResultId: input.keyResultId ?? null, squadId: input.squadId ?? null, source: input.source ?? "MCP" } })
+      const created = await tx.opportunity.create({ data: { workspaceId: input.workspaceId, ...(await allocateOneSeq(tx, input.workspaceId, "opportunity")), title: input.title.trim(), description: input.description?.trim() || null, customerSegment: input.customerSegment?.trim() || null, status: input.status ?? "EXPLORING", linkedKeyResultId: input.keyResultId ?? null, squadId: input.squadId ?? null, source: input.source ?? "MCP" } })
       if (input.keyResultId) await syncLegacyLink(tx, { opportunityId: created.id, workspaceId: input.workspaceId, keyResultId: input.keyResultId, ctx: linkContext(input.source) })
       return created
     }, { atomic: true })
     return ok(withUrlLine(
-      `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
-      safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "opportunity", id: opportunity.id }),
+      `**Opportunity created** in "${workspace.name}"\nID: ${opportunity.id}${displayLine("opportunity", opportunity)}\nTitle: ${opportunity.title}\nStatus: ${opportunity.status}`,
+      safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "opportunity", id: opportunity.id, displayId: displayIdFromRow("opportunity", opportunity) }),
     ), {
-      id: opportunity.id, title: opportunity.title, status: opportunity.status, workspaceId: input.workspaceId,
+      id: opportunity.id, displayId: displayIdFromRow("opportunity", opportunity), title: opportunity.title, status: opportunity.status, workspaceId: input.workspaceId,
       customerSegment: opportunity.customerSegment, linkedKeyResultId: opportunity.linkedKeyResultId, squadId: opportunity.squadId,
     })
   } catch (error) {

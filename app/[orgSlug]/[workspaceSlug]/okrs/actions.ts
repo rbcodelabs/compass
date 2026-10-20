@@ -11,6 +11,7 @@ import { assertWorkspaceWritable } from "@/lib/workspace-context";
 import { getKeyResultMoveTargets, moveKeyResultToObjective, OKRHierarchyError, setObjectiveParentKeyResult } from "@/lib/okr-hierarchy";
 import { drainAfterParentDelete, drainLegacyLinksForOpportunities, drainLinksFor } from "@/lib/typed-links";
 import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 // ─── Create Cycle ─────────────────────────────────────────────────────────────
 
@@ -100,16 +101,17 @@ export async function createObjective(
   // A client-supplied squad must live in the same workspace as the cycle.
   if (parsed.data.squadId) await requireProductEntity("squad", parsed.data.squadId, workspaceId);
 
-  await prisma.objective.create({
+  await withSequenceTransaction(prisma, async (tx) => tx.objective.create({
     data: {
       workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "objective")),
       cycleId: cycleId ?? null,
       title: parsed.data.title,
       description: parsed.data.description,
       owner: parsed.data.owner,
       squadId: parsed.data.squadId ?? null,
     },
-  });
+  }));
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
 }
@@ -138,17 +140,20 @@ export async function addKeyResult(
     throw new Error(parsed.error.issues[0].message);
   }
 
-  await requireProductEntity("objective", objectiveId);
+  // The Key Result's workspace is derived from the authorized parent Objective, never from client input.
+  const { workspaceId } = await requireProductEntity("objective", objectiveId);
   const prisma = getPrisma();
 
-  await prisma.keyResult.create({
+  await withSequenceTransaction(prisma, async (tx) => tx.keyResult.create({
     data: {
+      workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "keyResult")),
       objectiveId,
       title: parsed.data.title,
       target: parsed.data.target,
       unit: parsed.data.unit,
     },
-  });
+  }));
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/okrs`, "layout");
 }

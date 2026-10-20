@@ -21,6 +21,7 @@ import { CompassUrlNotConfiguredError, feedbackItemUrl, safeEntityUrl, withUrlLi
 import { FEEDBACK_STATUSES, type FeedbackStatus } from "@/lib/feedback-meta"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { isUniqueConflict, RoadmapPromotionConflict } from "@/lib/roadmap-promotion"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 const feedbackCursorSchema = z.object({
   v: z.literal(1),
@@ -133,10 +134,11 @@ export async function createFeedback({
       : []
     const attachmentRows = uploadedAttachments.map((attachment) => ({ id: randomUUID(), ...attachment }))
     createAttempted = true
-    const item = await prisma.feedbackItem.create({
+    const item = await withSequenceTransaction(prisma, async (tx) => tx.feedbackItem.create({
       data: {
         id: feedbackId,
         workspaceId,
+        ...(await allocateOneSeq(tx, workspaceId, "feedback")),
         title: validation.data.title,
         description: validation.data.description,
         type: type ?? "IDEA",
@@ -145,7 +147,7 @@ export async function createFeedback({
         source,
         ...(attachmentRows.length ? { attachments: { create: attachmentRows } } : {}),
       },
-    })
+    }))
     return createdFeedbackResult(item, uploadedAttachments, url)
   } catch (error) {
     if (createAttempted) {
@@ -712,6 +714,7 @@ export async function promoteFeedbackToRoadmap({
       return tx.roadmapItem.create({ data: {
         id: promotionId,
         workspaceId,
+        ...(await allocateOneSeq(tx, workspaceId, "roadmapItem")),
         title: feedback.title,
         horizon,
         sortOrder: lastItem ? lastItem.sortOrder + 1 : 0,

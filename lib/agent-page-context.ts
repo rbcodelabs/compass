@@ -26,6 +26,8 @@
 
 import { getEntitySummary } from "@/lib/entity-summary"
 import { parseEntityLink } from "@/lib/entity-links"
+import getPrisma from "@/lib/db"
+import { resolveWorkItem } from "@/lib/work-item-resolve"
 import { resolveThinkingModel, type ThinkingModelSource } from "@/lib/thinking-model/resolve"
 
 /** Longest URL we will look at. Real workspace URLs are far shorter. */
@@ -138,7 +140,9 @@ async function resolve({ pageUrl, workspace }: ResolvePageContextInput): Promise
   const link = parseEntityLink(pageUrl)
   if (link && link.orgSlug === orgSlug && link.workspaceSlug === workspaceSlug) {
     const labels = resolveThinkingModel(workspace).labels
-    const summary = await getEntitySummary(link.type, link.id, workspace.id, labels)
+    // The link may carry a display ID (`TASK-5`); resolve it inside this turn's workspace before reading.
+    const resolved = await resolveWorkItem(getPrisma(), workspace.id, link.type, link.id)
+    const summary = resolved.ok ? await getEntitySummary(link.type, resolved.id, workspace.id, labels) : null
     if (summary) {
       entity = {
         type: summary.type,
@@ -153,7 +157,7 @@ async function resolve({ pageUrl, workspace }: ResolvePageContextInput): Promise
   }
 
   // Echo `?detail=` only when it is the thing that resolved; a bogus one is noise.
-  const panelParam = entity && url.searchParams.get("detail") === `${entity.type}:${entity.id}` ? `?detail=${encodeURIComponent(url.searchParams.get("detail") as string)}` : ""
+  const panelParam = entity && [`${entity.type}:${entity.id}`, link && `${link.type}:${link.id}`].includes(url.searchParams.get("detail")) ? `?detail=${encodeURIComponent(url.searchParams.get("detail") as string)}` : ""
   const path = (entity ? url.pathname : `/${segments.slice(0, 3).map((s) => encodeURIComponent(s as string)).join("/")}`) + panelParam
   const lines = [`Section: ${section}`]
   if (entity) {

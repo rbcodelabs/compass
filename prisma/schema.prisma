@@ -26,6 +26,16 @@ model WorkspaceUpdatesState {
   @@map("workspace_updates_state")
 }
 
+model WorkspaceSequence {
+  workspaceId String   @map("workspace_id") @db.Uuid
+  entityType  String   @map("entity_type") @db.VarChar(40)
+  nextValue   Int      @default(1) @map("next_value")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  @@id([workspaceId, entityType])
+  @@map("workspace_sequences")
+}
+
 model WorkspaceUpdatesReadState {
   id                 String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId        String @map("workspace_id") @db.Uuid
@@ -327,6 +337,10 @@ model ResearchStudy {
   pmInterview       PMInterview?
 
   @@index([workspaceId, status])
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_research_studies_seq")
   @@map("research_studies")
 }
 
@@ -718,6 +732,10 @@ model Objective {
   source            String      @default("UI") @map("source") @db.VarChar(20)
 
   @@index([workspaceId], map: "idx_objectives_workspace_id")
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_objectives_seq")
   @@map("objectives")
 }
 
@@ -740,6 +758,12 @@ model KeyResult {
   updatedById          String?       @map("updated_by_id") @db.Uuid
   source               String        @default("UI") @map("source") @db.VarChar(20)
 
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  workspaceId String? @map("workspace_id") @db.Uuid
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_key_results_seq")
+  @@index([workspaceId], map: "idx_key_results_workspace_id")
   @@map("key_results")
 }
 
@@ -783,6 +807,10 @@ model Opportunity {
   source            String            @default("UI") @map("source") @db.VarChar(20)
   evidence          Evidence[]
 
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_opportunities_seq")
   @@map("opportunities")
 }
 
@@ -812,6 +840,10 @@ model Solution {
   score         SolutionScore?
 
   @@index([workspaceId], map: "idx_solutions_workspace_id")
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_solutions_seq")
   @@map("solutions")
 }
 
@@ -970,6 +1002,12 @@ model Assumption {
   source      String       @default("UI") @map("source") @db.VarChar(20)
   evidence    Evidence[]
 
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  workspaceId String? @map("workspace_id") @db.Uuid
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_assumptions_seq")
+  @@index([workspaceId], map: "idx_assumptions_workspace_id")
   @@map("assumptions")
 }
 
@@ -1152,6 +1190,10 @@ model Experiment {
   updatedById   String?            @map("updated_by_id") @db.Uuid
   source        String             @default("UI") @map("source") @db.VarChar(20)
 
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_experiments_seq")
   @@map("experiments")
 }
 
@@ -1213,6 +1255,10 @@ model RoadmapItem {
   positioningBrief Doc?
   capacityReservation PortfolioCapacityReservation?
 
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_roadmap_items_seq")
   @@map("roadmap_items")
 }
 
@@ -1262,6 +1308,10 @@ model ReviewRequest {
 
   @@unique([workspaceId, gateType, subjectType, subjectId], map: "idx_review_requests_subject_gate")
   @@index([workspaceId, state], map: "idx_review_requests_workspace_state")
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_review_requests_seq")
   @@map("review_requests")
 }
 
@@ -2019,6 +2069,10 @@ model FeedbackItem {
   // relationMode = "prisma" means Prisma emits no FK constraint, so DSQL
   // creates no backing index for this column either.
   @@index([opportunityId])
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_feedback_seq")
   @@map("feedback")
 }
 
@@ -2251,6 +2305,10 @@ model Doc {
   versions      DocVersion[]
   comments      DocComment[]
 
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_docs_seq")
   @@map("docs")
 }
 
@@ -2367,6 +2425,10 @@ model Artifact {
   feedbackSources   FeedbackSource[]
 
   @@index([workspaceId, status, updatedAt])
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_artifacts_seq")
   @@map("artifacts")
 }
 
@@ -2618,6 +2680,10 @@ model Task {
   @@index([parentTaskId])
   @@index([assigneeUserId])
   @@index([assigneeAgentId])
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_tasks_seq")
   @@map("tasks")
 }
 
@@ -3421,6 +3487,10 @@ model MetricDefinition {
   dashboardRow Int? @default(4) @map("dashboard_row")
   dashboardSortOrder Int? @default(0) @map("dashboard_sort_order")
   @@index([workspaceId, archived], map: "idx_metric_definition_workspace")
+  // Human-readable ID (ADR "Human-readable work item IDs"). Nullable until migration 093 numbers old rows.
+  seqPrefix String? @map("seq_prefix") @db.VarChar(8)
+  seqNumber Int? @map("seq_number")
+  @@unique([workspaceId, seqPrefix, seqNumber], map: "idx_metric_definitions_seq")
   @@map("metric_definitions")
 }
 

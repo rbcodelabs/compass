@@ -23,6 +23,7 @@
  * imports, which Node's native TS loader rejects. See the `preview:*` scripts.)
  */
 import getPrisma from "../lib/db"
+import { allocateOneSeq } from "../lib/work-item-sequence"
 
 if (!process.env.DATABASE_URL) {
   console.error("refusing to run without DATABASE_URL (local dev only)")
@@ -177,7 +178,7 @@ async function main() {
     })
     if (!opportunity) {
       opportunity = await prisma.opportunity.create({
-        data: { workspaceId: workspace.id, title: spec.title, sortOrder: index },
+        data: { workspaceId: workspace.id, ...(await allocateOneSeq(prisma, workspace.id, "opportunity")), title: spec.title, sortOrder: index },
       })
     }
     const assignments: [string, string | undefined][] = [

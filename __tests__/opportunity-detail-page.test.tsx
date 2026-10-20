@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { findFirst, getContext, requireContext } = vi.hoisted(() => ({ findFirst: vi.fn(), getContext: vi.fn(), requireContext: vi.fn() }));
 vi.mock("@/lib/db", () => ({ default: () => ({ opportunity: { findFirst } }) }));
 vi.mock("@/lib/workspace-context", () => ({ getWorkspaceContext: getContext, requireWorkspaceContext: requireContext }));
-vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NOT_FOUND"); } }));
+vi.mock("next/navigation", () => ({
+  notFound: () => { throw new Error("NOT_FOUND"); },
+  permanentRedirect: (url: string) => { throw new Error(`REDIRECT:${url}`); },
+}));
 vi.mock("@/components/discovery/opportunity-detail", () => ({ OpportunityDetail: () => null }));
 import OpportunityDetailPage, { generateMetadata } from "@/app/[orgSlug]/[workspaceSlug]/discovery/[opportunityId]/page";
 
@@ -43,7 +46,8 @@ describe("opportunity page access", () => {
   it("returns not found for a non-UUID path segment without querying", async () => {
     // e.g. a mistyped or bookmarked /discovery/card-sort: Opportunity.id is a
     // uuid column, so this must be a 404 and never reach Postgres as a 500.
-    getContext.mockResolvedValue({ status: "not-found" });
+    getContext.mockResolvedValue({ status: "ok", workspace: { id: "ws-id" } });
+    requireContext.mockResolvedValue({ workspace: { id: "ws-id" } });
     const bad = Promise.resolve({ orgSlug: "org", workspaceSlug: "ws", opportunityId: "card-sort" });
     expect(await generateMetadata({ params: bad })).toEqual({ title: "Opportunity" });
     await expect(OpportunityDetailPage({ params: bad })).rejects.toThrow("NOT_FOUND");

@@ -28,6 +28,8 @@ import {
   loadOpportunityComposerOptions,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 beforeEach(() => {
   vi.clearAllMocks();
   m.auth.mockResolvedValue({ user: { id: "user-1" } });

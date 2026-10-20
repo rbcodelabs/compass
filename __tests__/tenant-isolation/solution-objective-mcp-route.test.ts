@@ -14,6 +14,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { USERS, WS_A, WS_B, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
 import { runWithMcpActor } from "@/lib/mcp-authz";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const fake = vi.hoisted(() => ({ current: null as null | ReturnType<typeof createTenantFakePrisma> }));
 
 vi.mock("@/lib/db", () => ({ default: () => fake.current!.client }));

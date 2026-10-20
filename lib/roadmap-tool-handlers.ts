@@ -1,3 +1,4 @@
+import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
 /**
  * Handler functions for the Launch Tiers + Checklist Templates MCP tools.
  * Extracted into this module so they can be unit-tested without the MCP server layer,
@@ -22,6 +23,7 @@ import { getMcpActor } from "@/lib/mcp-authz"
 import { createRoadmapItemsFromSolutions } from "@/lib/roadmap/create-from-solution"
 import { addCalendarDays } from "@/lib/roadmap-timeline/calendar-geometry"
 import { durationDaysFor } from "@/lib/roadmap/scheduling"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 export function roadmapCreateData(input: Parameters<typeof createRoadmapItem>[0], sortOrder: number) {
   return {
@@ -42,14 +44,14 @@ export async function createRoadmapItem(input: {
   if (!workspace) return fail(`Workspace "${input.workspaceId}" not found.`)
   if (input.solutionId) return createFromSolution(prisma, workspace, input as typeof input & { solutionId: string })
   const lastItem = await prisma.roadmapItem.findFirst({ where: { workspaceId: input.workspaceId, horizon: input.horizon, status: "ACTIVE" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
-  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, tx => tx.roadmapItem.create({ data: roadmapCreateData(input, lastItem ? lastItem.sortOrder + 1 : 0) }))
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", workspaceMutationSource(input.source), undefined, async tx => tx.roadmapItem.create({ data: { ...roadmapCreateData(input, lastItem ? lastItem.sortOrder + 1 : 0), ...(await allocateOneSeq(tx, input.workspaceId, "roadmapItem")) } }))
   const format = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
   return ok(withUrlLine(
-    `**Roadmap item created** (${input.horizon})\nID: ${item.id}\nTitle: ${item.title}` +
+    `**Roadmap item created** (${input.horizon})\nID: ${item.id}${displayLine("roadmapItem", item)}\nTitle: ${item.title}` +
       (item.isPrivate ? "\nPrivate: yes (hidden from public portal)" : "") +
       (item.startDate || item.endDate ? `\nDates: ${item.startDate ? format(item.startDate) : "?"} – ${item.endDate ? format(item.endDate) : "?"}` : ""),
-    safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "roadmapItem", id: item.id }),
-  ), { id: item.id, title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate })
+    safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "roadmapItem", id: item.id, displayId: displayIdFromRow("roadmapItem", item) }),
+  ), { id: item.id, displayId: displayIdFromRow("roadmapItem", item), title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate })
 }
 
 function actingUserId(): string | null {
@@ -95,11 +97,11 @@ async function createFromSolution(
   const created = result.created.length > 0
   const format = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(date)
   return ok(withUrlLine(
-    `**${created ? "Roadmap item created" : "Solution is already on the roadmap"}** (${item.horizon})\nID: ${item.id}\nTitle: ${item.title}` +
+    `**${created ? "Roadmap item created" : "Solution is already on the roadmap"}** (${item.horizon})\nID: ${item.id}${displayLine("roadmapItem", item)}\nTitle: ${item.title}` +
       (item.isPrivate ? "\nPrivate: yes (hidden from public portal)" : "") +
       (item.startDate || item.endDate ? `\nDates: ${item.startDate ? format(item.startDate) : "?"} – ${item.endDate ? format(item.endDate) : "?"}` : ""),
-    safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "roadmapItem", id: item.id }),
-  ), { id: item.id, title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate, created })
+    safeEntityUrl({ orgSlug: workspace.organization?.slug, workspaceSlug: workspace.slug, type: "roadmapItem", id: item.id, displayId: displayIdFromRow("roadmapItem", item) }),
+  ), { id: item.id, displayId: displayIdFromRow("roadmapItem", item), title: item.title, horizon: item.horizon, isPrivate: item.isPrivate, solutionId: item.solutionId, keyResultId: item.keyResultId, opportunityId: item.opportunityId, squadId: item.squadId, startDate: item.startDate, endDate: item.endDate, created })
 }
 
 export async function promoteSolutionToRoadmap(input: {

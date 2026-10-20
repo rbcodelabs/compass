@@ -12,6 +12,7 @@ import { getWorkspace } from "@/lib/workspace"
 import * as analytics from "@/lib/analytics/service"
 import type { McpActor } from "@/lib/mcp-authz"
 import { assertWorkspaceWritable } from "@/lib/workspace-context"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 export async function createExperiment(
   workspaceId: string,
@@ -30,9 +31,10 @@ export async function createExperiment(
   if (data.assumptionId && !await prisma.assumption.findFirst({ where: { id: data.assumptionId, solution: { workspaceId } }, select: { id: true } })) throw new Error("Assumption not found in workspace")
   if (data.squadId && !await prisma.squad.findFirst({ where: { id: data.squadId, workspaceId }, select: { id: true } })) throw new Error("Squad not found in workspace")
 
-  const experiment = await captureWorkspaceMutation(prisma, "experiment", "create", "UI", undefined, tx => tx.experiment.create({
+  const experiment = await captureWorkspaceMutation(prisma, "experiment", "create", "UI", undefined, async tx => tx.experiment.create({
     data: {
       workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "experiment")),
       title: data.title,
       hypothesis: data.hypothesis,
       method: data.method,

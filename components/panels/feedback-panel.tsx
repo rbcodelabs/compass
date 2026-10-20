@@ -68,7 +68,7 @@ export function FeedbackPanel({
   workspaceSlug: string;
 }) {
   const labels = useLabels();
-  const { data, error, mutate, refresh } = useEntityDetail<FeedbackData>(
+  const { data, error, displayId, mutate, refresh } = useEntityDetail<FeedbackData>(
     "feedback",
     id,
     orgSlug,
@@ -94,7 +94,7 @@ export function FeedbackPanel({
     <PanelContainer entity={{ type: edit.type, id: edit.id, title: data.title }}>
       <FullPageLink href={`/${orgSlug}/${workspaceSlug}/feedback`} />
 
-      <PanelTitle
+      <PanelTitle displayId={displayId}
         title={data.title}
         status={TYPE[data.type] ?? { label: data.type }}
         edit={edit}

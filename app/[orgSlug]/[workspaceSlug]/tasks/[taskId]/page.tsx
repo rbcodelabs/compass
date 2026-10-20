@@ -1,3 +1,5 @@
+import { resolveWorkItemPage, type PageSearchParams } from "@/lib/work-item-page";
+import { resolveWorkItemId } from "@/lib/work-item-resolve";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeftIcon } from "lucide-react";
@@ -19,12 +21,14 @@ export async function generateMetadata({
   if (ctx.status !== "ok") return { title: "Task" };
   const workspace = ctx.workspace;
   const prisma = getPrisma();
-  const task = await prisma.task.findFirst({ where: { id: taskId, workspaceId: workspace.id }, select: { title: true } });
+  const resolvedId = await resolveWorkItemId(prisma, workspace.id, "task", taskId);
+  const task = resolvedId ? await prisma.task.findFirst({ where: { id: resolvedId, workspaceId: workspace.id }, select: { title: true } }) : null;
   return { title: task?.title ?? "Task" };
 }
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string; taskId: string }>;
+  searchParams?: Promise<PageSearchParams>;
 };
 
 // Thin route shell: auth + a light existence/scope check for the 404 and the
@@ -34,14 +38,15 @@ type Props = {
 // is fetched client-side by TaskDetail itself via useEntityDetail("task", …),
 // the same panel data source the sidebar uses — this route no longer
 // duplicates that Prisma work.
-export default async function TaskDetailPage({ params }: Props) {
+export default async function TaskDetailPage({ params, searchParams }: Props) {
   const { orgSlug, workspaceSlug, taskId } = await params;
   const prisma = getPrisma();
 
   const { workspace } = await requireWorkspaceContext(orgSlug, workspaceSlug);
 
+  const resolved = await resolveWorkItemPage({ type: "task", param: taskId, workspaceId: workspace.id, basePath: `/${orgSlug}/${workspaceSlug}/tasks`, searchParams: await searchParams });
   const task = await prisma.task.findFirst({
-    where: { id: taskId, workspaceId: workspace.id },
+    where: { id: resolved.id, workspaceId: workspace.id },
     select: { id: true, parentTaskId: true },
   });
   if (!task) notFound();
@@ -66,7 +71,7 @@ export default async function TaskDetailPage({ params }: Props) {
           )}
         </div>
 
-        <TaskDetail taskId={taskId} orgSlug={orgSlug} workspaceSlug={workspaceSlug} variant="page" />
+        <TaskDetail taskId={resolved.id} orgSlug={orgSlug} workspaceSlug={workspaceSlug} variant="page" />
       </div>
     </div>
   );

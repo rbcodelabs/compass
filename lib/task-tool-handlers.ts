@@ -1,3 +1,4 @@
+import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
 /**
  * Handler functions for the Tasks MCP tools (create_task, get_task, list_tasks,
  * update_task, move_task_status, link_task, unlink_task, list_task_links).
@@ -20,6 +21,7 @@ import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types"
 import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, taskLinkScope, validateTaskLink, validateTaskReferences, type ResolvedTaskAssignee, type TaskAssignee } from "@/lib/task-assignment"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 // Maps each TaskLinkedType to its Prisma model delegate name. Every target
 // table exposes a plain `title` column, so a single resolver works for all
@@ -163,9 +165,10 @@ export async function createTask({
   })
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0
 
-  const task = await captureWorkspaceMutation(prisma, "task", "create", workspaceMutationSource(source), undefined, tx => tx.task.create({
+  const task = await captureWorkspaceMutation(prisma, "task", "create", workspaceMutationSource(source), undefined, async tx => tx.task.create({
     data: {
       workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "task")),
       title: title.trim(),
       description,
       status: resolvedStatus,
@@ -187,12 +190,13 @@ export async function createTask({
       `**Task created:** ${task.title}\n` +
         `Status: ${task.status}\n` +
         `Priority: ${task.priority}\n` +
-        `ID: ${task.id}`,
+        `ID: ${task.id}${displayLine("task", task)}`,
       safeEntityUrl({
         orgSlug: workspace.organization?.slug,
         workspaceSlug: workspace.slug,
         type: "task",
         id: task.id,
+        displayId: displayIdFromRow("task", task),
       }),
     ),
     (await resolveTaskAssignees(workspaceId, [task]))[0],

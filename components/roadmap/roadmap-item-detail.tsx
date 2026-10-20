@@ -236,7 +236,7 @@ export function RoadmapItemDetail(props: Props) {
 function RoadmapItemDetailBody({ itemId, orgSlug, workspaceSlug, variant, onRetry }: Props & { onRetry: () => void }) {
   const { notifyEntityMutated } = usePanelContext();
   const labels = useLabels();
-  const { data, error, mutate, refresh } = useEntityDetail<RoadmapItemData>("roadmapItem", itemId, orgSlug, workspaceSlug);
+  const { data, error, displayId, mutate, refresh } = useEntityDetail<RoadmapItemData>("roadmapItem", itemId, orgSlug, workspaceSlug);
   const discussionRef = useRef<HTMLElement>(null);
   const discussionId = useId();
   const [actionError, setActionError] = useState<string | null>(null);
@@ -341,6 +341,7 @@ function RoadmapItemDetailBody({ itemId, orgSlug, workspaceSlug, variant, onRetr
         )}
 
         <div className="flex min-w-0 flex-col gap-3">
+          {displayId && <span className="font-mono text-xs text-muted-foreground" data-testid="display-id">{displayId}</span>}
           <h1 className="min-w-0"><EditableText value={data.title} field="title" edit={edit} className={titleClass} /></h1>
           <div aria-label="Roadmap item summary" className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
             <StatusSelect value={data.horizon} field="horizon" options={HORIZON_ORDER} map={HORIZON} edit={edit} label="Horizon" />

@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { validateFeedbackInput } from "@/lib/feedback";
 import type { FeedbackType } from "@/lib/types";
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 /**
  * Where "Send Feedback about Compass" always lands, regardless of which
@@ -63,17 +64,19 @@ export async function sendCompassFeedback(data: {
     };
   }
 
-  const item = await prisma.feedbackItem.create({
+  const submitter = { name: session.user.name ?? null, email: session.user.email ?? null };
+  const item = await withSequenceTransaction(prisma, async (tx) => tx.feedbackItem.create({
     data: {
       workspaceId: workspace.id,
+      ...(await allocateOneSeq(tx, workspace.id, "feedback")),
       title: validation.data.title,
       description: validation.data.description,
       type: data.type,
-      submitterName: session.user.name ?? null,
-      submitterEmail: session.user.email ?? null,
+      submitterName: submitter.name,
+      submitterEmail: submitter.email,
     },
     select: { id: true },
-  });
+  }));
 
   revalidatePath(`/${TARGET_ORG_SLUG}/${TARGET_WORKSPACE_SLUG}/feedback`);
 

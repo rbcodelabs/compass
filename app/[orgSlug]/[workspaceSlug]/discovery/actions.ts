@@ -29,6 +29,7 @@ import type {
   PlanStatus,
   SquadData,
 } from "@/lib/types";
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 // Types live in @/lib/types — import from there directly.
 
@@ -192,9 +193,10 @@ export async function addSolution(
   // never from client input.
   const { workspaceId } = await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
-  const solution = await captureWorkspaceMutation(prisma, "solution", "create", "UI", undefined, tx => tx.solution.create({
+  const solution = await captureWorkspaceMutation(prisma, "solution", "create", "UI", undefined, async tx => tx.solution.create({
     data: {
       workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "solution")),
       opportunityId,
       title: data.title,
       description: data.description,
@@ -239,9 +241,13 @@ export async function addAssumption(
   data: { title: string; riskLevel: RiskLevel },
   revalidatePathStr: string
 ) {
+  // The Assumption's workspace is derived from the authorized parent Solution, never from client input.
+  const { workspaceId } = await requireProductEntity("solution", solutionId);
   const prisma = getPrisma();
-  const assumption = await captureWorkspaceMutation(prisma, "assumption", "create", "UI", undefined, tx => tx.assumption.create({
+  const assumption = await captureWorkspaceMutation(prisma, "assumption", "create", "UI", undefined, async tx => tx.assumption.create({
     data: {
+      workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "assumption")),
       solutionId,
       title: data.title,
       riskLevel: data.riskLevel,

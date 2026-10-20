@@ -29,6 +29,8 @@ import {
   suggestFollowUpAssignee,
 } from "@/lib/decision-followthrough"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 describe("buildFollowUpDraft", () => {
   it("uses the decision question as the task title", () => {
     const draft = buildFollowUpDraft({ question: "Should we hold the offline experiment?", outcomeLabel: "Approve", rationale: "Corpus is not ready." })

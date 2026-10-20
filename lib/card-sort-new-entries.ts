@@ -11,6 +11,7 @@ import {
 import { OPPORTUNITY_TITLE_MAX_LENGTH } from "@/lib/opportunity-draft"
 import { createOpportunityWithLinks, OpportunityCreateError } from "@/lib/opportunity-create"
 import { withToolTransaction } from "@/lib/mcp-tool-db"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 /**
  * Proposing NEW entries in a card sort round.
@@ -94,10 +95,11 @@ async function createRoadmapItemFromEntry(
     orderBy: [{ sortOrder: "desc" }, { id: "desc" }],
     select: { sortOrder: true },
   })
-  return captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, (tx) =>
+  return captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, async (tx) =>
     tx.roadmapItem.create({
       data: {
         workspaceId,
+        ...(await allocateOneSeq(tx, workspaceId, "roadmapItem")),
         title: entry.title,
         description: entry.description,
         horizon: "LATER",

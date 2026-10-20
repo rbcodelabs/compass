@@ -67,7 +67,7 @@ export function ObjectivePanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error, mutate, refresh } = useEntityDetail<ObjectiveData>(
+  const { data, error, displayId, mutate, refresh } = useEntityDetail<ObjectiveData>(
     "objective",
     id,
     orgSlug,
@@ -114,7 +114,7 @@ export function ObjectivePanel({
     <PanelContainer entity={{ type: edit.type, id: edit.id, title: data.title }}>
       <FullPageLink href={`/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.cycle?.id)}`} />
 
-      <PanelTitle
+      <PanelTitle displayId={displayId}
         title={data.title}
         status={{ value: data.status, ...(STATUS[data.status] ?? { label: data.status }) }}
         edit={edit}

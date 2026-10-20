@@ -7,6 +7,8 @@ vi.mock("@/lib/workspace-update-mutations", () => ({
 
 import { autoRoadmapItemId, createRoadmapItemsFromSolutions, deterministicUuid } from "@/lib/roadmap/create-from-solution";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const context = { workspaceId: "ws-1", source: "UI", captureSource: "UI" as const, userId: "user-1", today: "2026-10-05" };
 const fresh = (): FakeState => ({
   solutions: [solutionRow("s1"), solutionRow("s2"), solutionRow("s3", { opportunity: { id: "opp-s3", squadId: null, linkedKeyResultId: null } })],

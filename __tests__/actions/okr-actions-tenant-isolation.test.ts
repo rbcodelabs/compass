@@ -144,6 +144,8 @@ import * as okr from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import * as settings from "@/app/[orgSlug]/[workspaceSlug]/settings/actions";
 import { requireProductEntity } from "@/lib/product-action-auth";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const form = (fields: Record<string, string>) => {
   const fd = new FormData();
   for (const [k, v] of Object.entries(fields)) fd.append(k, v);

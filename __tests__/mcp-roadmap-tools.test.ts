@@ -11,6 +11,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { runWithMcpActor } from "@/lib/mcp-authz"
 import { z } from "zod"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 // ── Prisma mock ─────────────────────────────────────────────────────────────
 
 const mockPrisma = {

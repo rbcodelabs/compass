@@ -17,6 +17,8 @@ vi.mock("@vercel/blob/client", () => ({ generateClientTokenFromReadWriteToken: (
 import { createArtifact, prepareArtifactUploadTool, updateArtifact } from "@/lib/artifact-tool-handlers"
 import { prepareArtifactUpload, verifyArtifactUploadReceipt } from "@/lib/artifact-upload"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const WS = "11111111-1111-4111-8111-111111111111"
 const OTHER_WS = "22222222-2222-4222-8222-222222222222"
 const HTML = "<!doctype html><html><body>hello</body></html>"

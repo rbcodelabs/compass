@@ -27,6 +27,7 @@ import { isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { documentMcpActor } from "@/lib/document-mcp-actor"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
 import type { DocType } from "@/lib/doc-types"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 // Keep the legacy history display label. Pilot receipts additionally bind the
 // trusted request actor carried by mcp-authz's AsyncLocalStorage.
@@ -345,7 +346,7 @@ export async function createDoc({
     }
   const doc = pilot || operationId
     ? await createDocument(data, { operationId, ...documentMcpActor() })
-    : await prisma.doc.create({ data: { ...data, revision: randomUUID() } })
+    : await withSequenceTransaction(prisma, async (tx) => tx.doc.create({ data: { ...data, ...(await allocateOneSeq(tx, workspaceId, "doc")), revision: randomUUID() } }))
   await followAfterCreate({ model: "doc", workspaceId, row: { id: doc.id }, actor: async () => mcpFollowActor() ?? { type: "SYSTEM", id: null } })
 
   // This used to emit a *relative* `/{org}/{ws}/docs` — the docs index, not the

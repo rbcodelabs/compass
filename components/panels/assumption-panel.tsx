@@ -67,7 +67,7 @@ export function AssumptionPanel({
   workspaceSlug: string;
 }) {
   const labels = useLabels();
-  const { data, error, mutate } = useEntityDetail<AssumptionData>(
+  const { data, error, displayId, mutate } = useEntityDetail<AssumptionData>(
     "assumption",
     id,
     orgSlug,
@@ -103,7 +103,7 @@ export function AssumptionPanel({
         />
       )}
 
-      <PanelTitle
+      <PanelTitle displayId={displayId}
         title={data.title}
         status={{ value: data.status, ...(STATUS[data.status] ?? { label: data.status }) }}
         edit={edit}

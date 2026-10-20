@@ -1,3 +1,4 @@
+import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
 /**
  * Handler functions for Solution MCP tools (update_solution).
  * Extracted into this module so it can be unit-tested without the MCP server layer.
@@ -16,13 +17,14 @@ export async function createSolution({ opportunityId, title, description, source
   const prisma = getPrisma()
   const opportunity = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { id: true, title: true, workspaceId: true, workspace: { select: { slug: true, organization: { select: { slug: true } } } } } })
   if (!opportunity) return fail(`Opportunity "${opportunityId}" not found.`)
-  const solution = await captureWorkspaceMutation(prisma, "solution", "create", workspaceMutationSource(source), undefined, (tx) => tx.solution.create({ data: { workspaceId: opportunity.workspaceId, opportunityId, title: title.trim(), description: description?.trim() || null, source } }))
+  const solution = await captureWorkspaceMutation(prisma, "solution", "create", workspaceMutationSource(source), undefined, async (tx) => tx.solution.create({ data: { workspaceId: opportunity.workspaceId, ...(await allocateOneSeq(tx, opportunity.workspaceId, "solution")), opportunityId, title: title.trim(), description: description?.trim() || null, source } }))
   return ok(withUrlLine(
-    `**Solution created** for "${opportunity.title}"\nID: ${solution.id}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
-    safeEntityUrl({ orgSlug: opportunity.workspace?.organization?.slug, workspaceSlug: opportunity.workspace?.slug, type: "solution", id: solution.id, opportunityId }),
-  ), { id: solution.id, title: solution.title, status: solution.status, opportunityId })
+    `**Solution created** for "${opportunity.title}"\nID: ${solution.id}${displayLine("solution", solution)}\nTitle: ${solution.title}\nStatus: ${solution.status}`,
+    safeEntityUrl({ orgSlug: opportunity.workspace?.organization?.slug, workspaceSlug: opportunity.workspace?.slug, type: "solution", id: solution.id, displayId: displayIdFromRow("solution", solution), opportunityId }),
+  ), { id: solution.id, displayId: displayIdFromRow("solution", solution), title: solution.title, status: solution.status, opportunityId })
 }
 import { ok, fail } from "@/lib/mcp-output"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 // ── update_solution ──────────────────────────────────────────────────────────
 

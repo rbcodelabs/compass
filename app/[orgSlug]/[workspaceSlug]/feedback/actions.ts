@@ -18,6 +18,7 @@ import {
   feedbackAttachmentRejection,
 } from "@/lib/feedback-attachment-rules";
 import type { FeedbackType } from "@/lib/types";
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 async function requireAuth() {
   const session = await auth();
@@ -143,9 +144,10 @@ export async function createFeedback(
   }
 
   const prisma = getPrisma();
-  const item = await prisma.feedbackItem.create({
+  const item = await withSequenceTransaction(prisma, async (tx) => tx.feedbackItem.create({
     data: {
       workspaceId: workspace.id,
+      ...(await allocateOneSeq(tx, workspace.id, "feedback")),
       title: validation.data.title,
       description: validation.data.description,
       type: data.type,
@@ -169,7 +171,7 @@ export async function createFeedback(
       createdAt: true,
       attachments: { select: { id: true, url: true, filename: true, fileType: true } },
     },
-  });
+  }));
 
   revalidatePath(revalidatePathStr);
 

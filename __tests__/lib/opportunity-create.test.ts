@@ -10,6 +10,8 @@ import {
   normalizeNewOpportunityInput,
 } from "@/lib/opportunity-create"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 /**
  * A tiny in-memory stand-in for the four tables this write touches. Its
  * `$transaction` works on a copy and only commits the copy when the callback

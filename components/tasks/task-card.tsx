@@ -1,5 +1,6 @@
 "use client";
 
+import { displayIdFromRow } from "@/lib/work-item-ids";
 import * as React from "react";
 import { useTransition } from "react";
 import { useSortable } from "@dnd-kit/sortable";
@@ -19,6 +20,9 @@ import type { MemberData } from "@/lib/types";
 
 export type TaskCardData = {
   id: string;
+  /** Work item number (TASK-12); absent on cards built before the server has numbered the row. */
+  seqPrefix?: string | null;
+  seqNumber?: number | null;
   title: string;
   description: string | null;
   status: TaskStatus;
@@ -112,6 +116,7 @@ export function TaskCard({ task, revalidatePathStr, members, onCancel }: Props) 
             onClick={() => openPanel("task", task.id)}
             className="text-left hover:underline underline-offset-2"
           >
+            {displayIdFromRow("task", task) && <span className="mr-1.5 font-mono text-xs font-normal text-muted-foreground no-underline" data-testid="display-id">{displayIdFromRow("task", task)}</span>}
             {task.title}
           </button>
         }
