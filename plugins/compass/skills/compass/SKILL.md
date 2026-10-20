@@ -181,7 +181,7 @@ synthesized and individual findings promoted into Evidence.
 | `generate_research_guide` | Draft 5–8 editable neutral questions or usability tasks for a live URL or a Compass Artifact target. Does **not** create a study — review the guide before use |
 | `create_research_study` | Create a study with a reviewed guide. Defaults to `ACTIVE`, returning its new participant link **once**. Pass `status: "DRAFT"` to stage it with no link issued — protocol fields stay editable — then `activate_research_study` when ready |
 | `list_research_studies` | Page through study metadata and counts, newest first. Archived studies excluded unless `status: ARCHIVED` is requested. No transcripts or participant identities |
-| `get_research_study` | Study settings, guide and session count only. Never returns participant credentials, transcripts, identities, or private storage paths |
+| `get_research_study` | Study settings, guide, session count and `linkedExperiments` (omitted for scoped research contexts). Never returns participant credentials, transcripts, identities, or private storage paths |
 | `update_research_study` | Update study settings. After any session starts, only the name changes — protocol fields lock. Archived studies cannot be edited |
 | `activate_research_study` | Activate a DRAFT or CLOSED study and return a fresh participant link once. Cannot reactivate an archived study |
 | `close_research_study` | Close an active study and revoke PRIMARY participant links; existing research is retained |
@@ -249,7 +249,7 @@ requests a decision, persist its request ID, report `AWAITING_DECISION`, and sto
 | Tool | Description |
 |---|---|
 | `list_experiments` | Filter by status and/or squad; recency-filterable (also accepts `endBefore`) |
-| `get_experiment` | Full details: hypothesis, method, kill condition, results |
+| `get_experiment` | Full details: hypothesis, method, kill condition, results, and `linkedStudies` when Research Capture is enabled (link them with `link_entities`, type `EXPERIMENT_INFORMED_BY_STUDY`) |
 | `create_experiment` | Create in DESIGNING status; link to an assumption |
 | `log_experiment_result` | Record an observation with optional metric + value |
 | `conclude_experiment` | PROCEED / KILL / ITERATE → auto-updates linked assumption status |
