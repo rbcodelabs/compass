@@ -2,8 +2,9 @@
 
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useEffect, useId, useRef, useState, type ComponentProps } from "react";
-import { MessageSquare } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { FileText, MessageSquare } from "lucide-react";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useEntityDetail, PanelSkeleton, PanelError, Section, type EditContext } from "@/components/panels/panel-parts";
 import { Discussion } from "@/components/comments/discussion";
@@ -95,6 +96,7 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
         <div className="flex flex-wrap items-center gap-3">
           {scoringModel && <ScoreBadge score={toScoreSummary(data.score, scoringModel)} scoringHref={`${detailPath}?tab=scoring`} />}
           <Button variant="ghost" size="sm" aria-controls={discussionId} onClick={() => { discussionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); discussionRef.current?.focus({ preventScroll: true }); }}><MessageSquare className="size-4" /> Discussion</Button>
+          <Link href={`${detailPath}/spec`} className={buttonVariants({ variant: "ghost", size: "sm" })}><FileText className="size-4" /> Spec</Link>
           <FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="OPPORTUNITY" subjectId={data.id} />
           <RequestDecisionLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="OPPORTUNITY" subjectId={data.id} subjectTitle={data.title} />
           {data.pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="OPPORTUNITY" targetId={data.id} />}

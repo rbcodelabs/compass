@@ -137,7 +137,9 @@ async function resolve({ pageUrl, workspace }: ResolvePageContextInput): Promise
   // filters/sorts that would add noise and are not ours to echo.
 
   let entity: AgentPageContext["entity"] = null
-  const link = parseEntityLink(pageUrl)
+  // /discovery/{opportunity}/spec is the opportunity's Product Spec Canvas: the same entity, a different view of it.
+  const isSpecView = sectionKey === "discovery" && segments.length === 5 && segments[4] === "spec"
+  const link = parseEntityLink(isSpecView ? `/${segments.slice(0, 4).map((s) => encodeURIComponent(s as string)).join("/")}${url.search}` : pageUrl)
   if (link && link.orgSlug === orgSlug && link.workspaceSlug === workspaceSlug) {
     const labels = resolveThinkingModel(workspace).labels
     // The link may carry a display ID (`TASK-5`); resolve it inside this turn's workspace before reading.
@@ -160,6 +162,7 @@ async function resolve({ pageUrl, workspace }: ResolvePageContextInput): Promise
   const panelParam = entity && [`${entity.type}:${entity.id}`, link && `${link.type}:${link.id}`].includes(url.searchParams.get("detail")) ? `?detail=${encodeURIComponent(url.searchParams.get("detail") as string)}` : ""
   const path = (entity ? url.pathname : `/${segments.slice(0, 3).map((s) => encodeURIComponent(s as string)).join("/")}`) + panelParam
   const lines = [`Section: ${section}`]
+  if (isSpecView && entity?.type === "opportunity") lines.push("View: the opportunity's Product Spec canvas (one document with its objectives, solutions, assumptions, experiments and prototypes, editable in place)")
   if (entity) {
     lines.push(
       `Showing: ${entity.typeLabel} "${entity.title}" (id ${entity.id})` + (entity.status ? `, status ${entity.status}` : ""),
