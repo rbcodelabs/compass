@@ -46,6 +46,7 @@ const OBJECTIVE_STATUS = ["ON_TRACK", "AT_RISK", "OFF_TRACK", "COMPLETE"] as con
 const OPPORTUNITY_STATUS = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE", "ARCHIVED"] as const;
 const SOLUTION_STATUS = ["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"] as const;
 const ASSUMPTION_STATUS = ["UNTESTED", "TESTING", "VALIDATED", "INVALIDATED"] as const;
+export const ASSUMPTION_RISK_LEVELS = ["HIGH", "MEDIUM", "LOW"] as const;
 const EXPERIMENT_STATUS = ["DESIGNING", "RUNNING", "COMPLETE", "KILLED"] as const;
 const FEEDBACK_STATUS = ["OPEN", "UNDER_REVIEW", "PLANNED", "IN_PROGRESS", "COMPLETED", "DECLINED"] as const;
 // Horizons the generic single-field edit may set. LAUNCHING is deliberately
@@ -167,6 +168,17 @@ export async function updateEntityField(
     }
     const trimmed = typeof value === "string" ? value.trim() : "";
     data = { description: trimmed.length > 0 ? trimmed : null };
+  } else if (type === "assumption" && field === "riskLevel") {
+    if (typeof value !== "string" || !(ASSUMPTION_RISK_LEVELS as readonly string[]).includes(value)) {
+      return { ok: false, status: 400, error: "Invalid riskLevel" };
+    }
+    data = { riskLevel: value };
+  } else if (type === "experiment" && field === "hypothesis") {
+    // Experiments keep their prose in `hypothesis` (there is no description column); it is required.
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return { ok: false, status: 400, error: "Hypothesis is required" };
+    }
+    data = { hypothesis: value.trim() };
   } else if (type === "opportunity" && (field === "squadId" || field === "linkedKeyResultId")) {
     if (value !== null && (typeof value !== "string" || !value.trim())) {
       return { ok: false, status: 400, error: `${field} must be a nonempty string or null` };

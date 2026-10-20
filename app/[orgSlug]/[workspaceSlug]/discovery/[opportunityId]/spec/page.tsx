@@ -17,11 +17,11 @@ export async function generateMetadata({ params }: Props) {
   return { title: `${resolveThinkingModel(workspace).labels.opportunity.singular} spec` }
 }
 
-// Full-screen read-only spec for one opportunity. The segment is a UUID or a display ID (OPP-4); like the
+// Full-screen, editable spec for one opportunity. The segment is a UUID or a display ID (OPP-4); like the
 // detail page, anything that does not resolve inside this workspace is a 404.
 export default async function OpportunitySpecPage({ params }: Props) {
   const { orgSlug, workspaceSlug, opportunityId } = await params
-  const { workspace } = await requireWorkspaceContext(orgSlug, workspaceSlug)
+  const { workspace, isReadOnly } = await requireWorkspaceContext(orgSlug, workspaceSlug)
   const basePath = `/${orgSlug}/${workspaceSlug}/discovery`
 
   const resolved = await resolveWorkItem(getPrisma(), workspace.id, "opportunity", opportunityId)
@@ -37,7 +37,13 @@ export default async function OpportunitySpecPage({ params }: Props) {
     // fixed + inset-0 lifts the canvas out of the workspace shell (sidebar/header), the same
     // full-screen treatment the artifact viewer uses; the back link is the way out.
     <div className="fixed inset-0 z-50 overflow-y-auto bg-surface-app">
-      <SpecDocument spec={spec} labels={resolveThinkingModel(workspace).labels} backHref={`${basePath}/${encodeURIComponent(resolved.canonical)}`} />
+      <SpecDocument
+        spec={spec}
+        labels={resolveThinkingModel(workspace).labels}
+        backHref={`${basePath}/${encodeURIComponent(resolved.canonical)}`}
+        context={{ orgSlug, workspaceSlug, workspaceId: workspace.id, opportunityId: resolved.id }}
+        readOnly={isReadOnly}
+      />
     </div>
   )
 }

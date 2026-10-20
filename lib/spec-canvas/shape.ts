@@ -125,6 +125,13 @@ const CONCLUSION_TONE: Record<string, SpecTone> = { PROCEED: "success", KILL: "d
 
 const toneOf = (table: Record<string, SpecTone>, value: string): SpecTone => table[value] ?? "neutral"
 
+export const opportunityStatusTone = (status: string) => toneOf(OPPORTUNITY_TONE, status)
+export const solutionStatusTone = (status: string) => toneOf(SOLUTION_TONE, status)
+export const assumptionStatusTone = (status: string) => toneOf(ASSUMPTION_TONE, status)
+export const riskTone = (risk: string) => toneOf(RISK_TONE, risk)
+export const experimentStatusTone = (status: string) => toneOf(EXPERIMENT_TONE, status)
+export const conclusionTone = (conclusion: string) => toneOf(CONCLUSION_TONE, conclusion)
+
 /** `IN_DELIVERY` -> `In delivery`. Unknown values still render readably. */
 export function humanizeEnum(value: string): string {
   const spaced = value.toLowerCase().replace(/_/g, " ")
@@ -159,12 +166,68 @@ export function keyResultProgress(current: number, target: number): number | nul
 
 // ── Shaping ──────────────────────────────────────────────────────────────────
 
+// ── Row builders (shared by the loader and by in-place creation) ──────────────
+
 type Slugs = { orgSlug: string; workspaceSlug: string }
+type LinkType = Parameters<typeof entityPath>[0]["type"]
+
+function linkFor(type: LinkType, row: { id: string } & Partial<SeqFields>, slugs: Slugs, opportunityId?: string): string {
+  return entityPath({ ...slugs, type, id: row.id, displayId: displayIdFromRow(type as never, row), ...(opportunityId ? { opportunityId } : {}) })
+}
+
+export type NewSolutionRow = Omit<RawSolution, "assumptions"> & Partial<Pick<RawSolution, "assumptions">>
+export function buildSpecSolution(row: NewSolutionRow, slugs: Slugs, opportunityId: string, assumptionCount = 0, artifactCount = 0): SpecSolution {
+  return {
+    id: row.id,
+    displayId: displayIdFromRow("solution", row),
+    title: row.title,
+    description: row.description,
+    href: linkFor("solution", row, slugs, opportunityId),
+    status: row.status,
+    statusTone: solutionStatusTone(row.status),
+    assumptionCount,
+    artifactCount,
+  }
+}
+
+export type NewAssumptionRow = Omit<RawAssumption, "experiments"> & Partial<Pick<RawAssumption, "experiments">>
+export function buildSpecAssumption(row: NewAssumptionRow, solution: { id: string; title: string }, slugs: Slugs, opportunityId: string, experimentCount = 0): SpecAssumption {
+  return {
+    id: row.id,
+    displayId: displayIdFromRow("assumption", row),
+    title: row.title,
+    description: row.description,
+    href: linkFor("assumption", row, slugs, opportunityId),
+    riskLevel: row.riskLevel,
+    riskTone: riskTone(row.riskLevel),
+    status: row.status,
+    statusTone: assumptionStatusTone(row.status),
+    solutionId: solution.id,
+    solutionTitle: solution.title,
+    experimentCount,
+  }
+}
+
+export function buildSpecExperiment(row: Omit<RawExperiment, "assumptionId"> & { assumptionId?: string | null }, assumption: { id: string; title: string }, slugs: Slugs): SpecExperiment {
+  return {
+    id: row.id,
+    displayId: displayIdFromRow("experiment", row),
+    title: row.title,
+    hypothesis: row.hypothesis,
+    href: linkFor("experiment", row, slugs),
+    status: row.status,
+    statusTone: experimentStatusTone(row.status),
+    conclusion: row.conclusion,
+    conclusionTone: row.conclusion ? conclusionTone(row.conclusion) : null,
+    conclusionReason: row.conclusionReason,
+    assumptionId: assumption.id,
+    assumptionTitle: assumption.title,
+  }
+}
 
 export function shapeSpecCanvas(raw: RawSpecCanvas, slugs: Slugs): SpecCanvas {
   const opp = raw.opportunity
-  const link = (type: Parameters<typeof entityPath>[0]["type"], row: { id: string } & Partial<SeqFields>, extra: { opportunityId?: string } = {}) =>
-    entityPath({ ...slugs, type, id: row.id, displayId: displayIdFromRow(type as never, row), ...extra })
+  const link = (type: LinkType, row: { id: string } & Partial<SeqFields>) => linkFor(type, row, slugs)
 
   // Key Results, keyed by id, remembering every way they tie back to this opportunity.
   const krIndex = new Map<string, { kr: RawKeyResult; viaOpportunity: boolean; solutionTitles: string[] }>()
@@ -208,47 +271,11 @@ export function shapeSpecCanvas(raw: RawSpecCanvas, slugs: Slugs): SpecCanvas {
   const assumptions: SpecAssumption[] = []
   const experiments: SpecExperiment[] = []
   for (const solution of raw.solutions) {
-    solutions.push({
-      id: solution.id,
-      displayId: displayIdFromRow("solution", solution),
-      title: solution.title,
-      description: solution.description,
-      href: link("solution", solution, { opportunityId: opp.id }),
-      status: solution.status,
-      statusTone: toneOf(SOLUTION_TONE, solution.status),
-      assumptionCount: solution.assumptions.length,
-      artifactCount: (raw.solutionArtifacts.get(solution.id) ?? []).length,
-    })
+    solutions.push(buildSpecSolution(solution, slugs, opp.id, solution.assumptions.length, (raw.solutionArtifacts.get(solution.id) ?? []).length))
     for (const assumption of solution.assumptions) {
-      assumptions.push({
-        id: assumption.id,
-        displayId: displayIdFromRow("assumption", assumption),
-        title: assumption.title,
-        description: assumption.description,
-        href: link("assumption", assumption, { opportunityId: opp.id }),
-        riskLevel: assumption.riskLevel,
-        riskTone: toneOf(RISK_TONE, assumption.riskLevel),
-        status: assumption.status,
-        statusTone: toneOf(ASSUMPTION_TONE, assumption.status),
-        solutionId: solution.id,
-        solutionTitle: solution.title,
-        experimentCount: assumption.experiments.length,
-      })
+      assumptions.push(buildSpecAssumption(assumption, { id: solution.id, title: solution.title }, slugs, opp.id, assumption.experiments.length))
       for (const experiment of assumption.experiments) {
-        experiments.push({
-          id: experiment.id,
-          displayId: displayIdFromRow("experiment", experiment),
-          title: experiment.title,
-          hypothesis: experiment.hypothesis,
-          href: link("experiment", experiment),
-          status: experiment.status,
-          statusTone: toneOf(EXPERIMENT_TONE, experiment.status),
-          conclusion: experiment.conclusion,
-          conclusionTone: experiment.conclusion ? toneOf(CONCLUSION_TONE, experiment.conclusion) : null,
-          conclusionReason: experiment.conclusionReason,
-          assumptionId: assumption.id,
-          assumptionTitle: assumption.title,
-        })
+        experiments.push(buildSpecExperiment(experiment, { id: assumption.id, title: assumption.title }, slugs))
       }
     }
   }
