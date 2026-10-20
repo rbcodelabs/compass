@@ -13,6 +13,8 @@
  */
 import { getMcpActivityPrisma as getPrisma } from "@/lib/analytics/activity"
 import { fail, ok } from "@/lib/mcp-output"
+import { getMcpActor } from "@/lib/mcp-authz"
+import { loadLinkSummaries } from "@/lib/links/read-models"
 import { linkEntities, listLinks, unlinkEntities } from "@/lib/links/service"
 import { mcpLinkContext, listLinksTool as listTypedLinksTool } from "@/lib/typed-link-tool-handlers"
 import { TypedLinkError, runTypedLinkTransaction, type LinkSource } from "@/lib/typed-links"
@@ -106,4 +108,16 @@ export const listLinksTool = (args: ListArgs) => {
   if (genericMode && legacy > 0) return Promise.resolve(fail("Provide either one of opportunityId, objectiveId, solutionId, keyResultId, or entityType with entityId, not both."))
   if (genericMode) return generic(args)
   return listTypedLinksTool(args)
+}
+
+/**
+ * Additive reciprocal summaries for the get_* tools (`linkedStudies` on an experiment, `linkedExperiments` on a study).
+ * Scoped participant, PM-interview and synthesis actors get none: the links tell them about records their scope
+ * never granted, and this change must not widen what those contexts can read. Callers have already authorized the
+ * entity itself through the tool gate.
+ */
+export async function linkSummariesForCaller(workspaceId: string, entityType: string, entityId: string): Promise<Record<string, unknown>> {
+  const actor = getMcpActor()
+  if (actor.purpose === "RESEARCH" || actor.scopeConversationId || actor.scopeClaimId) return {}
+  return loadLinkSummaries(getPrisma(), { workspaceId, entityType, entityId })
 }

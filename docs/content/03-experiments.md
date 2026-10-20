@@ -47,6 +47,14 @@ Click **New Experiment** on the Experiments page, or click **Test this assumptio
 
 Press **⌘/Ctrl + Enter** or select **Submit** to create the experiment. The composer then turns into the new experiment's detail panel. Your draft is saved on this device for each workspace as you type: closing the panel, reloading or leaving the page keeps it, and the composer says **Restored your unsent draft** the next time you open it. Discarding a draft asks for confirmation first.
 
+## Linking Research Studies
+
+Open an experiment's detail panel or full page and find **Informed by** (research studies) below its method. Choose **Link existing research study** to search for a customer interview or usability study in the same workspace. Linked studies show their status and let you open the study or unlink it. You can also manage the relationship from the study's **Informs** (experiments) section in Capture.
+
+One experiment can link to several studies, and the same study can support several experiments. Draft, active, and closed studies can be linked; archived studies keep existing links (still visible and removable) but cannot receive new ones. PM interviews and imported external studies do not appear in this picker. Research must be enabled for these controls to appear.
+
+A link records relevance, not validation. It does not create a study, change its participant guide, activate it, record an experiment result, or update an assumption. Links remain editable after participant sessions start and at every experiment status. Unlinking removes only the relationship, not the study or its research. The same relationship is available to agents through `link_entities` with link type `EXPERIMENT_INFORMED_BY_STUDY`.
+
 ## Recording Results
 
 Once an experiment is COMPLETE or KILLED, open the detail panel and click **+ Add Result**. Record what you observed: the actual metrics, any qualitative findings, and unexpected outcomes.

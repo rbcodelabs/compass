@@ -20,7 +20,8 @@ import { StatusBadge } from "@/components/patterns/status-badge"
 import { MarkdownContent } from "@/components/markdown-content"
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link"
 import { PmInterviewHistory } from "@/components/research/pm-interview-history"
-import { isPmInterviewEnabled } from "@/lib/research-feature"
+import { isPmInterviewEnabled, isResearchCaptureEnabled } from "@/lib/research-feature"
+import { LinkedEntitiesSection } from "@/components/links/linked-entities-section"
 import type { CustomFieldDefinitionData, CustomFieldValue, SquadData } from "@/lib/types"
 import { MeasurementsPanel } from "@/components/analytics/measurements-panel"
 
@@ -261,6 +262,8 @@ export default async function ExperimentDetailPage({
           </h2>
           <MarkdownContent className="text-foreground/80">{experiment.method}</MarkdownContent>
         </section>
+
+        {isResearchCaptureEnabled() && <LinkedEntitiesSection orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ linkType: "EXPERIMENT_INFORMED_BY_STUDY", entityType: "EXPERIMENT", entityId: id }} />}
 
         {/* Kill condition shown again in body when not active (collapsed after conclusion) */}
         {!isActive && (

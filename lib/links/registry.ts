@@ -5,7 +5,7 @@
  * handler, tool or cleanup hook, because lib/links/service.ts, the generic MCP/REST tools and the
  * delete wiring all read this registry.
  *
- * Nothing in this file touches the database. Rules that need a query (eligibility) receive the
+ * Nothing in this file opens a database connection. Rules that need a query (eligibility, candidates) receive the
  * caller's transaction.
  *
  * A contract test (__tests__/links/registry-contract.test.ts) iterates every entry, so a type that
@@ -38,6 +38,24 @@ export type LinkEligibilityInput = {
 /** Declarative description of a reciprocal getter field (wired into get_* tools by the UI phase). */
 export type LinkSummarySpec = { field: string; select: readonly string[] }
 
+/** One row the link picker offers, and one row the linked list shows. `status` is null for a type without one. */
+export type LinkPickerItem = { type: LinkableEntityType; id: string; title: string; status: string | null }
+
+export type LinkCandidatesInput = {
+  tx: AppTransactionClient
+  workspaceId: string
+  /** Which end of the type the viewed entity is. The candidates are entities of the OTHER end. */
+  side: "from" | "to"
+  entityId: string
+  query: string
+  /** Entities already linked to the viewed one; never offered again. */
+  excludeIds: readonly string[]
+  limit: number
+}
+
+/** `canLink` false hides the add button (the viewed entity can take no new link); null means the type does not apply to the viewed entity at all. */
+export type LinkCandidates = { canLink: boolean; items: LinkPickerItem[] } | null
+
 /** Dual-write / backfill hooks for a type that replaces a legacy table. Declared here, implemented by phases 4-7. */
 export type LegacyAdapter = { legacyTable: string; backfillMigration: string }
 
@@ -64,6 +82,11 @@ export type LinkTypeDef<A = unknown> = {
   authorize(operation: LinkOperation): AuthRule
   /** Link-specific eligibility (study type, archived state, ...). Runs on link only, so existing links stay removable. */
   eligible?(input: LinkEligibilityInput): Promise<void>
+  /**
+   * What the shared picker (components/links/linked-entities-section.tsx) offers when linking from either end,
+   * mirroring `eligible` so the picker never offers a pair the service would refuse. Absent means the type has no UI.
+   */
+  candidates?(input: LinkCandidatesInput): Promise<LinkCandidates>
   /** Feature flag. When false every mutation is refused and the type is hidden from reads and summaries. */
   isEnabled?(): boolean
   lifecycle: { onFromDeleted: "delete" | "block"; onToDeleted: "delete" | "block"; onArchive: "keep" }
@@ -86,7 +109,7 @@ export const defaultAuthorize = (operation: LinkOperation): AuthRule =>
 
 // ── EXPERIMENT_INFORMED_BY_STUDY (the first type; no legacy data) ───────────
 
-const LINKABLE_STUDY_TYPES: readonly string[] = ["CUSTOMER_INTERVIEW", "USABILITY_TEST"]
+export const LINKABLE_STUDY_TYPES: readonly string[] = ["CUSTOMER_INTERVIEW", "USABILITY_TEST"]
 
 /**
  * An Experiment is informed by research studies. Rules (from the superseded PR #277):
@@ -118,6 +141,29 @@ const experimentInformedByStudy: LinkTypeDef = {
       throw new TypedLinkError("Only customer interview and usability test studies can be linked to an experiment.", "INVALID")
     }
     if (study.status === "ARCHIVED") throw new TypedLinkError("Archived research studies cannot be linked to an experiment.", "INVALID")
+  },
+  async candidates({ tx, workspaceId, side, entityId, query, excludeIds, limit }) {
+    const like = { contains: query.trim().slice(0, 255), mode: "insensitive" as const }
+    if (side === "from") {
+      const studies = await tx.researchStudy.findMany({
+        where: { workspaceId, studyType: { in: [...LINKABLE_STUDY_TYPES] }, status: { not: "ARCHIVED" }, name: like, id: { notIn: [...excludeIds] } },
+        select: { id: true, name: true, status: true },
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+        take: limit,
+      })
+      return { canLink: true, items: studies.map((study) => ({ type: "RESEARCH_STUDY" as const, id: study.id, title: study.name, status: study.status })) }
+    }
+    const study = await tx.researchStudy.findFirst({ where: { id: entityId, workspaceId }, select: { studyType: true, status: true } })
+    if (!study || !LINKABLE_STUDY_TYPES.includes(study.studyType)) return null
+    // An archived study keeps its links visible and removable but takes no new one.
+    if (study.status === "ARCHIVED") return { canLink: false, items: [] }
+    const experiments = await tx.experiment.findMany({
+      where: { workspaceId, title: like, id: { notIn: [...excludeIds] } },
+      select: { id: true, title: true, status: true },
+      orderBy: [{ title: "asc" }, { id: "asc" }],
+      take: limit,
+    })
+    return { canLink: true, items: experiments.map((experiment) => ({ type: "EXPERIMENT" as const, id: experiment.id, title: experiment.title, status: experiment.status })) }
   },
   lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
   summaries: {
