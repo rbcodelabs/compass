@@ -54,8 +54,8 @@ test.describe("Sheet-mode undo / redo (Tasks list)", () => {
     await expect(rows).toHaveCount(3);
     const dueCell = (index: number) => rows.nth(index).locator('[data-col="due"]');
 
-    const undo = page.getByRole("button", { name: "Undo" });
-    const redo = page.getByRole("button", { name: "Redo" });
+    const undo = page.getByRole("button", { name: "Undo", exact: true });
+    const redo = page.getByRole("button", { name: "Redo", exact: true });
     await expect(undo).toBeDisabled();
 
     // Paste three dates: three saves, ONE history step.
@@ -97,7 +97,7 @@ test.describe("Sheet-mode undo / redo (Tasks list)", () => {
     await page.waitForLoadState("networkidle");
     const reloaded = page.getByRole("grid", { name: "Tasks" }).getByRole("row").filter({ hasText: prefix });
     await expect(reloaded.nth(2).locator('[data-col="due"]')).toContainText("Apr 3, 2031");
-    await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
   });
 });
 
@@ -162,7 +162,7 @@ test.describe("Discovery: edit segment and description in place", () => {
     await page.keyboard.press("Enter");
     await saved;
     saved = page.waitForResponse(isOpportunityPatch);
-    await page.getByRole("button", { name: "Undo" }).click();
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
     expect((await saved).ok()).toBe(true);
     await expect(again).toContainText("Enterprise");
   });
