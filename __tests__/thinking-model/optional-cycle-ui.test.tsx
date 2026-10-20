@@ -195,7 +195,7 @@ describe("panels: the Cycle field of a cycle-less Objective", () => {
     squad: null,
     cycle: null,
     keyResults: [],
-    parentKeyResult: null,
+    parentKeyResult: null, customFields: [],
     deliveryTasks: [],
     linkableTasks: [],
     members: [],

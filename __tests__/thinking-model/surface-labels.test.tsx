@@ -406,7 +406,7 @@ describe("surfaces converted earlier also follow Opportunity, Solution and Cycle
     entityDetail.data = {
       id: "o1", title: "Grow", description: null, owner: "Me", status: "ON_TRACK", cycle: { id: "c1", title: "Q3" }, squad: null,
       keyResults: [{ id: "k1", title: "Reach", current: 1, target: 2, unit: null }],
-      parentKeyResult: null, deliveryTasks: [], linkableTasks: [], members: [],
+      parentKeyResult: null, customFields: [], deliveryTasks: [], linkableTasks: [], members: [],
     }
     const objective = textFor(CUSTOM, () => <ObjectivePanel id="o1" {...common} />)
     expect(objective).toContain("Signals (1)")
