@@ -265,6 +265,7 @@ const _handler = createMcpHandler(
       const actor = { ...getMcpActor(), authorizedWorkspaceId: undefined }
       // Display IDs (TASK-12) become UUIDs exactly once, inside the gate and after its actor-type/policy checks, so the
       // tool's own gate, the handler and every receipt only ever see UUIDs, and a denied call resolves nothing.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let args: any = rawArgs ?? {}
       let resolved = false
       const resolveOnce = async () => {
