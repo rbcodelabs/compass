@@ -44,7 +44,29 @@ import { DraftArea } from "./draft-area";
 import { CellDisplay } from "./cells/cell-display";
 import { CellEditor } from "./cells/cell-editor";
 import { formatCellValue, parseCellText } from "./cells/cell-values";
+import { formatTsv, parseTsv, rangeToMatrix } from "./clipboard";
 import { EditableCell } from "./editable-cell";
+import {
+  DEFAULT_RANGE_OP_LIMIT,
+  createChangeSet,
+  describePlan,
+  planClear,
+  planFill,
+  planPaste,
+  runGrouped,
+  type GridChangeSet,
+  type GridChangeSource,
+  type PlanGrid,
+  type PlannedChange,
+  type RangePlan,
+} from "./interaction/range-ops";
+import {
+  isSingleCell,
+  moveCorner,
+  rangeContains,
+  selectionRange,
+  type GridRange,
+} from "./interaction/range";
 import {
   nextPosition,
   resolveGridKey,
@@ -53,6 +75,7 @@ import {
 } from "./interaction/grid-keymap";
 import {
   resolveActiveCell,
+  resolveRangeEnd,
   useGridInteraction,
 } from "./interaction/use-grid-interaction";
 import { useGridPreferences } from "./use-grid-preferences";
@@ -183,6 +206,17 @@ export type DataGridProps<TRow extends GridRowData> = {
    * `isReadOnly`. A UX affordance only: the server still enforces writes.
    */
   readOnly?: boolean;
+  /**
+   * Most cells one paste, fill or clear may write in sheet mode. A larger
+   * operation is refused with a message instead of writing a prefix.
+   * Defaults to 200.
+   */
+  rangeLimit?: number;
+  /**
+   * Called once per multi-cell gesture (paste, fill, clear, cut) after every
+   * cell has settled. One gesture is one change set, the unit undo will replay.
+   */
+  onChangeSet?: (changeSet: GridChangeSet) => void;
 
   /**
    * Opt-in draft area under the rows for creating rows in bulk: type or paste N
@@ -244,7 +278,18 @@ export type DataGridProps<TRow extends GridRowData> = {
  * so a nested row shape (Discovery's `{ kind, opportunity }`) can express its
  * own merge via `applyOptimistic`. Edits to one row compose in order.
  */
-type OverrideEntry<TRow> = { apply: (row: TRow) => TRow; pending: boolean };
+type OverrideEdit<TRow> = { seq: number; apply: (row: TRow) => TRow; pending: boolean };
+/**
+ * A row's optimistic edits in the order they were made. Kept as a list (not one
+ * composed function) so a failed save rolls back ONLY its own edit: a paste that
+ * writes three cells of a row must not undo the two that saved.
+ */
+type OverrideEntry<TRow> = readonly OverrideEdit<TRow>[];
+
+const applyEntry = <TRow,>(entry: OverrideEntry<TRow>, row: TRow): TRow =>
+  entry.reduce((current, edit) => edit.apply(current), row);
+const entryPending = <TRow,>(entry: OverrideEntry<TRow>): boolean =>
+  entry.some((edit) => edit.pending);
 
 /** Rows shown per PageUp / PageDown in sheet mode. */
 const SHEET_PAGE_ROWS = 10;
@@ -292,6 +337,8 @@ export function DataGrid<TRow extends GridRowData>({
   interaction,
   onOpenRow,
   readOnly = false,
+  rangeLimit = DEFAULT_RANGE_OP_LIMIT,
+  onChangeSet,
   creation,
   creationModes,
   creationRequest,
@@ -364,8 +411,13 @@ export function DataGrid<TRow extends GridRowData>({
     setOverrides((previous) => {
       if (previous.size === 0) return previous;
       const kept = new Map<string, OverrideEntry<TRow>>();
-      for (const [id, entry] of previous) if (entry.pending) kept.set(id, entry);
-      return kept.size === previous.size ? previous : kept;
+      let changed = false;
+      for (const [id, entry] of previous) {
+        const inFlight = entry.filter((edit) => edit.pending);
+        if (inFlight.length !== entry.length) changed = true;
+        if (inFlight.length > 0) kept.set(id, inFlight);
+      }
+      return changed ? kept : previous;
     });
     setErrors((previous) => (previous.size === 0 ? previous : new Map()));
   }
@@ -374,7 +426,7 @@ export function DataGrid<TRow extends GridRowData>({
     () =>
       rows.map((row) => {
         const entry = overrides.get(getRowId(row));
-        return entry ? entry.apply(row) : row;
+        return entry ? applyEntry(entry, row) : row;
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- getRowId is a caller-stable accessor
     [rows, overrides],
@@ -389,13 +441,13 @@ export function DataGrid<TRow extends GridRowData>({
       map.set(id, {
         row,
         id,
-        pending: entry?.pending ?? false,
+        pending: entry ? entryPending(entry) : false,
         // Derived, never stored: it self-clears when the override clears, so
         // "server wins" needs no separate stale-reset path. A row is
         // deliberately NOT stale while pending, since the write may still fail.
         stale:
           Boolean(entry) &&
-          !entry?.pending &&
+          !(entry && entryPending(entry)) &&
           Boolean(rowMatchesFilters) &&
           !rowMatchesFilters?.(row),
         error: errors.get(id),
@@ -406,58 +458,94 @@ export function DataGrid<TRow extends GridRowData>({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- getRowId is a caller-stable accessor
   }, [mergedRows, overrides, errors, rowMatchesFilters, selection?.selectedIds]);
 
-  const commitEdit = React.useCallback(
-    async (id: string, row: TRow, edit: GridEdit<TRow>, next: GridCellValue) => {
+  const editSeq = React.useRef(0);
+
+  /** Shows `next` immediately and returns the handle used to settle it. */
+  const applyOptimisticEdit = React.useCallback(
+    (id: string, edit: GridEdit<TRow>, next: GridCellValue): number => {
       // The union's members differ only in value type; the cell that produced
       // `next` already parsed it for its own kind.
+      const applyOptimistic = edit.applyOptimistic as
+        | ((row: TRow, next: GridCellValue) => TRow)
+        | undefined;
+      const apply = (current: TRow): TRow =>
+        applyOptimistic
+          ? applyOptimistic(current, next)
+          : ({ ...current, [edit.field]: next } as TRow);
+      editSeq.current += 1;
+      const seq = editSeq.current;
+      setOverrides((previous) =>
+        new Map(previous).set(id, [
+          ...(previous.get(id) ?? []),
+          { seq, apply, pending: true },
+        ]),
+      );
+      return seq;
+    },
+    [],
+  );
+
+  const settleEdit = React.useCallback((id: string, seq: number, saved: boolean) => {
+    setOverrides((previous) => {
+      const entry = previous.get(id);
+      if (!entry) return previous;
+      const map = new Map(previous);
+      // A failure rolls back only this edit; the rest of the row stands.
+      const next = saved
+        ? entry.map((edit) => (edit.seq === seq ? { ...edit, pending: false } : edit))
+        : entry.filter((edit) => edit.seq !== seq);
+      if (next.length === 0) map.delete(id);
+      else map.set(id, next);
+      return map;
+    });
+  }, []);
+
+  const persistEdit = React.useCallback(
+    async (
+      id: string,
+      row: TRow,
+      edit: GridEdit<TRow>,
+      next: GridCellValue,
+      seq: number,
+    ): Promise<GridActionResult> => {
       const save = edit.save as (
         row: TRow,
         next: GridCellValue,
       ) => Promise<GridActionResult>;
-      const applyOptimistic = edit.applyOptimistic as
-        | ((row: TRow, next: GridCellValue) => TRow)
-        | undefined;
-      const applyOne = (current: TRow): TRow =>
-        applyOptimistic
-          ? applyOptimistic(current, next)
-          : ({ ...current, [edit.field]: next } as TRow);
+      let result: GridActionResult;
+      try {
+        result = await save(row, next);
+      } catch {
+        // `save` is contracted never to reject; a rejection must still roll back.
+        result = { ok: false, error: "Couldn't save that change. Try again." };
+      }
+      settleEdit(id, seq, result.ok);
+      return result;
+    },
+    [settleEdit],
+  );
 
-      setErrors((previous) => {
-        if (!previous.has(id)) return previous;
-        const map = new Map(previous);
-        map.delete(id);
-        return map;
-      });
+  const clearRowErrors = React.useCallback((ids: readonly string[]) => {
+    setErrors((previous) => {
+      if (!ids.some((id) => previous.has(id))) return previous;
+      const map = new Map(previous);
+      for (const id of ids) map.delete(id);
+      return map;
+    });
+  }, []);
+
+  const commitEdit = React.useCallback(
+    async (id: string, row: TRow, edit: GridEdit<TRow>, next: GridCellValue) => {
+      clearRowErrors([id]);
       // Apply optimistically, synchronously, before awaiting anything.
-      setOverrides((previous) => {
-        const entry = previous.get(id);
-        const earlier = entry?.apply;
-        return new Map(previous).set(id, {
-          apply: earlier ? (current) => applyOne(earlier(current)) : applyOne,
-          pending: true,
-        });
-      });
-
-      const result = await save(row, next);
-
-      if (result.ok) {
-        setOverrides((previous) => {
-          const entry = previous.get(id);
-          if (!entry) return previous;
-          return new Map(previous).set(id, { ...entry, pending: false });
-        });
-      } else {
-        // Roll back entirely and surface the error inline. There is no toast
-        // library in this repo and one is not being added.
-        setOverrides((previous) => {
-          const map = new Map(previous);
-          map.delete(id);
-          return map;
-        });
+      const seq = applyOptimisticEdit(id, edit, next);
+      const result = await persistEdit(id, row, edit, next, seq);
+      if (!result.ok) {
+        // There is no toast library in this repo and one is not being added.
         setErrors((previous) => new Map(previous).set(id, result.error));
       }
     },
-    [],
+    [applyOptimisticEdit, clearRowErrors, persistEdit],
   );
 
   // ── Columns ───────────────────────────────────────────────────────────────
@@ -791,6 +879,156 @@ export function DataGrid<TRow extends GridRowData>({
     });
   };
 
+  // ── Range ─────────────────────────────────────────────────────────────────
+  // The active cell is the anchor; `rangeEnd` is the corner that moves. With no
+  // moving corner the "range" is the active cell, so copy / paste / fill share
+  // one path whether or not the user dragged.
+  const rangeEndPosition = React.useMemo(
+    () => (sheet ? resolveRangeEnd(sheetState, bodyRowIds, navColumnIds) : null),
+    [sheet, sheetState, bodyRowIds, navColumnIds],
+  );
+  const rangeRect: GridRange | null = activePosition
+    ? selectionRange(activePosition, rangeEndPosition)
+    : null;
+  const multiRange = rangeRect && !isSingleCell(rangeRect) ? rangeRect : null;
+  const fillPreview =
+    rangeRect && sheetState.fillTo !== null && sheetState.fillTo > rangeRect.bottom
+      ? { from: rangeRect.bottom + 1, to: sheetState.fillTo }
+      : null;
+
+  /** A non-blocking note about the last range operation (clamped, skipped, refused). */
+  const [rangeNotice, setRangeNotice] = React.useState<string | null>(null);
+
+  /** Text of a cell as copied: the column's `format`, else what the cell displays. */
+  const copyTextAt = (rowIndex: number, colIndex: number): string => {
+    const column = navColumns[colIndex];
+    const edit = column ? metaOf(column).edit : undefined;
+    const row = rowAt(rowIndex);
+    if (edit && row) return formatCellValue(edit, row);
+    const rowId = bodyRowIds[rowIndex];
+    const columnId = navColumnIds[colIndex];
+    const tr = Array.from(tbodyRef.current?.children ?? []).find(
+      (element) => element.getAttribute("data-row-id") === rowId,
+    );
+    const td = Array.from(tr?.children ?? []).find(
+      (element) => element.getAttribute("data-col") === columnId,
+    );
+    return td?.textContent?.trim() ?? "";
+  };
+
+  const planGrid: PlanGrid<TRow> = {
+    rowCount: bodyRowIds.length,
+    colCount: navColumnIds.length,
+    rowAt: (index) => {
+      const id = bodyRowIds[index];
+      const row = id === undefined ? undefined : rowStates.get(id)?.row;
+      return id !== undefined && row ? { id, row } : undefined;
+    },
+    columnIdAt: (index) => navColumnIds[index],
+    editAt: editableAt,
+    textAt: copyTextAt,
+  };
+
+  /**
+   * Applies a plan through the same optimistic + `save` path as a single edit:
+   * every cell shows at once (one render, no flicker), then saves run with
+   * bounded concurrency. A failed cell rolls back alone and is reported.
+   */
+  const applyPlan = async (
+    plan: RangePlan<TRow>,
+    source: GridChangeSource,
+  ): Promise<void> => {
+    const verb = source === "paste" ? "paste" : source === "fill" ? "fill" : "clear";
+    const notice = describePlan(plan, verb);
+    setRangeNotice(notice);
+    if (notice) setLiveMessage(notice);
+    const { changes } = plan;
+    if (changes.length === 0) {
+      if (!notice) setLiveMessage("Nothing to change.");
+      return;
+    }
+
+    clearRowErrors(changes.map((change) => change.rowId));
+    const pending = changes.map((change: PlannedChange<TRow>) => ({
+      change,
+      seq: applyOptimisticEdit(change.rowId, change.edit, change.next),
+    }));
+    const results = await runGrouped(
+      pending,
+      ({ change }) => change.rowId,
+      ({ change, seq }) =>
+        persistEdit(change.rowId, change.row, change.edit, change.next, seq),
+    );
+
+    const failuresByRow = new Map<string, string[]>();
+    const records = pending.map(({ change }, index) => {
+      const result = results[index];
+      if (!result.ok) {
+        const label = labelOf(navColumns[change.colIndex]);
+        failuresByRow.set(change.rowId, [
+          ...(failuresByRow.get(change.rowId) ?? []),
+          `${label}: ${result.error}`,
+        ]);
+      }
+      return {
+        rowId: change.rowId,
+        columnId: change.columnId,
+        field: change.edit.field as string,
+        prev: change.prev,
+        next: change.next,
+        status: result.ok ? ("saved" as const) : ("failed" as const),
+        error: result.ok ? undefined : result.error,
+      };
+    });
+    const failed = records.filter((record) => record.status === "failed").length;
+    if (failuresByRow.size > 0) {
+      setErrors((previous) => {
+        const map = new Map(previous);
+        for (const [rowId, messages] of failuresByRow) map.set(rowId, messages.join("; "));
+        return map;
+      });
+    }
+    onChangeSet?.(createChangeSet(source, records));
+    const saved = records.length - failed;
+    setLiveMessage(
+      `${notice ? `${notice} ` : ""}${saved} ${saved === 1 ? "cell" : "cells"} updated${failed > 0 ? `, ${failed} failed` : ""}.`,
+    );
+  };
+
+  const runClear = (range: GridRange, source: GridChangeSource = "clear") =>
+    applyPlan(planClear(range, planGrid, rangeLimit), source);
+
+  /** Ctrl+D: the top row of the range fills the rest; a lone cell copies the one above. */
+  const runFillDown = () => {
+    if (!rangeRect || readOnly) return;
+    if (rangeRect.bottom > rangeRect.top) {
+      void applyPlan(
+        planFill(
+          { ...rangeRect, bottom: rangeRect.top },
+          { from: rangeRect.top + 1, to: rangeRect.bottom },
+          planGrid,
+          rangeLimit,
+        ),
+        "fill",
+      );
+    } else if (rangeRect.top > 0) {
+      void applyPlan(
+        planFill(
+          { ...rangeRect, top: rangeRect.top - 1, bottom: rangeRect.top - 1 },
+          { from: rangeRect.top, to: rangeRect.top },
+          planGrid,
+          rangeLimit,
+        ),
+        "fill",
+      );
+    }
+  };
+
+  const idsAt = (position: GridPosition) => ({
+    rowId: bodyRowIds[position.row],
+    columnId: navColumnIds[position.col],
+  });
+
   /**
    * Settle the open editor. With `value` omitted the draft text is parsed; an
    * unparseable draft keeps the editor open and reports why. Returns whether the
@@ -902,7 +1140,39 @@ export function DataGrid<TRow extends GridRowData>({
         beginEdit(activePosition);
         return;
       }
+      case "extend": {
+        const corner = moveCorner(
+          rangeEndPosition ?? activePosition,
+          { rows: action.rows, cols: action.cols },
+          gridDimensions,
+        );
+        event.preventDefault();
+        dispatchSheet({ type: "extendRange", cell: idsAt(corner) });
+        const range = selectionRange(activePosition, corner);
+        const rowsSpan = range.bottom - range.top + 1;
+        const colsSpan = range.right - range.left + 1;
+        setLiveMessage(
+          `Selected ${rowsSpan} ${rowsSpan === 1 ? "row" : "rows"} by ${colsSpan} ${colsSpan === 1 ? "column" : "columns"}.`,
+        );
+        return;
+      }
+      case "collapse":
+        if (!multiRange) return;
+        event.preventDefault();
+        dispatchSheet({ type: "collapseRange" });
+        return;
+      case "fillDown":
+        // Always claim Ctrl+D: the browser's "bookmark this page" is never wanted here.
+        event.preventDefault();
+        runFillDown();
+        return;
       case "clear": {
+        if (multiRange) {
+          if (readOnly) return;
+          event.preventDefault();
+          void runClear(multiRange);
+          return;
+        }
         const edit = editableAt(activePosition.row, activePosition.col);
         const row = rowAt(activePosition.row);
         const id = bodyRowIds[activePosition.row];
@@ -934,6 +1204,144 @@ export function DataGrid<TRow extends GridRowData>({
         editSettled.current = true;
         dispatchSheet({ type: "endEdit", refocus: true });
         return;
+    }
+  };
+
+  // ── Clipboard ─────────────────────────────────────────────────────────────
+  // `copy` / `cut` / `paste` events on the body: no async Clipboard API, so no
+  // permission prompt, and text/plain only (Sheets also writes text/html; reading
+  // none of it avoids HTML parsing). While an editor is open the native input
+  // behaviour wins.
+  const handleBodyCopy = (
+    event: React.ClipboardEvent<HTMLTableSectionElement>,
+    cut: boolean,
+  ) => {
+    if (!sheet || !rangeRect || sheetState.mode === "edit") return;
+    if (cut && readOnly) return;
+
+    let clearPlan: RangePlan<TRow> | null = null;
+    if (cut) {
+      clearPlan = planClear(rangeRect, planGrid, rangeLimit);
+      if (clearPlan.overLimit) {
+        // Refuse the whole cut: copying but not clearing would look like it worked.
+        event.preventDefault();
+        const message = describePlan(clearPlan, "cut");
+        setRangeNotice(message);
+        if (message) setLiveMessage(message);
+        return;
+      }
+    }
+    event.preventDefault();
+    event.clipboardData.setData(
+      "text/plain",
+      formatTsv(rangeToMatrix(rangeRect, copyTextAt)),
+    );
+    if (clearPlan) void applyPlan(clearPlan, "cut");
+    else setLiveMessage("Copied.");
+  };
+
+  const handleBodyPaste = (event: React.ClipboardEvent<HTMLTableSectionElement>) => {
+    if (!sheet || readOnly || !rangeRect || sheetState.mode === "edit") return;
+    const matrix = parseTsv(event.clipboardData.getData("text/plain"));
+    if (matrix.length === 0) return;
+    event.preventDefault();
+    void applyPlan(planPaste(matrix, rangeRect, planGrid, rangeLimit), "paste");
+  };
+
+  // ── Pointer: drag-select and the fill handle ──────────────────────────────
+  // Mouse events on the body cells only. Column reorder (dnd-kit) is armed by
+  // listeners on the header drag handles alone, so nothing here can start it.
+  const pointerDrag = React.useRef<
+    { kind: "range" } | { kind: "fill"; source: GridRange } | null
+  >(null);
+
+  const endPointerDrag = React.useCallback(() => {
+    const drag = pointerDrag.current;
+    if (!drag) return;
+    pointerDrag.current = null;
+    if (drag.kind === "fill") dispatchSheet({ type: "setFillPreview", rowIndex: null });
+  }, [dispatchSheet]);
+
+  // A release anywhere (even outside the grid) ends the drag. The React `mouseup`
+  // on the body runs first, so a fill dropped on the body still applies.
+  React.useEffect(() => {
+    if (!sheet) return;
+    document.addEventListener("mouseup", endPointerDrag);
+    return () => document.removeEventListener("mouseup", endPointerDrag);
+  }, [sheet, endPointerDrag]);
+
+  const handleBodyMouseDown = (event: React.MouseEvent<HTMLTableSectionElement>) => {
+    if (!sheet || event.button !== 0) return;
+    const target = event.target as Element;
+    if (target.closest('[data-sheet-editing="true"]')) return;
+
+    if (target.closest("[data-fill-handle]")) {
+      if (readOnly || !rangeRect) return;
+      // Keep DOM focus on the active cell while the handle is dragged.
+      event.preventDefault();
+      pointerDrag.current = { kind: "fill", source: rangeRect };
+      return;
+    }
+
+    const hit = cellFromEvent(event.target);
+    if (!hit) return;
+    // With an editor open, a press elsewhere settles it through blur + focus as
+    // before; the range then starts from the focus handler's `activate`.
+    if (sheetState.mode === "edit") return;
+
+    if (event.shiftKey && sheetState.active) {
+      // Without this the browser moves focus and starts a text selection.
+      event.preventDefault();
+      dispatchSheet({ type: "extendRange", cell: { rowId: hit.rowId, columnId: hit.columnId } });
+      return;
+    }
+    dispatchSheet({
+      type: "beginPointer",
+      cell: { rowId: hit.rowId, columnId: hit.columnId },
+      rowIndex: hit.row,
+    });
+    pointerDrag.current = { kind: "range" };
+  };
+
+  const handleBodyMouseMove = (event: React.MouseEvent<HTMLTableSectionElement>) => {
+    const drag = pointerDrag.current;
+    if (!sheet || !drag) return;
+    if (event.buttons === 0) {
+      // The button was released outside the window: treat the drag as over.
+      endPointerDrag();
+      return;
+    }
+    const hit = cellFromEvent(event.target);
+    if (!hit) return;
+    if (drag.kind === "range") {
+      dispatchSheet({ type: "extendRange", cell: { rowId: hit.rowId, columnId: hit.columnId } });
+    } else {
+      dispatchSheet({
+        type: "setFillPreview",
+        rowIndex: hit.row > drag.source.bottom ? hit.row : null,
+      });
+    }
+  };
+
+  const handleBodyMouseUp = () => {
+    const drag = pointerDrag.current;
+    if (!sheet || !drag || drag.kind !== "fill") return;
+    const to = sheetState.fillTo;
+    if (to !== null && to > drag.source.bottom) {
+      void applyPlan(
+        planFill(drag.source, { from: drag.source.bottom + 1, to }, planGrid, rangeLimit),
+        "fill",
+      );
+      // The selection grows to cover what was filled.
+      dispatchSheet({
+        type: "beginPointer",
+        cell: idsAt({ row: drag.source.top, col: drag.source.left }),
+        rowIndex: drag.source.top,
+      });
+      dispatchSheet({
+        type: "extendRange",
+        cell: idsAt({ row: to, col: drag.source.right }),
+      });
     }
   };
 
@@ -990,6 +1398,18 @@ export function DataGrid<TRow extends GridRowData>({
     });
     return () => cancelAnimationFrame(frame);
   }, [sheet, sheetState.focusSeq]);
+
+  // Keep the moving corner of a range visible as Shift+Arrow extends it.
+  React.useEffect(() => {
+    if (!sheet || !rangeEndPosition) return;
+    const tr = Array.from(tbodyRef.current?.children ?? []).find(
+      (element) => element.getAttribute("data-row-id") === bodyRowIds[rangeEndPosition.row],
+    );
+    const td = Array.from(tr?.children ?? []).find(
+      (element) => element.getAttribute("data-col") === navColumnIds[rangeEndPosition.col],
+    );
+    (td as HTMLElement | undefined)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [sheet, rangeEndPosition, bodyRowIds, navColumnIds]);
 
   // One tab stop. Widgets inside a cell (the Tasks title button) would each be
   // their own stop; take them out of the tab order unless their cell is being
@@ -1075,6 +1495,26 @@ export function DataGrid<TRow extends GridRowData>({
         </div>
       )}
 
+      {sheet && rangeNotice && (
+        <div
+          role="status"
+          data-testid="grid-range-notice"
+          className="flex shrink-0 items-start gap-2 rounded-lg border border-status-warning-surface bg-status-warning-surface px-3 py-2 text-xs text-status-warning"
+        >
+          <span className="flex-1">{rangeNotice}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Dismiss message"
+            data-testid="grid-range-notice-dismiss"
+            onClick={() => setRangeNotice(null)}
+          >
+            <X />
+          </Button>
+        </div>
+      )}
+
       {staleCount > 0 && (
         <div
           data-testid="grid-stale-strip"
@@ -1138,6 +1578,7 @@ export function DataGrid<TRow extends GridRowData>({
           aria-label={sheet ? caption : undefined}
           aria-rowcount={sheet ? total + 1 : undefined}
           aria-colcount={sheet ? visibleColumns.length : undefined}
+          aria-multiselectable={sheet ? true : undefined}
           // `undefined` in mobile mode, where the single `colSpan` card must
           // fill the viewport rather than force the desktop sum into scroll.
           style={tableMinWidth ? { minWidth: tableMinWidth } : undefined}
@@ -1230,6 +1671,12 @@ export function DataGrid<TRow extends GridRowData>({
             onKeyDown={sheet ? handleBodyKeyDown : undefined}
             onFocus={sheet ? handleBodyFocus : undefined}
             onDoubleClick={sheet ? handleBodyDoubleClick : undefined}
+            onMouseDown={sheet ? handleBodyMouseDown : undefined}
+            onMouseMove={sheet ? handleBodyMouseMove : undefined}
+            onMouseUp={sheet ? handleBodyMouseUp : undefined}
+            onCopy={sheet ? (event) => handleBodyCopy(event, false) : undefined}
+            onCut={sheet ? (event) => handleBodyCopy(event, true) : undefined}
+            onPaste={sheet ? handleBodyPaste : undefined}
           >
             {bodyRows.length === 0 && (
               <TableRow data-testid="grid-empty-row">
@@ -1332,6 +1779,24 @@ export function DataGrid<TRow extends GridRowData>({
                       activePosition.row === rowIndex &&
                       activePosition.col === colIndex;
                     const isEditingCell = isActiveCell && editing;
+                    const inRange =
+                      sheet && multiRange !== null && rangeContains(multiRange, rowIndex, colIndex);
+                    const inFillPreview =
+                      sheet &&
+                      fillPreview !== null &&
+                      rangeRect !== null &&
+                      rowIndex >= fillPreview.from &&
+                      rowIndex <= fillPreview.to &&
+                      colIndex >= rangeRect.left &&
+                      colIndex <= rangeRect.right;
+                    const showFillHandle =
+                      sheet &&
+                      !readOnly &&
+                      !editing &&
+                      rangeRect !== null &&
+                      rowIndex === rangeRect.bottom &&
+                      colIndex === rangeRect.right &&
+                      Boolean(editableAt(rowIndex, colIndex));
                     const sheetEdit = sheet ? editableAt(rowIndex, colIndex) : undefined;
                     // A legacy grid only knows the select editor. Other kinds
                     // are sheet-only, so there it falls back to the display cell.
@@ -1356,6 +1821,9 @@ export function DataGrid<TRow extends GridRowData>({
                               "aria-readonly": !sheetEdit,
                               // Roving tabindex: exactly one cell is a tab stop.
                               tabIndex: isActiveCell ? 0 : -1,
+                              "aria-selected": inRange ? true : undefined,
+                              "data-range": inRange ? "true" : undefined,
+                              "data-fill-preview": inFillPreview ? "true" : undefined,
                               "data-sheet-active": isActiveCell ? "true" : undefined,
                               "data-sheet-editing": isEditingCell ? "true" : undefined,
                             }
@@ -1368,7 +1836,11 @@ export function DataGrid<TRow extends GridRowData>({
                           meta.overflow !== "visible" && CELL_CLIP_CLASS,
                           meta.align === "end" && "text-right",
                           sheet &&
-                            "outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                            "relative outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                          // No native text selection while dragging a range; copy
+                          // is ours, and an open editor keeps its own selection.
+                          sheet && !isEditingCell && "select-none",
+                          "data-[range=true]:bg-primary/10 data-[fill-preview=true]:bg-primary/5",
                           meta.cellClassName,
                         )}
                       >
@@ -1412,6 +1884,14 @@ export function DataGrid<TRow extends GridRowData>({
                         ) : cell ? (
                           <table.FlexRender cell={cell} />
                         ) : null}
+                        {showFillHandle && (
+                          <span
+                            aria-hidden
+                            data-fill-handle
+                            data-testid="grid-fill-handle"
+                            className="absolute right-0 bottom-0 size-2.5 cursor-crosshair rounded-[2px] border border-background bg-primary"
+                          />
+                        )}
                       </TableCell>
                     );
                   })}

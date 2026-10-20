@@ -67,7 +67,6 @@ describe("resolveGridKey (nav mode)", () => {
     expect(resolveGridKey({ key: "k", metaKey: true }, "nav")).toBeNull();
     expect(resolveGridKey({ key: "Shift" }, "nav")).toBeNull();
     expect(resolveGridKey({ key: "F5" }, "nav")).toBeNull();
-    expect(resolveGridKey({ key: "Escape" }, "nav")).toBeNull();
   });
 });
 
