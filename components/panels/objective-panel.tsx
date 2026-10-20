@@ -16,7 +16,8 @@ import {
   type EditContext,
 } from "./panel-parts";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
-import type { MemberData } from "@/lib/types";
+import type { MemberData, CustomFieldDefinitionData, CustomFieldValue } from "@/lib/types";
+import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
 import { cycleRouteSegment, noCycleLabel } from "@/lib/okr-cycle-scope";
 
@@ -47,6 +48,7 @@ type ObjectiveData = {
   deliveryTasks: LinkedTaskData[];
   linkableTasks: Array<{ id: string; title: string }>;
   members: MemberData[];
+  customFields: Array<CustomFieldDefinitionData & { currentValue: CustomFieldValue }>;
 };
 
 const STATUS: Record<string, { label: string; className: string }> = {
@@ -135,6 +137,17 @@ export function ObjectivePanel({
         {data.squad && <Field label="Squad">{data.squad.name}</Field>}
         {(data.cycle || showCycleField) && <Field label={labels.cycle.singular}>{data.cycle?.title ?? noCycleLabel(labels.cycle)}</Field>}
       </div>
+
+      {data.customFields.length > 0 && (
+        <Section label="Details" defaultOpen>
+          <CustomFieldsPanel
+            fields={data.customFields}
+            objectId={data.id}
+            revalidatePathStr={`/${orgSlug}/${workspaceSlug}/okrs/${cycleRouteSegment(data.cycle?.id)}`}
+            onSaved={refresh}
+          />
+        </Section>
+      )}
 
       <Section label={labels.keyResult.plural} count={data.keyResults.length}>
         <RelationList items={krItems} empty={`No ${labels.keyResult.lowerPlural} yet.`} />
