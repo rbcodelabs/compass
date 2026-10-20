@@ -138,6 +138,24 @@ describe("creating a task from a comment", () => {
     expect(await postDocCommentWithOptionalTask({ ...base, body: quinn, task: { ...withTask, title: "   " } })).toEqual({ ok: false, error: "EMPTY_TITLE" })
   })
 
+  it.each(["NOPE", "high", ""])("rejects the invalid priority %j before writing anything", async priority => {
+    const result = await postDocCommentWithOptionalTask({ ...base, body: quinn, task: { ...withTask, priority: priority as never } })
+    expect(result).toEqual({ ok: false, error: "INVALID_PRIORITY" })
+    expect(mocks.createComment).not.toHaveBeenCalled()
+  })
+
+  it.each(["2026-02-31", "2026-13-01", "2026-00-10", "10/23/2026", "2026-2-3", "not a date"])("rejects the invalid due date %j instead of normalizing it", async dueDate => {
+    const result = await postDocCommentWithOptionalTask({ ...base, body: quinn, task: { ...withTask, dueDate } })
+    expect(result).toEqual({ ok: false, error: "INVALID_DUE_DATE" })
+    expect(mocks.createComment).not.toHaveBeenCalled()
+    expect(mocks.createTask).not.toHaveBeenCalled()
+  })
+
+  it("accepts a leap day and no due date", async () => {
+    expect((await postDocCommentWithOptionalTask({ ...base, body: quinn, task: { ...withTask, dueDate: "2028-02-29" } })).ok).toBe(true)
+    expect((await postDocCommentWithOptionalTask({ ...base, body: quinn, task: { ...withTask, dueDate: null } })).ok).toBe(true)
+  })
+
   it("rejects an empty body", async () => {
     expect(await postDocCommentWithOptionalTask({ ...base, body: "  " })).toEqual({ ok: false, error: "EMPTY_BODY" })
   })

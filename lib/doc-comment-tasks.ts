@@ -155,6 +155,8 @@ export type PostCommentError =
   | "FORBIDDEN"
   | "EMPTY_BODY"
   | "EMPTY_TITLE"
+  | "INVALID_PRIORITY"
+  | "INVALID_DUE_DATE"
   | "NO_ASSIGNEE"
   | "ASSIGNEE_NOT_IN_WORKSPACE"
   | "AGENT_SCOPE_CONFIRMATION_REQUIRED"
@@ -166,7 +168,14 @@ export type PostCommentResult =
   | { ok: true; comment: DocComment; card: CommentTaskCardData | null; mentioned: { assignee: MentionRef | null; watchers: MentionRef[] } }
   | { ok: false; error: PostCommentError; message?: string }
 
-const DUE_DATE = /^\d{4}-\d{2}-\d{2}$/
+const PRIORITIES: readonly string[] = ["URGENT", "HIGH", "MEDIUM", "LOW"]
+
+/** A real calendar date as YYYY-MM-DD ("2026-02-31" is rejected, not rolled over to March). */
+export function parseDueDate(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const date = new Date(`${value}T00:00:00.000Z`)
+  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value ? null : date
+}
 
 export async function postDocCommentWithOptionalTask(input: PostCommentInput): Promise<PostCommentResult> {
   const prisma = getPrisma()
@@ -186,6 +195,8 @@ export async function postDocCommentWithOptionalTask(input: PostCommentInput): P
   if (input.task) {
     const title = input.task.title.trim()
     if (!title) return { ok: false, error: "EMPTY_TITLE" }
+    if (input.task.priority !== undefined && !PRIORITIES.includes(input.task.priority)) return { ok: false, error: "INVALID_PRIORITY" }
+    if (input.task.dueDate && !parseDueDate(input.task.dueDate)) return { ok: false, error: "INVALID_DUE_DATE" }
     if (!roles.assignee) return { ok: false, error: "NO_ASSIGNEE" }
     const eligible = await eligibleTaskAssignees(doc.workspaceId)
     const wantedType = roles.assignee.kind === "agent" ? "AGENT" : "USER"
@@ -211,7 +222,7 @@ export async function postDocCommentWithOptionalTask(input: PostCommentInput): P
   let taskId: string | null = null
   if (input.task && assignee) {
     try {
-      const dueDate = input.task.dueDate && DUE_DATE.test(input.task.dueDate) ? new Date(`${input.task.dueDate}T00:00:00.000Z`) : null
+      const dueDate = input.task.dueDate ? parseDueDate(input.task.dueDate) : null
       const anchor = created.comment.anchorText?.replace(/\s+/g, " ").trim()
       const task = await createWorkspaceTask(doc.workspaceId, {
         title: input.task.title.trim().slice(0, 255),

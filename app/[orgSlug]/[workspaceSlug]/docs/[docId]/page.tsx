@@ -121,8 +121,8 @@ export default async function DocPage({ params, searchParams }: Props) {
       mentionOptions={mentionOptions}
       taskCards={taskCards}
       confirmedAgentIds={confirmedAgentIds}
-      followAction={<FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="DOC" subjectId={doc.id} />}
-      decisionAction={<DocDecisionAction orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
+      followAction={<FollowButton key="follow" orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="DOC" subjectId={doc.id} />}
+      decisionAction={<DocDecisionAction key="decision" orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
     />
   );
 }

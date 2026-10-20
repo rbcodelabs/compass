@@ -88,6 +88,15 @@ describe("@ picker", () => {
     expect(option).toHaveTextContent("Agent")
   })
 
+  it("pastes plain text only: markup stays text and the picker stays closed", () => {
+    renderComposer()
+    type("hello ")
+    fireEvent.paste(editor(), { clipboardData: { getData: () => "pasted <b>bold</b>\nsecond @ line" } })
+    expect(editor()).toHaveTextContent("pasted <b>bold</b>")
+    expect(editor().querySelector("b")).toBeNull()
+    expect(screen.queryByRole("listbox")).toBeNull()
+  })
+
   it("keeps matching across spaces so multi-word names can be typed out", () => {
     renderComposer()
     type("Pull baselines @QA Ag")
@@ -201,6 +210,41 @@ describe("edge cases", () => {
     expect(confirm).toHaveTextContent("Nothing runs on its own")
     await act(async () => { fireEvent.click(screen.getByTestId("confirm-agent-assign")) })
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ assignee: { kind: "agent", id: BOT }, agentScopeConfirmed: true, task: expect.any(Object) })
+  })
+
+  it("brings the normal buttons back when the agent chip is deleted during the scope step", () => {
+    renderComposer()
+    type("Pull baselines @qa")
+    pick("QA Agent")
+    fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
+    expect(screen.getByTestId("agent-scope-confirm")).toBeInTheDocument()
+    // Backspace over the chip: the chip leaves the editor and the editor reports the new body.
+    screen.getByTestId("mention-chip").remove()
+    fireEvent.input(editor())
+    expect(screen.queryByTestId("agent-scope-confirm")).toBeNull()
+    expect(screen.getByRole("button", { name: "Comment" })).toBeEnabled()
+    // Adding the agent back does not resurrect the old confirmation; it asks again.
+    type("again @qa")
+    pick("QA Agent")
+    expect(screen.queryByTestId("agent-scope-confirm")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
+    expect(screen.getByTestId("agent-scope-confirm")).toBeInTheDocument()
+  })
+
+  it("keeps the picker in flow with a bounded, scrollable list and scrolls the active row into view", () => {
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    renderComposer()
+    type("@")
+    const picker = screen.getByTestId("mention-picker")
+    expect(picker.className).not.toMatch(/absolute|fixed/)
+    expect(screen.getByRole("listbox").className).toMatch(/max-h-\[min\(16rem,40vh\)\].*overflow-y-auto/)
+    scroll.mockClear()
+    fireEvent.keyDown(editor(), { key: "ArrowDown" })
+    fireEvent.keyDown(editor(), { key: "ArrowDown" })
+    // The newly active option is asked to scroll into view each time.
+    expect(scroll).toHaveBeenCalledWith({ block: "nearest" })
+    expect(scroll.mock.contexts.length).toBeGreaterThanOrEqual(2)
   })
 
   it("skips the scope confirmation for an agent already confirmed in this doc", async () => {

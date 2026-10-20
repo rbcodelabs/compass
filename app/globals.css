@@ -457,15 +457,18 @@ html[data-panel-resizing] * {
 }
 /* @mention chips in the comment composer and in posted comments. */
 .mention-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
+  display: inline;
+  max-width: 100%;
   padding: 0 0.375rem;
   border-radius: 0.375rem;
   background-color: var(--status-info-surface);
   color: var(--status-info);
   font-weight: 600;
-  white-space: nowrap;
+  /* A very long name wraps (and breaks mid-word if it must) rather than pushing the layout sideways. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
   user-select: all;
 }
 .mention-chip-agent {

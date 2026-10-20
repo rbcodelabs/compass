@@ -42,8 +42,6 @@ interface MentionEditorProps {
   onEscape?: () => void
   autoFocus?: boolean
   disabled?: boolean
-  /** Open the picker above the editor; for composers at the bottom of a scroll area. */
-  popupAbove?: boolean
   className?: string
   testId?: string
 }
@@ -112,10 +110,11 @@ function HighlightedName({ name, query }: { name: string; query: string }): Reac
 }
 
 export function MentionEditor({
-  options, ariaLabel, placeholder, onChange, onSubmitShortcut, onEscape, autoFocus, disabled, popupAbove, className, testId,
+  options, ariaLabel, placeholder, onChange, onSubmitShortcut, onEscape, autoFocus, disabled, className, testId,
 }: MentionEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const listId = useId()
+  const pickerRef = useRef<HTMLDivElement>(null)
   // The text node and offsets of the "@query" being typed.
   const triggerRef = useRef<{ node: Text; start: number; end: number } | null>(null)
   const [query, setQuery] = useState<string | null>(null)
@@ -198,6 +197,15 @@ export function MentionEditor({
     if (autoFocus) editorRef.current?.focus()
   }, [autoFocus])
 
+  // The picker sits in the flow below the editor (never overlaid), so no ancestor can clip it: it grows the
+  // popover or the thread list instead. Bring it into view when it opens, and keep the active row visible.
+  useEffect(() => {
+    if (open) pickerRef.current?.scrollIntoView?.({ block: "nearest" })
+  }, [open])
+  useEffect(() => {
+    if (open) document.getElementById(`${listId}-${active}`)?.scrollIntoView?.({ block: "nearest" })
+  }, [open, active, listId])
+
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (open) {
       if (event.key === "ArrowDown") { event.preventDefault(); setActive(i => (i + 1) % flat.length); return }
@@ -221,7 +229,25 @@ export function MentionEditor({
 
   function onPaste(event: React.ClipboardEvent<HTMLDivElement>) {
     event.preventDefault()
-    document.execCommand("insertText", false, event.clipboardData.getData("text/plain"))
+    const text = event.clipboardData.getData("text/plain")
+    const root = editorRef.current
+    if (!root || !text) return
+    // Insert plain text through the Range API rather than execCommand: it works whatever the browser decides
+    // about the selection, and never lets pasted markup in. With no caret in the editor the text goes at the end.
+    const selection = window.getSelection()
+    const range = selection && selection.rangeCount > 0 && root.contains(selection.getRangeAt(0).commonAncestorContainer)
+      ? selection.getRangeAt(0)
+      : (() => { const r = document.createRange(); r.selectNodeContents(root); r.collapse(false); return r })()
+    range.deleteContents()
+    const node = document.createTextNode(text)
+    range.insertNode(node)
+    const caret = document.createRange()
+    caret.setStartAfter(node)
+    caret.collapse(true)
+    selection?.removeAllRanges()
+    selection?.addRange(caret)
+    close()
+    emit()
   }
 
   let flatIndex = -1
@@ -255,17 +281,18 @@ export function MentionEditor({
       />
       {open && (
         <div
-          id={listId}
-          role="listbox"
-          aria-label="Mention suggestions"
+          ref={pickerRef}
           data-testid="mention-picker"
-          className={cn(
-            "absolute inset-x-0 z-30 rounded-lg border border-border-default bg-surface-card p-1.5 shadow-md",
-            popupAbove ? "bottom-full mb-1" : "top-full mt-1",
-          )}
+          className="mt-1 flex flex-col rounded-lg border border-border-default bg-surface-card p-1.5 shadow-md"
           // Keep focus (and the caret) in the editor while the pointer picks an option.
           onMouseDown={event => event.preventDefault()}
         >
+          <div
+            id={listId}
+            role="listbox"
+            aria-label="Mention suggestions"
+            className="max-h-[min(16rem,40vh)] min-h-0 overflow-y-auto overscroll-contain"
+          >
           {groups.map(group => (
             <div key={group.id}>
               <div className="px-2 pb-0.5 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-text-subtle">{group.title}</div>
@@ -305,6 +332,7 @@ export function MentionEditor({
               })}
             </div>
           ))}
+          </div>
           <div className="mt-1.5 flex gap-3 border-t border-border-default px-2 pb-0.5 pt-1.5 text-[11px] text-text-subtle">
             <span><kbd className="rounded border border-border-default px-1">{"↑"}</kbd> <kbd className="rounded border border-border-default px-1">{"↓"}</kbd> navigate</span>
             <span><kbd className="rounded border border-border-default px-1">{"↵"}</kbd> select</span>

@@ -59,6 +59,8 @@ const ERROR_COPY: Record<string, string> = {
   ASSIGNEE_NOT_IN_WORKSPACE: "That person is not in this workspace, so a task cannot be assigned to them.",
   NO_ASSIGNEE: "Mention someone to assign the task to.",
   EMPTY_TITLE: "Give the task a title.",
+  INVALID_PRIORITY: "Choose a priority from the list.",
+  INVALID_DUE_DATE: "That due date is not a real date.",
   TASK_FAILED: "The task could not be created, so the comment was not posted.",
 }
 
@@ -79,7 +81,9 @@ export function DocCommentComposer({
   const [promoted, setPromoted] = useState<{ kind: "user" | "agent"; id: string } | null>(null)
   // Remembered per assignee so choosing "Mention only" for one person does not stick to the next.
   const [mentionOnlyFor, setMentionOnlyFor] = useState<string | null>(null)
-  const [confirmingAgent, setConfirmingAgent] = useState(false)
+  // The assignee the scope step was opened for. The step only shows while that is still the assignee,
+  // so deleting or swapping the chip behind it brings the normal buttons straight back.
+  const [confirmingFor, setConfirmingFor] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editorKey, setEditorKey] = useState(0)
@@ -104,6 +108,7 @@ export function DocCommentComposer({
   const willCreateTask = assignable && taskOn && !mentionOnly
   const label = willCreateTask ? "Comment & create task" : idleLabel
   const needsScopeConfirm = willCreateTask && assignee?.kind === "agent" && !confirmedAgentIds.includes(assignee.id)
+  const confirmingAgent = needsScopeConfirm && confirmingFor !== null && confirmingFor === assigneeKey
 
   async function post(agentScopeConfirmed: boolean) {
     if (busy || !body.trim()) return
@@ -118,13 +123,13 @@ export function DocCommentComposer({
       })
       if (!result.ok) {
         setError(ERROR_COPY[result.error] ?? result.message)
-        setConfirmingAgent(false)
+        setConfirmingFor(null)
         return
       }
       // Reset for the next comment: remount the editor, clear task fields.
       setEditorKey(key => key + 1)
       setBody(""); setTitle(""); setTitleTouched(false); setDue(""); setPriority("MEDIUM")
-      setPromoted(null); setMentionOnlyFor(null); setTaskOn(true); setConfirmingAgent(false)
+      setPromoted(null); setMentionOnlyFor(null); setTaskOn(true); setConfirmingFor(null)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not post the comment.")
     } finally {
@@ -133,7 +138,7 @@ export function DocCommentComposer({
   }
 
   function submit() {
-    if (needsScopeConfirm) { setConfirmingAgent(true); return }
+    if (needsScopeConfirm) { setConfirmingFor(assigneeKey); return }
     void post(false)
   }
 
@@ -150,9 +155,8 @@ export function DocCommentComposer({
         ariaLabel={ariaLabel}
         placeholder={placeholder}
         autoFocus={autoFocus}
-        popupAbove={compact}
         disabled={busy}
-        onChange={value => { setBody(value); setError(null) }}
+        onChange={value => { setBody(value); setError(null); setConfirmingFor(null) }}
         onSubmitShortcut={submit}
         onEscape={onCancel}
         testId="doc-comment-editor"
@@ -269,7 +273,7 @@ export function DocCommentComposer({
           <p className="text-xs text-text-subtle">Nothing runs on its own: the agent picks the task up from its queue.</p>
           <div className="flex gap-2">
             <Button type="button" size="sm" disabled={busy} onClick={() => void post(true)} data-testid="confirm-agent-assign">Assign to agent</Button>
-            <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setConfirmingAgent(false)}>Cancel</Button>
+            <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setConfirmingFor(null)}>Cancel</Button>
           </div>
         </div>
       )}

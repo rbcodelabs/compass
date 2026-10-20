@@ -27,7 +27,7 @@ export function CommentTaskCard({ card, taskHref }: { card: CommentTaskCardData;
       data-task-id={card.taskId}
       data-agent={agent ? "true" : "false"}
       className={cn(
-        "mt-2 grid gap-1.5 rounded-lg border border-border-default border-l-[3px] bg-surface-panel p-2.5",
+        "mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1.5 rounded-lg border border-border-default border-l-[3px] bg-surface-panel p-2.5",
         agent ? "border-l-agent-accent" : "border-l-status-info",
       )}
     >
@@ -35,17 +35,26 @@ export function CommentTaskCard({ card, taskHref }: { card: CommentTaskCardData;
         <span data-testid="task-card-status" className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold", PILL_TONE[status.tone])}>{status.label}</span>
         {card.displayId && <span className="font-mono text-xs text-text-subtle">{card.displayId}</span>}
       </div>
-      <p className="m-0 text-sm font-semibold text-text-primary">{card.title}</p>
+      <p className="m-0 min-w-0 break-words text-sm font-semibold text-text-primary [overflow-wrap:anywhere]">{card.title}</p>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-subtle">
         {card.assignee && (
-          <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
             <span
               aria-hidden
               className={cn("flex size-[18px] items-center justify-center rounded-full text-[9px] font-bold text-text-inverse", agent ? "bg-agent-accent" : "bg-status-neutral")}
             >
               {agent ? "⚙" : initials(card.assignee.displayName)}
             </span>
-            {card.assignee.displayName}
+            <span className="min-w-0 break-words [overflow-wrap:anywhere]">{card.assignee.displayName}</span>
+            {!card.assignee.available && (
+              <span
+                data-testid="assignee-unavailable"
+                title="This person or agent is no longer available in this workspace, so the task will not be picked up."
+                className="rounded bg-status-warning-surface px-1.5 py-px text-[10px] font-semibold text-status-warning"
+              >
+                Unavailable
+              </span>
+            )}
             {agent && <span className="rounded bg-agent-accent-surface px-1.5 py-px text-[10px] font-semibold text-agent-accent">Agent</span>}
           </span>
         )}
