@@ -217,7 +217,7 @@ const solutionTargetsKeyResult: LinkTypeDef = {
   compat: { mcpTools: ["link_solution_to_key_result", "unlink_solution_from_key_result"], restOps: ["linkSolutionKeyResult", "unlinkSolutionKeyResult"] },
 }
 
-// ── OPPORTUNITY_TARGETS_OBJECTIVE / OPPORTUNITY_TARGETS_KEY_RESULT (phase 5: mirror of opportunity_objective_links and the KR pointer) ──
+// ── OPPORTUNITY_TARGETS_OBJECTIVE / OPPORTUNITY_TARGETS_KEY_RESULT (phase 5: mirror of the legacy Opportunity-Objective table and the KR pointer) ──
 
 /** Outside production the mirror is on so tests and E2E cover it; production needs COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR=1. */
 export function isOpportunityLinkMirrorEnabled(): boolean {

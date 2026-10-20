@@ -28,6 +28,9 @@ import {
   loadOpportunityComposerOptions,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 
+// The entity_links mirror (ADR phase 5) has its own tests; this file pins the legacy writes against hand-written fakes.
+process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR = "0";
+
 vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
 
 beforeEach(() => {

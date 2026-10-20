@@ -61,6 +61,7 @@ describe.skipIf(!databaseUrl)("095 entity_links opportunity backfill through the
 
     const obj1 = await objective(ws1)
     const obj2 = await objective(ws2)
+    // INTENTIONAL NULL workspaceId: an objective with no workspace is a crossWorkspace orphan that 095 must quarantine and report.
     const objNull = await objective(null)
     const kr1 = await keyResult(obj1)
     const kr2 = await keyResult(obj2)
@@ -80,9 +81,9 @@ describe.skipIf(!databaseUrl)("095 entity_links opportunity backfill through the
 
     // More than one batch of good pointers and links, to span the 500 batch cap.
     const bulk = ENTITY_LINKS_OPPORTUNITY_BACKFILL_BATCH_SIZE + 37
-    await q(`INSERT INTO $S.opportunities(workspace_id,title,linked_key_result_id) SELECT $1,'bulk'||g,$2 FROM generate_series(1,${bulk}) g`, [ws1, kr1])
-    await q(`INSERT INTO $S.opportunities(workspace_id,title) SELECT $1,'bulklink'||g FROM generate_series(1,${bulk}) g`, [ws1])
-    await q(`INSERT INTO $S.opportunity_objective_links(workspace_id,opportunity_id,objective_id,origin) SELECT workspace_id, id, $2, 'DIRECT' FROM $S.opportunities WHERE title LIKE 'bulklink%'`, [ws1, obj1])
+    await q(`INSERT INTO $S.opportunities(workspace_id,title,linked_key_result_id) SELECT $1::uuid,'bulk'||g,$2::uuid FROM generate_series(1,${bulk}) g`, [ws1, kr1])
+    await q(`INSERT INTO $S.opportunities(workspace_id,title) SELECT $1::uuid,'bulklink'||g FROM generate_series(1,${bulk}) g`, [ws1])
+    await q(`INSERT INTO $S.opportunity_objective_links(workspace_id,opportunity_id,objective_id,origin) SELECT $1::uuid, id, $2::uuid, 'DIRECT' FROM $S.opportunities WHERE title LIKE 'bulklink%'`, [ws1, obj1])
     seeded.bulk = String(bulk)
 
     // Orphans: all must be quarantined, none linked, none deleted.
@@ -107,10 +108,12 @@ describe.skipIf(!databaseUrl)("095 entity_links opportunity backfill through the
 
   const count = async (sql: string, params: unknown[] = []) => Number((await q(sql, params)).rows[0].n)
 
-  it("is explicit-only and refuses until 091 and 071 are applied is covered by the unit test; an untargeted run leaves it pending", async () => {
+  it("is explicit-only: an untargeted run names it as skipped and never applies it", async () => {
+    // Other pending migrations (093 here) may stop an untargeted run on the seeded orphans; either way 095 is only ever listed as skipped.
     const untargeted = await run()
-    expect(untargeted.status, JSON.stringify(await untargeted.clone().json())).toBe(200)
-    const applied = await q(`SELECT count(*)::int AS n FROM $S._prisma_migrations WHERE migration_name=$1 AND finished_at IS NOT NULL`, [NAME])
+    const body = await untargeted.json()
+    expect(`${body.message ?? ""}${body.log ?? ""}`).toMatch(/Skipped \(explicit-only, still pending\):[^\n]*095_entity_links_backfill_opportunity/)
+    const applied = await q(`SELECT count(*)::int AS n FROM $S._prisma_migrations WHERE migration_name=$1`, [NAME])
     expect(applied.rows[0].n).toBe(0)
     expect(await count(`SELECT count(*)::text AS n FROM $S.entity_links`)).toBe(0)
   }, 120_000)

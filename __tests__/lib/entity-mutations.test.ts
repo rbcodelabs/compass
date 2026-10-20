@@ -8,6 +8,9 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// The entity_links mirror (ADR phase 5) has its own tests; this file pins the legacy writes against hand-written fakes.
+process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR = "0";
+
 const models = {
   objective: { findFirst: vi.fn(), update: vi.fn() },
   keyResult: { findFirst: vi.fn(), update: vi.fn() },

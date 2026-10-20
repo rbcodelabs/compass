@@ -4,7 +4,7 @@
 -- READ ONLY and ends in ROLLBACK, and it selects counts and ids only (no titles, no content).
 --
 -- Usage (psql, as a read-only role; the schema is the deployment's, e.g. compass_prod):
---   psql "$READONLY_DATABASE_URL" -v schema=compass_prod -f docs/maintenance/entity-links-opportunity-preflight.sql
+--   psql "$READONLY_DATABASE_URL" -v schema=compass_prod -f docs/maintenance/entity-links-opportunity-preflight.psql
 -- It needs tables from migrations 068 and 071 (objectives.workspace_id, opportunity_objective_links). The entity_links section at the
 -- end needs 091 and is skipped by psql's ON_ERROR_STOP=off default if the table is missing; the same numbers (plus these) are served by
 -- GET /api/admin/migrate under entityLinksOpportunityBackfill once the code is deployed.

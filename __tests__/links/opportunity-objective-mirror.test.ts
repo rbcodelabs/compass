@@ -162,11 +162,11 @@ describe("Opportunity -> Key Result pointer", () => {
     expect(objectiveRows(KR)[0]).toMatchObject({ toId: "kr-a2", origin: "LEGACY" });
   });
 
-  it("a pointer that moved while the flag was off cannot leave a stale row behind once a write happens", async () => {
+  it("with the flag off the pointer sync touches neither the existing mirror rows nor creates any (095 prunes them later)", async () => {
     await setPointer("kr-a");
     vi.stubEnv("COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR", "0");
     await setPointer("kr-a2");
-    expect(objectiveRows(KR).map((row) => row.toId)).toEqual([]);
+    expect(objectiveRows(KR).map((row) => row.toId)).toEqual(["kr-a"]);
   });
 
   it("a Key Result in another workspace is refused before either table is written", async () => {

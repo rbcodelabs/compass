@@ -14,7 +14,7 @@ anything by itself.
 
 ## Order of operations (each production step needs the owner's explicit yes)
 
-1. Run `entity-links-opportunity-preflight.sql` (read-only) and read the counts and expected orphans. After the code is deployed the same numbers are
+1. Run `entity-links-opportunity-preflight.psql` (read-only) and read the counts and expected orphans. After the code is deployed the same numbers are
    in `GET /api/admin/migrate` under `entityLinksOpportunityBackfill` (counts and capped ids only).
 2. Decide who resolves quarantined rows (see below). 095 never links, changes or deletes them.
 3. Deploy the code, set `COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR=1`, redeploy so every instance mirrors.
