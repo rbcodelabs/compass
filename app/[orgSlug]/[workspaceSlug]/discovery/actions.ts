@@ -67,6 +67,8 @@ async function runBatchAction(
   orgSlug: string,
   workspaceSlug: string,
   run: (context: BatchContext) => Promise<BatchCreateResult>,
+  /** Pages besides Discovery that list what this batch creates. */
+  alsoRevalidate: readonly string[] = [],
 ): Promise<CreateBatchActionResult> {
   const workspaceContext = await requireWorkspaceContextOrThrow(orgSlug, workspaceSlug);
   try {
@@ -78,7 +80,10 @@ async function runBatchAction(
       createdById: workspaceContext.userId,
     });
     // Once per batch, not per item.
-    if (result.results.some((item) => item.ok && !item.deduped)) revalidatePath(`/[orgSlug]/[workspaceSlug]/discovery`, "layout");
+    if (result.results.some((item) => item.ok && !item.deduped)) {
+      revalidatePath(`/[orgSlug]/[workspaceSlug]/discovery`, "layout");
+      for (const path of alsoRevalidate) revalidatePath(path, "page");
+    }
     return { ok: true, ...result };
   } catch (error) {
     if (error instanceof BatchRequestError) return { ok: false, error: error.message };
@@ -93,7 +98,10 @@ export async function createOpportunitiesBatch(orgSlug: string, workspaceSlug: s
 
 /** Creates up to 100 solutions under existing opportunities of this workspace; same contract as createOpportunitiesBatch. */
 export async function createSolutionsBatch(orgSlug: string, workspaceSlug: string, items: SolutionBatchItem[]): Promise<CreateBatchActionResult> {
-  return runBatchAction(orgSlug, workspaceSlug, (context) => createSolutionBatch(getPrisma(), context, items));
+  // The Solutions backlog lists them too.
+  return runBatchAction(orgSlug, workspaceSlug, (context) => createSolutionBatch(getPrisma(), context, items), [
+    `/[orgSlug]/[workspaceSlug]/solutions`,
+  ]);
 }
 
 export type CreateOpportunityFromComposerResult =

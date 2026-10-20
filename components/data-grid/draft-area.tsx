@@ -17,15 +17,38 @@ import {
   pasteToDrafts,
   submitInChunks,
 } from "./draft-rows";
-import type { GridCreation, GridCreationField, GridDraftRow, GridDraftValues } from "./types";
+import type {
+  GridCreation,
+  GridCreationField,
+  GridCreationMode,
+  GridCreationRequest,
+  GridDraftRow,
+  GridDraftValues,
+} from "./types";
 
 const SELECT_CLASS =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive disabled:opacity-50";
 
-type Props = {
+type PanelProps = {
   creation: GridCreation;
   /** Routes a message to the grid's polite live region. */
   announce: (message: string) => void;
+  className?: string;
+  /** The batch parent (`creation.parent`), owned by the wrapper so a mode switch keeps it. */
+  parentId: string;
+  onParentChange: (parentId: string) => void;
+  /** Reports whether the panel holds drafts, so the wrapper can lock the mode switch. */
+  onWorkChange: (hasWork: boolean) => void;
+  /** The mode switch, rendered at the start of the toolbar. */
+  modeSwitch?: React.ReactNode;
+  rootRef?: React.Ref<HTMLElement>;
+};
+
+type Props = {
+  /** One entry is the plain draft area; several add a mode switch ("Add opportunities" / "Add solutions"). */
+  modes: readonly GridCreationMode[];
+  announce: (message: string) => void;
+  request?: GridCreationRequest;
   className?: string;
 };
 
@@ -50,7 +73,16 @@ function countLabel(count: number, noun: { singular: string; plural: string }) {
  * its place; because React keys by id, the input the user is typing in is the
  * same DOM node before and after, so focus survives the promotion.
  */
-export function DraftArea({ creation, announce, className }: Props) {
+function DraftPanel({
+  creation,
+  announce,
+  className,
+  parentId,
+  onParentChange,
+  onWorkChange,
+  modeSwitch,
+  rootRef,
+}: PanelProps) {
   const [state, dispatch] = React.useReducer(draftReducer, EMPTY_DRAFT_STATE);
   const [ghostId, setGhostId] = React.useState(newClientId);
   const [submitting, setSubmitting] = React.useState(false);
@@ -63,6 +95,14 @@ export function DraftArea({ creation, announce, className }: Props) {
   const ready = drafts.filter((draft) => draft.status !== "pending" && !isBlankValues(draft.values, defaults));
   const failing = drafts.filter((draft) => draft.status === "error").length;
   const hasWork = drafts.some((draft) => !isBlankValues(draft.values, defaults));
+
+  React.useEffect(() => {
+    onWorkChange(hasWork);
+  }, [hasWork, onWorkChange]);
+
+  /** What validate and submit see: the draft's values plus the batch parent, when the mode has one. */
+  const withParent = (values: GridDraftValues): GridDraftValues =>
+    creation.parent ? { ...values, parent: parentId } : values;
 
   // Unsaved drafts are lost on reload; make the browser ask first.
   React.useEffect(() => {
@@ -117,7 +157,7 @@ export function DraftArea({ creation, announce, className }: Props) {
     const invalid = new Map<string, Record<string, string>>();
     const sendable: GridDraftRow[] = [];
     for (const draft of ready) {
-      const errors = creation.validate(draft.values);
+      const errors = creation.validate(withParent(draft.values));
       if (Object.keys(errors).length > 0) invalid.set(draft.clientId, errors);
       else sendable.push(draft);
     }
@@ -134,7 +174,7 @@ export function DraftArea({ creation, announce, className }: Props) {
     setSummary("");
     dispatch({ type: "pending", clientIds: sendable.map((draft) => draft.clientId) });
     const outcome = await submitInChunks(
-      sendable.map((draft) => ({ clientId: draft.clientId, values: draft.values })),
+      sendable.map((draft) => ({ clientId: draft.clientId, values: withParent(draft.values) })),
       creation,
     );
     dispatch({ type: "settled", results: outcome.results });
@@ -166,12 +206,31 @@ export function DraftArea({ creation, announce, className }: Props) {
 
   return (
     <section
+      ref={rootRef}
       aria-label={`Add ${noun.plural}`}
       data-testid="grid-draft-area"
       className={cn("shrink-0 border-t border-dashed border-border-default bg-surface-inset/40", className)}
       onPaste={onPaste}
     >
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs text-text-secondary">
+        {modeSwitch}
+        {creation.parent && (
+          <select
+            aria-label={creation.parent.label}
+            className={cn(SELECT_CLASS, "w-56")}
+            value={parentId}
+            disabled={submitting}
+            data-testid="draft-parent"
+            onChange={(event) => onParentChange(event.target.value)}
+          >
+            <option value="">{creation.parent.placeholder}</option>
+            {creation.parent.options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        )}
         <span className="font-medium" data-testid="draft-status">
           {hasWork
             ? `${countLabel(ready.length, noun)} ready${failing > 0 ? `, ${failing} with errors` : ""}`
@@ -246,6 +305,78 @@ export function DraftArea({ creation, announce, className }: Props) {
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * The draft area. With several modes it shows a switch; the mode is locked while
+ * it holds drafts (create or discard first), so no draft is ever hidden or lost
+ * by a click. `request` lets the grid's rows switch the mode and preselect the
+ * parent ("Add solution" inside an expanded row).
+ */
+export function DraftArea({ modes, announce, request, className }: Props) {
+  const [modeId, setModeId] = React.useState(modes[0].id);
+  const [parentId, setParentId] = React.useState("");
+  const [locked, setLocked] = React.useState(false);
+  const [handledNonce, setHandledNonce] = React.useState(request?.nonce);
+  const rootRef = React.useRef<HTMLElement>(null);
+  const [focusNonce, setFocusNonce] = React.useState<number | null>(null);
+
+  // A new request is applied during render (not in an effect), so the panel for
+  // the requested mode mounts with the right parent in one pass.
+  if (request && request.nonce !== handledNonce) {
+    setHandledNonce(request.nonce);
+    if (locked && request.modeId !== modeId) {
+      announce("Create or discard your drafts before adding something else.");
+    } else if (modes.some((mode) => mode.id === request.modeId)) {
+      setModeId(request.modeId);
+      if (request.parentId !== undefined) setParentId(request.parentId);
+      setFocusNonce(request.nonce);
+    }
+  }
+
+  const active = modes.find((mode) => mode.id === modeId) ?? modes[0];
+  React.useEffect(() => {
+    if (focusNonce === null) return;
+    const inputs = rootRef.current?.querySelectorAll<HTMLInputElement>('input[data-testid^="draft-field-"]');
+    const target = inputs?.[inputs.length - 1];
+    target?.scrollIntoView?.({ block: "nearest" });
+    target?.focus();
+  }, [focusNonce]);
+
+  const modeSwitch =
+    modes.length > 1 ? (
+      <div role="group" aria-label="What to add" className="flex gap-1" data-testid="draft-modes">
+        {modes.map((mode) => (
+          <Button
+            key={mode.id}
+            type="button"
+            size="sm"
+            variant={mode.id === active.id ? "secondary" : "ghost"}
+            aria-pressed={mode.id === active.id}
+            disabled={locked && mode.id !== active.id}
+            title={locked && mode.id !== active.id ? "Create or discard your drafts first." : undefined}
+            data-testid={`draft-mode-${mode.id}`}
+            onClick={() => setModeId(mode.id)}
+          >
+            {mode.label}
+          </Button>
+        ))}
+      </div>
+    ) : null;
+
+  return (
+    <DraftPanel
+      key={active.id}
+      creation={active.creation}
+      announce={announce}
+      className={className}
+      parentId={parentId}
+      onParentChange={setParentId}
+      onWorkChange={setLocked}
+      modeSwitch={modeSwitch}
+      rootRef={rootRef}
+    />
   );
 }
 
