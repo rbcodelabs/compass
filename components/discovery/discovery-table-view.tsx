@@ -46,6 +46,8 @@ export type DiscoveryTableOpportunity = {
   id: string;
   title: string;
   customerSegment: string | null;
+  /** Shown (and editable) as a column only in the interactive table. */
+  description?: string | null;
   status: OpportunityStatus;
   sortOrder: number;
   squad: { id: string; name: string; color: string } | null;
@@ -506,13 +508,68 @@ export function DiscoveryTableView({
       {
         id: "segment",
         header: "Customer segment",
-        meta: { label: "Customer segment", width: "10rem" },
+        meta: {
+          label: "Customer segment",
+          width: "10rem",
+          ...(interactive
+            ? {
+                edit: {
+                  kind: "text" as const,
+                  field: "rowKey" as const,
+                  maxLength: OPPORTUNITY_SEGMENT_MAX_LENGTH,
+                  isDisabled: (row: DiscoveryGridRow) => row.kind === "solution",
+                  getValue: (row: DiscoveryGridRow) => (row.kind === "opportunity" ? row.opportunity.customerSegment : null),
+                  applyOptimistic: (row: DiscoveryGridRow, next: string | null) =>
+                    row.kind === "opportunity" ? { ...row, opportunity: { ...row.opportunity, customerSegment: next } } : row,
+                  triggerLabel: (row: DiscoveryGridRow) =>
+                    `Customer segment for ${row.kind === "opportunity" ? row.opportunity.title : row.solution.title}`,
+                  save: (row: DiscoveryGridRow, next: string | null) =>
+                    row.kind === "opportunity" && slugsRef.current
+                      ? saveOpportunityField(slugsRef.current, row.opportunity.id, "customerSegment", next)
+                      : Promise.resolve({ ok: false as const, error: "Couldn't save that change." }),
+                },
+              }
+            : {}),
+        },
         cell: ({ row }) => {
           const data = row.original;
           if (data.kind === "solution") return <span className="text-text-subtle">—</span>;
           return data.opportunity.customerSegment ?? <span className="text-text-subtle">—</span>;
         },
       },
+      // Only in the interactive table: the read-only table keeps its columns.
+      ...(interactive
+        ? [
+            {
+              id: "description",
+              header: "Description",
+              meta: {
+                label: "Description",
+                width: "14rem",
+                edit: {
+                  kind: "text" as const,
+                  field: "rowKey" as const,
+                  maxLength: BATCH_DESCRIPTION_MAX_LENGTH,
+                  isDisabled: (row: DiscoveryGridRow) => row.kind === "solution",
+                  getValue: (row: DiscoveryGridRow) => (row.kind === "opportunity" ? (row.opportunity.description ?? null) : null),
+                  applyOptimistic: (row: DiscoveryGridRow, next: string | null) =>
+                    row.kind === "opportunity" ? { ...row, opportunity: { ...row.opportunity, description: next } } : row,
+                  triggerLabel: (row: DiscoveryGridRow) =>
+                    `Description for ${row.kind === "opportunity" ? row.opportunity.title : row.solution.title}`,
+                  save: (row: DiscoveryGridRow, next: string | null) =>
+                    row.kind === "opportunity" && slugsRef.current
+                      ? saveOpportunityField(slugsRef.current, row.opportunity.id, "description", next)
+                      : Promise.resolve({ ok: false as const, error: "Couldn't save that change." }),
+                },
+              },
+              cell: ({ row }: { row: { original: DiscoveryGridRow } }) => {
+                const data = row.original;
+                const text = data.kind === "opportunity" ? data.opportunity.description : null;
+                return text ? <span className="block truncate">{text}</span> : <span className="text-text-subtle">—</span>;
+              },
+            } satisfies GridColumnDef<DiscoveryGridRow>,
+          ]
+        : []),
       {
         id: "evidence",
         header: "Evidence",

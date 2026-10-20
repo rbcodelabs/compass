@@ -121,6 +121,111 @@ describe("DiscoveryTableView in sheet mode", () => {
     expect(within(cellEl("opportunity:opp-1", "item")).getByRole("button", { name: "Renamed" })).toBeInTheDocument();
   });
 
+  it("edits the customer segment through the panel route, trims, and clears with Delete", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DiscoveryTableView opportunities={opportunities} workspace={workspace} />);
+
+    const cell = cellEl("opportunity:opp-1", "segment");
+    act(() => cell.focus());
+    expect(cell).toHaveAttribute("aria-readonly", "false");
+    fireEvent.keyDown(cell, { key: "Enter" });
+    const input = screen.getByTestId("grid-cell-input");
+    expect(input).toHaveValue("New teams");
+    fireEvent.change(input, { target: { value: "  Enterprise  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual({
+      field: "customerSegment",
+      value: "Enterprise",
+    });
+    expect(cellEl("opportunity:opp-1", "segment")).toHaveTextContent("Enterprise");
+
+    act(() => cellEl("opportunity:opp-1", "segment").focus());
+    fireEvent.keyDown(cellEl("opportunity:opp-1", "segment"), { key: "Delete" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body as string)).toEqual({
+      field: "customerSegment",
+      value: null,
+    });
+  });
+
+  it("rejects an over-long segment in the editor without calling the server", () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DiscoveryTableView opportunities={opportunities} workspace={workspace} />);
+    const cell = cellEl("opportunity:opp-1", "segment");
+    act(() => cell.focus());
+    fireEvent.keyDown(cell, { key: "Enter" });
+    const input = screen.getByTestId("grid-cell-input");
+    fireEvent.change(input, { target: { value: "x".repeat(256) } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("grid-cell-input")).toBeInTheDocument();
+  });
+
+  it("shows an editable Description column that saves through the panel route", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <DiscoveryTableView
+        opportunities={[{ ...opportunities[0], description: "Users drop off in week one." }]}
+        workspace={workspace}
+      />,
+    );
+    const cell = cellEl("opportunity:opp-1", "description");
+    expect(cell).toHaveTextContent("Users drop off in week one.");
+    act(() => cell.focus());
+    fireEvent.keyDown(cell, { key: "Enter" });
+    const input = screen.getByTestId("grid-cell-input");
+    expect(input).toHaveValue("Users drop off in week one.");
+    fireEvent.change(input, { target: { value: "Rewritten" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual({
+      field: "description",
+      value: "Rewritten",
+    });
+  });
+
+  it("undoes a segment edit by saving the previous value through the same route", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<DiscoveryTableView opportunities={opportunities} workspace={workspace} />);
+    const cell = cellEl("opportunity:opp-1", "segment");
+    act(() => cell.focus());
+    fireEvent.keyDown(cell, { key: "Enter" });
+    const input = screen.getByTestId("grid-cell-input");
+    fireEvent.change(input, { target: { value: "Enterprise" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body as string)).toEqual({
+      field: "customerSegment",
+      value: "New teams",
+    });
+    await waitFor(() => expect(cellEl("opportunity:opp-1", "segment")).toHaveTextContent("New teams"));
+  });
+
+  it("a read-only workspace cannot edit segment or description and has no undo", () => {
+    render(
+      <DiscoveryTableView
+        opportunities={[{ ...opportunities[0], description: "d" }]}
+        workspace={{ ...workspace, readOnly: true }}
+      />,
+    );
+    expect(cellEl("opportunity:opp-1", "segment")).toHaveAttribute("aria-readonly", "true");
+    expect(cellEl("opportunity:opp-1", "description")).toHaveAttribute("aria-readonly", "true");
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  it("does not add the Description column to the read-only table view", () => {
+    render(<DiscoveryTableView opportunities={opportunities} />);
+    expect(screen.queryByRole("columnheader", { name: /description/i })).toBeNull();
+  });
+
   it("does not make solution rows editable", () => {
     render(<DiscoveryTableView opportunities={opportunities} workspace={workspace} />);
     fireEvent.click(screen.getByRole("button", { name: "Expand Understand onboarding friction" }));

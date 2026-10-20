@@ -11,6 +11,7 @@ import {
   type FacetedFilterGroup,
 } from "@/components/patterns/faceted-filter-menu";
 import { cn } from "@/lib/utils";
+import { GridHistoryControls, type GridHistoryControl } from "./history-controls";
 import { ColumnOptionsMenu, type ColumnOption } from "./column-options-menu";
 import type { GridSearch } from "./types";
 
@@ -24,6 +25,8 @@ export type DataGridToolbarProps = {
   onMoveColumn: (id: string, direction: -1 | 1) => void;
   onResetColumns: () => void;
   actions?: ReactNode;
+  /** Undo / redo buttons; present only for an editable sheet grid. */
+  history?: GridHistoryControl;
   className?: string;
   searchDisplay?: "inline" | "popover";
   compact?: boolean;
@@ -120,6 +123,7 @@ export function DataGridToolbar({
   onMoveColumn,
   onResetColumns,
   actions,
+  history,
   className,
   searchDisplay = "inline",
   compact,
@@ -144,6 +148,7 @@ export function DataGridToolbar({
         )}
       </div>
       <div className="flex items-center gap-2">
+        {history && <GridHistoryControls history={history} />}
         <ColumnOptionsMenu
           columns={columns}
           onToggle={onToggleColumn}

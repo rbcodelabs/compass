@@ -40,6 +40,7 @@ import {
 } from "./data-grid-header-cell";
 import { DataGridPagination } from "./data-grid-pagination";
 import { DataGridToolbar } from "./data-grid-toolbar";
+import { GridHistoryControls, type GridHistoryControl } from "./history-controls";
 import { DraftArea } from "./draft-area";
 import { CellDisplay } from "./cells/cell-display";
 import { CellEditor } from "./cells/cell-editor";
@@ -60,6 +61,18 @@ import {
   type PlannedChange,
   type RangePlan,
 } from "./interaction/range-ops";
+import {
+  EMPTY_HISTORY,
+  describeRevert,
+  finishRevert,
+  inverseChangeSet,
+  planRevert,
+  recordChangeSet,
+  takeStep,
+  type CurrentCell,
+  type GridHistory,
+  type HistoryDirection,
+} from "./interaction/history";
 import {
   isSingleCell,
   moveCorner,
@@ -213,8 +226,10 @@ export type DataGridProps<TRow extends GridRowData> = {
    */
   rangeLimit?: number;
   /**
-   * Called once per multi-cell gesture (paste, fill, clear, cut) after every
-   * cell has settled. One gesture is one change set, the unit undo will replay.
+   * Called once per user gesture (edit, paste, fill, clear, cut, and the undo /
+   * redo of any of them) after every cell has settled. One gesture is one change
+   * set, which is also one undo step. Rows added through `creation` are never
+   * reported: creates are not undoable.
    */
   onChangeSet?: (changeSet: GridChangeSet) => void;
 
@@ -398,6 +413,35 @@ export function DataGrid<TRow extends GridRowData>({
   >(new Map());
   const [errors, setErrors] = React.useState<Map<string, string>>(new Map());
 
+  // ── Undo / redo history ───────────────────────────────────────────────────
+  // Per mounted grid, and dropped whenever the loaded page stops being the same
+  // query (page, page size, sort, search, filters): the recorded cells would
+  // describe rows that are no longer on screen. A mere re-delivery of `rows`
+  // (revalidatePath) keeps it, which is why the scope is NOT keyed on `rows`.
+  const historyScope = JSON.stringify([
+    page,
+    pageSizeProp ?? null,
+    sort,
+    search?.value ?? null,
+    filters?.map((group) => ("values" in group ? group.values : group.value)) ?? null,
+  ]);
+  // The scope travels with the stack, so a gesture that settles after a query
+  // change (its closure still holds the old scope) is discarded instead of
+  // filing cells from a page that is gone. No ref needed.
+  const [historyState, setHistoryState] = React.useState<{ scope: string; history: GridHistory }>({
+    scope: historyScope,
+    history: EMPTY_HISTORY,
+  });
+  if (historyState.scope !== historyScope) {
+    setHistoryState({ scope: historyScope, history: EMPTY_HISTORY });
+  }
+  const history = historyState.scope === historyScope ? historyState.history : EMPTY_HISTORY;
+  const updateHistory = (scope: string, change: (current: GridHistory) => GridHistory) =>
+    setHistoryState((previous) =>
+      previous.scope === scope ? { scope, history: change(previous.history) } : previous,
+    );
+  const [historyPending, setHistoryPending] = React.useState(false);
+
   // Reset DURING RENDER (React's documented "adjust state when a prop changes"
   // pattern) rather than in an effect: an effect commits a stale frame first,
   // which is a visible revert flash.
@@ -544,6 +588,7 @@ export function DataGrid<TRow extends GridRowData>({
         // There is no toast library in this repo and one is not being added.
         setErrors((previous) => new Map(previous).set(id, result.error));
       }
+      return result;
     },
     [applyOptimisticEdit, clearRowErrors, persistEdit],
   );
@@ -929,6 +974,40 @@ export function DataGrid<TRow extends GridRowData>({
     textAt: copyTextAt,
   };
 
+  /** Files a finished gesture as an undo step and tells the consumer. */
+  const emitChangeSet = (changeSet: GridChangeSet) => {
+    // Undo / redo are the history moving, not new edits: they must not clear redo.
+    if (changeSet.source !== "undo" && changeSet.source !== "redo") {
+      updateHistory(historyScope, (current) => recordChangeSet(current, changeSet));
+    }
+    onChangeSet?.(changeSet);
+  };
+
+  /** One cell edited through the normal save path, recorded as its own undo step. */
+  const commitCellEdit = async (
+    id: string,
+    row: TRow,
+    edit: GridEdit<TRow>,
+    columnId: string,
+    next: GridCellValue,
+  ) => {
+    const prev = edit.getValue(row) as GridCellValue;
+    const result = await commitEdit(id, row, edit, next);
+    emitChangeSet(
+      createChangeSet("edit", [
+        {
+          rowId: id,
+          columnId,
+          field: edit.field as string,
+          prev,
+          next,
+          status: result.ok ? "saved" : "failed",
+          error: result.ok ? undefined : result.error,
+        },
+      ]),
+    );
+  };
+
   /**
    * Applies a plan through the same optimistic + `save` path as a single edit:
    * every cell shows at once (one render, no flicker), then saves run with
@@ -988,12 +1067,112 @@ export function DataGrid<TRow extends GridRowData>({
         return map;
       });
     }
-    onChangeSet?.(createChangeSet(source, records));
+    emitChangeSet(createChangeSet(source, records));
     const saved = records.length - failed;
     setLiveMessage(
       `${notice ? `${notice} ` : ""}${saved} ${saved === 1 ? "cell" : "cells"} updated${failed > 0 ? `, ${failed} failed` : ""}.`,
     );
   };
+
+  // ── Undo / redo ───────────────────────────────────────────────────────────
+  /** The column's edit config by id, for replaying a recorded cell. */
+  const editForColumnId = (columnId: string): GridEdit<TRow> | undefined => {
+    const column = allColumns.find((candidate) => candidate.id === columnId);
+    return column ? metaOf(column).edit : undefined;
+  };
+
+  /**
+   * Reverts the next step of `direction`: each cell goes back to its recorded
+   * value through the column's own `save`, only where it still holds what the
+   * step wrote. Cells that changed since are skipped and reported, never
+   * overwritten. The inverse lands on the opposite stack, so redo is the same
+   * operation run on it.
+   */
+  const runRevert = async (direction: HistoryDirection): Promise<void> => {
+    if (!sheet || readOnly || historyPending) return;
+    const taken = takeStep(history, direction);
+    if (!taken) {
+      setLiveMessage(direction === "undo" ? "Nothing to undo." : "Nothing to redo.");
+      return;
+    }
+    const { step } = taken;
+    setHistoryPending(true);
+    const withoutStep = (stack: readonly GridChangeSet[]) => stack.filter((entry) => entry.id !== step.id);
+    updateHistory(historyScope, (current) =>
+      direction === "undo"
+        ? { ...current, undo: withoutStep(current.undo) }
+        : { ...current, redo: withoutStep(current.redo) },
+    );
+    try {
+      const plan = planRevert(step, (change): CurrentCell => {
+        const state = rowStates.get(change.rowId);
+        const edit = editForColumnId(change.columnId);
+        if (!state) return { found: false, reason: "missing" };
+        if (!edit || readOnly || edit.isDisabled?.(state.row)) return { found: false, reason: "readonly" };
+        return { found: true, value: edit.getValue(state.row) as GridCellValue };
+      });
+
+      clearRowErrors(plan.replay.map((change) => change.rowId));
+      const pending = plan.replay.map((change) => {
+        const edit = editForColumnId(change.columnId)!;
+        const row = rowStates.get(change.rowId)!.row;
+        return { change, edit, row, seq: applyOptimisticEdit(change.rowId, edit, change.prev) };
+      });
+      const results = await runGrouped(
+        pending,
+        ({ change }) => change.rowId,
+        ({ change, edit, row, seq }) => persistEdit(change.rowId, row, edit, change.prev, seq),
+      );
+
+      const failuresByRow = new Map<string, string[]>();
+      const outcomes = pending.map(({ change }, index) => {
+        const result = results[index];
+        if (!result.ok) {
+          failuresByRow.set(change.rowId, [...(failuresByRow.get(change.rowId) ?? []), result.error]);
+        }
+        return {
+          change,
+          status: result.ok ? ("saved" as const) : ("failed" as const),
+          error: result.ok ? undefined : result.error,
+        };
+      });
+      if (failuresByRow.size > 0) {
+        setErrors((previous) => {
+          const map = new Map(previous);
+          for (const [rowId, messages] of failuresByRow) map.set(rowId, messages.join("; "));
+          return map;
+        });
+      }
+
+      const inverse = inverseChangeSet(direction, outcomes);
+      // `updateHistory` ignores this when a query change dropped the history meanwhile.
+      updateHistory(historyScope, (current) => finishRevert(current, direction, inverse));
+      if (inverse.changes.length > 0) onChangeSet?.(inverse);
+
+      const failed = outcomes.filter((outcome) => outcome.status === "failed").length;
+      const message = describeRevert(direction, {
+        restored: outcomes.length - failed,
+        failed,
+        skipped: plan.skipped,
+      });
+      setLiveMessage(message);
+      // Only an incomplete revert needs the visible strip; a clean one is announced.
+      setRangeNotice(failed > 0 || plan.skipped.length > 0 ? message : null);
+    } finally {
+      setHistoryPending(false);
+    }
+  };
+
+  const historyControl: GridHistoryControl | null =
+    sheet && !readOnly
+      ? {
+          canUndo: history.undo.length > 0,
+          canRedo: history.redo.length > 0,
+          busy: historyPending,
+          onUndo: () => void runRevert("undo"),
+          onRedo: () => void runRevert("redo"),
+        }
+      : null;
 
   const runClear = (range: GridRange, source: GridChangeSource = "clear") =>
     applyPlan(planClear(range, planGrid, rangeLimit), source);
@@ -1056,7 +1235,9 @@ export function DataGrid<TRow extends GridRowData>({
     }
 
     editSettled.current = true;
-    if (next !== edit.getValue(row)) void commitEdit(id, row, edit, next);
+    if (next !== edit.getValue(row)) {
+      void commitCellEdit(id, row, edit, navColumnIds[activePosition.col], next);
+    }
     dispatchSheet({ type: "endEdit", refocus: true });
 
     if (move) {
@@ -1085,7 +1266,7 @@ export function DataGrid<TRow extends GridRowData>({
 
     if (edit.kind === "checkbox") {
       // A checkbox has no editor: Enter / F2 / Space flip it in place.
-      void commitEdit(id, row, edit, !edit.getValue(row));
+      void commitCellEdit(id, row, edit, navColumnIds[position.col], !edit.getValue(row));
       return;
     }
     editSettled.current = false;
@@ -1161,6 +1342,13 @@ export function DataGrid<TRow extends GridRowData>({
         event.preventDefault();
         dispatchSheet({ type: "collapseRange" });
         return;
+      case "undo":
+      case "redo":
+        // Claimed even when there is nothing to revert (and in a read-only
+        // grid): the browser's page-level undo has no meaning on a cell.
+        event.preventDefault();
+        if (!readOnly) void runRevert(action.type);
+        return;
       case "fillDown":
         // Always claim Ctrl+D: the browser's "bookmark this page" is never wanted here.
         event.preventDefault();
@@ -1184,7 +1372,7 @@ export function DataGrid<TRow extends GridRowData>({
           return;
         }
         if (cleared.value !== edit.getValue(row)) {
-          void commitEdit(id, row, edit, cleared.value);
+          void commitCellEdit(id, row, edit, navColumnIds[activePosition.col], cleared.value);
         }
         return;
       }
@@ -1446,6 +1634,13 @@ export function DataGrid<TRow extends GridRowData>({
         {liveMessage}
       </div>
 
+      {/* Grids without a toolbar (Discovery) still get the undo / redo buttons. */}
+      {!toolbar && historyControl && (
+        <div className="flex shrink-0 justify-end px-1">
+          <GridHistoryControls history={historyControl} />
+        </div>
+      )}
+
       {toolbar && (() => {
         const toolbarNode = (
           <DataGridToolbar
@@ -1460,6 +1655,7 @@ export function DataGrid<TRow extends GridRowData>({
             onMoveColumn={preferences.moveColumn}
             onResetColumns={preferences.reset}
             actions={toolbarActions}
+            history={historyControl ?? undefined}
           />
         );
         return toolbarPortal
@@ -1879,7 +2075,7 @@ export function DataGrid<TRow extends GridRowData>({
                             edit={meta.edit}
                             row={row}
                             readOnly={!sheetEdit}
-                            onToggle={(next) => void commitEdit(id, row, meta.edit!, next)}
+                            onToggle={(next) => void commitCellEdit(id, row, meta.edit!, columnId, next)}
                           />
                         ) : cell ? (
                           <table.FlexRender cell={cell} />
