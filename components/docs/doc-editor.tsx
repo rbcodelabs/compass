@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import { type MarkdownStorage } from "tiptap-markdown";
 import {
@@ -160,6 +160,26 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const [comments, setComments] = useState<DocCommentItem[]>(initialComments);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [pendingAnchor, setPendingAnchor] = useState<PendingAnchor | null>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // On phones the new-comment popover is bounded to what is left of the screen below it, leaving room for the
+  // bottom nav, and scrolls inside that. Measured rather than calculated in CSS: an ancestor can be the
+  // containing block of a fixed popover, so its real top is not a fixed number.
+  useLayoutEffect(() => {
+    const el = popoverRef.current;
+    if (!pendingAnchor || !el) return;
+    const fit = () => {
+      if (!window.matchMedia("(max-width: 639px)").matches) {
+        el.style.maxHeight = "";
+        return;
+      }
+      const reserve = 96; // bottom nav plus breathing room
+      el.style.maxHeight = `${Math.max(160, window.innerHeight - el.getBoundingClientRect().top - reserve)}px`;
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [pendingAnchor]);
   const [selectionEmpty, setSelectionEmpty] = useState(true);
   const [taskCards, setTaskCards] = useState<Record<string, CommentTaskCardData>>(initialTaskCards);
   const [confirmedAgentIds, setConfirmedAgentIds] = useState<string[]>(initialConfirmedAgentIds);
@@ -582,7 +602,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           </ToolbarButton>
           {pendingAnchor && (
             <div
-              className="absolute z-20 mt-1 w-[22rem] p-3 bg-surface-card border border-border-default rounded-lg shadow-md max-sm:fixed max-sm:inset-x-3 max-sm:top-44 max-sm:mt-0 max-sm:w-auto max-sm:max-h-[calc(100dvh-11rem-5.5rem-env(safe-area-inset-bottom))] max-sm:overflow-y-auto max-sm:overscroll-contain"
+              ref={popoverRef}
+              className="absolute z-20 mt-1 w-[22rem] p-3 bg-surface-card border border-border-default rounded-lg shadow-md max-sm:fixed max-sm:inset-x-3 max-sm:top-44 max-sm:mt-0 max-sm:w-auto max-sm:overflow-y-auto max-sm:overscroll-contain"
               data-testid="new-comment-popover"
               onKeyDown={(e) => {
                 if (e.key === "Escape") setPendingAnchor(null);

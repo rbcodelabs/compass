@@ -277,6 +277,11 @@ test.describe("Re-QA a022c39e", () => {
         await pool.query(`DELETE FROM "${S}".agent_workspace_grants WHERE agent_id = $1`, [id]).catch(() => undefined);
         await pool.query(`DELETE FROM "${S}".agents WHERE id = $1`, [id]).catch(() => undefined);
       }
+      // Notifications these flows generated (for the shared dev user too) would break the next spec's unread counts.
+      await pool.query(`DELETE FROM "${S}".notifications WHERE recipient_user_id = ANY($1::uuid[])`, [[aUserId, bUserId, wUserId, dUserId, xUserId].filter(Boolean)]).catch(() => undefined);
+      // The bulk members seeded for the long-picker tests.
+      await pool.query(`DELETE FROM "${S}".workspace_members WHERE user_id IN (SELECT id FROM "${S}".users WHERE email LIKE 'bulk-%-${suffix}-%@localhost.dev')`).catch(() => undefined);
+      await pool.query(`DELETE FROM "${S}".users WHERE email LIKE 'bulk-%-${suffix}-%@localhost.dev'`).catch(() => undefined);
       // Leave no "Rowan"/"Wren"-style members behind: the next spec's "@Rowan" must resolve to its own user.
       for (const userId of [bUserId, wUserId, dUserId, xUserId].filter(Boolean)) {
         await pool.query(`DELETE FROM "${S}".workspace_members WHERE user_id = $1`, [userId]).catch(() => undefined);
@@ -301,7 +306,7 @@ test.describe("Re-QA a022c39e", () => {
   async function seedBulkMembers(n: number) {
     for (let i = 0; i < n; i++) {
       const id = randomUUID();
-      const email = `bulk-${i}-${suffix}@localhost.dev`;
+      const email = `bulk-${i}-${suffix}-${randomUUID().slice(0, 6)}@localhost.dev`; // unique per call: the helper runs once per viewport
       await pool.query(`INSERT INTO "${S}".users (id, email, name) VALUES ($1, $2, $3)`, [id, email, `Bulk Person ${String(i).padStart(2, "0")} ${suffix}`]);
       await pool.query(`INSERT INTO "${S}".workspace_members (id, workspace_id, user_id, role, created_at) VALUES (gen_random_uuid(), $1, $2, 'MEMBER', NOW())`, [workspaceId, id]);
     }
@@ -901,7 +906,7 @@ test.describe("Re-QA a022c39e", () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // (8) New after the fix: the popover no longer scrolls on phones; is the submit still reachable?
+  // (8) The popover is viewport-bounded and scrolls on phones; is the submit reachable by scrolling it?
   for (const size of [{ w: 390, h: 844 }, { w: 375, h: 667 }]) {
     test(`8 phone ${size.w}x${size.h}: submit stays reachable (not under the bottom nav) for 1 mention, 2 mentions, picker open`, async ({ page, base }) => {
       test.setTimeout(240_000);
@@ -918,6 +923,8 @@ test.describe("Re-QA a022c39e", () => {
         for (const [key, sel] of [["submit", 'button:has-text("Comment")'], ["pickerFooter", '[data-testid="mention-picker"] kbd']] as const) {
           const el = [...document.querySelectorAll(sel.startsWith("button") ? "button" : sel)].filter((b) => sel.startsWith("button") ? /^Comment/.test(b.textContent ?? "") && !/Cancel/.test(b.textContent ?? "") : true).pop() as HTMLElement | undefined;
           if (!el) { out[key] = "absent"; continue; }
+          // Reach it the way a person does: scroll the popover until the element is in view, then measure.
+          el.scrollIntoView({ block: "nearest" });
           const r = el.getBoundingClientRect();
           const hit = document.elementFromPoint(r.left + r.width / 2, Math.min(Math.max(r.top + r.height / 2, 0), window.innerHeight - 1));
           out[key] = `top=${Math.round(r.top)} bottom=${Math.round(r.bottom)} covered=${hit && !el.contains(hit) ? (hit.closest("a")?.getAttribute("href") ?? hit.tagName) : "no"}`;
