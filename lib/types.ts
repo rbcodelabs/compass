@@ -273,9 +273,16 @@ export type TaskLinkedType =
   | "FEEDBACK_ITEM"
   | "DECISION"
 
+/**
+ * Every value a TaskLink row can hold. COMMENT (a Doc comment: Comment.id, shared
+ * with the legacy DocComment id) is written only by the Doc comment -> task flow,
+ * so it is deliberately not a user-pickable TaskLinkedType.
+ */
+export type TaskLinkRecordType = TaskLinkedType | "COMMENT"
+
 export interface TaskLinkData {
   id: string
-  linkedType: TaskLinkedType
+  linkedType: TaskLinkRecordType
   linkedId: string
   /** Resolved at read time from the target table — not stored on TaskLink. */
   linkedTitle: string

@@ -57,7 +57,7 @@ test.describe("Doc Inline Comments", () => {
       await expect(commentButton).toBeEnabled({ timeout: 10_000 });
       await commentButton.click();
 
-      const composer = page.getByPlaceholder("Add a comment…");
+      const composer = page.getByRole("textbox", { name: "Comment", exact: true });
       await expect(composer).toBeVisible({ timeout: 10_000 });
       await composer.fill(commentBody);
       await page.getByRole("button", { name: "Comment", exact: true }).click();
@@ -75,7 +75,7 @@ test.describe("Doc Inline Comments", () => {
       await expect(thread).toHaveCount(1);
 
       // ── 8. Reply to the thread ─────────────────────────────────────────────
-      const replyBox = page.getByPlaceholder("Reply…");
+      const replyBox = page.getByRole("textbox", { name: "Reply", exact: true });
       await expect(replyBox).toBeVisible({ timeout: 10_000 });
       await replyBox.fill(replyBody);
       await page.getByRole("button", { name: "Reply", exact: true }).click();

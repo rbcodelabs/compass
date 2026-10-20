@@ -18,7 +18,7 @@ import { listFollowers } from "@/lib/follows"
  * titles are resolved at read time behind an access check, so a recipient who
  * lost access, or a renamed or deleted subject, cannot leak stale content.
  */
-export const NOTIFICATION_KINDS = ["STATUS_CHANGED", "COMMENT_ADDED", "COMMENT_REPLIED", "ASSIGNED"] as const
+export const NOTIFICATION_KINDS = ["STATUS_CHANGED", "COMMENT_ADDED", "COMMENT_REPLIED", "ASSIGNED", "MENTIONED"] as const
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
 export const NOTIFICATION_ACTOR_TYPES = ["USER", "AGENT", "EXTERNAL", "SYSTEM"] as const
 export type NotificationActorType = (typeof NOTIFICATION_ACTOR_TYPES)[number]

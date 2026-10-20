@@ -233,7 +233,7 @@ describe("emitSubjectEvent is best effort", () => {
     follow(U1)
     await expect(emitSubjectEvent(statusEvent({ dedupeKey: "" }), fake.db)).resolves.toEqual({ status: "failed" })
     await expect(emitSubjectEvent(statusEvent({ dedupeKey: "k".repeat(201) }), fake.db)).resolves.toEqual({ status: "failed" })
-    await expect(emitSubjectEvent(statusEvent({ kind: "MENTIONED" as never }), fake.db)).resolves.toEqual({ status: "failed" })
+    await expect(emitSubjectEvent(statusEvent({ kind: "REACTED" as never }), fake.db)).resolves.toEqual({ status: "failed" })
     expect(getEmitFailureCount()).toBe(3)
   })
 })

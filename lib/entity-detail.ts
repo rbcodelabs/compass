@@ -28,6 +28,7 @@
  * it.
  */
 import getPrisma from "@/lib/db";
+import { commentLinkTitles } from "@/lib/comment-link-titles";
 import { isPmInterviewEnabled } from "@/lib/research-feature";
 import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getLinkedSolutionsByKeyResult } from "@/lib/typed-links";
 import { loadThinkingModelSource, offersSolutionToKrSurfaces } from "@/lib/thinking-model/link-surfaces";
@@ -541,6 +542,10 @@ async function fetchTask(id: string, workspaceId: string) {
           select: { id: true, currentRevision: { select: { title: true } } },
         });
         for (const row of rows) titleById.set(`DECISION:${row.id}`, row.currentRevision?.title ?? "Untitled decision");
+        return;
+      }
+      if (linkedType === "COMMENT") {
+        for (const [key, title] of await commentLinkTitles(workspaceId, ids)) titleById.set(key, title);
         return;
       }
       const modelName = LINK_TARGET_MODEL[linkedType as keyof typeof LINK_TARGET_MODEL];

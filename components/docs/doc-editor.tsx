@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import {
   updateDoc,
   createDocVersion,
-  addDocComment,
+  addDocCommentWithTask,
   resolveDocComment,
   deleteDocComment,
   getDocLinkedTasks,
@@ -51,6 +51,9 @@ import { createDocEditorExtensions } from "@/components/docs/doc-editor-extensio
 import { resolveCommentAnchor } from "@/lib/comment-anchor";
 import type { PanelPin } from "@/lib/panel-pin";
 import { DocsLibraryButton } from "@/components/docs/docs-library-button";
+import { DocCommentComposer, type ComposerPayload, type ComposerResult } from "@/components/docs/doc-comment-composer";
+import type { MentionOptions } from "@/components/docs/mention-editor";
+import { pinKind, type CommentTaskCardData } from "@/lib/comment-task-card";
 
 interface DocEditorProps {
   initialCommentsPin?: PanelPin;
@@ -78,7 +81,15 @@ interface DocEditorProps {
   decisionAction?: React.ReactNode;
   /** Follow toggle, rendered beside the decision action. */
   followAction?: React.ReactNode;
+  /** People and agents the @ picker offers in comments. */
+  mentionOptions?: MentionOptions;
+  /** Agents that already hold a task from a comment in this doc. */
+  confirmedAgentIds?: string[];
+  /** Task card per comment id. */
+  taskCards?: Record<string, CommentTaskCardData>;
 }
+
+const NO_MENTION_OPTIONS: MentionOptions = { people: [], agents: [], outside: [] };
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type SaveChange =
@@ -119,7 +130,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, initialCommentsPin, initialHistoryPin }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {} }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
@@ -149,8 +160,9 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const [comments, setComments] = useState<DocCommentItem[]>(initialComments);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [pendingAnchor, setPendingAnchor] = useState<PendingAnchor | null>(null);
-  const [commentDraft, setCommentDraft] = useState("");
   const [selectionEmpty, setSelectionEmpty] = useState(true);
+  const [taskCards, setTaskCards] = useState<Record<string, CommentTaskCardData>>(initialTaskCards);
+  const [confirmedAgentIds, setConfirmedAgentIds] = useState<string[]>(initialConfirmedAgentIds);
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingContent = useRef<string | null>(null);
@@ -212,7 +224,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   // anchored comments from the server. Later changes are pushed imperatively
   // via setCommentHighlights (a meta transaction), never by re-instantiating.
   const initialAnchorData: CommentAnchorData[] = useMemo(
-    () => toAnchorData(initialComments),
+    () => toAnchorData(initialComments, initialTaskCards),
     // Only the initial value matters — subsequent updates flow through the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
@@ -238,7 +250,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   useEffect(() => { editor?.setEditable(!isRestoring, false); }, [editor, isRestoring]);
 
   // Keep the highlight decorations in sync with the live comment set + focus.
-  const openAnchorData = useMemo(() => toAnchorData(comments), [comments]);
+  const openAnchorData = useMemo(() => toAnchorData(comments, taskCards), [comments, taskCards]);
   useEffect(() => {
     if (!editor) return;
     setCommentHighlights(editor, openAnchorData, activeCommentId);
@@ -340,33 +352,59 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     const anchor = captureAnchor(editor);
     if (!anchor) return;
     setPendingAnchor(anchor);
-    setCommentDraft("");
   }
 
-  async function handleSubmitComment() {
-    const body = commentDraft.trim();
-    if (!pendingAnchor || !body) return;
-    const created = await addDocComment(
+  /** Apply a successful post: the comment, its task card, and the agent now counted as confirmed in this doc. */
+  function applyPosted(result: Extract<Awaited<ReturnType<typeof addDocCommentWithTask>>, { ok: true }>) {
+    setComments((prev) => [...prev, toItem(result.comment)]);
+    const card = result.card;
+    if (card) {
+      setTaskCards((prev) => ({ ...prev, [result.comment.id]: card }));
+      if (card.assignee?.type === "AGENT") {
+        const agentId = card.assignee.id;
+        setConfirmedAgentIds((prev) => (prev.includes(agentId) ? prev : [...prev, agentId]));
+      }
+    }
+  }
+
+  async function postComment(payload: ComposerPayload, extra: { parentId?: string; anchor?: PendingAnchor }): Promise<ComposerResult> {
+    const result = await addDocCommentWithTask(
       {
         docId: doc.id,
-        body,
-        anchorText: pendingAnchor.anchorText,
-        anchorStart: pendingAnchor.anchorStart,
-        anchorEnd: pendingAnchor.anchorEnd,
-        anchorPrefix: pendingAnchor.anchorPrefix,
-        anchorSuffix: pendingAnchor.anchorSuffix,
+        body: payload.body,
+        parentId: extra.parentId ?? null,
+        ...(extra.anchor
+          ? {
+              anchorText: extra.anchor.anchorText,
+              anchorStart: extra.anchor.anchorStart,
+              anchorEnd: extra.anchor.anchorEnd,
+              anchorPrefix: extra.anchor.anchorPrefix,
+              anchorSuffix: extra.anchor.anchorSuffix,
+            }
+          : {}),
+        task: payload.task,
+        assignee: payload.assignee,
+        agentScopeConfirmed: payload.agentScopeConfirmed,
       },
       revalidatePathStr
     );
-    setComments((prev) => [...prev, toItem(created)]);
-    setPendingAnchor(null);
-    setCommentDraft("");
-    setActiveDocPanel("comments");
+    if (!result.ok) return { ok: false, error: result.error, message: result.message ?? "Could not post the comment." };
+    applyPosted(result);
+    return { ok: true };
   }
 
-  async function handleAddReply(parentId: string, body: string) {
-    const created = await addDocComment({ docId: doc.id, body, parentId }, revalidatePathStr);
-    setComments((prev) => [...prev, toItem(created)]);
+  async function handleSubmitComment(payload: ComposerPayload): Promise<ComposerResult> {
+    if (!pendingAnchor) return { ok: false, error: "NO_ANCHOR", message: "Select text to comment on." };
+    const result = await postComment(payload, { anchor: pendingAnchor });
+    if (result.ok) {
+      setPendingAnchor(null);
+      setActiveDocPanel("comments");
+    }
+    return result;
+  }
+
+  function handleAddReply(parentId: string, payload: ComposerPayload): Promise<ComposerResult> {
+    return postComment(payload, { parentId });
   }
 
   async function handleResolve(commentId: string, resolved: boolean) {
@@ -380,6 +418,10 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   async function handleDeleteComment(commentId: string) {
     await deleteDocComment(commentId, revalidatePathStr);
     setComments((prev) => prev.filter((c) => c.id !== commentId && c.parentId !== commentId));
+    setTaskCards((prev) => {
+      const removed = new Set([commentId, ...comments.filter((c) => c.parentId === commentId).map((c) => c.id)]);
+      return Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id)));
+    });
     if (activeCommentId === commentId) setActiveCommentId(null);
   }
 
@@ -539,48 +581,25 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
             <MessageSquarePlus className="w-4 h-4" />
           </ToolbarButton>
           {pendingAnchor && (
-            <div className="absolute z-20 mt-1 w-72 p-2 bg-surface-card border border-border-default rounded-lg shadow-md">
-              <p className="text-[11px] text-text-subtle mb-1 truncate" title={pendingAnchor.anchorText}>
-                Commenting on: “{pendingAnchor.anchorText}”
-              </p>
-              <textarea
-                autoFocus
-                value={commentDraft}
-                onChange={(e) => setCommentDraft(e.target.value)}
+            <div
+              className="absolute z-20 mt-1 w-[22rem] p-3 bg-surface-card border border-border-default rounded-lg shadow-md"
+              data-testid="new-comment-popover"
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setPendingAnchor(null);
+              }}
+            >
+              <DocCommentComposer
+                options={mentionOptions}
+                confirmedAgentIds={confirmedAgentIds}
+                docTitle={title}
+                anchorText={pendingAnchor.anchorText}
                 placeholder="Add a comment…"
-                rows={3}
-                className="w-full text-sm border border-border-default rounded px-2 py-1 outline-none focus:ring-1 focus:ring-border-focus bg-surface-panel text-text-primary resize-none"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault();
-                    void handleSubmitComment();
-                  }
-                  if (e.key === "Escape") {
-                    setPendingAnchor(null);
-                    setCommentDraft("");
-                  }
-                }}
+                ariaLabel="Comment"
+                idleLabel="Comment"
+                autoFocus
+                onSubmit={handleSubmitComment}
+                onCancel={() => setPendingAnchor(null)}
               />
-              <div className="flex justify-end gap-1.5 mt-1">
-                <button
-                  type="button"
-                  className="text-xs px-2 py-1 rounded text-text-subtle hover:text-text-primary"
-                  onClick={() => {
-                    setPendingAnchor(null);
-                    setCommentDraft("");
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="text-xs px-2 py-1 rounded bg-status-info-surface text-status-info disabled:opacity-50"
-                  disabled={commentDraft.trim().length === 0}
-                  onClick={() => void handleSubmitComment()}
-                >
-                  Comment
-                </button>
-              </div>
             </div>
           )}
         </div>
@@ -715,6 +734,11 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         comments={comments}
         orphanedIds={orphanedIds}
         onAddReply={handleAddReply}
+        mentionOptions={mentionOptions}
+        confirmedAgentIds={confirmedAgentIds}
+        docTitle={title}
+        taskCards={taskCards}
+        taskHrefBase={`/${orgSlug}/${workspaceSlug}/tasks`}
         onResolve={handleResolve}
         onDelete={handleDeleteComment}
         onFocusComment={handleFocusComment}
@@ -724,17 +748,24 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 }
 
 /** Map open, anchored root comments to the minimal data the highlighter needs. */
-function toAnchorData(comments: DocCommentItem[]): CommentAnchorData[] {
+function toAnchorData(comments: DocCommentItem[], taskCards: Record<string, CommentTaskCardData>): CommentAnchorData[] {
   return comments
     .filter((c) => c.parentId === null && c.status === "OPEN" && c.anchorText)
-    .map((c) => ({
-      id: c.id,
-      anchorText: c.anchorText,
-      anchorStart: c.anchorStart,
-      anchorEnd: c.anchorEnd,
-      anchorPrefix: c.anchorPrefix,
-      anchorSuffix: c.anchorSuffix,
-    }));
+    .map((c) => {
+      // A pin covers the root's own task and any task made from a reply in its thread.
+      const threadCards = comments
+        .filter((t) => t.id === c.id || t.parentId === c.id)
+        .flatMap((t) => (taskCards[t.id] ? [taskCards[t.id]] : []));
+      return {
+        id: c.id,
+        anchorText: c.anchorText,
+        anchorStart: c.anchorStart,
+        anchorEnd: c.anchorEnd,
+        anchorPrefix: c.anchorPrefix,
+        anchorSuffix: c.anchorSuffix,
+        taskPin: pinKind(threadCards),
+      };
+    });
 }
 
 /** Normalise a server-action DocComment result into the client item shape. */

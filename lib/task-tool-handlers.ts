@@ -22,6 +22,7 @@ import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, taskLink
 import { getMcpActor } from "@/lib/mcp-authz"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
+import { commentLinkTitles } from "@/lib/comment-link-titles"
 
 // Maps each TaskLinkedType to its Prisma model delegate name. Every target
 // table exposes a plain `title` column, so a single resolver works for all
@@ -69,6 +70,10 @@ async function resolveLinkTitles(
         select: { id: true, currentRevision: { select: { title: true } } },
       })
       for (const row of rows) titleById.set(`DECISION:${row.id}`, row.currentRevision?.title ?? "Untitled decision")
+      continue
+    }
+    if (linkedType === "COMMENT") {
+      for (const [key, title] of await commentLinkTitles(workspaceId, ids)) titleById.set(key, title)
       continue
     }
     const modelName = LINK_TARGET_MODEL[linkedType as Exclude<TaskLinkedType, "DECISION">]

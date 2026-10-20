@@ -9,6 +9,7 @@ import { assertWorkspaceWritable } from "@/lib/workspace-context";
 import { assignmentUpdate, resolveTaskAssignees, validateTaskLink, validateTaskReferences, type AssignmentInput, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
 import { allocateOneSeq } from "@/lib/work-item-sequence"
+import { createWorkspaceTask } from "@/lib/task-create"
 
 async function requireTaskWorkspace(workspaceId: string) {
   const session = await auth();
@@ -46,39 +47,8 @@ export async function addTask(
   },
   revalidatePathStr: string
 ) {
-  const prisma = getPrisma();
   await requireTaskWorkspace(workspaceId);
-  await validateTaskReferences(workspaceId, data);
-  const assignment = await assignmentUpdate(workspaceId, data);
-  const status = data.status ?? "TODO";
-
-  // Place new task at the end of its status column, same convention as
-  // roadmap/actions.ts addRoadmapItem.
-  const lastTask = await prisma.task.findFirst({
-    where: { workspaceId, status },
-    orderBy: { sortOrder: "desc" },
-    select: { sortOrder: true },
-  });
-  const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0;
-
-  const task = await captureWorkspaceMutation(prisma, "task", "create", "UI", undefined, async tx => tx.task.create({
-    data: {
-      workspaceId,
-      ...(await allocateOneSeq(tx, workspaceId, "task")),
-      title: data.title,
-      description: data.description,
-      status,
-      priority: data.priority ?? "MEDIUM",
-      squadId: data.squadId,
-      parentTaskId: data.parentTaskId,
-      ...assignment,
-      ownerName: data.ownerName,
-      storyPoints: data.storyPoints,
-      dueDate: data.dueDate,
-      iteration: data.iteration,
-      sortOrder,
-    },
-  }));
+  const task = await createWorkspaceTask(workspaceId, data);
 
   revalidatePath(revalidatePathStr);
   return (await resolveTaskAssignees(workspaceId, [task]))[0];

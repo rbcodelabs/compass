@@ -146,12 +146,18 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
 ): Promise<T> {
   const following = await followingActiveFor(model);
   let pending: FollowingEffect[] = [];
+  // Status a task held before this write, for the Doc comment thread sync below.
+  const taskBefore: { status: string | null } = { status: null };
   const result = await withWorkspaceUpdates(
     prisma,
     async (tx, enabled) => {
       // This callback can replay on a rolled-back attempt; only the attempt
       // that commits may leave effects behind.
       pending = [];
+      taskBefore.status = null;
+      if (model === "task" && operation === "update" && id) {
+        taskBefore.status = (await tx.task.findUnique({ where: { id }, select: { status: true } }))?.status ?? null;
+      }
       if (!enabled && !following) return mutate(tx);
       const updateActor = enabled ? await workspaceMutationActor(source) : null;
       const followActor = following
@@ -189,6 +195,12 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
       ? { ...options, atomic: true }
       : options,
   );
+  const statusAfter = (result as { status?: string }).status;
+  if (model === "task" && taskBefore.status !== null && statusAfter !== undefined && statusAfter !== taskBefore.status) {
+    const [from, to] = [taskBefore.status, statusAfter];
+    // Lazy import: the sync reaches lib/comments, which imports this module.
+    await runAfterCommit(async () => (await import("@/lib/comment-task-sync")).syncCommentThreadsForTaskStatus(result.id, from, to));
+  }
   if (pending.length > 0) {
     const effects = pending;
     // After the commit; queued until the outer transaction commits for MCP
