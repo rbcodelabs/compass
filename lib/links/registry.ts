@@ -277,8 +277,54 @@ const opportunityTargetsKeyResult: LinkTypeDef = {
   compat: { mcpTools: ["link_opportunity_to_kr"], restOps: ["updateOpportunity"] },
 }
 
+// ── TASK_REFERENCES (phase 7: mirror of the legacy task_links table) ────────
+
+/** Outside production the mirror is on so tests and E2E cover it; production needs COMPASS_ENTITY_LINKS_TASK_MIRROR=1 (fail-closed). */
+export function isTaskLinkMirrorEnabled(): boolean {
+  if (process.env.NODE_ENV !== "production") return process.env.COMPASS_ENTITY_LINKS_TASK_MIRROR !== "0"
+  return process.env.COMPASS_ENTITY_LINKS_TASK_MIRROR === "1"
+}
+
+/** The explicit-only backfill for TASK_REFERENCES (lib/migrations/entity-links-task-backfill.ts). */
+export const TASK_LINKS_BACKFILL_MIGRATION = "097_entity_links_backfill_task"
+
+/**
+ * The target types a TaskLink may name, as stored in entity_links.to_type. A task link calls a review request `DECISION`; the alias is
+ * normalised (lib/entity-types.ts) so only REVIEW_REQUEST is ever stored. Squad is excluded on purpose (a Task's squad is its own column) and
+ * COMMENT (a Doc comment a task was made from) is not a user-facing association, so it is not mirrored.
+ */
+export const TASK_REFERENCE_TARGET_TYPES = [
+  "OPPORTUNITY", "SOLUTION", "ROADMAP_ITEM", "OBJECTIVE", "KEY_RESULT", "DOC", "EXPERIMENT", "FEEDBACK_ITEM", "REVIEW_REQUEST",
+] as const satisfies readonly LinkableEntityType[]
+
+/**
+ * A Task references the objects it delivers or discusses: ONE type whose target varies (the ADR's `TASK_REFERENCES`), because the nine
+ * legacy targets share every rule. The legacy task_links table stays the source of truth and every read stays on it; the legacy writers
+ * (lib/task-link-writes.ts) mirror each link and unlink into entity_links in the same transaction while the flag is on, and migration 097
+ * backfills the existing rows (source, actor and created_at copied). Many-to-many; a repeat link is an error in the legacy tool
+ * (`duplicatePolicy: "error"`), but the mirror reconciles an existing row silently because the legacy row is the truth. Reads, summaries and
+ * the generic link tools ignore the type until a later phase flips reads.
+ */
+const taskReferences: LinkTypeDef = {
+  key: "TASK_REFERENCES",
+  from: "TASK",
+  to: TASK_REFERENCE_TARGET_TYPES,
+  direction: "directed",
+  cardinality: { from: "many", to: "many" },
+  labels: { forward: "Linked to", inverse: "Linked tasks" },
+  origins: ["DIRECT"],
+  duplicatePolicy: "error",
+  authorize: defaultAuthorize,
+  isEnabled: isTaskLinkMirrorEnabled,
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {},
+  restrictedContexts: "deny",
+  legacy: { legacyModule: "lib/task-link-writes.ts", backfillMigration: TASK_LINKS_BACKFILL_MIGRATION, mode: "mirror" },
+  compat: { mcpTools: ["link_task", "unlink_task", "list_task_links"], restOps: ["linkTaskResource", "unlinkTaskResource", "listTaskLinks"] },
+}
+
 /** Append-only. Add one entry per type; never edit or reuse a key. */
-const DEFINITIONS: readonly LinkTypeDef[] = [experimentInformedByStudy, solutionTargetsKeyResult, opportunityTargetsObjective, opportunityTargetsKeyResult]
+const DEFINITIONS: readonly LinkTypeDef[] = [experimentInformedByStudy, solutionTargetsKeyResult, opportunityTargetsObjective, opportunityTargetsKeyResult, taskReferences]
 
 export const LINK_TYPES: Readonly<Record<string, LinkTypeDef>> = Object.freeze(
   Object.fromEntries(DEFINITIONS.map((def) => [def.key, def])),

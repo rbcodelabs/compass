@@ -22,6 +22,8 @@ const mockPrisma = {
   taskLink: mockTaskLink,
 };
 
+// The entity_links mirror of task links (ADR phase 7) has its own tests (__tests__/links/task-reference-mirror.test.ts); this file pins the legacy writes against hand-written fakes.
+vi.mock("@/lib/links/legacy-mirror", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/links/legacy-mirror")>()), mirrorTaskReference: vi.fn(), unmirrorTaskReference: vi.fn() }));
 vi.mock("@/lib/db", () => ({
   default: vi.fn(() => mockPrisma),
 }));

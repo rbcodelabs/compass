@@ -689,8 +689,8 @@ Task is the standalone delivery/tracking entity used both for full engineering s
 | `list_tasks` | List tasks in a workspace, filterable by status, priority, squad, assignee, parent task (pass `null` for top-level Epics/tasks only), a linked object, `updatedSince`, or `updatedBefore`; orderable with `sort` (`recentlyUpdated` / `leastRecentlyUpdated`); summaries include created/updated timestamps and can optionally nest subtasks |
 | `update_task` | Update a Task's title, description, priority, assignee, owner, story points, due date, or iteration — does not accept status |
 | `move_task_status` | Dedicated status-transition tool for a Task, including moving it into or out of BLOCKED |
-| `link_task` | Link a Task to another Compass object; idempotent — re-linking the same pair is a no-op |
-| `unlink_task` | Remove a link between a Task and another Compass object |
+| `link_task` | Link a Task to another Compass object; idempotent — re-linking the same pair is a no-op. The `task_links` table stays the source of truth; each link is also mirrored into `entity_links` (`TASK_REFERENCES`, `DECISION` stored as `REVIEW_REQUEST`) in the same transaction while the mirror flag is on, and `link_entities` refuses that type |
+| `unlink_task` | Remove a link between a Task and another Compass object (and its `entity_links` mirror row, whatever the flag says) |
 | `list_task_links` | List all links for a Task, grouped by linked object type with resolved titles |
 
 ### Custom Fields

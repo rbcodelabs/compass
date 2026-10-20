@@ -86,6 +86,10 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     data: { assumptionId: null },
   });
 
+  // entity_links rows that name a review request (task links, ADR phase 7), by endpoint so a drifted workspace_id is covered too.
+  const reviewRequestIds = await ids(prisma.reviewRequest.findMany({ where: { workspaceId }, select: { id: true } }));
+  if (reviewRequestIds.length > 0) await deleteLinksForEntity(prisma, "REVIEW_REQUEST", reviewRequestIds);
+
   // Decision/release/capacity aggregates reference Tasks and RoadmapItems.
   // DSQL has no FK cascades, so clear the full child graph first.
   await deleteWorkspaceDecisionData(prisma, workspaceId);
@@ -96,6 +100,8 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     prisma.task.findMany({ where: { workspaceId }, select: { id: true } })
   );
   if (taskIds.length > 0) {
+    // The entity_links mirror of task links (ADR phase 7) goes first, by endpoint, whatever the flag says.
+    await deleteLinksForEntity(prisma, "TASK", taskIds);
     await prisma.taskLink.deleteMany({ where: { taskId: { in: taskIds } } });
   }
   await prisma.task.deleteMany({ where: { workspaceId } });
@@ -135,6 +141,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await prisma.roadmapVote.deleteMany({
       where: { roadmapItemId: { in: roadmapItemIds } },
     });
+    await deleteLinksForEntity(prisma, "ROADMAP_ITEM", roadmapItemIds);
   }
   await prisma.roadmapItem.deleteMany({ where: { workspaceId } });
 
@@ -152,6 +159,7 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
     await prisma.feedbackElementAnchor.deleteMany({
       where: { feedbackItemId: { in: feedbackIds } },
     });
+    await deleteLinksForEntity(prisma, "FEEDBACK_ITEM", feedbackIds);
   }
   await prisma.feedbackItem.deleteMany({ where: { workspaceId } });
 
@@ -285,6 +293,8 @@ export async function deleteWorkspaceCascade(prisma: AppPrismaClient, workspaceI
   // 14. Members + squads + docs, then the workspace itself.
   await prisma.workspaceMember.deleteMany({ where: { workspaceId } });
   await prisma.squad.deleteMany({ where: { workspaceId } });
+  const docIds = await ids(prisma.doc.findMany({ where: { workspaceId }, select: { id: true } }));
+  if (docIds.length > 0) await deleteLinksForEntity(prisma, "DOC", docIds);
   await prisma.doc.deleteMany({ where: { workspaceId } });
   await prisma.$transaction(async tx => {
     await tx.workspace.delete({ where: { id: workspaceId } });

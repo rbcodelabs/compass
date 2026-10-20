@@ -192,7 +192,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "094_work_item_ids_residual_backfill": "69479580a318817b5c806ce70fbad399dcec1fa2ea8d93e7e02456ec3219d932",
   // entity_links data half for Opportunity <-> Objective and the Opportunity -> Key Result pointer (ADR phase 5): no DDL, EXPLICIT-ONLY, the
   // work is the hook (lib/migrations/entity-links-opportunity-backfill.ts).
-  "095_entity_links_backfill_opportunity": "ea4edb5e798b215e9796b504090d185c0fe4d172531aed495653a15d0ef07350"
+  "095_entity_links_backfill_opportunity": "ea4edb5e798b215e9796b504090d185c0fe4d172531aed495653a15d0ef07350",
+  // entity_links data half for task links (ADR phase 7): no DDL, EXPLICIT-ONLY, the work is the hook (lib/migrations/entity-links-task-backfill.ts).
+  "097_entity_links_backfill_task": "ac22c83a1b21508ca49189ffbf1cda1a8c64e426c7bcb808538e0a3a85e6ecbf"
 };
 
 /**
@@ -266,6 +268,11 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 095 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
   "095_entity_links_backfill_opportunity": {
     "lib/migrations/entity-links-opportunity-backfill.ts": "31720625e69bfca38bed0b230ae61aa421ae4c105db588141105d715d8beb857",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 097 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
+  "097_entity_links_backfill_task": {
+    "lib/migrations/entity-links-task-backfill.ts": "8410412838f01033928cc63cf74a513217ab4f2619465e05118028ca28393189",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };

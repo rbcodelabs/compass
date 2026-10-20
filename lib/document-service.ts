@@ -5,6 +5,8 @@ import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { getDocumentStore, isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
+import { deleteLinksForEntity } from "@/lib/links/service"
+import { drainAfterParentDelete } from "@/lib/typed-links"
 
 export type DocumentMutationOptions = {
   expectedRevision?: string
@@ -270,4 +272,7 @@ export async function deleteDocument(docId: string, opts: DocumentMutationOption
     if (opts.operationId && await replay(workspaceId, opts.operationId, hash)) return
     throw error
   }
+  // Task links to this document were never cleaned by the legacy delete; their entity_links mirror rows (ADR phase 7) are, after the delete
+  // commits, whatever the flag says. A failure is logged and swallowed: migration 097 reports or prunes what is left.
+  await drainAfterParentDelete("document.delete.links", () => deleteLinksForEntity(db, "DOC", [docId]))
 }

@@ -19,6 +19,7 @@ import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
 import { followAfterCreate, sessionFollowActor } from "@/lib/following-hooks"
 import { eligibleTaskAssignees, type TaskAssignee } from "@/lib/task-assignment"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
+import { mirrorTaskLinks } from "@/lib/task-link-writes"
 
 /** Matches Task.title's column width. */
 const TITLE_LIMIT = 255
@@ -121,6 +122,8 @@ export async function createDecisionFollowUpTask(input: {
     const link = await tx.taskLink.create({
       data: { taskId: task.id, linkedType: "DECISION", linkedId: input.requestId, source: "UI" },
     })
+    // Mirrored into entity_links in this transaction while the flag is on (the legacy row stays the source of truth).
+    await mirrorTaskLinks(tx, { workspaceId: input.workspaceId, links: [link] })
     if (capture && actor) await recordWorkspaceUpdate(tx, { workspaceId: input.workspaceId, entityType: "TASK", entityId: task.id, kind: "CREATED", ...actor })
     return { taskId: task.id, linkId: link.id }
   })

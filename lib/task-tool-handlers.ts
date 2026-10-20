@@ -23,6 +23,7 @@ import { getMcpActor } from "@/lib/mcp-authz"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
 import { commentLinkTitles } from "@/lib/comment-link-titles"
+import { createTaskLink, deleteTaskLink } from "@/lib/task-link-writes"
 
 // Maps each TaskLinkedType to its Prisma model delegate name. Every target
 // table exposes a plain `title` column, so a single resolver works for all
@@ -565,7 +566,8 @@ export async function linkTask({
     return fail(`Task "${task.title}" is already linked to ${linkedType} '${target.title}'.\nID: ${existingLink.id}`)
   }
 
-  const link = await prisma.taskLink.create({ data: { taskId, linkedType, linkedId } })
+  // Legacy row first (the source of truth), mirrored into entity_links in the same transaction while the flag is on.
+  const link = await createTaskLink(prisma, { taskId, linkedType, linkedId, workspaceId: task.workspaceId })
 
   return ok(
     `**Linked:** ${task.title} → [${linkedType}] ${target.title}\n` +
@@ -592,7 +594,9 @@ export async function unlinkTask({
     return fail(`No link found between task "${taskId}" and ${linkedType} "${linkedId}".`)
   }
 
-  await prisma.taskLink.delete({ where: { id: link.id } })
+  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { workspaceId: true } })
+  if (task) await deleteTaskLink(prisma, { link, workspaceId: task.workspaceId })
+  else await prisma.taskLink.delete({ where: { id: link.id } })
 
   return ok(
     `Unlinked ${linkedType} "${linkedId}" from task "${taskId}".\nID: ${link.id}`,

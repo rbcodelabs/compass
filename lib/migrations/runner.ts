@@ -31,6 +31,7 @@ import { assertAgentWebSearchesMigration } from "@/lib/migrations/agent-web-sear
 import { assertAgentConversationParticipantsMigration } from "@/lib/migrations/agent-conversation-participants";
 import { assertEntityLinksMigration } from "@/lib/migrations/entity-links";
 import { assertWorkItemIdsMigration, WORK_ITEM_IDS_MIGRATION } from "@/lib/migrations/work-item-ids";
+import { ENTITY_LINKS_TASK_BACKFILL_MIGRATION, assertEntityLinksTaskBackfill, backfillEntityLinksTask, getEntityLinksTaskStatus } from "@/lib/migrations/entity-links-task-backfill";
 import { ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, assertEntityLinksOpportunityBackfill, backfillEntityLinksOpportunity, getEntityLinksOpportunityStatus } from "@/lib/migrations/entity-links-opportunity-backfill";
 import { assertWorkItemIdsBackfill, backfillWorkItemIds, getWorkItemIdsBackfillStatus, WORK_ITEM_IDS_BACKFILL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION } from "@/lib/migrations/work-item-ids-backfill";
 import { assertRoadmapItemProvenanceMigration } from "@/lib/migrations/roadmap-item-provenance";
@@ -615,6 +616,13 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // proves its postconditions before the receipt. POST it by name after the mirroring code and flag are live; never untargeted.
     name: "095_entity_links_backfill_opportunity",
     filePath: path.join(process.cwd(), "prisma/migrations/095_entity_links_backfill_opportunity/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY. Backfills entity_links (TASK_REFERENCES) from task_links, DECISION stored as REVIEW_REQUEST. Inconsistent legacy rows
+    // are quarantined and reported, never linked or deleted. The hook proves its postconditions before the receipt. POST it by name after the
+    // mirroring code and COMPASS_ENTITY_LINKS_TASK_MIRROR are live; never untargeted. (096 belongs to the artifact-link phase.)
+    name: "097_entity_links_backfill_task",
+    filePath: path.join(process.cwd(), "prisma/migrations/097_entity_links_backfill_task/migration.sql"),
   },
 ];
 
@@ -1808,6 +1816,8 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       // Orphan / NULL / parent-drift counts for 068, visible before a human POSTs it.
       // Counts and capped quarantine ids for 095, readable before it is POSTed.
       entityLinksOpportunityBackfill: await getEntityLinksOpportunityStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      // Counts and capped quarantine ids for 097 (task links), readable before it is POSTed.
+      entityLinksTaskBackfill: await getEntityLinksTaskStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       workItemIdsBackfill: await getWorkItemIdsBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       workspaceIdBackfill: await getWorkspaceIdBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       linkIntegrity: "error" in typedLinks ? typedLinks : typedLinks.linkIntegrity,
@@ -1820,10 +1830,10 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION];
 
 /**
- * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095).
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 097).
  * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
  * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
  * Production-style callers (the admin route, an untargeted POST) never set it.
@@ -2161,6 +2171,12 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         // leaves an unfinished attempt and the next POST resumes.
         await backfillEntityLinksOpportunity(client, schema, log)
         await assertEntityLinksOpportunityBackfill(client, schema)
+      }
+      if (migration.name === ENTITY_LINKS_TASK_BACKFILL_MIGRATION) {
+        // Data half: mirror the legacy task links (quarantining the inconsistent ones), then prove it. Before the receipt below, so a failure
+        // leaves an unfinished attempt and the next POST resumes.
+        await backfillEntityLinksTask(client, schema, log)
+        await assertEntityLinksTaskBackfill(client, schema)
       }
       if (migration.name === "090_v0_chat_artifacts") {
         const columns = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND ((table_name='artifacts' AND column_name='v0_chat_id') OR (table_name='artifact_revisions' AND column_name='v0_version_id'))", [schema])

@@ -157,7 +157,8 @@ export async function linkEntities(tx: Tx, input: LinkEntitiesInput): Promise<Li
 
   const existing = (await tx.entityLink.findFirst({ where: { fromId: first.id, linkType: def.key, toId: second.id } })) as EntityLinkRow | null
   if (existing) {
-    if (def.duplicatePolicy === "error") throw new TypedLinkError(`Already linked (${def.key}).`, "INVALID")
+    // The legacy writer reconciles: its own table already decided whether a repeat is an error, and the mirror row may predate it.
+    if (def.duplicatePolicy === "error" && !input.viaLegacyWriter) throw new TypedLinkError(`Already linked (${def.key}).`, "INVALID")
     const originDrift = Boolean(input.viaLegacyWriter && input.reconcileOrigin && existing.origin !== origin)
     if (existing.workspaceId === workspaceId && !originDrift) return { link: existing, created: false, from: fromEndpoint, to: toEndpoint, def }
     // A drifted workspaceId is repaired to the verified one: both endpoints were just checked there.
@@ -277,6 +278,25 @@ export async function drainLinksFromEntities(
   let removed = 0
   for (const part of chunk([...new Set(input.fromIds)], LINK_WRITE_CHUNK)) {
     const where = { linkType: def.key, fromId: { in: part }, ...(input.origin ? { origin: input.origin } : {}), ...(input.toId ? { toId: input.toId } : {}) }
+    removed += await drainByIds(
+      (take) => db.entityLink.findMany({ where, select: { id: true }, take }),
+      async (rowIds) => (await db.entityLink.deleteMany({ where: { id: { in: rowIds } } })).count,
+    )
+  }
+  return removed
+}
+
+/**
+ * Drains the links of one type that END at any of `toIds` (of entity type `toType`), in committed passes of at most LINK_WRITE_CHUNK
+ * links, through the reverse index (to_id, link_type, from_id). For the legacy writer only: the mirror counterpart of a legacy delete that
+ * removes the links to a deleted target (a Key Result or Objective). Removal never depends on the flag. Idempotent.
+ */
+export async function drainLinksToEntities(db: Tx, input: { linkType: string; toType: LinkableEntityType; toIds: readonly string[] }): Promise<number> {
+  const def = requireLinkType(input.linkType)
+  assertWritableHere(def, true)
+  let removed = 0
+  for (const part of chunk([...new Set(input.toIds)], LINK_WRITE_CHUNK)) {
+    const where = { linkType: def.key, toType: input.toType, toId: { in: part } }
     removed += await drainByIds(
       (take) => db.entityLink.findMany({ where, select: { id: true }, take }),
       async (rowIds) => (await db.entityLink.deleteMany({ where: { id: { in: rowIds } } })).count,

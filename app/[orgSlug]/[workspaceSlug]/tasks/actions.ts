@@ -10,6 +10,7 @@ import { assignmentUpdate, resolveTaskAssignees, validateTaskLink, validateTaskR
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
 import { allocateOneSeq } from "@/lib/work-item-sequence"
 import { createWorkspaceTask } from "@/lib/task-create"
+import { createTaskLink, deleteTaskLink, mirrorTaskLinks, upsertTaskLink } from "@/lib/task-link-writes"
 
 async function requireTaskWorkspace(workspaceId: string) {
   const session = await auth();
@@ -192,7 +193,8 @@ export async function linkTask(
     return existing;
   }
 
-  const link = await prisma.taskLink.create({ data: { taskId, linkedType, linkedId } });
+  // Legacy row first (the source of truth), mirrored into entity_links in the same transaction while the flag is on.
+  const link = await createTaskLink(prisma, { taskId, linkedType, linkedId, workspaceId: task.workspaceId });
 
   revalidatePath(revalidatePathStr);
   return link;
@@ -202,10 +204,10 @@ export async function unlinkTask(linkId: string, revalidatePathStr: string) {
   const prisma = getPrisma();
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  const link = await prisma.taskLink.findUnique({ where: { id: linkId }, select: { taskId: true } });
+  const link = await prisma.taskLink.findUnique({ where: { id: linkId }, select: { id: true, taskId: true, linkedType: true, linkedId: true } });
   if (!link) throw new Error("Not found");
-  await requireTask(link.taskId);
-  await prisma.taskLink.delete({ where: { id: linkId } });
+  const task = await requireTask(link.taskId);
+  await deleteTaskLink(prisma, { link: { id: linkId, taskId: link.taskId, linkedType: link.linkedType, linkedId: link.linkedId }, workspaceId: task.workspaceId });
 
   revalidatePath(revalidatePathStr);
 }
@@ -252,18 +254,23 @@ export async function addLinkedTask(
     orderBy: { sortOrder: "desc" },
     select: { sortOrder: true },
   });
-  const task = await captureWorkspaceMutation(getPrisma(), "task", "create", "UI", undefined, async tx => tx.task.create({
-    data: {
-      workspaceId: workspace.id,
-      ...(await allocateOneSeq(tx, workspace.id, "task")),
-      title,
-      status: "TODO",
-      priority: "MEDIUM",
-      ...assignment,
-      sortOrder: lastTask ? lastTask.sortOrder + 1 : 0,
-      links: { create: { linkedType, linkedId } },
-    },
-  }));
+  const task = await captureWorkspaceMutation(getPrisma(), "task", "create", "UI", undefined, async tx => {
+    const created = await tx.task.create({
+      data: {
+        workspaceId: workspace.id,
+        ...(await allocateOneSeq(tx, workspace.id, "task")),
+        title,
+        status: "TODO",
+        priority: "MEDIUM",
+        ...assignment,
+        sortOrder: lastTask ? lastTask.sortOrder + 1 : 0,
+        links: { create: { linkedType, linkedId } },
+      },
+    });
+    // The nested legacy link is mirrored in the same transaction (flagged).
+    await mirrorTaskLinks(tx, { workspaceId: workspace.id, links: [{ taskId: created.id, linkedType, linkedId }] });
+    return created;
+  });
   revalidatePath(revalidatePathStr);
   return task;
 }
@@ -282,10 +289,14 @@ export async function linkExistingTask(
     select: { id: true },
   });
   if (!task) throw new Error("Not found");
-  const link = await getPrisma().taskLink.upsert({
-    where: { taskId_linkedType_linkedId: { taskId, linkedType, linkedId } },
-    create: { taskId, linkedType, linkedId },
-    update: {},
+  const link = await upsertTaskLink(getPrisma(), {
+    taskId, linkedType, linkedId,
+    workspaceId: workspace.id,
+    upsert: tx => tx.taskLink.upsert({
+      where: { taskId_linkedType_linkedId: { taskId, linkedType, linkedId } },
+      create: { taskId, linkedType, linkedId },
+      update: {},
+    }),
   });
   revalidatePath(revalidatePathStr);
   return link;

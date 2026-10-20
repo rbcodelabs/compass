@@ -282,7 +282,7 @@ requests a decision, persist its request ID, report `AWAITING_DECISION`, and sto
 | `list_tasks` | Tasks for a workspace; filter by `status`, `priority`, `squadId`, `assigneeUserId`, or `parentTaskId`; recency-filterable |
 | `update_task` | Partial update of any task field (title, description, priority, assignee/owner, story points, due date, iteration, parent) |
 | `move_task_status` | Move a task to a new status column (BACKLOG / TODO / IN_PROGRESS / BLOCKED / IN_REVIEW / DONE / CANCELLED) |
-| `link_task` | Link a task to another object — `linkedType` one of OPPORTUNITY / SOLUTION / ROADMAP_ITEM / OBJECTIVE / KEY_RESULT / DOC / EXPERIMENT / FEEDBACK_ITEM — plus `linkedId`. Idempotent (re-linking the same pair is a no-op). Many-to-many |
+| `link_task` | Link a task to another object — `linkedType` one of OPPORTUNITY / SOLUTION / ROADMAP_ITEM / OBJECTIVE / KEY_RESULT / DOC / EXPERIMENT / FEEDBACK_ITEM — plus `linkedId`. Idempotent (re-linking the same pair is a no-op). Many-to-many. Always use this tool for task links: `TASK_REFERENCES` in `entity_links` is only a flagged mirror of them and `link_entities` refuses it |
 | `unlink_task` | Remove a task↔object link |
 | `list_task_links` | List all objects a task is linked to, grouped by type with resolved titles |
 
