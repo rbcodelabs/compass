@@ -213,11 +213,12 @@ export function createTenantFakePrisma() {
       if (!(key in row)) throw new Error(`fake prisma: unsupported where key "${key}" on ${model}`);
       const value = row[key];
       if (cond !== null && typeof cond === "object" && !(cond instanceof Date)) {
-        const op = cond as { in?: unknown[]; contains?: string; not?: unknown; gt?: unknown; lt?: unknown };
+        const op = cond as { in?: unknown[]; notIn?: unknown[]; contains?: string; not?: unknown; gt?: unknown; lt?: unknown };
         const cmp = (a: unknown, b: unknown) => (a instanceof Date && b instanceof Date ? a.getTime() - b.getTime() : a === b ? 0 : (a as number) > (b as number) ? 1 : -1);
         if (op.gt !== undefined) { if (value == null || cmp(value, op.gt) <= 0) return false; continue; }
         if (op.lt !== undefined) { if (value == null || cmp(value, op.lt) >= 0) return false; continue; }
         if (op.in !== undefined) { if (!op.in.includes(value)) return false; continue; }
+        if (op.notIn !== undefined) { if (op.notIn.includes(value)) return false; continue; }
         if (op.contains !== undefined) {
           if (typeof value !== "string" || !value.toLowerCase().includes(op.contains.toLowerCase())) return false;
           continue;
