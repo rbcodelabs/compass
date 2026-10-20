@@ -64,10 +64,24 @@ via `DATABASE_URL` (the Aurora DSQL account became unavailable); the DSQL path
 against plain PostgreSQL. `lib/db.ts` picks the path: set `DATABASE_URL` and it
 uses a plain `pg` pool; set `PGHOST` and it signs DSQL tokens.
 
-On the `DATABASE_URL` path each serverless instance keeps at most 3 connections
-(`DATABASE_POOL_MAX` overrides this). Use the pooler's **session** or direct
-connection string, not the transaction pooler, and size the cap so
-`instances × max` stays under the pooler's client limit (15 on Supabase Free).
+On the `DATABASE_URL` path the pooler mode is detected from the port:
+
+- **Runtime (`DATABASE_URL`) should be Supabase's transaction pooler (port
+  6543).** A backend connection is held only while a transaction runs, so many
+  serverless instances no longer exhaust the 15-slot session pool
+  (`EMAXCONNSESSION`). Each instance keeps at most 5 connections; the limit that
+  matters is the pooler's client-connection limit. This is safe because Prisma's
+  `schema` option schema-qualifies table names in each statement (no session
+  `search_path`), statements are unnamed (no server-side prepared statements)
+  and interactive `$transaction`s pin one connection until commit. Do not add
+  session state (`SET`, advisory locks, `LISTEN`, temp tables) to runtime code.
+- **Migrations use `DATABASE_MIGRATION_URL`** (session pooler or direct, port
+  5432). `/api/admin/migrate` and the Prisma CLI prefer it and fall back to
+  `DATABASE_URL`; the migrate route refuses to run over a transaction-mode URL.
+- On a session-mode URL (port 5432, or only `DATABASE_URL` set to such a URL)
+  each instance keeps at most 3 connections, as before. `DATABASE_POOL_MAX`
+  overrides the cap in either mode and `DATABASE_POOLER_MODE=transaction|session`
+  overrides port-based detection.
 
 Because DSQL does not support foreign-key constraints, `prisma/schema.prisma`
 uses `relationMode = "prisma"` — referential integrity is enforced by Prisma at
