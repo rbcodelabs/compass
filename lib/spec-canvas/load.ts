@@ -59,7 +59,7 @@ export async function loadSpecCanvas(args: {
   if (!opportunity) return null
 
   const solutionIds = opportunity.solutions.map((solution) => solution.id)
-  const [typedObjectives, solutionKeyResultLinks, legacyKeyResult, artifactLinks] = await Promise.all([
+  const [typedObjectives, keyResultsBySolution, legacyKeyResult, artifactLinks] = await Promise.all([
     getLinkedObjectivesByOpportunity(prisma, workspaceId, [opportunity.id], { preverified: true }),
     getLinkedKeyResultsBySolution(prisma, workspaceId, solutionIds, { preverified: true }),
     opportunity.linkedKeyResultId
@@ -71,13 +71,13 @@ export async function loadSpecCanvas(args: {
   ])
 
   // Link rows carry only id/title; fetch the full Key Result rows (progress needs current/target).
-  const linkedKrIds = [...new Set([...solutionKeyResultLinks.values()].flat().map((kr) => kr.id))]
+  const linkedKrIds = [...new Set([...keyResultsBySolution.values()].flat().map((kr) => kr.id))]
   const solutionKeyResultRows: RawKeyResult[] = linkedKrIds.length
     ? await prisma.keyResult.findMany({ where: { id: { in: linkedKrIds }, objective: { workspaceId } }, select: KEY_RESULT_SELECT })
     : []
   const krById = new Map(solutionKeyResultRows.map((kr) => [kr.id, kr]))
   const solutionKeyResults = new Map<string, RawKeyResult[]>(
-    [...solutionKeyResultLinks].map(([solutionId, links]) => [solutionId, links.flatMap((link) => krById.get(link.id) ?? [])]),
+    [...keyResultsBySolution].map(([solutionId, links]) => [solutionId, links.flatMap((link) => krById.get(link.id) ?? [])]),
   )
 
   const objectiveIds = [...new Set([

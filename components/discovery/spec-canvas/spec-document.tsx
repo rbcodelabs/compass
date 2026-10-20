@@ -61,7 +61,7 @@ export function SpecDocument({ spec, labels, backHref }: Props) {
             <h1 className="text-3xl font-semibold tracking-tight text-text-primary">{opportunity.title}</h1>
           </div>
 
-          <Section sectionKey="outcome" title={`${labels.objective.plural} & ${labels.keyResult.plural}`} hint="The outcome this work is meant to move.">
+          <Section sectionKey="outcome" title={`${labels.objective.plural} & ${labels.keyResult.plural}`} hint="What this work is meant to move.">
             {spec.objectives.length === 0 ? none(labels.objective.lowerPlural) : spec.objectives.map((objective) => (
               <EntityCard
                 key={objective.id}

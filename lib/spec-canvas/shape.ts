@@ -60,7 +60,7 @@ export type RawSpecCanvas = {
   /** The legacy `Opportunity.linkedKeyResultId` Key Result, if any (already workspace-verified). */
   opportunityKeyResult: RawKeyResult | null
   solutions: RawSolution[]
-  /** solutionId -> Key Results linked through solution_key_result_links. */
+  /** solutionId -> Key Results linked through the typed Solution links. */
   solutionKeyResults: ReadonlyMap<string, RawKeyResult[]>
   /** solutionId -> artifacts linked to that solution. */
   solutionArtifacts: ReadonlyMap<string, RawArtifact[]>
