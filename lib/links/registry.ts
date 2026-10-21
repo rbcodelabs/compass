@@ -425,6 +425,32 @@ const taskReferences: LinkTypeDef = {
   compat: { mcpTools: ["link_task", "unlink_task", "list_task_links"], restOps: ["linkTaskResource", "unlinkTaskResource", "listTaskLinks"] },
 }
 
+// ── DOC_SPECIFIES_SCOPE (spec docs phase 2: a Spec / Discovery Plan doc is scoped to the Solution or Opportunity it specifies) ──
+
+/** The link type key for a SPEC doc's scope, shared by lib/spec-docs (the only writer and reader outside the generic tools). */
+export const DOC_SPECIFIES_SCOPE_LINK_TYPE = "DOC_SPECIFIES_SCOPE"
+
+/**
+ * A Doc specifies the Solution (a Spec) or the Opportunity (a Discovery Plan) it is about. Cardinality is deliberately NOT enforced: a
+ * solution may have many specs and an opportunity many plans, so nothing here is unique, idempotent-by-scope or to-one. The registry's
+ * generic same-workspace check is the only eligibility rule. A native type (no legacy table, no mirror, no flag): lib/spec-docs/create.ts
+ * writes it when it creates the doc. Deleting the doc or the scope removes the link and leaves the other end (an unscoped doc survives).
+ */
+const docSpecifiesScope: LinkTypeDef = {
+  key: DOC_SPECIFIES_SCOPE_LINK_TYPE,
+  from: "DOC",
+  to: ["SOLUTION", "OPPORTUNITY"],
+  direction: "directed",
+  cardinality: { from: "many", to: "many" },
+  labels: { forward: "Specifies", inverse: "Specified by" },
+  duplicatePolicy: "idempotent",
+  authorize: defaultAuthorize,
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {},
+  restrictedContexts: "deny",
+  compat: { mcpTools: [], restOps: [] },
+}
+
 /** Append-only. Add one entry per type; never edit or reuse a key. */
 const DEFINITIONS: readonly LinkTypeDef[] = [
   experimentInformedByStudy,
@@ -434,6 +460,7 @@ const DEFINITIONS: readonly LinkTypeDef[] = [
   artifactAttachedToSolution,
   artifactSupportsDecision,
   taskReferences,
+  docSpecifiesScope,
 ]
 
 export const LINK_TYPES: Readonly<Record<string, LinkTypeDef>> = Object.freeze(

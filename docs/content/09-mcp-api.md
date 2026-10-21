@@ -500,11 +500,12 @@ Output data: `{ items, count, nextCursor }`, oldest link first.
 
 ### Generic links (`link_entities`)
 
-Association links between two entities are moving to one generic `entity_links` table driven by a registry of link types, so a new relationship is one registry entry rather than a new table and a new set of tools. The per-pair tools above are unchanged and keep reading their own tables; `link_entities`, `unlink_entities` and the generic mode of `list_links` work on the registered link types, of which there is currently one:
+Association links between two entities are moving to one generic `entity_links` table driven by a registry of link types, so a new relationship is one registry entry rather than a new table and a new set of tools. The per-pair tools above are unchanged and keep reading their own tables; `link_entities`, `unlink_entities` and the generic mode of `list_links` work on the registered link types:
 
 | `linkType` | `fromId` (from) | `toId` (to) | Reads as |
 |---|---|---|---|
 | `EXPERIMENT_INFORMED_BY_STUDY` | an Experiment | a Research Study | the experiment is "Informed by" the study; the study "Informs" the experiment |
+| `DOC_SPECIFIES_SCOPE` | a Doc | a Solution or an Opportunity (`toType` required) | the doc "Specifies" the scope; the scope is "Specified by" the doc. Written by `create_spec`; see [Specs and Discovery Plans](#specs-and-discovery-plans) |
 
 Rules for `EXPERIMENT_INFORMED_BY_STUDY`:
 
@@ -822,7 +823,11 @@ below) and call the standard `resources/list` and `resources/read` methods:
   a YAML frontmatter block followed by the markdown body. Frontmatter always
   carries `compass_doc_id` (the doc's underlying UUID, exposed for reference —
   never accepted as input), `compass_doc_type`, and — if the doc is linked —
-  `compass_roadmap_item_id`, plus any ordinary user-set properties.
+  `compass_roadmap_item_id`, plus any ordinary user-set properties. A `SPEC` doc
+  also carries `compass_scopes`, a read-only list of `solution:<uuid>` /
+  `opportunity:<uuid>` values derived from its `DOC_SPECIFIES_SCOPE` links on
+  every read. Like every `compass_` key it is ignored on write, so it can be
+  neither spoofed nor lost.
 
 A path segment is the doc's title, lightly sanitized (filesystem-illegal
 characters become `_`); it is **not** a lowercase slug, so renaming a doc's
@@ -832,16 +837,18 @@ path. Two sibling docs sharing a title are disambiguated with a suffix, e.g.
 
 | Tool | Description |
 |---|---|
-| `write_doc` | Create or update a doc by path — a write to a path that already resolves updates it; a write to a new path creates it. Missing parent directories in the path are created implicitly (e.g. writing `Product/Roadmap/Q3 Plan` under an empty workspace creates `Product` and `Product/Roadmap` too). Params: `workspaceId`, `path`, `content` (frontmatter + markdown body), optional `operationId`/`expectedRevision`, and create-only `docType` (`STANDARD` or `CANVAS`; for `CANVAS` the body is a JSON Canvas 1.0 document, validated, with a blank canvas when empty) |
+| `write_doc` | Create or update a doc by path — a write to a path that already resolves updates it; a write to a new path creates it. Missing parent directories in the path are created implicitly (e.g. writing `Product/Roadmap/Q3 Plan` under an empty workspace creates `Product` and `Product/Roadmap` too). Params: `workspaceId`, `path`, `content` (frontmatter + markdown body), optional `operationId`/`expectedRevision`, and create-only `docType` (`STANDARD` or `CANVAS`; for `CANVAS` the body is a JSON Canvas 1.0 document, validated, with a blank canvas when empty). `SPEC` docs are created only by `create_spec`; writing to an existing `SPEC` doc rejects malformed or unresolvable `compass://` embeds (see [Specs and Discovery Plans](#specs-and-discovery-plans)) |
 | `delete_doc` | Delete the doc at a path. Refuses (matching `rmdir` vs `rm -r`) if it has children unless `recursive: true` is passed |
 | `move_doc` | Rename and/or reparent a doc by changing its path — both are just "the path changed." Missing intermediate directories on the destination are created implicitly |
 | `list_doc_history` | List the saved versions of the doc at a path (id, label, author, created date), newest first. Does not include full content — call `restore_doc_version` to apply one |
 | `restore_doc_version` | Restore the doc at a path to a previously saved version (from `list_doc_history`). The doc's current state is snapshotted first (labeled "Before restore"), so restoring never loses data |
 | `capture_canvas` | Returns a PNG picture of a canvas doc (docType `CANVAS`) so an agent can check layout. Takes `docId` (the `compass_doc_id` in the canvas doc's `docs://` frontmatter), and optionally `nodeId` (a node or group id to zoom on) with `padding` (canvas units of context, default 80), or `region` (`x`, `y`, `width`, `height` in canvas coordinates); pass at most one of `nodeId` and `region`. Default is a fit-all overview. `scale` (0.05–4) overrides the automatic fit; output is capped at 2400 px per side. The canvas JSON is rendered to a self-contained page and photographed in a Vercel Sandbox with no network. Nodes, colours, group labels, edges with arrows and labels, and Compass object cards (live title, status, facts; cards outside the doc workspace show as unavailable) are drawn. Returns an MCP image content block plus text and metadata (`view`, `region`, `scale`, `image`, `byteSize`, `counts`, `timings`). The image is not stored. Gate class: `READ` |
 | `prepare_doc_image_upload` | Prepare a signed, short-lived upload for a PNG, JPEG, GIF, or WebP image up to 10 MiB in workspace-private Docs storage; returns the upload pathname/token plus the relative Compass image URL and Markdown |
-| `edit_doc` | Targeted text edit of a doc body without resending it, addressed by `docId` (the `compass_doc_id` in the doc's `docs://` frontmatter): `oldString` → `newString` (must match exactly once unless `replaceAll`), or up to 50 `edits` applied in order, all-or-nothing. Optional `expectedRevision` (the `_meta.revision` of a `docs://` resource read, or a prior `write_doc` result) rejects the edit if the doc changed; without it the edit is re-applied on top of concurrent changes. Edits the body only — change frontmatter properties with `write_doc`. On a CANVAS doc the result must still be valid JSON Canvas |
+| `edit_doc` | Targeted text edit of a doc body without resending it, addressed by `docId` (the `compass_doc_id` in the doc's `docs://` frontmatter): `oldString` → `newString` (must match exactly once unless `replaceAll`), or up to 50 `edits` applied in order, all-or-nothing. Optional `expectedRevision` (the `_meta.revision` of a `docs://` resource read, or a prior `write_doc` result) rejects the edit if the doc changed; without it the edit is re-applied on top of concurrent changes. Edits the body only — change frontmatter properties with `write_doc`. On a CANVAS doc the result must still be valid JSON Canvas; on a `SPEC` doc every `compass://` embed in the result must be well formed and resolve in the doc's workspace |
 | `edit_canvas` | Edit a CANVAS doc (by `docId`, as for `edit_doc`) with domain ops keyed by node id instead of rewriting the JSON: `add_card`, `add_text`, `add_group`, `add_edge`, `move`, `update`, `remove` (up to 200 per call, all-or-nothing; errors name the op index). Ids and placement are automatic; nodes may be referenced by node id or `kind:uuid`; re-adding an existing card or edge is a no-op; removing a node removes its edges. Optional `expectedRevision` |
 | `build_canvas_tree` | Draw the Opportunity Solution Tree onto a CANVAS doc (by `docId`) — the same engine as the editor's "Build tree". `scope`: `{kind:"workspace"}` (default) or `{kind: objective\|keyResult\|opportunity\|solution, id}`. Idempotent merge: existing cards are never duplicated, new content is auto-laid-out to the right, one group per root objective. Capped at 400 cards |
+| `create_spec` | Create a NEW Spec doc for a Solution (`scopeType: SOLUTION`) or Discovery Plan doc for an Opportunity (`scopeType: OPPORTUNITY`), pre-filled from the record's real children as `compass://` embeds. Params: `workspaceId`, `scopeType`, `scopeId`, optional `template` (`default` or `blank`) and `label`. Not idempotent: every call makes another doc. Text ends with `ID: <doc uuid>`; data: `{ id, title, path, docType: "SPEC", scopeType, scopeId, linkId, template, label, url }` |
+| `list_specs` | List the `SPEC` docs linked to a Solution or Opportunity (`workspaceId`, `scopeType`, `scopeId`), oldest first: `{ id, title, path, label, updatedAt, url }` |
 
 `write_doc` deliberately does not split into separate create/update tools —
 the path already tells you which one it is: writing to a path you just read
@@ -875,6 +882,16 @@ building an integration and want the full mechanics.
 To add a local screenshot, call `prepare_doc_image_upload` with its exact filename, MIME type, and byte size. Upload it with `put(pathname, file, { access: "private", token: clientToken, contentType: fileType })` from `@vercel/blob/client`, then place the returned `markdown` in the doc's content via `write_doc`. The token expires after ten minutes and is bound to one random workspace-prefixed pathname, MIME type, and maximum size; it cannot overwrite an existing blob. The saved Markdown contains only a relative Compass read URL, never the storage pathname or token. Image reads require a signed-in member of the owning workspace.
 
 This private flow applies to new uploads. Existing documents may contain older absolute `*.public.blob.vercel-storage.com` image URLs; they remain public and continue rendering. Compass does not migrate, delete, or rewrite those legacy blobs automatically.
+
+### Specs and Discovery Plans
+
+A **Spec** (scoped to a Solution) or **Discovery Plan** (scoped to an Opportunity) is an ordinary markdown doc with `docType: SPEC` whose body references live Compass records as embeds: ordinary markdown links to `compass://<kind>/<uuid>`, for example `[Checkout redesign](compass://solution/<uuid>)`. Kinds are `opportunity`, `solution`, `metric`, `doc`, `task`, `experiment`, `objective`, `keyResult`, `assumption`, `roadmapItem` and `artifact`. A link alone in a paragraph renders as a card in the editor; anywhere else it renders as a chip. The cached title is display-only.
+
+- **Create** with `create_spec`. The scope must be in `workspaceId` (a scope in another workspace and one that does not exist return the same "not found" message). The doc is generated from a template held in code and the scope's real records: a Spec has Problem and outcome (key results), Solution, Assumptions, Experiments, Prototypes, then empty Open questions and Decision log; a Discovery Plan has Outcome, Opportunity, Solutions under consideration, Riskiest assumptions, Experiment plan, Prototypes and Open questions. `metadata.template` (`spec@1` or `discovery-plan@1`) records the template and is informational only.
+- **Not idempotent.** A solution can have many specs and an opportunity many plans; nothing is unique. Call `list_specs` first if you only want the existing one, and use `label` to tell several apart.
+- **Scope link.** Each spec is tied to its scope by one `DOC_SPECIFIES_SCOPE` link (many-to-many, so the generic `link_entities` / `unlink_entities` / `list_links` also work on it). If the link cannot be written the new doc is deleted again. Deleting the spec doc, or the solution or opportunity, removes the link and leaves the other end (an unscoped spec doc survives).
+- **Strict agent writes.** `write_doc` and `edit_doc` on a `SPEC` doc reject a malformed `compass://` link, an unknown kind, or an embed whose record is not in the doc's workspace; the error never says whether a rejected id exists in another workspace. Saves from the editor and Geode sync are lenient: a bad link is kept as written, never rejected or stripped.
+- **Read.** The doc's `docs://` frontmatter lists its scopes in the read-only `compass_scopes`.
 
 ### Authoring Canvas docs (agents)
 

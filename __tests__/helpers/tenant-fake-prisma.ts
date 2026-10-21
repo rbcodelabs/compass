@@ -121,9 +121,9 @@ export function createTenantFakePrisma() {
     { id: "kr-null", objectiveId: "obj-null", title: "Key result under an unbackfilled objective", target: 10, current: 0, sortOrder: 0 },
   ];
   const assumptions: Graph[] = [
-    { id: "asm-a", solutionId: "sol-a", title: "A assumption" },
-    { id: "asm-b", solutionId: "sol-b", title: "B assumption" },
-    { id: "asm-null", solutionId: "sol-null", title: "Assumption under an unbackfilled solution" },
+    { id: "asm-a", solutionId: "sol-a", title: "A assumption", status: "UNTESTED", riskLevel: "MEDIUM", sortOrder: 0, createdAt: new Date(1) },
+    { id: "asm-b", solutionId: "sol-b", title: "B assumption", status: "UNTESTED", riskLevel: "MEDIUM", sortOrder: 0, createdAt: new Date(1) },
+    { id: "asm-null", solutionId: "sol-null", title: "Assumption under an unbackfilled solution", status: "UNTESTED", riskLevel: "MEDIUM", sortOrder: 0, createdAt: new Date(1) },
   ];
   const solutionComments: Graph[] = [
     { id: "scm-a", solutionId: "sol-a", body: "A comment" },
@@ -137,9 +137,9 @@ export function createTenantFakePrisma() {
   // Generic links (ADR phase 2): experiments, research studies and the entity_links rows between them. The pair
   // (fromId, toId) is unique like the real (from_id, link_type, to_id) index; tests use one link type at a time.
   const experiments: Graph[] = [
-    { id: "exp-a", workspaceId: WS_A.id, title: "A experiment", status: "DESIGNING", updatedAt: new Date(1) },
-    { id: "exp-a2", workspaceId: WS_A.id, title: "A experiment 2", status: "DESIGNING", updatedAt: new Date(1) },
-    { id: "exp-b", workspaceId: WS_B.id, title: "B experiment", status: "DESIGNING", updatedAt: new Date(1) },
+    { id: "exp-a", workspaceId: WS_A.id, title: "A experiment", status: "DESIGNING", updatedAt: new Date(1), assumptionId: null, createdAt: new Date(1) },
+    { id: "exp-a2", workspaceId: WS_A.id, title: "A experiment 2", status: "DESIGNING", updatedAt: new Date(1), assumptionId: null, createdAt: new Date(1) },
+    { id: "exp-b", workspaceId: WS_B.id, title: "B experiment", status: "DESIGNING", updatedAt: new Date(1), assumptionId: null, createdAt: new Date(1) },
   ];
   const researchStudies: Graph[] = [
     { id: "study-a", workspaceId: WS_A.id, name: "A interviews", studyType: "CUSTOMER_INTERVIEW", status: "ACTIVE", updatedAt: new Date(1) },
@@ -361,10 +361,13 @@ export function createTenantFakePrisma() {
     return true;
   };
 
-  const docs = [
-    { id: "doc-a", workspaceId: WS_A.id },
-    { id: "doc-b", workspaceId: WS_B.id },
+  // Docs are a modelled table (spec docs phase 2: DOC is an endpoint of DOC_SPECIFIES_SCOPE). doc-null is a row whose workspace is NULL.
+  const docs: Graph[] = [
+    { id: "doc-a", workspaceId: WS_A.id, title: "A doc", docType: "STANDARD", metadata: null, parentId: null, sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },
+    { id: "doc-b", workspaceId: WS_B.id, title: "B doc", docType: "STANDARD", metadata: null, parentId: null, sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },
+    { id: "doc-null", workspaceId: null, title: "Unbackfilled doc", docType: "STANDARD", metadata: null, parentId: null, sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },
   ];
+  tables.doc = docs;
   const docVersions = [
     { id: "ver-a", docId: "doc-a", content: "A secret", title: "A doc" },
     { id: "ver-b", docId: "doc-b", content: "B secret", title: "B doc" },
@@ -467,9 +470,7 @@ export function createTenantFakePrisma() {
         return { count: rows.length };
       },
     },
-    doc: {
-      findUnique: async ({ where }: { where: { id: string } }) => docs.find((d) => d.id === where.id) ?? null,
-    },
+    doc: delegate("doc"),
     docVersion: {
       findUnique: async ({ where }: { where: { id: string } }) => docVersions.find((v) => v.id === where.id) ?? null,
     },
@@ -515,7 +516,7 @@ export function createTenantFakePrisma() {
       const workspace = workspaces.find((w) => w.id === workspaceId);
       if (workspace && !workspace.members.includes(userId)) workspace.members.push(userId);
     },
-    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks, workspaces, experiments, researchStudies, entityLinks, artifacts, reviewRequests, artifactLinks },
+    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks, workspaces, experiments, researchStudies, entityLinks, artifacts, reviewRequests, artifactLinks, docs },
     /** Snapshot of every feedback row, for before/after "nothing changed" assertions. */
     snapshotFeedback: () => JSON.parse(JSON.stringify(feedback)) as unknown,
   };

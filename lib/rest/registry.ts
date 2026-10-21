@@ -192,7 +192,9 @@ const commentTargetPath = z.object({ workspaceId: uuid, targetType: commentTarge
 const commentCreate = z.object({ body: z.string().trim().min(1), parentId: uuid.optional() }).strict()
 const commentPatch = z.object({ body: z.string().trim().min(1) }).strict()
 const followPath = z.object({ workspaceId: uuid, subjectType: z.enum(ACTIVE_FOLLOWABLE_SUBJECT_TYPES), subjectId: uuid })
-const docCreate = z.object({ title: z.string().trim().min(1).max(255), content: z.string().optional(), parentId: uuid.nullable().optional(), icon: z.string().max(32).optional(), roadmapItemId: uuid.nullable().optional(), docType: z.enum(DOC_TYPES).optional(), operationId: uuid }).strict()
+/** SPEC docs are created only by createSpecCore (they need their scope link); REST createDoc keeps accepting exactly the types it did before. */
+const REST_CREATABLE_DOC_TYPES = ["STANDARD", "GTM_POSITIONING_BRIEF", "CANVAS"] as const satisfies readonly (typeof DOC_TYPES)[number][]
+const docCreate = z.object({ title: z.string().trim().min(1).max(255), content: z.string().optional(), parentId: uuid.nullable().optional(), icon: z.string().max(32).optional(), roadmapItemId: uuid.nullable().optional(), docType: z.enum(REST_CREATABLE_DOC_TYPES).optional(), operationId: uuid }).strict()
 const docPatch = z.object({ title: z.string().trim().min(1).max(255).optional(), content: z.string().optional(), icon: z.string().max(32).optional(), expectedRevision: z.string().min(1), operationId: uuid }).strict()
 const docUpload = z.object({ filename: z.string().trim().min(1).max(255), fileType: z.enum(DOC_IMAGE_ALLOWED_MIME_TYPES), fileSize: z.number().int().min(1).max(DOC_IMAGE_MAX_BYTES) }).strict()
 const versionCreate = z.object({ label: z.string().trim().max(255).optional(), expectedRevision: z.string().min(1), operationId: uuid }).strict()
