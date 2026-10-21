@@ -15,6 +15,8 @@ const mockPrisma = {
   workspace: { findFirst: vi.fn(), create: vi.fn() },
   organizationMember: { findMany: vi.fn() },
   workspaceMember: { createMany: vi.fn() },
+  agent: { findFirst: vi.fn() },
+  agentWorkspaceGrant: { create: vi.fn() },
   $transaction: vi.fn(),
 }
 
@@ -314,5 +316,32 @@ describe("createWorkspaceInOrg", () => {
     await expect(
       createWorkspaceInOrg({ orgSlug: "rbcodelabs", name: "My Product", slug: "my-product" })
     ).rejects.toThrow("connection reset")
+  })
+
+  describe("agentGrant", () => {
+    const create = (agentGrant = { agentId: "agent-1", grantedByUserId: "owner" }) =>
+      createWorkspaceInOrg({ orgSlug: "rbcodelabs", name: "P", slug: "p", agentGrant })
+    it("grants a USER-owned agent to its owner's new workspace", async () => {
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "owner", status: "ACTIVE" })
+      expect(await create()).toMatchObject({ ok: true })
+      expect(mockPrisma.agentWorkspaceGrant.create).toHaveBeenCalledWith({ data: expect.objectContaining({ agentId: "agent-1", workspaceId: "ws-1", grantedByUserId: "owner" }) })
+    })
+    it("does not grant a WORKSPACE-owned agent, but still creates the workspace", async () => {
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "home", status: "ACTIVE" })
+      expect(await create()).toMatchObject({ ok: true })
+      expect(mockPrisma.agentWorkspaceGrant.create).not.toHaveBeenCalled()
+    })
+    it("does not grant a WORKSPACE-owned agent that still carries the creator's id in owner_user_id", async () => {
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "owner", ownerType: "WORKSPACE", ownerWorkspaceId: "home", status: "ACTIVE" })
+      await create()
+      expect(mockPrisma.agentWorkspaceGrant.create).not.toHaveBeenCalled()
+    })
+    it("does not grant a USER-owned agent to someone who is not its owner, or a missing agent", async () => {
+      mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "someone-else", status: "ACTIVE" })
+      await create()
+      mockPrisma.agent.findFirst.mockResolvedValue(null)
+      await create()
+      expect(mockPrisma.agentWorkspaceGrant.create).not.toHaveBeenCalled()
+    })
   })
 })

@@ -324,6 +324,7 @@ async function seedAgentFixture(db: Db): Promise<AgentFixture> {
     })
     await db.prisma.agent.create({
       data: { id: agentId, ownerUserId: user.id, name: agentName },
+      select: { id: true }, // legacy column only: the probe may run against a database without migration 098
     })
     await db.prisma.agentWorkspaceGrant.create({
       data: {
@@ -919,6 +920,7 @@ async function main() {
     await db.prisma.agent.update({
       where: { id: fixture.agentId },
       data: { status: "SUSPENDED", updatedAt: new Date() },
+      select: { id: true },
     })
     const afterSuspension = await mcpRequest(accessToken, {
       jsonrpc: "2.0",

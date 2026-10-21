@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { agentsEnabled } from "@/lib/agent-access";
+import { listUserOwnedAgents } from "@/lib/agent-ownership";
 import { AccountAgentsPanel } from "@/components/settings/account-agents-panel";
 import { AgentActivity } from "@/components/settings/agent-activity";
 import { PageHeader } from "@/components/patterns/page-header";
@@ -27,7 +28,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
   const userId = session.user.id;
   const params = await searchParams;
   const [agents, workspaces, keys, connectedApps, connectorsAvailable] = await Promise.all([
-    prisma.agent.findMany({ where: { ownerUserId: userId }, orderBy: { createdAt: "asc" } }),
+    listUserOwnedAgents(prisma, userId, { orderBy: "createdAt" }),
     prisma.workspace.findMany({ where: { members: { some: { userId } } }, select: { id: true, name: true, slug: true, organization: { select: { slug: true } } } }),
     prisma.apiKey.findMany({ where: { userId, purpose: "AGENT" }, select: { id: true, agentId: true, name: true, keyPrefix: true, expiresAt: true, revokedAt: true }, orderBy: { createdAt: "desc" } }),
     getConnectedAppsForUser(userId),
@@ -47,7 +48,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
   return <main className="mx-auto flex max-w-3xl flex-col gap-6 p-4 sm:p-8">
     <Link href="/dashboard" className="text-sm text-text-subtle underline">Back to Compass</Link>
     <PageHeader title="My agents" description="Account-wide identities. Use one agent key across workspaces where administrators have enabled access." />
-    <AccountAgentsPanel enabled={agentsEnabled()} agents={agents.map((a) => ({ ...a, keys: keys.filter((k) => k.agentId === a.id), grants: grants.filter((g) => g.agentId === a.id).map((g) => { const w = workspaces.find((w) => w.id === g.workspaceId)!; return { id: g.id, name: w.name, href: `/${w.organization.slug}/${w.slug}/settings`, access: g.access, revoked: !!g.revokedAt }; }) }))} />
+    <AccountAgentsPanel enabled={agentsEnabled()} agents={agents.map((a) => ({ id: a.id, name: a.name, description: a.description ?? null, status: a.status, keys: keys.filter((k) => k.agentId === a.id), grants: grants.filter((g) => g.agentId === a.id).map((g) => { const w = workspaces.find((w) => w.id === g.workspaceId)!; return { id: g.id, name: w.name, href: `/${w.organization.slug}/${w.slug}/settings`, access: g.access, revoked: !!g.revokedAt }; }) }))} />
     <ConnectedAppsPanel connections={connectedApps} />
     <McpConnectorsPanel
       available={connectorsAvailable}

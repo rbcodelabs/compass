@@ -34,6 +34,7 @@ import { ThemePreferenceControl } from "@/components/theme/theme-preference-cont
 import { WorkspaceAgentsPanel } from "@/components/settings/workspace-agents-panel";
 import { AgentActivity } from "@/components/settings/agent-activity";
 import { agentsEnabled } from "@/lib/agent-access";
+import { agentOwner, listAgentsForWorkspace } from "@/lib/agent-ownership";
 import { AnalyticsSettingsPanel } from "@/components/analytics/analytics-settings-panel";
 import { listConnections } from "@/lib/analytics/service";
 import {
@@ -198,7 +199,7 @@ export default async function SettingsPage({ params }: Props) {
   const analyticsActor = { userId: session.user.id, purpose: "USER" as const, scopeWorkspaceId: workspace.id };
   const analyticsConnections = await listConnections(analyticsActor, workspace.id);
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: workspace.id, revokedAt: null } });
-  const workspaceAgents = await prisma.agent.findMany({ where: canManageCapabilityPacks ? { OR: [{ ownerUserId: { in: rawMembers.map((m) => m.userId) } }, { id: { in: grants.map((g) => g.agentId) } }] } : { id: { in: grants.map((g) => g.agentId) } }, orderBy: { name: "asc" } });
+  const workspaceAgents = await listAgentsForWorkspace(prisma, workspace.id, { memberUserIds: rawMembers.map((m) => m.userId), grantedAgentIds: grants.map((g) => g.agentId), includeGrantable: canManageCapabilityPacks });
   const agentActivity = canManageCapabilityPacks ? await prisma.agentToolCall.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "desc" }, take: 25 }) : [];
   // Embed tokens are a public write credential, so the panel below is gated on
   // the same bar its server actions enforce (resolveWorkspaceAdmin: workspace
@@ -375,7 +376,7 @@ export default async function SettingsPage({ params }: Props) {
       </SettingsSection>
 
       <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace. Assignment does not grant access or start execution.">
-        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} enabled={agentsEnabled()} canManage={canManageCapabilityPacks} agents={workspaceAgents.map((a) => ({ id: a.id, name: a.name, status: a.status, ownerName: rawMembers.find((m) => m.userId === a.ownerUserId)?.user.name ?? rawMembers.find((m) => m.userId === a.ownerUserId)?.user.email ?? "Former member", eligible: rawMembers.some((m) => m.userId === a.ownerUserId), access: grants.find((g) => g.agentId === a.id)?.access ?? null }))} />
+        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} enabled={agentsEnabled()} canManage={canManageCapabilityPacks} agents={workspaceAgents.map((a) => { const owner = agentOwner(a); const ownerMember = owner?.type === "USER" ? rawMembers.find((m) => m.userId === owner.userId) : undefined; return { id: a.id, name: a.name, status: a.status, ownerName: owner?.type === "WORKSPACE" ? "Shared" : ownerMember?.user.name ?? ownerMember?.user.email ?? "Former member", eligible: owner?.type === "WORKSPACE" || !!ownerMember, access: grants.find((g) => g.agentId === a.id)?.access ?? null }; })} />
       </SettingsSection>
       {canManageCapabilityPacks && <SettingsSection title="Workspace agent activity"><AgentActivity rows={agentActivity.map((r) => ({ ...r, agentName: workspaceAgents.find((a) => a.id === r.agentId)?.name ?? "Former workspace agent", workspaceName: workspace.name }))} /></SettingsSection>}
 

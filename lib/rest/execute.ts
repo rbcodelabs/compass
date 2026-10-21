@@ -1,5 +1,6 @@
 import getPrisma from "@/lib/db"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
+import { findAgentById, isUserOwnedBy, isWorkspaceOwned } from "@/lib/agent-ownership"
 import { assertOrgAdminBySlug, assertOrgMemberBySlug, assertScoringModelAccess, assertWorkspaceAdmin, assertWorkspaceMember, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { decodeCursor, decodeOrderedCursor, encodeCursor, encodeOrderedCursor, type OrderedCursorPayload } from "@/lib/rest/cursor"
 import type { RestAuthorizationPolicy, RestRoute } from "@/lib/rest/registry"
@@ -544,7 +545,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "updateDoc": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await updateDoc({ docId: id, ...(body as unknown as Omit<Parameters<typeof updateDoc>[0], "docId">) }))) }
     case "prepareDocImageUpload": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await prepareDocImageUploadTool({ workspaceId, filename: String(body.filename), fileType: String(body.fileType), fileSize: Number(body.fileSize) }))) }
     case "listDocVersions": { await assertDocWorkspace(prisma, id, workspaceId); return listPage(`doc-versions:${workspaceId}:${id}`, input.query, (cursor, take) => prisma.docVersion.findMany({ where: { docId: id, ...cursorWhere(cursor) }, select: { id: true, docId: true, label: true, createdByName: true, createdAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
-    case "createDocVersion": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await createDocVersion({ docId: id, label: body.label as string | undefined, authorName: await restActorName(prisma, actor), expectedRevision: body.expectedRevision as string | undefined, operationId: body.operationId as string | undefined }))) }
+    case "createDocVersion": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await createDocVersion({ docId: id, label: body.label as string | undefined, authorName: await restActorName(prisma, actor, workspaceId), expectedRevision: body.expectedRevision as string | undefined, operationId: body.operationId as string | undefined }))) }
     case "getDocVersion": { await assertDocVersionWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getDocVersion({ versionId: id }))) }
     case "restoreDocVersion": { await assertDocVersionWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await restoreDocVersion({ versionId: id, expectedRevision: body.expectedRevision as string | undefined, operationId: body.operationId as string | undefined }))) }
     case "listDocComments": { await assertDocWorkspace(prisma, id, workspaceId); return listPage(`doc-comments:${workspaceId}:${id}:${input.query.status ?? ""}`, input.query, (cursor, take) => prisma.docComment.findMany({ where: { docId: id, ...pick(input.query, ["status"]), ...cursorWhere(cursor) }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
@@ -571,8 +572,8 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "listReviewRequests": return listPage(`review-requests:${workspaceId}:${input.query.state ?? ""}`, input.query, (cursor, take) => prisma.reviewRequest.findMany({ where: { workspaceId, ...pick(input.query, ["state"]), ...cursorWhere(cursor) }, select: { id: true, workspaceId: true, gateType: true, subjectType: true, subjectId: true, state: true, createdAt: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
     case "getReviewRequest": { await assertReviewWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getReviewRequest({ requestId: id }))) }
     case "listSolutionPlanEntries": { await assertSolutionWorkspace(prisma, id, workspaceId); return listPage(`solution-plans:${workspaceId}:${id}`, input.query, (cursor, take) => prisma.solutionComment.findMany({ where: { solutionId: id, ...cursorWhere(cursor) }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
-    case "createSolutionPlan": { await assertSolutionWorkspace(prisma, id, workspaceId); const agent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"; return serialize(ensureTool(await addSolutionPlan({ solutionId: id, body: String(body.body), authorName: await restActorName(prisma, actor), authorType: agent ? "AGENT" : "HUMAN", source: agent ? "MCP" : "UI" }))) }
-    case "createSolutionPlanComment": { await assertSolutionWorkspace(prisma, id, workspaceId); const agent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"; return serialize(ensureTool(await addSolutionComment({ solutionId: id, body: String(body.body), authorName: await restActorName(prisma, actor), authorType: agent ? "AGENT" : "HUMAN" }))) }
+    case "createSolutionPlan": { await assertSolutionWorkspace(prisma, id, workspaceId); const agent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"; return serialize(ensureTool(await addSolutionPlan({ solutionId: id, body: String(body.body), authorName: await restActorName(prisma, actor, workspaceId), authorType: agent ? "AGENT" : "HUMAN", source: agent ? "MCP" : "UI" }))) }
+    case "createSolutionPlanComment": { await assertSolutionWorkspace(prisma, id, workspaceId); const agent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"; return serialize(ensureTool(await addSolutionComment({ solutionId: id, body: String(body.body), authorName: await restActorName(prisma, actor, workspaceId), authorType: agent ? "AGENT" : "HUMAN" }))) }
     case "getSolutionPlanEntry": { await assertSolutionPlanWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getSolutionComment({ commentId: id }))) }
     case "updateSolutionPlanEntry": { await assertSolutionPlanWorkspace(prisma, id, workspaceId); await assertWorkspaceAdmin(actor, workspaceId); return serialize(ensureTool(await updateSolutionComment({ commentId: id, body: String(body.body) }))) }
     case "deleteSolutionPlanEntry": { await assertSolutionPlanWorkspace(prisma, id, workspaceId); await assertWorkspaceAdmin(actor, workspaceId); ensureTool(await deleteSolutionComment({ commentId: id })); return undefined }
@@ -919,10 +920,17 @@ type Prisma = ReturnType<typeof getPrisma>
 function assertHumanCommentBodyEditor(actor: ReturnType<typeof getMcpActor>) {
   if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") throw new RestForbiddenError("An agent cannot edit comment bodies.")
 }
-async function restActorName(prisma: Prisma, actor: ReturnType<typeof getMcpActor>): Promise<string> {
+export async function restActorName(prisma: Prisma, actor: ReturnType<typeof getMcpActor>, workspaceId?: string): Promise<string> {
   if ((actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") && actor.agentId) {
-    const agent = await prisma.agent.findFirst({ where: { id: actor.agentId, ...(actor.userId ? { ownerUserId: actor.userId } : {}) }, select: { name: true } })
-    return agent?.name ?? "Compass agent"
+    const agent = await findAgentById(prisma, actor.agentId)
+    if (!agent) return "Compass agent"
+    // A name only for an agent this actor's user may act as. A WORKSPACE-owned agent's name is shown
+    // only in a workspace that holds a live grant for it, so a name cannot leak across workspaces.
+    if (isWorkspaceOwned(agent)) {
+      const grant = workspaceId ? await prisma.agentWorkspaceGrant.findFirst({ where: { agentId: agent.id, workspaceId, revokedAt: null }, select: { id: true } }) : null
+      return grant ? agent.name : "Compass agent"
+    }
+    return !actor.userId || isUserOwnedBy(agent, actor.userId) ? agent.name : "Compass agent"
   }
   if (actor.userId) {
     const user = await prisma.user.findFirst({ where: { id: actor.userId }, select: { name: true, email: true } })
@@ -933,7 +941,7 @@ async function restActorName(prisma: Prisma, actor: ReturnType<typeof getMcpActo
 async function restCommentAuthor(prisma: Prisma, actor: ReturnType<typeof getMcpActor>, workspaceId: string) {
   await assertWorkspaceMember(actor, workspaceId)
   const agent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"
-  return { authorId: agent ? null : actor.userId, authorName: await restActorName(prisma, actor), authorType: agent ? "AGENT" as const : "HUMAN" as const, source: agent ? "MCP" as const : "UI" as const }
+  return { authorId: agent ? null : actor.userId, authorName: await restActorName(prisma, actor, workspaceId), authorType: agent ? "AGENT" as const : "HUMAN" as const, source: agent ? "MCP" as const : "UI" as const }
 }
 async function assertCommentTargetWorkspace(targetType: string, targetId: string, workspaceId: string) {
   const target = await resolveCommentTarget(targetType as never, targetId)
