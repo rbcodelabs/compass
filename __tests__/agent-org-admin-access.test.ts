@@ -5,6 +5,7 @@ import { listAgentAccessRows } from "@/lib/agent-org-admin-access"
 function prismaWith(opts: { members: { userId: string; role: string }[]; agents: { id: string; name: string; ownerUserId: string | null; ownerType?: string; ownerWorkspaceId?: string }[]; grants: { agentId: string; grantedByUserId: string }[] }) {
   const agentFindMany = vi.fn().mockResolvedValue(opts.agents)
   const prisma = {
+    $transaction: vi.fn(),
     organizationMember: { findMany: vi.fn().mockResolvedValue(opts.members) },
     agent: { findMany: agentFindMany },
     workspace: { findMany: vi.fn().mockResolvedValue([{ id: "ws-1", name: "Platform" }]) },
