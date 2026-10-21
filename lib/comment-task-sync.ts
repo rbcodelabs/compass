@@ -77,6 +77,7 @@ async function reconcile(taskId: string): Promise<ThreadSyncResult> {
   const result: ThreadSyncResult = { resolved: [], reopened: [] }
   try {
     const prisma = getPrisma()
+    // Stays on task_links (not the TASK read flip): COMMENT links are legacy-only by design and never mirrored to entity_links.
     const links = await prisma.taskLink.findMany({ where: { taskId, linkedType: "COMMENT" }, select: { linkedId: true } })
     if (links.length === 0) return result
     const linked = await prisma.docComment.findMany({

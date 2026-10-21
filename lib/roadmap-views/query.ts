@@ -6,6 +6,7 @@
  */
 import type { Prisma } from "@prisma/client"
 import getPrisma from "@/lib/db"
+import { getTasksLinkedTo } from "@/lib/task-links-read"
 import { ROADMAP_CARD_INCLUDE, toRoadmapCardData } from "@/lib/roadmap/card-data"
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card"
 import type { TaskStatus } from "@/lib/types"
@@ -98,10 +99,7 @@ export async function loadCrossWorkspaceRoadmap(
   const truncated = rows.length > MAX_ROADMAP_ITEMS
   const page = truncated ? rows.slice(0, MAX_ROADMAP_ITEMS) : rows
 
-  const taskLinks = page.length === 0 ? [] : await db.taskLink.findMany({
-    where: { linkedType: "ROADMAP_ITEM", linkedId: { in: page.map((r) => r.id) }, task: { workspaceId: { in: workspaceIds } } },
-    select: { linkedId: true, task: { select: { status: true } } },
-  })
+  const taskLinks = page.length === 0 ? [] : await getTasksLinkedTo(db, { workspaceIds, linkedType: "ROADMAP_ITEM", linkedIds: page.map((r) => r.id) })
   const statusesByItem = new Map<string, TaskStatus[]>()
   for (const link of taskLinks) {
     const list = statusesByItem.get(link.linkedId) ?? []

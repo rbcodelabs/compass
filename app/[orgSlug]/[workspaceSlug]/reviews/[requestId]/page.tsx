@@ -1,4 +1,5 @@
 import { resolveWorkItemPage } from "@/lib/work-item-page"
+import { getTasksLinkedTo } from "@/lib/task-links-read"
 import { notFound } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
@@ -102,10 +103,7 @@ export default async function ReviewRequestPage({ params, searchParams }: { para
   const decidedForFollowUp = isTracked ? revision.decisions[0] : undefined
   const [followUpLinks, assigneeOptions] = decidedForFollowUp
     ? await Promise.all([
-        prisma.taskLink.findMany({
-          where: { linkedType: "DECISION", linkedId: requestId },
-          select: { task: { select: { id: true, title: true, status: true } } },
-        }),
+        getTasksLinkedTo(prisma, { workspaceIds: [request.workspaceId], linkedType: "DECISION", linkedIds: [requestId], unscopedLegacy: true }),
         canEditArtifacts ? eligibleTaskAssignees(request.workspaceId) : Promise.resolve([]),
       ])
     : [[], []]

@@ -113,6 +113,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   const [taskLinks, subtaskCounts] = taskIds.length === 0
     ? [[], []]
     : await Promise.all([
+        // Stays on task_links (not the TASK read flip): the rows carry the legacy link id the UI passes to unlinkTask, and COMMENT links are legacy-only.
         prisma.taskLink.findMany({ where: { taskId: { in: taskIds } }, orderBy: { createdAt: "asc" } }),
         prisma.task.groupBy({
           by: ["parentTaskId"],

@@ -187,6 +187,7 @@ export async function linkTask(
   const prisma = getPrisma();
   const task = await requireTask(taskId);
   await validateTaskLink(task.workspaceId, linkedType, linkedId);
+  // Stays on task_links (not the TASK read flip): idempotency check before a write, returns the legacy row.
   const existing = await prisma.taskLink.findFirst({ where: { taskId, linkedType, linkedId } });
   if (existing) {
     revalidatePath(revalidatePathStr);
@@ -204,6 +205,7 @@ export async function unlinkTask(linkId: string, revalidatePathStr: string) {
   const prisma = getPrisma();
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
+  // Stays on task_links (not the TASK read flip): looks the legacy row up by id to delete it.
   const link = await prisma.taskLink.findUnique({ where: { id: linkId }, select: { id: true, taskId: true, linkedType: true, linkedId: true } });
   if (!link) throw new Error("Not found");
   const task = await requireTask(link.taskId);

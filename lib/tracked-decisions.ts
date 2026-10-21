@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { getLinkedTargetIds } from "@/lib/task-links-read"
 import getPrisma from "@/lib/db"
 
 // Re-exported (not redefined) so this stays the single source of truth for
@@ -242,6 +243,14 @@ async function linkedRequestIds(prisma: ReturnType<typeof getPrisma>, requestIds
 }
 
 /**
+ * The display-listing form of linkedRequestIds (the "awaiting follow-through" lens): follows the TASK read-mode flag. The
+ * recordDecisionNoAction guard keeps the legacy linkedRequestIds above on purpose: it decides a write, so it reads the source of truth.
+ */
+function linkedRequestIdsForListing(prisma: ReturnType<typeof getPrisma>, workspaceId: string, requestIds: string[]): Promise<Set<string>> {
+  return getLinkedTargetIds(prisma, { workspaceIds: [workspaceId], linkedType: "DECISION", linkedIds: requestIds, unscopedLegacy: true })
+}
+
+/**
  * Decided-but-not-followed-through decisions: state DECIDED, not explicitly
  * closed with "no action needed", and no DECISION-type TaskLink pointing at
  * them. This workspace's decision volume is small (dozens, not thousands),
@@ -258,7 +267,7 @@ async function listAwaitingFollowThrough(prisma: ReturnType<typeof getPrisma>, w
     orderBy: { updatedAt: "desc" },
     take: MAX_CANDIDATES,
   })
-  const linked = await linkedRequestIds(prisma, candidates.map((request) => request.id))
+  const linked = await linkedRequestIdsForListing(prisma, workspaceId, candidates.map((request) => request.id))
   const requests = candidates.filter((request) => !linked.has(request.id))
   const total = requests.length
   return { requests: requests.slice((page - 1) * pageSize, page * pageSize), total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) }
@@ -279,6 +288,7 @@ export async function recordDecisionNoAction(input: { workspaceId: string; reque
   if (!request) throw new TrackedDecisionError("REQUEST_NOT_FOUND", "The decision was not found.")
   if (request.state !== "DECIDED") throw new TrackedDecisionError("NOT_DECIDED", "Only a decided decision can be closed as no action needed.")
   if (request.noActionAt) throw new TrackedDecisionError("ALREADY_CLOSED", "This decision was already closed as no action needed.")
+  // Stays on task_links (not the TASK read flip): this guard decides a write, so it reads the source of truth.
   const linked = await linkedRequestIds(prisma, [request.id])
   if (linked.has(request.id)) throw new TrackedDecisionError("HAS_LINKED_WORK", "This decision already has follow-up work linked to it. Unlink it first if it truly needs no action.")
   return prisma.reviewRequest.update({
