@@ -576,7 +576,8 @@ async function main(): Promise<void> {
   )
 
   const baseOptions: Options = {
-    model: "claude-sonnet-5",
+    // A named cloud agent may pick its own model; the host validates the value (lib/agent-harness.ts agentModelForHarness).
+    model: process.env.AGENT_MODEL?.trim() || "claude-sonnet-5",
     // Compass's own MCP catalog, reached AS the acting user, plus this turn's
     // connectors. Built above.
     mcpServers,
