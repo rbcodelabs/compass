@@ -84,3 +84,18 @@
   pointer-events: auto;
   white-space: nowrap;
 }
+
+/* Semantic zoom, driven by data-band on the root (see chain-graph-view.tsx). Dot band: no labels. */
+.chain-graph .cg-label,
+.chain-graph .cg-detail {
+  display: none;
+}
+.chain-graph [data-band="label"] .cg-label--key {
+  display: flex;
+}
+.chain-graph [data-band="full"] .cg-label {
+  display: flex;
+}
+.chain-graph [data-band="full"] .cg-detail {
+  display: block;
+}

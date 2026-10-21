@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { groupAnchors, hashUnit, layoutGraph, type LayoutNode } from "@/lib/chain-graph/layout"
+import { defaultTicks, groupAnchors, hashUnit, layoutGraph, type LayoutNode } from "@/lib/chain-graph/layout"
 import { syntheticChainGraph } from "@/lib/chain-graph/synthetic"
 
 const toLayout = (n: number) => {
   const g = syntheticChainGraph(n)
-  const nodes: LayoutNode[] = g.nodes.map((x) => ({ key: x.key, groupId: x.objectiveId ?? "none", radius: 14 }))
+  const nodes: LayoutNode[] = g.nodes.map((x) => ({ key: x.key, groupId: x.objectiveId ?? "none", radius: 22 }))
   const edges = g.edges.map((e) => ({ from: e.from, to: e.to }))
   return { nodes, edges }
 }
@@ -56,11 +56,36 @@ describe("layoutGraph", () => {
     expect(near.length / nodes.length).toBeGreaterThan(0.9)
   })
 
+  it("still separates groups at 1,000 nodes with the reduced tick budget", () => {
+    const { nodes, edges } = toLayout(1000)
+    const p = layoutGraph(nodes, edges)
+    const centroid = new Map<string, { x: number; y: number; n: number }>()
+    for (const n of nodes) {
+      const c = centroid.get(n.groupId) ?? { x: 0, y: 0, n: 0 }
+      const pt = p.get(n.key)!
+      centroid.set(n.groupId, { x: c.x + pt.x, y: c.y + pt.y, n: c.n + 1 })
+    }
+    const cs = [...centroid.entries()].map(([id, c]) => [id, c.x / c.n, c.y / c.n] as const)
+    const nearest = (n: LayoutNode) => {
+      const pt = p.get(n.key)!
+      return cs.reduce((best, c) => (Math.hypot(pt.x - c[1], pt.y - c[2]) < Math.hypot(pt.x - best[1], pt.y - best[2]) ? c : best))[0]
+    }
+    expect(nodes.filter((n) => nearest(n) === n.groupId).length / nodes.length).toBeGreaterThan(0.9)
+  })
+
   it("places distinct anchors per group", () => {
     const { nodes } = toLayout(200)
     const a = groupAnchors(nodes)
     const pts = [...a.values()].map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
     expect(new Set(pts).size).toBe(pts.length)
+  })
+})
+
+describe("defaultTicks", () => {
+  it("shrinks the settle budget as the graph grows", () => {
+    expect(defaultTicks(100)).toBe(300)
+    expect(defaultTicks(600)).toBe(200)
+    expect(defaultTicks(1500)).toBe(120)
   })
 })
 

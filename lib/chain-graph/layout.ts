@@ -22,7 +22,15 @@ export type LayoutOptions = {
 }
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
-const DEFAULT_TICKS = 300
+/**
+ * Settle budget by size. The simulation runs on the main thread (a worker is a later phase), and cost grows with nodes x ticks
+ * (about 1.7 s for 1,000 nodes at 300 ticks), so larger graphs get fewer ticks.
+ */
+export function defaultTicks(nodeCount: number): number {
+  if (nodeCount <= 400) return 300
+  if (nodeCount <= 800) return 200
+  return 120
+}
 
 /** FNV-1a, mapped to [0, 1). Stable across runs and platforms. */
 export function hashUnit(input: string, salt = 0): number {
@@ -53,7 +61,7 @@ export function groupAnchors(nodes: readonly LayoutNode[]): Map<string, Point> {
   const anchors = new Map<string, Point>()
   let travelled = 0
   order.forEach((id, i) => {
-    const cloud = 38 * Math.sqrt(sizes.get(id) ?? 1) + 40
+    const cloud = 52 * Math.sqrt(sizes.get(id) ?? 1) + 40
     // Radius grows with the cumulative cloud area so far (sum of previous clouds), keeping spacing proportional to size.
     const radius = i === 0 ? 0 : Math.sqrt(travelled) * 1.9
     const angle = i * GOLDEN_ANGLE
@@ -100,19 +108,19 @@ export function layoutGraph(nodes: readonly LayoutNode[], edges: readonly Layout
   const simulation = forceSimulation<SimNode>(sim)
     .randomSource(seededRandom(0x5eed))
     .stop()
-    .force("charge", forceManyBody<SimNode>().strength(-70).theta(0.9).distanceMax(500))
+    .force("charge", forceManyBody<SimNode>().strength(-110).theta(0.9).distanceMax(500))
     .force(
       "link",
       forceLink<SimNode, (typeof links)[number]>(links)
         .id((d) => d.key)
-        .distance(52)
+        .distance(70)
         .strength(0.25),
     )
     .force("collide", forceCollide<SimNode>((d) => d.radius + 4).strength(0.9))
     .force("x", forceX<SimNode>((d) => anchors.get(d.groupId)!.x).strength(0.09))
     .force("y", forceY<SimNode>((d) => anchors.get(d.groupId)!.y).strength(0.09))
 
-  simulation.tick(options.ticks ?? DEFAULT_TICKS)
+  simulation.tick(options.ticks ?? defaultTicks(nodes.length))
 
   for (const node of sim) result.set(node.key, { x: Math.round((node.x ?? 0) * 100) / 100, y: Math.round((node.y ?? 0) * 100) / 100 })
   return result

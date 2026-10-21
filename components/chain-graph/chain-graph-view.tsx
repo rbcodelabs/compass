@@ -22,7 +22,7 @@ import { chainNodeTypes, type ChainRFNode, type ClusterRFNode } from "./chain-gr
 import { ChainGraphUiContext, type ChainGraphUi } from "./chain-graph-context"
 import { clusterKey, defaultCollapsed, listGroups, projectGraph, type ClusterProjection } from "@/lib/chain-graph/cluster"
 import { layoutGraph, type LayoutNode, type Point } from "@/lib/chain-graph/layout"
-import { seriesForGroupIndex, TYPE_LABEL } from "@/lib/chain-graph/presentation"
+import { seriesForGroupIndex, TYPE_LABEL, zoomBand } from "@/lib/chain-graph/presentation"
 import { indexGraph, traceChain } from "@/lib/chain-graph/trace"
 import { CHAIN_NODE_TYPES, type ChainGraph, type ChainNodeType, type GroupBy } from "@/lib/chain-graph/types"
 
@@ -44,7 +44,7 @@ type View = { groupBy: GroupBy; collapsed: ReadonlySet<string>; hiddenTypes: Rea
 type Computed = { projection: ClusterProjection; positions: ReadonlyMap<string, Point> }
 
 const GROUP_BY_LABEL: Record<GroupBy, string> = { objective: "Objective", type: "Type", status: "Status" }
-const NODE_RADIUS = 14
+const NODE_RADIUS = 22
 
 function layoutNodesOf(projection: ClusterProjection): LayoutNode[] {
   return projection.nodes.map((v) => ({
@@ -226,11 +226,19 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
     [selectedRep, traced, hideUnrelated, matches, pinned, select, toggleGroup],
   )
 
-  // Counter-scale cloud labels with a CSS variable, written outside React so zooming never re-renders them.
+  // Counter-scale cloud labels and set the semantic-zoom band on the root, both written outside React so zooming never re-renders nodes.
   useEffect(() => {
     const el = rootRef.current
     if (!el) return
-    const apply = (zoom: number) => el.style.setProperty("--cg-inv-zoom", String(1 / Math.max(zoom, 0.05)))
+    let band = ""
+    const apply = (zoom: number) => {
+      el.style.setProperty("--cg-inv-zoom", String(1 / Math.max(zoom, 0.05)))
+      const next = zoomBand(zoom)
+      if (next !== band) {
+        band = next
+        el.dataset.band = next
+      }
+    }
     apply(storeApi.getState().transform[2])
     return storeApi.subscribe((s) => apply(s.transform[2]))
   }, [storeApi])

@@ -2,21 +2,22 @@
 
 /**
  * React Flow node renderers for the chain graph: one per object (shape encodes type, fill is the type's series colour,
- * a corner badge plus text at full detail encode status) and one for a collapsed cluster. Memoised, and the zoom band is
- * a quantised store selector, so nodes re-render only when the band changes, not on every wheel tick.
+ * a corner badge plus text at full detail encode status) and one for a collapsed cluster. Memoised.
+ *
+ * Semantic zoom is CSS-driven: the view writes the quantised band to `data-band` on the graph root (outside React, only when
+ * the band changes) and these nodes always render their label markup, shown or hidden by CSS. A band change therefore costs
+ * a style recalc instead of re-rendering every node (the first spike re-rendered ~1,000 nodes per band change: ~100 ms hitches).
  */
 import { memo, useContext } from "react"
-import { Handle, Position, useStore, type Node, type NodeProps, type ReactFlowState } from "@xyflow/react"
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react"
 import { cn } from "@/lib/utils"
 import { ChainGraphUiContext } from "./chain-graph-context"
 import type { ClusterNode, MemberNode } from "@/lib/chain-graph/cluster"
-import { seriesForGroupIndex, showsLabel, TYPE_LABEL, TYPE_SERIES, zoomBand, type ZoomBand } from "@/lib/chain-graph/presentation"
+import { seriesForGroupIndex, showsLabel, TYPE_LABEL, TYPE_SERIES } from "@/lib/chain-graph/presentation"
 import type { ChainNodeType, StatusTone } from "@/lib/chain-graph/types"
 
 export type ChainRFNode = Node<{ visible: MemberNode }, "chain">
 export type ClusterRFNode = Node<{ visible: ClusterNode }, "cluster">
-
-const selectBand = (s: ReactFlowState): ZoomBand => zoomBand(s.transform[2])
 
 /** A distinct silhouette per type so type is never colour-only. */
 const SHAPE: Record<ChainNodeType, string> = {
@@ -61,10 +62,10 @@ function useDim(key: string, isCluster: boolean) {
 
 const ChainNodeView = memo(function ChainNodeView({ data }: NodeProps<ChainRFNode>) {
   const { node } = data.visible
-  const band = useStore(selectBand)
   const { ui, selected, className } = useDim(node.key, false)
   const size = node.type === "OBJECTIVE" ? 24 : 18
-  const labelled = showsLabel(band, node.type)
+  // Which types keep a label at the middle band is decided by showsLabel (lib/chain-graph/presentation.ts); CSS applies it.
+  const keyLabel = showsLabel("label", node.type)
   const pinned = ui.pinned.has(node.key)
 
   return (
@@ -92,23 +93,18 @@ const ChainNodeView = memo(function ChainNodeView({ data }: NodeProps<ChainRFNod
         }}
       />
       <span className={cn("absolute -right-1 -top-1 size-2 rounded-full border border-surface-app", TONE_BADGE[node.tone])} aria-hidden />
-      {labelled && (
-        <span className="absolute left-full top-1/2 ml-2 flex max-w-[200px] -translate-y-1/2 flex-col rounded-sm bg-surface-app/85 px-1 leading-tight">
-          <span className="truncate text-xs font-medium text-text-primary">{node.title}</span>
-          {band === "full" && (
-            <span className="truncate text-[10px] text-text-subtle">
-              {TYPE_LABEL[node.type]} · <span className={TONE_TEXT[node.tone]}>{humanize(node.status)}</span>
-            </span>
-          )}
+      <span className={cn("cg-label absolute left-full top-1/2 ml-2 -translate-y-1/2 flex-col rounded-sm bg-surface-app/85 px-1 leading-tight", keyLabel && "cg-label--key")}>
+        <span className="max-w-[200px] truncate text-xs font-medium text-text-primary">{node.title}</span>
+        <span className="cg-detail max-w-[200px] truncate text-[10px] text-text-subtle">
+          {TYPE_LABEL[node.type]} · <span className={TONE_TEXT[node.tone]}>{humanize(node.status)}</span>
         </span>
-      )}
+      </span>
     </div>
   )
 })
 
 const ClusterNodeView = memo(function ClusterNodeView({ data }: NodeProps<ClusterRFNode>) {
   const cluster = data.visible
-  const band = useStore(selectBand)
   const { ui, selected, className } = useDim(cluster.key, true)
   const size = Math.round(26 + 5 * Math.sqrt(cluster.count))
   const series = seriesForGroupIndex(cluster.groupIndex)
@@ -142,20 +138,16 @@ const ClusterNodeView = memo(function ClusterNodeView({ data }: NodeProps<Cluste
       >
         {cluster.count}
       </div>
-      {showsLabel(band, "cluster") && (
-        <span className="absolute left-1/2 top-full mt-1 flex -translate-x-1/2 flex-col items-center rounded-sm bg-surface-app/85 px-1 leading-tight">
-          <span className="max-w-[180px] truncate text-xs font-medium text-text-primary">{cluster.label}</span>
-          {band === "full" && (
-            <span className="text-[10px] text-text-subtle">
-              {dominant.map(([tone, n]) => (
-                <span key={tone} className={cn("mr-1", TONE_TEXT[tone])}>
-                  {n} {tone}
-                </span>
-              ))}
+      <span className="cg-label cg-label--key absolute left-1/2 top-full mt-1 -translate-x-1/2 flex-col items-center rounded-sm bg-surface-app/85 px-1 leading-tight">
+        <span className="max-w-[180px] truncate text-xs font-medium text-text-primary">{cluster.label}</span>
+        <span className="cg-detail text-[10px] text-text-subtle">
+          {dominant.map(([tone, n]) => (
+            <span key={tone} className={cn("mr-1", TONE_TEXT[tone])}>
+              {n} {tone}
             </span>
-          )}
+          ))}
         </span>
-      )}
+      </span>
     </div>
   )
 })
