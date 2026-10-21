@@ -35,7 +35,10 @@ import { WorkspaceAgentsPanel } from "@/components/settings/workspace-agents-pan
 import { AgentActivity } from "@/components/settings/agent-activity";
 import { invokedByForAgentActivity } from "@/lib/agent-activity";
 import { agentsEnabled } from "@/lib/agent-access";
-import { agentOwner, listAgentsForWorkspace } from "@/lib/agent-ownership";
+import type { AgentInvokePolicy } from "@/lib/agent-ownership";
+import { agentKind, agentOwner, canInvokeAgent, isUserOwnedBy, listAgentsForWorkspace } from "@/lib/agent-ownership";
+import { getStoredDefaultAgentIds } from "@/lib/agent-defaults";
+import { allowedAgentModels } from "@/lib/agent-models";
 import { AnalyticsSettingsPanel } from "@/components/analytics/analytics-settings-panel";
 import { listConnections } from "@/lib/analytics/service";
 import {
@@ -201,6 +204,8 @@ export default async function SettingsPage({ params }: Props) {
   const analyticsConnections = await listConnections(analyticsActor, workspace.id);
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: workspace.id, revokedAt: null } });
   const workspaceAgents = await listAgentsForWorkspace(prisma, workspace.id, { memberUserIds: rawMembers.map((m) => m.userId), grantedAgentIds: grants.map((g) => g.agentId), includeGrantable: canManageCapabilityPacks });
+  const storedDefaults = await getStoredDefaultAgentIds(prisma, { userId: session.user.id, workspaceId: workspace.id });
+  const usableAgentIds = new Set((await Promise.all(workspaceAgents.map(async (a) => (agentKind(a) === "CLOUD" && a.status === "ACTIVE" && grants.some((g) => g.agentId === a.id) && (await canInvokeAgent(prisma, { userId: session.user!.id }, a)) ? a.id : null)))).filter((id): id is string => !!id));
   const agentActivity = canManageCapabilityPacks ? await prisma.agentToolCall.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "desc" }, take: 25 }) : [];
   const agentActivityInvokedBy = await invokedByForAgentActivity(agentActivity);
   // Embed tokens are a public write credential, so the panel below is gated on
@@ -377,8 +382,25 @@ export default async function SettingsPage({ params }: Props) {
         />
       </SettingsSection>
 
-      <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace. Assignment does not grant access or start execution.">
-        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} enabled={agentsEnabled()} canManage={canManageCapabilityPacks} agents={workspaceAgents.map((a) => { const owner = agentOwner(a); const ownerMember = owner?.type === "USER" ? rawMembers.find((m) => m.userId === owner.userId) : undefined; return { id: a.id, name: a.name, status: a.status, ownerName: owner?.type === "WORKSPACE" ? "Shared" : ownerMember?.user.name ?? ownerMember?.user.email ?? "Former member", eligible: owner?.type === "WORKSPACE" || !!ownerMember, access: grants.find((g) => g.agentId === a.id)?.access ?? null }; })} />
+      <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace, including cloud agents that run inside Compass. Assignment does not grant access.">
+        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} enabled={agentsEnabled()} canManage={canManageCapabilityPacks} models={allowedAgentModels()} agents={workspaceAgents.map((a) => {
+          const owner = agentOwner(a);
+          const ownerMember = owner?.type === "USER" ? rawMembers.find((m) => m.userId === owner.userId) : undefined;
+          // Editing follows canManageAgent: the owner of a personal agent, an administrator for a shared one. Only editors receive the instructions.
+          const canEdit = owner?.type === "WORKSPACE" ? canManageCapabilityPacks : isUserOwnedBy(a, session.user!.id);
+          return {
+            id: a.id, name: a.name, status: a.status,
+            ownerName: owner?.type === "WORKSPACE" ? "Shared" : ownerMember?.user.name ?? ownerMember?.user.email ?? "Former member",
+            eligible: owner?.type === "WORKSPACE" || !!ownerMember,
+            access: grants.find((g) => g.agentId === a.id)?.access ?? null,
+            kind: agentKind(a), shared: owner?.type === "WORKSPACE", description: a.description ?? null,
+            ...(canEdit && agentKind(a) === "CLOUD" ? { instructions: a.instructions ?? null, model: a.model ?? null, invokePolicy: (a.invokePolicy as AgentInvokePolicy | null) ?? null } : {}),
+            canEdit: canEdit && agentKind(a) === "CLOUD",
+            canUse: usableAgentIds.has(a.id),
+            isWorkspaceDefault: storedDefaults.workspaceDefaultAgentId === a.id,
+            isMyDefault: storedDefaults.userDefaultAgentId === a.id,
+          };
+        })} />
       </SettingsSection>
       {canManageCapabilityPacks && <SettingsSection title="Workspace agent activity"><AgentActivity rows={agentActivity.map((r) => ({ ...r, invokedByName: agentActivityInvokedBy.get(r) ?? null, agentName: workspaceAgents.find((a) => a.id === r.agentId)?.name ?? "Former workspace agent", workspaceName: workspace.name }))} /></SettingsSection>}
 
