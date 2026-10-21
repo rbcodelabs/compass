@@ -363,9 +363,9 @@ export function createTenantFakePrisma() {
 
   // Docs are a modelled table (spec docs phase 2: DOC is an endpoint of DOC_SPECIFIES_SCOPE). doc-null is a row whose workspace is NULL.
   const docs: Graph[] = [
-    { id: "doc-a", workspaceId: WS_A.id, title: "A doc", docType: "STANDARD", metadata: null, parentId: null, sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },
-    { id: "doc-b", workspaceId: WS_B.id, title: "B doc", docType: "STANDARD", metadata: null, parentId: null, sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },
-    { id: "doc-null", workspaceId: null, title: "Unbackfilled doc", docType: "STANDARD", metadata: null, parentId: null, sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },
+    { id: "doc-a", workspaceId: WS_A.id, title: "A doc", docType: "STANDARD", metadata: null, storageProvider: null, parentId: null, sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },
+    { id: "doc-b", workspaceId: WS_B.id, title: "B doc", docType: "STANDARD", metadata: null, storageProvider: null, parentId: null, sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },
+    { id: "doc-null", workspaceId: null, title: "Unbackfilled doc", docType: "STANDARD", metadata: null, storageProvider: null, parentId: null, sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },
   ];
   tables.doc = docs;
   const docVersions = [

@@ -425,7 +425,7 @@ export async function createSpec(
   options: { template?: SpecTemplateVariant; label?: string } = {}
 ): Promise<{ docId: string } | { error: string }> {
   const user = await requireWorkspaceMember(workspaceId);
-  if (!isSpecScopeType(scopeType)) return { error: "A spec needs a solution or an opportunity." };
+  if (!isSpecScopeType(scopeType)) return { error: "Choose a valid scope for the spec." };
   const result = await createSpecCore(
     { workspaceId, scopeType, scopeId, template: options.template, label: options.label },
     { userId: user.id ?? null, authorName: user.name ?? user.email ?? "Unknown", source: "UI" }
