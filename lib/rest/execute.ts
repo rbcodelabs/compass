@@ -41,6 +41,8 @@ import { deleteDocComment, getDocComment, reopenDocComment, resolveDocComment, u
 import { createDocCommentCore } from "@/lib/doc-comments"
 import { prepareDocImageUploadTool } from "@/lib/doc-image-tool-handlers"
 import { documentRevision } from "@/lib/document-service"
+import { DocSyncContinuationStaleError, DocSyncDisabledError, scanDocs } from "@/lib/doc-sync-scan"
+import { SyncMutationError, createSyncDoc, deleteSyncDoc, getSyncDoc, moveSyncDoc, updateSyncDoc } from "@/lib/doc-sync-mutations"
 import { archiveArtifact, createArtifact, getArtifact, linkArtifact, linkArtifactDecision, unlinkArtifact, unlinkArtifactDecision, updateArtifact } from "@/lib/artifact-tool-handlers"
 import { getDecision, getReviewRequest, listDecisions, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
 import { addSolutionComment, addSolutionPlan, deleteSolutionComment, getSolutionComment, updateSolutionComment } from "@/lib/solution-comment-tool-handlers"
@@ -63,6 +65,10 @@ export class RestNotFoundError extends Error {}
 export class RestForbiddenError extends Error {}
 export class RestBadRequestError extends Error {}
 export class RestConflictError extends Error {}
+/** 409 with problem code `continuation_stale`: restart the snapshot without a continuation. */
+export class RestContinuationStaleError extends RestConflictError {}
+/** A stable, machine-readable problem (status + code) raised by an endpoint contract, e.g. revision_conflict. */
+export class RestTypedProblemError extends Error { constructor(public readonly status: number, public readonly code: string, message: string) { super(message) } }
 export class RestCursorError extends Error {}
 export class RestValidationError extends Error {}
 
@@ -87,6 +93,18 @@ const select = {
   opportunityScore: { id: true, opportunityId: true, scoringModelId: true, modelVersion: true, formulaSnapshot: true, rawValues: true, rawScore: true, normalizedScore: true, scoredAt: true, createdAt: true, updatedAt: true },
   solutionScore: { id: true, solutionId: true, scoringModelId: true, modelVersion: true, formulaSnapshot: true, rawValues: true, rawScore: true, normalizedScore: true, scoredAt: true, createdAt: true, updatedAt: true },
 } as const
+
+/** Flag off is a 404; the sync mutation layer's typed failures become stable problem codes. */
+async function syncRoute<T>(run: () => Promise<T>): Promise<T> {
+  try { return await run() } catch (error) {
+    if (error instanceof DocSyncDisabledError) throw new RestNotFoundError()
+    if (error instanceof SyncMutationError) {
+      if (error.status === 404) throw new RestNotFoundError()
+      throw new RestTypedProblemError(error.status, error.code, error.message)
+    }
+    throw error
+  }
+}
 
 export async function executeRestRoute(route: RestRoute, input: Input): Promise<unknown> {
   const prisma = getPrisma()
@@ -540,6 +558,20 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "markNotificationsRead": return serialize(ensureTool(await markReadTool({ workspaceId, notificationIds: body.notificationIds as string[] | undefined, all: body.all as boolean | undefined })))
 
     case "listDocs": return listPage(`docs:${workspaceId}`, input.query, async (cursor, take) => (await prisma.doc.findMany({ where: { workspaceId, ...cursorWhere(cursor) }, select: { id: true, workspaceId: true, title: true, parentId: true, icon: true, docType: true, roadmapItemId: true, revision: true, createdAt: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })).map(doc => ({ ...doc, revision: documentRevision(doc) })))
+    case "scanSyncDocs": {
+      // Flag off behaves as if the route does not exist.
+      try { return await scanDocs(workspaceId, { cursor: input.query.cursor as string | undefined, continuation: input.query.continuation as string | undefined, limit: Number(input.query.limit) }) }
+      catch (error) {
+        if (error instanceof DocSyncDisabledError) throw new RestNotFoundError()
+        if (error instanceof DocSyncContinuationStaleError) throw new RestContinuationStaleError(error.message)
+        throw error
+      }
+    }
+    case "getSyncDoc": return syncRoute(() => getSyncDoc(workspaceId, id, input.query.revision as string | undefined))
+    case "createSyncDoc": return syncRoute(() => createSyncDoc(workspaceId, { path: String(body.path), content: String(body.content), operationKey: String(body.operationKey) }))
+    case "updateSyncDoc": return syncRoute(() => updateSyncDoc(workspaceId, id, { content: String(body.content), expectedRevision: String(body.expectedRevision), operationKey: String(body.operationKey) }))
+    case "moveSyncDoc": return syncRoute(() => moveSyncDoc(workspaceId, id, { path: String(body.path), expectedRevision: String(body.expectedRevision) }))
+    case "deleteSyncDoc": { await syncRoute(() => deleteSyncDoc(workspaceId, id, String(input.query.expectedRevision))); return undefined }
     case "getDoc": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getDoc({ docId: id }))) }
     case "createDoc": { await assertDocReferences(prisma, workspaceId, body); return serialize(ensureTool(await createDoc({ workspaceId, ...(body as unknown as Omit<Parameters<typeof createDoc>[0], "workspaceId">) }))) }
     case "updateDoc": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await updateDoc({ docId: id, ...(body as unknown as Omit<Parameters<typeof updateDoc>[0], "docId">) }))) }

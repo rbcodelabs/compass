@@ -27,7 +27,8 @@ import { normalizeCanvasContent } from "@/lib/json-canvas"
 import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
 import type { DocType } from "@/lib/doc-types"
 import getPrisma from "@/lib/db"
-import { Prisma } from "@prisma/client"
+import { Prisma, type Doc } from "@prisma/client"
+import { buildTree, type DocFsNode } from "@/lib/doc-virtual-paths"
 import { createDocument, updateDocument, deleteDocument, hydrateDocument, documentRevision, DocumentError } from "@/lib/document-service"
 
 /** Cast a plain metadata object to Prisma's InputJsonValue type required for Json fields. */
@@ -40,17 +41,6 @@ export class DocFsError extends Error {
     super(message)
     this.name = "DocFsError"
   }
-}
-
-export type DocFsNode = {
-  path: string
-  docId: string
-  title: string
-  parentId: string | null
-  roadmapItemId: string | null
-  docType: DocType
-  hasChildren: boolean
-  updatedAt: Date
 }
 
 export type DocFsMutationOptions = {
@@ -79,11 +69,7 @@ function actorOpts(opts: DocFsMutationOptions) {
 }
 
 export { sanitizeTitleSegment }
-
-/** First 8 hex chars of a docId, used to disambiguate a title collision among siblings. */
-function collisionSuffix(docId: string): string {
-  return docId.replace(/-/g, "").slice(0, 8)
-}
+export type { DocFsNode }
 
 /**
  * A deterministic, syntactically-valid UUID derived from two strings. Not a
@@ -96,60 +82,6 @@ function collisionSuffix(docId: string): string {
 export function deriveOperationId(base: string, salt: string): string {
   const hex = createHash("sha256").update(`${base}:${salt}`).digest("hex")
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`
-}
-
-type DocRow = {
-  id: string
-  title: string
-  parentId: string | null
-  roadmapItemId: string | null
-  docType: string
-  updatedAt: Date
-}
-
-/** Builds every doc's path in one pass, deduping sibling title collisions deterministically. */
-function buildTree(docs: DocRow[]): DocFsNode[] {
-  const presentIds = new Set(docs.map((d) => d.id))
-  const childrenByParent = new Map<string | null, DocRow[]>()
-  for (const d of docs) {
-    const key = d.parentId && presentIds.has(d.parentId) ? d.parentId : null
-    if (!childrenByParent.has(key)) childrenByParent.set(key, [])
-    childrenByParent.get(key)!.push(d)
-  }
-
-  function segmentsFor(siblings: DocRow[]): Map<string, string> {
-    const seenCount = new Map<string, number>()
-    const segByDocId = new Map<string, string>()
-    for (const d of siblings) {
-      const base = sanitizeTitleSegment(d.title)
-      const seen = seenCount.get(base) ?? 0
-      seenCount.set(base, seen + 1)
-      segByDocId.set(d.id, seen === 0 ? base : `${base} (${collisionSuffix(d.id)})`)
-    }
-    return segByDocId
-  }
-
-  const results: DocFsNode[] = []
-  function walk(parentId: string | null, parentPath: string) {
-    const siblings = childrenByParent.get(parentId) ?? []
-    const segments = segmentsFor(siblings)
-    for (const d of siblings) {
-      const path = parentPath ? `${parentPath}/${segments.get(d.id)}` : segments.get(d.id)!
-      results.push({
-        path,
-        docId: d.id,
-        title: d.title,
-        parentId: d.parentId,
-        roadmapItemId: d.roadmapItemId,
-        docType: d.docType === "GTM_POSITIONING_BRIEF" || d.docType === "CANVAS" ? d.docType : "STANDARD",
-        hasChildren: (childrenByParent.get(d.id) ?? []).length > 0,
-        updatedAt: d.updatedAt,
-      })
-      walk(d.id, path)
-    }
-  }
-  walk(null, "")
-  return results
 }
 
 /**
@@ -197,15 +129,10 @@ export async function readPath(workspaceId: string, path: string): Promise<DocFs
 }
 
 /**
- * Reads one doc's frontmatter + body by id. Split out of `readPath` so a caller
- * that already holds the whole tree from `listPaths` (the agent turn route
- * materializing every doc) does not re-list the entire workspace once per doc.
+ * The exact file text a doc materializes as (frontmatter + body, spec §1.3). Shared with the Geode
+ * sync scan so its size/hash describe the bytes a client would actually read.
  */
-export async function readDocById(workspaceId: string, docId: string): Promise<DocFsContent | null> {
-  const prisma = getPrisma()
-  const doc = await prisma.doc.findUnique({ where: { id: docId } })
-  if (!doc || doc.workspaceId !== workspaceId) return null
-  const hydrated = await hydrateDocument(workspaceId, doc)
+export function renderDocFile(doc: Pick<Doc, "id" | "docType" | "roadmapItemId" | "metadata">, body: string | null): string {
   const userMetadata =
     doc.metadata && typeof doc.metadata === "object" && !Array.isArray(doc.metadata)
       ? (doc.metadata as Record<string, unknown>)
@@ -216,7 +143,20 @@ export async function readDocById(workspaceId: string, docId: string): Promise<D
     compass_doc_type: doc.docType,
     ...(doc.roadmapItemId ? { compass_roadmap_item_id: doc.roadmapItemId } : {}),
   }
-  const content = stringifyFrontMatter(hydrated.content ?? "", frontmatter)
+  return stringifyFrontMatter(body ?? "", frontmatter)
+}
+
+/**
+ * Reads one doc's frontmatter + body by id. Split out of `readPath` so a caller
+ * that already holds the whole tree from `listPaths` (the agent turn route
+ * materializing every doc) does not re-list the entire workspace once per doc.
+ */
+export async function readDocById(workspaceId: string, docId: string): Promise<DocFsContent | null> {
+  const prisma = getPrisma()
+  const doc = await prisma.doc.findUnique({ where: { id: docId } })
+  if (!doc || doc.workspaceId !== workspaceId) return null
+  const hydrated = await hydrateDocument(workspaceId, doc)
+  const content = renderDocFile(doc, hydrated.content)
   return { docId: doc.id, content, revision: documentRevision(doc) }
 }
 

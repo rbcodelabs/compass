@@ -16,6 +16,7 @@
 import getPrisma from "@/lib/db"
 import { Prisma } from "@prisma/client"
 import { randomUUID } from "node:crypto"
+import { changeKindFor, writeDocWithChange } from "@/lib/doc-sync"
 
 const COALESCE_WINDOW_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -92,7 +93,7 @@ export async function restoreDocVersionCore(
   const version = await prisma.docVersion.findUnique({ where: { id: versionId } })
   if (!version) return null
 
-  const doc = await prisma.doc.findUnique({ where: { id: version.docId }, select: { id: true } })
+  const doc = await prisma.doc.findUnique({ where: { id: version.docId }, select: { id: true, workspaceId: true } })
   if (!doc) return null
 
   // Snapshot the doc's CURRENT state first (uncoalesced -- always writes,
@@ -103,7 +104,10 @@ export async function restoreDocVersionCore(
     label: "Before restore",
   })
 
-  const restored = await prisma.doc.update({
+  const restored = await writeDocWithChange(
+    prisma,
+    { workspaceId: doc.workspaceId, docId: version.docId, kind: (_result, before) => (before ? changeKindFor(before, { title: version.title }) : "UPSERT") },
+    (client) => client.doc.update({
     where: { id: version.docId },
     data: {
       title: version.title,
@@ -116,7 +120,7 @@ export async function restoreDocVersionCore(
       revision: randomUUID(),
       updatedAt: new Date(),
     },
-  })
+  }))
 
   return { id: restored.id, title: restored.title, docId: version.docId, restoredFrom: version.createdAt }
 }

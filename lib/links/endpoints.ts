@@ -16,6 +16,7 @@
  * One explicit branch per type: model delegates are never looked up by a computed name.
  */
 import type { AppTransactionClient } from "@/lib/db"
+import { isDocsSyncEnabled, lockCounter, recordDocChange } from "@/lib/doc-sync"
 import type { LinkableEntityType } from "@/lib/entity-types"
 import type { LinkEndpoint } from "@/lib/links/registry"
 
@@ -120,7 +121,15 @@ export async function touchEndpoint(tx: Tx, type: LinkableEntityType, workspaceI
       await tx.task.updateMany({ where: { id, workspaceId }, data: { updatedAt: new Date() } })
       return true
     case "DOC":
+      // Lock order is counter first, then doc row. Only a pre-revision doc is logged, so only then pay for the lock.
+      const pre = isDocsSyncEnabled() ? await tx.doc.findFirst({ where: { id, workspaceId }, select: { revision: true } }) : null
+      if (pre && pre.revision === null) await lockCounter(tx, workspaceId)
       await tx.doc.updateMany({ where: { id, workspaceId }, data: { updatedAt: new Date() } })
+      // The touch changes no content, title, parent or stored revision, so a doc with a revision needs no sync row.
+      // A pre-revision doc derives its revision from updatedAt (`legacy:<updatedAt>`), which the touch did change.
+      // Not wrapped in withDocChangeRetry: this runs inside the link service's own transaction, which already
+      // retries 40001 / OC000 / OC001 / P2034 (a retry must re-run the whole outer transaction).
+      if (pre && pre.revision === null) await recordDocChange(tx, workspaceId, id, "UPSERT")
       return true
     case "ARTIFACT":
       await tx.artifact.updateMany({ where: { id, workspaceId }, data: { updatedAt: new Date() } })

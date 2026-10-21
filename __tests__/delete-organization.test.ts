@@ -50,6 +50,8 @@ const mockWorkspaceSequence = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
 const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) };
+const mockDocChange = { deleteMany: vi.fn(), findMany: vi.fn().mockResolvedValue([]) };
+const mockDocChangeCounter = { deleteMany: vi.fn() };
 const mockArtifact = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactRevision = { findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() };
 const mockArtifactLink = { deleteMany: vi.fn() };
@@ -145,6 +147,8 @@ const mockPrisma = {
   workspaceSequence: mockWorkspaceSequence,
   workspaceMember: mockWorkspaceMember,
   squad: mockSquad,
+  docChange: mockDocChange,
+  docChangeCounter: mockDocChangeCounter,
   doc: mockDoc,
   artifact: mockArtifact,
   artifactRevision: mockArtifactRevision,
@@ -316,6 +320,8 @@ beforeEach(() => {
     mockWorkspaceSequence.deleteMany,
     mockWorkspaceMember.deleteMany,
     mockSquad.deleteMany,
+    mockDocChange.deleteMany,
+    mockDocChangeCounter.deleteMany,
     mockDoc.deleteMany,
     mockArtifact.updateMany,
     mockArtifact.deleteMany,
@@ -329,6 +335,7 @@ beforeEach(() => {
   ]) {
     fn.mockResolvedValue({ count: 1 });
   }
+  mockDocChange.findMany.mockResolvedValue([]);
 });
 
 describe("deleteOrganization", () => {
@@ -605,6 +612,7 @@ describe("deleteOrganization", () => {
     // ── Members / squads / docs / workspace ──
     expect(mockWorkspaceMember.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockSquad.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockDocChange.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "ws-1" }, take: 500 }));
     expect(mockDoc.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockWorkspace.delete).toHaveBeenCalledWith({ where: { id: "ws-1" } });
 

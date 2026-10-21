@@ -12,7 +12,7 @@
  *   agents always see the full document as they'd expect.
  */
 
-import getPrisma from "@/lib/db"
+import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { safeMatter, stringifyFrontMatter } from "@/lib/safe-matter"
 import { Prisma } from "@prisma/client"
@@ -25,6 +25,7 @@ import { createDocument, documentRevision, hydrateDocument, updateDocument } fro
 import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
 import { isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { documentMcpActor } from "@/lib/document-mcp-actor"
+import { changeKindFor, isDocsSyncEnabled, noteDocWriteWhileSyncOff, writeDocWithChange } from "@/lib/doc-sync"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
 import type { DocType } from "@/lib/doc-types"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
@@ -346,7 +347,14 @@ export async function createDoc({
     }
   const doc = pilot || operationId
     ? await createDocument(data, { operationId, ...documentMcpActor() })
-    : await withSequenceTransaction(prisma, async (tx) => tx.doc.create({ data: { ...data, ...(await allocateOneSeq(tx, workspaceId, "doc")), revision: randomUUID() } }))
+    : isDocsSyncEnabled()
+      // Sync on: writeDocWithChange opens the (retried, counter-locked) transaction, so `client` is a real transaction and can allocate the seq.
+      ? await writeDocWithChange(prisma, { workspaceId, kind: "UPSERT", before: null }, async (client) => {
+          const tx = client as AppTransactionClient
+          return tx.doc.create({ data: { ...data, ...(await allocateOneSeq(tx, workspaceId, "doc")), revision: randomUUID() } })
+        })
+      : (await noteDocWriteWhileSyncOff(prisma, workspaceId),
+        await withSequenceTransaction(prisma, async (tx) => tx.doc.create({ data: { ...data, ...(await allocateOneSeq(tx, workspaceId, "doc")), revision: randomUUID() } })))
   await followAfterCreate({ model: "doc", workspaceId, row: { id: doc.id }, actor: async () => mcpFollowActor() ?? { type: "SYSTEM", id: null } })
 
   // This used to emit a *relative* `/{org}/{ws}/docs` — the docs index, not the
@@ -402,7 +410,7 @@ export async function updateDoc({
 
   const existing = await prisma.doc.findUnique({
     where: { id: docId },
-    select: { title: true, storageProvider: true, docType: true },
+    select: { title: true, storageProvider: true, docType: true, workspaceId: true, parentId: true },
   })
   if (!existing) {
     return fail(`Doc "${docId}" not found.`)
@@ -442,10 +450,11 @@ export async function updateDoc({
     ...(body !== undefined ? { content: body } : {}),
     ...(metadata !== undefined ? { metadata: metadata === null ? Prisma.JsonNull : toJsonInput(metadata) } : {}),
     ...(icon !== undefined ? { icon: icon.trim() } : {}),
-  }, { expectedRevision, operationId, ...documentMcpActor() }) : await prisma.doc.update({
-    where: { id: docId },
-    data: { ...updateData, revision: randomUUID() },
-  })
+  }, { expectedRevision, operationId, ...documentMcpActor() }) : await writeDocWithChange(
+    prisma,
+    { workspaceId: existing.workspaceId, docId, kind: (_result, before) => (before ? changeKindFor(before, updateData) : "UPSERT") },
+    (client) => client.doc.update({ where: { id: docId }, data: { ...updateData, revision: randomUUID() } }),
+  )
 
   return ok(
     `**Doc updated**\n` +
@@ -480,7 +489,7 @@ export async function updateDocMetadata({
 
   const existing = await prisma.doc.findUnique({
     where: { id: docId },
-    select: { title: true, storageProvider: true },
+    select: { title: true, storageProvider: true, workspaceId: true },
   })
   if (!existing) {
     return fail(`Doc "${docId}" not found.`)
@@ -488,10 +497,11 @@ export async function updateDocMetadata({
 
   const updated = existing.storageProvider === "GEODE"
     ? await updateDocument(docId, { metadata: toJsonInput(metadata) }, { expectedRevision, operationId, ...documentMcpActor() })
-    : await prisma.doc.update({
-    where: { id: docId },
-    data: { metadata: toJsonInput(metadata), revision: randomUUID(), updatedAt: new Date() },
-  })
+    : await writeDocWithChange(
+      prisma,
+      { workspaceId: existing.workspaceId, docId, kind: "UPSERT" },
+      (client) => client.doc.update({ where: { id: docId }, data: { metadata: toJsonInput(metadata), revision: randomUUID(), updatedAt: new Date() } }),
+    )
 
   return ok(
     `**Doc metadata updated**\n` +

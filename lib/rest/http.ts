@@ -2,7 +2,7 @@ import { ZodError } from "zod"
 import { apiResourceUri, scopesSatisfy } from "@/lib/oauth/constants"
 import { validateProgrammaticAuth } from "@/lib/programmatic-auth"
 import { McpAuthzError, runWithMcpActor, type McpActor } from "@/lib/mcp-authz"
-import { executeRestRoute, RestBadRequestError, RestConflictError, RestCursorError, RestForbiddenError, RestNotFoundError, RestValidationError } from "@/lib/rest/execute"
+import { executeRestRoute, RestBadRequestError, RestConflictError, RestContinuationStaleError, RestCursorError, RestForbiddenError, RestNotFoundError, RestTypedProblemError, RestValidationError } from "@/lib/rest/execute"
 import { matchRestRoute, type RestMethod } from "@/lib/rest/registry"
 import { resolveRestRefs } from "@/lib/rest/work-item-refs"
 import { AnalyticsError } from "@/lib/analytics/providers"
@@ -69,6 +69,8 @@ export async function handleRestRequest(request: Request, method: RestMethod): P
     if (error instanceof RestCursorError) return problem(request, 400, "invalid_cursor", "Bad Request", error.message)
     if (error instanceof RestBadRequestError) return problem(request, 400, "invalid_request", "Bad Request", error.message)
     if (error instanceof RestValidationError) return problem(request, 422, "validation_failed", "Unprocessable Content", error.message)
+    if (error instanceof RestTypedProblemError) return problem(request, error.status, error.code, error.status === 422 ? "Unprocessable Content" : "Conflict", error.message)
+    if (error instanceof RestContinuationStaleError) return problem(request, 409, "continuation_stale", "Conflict", error.message)
     if (error instanceof RestConflictError) return problem(request, 409, "conflict", "Conflict", error.message)
     if (error instanceof RestResponseValidationError) return problem(request, 500, "internal_error", "Internal Server Error", "The request could not be completed.")
     console.error("REST API request failed", { operationId: matched.route.operationId, error })

@@ -204,7 +204,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "099_agent_owner_user_nullable": "9587f0d2c28ca41c92a4217c068966639aac72f722cca8943180751940ab231d",
   // entity_links data half for Solution <-> Key Result (ADR phase 4): no DDL, EXPLICIT-ONLY, the work is the hook
   // (lib/migrations/entity-links-solution-key-result-backfill.ts). Shares the numeric prefix 098 with the agent migration; the name is unique.
-  "098_entity_links_backfill_solution_key_result": "795934c658367a187f400eec3068e1e946d13ecf37b71daf758fb1c87ba4697f" // gitleaks:allow -- reviewed public SHA256, not a credential
+  "098_entity_links_backfill_solution_key_result": "795934c658367a187f400eec3068e1e946d13ecf37b71daf758fb1c87ba4697f", // gitleaks:allow -- reviewed public SHA256, not a credential
+  // Doc change log + seq counter for Geode doc sync (spike): two new empty tables and a unique (workspace_id, seq) async index.
+  // No backfill. Renumbered from 092 to 100 when main took 092..099. Digest recorded from the shipped SQL; please review it.
+  "100_doc_changes": "5cbe2a75a00c8ff6fcf61cd72ffc864878d0beda7699c66317ff8cbd500b4405",
 };
 
 /**
@@ -301,6 +304,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "098_entity_links_backfill_solution_key_result": {
     "lib/migrations/entity-links-solution-key-result-backfill.ts": "e61171d6fd196cacbb79708691aef6610a3adf6340c189a516738db498a7665d", // gitleaks:allow -- reviewed public SHA256, not a credential
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 100 postcondition (doc_changes table shape and the unique (workspace_id, seq) index valid and ready before the receipt).
+  "100_doc_changes": {
+    "lib/migrations/doc-changes.ts": "d651023594aa8a852ec8afba6539225d285a6bb075db48540a61ab7f094b4448",
   },
 };
 

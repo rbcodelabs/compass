@@ -21,7 +21,7 @@ import { synthesisSchema } from "@/lib/research-analysis"
 import { normalizeAllowedOrigins } from "@/lib/embed-sources"
 
 export type ApiScope = "api:read" | "api:write"
-export type RestMethod = "GET" | "POST" | "PATCH" | "DELETE"
+export type RestMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 export type RestAuthorizationPolicy = "authenticated-actor" | "accessible-workspaces" | "org-member" | "workspace-member" | "workspace-writer" | "human-member" | "human-admin" | "human-org-admin" | "scoring-admin"
 
 export type RestRoute = {
@@ -52,7 +52,7 @@ const taskLinkPath = z.object({
 const read = (operationId: string, path: string, summary: string, responseSchema: z.ZodType, pathSchema: z.ZodType = z.object({}), querySchema?: z.ZodType, authorizationPolicy: RestAuthorizationPolicy = "workspace-member"): RestRoute => ({
   method: "GET", path, operationId, summary, scope: "api:read", authorizationPolicy, pathSchema, querySchema, responseSchema,
 })
-const write = (method: "POST" | "PATCH" | "DELETE", operationId: string, path: string, summary: string, responseSchema: z.ZodType, pathSchema: z.ZodType, bodySchema?: z.ZodType, status?: number, authorizationPolicy: RestAuthorizationPolicy = "workspace-writer"): RestRoute => ({
+const write = (method: "POST" | "PUT" | "PATCH" | "DELETE", operationId: string, path: string, summary: string, responseSchema: z.ZodType, pathSchema: z.ZodType, bodySchema?: z.ZodType, status?: number, authorizationPolicy: RestAuthorizationPolicy = "workspace-writer"): RestRoute => ({
   method, path, operationId, summary, scope: "api:write", authorizationPolicy, pathSchema, bodySchema, responseSchema, status,
 })
 const opportunityCreate = z.object({ title: z.string().trim().min(1).max(255), description: z.string().trim().nullable().optional(), customerSegment: z.string().trim().max(255).nullable().optional(), status: opportunitySchema.shape.status.exclude(["ARCHIVED"]).optional(), squadId: uuid.nullable().optional(), linkedKeyResultId: uuid.nullable().optional() }).strict()
@@ -161,6 +161,20 @@ const notificationResponse = z.object({ id: uuid, kind: z.string(), subjectType:
 const notificationCollection = z.object({ items: z.array(notificationResponse), nextCursor: z.string().nullable(), unreadCount: z.number().int().nonnegative(), unreadOverflow: z.boolean() }).strict()
 const followResponse = z.object({ subjectType: z.enum(ACTIVE_FOLLOWABLE_SUBJECT_TYPES), subjectId: uuid, status: z.enum(["followed", "already_following", "unfollowed"]) }).strict()
 const markReadResponse = z.object({ marked: z.number().int().nonnegative() }).strict()
+const docSyncScanQuery = z.object({ cursor: z.string().max(2048).optional(), continuation: z.string().max(4096).optional(), limit: z.coerce.number().int().min(1).max(1000).default(500) }).strict()
+const docSyncEntry = z.object({ id: uuid, path: z.string(), kind: z.enum(["file", "folder", "tombstone"]), revision: z.string().nullable(), size: z.number().int().nonnegative(), hash: z.string().nullable() }).strict()
+const docSyncSkipped = z.object({ id: uuid, path: z.string(), error: z.string() }).strict()
+const docSyncScanResponse = z.object({ mode: z.enum(["snapshot", "delta"]), status: z.enum(["complete", "partial"]), cursor: z.string().nullable(), hasMore: z.boolean(), continuation: z.string().nullable(), entries: z.array(docSyncEntry), skipped: z.array(docSyncSkipped), reason: z.enum(["unreadable-doc", "unreadable-doc-blocks-cursor"]).nullable() }).strict()
+const syncEntry = z.object({ id: uuid, path: z.string(), kind: z.enum(["file", "folder"]), revision: z.string(), size: z.number().int().nonnegative(), hash: z.string(), operationKey: z.string().optional() }).strict()
+const syncDocRead = syncEntry.omit({ operationKey: true }).extend({ content: z.string() }).strict()
+const syncOperationKey = z.string().trim().min(1).max(200)
+const syncRevision = z.string().min(1).max(200)
+const syncContent = z.string().max(5_000_000)
+const syncCreateBody = z.object({ path: z.string().min(1).max(1000), content: syncContent, operationKey: syncOperationKey }).strict()
+const syncUpdateBody = z.object({ content: syncContent, expectedRevision: syncRevision, operationKey: syncOperationKey }).strict()
+const syncMoveBody = z.object({ path: z.string().min(1).max(1000), expectedRevision: syncRevision }).strict()
+const syncDeleteQuery = z.object({ expectedRevision: syncRevision }).strict()
+const syncReadQuery = z.object({ revision: syncRevision.optional() }).strict()
 const docSummary = z.object({ id: uuid, workspaceId: uuid, title: z.string(), parentId: uuid.nullable(), icon: z.string().nullable(), docType: z.enum(DOC_TYPES), roadmapItemId: uuid.nullable(), revision: z.union([z.string(), z.number()]), createdAt: timestamp, updatedAt: timestamp }).strict()
 const docCreateResponse = z.object({ id: uuid, title: z.string(), url: z.string().url().nullable(), revision: z.union([z.string(), z.number()]), storageProvider: z.string() }).strict()
 const docUpdateResponse = z.object({ id: uuid, title: z.string(), icon: z.string().nullable(), updatedAt: timestamp, revision: z.union([z.string(), z.number()]) }).strict()
@@ -370,6 +384,13 @@ export const REST_ROUTES: readonly RestRoute[] = [
 
   read("listDocs", "/api/v1/workspaces/{workspaceId}/docs", "List documents", collectionOf(docSummary), workspacePath, cursorQuery.strict()),
   write("POST", "createDoc", "/api/v1/workspaces/{workspaceId}/docs", "Create a document with an idempotent operation token", docCreateResponse, workspacePath, docCreate, 201),
+  read("scanSyncDocs", "/api/v1/workspaces/{workspaceId}/sync/docs/scan", "Scan STANDARD docs for Geode sync: snapshot or delta since an opaque cursor (requires DOCS_SYNC_ENABLED)", docSyncScanResponse, workspacePath, docSyncScanQuery),
+  // Geode doc sync, step 2. All 404 while DOCS_SYNC_ENABLED is off. The scan route above MUST stay first so "scan" is never read as an {id}.
+  read("getSyncDoc", "/api/v1/workspaces/{workspaceId}/sync/docs/{id}", "Read one synced doc: frontmatter + body exactly as the scan's size/hash are computed", syncDocRead, itemPath, syncReadQuery),
+  write("POST", "createSyncDoc", "/api/v1/workspaces/{workspaceId}/sync/docs", "Create a synced doc at a .md path; idempotent on operationKey", syncEntry, workspacePath, syncCreateBody, 201),
+  write("PUT", "updateSyncDoc", "/api/v1/workspaces/{workspaceId}/sync/docs/{id}", "Replace a synced doc's content; requires expectedRevision, idempotent on operationKey", syncEntry, itemPath, syncUpdateBody),
+  write("POST", "moveSyncDoc", "/api/v1/workspaces/{workspaceId}/sync/docs/{id}/move", "Move or rename a synced doc to a new .md path; requires expectedRevision", syncEntry, itemPath, syncMoveBody),
+  { ...write("DELETE", "deleteSyncDoc", "/api/v1/workspaces/{workspaceId}/sync/docs/{id}", "Delete a leaf synced doc; requires expectedRevision (query)", z.undefined(), itemPath, undefined, 204), querySchema: syncDeleteQuery },
   read("getDoc", "/api/v1/workspaces/{workspaceId}/docs/{id}", "Get a document", docDetailResponse, itemPath),
   write("PATCH", "updateDoc", "/api/v1/workspaces/{workspaceId}/docs/{id}", "Update a document with required optimistic concurrency and operation tokens", docUpdateResponse, itemPath, docPatch),
   write("POST", "prepareDocImageUpload", "/api/v1/workspaces/{workspaceId}/docs/{id}/image-uploads", "Prepare a private document image upload", docImagePreparation, itemPath, docUpload, 201),
