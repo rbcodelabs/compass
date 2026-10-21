@@ -1,6 +1,7 @@
 import getPrisma from "@/lib/db"
 import { searchHelp } from "@/lib/docs"
 import { entityPath, type EntityLinkType } from "@/lib/entity-links"
+import { displayIdFromRow, parseDisplayId } from "@/lib/work-item-ids"
 
 export const WORKSPACE_SEARCH_GROUPS = [
   { type: "opportunity", label: "Opportunities" },
@@ -18,6 +19,8 @@ export type WorkspaceSearchType = (typeof WORKSPACE_SEARCH_GROUPS)[number]["type
 export type WorkspaceSearchItem = {
   type: WorkspaceSearchType
   id: string
+  /** `TASK-12`; absent for help articles and for rows that are not numbered yet. */
+  displayId?: string | null
   title: string
   context?: string
   href: string
@@ -58,50 +61,85 @@ export async function searchWorkspace(input: {
 }): Promise<WorkspaceSearchResponse> {
   const prisma = getPrisma()
   const titleFilter = { contains: input.query, mode: "insensitive" as const }
-  const directWhere = { workspaceId: input.workspaceId, title: titleFilter }
-  const queryOptions = { take: 5, orderBy: [{ title: "asc" as const }, { id: "asc" as const }] }
+  const seq = { seqPrefix: true, seqNumber: true } as const
 
-  const [opportunities, solutions, experiments, roadmapItems, tasks, feedback, docs] =
-    await Promise.all([
-      prisma.opportunity.findMany({ ...queryOptions, where: directWhere, select: { id: true, title: true, status: true } }),
-      prisma.solution.findMany({
-        ...queryOptions,
-        where: { workspaceId: input.workspaceId, title: titleFilter },
-        select: { id: true, title: true, status: true, opportunity: { select: { id: true, title: true } } },
-      }),
-      prisma.experiment.findMany({ ...queryOptions, where: directWhere, select: { id: true, title: true, status: true, conclusion: true } }),
-      prisma.roadmapItem.findMany({ ...queryOptions, where: directWhere, select: { id: true, title: true, horizon: true, status: true } }),
-      prisma.task.findMany({ ...queryOptions, where: directWhere, select: { id: true, title: true, status: true, priority: true } }),
-      prisma.feedbackItem.findMany({ ...queryOptions, where: directWhere, select: { id: true, title: true, type: true, status: true } }),
-      prisma.doc.findMany({ ...queryOptions, where: directWhere, select: { id: true, title: true, docType: true } }),
-    ])
+  // One loader per searchable type, so the same select serves the title search and the exact-ID lookup.
+  type Where = Record<string, unknown>
+  type Options = { take: number; orderBy?: Array<Record<string, "asc">> }
+  const loaders = {
+    opportunity: (where: Where, o: Options) => prisma.opportunity.findMany({ ...o, where, select: { id: true, title: true, status: true, ...seq } }),
+    solution: (where: Where, o: Options) => prisma.solution.findMany({ ...o, where, select: { id: true, title: true, status: true, ...seq, opportunity: { select: { id: true, title: true } } } }),
+    experiment: (where: Where, o: Options) => prisma.experiment.findMany({ ...o, where, select: { id: true, title: true, status: true, conclusion: true, ...seq } }),
+    roadmapItem: (where: Where, o: Options) => prisma.roadmapItem.findMany({ ...o, where, select: { id: true, title: true, horizon: true, status: true, ...seq } }),
+    task: (where: Where, o: Options) => prisma.task.findMany({ ...o, where, select: { id: true, title: true, status: true, priority: true, ...seq } }),
+    feedback: (where: Where, o: Options) => prisma.feedbackItem.findMany({ ...o, where, select: { id: true, title: true, type: true, status: true, ...seq } }),
+    doc: (where: Where, o: Options) => prisma.doc.findMany({ ...o, where, select: { id: true, title: true, docType: true, ...seq } }),
+  }
+  type LoaderType = keyof typeof loaders
+  const directWhere = { workspaceId: input.workspaceId, title: titleFilter }
+  const queryOptions: Options = { take: 5, orderBy: [{ title: "asc" }, { id: "asc" }] }
+
+  // Typing a display ID (`TASK-12`, `opp-7`) finds that row even though no title contains it. The exact hit leads its
+  // group; the title matches that follow skip it, so it never shows twice.
+  const exact = parseDisplayId(input.query)
+  const exactType = exact && Object.hasOwn(loaders, exact.type) ? (exact.type as LoaderType) : null
+  const exactHit = exact && exactType
+    ? loaders[exactType]({ workspaceId: input.workspaceId, seqPrefix: exact.prefix, seqNumber: exact.number }, { take: 1 })
+    : Promise.resolve([])
+
+  const [opportunities, solutions, experiments, roadmapItems, tasks, feedback, docs, exactRows] = await Promise.all([
+    loaders.opportunity(directWhere, queryOptions),
+    loaders.solution(directWhere, queryOptions),
+    loaders.experiment(directWhere, queryOptions),
+    loaders.roadmapItem(directWhere, queryOptions),
+    loaders.task(directWhere, queryOptions),
+    loaders.feedback(directWhere, queryOptions),
+    loaders.doc(directWhere, queryOptions),
+    exactHit,
+  ])
+
+  const lead = <T extends { id: string }>(type: LoaderType, rows: T[]): T[] => {
+    if (type !== exactType || exactRows.length === 0) return rows
+    const hit = exactRows[0] as unknown as T
+    return [hit, ...rows.filter((row) => row.id !== hit.id)].slice(0, 5)
+  }
 
   const helpResults = searchHelp(input.query, 5)
 
   // Every non-help result routes through the shared builder, so a search hit
   // and the URL an MCP tool hands a human always land on the same screen.
-  const href = (type: EntityLinkType, id: string, opportunityId?: string) =>
-    entityPath({ orgSlug: input.orgSlug, workspaceSlug: input.workspaceSlug, type, id, opportunityId })
+  type Seq = { seqPrefix: string | null; seqNumber: number | null }
+  const item = <R extends { id: string; title: string } & Seq>(type: LoaderType, row: R, ctx: string | undefined, opportunityId?: string): WorkspaceSearchItem => {
+    const displayId = displayIdFromRow(type, row)
+    return {
+      type,
+      id: row.id,
+      displayId,
+      title: row.title,
+      context: ctx,
+      href: entityPath({ orgSlug: input.orgSlug, workspaceSlug: input.workspaceSlug, type, id: row.id, displayId, opportunityId }),
+    }
+  }
 
   return {
     query: input.query,
     groups: [
-      { type: "opportunity", label: "Opportunities", items: opportunities.map((item) => ({ type: "opportunity", id: item.id, title: item.title, context: item.status, href: href("opportunity", item.id) })) },
-      { type: "solution", label: "Solutions", items: solutions.map((item) => ({ type: "solution", id: item.id, title: item.title, context: context(item.status, item.opportunity.title), href: href("solution", item.id, item.opportunity.id) })) },
-      { type: "experiment", label: "Experiments", items: experiments.map((item) => ({ type: "experiment", id: item.id, title: item.title, context: context(item.status, item.conclusion), href: href("experiment", item.id) })) },
-      { type: "roadmapItem", label: "Roadmap", items: roadmapItems.map((item) => ({ type: "roadmapItem", id: item.id, title: item.title, context: context(item.horizon, item.status), href: href("roadmapItem", item.id) })) },
-      { type: "task", label: "Tasks", items: tasks.map((item) => ({ type: "task", id: item.id, title: item.title, context: context(item.status, item.priority), href: href("task", item.id) })) },
-      { type: "feedback", label: "Feedback", items: feedback.map((item) => ({ type: "feedback", id: item.id, title: item.title, context: context(item.type, item.status), href: href("feedback", item.id) })) },
-      { type: "doc", label: "Docs", items: docs.map((item) => ({ type: "doc", id: item.id, title: item.title, context: item.docType, href: href("doc", item.id) })) },
+      { type: "opportunity", label: "Opportunities", items: lead("opportunity", opportunities).map((row) => item("opportunity", row, row.status)) },
+      { type: "solution", label: "Solutions", items: lead("solution", solutions).map((row) => item("solution", row, context(row.status, row.opportunity.title), row.opportunity.id)) },
+      { type: "experiment", label: "Experiments", items: lead("experiment", experiments).map((row) => item("experiment", row, context(row.status, row.conclusion))) },
+      { type: "roadmapItem", label: "Roadmap", items: lead("roadmapItem", roadmapItems).map((row) => item("roadmapItem", row, context(row.horizon, row.status))) },
+      { type: "task", label: "Tasks", items: lead("task", tasks).map((row) => item("task", row, context(row.status, row.priority))) },
+      { type: "feedback", label: "Feedback", items: lead("feedback", feedback).map((row) => item("feedback", row, context(row.type, row.status))) },
+      { type: "doc", label: "Docs", items: lead("doc", docs).map((row) => item("doc", row, row.docType)) },
       {
         type: "help",
         label: "User Guide",
-        items: helpResults.map((item) => ({
-          type: "help",
-          id: `${item.slug}:${item.anchor ?? "root"}`,
-          title: item.title,
-          context: context(item.heading ?? item.section),
-          href: `/help/${item.slug}${item.anchor ? "#" + item.anchor : ""}`,
+        items: helpResults.map((row) => ({
+          type: "help" as const,
+          id: `${row.slug}:${row.anchor ?? "root"}`,
+          title: row.title,
+          context: context(row.heading ?? row.section),
+          href: `/help/${row.slug}${row.anchor ? "#" + row.anchor : ""}`,
         })),
       },
     ],

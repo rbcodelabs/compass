@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { commentLinkTitles } from "@/lib/comment-link-titles";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
@@ -86,7 +87,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       },
       orderBy: [{ status: "asc" }, { sortOrder: "asc" }],
       select: {
-        id: true, title: true, description: true, status: true, priority: true,
+        id: true, seqPrefix: true, seqNumber: true, title: true, description: true, status: true, priority: true,
         sortOrder: true, squadId: true, assigneeUserId: true, assigneeAgentId: true, ownerName: true,
         storyPoints: true, dueDate: true, iteration: true, parentTaskId: true,
       },
@@ -142,6 +143,10 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   const titleById = new Map<string, string>();
   await Promise.all(
     Array.from(linksByType.entries()).map(async ([linkedType, ids]) => {
+      if (linkedType === "COMMENT") {
+        for (const [key, title] of await commentLinkTitles(workspace.id, ids)) titleById.set(key, title);
+        return;
+      }
       const delegate = LINK_MODEL[linkedType as keyof typeof LINK_MODEL];
       if (!delegate) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -182,7 +187,13 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       )}
     >
       {view === "list" ? (
-        <TaskListView tasks={tasks} orgSlug={orgSlug} workspaceSlug={workspaceSlug} members={members} />
+        <TaskListView
+          tasks={tasks}
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          members={members}
+          readOnly={workspace.isReadOnly}
+        />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           {/*

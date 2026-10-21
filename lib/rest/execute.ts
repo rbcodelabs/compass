@@ -1,9 +1,11 @@
 import getPrisma from "@/lib/db"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
+import { findAgentById, isUserOwnedBy, isWorkspaceOwned } from "@/lib/agent-ownership"
 import { assertOrgAdminBySlug, assertOrgMemberBySlug, assertScoringModelAccess, assertWorkspaceAdmin, assertWorkspaceMember, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { decodeCursor, decodeOrderedCursor, encodeCursor, encodeOrderedCursor, type OrderedCursorPayload } from "@/lib/rest/cursor"
 import type { RestAuthorizationPolicy, RestRoute } from "@/lib/rest/registry"
-import { createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
+import { BatchRequestError, createOpportunityBatch, createSolutionBatch } from "@/lib/opportunity-batch-create"
+import { createOpportunity, programmaticBatchContext, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
 import { createSolution, updateSolution } from "@/lib/solution-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
 import { createAssumption, deleteAssumption, updateAssumption } from "@/lib/assumption-tool-handlers"
@@ -57,6 +59,7 @@ import { getDocRaw, getHelpTopic, searchHelp as searchHelpDocs } from "@/lib/doc
 import { createWorkspaceInOrg } from "@/lib/workspace-service"
 import { RoadmapPromotionConflict } from "@/lib/roadmap-promotion"
 import { thinkingModelForMcp } from "@/lib/thinking-model/mcp"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export class RestNotFoundError extends Error {}
 export class RestForbiddenError extends Error {}
@@ -73,17 +76,17 @@ type Input = { params: Record<string, string>; query: Record<string, unknown>; b
 
 const select = {
   workspace: { id: true, organizationId: true, slug: true, name: true, description: true, createdAt: true, updatedAt: true },
-  opportunity: { id: true, workspaceId: true, title: true, description: true, customerSegment: true, status: true, squadId: true, linkedKeyResultId: true, createdAt: true, updatedAt: true },
-  solution: { id: true, workspaceId: true, opportunityId: true, title: true, description: true, status: true, createdAt: true, updatedAt: true },
-  assumption: { id: true, solutionId: true, title: true, description: true, riskLevel: true, status: true, createdAt: true, updatedAt: true },
-  feedback: { id: true, workspaceId: true, opportunityId: true, title: true, description: true, type: true, status: true, voteCount: true, tags: true, submitterName: true, submitterEmail: true, createdAt: true, updatedAt: true },
-  task: { id: true, workspaceId: true, squadId: true, parentTaskId: true, title: true, description: true, status: true, priority: true, assigneeUserId: true, assigneeAgentId: true, ownerName: true, storyPoints: true, dueDate: true, iteration: true, createdAt: true, updatedAt: true },
-  roadmap: { id: true, workspaceId: true, squadId: true, title: true, description: true, horizon: true, status: true, isPrivate: true, startDate: true, endDate: true, solutionId: true, keyResultId: true, opportunityId: true, experimentId: true, feedbackId: true, createdAt: true, updatedAt: true },
+  opportunity: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, title: true, description: true, customerSegment: true, status: true, squadId: true, linkedKeyResultId: true, createdAt: true, updatedAt: true },
+  solution: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, opportunityId: true, title: true, description: true, status: true, createdAt: true, updatedAt: true },
+  assumption: { id: true, seqPrefix: true, seqNumber: true, solutionId: true, title: true, description: true, riskLevel: true, status: true, createdAt: true, updatedAt: true },
+  feedback: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, opportunityId: true, title: true, description: true, type: true, status: true, voteCount: true, tags: true, submitterName: true, submitterEmail: true, createdAt: true, updatedAt: true },
+  task: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, squadId: true, parentTaskId: true, title: true, description: true, status: true, priority: true, assigneeUserId: true, assigneeAgentId: true, ownerName: true, storyPoints: true, dueDate: true, iteration: true, createdAt: true, updatedAt: true },
+  roadmap: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, squadId: true, title: true, description: true, horizon: true, status: true, isPrivate: true, startDate: true, endDate: true, solutionId: true, keyResultId: true, opportunityId: true, experimentId: true, feedbackId: true, createdAt: true, updatedAt: true },
   cycle: { id: true, workspaceId: true, title: true, startDate: true, endDate: true, status: true, createdAt: true, updatedAt: true },
-  objective: { id: true, workspaceId: true, cycleId: true, squadId: true, parentKeyResultId: true, title: true, description: true, owner: true, status: true, sortOrder: true, createdAt: true, updatedAt: true },
-  keyResult: { id: true, objectiveId: true, title: true, target: true, current: true, unit: true, sortOrder: true, createdAt: true, updatedAt: true },
+  objective: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, cycleId: true, squadId: true, parentKeyResultId: true, title: true, description: true, owner: true, status: true, sortOrder: true, createdAt: true, updatedAt: true },
+  keyResult: { id: true, seqPrefix: true, seqNumber: true, objectiveId: true, title: true, target: true, current: true, unit: true, sortOrder: true, createdAt: true, updatedAt: true },
   checkIn: { id: true, keyResultId: true, value: true, note: true, createdAt: true },
-  experiment: { id: true, workspaceId: true, squadId: true, assumptionId: true, title: true, hypothesis: true, method: true, killCondition: true, status: true, startDate: true, endDate: true, conclusion: true, conclusionReason: true, createdAt: true, updatedAt: true },
+  experiment: { id: true, seqPrefix: true, seqNumber: true, workspaceId: true, squadId: true, assumptionId: true, title: true, hypothesis: true, method: true, killCondition: true, status: true, startDate: true, endDate: true, conclusion: true, conclusionReason: true, createdAt: true, updatedAt: true },
   experimentResult: { id: true, experimentId: true, note: true, metric: true, value: true, createdAt: true },
   squad: { id: true, workspaceId: true, name: true, color: true, createdAt: true },
   scoringModel: { id: true, organizationId: true, name: true, description: true, status: true, formulaType: true, version: true, createdAt: true, updatedAt: true, metrics: { select: { key: true, label: true, description: true, minValue: true, maxValue: true, weight: true, direction: true, order: true }, orderBy: { order: "asc" as const } } },
@@ -275,6 +278,18 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "listOpportunities": return listPage(`opportunities:${workspaceId}:${filters(input.query, ["status", "squadId"])}`, input.query, (cursor, take) => prisma.opportunity.findMany({ where: { workspaceId, ...pick(input.query, ["status", "squadId"]), ...cursorWhere(cursor) }, select: select.opportunity, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
     case "getOpportunity": return serialize(found(await prisma.opportunity.findFirst({ where: { id, workspaceId }, select: select.opportunity })))
     case "createOpportunity": { await validateOpportunityRefs(prisma, workspaceId, body); const result = ensureTool(await createOpportunity({ workspaceId, title: String(body.title), description: nullable(body.description), customerSegment: nullable(body.customerSegment), status: body.status as "EXPLORING" | "VALIDATING" | "PRIORITIZED" | "ACTIVE" | undefined, squadId: nullable(body.squadId), keyResultId: nullable(body.linkedKeyResultId), source: "API" })); return serialize(found(await prisma.opportunity.findFirst({ where: { workspaceId, id: String((result as { id: string }).id) }, select: select.opportunity }))) }
+    case "createOpportunitiesBatch": case "createSolutionsBatch": {
+      const items = (body.items ?? []) as Record<string, unknown>[]
+      try {
+        const context = programmaticBatchContext(workspaceId, "API")
+        if (route.operationId === "createOpportunitiesBatch") return await createOpportunityBatch(prisma, context, items as never)
+        // Parents are verified against workspaceId inside each item's transaction; a foreign id reads as NOT_FOUND.
+        return await createSolutionBatch(prisma, context, items.map(({ opportunityId, ...rest }) => ({ ...rest, parent: { id: String(opportunityId) } })) as never)
+      } catch (error) {
+        if (error instanceof BatchRequestError) throw new RestValidationError(error.message)
+        throw error
+      }
+    }
     case "updateOpportunity": {
       await validateOpportunityRefs(prisma, workspaceId, body)
       const existing = await prisma.opportunity.findFirst({ where: { id, workspaceId }, select: { id: true } }); if (!existing) throw new RestNotFoundError()
@@ -368,7 +383,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "createObjective": {
       await validateObjectiveRefs(prisma, workspaceId, body)
       const scope = found(await prisma.workspace.findFirst({ where: { id: workspaceId }, select: { id: true } }))
-      return serialize(await prisma.objective.create({ data: { workspaceId: scope.id, cycleId: nullable(body.cycleId) ?? null, squadId: nullable(body.squadId) ?? null, parentKeyResultId: nullable(body.parentKeyResultId) ?? null, title: String(body.title), description: nullable(body.description), owner: nullable(body.owner), source: "API" }, select: select.objective }))
+      return serialize(await withSequenceTransaction(prisma, async (tx) => tx.objective.create({ data: { workspaceId: scope.id, ...(await allocateOneSeq(tx, scope.id, "objective")), cycleId: nullable(body.cycleId) ?? null, squadId: nullable(body.squadId) ?? null, parentKeyResultId: nullable(body.parentKeyResultId) ?? null, title: String(body.title), description: nullable(body.description), owner: nullable(body.owner), source: "API" }, select: select.objective })))
     }
     case "updateObjective": {
       if (!(await prisma.objective.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError()
@@ -389,7 +404,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "deleteObjective": { if (!(await prisma.objective.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError(); ensureTool(await deleteObjective({ objectiveId: id })); return undefined }
     case "listKeyResults": { await requireObjective(prisma, workspaceId, id); return listPage(`key-results:${workspaceId}:${id}`, input.query, (cursor, take) => prisma.keyResult.findMany({ where: { objectiveId: id, objective: { workspaceId }, ...cursorWhere(cursor) }, select: select.keyResult, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
     case "getKeyResult": return serialize(found(await prisma.keyResult.findFirst({ where: { id, objective: { workspaceId } }, select: select.keyResult })))
-    case "createKeyResult": { await requireObjective(prisma, workspaceId, id); return serialize(await prisma.keyResult.create({ data: { objectiveId: id, title: String(body.title), target: Number(body.target), unit: nullable(body.unit), source: "API" }, select: select.keyResult })) }
+    case "createKeyResult": { await requireObjective(prisma, workspaceId, id); return serialize(await withSequenceTransaction(prisma, async (tx) => tx.keyResult.create({ data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "keyResult")), objectiveId: id, title: String(body.title), target: Number(body.target), unit: nullable(body.unit), source: "API" }, select: select.keyResult }))) }
     case "updateKeyResult": { if (!(await prisma.keyResult.findFirst({ where: { id, objective: { workspaceId } }, select: { id: true } }))) throw new RestNotFoundError(); ensureTool(await updateKeyResult({ keyResultId: id, ...body })); return serialize(found(await prisma.keyResult.findFirst({ where: { id, objective: { workspaceId } }, select: select.keyResult }))) }
     case "deleteKeyResult": { if (!(await prisma.keyResult.findFirst({ where: { id, objective: { workspaceId } }, select: { id: true } }))) throw new RestNotFoundError(); ensureTool(await deleteKeyResult({ keyResultId: id })); return undefined }
     case "listCheckIns": { await requireKeyResult(prisma, workspaceId, id); return listPage(`check-ins:${workspaceId}:${id}`, input.query, (cursor, take) => prisma.checkIn.findMany({ where: { keyResultId: id, keyResult: { objective: { workspaceId } }, ...cursorWhere(cursor) }, select: select.checkIn, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
@@ -405,7 +420,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
 
     case "listExperiments": return listPage(`experiments:${workspaceId}:${filters(input.query, ["status", "squadId", "assumptionId"])}`, input.query, (cursor, take) => prisma.experiment.findMany({ where: { workspaceId, ...pick(input.query, ["status", "squadId", "assumptionId"]), ...cursorWhere(cursor) }, select: select.experiment, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
     case "getExperiment": return serialize(found(await prisma.experiment.findFirst({ where: { id, workspaceId }, select: select.experiment })))
-    case "createExperiment": { await validateExperimentRefs(prisma, workspaceId, body); return serialize(await prisma.experiment.create({ data: { workspaceId, squadId: nullable(body.squadId) ?? null, assumptionId: nullable(body.assumptionId) ?? null, title: String(body.title), hypothesis: String(body.hypothesis), method: String(body.method), killCondition: String(body.killCondition), source: "API" }, select: select.experiment })) }
+    case "createExperiment": { await validateExperimentRefs(prisma, workspaceId, body); return serialize(await withSequenceTransaction(prisma, async (tx) => tx.experiment.create({ data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "experiment")), squadId: nullable(body.squadId) ?? null, assumptionId: nullable(body.assumptionId) ?? null, title: String(body.title), hypothesis: String(body.hypothesis), method: String(body.method), killCondition: String(body.killCondition), source: "API" }, select: select.experiment }))) }
     case "updateExperiment": {
       if (!(await prisma.experiment.findFirst({ where: { id, workspaceId }, select: { id: true } }))) throw new RestNotFoundError()
       await validateExperimentRefs(prisma, workspaceId, body)
@@ -562,7 +577,7 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "updateDoc": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await updateDoc({ docId: id, ...(body as unknown as Omit<Parameters<typeof updateDoc>[0], "docId">) }))) }
     case "prepareDocImageUpload": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await prepareDocImageUploadTool({ workspaceId, filename: String(body.filename), fileType: String(body.fileType), fileSize: Number(body.fileSize) }))) }
     case "listDocVersions": { await assertDocWorkspace(prisma, id, workspaceId); return listPage(`doc-versions:${workspaceId}:${id}`, input.query, (cursor, take) => prisma.docVersion.findMany({ where: { docId: id, ...cursorWhere(cursor) }, select: { id: true, docId: true, label: true, createdByName: true, createdAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
-    case "createDocVersion": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await createDocVersion({ docId: id, label: body.label as string | undefined, authorName: await restActorName(prisma, actor), expectedRevision: body.expectedRevision as string | undefined, operationId: body.operationId as string | undefined }))) }
+    case "createDocVersion": { await assertDocWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await createDocVersion({ docId: id, label: body.label as string | undefined, authorName: await restActorName(prisma, actor, workspaceId), expectedRevision: body.expectedRevision as string | undefined, operationId: body.operationId as string | undefined }))) }
     case "getDocVersion": { await assertDocVersionWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getDocVersion({ versionId: id }))) }
     case "restoreDocVersion": { await assertDocVersionWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await restoreDocVersion({ versionId: id, expectedRevision: body.expectedRevision as string | undefined, operationId: body.operationId as string | undefined }))) }
     case "listDocComments": { await assertDocWorkspace(prisma, id, workspaceId); return listPage(`doc-comments:${workspaceId}:${id}:${input.query.status ?? ""}`, input.query, (cursor, take) => prisma.docComment.findMany({ where: { docId: id, ...pick(input.query, ["status"]), ...cursorWhere(cursor) }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
@@ -589,8 +604,8 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
     case "listReviewRequests": return listPage(`review-requests:${workspaceId}:${input.query.state ?? ""}`, input.query, (cursor, take) => prisma.reviewRequest.findMany({ where: { workspaceId, ...pick(input.query, ["state"]), ...cursorWhere(cursor) }, select: { id: true, workspaceId: true, gateType: true, subjectType: true, subjectId: true, state: true, createdAt: true, updatedAt: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take }))
     case "getReviewRequest": { await assertReviewWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getReviewRequest({ requestId: id }))) }
     case "listSolutionPlanEntries": { await assertSolutionWorkspace(prisma, id, workspaceId); return listPage(`solution-plans:${workspaceId}:${id}`, input.query, (cursor, take) => prisma.solutionComment.findMany({ where: { solutionId: id, ...cursorWhere(cursor) }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take })) }
-    case "createSolutionPlan": { await assertSolutionWorkspace(prisma, id, workspaceId); const agent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"; return serialize(ensureTool(await addSolutionPlan({ solutionId: id, body: String(body.body), authorName: await restActorName(prisma, actor), authorType: agent ? "AGENT" : "HUMAN", source: agent ? "MCP" : "UI" }))) }
-    case "createSolutionPlanComment": { await assertSolutionWorkspace(prisma, id, workspaceId); const agent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"; return serialize(ensureTool(await addSolutionComment({ solutionId: id, body: String(body.body), authorName: await restActorName(prisma, actor), authorType: agent ? "AGENT" : "HUMAN" }))) }
+    case "createSolutionPlan": { await assertSolutionWorkspace(prisma, id, workspaceId); const agent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"; return serialize(ensureTool(await addSolutionPlan({ solutionId: id, body: String(body.body), authorName: await restActorName(prisma, actor, workspaceId), authorType: agent ? "AGENT" : "HUMAN", source: agent ? "MCP" : "UI" }))) }
+    case "createSolutionPlanComment": { await assertSolutionWorkspace(prisma, id, workspaceId); const agent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"; return serialize(ensureTool(await addSolutionComment({ solutionId: id, body: String(body.body), authorName: await restActorName(prisma, actor, workspaceId), authorType: agent ? "AGENT" : "HUMAN" }))) }
     case "getSolutionPlanEntry": { await assertSolutionPlanWorkspace(prisma, id, workspaceId); return serialize(ensureTool(await getSolutionComment({ commentId: id }))) }
     case "updateSolutionPlanEntry": { await assertSolutionPlanWorkspace(prisma, id, workspaceId); await assertWorkspaceAdmin(actor, workspaceId); return serialize(ensureTool(await updateSolutionComment({ commentId: id, body: String(body.body) }))) }
     case "deleteSolutionPlanEntry": { await assertSolutionPlanWorkspace(prisma, id, workspaceId); await assertWorkspaceAdmin(actor, workspaceId); ensureTool(await deleteSolutionComment({ commentId: id })); return undefined }
@@ -881,6 +896,13 @@ function pick(source: Record<string, unknown>, keys: string[]): Record<string, u
 function filters(query: Record<string, unknown>, keys: string[]): string { return JSON.stringify(pick(query, keys)) }
 function serialize(value: unknown): unknown {
   const serialized = JSON.parse(JSON.stringify(value)) as unknown
+  if (serialized && typeof serialized === "object" && "seqNumber" in serialized) {
+    // Numbered resources select seqPrefix/seqNumber; the public shape carries the one derived `displayId` (null until numbered).
+    const row = serialized as Record<string, unknown>
+    row.displayId = typeof row.seqPrefix === "string" && typeof row.seqNumber === "number" && row.seqNumber >= 1 ? `${row.seqPrefix}-${row.seqNumber}` : null
+    delete row.seqPrefix
+    delete row.seqNumber
+  }
   if (serialized && typeof serialized === "object" && "tags" in serialized) {
     const row = serialized as Record<string, unknown>
     row.tags = Array.isArray(row.tags) ? row.tags.filter((tag): tag is string => typeof tag === "string") : []
@@ -930,10 +952,17 @@ type Prisma = ReturnType<typeof getPrisma>
 function assertHumanCommentBodyEditor(actor: ReturnType<typeof getMcpActor>) {
   if (actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") throw new RestForbiddenError("An agent cannot edit comment bodies.")
 }
-async function restActorName(prisma: Prisma, actor: ReturnType<typeof getMcpActor>): Promise<string> {
+export async function restActorName(prisma: Prisma, actor: ReturnType<typeof getMcpActor>, workspaceId?: string): Promise<string> {
   if ((actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") && actor.agentId) {
-    const agent = await prisma.agent.findFirst({ where: { id: actor.agentId, ...(actor.userId ? { ownerUserId: actor.userId } : {}) }, select: { name: true } })
-    return agent?.name ?? "Compass agent"
+    const agent = await findAgentById(prisma, actor.agentId)
+    if (!agent) return "Compass agent"
+    // A name only for an agent this actor's user may act as. A WORKSPACE-owned agent's name is shown
+    // only in a workspace that holds a live grant for it, so a name cannot leak across workspaces.
+    if (isWorkspaceOwned(agent)) {
+      const grant = workspaceId ? await prisma.agentWorkspaceGrant.findFirst({ where: { agentId: agent.id, workspaceId, revokedAt: null }, select: { id: true } }) : null
+      return grant ? agent.name : "Compass agent"
+    }
+    return !actor.userId || isUserOwnedBy(agent, actor.userId) ? agent.name : "Compass agent"
   }
   if (actor.userId) {
     const user = await prisma.user.findFirst({ where: { id: actor.userId }, select: { name: true, email: true } })
@@ -944,7 +973,7 @@ async function restActorName(prisma: Prisma, actor: ReturnType<typeof getMcpActo
 async function restCommentAuthor(prisma: Prisma, actor: ReturnType<typeof getMcpActor>, workspaceId: string) {
   await assertWorkspaceMember(actor, workspaceId)
   const agent = actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN"
-  return { authorId: agent ? null : actor.userId, authorName: await restActorName(prisma, actor), authorType: agent ? "AGENT" as const : "HUMAN" as const, source: agent ? "MCP" as const : "UI" as const }
+  return { authorId: agent ? null : actor.userId, authorName: await restActorName(prisma, actor, workspaceId), authorType: agent ? "AGENT" as const : "HUMAN" as const, source: agent ? "MCP" as const : "UI" as const }
 }
 async function assertCommentTargetWorkspace(targetType: string, targetId: string, workspaceId: string) {
   const target = await resolveCommentTarget(targetType as never, targetId)

@@ -51,6 +51,8 @@ import {
   updateSortOrder,
 } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const WS = "workspace-a";
 const OTHER_WS = "workspace-b";
 const ITEM = "item-a";

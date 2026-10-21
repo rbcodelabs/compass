@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { redirect, notFound } from "next/navigation";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
+import { resolveWorkspaceAccess } from "@/lib/workspace-context";
 import { FeedbackGrid } from "@/components/feedback/feedback-grid";
 import {
   buildFeedbackOrderBy,
@@ -40,6 +41,12 @@ export default async function FeedbackPage({ params, searchParams }: Props) {
 
   if (!workspace) notFound();
 
+  // Org-wide read-only members get the sheet grid without edit affordances.
+  const access = session.user?.id
+    ? await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id)
+    : null;
+  const sheetReadOnly = access?.isReadOnly ?? true;
+
   return (
     <WorkspacePage
       title="Feedback"
@@ -62,6 +69,7 @@ export default async function FeedbackPage({ params, searchParams }: Props) {
           workspaceSlug={workspaceSlug}
           workspaceId={workspace.id}
           searchParams={searchParams}
+          sheetReadOnly={sheetReadOnly}
         />
       </Suspense>
     </WorkspacePage>
@@ -83,11 +91,13 @@ async function FeedbackGridSection({
   workspaceSlug,
   workspaceId,
   searchParams,
+  sheetReadOnly,
 }: {
   orgSlug: string;
   workspaceSlug: string;
   workspaceId: string;
   searchParams: Promise<FeedbackSearchParams>;
+  sheetReadOnly: boolean;
 }) {
   const rawSearchParams = await searchParams;
   // Everything is allowlist-validated here; nothing from the request reaches
@@ -159,6 +169,7 @@ async function FeedbackGridSection({
       total={total}
       query={query}
       hasAnyFeedback={unfilteredTotal > 0}
+      sheet={{ readOnly: sheetReadOnly }}
       items={feedbackItems.map((f) => ({
         id: f.id,
         title: f.title,

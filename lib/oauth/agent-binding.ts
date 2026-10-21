@@ -39,6 +39,7 @@
  * {@link resolveConsentBinding} refuse it.
  */
 import getPrisma from "@/lib/db"
+import { findActiveUserOwnedAgent, listUserOwnedAgents } from "@/lib/agent-ownership"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
 import { SCOPE_API_WRITE, SCOPE_MCP_WRITE } from "@/lib/oauth/constants"
 import type { AuthorizationBinding } from "@/lib/oauth/codes"
@@ -328,11 +329,8 @@ export async function loadConsentBindingOptions(userId: string): Promise<Consent
     return { agentsEnabled, agents: [], grantable, overrideAvailable, unresolvedMemberships: unresolved }
   }
 
-  const agentRows = await prisma.agent.findMany({
-    where: { ownerUserId: userId, status: "ACTIVE" },
-    select: { id: true, name: true },
-    orderBy: { name: "asc" },
-  })
+  // Personal OAuth bindings reach only the account's own (USER-owned) agents.
+  const agentRows = await listUserOwnedAgents(prisma, userId, { status: "ACTIVE" })
   const grants = agentRows.length
     ? await prisma.agentWorkspaceGrant.findMany({
         where: { agentId: { in: agentRows.map((agent) => agent.id) }, revokedAt: null },
@@ -598,10 +596,7 @@ export async function revalidateRememberedBinding(
 
   if (!agentsAreEnabled() || !stored.agentId) return null
   const prisma = getPrisma()
-  const agent = await prisma.agent.findFirst({
-    where: { id: stored.agentId, ownerUserId: userId, status: "ACTIVE" },
-    select: { id: true },
-  })
+  const agent = await findActiveUserOwnedAgent(prisma, stored.agentId, userId)
   if (!agent) return null
   // Reach is re-checked too, not just liveness: every grant can be revoked
   // between authorizations, and replaying a binding whose reach has gone to

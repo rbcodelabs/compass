@@ -11,6 +11,7 @@ import { ANALYTICS_PROVIDERS, effectiveObservationWindow, type ProviderContext }
 import { decodeBindingWindows, followupPolicySchema, resolveFollowupWindow, type BindingWindows } from "./windows"
 import { clampLayout, dashboardLayoutInputSchema, dashboardSortOrderSchema, DEFAULT_DASHBOARD_STATE, type DashboardLayoutInput } from "./dashboard-layout"
 import { computeCardStatus, computeDelta, headlineValue, type CardStatus, type CardDelta } from "./dashboard-status"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export const metricInputSchema = z.object({ name: z.string().trim().min(1).max(255), unit: z.string().trim().min(1).max(80), provider: z.enum(["vercel", "compass_activation"]), connectionId: z.string().uuid().optional(), query: querySchema }).strict()
 export type MetricInput = z.infer<typeof metricInputSchema>
@@ -134,11 +135,13 @@ export async function getMetric(actor: McpActor, workspaceId: string, metricId: 
 export async function createMetric(actor: McpActor, workspaceId: string, raw: MetricInput): Promise<MetricDTO> {
   await authorize(actor, workspaceId, true)
   const input = metricInputSchema.parse(raw)
-  return transaction(async db => {
+  // The metric number comes from the workspace counter, so a DSQL conflict or first-row race on it is replayed.
+  const run = <T>(fn: (tx: AppTransactionClient) => Promise<T>) => hasToolTransaction() ? fn(getToolPrisma()) : withSequenceTransaction(getPrisma(), fn)
+  return run(async db => {
     await fenceWorkspace(db, workspaceId)
     await validateMetricConnection(db, workspaceId, input)
     const id = randomUUID(), revisionId = randomUUID()
-    const definition = await db.metricDefinition.create({ data: { id, workspaceId, currentRevisionId: revisionId } })
+    const definition = await db.metricDefinition.create({ data: { id, workspaceId, ...(await allocateOneSeq(db, workspaceId, "metric")), currentRevisionId: revisionId } })
     const revision = await db.metricRevision.create({ data: { id: revisionId, workspaceId, metricId: id, revision: 1, name: input.name, unit: input.unit, provider: input.provider, connectionId: input.connectionId, queryJson: JSON.stringify(input.query) } })
     return metricDTO(definition, revision)
   })

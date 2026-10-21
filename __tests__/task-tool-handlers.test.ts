@@ -35,7 +35,7 @@ const mockDoc = { findUnique: vi.fn(), findMany: vi.fn() }
 const mockReviewRequest = { findUnique: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() }
 
 const mockPrisma = {
-  agent: { findUnique: vi.fn(), findMany: vi.fn() },
+  agent: { findFirst: vi.fn(), findMany: vi.fn() },
   agentWorkspaceGrant: { findFirst: vi.fn(), findMany: vi.fn() },
   workspaceMember: { findFirst: vi.fn() },
   squad: { findFirst: vi.fn() },
@@ -53,6 +53,8 @@ const mockPrisma = {
   reviewRequest: mockReviewRequest,
 }
 
+// The entity_links mirror of task links (ADR phase 7) has its own tests (__tests__/links/task-reference-mirror.test.ts); this file pins the legacy writes against hand-written fakes.
+vi.mock("@/lib/links/legacy-mirror", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/links/legacy-mirror")>()), mirrorTaskReference: vi.fn(), unmirrorTaskReference: vi.fn() }));
 vi.mock("@/lib/db", () => ({
   default: () => mockPrisma,
 }))
@@ -67,6 +69,8 @@ import {
   unlinkTask,
   listTaskLinks,
 } from "@/lib/task-tool-handlers"
+
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
 
 // ---------------------------------------------------------------------------
 
@@ -91,7 +95,7 @@ beforeEach(() => {
   mockPrisma.workspaceMember.findFirst.mockResolvedValue({ id: "member" })
   mockPrisma.squad.findFirst.mockResolvedValue({ id: "squad" })
   vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
-  mockPrisma.agent.findUnique.mockResolvedValue({ id: "agent-1", status: "ACTIVE", ownerUserId: "owner" })
+  mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", status: "ACTIVE", ownerUserId: "owner" })
   mockPrisma.agentWorkspaceGrant.findFirst.mockResolvedValue({ id: "grant" })
   mockWorkspace.findUnique.mockResolvedValue({ id: WORKSPACE_ID })
   mockTask.findFirst.mockResolvedValue(null)

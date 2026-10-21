@@ -32,6 +32,8 @@ vi.mock("@/auth", () => ({
 import { auth } from "@/auth";
 import { sendCompassFeedback } from "@/lib/meta-feedback-actions";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const mockAuth = vi.mocked(auth);
 
 const ORIGINAL_ENV = { ...process.env };

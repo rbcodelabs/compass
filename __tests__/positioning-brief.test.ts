@@ -17,6 +17,8 @@ vi.mock("@/lib/db", () => ({ default: () => mockPrisma }));
 import { createPositioningBriefCore } from "@/lib/positioning-brief";
 import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const WORKSPACE_ID = "ws-1";
 const ITEM_ID = "item-1";
 

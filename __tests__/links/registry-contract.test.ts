@@ -38,7 +38,8 @@ vi.mock("@/lib/links/endpoints", async (importOriginal) => {
 await import("@/app/api/mcp/route");
 
 import { ENTITY_TYPE_VOCABULARY, normalizeEntityType, toWorkspaceEntityType, type LinkableEntityType } from "@/lib/entity-types";
-import { LINK_TYPES, LINK_TYPE_KEYS, getLinkType, toTypesOf, validateLinkTypeDef, type LinkTypeDef } from "@/lib/links/registry";
+import { LINK_READ_FAMILIES, LINK_READ_FLAG_NAMES, LINK_TYPES, LINK_TYPE_KEYS, getLinkType, toTypesOf, validateLinkTypeDef, type LinkTypeDef } from "@/lib/links/registry";
+import { FAMILY_LINK_TYPES } from "@/lib/links/read-compare";
 import { linkEntities } from "@/lib/links/service";
 import { AGENT_TOOL_POLICY, RESEARCH_TOOL_ALLOWLIST, TOOL_GATES, TOOL_SCOPES } from "@/lib/mcp-tool-gates";
 import { MCP_REST_PARITY_MANIFEST } from "@/lib/rest/parity-manifest";
@@ -62,6 +63,22 @@ describe("registry shape", () => {
     expect(validateLinkTypeDef(def)).toEqual([]);
     expect(getLinkType(def.key)).toBe(def);
     expect(def.restrictedContexts).toBe("deny");
+  });
+
+  it.each(defs.filter((def) => def.legacy).map((def) => [def.key, def] as const))("%s: a legacy adapter declares the read axis (static mode + a read family with its own flag)", (_key, def) => {
+    expect(["mirror", "shadow", "read"]).toContain(def.legacy!.mode);
+    expect(LINK_READ_FAMILIES).toContain(def.legacy!.readFamily);
+    expect(LINK_READ_FLAG_NAMES[def.legacy!.readFamily]).toMatch(/^COMPASS_ENTITY_LINKS_[A-Z_]+_READ$/);
+    // The read-compare module knows this type under that family, so a new legacy type cannot ship without a comparator entry.
+    expect(FAMILY_LINK_TYPES[def.legacy!.readFamily]).toContain(def.key);
+  });
+
+  it("every read family owns at least one legacy-backed type and read-compare lists no unknown type", () => {
+    for (const family of LINK_READ_FAMILIES) {
+      const owned = defs.filter((def) => def.legacy?.readFamily === family).map((def) => def.key).sort();
+      expect(owned.length).toBeGreaterThan(0);
+      expect([...FAMILY_LINK_TYPES[family]].sort()).toEqual(owned);
+    }
   });
 
   it("validateLinkTypeDef catches a bad entry (canary)", () => {
@@ -120,7 +137,7 @@ describe("tenant isolation for every from/to pair", () => {
   it.each(pairs.map((pair) => [`${pair.key}: ${pair.from} -> ${pair.to}`, pair] as const))("%s: only same-workspace endpoints link", async (_label, pair) => {
     const create = vi.fn();
     const guarded = { entityLink: { findFirst: vi.fn(), create, count: vi.fn() } } as unknown as AppTransactionClient;
-    const base = { linkType: pair.key, toType: pair.to, ctx };
+    const base = { linkType: pair.key, toType: pair.to, ctx, viaLegacyWriter: true, origin: getLinkType(pair.key)?.origins?.[0] };
     // from in A, to in A, but the caller declares workspace B
     await expect(linkEntities(guarded, { ...base, fromId: `${pair.from}-A`, toId: `${pair.to}-A`, expectedWorkspaceId: "ws-B" })).rejects.toThrow(/not found/);
     // declared workspace A, but the to end is not A's
@@ -135,6 +152,11 @@ describe("delete paths and the workspace cascade cover every type", () => {
   const sources = {
     cascade: read("lib/delete-workspace-cascade.ts"),
     research: read("lib/research-workspace-cleanup.ts"),
+    // The legacy-mirrored Solution and Key Result sweeps live in the typed-link drains the UI, MCP and cascade deletes call.
+    typedLinks: read("lib/typed-links.ts"),
+    // Artifact links (phase 6): a single Artifact delete, and the workspace Decision teardown for the Review request end.
+    artifacts: read("lib/artifacts.ts"),
+    decisionData: read("lib/delete-workspace-decision-data.ts"),
   };
   const all = Object.values(sources).join("\n");
 
@@ -148,7 +170,7 @@ describe("delete paths and the workspace cascade cover every type", () => {
     ...(def.lifecycle.onFromDeleted === "delete" ? [[def.key, def.from] as const] : []),
     ...(def.lifecycle.onToDeleted === "delete" ? toTypesOf(def).map((type) => [def.key, type] as const) : []),
   ]))("%s: deleting a %s removes its links (deleteLinksForEntity is called in a delete path)", (_key, type) => {
-    expect(all).toContain(`deleteLinksForEntity(prisma, "${type}"`);
+    expect(all).toMatch(new RegExp(`deleteLinksForEntity\\((?:prisma|db|tx), "${type}"`));
   });
 
   it("studies' links go before the studies themselves", () => {

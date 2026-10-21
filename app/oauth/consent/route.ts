@@ -216,7 +216,7 @@ const consentBindingEffects = {
     // tool-call history yet, but it may have completed earlier grants before a
     // later grant failed, so those rows must be removed explicitly first.
     await prisma.agentWorkspaceGrant.deleteMany({ where: { agentId } })
-    await prisma.agent.delete({ where: { id: agentId } })
+    await prisma.agent.delete({ where: { id: agentId }, select: { id: true } })
   },
 }
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { Pool, PoolClient } from "pg";
+import { usesPlainPostgres } from "@/lib/db-url";
 import { readFileSync } from "fs";
 import path from "path";
 import { createHash, randomUUID } from "node:crypto";
@@ -29,8 +30,16 @@ import { assertRoadmapViewsMigration } from "@/lib/migrations/roadmap-views";
 import { assertAgentSessionsMigration } from "@/lib/migrations/agent-sessions";
 import { assertAgentWebSearchesMigration } from "@/lib/migrations/agent-web-searches";
 import { assertAgentConversationParticipantsMigration } from "@/lib/migrations/agent-conversation-participants";
+import { assertAgentKindAndWorkspaceOwnerMigration, assertAgentOwnerUserNullableMigration } from "@/lib/migrations/agent-kind-and-workspace-owner";
 import { assertEntityLinksMigration } from "@/lib/migrations/entity-links";
 import { assertDocChangesMigration } from "@/lib/migrations/doc-changes";
+import { assertWorkItemIdsMigration, WORK_ITEM_IDS_MIGRATION } from "@/lib/migrations/work-item-ids";
+import { ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, assertEntityLinksSolutionKeyResultBackfill, backfillEntityLinksSolutionKeyResult, getEntityLinksSolutionKeyResultStatus } from "@/lib/migrations/entity-links-solution-key-result-backfill";
+import { ENTITY_LINKS_TASK_BACKFILL_MIGRATION, assertEntityLinksTaskBackfill, backfillEntityLinksTask, getEntityLinksTaskStatus } from "@/lib/migrations/entity-links-task-backfill";
+import { getEntityLinksReadParityStatus } from "@/lib/migrations/entity-links-read-parity";
+import { ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, assertEntityLinksOpportunityBackfill, backfillEntityLinksOpportunity, getEntityLinksOpportunityStatus } from "@/lib/migrations/entity-links-opportunity-backfill";
+import { ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, assertEntityLinksArtifactBackfill, backfillEntityLinksArtifact, getEntityLinksArtifactStatus } from "@/lib/migrations/entity-links-artifact-backfill";
+import { assertWorkItemIdsBackfill, backfillWorkItemIds, getWorkItemIdsBackfillStatus, WORK_ITEM_IDS_BACKFILL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION } from "@/lib/migrations/work-item-ids-backfill";
 import { assertRoadmapItemProvenanceMigration } from "@/lib/migrations/roadmap-item-provenance";
 import { assertMcpConnectorsMigration } from "@/lib/migrations/mcp-connectors";
 import { assertMetricsDashboardMigration } from "@/lib/migrations/metrics-dashboard";
@@ -587,11 +596,74 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     filePath: path.join(process.cwd(), "prisma/migrations/091_entity_links/migration.sql"),
   },
   {
-    // Per-workspace doc change log for Geode doc sync (spike): one new empty table plus a unique
-    // (workspace_id, seq) async index. Rows are written only while DOCS_SYNC_ENABLED is on; no
-    // backfill. The 092 postcondition verifies the columns and that the index is valid and ready.
-    name: "092_doc_changes",
-    filePath: path.join(process.cwd(), "prisma/migrations/092_doc_changes/migration.sql"),
+    // Human-readable work item IDs, schema half (ADR "Human-readable work item IDs"): nullable seq_prefix and
+    // seq_number on 14 tables, nullable workspace_id on key_results and assumptions, the workspace_sequences
+    // counter, and one unique async index per table. Numbering existing rows is migration 093; 094 is its explicit-only residual pass.
+    // The 092 postcondition verifies the columns and that every index is valid, ready and unique.
+    name: "092_work_item_ids",
+    filePath: path.join(process.cwd(), "prisma/migrations/092_work_item_ids/migration.sql"),
+  },
+  {
+    // No DDL. Fills key_results / assumptions workspace_id from the parent, then numbers every existing row per
+    // (workspace, type) from the workspace_sequences counter. The hook proves zero NULLs, no duplicates and
+    // counters ahead of the highest number before the receipt.
+    name: "093_work_item_ids_backfill",
+    filePath: path.join(process.cwd(), "prisma/migrations/093_work_item_ids_backfill/migration.sql"),
+  },
+  {
+    // No DDL. Re-runs 093's backfill + postconditions for rows the previous deploy's instances inserted without a
+    // number after 093's receipt. POST it only after the deploy that allocates numbers has fully rolled out.
+    name: "094_work_item_ids_residual_backfill",
+    filePath: path.join(process.cwd(), "prisma/migrations/094_work_item_ids_residual_backfill/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY. Backfills entity_links from opportunity_objective_links (origin preserved) and from the
+    // opportunities.linked_key_result_id pointer. Inconsistent legacy rows are quarantined and reported, never linked or deleted. The hook
+    // proves its postconditions before the receipt. POST it by name after the mirroring code and flag are live; never untargeted.
+    name: "095_entity_links_backfill_opportunity",
+    filePath: path.join(process.cwd(), "prisma/migrations/095_entity_links_backfill_opportunity/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY. Backfills entity_links from artifact_links (Solution and TRACKED_DECISION targets). Inconsistent legacy rows are
+    // quarantined and reported, never linked or deleted. The hook proves its postconditions before the receipt. POST it by name after the
+    // mirroring code and flag are live; never untargeted.
+    name: "096_entity_links_backfill_artifact",
+    filePath: path.join(process.cwd(), "prisma/migrations/096_entity_links_backfill_artifact/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY. Backfills entity_links (TASK_REFERENCES) from task_links, DECISION stored as REVIEW_REQUEST. Inconsistent legacy rows
+    // are quarantined and reported, never linked or deleted. The hook proves its postconditions before the receipt. POST it by name after the
+    // mirroring code and COMPASS_ENTITY_LINKS_TASK_MIRROR are live; never untargeted.
+    name: "097_entity_links_backfill_task",
+    filePath: path.join(process.cwd(), "prisma/migrations/097_entity_links_backfill_task/migration.sql"),
+  },
+  {
+    // Cloud agents as first-class identities, PR1: six nullable columns on agents (kind, owner_type, owner_workspace_id,
+    // instructions, model, invoke_policy) and one async owner_workspace_id index. No backfill: NULL reads as
+    // EXTERNAL / USER. The 098 postcondition proves the columns and that the index is valid and ready.
+    name: "098_agent_kind_and_workspace_owner",
+    filePath: path.join(process.cwd(), "prisma/migrations/098_agent_kind_and_workspace_owner/migration.sql"),
+  },
+  {
+    // owner_user_id DROP NOT NULL, split from 098 so a DSQL refusal cannot block 098's receipt. WORKSPACE-owned agent creation
+    // must not ship until both 098 and 099 are confirmed applied. The postcondition proves the column is really nullable.
+    name: "099_agent_owner_user_nullable",
+    filePath: path.join(process.cwd(), "prisma/migrations/099_agent_owner_user_nullable/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY. Backfills entity_links (SOLUTION_TARGETS_KEY_RESULT) from solution_key_result_links, closing the phase 4 "new-only"
+    // gap before the Solution-KR read flip. Inconsistent legacy rows are quarantined and reported, never linked or deleted. The hook proves its
+    // postconditions before the receipt. POST it by name after the mirroring code and COMPASS_ENTITY_LINKS_SOLUTION_KR_MIRROR are live; never
+    // untargeted. Shares the numeric prefix 098 with the agent migration (duplicate prefixes are accepted, ADR-0012); the name is unique.
+    name: "098_entity_links_backfill_solution_key_result",
+    filePath: path.join(process.cwd(), "prisma/migrations/098_entity_links_backfill_solution_key_result/migration.sql"),
+  },
+  {
+    // Per-workspace doc change log for Geode doc sync (spike): two new empty tables (doc_changes, doc_change_counters) plus a unique
+    // (workspace_id, seq) async index. Rows are written only while DOCS_SYNC_ENABLED is on; no backfill. Renumbered from 092 to 100 when
+    // main took 092..099. The 100 postcondition verifies the columns and that the index is valid and ready.
+    name: "100_doc_changes",
+    filePath: path.join(process.cwd(), "prisma/migrations/100_doc_changes/migration.sql"),
   },
 ];
 
@@ -745,7 +817,7 @@ const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record
 const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_decision_evidence_refs_subject", "idx_now_policy_evidence_workspace_created", "idx_now_gate_evaluations_workspace_created", "idx_now_gate_evaluations_workspace_outcome_created", "idx_now_gate_evaluations_item_created", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
 const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "decision_evidence_refs_pkey", "idx_decision_evidence_refs_revision_authority", "now_policy_application_evidence_pkey", "idx_now_policy_evidence_receipt", "now_gate_evaluations_pkey", "chk_now_gate_evaluations_mode", "chk_now_gate_evaluations_outcome", "chk_now_gate_evaluations_actor", "chk_roadmap_items_commitment_provenance_not_null", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
 const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger", "042_native_decision_gates_repair", "043_decision_evidence_refs", "044_now_policy_application_evidence", "045_now_gate_shadow_evaluations"] as const;
-const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_agent_identity", "049_research_participant_voice", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "060_workspace_updates", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_doc_changes"] as const;
+const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_agent_identity", "049_research_participant_voice", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "060_workspace_updates", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_work_item_ids", "098_agent_kind_and_workspace_owner", "100_doc_changes"] as const;
 /** ADR-0012 step 5. Unique first: the idempotency lookup promotion depends on. */
 const RESEARCH_EVIDENCE_PROMOTION_INDEXES = ["idx_evidence_workspace_finding_key", "idx_evidence_research_sources_evidence_turn", "idx_evidence_research_synthesis", "idx_evidence_research_sources_turn"] as const;
 const RESEARCH_VOICE_CONTROL_PLANE_INDEXES = [
@@ -1341,11 +1413,11 @@ async function advanceDecisionMigration(client: PoolClient, schema: string, migr
       if (skipped.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim while skipping a verified step.`)
       return { status: 202, state: "ADVANCED", attemptId: run.attempt_id, nextStep: run.next_step + 1 }
     }
-    const executableSql = process.env.DATABASE_URL ? step.sql!.replace(/\bINDEX ASYNC\b/gi, "INDEX").replace(/ALTER\s+TABLE\s+ASYNC/gi, "ALTER TABLE") : step.sql!
+    const executableSql = usesPlainPostgres(process.env) ? step.sql!.replace(/\bINDEX ASYNC\b/gi, "INDEX").replace(/ALTER\s+TABLE\s+ASYNC/gi, "ALTER TABLE") : step.sql!
     const intent = await client.query(`UPDATE "${schema}"._migration_execution_state SET executing_step=$4, executing_started_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, run.next_step])
     if (intent.rowCount !== 1) throw new Error(`Migration ${migration.name} lost its fenced claim before executing step ${step.id}.`)
     const result = await client.query<{ job_id?: string }>(executableSql)
-    if (step.async && !process.env.DATABASE_URL) {
+    if (step.async && !usesPlainPostgres(process.env)) {
       const jobId = result.rows[0]?.job_id
       if (!jobId) throw new Error(`Migration ${migration.name} async step ${step.id} returned no job_id.`)
       const persisted = await client.query(`UPDATE "${schema}"._migration_execution_state SET pending_step=$4, pending_job_id=$5, executing_step=NULL, executing_started_at=NULL, last_error=NULL WHERE migration_name=$1 AND claimed_by=$2 AND claim_epoch=$3`, [migration.name, claimId, claimEpoch, run.next_step, jobId])
@@ -1783,6 +1855,17 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       legacyDecisionReviewRepair,
       geodeDocumentStorage: await getGeodeDocumentStorageHealth(client, schema, appliedNames.includes("059_geode_document_storage")),
       // Orphan / NULL / parent-drift counts for 068, visible before a human POSTs it.
+      // Counts and capped quarantine ids for 095, readable before it is POSTed.
+      entityLinksOpportunityBackfill: await getEntityLinksOpportunityStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      // Counts and capped quarantine ids for 096, readable before it is POSTed.
+      entityLinksArtifactBackfill: await getEntityLinksArtifactStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      // Counts and capped quarantine ids for 097 (task links), readable before it is POSTed.
+      entityLinksTaskBackfill: await getEntityLinksTaskStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      // Counts and capped quarantine ids for 098_entity_links_backfill_solution_key_result, readable before it is POSTed.
+      entityLinksSolutionKeyResultBackfill: await getEntityLinksSolutionKeyResultStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      // Read-flip parity (PR A of the entity_links read flip): per family, live legacy rows vs live mirror rows, plus the read modes. Counts and capped ids only.
+      entityLinksReadParity: await getEntityLinksReadParityStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      workItemIdsBackfill: await getWorkItemIdsBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       workspaceIdBackfill: await getWorkspaceIdBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       linkIntegrity: "error" in typedLinks ? typedLinks : typedLinks.linkIntegrity,
       typedLinkPreflight: "error" in typedLinks ? typedLinks : typedLinks.preflight,
@@ -1794,10 +1877,10 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION];
 
 /**
- * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072).
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 098_entity_links_backfill_solution_key_result).
  * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
  * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
  * Production-style callers (the admin route, an untargeted POST) never set it.
@@ -2004,7 +2087,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
           }
           // ASYNC is mandatory on DSQL and unsupported by local PostgreSQL.
           // DATABASE_URL is the worktree-bootstrap local-mode signal.
-          const executableStmt = process.env.DATABASE_URL
+          const executableStmt = usesPlainPostgres(process.env)
             ? stmt.replace(/\bINDEX ASYNC\b/gi, "INDEX").replace(/ALTER\s+TABLE\s+ASYNC/gi, "ALTER TABLE")
             : stmt;
           const voiceCounterBackfill = migration.name === "047_research_voice_control_plane"
@@ -2023,11 +2106,11 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
             continue
           }
           const result = await client.query<{ job_id?: string }>(executableStmt);
-          if (!process.env.DATABASE_URL && ASYNC_WAIT_MIGRATIONS.includes(migration.name as typeof ASYNC_WAIT_MIGRATIONS[number]) && /(?:CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC|ALTER\s+TABLE\s+ASYNC)/i.test(stmt)) {
+          if (!usesPlainPostgres(process.env) && ASYNC_WAIT_MIGRATIONS.includes(migration.name as typeof ASYNC_WAIT_MIGRATIONS[number]) && /(?:CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC|ALTER\s+TABLE\s+ASYNC)/i.test(stmt)) {
             const jobId = result.rows[0]?.job_id
             // IF NOT EXISTS returns no job for an already-created agent index.
             // Its validity is checked before a completion receipt is written.
-            if (!jobId && ["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_doc_changes"].includes(migration.name)) continue
+            if (!jobId && ["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_work_item_ids", "098_agent_kind_and_workspace_owner", "100_doc_changes"].includes(migration.name)) continue
             if (!jobId) throw new Error(`Migration ${migration.name} async DDL returned no job_id.`)
             await client.query("CALL sys.wait_for_job($1)", [jobId])
             const waited = await client.query<{ status: string }>("SELECT status FROM sys.jobs WHERE job_id = $1", [jobId])
@@ -2039,7 +2122,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
             pendingRoadmapCommitmentProvenanceBackfill = false;
             await backfillRoadmapCommitmentProvenance(client, schema, log);
           }
-          if (!process.env.DATABASE_URL && /CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC/i.test(stmt)) {
+          if (!usesPlainPostgres(process.env) && /CREATE\s+(?:UNIQUE\s+)?INDEX\s+ASYNC/i.test(stmt)) {
             const jobId = result.rows[0]?.job_id;
             if (jobId && migration.name === "036_research_capture_hardening") {
               researchCaptureAsyncIndexJobIds.push(jobId);
@@ -2103,6 +2186,8 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "080_agent_sessions") await assertAgentSessionsMigration(client, schema)
       if (migration.name === "081_agent_web_searches") await assertAgentWebSearchesMigration(client, schema)
       if (migration.name === "082_agent_conversation_participants") await assertAgentConversationParticipantsMigration(client, schema)
+      if (migration.name === "098_agent_kind_and_workspace_owner") await assertAgentKindAndWorkspaceOwnerMigration(client, schema)
+      if (migration.name === "099_agent_owner_user_nullable") await assertAgentOwnerUserNullableMigration(client, schema)
       if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {
         // Data half: backfill from the parent in bounded batches, then prove it.
         // Both run before the receipt below, so a failure leaves an unfinished
@@ -2123,7 +2208,38 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "077_artifact_screenshots") await assertArtifactScreenshotsMigration(client, schema)
       if (migration.name === "069_background_agent_runs") await assertBackgroundAgentRunsMigration(client, schema)
       if (migration.name === "091_entity_links") await assertEntityLinksMigration(client, schema)
-      if (migration.name === "092_doc_changes") await assertDocChangesMigration(client, schema)
+      if (migration.name === WORK_ITEM_IDS_MIGRATION) await assertWorkItemIdsMigration(client, schema)
+      if (migration.name === "100_doc_changes") await assertDocChangesMigration(client, schema)
+      if (migration.name === WORK_ITEM_IDS_BACKFILL_MIGRATION || migration.name === WORK_ITEM_IDS_RESIDUAL_MIGRATION) {
+        // Data half: fill workspace_id from the parent, number the existing rows from the shared counter, then prove it.
+        // Both run before the receipt below, so a failure leaves an unfinished attempt and the next POST resumes.
+        await backfillWorkItemIds(client, schema, log)
+        await assertWorkItemIdsBackfill(client, schema, migration.name)
+      }
+      if (migration.name === ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION) {
+        // Data half: mirror the legacy rows (quarantining the inconsistent ones), then prove it. Before the receipt below, so a failure
+        // leaves an unfinished attempt and the next POST resumes.
+        await backfillEntityLinksOpportunity(client, schema, log)
+        await assertEntityLinksOpportunityBackfill(client, schema)
+      }
+      if (migration.name === ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION) {
+        // Data half: mirror the artifact_links rows (quarantining the inconsistent ones), then prove it. Before the receipt below, so a failure
+        // leaves an unfinished attempt and the next POST resumes.
+        await backfillEntityLinksArtifact(client, schema, log)
+        await assertEntityLinksArtifactBackfill(client, schema)
+      }
+      if (migration.name === ENTITY_LINKS_TASK_BACKFILL_MIGRATION) {
+        // Data half: mirror the legacy task links (quarantining the inconsistent ones), then prove it. Before the receipt below, so a failure
+        // leaves an unfinished attempt and the next POST resumes.
+        await backfillEntityLinksTask(client, schema, log)
+        await assertEntityLinksTaskBackfill(client, schema)
+      }
+      if (migration.name === ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION) {
+        // Data half: mirror the legacy Solution-Key Result links (quarantining the inconsistent ones), then prove it. Before the receipt below, so a
+        // failure leaves an unfinished attempt and the next POST resumes.
+        await backfillEntityLinksSolutionKeyResult(client, schema, log)
+        await assertEntityLinksSolutionKeyResultBackfill(client, schema)
+      }
       if (migration.name === "090_v0_chat_artifacts") {
         const columns = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND ((table_name='artifacts' AND column_name='v0_chat_id') OR (table_name='artifact_revisions' AND column_name='v0_version_id'))", [schema])
         if (columns.rows[0]?.count !== "2") throw new Error("Migration 090 postcondition failed: v0 artifact columns missing")

@@ -109,7 +109,9 @@ function objectKeys(text: string, open: number): Keys {
   let segmentStart = 0;
   const flush = (end: number) => {
     const segment = body.slice(segmentStart, end).trim();
-    if (segment.startsWith("...")) hasSpread = true;
+    // The work item ID allocator only returns { seqPrefix, seqNumber }, so spreading it cannot smuggle in a workspaceId.
+    if (/^\.\.\.\s*\(\s*await\s+allocate(?:One)?Seq\s*\(/.test(segment)) { /* allocator columns, not a workspace source */ }
+    else if (segment.startsWith("...")) hasSpread = true;
     else {
       const m = /^(?:\[[^\]]*\]|["'`]?([A-Za-z_$][\w$]*)["'`]?)\s*(?::|$|\()/.exec(segment);
       if (m?.[1]) {
@@ -422,7 +424,7 @@ const KNOWN_PRISMA_CREATE_SITES: Record<string, number> = {
   "e2e/functional/specs/canvas-doc.spec.ts": 3, // three solution fixtures (one card test, two for the tree builder), each created with the e2e workspace's workspaceId
   "e2e/functional/specs/decisions.spec.ts": 1,
   "e2e/functional/specs/pm-interview.spec.ts": 1,
-  "lib/solution-tool-handlers.ts": 1,
+  "lib/opportunity-batch-create.ts": 1, // the shared Solution create core; workspaceId comes from the authorized workspace
   "lib/rest/execute.ts": 1,
   "scripts/seed-demo-intro.ts": 4, // demo-video sample data: every objective/solution create sets workspaceId
 };
@@ -435,6 +437,14 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   "__tests__/typed-links-delete.integration.test.ts": 2, // objectives and a solution for the delete scenarios, each listing workspace_id
   // INSERT INTO ${ownerTable}: the managed-pilot ownership table (see DYNAMIC_INSERT_ALLOWED); counted so a second one is noticed.
   "lib/preview-automation/managed-migrations.ts": 1,
+  // INSERT INTO ${schema}.${WORKSPACE_SEQUENCES_TABLE}: the work item counter (see DYNAMIC_INSERT_ALLOWED); counted so a second one is noticed.
+  "lib/migrations/work-item-ids-backfill.ts": 1,
+  "__tests__/links/task-link-writes.integration.test.ts": 1, // one objective for the task-link writers, listing workspace_id
+  "__tests__/entity-links-task-backfill.integration.test.ts": 2, // the objective and solution fixtures for the 097 backfill, each listing workspace_id (a null parameter simulates a row with no workspace)
+  "__tests__/entity-links-opportunity-backfill.integration.test.ts": 1, // legacy objective fixtures (one with no workspace) for the 095 backfill
+  "__tests__/entity-links-artifact-backfill.integration.test.ts": 1, // legacy solution fixtures (one with no workspace) for the 096 backfill
+  "__tests__/entity-links-solution-key-result-backfill.integration.test.ts": 3, // objective, solution and bulk-solution fixtures for the 098 backfill, each listing workspace_id (a null parameter simulates a row with no workspace)
+  "__tests__/work-item-ids-backfill.integration.test.ts": 3, // legacy objective/solution/task fixtures for the 093 backfill; one objective deliberately has no workspace
   "e2e/functional/fixtures/seed-e2e.ts": 2,
   "e2e/functional/specs/link-authoring.spec.ts": 2, // one objective and one solution for the synthetic workspace, each listing workspace_id
   "e2e/functional/specs/kanban-mobile-scroll.spec.ts": 2, // 1 literal solutions insert + 1 allow-listed dynamic (board.table)
@@ -453,10 +463,14 @@ const INTENTIONAL_NULL_CREATES: Record<string, string> = {
 };
 /** Raw inserts that deliberately omit workspace_id (they simulate rows written by pre-068 code). Same marker rule. */
 const INTENTIONAL_NULL_RAW_INSERTS: Record<string, string> = {
+  "__tests__/entity-links-opportunity-backfill.integration.test.ts": "seeds a legacy objective with no workspace so 095 has a crossWorkspace orphan to quarantine and report",
+  "__tests__/entity-links-artifact-backfill.integration.test.ts": "seeds a legacy solution with no workspace so 096 has a crossWorkspace orphan to quarantine and report",
+  "__tests__/work-item-ids-backfill.integration.test.ts": "seeds a legacy objective with no workspace so the 093 postcondition has a row to refuse",
   "__tests__/workspace-id-on-solution-objective-migration.integration.test.ts": "simulates pre-068 rows and late rows inserted by old instances so the backfill has something to fill",
 };
 /** Dynamic-table inserts that are reviewed and known not to target solutions/objectives. Matched by file AND the exact interpolated name. */
 const DYNAMIC_INSERT_ALLOWED: Record<string, Array<{ name: string; reason: string }>> = {
+  "lib/migrations/work-item-ids-backfill.ts": [{ name: "${WORKSPACE_SEQUENCES_TABLE}", reason: "the work item counter table, a constant; never solutions or objectives" }],
   "lib/preview-automation/managed-migrations.ts": [{ name: "${ownerTable}", reason: "the managed-pilot ownership table, resolved by table(context); never solutions or objectives" }],
   "e2e/functional/specs/kanban-mobile-scroll.spec.ts": [{ name: "${board.table}", reason: "board.table comes from a fixed list: tasks, opportunities, experiments, roadmap_items" }],
   "e2e/functional/specs/markdown-description.spec.ts": [{ name: "compass_dev.${kind}", reason: "kind is typed to 'opportunities' | 'tasks' | 'roadmap_items'" }],

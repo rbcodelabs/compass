@@ -50,6 +50,8 @@ export function notificationAction({ kind, payload }: Pick<NotificationSentenceI
       return "replied to a comment"
     case "ASSIGNED":
       return "assigned this to you"
+    case "MENTIONED":
+      return "mentioned you in a comment"
     default:
       return "made a change"
   }

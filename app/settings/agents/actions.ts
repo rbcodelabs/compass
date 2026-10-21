@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { resolveWorkspaceAdmin } from "@/lib/permissions";
 import { agentsEnabled } from "@/lib/agent-access";
+import { AGENT_LEGACY_SELECT, agentOwner, canManageAgent, findAgentById, isUserOwnedBy } from "@/lib/agent-ownership";
 
 async function account() {
   const session = await auth();
@@ -26,7 +27,7 @@ function descriptionValue(value?: string) {
 export async function createAgent(input: { name: string; description?: string }) {
   const { prisma, userId } = await account();
   requireEnabled();
-  const agent = await prisma.agent.create({ data: { ownerUserId: userId, name: nameValue(input.name), description: descriptionValue(input.description), status: "ACTIVE", updatedAt: new Date() } });
+  const agent = await prisma.agent.create({ data: { ownerUserId: userId, name: nameValue(input.name), description: descriptionValue(input.description), status: "ACTIVE", updatedAt: new Date() }, select: AGENT_LEGACY_SELECT });
   revalidatePath("/settings/agents");
   return agent;
 }
@@ -34,16 +35,18 @@ export async function updateAgent(id: string, input: { name: string; description
   const { prisma, userId } = await account();
   if (input.status !== "ACTIVE" && input.status !== "SUSPENDED") throw new Error("Invalid agent status");
   if (input.status === "ACTIVE") requireEnabled();
-  const agent = await prisma.agent.findFirst({ where: { id, ownerUserId: userId } });
-  if (!agent) throw new Error("Agent not found");
-  await prisma.agent.update({ where: { id }, data: { name: nameValue(input.name), description: descriptionValue(input.description), status: input.status, updatedAt: new Date() } });
+  const agent = await findAgentById(prisma, id);
+  if (!agent || !(await canManageAgent(prisma, { userId }, agent))) throw new Error("Agent not found");
+  // select: the full row would include columns a database without migration 098 does not have.
+  await prisma.agent.update({ where: { id }, data: { name: nameValue(input.name), description: descriptionValue(input.description), status: input.status, updatedAt: new Date() }, select: { id: true } });
   revalidatePath("/settings/agents");
 }
 export async function createAgentKey(agentId: string, input: { name: string; expiresAt?: string }) {
   const { prisma, userId } = await account();
   requireEnabled();
-  const agent = await prisma.agent.findFirst({ where: { id: agentId, ownerUserId: userId } });
-  if (!agent) throw new Error("Agent not found");
+  const agent = await findAgentById(prisma, agentId);
+  // A personal key is bound to its holder, so only a USER-owned agent can have one.
+  if (!agent || !isUserOwnedBy(agent, userId)) throw new Error("Agent not found");
   if (agent.status !== "ACTIVE") throw new Error("Agent is suspended");
   const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
   if (expiresAt && (!Number.isFinite(expiresAt.getTime()) || expiresAt <= new Date())) throw new Error("Expiry must be a valid future date");
@@ -64,17 +67,25 @@ export async function grantWorkspaceAgent(orgSlug: string, workspaceSlug: string
   requireEnabled();
   if (access !== "READ" && access !== "WRITE") throw new Error("Invalid access");
   const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
-  const agent = await prisma.agent.findFirst({ where: { id: agentId, status: "ACTIVE" } });
-  if (!agent) throw new Error("Agent not found");
+  const agent = await findAgentById(prisma, agentId);
+  if (!agent || agent.status !== "ACTIVE") throw new Error("Agent not found");
+  const owner = agentOwner(agent);
+  if (!owner) throw new Error("Agent not found");
+  // A shared agent is granted only into the workspace that owns it: another workspace's admin
+  // must not be able to pull it into theirs.
+  if (owner.type === "WORKSPACE" && owner.workspaceId !== workspaceId) throw new Error("Agent not found");
   await prisma.$transaction(async (tx) => {
-    const member = await tx.workspaceMember.findFirst({ where: { workspaceId, userId: agent.ownerUserId }, select: { id: true, role: true } });
-    if (!member) throw new Error("Agent owner must be a current workspace member");
+    // A WORKSPACE-owned agent has no owner user, so there is no membership to require or lock.
+    const member = owner.type === "USER" ? await tx.workspaceMember.findFirst({ where: { workspaceId, userId: owner.userId }, select: { id: true, role: true } }) : null;
+    if (owner.type === "USER" && !member) throw new Error("Agent owner must be a current workspace member");
     // Touch the membership row so DSQL rejects a concurrent membership delete.
     // Without this write, a grant could commit after removal and revive on rejoin.
     // Compare the role as well: a concurrent demotion must never be overwritten
     // by the role read before waiting for PostgreSQL's row lock.
-    const locked = await tx.workspaceMember.updateMany({ where: { id: member.id, role: member.role }, data: { role: member.role } });
-    if (locked.count !== 1) throw new Error("Membership changed; retry the operation");
+    if (member) {
+      const locked = await tx.workspaceMember.updateMany({ where: { id: member.id, role: member.role }, data: { role: member.role } });
+      if (locked.count !== 1) throw new Error("Membership changed; retry the operation");
+    }
     const data = { access, grantedByUserId: userId, revokedAt: null, updatedAt: new Date() };
     await tx.agentWorkspaceGrant.upsert({ where: { agentId_workspaceId: { agentId, workspaceId } }, create: { agentId, workspaceId, ...data }, update: data });
   });

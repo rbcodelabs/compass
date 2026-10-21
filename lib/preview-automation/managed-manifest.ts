@@ -183,9 +183,31 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Generic entity_links table (ADR phase 1): one new empty table, a unique pair index and two non-unique
   // async indexes. No backfill, no readers or writers. Digest recorded from the shipped SQL; please review it.
   "091_entity_links": "35ea5cfb70d4eb7df705c59441638946f209893fca1cfa0b33a17db6fad68b61",
+  // Human-readable work item IDs, schema half: nullable ADD COLUMNs (seq_prefix, seq_number on 14 tables; workspace_id on
+  // key_results and assumptions), the workspace_sequences counter table and one async index per table. No backfill (093).
+  // Digest recorded from the shipped SQL; please review it.
+  "092_work_item_ids": "fc3cdc691a69a668c81ff8afc35fab4558171d25a7ebc4814a4154485a448d8a",
+  // Work item IDs data half: no DDL, the work is the hook (lib/migrations/work-item-ids-backfill.ts). 094 is its explicit-only residual pass.
+  "093_work_item_ids_backfill": "abe86fa984f96be2b172e32910156c6f24c0087a4bda6798eafbdeb0faa5879d",
+  "094_work_item_ids_residual_backfill": "69479580a318817b5c806ce70fbad399dcec1fa2ea8d93e7e02456ec3219d932",
+  // entity_links data half for Opportunity <-> Objective and the Opportunity -> Key Result pointer (ADR phase 5): no DDL, EXPLICIT-ONLY, the
+  // work is the hook (lib/migrations/entity-links-opportunity-backfill.ts).
+  "095_entity_links_backfill_opportunity": "ea4edb5e798b215e9796b504090d185c0fe4d172531aed495653a15d0ef07350",
+  // entity_links data half for ArtifactLink (Artifact -> Solution and Artifact -> Decision; ADR phase 6): no DDL, EXPLICIT-ONLY, the work is the
+  // hook (lib/migrations/entity-links-artifact-backfill.ts).
+  "096_entity_links_backfill_artifact": "8b79a111405e48d39cb6d8afc65ffea3ec7d0612b2a7e140f76d2fa00b02edad",
+  // entity_links data half for task links (ADR phase 7): no DDL, EXPLICIT-ONLY, the work is the hook (lib/migrations/entity-links-task-backfill.ts).
+  "097_entity_links_backfill_task": "ac22c83a1b21508ca49189ffbf1cda1a8c64e426c7bcb808538e0a3a85e6ecbf",
+  // Cloud agents PR1: six nullable agents columns and one async owner_workspace_id index. No backfill.
+  "098_agent_kind_and_workspace_owner": "239b13f323e305a41820e7e8c12cc6af06a723b9355cb1fb00aeaa6393cf0fe0",
+  // Cloud agents PR1: owner_user_id DROP NOT NULL (as 070), split from 098 so a DSQL refusal cannot block 098's receipt.
+  "099_agent_owner_user_nullable": "9587f0d2c28ca41c92a4217c068966639aac72f722cca8943180751940ab231d",
+  // entity_links data half for Solution <-> Key Result (ADR phase 4): no DDL, EXPLICIT-ONLY, the work is the hook
+  // (lib/migrations/entity-links-solution-key-result-backfill.ts). Shares the numeric prefix 098 with the agent migration; the name is unique.
+  "098_entity_links_backfill_solution_key_result": "795934c658367a187f400eec3068e1e946d13ecf37b71daf758fb1c87ba4697f", // gitleaks:allow -- reviewed public SHA256, not a credential
   // Doc change log + seq counter for Geode doc sync (spike): two new empty tables and a unique (workspace_id, seq) async index.
-  // No backfill. Digest recorded from the shipped SQL; please review it.
-  "092_doc_changes": "f5fcc91f016ce51f825d708a49697f90618418695cbcb09f97ce1ecfae8b4c1e"
+  // No backfill. Renumbered from 092 to 100 when main took 092..099. Digest recorded from the shipped SQL; please review it.
+  "100_doc_changes": "5cbe2a75a00c8ff6fcf61cd72ffc864878d0beda7699c66317ff8cbd500b4405",
 };
 
 /**
@@ -244,9 +266,48 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "091_entity_links": {
     "lib/migrations/entity-links.ts": "bcf8ffa729fb67b56792f709223c53c630a55a383262d8d3bc27d6e925169c76",
   },
-  // The 092 postcondition (doc_changes table shape and the unique (workspace_id, seq) index valid and ready before the receipt).
-  "092_doc_changes": {
-    "lib/migrations/doc-changes.ts": "73021f823298fad226a244f730f2e77b49d0ad8588b54481acdf9f51d19c60fc",
+  // The 092 postcondition (columns on 14 tables, the counter table and every unique index valid and ready before the receipt).
+  "092_work_item_ids": {
+    "lib/migrations/work-item-ids.ts": "b18c0f7f38436fd8a37caf5e15626bcda5f288e0d3cce4ad59d1e490c64a4f47",
+  },
+  "094_work_item_ids_residual_backfill": {
+    "lib/migrations/work-item-ids-backfill.ts": "bfb0533167f1c9fac0d0ab72da59adb559eccb1c6ac169f83091a69642a46c5a",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  "093_work_item_ids_backfill": {
+    "lib/migrations/work-item-ids-backfill.ts": "bfb0533167f1c9fac0d0ab72da59adb559eccb1c6ac169f83091a69642a46c5a",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 095 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
+  "095_entity_links_backfill_opportunity": {
+    "lib/migrations/entity-links-opportunity-backfill.ts": "31720625e69bfca38bed0b230ae61aa421ae4c105db588141105d715d8beb857",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 096 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
+  "096_entity_links_backfill_artifact": {
+    "lib/migrations/entity-links-artifact-backfill.ts": "994adc6269188d5c99e018dd4fa7d5a7c33d05da65cc133e8ff308e3ec4f7fa7",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 097 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
+  "097_entity_links_backfill_task": {
+    "lib/migrations/entity-links-task-backfill.ts": "761445d5aafdfafe2d6294dfde95b36e4d1da608cf78758341d716116362196b",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 098 and 099 postconditions (098: six nullable columns, owner_workspace_id index valid and ready; 099: owner_user_id really nullable).
+  "098_agent_kind_and_workspace_owner": {
+    "lib/migrations/agent-kind-and-workspace-owner.ts": "c91e3e799fe030d2f11066e8cac55da25844ffcd03c27686d3b7dab66dd4d7e8",
+  },
+  "099_agent_owner_user_nullable": {
+    "lib/migrations/agent-kind-and-workspace-owner.ts": "c91e3e799fe030d2f11066e8cac55da25844ffcd03c27686d3b7dab66dd4d7e8",
+  },
+  // The 098 solution-key-result backfill hook and the OCC retry it imports; editing either re-reviews the migration.
+  "098_entity_links_backfill_solution_key_result": {
+    "lib/migrations/entity-links-solution-key-result-backfill.ts": "e61171d6fd196cacbb79708691aef6610a3adf6340c189a516738db498a7665d", // gitleaks:allow -- reviewed public SHA256, not a credential
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 100 postcondition (doc_changes table shape and the unique (workspace_id, seq) index valid and ready before the receipt).
+  "100_doc_changes": {
+    "lib/migrations/doc-changes.ts": "d651023594aa8a852ec8afba6539225d285a6bb075db48540a61ab7f094b4448",
   },
 };
 

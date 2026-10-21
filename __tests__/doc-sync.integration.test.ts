@@ -5,7 +5,7 @@
  *      serializes them and the counter is locked BEFORE the doc tree is read);
  *   2. two writers that each create a same-titled sibling see each other's committed tree, so the
  *      collision-suffix rename of the first doc is logged exactly once;
- *   3. the real 092 SQL (minus ASYNC, as the runner does for DATABASE_URL) matches the Prisma models.
+ *   3. the real 100 SQL (minus ASYNC, as the runner does for DATABASE_URL) matches the Prisma models.
  * Skipped unless a database is configured (it is not part of the tq unit gate):
  *
  *   DOC_SYNC_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5437/compass_e2e \
@@ -45,7 +45,7 @@ describe.skipIf(!databaseUrl)("doc change log against real Postgres", () => {
       sort_order INTEGER NOT NULL DEFAULT 0, roadmap_item_id UUID UNIQUE, doc_type VARCHAR(50) NOT NULL DEFAULT 'STANDARD',
       created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       created_by_id UUID, updated_by_id UUID, source VARCHAR(20) NOT NULL DEFAULT 'UI')`)
-    const sql = readFileSync(path.join(process.cwd(), "prisma/migrations/092_doc_changes/migration.sql"), "utf-8")
+    const sql = readFileSync(path.join(process.cwd(), "prisma/migrations/100_doc_changes/migration.sql"), "utf-8")
     // The migration's statements are unqualified, so run them on one connection whose search_path is the throwaway schema.
     const migrationClient = await pool.connect()
     try {

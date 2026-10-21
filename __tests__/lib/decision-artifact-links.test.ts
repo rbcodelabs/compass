@@ -5,7 +5,13 @@ const prisma = vi.hoisted(() => ({
   reviewRequest: { findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
   artifactLink: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn(), findMany: vi.fn() },
 }))
+const mirror = vi.hoisted(() => ({ link: vi.fn(), unlink: vi.fn() }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
+// The legacy write and its entity_links mirror share ONE transaction (ADR phase 6); the mirror has its own tests (links/artifact-link-mirror.test.ts).
+vi.mock("@/lib/workspace-updates-capture", () => ({
+  withWorkspaceUpdates: async (client: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(client, false),
+}))
+vi.mock("@/lib/links/legacy-mirror", () => ({ mirrorArtifactLink: mirror.link, unmirrorArtifactLink: mirror.unlink }))
 import * as artifacts from "@/lib/artifacts"
 
 const input = { workspaceId: "workspace", artifactId: "artifact", requestId: "decision", createdById: "user", source: "UI" as const }
@@ -39,8 +45,32 @@ describe("Decision supporting Artifacts", () => {
   })
   it("returns the winning link on a concurrent duplicate", async () => {
     prisma.artifactLink.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "winner" })
-    prisma.artifactLink.create.mockRejectedValue({ code: "P2002" })
+    prisma.artifactLink.create.mockRejectedValue(Object.assign(new Error("Unique constraint failed on artifact_links"), { code: "P2002" }))
+    // The race aborts the transaction, so the whole thing re-runs and the repeat read returns the winner.
     expect(await artifacts.linkArtifactToDecision(input)).toMatchObject({ id: "winner", created: false })
+  })
+  it("mirrors a new link, an idempotent replay and an unlink into entity_links in the same transaction", async () => {
+    await artifacts.linkArtifactToDecision(input)
+    expect(mirror.link).toHaveBeenCalledWith(prisma, { linkedType: "REVIEW_REQUEST", artifactId: "artifact", linkedId: "decision", workspaceId: "workspace", ctx: { source: "UI", createdById: "user" } })
+    prisma.artifactLink.findFirst.mockResolvedValue({ id: "link", source: "MCP", createdById: "original-actor" })
+    mirror.link.mockClear()
+    expect(await artifacts.linkArtifactToDecision(input)).toMatchObject({ created: false })
+    expect(mirror.link).toHaveBeenCalledTimes(1)
+    // A replay heals the mirror with the LEGACY row's source and actor (as the backfill copies), not the replaying caller's.
+    expect(mirror.link.mock.calls[0][1].ctx).toEqual({ source: "MCP", createdById: "original-actor" })
+    await artifacts.unlinkArtifactFromDecision(input)
+    expect(mirror.unlink).toHaveBeenCalledWith(prisma, { linkedType: "REVIEW_REQUEST", artifactId: "artifact", linkedId: "decision", workspaceId: "workspace" })
+  })
+  it("does not mirror a refused link (foreign target, archived Artifact) and rolls back when the mirror fails", async () => {
+    prisma.reviewRequest.findFirst.mockResolvedValue(null)
+    await expect(artifacts.linkArtifactToDecision(input)).rejects.toThrow(/same workspace/)
+    prisma.reviewRequest.findFirst.mockResolvedValue({ id: "decision" })
+    prisma.artifact.findFirst.mockResolvedValue({ id: "artifact", status: "ARCHIVED" })
+    await expect(artifacts.linkArtifactToDecision(input)).rejects.toThrow(/archived/i)
+    expect(mirror.link).not.toHaveBeenCalled()
+    prisma.artifact.findFirst.mockResolvedValue({ id: "artifact", status: "ACTIVE" })
+    mirror.link.mockRejectedValue(new Error("mirror failed"))
+    await expect(artifacts.linkArtifactToDecision(input)).rejects.toThrow("mirror failed")
   })
   it("propagates non-duplicate persistence failures", async () => {
     prisma.artifactLink.create.mockRejectedValue(new Error("database unavailable"))

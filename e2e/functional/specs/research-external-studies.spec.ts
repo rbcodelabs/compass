@@ -27,7 +27,7 @@ async function createExternalStudy(page: Page, base: string, name: string) {
   await page.getByLabel("Where was it run?").selectOption("USERTESTING")
   await page.getByLabel("Link to the study (optional)").fill("https://app.usertesting.com/studies/e2e")
   await page.getByRole("button", { name: "Create external study" }).click()
-  await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+$/, { timeout: 30_000 })
+  await expect(page).toHaveURL(/\/capture\/studies\/[A-Za-z0-9-]+$/, { timeout: 30_000 })
 }
 
 test.describe("Research — external studies", () => {
@@ -108,7 +108,7 @@ test.describe("Research — external studies", () => {
 
     // A second, separately submitted session is not mistaken for a replay.
     await page.getByRole("link", { name: "Back to study" }).click()
-    await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+$/)
+    await expect(page).toHaveURL(/\/capture\/studies\/[A-Za-z0-9-]+$/)
     await page.getByLabel("Transcript", { exact: true }).fill("Participant: A second, different session.")
     await page.getByRole("button", { name: "Save session" }).click()
     await expect(sessions).toHaveCount(2, { timeout: 30_000 })

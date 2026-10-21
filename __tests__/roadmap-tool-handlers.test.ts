@@ -76,6 +76,8 @@ import {
   updateLaunchChecklistItem,
 } from "@/lib/roadmap-tool-handlers"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 // ---------------------------------------------------------------------------
 
 const WORKSPACE_ID = "ws-1"

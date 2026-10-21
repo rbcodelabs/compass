@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), lookup: vi.fn(), workspace: vi.fn(), doc: vi.fn(), versions: vi.fn(), comments: vi.fn(), cookie: vi.fn(), hydrate: vi.fn() }))
+vi.mock("@/lib/work-item-resolve", async () => (await import("./helpers/work-item-resolve-mock")).workItemResolveMock())
+vi.mock("@/lib/work-item-page", async () => (await import("./helpers/work-item-resolve-mock")).workItemPageMock())
 vi.mock("@/lib/document-service", () => ({ hydrateDocument: mocks.hydrate, documentRevision: (d: { revision?: string | null; updatedAt: Date }) => d.revision ?? `legacy:${d.updatedAt.toISOString()}` }))
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: mocks.cookie }) }))
 vi.mock("@/auth", () => ({ auth: mocks.auth }))
 vi.mock("next/navigation", () => ({ redirect: () => { throw Error("redirect") }, notFound: () => { throw Error("not found") } }))
 vi.mock("@/lib/db", () => ({ default: () => ({ workspace: { findFirst: mocks.workspace }, doc: { findFirst: mocks.doc }, docVersion: { findMany: mocks.versions }, docComment: { findMany: mocks.comments }, task: { findMany: vi.fn().mockResolvedValue([]) }, workspaceMember: { findMany: vi.fn().mockResolvedValue([]) } }) }))
 vi.mock("@/lib/tracked-decisions", () => ({ listDocDecisions: mocks.lookup }))
+vi.mock("@/lib/doc-comment-tasks", () => ({
+  loadMentionCandidates: async () => ({ people: [{ kind: "user", id: "u1", name: "Quinn", detail: null }], agents: [], outside: [] }),
+  loadCommentTaskCards: async () => ({}),
+  agentIdsAssignedInDoc: async () => ["agent-1"],
+}))
 vi.mock("@/components/docs/doc-editor", () => ({ DocEditor: () => null }))
 vi.mock("@/components/docs/doc-decision-action", () => ({ DocDecisionAction: () => null }))
 import DocPage from "@/app/[orgSlug]/[workspaceSlug]/docs/[docId]/page"
@@ -22,6 +29,12 @@ describe("Docs decision lookup authorization and fallback", () => {
     expect(mocks.doc).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "doc", workspaceId: "workspace" } }))
     expect(mocks.lookup).toHaveBeenCalledWith("workspace", "doc")
     expect(page.props.decisionAction.props.decisions).toEqual({ pending: [{ id: "request", title: "Ship?" }], latestDecided: null })
+  })
+  it("hands the editor the @mention picker options, task cards and already-confirmed agents", async () => {
+    const page = await DocPage({ params })
+    expect(page.props.mentionOptions.people).toEqual([{ kind: "user", id: "u1", name: "Quinn", detail: null }])
+    expect(page.props.taskCards).toEqual({})
+    expect(page.props.confirmedAgentIds).toEqual(["agent-1"])
   })
   it("gives a legacy doc with no stored revision a legacy:<updatedAt> revision so saves are not rejected", async () => {
     const page = await DocPage({ params })

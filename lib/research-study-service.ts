@@ -7,6 +7,7 @@ import { runResearchInterviewAgent } from "@/lib/research-agent"
 import { readSessionAnalysis, readStudySynthesis } from "@/lib/research-analysis"
 import { decodeCursor, encodeCursor } from "@/lib/rest/cursor"
 import { EXTERNAL_PROVENANCE, deterministicExternalSessionId, normalizeExternalSessionInput, normalizeExternalStudyInput } from "@/lib/research-external"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export class ResearchStudyError extends Error {}
 export class ResearchCursorError extends ResearchStudyError {}
@@ -181,19 +182,19 @@ export async function createResearchStudy(scope: ResearchWorkspaceScope, actor: 
   const status = String(input.status ?? "ACTIVE")
   assertCreatableStatus(status)
   const studyId = randomUUID()
-  const studyCreate = prisma.researchStudy.create({ data: { id: studyId, workspaceId: workspace.id, name, goal, studyType, guide: JSON.stringify(guide), targetMinutes, appUrl: target.appUrl, artifactId: target.artifactId, status, source: actor.source ?? "UI", createdById: actor.userId, updatedById: actor.userId } })
+  const studyData = { id: studyId, workspaceId: workspace.id, name, goal, studyType, guide: JSON.stringify(guide), targetMinutes, appUrl: target.appUrl, artifactId: target.artifactId, status, source: actor.source ?? "UI", createdById: actor.userId, updatedById: actor.userId }
   // DRAFT stages the study without issuing a participant link — activate_research_study
   // remains the single explicit step that transitions to ACTIVE and mints one.
   if (status === "DRAFT") {
-    await prisma.$transaction([studyCreate])
+    await withSequenceTransaction(prisma, async (tx) => { await tx.researchStudy.create({ data: { ...studyData, ...(await allocateOneSeq(tx, workspace.id, "researchStudy")) } }) })
     return { id: studyId, status }
   }
   const { token, tokenHash } = createResearchToken()
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-  await prisma.$transaction([
-    studyCreate,
-    prisma.researchParticipantToken.create({ data: { studyId, tokenHash, kind: "PRIMARY", expiresAt, createdById: actor.userId } }),
-  ])
+  await withSequenceTransaction(prisma, async (tx) => {
+    await tx.researchStudy.create({ data: { ...studyData, ...(await allocateOneSeq(tx, workspace.id, "researchStudy")) } })
+    await tx.researchParticipantToken.create({ data: { studyId, tokenHash, kind: "PRIMARY", expiresAt, createdById: actor.userId } })
+  })
   return { id: studyId, status, token }
 }
 
@@ -572,13 +573,13 @@ export async function createExternalResearchStudy(
   const data = normalizeExternalStudyInput(input)
   const id = randomUUID()
   // ACTIVE with no participant token: the status only means "accepting imported sessions".
-  await prisma.researchStudy.create({
+  await withSequenceTransaction(prisma, async (tx) => tx.researchStudy.create({
     data: {
-      id, workspaceId: workspace.id, name: data.name, goal: data.goal, studyType: "EXTERNAL", guide: "[]",
+      id, workspaceId: workspace.id, ...(await allocateOneSeq(tx, workspace.id, "researchStudy")), name: data.name, goal: data.goal, studyType: "EXTERNAL", guide: "[]",
       status: "ACTIVE", source: actor.source ?? "UI", externalProvider: data.externalProvider, externalUrl: data.externalUrl,
       createdById: actor.userId, updatedById: actor.userId,
     },
-  })
+  }))
   return { id }
 }
 

@@ -12,7 +12,7 @@
  *   agents always see the full document as they'd expect.
  */
 
-import getPrisma from "@/lib/db"
+import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { safeMatter, stringifyFrontMatter } from "@/lib/safe-matter"
 import { Prisma } from "@prisma/client"
@@ -25,9 +25,10 @@ import { createDocument, documentRevision, hydrateDocument, updateDocument } fro
 import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
 import { isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { documentMcpActor } from "@/lib/document-mcp-actor"
-import { changeKindFor, writeDocWithChange } from "@/lib/doc-sync"
+import { changeKindFor, isDocsSyncEnabled, noteDocWriteWhileSyncOff, writeDocWithChange } from "@/lib/doc-sync"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
 import type { DocType } from "@/lib/doc-types"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 // Keep the legacy history display label. Pilot receipts additionally bind the
 // trusted request actor carried by mcp-authz's AsyncLocalStorage.
@@ -346,7 +347,14 @@ export async function createDoc({
     }
   const doc = pilot || operationId
     ? await createDocument(data, { operationId, ...documentMcpActor() })
-    : await writeDocWithChange(prisma, { workspaceId, kind: "UPSERT", before: null }, (client) => client.doc.create({ data: { ...data, revision: randomUUID() } }))
+    : isDocsSyncEnabled()
+      // Sync on: writeDocWithChange opens the (retried, counter-locked) transaction, so `client` is a real transaction and can allocate the seq.
+      ? await writeDocWithChange(prisma, { workspaceId, kind: "UPSERT", before: null }, async (client) => {
+          const tx = client as AppTransactionClient
+          return tx.doc.create({ data: { ...data, ...(await allocateOneSeq(tx, workspaceId, "doc")), revision: randomUUID() } })
+        })
+      : (await noteDocWriteWhileSyncOff(prisma, workspaceId),
+        await withSequenceTransaction(prisma, async (tx) => tx.doc.create({ data: { ...data, ...(await allocateOneSeq(tx, workspaceId, "doc")), revision: randomUUID() } })))
   await followAfterCreate({ model: "doc", workspaceId, row: { id: doc.id }, actor: async () => mcpFollowActor() ?? { type: "SYSTEM", id: null } })
 
   // This used to emit a *relative* `/{org}/{ws}/docs` — the docs index, not the

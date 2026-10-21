@@ -27,6 +27,14 @@ artifacts, decision/review requests, solution plans, launch checklists, and
 release-authorization requests. The MCP endpoint remains supported and
 unchanged.
 
+Bulk create: `POST /api/v1/workspaces/{workspaceId}/opportunity-batches`
+(`createOpportunitiesBatch`) and `.../solution-batches` (`createSolutionsBatch`)
+take `items` (up to 100; 25 for agent callers). Each item is created in its own
+transaction and answered in `results` (`ok` with `id`, or `code`/`error`); the
+response is 200 even when some items fail. A client-generated `clientId` becomes
+the row id, so resending an item is idempotent (`deduped: true`). They mirror
+`create_opportunities` and `create_solutions`.
+
 Phase 4 adds research studies, saved sessions and transcript turns, completed
 syntheses and evidence promotion; initiating-owner PM interview reads;
 analytics connections; and card-sort rounds, blind proposals, tallies, and

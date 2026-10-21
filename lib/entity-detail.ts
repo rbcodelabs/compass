@@ -28,8 +28,10 @@
  * it.
  */
 import getPrisma from "@/lib/db";
-import { isPmInterviewEnabled } from "@/lib/research-feature";
+import { commentLinkTitles } from "@/lib/comment-link-titles";
+import { isPmInterviewEnabled, isResearchCaptureEnabled } from "@/lib/research-feature";
 import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getLinkedSolutionsByKeyResult } from "@/lib/typed-links";
+import { getSolutionArtifactIds } from "@/lib/artifacts";
 import { loadThinkingModelSource, offersSolutionToKrSurfaces } from "@/lib/thinking-model/link-surfaces";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
@@ -128,7 +130,8 @@ async function fetchObjective(id: string, workspaceId: string) {
   if (!item) return null;
   // The parent KR's objective must be in this workspace too; otherwise the link is hidden, not followed.
   const parentKeyResult = item.parentKeyResult && item.parentKeyResult.objective.workspaceId === workspaceId ? item.parentKeyResult : null;
-  return { ...item, parentKeyResult, ...(await fetchLinkedTasksBundle(workspaceId, "OBJECTIVE", id)) };
+  const customFields = await loadCustomFieldsForObject(getPrisma(), { workspaceId, objectType: "OBJECTIVE", objectId: id });
+  return { ...item, parentKeyResult, customFields, ...(await fetchLinkedTasksBundle(workspaceId, "OBJECTIVE", id)) };
 }
 
 async function fetchKeyResult(id: string, workspaceId: string) {
@@ -309,8 +312,8 @@ async function fetchSolution(id: string, workspaceId: string) {
     },
   });
   if (!solution) return null
-  const [links, availableArtifacts, pmInterviews, linkedTasks, evidence, customFields, scoringConfig, linkedKeyResultsBySolution] = await Promise.all([
-    prisma.artifactLink.findMany({ where: { workspaceId, linkedType: "SOLUTION", linkedId: id }, select: { artifactId: true } }),
+  const [linkedArtifactIds, availableArtifacts, pmInterviews, linkedTasks, evidence, customFields, scoringConfig, linkedKeyResultsBySolution] = await Promise.all([
+    getSolutionArtifactIds(prisma, workspaceId, id),
     prisma.artifact.findMany({ where: { workspaceId, status: "ACTIVE" }, select: { id: true, title: true, sourceType: true }, orderBy: { title: "asc" } }),
     pmInterviewHistory(workspaceId, "SOLUTION", id),
     fetchLinkedTasksBundle(workspaceId, "SOLUTION", id),
@@ -327,7 +330,7 @@ async function fetchSolution(id: string, workspaceId: string) {
     // Additive typed Solution<->Key Result links (workspace-filtered).
     getLinkedKeyResultsBySolution(prisma, workspaceId, [id], { preverified: true }),
   ])
-  const linkedIds = new Set(links.map((link) => link.artifactId))
+  const linkedIds = new Set(linkedArtifactIds)
   const solutionScoringModel = (scoringConfig?.solutionScoringModel as ScoringModelData | null) ?? null
   // Phase 4B: options for the Solution <-> Key Result picker, only for presets that offer it (CLASSIC reads nothing extra).
   // Filtered through the Key Result's Objective workspace, so a NULL / foreign row is never offered.
@@ -402,7 +405,7 @@ async function fetchExperiment(id: string, workspaceId: string) {
     pmInterviewHistory(workspaceId, "EXPERIMENT", id),
     fetchLinkedTasksBundle(workspaceId, "EXPERIMENT", id),
   ]);
-  return { ...item, ...linkedTasks, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews };
+  return { ...item, ...linkedTasks, researchCaptureEnabled: isResearchCaptureEnabled(), pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews };
 }
 
 async function fetchRoadmapItem(id: string, workspaceId: string) {
@@ -540,6 +543,10 @@ async function fetchTask(id: string, workspaceId: string) {
           select: { id: true, currentRevision: { select: { title: true } } },
         });
         for (const row of rows) titleById.set(`DECISION:${row.id}`, row.currentRevision?.title ?? "Untitled decision");
+        return;
+      }
+      if (linkedType === "COMMENT") {
+        for (const [key, title] of await commentLinkTitles(workspaceId, ids)) titleById.set(key, title);
         return;
       }
       const modelName = LINK_TARGET_MODEL[linkedType as keyof typeof LINK_TARGET_MODEL];

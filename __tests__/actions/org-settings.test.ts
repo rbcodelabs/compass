@@ -684,6 +684,26 @@ describe("grantAgentScoringModelAdmin", () => {
     });
     expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
   });
+
+  describe("a WORKSPACE-owned agent", () => {
+    const shared = { id: "agent-1", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "ws-1", status: "ACTIVE" };
+
+    it("is refused with a clear message, even when its workspace belongs to this organization (it confers nothing until PR2)", async () => {
+      mockAgent.findFirst.mockResolvedValue(shared);
+      mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1" });
+      await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
+        ok: false,
+        error: "Shared workspace agents cannot be granted organization admin access yet",
+      });
+      expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
+    });
+
+    it("is refused when the row names no owner at all", async () => {
+      mockAgent.findFirst.mockResolvedValue({ ...shared, ownerWorkspaceId: null });
+      await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({ ok: false, error: "Agent not found" });
+      expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("revokeAgentScoringModelAdmin", () => {

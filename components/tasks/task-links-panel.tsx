@@ -55,7 +55,7 @@ export function TaskLinksPanel({ taskId, initialLinks, revalidatePathStr, linkab
       ) : (
         <div className="rounded-xl border border-border overflow-hidden">
           {links.map((link, i) => {
-            const panelType = TASK_LINK_TO_PANEL_TYPE[link.linkedType];
+            const panelType = link.linkedType === "COMMENT" ? undefined : TASK_LINK_TO_PANEL_TYPE[link.linkedType];
             return (
               <div
                 key={link.id}
@@ -63,7 +63,7 @@ export function TaskLinksPanel({ taskId, initialLinks, revalidatePathStr, linkab
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-xs bg-muted rounded px-1.5 py-0.5 text-muted-foreground shrink-0">
-                    {typeLabels[link.linkedType]}
+                    {link.linkedType === "COMMENT" ? "Comment" : typeLabels[link.linkedType]}
                   </span>
                   {link.linkedType === "DOC" ? (
                     <Link

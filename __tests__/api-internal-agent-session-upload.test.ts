@@ -204,6 +204,24 @@ describe("what a run may upload", () => {
   })
 })
 
+describe("harness tag", () => {
+  it("stores an opencode upload under an opencode-tagged key", async () => {
+    const h = harness()
+    const res = await handleAgentSessionUpload(upload(GZ as Any, { headers: { "x-agent-session-harness": "opencode" } }), RUN_ID, h.prisma, h.storage)
+    expect(res.status).toBe(200)
+    expect([...h.objects.keys()][0]).toMatch(/\.opencode\.jsonl\.gz$/)
+  })
+
+  it("treats a missing or unknown harness header as Claude", async () => {
+    for (const headers of [{} as Record<string, string>, { "x-agent-session-harness": "other" }]) {
+      const h = harness()
+      const res = await handleAgentSessionUpload(upload(GZ as Any, { headers }), RUN_ID, h.prisma, h.storage)
+      expect(res.status).toBe(200)
+      expect([...h.objects.keys()][0]).not.toMatch(/\.opencode\./)
+    }
+  })
+})
+
 describe("committing", () => {
   it("stores the transcript under keys derived from the run row, not the request", async () => {
     const h = harness()

@@ -19,6 +19,8 @@ vi.mock("@/lib/db", () => ({ default: () => {
 import { activateResearchStudy, addExternalResearchSession, createExternalResearchStudy, issueResearchLink, regenerateResearchLink } from "@/lib/research-study-service"
 import { ExternalResearchInputError } from "@/lib/research-external"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const scope = { workspaceId: "00000000-0000-4000-8000-000000000001" }
 const actor = { userId: "member" }
 const REQUEST_ID = "test-idempotency-key-0001"

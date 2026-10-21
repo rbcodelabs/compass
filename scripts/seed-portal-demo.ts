@@ -21,6 +21,7 @@
  * `compass_dev` schema in development, not `public`.
  */
 import getPrisma from "../lib/db"
+import { allocateOneSeq } from "../lib/work-item-sequence"
 
 if (!process.env.DATABASE_URL) {
   console.error("refusing to run without DATABASE_URL (local dev only)")
@@ -84,7 +85,7 @@ async function main() {
     if (existing) {
       await prisma.roadmapItem.update({ where: { id: existing.id }, data })
     } else {
-      await prisma.roadmapItem.create({ data: { workspaceId: workspace.id, title: item.title, ...data } })
+      await prisma.roadmapItem.create({ data: { workspaceId: workspace.id, ...(await allocateOneSeq(prisma, workspace.id, "roadmapItem")), title: item.title, ...data } })
     }
   }
 

@@ -160,6 +160,14 @@ Open the study and use **Add a session** to enter one session at a time: an opti
 
 Imported sessions are saved as completed and marked as imported and member-reported, not verified against the provider. External studies have no participant link, AI interviewer or voice, and cannot be activated. Because the transcript is stored as saved participant turns, you can run analysis and synthesis and promote findings to Evidence as you would for a native study. A session with notes only is stored and shown but has no participant turns to cite, so it cannot support evidence on its own.
 
+## Linking studies to experiments
+
+A customer interview or usability study's **Informs** section shows the experiments it informs. Choose **Link existing experiment** to search experiments in the same workspace, then open or unlink them from this section. The relationship also appears under **Informed by** on each experiment's detail panel and full page.
+
+A study can inform several experiments, and an experiment can use several studies. Draft, active, and closed studies accept new links. Archived studies retain their existing links for review and removal; PM interviews and imported external studies are excluded.
+
+Relationships can change after participant sessions begin because they do not alter the locked research protocol. Linking does not activate a study, issue a participant link, record results, or validate an assumption. Unlinking preserves both records and all research.
+
 ## Research results
 
 Open a study to review session status, dates, saved-turn counts, summaries and transcripts. **View full interview and attachments** opens a paginated transcript; evidence links jump to the page containing the referenced turn. Study lists, sessions, transcript turns, attachments and synthesis history are paginated, so older research remains accessible. **View archived studies** opens retained archived records.

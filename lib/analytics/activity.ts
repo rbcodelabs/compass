@@ -9,7 +9,7 @@ type Source = "ui" | "mcp" | "agent"
 type Event = { action: ActivityAction; source: Source }
 const eventQueue = new AsyncLocalStorage<Event[]>()
 const toolContext = new AsyncLocalStorage<boolean>()
-const qualifyingTools = new Set(["create_opportunity", "update_opportunity", "update_opportunity_status", "add_solution", "update_solution", "update_solution_status", "add_to_roadmap", "promote_to_roadmap", "promote_feedback_to_roadmap", "update_roadmap_item", "set_launch_tier", "create_experiment", "update_experiment", "conclude_experiment", "log_experiment_result", "log_checkin"])
+const qualifyingTools = new Set(["create_opportunity", "create_opportunities", "create_solutions", "update_opportunity", "update_opportunity_status", "add_solution", "update_solution", "update_solution_status", "add_to_roadmap", "promote_to_roadmap", "promote_feedback_to_roadmap", "update_roadmap_item", "set_launch_tier", "create_experiment", "update_experiment", "conclude_experiment", "log_experiment_result", "log_checkin"])
 async function flushEvents(events: Event[]) {
   const unique = [...new Map(events.map(event => [event.action + ":" + event.source, event])).values()]
   await Promise.allSettled(unique.map(event => sendActivityEvent(event)))

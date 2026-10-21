@@ -3,7 +3,7 @@
  * Opportunities, Objectives, Key Results and Solutions; Phase 2):
  *
  *   opportunity_objective_links   Opportunity <-> Objective   (origin DIRECT | LEGACY)
- *   solution_key_result_links     Solution    <-> Key Result  (new-only, no legacy analogue)
+ *   solution_key_result_links     Solution    <-> Key Result  (mirrored into entity_links, backfilled by 098)
  *
  * Nothing else in the codebase may name the two link models; a guard test
  * (__tests__/typed-link-tables-unused.test.ts) pins that. Every other file goes through
@@ -27,6 +27,15 @@
  */
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
 import { withWorkspaceUpdates } from "@/lib/workspace-updates-capture"
+import { getLinkReadMode } from "@/lib/links/read-mode"
+import { readByFamilyMode } from "@/lib/links/read-switch"
+import type { ComparableLink } from "@/lib/links/read-compare"
+
+// lib/links/* imports this module, so its functions are loaded lazily at call time: a static import would be a cycle
+// (and would pull the registry into modules that only need the legacy tables).
+const readCompare = () => import("@/lib/links/read-compare")
+const legacyMirror = () => import("@/lib/links/legacy-mirror")
+const entityLinkService = () => import("@/lib/links/service")
 
 export type LinkSource = "UI" | "MCP" | "API"
 export type LinkContext = { source: LinkSource; createdById?: string | null }
@@ -109,7 +118,7 @@ async function loadKeyResultIn(tx: Tx, id: string, workspaceId: string) {
 // ── Transactions ────────────────────────────────────────────────────────────
 
 // entity_links (lib/links/service.ts, ADR phase 2) shares this race matcher and runTypedLinkTransaction.
-const LINK_NAMES = /idx_(?:opportunity_objective|solution_key_result)_links_pair|idx_entity_links_pair|opportunity_objective_links|solution_key_result_links|entity_links|OpportunityObjectiveLink|SolutionKeyResultLink|EntityLink\b/
+const LINK_NAMES = /idx_(?:opportunity_objective|solution_key_result)_links_pair|idx_entity_links_pair|opportunity_objective_links|solution_key_result_links|entity_links|OpportunityObjectiveLink|SolutionKeyResultLink|artifact_links|ArtifactLink\b|EntityLink\b/
 
 /**
  * A lost race on the unique pair index. Prisma reports it as P2002, but a driver adapter does not necessarily fill `meta.modelName`,
@@ -168,16 +177,24 @@ async function upsertOpportunityObjectiveLink(
   input: { workspaceId: string; opportunityId: string; objectiveId: string; origin: "DIRECT" | "LEGACY"; ctx: LinkContext },
 ): Promise<{ link: LinkRow; created: boolean; originFlipped: boolean }> {
   const { workspaceId, opportunityId, objectiveId, origin, ctx } = input
+  // The legacy row is written first and stays the source of truth; the entity_links mirror (flagged) joins the same transaction
+  // with the legacy row's FINAL origin, so a kept DIRECT stays DIRECT in the mirror too.
+  const mirror = async (final: LinkRow) =>
+    (await legacyMirror()).mirrorOpportunityTargetsObjective(tx, { opportunityId, objectiveId, workspaceId, origin: final.origin === "DIRECT" ? "DIRECT" : "LEGACY", ctx })
   const existing = (await tx.opportunityObjectiveLink.findFirst({ where: { opportunityId, objectiveId } })) as LinkRow | null
   if (!existing) {
     const link = (await tx.opportunityObjectiveLink.create({
       data: { workspaceId, opportunityId, objectiveId, origin, source: ctx.source, createdById: ctx.createdById ?? null },
     })) as LinkRow
+    await mirror(link)
     return { link, created: true, originFlipped: false }
   }
   const flip = origin === "DIRECT" && existing.origin !== "DIRECT"
   const repair = existing.workspaceId !== workspaceId
-  if (!flip && !repair) return { link: existing, created: false, originFlipped: false }
+  if (!flip && !repair) {
+    await mirror(existing)
+    return { link: existing, created: false, originFlipped: false }
+  }
   const link = (await tx.opportunityObjectiveLink.update({
     where: { id: existing.id },
     data: {
@@ -185,6 +202,7 @@ async function upsertOpportunityObjectiveLink(
       ...(flip ? { origin: "DIRECT", source: ctx.source, createdById: ctx.createdById ?? null } : {}),
     },
   })) as LinkRow
+  await mirror(link)
   return { link, created: false, originFlipped: flip }
 }
 
@@ -206,7 +224,11 @@ export async function unlinkOpportunityFromObjective(
   const opportunity = await loadOpportunity(tx, input.opportunityId, input.expectedWorkspaceId)
   const where = { opportunityId: opportunity.id, objectiveId: input.objectiveId, workspaceId: opportunity.workspaceId }
   const existing = (await tx.opportunityObjectiveLink.findFirst({ where })) as LinkRow | null
-  if (!existing) return { removed: 0 }
+  // The mirror row (if any) goes whatever the flag says, so a legacy unlink never strands one.
+  if (!existing) {
+    await (await legacyMirror()).unmirrorOpportunityTargetsObjective(tx, { opportunityId: opportunity.id, objectiveId: input.objectiveId, workspaceId: opportunity.workspaceId })
+    return { removed: 0 }
+  }
 
   // This function READS the opportunity's pointer to decide what to do. Touching the opportunity row makes that read part of the
   // write set, so a concurrent pointer change conflicts (DSQL detects write-write conflicts only) instead of write-skewing.
@@ -220,11 +242,15 @@ export async function unlinkOpportunityFromObjective(
       select: { objectiveId: true },
     })
     if (pointer?.objectiveId === input.objectiveId) {
-      if (existing.origin === "DIRECT") await tx.opportunityObjectiveLink.update({ where: { id: existing.id }, data: { origin: "LEGACY" } })
+      if (existing.origin === "DIRECT") {
+        await tx.opportunityObjectiveLink.update({ where: { id: existing.id }, data: { origin: "LEGACY" } })
+        await (await legacyMirror()).mirrorOpportunityTargetsObjective(tx, { opportunityId: opportunity.id, objectiveId: input.objectiveId, workspaceId: opportunity.workspaceId, origin: "LEGACY", ctx: { source: existing.source as LinkSource } })
+      }
       return { removed: 0, stillLinkedViaKeyResult: true }
     }
   }
   const { count } = await tx.opportunityObjectiveLink.deleteMany({ where: { id: existing.id, workspaceId: opportunity.workspaceId } })
+  await (await legacyMirror()).unmirrorOpportunityTargetsObjective(tx, { opportunityId: opportunity.id, objectiveId: input.objectiveId, workspaceId: opportunity.workspaceId })
   return { removed: count }
 }
 
@@ -249,7 +275,12 @@ export async function syncLegacyLink(
       ...(keyResult ? { objectiveId: { not: keyResult.objectiveId } } : {}),
     },
   })
+  const mirror = await legacyMirror()
+  // Mirror rows go unless their legacy row survived the delete above (the pointer's own, or a DIRECT one).
+  const surviving = await tx.opportunityObjectiveLink.findMany({ where: { opportunityId: input.opportunityId }, select: { objectiveId: true } })
+  await mirror.unmirrorStaleLegacyObjectiveLinks(tx, { opportunityId: input.opportunityId, workspaceId: input.workspaceId, keepObjectiveIds: surviving.map((row: { objectiveId: string }) => row.objectiveId) })
   if (keyResult) {
+    // Mirrors the Opportunity <-> Objective link too (inside upsert).
     await upsertOpportunityObjectiveLink(tx, {
       workspaceId: input.workspaceId,
       opportunityId: input.opportunityId,
@@ -258,6 +289,8 @@ export async function syncLegacyLink(
       ctx: input.ctx,
     })
   }
+  // The pointer itself (OPPORTUNITY_TARGETS_KEY_RESULT) carries the Key Result granularity the Objective link cannot.
+  await mirror.mirrorOpportunityKeyResultPointer(tx, { opportunityId: input.opportunityId, keyResultId: keyResult?.id ?? null, workspaceId: input.workspaceId, ctx: input.ctx })
 }
 
 /**
@@ -300,14 +333,21 @@ export async function linkSolutionToKeyResult(
   const workspaceId = assertSameWorkspacePair(solution, keyResult.objective)
   const existing = (await tx.solutionKeyResultLink.findFirst({ where: { solutionId: solution.id, keyResultId: keyResult.id } })) as SolutionLinkRow | null
   const shared = { solution: { id: solution.id, title: solution.title, workspaceId }, keyResult: { id: keyResult.id, title: keyResult.title } }
+  // The legacy row is written first and stays the source of truth; the entity_links mirror (flagged) joins the same transaction.
+  const mirror = async () => (await legacyMirror()).mirrorSolutionTargetsKeyResult(tx, { solutionId: solution.id, keyResultId: keyResult.id, workspaceId, ctx: input.ctx })
   if (existing) {
-    if (existing.workspaceId === workspaceId) return { link: existing, created: false, ...shared }
+    if (existing.workspaceId === workspaceId) {
+      await mirror()
+      return { link: existing, created: false, ...shared }
+    }
     const link = (await tx.solutionKeyResultLink.update({ where: { id: existing.id }, data: { workspaceId } })) as SolutionLinkRow
+    await mirror()
     return { link, created: false, ...shared }
   }
   const link = (await tx.solutionKeyResultLink.create({
     data: { workspaceId, solutionId: solution.id, keyResultId: keyResult.id, source: input.ctx.source, createdById: input.ctx.createdById ?? null },
   })) as SolutionLinkRow
+  await mirror()
   return { link, created: true, ...shared }
 }
 
@@ -319,6 +359,7 @@ export async function unlinkSolutionFromKeyResult(
   const { count } = await tx.solutionKeyResultLink.deleteMany({
     where: { solutionId: solution.id, keyResultId: input.keyResultId, workspaceId: solution.workspaceId },
   })
+  await (await legacyMirror()).unmirrorSolutionTargetsKeyResult(tx, { solutionId: solution.id, keyResultId: input.keyResultId, workspaceId: solution.workspaceId })
   return { removed: count }
 }
 
@@ -344,6 +385,11 @@ export async function deleteLinksFor(tx: Tx, kind: LinkParentKind, ids: readonly
     else if (kind === "solution") removed += (await tx.solutionKeyResultLink.deleteMany({ where: { solutionId: { in: part } } })).count
     else removed += (await tx.solutionKeyResultLink.deleteMany({ where: { keyResultId: { in: part } } })).count
   }
+  // The entity_links mirror is swept whatever the flag says: rows written while it was on must not outlive their endpoints.
+  if (kind === "opportunity") removed += await (await entityLinkService()).deleteLinksForEntity(tx, "OPPORTUNITY", ids)
+  else if (kind === "objective") removed += await (await entityLinkService()).deleteLinksForEntity(tx, "OBJECTIVE", ids)
+  else if (kind === "solution") removed += await (await entityLinkService()).deleteLinksForEntity(tx, "SOLUTION", ids)
+  else removed += await (await entityLinkService()).deleteLinksForEntity(tx, "KEY_RESULT", ids)
   return removed
 }
 
@@ -413,6 +459,11 @@ export async function drainLinksFor(db: Tx, kind: LinkParentKind, ids: readonly 
       )
     }
   }
+  // Mirror rows (entity_links) for the same parents, in the same committed passes.
+  if (kind === "opportunity") removed += await (await entityLinkService()).deleteLinksForEntity(db, "OPPORTUNITY", ids)
+  else if (kind === "objective") removed += await (await entityLinkService()).deleteLinksForEntity(db, "OBJECTIVE", ids)
+  else if (kind === "solution") removed += await (await entityLinkService()).deleteLinksForEntity(db, "SOLUTION", ids)
+  else removed += await (await entityLinkService()).deleteLinksForEntity(db, "KEY_RESULT", ids)
   return removed
 }
 
@@ -427,6 +478,8 @@ export async function drainLegacyLinksForOpportunities(db: Tx, opportunityIds: r
       async (rowIds) => (await db.opportunityObjectiveLink.deleteMany({ where: { id: { in: rowIds } } })).count,
     )
   }
+  // The same LEGACY rows in the mirror (not counted: the return value is the legacy table's, as before).
+  await (await legacyMirror()).drainMirroredLegacyObjectiveLinks(db, opportunityIds, objectiveId)
   return removed
 }
 
@@ -439,6 +492,7 @@ export async function deleteLegacyLinksForOpportunities(tx: Tx, opportunityIds: 
   for (const part of chunk(opportunityIds, LINK_WRITE_CHUNK)) {
     removed += (await tx.opportunityObjectiveLink.deleteMany({ where: { opportunityId: { in: part }, origin: "LEGACY" } })).count
   }
+  await (await legacyMirror()).drainMirroredLegacyObjectiveLinks(tx, opportunityIds)
   return removed
 }
 
@@ -479,7 +533,7 @@ export type LinkReadOptions = { preverified?: boolean }
  * list when it has no links); ids outside the workspace are absent. A link is included only when
  * its objective is itself in the workspace, so a NULL / drifted objective is hidden, as in #331.
  */
-export async function getLinkedObjectivesByOpportunity(
+async function legacyLinkedObjectivesByOpportunity(
   db: Tx,
   workspaceId: string,
   opportunityIds: readonly string[],
@@ -510,7 +564,7 @@ export async function getLinkedObjectivesByOpportunity(
 }
 
 /** The solution-side batch read, with the same filtering. A key result is in the workspace of its Objective. */
-export async function getLinkedKeyResultsBySolution(
+async function legacyLinkedKeyResultsBySolution(
   db: Tx,
   workspaceId: string,
   solutionIds: readonly string[],
@@ -540,6 +594,86 @@ export async function getLinkedKeyResultsBySolution(
   return result
 }
 
+// ── Read-mode routing (entity_links read flip) ───────────────────────────────
+// Each public reader below keeps its signature, shape and ordering. With the family flag off (the default) it is the legacy reader,
+// untouched. "shadow" returns the legacy result and compares it with entity_links; "on" serves entity_links (the legacy tables are still
+// written, so the rollback is the flag). See lib/links/read-switch.ts. Writers and write-decision reads never go through here.
+
+const flatten = <T extends { id: string }>(map: Map<string, T[]>, make: (key: string, item: T) => ComparableLink): ComparableLink[] =>
+  [...map].flatMap(([key, items]) => items.map((item) => make(key, item)))
+
+export async function getLinkedObjectivesByOpportunity(
+  db: Tx,
+  workspaceId: string,
+  opportunityIds: readonly string[],
+  options: LinkReadOptions = {},
+): Promise<Map<string, LinkedObjective[]>> {
+  return readByFamilyMode("OPPORTUNITY", {
+    legacy: () => legacyLinkedObjectivesByOpportunity(db, workspaceId, opportunityIds, options),
+    shadowScope: (legacyResult) => ({
+      legacy: flatten(legacyResult, (opportunityId, objective) => ({ linkType: "OPPORTUNITY_TARGETS_OBJECTIVE", fromType: "OPPORTUNITY", fromId: opportunityId, toType: "OBJECTIVE", toId: objective.id })),
+      readEntityLinks: async () => (await readCompare()).readEntityLinksOpportunityObjective(db, workspaceId, { opportunityIds: [...legacyResult.keys()] }),
+    }),
+    entityLinks: async () => {
+      const { readEntityLinksOpportunityObjective } = await readCompare()
+      const result = new Map<string, LinkedObjective[]>()
+      for (const ids of chunk([...new Set(opportunityIds)], LINK_WRITE_CHUNK)) {
+        const verified = options.preverified
+          ? new Set(ids)
+          : new Set((await db.opportunity.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true } })).map((row) => row.id))
+        if (verified.size === 0) continue
+        const links = await readEntityLinksOpportunityObjective(db, workspaceId, { opportunityIds: [...verified] })
+        const objectiveIds = [...new Set(links.map((link) => link.toId))]
+        const objectives = objectiveIds.length ? await db.objective.findMany({ where: { id: { in: objectiveIds }, workspaceId }, select: { id: true, title: true } }) : []
+        const titles = new Map(objectives.map((objective) => [objective.id, objective.title]))
+        for (const id of verified) result.set(id, [])
+        for (const link of links) {
+          const title = titles.get(link.toId)
+          if (title !== undefined) result.get(link.fromId)!.push({ id: link.toId, title })
+        }
+      }
+      return result
+    },
+  })
+}
+
+export async function getLinkedKeyResultsBySolution(
+  db: Tx,
+  workspaceId: string,
+  solutionIds: readonly string[],
+  options: LinkReadOptions = {},
+): Promise<Map<string, LinkedKeyResult[]>> {
+  return readByFamilyMode("SOLUTION_KR", {
+    legacy: () => legacyLinkedKeyResultsBySolution(db, workspaceId, solutionIds, options),
+    shadowScope: (legacyResult) => ({
+      legacy: flatten(legacyResult, (solutionId, kr) => ({ linkType: "SOLUTION_TARGETS_KEY_RESULT", fromType: "SOLUTION", fromId: solutionId, toType: "KEY_RESULT", toId: kr.id })),
+      readEntityLinks: async () => (await readCompare()).readEntityLinksSolutionKeyResult(db, workspaceId, { solutionIds: [...legacyResult.keys()] }),
+    }),
+    entityLinks: async () => {
+      const { readEntityLinksSolutionKeyResult } = await readCompare()
+      const result = new Map<string, LinkedKeyResult[]>()
+      for (const ids of chunk([...new Set(solutionIds)], LINK_WRITE_CHUNK)) {
+        const verified = options.preverified
+          ? new Set(ids)
+          : new Set((await db.solution.findMany({ where: { id: { in: ids }, workspaceId }, select: { id: true } })).map((row) => row.id))
+        if (verified.size === 0) continue
+        const links = await readEntityLinksSolutionKeyResult(db, workspaceId, { solutionIds: [...verified] })
+        const keyResultIds = [...new Set(links.map((link) => link.toId))]
+        const keyResults = keyResultIds.length
+          ? await db.keyResult.findMany({ where: { id: { in: keyResultIds }, objective: { workspaceId } }, select: { id: true, title: true, objectiveId: true } })
+          : []
+        const known = new Map(keyResults.map((kr) => [kr.id, kr]))
+        for (const id of verified) result.set(id, [])
+        for (const link of links) {
+          const kr = known.get(link.toId)
+          if (kr) result.get(link.fromId)!.push({ id: kr.id, title: kr.title, objectiveId: kr.objectiveId })
+        }
+      }
+      return result
+    },
+  })
+}
+
 export type LinkedSolution = { id: string; title: string }
 
 /**
@@ -549,7 +683,7 @@ export type LinkedSolution = { id: string; title: string }
  * A link is included only when its Solution is itself in the workspace (the Solution's own workspaceId), so a NULL /
  * drifted Solution is hidden. A missing link table fails loudly (the database error propagates).
  */
-export async function getLinkedSolutionsByKeyResult(
+async function legacyLinkedSolutionsByKeyResult(
   db: Tx,
   workspaceId: string,
   keyResultIds: readonly string[],
@@ -579,6 +713,41 @@ export async function getLinkedSolutionsByKeyResult(
   return result
 }
 
+export async function getLinkedSolutionsByKeyResult(
+  db: Tx,
+  workspaceId: string,
+  keyResultIds: readonly string[],
+  options: LinkReadOptions = {},
+): Promise<Map<string, LinkedSolution[]>> {
+  return readByFamilyMode("SOLUTION_KR", {
+    legacy: () => legacyLinkedSolutionsByKeyResult(db, workspaceId, keyResultIds, options),
+    shadowScope: (legacyResult) => ({
+      legacy: flatten(legacyResult, (keyResultId, solution) => ({ linkType: "SOLUTION_TARGETS_KEY_RESULT", fromType: "SOLUTION", fromId: solution.id, toType: "KEY_RESULT", toId: keyResultId })),
+      readEntityLinks: async () => (await readCompare()).readEntityLinksSolutionKeyResult(db, workspaceId, { keyResultIds: [...legacyResult.keys()] }),
+    }),
+    entityLinks: async () => {
+      const { readEntityLinksSolutionKeyResult } = await readCompare()
+      const result = new Map<string, LinkedSolution[]>()
+      for (const ids of chunk([...new Set(keyResultIds)], LINK_WRITE_CHUNK)) {
+        const verified = options.preverified
+          ? new Set(ids)
+          : new Set((await db.keyResult.findMany({ where: { id: { in: ids }, objective: { workspaceId } }, select: { id: true } })).map((row) => row.id))
+        if (verified.size === 0) continue
+        const links = await readEntityLinksSolutionKeyResult(db, workspaceId, { keyResultIds: [...verified] })
+        const solutionIds = [...new Set(links.map((link) => link.fromId))]
+        const solutions = solutionIds.length ? await db.solution.findMany({ where: { id: { in: solutionIds }, workspaceId }, select: { id: true, title: true } }) : []
+        const titles = new Map(solutions.map((solution) => [solution.id, solution.title]))
+        for (const id of verified) result.set(id, [])
+        for (const link of links) {
+          const title = titles.get(link.fromId)
+          if (title !== undefined) result.get(link.toId)!.push({ id: link.fromId, title })
+        }
+      }
+      return result
+    },
+  })
+}
+
 /** The link rows the canvas draws as edges. Ids only: titles and nodes come from the canvas's own workspace-filtered reads. */
 export type CanvasLinkRows = {
   opportunityObjective: { opportunityId: string; objectiveId: string; origin: "DIRECT" | "LEGACY" }[]
@@ -593,7 +762,7 @@ export type CanvasLinkRows = {
  * LEGACY rows). Chunked IN lists, one query per chunk, no per-row reads. A missing link table fails loudly: the database error
  * propagates (no silent "no links").
  */
-export async function getCanvasLinkRows(
+async function legacyCanvasLinkRows(
   db: Tx,
   workspaceId: string,
   input: { opportunityIds: readonly string[]; solutionIds: readonly string[]; origins: "ALL" | "DIRECT" },
@@ -617,6 +786,84 @@ export async function getCanvasLinkRows(
     for (const row of rows.sort(byCreatedThenId)) solutionKeyResult.push({ solutionId: row.solutionId, keyResultId: row.keyResultId })
   }
   return { opportunityObjective, solutionKeyResult }
+}
+
+/**
+ * The canvas edge rows, routed per family: the Opportunity-Objective half follows the OPPORTUNITY flag and the Solution-Key Result half
+ * the SOLUTION_KR flag, independently. The entity_links side is liveness-filtered (both endpoints live rows of this workspace), which
+ * only removes edges the canvas would drop anyway (it keeps a link only when both endpoints are nodes it loaded).
+ */
+export async function getCanvasLinkRows(
+  db: Tx,
+  workspaceId: string,
+  input: { opportunityIds: readonly string[]; solutionIds: readonly string[]; origins: "ALL" | "DIRECT" },
+): Promise<CanvasLinkRows> {
+  // Both flags off (the default): exactly the legacy read, one call.
+  if (getLinkReadMode("OPPORTUNITY") === "off" && getLinkReadMode("SOLUTION_KR") === "off") return legacyCanvasLinkRows(db, workspaceId, input)
+  const [opportunityObjective, solutionKeyResult] = await Promise.all([
+    readByFamilyMode("OPPORTUNITY", {
+      legacy: async () => (await legacyCanvasLinkRows(db, workspaceId, { ...input, solutionIds: [] })).opportunityObjective,
+      shadowScope: async (rows) => {
+        const { retainLiveEndpoints, legacyOpportunityObjectivePairs, readEntityLinksOpportunityObjective } = await readCompare()
+        return {
+          legacy: await retainLiveEndpoints(db, workspaceId, legacyOpportunityObjectivePairs(rows)),
+          readEntityLinks: () => readEntityLinksOpportunityObjective(db, workspaceId, { opportunityIds: [...new Set(input.opportunityIds)], origins: input.origins }),
+        }
+      },
+      entityLinks: async () => {
+        const { readEntityLinksOpportunityObjective } = await readCompare()
+        const links = await readEntityLinksOpportunityObjective(db, workspaceId, { opportunityIds: [...new Set(input.opportunityIds)], origins: input.origins })
+        return links.map((link) => ({ opportunityId: link.fromId, objectiveId: link.toId, origin: link.origin === "DIRECT" ? ("DIRECT" as const) : ("LEGACY" as const) }))
+      },
+    }),
+    readByFamilyMode("SOLUTION_KR", {
+      legacy: async () => (await legacyCanvasLinkRows(db, workspaceId, { ...input, opportunityIds: [] })).solutionKeyResult,
+      shadowScope: async (rows) => {
+        const { retainLiveEndpoints, legacySolutionKeyResultPairs, readEntityLinksSolutionKeyResult } = await readCompare()
+        return {
+          legacy: await retainLiveEndpoints(db, workspaceId, legacySolutionKeyResultPairs(rows)),
+          readEntityLinks: () => readEntityLinksSolutionKeyResult(db, workspaceId, { solutionIds: [...new Set(input.solutionIds)] }),
+        }
+      },
+      entityLinks: async () => {
+        const { readEntityLinksSolutionKeyResult } = await readCompare()
+        const links = await readEntityLinksSolutionKeyResult(db, workspaceId, { solutionIds: [...new Set(input.solutionIds)] })
+        return links.map((link) => ({ solutionId: link.fromId, keyResultId: link.toId }))
+      },
+    }),
+  ])
+  return { opportunityObjective, solutionKeyResult }
+}
+
+/**
+ * The Opportunity -> Key Result pointer for display / graph reads (canvas, discovery rail, outcome tree). The caller passes the opportunity
+ * rows it already read (with the legacy `linked_key_result_id` column); the result maps each opportunity id to its Key Result id or null.
+ * Off (default): the column, exactly as before. Shadow: the column, compared with the OPPORTUNITY_TARGETS_KEY_RESULT mirror. On: the mirror.
+ * Reads that DECIDE a write (clear-on-delete, create-from-solution defaults, REST/tool serialisation of the column) stay on the column.
+ */
+export async function getOpportunityKeyResultPointers(
+  db: Tx,
+  workspaceId: string,
+  rows: readonly { id: string; linkedKeyResultId: string | null }[],
+): Promise<Map<string, string | null>> {
+  const fromColumn = async () => new Map(rows.map((row) => [row.id, row.linkedKeyResultId]))
+  return readByFamilyMode("OPPORTUNITY", {
+    legacy: fromColumn,
+    shadowScope: async () => {
+      const { retainLiveEndpoints, legacyOpportunityKeyResultPointers, readEntityLinksOpportunityKeyResultPointer } = await readCompare()
+      return {
+        legacy: await retainLiveEndpoints(db, workspaceId, legacyOpportunityKeyResultPointers(rows)),
+        readEntityLinks: () => readEntityLinksOpportunityKeyResultPointer(db, workspaceId, { opportunityIds: rows.map((row) => row.id) }),
+      }
+    },
+    entityLinks: async () => {
+      const { readEntityLinksOpportunityKeyResultPointer } = await readCompare()
+      const links = await readEntityLinksOpportunityKeyResultPointer(db, workspaceId, { opportunityIds: rows.map((row) => row.id) })
+      const result = new Map<string, string | null>(rows.map((row) => [row.id, null]))
+      for (const link of links) if (result.get(link.fromId) === null) result.set(link.fromId, link.toId)
+      return result
+    },
+  })
 }
 
 export type ListLinksInput = {

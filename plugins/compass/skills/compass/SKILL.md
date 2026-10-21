@@ -149,15 +149,17 @@ The API key is stored in the Vercel project settings and in `.env.local` as `MCP
 | `get_opportunity` | Full tree: opportunity → solutions → assumptions → experiments. Also carries `linkedObjectives` |
 | `create_opportunity` | Create with optional KR link and squad assignment |
 | `update_opportunity_status` | Move through EXPLORING → VALIDATING → PRIORITIZED → ACTIVE → ARCHIVED |
-| `link_opportunity_to_kr` | Associate an opportunity to its one driving Key Result (`keyResultId: null` clears). A Key Result from another workspace is rejected. Also writes a `LEGACY` link to that Key Result's Objective |
-| `link_opportunity_to_objective` | `workspaceId, opportunityId, objectiveId`. Idempotent: `created:true`, or `created:false` on repeat; `originFlipped:true` when it upgrades a `LEGACY` link to `DIRECT`. A `DIRECT` link survives clearing the opportunity's Key Result |
+| `link_opportunity_to_kr` | Associate an opportunity to its one driving Key Result (`keyResultId: null` clears). A Key Result from another workspace is rejected. Also writes a `LEGACY` link to that Key Result's Objective. Always use this tool for the pointer: `OPPORTUNITY_TARGETS_KEY_RESULT` in `entity_links` is only a flagged mirror of it and `link_entities` refuses it |
+| `link_opportunity_to_objective` | `workspaceId, opportunityId, objectiveId`. Idempotent: `created:true`, or `created:false` on repeat; `originFlipped:true` when it upgrades a `LEGACY` link to `DIRECT`. A `DIRECT` link survives clearing the opportunity's Key Result. Always use this tool, not `link_entities`, which refuses `OPPORTUNITY_TARGETS_OBJECTIVE` (a flagged mirror that keeps the `DIRECT`/`LEGACY` origin) |
 | `unlink_opportunity_from_objective` | Same inputs. `removed:1`, or `removed:0` when none. `removed:0, stillLinkedViaKeyResult:true` is a **successful no-op**: the opportunity's Key Result is under that Objective so the link stays (see *Links*) |
-| `link_solution_to_key_result` | `workspaceId, solutionId, keyResultId`. Idempotent (`created:false` on repeat). The solution keeps its single parent opportunity |
+| `link_solution_to_key_result` | `workspaceId, solutionId, keyResultId`. Idempotent (`created:false` on repeat). The solution keeps its single parent opportunity. Always use this tool for solution-to-key-result links: the generic `link_entities` refuses `SOLUTION_TARGETS_KEY_RESULT`, which is only a flagged mirror of these links |
 | `unlink_solution_from_key_result` | Same inputs. `removed:1`, or `removed:0` when none |
 | `list_links` | `workspaceId` plus exactly one of `opportunityId`, `objectiveId`, `solutionId`, `keyResultId`; `limit` (1-100, default 50) and `cursor`. Returns `{ items, count, nextCursor }`, oldest first; page until `nextCursor` is null (a page can be short without being the last). Opportunity-objective items report `origin` DIRECT or LEGACY. Generic mode: `workspaceId`, `entityType` + `entityId`, optional `linkType` (not combinable with the four ids); items are `kind:"entity_link"` with `side`, `label`, `from`, `to` |
 | `link_entities` | `workspaceId, linkType, fromId, toId` (`toType` only for multi-target types). Creates a registry-backed link; today `EXPERIMENT_INFORMED_BY_STUDY` (Experiment `fromId` -> customer-interview or usability-test Research Study `toId`, not archived, research capture enabled). Idempotent (`created:false` on repeat). Text ends with `ID: <link uuid>` |
 | `unlink_entities` | `workspaceId, linkType, fromId, toId`. `removed:1`, or `removed:0` when none. Only `fromId` is checked, so a link to a deleted study is still removable |
 | `add_solution` | Propose a solution under an opportunity |
+| `create_opportunities` | Bulk-create up to 25 opportunities; per-item results; pass `clientId` per item so retries are safe |
+| `create_solutions` | Bulk-create up to 25 solutions, each under an existing opportunity; per-item results; pass `clientId` per item |
 | `add_assumption` | Add a testable assumption to a solution (HIGH/MEDIUM/LOW risk) |
 | `update_assumption` | Update an assumption's title, risk level, or status (UNTESTED/TESTING/VALIDATED/INVALIDATED) |
 | `delete_assumption` | Permanently delete an assumption; unlinks (does not delete) any Experiments or Evidence that referenced it |
@@ -181,7 +183,7 @@ synthesized and individual findings promoted into Evidence.
 | `generate_research_guide` | Draft 5–8 editable neutral questions or usability tasks for a live URL or a Compass Artifact target. Does **not** create a study — review the guide before use |
 | `create_research_study` | Create a study with a reviewed guide. Defaults to `ACTIVE`, returning its new participant link **once**. Pass `status: "DRAFT"` to stage it with no link issued — protocol fields stay editable — then `activate_research_study` when ready |
 | `list_research_studies` | Page through study metadata and counts, newest first. Archived studies excluded unless `status: ARCHIVED` is requested. No transcripts or participant identities |
-| `get_research_study` | Study settings, guide and session count only. Never returns participant credentials, transcripts, identities, or private storage paths |
+| `get_research_study` | Study settings, guide, session count and `linkedExperiments` (omitted for scoped research contexts). Never returns participant credentials, transcripts, identities, or private storage paths |
 | `update_research_study` | Update study settings. After any session starts, only the name changes — protocol fields lock. Archived studies cannot be edited |
 | `activate_research_study` | Activate a DRAFT or CLOSED study and return a fresh participant link once. Cannot reactivate an archived study |
 | `close_research_study` | Close an active study and revoke PRIMARY participant links; existing research is retained |
@@ -249,7 +251,7 @@ requests a decision, persist its request ID, report `AWAITING_DECISION`, and sto
 | Tool | Description |
 |---|---|
 | `list_experiments` | Filter by status and/or squad; recency-filterable (also accepts `endBefore`) |
-| `get_experiment` | Full details: hypothesis, method, kill condition, results |
+| `get_experiment` | Full details: hypothesis, method, kill condition, results, and `linkedStudies` when Research Capture is enabled (link them with `link_entities`, type `EXPERIMENT_INFORMED_BY_STUDY`) |
 | `create_experiment` | Create in DESIGNING status; link to an assumption |
 | `log_experiment_result` | Record an observation with optional metric + value |
 | `conclude_experiment` | PROCEED / KILL / ITERATE → auto-updates linked assumption status |
@@ -280,7 +282,7 @@ requests a decision, persist its request ID, report `AWAITING_DECISION`, and sto
 | `list_tasks` | Tasks for a workspace; filter by `status`, `priority`, `squadId`, `assigneeUserId`, or `parentTaskId`; recency-filterable |
 | `update_task` | Partial update of any task field (title, description, priority, assignee/owner, story points, due date, iteration, parent) |
 | `move_task_status` | Move a task to a new status column (BACKLOG / TODO / IN_PROGRESS / BLOCKED / IN_REVIEW / DONE / CANCELLED) |
-| `link_task` | Link a task to another object — `linkedType` one of OPPORTUNITY / SOLUTION / ROADMAP_ITEM / OBJECTIVE / KEY_RESULT / DOC / EXPERIMENT / FEEDBACK_ITEM — plus `linkedId`. Idempotent (re-linking the same pair is a no-op). Many-to-many |
+| `link_task` | Link a task to another object — `linkedType` one of OPPORTUNITY / SOLUTION / ROADMAP_ITEM / OBJECTIVE / KEY_RESULT / DOC / EXPERIMENT / FEEDBACK_ITEM — plus `linkedId`. Idempotent (re-linking the same pair is a no-op). Many-to-many. Always use this tool for task links: `TASK_REFERENCES` in `entity_links` is only a flagged mirror of them and `link_entities` refuses it |
 | `unlink_task` | Remove a task↔object link |
 | `list_task_links` | List all objects a task is linked to, grouped by type with resolved titles |
 
@@ -446,6 +448,8 @@ captures a v0 chat as an Artifact. `title` may be empty to use the chat name.
   second domain. If the proxy is not configured in that environment (no
   `V0_PREVIEW_HOST` / `V0_PREVIEW_TICKET_KEY`), the Artifact falls back to a link
   card rather than an embedded preview.
+
+**Linking an Artifact.** Always use `link_artifact_to_solution` / `unlink_artifact_from_solution` and `link_artifact_to_decision` / `unlink_artifact_from_decision`; the generic `link_entities` refuses `ARTIFACT_ATTACHED_TO_SOLUTION` and `ARTIFACT_SUPPORTS_DECISION`, which are only flagged mirrors of those links in `entity_links`. A Decision link is live supporting material (it names the Artifact, not a revision, and implies nothing about what an approval covered) and is accepted only for tracked Decisions.
 
 #### Feedback
 

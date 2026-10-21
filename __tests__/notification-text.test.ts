@@ -12,6 +12,7 @@ describe("notification wording", () => {
     expect(notificationAction({ kind: "COMMENT_ADDED", payload: {} })).toBe("commented")
     expect(notificationAction({ kind: "COMMENT_REPLIED", payload: {} })).toBe("replied to a comment")
     expect(notificationAction({ kind: "ASSIGNED", payload: {} })).toBe("assigned this to you")
+    expect(notificationAction({ kind: "MENTIONED", payload: {} })).toBe("mentioned you in a comment")
   })
 
   it("never throws on a kind from a newer version", () => {

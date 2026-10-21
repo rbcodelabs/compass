@@ -10,6 +10,7 @@ import { SLUG_PATTERN } from "@/lib/slug";
 import { validateOrgSlug } from "@/lib/org-slug";
 import { createWorkspaceInOrg, type WorkspaceMemberSeeding } from "@/lib/workspace-service";
 import { agentsEnabled } from "@/lib/agent-access";
+import { agentOwner, findAgentById } from "@/lib/agent-ownership";
 
 export interface ScoringMetricInput {
   key: string;
@@ -535,13 +536,19 @@ export async function grantAgentScoringModelAdmin(
     const { prisma, organizationId } = await resolveOrgAdmin(orgSlug);
     if (!agentsEnabled()) return { ok: false, error: "Agent changes are currently disabled" };
 
-    const agent = await prisma.agent.findFirst({ where: { id: agentId, status: "ACTIVE" } });
-    if (!agent) return { ok: false, error: "Agent not found" };
+    const agent = await findAgentById(prisma, agentId);
+    if (!agent || agent.status !== "ACTIVE") return { ok: false, error: "Agent not found" };
+    const owner = agentOwner(agent);
+    if (!owner) return { ok: false, error: "Agent not found" };
+
+    // A WORKSPACE-owned agent can hold no org-admin grant yet: it confers nothing until the
+    // run-as-agent change (PR2), so refuse rather than record an inert grant.
+    if (owner.type === "WORKSPACE") return { ok: false, error: "Shared workspace agents cannot be granted organization admin access yet" };
 
     // The grant is org-scoped (not workspace-scoped), so the owner check is
     // against OrganizationMember, not WorkspaceMember.
     const ownerMembership = await prisma.organizationMember.findFirst({
-      where: { organizationId, userId: agent.ownerUserId },
+      where: { organizationId, userId: owner.userId },
       select: { id: true },
     });
     if (!ownerMembership) return { ok: false, error: "Agent owner must be a current organization member" };

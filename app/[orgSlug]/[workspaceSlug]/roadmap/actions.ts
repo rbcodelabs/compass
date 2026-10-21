@@ -15,6 +15,7 @@ import { createRoadmapItemsFromSolutions, utcToday, type SolutionScheduleRequest
 import { ROADMAP_CARD_INCLUDE, toRoadmapCardData } from "@/lib/roadmap/card-data";
 import type { RoadmapCardData } from "@/components/roadmap/roadmap-card";
 import { toCustomFieldDefinitionData } from "@/lib/custom-field-definitions";
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 type Database = ReturnType<typeof getPrisma>;
 const ROADMAP_ITEM_NOT_FOUND = "Roadmap item not found";
@@ -104,8 +105,9 @@ export async function addRoadmapItem(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, tx => tx.roadmapItem.create({ data: {
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, async tx => tx.roadmapItem.create({ data: {
       workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "roadmapItem")),
       title: data.title,
       description: data.description,
       horizon: data.horizon,
@@ -268,8 +270,9 @@ export async function promoteToRoadmap(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, tx => tx.roadmapItem.create({ data: {
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, async tx => tx.roadmapItem.create({ data: {
       workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "roadmapItem")),
       title: solution.title,
       horizon,
       sortOrder,
@@ -300,8 +303,9 @@ export async function promoteFeedbackToRoadmap(
   });
   const sortOrder = lastItem ? lastItem.sortOrder + 1 : 0;
 
-  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, tx => tx.roadmapItem.create({ data: {
+  const item = await captureWorkspaceMutation(prisma, "roadmapItem", "create", "UI", undefined, async tx => tx.roadmapItem.create({ data: {
       workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "roadmapItem")),
       title: feedback.title,
       horizon,
       sortOrder,

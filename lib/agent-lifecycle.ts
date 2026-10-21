@@ -2,8 +2,15 @@ import type { AppPrismaClient, AppTransactionClient } from "@/lib/db";
 import { agentRunsAvailable } from "@/lib/agent-runs";
 import { deleteWorkspaceAgentSessions } from "@/lib/agent-session";
 
-/** Rejoining a workspace requires a fresh administrator grant. */
+/**
+ * Rejoining a workspace requires a fresh administrator grant. Only the removed member's USER-owned
+ * agents lose their grants: a WORKSPACE-owned agent belongs to the workspace, not to a person, so
+ * one member leaving must not strip it.
+ */
 export async function revokeMemberAgentGrants(prisma: AppTransactionClient, workspaceId: string, ownerUserId: string) {
+  // Runs inside a transaction, where a failed statement aborts the whole transaction, so it selects only
+  // `id` (a column that always exists) instead of using the column-fallback helpers. Only USER-owned
+  // agents carry an ownerUserId; a WORKSPACE-owned row has none (see lib/agent-ownership.ts).
   const agents = await prisma.agent.findMany({ where: { ownerUserId }, select: { id: true } });
   if (agents.length) await prisma.agentWorkspaceGrant.updateMany({ where: { workspaceId, agentId: { in: agents.map((a) => a.id) }, revokedAt: null }, data: { revokedAt: new Date(), updatedAt: new Date() } });
 }

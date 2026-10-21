@@ -9,6 +9,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.mock("@/lib/db", () => ({ default: () => ({}) }));
+vi.mock("@/lib/work-item-resolve", async () => (await import("./helpers/work-item-resolve-mock")).workItemResolveMock())
 vi.mock("@/auth", () => ({ auth: vi.fn() }));
 vi.mock("@/lib/workspace", () => ({ getWorkspace: vi.fn() }));
 vi.mock("@/lib/entity-detail", async () => {
@@ -106,7 +108,7 @@ describe("GET /api/panels/entity/[type]/[id]", () => {
     mockGetEntityDetail.mockResolvedValue(detail as never);
     const res = await call("experiment", "exp-1");
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual(detail);
+    await expect(res.json()).resolves.toEqual({ ...detail, displayId: null });
     // scoped to the workspace getWorkspace resolved, not anything client-supplied
     expect(mockGetEntityDetail).toHaveBeenCalledWith("experiment", "exp-1", "ws-1");
   });
@@ -128,7 +130,7 @@ describe("PATCH /api/panels/entity/[type]/[id]", () => {
     mockUpdateEntityField.mockResolvedValue({ ok: true, roadmapSync } as never);
     mockGetEntityDetail.mockResolvedValue({ type: "solution", data: { id: "sol-1" } } as never);
     const body = await (await patch("solution", "sol-1", { field: "status", value: "IN_DELIVERY" })).json();
-    expect(body).toEqual({ type: "solution", data: { id: "sol-1" }, roadmapSync });
+    expect(body).toEqual({ type: "solution", data: { id: "sol-1" }, displayId: null, roadmapSync });
   });
 
   it("returns the plain detail when nothing reached the roadmap", async () => {
@@ -136,7 +138,7 @@ describe("PATCH /api/panels/entity/[type]/[id]", () => {
     mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: false } as never);
     mockUpdateEntityField.mockResolvedValue({ ok: true } as never);
     mockGetEntityDetail.mockResolvedValue({ type: "solution", data: { id: "sol-1" } } as never);
-    expect(await (await patch("solution", "sol-1", { field: "title", value: "x" })).json()).toEqual({ type: "solution", data: { id: "sol-1" } });
+    expect(await (await patch("solution", "sol-1", { field: "title", value: "x" })).json()).toEqual({ type: "solution", data: { id: "sol-1" }, displayId: null });
   });
 
   it("succeeds for a real member (isReadOnly: false)", async () => {
@@ -154,5 +156,41 @@ describe("PATCH /api/panels/entity/[type]/[id]", () => {
       "New",
       { kind: "USER", id: "user-1" }
     );
+  });
+  it("403s a read-only member editing customerSegment or description, writing nothing", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: true } as never);
+    for (const field of ["customerSegment", "description"]) {
+      const res = await patch("opportunity", "opp-1", { field, value: "x" });
+      expect(res.status).toBe(403);
+    }
+    expect(mockUpdateEntityField).not.toHaveBeenCalled();
+  });
+
+  it("404s a non-member editing customerSegment before touching the entity", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue(null as never);
+    const res = await patch("opportunity", "opp-1", { field: "customerSegment", value: "SMB" });
+    expect(res.status).toBe(404);
+    expect(mockUpdateEntityField).not.toHaveBeenCalled();
+  });
+
+  it("passes a customerSegment edit to the workspace-scoped mutation", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: false } as never);
+    mockUpdateEntityField.mockResolvedValue({ ok: true } as never);
+    mockGetEntityDetail.mockResolvedValue({ type: "opportunity", data: { id: "opp-1" } } as never);
+    const res = await patch("opportunity", "opp-1", { field: "customerSegment", value: "SMB" });
+    expect(res.status).toBe(200);
+    expect(mockUpdateEntityField).toHaveBeenCalledWith("opportunity", "opp-1", "ws-1", "customerSegment", "SMB", { kind: "USER", id: "user-1" });
+  });
+
+  it("surfaces a validation failure from the mutation as a 400 body", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: false } as never);
+    mockUpdateEntityField.mockResolvedValue({ ok: false, status: 400, error: "Customer segment must be 255 characters or fewer" } as never);
+    const res = await patch("opportunity", "opp-1", { field: "customerSegment", value: "x".repeat(300) });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Customer segment must be 255 characters or fewer" });
   });
 });

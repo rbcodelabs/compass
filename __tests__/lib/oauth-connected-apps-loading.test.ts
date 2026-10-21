@@ -38,7 +38,7 @@ beforeEach(() => {
     { clientId: "other-client", clientName: "Other", redirectUris: ["http://localhost/callback"] },
   ])
   db.oAuthToken.findMany.mockResolvedValue([])
-  db.agent.findMany.mockResolvedValue([{ id: "agent", name: "Product agent" }])
+  db.agent.findMany.mockResolvedValue([{ id: "agent", name: "Product agent", ownerUserId: "owner", status: "ACTIVE" }])
   db.agentWorkspaceGrant.findMany.mockResolvedValue([])
   db.workspace.findMany.mockResolvedValue([])
 })
@@ -52,11 +52,28 @@ describe("getConnectedAppsForUser", () => {
       where: { userId: "owner", clientId: { in: ["client", "other-client"] } },
     }))
     expect(db.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: { in: ["agent", "another-users-agent"] }, ownerUserId: "owner" },
+      where: { id: { in: ["agent", "another-users-agent"] } },
     }))
     expect(db.workspace.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { members: { some: { userId: "owner" } } },
     }))
+    expect(db.agentWorkspaceGrant.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { agentId: { in: ["agent"] }, revokedAt: null },
+    }))
+  })
+  it("does not query agents at all when no consent names one", async () => {
+    db.oAuthConsent.findMany.mockResolvedValue([])
+    await getConnectedAppsForUser("owner")
+    expect(db.agent.findMany).not.toHaveBeenCalled()
+  })
+  it("never loads grants for an agent the account does not own as a USER, even if the row comes back", async () => {
+    db.agent.findMany.mockResolvedValue([
+      { id: "agent", name: "Product agent", ownerUserId: "owner", status: "ACTIVE" },
+      { id: "another-users-agent", name: "Theirs", ownerUserId: "someone-else", status: "ACTIVE" },
+      // A WORKSPACE-owned agent is not an account-owned identity, whatever ownerUserId says.
+      { id: "shared", name: "Shared", ownerUserId: "owner", ownerType: "WORKSPACE", ownerWorkspaceId: "ws", status: "ACTIVE" },
+    ])
+    await getConnectedAppsForUser("owner")
     expect(db.agentWorkspaceGrant.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { agentId: { in: ["agent"] }, revokedAt: null },
     }))

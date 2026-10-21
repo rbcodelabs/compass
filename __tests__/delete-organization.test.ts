@@ -46,9 +46,10 @@ const mockCapabilityPackVersion = { findMany: vi.fn(), findFirst: vi.fn(), delet
 const mockCanvasNodePosition = { deleteMany: vi.fn() };
 const mockPortalHomeLayout = { deleteMany: vi.fn() };
 const mockRoadmapView = { deleteMany: vi.fn() };
+const mockWorkspaceSequence = { deleteMany: vi.fn() };
 const mockWorkspaceMember = { deleteMany: vi.fn() };
 const mockSquad = { deleteMany: vi.fn() };
-const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null) };
+const mockDoc = { deleteMany: vi.fn(), findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) };
 const mockDocChange = { deleteMany: vi.fn(), findMany: vi.fn().mockResolvedValue([]) };
 const mockDocChangeCounter = { deleteMany: vi.fn() };
 const mockArtifact = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
@@ -65,7 +66,7 @@ const mockDecisionEvidenceRef = { deleteMany: vi.fn() };
 const mockDecisionRecord = { deleteMany: vi.fn() };
 const mockReviewOption = { deleteMany: vi.fn() };
 const mockReviewRevision = { deleteMany: vi.fn() };
-const mockReviewRequest = { updateMany: vi.fn(), deleteMany: vi.fn() };
+const mockReviewRequest = { findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() };
 const mockPortfolioCapacityReservation = { deleteMany: vi.fn() };
 const mockPortfolioCapacityPlan = { deleteMany: vi.fn() };
 const mockResearchDelete = { deleteMany: vi.fn(), updateMany: vi.fn() };
@@ -143,6 +144,7 @@ const mockPrisma = {
   canvasNodePosition: mockCanvasNodePosition,
   portalHomeLayout: mockPortalHomeLayout,
   roadmapView: mockRoadmapView,
+  workspaceSequence: mockWorkspaceSequence,
   workspaceMember: mockWorkspaceMember,
   squad: mockSquad,
   docChange: mockDocChange,
@@ -194,6 +196,8 @@ import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import { deleteOrganization } from "@/app/[orgSlug]/settings/actions";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const mockAuth = vi.mocked(auth);
 
 const ORG_NAME = "Acme Corp";
@@ -215,6 +219,7 @@ function seedNonEmptyFindMany() {
   mockKeyResult.findMany.mockResolvedValue([{ id: "kr-1" }]);
   mockScoringModel.findMany.mockResolvedValue([{ id: "sm-1" }]);
   mockArtifact.findMany.mockResolvedValue([{ id: "art-1" }]);
+  mockReviewRequest.findMany.mockResolvedValue([{ id: "rr-1" }]);
   mockArtifactRevision.findMany.mockResolvedValue([{ blobPathname: null }]);
   mockFeedbackSourceToken.findMany.mockResolvedValue([{ id: "token-1" }]);
   mockResearchStudy.findMany.mockResolvedValue([{ id: "study-1" }]);
@@ -312,6 +317,7 @@ beforeEach(() => {
     mockCanvasNodePosition.deleteMany,
     mockPortalHomeLayout.deleteMany,
     mockRoadmapView.deleteMany,
+    mockWorkspaceSequence.deleteMany,
     mockWorkspaceMember.deleteMany,
     mockSquad.deleteMany,
     mockDocChange.deleteMany,
@@ -476,6 +482,15 @@ describe("deleteOrganization", () => {
     expect(mockEntityLink.findMany.mock.invocationCallOrder[0]).toBeLessThan(mockOpportunity.deleteMany.mock.invocationCallOrder[0]);
     expect(orderOf(sweptFor("RESEARCH_STUDY"))).toBeLessThan(mockResearchStudy.deleteMany.mock.invocationCallOrder[0]);
     expect(orderOf(sweptFor("EXPERIMENT"))).toBeLessThan(mockExperiment.deleteMany.mock.invocationCallOrder[0]);
+    // ArtifactLink mirror (ADR phase 6): swept by endpoint before the artifacts and the review requests go.
+    expect(mockEntityLink.findMany).toHaveBeenCalledWith({
+      where: { OR: [{ fromType: "ARTIFACT", fromId: { in: ["art-1"] } }, { toType: "ARTIFACT", toId: { in: ["art-1"] } }] }, ...drain,
+    });
+    expect(mockEntityLink.findMany).toHaveBeenCalledWith({
+      where: { OR: [{ fromType: "REVIEW_REQUEST", fromId: { in: ["rr-1"] } }, { toType: "REVIEW_REQUEST", toId: { in: ["rr-1"] } }] }, ...drain,
+    });
+    expect(orderOf(sweptFor("ARTIFACT"))).toBeLessThan(mockArtifact.deleteMany.mock.invocationCallOrder[0]);
+    expect(orderOf((call) => JSON.stringify(call[0]).includes('"fromType":"REVIEW_REQUEST"'))).toBeLessThan(mockReviewRequest.deleteMany.mock.invocationCallOrder[0]);
 
     // ── Tasks / TaskLinks ──
     expect(mockTaskLink.deleteMany).toHaveBeenCalledWith({ where: { taskId: { in: ["task-1"] } } });
@@ -592,6 +607,7 @@ describe("deleteOrganization", () => {
     expect(mockCanvasNodePosition.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockPortalHomeLayout.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
     expect(mockRoadmapView.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
+    expect(mockWorkspaceSequence.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });
 
     // ── Members / squads / docs / workspace ──
     expect(mockWorkspaceMember.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "ws-1" } });

@@ -1,0 +1,68 @@
+-- READ-ONLY preflight for migration 096_entity_links_backfill_artifact (entity_links ADR phase 6).
+-- Counts the artifact_links rows the backfill would mirror and the orphans it would quarantine and report, so the owner can read the
+-- production numbers BEFORE deciding to POST 096 and who resolves the quarantined rows. It changes nothing: the transaction is
+-- READ ONLY and ends in ROLLBACK, and it selects counts and ids only (no titles, no content).
+--
+-- Usage (psql, as a read-only role; the schema is the deployment's, e.g. compass_prod):
+--   psql "$READONLY_DATABASE_URL" -v schema=compass_prod -f docs/maintenance/entity-links-artifact-preflight.psql
+-- It needs tables from migrations 034 (artifacts, artifact_links), 068 (solutions.workspace_id) and the review_requests table. The
+-- entity_links section at the end needs 091 and is skipped by psql's ON_ERROR_STOP=off default if the table is missing; the same numbers
+-- (plus these) are served by GET /api/admin/migrate under entityLinksArtifactBackfill once the code is deployed.
+--
+-- Classes, identical to lib/migrations/entity-links-artifact-backfill.ts (first match wins):
+--   ok                  mirrorable
+--   invalidType         linked_type is neither SOLUTION nor REVIEW_REQUEST
+--   dangling            the Artifact or the target row is gone
+--   crossWorkspace      Artifact and target are in different workspaces, or the target has no workspace
+--   linkWorkspaceDrift  the link row's workspace_id differs from the Artifact's
+--   notTrackedDecision  a REVIEW_REQUEST target whose gate_type is not TRACKED_DECISION
+
+\set ON_ERROR_STOP off
+BEGIN READ ONLY;
+
+\echo '== 1. artifact_links by linked_type =='
+SELECT linked_type, count(*) AS rows FROM :"schema".artifact_links GROUP BY linked_type ORDER BY linked_type;
+
+\echo '== 2. artifact_links by class (everything but ok is quarantined and reported by 096) =='
+SELECT CASE
+         WHEN l.linked_type NOT IN ('SOLUTION', 'REVIEW_REQUEST') THEN 'invalidType'
+         WHEN a.id IS NULL OR (sol.id IS NULL AND r.id IS NULL) THEN 'dangling'
+         WHEN COALESCE(sol.workspace_id, r.workspace_id) IS NULL OR a.workspace_id <> COALESCE(sol.workspace_id, r.workspace_id) THEN 'crossWorkspace'
+         WHEN l.workspace_id <> a.workspace_id THEN 'linkWorkspaceDrift'
+         WHEN r.id IS NOT NULL AND r.gate_type <> 'TRACKED_DECISION' THEN 'notTrackedDecision'
+         ELSE 'ok' END AS class,
+       count(*) AS rows
+  FROM :"schema".artifact_links AS l
+  LEFT JOIN :"schema".artifacts AS a ON a.id = l.artifact_id
+  LEFT JOIN :"schema".solutions AS sol ON l.linked_type = 'SOLUTION' AND sol.id = l.linked_id
+  LEFT JOIN :"schema".review_requests AS r ON l.linked_type = 'REVIEW_REQUEST' AND r.id = l.linked_id
+ GROUP BY 1 ORDER BY 1;
+
+\echo '== 3. Expected orphans, ids only: artifact_links.id with its class (first 200) =='
+SELECT l.id AS link_id,
+       CASE
+         WHEN l.linked_type NOT IN ('SOLUTION', 'REVIEW_REQUEST') THEN 'invalidType'
+         WHEN a.id IS NULL OR (sol.id IS NULL AND r.id IS NULL) THEN 'dangling'
+         WHEN COALESCE(sol.workspace_id, r.workspace_id) IS NULL OR a.workspace_id <> COALESCE(sol.workspace_id, r.workspace_id) THEN 'crossWorkspace'
+         WHEN l.workspace_id <> a.workspace_id THEN 'linkWorkspaceDrift'
+         ELSE 'notTrackedDecision' END AS class
+  FROM :"schema".artifact_links AS l
+  LEFT JOIN :"schema".artifacts AS a ON a.id = l.artifact_id
+  LEFT JOIN :"schema".solutions AS sol ON l.linked_type = 'SOLUTION' AND sol.id = l.linked_id
+  LEFT JOIN :"schema".review_requests AS r ON l.linked_type = 'REVIEW_REQUEST' AND r.id = l.linked_id
+ WHERE l.linked_type NOT IN ('SOLUTION', 'REVIEW_REQUEST')
+    OR a.id IS NULL OR (sol.id IS NULL AND r.id IS NULL)
+    OR COALESCE(sol.workspace_id, r.workspace_id) IS NULL OR a.workspace_id <> COALESCE(sol.workspace_id, r.workspace_id)
+    OR l.workspace_id <> a.workspace_id
+    OR (r.id IS NOT NULL AND r.gate_type <> 'TRACKED_DECISION')
+ ORDER BY l.id LIMIT 200;
+
+\echo '== 4. Solutions with no workspace_id (their artifact links are crossWorkspace orphans until 068/069 fills them) =='
+SELECT count(*) AS solutions_without_workspace FROM :"schema".solutions WHERE workspace_id IS NULL;
+
+-- Section 5 is last on purpose: it needs migration 091, and with ON_ERROR_STOP off a missing entity_links table only costs this section.
+\echo '== 5. entity_links state of the two types (needs migration 091) =='
+SELECT link_type, origin, count(*) AS rows FROM :"schema".entity_links
+ WHERE link_type IN ('ARTIFACT_ATTACHED_TO_SOLUTION', 'ARTIFACT_SUPPORTS_DECISION') GROUP BY 1, 2 ORDER BY 1, 2;
+
+ROLLBACK;

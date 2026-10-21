@@ -27,6 +27,19 @@ import { resolveCommentAnchor, type CommentAnchor } from "@/lib/comment-anchor"
 /** The minimal per-comment data the highlighter needs. */
 export interface CommentAnchorData extends CommentAnchor {
   id: string
+  /** The comment has a task: draw a pin after the passage (check for a person, gear for an agent). */
+  taskPin?: "human" | "agent" | null
+}
+
+function pinElement(commentId: string, kind: "human" | "agent"): HTMLElement {
+  const el = document.createElement("span")
+  el.className = kind === "agent" ? "doc-comment-pin doc-comment-pin-agent" : "doc-comment-pin"
+  el.textContent = kind === "agent" ? "\u2699 1" : "\u2713 1"
+  el.title = kind === "agent" ? "Agent task linked to this comment" : "Task linked to this comment"
+  el.setAttribute("data-testid", "doc-comment-task-pin")
+  el.setAttribute("data-pin-comment-id", commentId)
+  el.contentEditable = "false"
+  return el
 }
 
 export interface CommentHighlightOptions {
@@ -99,15 +112,21 @@ function buildDecorations(
 
     if (from == null || to == null || from >= to) continue
 
+    const taskClass =
+      comment.taskPin === "agent" ? " doc-comment-highlight-task-agent" : comment.taskPin === "human" ? " doc-comment-highlight-task" : ""
     decorations.push(
       Decoration.inline(from, to, {
         class:
-          comment.id === activeId
+          (comment.id === activeId
             ? "doc-comment-highlight doc-comment-highlight-active"
-            : "doc-comment-highlight",
+            : "doc-comment-highlight") + (comment.id === activeId ? "" : taskClass),
         "data-comment-id": comment.id,
       })
     )
+    if (comment.taskPin) {
+      const pin = comment.taskPin
+      decorations.push(Decoration.widget(to, () => pinElement(comment.id, pin), { side: 1, key: `pin-${comment.id}-${pin}` }))
+    }
   }
 
   return DecorationSet.create(doc, decorations)

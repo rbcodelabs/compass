@@ -1,5 +1,6 @@
 import { createHash } from "crypto"
 import getPrisma from "@/lib/db"
+import { findActiveUserOwnedAgent } from "@/lib/agent-ownership"
 import { mcpResourceUri, parseScope } from "@/lib/oauth/constants"
 import { ACCESS_TOKEN_PREFIX, hashOAuthToken } from "@/lib/oauth/tokens"
 import { getManagedPilotContext } from "@/lib/preview-automation/managed-context"
@@ -36,10 +37,18 @@ export type McpAuthResult = {
 // Returns the userId if a per-user key matched (null for service key), or false if invalid.
 export async function validateMcpAuth(request: Request): Promise<McpAuthResult> {
   try {
-    return validateProgrammaticAuth(request, { resource: mcpResourceUri() })
-  } catch {
+    // `await` is load-bearing: without it a rejected promise bypasses this catch.
+    return await validateProgrammaticAuth(request, { resource: mcpResourceUri() })
+  } catch (error) {
+    // Auth failures return `{ valid: false }` and never reach here; this is an
+    // unexpected error (typically a transient database failure). Fail closed.
+    console.error("[mcp-auth] unexpected error validating bearer token", describeError(error))
     return { valid: false }
   }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error)
 }
 
 export async function validateProgrammaticAuth(
@@ -88,7 +97,8 @@ export async function validateProgrammaticAuth(
   if (apiKey.agentId && apiKey.purpose !== "AGENT") return { valid: false }
   if (apiKey.purpose === "AGENT") {
     if (process.env.COMPASS_AGENTS_ENABLED !== "1" || !apiKey.agentId) return { valid: false }
-    const agent = await prisma.agent.findFirst({ where: { id: apiKey.agentId, ownerUserId: apiKey.userId, status: "ACTIVE" }, select: { id: true } })
+    // A personal key reaches only a USER-owned agent; a WORKSPACE-owned one fails closed here.
+    const agent = await findActiveUserOwnedAgent(prisma, apiKey.agentId, apiKey.userId)
     if (!agent) return { valid: false }
   }
   if (apiKey.purpose === "AGENT_TURN" && (!apiKey.scopeWorkspaceId || !apiKey.expiresAt || apiKey.expiresAt.getTime() <= Date.now())) return { valid: false }
@@ -198,10 +208,7 @@ async function validateOAuthAccessToken(token: string, expectedResource: string)
     //     every write fails — a half-working credential that reads as a Compass
     //     bug rather than a missing field.
     if (process.env.COMPASS_AGENTS_ENABLED !== "1" || !accessToken.agentId) return { valid: false }
-    const agent = await prisma.agent.findFirst({
-      where: { id: accessToken.agentId, ownerUserId: accessToken.userId, status: "ACTIVE" },
-      select: { id: true },
-    })
+    const agent = await findActiveUserOwnedAgent(prisma, accessToken.agentId, accessToken.userId)
     if (!agent) return { valid: false }
     return {
       valid: true,

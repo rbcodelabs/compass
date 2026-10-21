@@ -1,3 +1,4 @@
+import { displayIdFromRow, displayLine } from "@/lib/work-item-ids"
 /**
  * Handler functions for the Tasks MCP tools (create_task, get_task, list_tasks,
  * update_task, move_task_status, link_task, unlink_task, list_task_links).
@@ -20,6 +21,9 @@ import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types"
 import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, taskLinkScope, validateTaskLink, validateTaskReferences, type ResolvedTaskAssignee, type TaskAssignee } from "@/lib/task-assignment"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
+import { allocateOneSeq } from "@/lib/work-item-sequence"
+import { commentLinkTitles } from "@/lib/comment-link-titles"
+import { createTaskLink, deleteTaskLink } from "@/lib/task-link-writes"
 
 // Maps each TaskLinkedType to its Prisma model delegate name. Every target
 // table exposes a plain `title` column, so a single resolver works for all
@@ -67,6 +71,10 @@ async function resolveLinkTitles(
         select: { id: true, currentRevision: { select: { title: true } } },
       })
       for (const row of rows) titleById.set(`DECISION:${row.id}`, row.currentRevision?.title ?? "Untitled decision")
+      continue
+    }
+    if (linkedType === "COMMENT") {
+      for (const [key, title] of await commentLinkTitles(workspaceId, ids)) titleById.set(key, title)
       continue
     }
     const modelName = LINK_TARGET_MODEL[linkedType as Exclude<TaskLinkedType, "DECISION">]
@@ -163,9 +171,10 @@ export async function createTask({
   })
   const sortOrder = lastTask ? lastTask.sortOrder + 1 : 0
 
-  const task = await captureWorkspaceMutation(prisma, "task", "create", workspaceMutationSource(source), undefined, tx => tx.task.create({
+  const task = await captureWorkspaceMutation(prisma, "task", "create", workspaceMutationSource(source), undefined, async tx => tx.task.create({
     data: {
       workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "task")),
       title: title.trim(),
       description,
       status: resolvedStatus,
@@ -187,12 +196,13 @@ export async function createTask({
       `**Task created:** ${task.title}\n` +
         `Status: ${task.status}\n` +
         `Priority: ${task.priority}\n` +
-        `ID: ${task.id}`,
+        `ID: ${task.id}${displayLine("task", task)}`,
       safeEntityUrl({
         orgSlug: workspace.organization?.slug,
         workspaceSlug: workspace.slug,
         type: "task",
         id: task.id,
+        displayId: displayIdFromRow("task", task),
       }),
     ),
     (await resolveTaskAssignees(workspaceId, [task]))[0],
@@ -556,7 +566,8 @@ export async function linkTask({
     return fail(`Task "${task.title}" is already linked to ${linkedType} '${target.title}'.\nID: ${existingLink.id}`)
   }
 
-  const link = await prisma.taskLink.create({ data: { taskId, linkedType, linkedId } })
+  // Legacy row first (the source of truth), mirrored into entity_links in the same transaction while the flag is on.
+  const link = await createTaskLink(prisma, { taskId, linkedType, linkedId, workspaceId: task.workspaceId })
 
   return ok(
     `**Linked:** ${task.title} → [${linkedType}] ${target.title}\n` +
@@ -583,7 +594,10 @@ export async function unlinkTask({
     return fail(`No link found between task "${taskId}" and ${linkedType} "${linkedId}".`)
   }
 
-  await prisma.taskLink.delete({ where: { id: link.id } })
+  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { workspaceId: true } })
+  // A task row that vanished cannot be unmirrored through the service (it verifies the task); migration 097 prunes that mirror row.
+  if (task) await deleteTaskLink(prisma, { link, workspaceId: task.workspaceId })
+  else await prisma.taskLink.delete({ where: { id: link.id } })
 
   return ok(
     `Unlinked ${linkedType} "${linkedId}" from task "${taskId}".\nID: ${link.id}`,

@@ -15,6 +15,7 @@ import {
   setDocCommentStatusCore,
   deleteDocCommentCore,
 } from "@/lib/doc-comments";
+import { postDocCommentWithOptionalTask, type CommentTaskRequest, type PostCommentResult } from "@/lib/doc-comment-tasks";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { parseArtifactKind } from "@/lib/artifact-kind";
 import { resolveCanvasCards, searchCanvasCardTargets } from "@/lib/canvas-card-data";
@@ -507,6 +508,38 @@ export async function addDocComment(
 
   revalidatePath(revalidatePathStr);
   return result.comment;
+}
+
+/**
+ * Post a comment that may carry @mentions and, optionally, a task for the first
+ * mention. Expected failures come back as values (production masks the message
+ * of a thrown server-action error). The membership gate lives in the service.
+ */
+export async function addDocCommentWithTask(
+  input: {
+    docId: string;
+    body: string;
+    parentId?: string | null;
+    anchorText?: string | null;
+    anchorPrefix?: string | null;
+    anchorSuffix?: string | null;
+    anchorStart?: number | null;
+    anchorEnd?: number | null;
+    task?: CommentTaskRequest | null;
+    assignee?: { kind: "user" | "agent"; id: string } | null;
+    agentScopeConfirmed?: boolean;
+  },
+  revalidatePathStr: string
+): Promise<PostCommentResult> {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const result = await postDocCommentWithOptionalTask({
+    ...input,
+    userId: session.user.id,
+    userName: session.user.name ?? session.user.email ?? "Unknown",
+  });
+  if (result.ok) revalidatePath(revalidatePathStr);
+  return result;
 }
 
 export async function listDocComments(docId: string) {

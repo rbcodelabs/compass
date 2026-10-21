@@ -5,6 +5,9 @@ import getPrisma, { type AppPrismaClient, type AppTransactionClient } from "@/li
 import { getDocumentStore, isDocumentPilotWorkspace } from "@/lib/document-storage"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
 import { changeKindFor, isDocsSyncEnabled, lockCounter, noteDocWriteWhileSyncOff, recordDocChange, withDocChangeRetry } from "@/lib/doc-sync"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
+import { deleteLinksForEntity } from "@/lib/links/service"
+import { drainAfterParentDelete } from "@/lib/typed-links"
 
 export type DocumentMutationOptions = {
   expectedRevision?: string
@@ -135,14 +138,16 @@ export async function createDocument(input: Prisma.DocUncheckedCreateInput, opts
   await noteDocWriteWhileSyncOff(db, data.workspaceId)
   const contentRef = pilot ? await upload(data.workspaceId, data.content ?? "") : null
   try {
-    return await inTx(db, data.workspaceId, async tx => {
+    // Doc-change retry (sync on) wraps main's seq-conflict retry; the change counter is locked first so writers share one lock order.
+    return await withDocChangeRetry(() => withSequenceTransaction(db, async tx => {
+      if (isDocsSyncEnabled()) await lockCounter(tx, data.workspaceId)
       const doc = await tx.doc.create({ data: pilot
-        ? { ...data, storageProvider: "GEODE", content: null, contentRef, revision: randomUUID() }
-        : { ...data, revision: randomUUID() } })
+        ? { ...data, ...(await allocateOneSeq(tx, data.workspaceId, "doc")), storageProvider: "GEODE", content: null, contentRef, revision: randomUUID() }
+        : { ...data, ...(await allocateOneSeq(tx, data.workspaceId, "doc")), revision: randomUUID() } })
       await recordDocChange(tx, doc.workspaceId, doc.id, "UPSERT", null)
       if (guarded) await record(tx, doc, opts.operationId!, hash, doc)
       return doc
-    })
+    }))
   } catch (error) {
     if (guarded) {
       const previous = await replay(data.workspaceId, opts.operationId!, hash)
@@ -293,4 +298,7 @@ export async function deleteDocument(docId: string, opts: DocumentMutationOption
     if (opts.operationId && await replay(workspaceId, opts.operationId, hash)) return
     throw error
   }
+  // Task links to this document were never cleaned by the legacy delete; their entity_links mirror rows (ADR phase 7) are, after the delete
+  // commits, whatever the flag says. A failure is logged and swallowed: migration 097 reports or prunes what is left.
+  await drainAfterParentDelete("document.delete.links", () => deleteLinksForEntity(db, "DOC", [docId]))
 }

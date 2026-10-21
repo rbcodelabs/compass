@@ -3,11 +3,11 @@ import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 
 /**
- * Static guards for 092_doc_changes. The DDL that reaches Aurora DSQL is the SQL file, not
+ * Static guards for 100_doc_changes. The DDL that reaches Aurora DSQL is the SQL file, not
  * schema.prisma, so the two are pinned to each other here.
  */
 const ROOT = process.cwd()
-const NAME = "092_doc_changes"
+const NAME = "100_doc_changes"
 const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8")
 const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8")
 const sqlPath = path.join(ROOT, "prisma/migrations", NAME, "migration.sql")
@@ -19,7 +19,7 @@ const statements = sql.split(";").map((s) => s.trim()).filter(Boolean)
 describe(NAME, () => {
   it("is registered exactly once, after 091, with the async-wait and postcondition hooks", () => {
     expect([...runner.matchAll(new RegExp(`name:\\s*"${NAME}"`, "g"))]).toHaveLength(1)
-    expect(runner.indexOf(`name: "${NAME}"`)).toBeGreaterThan(runner.indexOf('name: "091_entity_links"'))
+    expect(runner.indexOf(`name: "${NAME}"`)).toBeGreaterThan(runner.indexOf('name: "099_agent_owner_user_nullable"'))
     expect(runner).toContain(`migration.name === "${NAME}") await assertDocChangesMigration`)
     expect([...runner.matchAll(new RegExp(`"${NAME}"`, "g"))].length).toBeGreaterThanOrEqual(3)
   })

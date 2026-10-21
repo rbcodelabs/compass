@@ -24,6 +24,7 @@ import {
   keysetLimitSchema,
   type KeysetCursor,
 } from "@/lib/mcp-keyset"
+import { widenRefSchemas, resolveToolRefs } from "@/lib/mcp-work-item-refs"
 import { runWithMcpActor, getMcpActor, isResearchActor, assertWorkspaceMember, McpAuthzError } from "@/lib/mcp-authz"
 import { applyToolGate, AGENT_TOOL_POLICY, scopesSatisfy, type ToolScope } from "@/lib/mcp-tool-gates"
 import { bearerChallenge, requiredScopeForPayload } from "@/lib/mcp-oauth-challenge"
@@ -96,7 +97,7 @@ import {
   updateAssumption,
   deleteAssumption,
 } from "@/lib/assumption-tool-handlers"
-import { createSolution, updateSolution } from "@/lib/solution-tool-handlers"
+import { createSolution, createSolutions, updateSolution } from "@/lib/solution-tool-handlers"
 import {
   addSolutionPlan,
   addSolutionComment,
@@ -108,7 +109,7 @@ import {
   rejectSolutionPlan,
 } from "@/lib/solution-comment-tool-handlers"
 import { updateSolutionStatus } from "@/lib/solution-status-tool-handlers"
-import { createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
+import { createOpportunities, createOpportunity, updateOpportunity, updateOpportunityKeyResult, updateOpportunityStatus } from "@/lib/opportunity-tool-handlers"
 import { listAssumptions, listSolutions } from "@/lib/discovery-query-tool-handlers"
 import {
   listScoringModels,
@@ -175,7 +176,7 @@ import {
   unlinkOpportunityFromObjectiveTool,
   unlinkSolutionFromKeyResultTool,
 } from "@/lib/typed-link-tool-handlers"
-import { linkEntitiesTool, listLinksTool, unlinkEntitiesTool } from "@/lib/link-tool-handlers"
+import { linkEntitiesTool, linkSummariesForCaller, listLinksTool, unlinkEntitiesTool } from "@/lib/link-tool-handlers"
 import { ENTITY_TYPE_VOCABULARY } from "@/lib/entity-types"
 import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
@@ -200,6 +201,7 @@ import {
   getCardSortBoardTool,
   getCardSortTallyTool,
 } from "@/lib/card-sort-tool-handlers"
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 // Roadmap item start/end dates come from a plain "YYYY-MM-DD" string (an
 // <input type="date"> value, or an MCP caller's ISO date string), which
@@ -259,9 +261,25 @@ const _handler = createMcpHandler(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       handler: (args: any, extra?: any) => any
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ) => (server.registerTool as (...a: any[]) => any)(name, meta, async (args: any, extra: any) => {
+    ) => (server.registerTool as (...a: any[]) => any)(name, meta && typeof meta === "object" && meta.inputSchema ? { ...meta, inputSchema: widenRefSchemas(meta.inputSchema) } : meta, async (rawArgs: any, extra: any) => {
       const actor = { ...getMcpActor(), authorizedWorkspaceId: undefined }
-      return runWithMcpActor(actor, () => withAgentActivity(actor, name, AGENT_TOOL_POLICY[name] !== "READ", () => applyToolGate(name, actor, args ?? {}), () => withAnalyticsTool(name, () => withInterviewMutation(name, args ?? {}, () => handler(args, extra)))))
+      // Display IDs (TASK-12) become UUIDs exactly once, inside the gate and after its actor-type/policy checks, so the
+      // tool's own gate, the handler and every receipt only ever see UUIDs, and a denied call resolves nothing.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let args: any = rawArgs ?? {}
+      let resolved = false
+      const resolveOnce = async () => {
+        if (!resolved) {
+          args = await resolveToolRefs(actor, args)
+          resolved = true
+        }
+        return args
+      }
+      return runWithMcpActor(actor, () => withAgentActivity(actor, name, AGENT_TOOL_POLICY[name] !== "READ", async () => {
+        await applyToolGate(name, actor, args, resolveOnce)
+        // A service actor returns from the gate early; its handler still needs UUIDs.
+        await resolveOnce()
+      }, () => withAnalyticsTool(name, () => withInterviewMutation(name, args, () => handler(args, extra)))))
     })
 
     register("get_current_identity", { title: "Current Identity", description: "Returns the authenticated caller and currently accessible workspaces.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, async () => {
@@ -285,7 +303,7 @@ const _handler = createMcpHandler(
     register("generate_research_guide", { title: "Generate Research Guide", description: "Draft 5–8 editable neutral questions or usability tasks for a live URL or a Compass Artifact target. Does not create a study. Uses a bounded tool-free model call; review the guide before use.", inputSchema: { ...researchScope, studyType: researchType, goal: researchFields.goal, appUrl: researchFields.appUrl, artifactId: researchFields.artifactId, targetMinutes: researchDuration }, outputSchema: TOOL_OUTPUT_SCHEMA }, generateResearchGuideTool)
     register("create_research_study", { title: "Create Research Study", description: "Create a research study. Defaults to ACTIVE, returning its new participant link once (store it securely; plaintext cannot be retrieved later). Pass status: \"DRAFT\" to stage the study — protocol fields stay editable via update_research_study — without issuing a link; call activate_research_study when ready to launch it.", inputSchema: { ...researchScope, ...researchFields, status: z.enum(["DRAFT", "ACTIVE"]).optional().default("ACTIVE").describe("Initial lifecycle status. DRAFT stages the study with no participant link issued; ACTIVE (default) issues one immediately.") }, outputSchema: TOOL_OUTPUT_SCHEMA }, createResearchStudyTool)
     register("list_research_studies", { title: "List Research Studies", description: "Page through study metadata and counts, newest first. Archived studies are excluded unless status ARCHIVED is requested. Cursors are scoped to workspace and status; no transcripts or participant identities are returned.", inputSchema: { ...researchScope, status: z.enum(["DRAFT", "ACTIVE", "CLOSED", "ARCHIVED"]).optional(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(1_024).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listResearchStudiesTool)
-    register("get_research_study", { title: "Get Research Study", description: "Get study settings, guide and session count only. Does not return participant credentials, transcripts, identities or private storage paths.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, getResearchStudyTool)
+    register("get_research_study", { title: "Get Research Study", description: "Get study settings, guide, session count and linkedExperiments (experiments it informs; omitted for scoped research contexts). Does not return participant credentials, transcripts, identities or private storage paths.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, getResearchStudyTool)
     register("update_research_study", { title: "Update Research Study", description: "Update study settings. After any session starts, only the name changes; protocol fields remain locked. Archived studies cannot be edited.", inputSchema: { ...researchStudy, ...researchFields, goal: researchFields.goal.optional(), guide: researchGuide.optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, updateResearchStudyTool)
     register("activate_research_study", { title: "Activate Research Study", description: "Activate a draft or closed study and return a fresh participant link once. Cannot reactivate an archived study.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, activateResearchStudyTool)
     register("close_research_study", { title: "Close Research Study", description: "Close an active study and revoke PRIMARY participant links; retain existing research.", inputSchema: researchStudy, outputSchema: TOOL_OUTPUT_SCHEMA }, closeResearchStudyTool)
@@ -822,10 +840,10 @@ const _handler = createMcpHandler(
               : "The parent KR must belong to an open cycle or to a cycle-less Objective in this workspace.")
           }
         }
-        const objective = await prisma.objective.create({
+        const objective = await withSequenceTransaction(prisma, async (tx) => tx.objective.create({
           // workspaceId comes from the cycle just verified to live in the authorized workspace (or, with no cycle, the gate-authorized workspaceId), never from unverified input.
-          data: { workspaceId: scope.workspaceId, cycleId: cycleId ?? null, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
-        })
+          data: { workspaceId: scope.workspaceId, ...(await allocateOneSeq(tx, scope.workspaceId, "objective")), cycleId: cycleId ?? null, title: title.trim(), description: description?.trim(), owner: owner?.trim(), squadId: squadId ?? null, parentKeyResultId: parentKeyResultId ?? null },
+        }))
         return ok(
           withUrlLine(
             `**Objective created** ${cycle ? `in cycle "${cycle.title}"` : `with no cycle (${NO_CYCLE_LABEL})`}\nID: ${objective.id}\nTitle: ${objective.title}\nStatus: ${objective.status}`,
@@ -899,9 +917,10 @@ const _handler = createMcpHandler(
         if (!objective?.workspaceId) {
           return fail(`Objective "${objectiveId}" not found.`)
         }
-        const keyResult = await prisma.keyResult.create({
-          data: { objectiveId, title: title.trim(), target, unit: unit?.trim() },
-        })
+        const keyResultWorkspaceId = objective.workspaceId
+        const keyResult = await withSequenceTransaction(prisma, async (tx) => tx.keyResult.create({
+          data: { workspaceId: keyResultWorkspaceId, ...(await allocateOneSeq(tx, keyResultWorkspaceId, "keyResult")), objectiveId, title: title.trim(), target, unit: unit?.trim() },
+        }))
         return ok(
           withUrlLine(
             `**Key Result created** on "${objective.title}"\nID: ${keyResult.id}\nTitle: ${keyResult.title}\nTarget: ${keyResult.target}${keyResult.unit ? " " + keyResult.unit : ""}\nCurrent: 0`,
@@ -1337,6 +1356,52 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       createOpportunity,
+    )
+
+    register(
+      "create_opportunities",
+      {
+        title: "Create Opportunities (bulk)",
+        description:
+          "Creates several Opportunities in one call: up to 25 items for agent callers (100 for human API keys). Each item is created in its own transaction and reported separately, so one invalid item never blocks the others; the call succeeds even when some items fail, so read data.results. " +
+          "Pass your own `clientId` (a UUID) per item to make retries safe: resending an item that was already created returns { ok: true, deduped: true } instead of a duplicate, and an id that is taken by different content returns CONFLICT. Omit it only if you will not retry. " +
+          "Items take title, description, customerSegment, status (EXPLORING, VALIDATING, PRIORITIZED or ACTIVE) and squadId; use create_opportunity to link a Key Result.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          items: z.array(z.object({
+            clientId: z.string().uuid().optional().describe("Idempotency key and the new Opportunity's id"),
+            title: z.string().describe("Short title (at most 255 characters)"),
+            description: z.string().nullable().optional(),
+            customerSegment: z.string().nullable().optional(),
+            status: z.string().optional().describe("EXPLORING (default), VALIDATING, PRIORITIZED or ACTIVE"),
+            squadId: z.string().uuid().nullable().optional(),
+          }).strict()).min(1).max(100),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      createOpportunities,
+    )
+
+    register(
+      "create_solutions",
+      {
+        title: "Create Solutions (bulk)",
+        description:
+          "Creates several Solutions under existing Opportunities in one call: up to 25 items for agent callers (100 for human API keys). Each item names its parent `opportunityId`, is created in its own transaction (status IDEA) and is reported separately; read data.results. " +
+          "A parent that is missing or in another workspace returns NOT_FOUND for that item. Pass your own `clientId` (a UUID) per item to make retries safe: a repeat returns { ok: true, deduped: true }.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          items: z.array(z.object({
+            clientId: z.string().uuid().optional().describe("Idempotency key and the new Solution's id"),
+            opportunityId: z.string().uuid().describe("UUID of the parent Opportunity"),
+            title: z.string().describe("Title (at most 255 characters)"),
+            description: z.string().nullable().optional(),
+          }).strict()).min(1).max(100),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      async ({ items, ...rest }: { workspaceId: string; items: Array<{ clientId?: string; opportunityId: string; title: string; description?: string | null }> }) =>
+        createSolutions({ ...rest, items: items.map(({ opportunityId, ...item }) => ({ ...item, parent: { id: opportunityId } })) }),
     )
 
     register(
@@ -1848,7 +1913,7 @@ const _handler = createMcpHandler(
         title: "Get Experiment",
         description:
           "Returns full details for a single experiment: hypothesis, method, kill condition, " +
-          "linked assumption, all logged results, and conclusion.",
+          "linked assumption, all logged results, conclusion, and linkedStudies (research studies linked via EXPERIMENT_INFORMED_BY_STUDY).",
         inputSchema: {
           experimentId: z.string().uuid().describe("UUID of the experiment"),
         },
@@ -1886,7 +1951,7 @@ const _handler = createMcpHandler(
               ? `\n**Linked Assumption:** ${experiment.assumption.title} [${experiment.assumption.status}]\n  ID: ${experiment.assumption.id}\n`
               : "\n") +
             `\n**Results (${experiment.results.length}):**\n${resultsText}`,
-          experiment,
+          { ...experiment, ...(await linkSummariesForCaller(experiment.workspaceId, "EXPERIMENT", experiment.id)) },
         )
       }
     )
@@ -1917,8 +1982,8 @@ const _handler = createMcpHandler(
           const a = await prisma.assumption.findUnique({ where: { id: assumptionId } })
           if (!a) return fail(`Assumption "${assumptionId}" not found.`)
         }
-        const experiment = await captureWorkspaceMutation(prisma, "experiment", "create", "MCP", undefined, tx => tx.experiment.create({
-          data: { workspaceId, title: title.trim(), hypothesis: hypothesis.trim(), method: method.trim(), killCondition: killCondition.trim(), assumptionId: assumptionId ?? null, squadId: squadId ?? null, status: "DESIGNING" },
+        const experiment = await captureWorkspaceMutation(prisma, "experiment", "create", "MCP", undefined, async tx => tx.experiment.create({
+          data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "experiment")), title: title.trim(), hypothesis: hypothesis.trim(), method: method.trim(), killCondition: killCondition.trim(), assumptionId: assumptionId ?? null, squadId: squadId ?? null, status: "DESIGNING" },
         }))
         return ok(
           withUrlLine(

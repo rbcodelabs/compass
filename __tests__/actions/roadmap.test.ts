@@ -53,6 +53,8 @@ import {
   editRoadmapItem,
 } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockRoadmapItem.create.mockResolvedValue({ id: "item-1", title: "Test Item" });

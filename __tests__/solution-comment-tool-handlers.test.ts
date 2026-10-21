@@ -78,7 +78,7 @@ it("derives registered-agent plan attribution", async () => {
 beforeEach(() => {
   vi.clearAllMocks()
   actor.get.mockReturnValue({ purpose: "USER", userId: "user" })
-  mockPrisma.agent.findFirst.mockResolvedValue({ name: "Registered worker" })
+  mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent", name: "Registered worker", ownerUserId: "user", status: "ACTIVE" })
   mockSolution.findUnique.mockResolvedValue({ id: SOLUTION_ID, title: "Ship the diff-view rail" })
   mockSolutionComment.create.mockImplementation(({ data }) =>
     Promise.resolve({

@@ -10,6 +10,11 @@ import {
   normalizeNewOpportunityInput,
 } from "@/lib/opportunity-create"
 
+// The entity_links mirror (ADR phase 5) has its own tests; this file pins the legacy writes against hand-written fakes.
+process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR = "0";
+
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 /**
  * A tiny in-memory stand-in for the four tables this write touches. Its
  * `$transaction` works on a copy and only commits the copy when the callback
@@ -40,7 +45,9 @@ function makeDb(initial: State) {
         return row ? { id: row.id, title: row.id, objectiveId: row.objectiveId, objective: { workspaceId: row.workspaceId } } : null
       },
     },
+    entityLink: { deleteMany: async () => ({ count: 0 }) },
     opportunityObjectiveLink: {
+      findMany: async ({ where }: { where: { opportunityId: string } }) => s.links.filter((l) => l.opportunityId === where.opportunityId).map((l) => ({ objectiveId: l.objectiveId })),
       findFirst: async ({ where }: { where: { opportunityId: string; objectiveId: string } }) =>
         s.links.find((l) => l.opportunityId === where.opportunityId && l.objectiveId === where.objectiveId) ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -69,6 +76,7 @@ function makeDb(initial: State) {
         s.opportunities.push(row)
         return row
       },
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) => s.opportunities.filter((o) => where.id.in.includes(o.id)).map((o) => ({ id: o.id, title: o.title })),
       findFirst: async ({ where }: { where: { id: string; workspaceId?: string } }) => {
         const row = s.opportunities.find((o) => o.id === where.id && (!where.workspaceId || o.workspaceId === where.workspaceId))
         return row ? { id: row.id, workspaceId: row.workspaceId, title: row.title, linkedKeyResultId: row.linkedKeyResultId ?? null } : null

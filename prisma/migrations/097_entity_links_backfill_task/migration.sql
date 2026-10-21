@@ -1,0 +1,18 @@
+-- Migration 097: backfill entity_links for task links
+-- (ADR "One generic entity_links table for association links", phase 7).
+--
+-- NO DDL, and EXPLICIT-ONLY: an untargeted POST never runs it. POST it by name
+-- ({"script":"097_entity_links_backfill_task"}) after the mirroring code is deployed and
+-- COMPASS_ENTITY_LINKS_TASK_MIRROR=1 is live. The legacy task_links table stays the source of truth; nothing here changes
+-- or deletes it.
+--
+--   TASK_REFERENCES  <- task_links (task -> OPPORTUNITY, SOLUTION, ROADMAP_ITEM, OBJECTIVE, KEY_RESULT, DOC, EXPERIMENT,
+--                       FEEDBACK_ITEM, DECISION; origin DIRECT, source, actor and created_at copied; DECISION is stored as
+--                       REVIEW_REQUEST). Rows of linked_type COMMENT are not mirrored by design.
+--
+-- Batched at 500 rows (keyset-paged) with an anti-join and no ON CONFLICT. Dangling, cross-workspace and unknown-type legacy rows
+-- are quarantined: never linked, never deleted, REPORTED. Before the receipt the hook proves zero unmatched non-quarantined legacy
+-- rows, zero duplicate pairs, mirror workspace_id equal to both endpoints', and no dangling endpoint other than the reported ones.
+--
+-- This file intentionally contains no executable statement; the work is the hook
+-- (lib/migrations/entity-links-task-backfill.ts).

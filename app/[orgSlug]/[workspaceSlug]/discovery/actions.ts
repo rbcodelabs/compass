@@ -4,6 +4,16 @@ import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { requireProductEntity, requireProductWorkspace, requireProductWorkspaceBySlug } from "@/lib/product-action-auth";
+import {
+  BatchRequestError,
+  createOpportunityBatch,
+  createSolutionBatch,
+  type BatchContext,
+  type BatchCreateResult,
+  type OpportunityBatchItem,
+  type SolutionBatchItem,
+} from "@/lib/opportunity-batch-create";
+import { requireWorkspaceContextOrThrow } from "@/lib/workspace-context";
 import { OpportunityCreateError, createOpportunityWithLinks, opportunityCreateErrorMessage, type NewOpportunityInput } from "@/lib/opportunity-create";
 import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
 import { syncRoadmapOnSolutionChange } from "@/lib/roadmap/solution-sync";
@@ -29,6 +39,7 @@ import type {
   PlanStatus,
   SquadData,
 } from "@/lib/types";
+import { allocateOneSeq } from "@/lib/work-item-sequence"
 
 // Types live in @/lib/types — import from there directly.
 
@@ -42,6 +53,55 @@ export async function createOpportunity(workspaceId: string, data: NewOpportunit
   const opportunity = await createOpportunityWithLinks(getPrisma(), workspaceId, data);
   revalidatePath(`/[orgSlug]/[workspaceSlug]/discovery`, "page");
   return opportunity;
+}
+
+export type CreateBatchActionResult = ({ ok: true } & BatchCreateResult) | { ok: false; error: string };
+
+/**
+ * Shared by both batch actions. Membership comes from the slug-addressed workspace context, whose `isReadOnly`
+ * (org-wide read-only access) makes the core refuse the write. Per-item failures come back as values; only a refused
+ * request (empty, over the 100-item cap) is `ok: false`. A read-only or unauthenticated caller throws, like every
+ * other write action.
+ */
+async function runBatchAction(
+  orgSlug: string,
+  workspaceSlug: string,
+  run: (context: BatchContext) => Promise<BatchCreateResult>,
+  /** Pages besides Discovery that list what this batch creates. */
+  alsoRevalidate: readonly string[] = [],
+): Promise<CreateBatchActionResult> {
+  const workspaceContext = await requireWorkspaceContextOrThrow(orgSlug, workspaceSlug);
+  try {
+    const result = await run({
+      workspace: { id: workspaceContext.workspace.id, isReadOnly: workspaceContext.isReadOnly },
+      caller: "human",
+      source: "UI",
+      mutationSource: "UI",
+      createdById: workspaceContext.userId,
+    });
+    // Once per batch, not per item.
+    if (result.results.some((item) => item.ok && !item.deduped)) {
+      revalidatePath(`/[orgSlug]/[workspaceSlug]/discovery`, "layout");
+      for (const path of alsoRevalidate) revalidatePath(path, "page");
+    }
+    return { ok: true, ...result };
+  } catch (error) {
+    if (error instanceof BatchRequestError) return { ok: false, error: error.message };
+    throw error;
+  }
+}
+
+/** Creates up to 100 opportunities, each in its own transaction, with a per-item result. Re-sending the same `clientId`s is safe. */
+export async function createOpportunitiesBatch(orgSlug: string, workspaceSlug: string, items: OpportunityBatchItem[]): Promise<CreateBatchActionResult> {
+  return runBatchAction(orgSlug, workspaceSlug, (context) => createOpportunityBatch(getPrisma(), context, items));
+}
+
+/** Creates up to 100 solutions under existing opportunities of this workspace; same contract as createOpportunitiesBatch. */
+export async function createSolutionsBatch(orgSlug: string, workspaceSlug: string, items: SolutionBatchItem[]): Promise<CreateBatchActionResult> {
+  // The Solutions backlog lists them too.
+  return runBatchAction(orgSlug, workspaceSlug, (context) => createSolutionBatch(getPrisma(), context, items), [
+    `/[orgSlug]/[workspaceSlug]/solutions`,
+  ]);
 }
 
 export type CreateOpportunityFromComposerResult =
@@ -192,9 +252,10 @@ export async function addSolution(
   // never from client input.
   const { workspaceId } = await requireProductEntity("opportunity", opportunityId);
   const prisma = getPrisma();
-  const solution = await captureWorkspaceMutation(prisma, "solution", "create", "UI", undefined, tx => tx.solution.create({
+  const solution = await captureWorkspaceMutation(prisma, "solution", "create", "UI", undefined, async tx => tx.solution.create({
     data: {
       workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "solution")),
       opportunityId,
       title: data.title,
       description: data.description,
@@ -239,9 +300,13 @@ export async function addAssumption(
   data: { title: string; riskLevel: RiskLevel },
   revalidatePathStr: string
 ) {
+  // The Assumption's workspace is derived from the authorized parent Solution, never from client input.
+  const { workspaceId } = await requireProductEntity("solution", solutionId);
   const prisma = getPrisma();
-  const assumption = await captureWorkspaceMutation(prisma, "assumption", "create", "UI", undefined, tx => tx.assumption.create({
+  const assumption = await captureWorkspaceMutation(prisma, "assumption", "create", "UI", undefined, async tx => tx.assumption.create({
     data: {
+      workspaceId,
+      ...(await allocateOneSeq(tx, workspaceId, "assumption")),
       solutionId,
       title: data.title,
       riskLevel: data.riskLevel,

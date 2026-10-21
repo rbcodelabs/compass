@@ -11,12 +11,20 @@ const prisma = {
 }
 
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
+// The legacy write and its entity_links mirror share ONE transaction (ADR phase 6); the mirror has its own tests (links/artifact-link-mirror.test.ts).
+vi.mock("@/lib/workspace-updates-capture", () => ({
+  withWorkspaceUpdates: async (client: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(client, false),
+}))
+vi.mock("@/lib/links/legacy-mirror", () => ({ mirrorArtifactLink: vi.fn(), unmirrorArtifactLink: vi.fn() }))
+const sweep = vi.hoisted(() => ({ deleteLinksForEntity: vi.fn() }))
+vi.mock("@/lib/links/service", () => sweep)
 
 import {
   MAX_ARTIFACT_HTML_BYTES,
   buildSandboxedHtml,
   createExternalArtifact,
   createHtmlArtifact,
+  deleteArtifact,
   deleteWorkspaceArtifacts,
   linkArtifactToSolution,
   replaceHtmlArtifactRevision,
@@ -25,6 +33,8 @@ import {
   validateExternalUrl,
   validateHtmlUpload,
 } from "@/lib/artifacts"
+
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
 
 describe("artifact validation", () => {
   it("accepts a self-contained HTML document", () => {
@@ -235,9 +245,27 @@ describe("artifact lifecycle", () => {
     prisma.artifact.findFirst.mockResolvedValue({ id: "art-1", workspaceId: "ws-1" })
     prisma.solution.findFirst.mockResolvedValue({ id: "sol-1" })
     prisma.artifactLink.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "link-winner" })
-    prisma.artifactLink.create.mockRejectedValue(Object.assign(new Error("unique"), { code: "P2002" }))
+    prisma.artifactLink.create.mockRejectedValue(Object.assign(new Error("Unique constraint failed on artifact_links"), { code: "P2002" }))
     await expect(linkArtifactToSolution({ artifactId: "art-1", solutionId: "sol-1", workspaceId: "ws-1" }))
       .resolves.toEqual(expect.objectContaining({ id: "link-winner", created: false }))
+  })
+
+  it("deleteArtifact sweeps the entity_links mirror BEFORE any legacy delete, and a failed sweep deletes nothing", async () => {
+    prisma.artifact.findFirst.mockResolvedValue({ id: "art-1", revisions: [{ blobPathname: "p", thumbnailPathname: null }] })
+    prisma.artifactBlobCleanup.findMany.mockResolvedValue([])
+    prisma.artifact.update.mockResolvedValue({})
+    const storage = { put: vi.fn(), get: vi.fn(), del: vi.fn() }
+    await deleteArtifact({ artifactId: "art-1", workspaceId: "ws-1" }, storage)
+    expect(sweep.deleteLinksForEntity).toHaveBeenCalledWith(prisma, "ARTIFACT", ["art-1"])
+    const order = sweep.deleteLinksForEntity.mock.invocationCallOrder[0]
+    expect(order).toBeLessThan(prisma.artifactLink.deleteMany.mock.invocationCallOrder[0])
+    expect(order).toBeLessThan(prisma.artifact.delete.mock.invocationCallOrder[0])
+    vi.clearAllMocks()
+    prisma.artifact.findFirst.mockResolvedValue({ id: "art-1", revisions: [] })
+    sweep.deleteLinksForEntity.mockRejectedValue(new Error("sweep failed"))
+    await expect(deleteArtifact({ artifactId: "art-1", workspaceId: "ws-1" }, storage)).rejects.toThrow("sweep failed")
+    expect(prisma.artifactLink.deleteMany).not.toHaveBeenCalled()
+    expect(prisma.artifact.delete).not.toHaveBeenCalled()
   })
 
   it("deletes workspace artifacts in DSQL-safe order and removes private blobs", async () => {

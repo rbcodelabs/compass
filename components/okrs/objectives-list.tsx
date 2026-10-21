@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, useId } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   DndContext,
   type DragEndEvent,
@@ -16,6 +17,7 @@ import {
   arrayMove,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
+import { groupableObjectiveFields } from "@/lib/okr-grouping";
 import { ObjectiveRow } from "@/components/okrs/objective-row";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import {
@@ -84,6 +86,36 @@ export function ObjectivesList({
   // Collapsed ids are view state only (not persisted); everything starts expanded.
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [, startTransition] = useTransition();
+  const searchParams = useSearchParams();
+
+  // The picker lives in the page header (OkrGroupByToggle); this list only reads
+  // the choice from the URL. Same definitions are attached to every objective.
+  const groupableFields = groupableObjectiveFields(objectives[0]?.customFields ?? []);
+  const groupByParam = searchParams.get("groupBy");
+  const groupField = groupByParam?.startsWith("field:")
+    ? groupableFields.find((f) => f.id === groupByParam.slice(6)) ?? null
+    : null;
+
+  const valueOf = (o: ObjectiveData) =>
+    groupField ? o.customFields?.find((f) => f.id === groupField.id)?.currentValue : null;
+  const groups = groupField
+    ? [
+        ...(groupField.options ?? []).map((opt) => ({
+          key: opt.value,
+          label: opt.label,
+          color: opt.color,
+          items: objectives.filter((o) => valueOf(o) === opt.value),
+        })),
+        {
+          key: "__none__",
+          label: `No ${groupField.name}`,
+          color: undefined as string | undefined,
+          items: objectives.filter(
+            (o) => !(groupField.options ?? []).some((opt) => opt.value === valueOf(o))
+          ),
+        },
+      ].filter((g) => g.items.length > 0)
+    : null;
 
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
@@ -130,6 +162,23 @@ export function ObjectivesList({
   const allCollapsed = objectives.length > 0 && objectives.every((o) => collapsedIds.has(o.id));
   const toggleAllLabel = `${allCollapsed ? "Expand" : "Collapse"} all ${labels.objective.lowerPlural}`;
 
+  const renderRow = (obj: ObjectiveData) => (
+    <ObjectiveRow
+      key={obj.id}
+      objective={obj}
+      orgSlug={orgSlug}
+      workspaceSlug={workspaceSlug}
+      revalidatePathStr={cyclePath}
+      availableKRs={availableKRs}
+      parentKeyResultId={obj.parentKeyResultId ?? null}
+      supportingObjectiveOptions={supportingObjectiveOptions}
+      paceElapsed={paceElapsed}
+      hideProgress={hideProgress}
+      collapsed={collapsedIds.has(obj.id)}
+      onCollapsedChange={(c) => setCollapsed(obj.id, c)}
+    />
+  );
+
   return (
     <>
     {objectives.length > 1 && (
@@ -149,24 +198,26 @@ export function ObjectivesList({
       collisionDetection={closestCenter}
       onDragEnd={handleDragEnd}
     >
-      <SortableContext items={objectiveIds} strategy={verticalListSortingStrategy}>
-        {objectives.map((obj) => (
-          <ObjectiveRow
-            key={obj.id}
-            objective={obj}
-            orgSlug={orgSlug}
-            workspaceSlug={workspaceSlug}
-            revalidatePathStr={cyclePath}
-            availableKRs={availableKRs}
-            parentKeyResultId={obj.parentKeyResultId ?? null}
-            supportingObjectiveOptions={supportingObjectiveOptions}
-            paceElapsed={paceElapsed}
-            hideProgress={hideProgress}
-            collapsed={collapsedIds.has(obj.id)}
-            onCollapsedChange={(c) => setCollapsed(obj.id, c)}
-          />
-        ))}
-      </SortableContext>
+      {groups ? (
+        groups.map((g) => (
+          <section key={g.key} className="flex flex-col gap-3">
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              {g.color && (
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: g.color }} />
+              )}
+              {g.label}
+              <span className="text-xs font-normal text-text-subtle">{g.items.length}</span>
+            </h3>
+            <SortableContext items={g.items.map((o) => o.id)} strategy={verticalListSortingStrategy}>
+              {g.items.map(renderRow)}
+            </SortableContext>
+          </section>
+        ))
+      ) : (
+        <SortableContext items={objectiveIds} strategy={verticalListSortingStrategy}>
+          {objectives.map(renderRow)}
+        </SortableContext>
+      )}
     </DndContext>
     </>
   );

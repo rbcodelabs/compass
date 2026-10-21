@@ -66,6 +66,8 @@ import {
   discardFeedbackAttachment,
 } from "@/app/[orgSlug]/[workspaceSlug]/feedback/actions";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const mockAuth = vi.mocked(auth);
 const ORG = "acme";
 const WS = "widgets";

@@ -1,5 +1,20 @@
 export { DataGrid, SELECTION_COLUMN_ID, type DataGridProps } from "./data-grid";
 export {
+  DEFAULT_RANGE_OP_LIMIT,
+  type GridCellChange,
+  type GridChangeSet,
+  type GridChangeSource,
+} from "./interaction/range-ops";
+export {
+  GridHistoryControls,
+  type GridHistoryControl,
+} from "./history-controls";
+export {
+  EMPTY_HISTORY,
+  HISTORY_LIMIT,
+  type GridHistory,
+} from "./interaction/history";
+export {
   DataGridHeaderCell,
   STICKY_HEADER_CELL_CLASS,
   type DataGridHeaderCellProps,
@@ -28,10 +43,24 @@ export {
   gridFeatures,
   type GridActionResult,
   type GridAlign,
+  type GridBatchItemResult,
+  type GridBatchResult,
+  type GridCreation,
+  type GridCreationMode,
+  type GridCreationParent,
+  type GridCreationRequest,
+  type GridCreationField,
+  type GridDraftRow,
+  type GridDraftSubmitItem,
+  type GridDraftValues,
+  type GridCellValue,
   type GridColumnDef,
   type GridColumnMeta,
   type GridEdit,
   type GridEditOption,
+  type GridParseResult,
+  type GridPersonOption,
+  type GridSelectEdit,
   type GridFeatures,
   type GridRowData,
   type GridRowState,

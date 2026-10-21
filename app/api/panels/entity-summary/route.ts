@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
-import { isEntityId, type EntityLinkType } from "@/lib/entity-links";
+import type { EntityLinkType } from "@/lib/entity-links";
+import getPrisma from "@/lib/db";
+import { resolveWorkItem } from "@/lib/work-item-resolve";
 import { getEntitySummary } from "@/lib/entity-summary";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 
@@ -34,12 +36,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "orgSlug, workspaceSlug, type and id are required" }, { status: 400 });
   }
   if (!SUMMARY_TYPES.has(type)) return NextResponse.json({ error: "Unknown entity type" }, { status: 400 });
-  if (!isEntityId(id)) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const summary = await getEntitySummary(type as EntityLinkType, id, workspace.id, resolveThinkingModel(workspace).labels);
+  // `id` is a UUID or a display ID (`TASK-5`); the type names are the same strings the work item registry uses.
+  const resolved = await resolveWorkItem(getPrisma(), workspace.id, type as EntityLinkType, id);
+  if (!resolved.ok) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const summary = await getEntitySummary(type as EntityLinkType, resolved.id, workspace.id, resolveThinkingModel(workspace).labels);
   if (!summary) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(summary);
+  return NextResponse.json({ ...summary, displayId: resolved.displayId });
 }

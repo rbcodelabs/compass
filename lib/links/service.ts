@@ -65,6 +65,14 @@ export type EntityLinkRow = {
 
 const FEATURE_OFF = "This link type cannot be used: it is not enabled for this deployment."
 
+/** A legacy-mirrored type is written only by its legacy writer (lib/links/legacy-mirror.ts), which passes viaLegacyWriter. */
+function assertWritableHere(def: LinkTypeDef, viaLegacyWriter: boolean | undefined) {
+  if (def.legacy && !viaLegacyWriter) {
+    const tool = def.compat?.mcpTools[0]
+    throw new TypedLinkError(`${def.key} is written through ${tool ?? "its existing link tool"}, not the generic link tools.`, "INVALID")
+  }
+}
+
 function assertEnabled(def: LinkTypeDef) {
   if (!isLinkTypeEnabled(def)) throw new TypedLinkError(FEATURE_OFF, "INVALID")
 }
@@ -113,6 +121,10 @@ export type LinkEntitiesInput = {
   attrs?: unknown
   origin?: LinkOrigin
   ctx: LinkContext
+  /** Set only by lib/links/legacy-mirror.ts, the single writer of a legacy-mirrored type. */
+  viaLegacyWriter?: boolean
+  /** With viaLegacyWriter only: an existing row takes `origin` (and, when it becomes DIRECT, this call's source and actor), because the legacy row is the truth. */
+  reconcileOrigin?: boolean
 }
 
 export type LinkEntitiesResult = { link: EntityLinkRow; created: boolean; from: LinkEndpoint; to: LinkEndpoint; def: LinkTypeDef }
@@ -123,6 +135,7 @@ export type LinkEntitiesResult = { link: EntityLinkRow; created: boolean; from: 
  */
 export async function linkEntities(tx: Tx, input: LinkEntitiesInput): Promise<LinkEntitiesResult> {
   const def = requireLinkType(input.linkType)
+  assertWritableHere(def, input.viaLegacyWriter)
   assertEnabled(def)
   const origin = input.origin ?? "DIRECT"
   if (def.origins && !def.origins.includes(origin)) throw new TypedLinkError(`${def.key} does not allow origin ${origin}.`, "INVALID")
@@ -144,10 +157,19 @@ export async function linkEntities(tx: Tx, input: LinkEntitiesInput): Promise<Li
 
   const existing = (await tx.entityLink.findFirst({ where: { fromId: first.id, linkType: def.key, toId: second.id } })) as EntityLinkRow | null
   if (existing) {
-    if (def.duplicatePolicy === "error") throw new TypedLinkError(`Already linked (${def.key}).`, "INVALID")
-    if (existing.workspaceId === workspaceId) return { link: existing, created: false, from: fromEndpoint, to: toEndpoint, def }
+    // The legacy writer reconciles: its own table already decided whether a repeat is an error, and the mirror row may predate it.
+    if (def.duplicatePolicy === "error" && !input.viaLegacyWriter) throw new TypedLinkError(`Already linked (${def.key}).`, "INVALID")
+    const originDrift = Boolean(input.viaLegacyWriter && input.reconcileOrigin && existing.origin !== origin)
+    if (existing.workspaceId === workspaceId && !originDrift) return { link: existing, created: false, from: fromEndpoint, to: toEndpoint, def }
     // A drifted workspaceId is repaired to the verified one: both endpoints were just checked there.
-    const link = (await tx.entityLink.update({ where: { id: existing.id }, data: { workspaceId, updatedAt: new Date() } })) as EntityLinkRow
+    const link = (await tx.entityLink.update({
+      where: { id: existing.id },
+      data: {
+        workspaceId,
+        updatedAt: new Date(),
+        ...(originDrift ? { origin, ...(origin === "DIRECT" ? { source: input.ctx.source, createdById: input.ctx.createdById ?? null } : {}) } : {}),
+      },
+    })) as EntityLinkRow
     return { link, created: false, from: fromEndpoint, to: toEndpoint, def }
   }
 
@@ -191,7 +213,7 @@ async function enforceCardinality(tx: Tx, def: LinkTypeDef, workspaceId: string,
   }
 }
 
-export type UnlinkEntitiesInput = { linkType: string; fromId: string; toId: string; expectedWorkspaceId: string }
+export type UnlinkEntitiesInput = { linkType: string; fromId: string; toId: string; expectedWorkspaceId: string; viaLegacyWriter?: boolean }
 
 /**
  * Removes the link (a hard delete; the audit trail is the workspace update capture). Only the `from`
@@ -200,7 +222,9 @@ export type UnlinkEntitiesInput = { linkType: string; fromId: string; toId: stri
  */
 export async function unlinkEntities(tx: Tx, input: UnlinkEntitiesInput): Promise<{ removed: number; removedIds: string[]; def: LinkTypeDef }> {
   const def = requireLinkType(input.linkType)
-  assertEnabled(def)
+  assertWritableHere(def, input.viaLegacyWriter)
+  // A mirror row must stay removable after the flag is turned off, or the legacy unlink would strand it.
+  if (!input.viaLegacyWriter) assertEnabled(def)
   const from = await requireEndpoint(tx, def.from, input.expectedWorkspaceId, input.fromId)
   const pair = { linkType: def.key, workspaceId: from.workspaceId }
   const where =
@@ -214,7 +238,72 @@ export async function unlinkEntities(tx: Tx, input: UnlinkEntitiesInput): Promis
   return { removed: count, removedIds: ids, def }
 }
 
+/**
+ * Removes the links of one type that start at `fromId`, optionally keeping those that end at `exceptToIds` and optionally only
+ * those of one origin. For the legacy writer only (a pointer that moved replaces its row; LEGACY objective links go stale when the
+ * pointer does). The `from` endpoint is verified in `expectedWorkspaceId`; the delete is by `fromId` and type, so a row whose
+ * workspace_id has drifted is removed too. `removed: 0` is success.
+ */
+export async function unlinkFromEntity(
+  tx: Tx,
+  input: { linkType: string; fromId: string; expectedWorkspaceId: string; exceptToIds?: readonly string[]; origin?: LinkOrigin },
+): Promise<{ removed: number }> {
+  const def = requireLinkType(input.linkType)
+  assertWritableHere(def, true)
+  await requireEndpoint(tx, def.from, input.expectedWorkspaceId, input.fromId)
+  const { count } = await tx.entityLink.deleteMany({
+    where: {
+      linkType: def.key,
+      fromId: input.fromId,
+      ...(input.exceptToIds?.length ? { toId: { notIn: [...input.exceptToIds] } } : {}),
+      ...(input.origin ? { origin: input.origin } : {}),
+    },
+  })
+  return { removed: count }
+}
+
 // ── Deletes ─────────────────────────────────────────────────────────────────
+
+/**
+ * Drains the links of one type that start at any of `fromIds` (optionally only one origin and only those that end at `toId`), in
+ * committed passes of at most LINK_WRITE_CHUNK links. For the legacy writer only: the mirror counterpart of the legacy LEGACY-link
+ * drain after a Key Result is deleted. Idempotent.
+ */
+export async function drainLinksFromEntities(
+  db: Tx,
+  input: { linkType: string; fromIds: readonly string[]; origin?: LinkOrigin; toId?: string },
+): Promise<number> {
+  const def = requireLinkType(input.linkType)
+  assertWritableHere(def, true)
+  let removed = 0
+  for (const part of chunk([...new Set(input.fromIds)], LINK_WRITE_CHUNK)) {
+    const where = { linkType: def.key, fromId: { in: part }, ...(input.origin ? { origin: input.origin } : {}), ...(input.toId ? { toId: input.toId } : {}) }
+    removed += await drainByIds(
+      (take) => db.entityLink.findMany({ where, select: { id: true }, take }),
+      async (rowIds) => (await db.entityLink.deleteMany({ where: { id: { in: rowIds } } })).count,
+    )
+  }
+  return removed
+}
+
+/**
+ * Drains the links of one type that END at any of `toIds` (of entity type `toType`), in committed passes of at most LINK_WRITE_CHUNK
+ * links, through the reverse index (to_id, link_type, from_id). For the legacy writer only: the mirror counterpart of a legacy delete that
+ * removes the links to a deleted target (a Key Result or Objective). Removal never depends on the flag. Idempotent.
+ */
+export async function drainLinksToEntities(db: Tx, input: { linkType: string; toType: LinkableEntityType; toIds: readonly string[] }): Promise<number> {
+  const def = requireLinkType(input.linkType)
+  assertWritableHere(def, true)
+  let removed = 0
+  for (const part of chunk([...new Set(input.toIds)], LINK_WRITE_CHUNK)) {
+    const where = { linkType: def.key, toType: input.toType, toId: { in: part } }
+    removed += await drainByIds(
+      (take) => db.entityLink.findMany({ where, select: { id: true }, take }),
+      async (rowIds) => (await db.entityLink.deleteMany({ where: { id: { in: rowIds } } })).count,
+    )
+  }
+  return removed
+}
 
 /**
  * Removes every link that names any of `ids` as an endpoint of `type`, in BOTH directions (there are no
@@ -290,7 +379,8 @@ export async function listLinks(db: Tx, input: ListEntityLinksInput): Promise<{ 
   if (input.linkType !== undefined) {
     const def = requireLinkType(input.linkType)
     scoped = applicable.filter((entry) => entry.def.key === def.key)
-    if (scoped.length === 0 && !isLinkTypeEnabled(def)) return { items: [], nextCursor: null }
+    // Disabled, or legacy-mirrored (reads stay on the legacy table): nothing to list, and not an error.
+    if (scoped.length === 0 && (def.legacy || !isLinkTypeEnabled(def))) return { items: [], nextCursor: null }
     if (scoped.length === 0) throw new TypedLinkError(`${def.key} does not link ${entityType} entities.`, "INVALID")
   }
   if (scoped.length === 0) return { items: [], nextCursor: null }

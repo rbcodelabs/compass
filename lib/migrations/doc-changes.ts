@@ -4,7 +4,7 @@ export const DOC_CHANGES_TABLE = "doc_changes"
 export const DOC_CHANGES_INDEX = "idx_doc_changes_workspace_seq"
 export const DOC_CHANGE_COUNTERS_TABLE = "doc_change_counters"
 
-/** Columns 092_doc_changes must leave behind, with their nullability. */
+/** Columns 100_doc_changes must leave behind, with their nullability. */
 const EXPECTED_COLUMNS: { column: string; nullable: boolean }[] = [
   { column: "id", nullable: false },
   { column: "workspace_id", nullable: false },
@@ -37,7 +37,7 @@ async function assertColumns(client: PoolClient, schema: string, table: string, 
   const actual = new Map(result.rows.map((row) => [row.column_name, row.is_nullable === "YES"]))
   for (const { column, nullable } of expected) {
     if (actual.get(column) !== nullable) {
-      throw new Error(`Migration 092 postcondition failed: ${table}.${column} is missing or has the wrong nullability`)
+      throw new Error(`Migration 100 postcondition failed: ${table}.${column} is missing or has the wrong nullability`)
     }
   }
 }
@@ -54,7 +54,7 @@ export async function assertDocChangesMigration(client: PoolClient, schema: stri
     [schema, DOC_CHANGE_COUNTERS_TABLE],
   )
   if (pk.rows.length !== 1 || pk.rows[0].columns.join(",") !== "workspace_id") {
-    throw new Error(`Migration 092 postcondition failed: ${DOC_CHANGE_COUNTERS_TABLE} must have a primary key on workspace_id alone`)
+    throw new Error(`Migration 100 postcondition failed: ${DOC_CHANGE_COUNTERS_TABLE} must have a primary key on workspace_id alone`)
   }
 
   const index = await client.query<{

@@ -5,6 +5,7 @@ import * as studies from "@/lib/research-study-service"
 import { ResearchAnalysisError, storeAgentStudySynthesis } from "@/lib/research-analysis-service"
 import { ResearchPromotionError, promoteResearchFindingToEvidence } from "@/lib/research-evidence-promotion"
 import type { ResearchStudyType } from "@/lib/research"
+import { linkSummariesForCaller } from "@/lib/link-tool-handlers"
 
 type Scope = { workspaceId: string }
 type Study = Scope & { studyId: string }
@@ -61,7 +62,7 @@ export async function listResearchStudiesTool(input: Scope & { limit?: number; s
 export async function getResearchStudyTool(input: Study) {
   return invoke(async actor => {
     const data = await studies.getResearchStudy({ workspaceId: input.workspaceId }, actor, input.studyId)
-    return ok(`Research study metadata.\nID: ${data.id}`, data)
+    return ok(`Research study metadata.\nID: ${data.id}`, { ...data, ...(await linkSummariesForCaller(data.workspaceId, "RESEARCH_STUDY", data.id)) })
   })
 }
 export async function activateResearchStudyTool(input: Study) {

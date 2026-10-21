@@ -20,10 +20,14 @@ type ComboboxProps = {
   /** Controlled open state — use with a triggerless, anchored ComboboxContent. */
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  /** Server-search pickers can control input and disable local filtering. */
+  inputValue?: string
+  onInputValueChange?: ComboboxPrimitive.Root.Props<ComboboxItemData>["onInputValueChange"]
+  filter?: null
   children: React.ReactNode
 }
 
-function Combobox({ items, value, onValueChange, disabled, open, onOpenChange, children }: ComboboxProps) {
+function Combobox({ items, value, onValueChange, disabled, open, onOpenChange, inputValue, onInputValueChange, filter, children }: ComboboxProps) {
   const selectedItem = React.useMemo(
     () => (value != null ? (items.find((item) => item.value === value) ?? null) : null),
     [items, value]
@@ -37,6 +41,9 @@ function Combobox({ items, value, onValueChange, disabled, open, onOpenChange, c
       disabled={disabled}
       open={open}
       onOpenChange={onOpenChange ? (nextOpen) => onOpenChange(nextOpen) : undefined}
+      inputValue={inputValue}
+      onInputValueChange={onInputValueChange}
+      filter={filter}
       autoHighlight
     >
       {children}

@@ -10,6 +10,7 @@ import {
   type FollowingEffect,
 } from "@/lib/following-hooks";
 import { getMcpActor } from "@/lib/mcp-authz";
+import { withTaskWriteLock } from "@/lib/task-write-lock";
 import { detectFieldTransitions } from "@/lib/status-transitions";
 import {
   recordWorkspaceUpdate,
@@ -28,6 +29,8 @@ const types = {
   evidence: "EVIDENCE",
 } as const;
 type Model = keyof typeof types;
+/** Models whose rows carry a human-readable work item ID (lib/work-item-ids.ts). */
+const NUMBERED_MODELS: ReadonlySet<Model> = new Set<Model>(["task", "opportunity", "solution", "assumption", "roadmapItem", "experiment"]);
 type Row = {
   id: string;
   workspaceId?: string;
@@ -142,14 +145,43 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
   mutate: (tx: AppTransactionClient) => Promise<T>,
   options?: WorkspaceUpdatesOptions,
 ): Promise<T> {
+  // Task updates run one at a time per task so each write's "before" status is the previous write's result
+  // (see lib/task-write-lock.ts); everything else goes straight through.
+  if (model === "task" && operation === "update" && id) {
+    return withTaskWriteLock(id, () => captureUnlocked(prisma, model, operation, source, id, mutate, options));
+  }
+  return captureUnlocked(prisma, model, operation, source, id, mutate, options);
+}
+
+async function captureUnlocked<T extends { id: string }>(
+  prisma: AppPrismaClient,
+  model: Model,
+  operation: "create" | "update",
+  source: "UI" | "MCP" | UpdateActor,
+  id: string | undefined,
+  mutate: (tx: AppTransactionClient) => Promise<T>,
+  options?: WorkspaceUpdatesOptions,
+): Promise<T> {
   const following = await followingActiveFor(model);
   let pending: FollowingEffect[] = [];
+  // Status a task held before this write, for the Doc comment thread sync below.
+  const taskBefore: { status: string | null } = { status: null };
+
   const result = await withWorkspaceUpdates(
     prisma,
     async (tx, enabled) => {
       // This callback can replay on a rolled-back attempt; only the attempt
       // that commits may leave effects behind.
       pending = [];
+      taskBefore.status = null;
+      if (model === "task" && operation === "update" && id) {
+        // Best-effort: the thread sync is a side effect and must never block the task edit itself.
+        try {
+          taskBefore.status = (await tx.task.findUnique({ where: { id }, select: { status: true } }))?.status ?? null;
+        } catch (error) {
+          console.error("[comment-task-sync] could not read previous task status", error);
+        }
+      }
       if (!enabled && !following) return mutate(tx);
       const updateActor = enabled ? await workspaceMutationActor(source) : null;
       const followActor = following
@@ -181,8 +213,20 @@ export async function captureWorkspaceMutation<T extends { id: string }>(
       const actor = updateActor!;
       return recordUpdates(tx, model, operation, actor, before, after, changed, result);
     },
-    options,
+    // A numbered create allocates its work item ID from the workspace counter in the same transaction as the
+    // insert (lib/work-item-sequence.ts), so it must always run in a replayable transaction, capture or not.
+    operation === "create" && NUMBERED_MODELS.has(model)
+      ? { ...options, atomic: true }
+      : options,
   );
+  const statusAfter = (result as { status?: string } | undefined)?.status;
+  if (model === "task" && taskBefore.status !== null && statusAfter !== undefined) {
+    const [from, to] = [taskBefore.status, statusAfter];
+    if (from !== to && (from === "DONE" || to === "DONE")) {
+      // Lazy import: the sync reaches lib/comments, which imports this module.
+      await runAfterCommit(async () => (await import("@/lib/comment-task-sync")).syncCommentThreadsForTaskStatus(result.id, from, to));
+    }
+  }
   if (pending.length > 0) {
     const effects = pending;
     // After the commit; queued until the outer transaction commits for MCP

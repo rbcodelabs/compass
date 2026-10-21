@@ -7,11 +7,13 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { GridEdit, GridRowData } from "./types";
+import type { GridRowData, GridSelectEdit } from "./types";
 
 export type EditableCellProps<TRow extends GridRowData> = {
   row: TRow;
-  edit: GridEdit<TRow>;
+  edit: GridSelectEdit<TRow>;
+  /** Render the current value without a picker. Used for read-only workspaces. */
+  readOnly?: boolean;
   /** A write for this row is in flight. */
   pending: boolean;
   /** The last write for this row failed with this message. */
@@ -35,12 +37,28 @@ export function EditableCell<TRow extends GridRowData>({
   row,
   edit,
   pending,
+  readOnly = false,
   error,
   onCommit,
 }: EditableCellProps<TRow>) {
   const value = edit.getValue(row);
   const selected = edit.options.find((option) => option.value === value);
   const disabled = pending || Boolean(edit.isDisabled?.(row));
+
+  if (readOnly) {
+    return (
+      <span data-testid="grid-cell-static" className="flex items-center px-1">
+        {edit.renderTrigger ? (
+          edit.renderTrigger(selected, row)
+        ) : (
+          <span className="flex items-center gap-1.5 truncate text-xs">
+            {selected?.icon}
+            {selected?.label ?? value}
+          </span>
+        )}
+      </span>
+    );
+  }
 
   return (
     <Select

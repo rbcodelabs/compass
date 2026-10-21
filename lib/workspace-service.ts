@@ -24,6 +24,7 @@
  * faults — a dropped connection, schema drift — are left to throw.
  */
 
+import { findAgentById, isUserOwnedBy } from "@/lib/agent-ownership"
 import { revalidatePath } from "next/cache"
 import getPrisma from "@/lib/db"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
@@ -162,6 +163,12 @@ export async function createWorkspaceInOrg({
     return { ok: false, code: "SLUG_TAKEN", error: slugTakenMessage(slug, org.name) }
   }
 
+  // Only a USER-owned agent created by its owner is granted into the new workspace. A WORKSPACE-owned
+  // agent belongs to one workspace and is never pulled into another; checked before the transaction so
+  // the lookup can use the full column set.
+  const grantee = agentGrant ? await findAgentById(prisma, agentGrant.agentId) : null
+  const grantAgent = agentGrant && grantee && isUserOwnedBy(grantee, agentGrant.grantedByUserId) ? agentGrant : undefined
+
   let workspace
   try {
     workspace = await prisma.$transaction(async (tx) => {
@@ -196,13 +203,13 @@ export async function createWorkspaceInOrg({
         })
       }
 
-      if (agentGrant) {
+      if (grantAgent) {
         await tx.agentWorkspaceGrant.create({
           data: {
-            agentId: agentGrant.agentId,
+            agentId: grantAgent.agentId,
             workspaceId: created.id,
             access: "WRITE",
-            grantedByUserId: agentGrant.grantedByUserId,
+            grantedByUserId: grantAgent.grantedByUserId,
           },
         })
       }

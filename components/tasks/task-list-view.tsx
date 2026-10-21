@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { DataGrid, type GridColumnDef } from "@/components/data-grid";
+import {
+  DataGrid,
+  type GridActionResult,
+  type GridCellValue,
+  type GridColumnDef,
+  type GridEditOption,
+} from "@/components/data-grid";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { TaskLinksBadge } from "./task-links-badge";
 import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
@@ -22,7 +28,19 @@ type Props = {
   orgSlug: string;
   workspaceSlug: string;
   members: MemberData[];
+  /**
+   * The workspace context's `isReadOnly` (org-wide read-only access). The grid
+   * then renders nothing editable; the PATCH route also refuses the write.
+   */
+  readOnly?: boolean;
 };
+
+/**
+ * Mirrors `TITLE_MAX_LENGTH` in `lib/entity-mutations.ts`, which imports the
+ * database layer and so cannot be pulled into a client component. The server
+ * remains the authority; this only avoids a round trip for an obvious error.
+ */
+const TITLE_MAX_LENGTH = 255;
 
 /**
  * One flattened row: a task, the hierarchy depth it renders at, and its
@@ -81,7 +99,50 @@ function flattenByHierarchy(tasks: TaskCardData[]): { task: TaskCardData; depth:
   return result;
 }
 
-export function TaskListView({ tasks: initialTasks, members }: Props) {
+const PRIORITY_OPTIONS: readonly GridEditOption[] = Object.entries(
+  TASK_PRIORITY_LABELS,
+).map(([value, label]) => ({ value, label }));
+
+const STATUS_OPTIONS: readonly GridEditOption[] = Object.entries(
+  TASK_STATUS_LABELS,
+).map(([value, label]) => ({ value, label }));
+
+/**
+ * Saves one field through the same endpoint the detail panel uses
+ * (`PATCH /api/panels/entity/task/:id`), which routes into
+ * `lib/entity-mutations.ts` for validation, workspace scoping and update
+ * capture. Resolves, never rejects: the grid rolls the cell back on `ok: false`.
+ */
+async function saveTaskField(
+  slugs: { orgSlug: string; workspaceSlug: string },
+  taskId: string,
+  field: string,
+  value: GridCellValue,
+): Promise<GridActionResult> {
+  try {
+    const response = await fetch(
+      `/api/panels/entity/task/${encodeURIComponent(taskId)}?orgSlug=${encodeURIComponent(slugs.orgSlug)}&workspaceSlug=${encodeURIComponent(slugs.workspaceSlug)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ field, value }),
+      },
+    );
+    if (response.ok) return { ok: true };
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    return { ok: false, error: body?.error ?? "Couldn't save that change." };
+  } catch {
+    return { ok: false, error: "Couldn't save that change." };
+  }
+}
+
+export function TaskListView({
+  tasks: initialTasks,
+  orgSlug,
+  workspaceSlug,
+  members,
+  readOnly = false,
+}: Props) {
   const { openPanel, subscribeEntityMutated } = usePanelContext();
   const [tasks, setTasks] = useState(initialTasks);
 
@@ -105,6 +166,13 @@ export function TaskListView({ tasks: initialTasks, members }: Props) {
   useEffect(() => {
     openPanelRef.current = openPanel;
   }, [openPanel]);
+
+  // Same reasoning as `openPanelRef`: the save callbacks live in column
+  // definitions that must stay referentially stable.
+  const slugsRef = useRef({ orgSlug, workspaceSlug });
+  useEffect(() => {
+    slugsRef.current = { orgSlug, workspaceSlug };
+  }, [orgSlug, workspaceSlug]);
 
   // Re-sync when the server hands down a fresh list (e.g. a filter change).
   useEffect(() => {
@@ -168,7 +236,31 @@ export function TaskListView({ tasks: initialTasks, members }: Props) {
         header: "Title",
         // `hideable: false` pins Title first and keeps it out of the column
         // menu — a row with no title is not a useful view.
-        meta: { label: "Title", hideable: false, minWidth: "14rem" },
+        meta: {
+          label: "Title",
+          hideable: false,
+          minWidth: "14rem",
+          edit: {
+            kind: "text",
+            field: "task",
+            maxLength: TITLE_MAX_LENGTH,
+            getValue: (row) => row.task.title,
+            applyOptimistic: (row, next) => ({
+              ...row,
+              task: { ...row.task, title: next ?? row.task.title },
+            }),
+            // A task cannot be untitled, so clearing the cell is rejected here
+            // rather than saved and rolled back.
+            parse: (text) =>
+              text.trim() === ""
+                ? { ok: false, error: "Title is required" }
+                : text.trim().length > TITLE_MAX_LENGTH
+                  ? { ok: false, error: `Title must be ${TITLE_MAX_LENGTH} characters or fewer` }
+                  : { ok: true, value: text.trim() },
+            triggerLabel: (row) => `Title for ${row.task.title}`,
+            save: (row, next) => saveTaskField(slugsRef.current, row.task.id, "title", next),
+          },
+        },
         cell: ({ row }) => {
           const { task, depth } = row.original;
           return (
@@ -222,19 +314,65 @@ export function TaskListView({ tasks: initialTasks, members }: Props) {
       {
         id: "priority",
         header: "Priority",
-        meta: { label: "Priority", width: "7rem" },
+        meta: {
+          label: "Priority",
+          width: "7rem",
+          edit: {
+            kind: "select",
+            field: "task",
+            options: PRIORITY_OPTIONS,
+            getValue: (row) => row.task.priority,
+            applyOptimistic: (row, next) => ({
+              ...row,
+              task: { ...row.task, priority: next as TaskCardData["priority"] },
+            }),
+            triggerLabel: (row) => `Priority for ${row.task.title}`,
+            save: (row, next) => saveTaskField(slugsRef.current, row.task.id, "priority", next),
+          },
+        },
         cell: ({ row }) => <Badge variant="outline">{TASK_PRIORITY_LABELS[row.original.task.priority]}</Badge>,
       },
       {
         id: "status",
         header: "Status",
-        meta: { label: "Status", width: "7rem" },
+        meta: {
+          label: "Status",
+          width: "7rem",
+          edit: {
+            kind: "select",
+            field: "task",
+            options: STATUS_OPTIONS,
+            getValue: (row) => row.task.status,
+            applyOptimistic: (row, next) => ({
+              ...row,
+              task: { ...row.task, status: next as TaskCardData["status"] },
+            }),
+            triggerLabel: (row) => `Status for ${row.task.title}`,
+            save: (row, next) => saveTaskField(slugsRef.current, row.task.id, "status", next),
+          },
+        },
         cell: ({ row }) => <Badge variant="secondary">{TASK_STATUS_LABELS[row.original.task.status]}</Badge>,
       },
       {
         id: "due",
         header: "Due",
-        meta: { label: "Due", width: "8rem", cellClassName: "text-muted-foreground" },
+        meta: {
+          label: "Due",
+          width: "8rem",
+          cellClassName: "text-muted-foreground",
+          edit: {
+            kind: "date",
+            field: "task",
+            // Date-only, UTC: the same slice `InlineDateField` uses.
+            getValue: (row) => row.task.dueDate?.slice(0, 10) ?? null,
+            applyOptimistic: (row, next) => ({
+              ...row,
+              task: { ...row.task, dueDate: next ? `${next}T00:00:00.000Z` : null },
+            }),
+            triggerLabel: (row) => `Due date for ${row.task.title}`,
+            save: (row, next) => saveTaskField(slugsRef.current, row.task.id, "dueDate", next),
+          },
+        },
         cell: ({ row }) => {
           const { dueDate } = row.original.task;
           if (!dueDate) return "—";
@@ -249,7 +387,23 @@ export function TaskListView({ tasks: initialTasks, members }: Props) {
       {
         id: "points",
         header: "Points",
-        meta: { label: "Points", width: "5rem", cellClassName: "text-muted-foreground" },
+        meta: {
+          label: "Points",
+          width: "5rem",
+          cellClassName: "text-muted-foreground",
+          edit: {
+            kind: "number",
+            field: "task",
+            min: 0,
+            getValue: (row) => row.task.storyPoints,
+            applyOptimistic: (row, next) => ({
+              ...row,
+              task: { ...row.task, storyPoints: next },
+            }),
+            triggerLabel: (row) => `Points for ${row.task.title}`,
+            save: (row, next) => saveTaskField(slugsRef.current, row.task.id, "storyPoints", next),
+          },
+        },
         cell: ({ row }) => row.original.task.storyPoints ?? "—",
       },
       {
@@ -282,6 +436,9 @@ export function TaskListView({ tasks: initialTasks, members }: Props) {
       rows={rows}
       getRowId={(row) => row.rowKey}
       caption="Tasks"
+      interaction="sheet"
+      readOnly={readOnly}
+      onOpenRow={(row) => openPanelRef.current("task", row.task.id)}
       height="fill"
       pagination={false}
       toolbar={false}

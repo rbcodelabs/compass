@@ -1,0 +1,19 @@
+-- Migration 098 (entity_links Solution-Key Result backfill): backfill entity_links for Solution <-> Key Result links
+-- (ADR "One generic entity_links table for association links", phase 4 data half).
+--
+-- NO DDL, and EXPLICIT-ONLY: an untargeted POST never runs it. POST it by name
+-- ({"script":"098_entity_links_backfill_solution_key_result"}) after the mirroring code is deployed and
+-- COMPASS_ENTITY_LINKS_SOLUTION_KR_MIRROR=1 is live. The legacy solution_key_result_links table stays the source of truth; nothing
+-- here changes or deletes it.
+--
+--   SOLUTION_TARGETS_KEY_RESULT  <- solution_key_result_links (Solution -> Key Result; origin DIRECT as the live mirror writes it,
+--                                   source, actor and created_at copied, workspace_id from the verified Solution)
+--
+-- Batched at 500 rows with an anti-join and no ON CONFLICT. Stale mirror rows are pruned and workspace drift is repaired. Dangling,
+-- cross-workspace and link-workspace-drift legacy rows are quarantined: never linked, never deleted, REPORTED. Before the receipt the
+-- hook proves zero unmatched non-quarantined legacy rows, zero duplicate pairs, mirror workspace_id equal to both endpoints', and no
+-- dangling endpoint other than the reported ones.
+--
+-- This file intentionally contains no executable statement; the work is the hook
+-- (lib/migrations/entity-links-solution-key-result-backfill.ts). The numeric prefix 098 is shared with 098_agent_kind_and_workspace_owner
+-- (duplicate prefixes are accepted, ADR-0012); the migration name is unique.

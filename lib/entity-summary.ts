@@ -17,6 +17,8 @@ export type EntitySummary = {
   /** One short secondary line (horizon, parent, progress…). */
   meta: string | null
   description: string | null
+  /** `TASK-5`; set by the API route, null while the row is not numbered yet. */
+  displayId?: string | null
 }
 
 const DESCRIPTION_LIMIT = 220

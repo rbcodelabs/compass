@@ -155,7 +155,7 @@ export function KeyResultPanel({
   orgSlug: string;
   workspaceSlug: string;
 }) {
-  const { data, error, mutate, refresh } = useEntityDetail<KeyResultData>(
+  const { data, error, displayId, mutate, refresh } = useEntityDetail<KeyResultData>(
     "keyResult",
     id,
     orgSlug,
@@ -229,7 +229,7 @@ export function KeyResultPanel({
         />
       )}
 
-      <PanelTitle title={data.title} edit={edit} />
+      <PanelTitle displayId={displayId} title={data.title} edit={edit} />
       <MeasurementsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ targetType: "KEY_RESULT", targetId: data.id }} compact />
 
       <KrHero current={data.current} target={data.target} unit={data.unit} elapsed={elapsed}

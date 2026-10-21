@@ -52,28 +52,84 @@ export type GridEditOption = {
   icon?: ReactNode;
 };
 
+/** The primitive values a typed cell can hold. */
+export type GridCellValue = string | number | boolean | null;
+
+/** Result of parsing pasted or typed text into a cell value. */
+export type GridParseResult<V> =
+  | { ok: true; value: V }
+  | { ok: false; error: string };
+
+/** One assignable person in a `person` editor. `value` is the user id. */
+export type GridPersonOption = {
+  value: string;
+  label: string;
+  /** Extra text used when matching typed input, e.g. the email address. */
+  email?: string;
+};
+
 /**
- * Inline edit config for a column.
+ * Fields shared by every edit kind.
  *
  * `field` is the property the optimistic overlay writes on the row, so the
- * merged row reflects the edit before the server confirms it.
+ * merged row reflects the edit before the server confirms it. Rows that nest
+ * their data (Discovery's `{ kind, opportunity }`) supply `applyOptimistic`
+ * instead, because a top-level `{ ...row, [field]: next }` would write the
+ * wrong place.
  */
-export type GridEdit<TRow extends GridRowData> = {
-  kind: "select";
-  options: readonly GridEditOption[];
+type GridEditBase<TRow extends GridRowData, V extends GridCellValue> = {
   /** Current value for a row. */
-  getValue: (row: TRow) => string;
+  getValue: (row: TRow) => V;
   /** Row property the optimistic value is written to. */
   field: keyof TRow & string;
+  /** Overrides the default `{ ...row, [field]: next }` optimistic merge. */
+  applyOptimistic?: (row: TRow, next: V) => TRow;
   /** Persist the change. Must resolve, never reject, with a result object. */
-  save: (row: TRow, next: string) => Promise<GridActionResult>;
+  save: (row: TRow, next: V) => Promise<GridActionResult>;
   /** Accessible name for the trigger, e.g. `(row) => \`Status for ${row.title}\``. */
   triggerLabel?: (row: TRow) => string;
-  /** Custom trigger content; defaults to the option's label. */
-  renderTrigger?: (option: GridEditOption | undefined, row: TRow) => ReactNode;
   /** Disable editing for particular rows. */
   isDisabled?: (row: TRow) => boolean;
+  /** Typed text to a value. Defaults per kind (see `cells/cell-values.ts`). */
+  parse?: (text: string, row?: TRow) => GridParseResult<V>;
+  /** A value to editable text. Defaults per kind. */
+  format?: (value: V, row: TRow) => string;
 };
+
+/** The original (and still source-compatible) inline select. */
+export type GridSelectEdit<TRow extends GridRowData> = GridEditBase<TRow, string> & {
+  kind: "select";
+  options: readonly GridEditOption[];
+  /** Custom trigger content; defaults to the option's label. */
+  renderTrigger?: (option: GridEditOption | undefined, row: TRow) => ReactNode;
+};
+
+/**
+ * Inline edit config for a column, discriminated on `kind`.
+ *
+ * `select` works in every grid. The other kinds are only editable in
+ * `interaction="sheet"` mode; a legacy grid renders the column's normal
+ * display cell for them.
+ */
+export type GridEdit<TRow extends GridRowData> =
+  | GridSelectEdit<TRow>
+  | (GridEditBase<TRow, string | null> & { kind: "text"; maxLength?: number })
+  | (GridEditBase<TRow, number | null> & {
+      kind: "number";
+      min?: number;
+      max?: number;
+      integer?: boolean;
+    })
+  /** Date-only `YYYY-MM-DD`, UTC, matching `inline-date-field`. */
+  | (GridEditBase<TRow, string | null> & { kind: "date" })
+  /** http(s) only. */
+  | (GridEditBase<TRow, string | null> & { kind: "url" })
+  | (GridEditBase<TRow, boolean> & { kind: "checkbox" })
+  | (GridEditBase<TRow, string | null> & {
+      kind: "person";
+      options: readonly GridPersonOption[];
+      allowUnassigned?: boolean;
+    });
 
 /** Compass metadata attached to a column definition. */
 export type GridColumnMeta<TRow extends GridRowData> = {
@@ -200,3 +256,106 @@ export type GridSearch = {
   label?: string;
   debounceMs?: number;
 };
+
+// ── Draft-row creation ──────────────────────────────────────────────────────
+
+/** Draft cell values, keyed by `GridCreationField.id`. Select fields hold the option value. */
+export type GridDraftValues = Record<string, string>;
+
+/** One input in the draft area. Field order is also the paste column order. */
+export type GridCreationField = {
+  id: string;
+  label: string;
+  kind: "text" | "select";
+  /** Required for `select`. */
+  options?: readonly GridEditOption[];
+  maxLength?: number;
+  /** Fixed column width, e.g. `"9rem"`; fields without one share the remainder. */
+  width?: string;
+};
+
+/** What `submit` receives for each draft. `clientId` is the idempotency key and the new row's id. */
+export type GridDraftSubmitItem = { clientId: string; values: GridDraftValues };
+
+/** One draft's outcome, mirroring the server's batch result. */
+export type GridBatchItemResult =
+  | { clientId: string; ok: true; id: string; deduped?: true }
+  | {
+      clientId: string;
+      ok: false;
+      code: string;
+      error: string;
+      /** A field id from `GridCreation.fields` is shown on that cell; anything else lands on the row. */
+      field?: string;
+    };
+
+/** A refused request is `ok: false`; per-item failures live inside `results`. */
+export type GridBatchResult =
+  | { ok: true; results: readonly GridBatchItemResult[] }
+  | { ok: false; error: string };
+
+export type GridDraftRow = {
+  /** Stable across retries; sent as the server-side primary key. */
+  clientId: string;
+  values: GridDraftValues;
+  status: "draft" | "pending" | "error";
+  fieldErrors: Record<string, string>;
+  rowError?: string;
+};
+
+/**
+ * Opt-in draft area under the rows: type or paste rows, then create them with
+ * one explicit submit. Hidden below `md` and when the grid is `readOnly`.
+ *
+ * Callers pass a stable reference (module constant or `useMemo`).
+ */
+export type GridCreation = {
+  fields: readonly GridCreationField[];
+  /** A fresh row's values, including defaults (e.g. the initial status). */
+  makeValues: () => GridDraftValues;
+  /** Field id to message. The same rules the server applies; the server stays the authority. */
+  validate: (values: GridDraftValues) => Record<string, string>;
+  /**
+   * Sends one chunk. The grid splits drafts into chunks by `limits` and calls
+   * this sequentially, so it must tolerate several calls per click. Re-sending
+   * a chunk with the same `clientId`s is safe by contract (idempotent).
+   */
+  submit: (items: GridDraftSubmitItem[]) => Promise<GridBatchResult>;
+  /**
+   * Per-request limits. `maxItems` mirrors the server's cap; `maxBytes` is a
+   * budget on the UTF-8 size of the JSON items, kept well under Next's 1 MB
+   * server-action body limit.
+   */
+  limits: { maxItems: number; maxBytes: number };
+  /** Most drafts the area holds at once (also the paste cap). */
+  maxRows: number;
+  noun: { singular: string; plural: string };
+  /** Placeholder for the always-present blank row. */
+  addLabel?: string;
+  /**
+   * A parent chosen once for the whole batch (e.g. the Opportunity new Solutions
+   * belong to). The area renders the picker and adds the chosen id to every
+   * draft's values as `values.parent` before `validate` and `submit` see them
+   * (empty string when nothing is chosen), so a row can still carry its own
+   * parent in a field of its own.
+   */
+  parent?: GridCreationParent;
+};
+
+export type GridCreationParent = {
+  /** Accessible name of the picker, e.g. "Opportunity". */
+  label: string;
+  options: readonly GridEditOption[];
+  /** Text of the empty option, e.g. "Choose an opportunity". */
+  placeholder: string;
+};
+
+/** One way of adding rows ("Add opportunities", "Add solutions"). */
+export type GridCreationMode = { id: string; label: string; creation: GridCreation };
+
+/**
+ * Asks the draft area to switch to a mode and optionally preselect its parent,
+ * e.g. from an "Add solution" button inside an expanded row. Bump `nonce` for
+ * every request; the area acts when it changes.
+ */
+export type GridCreationRequest = { modeId: string; parentId?: string; nonce: number };

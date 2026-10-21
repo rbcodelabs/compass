@@ -89,6 +89,8 @@ import {
 import * as feedbackHandlers from "@/lib/feedback-tool-handlers"
 import { prepareFeedbackAttachmentUpload } from "@/lib/feedback-attachments"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 // ---------------------------------------------------------------------------
 
 const FEED_ID = "11111111-1111-1111-1111-111111111111"
@@ -215,6 +217,8 @@ describe("createFeedback", () => {
       data: {
         id: expect.any(String),
         workspaceId: WS_ID,
+        seqPrefix: "FB",
+        seqNumber: expect.any(Number),
         title: "Dark mode support",
         description: null,
         type: "IDEA",
@@ -289,6 +293,8 @@ describe("createFeedback", () => {
       data: {
         id: expect.any(String),
         workspaceId: WS_ID,
+        seqPrefix: "FB",
+        seqNumber: expect.any(Number),
         title: "Dark mode support",
         description: "Users want a dark mode option.",
         type: "IDEA",
@@ -1106,6 +1112,8 @@ describe("promoteFeedbackToRoadmap", () => {
       data: {
         id: expect.stringMatching(/^[0-9a-f-]{36}$/),
         workspaceId: WS_ID,
+        seqPrefix: "RM",
+        seqNumber: expect.any(Number),
         title: "Login button broken",
         horizon: "NEXT",
         sortOrder: 0,
@@ -1153,6 +1161,8 @@ describe("promoteFeedbackToRoadmap", () => {
       data: {
         id: expect.stringMatching(/^[0-9a-f-]{36}$/),
         workspaceId: WS_ID,
+        seqPrefix: "RM",
+        seqNumber: expect.any(Number),
         title: "Crash on save",
         horizon: "NEXT",
         sortOrder: 5,

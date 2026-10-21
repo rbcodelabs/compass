@@ -2,6 +2,7 @@ import getPrisma from "@/lib/db"
 import type { Prisma } from "@prisma/client"
 import type { McpActor } from "@/lib/mcp-authz"
 import { isOrgAdminRole } from "@/lib/roles"
+import { agentIdentityValidForUser, findAgentById, isUserOwnedBy } from "@/lib/agent-ownership"
 
 export const agentsEnabled = () => process.env.COMPASS_AGENTS_ENABLED === "1"
 
@@ -12,8 +13,8 @@ export async function agentWorkspaceWhere(actor: McpActor): Promise<Prisma.Works
   if (actor.purpose !== "AGENT") return { ...membership, ...(actor.scopeWorkspaceId ? { id: actor.scopeWorkspaceId } : {}) }
   if (!agentsEnabled() || !actor.agentId || !actor.userId) return { id: { in: [] } }
   const prisma = getPrisma()
-  const agent = await prisma.agent.findFirst({ where: { id: actor.agentId, ownerUserId: actor.userId, status: "ACTIVE" }, select: { id: true } })
-  if (!agent) return { id: { in: [] } }
+  const agent = await findAgentById(prisma, actor.agentId)
+  if (!agent || !agentIdentityValidForUser(agent, actor.userId)) return { id: { in: [] } }
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { agentId: actor.agentId, revokedAt: null, ...(actor.requiredAgentAccess === "WRITE" ? { access: "WRITE" } : { access: { in: ["READ", "WRITE"] } }) }, select: { workspaceId: true } })
   return { ...membership, id: { in: grants.map(g => g.workspaceId).filter(id => !actor.scopeWorkspaceId || id === actor.scopeWorkspaceId) } }
 }
@@ -37,8 +38,8 @@ export type AgentAdminCapability = "SCORING_MODEL_ADMIN"
  *
  * "Live and valid" requires ALL of:
  *   - agents are enabled, and the actor carries both an agentId and userId;
- *   - that agent is ACTIVE and owned by actor.userId (mirrors every other
- *     agent-identity check in this file);
+ *   - that agent is ACTIVE and, when USER-owned, owned by actor.userId
+ *     (WORKSPACE-owned agents have no owner to match; the grant is their only authority);
  *   - an unrevoked grant row exists for (agentId, organizationId, capability);
  *   - the human who ISSUED that grant (grantedByUserId) is a CURRENT org
  *     OWNER/ADMIN, re-checked live on every call — see the schema comment on
@@ -55,8 +56,9 @@ export async function hasValidAgentOrgAdminGrant(
 ): Promise<boolean> {
   if (!agentsEnabled() || !actor.agentId || !actor.userId) return false
   const prisma = getPrisma()
-  const agent = await prisma.agent.findFirst({ where: { id: actor.agentId, ownerUserId: actor.userId, status: "ACTIVE" }, select: { id: true } })
-  if (!agent) return false
+  const agent = await findAgentById(prisma, actor.agentId)
+  if (!agent || !agentIdentityValidForUser(agent, actor.userId)) return false
+  // A WORKSPACE-owned agent never passes the identity check above with a user-carrying request; it gains this path with an agent-scoped credential (run-as-agent change).
   const grant = await prisma.agentOrgAdminGrant.findFirst({
     where: { agentId: actor.agentId, organizationId, capability, revokedAt: null },
     select: { id: true, grantedByUserId: true },
@@ -81,7 +83,7 @@ export async function hasValidAgentOrgAdminGrant(
  *   - agents are enabled, and the actor carries both an agentId and userId;
  *   - the actor is not bound to a single workspace (`scopeWorkspaceId`): a
  *     workspace-scoped identity must not be able to mint new workspaces;
- *   - the agent is ACTIVE and owned by actor.userId;
+ *   - the agent is ACTIVE and USER-owned by actor.userId (a WORKSPACE-owned agent never inherits);
  *   - the owner is a CURRENT org OWNER/ADMIN, re-read from OrganizationMember
  *     on every call (time-of-check, same principle as
  *     hasValidAgentOrgAdminGrant) — demoting the owner revokes this at once.
@@ -93,8 +95,9 @@ export async function hasValidAgentOrgAdminGrant(
 export async function hasOwnerOrgAdminRights(actor: McpActor, organizationId: string): Promise<boolean> {
   if (!agentsEnabled() || !actor.agentId || !actor.userId || actor.scopeWorkspaceId) return false
   const prisma = getPrisma()
-  const agent = await prisma.agent.findFirst({ where: { id: actor.agentId, ownerUserId: actor.userId, status: "ACTIVE" }, select: { id: true } })
-  if (!agent) return false
+  const agent = await findAgentById(prisma, actor.agentId)
+  // Only a USER-owned agent inherits its owner's rights; a WORKSPACE-owned one has none to inherit.
+  if (!agent || agent.status !== "ACTIVE" || !isUserOwnedBy(agent, actor.userId)) return false
   const owner = await prisma.organizationMember.findFirst({
     where: { organizationId, userId: actor.userId },
     select: { role: true },

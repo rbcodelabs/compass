@@ -13,6 +13,8 @@ vi.mock("@/lib/workspace-updates-capture", () => ({ withWorkspaceUpdates: (tx: u
 import { addTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions"
 import { createTask } from "@/lib/task-tool-handlers"
 import { runWithMcpActor } from "@/lib/mcp-authz"
+
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.member.mockResolvedValue({ id: "membership" })

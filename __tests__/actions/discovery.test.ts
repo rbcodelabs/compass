@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// The entity_links mirror (ADR phase 5) has its own tests; this file pins the legacy writes against hand-written fakes.
+process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR = "0";
+
 // Membership/foreign-entity denial uses real helpers in product-analytics-auth.test.ts.
 vi.mock("@/lib/product-action-auth", () => ({
   requireProductWorkspace: vi.fn().mockResolvedValue("ws-1"),
@@ -13,6 +16,7 @@ const mockOpportunity = {
   update: vi.fn(),
   findFirst: vi.fn(),
   delete: vi.fn(),
+  findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id })),
 };
 const mockSolution = {
   create: vi.fn(),
@@ -40,7 +44,8 @@ const mockPrisma = {
   solutionScore: mockSolutionScore,
   squad: { findFirst: vi.fn().mockResolvedValue({ id: "squad-1" }) },
   keyResult: { findFirst: vi.fn() },
-  opportunityObjectiveLink: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
+  opportunityObjectiveLink: { findFirst: vi.fn(), findMany: async () => [], create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
+  entityLink: { deleteMany: async () => ({ count: 0 }) },
 };
 // createOpportunity writes the opportunity and its links in one transaction.
 const mockTransaction = vi.fn(async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma));
@@ -83,6 +88,8 @@ import {
   saveSolutionScore,
   moveSolutionStatus,
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
+
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
 
 const mockAuth = vi.mocked(auth);
 
@@ -165,7 +172,7 @@ describe("addSolution", () => {
     const result = await addSolution("opp-1", { title: "New Solution" }, "/path");
     expect(mockSolution.create).toHaveBeenCalledWith({
       // workspaceId is derived from the authorized parent Opportunity, never client input.
-      data: { workspaceId: "ws-1", opportunityId: "opp-1", title: "New Solution", description: undefined },
+      data: { workspaceId: "ws-1", seqPrefix: "SOL", seqNumber: expect.any(Number), opportunityId: "opp-1", title: "New Solution", description: undefined },
     });
     expect(result).toEqual({ id: "sol-1", title: "Test Sol" });
   });
@@ -207,8 +214,10 @@ describe("addAssumption", () => {
   it("creates an assumption with riskLevel", async () => {
     await addAssumption("sol-1", { title: "Users will adopt it", riskLevel: "HIGH" }, "/path");
     expect(mockAssumption.create).toHaveBeenCalledWith({
-      data: { solutionId: "sol-1", title: "Users will adopt it", riskLevel: "HIGH" },
+      // workspaceId is derived from the authorized parent Solution, never client input.
+      data: { workspaceId: "ws-1", seqPrefix: "ASM", seqNumber: expect.any(Number), solutionId: "sol-1", title: "Users will adopt it", riskLevel: "HIGH" },
     });
+    expect(requireProductEntity).toHaveBeenCalledWith("solution", "sol-1");
   });
 });
 

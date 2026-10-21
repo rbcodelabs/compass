@@ -42,6 +42,8 @@ import {
   reorderExperiment,
 } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockExperiment.create.mockResolvedValue({

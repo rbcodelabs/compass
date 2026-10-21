@@ -1,3 +1,5 @@
+import { resolveWorkItemPage } from "@/lib/work-item-page";
+import { resolveWorkItemId } from "@/lib/work-item-resolve";
 import { auth } from "@/auth";
 import { resolveWorkspaceAccess } from "@/lib/workspace-context";
 import { listDocCommentsCore } from "@/lib/doc-comments";
@@ -11,6 +13,7 @@ import { DocDecisionAction } from "@/components/docs/doc-decision-action";
 import { FollowButton } from "@/components/following/follow-button";
 import { listDocDecisions } from "@/lib/tracked-decisions";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
+import { agentIdsAssignedInDoc, loadCommentTaskCards, loadMentionCandidates } from "@/lib/doc-comment-tasks";
 import { documentRevision, hydrateDocument } from "@/lib/document-service";
 
 type Props = {
@@ -19,6 +22,7 @@ type Props = {
     workspaceSlug: string;
     docId: string;
   }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 export async function generateMetadata({ params }: Props) {
@@ -27,23 +31,26 @@ export async function generateMetadata({ params }: Props) {
   const { docId, orgSlug, workspaceSlug } = await params;
   const access = await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id);
   if (!access) return { title: "Document" };
-  const doc = await getPrisma().doc.findFirst({
-    where: { id: docId, workspaceId: access.workspaceId },
+  const resolvedId = await resolveWorkItemId(getPrisma(), access.workspaceId, "doc", docId);
+  const doc = resolvedId ? await getPrisma().doc.findFirst({
+    where: { id: resolvedId, workspaceId: access.workspaceId },
     select: { title: true },
-  });
+  }) : null;
   return { title: doc?.title ?? "Untitled" };
 }
 
-export default async function DocPage({ params }: Props) {
+export default async function DocPage({ params, searchParams }: Props) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
 
-  const { orgSlug, workspaceSlug, docId } = await params;
+  const { orgSlug, workspaceSlug, docId: docParam } = await params;
   const prisma = getPrisma();
 
   const access = await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id);
   if (!access) notFound();
   const workspace = { id: access.workspaceId };
+  const resolvedDoc = await resolveWorkItemPage({ type: "doc", param: docParam, workspaceId: workspace.id, basePath: `/${orgSlug}/${workspaceSlug}/docs`, searchParams: await searchParams });
+  const docId = resolvedDoc.id;
 
   const storedDoc = await prisma.doc.findFirst({
     where: { id: docId, workspaceId: workspace.id },
@@ -72,7 +79,15 @@ export default async function DocPage({ params }: Props) {
   // the open/anchored ones and the sidebar filters resolved behind a toggle.
   const comments = await listDocCommentsCore(docId);
 
-  const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/docs/${docId}`;
+  // @mention picker, the task card under each comment, and which agents are already
+  // confirmed in this doc (skips the first-assignment scope step).
+  const [mentionOptions, taskCards, confirmedAgentIds] = await Promise.all([
+    loadMentionCandidates(workspace.id),
+    loadCommentTaskCards(workspace.id, comments.map((comment) => comment.id)),
+    agentIdsAssignedInDoc(workspace.id, doc.id),
+  ]);
+
+  const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/docs/${resolvedDoc.canonical}`;
 
   const linkedTasks = await fetchLinkedTasksBundle(workspace.id, "DOC", doc.id);
   const cookieStore = await cookies();
@@ -103,8 +118,11 @@ export default async function DocPage({ params }: Props) {
       workspaceSlug={workspaceSlug}
       workspaceId={workspace.id}
       linkedTasks={linkedTasks}
-      followAction={<FollowButton orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="DOC" subjectId={doc.id} />}
-      decisionAction={<DocDecisionAction orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
+      mentionOptions={mentionOptions}
+      taskCards={taskCards}
+      confirmedAgentIds={confirmedAgentIds}
+      followAction={<FollowButton key="follow" orgSlug={orgSlug} workspaceSlug={workspaceSlug} subjectType="DOC" subjectId={doc.id} />}
+      decisionAction={<DocDecisionAction key="decision" orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
     />
   );
 }

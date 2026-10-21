@@ -1,3 +1,4 @@
+import { resolveWorkItemPage } from "@/lib/work-item-page"
 import { notFound, redirect } from "next/navigation"
 import getPrisma from "@/lib/db"
 import { auth } from "@/auth"
@@ -20,19 +21,27 @@ import Link from "next/link"
 import { SessionAnalysisResults, SynthesisResults } from "@/components/research/analysis-results"
 import { guideFingerprint, parseResearchPage } from "@/lib/research-analysis"
 import { deserializeResearchGuide } from "@/lib/research"
+import { LinkedEntitiesSection } from "@/components/links/linked-entities-section"
 
 export default async function StudyPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; studyId: string }>; searchParams: Promise<{ token?: string; page?: string; synthesisPage?: string; turnId?: string }> }) {
   if (!isResearchCaptureEnabled()) notFound()
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
-  const { orgSlug, workspaceSlug, studyId } = await params
-  const { token, page: requestedPage, synthesisPage: requestedSynthesisPage, turnId } = await searchParams
+  const { orgSlug, workspaceSlug, studyId: studyParam } = await params
+  const query = await searchParams
+  const { token, page: requestedPage, synthesisPage: requestedSynthesisPage, turnId } = query
   const page = parseResearchPage(requestedPage)
   const synthesisPage = parseResearchPage(requestedSynthesisPage)
   const prisma = getPrisma()
+  const member = await prisma.workspace.findFirst({
+    where: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } },
+    select: { id: true },
+  })
+  if (!member) notFound()
+  const resolvedStudy = await resolveWorkItemPage({ type: "researchStudy", param: studyParam, workspaceId: member.id, basePath: `/${orgSlug}/${workspaceSlug}/capture/studies`, searchParams: query })
   const access = await prisma.researchStudy.findFirst({
     where: {
-      id: studyId,
+      id: resolvedStudy.id,
       workspace: {
         slug: workspaceSlug,
         organization: { slug: orgSlug },
@@ -47,7 +56,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
   if (turnId) {
     const evidence = await prisma.researchTurn.findFirst({ where: { id: turnId, session: { studyId: access.id } }, select: { sessionId: true } })
     if (!evidence) notFound()
-    redirect(`/${orgSlug}/${workspaceSlug}/capture/studies/${access.id}/sessions/${evidence.sessionId}?turnId=${encodeURIComponent(turnId)}#turn-${encodeURIComponent(turnId)}`)
+    redirect(`/${orgSlug}/${workspaceSlug}/capture/studies/${resolvedStudy.canonical}/sessions/${evidence.sessionId}?turnId=${encodeURIComponent(turnId)}#turn-${encodeURIComponent(turnId)}`)
   }
   await reconcileAbandonedResearchSessions(prisma, access.id)
   const study = await prisma.researchStudy.findUnique({
@@ -75,7 +84,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
   // Completed transcripts are immutable. Guide + completed IDs detect staleness without
   // rereading all turns; 501 is necessarily stale against any valid <=500-session snapshot.
   const completedSessions = await prisma.researchSession.findMany({ where: { studyId: study.id, status: "COMPLETED" }, select: { id: true }, take: 501 })
-  const studyUrl = `/${orgSlug}/${workspaceSlug}/capture/studies/${study.id}`
+  const studyUrl = `/${orgSlug}/${workspaceSlug}/capture/studies/${resolvedStudy.canonical}`
   const guide = deserializeResearchGuide(study.guide)
   const displayedToken = token ? await prisma.researchParticipantToken.findFirst({
     where: {
@@ -125,6 +134,8 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
         {guided && study.appUrl && <div className="min-w-0"><span className="text-text-muted">Product</span><div><a className="break-all font-medium underline" href={study.appUrl} rel="noopener noreferrer" target="_blank">{study.appUrl}</a></div></div>}
         {guided && linkedArtifact && artifactHref && <div className="min-w-0"><span className="text-text-muted">Prototype artifact</span><div><Link className="break-all font-medium underline" href={artifactHref}>{linkedArtifact.title}</Link></div></div>}
       </section>
+      {/* Hides itself for a study type the registry does not allow (EXTERNAL) */}
+      <LinkedEntitiesSection orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ linkType: "EXPERIMENT_INFORMED_BY_STUDY", entityType: "RESEARCH_STUDY", entityId: study.id }} />
       {!external && <section className="max-w-3xl rounded-xl border bg-surface-panel p-5">
         <h2 className="font-semibold">Participant link</h2>
         {shareUrl ? <><Input aria-label="Participant link" className="mt-3" readOnly value={shareUrl} /><p className="mt-2 text-xs text-text-muted">Save this link now. Compass stores only its secure hash.</p></> : <p className="mt-2 text-sm text-text-subtle">For security, Compass cannot display an existing link again. {study.participantTokens.length ? `${study.participantTokens.length} active link${study.participantTokens.length === 1 ? " is" : "s are"} available.` : "There is no active participant link."}</p>}

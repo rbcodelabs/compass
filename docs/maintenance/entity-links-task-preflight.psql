@@ -1,0 +1,86 @@
+-- READ-ONLY preflight for migration 097_entity_links_backfill_task (entity_links ADR phase 7, task links).
+-- Counts the legacy task_links rows the backfill would mirror and the orphans it would quarantine and report, so the owner can read the
+-- production numbers BEFORE deciding to POST 097 and who resolves the quarantined rows. It changes nothing: the transaction is
+-- READ ONLY and ends in ROLLBACK, and it selects counts and ids only (no titles, no content). DO NOT run it against production without the
+-- owner's go-ahead; use a read-only role.
+--
+-- Usage (psql, as a read-only role; the schema is the deployment's, e.g. compass_prod):
+--   psql "$READONLY_DATABASE_URL" -v schema=compass_prod -f docs/maintenance/entity-links-task-preflight.psql
+-- It needs tables from migrations 027 and 068 (task_links, objectives.workspace_id). The entity_links section at the end needs 091 and is
+-- skipped by psql's ON_ERROR_STOP=off default if the table is missing; the same numbers (plus these) are served by
+-- GET /api/admin/migrate under entityLinksTaskBackfill once the code is deployed.
+--
+-- Classes, identical to lib/migrations/entity-links-task-backfill.ts:
+--   ok               the task and the target exist and share one workspace
+--   dangling         the task or the target row is gone
+--   crossWorkspace   task and target are in different workspaces, or the target has no workspace (a Key Result takes its Objective's)
+--   unsupportedType  a linked_type that is none of the nine (COMMENT is excluded by design and is not a class)
+-- linked_type DECISION is a review request; the backfill stores it as REVIEW_REQUEST.
+
+\set ON_ERROR_STOP off
+BEGIN READ ONLY;
+
+\echo '== 1. task_links by linked_type (COMMENT is not mirrored by design) =='
+SELECT linked_type, count(*) AS rows FROM :"schema".task_links GROUP BY linked_type ORDER BY linked_type;
+
+\echo '== 2. Each mirrorable linked_type by class (everything but ok is quarantined and reported by 097) =='
+WITH classified AS (
+  SELECT l.id, l.linked_type,
+         CASE
+           WHEN t.id IS NULL OR x.id IS NULL THEN 'dangling'
+           WHEN t.workspace_id IS NULL OR x.ws IS NULL OR t.workspace_id <> x.ws THEN 'crossWorkspace'
+           ELSE 'ok' END AS class
+    FROM :"schema".task_links AS l
+    LEFT JOIN :"schema".tasks AS t ON t.id = l.task_id
+    LEFT JOIN (
+      SELECT 'OPPORTUNITY' AS type, id, workspace_id AS ws FROM :"schema".opportunities
+      UNION ALL SELECT 'SOLUTION', id, workspace_id FROM :"schema".solutions
+      UNION ALL SELECT 'ROADMAP_ITEM', id, workspace_id FROM :"schema".roadmap_items
+      UNION ALL SELECT 'OBJECTIVE', id, workspace_id FROM :"schema".objectives
+      UNION ALL SELECT 'KEY_RESULT', kr.id, o.workspace_id FROM :"schema".key_results AS kr JOIN :"schema".objectives AS o ON o.id = kr.objective_id
+      UNION ALL SELECT 'DOC', id, workspace_id FROM :"schema".docs
+      UNION ALL SELECT 'EXPERIMENT', id, workspace_id FROM :"schema".experiments
+      UNION ALL SELECT 'FEEDBACK_ITEM', id, workspace_id FROM :"schema".feedback
+      UNION ALL SELECT 'DECISION', id, workspace_id FROM :"schema".review_requests
+    ) AS x ON x.type = l.linked_type AND x.id = l.linked_id
+   WHERE l.linked_type IN ('OPPORTUNITY','SOLUTION','ROADMAP_ITEM','OBJECTIVE','KEY_RESULT','DOC','EXPERIMENT','FEEDBACK_ITEM','DECISION')
+)
+SELECT linked_type, class, count(*) AS rows FROM classified GROUP BY 1, 2 ORDER BY 1, 2;
+
+\echo '== 3. Unsupported linked_type rows (quarantined as unsupportedType), ids only (first 200) =='
+SELECT id AS task_link_id, linked_type FROM :"schema".task_links
+ WHERE linked_type NOT IN ('OPPORTUNITY','SOLUTION','ROADMAP_ITEM','OBJECTIVE','KEY_RESULT','DOC','EXPERIMENT','FEEDBACK_ITEM','DECISION','COMMENT')
+ ORDER BY id LIMIT 200;
+
+\echo '== 4. Expected orphans, ids only: task_links.id with its class (first 200) =='
+WITH classified AS (
+  SELECT l.id, l.linked_type,
+         CASE
+           WHEN t.id IS NULL OR x.id IS NULL THEN 'dangling'
+           WHEN t.workspace_id IS NULL OR x.ws IS NULL OR t.workspace_id <> x.ws THEN 'crossWorkspace'
+           ELSE 'ok' END AS class
+    FROM :"schema".task_links AS l
+    LEFT JOIN :"schema".tasks AS t ON t.id = l.task_id
+    LEFT JOIN (
+      SELECT 'OPPORTUNITY' AS type, id, workspace_id AS ws FROM :"schema".opportunities
+      UNION ALL SELECT 'SOLUTION', id, workspace_id FROM :"schema".solutions
+      UNION ALL SELECT 'ROADMAP_ITEM', id, workspace_id FROM :"schema".roadmap_items
+      UNION ALL SELECT 'OBJECTIVE', id, workspace_id FROM :"schema".objectives
+      UNION ALL SELECT 'KEY_RESULT', kr.id, o.workspace_id FROM :"schema".key_results AS kr JOIN :"schema".objectives AS o ON o.id = kr.objective_id
+      UNION ALL SELECT 'DOC', id, workspace_id FROM :"schema".docs
+      UNION ALL SELECT 'EXPERIMENT', id, workspace_id FROM :"schema".experiments
+      UNION ALL SELECT 'FEEDBACK_ITEM', id, workspace_id FROM :"schema".feedback
+      UNION ALL SELECT 'DECISION', id, workspace_id FROM :"schema".review_requests
+    ) AS x ON x.type = l.linked_type AND x.id = l.linked_id
+   WHERE l.linked_type IN ('OPPORTUNITY','SOLUTION','ROADMAP_ITEM','OBJECTIVE','KEY_RESULT','DOC','EXPERIMENT','FEEDBACK_ITEM','DECISION')
+)
+SELECT id AS task_link_id, linked_type, class FROM classified WHERE class <> 'ok' ORDER BY id LIMIT 200;
+
+\echo '== 5. Targets with no workspace_id (links to them are crossWorkspace orphans until 068/069 fills them) =='
+SELECT 'solutions' AS source, count(*) AS rows FROM :"schema".solutions WHERE workspace_id IS NULL
+UNION ALL SELECT 'objectives', count(*) FROM :"schema".objectives WHERE workspace_id IS NULL;
+
+\echo '== 6. entity_links state of the type (needs migration 091) =='
+SELECT to_type, origin, count(*) AS rows FROM :"schema".entity_links WHERE link_type = 'TASK_REFERENCES' GROUP BY 1, 2 ORDER BY 1, 2;
+
+ROLLBACK;

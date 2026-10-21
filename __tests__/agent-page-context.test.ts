@@ -8,6 +8,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 const getEntitySummary = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/db", () => ({ default: () => ({}) }))
+vi.mock("@/lib/work-item-resolve", async () => (await import("./helpers/work-item-resolve-mock")).workItemResolveMock())
 vi.mock("@/lib/entity-summary", () => ({ getEntitySummary }))
 
 import { resolveAgentPageContext } from "@/lib/agent-page-context"

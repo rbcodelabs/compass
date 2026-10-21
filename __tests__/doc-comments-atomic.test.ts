@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     comment: { create: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() },
     docCommentAnchor: { create: vi.fn(), deleteMany: vi.fn() }, solutionPlanProposal: { create: vi.fn(), deleteMany: vi.fn() },
     commentElementAnchor: { create: vi.fn(), deleteMany: vi.fn() }, commentExternalAuthor: { create: vi.fn(), deleteMany: vi.fn() },
+    taskLink: { deleteMany: vi.fn() },
   },
   db: { $transaction: vi.fn() },
 }))

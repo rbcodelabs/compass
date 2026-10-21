@@ -2,18 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { prisma } = vi.hoisted(() => ({ prisma: {
   workspaceMember: { findFirst: vi.fn(), findMany: vi.fn() },
-  agent: { findUnique: vi.fn(), findMany: vi.fn() },
+  agent: { findFirst: vi.fn(), findMany: vi.fn() },
   agentWorkspaceGrant: { findFirst: vi.fn(), findMany: vi.fn() },
 } }));
 vi.mock("@/lib/db", () => ({ default: () => prisma }));
-import { assignmentUpdate, parseAssigneeFilter, resolveTaskAssignees } from "@/lib/task-assignment";
+import { assignmentUpdate, eligibleTaskAssignees, parseAssigneeFilter, resolveTaskAssignees } from "@/lib/task-assignment";
 import { UNASSIGNED_ASSIGNEE_FILTER } from "@/lib/task-assignee-display";
 
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv("COMPASS_AGENTS_ENABLED", "1");
   prisma.workspaceMember.findFirst.mockResolvedValue({ id: "member" });
-  prisma.agent.findUnique.mockResolvedValue({ id: "agent", ownerUserId: "owner", status: "ACTIVE" });
+  prisma.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "owner", status: "ACTIVE" });
   prisma.agentWorkspaceGrant.findFirst.mockResolvedValue({ id: "grant" });
 });
 
@@ -39,9 +39,9 @@ describe("single task assignment", () => {
     await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "agent" } })).rejects.toThrow("workspace");
   });
   it("denies suspended and ungranted agents", async () => {
-    prisma.agent.findUnique.mockResolvedValue({ status: "SUSPENDED" });
+    prisma.agent.findFirst.mockResolvedValue({ status: "SUSPENDED" });
     await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "agent" } })).rejects.toThrow("active");
-    prisma.agent.findUnique.mockResolvedValue({ status: "ACTIVE", ownerUserId: "owner" });
+    prisma.agent.findFirst.mockResolvedValue({ status: "ACTIVE", ownerUserId: "owner" });
     prisma.agentWorkspaceGrant.findFirst.mockResolvedValue(null);
     await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "agent" } })).rejects.toThrow("workspace");
   });
@@ -82,5 +82,92 @@ describe("single task assignment", () => {
     prisma.workspaceMember.findMany.mockResolvedValue([]);
     const [task] = await resolveTaskAssignees("ws", [{ assigneeAgentId: "agent", assigneeUserId: null }]);
     expect(task.assignee).toMatchObject({ type: "AGENT", id: "agent", displayName: "Engineer", available: false });
+  });
+});
+
+describe("WORKSPACE-owned agents", () => {
+  const shared = { id: "shared", name: "Ops", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "ws", status: "ACTIVE" };
+
+  it("is assignable with an ACTIVE status and a live grant, without any owner membership", async () => {
+    prisma.agent.findFirst.mockResolvedValue(shared);
+    prisma.workspaceMember.findFirst.mockResolvedValue(null);
+    expect(await assignmentUpdate("ws", { assignee: { type: "AGENT", id: "shared" } })).toEqual({ assigneeUserId: null, assigneeAgentId: "shared" });
+    // No membership lookup at all: there is no owner user to look up.
+    expect(prisma.workspaceMember.findFirst).not.toHaveBeenCalled();
+  });
+  it("is refused without a live grant", async () => {
+    prisma.agent.findFirst.mockResolvedValue(shared);
+    prisma.agentWorkspaceGrant.findFirst.mockResolvedValue(null);
+    await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "shared" } })).rejects.toThrow("workspace");
+  });
+  it("is refused when suspended", async () => {
+    prisma.agent.findFirst.mockResolvedValue({ ...shared, status: "SUSPENDED" });
+    await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "shared" } })).rejects.toThrow("active");
+  });
+  it("a USER-owned agent whose owner is not a member is still refused (unchanged)", async () => {
+    prisma.agent.findFirst.mockResolvedValue({ id: "agent", name: "Mine", ownerUserId: "owner", ownerType: "USER", status: "ACTIVE" });
+    prisma.workspaceMember.findFirst.mockResolvedValue(null);
+    await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "agent" } })).rejects.toThrow("workspace");
+  });
+  it("a WORKSPACE agent that names a user in ownerUserId is still not treated as user-owned", async () => {
+    // The owner type is authoritative: a leftover owner_user_id must not revive owner-membership rules.
+    prisma.agent.findFirst.mockResolvedValue({ ...shared, ownerUserId: "former-admin" });
+    prisma.workspaceMember.findFirst.mockResolvedValue(null);
+    expect(await assignmentUpdate("ws", { assignee: { type: "AGENT", id: "shared" } })).toEqual({ assigneeUserId: null, assigneeAgentId: "shared" });
+  });
+  it("shows a granted shared agent as available in task reads, with no owner in the workspace", async () => {
+    prisma.agent.findMany.mockResolvedValue([shared]);
+    prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ agentId: "shared" }]);
+    prisma.workspaceMember.findMany.mockResolvedValue([]);
+    const [task] = await resolveTaskAssignees("ws", [{ assigneeAgentId: "shared", assigneeUserId: null }]);
+    expect(task.assignee).toMatchObject({ id: "shared", displayName: "Ops", available: true });
+  });
+  it("is refused in a workspace other than the one that owns it, even with a live grant", async () => {
+    prisma.agent.findFirst.mockResolvedValue({ ...shared, ownerWorkspaceId: "other-ws" });
+    prisma.agentWorkspaceGrant.findFirst.mockResolvedValue({ id: "grant" });
+    await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "shared" } })).rejects.toThrow("workspace");
+  });
+  it("shows a foreign workspace's shared agent as unavailable in task reads and absent from the picker", async () => {
+    const foreign = { ...shared, ownerWorkspaceId: "other-ws" };
+    prisma.agent.findMany.mockResolvedValue([foreign]);
+    prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ agentId: "shared" }]);
+    prisma.workspaceMember.findMany.mockResolvedValue([]);
+    const [task] = await resolveTaskAssignees("ws", [{ assigneeAgentId: "shared", assigneeUserId: null }]);
+    expect(task.assignee).toMatchObject({ id: "shared", available: false });
+    expect((await eligibleTaskAssignees("ws")).filter((a) => a.type === "AGENT")).toEqual([]);
+  });
+  it("shows an ungranted shared agent as unavailable in task reads", async () => {
+    prisma.agent.findMany.mockResolvedValue([shared]);
+    prisma.agentWorkspaceGrant.findMany.mockResolvedValue([]);
+    prisma.workspaceMember.findMany.mockResolvedValue([]);
+    const [task] = await resolveTaskAssignees("ws", [{ assigneeAgentId: "shared", assigneeUserId: null }]);
+    expect(task.assignee).toMatchObject({ id: "shared", available: false });
+  });
+});
+
+describe("eligibleTaskAssignees", () => {
+  const member = { userId: "owner", user: { name: "Olive", email: "o@x.com" } };
+  beforeEach(() => {
+    prisma.workspaceMember.findMany.mockResolvedValue([member]);
+  });
+
+  it("lists a USER-owned agent only while its owner is a member, and a WORKSPACE-owned agent whenever it is granted", async () => {
+    prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ agentId: "mine" }, { agentId: "orphan" }, { agentId: "shared" }]);
+    prisma.agent.findMany.mockResolvedValue([
+      { id: "mine", name: "Mine", ownerUserId: "owner", status: "ACTIVE" },
+      { id: "orphan", name: "Orphan", ownerUserId: "departed", status: "ACTIVE" },
+      { id: "shared", name: "Shared", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "ws", status: "ACTIVE" },
+    ]);
+    const list = await eligibleTaskAssignees("ws");
+    const agents = list.filter((a) => a.type === "AGENT");
+    expect(agents.map((a) => a.id)).toEqual(["mine", "shared"]);
+    expect(agents.find((a) => a.id === "mine")?.ownerName).toBe("Olive");
+    expect(agents.find((a) => a.id === "shared")?.ownerName).toBeUndefined();
+  });
+  it("lists no agents with no live grants, or with agents disabled", async () => {
+    prisma.agentWorkspaceGrant.findMany.mockResolvedValue([]);
+    expect((await eligibleTaskAssignees("ws")).filter((a) => a.type === "AGENT")).toEqual([]);
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0");
+    expect((await eligibleTaskAssignees("ws")).filter((a) => a.type === "AGENT")).toEqual([]);
   });
 });

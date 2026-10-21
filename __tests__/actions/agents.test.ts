@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   oAuthAuthorizationCode: { deleteMany: vi.fn() },
   oAuthToken: { updateMany: vi.fn() },
   workspaceMember: { findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+  workspace: { findFirst: vi.fn() },
   $transaction: vi.fn(),
   agentWorkspaceGrant: { upsert: vi.fn(), updateMany: vi.fn() },
 }));
@@ -50,7 +51,8 @@ describe("agent account and workspace management", () => {
   });
   it("creates an account identity without workspace membership", async () => {
     await createAgent({ name: " Engineer " });
-    expect(mocks.agent.create).toHaveBeenCalledWith({ data: expect.objectContaining({ ownerUserId: "owner", name: "Engineer" }) });
+    // select keeps the returned row to columns that exist before migration 098 is applied.
+    expect(mocks.agent.create).toHaveBeenCalledWith({ data: expect.objectContaining({ ownerUserId: "owner", name: "Engineer" }), select: expect.objectContaining({ id: true }) });
     expect(mocks.admin).not.toHaveBeenCalled();
   });
   it("requires authentication", async () => {
@@ -73,7 +75,7 @@ describe("agent account and workspace management", () => {
     await expect(createAgentKey("agent", { name: "Laptop", expiresAt: "2000-01-01" })).rejects.toThrow("Expiry");
   });
   it("does not mint keys for suspended agents", async () => {
-    mocks.agent.findFirst.mockResolvedValue({ id: "agent", status: "SUSPENDED" });
+    mocks.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "owner", status: "SUSPENDED" });
     await expect(createAgentKey("agent", { name: "Laptop" })).rejects.toThrow("suspended");
   });
   it("prevents grant expansion when rollout is disabled", async () => {
@@ -95,6 +97,36 @@ describe("agent account and workspace management", () => {
     expect(mocks.apiKey.create).not.toHaveBeenCalled();
     expect(mocks.workspaceMember.updateMany).toHaveBeenCalledWith({ where: { id: "member", role: "MEMBER" }, data: { role: "MEMBER" } });
     expect(mocks.$transaction).toHaveBeenCalled();
+  });
+  describe("a WORKSPACE-owned agent", () => {
+    const shared = { id: "agent", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "workspace", status: "ACTIVE" };
+
+    it("is granted by a workspace admin into its own workspace without any owner-membership check", async () => {
+      mocks.agent.findFirst.mockResolvedValue(shared);
+      mocks.workspaceMember.findFirst.mockResolvedValue(null);
+      await grantWorkspaceAgent("org", "ws", "agent", "WRITE");
+      expect(mocks.agentWorkspaceGrant.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: expect.objectContaining({ access: "WRITE", grantedByUserId: "owner", revokedAt: null }) }));
+      expect(mocks.workspaceMember.findFirst).not.toHaveBeenCalled();
+    });
+    it("cannot be pulled into a different workspace by that workspace's admin", async () => {
+      mocks.agent.findFirst.mockResolvedValue({ ...shared, ownerWorkspaceId: "another-workspace" });
+      await expect(grantWorkspaceAgent("org", "ws", "agent", "WRITE")).rejects.toThrow("Agent not found");
+      expect(mocks.agentWorkspaceGrant.upsert).not.toHaveBeenCalled();
+    });
+    it("is managed by an admin of its workspace, and not by an unrelated user", async () => {
+      mocks.agent.findFirst.mockResolvedValue(shared);
+      mocks.workspace.findFirst.mockResolvedValueOnce(null);
+      await expect(updateAgent("agent", { name: "Changed", status: "ACTIVE" })).rejects.toThrow("Agent not found");
+      expect(mocks.agent.update).not.toHaveBeenCalled();
+      mocks.workspace.findFirst.mockResolvedValueOnce({ members: [{ role: "ADMIN" }], organization: { members: [] } });
+      await updateAgent("agent", { name: "Changed", status: "ACTIVE" });
+      expect(mocks.agent.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "agent" }, select: { id: true } }));
+    });
+    it("never gets a personal API key, even from a workspace admin", async () => {
+      mocks.agent.findFirst.mockResolvedValue(shared);
+      await expect(createAgentKey("agent", { name: "Laptop" })).rejects.toThrow("Agent not found");
+      expect(mocks.apiKey.create).not.toHaveBeenCalled();
+    });
   });
   it("allows revocation while rollout is disabled", async () => {
     mocks.enabled.mockReturnValue(false);

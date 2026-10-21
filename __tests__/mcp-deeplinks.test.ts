@@ -15,9 +15,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { runWithMcpActor } from "@/lib/mcp-authz"
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const mockPrisma = {
   workspace: { findUnique: vi.fn() },
-  opportunity: { findUnique: vi.fn(), create: vi.fn() },
+  opportunity: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
   solution: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
   squad: { findMany: vi.fn() },
   assumption: { findUnique: vi.fn(), create: vi.fn() },
@@ -36,6 +38,8 @@ vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 type ToolCallback = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>
 const registeredTools: Record<string, ToolCallback> = {}
 
+// Membership is proven by the tool gate; the batch core's read-only check would load the session.
+vi.mock("@/lib/workspace-context", () => ({ assertWorkspaceWritable: vi.fn() }))
 vi.mock("mcp-handler", () => ({
   createMcpHandler: (setup: (server: { registerTool: (name: string, meta: unknown, cb: ToolCallback) => void; registerResource: (...args: unknown[]) => void }) => void) => {
     setup({ registerTool(name, _meta, cb) { registeredTools[name] = cb }, registerResource() {} })
@@ -82,21 +86,24 @@ describe("create_opportunity deeplink", () => {
   const args = { workspaceId: "ws-1", title: "Setup is confusing" }
 
   beforeEach(() => {
-    mockPrisma.opportunity.create.mockResolvedValue({ id: "opp-1", title: "Setup is confusing", status: "EXPLORING" })
+    // The create goes through the batch core: nothing exists until the insert, and the handler then reads the row back.
+    mockPrisma.opportunity.create.mockResolvedValue({ id: "opp_1" })
+    mockPrisma.opportunity.findFirst.mockImplementation(async () =>
+      mockPrisma.opportunity.create.mock.calls.length ? { id: "opp_1", title: "Setup is confusing", status: "EXPLORING" } : null)
   })
 
   it("links to the opportunity's own discovery page", async () => {
     mockPrisma.workspace.findUnique.mockResolvedValue(SLUGGED)
     const text = (await call("create_opportunity", args)).content[0].text
-    expect(text).toContain("ID: opp-1")
-    expect(text).toContain(`URL: ${BASE}/discovery/opp-1`)
+    expect(text).toContain("ID: opp_1")
+    expect(text).toContain(`URL: ${BASE}/discovery/opp_1`)
   })
 
   it("still creates the opportunity, without a URL line, when slugs are unavailable", async () => {
     mockPrisma.workspace.findUnique.mockResolvedValue(UNSLUGGED)
     const text = (await call("create_opportunity", args)).content[0].text
     expect(mockPrisma.opportunity.create).toHaveBeenCalled()
-    expect(text).toContain("ID: opp-1")
+    expect(text).toContain("ID: opp_1")
     expect(text).not.toContain("URL:")
   })
 
@@ -105,25 +112,33 @@ describe("create_opportunity deeplink", () => {
     mockPrisma.workspace.findUnique.mockResolvedValue(SLUGGED)
     const text = (await call("create_opportunity", args)).content[0].text
     expect(mockPrisma.opportunity.create).toHaveBeenCalled()
-    expect(text).toContain("ID: opp-1")
+    expect(text).toContain("ID: opp_1")
     expect(text).not.toContain("URL:")
   })
 })
 
 describe("add_solution deeplink", () => {
+  const OPP = "7d1c2a5e-0b1f-4c63-9a52-3f1e0c4b8a11"
+  const arrangeCreate = () => {
+    mockPrisma.opportunity.findFirst.mockResolvedValue({ id: OPP }) // parent verification inside the item's transaction
+    mockPrisma.solution.findFirst.mockImplementation(async () =>
+      mockPrisma.solution.create.mock.calls.length ? { id: "sol-1", title: "Guided setup", status: "IDEA" } : null)
+    mockPrisma.solution.create.mockResolvedValue({ id: "sol-1" })
+  }
+
   it("opens the solution panel on its owning opportunity page", async () => {
     mockPrisma.opportunity.findUnique.mockResolvedValue({
-      id: "opp-1", title: "Setup is confusing", workspace: SLUGGED,
+      id: OPP, title: "Setup is confusing", workspaceId: "ws-1", workspace: SLUGGED,
     })
-    mockPrisma.solution.create.mockResolvedValue({ id: "sol-1", title: "Guided setup", status: "IDEA" })
-    const text = (await call("add_solution", { opportunityId: "opp-1", title: "Guided setup" })).content[0].text
-    expect(text).toContain(`URL: ${BASE}/discovery/opp-1?detail=solution%3Asol-1`)
+    arrangeCreate()
+    const text = (await call("add_solution", { opportunityId: OPP, title: "Guided setup" })).content[0].text
+    expect(text).toContain(`URL: ${BASE}/discovery/${OPP}?detail=solution%3Asol-1`)
   })
 
   it("omits the URL line when the opportunity carries no workspace slugs", async () => {
-    mockPrisma.opportunity.findUnique.mockResolvedValue({ id: "opp-1", title: "Setup is confusing" })
-    mockPrisma.solution.create.mockResolvedValue({ id: "sol-1", title: "Guided setup", status: "IDEA" })
-    const text = (await call("add_solution", { opportunityId: "opp-1", title: "Guided setup" })).content[0].text
+    mockPrisma.opportunity.findUnique.mockResolvedValue({ id: OPP, title: "Setup is confusing", workspaceId: "ws-1" })
+    arrangeCreate()
+    const text = (await call("add_solution", { opportunityId: OPP, title: "Guided setup" })).content[0].text
     expect(text).toContain("ID: sol-1")
     expect(text).not.toContain("URL:")
   })
@@ -132,40 +147,40 @@ describe("add_solution deeplink", () => {
 describe("add_assumption deeplink", () => {
   it("opens the assumption panel on the owning opportunity page (two-hop scope)", async () => {
     mockPrisma.solution.findUnique.mockResolvedValue({
-      id: "sol-1", title: "Guided setup", opportunityId: "opp-1", workspace: SLUGGED,
+      id: "sol_1", title: "Guided setup", opportunityId: "opp_1", workspaceId: "ws-1", workspace: SLUGGED,
     })
-    mockPrisma.assumption.create.mockResolvedValue({ id: "asm-1", title: "Users will finish", riskLevel: "HIGH", status: "UNTESTED", description: null })
-    const text = (await call("add_assumption", { solutionId: "sol-1", title: "Users will finish", riskLevel: "HIGH" })).content[0].text
-    expect(text).toContain(`URL: ${BASE}/discovery/opp-1?detail=assumption%3Aasm-1`)
+    mockPrisma.assumption.create.mockResolvedValue({ id: "asm_1", title: "Users will finish", riskLevel: "HIGH", status: "UNTESTED", description: null })
+    const text = (await call("add_assumption", { solutionId: "sol_1", title: "Users will finish", riskLevel: "HIGH" })).content[0].text
+    expect(text).toContain(`URL: ${BASE}/discovery/opp_1?detail=assumption%3Aasm_1`)
   })
 
   it("omits the URL line when the parent chain carries no slugs", async () => {
-    mockPrisma.solution.findUnique.mockResolvedValue({ id: "sol-1", title: "Guided setup" })
-    mockPrisma.assumption.create.mockResolvedValue({ id: "asm-1", title: "Users will finish", riskLevel: "HIGH", status: "UNTESTED", description: null })
-    const text = (await call("add_assumption", { solutionId: "sol-1", title: "Users will finish", riskLevel: "HIGH" })).content[0].text
-    expect(text).toContain("ID: asm-1")
+    mockPrisma.solution.findUnique.mockResolvedValue({ id: "sol_1", title: "Guided setup", workspaceId: "ws-1" })
+    mockPrisma.assumption.create.mockResolvedValue({ id: "asm_1", title: "Users will finish", riskLevel: "HIGH", status: "UNTESTED", description: null })
+    const text = (await call("add_assumption", { solutionId: "sol_1", title: "Users will finish", riskLevel: "HIGH" })).content[0].text
+    expect(text).toContain("ID: asm_1")
     expect(text).not.toContain("URL:")
   })
 })
 
 describe("create_objective deeplink", () => {
   it("opens the objective panel on the OKRs page", async () => {
-    mockPrisma.oKRCycle.findFirst.mockResolvedValue({ id: "cycle-1", title: "Q3", workspace: SLUGGED })
-    mockPrisma.objective.create.mockResolvedValue({ id: "obj-1", title: "Grow activation", status: "ON_TRACK", description: null, owner: null, squadId: null, parentKeyResultId: null })
+    mockPrisma.oKRCycle.findFirst.mockResolvedValue({ id: "cycle-1", title: "Q3", workspaceId: "ws-1", workspace: SLUGGED })
+    mockPrisma.objective.create.mockResolvedValue({ id: "obj_1", title: "Grow activation", status: "ON_TRACK", description: null, owner: null, squadId: null, parentKeyResultId: null })
     const text = (await call("create_objective", { workspaceId: "ws-1", cycleId: "cycle-1", title: "Grow activation" })).content[0].text
-    expect(text).toContain(`URL: ${BASE}/okrs?detail=objective%3Aobj-1`)
+    expect(text).toContain(`URL: ${BASE}/okrs?detail=objective%3Aobj_1`)
   })
 
   it("creates a cycle-less Objective when cycleId is omitted (migration 070) and still links to it", async () => {
     mockPrisma.workspace.findUnique.mockResolvedValue({ id: "ws-1", ...SLUGGED })
-    mockPrisma.objective.create.mockResolvedValue({ id: "obj-2", title: "Always-on goal", status: "ON_TRACK", description: null, owner: null, squadId: null, parentKeyResultId: null })
+    mockPrisma.objective.create.mockResolvedValue({ id: "obj_2", title: "Always-on goal", status: "ON_TRACK", description: null, owner: null, squadId: null, parentKeyResultId: null })
     const text = (await call("create_objective", { workspaceId: "ws-1", title: "Always-on goal" })).content[0].text
     expect(mockPrisma.oKRCycle.findFirst).not.toHaveBeenCalled()
     expect(mockPrisma.objective.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ workspaceId: "ws-1", cycleId: null, title: "Always-on goal" }),
     })
     expect(text).toContain("No cycle / Persistent")
-    expect(text).toContain(`URL: ${BASE}/okrs?detail=objective%3Aobj-2`)
+    expect(text).toContain(`URL: ${BASE}/okrs?detail=objective%3Aobj_2`)
   })
 
   it("still verifies a provided cycle belongs to the workspace", async () => {
@@ -180,30 +195,30 @@ describe("create_objective deeplink", () => {
 describe("list_okr_cycles with cycle-less Objectives", () => {
   it("lists them under a labeled group so they never vanish, even when there are no cycles", async () => {
     mockPrisma.oKRCycle.findMany.mockResolvedValue([])
-    mockPrisma.objective.findMany.mockResolvedValue([{ id: "obj-2", title: "Always-on goal", status: "ON_TRACK" }])
+    mockPrisma.objective.findMany.mockResolvedValue([{ id: "obj_2", title: "Always-on goal", status: "ON_TRACK" }])
     const result = await call("list_okr_cycles", { workspaceId: "ws-1" })
     expect(mockPrisma.objective.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { workspaceId: "ws-1", cycleId: null } }))
     expect(result.content[0].text).toContain("No cycle / Persistent")
     expect(result.content[0].text).toContain("Always-on goal")
-    expect(result.content[0].text).toContain("Objective ID: obj-2")
+    expect(result.content[0].text).toContain("Objective ID: obj_2")
   })
 })
 
 describe("add_key_result deeplink", () => {
   it("opens the key result panel on the OKRs page (scoped through the objective's own workspace)", async () => {
     mockPrisma.objective.findUnique.mockResolvedValue({
-      id: "obj-1", title: "Grow activation", workspaceId: "ws-1", workspace: SLUGGED,
+      id: "obj_1", title: "Grow activation", workspaceId: "ws-1", workspace: SLUGGED,
     })
-    mockPrisma.keyResult.create.mockResolvedValue({ id: "kr-1", title: "Activation rate", target: 50, unit: "%", current: 0 })
-    const text = (await call("add_key_result", { objectiveId: "obj-1", title: "Activation rate", target: 50 })).content[0].text
-    expect(text).toContain(`URL: ${BASE}/okrs?detail=keyResult%3Akr-1`)
+    mockPrisma.keyResult.create.mockResolvedValue({ id: "kr_1", title: "Activation rate", target: 50, unit: "%", current: 0 })
+    const text = (await call("add_key_result", { objectiveId: "obj_1", title: "Activation rate", target: 50 })).content[0].text
+    expect(text).toContain(`URL: ${BASE}/okrs?detail=keyResult%3Akr_1`)
   })
 
   it("omits the URL line when the workspace slugs are unavailable", async () => {
-    mockPrisma.objective.findUnique.mockResolvedValue({ id: "obj-1", title: "Grow activation", workspaceId: "ws-1" })
-    mockPrisma.keyResult.create.mockResolvedValue({ id: "kr-1", title: "Activation rate", target: 50, unit: null, current: 0 })
-    const text = (await call("add_key_result", { objectiveId: "obj-1", title: "Activation rate", target: 50 })).content[0].text
-    expect(text).toContain("ID: kr-1")
+    mockPrisma.objective.findUnique.mockResolvedValue({ id: "obj_1", title: "Grow activation", workspaceId: "ws-1" })
+    mockPrisma.keyResult.create.mockResolvedValue({ id: "kr_1", title: "Activation rate", target: 50, unit: null, current: 0 })
+    const text = (await call("add_key_result", { objectiveId: "obj_1", title: "Activation rate", target: 50 })).content[0].text
+    expect(text).toContain("ID: kr_1")
     expect(text).not.toContain("URL:")
   })
 })
@@ -211,9 +226,9 @@ describe("add_key_result deeplink", () => {
 describe("create_experiment deeplink", () => {
   it("links to the experiment's own page", async () => {
     mockPrisma.workspace.findUnique.mockResolvedValue(SLUGGED)
-    mockPrisma.experiment.create.mockResolvedValue({ id: "exp-1", title: "Concierge onboarding", status: "DESIGNING", hypothesis: "h", method: "m", killCondition: "k", assumptionId: null, squadId: null })
+    mockPrisma.experiment.create.mockResolvedValue({ id: "exp_1", title: "Concierge onboarding", status: "DESIGNING", hypothesis: "h", method: "m", killCondition: "k", assumptionId: null, squadId: null })
     const text = (await call("create_experiment", { workspaceId: "ws-1", title: "Concierge onboarding", hypothesis: "h", method: "m", killCondition: "k" })).content[0].text
-    expect(text).toContain(`URL: ${BASE}/experiments/exp-1`)
+    expect(text).toContain(`URL: ${BASE}/experiments/exp_1`)
   })
 })
 
@@ -227,8 +242,8 @@ describe("add_to_roadmap deeplink", () => {
 })
 
 describe("promote_to_roadmap deeplink", () => {
-  const solution = { id: "sol-1", title: "Guided setup", opportunityId: "opp-1", opportunity: { id: "opp-1", title: "Setup is confusing", squadId: null, linkedKeyResultId: null } }
-  const created = { id: "item-2", workspaceId: "ws-1", title: "Guided setup", horizon: "NOW", isPrivate: false, squadId: null, solutionId: "sol-1", opportunityId: "opp-1", startDate: null, endDate: null, keyResultId: null, autoCreated: null }
+  const solution = { id: "sol_1", title: "Guided setup", opportunityId: "opp_1", opportunity: { id: "opp_1", title: "Setup is confusing", squadId: null, linkedKeyResultId: null } }
+  const created = { id: "item-2", workspaceId: "ws-1", title: "Guided setup", horizon: "NOW", isPrivate: false, squadId: null, solutionId: "sol_1", opportunityId: "opp_1", startDate: null, endDate: null, keyResultId: null, autoCreated: null }
 
   beforeEach(() => {
     mockPrisma.workspace.findUnique.mockResolvedValue(SLUGGED)
@@ -241,13 +256,13 @@ describe("promote_to_roadmap deeplink", () => {
   })
 
   it("opens the new roadmap item panel on the roadmap", async () => {
-    const text = (await call("promote_to_roadmap", { solutionId: "sol-1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
+    const text = (await call("promote_to_roadmap", { solutionId: "sol_1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
     expect(text).toContain(`URL: ${BASE}/roadmap?detail=roadmapItem%3Aitem-2`)
   })
 
   it("is idempotent: a solution already on the roadmap returns its item and creates nothing", async () => {
-    mockPrisma.roadmapItem.findMany.mockImplementation(({ where }: { where: { solutionId?: unknown } }) => Promise.resolve(where.solutionId ? [{ id: "item-2", solutionId: "sol-1" }] : []))
-    const text = (await call("promote_to_roadmap", { solutionId: "sol-1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
+    mockPrisma.roadmapItem.findMany.mockImplementation(({ where }: { where: { solutionId?: unknown } }) => Promise.resolve(where.solutionId ? [{ id: "item-2", solutionId: "sol_1" }] : []))
+    const text = (await call("promote_to_roadmap", { solutionId: "sol_1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
     expect(text).toContain("Already on the roadmap")
     expect(text).toContain("Roadmap Item ID: item-2")
     expect(mockPrisma.roadmapItem.create).not.toHaveBeenCalled()
@@ -255,7 +270,7 @@ describe("promote_to_roadmap deeplink", () => {
 
   it("does not promote a solution that belongs to a different workspace", async () => {
     mockPrisma.solution.findFirst.mockResolvedValue(null)
-    const text = (await call("promote_to_roadmap", { solutionId: "sol-1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
+    const text = (await call("promote_to_roadmap", { solutionId: "sol_1", workspaceId: "ws-1", horizon: "NOW" })).content[0].text
     expect(text).toContain("not found")
     expect(mockPrisma.roadmapItem.create).not.toHaveBeenCalled()
   })

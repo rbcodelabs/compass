@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
-import { requireWorkspaceContextOrThrow } from "@/lib/workspace-context";
+import { assertWorkspaceWritable, requireWorkspaceContextOrThrow } from "@/lib/workspace-context";
 import { feedbackOpportunityLinkData, validateFeedbackInput } from "@/lib/feedback";
 import {
   deleteFeedbackBlobs,
@@ -18,6 +18,7 @@ import {
   feedbackAttachmentRejection,
 } from "@/lib/feedback-attachment-rules";
 import type { FeedbackType } from "@/lib/types";
+import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 async function requireAuth() {
   const session = await auth();
@@ -143,9 +144,10 @@ export async function createFeedback(
   }
 
   const prisma = getPrisma();
-  const item = await prisma.feedbackItem.create({
+  const item = await withSequenceTransaction(prisma, async (tx) => tx.feedbackItem.create({
     data: {
       workspaceId: workspace.id,
+      ...(await allocateOneSeq(tx, workspace.id, "feedback")),
       title: validation.data.title,
       description: validation.data.description,
       type: data.type,
@@ -169,7 +171,7 @@ export async function createFeedback(
       createdAt: true,
       attachments: { select: { id: true, url: true, filename: true, fileType: true } },
     },
-  });
+  }));
 
   revalidatePath(revalidatePathStr);
 
@@ -343,13 +345,19 @@ function toFailure(error: unknown): { ok: false; error: string } {
 }
 
 /**
- * Resolve the workspace named by the slugs through the shared, membership-
- * checked resolver. A server action is a public POST endpoint: a session alone
- * must never be enough to touch a workspace. "No such workspace" and "not a
- * member" are indistinguishable by design.
+ * Resolve the workspace named by the slugs for a WRITE, through the shared,
+ * membership-checked resolver. A server action is a public POST endpoint: a
+ * session alone must never be enough to touch a workspace. "No such workspace"
+ * and "not a member" are indistinguishable by design.
+ *
+ * `requireWorkspaceContextOrThrow` also resolves org-wide read-only access
+ * (`Organization.memberWorkspaceReadOnlyAccess`) without throwing, so the
+ * writability assertion must follow it here. Every feedback write goes through
+ * this helper; read paths must not.
  */
-async function requireMemberWorkspaceId(orgSlug: string, workspaceSlug: string) {
+async function requireWritableWorkspaceId(orgSlug: string, workspaceSlug: string) {
   const context = await requireWorkspaceContextOrThrow(orgSlug, workspaceSlug);
+  assertWorkspaceWritable(context);
   return context.workspace.id;
 }
 
@@ -371,7 +379,7 @@ async function updateWorkspaceFeedback(
   beforeWrite?: (workspaceId: string) => Promise<string | null>
 ): Promise<FeedbackMutationResult> {
   try {
-    const workspaceId = await requireMemberWorkspaceId(orgSlug, workspaceSlug);
+    const workspaceId = await requireWritableWorkspaceId(orgSlug, workspaceSlug);
     if (beforeWrite) {
       const rejection = await beforeWrite(workspaceId);
       if (rejection) return { ok: false, error: rejection };

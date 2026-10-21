@@ -21,6 +21,7 @@
  *     npx tsx scripts/seed-demo-intro.ts [--reset]
  */
 import getPrisma from "../lib/db"
+import { allocateOneSeq, allocateSeq, withSeq } from "../lib/work-item-sequence"
 
 if (!process.env.DATABASE_URL) {
   console.error("refusing to run without DATABASE_URL (local dev only; never Aurora DSQL)")
@@ -95,6 +96,7 @@ async function main() {
     select,
   })
   const workspaceId = workspace.id
+  // Single-user local seed: the counter is incremented outside a transaction, which is fine without concurrent writers.
   await prisma.workspaceMember.create({ data: { workspaceId, userId: user.id, role: "OWNER" } })
 
   // ── Outcomes and key results ──────────────────────────────────────────────
@@ -103,6 +105,7 @@ async function main() {
   })
   const onboarding = await prisma.objective.create({
     data: {
+      ...(await allocateOneSeq(prisma, workspaceId, "objective")),
       workspaceId,
       cycleId: cycle.id,
       title: "Make Ember effortless for new teams",
@@ -114,6 +117,7 @@ async function main() {
   })
   const growth = await prisma.objective.create({
     data: {
+      ...(await allocateOneSeq(prisma, workspaceId, "objective")),
       workspaceId,
       cycleId: cycle.id,
       title: "Grow paid team plans",
@@ -124,13 +128,13 @@ async function main() {
     },
   })
   const activation = await prisma.keyResult.create({
-    data: { objectiveId: onboarding.id, title: "Week-1 activation rate", target: 55, current: 38, unit: "%", sortOrder: 1 },
+    data: { workspaceId, ...(await allocateOneSeq(prisma, workspaceId, "keyResult")), objectiveId: onboarding.id, title: "Week-1 activation rate", target: 55, current: 38, unit: "%", sortOrder: 1 },
   })
   await prisma.keyResult.create({
-    data: { objectiveId: onboarding.id, title: "Median minutes to first project", target: 10, current: 26, unit: "min", sortOrder: 2 },
+    data: { workspaceId, ...(await allocateOneSeq(prisma, workspaceId, "keyResult")), objectiveId: onboarding.id, title: "Median minutes to first project", target: 10, current: 26, unit: "min", sortOrder: 2 },
   })
   const upgrades = await prisma.keyResult.create({
-    data: { objectiveId: growth.id, title: "Team plan upgrades per month", target: 120, current: 74, unit: "", sortOrder: 1 },
+    data: { workspaceId, ...(await allocateOneSeq(prisma, workspaceId, "keyResult")), objectiveId: growth.id, title: "Team plan upgrades per month", target: 120, current: 74, unit: "", sortOrder: 1 },
   })
   await prisma.checkIn.createMany({
     data: [
@@ -142,6 +146,7 @@ async function main() {
   // ── Opportunities already in the backlog (context for the tree) ───────────
   const invite = await prisma.opportunity.create({
     data: {
+      ...(await allocateOneSeq(prisma, workspaceId, "opportunity")),
       workspaceId,
       title: "Admins struggle to bring teammates on board",
       description: "Team admins say inviting colleagues takes too many steps.",
@@ -152,6 +157,7 @@ async function main() {
   })
   const sharing = await prisma.opportunity.create({
     data: {
+      ...(await allocateOneSeq(prisma, workspaceId, "opportunity")),
       workspaceId,
       title: "Reports are hard to share outside the team",
       description: "Managers export screenshots because there is no share link.",
@@ -160,18 +166,17 @@ async function main() {
     },
   })
   const inviteSolution = await prisma.solution.create({
-    data: { workspaceId, opportunityId: invite.id, title: "Invite by link", description: "One shareable invite link per workspace.", status: "IDEA", sortOrder: 1 },
+    data: { ...(await allocateOneSeq(prisma, workspaceId, "solution")), workspaceId, opportunityId: invite.id, title: "Invite by link", description: "One shareable invite link per workspace.", status: "IDEA", sortOrder: 1 },
   })
   await prisma.assumption.create({
-    data: { solutionId: inviteSolution.id, title: "Admins are comfortable sharing a link in chat", riskLevel: "LOW", status: "UNTESTED", sortOrder: 1 },
+    data: { workspaceId, ...(await allocateOneSeq(prisma, workspaceId, "assumption")), solutionId: inviteSolution.id, title: "Admins are comfortable sharing a link in chat", riskLevel: "LOW", status: "UNTESTED", sortOrder: 1 },
   })
   await prisma.solution.create({
-    data: { workspaceId, opportunityId: sharing.id, title: "Public read-only report links", status: "IDEA", sortOrder: 1 },
+    data: { ...(await allocateOneSeq(prisma, workspaceId, "solution")), workspaceId, opportunityId: sharing.id, title: "Public read-only report links", status: "IDEA", sortOrder: 1 },
   })
 
   // ── Feedback inbox: the signal that starts the story ──────────────────────
-  await prisma.feedbackItem.createMany({
-    data: [
+  const feedbackRows = [
       {
         workspaceId,
         title: "I signed up and had no idea what to do first",
@@ -213,8 +218,8 @@ async function main() {
         voteCount: 6,
         createdAt: day(-6),
       },
-    ],
-  })
+  ]
+  await prisma.feedbackItem.createMany({ data: withSeq(await allocateSeq(prisma, workspaceId, "feedback", feedbackRows.length), feedbackRows) })
 
   console.log(`seeded ${DEMO.orgSlug}/${DEMO.workspaceSlug}; login as ${DEMO.userEmail} (dev credentials)`)
   await prisma.$disconnect()

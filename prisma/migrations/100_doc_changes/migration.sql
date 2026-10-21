@@ -1,4 +1,4 @@
--- Migration 092: per-workspace monotonic doc change log and its seq counter (Geode doc sync spike, ADR "Compass as a
+-- Migration 100: per-workspace monotonic doc change log and its seq counter (Geode doc sync spike, ADR "Compass as a
 -- Geode Sync Provider", rollout step 1).
 -- Additive and empty: two new tables and one unique index. Rows are only written while
 -- DOCS_SYNC_ENABLED is on, so the code can ship before or after this is applied. No backfill.

@@ -4,6 +4,7 @@ import { Pool } from "pg";
 import { DsqlSigner } from "@aws-sdk/dsql-signer";
 import { awsCredentialsProvider } from "@vercel/functions/oidc";
 import { getActiveSchema } from "@/lib/schema";
+import { getMigrationDatabaseUrl, getPoolerMode } from "@/lib/db-url";
 import { getManagedPilotContext } from "@/lib/preview-automation/managed-context";
 import { createManagedMigrationPool } from "@/lib/preview-automation/managed-database";
 import { initializeManagedPilot, applyManagedMigration, getManagedMigrationStatus, releaseManagedClaim } from "@/lib/preview-automation/managed-migrations";
@@ -18,11 +19,19 @@ import { getMigrationStatus, applyMigrations } from "@/lib/migrations/runner";
 import { repairWorkspaceIdResidual, WorkspaceIdBackfillRefusal } from "@/lib/migrations/workspace-id-on-solution-objective";
 import { parseMigratePostBody } from "@/lib/migrations/admin-request";
 
+const DSQL_QUERY_TIMEOUT_MS = 280_000;
+
 async function getPool(): Promise<Pool> {
   // worktree-bootstrap provides a local Postgres URL. Keep local verification
   // on the exact same migration runner/search_path as DSQL deployments.
-  if (process.env.DATABASE_URL) {
-    return new Pool({ connectionString: process.env.DATABASE_URL, max: 3, query_timeout: 40_000 });
+  // Migrations need session semantics, so prefer DATABASE_MIGRATION_URL (session or
+  // direct, port 5432) over the runtime URL, which may be the transaction pooler.
+  const migrationUrl = getMigrationDatabaseUrl(process.env);
+  if (migrationUrl) {
+    if (getPoolerMode(migrationUrl, process.env) === "transaction") {
+      throw new Error("Migrations require a session-mode or direct connection (port 5432); set DATABASE_MIGRATION_URL to the session pooler (port 5432).");
+    }
+    return new Pool({ connectionString: migrationUrl, max: 3, query_timeout: 40_000 });
   }
   const host = process.env.PGHOST!;
   const signer = new DsqlSigner({
@@ -43,7 +52,11 @@ async function getPool(): Promise<Pool> {
     port: 5432,
     ssl: true,
     max: 3,
-    query_timeout: 40_000,
+    // One CALL sys.wait_for_job (a CREATE INDEX ASYNC on DSQL) can outlast 40s. A shorter
+    // client timeout fails the request while DSQL keeps building, so a retry waits on the
+    // same job and times out again (092_work_item_ids on compass_prod, 2026-10-20). Stay
+    // under maxDuration so the route, not the driver, is the final bound.
+    query_timeout: DSQL_QUERY_TIMEOUT_MS,
   });
 }
 

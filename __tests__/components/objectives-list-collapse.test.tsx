@@ -15,7 +15,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/okrs/actions", () => ({
 vi.mock("@/components/panels/panel-context", () => ({
   usePanelContext: () => ({ openPanel: vi.fn() }),
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }), useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/components/okrs/add-key-result-form", () => ({ AddKeyResultForm: () => null }));
 vi.mock("@/components/custom-fields/custom-fields-panel", () => ({ CustomFieldsPanel: () => null }));
 vi.mock("@/components/okrs/check-in-form", () => ({ CheckInForm: () => null }));

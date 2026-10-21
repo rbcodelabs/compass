@@ -31,6 +31,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
+import { deleteLinksForEntity } from "@/lib/links/service";
+import { drainAfterParentDelete } from "@/lib/typed-links";
 
 function checkAuth(req: NextRequest): boolean {
   const secret = process.env.MIGRATION_SECRET;
@@ -109,6 +111,9 @@ export async function POST(req: NextRequest) {
     // as defense in depth.
     where: { id: { in: scopedIds }, workspaceId: workspace.id },
   });
+
+  // Mirror rows of task links to the deleted items (ADR phase 7); failures are logged and swallowed, migration 097 prunes what is left.
+  await drainAfterParentDelete("purge-feedback.links", () => deleteLinksForEntity(prisma, "FEEDBACK_ITEM", scopedIds));
 
   return NextResponse.json({
     deleted: count,

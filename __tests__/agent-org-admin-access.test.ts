@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import type getPrisma from "@/lib/db"
 import { listAgentAccessRows } from "@/lib/agent-org-admin-access"
 
-function prismaWith(opts: { members: { userId: string; role: string }[]; agents: { id: string; name: string; ownerUserId: string }[]; grants: { agentId: string; grantedByUserId: string }[] }) {
+function prismaWith(opts: { members: { userId: string; role: string }[]; agents: { id: string; name: string; ownerUserId: string | null; ownerType?: string; ownerWorkspaceId?: string }[]; grants: { agentId: string; grantedByUserId: string }[] }) {
   const agentFindMany = vi.fn().mockResolvedValue(opts.agents)
   const prisma = {
     organizationMember: { findMany: vi.fn().mockResolvedValue(opts.members) },
@@ -26,10 +26,10 @@ describe("listAgentAccessRows", () => {
     { userId: "demoted", role: "MEMBER" },
   ]
 
-  it("queries only ACTIVE agents owned by current members", async () => {
+  it("queries only ACTIVE agents USER-owned by current members", async () => {
     const { prisma, agentFindMany } = prismaWith({ members, agents: [], grants: [] })
     expect(await listAgentAccessRows(prisma, "org-1")).toEqual([])
-    expect(agentFindMany.mock.calls[0][0].where).toEqual({ status: "ACTIVE", ownerUserId: { in: ["owner", "admin", "demoted"] } })
+    expect(agentFindMany.mock.calls[0][0].where).toEqual({ status: "ACTIVE", OR: [{ ownerUserId: { in: ["owner", "admin", "demoted"] } }] })
   })
 
   it("reports ungranted, active-granted and inactive-grantor states", async () => {
@@ -49,5 +49,18 @@ describe("listAgentAccessRows", () => {
     expect(rows[0]).toMatchObject({ agentId: "a1", ownerName: "Olive", granted: false, inactive: false })
     expect(rows[1]).toMatchObject({ agentId: "a2", granted: true, grantedByName: "admin@x.com", inactive: false })
     expect(rows[2]).toMatchObject({ agentId: "a3", granted: true, grantedByName: "Dee", inactive: true })
+  })
+
+  it("does not list WORKSPACE-owned agents (an org-admin grant confers nothing on them until PR2), even if the query returned one", async () => {
+    const { prisma } = prismaWith({
+      members,
+      agents: [
+        { id: "a1", name: "Mine", ownerUserId: "owner" },
+        { id: "s1", name: "Shared", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "ws-1" },
+      ],
+      grants: [{ agentId: "s1", grantedByUserId: "demoted" }],
+    })
+    const rows = await listAgentAccessRows(prisma, "org-1")
+    expect(rows.map((r) => r.agentId)).toEqual(["a1"])
   })
 })

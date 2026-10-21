@@ -4,6 +4,7 @@ import { validateProgrammaticAuth } from "@/lib/programmatic-auth"
 import { McpAuthzError, runWithMcpActor, type McpActor } from "@/lib/mcp-authz"
 import { executeRestRoute, RestBadRequestError, RestConflictError, RestContinuationStaleError, RestCursorError, RestForbiddenError, RestNotFoundError, RestTypedProblemError, RestValidationError } from "@/lib/rest/execute"
 import { matchRestRoute, type RestMethod } from "@/lib/rest/registry"
+import { resolveRestRefs } from "@/lib/rest/work-item-refs"
 import { AnalyticsError } from "@/lib/analytics/providers"
 import { DocumentError } from "@/lib/document-service"
 import { CommentHttpError } from "@/lib/comment-http-error"
@@ -32,11 +33,12 @@ export async function handleRestRequest(request: Request, method: RestMethod): P
     try { rawBody = await request.json() } catch { return problem(request, 400, "malformed_json", "Bad Request", "The request body must be valid JSON.") }
   }
   try {
-    const params = matched.route.pathSchema.parse(matched.params) as Record<string, string>
-    const queryObject = Object.fromEntries(url.searchParams)
-    const query = (matched.route.querySchema?.parse(queryObject) ?? {}) as Record<string, unknown>
-    const body = matched.route.bodySchema?.parse(rawBody) as Record<string, unknown> | undefined
     const actor: McpActor = { ...auth, requiredAgentAccess: matched.route.scope === "api:write" ? "WRITE" : "READ" }
+    // Display IDs (TASK-12) become UUIDs before validation, so the route schemas and handlers only ever see UUIDs.
+    const refs = await resolveRestRefs(matched.route, { params: matched.params as Record<string, string>, query: Object.fromEntries(url.searchParams), body: rawBody }, actor)
+    const params = matched.route.pathSchema.parse(refs.params) as Record<string, string>
+    const query = (matched.route.querySchema?.parse(refs.query) ?? {}) as Record<string, unknown>
+    const body = matched.route.bodySchema?.parse(refs.body) as Record<string, unknown> | undefined
     const rawResult = await runWithMcpActor(actor, () => executeRestRoute(matched.route, { params, query, body }))
     let result: unknown = undefined
     if ((matched.route.status ?? 200) !== 204) {

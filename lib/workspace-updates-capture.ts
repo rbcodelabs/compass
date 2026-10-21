@@ -81,7 +81,7 @@ export async function retryUpdatesTransaction<T>(
       );
       const firstRowRace =
         details?.code === "P2002" &&
-        ["WorkspaceUpdatesState", "WorkspaceUpdatesReadState"].includes(
+        ["WorkspaceUpdatesState", "WorkspaceUpdatesReadState", "WorkspaceSequence"].includes(
           details.meta?.modelName ?? "",
         );
       if (attempt >= 3 || (!rollbackConflict && !firstRowRace)) throw error;

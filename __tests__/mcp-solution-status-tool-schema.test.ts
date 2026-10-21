@@ -22,7 +22,8 @@ describe("update_solution_status route registration metadata", () => {
     const tool = registeredTools.update_solution_status
 
     expect(tool).toBeDefined()
-    expect(Object.keys(tool.inputSchema)).toEqual(["solutionId", "status"])
+    expect(Object.keys(tool.inputSchema)).toEqual(["solutionId", "status", "workspaceId"])
+    // workspaceId is optional and only needed for a display ID such as SOL-12.
 
     const schema = z.object(tool.inputSchema)
     const validId = "7df95340-297e-40e7-b021-42e2ecbf22e3"
@@ -35,6 +36,7 @@ describe("update_solution_status route registration metadata", () => {
     expect(schema.safeParse({ solutionId: validId }).success).toBe(false)
     expect(schema.safeParse({ status: "SHIPPED" }).success).toBe(false)
     expect(schema.safeParse({ solutionId: "not-a-uuid", status: "SHIPPED" }).success).toBe(false)
+    expect(schema.safeParse({ solutionId: "SOL-12", workspaceId: validId, status: "SHIPPED" }).success).toBe(true)
   })
 })
 

@@ -1,7 +1,11 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useMemo, type ReactNode } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { remarkWorkItemRefs } from "@/lib/work-item-linkify";
+import { useWorkItemLinkScope } from "@/components/work-item-link-scope";
 
 const PROSE = [
   "min-w-0 text-sm leading-relaxed break-words",
@@ -64,9 +68,15 @@ export function MarkdownContent({
   className?: string;
   linkComponent?: LinkRenderer;
 }) {
+  // Inside a workspace, display IDs in prose (TASK-12) become links; elsewhere (portal, marketing) text is untouched.
+  const scope = useWorkItemLinkScope();
+  const remarkPlugins = useMemo(
+    () => (scope ? [remarkGfm, [remarkWorkItemRefs, scope] as [typeof remarkWorkItemRefs, typeof scope]] : [remarkGfm]),
+    [scope],
+  );
   return (
     <div className={cn(PROSE, className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={safeUrl} components={componentsFor(linkComponent)}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} urlTransform={safeUrl} components={componentsFor(linkComponent)}>
         {children ?? ""}
       </ReactMarkdown>
     </div>

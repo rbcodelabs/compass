@@ -8,21 +8,25 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// The entity_links mirror (ADR phase 5) has its own tests; this file pins the legacy writes against hand-written fakes.
+process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR = "0";
+
 const models = {
   objective: { findFirst: vi.fn(), update: vi.fn() },
   keyResult: { findFirst: vi.fn(), update: vi.fn() },
-  opportunity: { findFirst: vi.fn(), update: vi.fn() },
+  opportunity: { findFirst: vi.fn(), update: vi.fn(), findMany: async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, title: id })), },
   solution: { findFirst: vi.fn(), update: vi.fn() },
   feedbackItem: { findFirst: vi.fn(), update: vi.fn() },
   roadmapItem: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
   task: { findFirst: vi.fn(), update: vi.fn() },
 };
 
-const links = { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() };
+const links = { findFirst: vi.fn(), findMany: async () => [], create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() };
 
 const database = {
   ...models,
   opportunityObjectiveLink: links,
+  entityLink: { deleteMany: async () => ({ count: 0 }) },
   squad: { findFirst: vi.fn() },
   opportunity: models.opportunity,
   workspace: { findUnique: vi.fn() },
@@ -43,6 +47,8 @@ vi.mock("@/lib/roadmap/solution-sync", () => ({ syncRoadmapOnSolutionChange: moc
 vi.mock("@/lib/task-assignment", () => ({ assignmentUpdate: vi.fn() }));
 
 import { updateEntityField, EDIT_CONFIG, TITLE_MAX_LENGTH } from "@/lib/entity-mutations";
+import { BATCH_DESCRIPTION_MAX_LENGTH } from "@/lib/batch-create-limits";
+import { OPPORTUNITY_SEGMENT_MAX_LENGTH } from "@/lib/opportunity-draft";
 import { assignmentUpdate } from "@/lib/task-assignment";
 
 const WS = "ws-1";
@@ -490,5 +496,57 @@ describe("roadmap item detail fields", () => {
 
   it("does not offer these fields on other entity types", async () => {
     expect(await updateEntityField("feedback", "e1", WS, "isPrivate", true, user)).toMatchObject({ ok: false, status: 400 });
+  });
+});
+
+describe("updateEntityField: opportunity customerSegment and description (sheet cell edits)", () => {
+  it("trims and saves a customer segment, setting updatedAt", async () => {
+    const r = await updateEntityField("opportunity", "e1", WS, "customerSegment", "  SMB  ");
+    expect(r).toEqual({ ok: true });
+    const arg = models.opportunity.update.mock.calls[0][0];
+    expect(arg.where).toEqual({ id: "e1" });
+    expect(arg.data.customerSegment).toBe("SMB");
+    expect(arg.data.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("clears the segment on blank or null", async () => {
+    await updateEntityField("opportunity", "e1", WS, "customerSegment", "   ");
+    await updateEntityField("opportunity", "e1", WS, "customerSegment", null);
+    expect(models.opportunity.update.mock.calls[0][0].data.customerSegment).toBeNull();
+    expect(models.opportunity.update.mock.calls[1][0].data.customerSegment).toBeNull();
+  });
+
+  it("accepts exactly the segment cap and rejects one over", async () => {
+    const ok = await updateEntityField("opportunity", "e1", WS, "customerSegment", "s".repeat(OPPORTUNITY_SEGMENT_MAX_LENGTH));
+    expect(ok.ok).toBe(true);
+    const over = await updateEntityField("opportunity", "e1", WS, "customerSegment", "s".repeat(OPPORTUNITY_SEGMENT_MAX_LENGTH + 1));
+    expect(over).toEqual({ ok: false, status: 400, error: "Customer segment must be 255 characters or fewer" });
+    expect(models.opportunity.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a non-text segment", async () => {
+    const r = await updateEntityField("opportunity", "e1", WS, "customerSegment", 5);
+    expect(r.ok).toBe(false);
+    expect(models.opportunity.update).not.toHaveBeenCalled();
+  });
+
+  it("customerSegment is still not editable on other entities", async () => {
+    const r = await updateEntityField("solution", "e1", WS, "customerSegment", "SMB");
+    expect(r).toEqual({ ok: false, status: 400, error: 'Field "customerSegment" is not editable' });
+  });
+
+  it("caps opportunity and solution descriptions at the batch-create limit", async () => {
+    const max = "d".repeat(BATCH_DESCRIPTION_MAX_LENGTH);
+    expect((await updateEntityField("opportunity", "e1", WS, "description", max)).ok).toBe(true);
+    const over = await updateEntityField("opportunity", "e1", WS, "description", max + "d");
+    expect(over).toEqual({ ok: false, status: 400, error: "Description must be 10000 characters or fewer" });
+    expect((await updateEntityField("solution", "e1", WS, "description", max + "d")).ok).toBe(false);
+    expect(models.opportunity.update).toHaveBeenCalledTimes(1);
+    expect(models.solution.update).not.toHaveBeenCalled();
+  });
+
+  it("does not apply the cap to entities the batch core does not create", async () => {
+    const r = await updateEntityField("objective", "e1", WS, "description", "d".repeat(BATCH_DESCRIPTION_MAX_LENGTH + 1));
+    expect(r.ok).toBe(true);
   });
 });

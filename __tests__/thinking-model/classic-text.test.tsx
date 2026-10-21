@@ -235,7 +235,7 @@ describe("CLASSIC text is identical to main", () => {
     entityDetail.data = {
       id: "o1", title: "Grow", description: null, owner: "Me", status: "ON_TRACK", cycle: { id: "c1", title: "Q3" }, squad: null,
       keyResults: [{ id: "k1", title: "Reach", current: 1, target: 2, unit: null }],
-      parentKeyResult: { id: "k9", title: "Parent", objective: { id: "o9", title: "P", cycle: { id: "c0", title: "Y", status: "ACTIVE" } } },
+      customFields: [], parentKeyResult: { id: "k9", title: "Parent", objective: { id: "o9", title: "P", cycle: { id: "c0", title: "Y", status: "ACTIVE" } } },
       deliveryTasks: [], linkableTasks: [], members: [],
     }
     const { container } = render(<ObjectivePanel id="o1" {...common} />)

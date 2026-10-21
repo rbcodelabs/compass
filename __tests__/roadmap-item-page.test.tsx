@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { findFirst, getContext, requireContext } = vi.hoisted(() => ({ findFirst: vi.fn(), getContext: vi.fn(), requireContext: vi.fn() }));
 vi.mock("@/lib/db", () => ({ default: () => ({ roadmapItem: { findFirst } }) }));
 vi.mock("@/lib/workspace-context", () => ({ getWorkspaceContext: getContext, requireWorkspaceContext: requireContext }));
-vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NOT_FOUND"); } }));
+vi.mock("next/navigation", () => ({
+  notFound: () => { throw new Error("NOT_FOUND"); },
+  permanentRedirect: (url: string) => { throw new Error(`REDIRECT:${url}`); },
+}));
 vi.mock("@/components/roadmap/roadmap-item-detail", () => ({ RoadmapItemDetail: () => null }));
 import RoadmapItemPage, { generateMetadata } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/[itemId]/page";
 
@@ -35,10 +38,24 @@ describe("roadmap item page access", () => {
   });
 
   it("returns not found for a non-UUID path segment without querying", async () => {
-    getContext.mockResolvedValue({ status: "not-found" });
+    getContext.mockResolvedValue({ status: "ok", workspace: { id: "ws-id" } });
+    requireContext.mockResolvedValue({ workspace: { id: "ws-id" } });
     const bad = Promise.resolve({ orgSlug: "org", workspaceSlug: "ws", itemId: "not-a-uuid" });
     expect(await generateMetadata({ params: bad })).toEqual({ title: "Roadmap item" });
     await expect(RoadmapItemPage({ params: bad })).rejects.toThrow("NOT_FOUND");
     expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it("resolves a display ID inside the workspace", async () => {
+    requireContext.mockResolvedValue({ workspace: { id: "ws-id" } });
+    findFirst.mockResolvedValue({ id: ITEM_ID, seqPrefix: "RM", seqNumber: 7 });
+    await RoadmapItemPage({ params: Promise.resolve({ orgSlug: "org", workspaceSlug: "ws", itemId: "RM-7" }) });
+    expect(findFirst.mock.calls[0][0].where).toEqual({ workspaceId: "ws-id", seqPrefix: "RM", seqNumber: 7 });
+  });
+
+  it("308s a UUID URL of a numbered item to its display ID, keeping the query string", async () => {
+    requireContext.mockResolvedValue({ workspace: { id: "ws-id" } });
+    findFirst.mockResolvedValue({ id: ITEM_ID, seqPrefix: "RM", seqNumber: 7 });
+    await expect(RoadmapItemPage({ params, searchParams: Promise.resolve({ tab: "notes" }) })).rejects.toThrow("REDIRECT:/org/ws/roadmap/RM-7?tab=notes");
   });
 });

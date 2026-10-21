@@ -1,3 +1,4 @@
+import { resolveWorkItemPage } from "@/lib/work-item-page"
 import { auth } from "@/auth"
 import { cookies } from "next/headers"
 import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin"
@@ -6,7 +7,7 @@ import { notFound, redirect } from "next/navigation"
 import { resolveWorkspaceAccess } from "@/lib/workspace-context"
 import { ArtifactDetail } from "@/components/docs/artifact-detail"
 import { getArtifactStorage } from "@/lib/artifact-storage"
-import { getArtifactDecisions, toArtifactDetailDto } from "@/lib/artifacts"
+import { getArtifactDecisions, getArtifactSolutionIds, toArtifactDetailDto } from "@/lib/artifacts"
 import { buildArtifactPresentation, type ArtifactSlideDto } from "@/lib/artifact-slides"
 import { livePreviewSrcFor } from "@/lib/v0-preview-frame"
 
@@ -20,12 +21,14 @@ function initialSlideFromParam(value: string | string[] | undefined): number {
 export default async function ArtifactPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; artifactId: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
-  const { orgSlug, workspaceSlug, artifactId } = await params
+  const { orgSlug, workspaceSlug, artifactId: artifactParam } = await params
   const prisma = getPrisma()
   const access = await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id)
   if (!access) notFound()
   const workspace = { id: access.workspaceId }
-  const artifact = await prisma.artifact.findFirst({ where: { id: artifactId, workspaceId: workspace.id }, include: { currentRevision: true, revisions: { orderBy: { revisionNumber: "desc" } }, links: { where: { linkedType: "SOLUTION" }, select: { linkedId: true } } } })
+  const resolvedArtifact = await resolveWorkItemPage({ type: "artifact", param: artifactParam, workspaceId: workspace.id, basePath: `/${orgSlug}/${workspaceSlug}/docs/artifacts`, searchParams: await searchParams })
+  const artifactId = resolvedArtifact.id
+  const artifact = await prisma.artifact.findFirst({ where: { id: artifactId, workspaceId: workspace.id }, include: { currentRevision: true, revisions: { orderBy: { revisionNumber: "desc" } } } })
   if (!artifact) notFound()
   let html: string | undefined
   let slides: ArtifactSlideDto[] | undefined
@@ -35,7 +38,7 @@ export default async function ArtifactPage({ params, searchParams }: { params: P
   }
   const initialSlideIndex = initialSlideFromParam((await searchParams).slide)
   const rawSolutions = await prisma.solution.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { title: "asc" } })
-  const linkedIds = new Set(artifact.links.map((link) => link.linkedId))
+  const linkedIds = new Set(await getArtifactSolutionIds(prisma, workspace.id, artifactId))
   const decisions = await getArtifactDecisions(workspace.id, artifactId)
   const initialCommentsPin = parsePanelPin((await cookies()).get(panelPinCookieName("artifactComments"))?.value)
   // A v0 chat shows v0's running app, fetched with the viewer's own grant on every view

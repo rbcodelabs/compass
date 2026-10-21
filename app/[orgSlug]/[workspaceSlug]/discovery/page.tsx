@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { resolveWorkspaceAccess } from "@/lib/workspace-context";
 import getPrisma from "@/lib/db";
 import { OpportunityBoard } from "@/components/discovery/opportunity-board";
 import { DiscoveryFilters } from "@/components/discovery/discovery-filters";
@@ -96,6 +97,9 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
 
   if (!workspace) notFound();
 
+  // Org-wide read-only access hides the table's editors and draft area (the server still refuses the write).
+  const workspaceAccess = session.user?.id ? await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id) : null;
+
   // The workspace tree exists only for the presets whose tree is not the classic KR-rooted one.
   const thinkingModel = await getThinkingModelForSlugs(orgSlug, workspaceSlug);
   const showWorkspaceTree = thinkingModel.tree !== "kr-rooted";
@@ -147,6 +151,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         id: true,
         title: true,
         customerSegment: true,
+        description: true,
         status: true,
         sortOrder: true,
         squadId: true,
@@ -251,6 +256,16 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
     };
   }
 
+  // "Add solutions" offers every live Opportunity of the workspace as a parent, not just the filtered rows.
+  const solutionParents =
+    view === "table"
+      ? await prisma.opportunity.findMany({
+          where: { workspaceId: workspace.id, status: { not: "ARCHIVED" } },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          select: { id: true, title: true },
+        })
+      : [];
+
   const opportunitiesByStatus = ACTIVE_STATUSES.reduce(
     (acc, status) => {
       acc[status] = opportunities.filter((o) => o.status === status).map(toCardData);
@@ -266,6 +281,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         id: opportunity.id,
         title: opportunity.title,
         customerSegment: opportunity.customerSegment,
+        description: opportunity.description,
         status: opportunity.status as OpportunityStatus,
         sortOrder: opportunity.sortOrder,
         squad: opportunity.squadId ? (squadMap.get(opportunity.squadId) ?? null) : null,
@@ -342,7 +358,16 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       )}
     >
       {view === "table" ? (
-        <DiscoveryTableView opportunities={tableOpportunities} />
+        <DiscoveryTableView
+          opportunities={tableOpportunities}
+          workspace={{
+            orgSlug,
+            workspaceSlug,
+            squads: squads.map((s) => ({ id: s.id, name: s.name, color: s.color })),
+            solutionParents,
+            readOnly: workspaceAccess?.isReadOnly ?? true,
+          }}
+        />
       ) : groupField ? (
         <OpportunityFieldBoard
           // Keyed on the field and the opportunity set, never on values: a

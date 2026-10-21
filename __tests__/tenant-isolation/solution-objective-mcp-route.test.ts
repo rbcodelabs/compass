@@ -14,12 +14,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { USERS, WS_A, WS_B, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
 import { runWithMcpActor } from "@/lib/mcp-authz";
 
+vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
+
 const fake = vi.hoisted(() => ({ current: null as null | ReturnType<typeof createTenantFakePrisma> }));
 
 vi.mock("@/lib/db", () => ({ default: () => fake.current!.client }));
 
 type ToolCallback = (args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>;
 const registeredTools: Record<string, ToolCallback> = {};
+// Membership is proven by the tool gate; the batch core's read-only check would load the session.
+vi.mock("@/lib/workspace-context", () => ({ assertWorkspaceWritable: vi.fn() }))
 vi.mock("mcp-handler", () => ({
   createMcpHandler: (setup: (server: { registerTool: (name: string, meta: unknown, cb: ToolCallback) => void; registerResource: (...args: unknown[]) => void }) => void) => {
     setup({ registerTool(name, _meta, cb) { registeredTools[name] = cb; }, registerResource() {} });
