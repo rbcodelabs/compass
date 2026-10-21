@@ -19,6 +19,8 @@ import { getMigrationStatus, applyMigrations } from "@/lib/migrations/runner";
 import { repairWorkspaceIdResidual, WorkspaceIdBackfillRefusal } from "@/lib/migrations/workspace-id-on-solution-objective";
 import { parseMigratePostBody } from "@/lib/migrations/admin-request";
 
+const DSQL_QUERY_TIMEOUT_MS = 280_000;
+
 async function getPool(): Promise<Pool> {
   // worktree-bootstrap provides a local Postgres URL. Keep local verification
   // on the exact same migration runner/search_path as DSQL deployments.
@@ -50,7 +52,11 @@ async function getPool(): Promise<Pool> {
     port: 5432,
     ssl: true,
     max: 3,
-    query_timeout: 40_000,
+    // One CALL sys.wait_for_job (a CREATE INDEX ASYNC on DSQL) can outlast 40s. A shorter
+    // client timeout fails the request while DSQL keeps building, so a retry waits on the
+    // same job and times out again (092_work_item_ids on compass_prod, 2026-10-20). Stay
+    // under maxDuration so the route, not the driver, is the final bound.
+    query_timeout: DSQL_QUERY_TIMEOUT_MS,
   });
 }
 
