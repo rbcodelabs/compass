@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { isPlatformAdminSession } from "@/lib/platform-admin";
 import { getUserWorkspaces } from "@/lib/workspace";
 import { Sidebar } from "@/components/sidebar";
 import { BottomNav } from "@/components/bottom-nav";
@@ -45,6 +46,7 @@ export default async function SettingsLayout({ children }: SettingsLayoutProps) 
 
   const workspaces = await getUserWorkspaces(session.user.id);
   const anchorWorkspace = workspaces[0];
+  const isPlatformAdmin = isPlatformAdminSession(session);
 
   if (!anchorWorkspace) {
     return <>{children}</>;
@@ -71,6 +73,7 @@ export default async function SettingsLayout({ children }: SettingsLayoutProps) 
         userName={session.user.name ?? session.user.email ?? ""}
         userEmail={session.user.email ?? ""}
         userImage={session.user.image ?? undefined}
+        isPlatformAdmin={isPlatformAdmin}
       />
 
       <TooltipProvider>
@@ -89,6 +92,7 @@ export default async function SettingsLayout({ children }: SettingsLayoutProps) 
             userName={session.user.name ?? session.user.email ?? ""}
             userEmail={session.user.email ?? ""}
             userImage={session.user.image ?? undefined}
+            isPlatformAdmin={isPlatformAdmin}
             workspaces={workspaces}
           />
 
