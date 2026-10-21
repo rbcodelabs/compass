@@ -166,7 +166,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       orderBy: { createdAt: "asc" },
     }),
     // Every live Discovery solution, flagged by whether it already has an ACTIVE
-    // RoadmapItem. This one read feeds the "Ready to schedule" rail (validated and
+    // RoadmapItem. This one read feeds the "Not scheduled" rail (validated and
     // in-delivery solutions with no item yet, the same "ready to promote" condition
     // as the Discovery solution card), the schedule palette and the empty-roadmap
     // presets. It is deliberately not narrowed by the view filters: a solution

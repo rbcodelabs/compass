@@ -16,6 +16,7 @@ import { solutionStatusBadge } from "@/lib/solution-status";
 import { groupByOpportunity, matchesQuery, matchesRailFilter, type RailFilter } from "@/lib/roadmap/rail";
 import type { Horizon, SquadData } from "@/lib/types";
 import type { RoadmapCardData } from "../roadmap-card";
+import { NOT_SCHEDULED_TITLE, SidebarCollapseButton, SidebarTitleRow } from "./sidebar-chrome";
 import { unscheduledDragId, type UnscheduledItem } from "../unscheduled-items-panel";
 
 export type SolutionRailItem = Extract<UnscheduledItem, { kind: "solution" }>;
@@ -38,6 +39,10 @@ type Props = {
   onBulkSchedule: (items: SolutionRailItem[], placement: BulkPlacement) => void;
   onQuickAddFeedback: (item: FeedbackRailItem, horizon: Horizon) => void;
   onUndoAuto: (item: RoadmapCardData) => void;
+  /** Collapses the pane (the same button the board's sidebar has). Omitted: no button. */
+  onCollapse?: () => void;
+  /** DOM id of the region the collapse button controls. */
+  controlsId?: string;
   className?: string;
 };
 
@@ -49,7 +54,7 @@ function formatDay(iso: string | null): string {
 }
 
 /**
- * The "Ready to schedule" rail: validated and in-delivery solutions that have no
+ * The "Not scheduled" rail: validated and in-delivery solutions that have no
  * roadmap item yet, grouped under their opportunity. Cards drag onto the
  * timeline (ids are `unscheduled:solution:<id>`), have a keyboard-reachable
  * "Schedule" button, and can be multi-selected for a bulk placement. Bug
@@ -64,6 +69,8 @@ export function ScheduleRail({
   onBulkSchedule,
   onQuickAddFeedback,
   onUndoAuto,
+  onCollapse,
+  controlsId,
   className,
 }: Props) {
   const labels = useLabels();
@@ -93,17 +100,16 @@ export function ScheduleRail({
 
   return (
     <aside
-      aria-label="Ready to schedule"
+      aria-label={NOT_SCHEDULED_TITLE}
       data-testid="schedule-rail"
       className={cn("flex min-h-0 flex-col overflow-hidden rounded-xl border bg-card", className)}
     >
       <div className="flex shrink-0 flex-col gap-2 border-b p-3">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-foreground">Ready to schedule</h2>
-          <span data-testid="schedule-rail-count" className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
-            {items.length}
-          </span>
-        </div>
+        <SidebarTitleRow
+          count={items.length}
+          countTestId="schedule-rail-count"
+          action={onCollapse ? <SidebarCollapseButton onClick={onCollapse} controls={controlsId} /> : undefined}
+        />
         <p className="text-xs text-muted-foreground">
           {labels.solution.plural} from Discovery. Drag one onto the timeline, or press <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">/</kbd> to search. The roadmap item is created for you.
         </p>
@@ -114,7 +120,7 @@ export function ScheduleRail({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={`Filter ${labels.solution.lowerPlural} & ${labels.opportunity.lowerPlural}`}
-            aria-label="Filter the ready to schedule list"
+            aria-label="Filter the not scheduled list"
             className="h-9 pl-7 md:h-8"
           />
         </div>
@@ -272,7 +278,7 @@ function SolutionCard({ item, squad, pending, selected, onSelectedChange, onSche
           type="button"
           onClick={() => openPanel("solution", item.id)}
           disabled={pending}
-          className="block w-full text-left text-sm font-medium leading-snug hover:underline underline-offset-2 disabled:cursor-wait"
+          className="block w-full break-words text-left text-sm font-medium leading-snug hover:underline underline-offset-2 disabled:cursor-wait"
         >
           {item.title}
         </button>
@@ -331,7 +337,7 @@ function BugCard({ item, pending, onQuickAdd }: { item: FeedbackRailItem; pendin
         <GripVertical aria-hidden="true" className="size-3.5" />
       </button>
       <div className="min-w-0 flex-1">
-        <button type="button" onClick={() => openPanel("feedback", item.id)} disabled={pending} className="block w-full text-left text-sm font-medium leading-snug hover:underline underline-offset-2">
+        <button type="button" onClick={() => openPanel("feedback", item.id)} disabled={pending} className="block w-full break-words text-left text-sm font-medium leading-snug hover:underline underline-offset-2">
           {item.title}
         </button>
         <Badge variant="destructive" className="mt-1 h-5 gap-1 px-1.5 text-[10px]">
