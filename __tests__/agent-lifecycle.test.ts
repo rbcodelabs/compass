@@ -42,17 +42,20 @@ describe("agent lifecycle", () => {
   it("revokes only the departing member's workspace grants", async () => {
     const db = { agent: { findMany: vi.fn().mockResolvedValue([{ id: "agent", ownerUserId: "owner" }]) }, agentWorkspaceGrant: { updateMany: vi.fn() } };
     await revokeMemberAgentGrants(db as unknown as AppTransactionClient, "workspace", "owner");
-    expect(db.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { ownerUserId: "owner" } }));
+    expect(db.agent.findMany).toHaveBeenCalledWith({ where: { ownerUserId: "owner" }, select: { id: true } });
     expect(db.agentWorkspaceGrant.updateMany).toHaveBeenCalledWith({ where: { workspaceId: "workspace", agentId: { in: ["agent"] }, revokedAt: null }, data: { revokedAt: expect.any(Date), updatedAt: expect.any(Date) } });
   });
-  it("never revokes a WORKSPACE-owned agent when a member leaves, even if the row still names them", async () => {
+  /** An agents table that honors `where: { ownerUserId }`, as the database does. */
+  const agentsTable = (rows: { id: string; ownerUserId: string | null }[]) =>
+    vi.fn(async ({ where }: { where: { ownerUserId: string } }) => rows.filter((row) => row.ownerUserId === where.ownerUserId).map(({ id }) => ({ id })));
+  it("never revokes a WORKSPACE-owned agent when a member leaves (it has no owner user to match)", async () => {
     // A WORKSPACE-owned agent belongs to the workspace, so one member leaving must not strip its grants.
-    const db = { agent: { findMany: vi.fn().mockResolvedValue([{ id: "personal", ownerUserId: "owner", ownerType: "USER" }, { id: "shared", ownerUserId: "owner", ownerType: "WORKSPACE", ownerWorkspaceId: "workspace" }]) }, agentWorkspaceGrant: { updateMany: vi.fn() } };
+    const db = { agent: { findMany: agentsTable([{ id: "personal", ownerUserId: "owner" }, { id: "shared", ownerUserId: null }]) }, agentWorkspaceGrant: { updateMany: vi.fn() } };
     await revokeMemberAgentGrants(db as unknown as AppTransactionClient, "workspace", "owner");
     expect(db.agentWorkspaceGrant.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ agentId: { in: ["personal"] } }) }));
   });
   it("revokes nothing when the departing member owns no USER-owned agent", async () => {
-    const db = { agent: { findMany: vi.fn().mockResolvedValue([{ id: "shared", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "workspace" }]) }, agentWorkspaceGrant: { updateMany: vi.fn() } };
+    const db = { agent: { findMany: agentsTable([{ id: "shared", ownerUserId: null }]) }, agentWorkspaceGrant: { updateMany: vi.fn() } };
     await revokeMemberAgentGrants(db as unknown as AppTransactionClient, "workspace", "owner");
     expect(db.agentWorkspaceGrant.updateMany).not.toHaveBeenCalled();
   });

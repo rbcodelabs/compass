@@ -44,7 +44,7 @@ const organization = { findUnique: vi.fn() }
 const scoringModel = { findUnique: vi.fn() }
 vi.mock("@/lib/db", () => ({
   default: () => ({
-    $transaction: vi.fn(), agent, oAuthToken, agentToolCall, apiKey, agentWorkspaceGrant, workspace,
+    agent, oAuthToken, agentToolCall, apiKey, agentWorkspaceGrant, workspace,
     agentOrgAdminGrant, organizationMember, organization, scoringModel,
   }),
 }))

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { AppTransactionClient } from "@/lib/db"
+import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
 import {
   AGENT_LEGACY_SELECT,
   AGENT_OWNERSHIP_SELECT,
@@ -52,9 +52,7 @@ const prisma = {
     ),
   },
   agent: { findFirst: vi.fn(), findMany: vi.fn() },
-  // A top-level client has $transaction; an interactive-transaction client does not (see txPrisma).
-  $transaction: vi.fn(),
-} as unknown as AppTransactionClient & { agent: { findFirst: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> } }
+} as unknown as AppPrismaClient & { agent: { findFirst: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> } }
 
 const userAgent = { id: "u-agent", name: "Mine", status: "ACTIVE", ownerUserId: "owner" }
 const sharedAgent = { id: "w-agent", name: "Shared", status: "ACTIVE", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: HOME, kind: "CLOUD" }
@@ -226,41 +224,58 @@ describe("loading, and tolerating an unapplied migration 098", () => {
     prisma.agent.findFirst.mockRejectedValueOnce(new Error("connection reset"))
     await expect(findActiveUserOwnedAgent(prisma, "u-agent", "owner")).rejects.toThrow("connection reset")
   })
-  describe("inside a transaction (a failed statement aborts it, so no error-driven retry)", () => {
-    /** Behaves like PostgreSQL: after any error every later statement fails until rollback. */
+  it("ignores a missing column that is not one of migration 098's", async () => {
+    const other = Object.assign(new Error("The column `agents.something_else` does not exist in the current database."), { code: "P2022" })
+    prisma.agent.findFirst.mockRejectedValueOnce(other)
+    await expect(findActiveUserOwnedAgent(prisma, "u-agent", "owner")).rejects.toThrow("something_else")
+  })
+  it("recognizes Prisma's real P2022 wording for a new column", async () => {
+    const real = Object.assign(new Error("The column `agents.owner_workspace_id` does not exist in the current database."), { code: "P2022", meta: { modelName: "Agent", column: "agents.owner_workspace_id" } })
+    prisma.agent.findFirst.mockRejectedValueOnce(real).mockResolvedValue(userAgent)
+    expect(await findActiveUserOwnedAgent(prisma, "u-agent", "owner")).toMatchObject({ id: "u-agent" })
+  })
+  describe("inside a transaction (a failed statement aborts it, so there is no fallback to lean on)", () => {
+    /** Behaves like PostgreSQL: after any error every later statement fails until rollback. Any select naming a 098 column aborts it. */
     function abortingTx() {
       let aborted = false
-      const guard = (fn: (args: unknown) => unknown) => vi.fn(async (args: { select: unknown }) => {
+      const guard = (rows: unknown) => vi.fn(async (args: { select: Record<string, unknown> }) => {
         if (aborted) throw new Error("current transaction is aborted, commands ignored until end of transaction block")
-        if (args.select === AGENT_OWNERSHIP_SELECT) { aborted = true; throw missingColumn }
-        return fn(args)
+        if ("ownerWorkspaceId" in args.select || "kind" in args.select) { aborted = true; throw missingColumn }
+        return rows
       })
       return {
-        agent: { findFirst: guard(() => userAgent), findMany: guard(() => [userAgent]) },
+        agent: { findMany: guard([{ id: "u-agent" }]) },
         agentWorkspaceGrant: { updateMany: vi.fn(async () => ({ count: 1 })) },
-      } as unknown as AppTransactionClient & { agent: { findMany: ReturnType<typeof vi.fn> } }
+      }
     }
-    it("reads the legacy columns when the availability is unknown, never touching the new ones", async () => {
-      const tx = abortingTx()
-      expect((await listUserOwnedAgents(tx, "owner")).map((a) => a.id)).toEqual(["u-agent"])
-      expect(tx.agent.findMany).toHaveBeenCalledTimes(1)
-      expect(tx.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ select: AGENT_LEGACY_SELECT }))
-    })
-    it("revokeMemberAgentGrants completes inside a transaction on a database without 098", async () => {
+    it("revokeMemberAgentGrants reads only the id column, so it completes on a database without 098", async () => {
       const { revokeMemberAgentGrants } = await import("@/lib/agent-lifecycle")
       const tx = abortingTx()
-      await revokeMemberAgentGrants(tx, HOME, "owner")
+      await revokeMemberAgentGrants(tx as unknown as AppTransactionClient, HOME, "owner")
+      expect(tx.agent.findMany).toHaveBeenCalledTimes(1)
+      expect(tx.agent.findMany).toHaveBeenCalledWith({ where: { ownerUserId: "owner" }, select: { id: true } })
       expect(tx.agentWorkspaceGrant.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ agentId: { in: ["u-agent"] } }) }))
     })
-    it("uses the new columns once a top-level call has proven they exist", async () => {
-      prisma.agent.findMany.mockResolvedValueOnce([])
-      await listUserOwnedAgents(prisma, "owner")
-      const tx = { agent: { findMany: vi.fn(async () => []) } } as unknown as AppTransactionClient & { agent: { findMany: ReturnType<typeof vi.fn> } }
-      await listUserOwnedAgents(tx, "owner")
-      expect(tx.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ select: AGENT_OWNERSHIP_SELECT }))
+    it("works with the shape of a real Prisma interactive-transaction client, which still has $transaction", async () => {
+      const { PrismaClient } = await import("@prisma/client")
+      const { PrismaPg } = await import("@prisma/adapter-pg")
+      const base = new PrismaClient({ adapter: new PrismaPg({ connectionString: "postgres://u:p@127.0.0.1:1/none" }) }) as unknown as {
+        _createItxClient: (transaction: unknown) => Record<string, unknown>
+      }
+      const itx = base._createItxClient({ kind: "itx", id: "tx-1", payload: {} })
+      // The premise the earlier duck typing got wrong: nothing strips $transaction at runtime.
+      expect(typeof itx.$transaction).toBe("function")
+      const fake = abortingTx()
+      const tx = new Proxy(itx, { get: (target, key) => (key in fake ? fake[key as keyof typeof fake] : target[key as string]) })
+      const { revokeMemberAgentGrants } = await import("@/lib/agent-lifecycle")
+      await revokeMemberAgentGrants(tx as unknown as AppTransactionClient, HOME, "owner")
+      expect(fake.agent.findMany).toHaveBeenCalledTimes(1)
+      expect(fake.agent.findMany).toHaveBeenCalledWith({ where: { ownerUserId: "owner" }, select: { id: true } })
+      expect(fake.agentWorkspaceGrant.updateMany).toHaveBeenCalledTimes(1)
     })
-    it("a transaction never records a negative availability for later top-level calls", async () => {
-      await listUserOwnedAgents(abortingTx(), "owner")
+    it("never records a negative availability for later top-level calls", async () => {
+      const { revokeMemberAgentGrants } = await import("@/lib/agent-lifecycle")
+      await revokeMemberAgentGrants(abortingTx() as unknown as AppTransactionClient, HOME, "owner")
       prisma.agent.findMany.mockResolvedValueOnce([])
       await listUserOwnedAgents(prisma, "owner")
       expect(prisma.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ select: AGENT_OWNERSHIP_SELECT }))
@@ -268,7 +283,7 @@ describe("loading, and tolerating an unapplied migration 098", () => {
   })
   it("tells the callback whether the new columns may be used in a where", async () => {
     const seen: boolean[] = []
-    await withAgentColumns(prisma, async ({ extended }) => { seen.push(extended); if (extended) throw missingColumn; return null })
+    await withAgentColumns(async ({ extended }) => { seen.push(extended); if (extended) throw missingColumn; return null })
     expect(seen).toEqual([true, false])
   })
   it("does not filter on owner_workspace_id while the migration is unapplied", async () => {

@@ -1,4 +1,4 @@
-import type { AppTransactionClient } from "@/lib/db"
+import type { AppPrismaClient } from "@/lib/db"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
 
 /**
@@ -21,7 +21,8 @@ export type AgentOwnerType = "USER" | "WORKSPACE"
 export type AgentInvokePolicy = "WORKSPACE_MEMBERS" | "ADMINS" | "OWNER"
 export type AgentOwner = { type: "USER"; userId: string } | { type: "WORKSPACE"; workspaceId: string }
 
-type AgentDb = AppTransactionClient
+/** A top-level client only: see {@link withAgentColumns} for why a transaction client must not reach these helpers. */
+type AgentDb = AppPrismaClient
 
 /** The columns that exist with or without migration 098. */
 export const AGENT_LEGACY_SELECT = {
@@ -139,19 +140,16 @@ export function agentEligibleInWorkspace(
 const AVAILABILITY_NEGATIVE_TTL_MS = 30_000
 let columnsAvailability: { value: boolean; checkedAt: number } | null = null
 
+/** Matches `agents.<new column>` or a quoted new column name, in Prisma's and PostgreSQL's wording. */
+const NEW_COLUMN_REFERENCE = /(?:agents\.|["'`])(?:kind|owner_type|owner_workspace_id|instructions|model|invoke_policy|ownerType|ownerWorkspaceId|invokePolicy)\b/
+
+/** A missing-column error that names a column migration 098 adds; any other missing column is a real fault. */
 function isMissingColumnError(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false
-  if ("code" in error && error.code === "P2022") return true
-  return error instanceof Error && /column .*does not exist/i.test(error.message)
-}
-
-/**
- * An interactive-transaction client has no `$transaction` (Prisma strips it, with `$connect`).
- * Inside a transaction a failed statement aborts the whole transaction in PostgreSQL, so a retry
- * would fail with "current transaction is aborted"; the error-driven fallback must never run there.
- */
-function isTransactionClient(db: unknown): boolean {
-  return typeof db === "object" && db !== null && typeof (db as { $transaction?: unknown }).$transaction !== "function"
+  const message = error instanceof Error ? error.message : ""
+  const meta = "meta" in error && typeof error.meta === "object" && error.meta !== null ? JSON.stringify(error.meta) : ""
+  const isMissingColumn = ("code" in error && error.code === "P2022") || /column .*does not exist/i.test(message)
+  return isMissingColumn && NEW_COLUMN_REFERENCE.test(`${message} ${meta}`)
 }
 
 type ColumnContext = { select: typeof AGENT_OWNERSHIP_SELECT | typeof AGENT_LEGACY_SELECT; extended: boolean }
@@ -163,25 +161,24 @@ type ColumnContext = { select: typeof AGENT_OWNERSHIP_SELECT | typeof AGENT_LEGA
  * whether it may reference the new columns in a `where`. A missing column is the only error
  * swallowed; anything else is a real fault and is rethrown.
  *
- * Pass the client the callback will query with. On a transaction client the function never tries
- * the new columns speculatively: it uses them only once a non-transactional call has already
- * proven they exist (the positive result is cached for the process), and otherwise reads the
- * legacy set, which is all a USER-owned lookup needs. Callers that must see WORKSPACE-owned rows
- * inside a transaction should list the agents before opening it.
+ * NEVER call this with a client that is inside an interactive transaction. A failed statement
+ * aborts the whole PostgreSQL transaction, so the retry would fail too, and a transaction client
+ * cannot be told apart from a top-level one at runtime (Prisma leaves `$transaction` on it). The
+ * helpers in this module therefore take a top-level client ({@link AgentDb}); code that runs in a
+ * transaction must query agents directly with {@link AGENT_LEGACY_SELECT} or a plain `id` select.
  */
-export async function withAgentColumns<T>(db: unknown, run: (ctx: ColumnContext) => Promise<T>): Promise<T> {
-  const legacy = () => run({ select: AGENT_LEGACY_SELECT, extended: false })
-  const extended = () => run({ select: AGENT_OWNERSHIP_SELECT, extended: true })
-  if (isTransactionClient(db)) return columnsAvailability?.value ? extended() : legacy()
-  if (columnsAvailability && !columnsAvailability.value && Date.now() - columnsAvailability.checkedAt < AVAILABILITY_NEGATIVE_TTL_MS) return legacy()
+export async function withAgentColumns<T>(run: (ctx: ColumnContext) => Promise<T>): Promise<T> {
+  if (columnsAvailability && !columnsAvailability.value && Date.now() - columnsAvailability.checkedAt < AVAILABILITY_NEGATIVE_TTL_MS) {
+    return run({ select: AGENT_LEGACY_SELECT, extended: false })
+  }
   try {
-    const result = await extended()
+    const result = await run({ select: AGENT_OWNERSHIP_SELECT, extended: true })
     columnsAvailability = { value: true, checkedAt: Date.now() }
     return result
   } catch (error) {
     if (!isMissingColumnError(error)) throw error
     columnsAvailability = { value: false, checkedAt: Date.now() }
-    return legacy()
+    return run({ select: AGENT_LEGACY_SELECT, extended: false })
   }
 }
 
@@ -193,12 +190,12 @@ export function resetAgentColumnsAvailabilityCache() {
 // ── Loading ────────────────────────────────────────────────────────────────
 
 export async function findAgentById(prisma: AgentDb, id: string): Promise<AgentRecord | null> {
-  return withAgentColumns(prisma, ({ select }) => prisma.agent.findFirst({ where: { id }, select })) as Promise<AgentRecord | null>
+  return withAgentColumns(({ select }) => prisma.agent.findFirst({ where: { id }, select })) as Promise<AgentRecord | null>
 }
 
 export async function findAgentsByIds(prisma: AgentDb, ids: string[]): Promise<AgentRecord[]> {
   if (ids.length === 0) return []
-  return withAgentColumns(prisma, ({ select }) => prisma.agent.findMany({ where: { id: { in: ids } }, select })) as Promise<AgentRecord[]>
+  return withAgentColumns(({ select }) => prisma.agent.findMany({ where: { id: { in: ids } }, select })) as Promise<AgentRecord[]>
 }
 
 /**
@@ -214,7 +211,7 @@ export async function findActiveUserOwnedAgent(prisma: AgentDb, agentId: string,
 
 /** USER-owned agents of `userId`, optionally only the ACTIVE ones. */
 export async function listUserOwnedAgents(prisma: AgentDb, userId: string, options: { status?: "ACTIVE"; orderBy?: "name" | "createdAt" } = {}): Promise<AgentRecord[]> {
-  const rows = (await withAgentColumns(prisma, ({ select }) =>
+  const rows = (await withAgentColumns(({ select }) =>
     prisma.agent.findMany({ where: { ownerUserId: userId, ...(options.status ? { status: options.status } : {}) }, select, orderBy: { [options.orderBy ?? "name"]: "asc" } }),
   )) as AgentRecord[]
   // ownerUserId alone could match a malformed WORKSPACE row, so the owner type is re-read in memory.
@@ -227,7 +224,7 @@ export async function listUserOwnedAgents(prisma: AgentDb, userId: string, optio
  * workspaces.
  */
 export async function listActiveAgentsOwnedBy(prisma: AgentDb, owners: { userIds: string[]; workspaceIds: string[] }): Promise<AgentRecord[]> {
-  const rows = (await withAgentColumns(prisma, ({ select, extended }) =>
+  const rows = (await withAgentColumns(({ select, extended }) =>
     prisma.agent.findMany({
       where: {
         status: "ACTIVE",
@@ -258,7 +255,7 @@ export async function listAgentsForWorkspace(
   workspaceId: string,
   scope: { memberUserIds: string[]; grantedAgentIds: string[]; includeGrantable: boolean },
 ): Promise<AgentRecord[]> {
-  const rows = (await withAgentColumns(prisma, ({ select, extended }) =>
+  const rows = (await withAgentColumns(({ select, extended }) =>
     prisma.agent.findMany({
       where: {
         OR: [

@@ -80,7 +80,7 @@ export async function eligibleTaskAssignees(workspaceId: string): Promise<Resolv
   if (process.env.COMPASS_AGENTS_ENABLED !== "1") return people;
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId, revokedAt: null } });
   if (!grants.length) return people;
-  const granted = await withAgentColumns(prisma, ({ select }) => prisma.agent.findMany({ where: { id: { in: grants.map(g => g.agentId) }, status: "ACTIVE" }, select, orderBy: [{ name: "asc" }, { id: "asc" }] }));
+  const granted = await withAgentColumns(({ select }) => prisma.agent.findMany({ where: { id: { in: grants.map(g => g.agentId) }, status: "ACTIVE" }, select, orderBy: [{ name: "asc" }, { id: "asc" }] }));
   const memberUserIds = new Set(members.map(m => m.userId));
   // A grant is necessary for everyone; a USER-owned agent additionally needs its owner to still be a member.
   const agents = (granted as AgentRecord[]).filter(agent => agentEligibleInWorkspace(agent, { workspaceId, hasLiveGrant: true, memberUserIds }));

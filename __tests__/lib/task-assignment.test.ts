@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { prisma } = vi.hoisted(() => ({ prisma: {
-  $transaction: vi.fn(),
   workspaceMember: { findFirst: vi.fn(), findMany: vi.fn() },
   agent: { findFirst: vi.fn(), findMany: vi.fn() },
   agentWorkspaceGrant: { findFirst: vi.fn(), findMany: vi.fn() },

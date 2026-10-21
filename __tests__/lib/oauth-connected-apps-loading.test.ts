@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const db = vi.hoisted(() => ({
-  $transaction: vi.fn(),
   oAuthConsent: { findMany: vi.fn() },
   oAuthClient: { findMany: vi.fn() },
   oAuthToken: { findMany: vi.fn() },
