@@ -8,6 +8,7 @@ import { AccountAgentsPanel } from "@/components/settings/account-agents-panel";
 import { AgentActivity } from "@/components/settings/agent-activity";
 import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
+import { invokedByForAgentActivity } from "@/lib/agent-activity";
 import { ownerAgentActivityWhere } from "@/lib/agent-activity-visibility";
 import { ConnectedAppsPanel } from "@/components/settings/connected-apps-panel";
 import { getConnectedAppsForUser } from "@/lib/oauth/connected-apps";
@@ -45,6 +46,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
     prisma.agentWorkspaceGrant.findMany({ where: { agentId: { in: agentIds }, workspaceId: { in: workspaceIds } } }),
     prisma.agentToolCall.findMany({ where: ownerAgentActivityWhere(userId, agentIds, workspaceIds), orderBy: { createdAt: "desc" }, take: 50 }),
   ]);
+  const invokedBy = await invokedByForAgentActivity(activity);
   return <main className="mx-auto flex max-w-3xl flex-col gap-6 p-4 sm:p-8">
     <Link href="/dashboard" className="text-sm text-text-subtle underline">Back to Compass</Link>
     <PageHeader title="My agents" description="Account-wide identities. Use one agent key across workspaces where administrators have enabled access." />
@@ -62,6 +64,6 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
         configured: isConnectorConfigured(definition),
       }))}
     />
-    <SettingsSection title="Recent agent activity" description="Latest 50 operations in accessible workspaces, including attempts without a recorded workspace. Success means the operation completed, not that the underlying task is finished."><AgentActivity rows={activity.map((r) => ({ ...r, agentName: agents.find((a) => a.id === r.agentId)?.name ?? "Agent", workspaceName: workspaces.find((w) => w.id === r.workspaceId)?.name ?? "Workspace not recorded" }))} /></SettingsSection>
+    <SettingsSection title="Recent agent activity" description="Latest 50 operations in accessible workspaces, including attempts without a recorded workspace. Success means the operation completed, not that the underlying task is finished."><AgentActivity rows={activity.map((r) => ({ ...r, invokedByName: invokedBy.get(r) ?? null, agentName: agents.find((a) => a.id === r.agentId)?.name ?? "Agent", workspaceName: workspaces.find((w) => w.id === r.workspaceId)?.name ?? "Workspace not recorded" }))} /></SettingsSection>
   </main>;
 }

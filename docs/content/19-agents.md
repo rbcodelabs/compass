@@ -89,6 +89,11 @@ without a recorded final result has an unknown outcome; check the affected data
 before retrying. A successful operation means Compass processed the tool request,
 not that the task's underlying work is complete.
 
+When a cloud agent runs on someone's behalf, each row names the agent and shows who
+invoked the run. A shared agent acts only through the workspace access it was
+explicitly granted; it never gains the rights of the person who started the run,
+and its access ends as soon as the run does.
+
 Activity is scoped to the viewer's current workspace access. Raw tool arguments
 and API key secrets are not included.
 

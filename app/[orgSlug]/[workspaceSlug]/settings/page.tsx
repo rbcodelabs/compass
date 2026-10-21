@@ -33,6 +33,7 @@ import { CapabilityPacksPanel, type CapabilityPackSettingsRow } from "@/componen
 import { ThemePreferenceControl } from "@/components/theme/theme-preference-control";
 import { WorkspaceAgentsPanel } from "@/components/settings/workspace-agents-panel";
 import { AgentActivity } from "@/components/settings/agent-activity";
+import { invokedByForAgentActivity } from "@/lib/agent-activity";
 import { agentsEnabled } from "@/lib/agent-access";
 import { agentOwner, listAgentsForWorkspace } from "@/lib/agent-ownership";
 import { AnalyticsSettingsPanel } from "@/components/analytics/analytics-settings-panel";
@@ -201,6 +202,7 @@ export default async function SettingsPage({ params }: Props) {
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: workspace.id, revokedAt: null } });
   const workspaceAgents = await listAgentsForWorkspace(prisma, workspace.id, { memberUserIds: rawMembers.map((m) => m.userId), grantedAgentIds: grants.map((g) => g.agentId), includeGrantable: canManageCapabilityPacks });
   const agentActivity = canManageCapabilityPacks ? await prisma.agentToolCall.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "desc" }, take: 25 }) : [];
+  const agentActivityInvokedBy = await invokedByForAgentActivity(agentActivity);
   // Embed tokens are a public write credential, so the panel below is gated on
   // the same bar its server actions enforce (resolveWorkspaceAdmin: workspace
   // admin or org admin) — which is exactly what canManageCapabilityPacks is.
@@ -378,7 +380,7 @@ export default async function SettingsPage({ params }: Props) {
       <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace. Assignment does not grant access or start execution.">
         <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} enabled={agentsEnabled()} canManage={canManageCapabilityPacks} agents={workspaceAgents.map((a) => { const owner = agentOwner(a); const ownerMember = owner?.type === "USER" ? rawMembers.find((m) => m.userId === owner.userId) : undefined; return { id: a.id, name: a.name, status: a.status, ownerName: owner?.type === "WORKSPACE" ? "Shared" : ownerMember?.user.name ?? ownerMember?.user.email ?? "Former member", eligible: owner?.type === "WORKSPACE" || !!ownerMember, access: grants.find((g) => g.agentId === a.id)?.access ?? null }; })} />
       </SettingsSection>
-      {canManageCapabilityPacks && <SettingsSection title="Workspace agent activity"><AgentActivity rows={agentActivity.map((r) => ({ ...r, agentName: workspaceAgents.find((a) => a.id === r.agentId)?.name ?? "Former workspace agent", workspaceName: workspace.name }))} /></SettingsSection>}
+      {canManageCapabilityPacks && <SettingsSection title="Workspace agent activity"><AgentActivity rows={agentActivity.map((r) => ({ ...r, invokedByName: agentActivityInvokedBy.get(r) ?? null, agentName: workspaceAgents.find((a) => a.id === r.agentId)?.name ?? "Former workspace agent", workspaceName: workspace.name }))} /></SettingsSection>}
 
       {canManageCapabilityPacks && <SettingsSection title="Agent capability packs" description="Install validated skills-only packs for the in-app agent. Packs add instructions, never tools or credentials.">
         <CapabilityPacksPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} initialPacks={capabilityPacks} />
