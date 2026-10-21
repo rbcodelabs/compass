@@ -2728,6 +2728,33 @@ model AgentWorkspaceGrant {
   @@map("agent_workspace_grants")
 }
 
+/// The agent a run uses in a workspace when nobody picked one (migration 101). One row per workspace.
+/// Bare UUIDs, no relations (DSQL). A row pointing at an agent that is gone, suspended, ungranted or not invokable is ignored at
+/// read time, so it never needs cleanup. Read through lib/agent-defaults.ts, which tolerates the migration being unapplied.
+model WorkspaceDefaultAgent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  agentId String @map("agent_id") @db.Uuid
+  setByUserId String? @map("set_by_user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  /// Set by the application on every write (DSQL has no trigger).
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@unique([workspaceId], map: "workspace_default_agents_workspace_id_key")
+  @@map("workspace_default_agents")
+}
+
+/// A member's personal override of the workspace default (migration 101). One row per (user, workspace); same read-time rules.
+model UserDefaultAgent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  agentId String @map("agent_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@unique([userId, workspaceId], map: "user_default_agents_user_id_workspace_id_key")
+  @@map("user_default_agents")
+}
+
 /// Explicit, auditable grant of an admin-level MCP capability to a specific
 /// agent, scoped to one organization. Unlike AgentWorkspaceGrant (workspace-
 /// scoped READ/WRITE on ordinary discovery data), this only ever authorizes
