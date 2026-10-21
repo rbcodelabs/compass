@@ -101,6 +101,35 @@ describe("WorkspaceAgentsPanel", () => {
     await waitFor(() => expect(actions.updateCloudAgent).toHaveBeenCalledWith("a-shared", { name: "Triage", description: "", instructions: "New instructions", model: "claude-sonnet-5-5", invokePolicy: "ADMINS" }))
   })
 
+  it("shows the stored run limits in the edit form, and sends only the ones that changed", async () => {
+    renderPanel([{ ...shared, maxConcurrentRuns: 3, maxRunsPerDay: null }], { canManage: true })
+    fireEvent.click(screen.getByRole("button", { name: "Edit Triage" }))
+    expect(screen.getByLabelText("Concurrent run limit")).toHaveValue(3)
+    expect(screen.getByLabelText("Daily run limit")).toHaveValue(null)
+    expect(screen.getByLabelText("Daily run limit")).toHaveAttribute("placeholder", "100 (default)")
+    fireEvent.change(screen.getByLabelText("Daily run limit"), { target: { value: "25" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save agent" }))
+    await waitFor(() => expect(actions.updateCloudAgent).toHaveBeenCalled())
+    const input = actions.updateCloudAgent.mock.calls[0][1]
+    expect(input.maxRunsPerDay).toBe(25)
+    expect(input).not.toHaveProperty("maxConcurrentRuns")
+  })
+
+  it("clears a limit back to the default by emptying the field", async () => {
+    renderPanel([{ ...shared, maxConcurrentRuns: 3 }], { canManage: true })
+    fireEvent.click(screen.getByRole("button", { name: "Edit Triage" }))
+    fireEvent.change(screen.getByLabelText("Concurrent run limit"), { target: { value: "" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save agent" }))
+    await waitFor(() => expect(actions.updateCloudAgent).toHaveBeenCalled())
+    expect(actions.updateCloudAgent.mock.calls[0][1].maxConcurrentRuns).toBeNull()
+  })
+
+  it("does not offer run limits on the create form", () => {
+    renderPanel([shared], { canManage: true })
+    fireEvent.click(screen.getByRole("button", { name: "New cloud agent" }))
+    expect(screen.queryByLabelText("Concurrent run limit")).toBeNull()
+  })
+
   it("shows no invoke policy and sends none when editing a personal agent", async () => {
     renderPanel([personal])
     fireEvent.click(screen.getByRole("button", { name: "Edit Mine" }))

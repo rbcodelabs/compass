@@ -43,7 +43,7 @@ import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { resolveAgentPageContext } from "@/lib/agent-page-context"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
-import { checkAgentUsageLimit } from "@/lib/agent-limits"
+import { agentCapReachedBody, checkAgentRunCaps, checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
 import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
 import { resolveGatewayCredential, opencodeModel, resolveAgentHarness, agentModelForHarness, type AgentHarness } from "@/lib/agent-harness"
@@ -509,6 +509,16 @@ export async function POST(request: NextRequest) {
   }
   if (runAgent && linkedConversation?.interviewProcessingJson && !explicitContinuation) {
     return Response.json({ error: "Interview processing cannot run as a named agent.", code: "AGENT_RUN_UNSUPPORTED" }, { status: 400 })
+  }
+  // The named agent's own caps (concurrent and daily runs), on top of the per-user limit above. A default agent is refused
+  // too rather than quietly swapped for the built-in one: the user would otherwise get a different identity than the one
+  // they were told would answer.
+  if (runAgent) {
+    const capped = await checkAgentRunCaps(prisma, runAgent.id)
+    if (!capped.allowed) {
+      await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
+      return Response.json(agentCapReachedBody(capped), { status: 429 })
+    }
   }
   if (linkedConversation?.interviewProcessingJson && !explicitContinuation) {
     const leaseMs = detached ? budgetMs + RUN_INFRA_GRACE_MS : DEFAULT_INTERVIEW_CLAIM_LEASE_MS

@@ -59,7 +59,8 @@ const mockPackStorage = vi.fn()
 vi.mock("@/lib/artifact-storage", () => ({ getCapabilityPackArtifactStorage: () => mockPackStorage() }))
 
 const mockCheckLimit = vi.fn()
-vi.mock("@/lib/agent-limits", () => ({ checkAgentUsageLimit: () => mockCheckLimit() }))
+const mockCheckAgentRunCaps = vi.fn()
+vi.mock("@/lib/agent-limits", async (original) => ({ ...await original<object>(), checkAgentUsageLimit: () => mockCheckLimit(), checkAgentRunCaps: (...args: unknown[]) => mockCheckAgentRunCaps(...args) }))
 
 const mockResolveAgentHandoffContext = vi.fn()
 vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: (...args: unknown[]) => mockResolveAgentHandoffContext(...args) }))
@@ -126,6 +127,7 @@ beforeEach(() => {
   runMocks.finalize.mockResolvedValue(undefined)
   runMocks.attach.mockResolvedValue(true)
   identityMocks.resolve.mockResolvedValue(null)
+  mockCheckAgentRunCaps.mockResolvedValue({ allowed: true })
   mockPrisma.doc.findMany.mockResolvedValue([])
   process.env.AUTH_SECRET = "test-auth-secret"
 })
@@ -846,6 +848,29 @@ describe("agent turn route — detached runs", () => {
       expect(await response.json()).toMatchObject({ code: "AGENT_ATTRIBUTION_UNAVAILABLE" })
       expect(mockMintKey).not.toHaveBeenCalled()
       expect(mockBootSandbox).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ["concurrent", { allowed: false, cap: "CONCURRENT", limit: 5, reason: "This agent already has 5 runs in progress (limit 5)." }],
+      ["daily", { allowed: false, cap: "DAILY", limit: 100, reason: "This agent has reached its daily limit of 100 runs." }],
+    ])("refuses with 429 AGENT_CAP_REACHED naming the %s cap, before any run or key exists", async (_label, capped) => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      mockCheckAgentRunCaps.mockResolvedValue(capped)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(429)
+      expect(await response.json()).toEqual({ error: capped.reason, code: "AGENT_CAP_REACHED", cap: capped.cap, limit: capped.limit })
+      expect(mockCheckAgentRunCaps).toHaveBeenCalledWith(mockPrisma, AGENT_ID)
+      expect(runMocks.create).not.toHaveBeenCalled()
+      expect(mockMintKey).not.toHaveBeenCalled()
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+    })
+
+    it("does not consult the agent caps for the built-in agent", async () => {
+      identityMocks.resolve.mockResolvedValue(null)
+      sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(mockCheckAgentRunCaps).not.toHaveBeenCalled()
     })
 
     it("fails the run and revokes the key when the run ended before its key could be attached", async () => {

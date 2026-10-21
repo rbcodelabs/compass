@@ -65,6 +65,18 @@ type Options = {
   onSettled?: (settlement: TurnSettlement) => void
 }
 
+/**
+ * The turn route answers some refusals as JSON ({ error, code }: an agent cap reached, an agent the caller may not run) and
+ * others as plain text. Show the sentence either way, never the raw JSON.
+ */
+export function readTurnErrorMessage(body: string): string {
+  try {
+    const parsed: unknown = JSON.parse(body)
+    if (parsed && typeof parsed === "object" && "error" in parsed && typeof parsed.error === "string" && parsed.error) return parsed.error
+  } catch { /* plain text */ }
+  return body
+}
+
 export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: Options) {
   const [phase, setPhase] = useState<StreamPhase>("idle")
   const [streamingText, setStreamingText] = useState("")
@@ -345,7 +357,7 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
       })
       if (controller.signal.aborted) return true
       if (!res.ok || !res.body) {
-        const serverMsg = await res.text().catch(() => "")
+        const serverMsg = readTurnErrorMessage(await res.text().catch(() => ""))
         throw new Error(
           res.status === 401
             ? "Your session expired — reload and sign in."

@@ -193,6 +193,68 @@ describe("updateCloudAgent", () => {
   })
 })
 
+describe("updateCloudAgent run limits", () => {
+  it("lets the owner set both caps on a personal agent", async () => {
+    mocks.agent.findFirst.mockResolvedValue(personalAgent)
+    await updateCloudAgent("a-personal", { maxConcurrentRuns: 2, maxRunsPerDay: 40 })
+    expect(mocks.agent.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ maxConcurrentRuns: 2, maxRunsPerDay: 40 }) }))
+  })
+
+  it("clears a cap back to the default with null, and leaves an omitted cap alone", async () => {
+    mocks.agent.findFirst.mockResolvedValue(personalAgent)
+    await updateCloudAgent("a-personal", { maxConcurrentRuns: null })
+    const data = mocks.agent.update.mock.calls[0][0].data
+    expect(data.maxConcurrentRuns).toBeNull()
+    expect(data).not.toHaveProperty("maxRunsPerDay")
+  })
+
+  it.each([0, -1, 1.5, 51, "5", Number.NaN])("rejects a concurrent limit of %s", async (bad) => {
+    mocks.agent.findFirst.mockResolvedValue(personalAgent)
+    await expect(updateCloudAgent("a-personal", { maxConcurrentRuns: bad as any })).rejects.toThrow(/Concurrent run limit must be a whole number from 1 to 50/)
+    expect(mocks.agent.update).not.toHaveBeenCalled()
+  })
+
+  it.each([0, -5, 2.5, 5001, "100"])("rejects a daily limit of %s", async (bad) => {
+    mocks.agent.findFirst.mockResolvedValue(personalAgent)
+    await expect(updateCloudAgent("a-personal", { maxRunsPerDay: bad as any })).rejects.toThrow(/Daily run limit must be a whole number from 1 to 5000/)
+    expect(mocks.agent.update).not.toHaveBeenCalled()
+  })
+
+  it("accepts the ceilings exactly", async () => {
+    mocks.agent.findFirst.mockResolvedValue(personalAgent)
+    await updateCloudAgent("a-personal", { maxConcurrentRuns: 50, maxRunsPerDay: 5000 })
+    expect(mocks.agent.update).toHaveBeenCalled()
+  })
+
+  it("lets only a workspace admin set a shared agent's caps; a member and a stranger get 'not found'", async () => {
+    mocks.agent.findFirst.mockResolvedValue(sharedAgent)
+    arrangeWorkspace()
+    await expect(updateCloudAgent("a-shared", { maxRunsPerDay: 10 })).rejects.toThrow("Agent not found")
+    signIn("other-admin")
+    arrangeWorkspace({ adminUserIds: [] })
+    await expect(updateCloudAgent("a-shared", { maxConcurrentRuns: 1 })).rejects.toThrow("Agent not found")
+    expect(mocks.agent.update).not.toHaveBeenCalled()
+    signIn("admin")
+    arrangeWorkspace({ adminUserIds: ["admin"] })
+    await updateCloudAgent("a-shared", { maxConcurrentRuns: 3 })
+    expect(mocks.agent.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ maxConcurrentRuns: 3 }) }))
+  })
+
+  it("refuses someone else's personal agent's caps as 'not found'", async () => {
+    signIn("intruder")
+    mocks.agent.findFirst.mockResolvedValue(personalAgent)
+    await expect(updateCloudAgent("a-personal", { maxConcurrentRuns: 50 })).rejects.toThrow("Agent not found")
+    expect(mocks.agent.update).not.toHaveBeenCalled()
+  })
+
+  it("explains an unapplied migration 102 instead of leaking a database error, only when caps were sent", async () => {
+    mocks.agent.findFirst.mockResolvedValue(personalAgent)
+    mocks.agent.update.mockRejectedValue(Object.assign(new Error("column max_concurrent_runs does not exist"), { code: "P2022" }))
+    await expect(updateCloudAgent("a-personal", { maxConcurrentRuns: 2 })).rejects.toThrow("Run limits are not available yet")
+    await expect(updateCloudAgent("a-personal", { name: "Renamed" })).rejects.toThrow("column max_concurrent_runs")
+  })
+})
+
 describe("setWorkspaceDefaultAgentAction", () => {
   beforeEach(() => {
     mocks.admin.mockResolvedValue({ prisma: mocks, workspaceId: WS, organizationId: "org" })

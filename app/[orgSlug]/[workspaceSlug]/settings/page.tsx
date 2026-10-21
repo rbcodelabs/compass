@@ -36,6 +36,7 @@ import { AgentActivity } from "@/components/settings/agent-activity";
 import { invokedByForAgentActivity } from "@/lib/agent-activity";
 import { agentsEnabled } from "@/lib/agent-access";
 import type { AgentInvokePolicy } from "@/lib/agent-ownership";
+import { loadConfiguredAgentRunCaps } from "@/lib/agent-limits";
 import { agentKind, agentOwner, canInvokeAgent, isUserOwnedBy, listAgentsForWorkspace } from "@/lib/agent-ownership";
 import { getStoredDefaultAgentIds } from "@/lib/agent-defaults";
 import { allowedAgentModels } from "@/lib/agent-models";
@@ -204,6 +205,8 @@ export default async function SettingsPage({ params }: Props) {
   const analyticsConnections = await listConnections(analyticsActor, workspace.id);
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: workspace.id, revokedAt: null } });
   const workspaceAgents = await listAgentsForWorkspace(prisma, workspace.id, { memberUserIds: rawMembers.map((m) => m.userId), grantedAgentIds: grants.map((g) => g.agentId), includeGrantable: canManageCapabilityPacks });
+  // Only the cloud agents this viewer may edit are sent their limits, but one tolerant query covers the lot.
+  const runCaps = await loadConfiguredAgentRunCaps(prisma, workspaceAgents.filter((a) => agentKind(a) === "CLOUD").map((a) => a.id));
   const storedDefaults = await getStoredDefaultAgentIds(prisma, { userId: session.user.id, workspaceId: workspace.id });
   const usableAgentIds = new Set((await Promise.all(workspaceAgents.map(async (a) => (agentKind(a) === "CLOUD" && a.status === "ACTIVE" && grants.some((g) => g.agentId === a.id) && (await canInvokeAgent(prisma, { userId: session.user!.id }, a)) ? a.id : null)))).filter((id): id is string => !!id));
   const agentActivity = canManageCapabilityPacks ? await prisma.agentToolCall.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "desc" }, take: 25 }) : [];
@@ -394,7 +397,7 @@ export default async function SettingsPage({ params }: Props) {
             eligible: owner?.type === "WORKSPACE" || !!ownerMember,
             access: grants.find((g) => g.agentId === a.id)?.access ?? null,
             kind: agentKind(a), shared: owner?.type === "WORKSPACE", description: a.description ?? null,
-            ...(canEdit && agentKind(a) === "CLOUD" ? { instructions: a.instructions ?? null, model: a.model ?? null, invokePolicy: (a.invokePolicy as AgentInvokePolicy | null) ?? null } : {}),
+            ...(canEdit && agentKind(a) === "CLOUD" ? { instructions: a.instructions ?? null, model: a.model ?? null, invokePolicy: (a.invokePolicy as AgentInvokePolicy | null) ?? null, ...(runCaps.get(a.id) ?? {}) } : {}),
             canEdit: canEdit && agentKind(a) === "CLOUD",
             canUse: usableAgentIds.has(a.id),
             isWorkspaceDefault: storedDefaults.workspaceDefaultAgentId === a.id,

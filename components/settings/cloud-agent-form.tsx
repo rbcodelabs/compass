@@ -7,7 +7,11 @@ import { Textarea } from "@/components/ui/textarea";
 import type { AgentInvokePolicy } from "@/lib/agent-ownership";
 
 export type CloudAgentModelOption = { value: string; label: string };
-export type CloudAgentFormValues = { name: string; description: string; instructions: string; model: string; invokePolicy: AgentInvokePolicy };
+/** `maxConcurrentRuns` / `maxRunsPerDay` are the typed text of the run limits; "" = use the default. */
+export type CloudAgentFormValues = { name: string; description: string; instructions: string; model: string; invokePolicy: AgentInvokePolicy; maxConcurrentRuns: string; maxRunsPerDay: string };
+
+/** Defaults shown as placeholders; the real ones live in lib/agent-limits.ts (kept literal here so the client bundle stays small). */
+const CAP_PLACEHOLDERS = { concurrent: "5 (default)", daily: "100 (default)" };
 
 const selectClass = "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30";
 
@@ -15,7 +19,7 @@ const selectClass = "h-8 w-full min-w-0 rounded-lg border border-input bg-transp
  * The fields shared by "New cloud agent" and "Edit cloud agent". Controlled: the parent owns the values and the submit.
  * `showInvokePolicy` is for shared agents only; a personal agent is always invoked by its owner alone.
  */
-export function CloudAgentFields({ values, onChange, models, disabled, showInvokePolicy }: { values: CloudAgentFormValues; onChange: (next: CloudAgentFormValues) => void; models: CloudAgentModelOption[]; disabled?: boolean; showInvokePolicy: boolean }) {
+export function CloudAgentFields({ values, onChange, models, disabled, showInvokePolicy, showRunLimits = false }: { values: CloudAgentFormValues; onChange: (next: CloudAgentFormValues) => void; models: CloudAgentModelOption[]; disabled?: boolean; showInvokePolicy: boolean; showRunLimits?: boolean }) {
   const id = useId();
   const set = <K extends keyof CloudAgentFormValues>(key: K, value: CloudAgentFormValues[K]) => onChange({ ...values, [key]: value });
   return <div className="min-w-0 space-y-2">
@@ -31,6 +35,13 @@ export function CloudAgentFields({ values, onChange, models, disabled, showInvok
       {values.model && !models.some((m) => m.value === values.model) && <option value={values.model}>{values.model} (no longer offered)</option>}
       {models.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
     </select>
+    {showRunLimits && <>
+      <Label htmlFor={`${id}-max-concurrent`}>Concurrent run limit</Label>
+      <Input id={`${id}-max-concurrent`} type="number" inputMode="numeric" min={1} max={50} step={1} value={values.maxConcurrentRuns} placeholder={CAP_PLACEHOLDERS.concurrent} onChange={(e) => set("maxConcurrentRuns", e.target.value)} disabled={disabled} />
+      <Label htmlFor={`${id}-max-daily`}>Daily run limit</Label>
+      <Input id={`${id}-max-daily`} type="number" inputMode="numeric" min={1} max={5000} step={1} value={values.maxRunsPerDay} placeholder={CAP_PLACEHOLDERS.daily} onChange={(e) => set("maxRunsPerDay", e.target.value)} disabled={disabled} />
+      <p className="text-xs text-text-muted">Runs of this agent in progress at once, and runs it may start in any 24 hours. When a limit is reached, new runs (including from assignments) are refused with a message. Leave empty for the default.</p>
+    </>}
     {showInvokePolicy && <>
       <Label htmlFor={`${id}-policy`}>Who can run this agent</Label>
       <select id={`${id}-policy`} className={selectClass} value={values.invokePolicy === "OWNER" ? "ADMINS" : values.invokePolicy} onChange={(e) => set("invokePolicy", e.target.value as AgentInvokePolicy)} disabled={disabled}>
@@ -41,4 +52,19 @@ export function CloudAgentFields({ values, onChange, models, disabled, showInvok
   </div>;
 }
 
-export const EMPTY_CLOUD_AGENT_VALUES: CloudAgentFormValues = { name: "", description: "", instructions: "", model: "", invokePolicy: "WORKSPACE_MEMBERS" };
+export const EMPTY_CLOUD_AGENT_VALUES: CloudAgentFormValues = { name: "", description: "", instructions: "", model: "", invokePolicy: "WORKSPACE_MEMBERS", maxConcurrentRuns: "", maxRunsPerDay: "" };
+
+/** The cap fields to send on save: only those the editor changed, so an untouched form never rewrites a limit. */
+export function changedRunLimits(values: CloudAgentFormValues, initial: { maxConcurrentRuns?: number | null; maxRunsPerDay?: number | null }): { maxConcurrentRuns?: number | null; maxRunsPerDay?: number | null } {
+  const out: { maxConcurrentRuns?: number | null; maxRunsPerDay?: number | null } = {};
+  const parse = (text: string) => (text.trim() === "" ? null : Number(text));
+  const concurrent = parse(values.maxConcurrentRuns);
+  const daily = parse(values.maxRunsPerDay);
+  if (concurrent !== (initial.maxConcurrentRuns ?? null)) out.maxConcurrentRuns = concurrent;
+  if (daily !== (initial.maxRunsPerDay ?? null)) out.maxRunsPerDay = daily;
+  return out;
+}
+
+export function runLimitText(value: number | null | undefined) {
+  return value ? String(value) : "";
+}

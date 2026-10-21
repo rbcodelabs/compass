@@ -10,6 +10,7 @@ import { AGENT_LEGACY_SELECT, agentKind, agentOwner, canManageAgent, findAgentBy
 import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity";
 import { clearUserDefaultAgent, clearWorkspaceDefaultAgent, setUserDefaultAgent, setWorkspaceDefaultAgent } from "@/lib/agent-defaults";
 import { parseAgentModel } from "@/lib/agent-models";
+import { parseAgentCap } from "@/lib/agent-limits";
 
 async function account() {
   const session = await auth();
@@ -128,7 +129,11 @@ export async function createCloudAgent(input: {
   }
 }
 
-export async function updateCloudAgent(id: string, input: { name?: string; description?: string; instructions?: string; model?: string | null; invokePolicy?: AgentInvokePolicy }) {
+export async function updateCloudAgent(id: string, input: {
+  name?: string; description?: string; instructions?: string; model?: string | null; invokePolicy?: AgentInvokePolicy;
+  /** Run caps (migration 102). null = back to the default; omitted = unchanged. */
+  maxConcurrentRuns?: number | null; maxRunsPerDay?: number | null;
+}) {
   const { prisma, userId } = await account();
   requireEnabled();
   const agent = await findAgentById(prisma, id);
@@ -146,7 +151,20 @@ export async function updateCloudAgent(id: string, input: { name?: string; descr
     if (owner?.type !== "WORKSPACE") throw new Error("Only shared agents have an invoke policy");
     data.invokePolicy = invokePolicyValue(input.invokePolicy);
   }
-  await prisma.agent.update({ where: { id }, data, select: { id: true } });
+  const capsRequested = input.maxConcurrentRuns !== undefined || input.maxRunsPerDay !== undefined;
+  if (capsRequested) {
+    // Run caps bound spend, so a shared agent's are an administrator's call even if canManageAgent ever widens, and a
+    // personal agent's are its owner's. canManageAgent above already refused everyone else with "Agent not found".
+    if (owner?.type === "WORKSPACE" && !(await isWorkspaceAdminUser(prisma, userId, owner.workspaceId))) throw new Error("Agent not found");
+    if (input.maxConcurrentRuns !== undefined) data.maxConcurrentRuns = parseAgentCap(input.maxConcurrentRuns, "maxConcurrentRuns");
+    if (input.maxRunsPerDay !== undefined) data.maxRunsPerDay = parseAgentCap(input.maxRunsPerDay, "maxRunsPerDay");
+  }
+  try {
+    await prisma.agent.update({ where: { id }, data, select: { id: true } });
+  } catch (error) {
+    if (capsRequested && isMissingColumn(error)) throw new Error("Run limits are not available yet. Try again after the database update finishes.");
+    throw error;
+  }
   revalidatePath("/settings/agents");
 }
 

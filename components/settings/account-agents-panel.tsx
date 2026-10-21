@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createAgent, updateAgent, updateCloudAgent, setMyDefaultAgentAction, createAgentKey, revokeAgentKey } from "@/app/settings/agents/actions";
 import { Badge } from "@/components/ui/badge";
-import { CloudAgentFields, type CloudAgentFormValues, type CloudAgentModelOption } from "@/components/settings/cloud-agent-form";
+import { changedRunLimits, CloudAgentFields, runLimitText, type CloudAgentFormValues, type CloudAgentModelOption } from "@/components/settings/cloud-agent-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,7 @@ import { SettingsSection } from "@/components/patterns/settings-section";
 
 /** A workspace the member belongs to, with whether this cloud agent is enabled there and is the member's default. */
 export type AccountAgentWorkspace = { orgSlug: string; workspaceSlug: string; name: string; enabled: boolean; isMyDefault: boolean };
-type AgentRow = { kind?: "EXTERNAL" | "CLOUD"; instructions?: string | null; model?: string | null; workspaces?: AccountAgentWorkspace[]; id: string; name: string; description: string | null; status: string; keys: { id: string; name: string; keyPrefix: string; revokedAt: Date | null; expiresAt: Date | null }[]; grants: { id: string; name: string; href: string; access: string; revoked: boolean }[] };
+type AgentRow = { kind?: "EXTERNAL" | "CLOUD"; instructions?: string | null; model?: string | null; maxConcurrentRuns?: number | null; maxRunsPerDay?: number | null; workspaces?: AccountAgentWorkspace[]; id: string; name: string; description: string | null; status: string; keys: { id: string; name: string; keyPrefix: string; revokedAt: Date | null; expiresAt: Date | null }[]; grants: { id: string; name: string; href: string; access: string; revoked: boolean }[] };
 
 function AgentCard({ agent, enabled }: { agent: AgentRow; enabled: boolean }) {
   const router = useRouter();
@@ -40,15 +40,15 @@ function AgentCard({ agent, enabled }: { agent: AgentRow; enabled: boolean }) {
 
 function CloudAgentCard({ agent, enabled, models }: { agent: AgentRow; enabled: boolean; models: CloudAgentModelOption[] }) {
   const router = useRouter();
-  const [values, setValues] = useState<CloudAgentFormValues>({ name: agent.name, description: agent.description ?? "", instructions: agent.instructions ?? "", model: agent.model ?? "", invokePolicy: "OWNER" });
+  const [values, setValues] = useState<CloudAgentFormValues>({ name: agent.name, description: agent.description ?? "", instructions: agent.instructions ?? "", model: agent.model ?? "", invokePolicy: "OWNER", maxConcurrentRuns: runLimitText(agent.maxConcurrentRuns), maxRunsPerDay: runLimitText(agent.maxRunsPerDay) });
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   function run(action: () => Promise<unknown>) { setError(null); start(async () => { try { await action(); router.refresh(); } catch (e) { setError(e instanceof Error ? e.message : "Operation failed"); } }); }
   return <SettingsSection title={agent.name} description={`Cloud agent · ${agent.status === "ACTIVE" ? "Active" : "Suspended"} · Personal`}>
     <div className="min-w-0 space-y-4">
       {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
-      <form className="space-y-2" aria-label={`Edit ${agent.name}`} onSubmit={(e) => { e.preventDefault(); run(() => updateCloudAgent(agent.id, { name: values.name, description: values.description, instructions: values.instructions, model: values.model || null })); }}>
-        <CloudAgentFields values={values} onChange={setValues} models={models} disabled={pending || !enabled} showInvokePolicy={false} />
+      <form className="space-y-2" aria-label={`Edit ${agent.name}`} onSubmit={(e) => { e.preventDefault(); run(() => updateCloudAgent(agent.id, { name: values.name, description: values.description, instructions: values.instructions, model: values.model || null, ...changedRunLimits(values, agent) })); }}>
+        <CloudAgentFields values={values} onChange={setValues} models={models} disabled={pending || !enabled} showInvokePolicy={false} showRunLimits />
         <div className="flex flex-wrap gap-2">
           <Button type="submit" variant="outline" disabled={pending || !enabled || !values.name.trim()}>Save agent</Button>
           <Button type="button" variant="outline" disabled={pending || (!enabled && agent.status !== "ACTIVE")} onClick={() => run(() => updateAgent(agent.id, { name: agent.name, description: agent.description ?? "", status: agent.status === "ACTIVE" ? "SUSPENDED" : "ACTIVE" }))}>{agent.status === "ACTIVE" ? "Suspend" : "Reactivate"}</Button>

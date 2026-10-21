@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CloudAgentFields, EMPTY_CLOUD_AGENT_VALUES, type CloudAgentFormValues, type CloudAgentModelOption } from "@/components/settings/cloud-agent-form";
+import { changedRunLimits, CloudAgentFields, EMPTY_CLOUD_AGENT_VALUES, runLimitText, type CloudAgentFormValues, type CloudAgentModelOption } from "@/components/settings/cloud-agent-form";
 import type { AgentInvokePolicy } from "@/lib/agent-ownership";
 
 export type WorkspaceAgentRow = {
@@ -27,6 +27,9 @@ export type WorkspaceAgentRow = {
   instructions?: string | null;
   model?: string | null;
   invokePolicy?: AgentInvokePolicy | null;
+  /** Configured run limits (null = default). Only sent for agents the viewer may edit. */
+  maxConcurrentRuns?: number | null;
+  maxRunsPerDay?: number | null;
   canEdit?: boolean;
   /** The viewer could start a run as this agent right now (cloud, active, enabled here, allowed by its policy). */
   canUse?: boolean;
@@ -35,9 +38,9 @@ export type WorkspaceAgentRow = {
 };
 
 function CloudAgentEditor({ agent, models, disabled, onSave }: { agent: WorkspaceAgentRow; models: CloudAgentModelOption[]; disabled: boolean; onSave: (values: CloudAgentFormValues) => void }) {
-  const [values, setValues] = useState<CloudAgentFormValues>({ name: agent.name, description: agent.description ?? "", instructions: agent.instructions ?? "", model: agent.model ?? "", invokePolicy: agent.invokePolicy ?? "WORKSPACE_MEMBERS" });
+  const [values, setValues] = useState<CloudAgentFormValues>({ name: agent.name, description: agent.description ?? "", instructions: agent.instructions ?? "", model: agent.model ?? "", invokePolicy: agent.invokePolicy ?? "WORKSPACE_MEMBERS", maxConcurrentRuns: runLimitText(agent.maxConcurrentRuns), maxRunsPerDay: runLimitText(agent.maxRunsPerDay) });
   return <form className="mt-3 min-w-0 space-y-2 border-t border-border-default pt-3" aria-label={`Edit ${agent.name}`} onSubmit={(e) => { e.preventDefault(); onSave(values); }}>
-    <CloudAgentFields values={values} onChange={setValues} models={models} disabled={disabled} showInvokePolicy={!!agent.shared} />
+    <CloudAgentFields values={values} onChange={setValues} models={models} disabled={disabled} showInvokePolicy={!!agent.shared} showRunLimits />
     <Button type="submit" size="sm" disabled={disabled || !values.name.trim()}>Save agent</Button>
   </form>;
 }
@@ -84,7 +87,7 @@ export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage
           {canManage && <Button variant="outline" size="sm" aria-label={`Revoke access to ${a.name}`} disabled={pending} onClick={() => run(() => revokeWorkspaceAgent(orgSlug, workspaceSlug, a.id))}>Revoke access</Button>}
         </div>
       </div>
-      {editing === a.id && <CloudAgentEditor agent={a} models={models} disabled={pending || !enabled} onSave={(values) => run(() => updateCloudAgent(a.id, { name: values.name, description: values.description, instructions: values.instructions, model: values.model || null, ...(a.shared ? { invokePolicy: values.invokePolicy === "OWNER" ? "ADMINS" : values.invokePolicy } : {}) }), () => setEditing(null))} />}
+      {editing === a.id && <CloudAgentEditor agent={a} models={models} disabled={pending || !enabled} onSave={(values) => run(() => updateCloudAgent(a.id, { name: values.name, description: values.description, instructions: values.instructions, model: values.model || null, ...(a.shared ? { invokePolicy: values.invokePolicy === "OWNER" ? "ADMINS" : values.invokePolicy } : {}), ...changedRunLimits(values, a) }), () => setEditing(null))} />}
     </li>)}</ul>
     {enabled && (creating
       ? <form className="min-w-0 space-y-2 rounded-md border border-border-default p-3" aria-label="New cloud agent" onSubmit={(e) => {
