@@ -1,13 +1,13 @@
 /** Expected failures of the saved-view service. Actions turn these into `{ ok: false }` results; anything else keeps throwing. */
-export type RoadmapViewErrorCode = "NOT_FOUND" | "FORBIDDEN" | "INVALID" | "LIMIT"
+export type SavedViewErrorCode = "NOT_FOUND" | "FORBIDDEN" | "INVALID" | "LIMIT" | "CONFLICT"
 
-export class RoadmapViewError extends Error {
-  constructor(readonly code: RoadmapViewErrorCode, message: string) {
+export class SavedViewError extends Error {
+  constructor(readonly code: SavedViewErrorCode, message: string) {
     super(message)
-    this.name = "RoadmapViewError"
+    this.name = "SavedViewError"
   }
 }
 
-export function isRoadmapViewError(error: unknown): error is RoadmapViewError {
-  return error instanceof RoadmapViewError
+export function isSavedViewError(error: unknown): error is SavedViewError {
+  return error instanceof SavedViewError
 }
