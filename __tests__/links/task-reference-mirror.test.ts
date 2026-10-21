@@ -130,7 +130,7 @@ describe("registry entry", () => {
       ["DOC", "EXPERIMENT", "FEEDBACK_ITEM", "KEY_RESULT", "OBJECTIVE", "OPPORTUNITY", "REVIEW_REQUEST", "ROADMAP_ITEM", "SOLUTION"],
     );
     expect(def.from).toBe("TASK");
-    expect(def.legacy).toEqual({ legacyModule: "lib/task-link-writes.ts", backfillMigration: "097_entity_links_backfill_task", mode: "mirror" });
+    expect(def.legacy).toEqual({ legacyModule: "lib/task-link-writes.ts", backfillMigration: "097_entity_links_backfill_task", mode: "mirror", readFamily: "TASK" });
     expect(def.duplicatePolicy).toBe("error");
     expect(def.origins).toEqual(["DIRECT"]);
   });

@@ -133,7 +133,7 @@ describe("one writer: the generic surface cannot write or read this type", () =>
 
   it("the registry entry is legacy-mirrored, new-only (no backfill) and names its compat tools", () => {
     const def = getLinkType(KEY)!;
-    expect(def.legacy).toEqual({ legacyModule: "lib/typed-links.ts", backfillMigration: null, mode: "mirror" });
+    expect(def.legacy).toEqual({ legacyModule: "lib/typed-links.ts", backfillMigration: null, mode: "mirror", readFamily: "SOLUTION_KR" });
     expect(def.compat?.mcpTools).toEqual(["link_solution_to_key_result", "unlink_solution_from_key_result"]);
     expect(isLinkTypeEnabled(def)).toBe(true);
   });

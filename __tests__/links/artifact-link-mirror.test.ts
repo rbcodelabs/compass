@@ -196,7 +196,7 @@ describe("the mirror is invisible to reads and the generic tools", () => {
   it("registers both types as legacy mirrors of lib/artifacts.ts with the 096 backfill and the existing tools as compat", () => {
     for (const key of [SOLUTION, DECISION]) {
       const def = getLinkType(key)!;
-      expect(def.legacy).toEqual({ legacyModule: "lib/artifacts.ts", backfillMigration: "096_entity_links_backfill_artifact", mode: "mirror" });
+      expect(def.legacy).toEqual({ legacyModule: "lib/artifacts.ts", backfillMigration: "096_entity_links_backfill_artifact", mode: "mirror", readFamily: "ARTIFACT" });
       expect(isLinkTypeEnabled(def)).toBe(true);
       expect(def.cardinality).toEqual({ from: "many", to: "many" });
     }

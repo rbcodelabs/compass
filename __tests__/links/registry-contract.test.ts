@@ -38,7 +38,8 @@ vi.mock("@/lib/links/endpoints", async (importOriginal) => {
 await import("@/app/api/mcp/route");
 
 import { ENTITY_TYPE_VOCABULARY, normalizeEntityType, toWorkspaceEntityType, type LinkableEntityType } from "@/lib/entity-types";
-import { LINK_TYPES, LINK_TYPE_KEYS, getLinkType, toTypesOf, validateLinkTypeDef, type LinkTypeDef } from "@/lib/links/registry";
+import { LINK_READ_FAMILIES, LINK_READ_FLAG_NAMES, LINK_TYPES, LINK_TYPE_KEYS, getLinkType, toTypesOf, validateLinkTypeDef, type LinkTypeDef } from "@/lib/links/registry";
+import { FAMILY_LINK_TYPES } from "@/lib/links/read-compare";
 import { linkEntities } from "@/lib/links/service";
 import { AGENT_TOOL_POLICY, RESEARCH_TOOL_ALLOWLIST, TOOL_GATES, TOOL_SCOPES } from "@/lib/mcp-tool-gates";
 import { MCP_REST_PARITY_MANIFEST } from "@/lib/rest/parity-manifest";
@@ -62,6 +63,22 @@ describe("registry shape", () => {
     expect(validateLinkTypeDef(def)).toEqual([]);
     expect(getLinkType(def.key)).toBe(def);
     expect(def.restrictedContexts).toBe("deny");
+  });
+
+  it.each(defs.filter((def) => def.legacy).map((def) => [def.key, def] as const))("%s: a legacy adapter declares the read axis (static mode + a read family with its own flag)", (_key, def) => {
+    expect(["mirror", "shadow", "read"]).toContain(def.legacy!.mode);
+    expect(LINK_READ_FAMILIES).toContain(def.legacy!.readFamily);
+    expect(LINK_READ_FLAG_NAMES[def.legacy!.readFamily]).toMatch(/^COMPASS_ENTITY_LINKS_[A-Z_]+_READ$/);
+    // The read-compare module knows this type under that family, so a new legacy type cannot ship without a comparator entry.
+    expect(FAMILY_LINK_TYPES[def.legacy!.readFamily]).toContain(def.key);
+  });
+
+  it("every read family owns at least one legacy-backed type and read-compare lists no unknown type", () => {
+    for (const family of LINK_READ_FAMILIES) {
+      const owned = defs.filter((def) => def.legacy?.readFamily === family).map((def) => def.key).sort();
+      expect(owned.length).toBeGreaterThan(0);
+      expect([...FAMILY_LINK_TYPES[family]].sort()).toEqual(owned);
+    }
   });
 
   it("validateLinkTypeDef catches a bad entry (canary)", () => {

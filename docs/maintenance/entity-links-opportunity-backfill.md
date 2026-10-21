@@ -41,3 +41,29 @@ here because nothing yet calls for it.
   swallowed on failure), like phase 4's solution links. A failed drain leaves a row 095 prunes.
 - Origin changes made while the flag is off are not mirrored; 095 repairs them. With the flag off, removals of stale pointer and LEGACY objective rows still happen on the next legacy write (only creation is gated).
 - A live writer inserting a pair between 095's select and insert makes the unique index refuse that batch; the hook re-selects (bounded), and a re-POST resumes anyway.
+
+## Read flag and read parity (entity_links read flip)
+
+`COMPASS_ENTITY_LINKS_OPPORTUNITY_READ` = `off | shadow | on` decides how readers treat `OPPORTUNITY_TARGETS_OBJECTIVE` (origin compared) and `OPPORTUNITY_TARGETS_KEY_RESULT` (the `linked_key_result_id` pointer). Fail-closed: only the exact strings `shadow` and `on` count (in production
+exactly; elsewhere trimmed and case-insensitive), anything else, including unset, is `off`, and unlike the `*_MIRROR` flag there is no
+default-on outside production. Semantics: `off` reads the legacy table only; `shadow` serves the legacy result and compares it with
+`entity_links` (counts and ids only, never content), `on` serves `entity_links`. Rollback is always the flag set to `off`. The flag moves
+`LegacyAdapter.mode` from `mirror` to `shadow` / `read` (`effectiveLegacyMode` in `lib/links/registry.ts`).
+
+This change ships the flag, the comparator (`lib/links/read-compare.ts`) and the status below, and routes NO reader through them yet, so setting
+the flag changes nothing until the reader PR for this family lands.
+
+`GET /api/admin/migrate` reports `entityLinksReadParity` (read-only, counts and ids capped at 20): the read modes, `totalMismatches`, and per
+type `legacyLive`, `mirrorLive`, `onlyLegacy` (a flipped reader would hide the link), `onlyEntityLinks` (it would show an extra link) and
+`originDrift`. "Live" means both endpoints exist in the link's workspace, i.e. what the workspace-filtered readers show, so quarantined
+rows (dangling, cross-workspace) are absent on both sides. Cost: one scan of the legacy table plus the mirror rows of the family's types
+(`entity_links` has no index that leads with `link_type`); poll sparingly. Require zero mismatches (or an explained, repaired cause) before
+setting the flag to `on`. Types in this family: `opportunityObjective`, `opportunityKeyResultPointer`.
+
+The fourth family, `COMPASS_ENTITY_LINKS_SOLUTION_KR_READ` (`SOLUTION_TARGETS_KEY_RESULT`, status entry `solutionKeyResult`), has the same semantics but is new-only:
+no backfill has run, so its parity will show `onlyLegacy` for every pre-mirror link and it must stay `off` or `shadow` until a backfill exists.
+
+Testing note: the SQL half of `__tests__/links/read-parity-status.test.ts` is skipped unless `READ_PARITY_TEST_DATABASE_URL` points at a throwaway
+Postgres (any version >= 12, for example `postgresql://postgres@localhost:5499/t`); it builds and drops its own schema. Run it before changing
+`lib/migrations/entity-links-read-parity.ts`. Each family's parity query runs in its own transaction under `SET LOCAL statement_timeout = 15s`, so a
+slow query shows up as an `error` field in `entityLinksReadParity` instead of hanging the endpoint.
