@@ -13,6 +13,7 @@
  */
 
 import getPrisma from "@/lib/db"
+import { agentIdentityValidForUser, findAgentById } from "@/lib/agent-ownership"
 import { ok, fail } from "@/lib/mcp-output"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat"
@@ -26,8 +27,8 @@ async function resolveAuthor(authorName: string, authorType: AuthorType) {
   if (actor.purpose === "AGENT_TURN") return { authorName: "Compass assistant", authorType: "AGENT" as const }
   if (actor.purpose !== "AGENT") return { authorName, authorType }
   if (!actor.agentId || !actor.userId) throw new Error("Incomplete agent identity")
-  const agent = await getPrisma().agent.findFirst({ where: { id: actor.agentId, ownerUserId: actor.userId, status: "ACTIVE" }, select: { name: true } })
-  if (!agent) throw new Error("Agent is unavailable")
+  const agent = await findAgentById(getPrisma(), actor.agentId)
+  if (!agent || !agentIdentityValidForUser(agent, actor.userId)) throw new Error("Agent is unavailable")
   return { authorName: agent.name, authorType: "AGENT" as const }
 }
 

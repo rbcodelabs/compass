@@ -2689,13 +2689,28 @@ model Task {
 
 model Agent {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  ownerUserId String @map("owner_user_id") @db.Uuid
+  /// Set for USER-owned agents. Nullable since migration 098 so a WORKSPACE-owned agent can leave it empty;
+  /// read ownership through lib/agent-ownership.ts, never by comparing this column directly.
+  ownerUserId String? @map("owner_user_id") @db.Uuid
   name String @db.VarChar(255)
   description String? @db.Text
   status String @default("ACTIVE") @db.VarChar(20)
+  /// EXTERNAL (key based) | CLOUD (sandbox run). NULL (rows predating migration 098) reads as EXTERNAL.
+  kind String? @db.VarChar(20)
+  /// USER | WORKSPACE. NULL reads as USER.
+  ownerType String? @map("owner_type") @db.VarChar(20)
+  /// Bare UUID, no relation (DSQL). Set only when ownerType is WORKSPACE.
+  ownerWorkspaceId String? @map("owner_workspace_id") @db.Uuid
+  /// System prompt for CLOUD agents.
+  instructions String? @db.Text
+  /// NULL = system default.
+  model String? @db.VarChar(100)
+  /// WORKSPACE_MEMBERS | ADMINS | OWNER. NULL = the default for the owner type.
+  invokePolicy String? @map("invoke_policy") @db.VarChar(30)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @map("updated_at")
   @@index([ownerUserId])
+  @@index([ownerWorkspaceId], map: "agents_owner_workspace_id_idx")
   @@map("agents")
 }
 

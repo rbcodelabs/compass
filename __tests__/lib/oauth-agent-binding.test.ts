@@ -98,7 +98,7 @@ describe("a mutation through an agent-bound OAuth token", () => {
     vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
     oAuthToken.findFirst.mockResolvedValue(TOKEN_ROW)
     oAuthToken.update.mockResolvedValue({})
-    agent.findFirst.mockResolvedValue({ id: "agent-1" })
+    agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "user-1", status: "ACTIVE" })
     agentToolCall.create.mockResolvedValue({ id: "call-1" })
     agentToolCall.update.mockResolvedValue({})
   })
@@ -212,7 +212,7 @@ describe("an agent-bound OAuth token engages the agent authorization model", () 
     vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
     oAuthToken.findFirst.mockResolvedValue(TOKEN_ROW)
     oAuthToken.update.mockResolvedValue({})
-    agent.findFirst.mockResolvedValue({ id: "agent-1" })
+    agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "user-1", status: "ACTIVE" })
   })
 
   it("narrows workspace reach to unrevoked grants, not to every membership", async () => {

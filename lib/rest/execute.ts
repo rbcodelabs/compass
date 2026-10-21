@@ -1,5 +1,6 @@
 import getPrisma from "@/lib/db"
 import { agentWorkspaceWhere } from "@/lib/agent-access"
+import { findAgentById, isUserOwnedBy, isWorkspaceOwned } from "@/lib/agent-ownership"
 import { assertOrgAdminBySlug, assertOrgMemberBySlug, assertScoringModelAccess, assertWorkspaceAdmin, assertWorkspaceMember, getMcpActor, isServiceActor } from "@/lib/mcp-authz"
 import { decodeCursor, decodeOrderedCursor, encodeCursor, encodeOrderedCursor, type OrderedCursorPayload } from "@/lib/rest/cursor"
 import type { RestAuthorizationPolicy, RestRoute } from "@/lib/rest/registry"
@@ -921,8 +922,9 @@ function assertHumanCommentBodyEditor(actor: ReturnType<typeof getMcpActor>) {
 }
 async function restActorName(prisma: Prisma, actor: ReturnType<typeof getMcpActor>): Promise<string> {
   if ((actor.purpose === "AGENT" || actor.purpose === "AGENT_TURN") && actor.agentId) {
-    const agent = await prisma.agent.findFirst({ where: { id: actor.agentId, ...(actor.userId ? { ownerUserId: actor.userId } : {}) }, select: { name: true } })
-    return agent?.name ?? "Compass agent"
+    const agent = await findAgentById(prisma, actor.agentId)
+    // Same display rule as before: a name only for an agent this actor's user may act as.
+    return agent && (!actor.userId || isWorkspaceOwned(agent) || isUserOwnedBy(agent, actor.userId)) ? agent.name : "Compass agent"
   }
   if (actor.userId) {
     const user = await prisma.user.findFirst({ where: { id: actor.userId }, select: { name: true, email: true } })

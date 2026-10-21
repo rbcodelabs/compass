@@ -40,10 +40,21 @@ it("deletes conversation credentials and child receipts before conversations", a
 });
 describe("agent lifecycle", () => {
   it("revokes only the departing member's workspace grants", async () => {
-    const db = { agent: { findMany: vi.fn().mockResolvedValue([{ id: "agent" }]) }, agentWorkspaceGrant: { updateMany: vi.fn() } };
+    const db = { agent: { findMany: vi.fn().mockResolvedValue([{ id: "agent", ownerUserId: "owner" }]) }, agentWorkspaceGrant: { updateMany: vi.fn() } };
     await revokeMemberAgentGrants(db as unknown as AppTransactionClient, "workspace", "owner");
-    expect(db.agent.findMany).toHaveBeenCalledWith({ where: { ownerUserId: "owner" }, select: { id: true } });
+    expect(db.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { ownerUserId: "owner" } }));
     expect(db.agentWorkspaceGrant.updateMany).toHaveBeenCalledWith({ where: { workspaceId: "workspace", agentId: { in: ["agent"] }, revokedAt: null }, data: { revokedAt: expect.any(Date), updatedAt: expect.any(Date) } });
+  });
+  it("never revokes a WORKSPACE-owned agent when a member leaves, even if the row still names them", async () => {
+    // A WORKSPACE-owned agent belongs to the workspace, so one member leaving must not strip its grants.
+    const db = { agent: { findMany: vi.fn().mockResolvedValue([{ id: "personal", ownerUserId: "owner", ownerType: "USER" }, { id: "shared", ownerUserId: "owner", ownerType: "WORKSPACE", ownerWorkspaceId: "workspace" }]) }, agentWorkspaceGrant: { updateMany: vi.fn() } };
+    await revokeMemberAgentGrants(db as unknown as AppTransactionClient, "workspace", "owner");
+    expect(db.agentWorkspaceGrant.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ agentId: { in: ["personal"] } }) }));
+  });
+  it("revokes nothing when the departing member owns no USER-owned agent", async () => {
+    const db = { agent: { findMany: vi.fn().mockResolvedValue([{ id: "shared", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "workspace" }]) }, agentWorkspaceGrant: { updateMany: vi.fn() } };
+    await revokeMemberAgentGrants(db as unknown as AppTransactionClient, "workspace", "owner");
+    expect(db.agentWorkspaceGrant.updateMany).not.toHaveBeenCalled();
   });
   it("removes workspace records without deleting cross-workspace identities or keys", async () => {
     const db = { apiKey: { deleteMany: vi.fn() }, pMInterview: { updateMany: vi.fn() }, agentMessage: { deleteMany: vi.fn() }, agentAuditLog: { deleteMany: vi.fn() }, agentConversation: { deleteMany: vi.fn() }, agentWorkspaceGrant: { deleteMany: vi.fn() }, agentToolCall: { deleteMany: vi.fn() }, ...runDelegates() };
