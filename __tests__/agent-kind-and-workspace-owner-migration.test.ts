@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import type { PoolClient } from "pg"
-import { assertAgentKindAndWorkspaceOwnerMigration } from "@/lib/migrations/agent-kind-and-workspace-owner"
+import { assertAgentKindAndWorkspaceOwnerMigration, assertAgentOwnerUserNullableMigration } from "@/lib/migrations/agent-kind-and-workspace-owner"
 
 /**
  * Static guards for 098_agent_kind_and_workspace_owner. The DDL that reaches Aurora DSQL is the
@@ -13,9 +13,11 @@ const NAME = "098_agent_kind_and_workspace_owner"
 const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8")
 const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8")
 const sqlPath = path.join(ROOT, "prisma/migrations", NAME, "migration.sql")
-const sql = existsSync(sqlPath)
-  ? readFileSync(sqlPath, "utf-8").split("\n").map((line) => line.replace(/--.*$/, "")).join("\n")
-  : ""
+const NULLABLE_NAME = "099_agent_owner_user_nullable"
+const nullablePath = path.join(ROOT, "prisma/migrations", NULLABLE_NAME, "migration.sql")
+const stripComments = (path: string) => (existsSync(path) ? readFileSync(path, "utf-8").split("\n").map((line) => line.replace(/--.*$/, "")).join("\n") : "")
+const sql = stripComments(sqlPath)
+const nullableStatements = stripComments(nullablePath).split(";").map((s) => s.trim()).filter(Boolean)
 const statements = sql.split(";").map((s) => s.trim()).filter(Boolean)
 const agentModel = schema.match(/model Agent \{[^}]*\}/)?.[0] ?? ""
 
@@ -26,8 +28,8 @@ describe(NAME, () => {
     expect(runner.indexOf(`name: "${NAME}"`)).toBeGreaterThan(runner.indexOf('name: "097_entity_links_backfill_task"'))
   })
 
-  it("is six bare nullable columns, one DROP NOT NULL, then one async index (one DDL per statement)", () => {
-    expect(statements).toHaveLength(8)
+  it("is six bare nullable columns, then one async index (one DDL per statement)", () => {
+    expect(statements).toHaveLength(7)
     const columns = [
       ["kind", "VARCHAR\\(20\\)"],
       ["owner_type", "VARCHAR\\(20\\)"],
@@ -40,14 +42,23 @@ describe(NAME, () => {
       // DSQL rejects any constraint or DEFAULT on ADD COLUMN, so each is bare and nullable.
       expect(statements[index]).toMatch(new RegExp(`^ALTER TABLE agents ADD COLUMN IF NOT EXISTS ${column} ${type}$`, "i"))
     })
-    expect(statements[6]).toMatch(/^ALTER TABLE agents ALTER COLUMN owner_user_id DROP NOT NULL$/i)
-    expect(statements[7]).toMatch(/^CREATE INDEX ASYNC IF NOT EXISTS agents_owner_workspace_id_idx ON agents\(owner_workspace_id\)$/i)
+    expect(statements[6]).toMatch(/^CREATE INDEX ASYNC IF NOT EXISTS agents_owner_workspace_id_idx ON agents\(owner_workspace_id\)$/i)
   })
 
   it("is idempotent and additive: IF NOT EXISTS on every create, no foreign keys, defaults, backfill or deletes", () => {
     for (const statement of statements.slice(0, 6)) expect(statement).toMatch(/IF NOT EXISTS/i)
     expect(sql).not.toMatch(/REFERENCES|CREATE TYPE|CREATE TRIGGER|\bWHERE\b|SERIAL|\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bDEFAULT\b|\bNOT NULL\b(?!\s*;)/i)
     expect(sql).not.toMatch(/DROP COLUMN|DROP TABLE|RENAME/i)
+  })
+
+  it("registers 099 exactly once, directly after 098, as the lone DROP NOT NULL", () => {
+    expect([...runner.matchAll(new RegExp(`name:\\s*"${NULLABLE_NAME}"`, "g"))]).toHaveLength(1)
+    expect(runner.indexOf(`name: "${NULLABLE_NAME}"`)).toBeGreaterThan(runner.indexOf(`name: "${NAME}"`))
+    expect(nullableStatements).toEqual(["ALTER TABLE agents ALTER COLUMN owner_user_id DROP NOT NULL"])
+    expect(sql).not.toMatch(/owner_user_id/)
+    // No async DDL, so it is deliberately absent from the async wait lists.
+    expect(runner).not.toMatch(/"099_agent_owner_user_nullable"[^\n]*\]\.includes\(migration\.name\)/)
+    expect(runner).toContain('migration.name === "099_agent_owner_user_nullable") await assertAgentOwnerUserNullableMigration')
   })
 
   it("maps the same columns and index in schema.prisma, with owner_user_id nullable and no @updatedAt", () => {
@@ -100,16 +111,6 @@ describe(`${NAME} postcondition`, () => {
     await expect(assertAgentKindAndWorkspaceOwnerMigration(client({}), "s")).resolves.toBeUndefined()
   })
 
-  it("fails when owner_user_id is still NOT NULL (a DSQL that refused the statement must not record success)", async () => {
-    const columns = [
-      { column_name: "owner_user_id", is_nullable: "NO", data_type: "uuid" },
-      ...["kind", "owner_type", "invoke_policy", "model"].map((column_name) => ({ column_name, is_nullable: "YES", data_type: "character varying" })),
-      { column_name: "owner_workspace_id", is_nullable: "YES", data_type: "uuid" },
-      { column_name: "instructions", is_nullable: "YES", data_type: "text" },
-    ]
-    await expect(assertAgentKindAndWorkspaceOwnerMigration(client({ columns }), "s")).rejects.toThrow(/owner_user_id/)
-  })
-
   it("fails when a new column is missing or has the wrong shape", async () => {
     const base = [
       { column_name: "owner_user_id", is_nullable: "YES", data_type: "uuid" },
@@ -134,5 +135,18 @@ describe(`${NAME} postcondition`, () => {
     ["partial", { predicate: "(status = 'ACTIVE')" }],
   ])("fails when the owner_workspace_id index is %s", async (_label, index) => {
     await expect(assertAgentKindAndWorkspaceOwnerMigration(client({ index }), "s")).rejects.toThrow(/agents_owner_workspace_id_idx/)
+  })
+})
+
+describe(`${NULLABLE_NAME} postcondition`, () => {
+  const client = (rows: { is_nullable: string }[]) => ({ query: vi.fn(async () => ({ rows })) }) as unknown as PoolClient
+  it("passes when owner_user_id is nullable", async () => {
+    await expect(assertAgentOwnerUserNullableMigration(client([{ is_nullable: "YES" }]), "s")).resolves.toBeUndefined()
+  })
+  it("fails when owner_user_id is still NOT NULL (a DSQL that refused the statement must not record success)", async () => {
+    await expect(assertAgentOwnerUserNullableMigration(client([{ is_nullable: "NO" }]), "s")).rejects.toThrow(/owner_user_id/)
+  })
+  it("fails when the column is missing", async () => {
+    await expect(assertAgentOwnerUserNullableMigration(client([]), "s")).rejects.toThrow(/owner_user_id/)
   })
 })

@@ -30,7 +30,7 @@ import { assertRoadmapViewsMigration } from "@/lib/migrations/roadmap-views";
 import { assertAgentSessionsMigration } from "@/lib/migrations/agent-sessions";
 import { assertAgentWebSearchesMigration } from "@/lib/migrations/agent-web-searches";
 import { assertAgentConversationParticipantsMigration } from "@/lib/migrations/agent-conversation-participants";
-import { assertAgentKindAndWorkspaceOwnerMigration } from "@/lib/migrations/agent-kind-and-workspace-owner";
+import { assertAgentKindAndWorkspaceOwnerMigration, assertAgentOwnerUserNullableMigration } from "@/lib/migrations/agent-kind-and-workspace-owner";
 import { assertEntityLinksMigration } from "@/lib/migrations/entity-links";
 import { assertWorkItemIdsMigration, WORK_ITEM_IDS_MIGRATION } from "@/lib/migrations/work-item-ids";
 import { ENTITY_LINKS_TASK_BACKFILL_MIGRATION, assertEntityLinksTaskBackfill, backfillEntityLinksTask, getEntityLinksTaskStatus } from "@/lib/migrations/entity-links-task-backfill";
@@ -636,10 +636,16 @@ const MIGRATIONS: readonly MigrationEntry[] = [
   },
   {
     // Cloud agents as first-class identities, PR1: six nullable columns on agents (kind, owner_type, owner_workspace_id,
-    // instructions, model, invoke_policy), owner_user_id DROP NOT NULL, and one async owner_workspace_id index. No backfill: NULL reads as
-    // EXTERNAL / USER. The 098 postcondition proves the columns, the nullability change and that the index is valid and ready.
+    // instructions, model, invoke_policy) and one async owner_workspace_id index. No backfill: NULL reads as
+    // EXTERNAL / USER. The 098 postcondition proves the columns and that the index is valid and ready.
     name: "098_agent_kind_and_workspace_owner",
     filePath: path.join(process.cwd(), "prisma/migrations/098_agent_kind_and_workspace_owner/migration.sql"),
+  },
+  {
+    // owner_user_id DROP NOT NULL, split from 098 so a DSQL refusal cannot block 098's receipt. WORKSPACE-owned agent creation
+    // must not ship until both 098 and 099 are confirmed applied. The postcondition proves the column is really nullable.
+    name: "099_agent_owner_user_nullable",
+    filePath: path.join(process.cwd(), "prisma/migrations/099_agent_owner_user_nullable/migration.sql"),
   },
 ];
 
@@ -2159,6 +2165,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "081_agent_web_searches") await assertAgentWebSearchesMigration(client, schema)
       if (migration.name === "082_agent_conversation_participants") await assertAgentConversationParticipantsMigration(client, schema)
       if (migration.name === "098_agent_kind_and_workspace_owner") await assertAgentKindAndWorkspaceOwnerMigration(client, schema)
+      if (migration.name === "099_agent_owner_user_nullable") await assertAgentOwnerUserNullableMigration(client, schema)
       if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {
         // Data half: backfill from the parent in bounded batches, then prove it.
         // Both run before the receipt below, so a failure leaves an unfinished
