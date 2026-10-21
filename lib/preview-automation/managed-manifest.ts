@@ -201,7 +201,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Cloud agents PR1: six nullable agents columns and one async owner_workspace_id index. No backfill.
   "098_agent_kind_and_workspace_owner": "239b13f323e305a41820e7e8c12cc6af06a723b9355cb1fb00aeaa6393cf0fe0",
   // Cloud agents PR1: owner_user_id DROP NOT NULL (as 070), split from 098 so a DSQL refusal cannot block 098's receipt.
-  "099_agent_owner_user_nullable": "9587f0d2c28ca41c92a4217c068966639aac72f722cca8943180751940ab231d"
+  "099_agent_owner_user_nullable": "9587f0d2c28ca41c92a4217c068966639aac72f722cca8943180751940ab231d",
+  // entity_links data half for Solution <-> Key Result (ADR phase 4): no DDL, EXPLICIT-ONLY, the work is the hook
+  // (lib/migrations/entity-links-solution-key-result-backfill.ts). Shares the numeric prefix 098 with the agent migration; the name is unique.
+  "098_entity_links_backfill_solution_key_result": "795934c658367a187f400eec3068e1e946d13ecf37b71daf758fb1c87ba4697f" // gitleaks:allow -- reviewed public SHA256, not a credential
 };
 
 /**
@@ -293,6 +296,11 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   "099_agent_owner_user_nullable": {
     "lib/migrations/agent-kind-and-workspace-owner.ts": "c91e3e799fe030d2f11066e8cac55da25844ffcd03c27686d3b7dab66dd4d7e8",
+  },
+  // The 098 solution-key-result backfill hook and the OCC retry it imports; editing either re-reviews the migration.
+  "098_entity_links_backfill_solution_key_result": {
+    "lib/migrations/entity-links-solution-key-result-backfill.ts": "e61171d6fd196cacbb79708691aef6610a3adf6340c189a516738db498a7665d", // gitleaks:allow -- reviewed public SHA256, not a credential
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };
 

@@ -1,5 +1,5 @@
 /**
- * Phase 4: Solution <-> Key Result is "new-only". solution_key_result_links stays the source of truth;
+ * Phase 4: Solution <-> Key Result mirror (backfilled by 098). solution_key_result_links stays the source of truth;
  * lib/typed-links.ts mirrors each link/unlink into entity_links (SOLUTION_TARGETS_KEY_RESULT) in the same
  * transaction while COMPASS_ENTITY_LINKS_SOLUTION_KR_MIRROR is on. Reads and the generic tools ignore the type.
  */
@@ -131,9 +131,9 @@ describe("one writer: the generic surface cannot write or read this type", () =>
     expect((await listLinks(tx(), { workspaceId: WS_A.id, entityType: "SOLUTION", entityId: "sol-a", limit: 10 })).items).toEqual([]);
   });
 
-  it("the registry entry is legacy-mirrored, new-only (no backfill) and names its compat tools", () => {
+  it("the registry entry is legacy-mirrored, names its explicit-only 098 backfill and its compat tools", () => {
     const def = getLinkType(KEY)!;
-    expect(def.legacy).toEqual({ legacyModule: "lib/typed-links.ts", backfillMigration: null, mode: "mirror", readFamily: "SOLUTION_KR" });
+    expect(def.legacy).toEqual({ legacyModule: "lib/typed-links.ts", backfillMigration: "098_entity_links_backfill_solution_key_result", mode: "mirror", readFamily: "SOLUTION_KR" });
     expect(def.compat?.mcpTools).toEqual(["link_solution_to_key_result", "unlink_solution_from_key_result"]);
     expect(isLinkTypeEnabled(def)).toBe(true);
   });

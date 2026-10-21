@@ -33,6 +33,7 @@ import { assertAgentConversationParticipantsMigration } from "@/lib/migrations/a
 import { assertAgentKindAndWorkspaceOwnerMigration, assertAgentOwnerUserNullableMigration } from "@/lib/migrations/agent-kind-and-workspace-owner";
 import { assertEntityLinksMigration } from "@/lib/migrations/entity-links";
 import { assertWorkItemIdsMigration, WORK_ITEM_IDS_MIGRATION } from "@/lib/migrations/work-item-ids";
+import { ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, assertEntityLinksSolutionKeyResultBackfill, backfillEntityLinksSolutionKeyResult, getEntityLinksSolutionKeyResultStatus } from "@/lib/migrations/entity-links-solution-key-result-backfill";
 import { ENTITY_LINKS_TASK_BACKFILL_MIGRATION, assertEntityLinksTaskBackfill, backfillEntityLinksTask, getEntityLinksTaskStatus } from "@/lib/migrations/entity-links-task-backfill";
 import { getEntityLinksReadParityStatus } from "@/lib/migrations/entity-links-read-parity";
 import { ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, assertEntityLinksOpportunityBackfill, backfillEntityLinksOpportunity, getEntityLinksOpportunityStatus } from "@/lib/migrations/entity-links-opportunity-backfill";
@@ -647,6 +648,14 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // must not ship until both 098 and 099 are confirmed applied. The postcondition proves the column is really nullable.
     name: "099_agent_owner_user_nullable",
     filePath: path.join(process.cwd(), "prisma/migrations/099_agent_owner_user_nullable/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY. Backfills entity_links (SOLUTION_TARGETS_KEY_RESULT) from solution_key_result_links, closing the phase 4 "new-only"
+    // gap before the Solution-KR read flip. Inconsistent legacy rows are quarantined and reported, never linked or deleted. The hook proves its
+    // postconditions before the receipt. POST it by name after the mirroring code and COMPASS_ENTITY_LINKS_SOLUTION_KR_MIRROR are live; never
+    // untargeted. Shares the numeric prefix 098 with the agent migration (duplicate prefixes are accepted, ADR-0012); the name is unique.
+    name: "098_entity_links_backfill_solution_key_result",
+    filePath: path.join(process.cwd(), "prisma/migrations/098_entity_links_backfill_solution_key_result/migration.sql"),
   },
 ];
 
@@ -1844,6 +1853,8 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
       entityLinksArtifactBackfill: await getEntityLinksArtifactStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       // Counts and capped quarantine ids for 097 (task links), readable before it is POSTed.
       entityLinksTaskBackfill: await getEntityLinksTaskStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
+      // Counts and capped quarantine ids for 098_entity_links_backfill_solution_key_result, readable before it is POSTed.
+      entityLinksSolutionKeyResultBackfill: await getEntityLinksSolutionKeyResultStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       // Read-flip parity (PR A of the entity_links read flip): per family, live legacy rows vs live mirror rows, plus the read modes. Counts and capped ids only.
       entityLinksReadParity: await getEntityLinksReadParityStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
       workItemIdsBackfill: await getWorkItemIdsBackfillStatus(client, schema).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })),
@@ -1858,10 +1869,10 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION];
 
 /**
- * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097).
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 098_entity_links_backfill_solution_key_result).
  * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
  * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
  * Production-style callers (the admin route, an untargeted POST) never set it.
@@ -2213,6 +2224,12 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         // leaves an unfinished attempt and the next POST resumes.
         await backfillEntityLinksTask(client, schema, log)
         await assertEntityLinksTaskBackfill(client, schema)
+      }
+      if (migration.name === ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION) {
+        // Data half: mirror the legacy Solution-Key Result links (quarantining the inconsistent ones), then prove it. Before the receipt below, so a
+        // failure leaves an unfinished attempt and the next POST resumes.
+        await backfillEntityLinksSolutionKeyResult(client, schema, log)
+        await assertEntityLinksSolutionKeyResultBackfill(client, schema)
       }
       if (migration.name === "090_v0_chat_artifacts") {
         const columns = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND ((table_name='artifacts' AND column_name='v0_chat_id') OR (table_name='artifact_revisions' AND column_name='v0_version_id'))", [schema])

@@ -60,8 +60,8 @@ rows (dangling, cross-workspace) are absent on both sides. Cost: one scan of the
 (`entity_links` has no index that leads with `link_type`); poll sparingly. Require zero mismatches (or an explained, repaired cause) before
 setting the flag to `on`. Types in this family: `opportunityObjective`, `opportunityKeyResultPointer`.
 
-The fourth family, `COMPASS_ENTITY_LINKS_SOLUTION_KR_READ` (`SOLUTION_TARGETS_KEY_RESULT`, status entry `solutionKeyResult`), has the same semantics but is new-only:
-no backfill has run, so its parity will show `onlyLegacy` for every pre-mirror link and it must stay `off` or `shadow` until a backfill exists.
+The fourth family, `COMPASS_ENTITY_LINKS_SOLUTION_KR_READ` (`SOLUTION_TARGETS_KEY_RESULT`, status entry `solutionKeyResult`), has the same semantics and is backfilled by the explicit-only `098_entity_links_backfill_solution_key_result` (runbook:
+`entity-links-solution-key-result-backfill.md`). Until 098 has been applied its parity shows `onlyLegacy` for every pre-mirror link, so it must stay `off` or `shadow` until then.
 
 Testing note: the SQL half of `__tests__/links/read-parity-status.test.ts` is skipped unless `READ_PARITY_TEST_DATABASE_URL` points at a throwaway
 Postgres (any version >= 12, for example `postgresql://postgres@localhost:5499/t`); it builds and drops its own schema. Run it before changing
