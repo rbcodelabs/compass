@@ -24,6 +24,7 @@ import { parseUnscheduledDragId, type UnscheduledItem } from "../unscheduled-ite
 import { ScheduleRail, type BulkPlacement, type SolutionRailItem } from "../schedule/schedule-rail";
 import { SchedulePalette, type PaletteDates } from "../schedule/schedule-palette";
 import { RailRegion, useRailState } from "../schedule/rail-region";
+import { CollapsedSidebarTab } from "../schedule/sidebar-chrome";
 import type { RailPreference } from "@/lib/roadmap/rail-state";
 import { RangeSchedulePopover } from "../schedule/range-schedule-popover";
 import type { WorkspaceSavedViews } from "../workspace-saved-views";
@@ -120,7 +121,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
   scheduleCatalog?: ScheduleCatalog;
   /** The workspace has no ACTIVE roadmap items at all (not merely none matching the current filter). */
   roadmapEmpty?: boolean;
-  /** The user's explicit open/closed choice for the Ready to schedule rail (server-read cookie); null follows the viewport default. */
+  /** The user's explicit open/closed choice for the Not scheduled sidebar (server-read cookie); null follows the viewport default. */
   initialRailPreference?: RailPreference | null;
 }) {
   const labels = useLabels();
@@ -555,19 +556,6 @@ export function NativeTimeline(props: TimelineEngineProps & {
           }}
         >
           <section data-testid="timeline-engine-native" className="flex min-w-0 flex-col p-1 min-[1320px]:flex-row min-[1320px]:items-start">
-            <RailRegion id={railId} mode={rail.mode} open={rail.open} regionRef={railRegionRef}>
-            <ScheduleRail
-              className="max-h-80 min-[1320px]:max-h-[calc(100dvh-9rem)] min-[1320px]:w-80"
-              items={controller.unscheduled}
-              squads={props.headerSquads ?? props.squads}
-              autoAdded={autoAdded}
-              pendingItemKeys={controller.pendingBacklogIds}
-              onScheduleOne={(item) => { void controller.scheduleSolutions([{ solutionId: item.id }]).catch(() => undefined); }}
-              onBulkSchedule={scheduleFromRail}
-              onQuickAddFeedback={(item, horizon) => controller.quickAdd(item satisfies UnscheduledItem, horizon)}
-              onUndoAuto={(item) => { void controller.undoCreated([item.id]).catch(() => undefined); }}
-            />
-            </RailRegion>
             <div className="flex min-w-0 flex-1 flex-col gap-3">
             {controller.reconciliationRequiredIds.size > 0 && <p role="alert" className="text-sm text-muted-foreground">An item changed elsewhere. Reload the timeline before editing it again.</p>}
             {showEmptyState ? (
@@ -577,7 +565,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
                 onBuild={(preset) => controller.buildFromDiscovery(preset)}
                 onAddManually={() => {
                   setManualMode(true);
-                  pushUndoToast({ message: "Blank roadmap. Draw on a row, press / to search, or open the Ready to schedule rail to drag items." });
+                  pushUndoToast({ message: "Blank roadmap. Draw on a row, press / to search, or open the Not scheduled sidebar to drag items." });
                 }}
               />
             ) : (
@@ -733,6 +721,29 @@ export function NativeTimeline(props: TimelineEngineProps & {
               onSave={(horizon, start, end) => controller.reschedule(editing!.id, horizon, start, end)}
             />
             </div>
+            <RailRegion id={railId} mode={rail.mode} open={rail.open} regionRef={railRegionRef}>
+            <ScheduleRail
+              className="max-h-80 w-full min-[1320px]:max-h-[calc(100dvh-9rem)]"
+              onCollapse={toggleRail}
+              controlsId={railId}
+              items={controller.unscheduled}
+              squads={props.headerSquads ?? props.squads}
+              autoAdded={autoAdded}
+              pendingItemKeys={controller.pendingBacklogIds}
+              onScheduleOne={(item) => { void controller.scheduleSolutions([{ solutionId: item.id }]).catch(() => undefined); }}
+              onBulkSchedule={scheduleFromRail}
+              onQuickAddFeedback={(item, horizon) => controller.quickAdd(item satisfies UnscheduledItem, horizon)}
+              onUndoAuto={(item) => { void controller.undoCreated([item.id]).catch(() => undefined); }}
+            />
+            </RailRegion>
+            {!rail.open && (
+              <CollapsedSidebarTab
+                className="ml-3 hidden min-[1320px]:flex"
+                count={controller.unscheduled.length}
+                controls={railId}
+                onClick={toggleRail}
+              />
+            )}
             <SchedulePalette
               open={paletteOpen}
               onOpenChange={setPaletteOpen}

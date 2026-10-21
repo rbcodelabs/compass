@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 import Link from "next/link";
-import { CalendarDays, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, RefreshCw, Shuffle } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, PanelRightClose, PanelRightOpen, RefreshCw, Shuffle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -16,7 +16,7 @@ import type { TimelineZoom } from "./native-timeline/timeline-model";
 import type { CustomFieldFilterGroup } from "@/lib/custom-field-filter";
 import type { SquadData } from "@/lib/types";
 
-/** The collapsible "Ready to schedule" rail the header toggles. */
+/** The collapsible "Not scheduled" sidebar the header toggles. */
 type RailToggle = {
   open: boolean;
   onToggle: () => void;
@@ -42,11 +42,11 @@ function RailToggleButton({ rail }: { rail: RailToggle }) {
   const tooltipId = useId();
   const summaryId = useId();
   const [tooltipOpen, setTooltipOpen] = useState(false);
-  const label = rail.open ? "Hide ready-to-schedule rail" : "Show ready-to-schedule rail";
+  const label = rail.open ? "Hide not-scheduled sidebar" : "Show not-scheduled sidebar";
   const summary = rail.count === 0
-    ? "Nothing waiting to schedule"
-    : `${rail.count} ready to schedule${rail.autoAdded > 0 ? `, ${rail.autoAdded} auto-added` : ""}`;
-  const Icon = rail.open ? PanelLeftClose : PanelLeftOpen;
+    ? "Nothing not scheduled"
+    : `${rail.count} not scheduled${rail.autoAdded > 0 ? `, ${rail.autoAdded} auto-added` : ""}`;
+  const Icon = rail.open ? PanelRightClose : PanelRightOpen;
   return (
     <TooltipProvider>
     <Tooltip onOpenChange={setTooltipOpen}>
@@ -70,8 +70,8 @@ function RailToggleButton({ rail }: { rail: RailToggle }) {
 
 /**
  * Roadmap's header, on the shared workspace frame (docs/design/workspace-header.md).
- * Slot order: View (board / timeline) → timeline navigation and
- * ready-to-schedule rail toggle → Arrange (group-by, timeline only) → Filter →
+ * Slot order: View (board / timeline, then saved views) → timeline navigation and
+ * not-scheduled sidebar toggle → Arrange (group-by, timeline only) → Filter →
  * auto-sync status → Primary (Schedule from discovery, timeline only) → ⋯ (card sort;
  * timeline scale and reload, timeline only).
  * The row below the title under `md` carries everything after the view toggle.
