@@ -33,8 +33,6 @@
 // lib/route-access.ts so the middleware doesn't 302 it, then it enforces the
 // session itself (401 otherwise).
 
-import { readFileSync } from "node:fs"
-import path from "node:path"
 import { randomUUID } from "node:crypto"
 import { NextRequest } from "next/server"
 import { auth } from "@/auth"
