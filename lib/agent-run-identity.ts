@@ -15,6 +15,7 @@
 
 import type { AppPrismaClient } from "@/lib/db"
 import { agentIdentityValidForActor, agentsEnabled, liveGrantedWorkspaceIds } from "@/lib/agent-access"
+import { BUILT_IN_AGENT_SELECTION, getStoredDefaultAgentIds } from "@/lib/agent-defaults"
 import { agentKind, canInvokeAgent, findAgentById, type AgentRecord } from "@/lib/agent-ownership"
 
 /**
@@ -33,36 +34,66 @@ export class AgentSelectionError extends Error {
 
 const NOT_AVAILABLE = "Agent not found or not available in this workspace."
 
+/** Whether an agent may start a run for this user in this workspace; a refusal carries the error to throw for an explicit pick. */
+type Runnable = { ok: true; agent: AgentRecord } | { ok: false; error: AgentSelectionError }
+
 /**
- * The agent a run should act as, or null for the built-in assistant (the pre-agents behaviour).
- *
- * Phase 2 accepts only an EXPLICIT agent id; the default tables (user override, workspace default) arrive
- * with phase 3 and will be consulted here when \`requestedAgentId\` is absent. Everything below runs on
- * every explicit request, so a hand-edited agent id gets no further than a picker would.
+ * The checks every pick goes through, explicit or default:
  *
  *  - It must exist, be a CLOUD agent, and be ACTIVE (a suspended agent cannot start a run).
  *  - It must hold a live grant in THIS workspace (a shared agent is also confined to the workspace that owns
  *    it, and its grants must still be backed by a current administrator). An agent with no grant here would
  *    run with no reach at all; refusing is clearer than starting a run that can do nothing.
- *  - \`canInvokeAgent\` must allow the invoker (a USER-owned agent: its owner only; a shared agent: per its policy).
+ *  - `canInvokeAgent` must allow the invoker (a USER-owned agent: its owner only; a shared agent: per its policy).
  *
  * Not-found, wrong kind, suspended and not-granted all answer the same way so an id reveals nothing; only a
  * policy refusal is distinguishable, and only for an agent the caller can already see is usable here.
+ */
+async function checkRunnable(prisma: AppPrismaClient, input: { userId: string; workspaceId: string; agentId: string }): Promise<Runnable> {
+  const notFound: Runnable = { ok: false, error: new AgentSelectionError(NOT_AVAILABLE, 404, "AGENT_NOT_FOUND") }
+  const agent = await findAgentById(prisma, input.agentId)
+  if (!agent || agent.status !== "ACTIVE" || agentKind(agent) !== "CLOUD") return notFound
+  const granted = await liveGrantedWorkspaceIds(agent, "READ")
+  if (!granted.includes(input.workspaceId)) return notFound
+  if (!(await canInvokeAgent(prisma, { userId: input.userId }, agent))) {
+    return { ok: false, error: new AgentSelectionError("You are not allowed to run this agent.", 403, "AGENT_NOT_INVOKABLE") }
+  }
+  return { ok: true, agent }
+}
+
+/**
+ * The agent a run should act as, or null for the built-in assistant (the pre-agents behaviour).
+ *
+ * Order: explicit pick > the user's own default > the workspace default > built-in.
+ *
+ *  - An EXPLICIT pick (`requestedAgentId`) must pass every check or the request is refused: a hand-edited agent id
+ *    gets no further than a picker would. The literal {@link BUILT_IN_AGENT_SELECTION} means "the built-in agent, on
+ *    purpose" and skips the defaults.
+ *  - A DEFAULT is only a convenience. One that is gone, suspended, no longer granted here, or not invokable by this
+ *    user falls through to the next level without an error, so revoking a grant or suspending an agent can never break
+ *    anyone's chat.
+ *  - With agents disabled, defaults are not consulted at all (built-in), but an explicit pick is refused.
  */
 export async function resolveRunAgent(
   prisma: AppPrismaClient,
   input: { userId: string; workspaceId: string; requestedAgentId?: string | null },
 ): Promise<AgentRecord | null> {
-  if (input.requestedAgentId == null) return null
-  if (!agentsEnabled()) throw new AgentSelectionError(NOT_AVAILABLE, 404, "AGENT_NOT_FOUND")
-  const agent = await findAgentById(prisma, input.requestedAgentId)
-  if (!agent || agent.status !== "ACTIVE" || agentKind(agent) !== "CLOUD") throw new AgentSelectionError(NOT_AVAILABLE, 404, "AGENT_NOT_FOUND")
-  const granted = await liveGrantedWorkspaceIds(agent, "READ")
-  if (!granted.includes(input.workspaceId)) throw new AgentSelectionError(NOT_AVAILABLE, 404, "AGENT_NOT_FOUND")
-  if (!(await canInvokeAgent(prisma, { userId: input.userId }, agent))) {
-    throw new AgentSelectionError("You are not allowed to run this agent.", 403, "AGENT_NOT_INVOKABLE")
+  if (input.requestedAgentId === BUILT_IN_AGENT_SELECTION) return null
+  if (input.requestedAgentId != null) {
+    if (!agentsEnabled()) throw new AgentSelectionError(NOT_AVAILABLE, 404, "AGENT_NOT_FOUND")
+    const checked = await checkRunnable(prisma, { userId: input.userId, workspaceId: input.workspaceId, agentId: input.requestedAgentId })
+    if (!checked.ok) throw checked.error
+    return checked.agent
   }
-  return agent
+  if (!agentsEnabled()) return null
+  const stored = await getStoredDefaultAgentIds(prisma, input)
+  // De-duplicated so a personal default equal to the workspace default is checked once.
+  const candidates = [...new Set([stored.userDefaultAgentId, stored.workspaceDefaultAgentId].filter((id): id is string => !!id))]
+  for (const agentId of candidates) {
+    const checked = await checkRunnable(prisma, { userId: input.userId, workspaceId: input.workspaceId, agentId })
+    if (checked.ok) return checked.agent
+  }
+  return null
 }
 
 /** The fields of an ApiKey row this check reads. */

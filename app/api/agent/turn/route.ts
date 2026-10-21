@@ -48,6 +48,7 @@ import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
 import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
 import { resolveGatewayCredential, opencodeModel, resolveAgentHarness, agentModelForHarness, type AgentHarness } from "@/lib/agent-harness"
 import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity"
+import { BUILT_IN_AGENT_SELECTION } from "@/lib/agent-defaults"
 import type { AgentRecord } from "@/lib/agent-ownership"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
@@ -63,6 +64,7 @@ import {
   AGENT_RUN_HEARTBEAT_MS,
   AgentRunError,
   DEFAULT_AGENT_RUN_BUDGET_MS,
+  agentRunAttributionAvailable,
   agentRunsAvailable,
   attachAgentRunKey,
   createAgentRun,
@@ -382,21 +384,21 @@ export async function POST(request: NextRequest) {
     return new Response("Workspace not found or access denied.", { status: 404 })
   }
 
-  // ── Which agent runs this turn (explicit only until the default tables land) ─────
+  // ── Which agent runs this turn: explicit pick > personal default > workspace default > built-in ─────
   // Resolved before anything is written (no conversation, no message, no claim), and every check runs here on the
-  // server: a hand-edited agent id gets exactly what the picker would have given it.
+  // server: a hand-edited agent id gets exactly what the picker would have given it. `"builtin"` is the picker's way to
+  // choose the built-in agent on purpose. A DEFAULT that cannot run is dropped below instead of failing the turn.
   const requestedAgentId: unknown = body.agentId
+  const agentPickedExplicitly = requestedAgentId !== undefined && requestedAgentId !== null
+  if (agentPickedExplicitly && (typeof requestedAgentId !== "string" || !(requestedAgentId === BUILT_IN_AGENT_SELECTION || UUID_RE.test(requestedAgentId)))) {
+    return Response.json({ error: "agentId must be a UUID.", code: "INVALID_AGENT_ID" }, { status: 400 })
+  }
   let runAgent: AgentRecord | null = null
-  if (requestedAgentId !== undefined && requestedAgentId !== null) {
-    if (typeof requestedAgentId !== "string" || !UUID_RE.test(requestedAgentId)) {
-      return Response.json({ error: "agentId must be a UUID.", code: "INVALID_AGENT_ID" }, { status: 400 })
-    }
-    try {
-      runAgent = await resolveRunAgent(prisma, { userId, workspaceId, requestedAgentId })
-    } catch (error) {
-      if (error instanceof AgentSelectionError) return Response.json({ error: error.message, code: error.code }, { status: error.status })
-      throw error
-    }
+  try {
+    runAgent = await resolveRunAgent(prisma, { userId, workspaceId, requestedAgentId: agentPickedExplicitly ? (requestedAgentId as string) : null })
+  } catch (error) {
+    if (error instanceof AgentSelectionError) return Response.json({ error: error.message, code: error.code }, { status: error.status })
+    throw error
   }
 
   // ── Rate + cost guardrail (Phase 5): cap turns/spend per user per day ───────
@@ -496,11 +498,15 @@ export async function POST(request: NextRequest) {
   const linkedState = parseProcessingState(linkedConversation?.interviewProcessingJson)
   // A named agent runs only ordinary conversations over background runs. Claim-scoped interview/handoff turns keep their
   // narrower built-in credential, and the synchronous fallback has no run row to prove an agent key against.
+  // A DEFAULT agent never turns a working chat into an error: where a named agent cannot run (no background runs, or the
+  // attribution migration is not applied) a default quietly yields to the built-in agent; only an explicit pick is refused.
+  if (runAgent && !agentPickedExplicitly && (!detached || !(await agentRunAttributionAvailable(prisma)))) runAgent = null
+  const explicitContinuation = body.continue === true && linkedState && !["PENDING", "RUNNING"].includes(processingStatus(linkedState))
+  if (runAgent && !agentPickedExplicitly && linkedConversation?.interviewProcessingJson && !explicitContinuation) runAgent = null
   if (runAgent && !detached) {
     await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
     return Response.json({ error: "Running as a named agent needs background runs, which are not available yet.", code: "AGENT_RUN_UNAVAILABLE" }, { status: 503 })
   }
-  const explicitContinuation = body.continue === true && linkedState && !["PENDING", "RUNNING"].includes(processingStatus(linkedState))
   if (runAgent && linkedConversation?.interviewProcessingJson && !explicitContinuation) {
     return Response.json({ error: "Interview processing cannot run as a named agent.", code: "AGENT_RUN_UNSUPPORTED" }, { status: 400 })
   }

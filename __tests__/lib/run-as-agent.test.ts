@@ -52,6 +52,8 @@ const prisma: Row = {
   user: table("user"),
   agentRun: table("agentRun"),
   agentWorkspaceGrant: table("agentWorkspaceGrant"),
+  workspaceDefaultAgent: table("workspaceDefaultAgent"),
+  userDefaultAgent: table("userDefaultAgent"),
   agentOrgAdminGrant: table("agentOrgAdminGrant"),
   agentToolCall: { create: vi.fn(async ({ data }: Row) => { db.created.push({ toolCall: data }); return { id: "call-1" } }), update: vi.fn(async () => ({})) },
   workspaceMember: table("workspaceMember"),
@@ -80,6 +82,7 @@ import { assertOrgAdminBySlug, assertOrgMemberBySlug, assertWorkspaceAdmin, type
 import { mintAgentMcpKey } from "@/lib/agent-mcp-key"
 import { invokedByForAgentActivity, withAgentActivity } from "@/lib/agent-activity"
 import { agentIdentityValidForTurn, resetAgentColumnsAvailabilityCache } from "@/lib/agent-ownership"
+import { resetAgentDefaultsAvailabilityCache } from "@/lib/agent-defaults"
 import { AgentSelectionError, LIVE_AGENT_RUN_STATUSES, resolveRunAgent } from "@/lib/agent-run-identity"
 import { NON_TERMINAL_AGENT_RUN_STATUSES } from "@/lib/agent-runs"
 
@@ -107,6 +110,7 @@ beforeEach(() => {
   vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
   vi.clearAllMocks()
   resetAgentColumnsAvailabilityCache()
+  resetAgentDefaultsAvailabilityCache()
   db.created.length = 0
   db.state = {
     apiKey: [turnKey()],
@@ -445,6 +449,100 @@ describe("resolveRunAgent (who may start a run as which agent)", () => {
   it("answers 404 when agents are disabled", async () => {
     vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
     expect(await refusal(resolve("invoker", HOME, sharedAgent.id))).toMatchObject({ status: 404 })
+  })
+})
+
+describe("resolveRunAgent default chain (explicit > user default > workspace default > built-in)", () => {
+  const resolve = (userId: string, workspaceId: string, requestedAgentId?: string | null) => resolveRunAgent(prisma as never, { userId, workspaceId, requestedAgentId })
+  const secondShared = { ...sharedAgent, id: "agent-shared-2", name: "Second shared" }
+  beforeEach(() => {
+    db.state.agent.push({ ...secondShared })
+    db.state.agentWorkspaceGrant.push({ agentId: secondShared.id, workspaceId: HOME, access: "READ", revokedAt: null, grantedByUserId: "admin" })
+    db.state.agentWorkspaceGrant.push({ agentId: personalAgent.id, workspaceId: HOME, access: "READ", revokedAt: null, grantedByUserId: "admin" })
+  })
+  const setWorkspaceDefault = (agentId: string) => { db.state.workspaceDefaultAgent = [{ workspaceId: HOME, agentId }] }
+  const setUserDefault = (userId: string, agentId: string) => { db.state.userDefaultAgent = [{ userId, workspaceId: HOME, agentId }] }
+
+  it("is the built-in agent when no default is set", async () => {
+    expect(await resolve("invoker", HOME)).toBeNull()
+  })
+
+  it("uses the workspace default when the user has none", async () => {
+    setWorkspaceDefault(sharedAgent.id)
+    await expect(resolve("invoker", HOME)).resolves.toMatchObject({ id: sharedAgent.id })
+  })
+
+  it("prefers the user's own default over the workspace default", async () => {
+    setWorkspaceDefault(sharedAgent.id)
+    setUserDefault("invoker", secondShared.id)
+    await expect(resolve("invoker", HOME)).resolves.toMatchObject({ id: secondShared.id })
+    // Another member still gets the workspace default: the override is personal.
+    await expect(resolve("owner", HOME)).resolves.toMatchObject({ id: sharedAgent.id })
+  })
+
+  it("lets an explicit pick beat both defaults, and 'builtin' opt out of them", async () => {
+    setWorkspaceDefault(sharedAgent.id)
+    setUserDefault("invoker", secondShared.id)
+    await expect(resolve("invoker", HOME, sharedAgent.id)).resolves.toMatchObject({ id: sharedAgent.id })
+    expect(await resolve("invoker", HOME, "builtin")).toBeNull()
+  })
+
+  it("lets a user default their own USER-owned agent", async () => {
+    setUserDefault("owner", personalAgent.id)
+    await expect(resolve("owner", HOME)).resolves.toMatchObject({ id: personalAgent.id })
+  })
+
+  it.each([
+    ["suspended", () => { db.state.agent.find((a) => a.id === secondShared.id)!.status = "SUSPENDED" }],
+    ["deleted", () => { db.state.agent = db.state.agent.filter((a) => a.id !== secondShared.id) }],
+    ["no longer granted in this workspace", () => { db.state.agentWorkspaceGrant = db.state.agentWorkspaceGrant.filter((g) => g.agentId !== secondShared.id) }],
+    ["a grant revoked", () => { db.state.agentWorkspaceGrant.find((g) => g.agentId === secondShared.id)!.revokedAt = PAST }],
+  ])("silently falls through a stale user default (%s) to the workspace default", async (_label, arrange) => {
+    setWorkspaceDefault(sharedAgent.id)
+    setUserDefault("invoker", secondShared.id)
+    arrange()
+    await expect(resolve("invoker", HOME)).resolves.toMatchObject({ id: sharedAgent.id })
+  })
+
+  it("falls through a stale default all the way to the built-in agent without throwing", async () => {
+    setWorkspaceDefault(sharedAgent.id)
+    setUserDefault("invoker", secondShared.id)
+    db.state.agent.forEach((a) => { a.status = "SUSPENDED" })
+    expect(await resolve("invoker", HOME)).toBeNull()
+  })
+
+  it("ignores a default the user is no longer allowed to invoke (someone else's USER-owned agent, or an admins-only agent)", async () => {
+    setUserDefault("invoker", personalAgent.id)
+    expect(await resolve("invoker", HOME)).toBeNull()
+    db.state.userDefaultAgent = []
+    db.state.agent.find((a) => a.id === sharedAgent.id)!.invokePolicy = "ADMINS"
+    setWorkspaceDefault(sharedAgent.id)
+    expect(await resolve("invoker", HOME)).toBeNull()
+    await expect(resolve("admin", HOME)).resolves.toMatchObject({ id: sharedAgent.id })
+  })
+
+  it("never applies another workspace's default", async () => {
+    db.state.workspaceDefaultAgent = [{ workspaceId: OTHER_WS, agentId: sharedAgent.id }]
+    expect(await resolve("invoker", HOME)).toBeNull()
+  })
+
+  it("does not consult defaults at all when agents are disabled (built-in), though an explicit pick is refused", async () => {
+    setWorkspaceDefault(sharedAgent.id)
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+    expect(await resolve("invoker", HOME)).toBeNull()
+    await expect(resolve("invoker", HOME, sharedAgent.id)).rejects.toMatchObject({ status: 404 })
+  })
+
+  it("tolerates migration 101 being unapplied: no default, built-in agent", async () => {
+    const missing = Object.assign(new Error("The table does not exist"), { code: "P2021" })
+    prisma.workspaceDefaultAgent.findFirst.mockRejectedValueOnce(missing)
+    prisma.userDefaultAgent.findFirst.mockRejectedValueOnce(missing)
+    expect(await resolve("invoker", HOME)).toBeNull()
+  })
+
+  it("rethrows any other database fault rather than silently running the wrong agent", async () => {
+    prisma.workspaceDefaultAgent.findFirst.mockRejectedValueOnce(new Error("connection reset"))
+    await expect(resolve("invoker", HOME)).rejects.toThrow(/connection reset/)
   })
 })
 

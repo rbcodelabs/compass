@@ -75,10 +75,11 @@ vi.mock("@/lib/mcp-connectors/store", () => ({
 // `agentRunsAvailable` defaults to false in beforeEach so the existing
 // guard + streaming expectations below keep exercising the synchronous fallback
 // path; the detached path has its own describe block at the end of this file.
-const runMocks = vi.hoisted(() => ({ available: vi.fn(), create: vi.fn(), started: vi.fn(), finalize: vi.fn(), attach: vi.fn() }))
+const runMocks = vi.hoisted(() => ({ available: vi.fn(), attribution: vi.fn(), create: vi.fn(), started: vi.fn(), finalize: vi.fn(), attach: vi.fn() }))
 vi.mock("@/lib/agent-runs", async (original) => ({
   ...await original<object>(),
   agentRunsAvailable: runMocks.available,
+  agentRunAttributionAvailable: runMocks.attribution,
   createAgentRun: runMocks.create,
   markAgentRunStarted: runMocks.started,
   finalizeAgentRun: runMocks.finalize,
@@ -120,6 +121,7 @@ beforeEach(() => {
   mockResolveAgentHandoffContext.mockResolvedValue(null)
   mockListConnectedGrants.mockResolvedValue([])
   runMocks.available.mockResolvedValue(false)
+  runMocks.attribution.mockResolvedValue(true)
   runMocks.started.mockResolvedValue(undefined)
   runMocks.finalize.mockResolvedValue(undefined)
   runMocks.attach.mockResolvedValue(true)
@@ -761,7 +763,8 @@ describe("agent turn route — detached runs", () => {
     it("a run with no agentId is exactly the built-in run: no agent, no attach, no model, no agent section", async () => {
       const { runCommand } = sandbox()
       await POST(req({ workspaceId: "ws-1", message: "hi" }))
-      expect(identityMocks.resolve).not.toHaveBeenCalled()
+      // Resolution still runs (a default may apply), with nothing explicitly requested.
+      expect(identityMocks.resolve).toHaveBeenCalledWith(mockPrisma, { userId: "user-1", workspaceId: "ws-1", requestedAgentId: null })
       expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: null }))
       expect(mockMintKey.mock.calls[0][4]).toEqual({ agentId: null })
       expect(runMocks.attach).not.toHaveBeenCalled()
@@ -782,6 +785,39 @@ describe("agent turn route — detached runs", () => {
       expect(mockPrisma.agentMessage.create).not.toHaveBeenCalled()
       expect(runMocks.create).not.toHaveBeenCalled()
       expect(mockMintKey).not.toHaveBeenCalled()
+    })
+
+    it("runs the agent a default resolved to, attributed to it, when nothing was requested", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(response.status).toBe(202)
+      expect(identityMocks.resolve).toHaveBeenCalledWith(mockPrisma, { userId: "user-1", workspaceId: "ws-1", requestedAgentId: null })
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: AGENT_ID }))
+    })
+
+    it('passes "builtin" through so a picker can choose the built-in agent on purpose', async () => {
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: "builtin" }))
+      expect(response.status).toBe(202)
+      expect(identityMocks.resolve).toHaveBeenCalledWith(mockPrisma, { userId: "user-1", workspaceId: "ws-1", requestedAgentId: "builtin" })
+    })
+
+    it("quietly runs the built-in agent when a DEFAULT cannot run as a named agent (no background runs)", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      runMocks.available.mockResolvedValue(false)
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(response.status).not.toBe(503)
+      expect(runMocks.attach).not.toHaveBeenCalled()
+    })
+
+    it("quietly runs the built-in agent when a DEFAULT cannot be attributed (migration 100 unapplied)", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      runMocks.attribution.mockResolvedValue(false)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(response.status).toBe(202)
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: null }))
     })
 
     it("rejects a malformed agentId with 400 without resolving anything", async () => {
