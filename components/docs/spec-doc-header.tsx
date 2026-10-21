@@ -18,13 +18,13 @@ export function SpecDocHeader({ scopes }: { scopes: SpecScopeView[] }) {
         ))}
         {scopes.map((scope) => (
           <Link key={`${scope.scopeType}:${scope.scopeId}`} href={scope.href} className="min-w-0 break-words text-sm text-text-secondary hover:text-text-primary hover:underline">
-            {scope.scopeType === "SOLUTION" ? "Specifies solution" : "Plans opportunity"}: {scope.title}
+            For {scope.title}
           </Link>
         ))}
       </div>
       {scopes.length === 0 ? (
         <div role="status" data-slot="spec-doc-unscoped" className="rounded-md border border-status-warning bg-status-warning-surface px-3 py-2 text-sm text-status-warning">
-          <span className="font-medium">{UNSCOPED_SPEC_LABEL}.</span> The solution or opportunity this document was written for no longer exists. The document is unchanged and its cards still show live data.
+          <span className="font-medium">{UNSCOPED_SPEC_LABEL}.</span> The record this document was written for no longer exists. The document is unchanged and its cards still show live data.
         </div>
       ) : null}
     </div>

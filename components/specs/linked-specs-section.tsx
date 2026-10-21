@@ -7,15 +7,18 @@ import { Button } from "@/components/ui/button";
 import { Section } from "@/components/panels/panel-parts";
 import type { EntityPanelType } from "@/components/panels/panel-context";
 import { createSpec, loadScopeSpecs } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
+import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { SPEC_KIND_LABEL } from "@/lib/spec-docs/labels";
 import type { SpecScopeType } from "@/lib/spec-docs/scopes";
 import type { SpecListItem } from "@/lib/spec-docs/view";
 
 type Loaded = { workspaceId: string; canCreate: boolean; specs: SpecListItem[] };
 
-const COPY: Record<SpecScopeType, { section: string; newLabel: string; empty: string; noun: string }> = {
-  SOLUTION: { section: "Specs", newLabel: "New spec", empty: "No specs for this solution yet.", noun: "spec" },
-  OPPORTUNITY: { section: "Discovery Plans", newLabel: "New plan", empty: "No discovery plans for this opportunity yet.", noun: "discovery plan" },
+// The scope's own name comes from the workspace's thinking model (a workspace may call a Solution something else); "Spec" and
+// "Discovery Plan" are the document kinds and are fixed.
+const COPY: Record<SpecScopeType, { section: string; newLabel: string; noun: string }> = {
+  SOLUTION: { section: "Specs", newLabel: "New spec", noun: "spec" },
+  OPPORTUNITY: { section: "Discovery Plans", newLabel: "New plan", noun: "discovery plan" },
 };
 
 /**
@@ -39,6 +42,8 @@ export function LinkedSpecsSection({
   panelType?: EntityPanelType;
 }) {
   const copy = COPY[scopeType];
+  const labels = useLabels();
+  const empty = scopeType === "SOLUTION" ? `No specs for this ${labels.solution.lower} yet.` : `No discovery plans for this ${labels.opportunity.lower} yet.`;
   const router = useRouter();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -77,7 +82,7 @@ export function LinkedSpecsSection({
         ) : (
           <>
             {loaded.specs.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{copy.empty}</p>
+              <p className="text-sm text-muted-foreground">{empty}</p>
             ) : (
               <ul className="flex min-w-0 flex-col divide-y divide-border-default rounded-md border border-border-default">
                 {loaded.specs.map((spec) => (

@@ -55,6 +55,8 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/settings/analytics-actions", actionsPro
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/reviews/actions", actionsProxy)
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/feedback/actions", actionsProxy)
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", actionsProxy)
+// The Specs / Discovery Plans sections are additive (they load their own data); the CLASSIC-text snapshot is of the pre-existing copy.
+vi.mock("@/components/specs/linked-specs-section", () => ({ LinkedSpecsSection: () => null }))
 vi.mock("@/lib/actions/auth-actions", actionsProxy)
 
 const entityDetail = vi.hoisted(() => ({ data: null as unknown }))
