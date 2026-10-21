@@ -81,3 +81,21 @@ target but have never removed its legacy `task_links` (the legacy tables simply 
 as `dangling`, and they have no mirror row. A reader flipped to `entity_links` is consistent with that only if the legacy reader also treats a
 link to a missing target as absent (the workspace-filtered endpoint reads already do). Verify this on the legacy read paths before flipping,
 or clean the dangling `task_links` rows as a separate, owner-approved step. This PR does not change those delete paths.
+
+## Read flag and read parity (entity_links read flip)
+
+`COMPASS_ENTITY_LINKS_TASK_READ` = `off | shadow | on` decides how readers treat `TASK_REFERENCES` (legacy `DECISION` compares as stored `REVIEW_REQUEST`; `COMMENT` links are legacy-only and excluded from both sides). Fail-closed: only the exact strings `shadow` and `on` count (in production
+exactly; elsewhere trimmed and case-insensitive), anything else, including unset, is `off`, and unlike the `*_MIRROR` flag there is no
+default-on outside production. Semantics: `off` reads the legacy table only; `shadow` serves the legacy result and compares it with
+`entity_links` (counts and ids only, never content), `on` serves `entity_links`. Rollback is always the flag set to `off`. The flag moves
+`LegacyAdapter.mode` from `mirror` to `shadow` / `read` (`effectiveLegacyMode` in `lib/links/registry.ts`).
+
+This change ships the flag, the comparator (`lib/links/read-compare.ts`) and the status below, and routes NO reader through them yet, so setting
+the flag changes nothing until the reader PR for this family lands.
+
+`GET /api/admin/migrate` reports `entityLinksReadParity` (read-only, counts and ids capped at 20): the read modes, `totalMismatches`, and per
+type `legacyLive`, `mirrorLive`, `onlyLegacy` (a flipped reader would hide the link), `onlyEntityLinks` (it would show an extra link) and
+`originDrift`. "Live" means both endpoints exist in the link's workspace, i.e. what the workspace-filtered readers show, so quarantined
+rows (dangling, cross-workspace) are absent on both sides. Cost: one scan of the legacy table plus the mirror rows of the family's types
+(`entity_links` has no index that leads with `link_type`); poll sparingly. Require zero mismatches (or an explained, repaired cause) before
+setting the flag to `on`. Types in this family: `taskReferences`.

@@ -237,7 +237,7 @@ describe("one writer: the generic surface cannot write or read these types", () 
 
   it("the registry entries are legacy-mirrored, name the 095 backfill, origins and their compat tools", () => {
     const objective = getLinkType(OBJ)!;
-    expect(objective.legacy).toEqual({ legacyModule: "lib/typed-links.ts", backfillMigration: "095_entity_links_backfill_opportunity", mode: "mirror" });
+    expect(objective.legacy).toEqual({ legacyModule: "lib/typed-links.ts", backfillMigration: "095_entity_links_backfill_opportunity", mode: "mirror", readFamily: "OPPORTUNITY" });
     expect(objective.origins).toEqual(["DIRECT", "LEGACY"]);
     expect(objective.cardinality).toEqual({ from: "many", to: "many" });
     const pointer = getLinkType(KR)!;

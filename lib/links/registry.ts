@@ -56,6 +56,39 @@ export type LinkCandidatesInput = {
 /** `canLink` false hides the add button (the viewed entity can take no new link); null means the type does not apply to the viewed entity at all. */
 export type LinkCandidates = { canLink: boolean; items: LinkPickerItem[] } | null
 
+export type LegacyAdapterMode = "mirror" | "shadow" | "read"
+
+/** The read-flip units. Each has its own flag, so one family can shadow or flip without touching the others. */
+export const LINK_READ_FAMILIES = ["SOLUTION_KR", "OPPORTUNITY", "ARTIFACT", "TASK"] as const
+export type LinkReadFamily = (typeof LINK_READ_FAMILIES)[number]
+export type LinkReadMode = "off" | "shadow" | "on"
+
+/** The env flag of each family. Values: off | shadow | on. Anything else is off. */
+export const LINK_READ_FLAG_NAMES: Readonly<Record<LinkReadFamily, string>> = Object.freeze({
+  SOLUTION_KR: "COMPASS_ENTITY_LINKS_SOLUTION_KR_READ",
+  OPPORTUNITY: "COMPASS_ENTITY_LINKS_OPPORTUNITY_READ",
+  ARTIFACT: "COMPASS_ENTITY_LINKS_ARTIFACT_READ",
+  TASK: "COMPASS_ENTITY_LINKS_TASK_READ",
+})
+
+/**
+ * The read mode of one family. Fail-closed everywhere: only the exact strings "shadow" and "on" enable anything, and outside production
+ * the default is off too (unlike the *_MIRROR flags, which default on outside production), so no read path changes unless a flag is set.
+ * Outside production the value is trimmed and case-insensitive for convenience; in production it must match exactly.
+ */
+export function getLinkReadMode(family: LinkReadFamily): LinkReadMode {
+  const raw = process.env[LINK_READ_FLAG_NAMES[family]]
+  const value = process.env.NODE_ENV === "production" ? raw : raw?.trim().toLowerCase()
+  return value === "shadow" || value === "on" ? value : "off"
+}
+
+/** The effective mode of a legacy-backed type right now: the registry's static mode, raised to "shadow" or "read" by its family's flag. */
+export function effectiveLegacyMode(def: LinkTypeDef): LegacyAdapterMode | null {
+  if (!def.legacy) return null
+  const mode = getLinkReadMode(def.legacy.readFamily)
+  return mode === "on" ? "read" : mode === "shadow" ? "shadow" : def.legacy.mode
+}
+
 /** Dual-write / backfill hooks for a type that replaces a legacy table. Declared here, implemented by phases 4-7. */
 export type LegacyAdapter = {
   /** The module that owns the legacy table (the only place allowed to name it). */
@@ -63,11 +96,15 @@ export type LegacyAdapter = {
   /** The explicit-only backfill migration, or null for a new-only type (phase 4: no backfill, legacy stays the source of truth). */
   backfillMigration: string | null
   /**
-   * "mirror": the legacy writer module writes this table first and mirrors into entity_links in the same transaction.
-   * The generic service refuses direct writes and reads hide the type, because the table is a partial shadow
-   * until a later phase backfills and flips reads.
+   * The static, registry-level mode. "mirror": the legacy writer module writes this table first and mirrors into entity_links in the
+   * same transaction; the generic service refuses direct writes and reads hide the type, because the table is a partial shadow until a
+   * later phase backfills and flips reads. "shadow" and "read" are the two states the per-family read flag can move a type into
+   * (see getLinkReadMode / effectiveLegacyMode below): "shadow" still serves the legacy result and records a comparison against
+   * entity_links, "read" serves entity_links. Registry entries stay "mirror"; the flag decides the effective mode at runtime.
    */
-  mode: "mirror"
+  mode: LegacyAdapterMode
+  /** The read-flip family this type belongs to (one COMPASS_ENTITY_LINKS_<FAMILY>_READ flag per family). */
+  readFamily: LinkReadFamily
 }
 
 export type LinkTypeDef<A = unknown> = {
@@ -213,7 +250,7 @@ const solutionTargetsKeyResult: LinkTypeDef = {
   lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
   summaries: {},
   restrictedContexts: "deny",
-  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: null, mode: "mirror" },
+  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: null, mode: "mirror", readFamily: "SOLUTION_KR" },
   compat: { mcpTools: ["link_solution_to_key_result", "unlink_solution_from_key_result"], restOps: ["linkSolutionKeyResult", "unlinkSolutionKeyResult"] },
 }
 
@@ -249,7 +286,7 @@ const opportunityTargetsObjective: LinkTypeDef = {
   lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
   summaries: {},
   restrictedContexts: "deny",
-  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: OPPORTUNITY_LINKS_BACKFILL_MIGRATION, mode: "mirror" },
+  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: OPPORTUNITY_LINKS_BACKFILL_MIGRATION, mode: "mirror", readFamily: "OPPORTUNITY" },
   compat: { mcpTools: ["link_opportunity_to_objective", "unlink_opportunity_from_objective"], restOps: ["linkOpportunityObjective", "unlinkOpportunityObjective"] },
 }
 
@@ -273,7 +310,7 @@ const opportunityTargetsKeyResult: LinkTypeDef = {
   lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
   summaries: {},
   restrictedContexts: "deny",
-  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: OPPORTUNITY_LINKS_BACKFILL_MIGRATION, mode: "mirror" },
+  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: OPPORTUNITY_LINKS_BACKFILL_MIGRATION, mode: "mirror", readFamily: "OPPORTUNITY" },
   compat: { mcpTools: ["link_opportunity_to_kr"], restOps: ["updateOpportunity"] },
 }
 
@@ -307,7 +344,7 @@ const artifactAttachedToSolution: LinkTypeDef = {
   lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
   summaries: {},
   restrictedContexts: "deny",
-  legacy: { legacyModule: "lib/artifacts.ts", backfillMigration: ARTIFACT_LINKS_BACKFILL_MIGRATION, mode: "mirror" },
+  legacy: { legacyModule: "lib/artifacts.ts", backfillMigration: ARTIFACT_LINKS_BACKFILL_MIGRATION, mode: "mirror", readFamily: "ARTIFACT" },
   compat: { mcpTools: ["link_artifact_to_solution", "unlink_artifact_from_solution"], restOps: ["linkArtifactSolution", "unlinkArtifactSolution"] },
 }
 
@@ -335,7 +372,7 @@ const artifactSupportsDecision: LinkTypeDef = {
   lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
   summaries: {},
   restrictedContexts: "deny",
-  legacy: { legacyModule: "lib/artifacts.ts", backfillMigration: ARTIFACT_LINKS_BACKFILL_MIGRATION, mode: "mirror" },
+  legacy: { legacyModule: "lib/artifacts.ts", backfillMigration: ARTIFACT_LINKS_BACKFILL_MIGRATION, mode: "mirror", readFamily: "ARTIFACT" },
   compat: { mcpTools: ["link_artifact_to_decision", "unlink_artifact_from_decision"], restOps: ["linkArtifactDecision", "unlinkArtifactDecision"] },
 }
 
@@ -381,7 +418,7 @@ const taskReferences: LinkTypeDef = {
   lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
   summaries: {},
   restrictedContexts: "deny",
-  legacy: { legacyModule: "lib/task-link-writes.ts", backfillMigration: TASK_LINKS_BACKFILL_MIGRATION, mode: "mirror" },
+  legacy: { legacyModule: "lib/task-link-writes.ts", backfillMigration: TASK_LINKS_BACKFILL_MIGRATION, mode: "mirror", readFamily: "TASK" },
   compat: { mcpTools: ["link_task", "unlink_task", "list_task_links"], restOps: ["linkTaskResource", "unlinkTaskResource", "listTaskLinks"] },
 }
 
