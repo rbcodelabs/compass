@@ -44,7 +44,7 @@ describe.skipIf(!databaseUrl)("doc change log against real Postgres", () => {
       content TEXT, storage_provider VARCHAR(20), content_ref TEXT, revision UUID, metadata JSON, icon VARCHAR(50),
       sort_order INTEGER NOT NULL DEFAULT 0, roadmap_item_id UUID UNIQUE, doc_type VARCHAR(50) NOT NULL DEFAULT 'STANDARD',
       created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      created_by_id UUID, updated_by_id UUID, source VARCHAR(20) NOT NULL DEFAULT 'UI')`)
+      created_by_id UUID, updated_by_id UUID, source VARCHAR(20) NOT NULL DEFAULT 'UI', seq_prefix VARCHAR(8), seq_number INTEGER)`)
     const sql = readFileSync(path.join(process.cwd(), "prisma/migrations/100_doc_changes/migration.sql"), "utf-8")
     // The migration's statements are unqualified, so run them on one connection whose search_path is the throwaway schema.
     const migrationClient = await pool.connect()

@@ -14,6 +14,7 @@ export const store = {
   counters: [] as Row[],
   versions: [] as Row[],
   operations: [] as Row[],
+  sequences: [] as Row[],
   failChangeWrite: false,
   ids: 0,
   counterOwner: null as symbol | null,
@@ -33,6 +34,7 @@ export function resetStore() {
   store.counters.length = 0
   store.versions.length = 0
   store.operations.length = 0
+  store.sequences.length = 0
   store.failChangeWrite = false
   store.ids = 0
   store.counterOwner = null
@@ -137,6 +139,16 @@ function client(journal: Journal, txId: symbol | null): Row {
         const row = store.counters.find((r) => matches(r, where))
         if (!row) return { ...counters._insert(create) }
         counters._patch(row, { lastSeq: row.lastSeq + update.lastSeq.increment, ...(update.dirty !== undefined ? { dirty: update.dirty } : {}) })
+        return { ...row }
+      },
+    },
+    // Work item ID counter (main allocates a DOC-NNN number on every doc create). Counts up per (workspace, type); not rolled back.
+    workspaceSequence: {
+      upsert: async ({ where, create, update }: Row) => {
+        const k = where.workspaceId_entityType
+        const row = store.sequences.find((r) => r.workspaceId === k.workspaceId && r.entityType === k.entityType)
+        if (!row) { const created = { ...create }; store.sequences.push(created); return { ...created } }
+        row.nextValue += update.nextValue.increment
         return { ...row }
       },
     },
