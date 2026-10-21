@@ -53,20 +53,28 @@ deleted, and reported separately as `mirrorRowsKeptForQuarantine` (count plus ca
 
 ## Postconditions (before the receipt)
 
-Zero consistent legacy rows without a matching mirror row (workspace included); zero duplicate `(from, type, to)` pairs; every mirror row's
+Zero consistent legacy rows without a matching mirror row (workspace included); zero stale mirror rows (no legacy counterpart); zero duplicate `(from, type, to)` pairs; every mirror row's
 `workspace_id` equals its Solution's and its Key Result's Objective's; no mirror row has a missing endpoint unless its legacy row is one of the
 reported quarantined rows. Any failure throws before the receipt, so the attempt stays unfinished and a re-POST resumes.
 
-## Residual pass
+## Residual pass (post-receipt drift)
 
-098 re-selects from the legacy table on every run, so a re-POST is its own residual pass. If the read flip needs a separately numbered re-run
-(for example the best-effort drains left drift), register a DDL-free residual that calls `backfillEntityLinksSolutionKeyResult` and
-`assertEntityLinksSolutionKeyResultBackfill` (the 072/094 pattern). It is not built here because nothing yet calls for it.
+A re-POST only resumes an UNFINISHED attempt (one whose postconditions failed, or that crashed). Once the receipt exists, the runner skips the
+name (`selectMigrationsToRun` ignores applied migrations), so a second POST is a no-op: 098 is NOT its own residual pass. Drift that appears
+after the receipt (for example from the best-effort drains below) is repaired only by a separately numbered, DDL-free residual migration that
+calls `backfillEntityLinksSolutionKeyResult` and `assertEntityLinksSolutionKeyResultBackfill` (the 072/094 pattern), or is watched for:
+`staleMirrorRows` and `unmatched` in `entityLinksSolutionKeyResultBackfill` (and the parity entry) in GET status should stay zero. We will decide
+whether the residual is needed before the read flip, from what the status and the shadow parity show; it is not built here.
 
-## Known mirror gaps the backfill covers
+## Postcondition note
+
+The postconditions include "no stale mirror row" (a mirror row with no legacy counterpart). A mirror row whose legacy row is quarantined still
+has a counterpart, so kept rows (`mirrorRowsKeptForQuarantine`) never trip it.
+
+## Known mirror gaps the backfill covers (before the receipt)
 
 - A Key Result or Solution delete removes the legacy links in its own transaction; mirror rows go in a best-effort drain afterwards (logged and
-  swallowed on failure). A failed drain leaves a row 098 prunes.
-- Links written while the flag is off are not mirrored; 098 inserts them.
-- A live writer inserting a pair between 098's select and insert makes the unique index refuse that batch; the hook re-selects (bounded), and a
-  re-POST resumes anyway.
+  swallowed on failure). A failed drain before the run leaves a row 098 prunes; after the receipt it leaves a stale row (see above).
+- Links written while the flag is off are not mirrored; 098 inserts them if it has not run yet.
+- A live writer inserting a pair between 098's select and insert is handled twice: the insert itself skips pairs that already have a mirror row,
+  and a unique-index refusal re-selects (bounded). If a run still fails, a re-POST resumes it.

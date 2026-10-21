@@ -102,6 +102,45 @@ describe("preconditions fail closed before any write", () => {
   });
 });
 
+describe("insert races", () => {
+  // Select returns one id the first time; the INSERT then hits the unique index (23505) `failures` times before it succeeds.
+  const racing = (failures: number) => {
+    let inserts = 0;
+    let selects = 0;
+    return fakeClient((sql) => {
+      if (/^\s*INSERT/.test(sql)) {
+        inserts += 1;
+        if (inserts <= failures) throw Object.assign(new Error("duplicate key"), { code: "23505" });
+        return { rowCount: 1 };
+      }
+      if (/WHERE e\.id IS NULL AND/.test(sql) && /LIMIT/.test(sql)) {
+        selects += 1;
+        return { rows: selects <= failures + 1 ? [{ id: "l1" }] : [] };
+      }
+      if (sql.includes("_prisma_migrations")) return { rows: [{ n: "1" }] };
+      if (sql.includes("information_schema")) return { rows: [{ table_name: "a" }, { table_name: "b" }, { table_name: "c" }, { table_name: "d" }] };
+      return /count\(\*\)/.test(sql) ? { rows: [{ n: "0" }] } : { rows: [] };
+    });
+  };
+
+  it("re-selects after a unique-index refusal (23505) and finishes", async () => {
+    const { client, query } = racing(2);
+    const result = await backfillEntityLinksSolutionKeyResult(client, "s", []);
+    expect(result.inserted).toBe(1);
+    expect(query.mock.calls.filter(([sql]) => /^\s*INSERT/.test(sql))).toHaveLength(3);
+  });
+
+  it("fails closed after more than five consecutive races", async () => {
+    const { client } = racing(10);
+    await expect(backfillEntityLinksSolutionKeyResult(client, "s", [])).rejects.toMatchObject({ code: "23505" });
+  });
+
+  it("the INSERT guards the pair and the endpoints itself, not only the unique index", () => {
+    const code = read("lib/migrations/entity-links-solution-key-result-backfill.ts");
+    expect(code).toMatch(/INSERT INTO[\s\S]*AND NOT EXISTS \(SELECT 1 FROM "\$\{schema\}"."entity_links" AS x/);
+  });
+});
+
 describe("postconditions refuse the receipt", () => {
   // Answers every count with 0 except the one whose SQL matches.
   const clientFailing = (marker: RegExp) => fakeClient((sql) => ({ rows: [{ n: marker.test(sql) ? "3" : "0" }] })).client;
@@ -112,6 +151,7 @@ describe("postconditions refuse the receipt", () => {
 
   it.each([
     ["unmatched links", /e\.id IS NULL OR e\.workspace_id <> s\.workspace_id/, /coverage postcondition failed: 3 consistent solution_key_result_links/],
+    ["a stale mirror row", /NOT EXISTS \(SELECT 1 FROM "s"\."solution_key_result_links" AS c/, /staleness postcondition failed: 3/],
     ["duplicate pairs", /GROUP BY from_id, link_type, to_id HAVING count\(\*\) > 1/, /uniqueness postcondition failed/],
     ["a dangling endpoint", /\(s\.id IS NULL OR kr\.id IS NULL OR obj\.id IS NULL\)/, /integrity postcondition failed/],
     ["a workspace mismatch", /e\.workspace_id IS DISTINCT FROM s\.workspace_id/, /tenant postcondition failed/],

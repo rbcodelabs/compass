@@ -121,6 +121,7 @@ async function pruneStaleMirrorRows(client: PoolClient, schema: string, sleep?: 
 /** Mirror rows of consistent legacy rows whose workspace_id disagrees with the verified Solution's. */
 async function repairDriftedMirrorRows(client: PoolClient, schema: string, sleep?: Sleep): Promise<number> {
   let repaired = 0
+  let stalls = 0
   while (true) {
     const batch = await client.query<{ id: string; workspace_id: string }>(
       `SELECT e.id AS id, s.workspace_id AS workspace_id FROM ${source(schema)} ${mirrorOf(schema)}
@@ -139,7 +140,13 @@ async function repairDriftedMirrorRows(client: PoolClient, schema: string, sleep
       )
       changed += result.rowCount ?? 0
     }
-    if (changed === 0) throw refuse(`repair ${SOLUTION_KEY_RESULT_KEY} made no progress on ${batch.rows.length} selected rows`)
+    if (changed === 0) {
+      // A concurrent writer can legitimately fix or remove a selected row first; the re-select then excludes it. Bounded, then it fails closed.
+      stalls += 1
+      if (stalls > 3) throw refuse(`repair ${SOLUTION_KEY_RESULT_KEY} made no progress on ${batch.rows.length} selected rows`)
+      continue
+    }
+    stalls = 0
     repaired += changed
   }
 }
@@ -160,7 +167,9 @@ async function insertMissingMirrorRows(client: PoolClient, schema: string, sleep
         () => client.query(
           `INSERT INTO "${schema}"."entity_links" (workspace_id, link_type, from_type, from_id, to_type, to_id, origin, source, created_by_id, created_at, updated_at)
            SELECT s.workspace_id, '${SOLUTION_KEY_RESULT_KEY}', 'SOLUTION', l.solution_id, 'KEY_RESULT', l.key_result_id, 'DIRECT', l.source, l.created_by_id, l.created_at, CURRENT_TIMESTAMP
-           FROM "${schema}"."solution_key_result_links" AS l JOIN "${schema}"."solutions" AS s ON s.id = l.solution_id WHERE l.id = ANY($1::uuid[])`,
+           FROM ${source(schema)}
+           WHERE l.id = ANY($1::uuid[]) AND (${classOf}) = 'ok'
+             AND NOT EXISTS (SELECT 1 FROM "${schema}"."entity_links" AS x WHERE x.from_id = l.solution_id AND x.link_type = '${SOLUTION_KEY_RESULT_KEY}' AND x.to_id = l.key_result_id)`,
           [ids],
         ),
         sleep,
@@ -171,9 +180,10 @@ async function insertMissingMirrorRows(client: PoolClient, schema: string, sleep
       if ((error as { code?: string } | null)?.code === "23505" && (uniqueRaces += 1) <= 5) continue
       throw error
     }
-    // A selected row that cannot be inserted (its legacy row vanished in between) is simply re-selected; no rows while they still exist would loop forever.
+    // The insert re-checks the endpoints and the pair itself (no reliance on the unique index), so a row that went bad or gained a mirror row
+    // since the select is skipped. Zero inserted while a selected row still qualifies would loop forever, so that throws.
     if ((result.rowCount ?? 0) === 0) {
-      const again = await client.query<{ id: string }>(`SELECT l.id AS id FROM "${schema}"."solution_key_result_links" AS l WHERE l.id = ANY($1::uuid[])`, [ids])
+      const again = await client.query<{ id: string }>(`SELECT l.id AS id FROM ${source(schema)} ${mirrorOf(schema)} WHERE l.id = ANY($1::uuid[]) AND e.id IS NULL AND (${classOf}) = 'ok'`, [ids])
       if (again.rows.length > 0) throw refuse(`insert ${SOLUTION_KEY_RESULT_KEY} made no progress on ${ids.length} selected rows`)
     }
     inserted += result.rowCount ?? 0
@@ -257,13 +267,18 @@ export async function findMirrorRowsKeptForQuarantine(client: PoolClient, schema
 /**
  * All of these must hold before the receipt is recorded (each throws a refusal, so the attempt stays unfinished and a re-POST resumes):
  *   1. no consistent legacy row lacks its mirror row (workspace_id included);
- *   2. no duplicate (from, type, to) pair;
+ *   2. no stale mirror row (one with no legacy counterpart) and no duplicate (from, type, to) pair;
  *   3. every mirror row's workspace_id equals both endpoints', and no endpoint is missing, except where the legacy counterpart is one of
  *      the reported quarantined rows (a legacy row that is itself dangling or cross-workspace is reported, never repaired here).
  */
 export async function assertEntityLinksSolutionKeyResultBackfill(client: PoolClient, schema: string) {
   const unmatched = await count(client, `SELECT count(*)::text AS n FROM ${source(schema)} ${mirrorOf(schema)} WHERE ${unmatchedWhere}`)
   if (unmatched !== 0) throw refuse(`coverage postcondition failed: ${unmatched} consistent solution_key_result_links rows have no matching ${SOLUTION_KEY_RESULT_KEY} row`)
+
+  // A mirror row whose legacy row is quarantined still HAS a counterpart (the pair exists), so this cannot fail on a kept row.
+  const stale = await count(client, `SELECT count(*)::text AS n FROM "${schema}"."entity_links" AS e
+         WHERE e.link_type = '${SOLUTION_KEY_RESULT_KEY}' AND NOT EXISTS (SELECT 1 FROM "${schema}"."solution_key_result_links" AS c WHERE c.solution_id = e.from_id AND c.key_result_id = e.to_id)`)
+  if (stale !== 0) throw refuse(`staleness postcondition failed: ${stale} ${SOLUTION_KEY_RESULT_KEY} rows have no legacy counterpart`)
 
   const duplicates = await count(client, `SELECT count(*)::text AS n FROM (
          SELECT from_id FROM "${schema}"."entity_links" WHERE link_type = '${SOLUTION_KEY_RESULT_KEY}'
@@ -286,7 +301,10 @@ export type EntityLinksSolutionKeyResultStatus = {
   mirroredLinks: number
   /** Consistent legacy rows the backfill would still insert or repair. */
   unmatched: number
-  /** Mirror rows with no legacy counterpart; a re-POST prunes them. */
+  /**
+   * Mirror rows with no legacy counterpart. Until the receipt exists a re-POST prunes them; once it exists a re-POST is skipped (applied names
+   * are not re-run), so a non-zero value after the receipt is post-receipt drift that needs a separately numbered residual migration.
+   */
   staleMirrorRows: number
   quarantined: SolutionKeyResultQuarantine
   /** Mirror rows kept (not deleted) because their legacy row is quarantined. */

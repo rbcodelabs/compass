@@ -227,6 +227,32 @@ describe.skipIf(!databaseUrl)("098 entity_links Solution-Key Result backfill thr
     await q(`DELETE FROM $S.entity_links WHERE id = (SELECT id FROM $S.entity_links WHERE link_type=$1 AND from_id=$2 AND to_id=$3 LIMIT 1)`, [KEY, row.from_id, row.to_id])
   }, 120_000)
 
+  it.each([
+    ["linkWorkspaceDrift", "legacy link stamped with another workspace", (id: string) => q(`UPDATE $S.solution_key_result_links SET workspace_id=$2 WHERE id=$1`, [id, ws2]), (id: string) => q(`UPDATE $S.solution_key_result_links SET workspace_id=$2 WHERE id=$1`, [id, ws1])],
+    ["crossWorkspace", "key result moved under an objective of another workspace", (_id: string) => q(`UPDATE $S.key_results SET objective_id=(SELECT id FROM $S.objectives WHERE workspace_id=$2 LIMIT 1) WHERE id=$1`, [seeded.kr1b, ws2]), (_id: string) => q(`UPDATE $S.key_results SET objective_id=(SELECT id FROM $S.objectives WHERE workspace_id=$2 LIMIT 1) WHERE id=$1`, [seeded.kr1b, ws1])],
+  ])("%s: the mirror row of a pair that became %s is kept unchanged and reported, never deleted or repaired, and the postconditions pass", async (cls, _what, break_, restore) => {
+    const pair = [seeded.sol1, seeded.kr1b]
+    const legacyId = (await q(`SELECT id FROM $S.solution_key_result_links WHERE solution_id=$1 AND key_result_id=$2`, pair)).rows[0].id as string
+    const mirrorBefore = (await q(`SELECT id, workspace_id FROM $S.entity_links WHERE link_type=$1 AND from_id=$2 AND to_id=$3`, [KEY, ...pair])).rows
+    expect(mirrorBefore).toHaveLength(1)
+    await break_(legacyId)
+    const log: string[] = []
+    const result = await withClient(async (client) => {
+      const done = await backfillEntityLinksSolutionKeyResult(client, schema, log)
+      await assertEntityLinksSolutionKeyResultBackfill(client, schema)
+      return done
+    })
+    expect(result.pruned).toBe(0)
+    expect(result.repaired).toBe(0)
+    expect((await q(`SELECT id, workspace_id FROM $S.entity_links WHERE link_type=$1 AND from_id=$2 AND to_id=$3`, [KEY, ...pair])).rows).toEqual(mirrorBefore)
+    expect(result.keptMirrorRows.ids).toContain(mirrorBefore[0].id)
+    expect(result.quarantined[cls as "crossWorkspace" | "linkWorkspaceDrift"].ids).toContain(legacyId)
+    expect(await count(`SELECT count(*)::text AS n FROM $S.solution_key_result_links WHERE id=$1`, [legacyId])).toBe(1)
+    await restore(legacyId)
+    await withClient((client) => backfillEntityLinksSolutionKeyResult(client, schema, []))
+    await withClient((client) => assertEntityLinksSolutionKeyResultBackfill(client, schema))
+  }, 120_000)
+
   it("mirror rows whose legacy row became quarantined are kept and reported, never deleted, and the postconditions still pass", async () => {
     const before = await count(`SELECT count(*)::text AS n FROM $S.entity_links WHERE link_type=$1`, [KEY])
     expect(before).toBeGreaterThan(0)

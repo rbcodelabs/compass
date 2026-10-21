@@ -299,7 +299,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 098 solution-key-result backfill hook and the OCC retry it imports; editing either re-reviews the migration.
   "098_entity_links_backfill_solution_key_result": {
-    "lib/migrations/entity-links-solution-key-result-backfill.ts": "af8c1c5b0323fc66756bfc856f24f3df766c13fde251b618337923b3b09aeb63", // gitleaks:allow -- reviewed public SHA256, not a credential
+    "lib/migrations/entity-links-solution-key-result-backfill.ts": "e61171d6fd196cacbb79708691aef6610a3adf6340c189a516738db498a7665d", // gitleaks:allow -- reviewed public SHA256, not a credential
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };
