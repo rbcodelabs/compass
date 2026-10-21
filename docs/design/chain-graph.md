@@ -1,6 +1,6 @@
 # Design: Chain graph ("cloud" view of Compass object chains)
 
-**Status:** Proposed (design only; no implementation)
+**Status:** Phase 2 implemented (PR #452, flag-gated spike); phase 3 in progress. Sections below describe the design; section 10 records what was actually built and where it differs.
 **Author:** Rick + Claude
 **Base:** `origin/main` @ `f3684e30`
 **Reference prototype:** `compass-graph-proto/index.html` (mock data, vanilla SVG, hand-rolled force layout). Concept approved by Rick: semantic zoom (dots, key labels, full detail), group-by clouds (objective / type / status) with collapsible clusters, click-to-trace upstream and downstream chain, hide-unrelated, type filter, search, drag-to-pin.
@@ -228,3 +228,36 @@ Phases 2 and 3 can swap if Rick wants the per-object entry first; Phase 1 must c
 - **Q6.** Archived objects: hidden by default with a toggle (design assumption), or never shown?
 - **Q7.** Should this view be visible to read-only members and to portal/public roles? Design assumes workspace members only, same as the detail panel.
 - **Q8.** Thinking-model presets: confirm the graph should follow each preset's Opportunity-Objective emphasis, as the canvas builder does.
+
+## 10. As built (phase 2, PR #452) and final decisions
+
+### 10.1 Rick's final decisions
+
+Q1 panel-only entry in v1, no sidebar item. Q2 `d3-force` added. Q3 core chain only (Objective, Opportunity, Solution, Assumption, Experiment, Roadmap item); tasks, feedback, docs and decisions are a later phase. Q4 drag-to-pin is session-only. Q6 archived objects hidden by default with a toggle. Q5, Q7 and Q8 are unchanged (decisions out of v1 scope; workspace members only; thinking-model presets followed via `buildCanvasEdges` options).
+
+### 10.2 Deviations from sections 3 to 6 (all accepted)
+
+- **Link adapter.** No separate `loadLinkRows`. `getCanvasOverview` already reads Opportunity-Objective and Solution-Key Result links through `readByFamilyMode`, so the loader is correct before and after the read flip with no extra seam.
+- **Key Results are folded into their Objective.** v1 shows the core chain only, so KR -> Opportunity becomes Objective -> Opportunity; self-loops and duplicates from the contraction are dropped and the strongest edge kind wins.
+- **Edges are oriented parent to child by chain rank.** The typed Solution -> Key Result link points up the chain in the canvas; as built it is Objective -> Solution (kind `link`). Downstream therefore always means further along the chain, and tracing from a Solution does not pull in the Objective's whole subtree.
+- **Archived definition.** Opportunity `ARCHIVED`, Solution `KILLED`, Experiment `KILLED` or `NOT_PURSUED`. Objectives and assumptions have no archived state; roadmap items are loaded active-only.
+- **Module layout.** `lib/chain-graph/{types,build,trace,cluster,layout,presentation,loader,flag,synthetic}.ts`. `ChainNode.objectiveId` (nearest upstream Objective by BFS; an Objective is its own group) replaces `group`. Group colour is by stable index over the whole graph.
+- **Semantic zoom is CSS-driven.** The view writes the quantised band to `data-band` outside React and nodes always render label markup; the first spike re-rendered ~1,000 nodes per band change (~100 ms hitches).
+- **Layout** runs on the main thread with a size-dependent tick budget (300 / 200 / 120 for up to 400 / 800 / more nodes). Incremental relayout on collapse pins everything outside the changed group. Drag does not reheat neighbours.
+- **Gating.** `/[org]/[ws]/graph` is on in development and preview and opt-in with `COMPASS_CHAIN_GRAPH=1`. `graph` is registered in `TOP_LEVEL_SECTIONS` (a workspace-switch landing list, not nav). `/chain-graph-bench` (synthetic data, dev or `COMPASS_CHAIN_GRAPH_BENCH=1`) is public like `/ui` and its slug is reserved.
+
+### 10.3 Benchmark and go/no-go (D4)
+
+Production build, headless Chromium with software rendering, 4 shared vCPU, three runs (about +/-10 fps run to run; pessimistic against a laptop GPU). Script: `scripts/chain-graph-bench.mjs`.
+
+| Case | Elements (nodes + edges) | Pan | Wheel zoom | Settle |
+|---|---|---|---|---|
+| 1,000 nodes expanded | ~2,000 | 47 to 60 fps | 29 to 36 fps | ~0.55 s |
+| 1,500 nodes expanded | ~3,000 | 38 to 40 fps at fit view | 29 to 31 fps | ~0.8 s |
+| Default-collapsed (either) | 37 to 57 | 60 fps | 60 fps | n/a |
+
+Verdict: **conditional go** for React Flow. It meets the ~30 fps bar at 1,000 nodes (zoom is marginal) and fails it intermittently at 1,500 expanded. The rule is therefore: **above ~1,000 visible elements the view renders clusters only** (groups cannot be expanded until filters or collapsing elsewhere bring the visible count down) and shows a notice. The renderer stays swappable because all graph logic is outside React Flow.
+
+### 10.4 Phase 3 additions
+
+`/api/chain-graph` (focus and workspace scope, session plus workspace membership, capped), `?focus=` accepting UUIDs and display IDs, a "View chain" action in the detail panel, and the clusters-only enforcement above. Still no sidebar item.
