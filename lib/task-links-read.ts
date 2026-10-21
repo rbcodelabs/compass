@@ -1,7 +1,7 @@
 /**
  * Display / listing reads of `task_links`, routed through the TASK read-mode flag (entity_links read flip, PR C).
  *
- *   off (default)  the legacy `task_links` query, exactly as each call site ran it before.
+ *   off (default)  the call site's own legacy `task_links` query, passed in as a closure and run verbatim (same where / select), nothing else.
  *   shadow         the legacy result is returned; the same scope is compared with entity_links TASK_REFERENCES (counts and ids only).
  *   on             entity_links serves the read; if that read throws, legacy serves it (lib/links/read-switch.ts).
  *
@@ -34,29 +34,17 @@ export type TaskLinksReadInput = {
   workspaceIds: readonly string[]
   linkedType: TaskLinkReadTarget
   linkedIds: readonly string[]
-  /**
-   * True when the call site never filtered the legacy read by the task's workspace. Off / shadow then keep that query unchanged;
-   * `on` is workspace-scoped regardless (entity_links rows are).
-   */
-  unscopedLegacy?: boolean
 }
 
-type LegacyRow = { taskId: string; linkedId: string; task?: Partial<LinkedTask> & { workspaceId?: string } }
-
-async function legacyRows(db: Db, input: TaskLinksReadInput, withTask: boolean): Promise<LegacyRow[]> {
-  if (input.linkedIds.length === 0) return []
+/** What shadow needs from the legacy side: the link's task and that task's workspace. Selected only in shadow, never in off. */
+async function shadowLegacyRows(db: Db, input: TaskLinksReadInput): Promise<{ taskId: string; linkedId: string; task: { workspaceId: string } }[]> {
   return db.taskLink.findMany({
-    where: {
-      linkedType: input.linkedType,
-      linkedId: { in: [...input.linkedIds] },
-      ...(input.unscopedLegacy ? {} : { task: { workspaceId: { in: [...input.workspaceIds] } } }),
-    },
-    select: { taskId: true, linkedId: true, task: { select: withTask ? { id: true, title: true, status: true, workspaceId: true } : { workspaceId: true } } },
-  }) as Promise<LegacyRow[]>
+    where: { linkedType: input.linkedType, linkedId: { in: [...input.linkedIds] } },
+    select: { taskId: true, linkedId: true, task: { select: { workspaceId: true } } },
+  })
 }
 
 async function entityLinkReferences(db: Db, input: TaskLinksReadInput): Promise<ComparableLink[]> {
-  if (input.linkedIds.length === 0) return []
   const { readEntityLinksTaskReferences } = await readCompare()
   const out: ComparableLink[] = []
   for (const workspaceId of new Set(input.workspaceIds)) {
@@ -65,49 +53,48 @@ async function entityLinkReferences(db: Db, input: TaskLinksReadInput): Promise<
   return out
 }
 
-type Linked = { linkedId: string; task?: LinkedTask }
-
-/** The shared read. `withTask` false (id-only callers) skips selecting / loading task fields on either side. */
-async function readLinked(db: Db, input: TaskLinksReadInput, withTask: boolean): Promise<Linked[]> {
-  let held: LegacyRow[] = [] // the legacy rows, kept for the shadow compare (each task's workspace drives the liveness filter)
-  return readByFamilyMode<Linked[]>("TASK", {
-    legacy: async () => {
-      held = await legacyRows(db, input, withTask)
-      return held.map((row) => (withTask ? { linkedId: row.linkedId, task: { id: row.task!.id!, title: row.task!.title!, status: row.task!.status! } } : { linkedId: row.linkedId }))
-    },
+async function readLinked<R>(db: Db, input: TaskLinksReadInput, withTask: boolean, legacy: () => Promise<R[]>): Promise<R[]> {
+  return readByFamilyMode<R[]>("TASK", {
+    legacy,
     shadowScope: async () => {
+      if (input.linkedIds.length === 0) return null
       const { retainLiveEndpoints, legacyTaskReferences } = await readCompare()
       const wanted = new Set(input.workspaceIds)
-      const workspaceOf = (row: LegacyRow) => row.task?.workspaceId ?? input.workspaceIds[0]
-      const rows = held.filter((row) => wanted.has(workspaceOf(row)))
-      const legacy: ComparableLink[] = []
+      const rows = (await shadowLegacyRows(db, input)).filter((row) => wanted.has(row.task.workspaceId))
+      const comparable: ComparableLink[] = []
       for (const workspaceId of wanted) {
-        const inWorkspace = rows.filter((row) => workspaceOf(row) === workspaceId)
-        legacy.push(...(await retainLiveEndpoints(db as AppTransactionClient, workspaceId, legacyTaskReferences(inWorkspace.map((row) => ({ taskId: row.taskId, linkedType: input.linkedType, linkedId: row.linkedId }))))))
+        const inWorkspace = rows.filter((row) => row.task.workspaceId === workspaceId)
+        comparable.push(...(await retainLiveEndpoints(db as AppTransactionClient, workspaceId, legacyTaskReferences(inWorkspace.map((row) => ({ taskId: row.taskId, linkedType: input.linkedType, linkedId: row.linkedId }))))))
       }
-      return { legacy, readEntityLinks: () => entityLinkReferences(db, input) }
+      return { legacy: comparable, readEntityLinks: () => entityLinkReferences(db, input) }
     },
     entityLinks: async () => {
+      if (input.linkedIds.length === 0) return []
       const links = await entityLinkReferences(db, input)
-      if (!withTask) return links.map((link) => ({ linkedId: link.toId }))
+      if (!withTask) return links.map((link) => ({ linkedId: link.toId })) as unknown as R[]
       const taskIds = [...new Set(links.map((link) => link.fromId))]
       if (taskIds.length === 0) return []
       const tasks = await db.task.findMany({ where: { id: { in: taskIds }, workspaceId: { in: [...input.workspaceIds] } }, select: { id: true, title: true, status: true } })
       const byId = new Map(tasks.map((task) => [task.id, task]))
-      return links.flatMap((link): Linked[] => {
+      // Callers consume only the fields their own legacy select returned, all of which this superset carries.
+      return links.flatMap((link) => {
         const task = byId.get(link.fromId)
         return task ? [{ linkedId: link.toId, task: { id: task.id, title: task.title, status: task.status } }] : []
-      })
+      }) as unknown as R[]
     },
   })
 }
 
-/** The tasks linked to the given targets, one row per link. Same shape as the legacy `{ linkedId, task }` select. */
-export async function getTasksLinkedTo(db: Db, input: TaskLinksReadInput): Promise<TaskLinkedTo[]> {
-  return (await readLinked(db, input, true)) as TaskLinkedTo[]
+/**
+ * The tasks linked to the given targets, one row per link. `legacy` is the call site's own task_links query, verbatim: it is the whole
+ * off path (and the shadow result, and the fallback when the entity_links read throws). `on` returns `{ linkedId, task:{id,title,status} }`
+ * rows, a superset of every legacy select used at the routed sites.
+ */
+export function getTasksLinkedTo<R>(db: Db, input: TaskLinksReadInput, legacy: () => Promise<R[]>): Promise<R[]> {
+  return readLinked(db, input, true, legacy)
 }
 
-/** Just the target ids that have at least one linked task (for "has follow-up work" filters). */
-export async function getLinkedTargetIds(db: Db, input: TaskLinksReadInput): Promise<Set<string>> {
-  return new Set((await readLinked(db, input, false)).map((row) => row.linkedId))
+/** Just the target ids that have at least one linked task. `legacy` is the call site's verbatim `select: { linkedId: true }` query. */
+export async function getLinkedTargetIds(db: Db, input: TaskLinksReadInput, legacy: () => Promise<{ linkedId: string }[]>): Promise<Set<string>> {
+  return new Set((await readLinked(db, input, false, legacy)).map((row) => row.linkedId))
 }

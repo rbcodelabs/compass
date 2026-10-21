@@ -246,8 +246,9 @@ async function linkedRequestIds(prisma: ReturnType<typeof getPrisma>, requestIds
  * The display-listing form of linkedRequestIds (the "awaiting follow-through" lens): follows the TASK read-mode flag. The
  * recordDecisionNoAction guard keeps the legacy linkedRequestIds above on purpose: it decides a write, so it reads the source of truth.
  */
-function linkedRequestIdsForListing(prisma: ReturnType<typeof getPrisma>, workspaceId: string, requestIds: string[]): Promise<Set<string>> {
-  return getLinkedTargetIds(prisma, { workspaceIds: [workspaceId], linkedType: "DECISION", linkedIds: requestIds, unscopedLegacy: true })
+async function linkedRequestIdsForListing(prisma: ReturnType<typeof getPrisma>, workspaceId: string, requestIds: string[]): Promise<Set<string>> {
+  if (!requestIds.length) return new Set()
+  return getLinkedTargetIds(prisma, { workspaceIds: [workspaceId], linkedType: "DECISION", linkedIds: requestIds }, () => prisma.taskLink.findMany({ where: { linkedType: "DECISION", linkedId: { in: requestIds } }, select: { linkedId: true } }))
 }
 
 /**

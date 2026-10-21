@@ -156,6 +156,12 @@ describe("review request page — \"Send to agent\" on a decided banner", () => 
     expect(link.getAttribute("href")).toBe("/acme/product/agent?entityType=decision&entityId=request-1")
   })
 
+  it("loads follow-up tasks with exactly the legacy task_links query when the TASK flag is unset", async () => {
+    findFirst.mockResolvedValue(decidedRequest("TRACKED_DECISION", "APPROVE"))
+    render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))
+    expect(findTaskLinks).toHaveBeenCalledWith({ where: { linkedType: "DECISION", linkedId: "request-1" }, select: { task: { select: { id: true, title: true, status: true } } } })
+  })
+
   it("hides the link when the decided TRACKED_DECISION outcome is REJECT", async () => {
     findFirst.mockResolvedValue(decidedRequest("TRACKED_DECISION", "REJECT"))
     render(await ReviewRequestPage({ params: Promise.resolve({ orgSlug: "acme", workspaceSlug: "product", requestId: "request-1" }) }))

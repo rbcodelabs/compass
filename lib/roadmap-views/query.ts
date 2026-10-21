@@ -99,7 +99,10 @@ export async function loadCrossWorkspaceRoadmap(
   const truncated = rows.length > MAX_ROADMAP_ITEMS
   const page = truncated ? rows.slice(0, MAX_ROADMAP_ITEMS) : rows
 
-  const taskLinks = page.length === 0 ? [] : await getTasksLinkedTo(db, { workspaceIds, linkedType: "ROADMAP_ITEM", linkedIds: page.map((r) => r.id) })
+  const taskLinks = page.length === 0 ? [] : await getTasksLinkedTo(db, { workspaceIds, linkedType: "ROADMAP_ITEM", linkedIds: page.map((r) => r.id) }, () => db.taskLink.findMany({
+    where: { linkedType: "ROADMAP_ITEM", linkedId: { in: page.map((r) => r.id) }, task: { workspaceId: { in: workspaceIds } } },
+    select: { linkedId: true, task: { select: { status: true } } },
+  }))
   const statusesByItem = new Map<string, TaskStatus[]>()
   for (const link of taskLinks) {
     const list = statusesByItem.get(link.linkedId) ?? []

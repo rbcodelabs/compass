@@ -214,7 +214,18 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   const taskLinks = items.length === 0
     ? []
     // Display-only delivery rollup: follows the TASK read-mode flag (lib/task-links-read.ts).
-    : await getTasksLinkedTo(prisma, { workspaceIds: [workspace.id], linkedType: "ROADMAP_ITEM", linkedIds: items.map((item) => item.id) });
+    : await getTasksLinkedTo(
+        prisma,
+        { workspaceIds: [workspace.id], linkedType: "ROADMAP_ITEM", linkedIds: items.map((item) => item.id) },
+        () => prisma.taskLink.findMany({
+          where: {
+            linkedType: "ROADMAP_ITEM",
+            linkedId: { in: items.map((item) => item.id) },
+            task: { workspaceId: workspace.id },
+          },
+          select: { linkedId: true, task: { select: { status: true } } },
+        }),
+      );
   const taskStatusesByRoadmapItem = new Map<string, TaskStatus[]>();
   for (const link of taskLinks) {
     const statuses = taskStatusesByRoadmapItem.get(link.linkedId) ?? [];

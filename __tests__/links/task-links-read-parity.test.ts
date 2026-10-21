@@ -50,6 +50,19 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 const ROADMAP = (ids: string[], workspaceIds: string[] = [WS_A.id]) => ({ workspaceIds, linkedType: "ROADMAP_ITEM" as const, linkedIds: ids });
+const prisma = () => fake.current!.client as unknown as AppTransactionClient;
+// The verbatim legacy queries of the routed call sites (roadmap rollup / decision follow-ups / awaiting-follow-through listing).
+const ROADMAP_SELECT = { linkedId: true, task: { select: { status: true } } } as const;
+const roadmapLegacy = (ids: string[], workspaceIds: string[]) => () => prisma().taskLink.findMany({ where: { linkedType: "ROADMAP_ITEM", linkedId: { in: ids }, task: { workspaceId: { in: workspaceIds } } }, select: ROADMAP_SELECT });
+const FOLLOW_UP_SELECT = { task: { select: { id: true, title: true, status: true } } } as const;
+const followUpLegacy = (requestId: string) => () => prisma().taskLink.findMany({ where: { linkedType: "DECISION", linkedId: requestId }, select: FOLLOW_UP_SELECT });
+const idsLegacy = (ids: string[]) => () => prisma().taskLink.findMany({ where: { linkedType: "DECISION", linkedId: { in: ids } }, select: { linkedId: true } });
+// A legacy query that selects the full task, so parity tests can compare ids / titles / statuses across the three modes.
+const fullLegacy = (input: { workspaceIds: string[]; linkedType: "ROADMAP_ITEM" | "DECISION"; linkedIds: string[] }) => () =>
+  prisma().taskLink.findMany({
+    where: { linkedType: input.linkedType, linkedId: { in: input.linkedIds }, ...(input.linkedType === "DECISION" ? {} : { task: { workspaceId: { in: input.workspaceIds } } }) },
+    select: { linkedId: true, task: { select: { id: true, title: true, status: true } } },
+  });
 
 describe("getTasksLinkedTo (roadmap delivery rollup)", () => {
   it("same rows in off / shadow / on, with workspace scoping", async () => {
@@ -57,7 +70,7 @@ describe("getTasksLinkedTo (roadmap delivery rollup)", () => {
     link("task-a2", "ROADMAP_ITEM", "ri-a");
     link("task-a3", "ROADMAP_ITEM", "ri-a2");
     link("task-b", "ROADMAP_ITEM", "ri-b"); // workspace B
-    const { off, shadow, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP(["ri-a", "ri-a2", "ri-b"])));
+    const { off, shadow, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP(["ri-a", "ri-a2", "ri-b"]), fullLegacy(ROADMAP(["ri-a", "ri-a2", "ri-b"]))));
     expect(off.map((r) => [r.linkedId, r.task.id, r.task.status])).toEqual([["ri-a", "task-a", "TODO"], ["ri-a", "task-a2", "DONE"], ["ri-a2", "task-a3", "IN_PROGRESS"]]);
     expect(shadow).toEqual(off);
     expect(on).toEqual(off);
@@ -67,7 +80,7 @@ describe("getTasksLinkedTo (roadmap delivery rollup)", () => {
 
   it("returns exactly {linkedId, task:{id,title,status}} (no extra legacy fields leak)", async () => {
     link("task-a", "ROADMAP_ITEM", "ri-a");
-    const { off, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP(["ri-a"])));
+    const { off, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP(["ri-a"]), fullLegacy(ROADMAP(["ri-a"]))));
     expect(off).toEqual([{ linkedId: "ri-a", task: { id: "task-a", title: "A task", status: "TODO" } }]);
     expect(on).toEqual(off);
   });
@@ -75,7 +88,7 @@ describe("getTasksLinkedTo (roadmap delivery rollup)", () => {
   it("COMMENT links and other target types are never returned", async () => {
     link("task-a", "COMMENT", "ri-a");
     link("task-a2", "DOC", "ri-a");
-    const { off, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP(["ri-a"])));
+    const { off, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP(["ri-a"]), fullLegacy(ROADMAP(["ri-a"]))));
     expect(off).toEqual([]);
     expect(on).toEqual([]);
   });
@@ -83,7 +96,7 @@ describe("getTasksLinkedTo (roadmap delivery rollup)", () => {
   it("multi-workspace scope (cross-workspace roadmap view) matches legacy", async () => {
     link("task-a", "ROADMAP_ITEM", "ri-a");
     link("task-b", "ROADMAP_ITEM", "ri-b");
-    const { off, shadow, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP(["ri-a", "ri-b"], [WS_A.id, WS_B.id])));
+    const { off, shadow, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP(["ri-a", "ri-b"], [WS_A.id, WS_B.id]), fullLegacy(ROADMAP(["ri-a", "ri-b"], [WS_A.id, WS_B.id]))));
     expect(off.map((r) => r.task.id).sort()).toEqual(["task-a", "task-b"]);
     expect(shadow).toEqual(off);
     expect([...on].sort((x, y) => x.task.id.localeCompare(y.task.id))).toEqual([...off].sort((x, y) => x.task.id.localeCompare(y.task.id)));
@@ -91,7 +104,7 @@ describe("getTasksLinkedTo (roadmap delivery rollup)", () => {
   });
 
   it("empty id list short-circuits in every mode", async () => {
-    const { off, shadow, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP([])));
+    const { off, shadow, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP([]), fullLegacy(ROADMAP([]))));
     expect([off, shadow, on]).toEqual([[], [], []]);
   });
 
@@ -101,7 +114,7 @@ describe("getTasksLinkedTo (roadmap delivery rollup)", () => {
     link("task-a", "ROADMAP_ITEM", "ri-a", { createdAt: tie, id: "tl-y" });
     link("task-a2", "ROADMAP_ITEM", "ri-a", { createdAt: new Date(4_000), id: "tl-x" });
     vi.stubEnv(LINK_READ_FLAG_NAMES.TASK, "on");
-    expect((await getTasksLinkedTo(db(), ROADMAP(["ri-a"]))).map((r) => r.task.id)).toEqual(["task-a2", "task-a", "task-a3"]);
+    expect((await getTasksLinkedTo(db(), ROADMAP(["ri-a"]), fullLegacy(ROADMAP(["ri-a"])))).map((r) => r.task.id)).toEqual(["task-a2", "task-a", "task-a3"]);
   });
 });
 
@@ -109,8 +122,8 @@ describe("getTasksLinkedTo / getLinkedTargetIds for DECISION targets", () => {
   it("DECISION is read as REVIEW_REQUEST; same tasks in every mode", async () => {
     link("task-a", "DECISION", "rr-a");
     link("task-a2", "DECISION", "rr-a");
-    const input = { workspaceIds: [WS_A.id], linkedType: "DECISION" as const, linkedIds: ["rr-a"], unscopedLegacy: true };
-    const { off, shadow, on } = await inEachMode(() => getTasksLinkedTo(db(), input));
+    const input = { workspaceIds: [WS_A.id], linkedType: "DECISION" as const, linkedIds: ["rr-a"] };
+    const { off, shadow, on } = await inEachMode(() => getTasksLinkedTo(db(), input, fullLegacy(input)));
     expect(off.map((r) => r.task.id)).toEqual(["task-a", "task-a2"]);
     expect(shadow).toEqual(off);
     expect(on).toEqual(off);
@@ -119,8 +132,8 @@ describe("getTasksLinkedTo / getLinkedTargetIds for DECISION targets", () => {
 
   it("getLinkedTargetIds: the set of decisions with follow-up work, same in every mode", async () => {
     link("task-a", "DECISION", "rr-a");
-    const input = { workspaceIds: [WS_A.id], linkedType: "DECISION" as const, linkedIds: ["rr-a", "rr-a-system"], unscopedLegacy: true };
-    const { off, shadow, on } = await inEachMode(() => getLinkedTargetIds(db(), input));
+    const input = { workspaceIds: [WS_A.id], linkedType: "DECISION" as const, linkedIds: ["rr-a", "rr-a-system"] };
+    const { off, shadow, on } = await inEachMode(() => getLinkedTargetIds(db(), input, idsLegacy(input.linkedIds)));
     expect([...off]).toEqual(["rr-a"]);
     expect([...shadow]).toEqual(["rr-a"]);
     expect([...on]).toEqual(["rr-a"]);
@@ -128,8 +141,8 @@ describe("getTasksLinkedTo / getLinkedTargetIds for DECISION targets", () => {
 
   it("another workspace's decision is not visible through this workspace in on mode", async () => {
     link("task-b", "DECISION", "rr-b");
-    const input = { workspaceIds: [WS_A.id], linkedType: "DECISION" as const, linkedIds: ["rr-b"], unscopedLegacy: true };
-    const { on } = await inEachMode(() => getTasksLinkedTo(db(), input));
+    const input = { workspaceIds: [WS_A.id], linkedType: "DECISION" as const, linkedIds: ["rr-b"] };
+    const { on } = await inEachMode(() => getTasksLinkedTo(db(), input, fullLegacy(input)));
     expect(on).toEqual([]);
   });
 });
@@ -137,7 +150,7 @@ describe("getTasksLinkedTo / getLinkedTargetIds for DECISION targets", () => {
 describe("documented differences: on is stricter than legacy", () => {
   it("a dangling target is returned by off, absent on", async () => {
     link("task-a", "ROADMAP_ITEM", "ri-gone");
-    const { off, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP(["ri-gone"])));
+    const { off, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP(["ri-gone"]), fullLegacy(ROADMAP(["ri-gone"]))));
     expect(off.map((r) => r.linkedId)).toEqual(["ri-gone"]);
     expect(on).toEqual([]);
   });
@@ -146,21 +159,21 @@ describe("documented differences: on is stricter than legacy", () => {
     link("task-a", "ROADMAP_ITEM", "ri-gone");
     link("task-a", "ROADMAP_ITEM", "ri-a");
     vi.stubEnv(LINK_READ_FLAG_NAMES.TASK, "shadow");
-    await getTasksLinkedTo(db(), ROADMAP(["ri-gone", "ri-a"]));
+    await getTasksLinkedTo(db(), ROADMAP(["ri-gone", "ri-a"]), fullLegacy(ROADMAP(["ri-gone", "ri-a"])));
     expect(getReadCompareCounters().TASK).toMatchObject({ compares: 1, mismatches: 0 });
   });
 
   it("a decision link from a task in another workspace: legacy (unscoped) shows it, on does not", async () => {
     link("task-b", "DECISION", "rr-a");
-    const input = { workspaceIds: [WS_A.id], linkedType: "DECISION" as const, linkedIds: ["rr-a"], unscopedLegacy: true };
-    const { off, on } = await inEachMode(() => getTasksLinkedTo(db(), input));
+    const input = { workspaceIds: [WS_A.id], linkedType: "DECISION" as const, linkedIds: ["rr-a"] };
+    const { off, on } = await inEachMode(() => getTasksLinkedTo(db(), input, fullLegacy(input)));
     expect(off.map((r) => r.task.id)).toEqual(["task-b"]);
     expect(on).toEqual([]);
   });
 
   it("scoped legacy (roadmap) already hides a foreign task, so off and on agree", async () => {
     link("task-b", "ROADMAP_ITEM", "ri-a");
-    const { off, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP(["ri-a"])));
+    const { off, on } = await inEachMode(() => getTasksLinkedTo(db(), ROADMAP(["ri-a"]), fullLegacy(ROADMAP(["ri-a"]))));
     expect(off).toEqual([]);
     expect(on).toEqual([]);
   });
@@ -171,7 +184,7 @@ describe("shadow and fallback behaviour", () => {
     link("task-a", "ROADMAP_ITEM", "ri-a", { mirrored: false });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubEnv(LINK_READ_FLAG_NAMES.TASK, "shadow");
-    const result = await getTasksLinkedTo(db(), ROADMAP(["ri-a"]));
+    const result = await getTasksLinkedTo(db(), ROADMAP(["ri-a"]), fullLegacy(ROADMAP(["ri-a"])));
     expect(result.map((r) => r.task.id)).toEqual(["task-a"]);
     expect(getReadCompareCounters().TASK).toMatchObject({ compares: 1, mismatches: 1, onlyLegacy: 1 });
     warn.mockRestore();
@@ -184,7 +197,7 @@ describe("shadow and fallback behaviour", () => {
     const client = fake.current!.client as unknown as { entityLink: { findMany: (...a: unknown[]) => Promise<unknown> } };
     const original = client.entityLink.findMany;
     client.entityLink.findMany = async () => { throw new Error("entity_links unavailable") };
-    const result = await getTasksLinkedTo(db(), ROADMAP(["ri-a"]));
+    const result = await getTasksLinkedTo(db(), ROADMAP(["ri-a"]), fullLegacy(ROADMAP(["ri-a"])));
     client.entityLink.findMany = original;
     expect(result.map((r) => r.task.id)).toEqual(["task-a"]);
     expect(getReadCompareCounters().TASK.errors).toBe(1);
@@ -198,7 +211,7 @@ describe("shadow and fallback behaviour", () => {
     const client = fake.current!.client as unknown as { entityLink: { findMany: (...a: unknown[]) => Promise<unknown> } };
     const original = client.entityLink.findMany;
     client.entityLink.findMany = async () => { throw new Error("entity_links unavailable") };
-    const result = await getTasksLinkedTo(db(), ROADMAP(["ri-a"]));
+    const result = await getTasksLinkedTo(db(), ROADMAP(["ri-a"]), fullLegacy(ROADMAP(["ri-a"])));
     client.entityLink.findMany = original;
     expect(result.map((r) => r.task.id)).toEqual(["task-a"]);
     expect(getReadCompareCounters().TASK.errors).toBe(1);
@@ -209,13 +222,64 @@ describe("shadow and fallback behaviour", () => {
     link("task-a", "ROADMAP_ITEM", "ri-a");
     const client = fake.current!.client as unknown as { entityLink: { findMany: (...a: unknown[]) => Promise<unknown> } };
     client.entityLink.findMany = async () => { throw new Error("must not be called") };
-    expect((await getTasksLinkedTo(db(), ROADMAP(["ri-a"]))).map((r) => r.task.id)).toEqual(["task-a"]);
+    expect((await getTasksLinkedTo(db(), ROADMAP(["ri-a"]), fullLegacy(ROADMAP(["ri-a"])))).map((r) => r.task.id)).toEqual(["task-a"]);
     expect(getReadCompareCounters().TASK.errors).toBe(0);
   });
 
   it("the TASK flag does not affect other families' readers", async () => {
     vi.stubEnv(LINK_READ_FLAG_NAMES.ARTIFACT, "on");
     link("task-a", "ROADMAP_ITEM", "ri-a", { mirrored: false });
-    expect((await getTasksLinkedTo(db(), ROADMAP(["ri-a"]))).map((r) => r.task.id)).toEqual(["task-a"]); // ARTIFACT=on, TASK off: legacy
+    expect((await getTasksLinkedTo(db(), ROADMAP(["ri-a"]), fullLegacy(ROADMAP(["ri-a"])))).map((r) => r.task.id)).toEqual(["task-a"]); // ARTIFACT=on, TASK off: legacy
+  });
+});
+
+describe("flag OFF issues exactly the call sites' legacy queries (env var UNSET)", () => {
+  const spyFindMany = () => {
+    const client = fake.current!.client as unknown as { taskLink: { findMany: (...a: unknown[]) => Promise<unknown> } };
+    const original = client.taskLink.findMany;
+    const spy = vi.fn(original);
+    client.taskLink.findMany = spy;
+    return spy;
+  };
+
+  beforeEach(() => {
+    delete process.env[LINK_READ_FLAG_NAMES.TASK];
+    link("task-a", "ROADMAP_ITEM", "ri-a");
+    link("task-a", "DECISION", "rr-a");
+  });
+
+  it("roadmap rollup: one findMany, verbatim where/select, no entity_links query", async () => {
+    const spy = spyFindMany();
+    const entityLinkSpy = vi.spyOn((fake.current!.client as unknown as { entityLink: { findMany: () => Promise<unknown> } }).entityLink, "findMany");
+    const input = ROADMAP(["ri-a"], [WS_A.id, WS_B.id]);
+    const rows = await getTasksLinkedTo(db(), input, roadmapLegacy(input.linkedIds, input.workspaceIds));
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith({ where: { linkedType: "ROADMAP_ITEM", linkedId: { in: ["ri-a"] }, task: { workspaceId: { in: [WS_A.id, WS_B.id] } } }, select: { linkedId: true, task: { select: { status: true } } } });
+    expect(entityLinkSpy).not.toHaveBeenCalled();
+    expect(rows).toEqual([{ linkedId: "ri-a", task: { status: "TODO" } }]);
+  });
+
+  it("decision follow-ups: select { task } only, linkedId matched by equality", async () => {
+    const spy = spyFindMany();
+    const rows = await getTasksLinkedTo(db(), { workspaceIds: [WS_A.id], linkedType: "DECISION", linkedIds: ["rr-a"] }, followUpLegacy("rr-a"));
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith({ where: { linkedType: "DECISION", linkedId: "rr-a" }, select: { task: { select: { id: true, title: true, status: true } } } });
+    expect(rows).toEqual([{ task: { id: "task-a", title: "A task", status: "TODO" } }]);
+  });
+
+  it("getLinkedTargetIds: select { linkedId } only, no task join", async () => {
+    const spy = spyFindMany();
+    const ids = await getLinkedTargetIds(db(), { workspaceIds: [WS_A.id], linkedType: "DECISION", linkedIds: ["rr-a"] }, idsLegacy(["rr-a"]));
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith({ where: { linkedType: "DECISION", linkedId: { in: ["rr-a"] } }, select: { linkedId: true } });
+    expect([...ids]).toEqual(["rr-a"]);
+  });
+
+  it("shadow/on may select extra columns, off never does (shadow adds a second, wider query)", async () => {
+    const spy = spyFindMany();
+    vi.stubEnv(LINK_READ_FLAG_NAMES.TASK, "shadow");
+    await getLinkedTargetIds(db(), { workspaceIds: [WS_A.id], linkedType: "DECISION", linkedIds: ["rr-a"] }, idsLegacy(["rr-a"]));
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy).toHaveBeenLastCalledWith({ where: { linkedType: "DECISION", linkedId: { in: ["rr-a"] } }, select: { taskId: true, linkedId: true, task: { select: { workspaceId: true } } } });
   });
 });

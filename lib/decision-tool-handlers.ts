@@ -77,7 +77,8 @@ async function resolveRequester(request: { requestedById: string | null; request
 /** Follow-up work linked to a decision via the DECISION TaskLink type (item 3: reciprocal display). */
 async function resolveFollowUpTasks(workspaceId: string, requestId: string) {
   // Display-only: follows the TASK read-mode flag (lib/task-links-read.ts).
-  const links = await getTasksLinkedTo(getPrisma(), { workspaceIds: [workspaceId], linkedType: "DECISION", linkedIds: [requestId], unscopedLegacy: true })
+  const prisma = getPrisma()
+  const links = await getTasksLinkedTo(prisma, { workspaceIds: [workspaceId], linkedType: "DECISION", linkedIds: [requestId] }, () => prisma.taskLink.findMany({ where: { linkedType: "DECISION", linkedId: requestId }, select: { task: { select: { id: true, title: true, status: true } } } }))
   return links.map((link) => link.task)
 }
 
