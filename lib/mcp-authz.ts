@@ -35,7 +35,7 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import getPrisma from "@/lib/db"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
-import { agentWorkspaceWhere, hasOwnerOrgAdminRights, hasValidAgentOrgAdminGrant, type AgentAdminCapability } from "@/lib/agent-access"
+import { agentWorkspaceWhere, hasOwnerOrgAdminRights, hasValidAgentOrgAdminGrant, isAgentIdentityActor, sharedAgentOrganizationId, type AgentAdminCapability } from "@/lib/agent-access"
 import { getManagedPilotContext } from "@/lib/preview-automation/managed-context"
 
 export type McpActor = {
@@ -45,6 +45,12 @@ export type McpActor = {
   credentialId?: string
   /** Which table `credentialId` points into — see McpAuthResult (ADR 0015). */
   credentialType?: "API_KEY" | "OAUTH"
+  /**
+   * The AgentRun an AGENT_TURN credential is bound to, set by validateMcpAuth only after it found that run
+   * non-terminal and unexpired. Absent for every other actor. An AGENT_TURN actor carrying an agentId but no
+   * agentRunId is never a valid agent identity (lib/agent-ownership.ts agentIdentityValidForTurn).
+   */
+  agentRunId?: string
   requiredAgentAccess?: "READ" | "WRITE"
   authorizedWorkspaceId?: string
   /**
@@ -182,7 +188,9 @@ export async function assertWorkspaceBySlug(
     where: {
       slug: workspaceSlug,
       organization: { slug: orgSlug },
-      ...(isService(actor) ? {} : { members: { some: { userId: actor.userId! } } }),
+      // An agent identity's reach is its live grants (checked by assertWorkspaceMember below), not the
+      // human's membership: a shared agent must not need, or be widened by, its invoker's membership.
+      ...(isService(actor) || isAgentIdentityActor(actor) ? {} : { members: { some: { userId: actor.userId! } } }),
     },
     select: { id: true },
   })
@@ -206,6 +214,14 @@ export async function assertOrgMemberBySlug(
   if (isService(actor)) {
     const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
     if (!org) throw new McpAuthzError(`Organization not found: ${orgSlug}`)
+    return { organizationId: org.id }
+  }
+  // A shared (WORKSPACE-owned) agent has no org membership of its own and must not borrow its invoker's:
+  // it sees only the organization that owns its workspace.
+  const sharedOrg = await sharedAgentOrganizationId(actor)
+  if (sharedOrg !== undefined) {
+    const org = await prisma.organization.findUnique({ where: { slug: orgSlug }, select: { id: true } })
+    if (!sharedOrg || !org || org.id !== sharedOrg) throw new McpAuthzError(`Organization not found or access denied: ${orgSlug}`)
     return { organizationId: org.id }
   }
   const member = await prisma.organizationMember.findFirst({

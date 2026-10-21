@@ -4118,6 +4118,7 @@ async function withMcpAuth(req: Request): Promise<Response> {
     agentId: auth.agentId,
     credentialId: auth.credentialId,
     credentialType: auth.credentialType,
+    agentRunId: auth.agentRunId,
     scopeWorkspaceId: auth.scopeWorkspaceId,
     scopeConversationId: auth.scopeConversationId,
     scopeClaimId: auth.scopeClaimId,

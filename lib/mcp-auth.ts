@@ -1,6 +1,7 @@
 import { createHash } from "crypto"
 import getPrisma from "@/lib/db"
 import { findActiveUserOwnedAgent } from "@/lib/agent-ownership"
+import { authorizeAgentTurnKey } from "@/lib/agent-run-identity"
 import { mcpResourceUri, parseScope } from "@/lib/oauth/constants"
 import { ACCESS_TOKEN_PREFIX, hashOAuthToken } from "@/lib/oauth/tokens"
 import { getManagedPilotContext } from "@/lib/preview-automation/managed-context"
@@ -18,6 +19,8 @@ export type McpAuthResult = {
    * polymorphic (ADR 0015). Absent for actors that write no audit rows.
    */
   credentialType?: "API_KEY" | "OAUTH"
+  /** Set only for an agent-scoped AGENT_TURN key, after its live run was found (see lib/agent-run-identity.ts). */
+  agentRunId?: string
   scopeWorkspaceId: string | null
   scopeConversationId?: string | null
   scopeClaimId?: string | null
@@ -86,12 +89,19 @@ export async function validateProgrammaticAuth(
     if (!run || run.workspaceId !== managed.workspaceId || run.deploymentId !== managed.deploymentId || run.revokedAt || run.expiresAt.getTime() <= Date.now() ||
       ![run.ownerUserId, run.viewerUserId].includes(apiKey.userId)) return { valid: false }
   }
-  if (apiKey.agentId && apiKey.purpose !== "AGENT") return { valid: false }
+  // An agent id on a key is valid for exactly two purposes: a personal AGENT key, and an AGENT_TURN key minted for a cloud run.
+  if (apiKey.agentId && apiKey.purpose !== "AGENT" && apiKey.purpose !== "AGENT_TURN") return { valid: false }
   if (apiKey.purpose === "AGENT") {
     if (process.env.COMPASS_AGENTS_ENABLED !== "1" || !apiKey.agentId) return { valid: false }
     // A personal key reaches only a USER-owned agent; a WORKSPACE-owned one fails closed here.
     const agent = await findActiveUserOwnedAgent(prisma, apiKey.agentId, apiKey.userId)
     if (!agent) return { valid: false }
+  }
+  // A turn key tied to an agent is only the agent while its run is live; a WORKSPACE-owned agent is reachable ONLY this way.
+  let agentRunId: string | undefined
+  if (apiKey.purpose === "AGENT_TURN" && apiKey.agentId) {
+    agentRunId = (await authorizeAgentTurnKey(prisma, apiKey)) ?? undefined
+    if (!agentRunId) return { valid: false }
   }
   if (apiKey.purpose === "AGENT_TURN" && (!apiKey.scopeWorkspaceId || !apiKey.expiresAt || apiKey.expiresAt.getTime() <= Date.now())) return { valid: false }
   if (apiKey.purpose && !["USER", "RESEARCH", "AGENT", "AGENT_TURN"].includes(apiKey.purpose)) return { valid: false }
@@ -113,6 +123,7 @@ export async function validateProgrammaticAuth(
     agentId: apiKey.agentId,
     credentialId: apiKey.id,
     credentialType: "API_KEY",
+    ...(agentRunId ? { agentRunId } : {}),
     scopeWorkspaceId: managed?.workspaceId ?? apiKey.scopeWorkspaceId,
     scopeConversationId: apiKey.scopeConversationId,
     scopeClaimId: apiKey.scopeClaimId,
