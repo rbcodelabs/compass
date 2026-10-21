@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({ link: vi.fn(), unlink: vi.fn(), artifacts: vi.fn(), decisions: vi.fn(), tracked: vi.fn(), review: vi.fn(), artifact: vi.fn(), taskLink: vi.fn(), agent: vi.fn(), user: vi.fn() }))
-vi.mock("@/lib/artifacts", () => ({ linkArtifactToDecision: mocks.link, unlinkArtifactFromDecision: mocks.unlink, getDecisionArtifacts: mocks.artifacts, getArtifactDecisions: mocks.decisions }))
+vi.mock("@/lib/artifacts", () => ({ linkArtifactToDecision: mocks.link, unlinkArtifactFromDecision: mocks.unlink, getDecisionArtifacts: mocks.artifacts, getArtifactDecisions: mocks.decisions, getArtifactSolutionIds: async () => [] }))
 vi.mock("@/lib/tracked-decisions", () => ({ getTrackedDecision: mocks.tracked }))
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ userId: "agent-owner" }) }))
 vi.mock("@/lib/db", () => ({ default: () => ({

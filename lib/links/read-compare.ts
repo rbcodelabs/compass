@@ -164,10 +164,15 @@ export async function compareFamilyRead(
     recordReadCompare(result)
     return result
   } catch (error) {
-    counters[family].errors += 1
-    console.warn("[entity-links read-compare] entity_links read failed", JSON.stringify({ family, error: error instanceof Error ? error.name : "unknown" }))
+    recordReadError(family, error)
     return null
   }
+}
+
+/** Counts a failed entity_links read (shadow: the comparison was skipped; on: the reader fell back to legacy). Error class name only. */
+export function recordReadError(family: LinkReadFamily, error: unknown): void {
+  counters[family].errors += 1
+  console.warn("[entity-links read-compare] entity_links read failed", JSON.stringify({ family, error: error instanceof Error ? error.name : "unknown" }))
 }
 
 export function readModesByFamily(): Record<LinkReadFamily, LinkReadMode> {
