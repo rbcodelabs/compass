@@ -2707,6 +2707,11 @@ model Agent {
   model String? @db.VarChar(100)
   /// WORKSPACE_MEMBERS | ADMINS | OWNER. NULL = the default for the owner type.
   invokePolicy String? @map("invoke_policy") @db.VarChar(30)
+  /// Most non-terminal runs at once (migration 102). NULL = the default (5). Read through lib/agent-limits.ts, which tolerates the
+  /// migration being unapplied; it is deliberately not in the shared agent select for that reason.
+  maxConcurrentRuns Int? @map("max_concurrent_runs")
+  /// Most runs started in a rolling 24 hours (migration 102). NULL = the default (100).
+  maxRunsPerDay Int? @map("max_runs_per_day")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @map("updated_at")
   @@index([ownerUserId])

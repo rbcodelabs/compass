@@ -32,6 +32,7 @@ import { assertAgentWebSearchesMigration } from "@/lib/migrations/agent-web-sear
 import { assertAgentConversationParticipantsMigration } from "@/lib/migrations/agent-conversation-participants";
 import { assertAgentRunAttributionMigration } from "@/lib/migrations/agent-run-attribution";
 import { assertAgentDefaultSelectionMigration } from "@/lib/migrations/agent-default-selection";
+import { assertAgentRunCapsMigration } from "@/lib/migrations/agent-run-caps";
 import { SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, runSharedCompassAgentBootstrap } from "@/lib/migrations/shared-compass-agent-bootstrap";
 import { assertAgentKindAndWorkspaceOwnerMigration, assertAgentOwnerUserNullableMigration } from "@/lib/migrations/agent-kind-and-workspace-owner";
 import { assertEntityLinksMigration } from "@/lib/migrations/entity-links";
@@ -664,9 +665,14 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     filePath: path.join(process.cwd(), "prisma/migrations/101_agent_default_selection/migration.sql"),
   },
   {
+    // Cloud agents phase 4 (caps): two nullable integer columns on agents (max_concurrent_runs, max_runs_per_day); NULL = the default cap.
+    // No index (the counts use migration 100's agent_runs index) and no backfill. The postcondition proves both columns.
+    name: "102_agent_run_caps",
+    filePath: path.join(process.cwd(), "prisma/migrations/102_agent_run_caps/migration.sql"),
+  },
+  {
     // No DDL, EXPLICIT-ONLY and TARGETED. Creates the shared "Compass Agent" (CLOUD, WORKSPACE-owned, WRITE grant by a current administrator,
     // workspace default if none) in the workspaces named by COMPASS_SHARED_AGENT_WORKSPACE_IDS; refuses when none are named. Idempotent.
-    // 102 is reserved for the agent run caps columns (phase 4).
     name: "103_shared_compass_agent_bootstrap",
     filePath: path.join(process.cwd(), "prisma/migrations/103_shared_compass_agent_bootstrap/migration.sql"),
   },
@@ -2193,6 +2199,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "099_agent_owner_user_nullable") await assertAgentOwnerUserNullableMigration(client, schema)
       if (migration.name === "100_agent_runs_agent_attribution") await assertAgentRunAttributionMigration(client, schema)
       if (migration.name === "101_agent_default_selection") await assertAgentDefaultSelectionMigration(client, schema)
+      if (migration.name === "102_agent_run_caps") await assertAgentRunCapsMigration(client, schema)
       if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {
         // Data half: backfill from the parent in bounded batches, then prove it.
         // Both run before the receipt below, so a failure leaves an unfinished
