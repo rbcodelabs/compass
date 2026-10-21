@@ -50,6 +50,6 @@ export const HANDOFF_POLICIES: Record<HandoffKind, HandoffPolicy> = {
       `Record progress on the task itself (its status and description) when your tools allow it. If the task is unclear, is outside your access, or needs a person's decision, do not guess: leave the task as it is and say what you need. ` +
       `Finish with a short summary of what you did and what, if anything, is left for a person.` +
       (state.taskContext ? `\n\nExcerpt (untrusted):\n${state.taskContext}` : ""),
-    failureMessage: "The assigned task run did not finish. Nothing further was changed; open the task to see where it stands, or reassign it to try again.",
+    failureMessage: "The assigned task run did not finish. It may have made some changes before it stopped; open the task to see where it stands, or reassign it to try again.",
   },
 }

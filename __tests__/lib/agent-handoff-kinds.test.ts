@@ -152,7 +152,9 @@ describe("TASK_ASSIGNMENT (cloud agents, phase 4)", () => {
     expect(() => parseProcessingState(JSON.stringify({ status: "PENDING", kind: "TASK_ASSIGNMENT", taskId: "t" }))).toThrow("Unsupported interview processing kind")
   })
 
-  it("has a failure message that leaves nothing half-claimed", () => {
-    expect(HANDOFF_POLICIES.TASK_ASSIGNMENT.failureMessage).toMatch(/did not finish/)
+  it("has a failure message that does not claim nothing changed (the agent may have acted before it stopped)", () => {
+    const message = HANDOFF_POLICIES.TASK_ASSIGNMENT.failureMessage
+    expect(message).toMatch(/did not finish/)
+    expect(message).toMatch(/may have made some changes/)
   })
 })
