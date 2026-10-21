@@ -21,13 +21,15 @@ describe("getLinkReadMode", () => {
     expect(getLinkReadMode(family)).toBe("off");
   });
 
-  it.each(LINK_READ_FAMILIES)("%s: off | shadow | on outside production", (family) => {
+  it.each(LINK_READ_FAMILIES)("%s: off | shadow | on outside production, matched exactly (no trim or case folding)", (family) => {
     for (const value of ["off", "shadow", "on"] as const) {
       vi.stubEnv(LINK_READ_FLAG_NAMES[family], value);
       expect(getLinkReadMode(family)).toBe(value);
     }
-    vi.stubEnv(LINK_READ_FLAG_NAMES[family], "  SHADOW ");
-    expect(getLinkReadMode(family)).toBe("shadow");
+    for (const value of ["  SHADOW ", "ON", "On", " on", "shadow "]) {
+      vi.stubEnv(LINK_READ_FLAG_NAMES[family], value);
+      expect(getLinkReadMode(family)).toBe("off");
+    }
   });
 
   it.each(LINK_READ_FAMILIES)("%s: production is fail-closed, only the exact strings count", (family) => {

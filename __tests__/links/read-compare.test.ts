@@ -217,7 +217,7 @@ describe("Task references parity", () => {
   });
 
   it("COMMENT (and unknown) task links are legacy-only and excluded from the comparison", async () => {
-    const rows = [legacyTaskLink("task-a", "COMMENT", "cmt-1"), legacyTaskLink("task-a", "SQUAD", "squad-a"), legacyTaskLink("task-a", "OPPORTUNITY", "opp-a")];
+    const rows = [legacyTaskLink("task-a", "COMMENT", "cmt-1"), legacyTaskLink("task-a", "SQUAD", "squad-a"), legacyTaskLink("task-a", "REVIEW_REQUEST", "rr-a"), legacyTaskLink("task-a", "OPPORTUNITY", "opp-a")];
     mirror("TASK_REFERENCES", "TASK", "task-a", "OPPORTUNITY", "opp-a");
     expect(legacyTaskReferences(rows)).toHaveLength(1);
     expect(compareLinks("TASK", await retainLiveEndpoints(tx(), WS_A.id, legacyTaskReferences(rows)), await readEntityLinksTaskReferences(tx(), WS_A.id, { taskIds: ["task-a"] })).ok).toBe(true);

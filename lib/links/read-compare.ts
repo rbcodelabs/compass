@@ -207,14 +207,20 @@ export function legacyArtifactLinks(rows: readonly { artifactId: string; linkedT
 
 const isTaskTargetType = (value: string): value is (typeof TASK_REFERENCE_TARGET_TYPES)[number] => (TASK_REFERENCE_TARGET_TYPES as readonly string[]).includes(value)
 
+/** The legacy `linked_type` spellings migration 097 mirrors: the eight direct types and DECISION. A stored spelling such as REVIEW_REQUEST is NOT a legacy value. */
+const LEGACY_TASK_LINK_TYPES: Readonly<Record<string, (typeof TASK_REFERENCE_TARGET_TYPES)[number]>> = Object.freeze({
+  OPPORTUNITY: "OPPORTUNITY", SOLUTION: "SOLUTION", ROADMAP_ITEM: "ROADMAP_ITEM", OBJECTIVE: "OBJECTIVE", KEY_RESULT: "KEY_RESULT",
+  DOC: "DOC", EXPERIMENT: "EXPERIMENT", FEEDBACK_ITEM: "FEEDBACK_ITEM", DECISION: "REVIEW_REQUEST",
+})
+
 /**
- * task_links rows. The legacy spelling DECISION is a review request (the entity-types alias); COMMENT, SQUAD and anything unknown are not
- * mirrored and are excluded here, exactly as migration 097 excludes them.
+ * task_links rows. Only the nine legacy spellings count (DECISION is a review request); COMMENT, SQUAD, a stray stored spelling such as
+ * REVIEW_REQUEST and anything unknown are not mirrored and are excluded, exactly as migration 097 and the parity SQL exclude them.
  */
 export function legacyTaskReferences(rows: readonly { taskId: string; linkedType: string; linkedId: string }[]): ComparableLink[] {
-  return rows.flatMap((row) => {
-    const stored = Object.prototype.hasOwnProperty.call(ENTITY_TYPE_ALIASES, row.linkedType) ? ENTITY_TYPE_ALIASES[row.linkedType] : row.linkedType
-    return isTaskTargetType(stored) ? [{ linkType: TASK_REFERENCES, fromType: "TASK" as const, fromId: row.taskId, toType: stored, toId: row.linkedId }] : []
+  return rows.flatMap((row): ComparableLink[] => {
+    const stored = Object.prototype.hasOwnProperty.call(LEGACY_TASK_LINK_TYPES, row.linkedType) ? LEGACY_TASK_LINK_TYPES[row.linkedType] : null
+    return stored ? [{ linkType: TASK_REFERENCES, fromType: "TASK", fromId: row.taskId, toType: stored, toId: row.linkedId }] : []
   })
 }
 

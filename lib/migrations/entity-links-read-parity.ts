@@ -13,6 +13,8 @@ import type { PoolClient } from "pg"
 import { getLinkReadMode, type LinkReadFamily, type LinkReadMode } from "@/lib/links/registry"
 
 const ID_CAP = 20
+/** Per-family cap on the parity query; a timeout surfaces as the status's {error} field, never a hung request. */
+const STATEMENT_TIMEOUT_MS = 15_000
 const num = (value: unknown) => Number(value ?? "0")
 
 type SetSql = { legacy: string; mirror: string }
@@ -142,17 +144,30 @@ async function parityFor(client: PoolClient, schema: string, spec: Spec): Promis
   const { legacy, mirror: mirrorSql } = spec.sets(schema)
   const absent = (a: string, b: string) => `NOT EXISTS (SELECT 1 FROM ${b} AS y WHERE y.f = ${a}.f AND y.tt = ${a}.tt AND y.t = ${a}.t)`
   const drift = `FROM l JOIN m ON m.f = l.f AND m.tt = l.tt AND m.t = l.t WHERE l.o IS NOT NULL AND m.o IS NOT NULL AND l.o <> m.o`
-  const result = await client.query<Record<string, string | string[]>>(`
-    WITH l AS MATERIALIZED (${legacy}), m AS MATERIALIZED (${mirrorSql})
+  const sql = `
+    WITH l AS MATERIALIZED (${legacy}), m AS MATERIALIZED (${mirrorSql}),
+      ol AS MATERIALIZED (SELECT l.* FROM l WHERE ${absent("l", "m")}),
+      om AS MATERIALIZED (SELECT m.* FROM m WHERE ${absent("m", "l")})
     SELECT
       (SELECT count(*) FROM l)::text AS legacy_live,
       (SELECT count(*) FROM m)::text AS mirror_live,
-      (SELECT count(*) FROM l WHERE ${absent("l", "m")})::text AS only_legacy,
-      ARRAY(SELECT l.id FROM l WHERE ${absent("l", "m")} ORDER BY l.id LIMIT ${ID_CAP}) AS only_legacy_ids,
-      (SELECT count(*) FROM m WHERE ${absent("m", "l")})::text AS only_entity_links,
-      ARRAY(SELECT m.id FROM m WHERE ${absent("m", "l")} ORDER BY m.id LIMIT ${ID_CAP}) AS only_entity_links_ids,
+      (SELECT count(*) FROM ol)::text AS only_legacy,
+      ARRAY(SELECT ol.id FROM ol ORDER BY ol.id LIMIT ${ID_CAP}) AS only_legacy_ids,
+      (SELECT count(*) FROM om)::text AS only_entity_links,
+      ARRAY(SELECT om.id FROM om ORDER BY om.id LIMIT ${ID_CAP}) AS only_entity_links_ids,
       (SELECT count(*) ${drift})::text AS origin_drift,
-      ARRAY(SELECT l.id ${drift} ORDER BY l.id LIMIT ${ID_CAP}) AS origin_drift_ids`)
+      ARRAY(SELECT l.id ${drift} ORDER BY l.id LIMIT ${ID_CAP}) AS origin_drift_ids`
+  // A slow query must not hang GET /api/admin/migrate: SET LOCAL lives only inside this transaction (no session state is left on the connection).
+  let result
+  try {
+    await client.query("BEGIN")
+    await client.query(`SET LOCAL statement_timeout = ${STATEMENT_TIMEOUT_MS}`)
+    result = await client.query<Record<string, string | string[]>>(sql)
+    await client.query("COMMIT")
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined)
+    throw error
+  }
   const row = result.rows[0]
   return {
     legacyLive: num(row.legacy_live),

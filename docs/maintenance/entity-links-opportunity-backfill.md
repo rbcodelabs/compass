@@ -62,3 +62,8 @@ setting the flag to `on`. Types in this family: `opportunityObjective`, `opportu
 
 The fourth family, `COMPASS_ENTITY_LINKS_SOLUTION_KR_READ` (`SOLUTION_TARGETS_KEY_RESULT`, status entry `solutionKeyResult`), has the same semantics but is new-only:
 no backfill has run, so its parity will show `onlyLegacy` for every pre-mirror link and it must stay `off` or `shadow` until a backfill exists.
+
+Testing note: the SQL half of `__tests__/links/read-parity-status.test.ts` is skipped unless `READ_PARITY_TEST_DATABASE_URL` points at a throwaway
+Postgres (any version >= 12, for example `postgresql://postgres@localhost:5499/t`); it builds and drops its own schema. Run it before changing
+`lib/migrations/entity-links-read-parity.ts`. Each family's parity query runs in its own transaction under `SET LOCAL statement_timeout = 15s`, so a
+slow query shows up as an `error` field in `entityLinksReadParity` instead of hanging the endpoint.

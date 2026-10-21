@@ -74,11 +74,10 @@ export const LINK_READ_FLAG_NAMES: Readonly<Record<LinkReadFamily, string>> = Ob
 /**
  * The read mode of one family. Fail-closed everywhere: only the exact strings "shadow" and "on" enable anything, and outside production
  * the default is off too (unlike the *_MIRROR flags, which default on outside production), so no read path changes unless a flag is set.
- * Outside production the value is trimmed and case-insensitive for convenience; in production it must match exactly.
+ * Matching is exact in every environment (no trimming, no case folding), so a flag cannot mean one thing in preview and another in production.
  */
 export function getLinkReadMode(family: LinkReadFamily): LinkReadMode {
-  const raw = process.env[LINK_READ_FLAG_NAMES[family]]
-  const value = process.env.NODE_ENV === "production" ? raw : raw?.trim().toLowerCase()
+  const value = process.env[LINK_READ_FLAG_NAMES[family]]
   return value === "shadow" || value === "on" ? value : "off"
 }
 
