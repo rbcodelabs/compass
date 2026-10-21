@@ -103,7 +103,7 @@ function decodeContinuation(token: string): { tag: string; head: number; afterPa
 }
 
 /** Narrow rows (no body, no metadata) are enough to build the tree. */
-function loadTreeRows(workspaceId: string) {
+export function loadTreeRows(workspaceId: string) {
   return getPrisma().doc.findMany({
     where: { workspaceId },
     select: { id: true, title: true, parentId: true, roadmapItemId: true, docType: true, updatedAt: true, revision: true, sortOrder: true, createdAt: true },
@@ -113,11 +113,23 @@ function loadTreeRows(workspaceId: string) {
 type TreeRows = Awaited<ReturnType<typeof loadTreeRows>>
 type Node = ReturnType<typeof buildTree>[number]
 
+/**
+ * One doc as a sync entry plus the exact file text its size/hash describe (frontmatter + body, as
+ * `readDocById` returns it). Shared by the scan and the mutation endpoints so they cannot disagree.
+ */
+export async function buildEntry(workspaceId: string, doc: Parameters<typeof renderDocFile>[0] & { id: string; revision: string | null; updatedAt: Date; content: string | null; storageProvider?: string | null; contentRef?: string | null }, node: { path: string; hasChildren: boolean }): Promise<{ entry: DocSyncEntry; text: string }> {
+  const hydrated = await hydrateDocument(workspaceId, doc)
+  const text = renderDocFile(doc, hydrated.content)
+  const bytes = Buffer.from(text, "utf8")
+  // An implicit parent (created by mkdir -p semantics) has no body of its own: a folder.
+  const isFolder = node.hasChildren && !(hydrated.content ?? "").trim()
+  return { text, entry: { id: doc.id, path: node.path, kind: isFolder ? "folder" : "file", revision: docRevisionOf(doc), size: bytes.byteLength, hash: createHash("sha256").update(bytes).digest("hex") } }
+}
+
 /** Hydrates only the docs actually emitted; a doc that cannot be read is reported, not fatal. */
-async function toEntries(workspaceId: string, treeRows: TreeRows, nodes: Node[]): Promise<{ entries: DocSyncEntry[]; skipped: DocSyncSkipped[] }> {
+async function toEntries(workspaceId: string, _treeRows: TreeRows, nodes: Node[]): Promise<{ entries: DocSyncEntry[]; skipped: DocSyncSkipped[] }> {
   const entries: DocSyncEntry[] = []
   const skipped: DocSyncSkipped[] = []
-  const revisions = new Map(treeRows.map((r) => [r.id, docRevisionOf(r)]))
   for (let i = 0; i < nodes.length; i += HYDRATE_BATCH) {
     const batch = nodes.slice(i, i + HYDRATE_BATCH)
     const full = await getPrisma().doc.findMany({ where: { workspaceId, id: { in: batch.map((n) => n.docId) } } })
@@ -125,11 +137,7 @@ async function toEntries(workspaceId: string, treeRows: TreeRows, nodes: Node[])
     const settled = await Promise.allSettled(batch.map(async (node): Promise<DocSyncEntry> => {
       const doc = byId.get(node.docId)
       if (!doc) throw new DocumentError("not-found")
-      const hydrated = await hydrateDocument(workspaceId, doc)
-      const bytes = Buffer.from(renderDocFile(doc, hydrated.content), "utf8")
-      // An implicit parent (created by mkdir -p semantics) has no body of its own: a folder.
-      const isFolder = node.hasChildren && !(hydrated.content ?? "").trim()
-      return { id: doc.id, path: node.path, kind: isFolder ? "folder" : "file", revision: revisions.get(doc.id) ?? docRevisionOf(doc), size: bytes.byteLength, hash: createHash("sha256").update(bytes).digest("hex") }
+      return (await buildEntry(workspaceId, doc, node)).entry
     }))
     settled.forEach((result, index) => {
       if (result.status === "fulfilled") entries.push(result.value)

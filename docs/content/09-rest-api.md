@@ -96,6 +96,26 @@ newer content, including workspaces backed by the GEODE document store. Reusing
 an operation ID for a different payload or sending a stale revision returns
 `409`; missing/invalid operation tokens return `422`.
 
+## Geode doc sync (preview, feature-flagged)
+
+When `DOCS_SYNC_ENABLED` is on, `/api/v1/workspaces/{workspaceId}/sync/docs` exposes a markdown-only view of
+STANDARD docs (no CANVAS or GTM brief, and nothing beneath one) for the Geode sync plugin; every route answers
+`404` while the flag is off.
+
+- `GET .../sync/docs/scan?cursor=&continuation=&limit=` returns a paged `snapshot` or a `delta` of
+  `{id, path, kind: file|folder|tombstone, revision, size, hash}` entries. `status: partial` or a `null`
+  cursor means do not adopt a checkpoint; `409 continuation_stale` means restart the snapshot.
+- `GET .../sync/docs/{id}?revision=` returns `{id, path, kind, revision, size, hash, content}`; `content` is the
+  frontmatter plus body that `size` and `hash` describe.
+- `POST .../sync/docs` `{path, content, operationKey}` creates a doc (`201`); `PUT .../sync/docs/{id}`
+  `{content, expectedRevision, operationKey}` replaces content; `POST .../sync/docs/{id}/move`
+  `{path, expectedRevision}` renames or reparents; `DELETE .../sync/docs/{id}?expectedRevision=` deletes a leaf
+  (`204`). Paths end in `.md` (`422 unsupported_extension` otherwise) while scan paths do not. Missing folders
+  are created implicitly; there are no folder endpoints.
+- Stable problem codes: `revision_conflict`, `path_conflict`, `has_children`, `operation_conflict` (all `409`),
+  `unsupported_extension`, `invalid_path`, `invalid_move` (`422`). `operationKey` makes create and update
+  idempotent; reusing a key with different input is `operation_conflict`.
+
 ## Release authorization
 
 `POST /api/v1/workspaces/{workspaceId}/release-authorizations` prepares an

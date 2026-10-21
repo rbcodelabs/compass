@@ -13,11 +13,13 @@ export const store = {
   changes: [] as Row[],
   counters: [] as Row[],
   versions: [] as Row[],
+  operations: [] as Row[],
   failChangeWrite: false,
   ids: 0,
   counterOwner: null as symbol | null,
   conflicts: 0,
   trace: [] as string[],
+  denyWorkspace: false,
   createManySizes: [] as number[],
   docFindManyArgs: [] as Row[],
   /** Runs once, inside the first counter lock of the next transaction, then that lock fails with a write conflict. */
@@ -30,11 +32,13 @@ export function resetStore() {
   store.changes.length = 0
   store.counters.length = 0
   store.versions.length = 0
+  store.operations.length = 0
   store.failChangeWrite = false
   store.ids = 0
   store.counterOwner = null
   store.conflicts = 0
   store.trace.length = 0
+  store.denyWorkspace = false
   store.createManySizes.length = 0
   store.docFindManyArgs.length = 0
   store.onFirstLock = null
@@ -138,9 +142,15 @@ function client(journal: Journal, txId: symbol | null): Row {
     },
     docVersion: { findFirst: async () => null, create: async () => ({}), deleteMany: async () => ({ count: 0 }), findUnique: async ({ where }: Row) => store.versions.find((v) => matches(v, where)) ?? null },
     docComment: { deleteMany: async () => ({ count: 0 }) },
-    docOperation: { findUnique: async () => null, create: async () => ({}) },
+    docOperation: {
+      findUnique: async ({ where }: Row) => { const k = where.workspaceId_operationId; const r = store.operations.find((o) => o.workspaceId === k.workspaceId && o.operationId === k.operationId); return r ? { ...r } : null },
+      create: async ({ data }: Row) => {
+        if (store.operations.some((o) => o.workspaceId === data.workspaceId && o.operationId === data.operationId)) throw Object.assign(new Error("Unique constraint failed on doc_operations"), { code: "P2002" })
+        store.operations.push({ ...data }); journal?.push(() => { store.operations.pop() }); return { ...data }
+      },
+    },
     roadmapItem: { findFirst: async () => null, findUnique: async () => null },
-    workspace: { findUnique: async () => ({ name: "Compass", slug: "compass", organization: { slug: "org" } }) },
+    workspace: { findUnique: async () => ({ name: "Compass", slug: "compass", organization: { slug: "org" } }), findFirst: async () => (store.denyWorkspace ? null : { id: "workspace" }) },
   }
 }
 
