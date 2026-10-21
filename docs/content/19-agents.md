@@ -1,6 +1,6 @@
 ---
 title: Agents
-description: Assign tasks to external agents and use one API key across approved workspaces
+description: Create cloud agents, choose which one answers, and connect external agents with one key
 icon: "Bot"
 order: 19
 section: "Core Features"
@@ -35,6 +35,49 @@ personal key for work you operate yourself. See
 
 ![Account-wide agent settings](/screenshots/docs/agents-desktop.png)
 
+## Cloud agents
+
+A **cloud agent** runs inside Compass, in the same sandbox as the chat assistant, with
+instructions and a model that you choose. It is a named identity: it can be assigned
+tasks, shows up in Workspace > Agents, and its activity is attributed to it. External
+agents (above) connect from your own tooling with a key; cloud agents need no key.
+
+Create one from **Workspace settings > Workspace agents > New cloud agent**:
+
+- **Personal** agents belong to you. Any workspace member can create one, and only the
+  owner can run it. A workspace administrator must enable it in the workspace (it is
+  enabled for you automatically if you are the administrator).
+- **Shared** agents belong to the workspace. Only a workspace administrator can create
+  one. The administrator who creates it grants it read-only or read-and-write access,
+  and chooses who may run it: any workspace member, or administrators only.
+
+The **Instructions** guide the agent. They cannot widen its access: a cloud agent
+reaches only what it was granted, and a personal agent is further limited to what its
+owner can do. The **Model** list shows the models your deployment allows; leave it on
+the system default if unsure. Edit an agent's instructions, model and (for shared
+agents) who can run it from the same panel, or from **My agents** for personal ones.
+
+### Which agent answers
+
+Chat and **Send to agent** use the first of these that applies:
+
+1. the agent you pick in the chat's **Agent** menu (or in the Send to agent menu);
+2. your **personal default** ("Use as my default" on an agent you can run);
+3. the **workspace default** an administrator sets on a shared agent;
+4. the built-in **Compass Agent**.
+
+A default that is no longer usable (the agent was suspended, lost its workspace
+access, or you may no longer run it) is skipped silently and the next one applies, so
+revoking access can never break anyone's chat. Pick **Compass Agent** in the menu to
+use the built-in assistant for one conversation regardless of defaults. Defaults need
+the cloud-agent database update (migrations 100 and 101); until then the built-in
+agent answers.
+
+Administrators can create the shared Compass Agent for chosen workspaces with
+migration `103_shared_compass_agent_bootstrap`. It never runs on its own: name the
+workspaces in `COMPASS_SHARED_AGENT_WORKSPACE_IDS` and run it by name. It is safe to
+repeat and never overrides an existing default or revives a revoked grant.
+
 ## Workspace access
 
 Workspace administrators, or organization administrators with workspace access,
@@ -64,8 +107,10 @@ Use the task's **Assignee** picker to select a person or agent. A task has one
 assignee, or can be unassigned. The board, list, detail page, and roadmap delivery
 panel display the same identity. Assignee filters include people and agents.
 
-Assignment records who should do the work. It does not automatically launch the
-agent or grant access. Your MCP client or automation decides when to execute.
+Assignment records who should do the work. It does not grant access. Cloud agents
+appear in the picker once they are enabled in the workspace. Assigning a task does not
+start a cloud agent yet; run it from chat. Your MCP client or automation decides when
+an external agent executes.
 
 If an agent is suspended or loses access, existing assignments remain visible as
 unavailable. Clear or reassign them explicitly. The external Owner label remains
@@ -115,7 +160,10 @@ Do not send both `assignee` and the legacy `assigneeUserId` field.
 ## Deployment
 
 Administrators must apply and verify migration `049_agent_identity` before
-this revision receives user traffic, then enable `COMPASS_AGENTS_ENABLED=1`.
+this revision receives user traffic, then enable `COMPASS_AGENTS_ENABLED=1`. Cloud agents
+additionally need migrations `098`, `099`, `100` and `101`; the code tolerates any of
+them being unapplied (cloud-agent features stay unavailable and chat uses the built-in agent).
+`COMPASS_CLOUD_AGENT_MODELS` (comma-separated) adds models to the allowed list.
 The flag is not a substitute for installing the schema. Turning off new agent operations preserves
-existing assignment records. This release supports external agents; the built-in
-chat assistant is not a registered task assignee.
+existing assignment records. The built-in Compass Agent is not itself a task assignee;
+create a shared cloud agent if you want one.
