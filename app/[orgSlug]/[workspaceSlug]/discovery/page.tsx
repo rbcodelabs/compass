@@ -39,7 +39,7 @@ import {
 } from "@/lib/opportunity-field-board";
 
 export const metadata = {
-  title: "Discovery",
+  title: "Opportunities",
 };
 
 type Props = {
@@ -321,7 +321,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
 
   return (
     <WorkspacePage
-      title="Discovery"
+      title="Opportunities"
       contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
       actions={(
         <>
