@@ -32,6 +32,7 @@ import { assertAgentWebSearchesMigration } from "@/lib/migrations/agent-web-sear
 import { assertAgentConversationParticipantsMigration } from "@/lib/migrations/agent-conversation-participants";
 import { assertAgentRunAttributionMigration } from "@/lib/migrations/agent-run-attribution";
 import { assertAgentDefaultSelectionMigration } from "@/lib/migrations/agent-default-selection";
+import { SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, runSharedCompassAgentBootstrap } from "@/lib/migrations/shared-compass-agent-bootstrap";
 import { assertAgentKindAndWorkspaceOwnerMigration, assertAgentOwnerUserNullableMigration } from "@/lib/migrations/agent-kind-and-workspace-owner";
 import { assertEntityLinksMigration } from "@/lib/migrations/entity-links";
 import { assertWorkItemIdsMigration, WORK_ITEM_IDS_MIGRATION } from "@/lib/migrations/work-item-ids";
@@ -661,6 +662,13 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // no row means "no default" and falls through to the built-in agent. The postcondition proves the columns and both unique indexes.
     name: "101_agent_default_selection",
     filePath: path.join(process.cwd(), "prisma/migrations/101_agent_default_selection/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY and TARGETED. Creates the shared "Compass Agent" (CLOUD, WORKSPACE-owned, WRITE grant by a current administrator,
+    // workspace default if none) in the workspaces named by COMPASS_SHARED_AGENT_WORKSPACE_IDS; refuses when none are named. Idempotent.
+    // 102 is reserved for the agent run caps columns (phase 4).
+    name: "103_shared_compass_agent_bootstrap",
+    filePath: path.join(process.cwd(), "prisma/migrations/103_shared_compass_agent_bootstrap/migration.sql"),
   },
 ];
 
@@ -1872,10 +1880,10 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION];
 
 /**
- * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097).
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 103).
  * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
  * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
  * Production-style callers (the admin route, an untargeted POST) never set it.
@@ -2229,6 +2237,11 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         // leaves an unfinished attempt and the next POST resumes.
         await backfillEntityLinksTask(client, schema, log)
         await assertEntityLinksTaskBackfill(client, schema)
+      }
+      if (migration.name === SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION) {
+        // Data half: create the shared Compass Agent in the NAMED workspaces, then prove it. Before the receipt below, so a failure leaves an
+        // unfinished attempt and the next POST resumes.
+        await runSharedCompassAgentBootstrap(client, schema, log)
       }
       if (migration.name === "090_v0_chat_artifacts") {
         const columns = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND ((table_name='artifacts' AND column_name='v0_chat_id') OR (table_name='artifact_revisions' AND column_name='v0_version_id'))", [schema])

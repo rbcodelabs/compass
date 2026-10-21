@@ -205,7 +205,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Cloud agents phase 2: nullable agent_id and invoked_by_user_id on agent_runs plus two async indexes. No backfill.
   "100_agent_runs_agent_attribution": "a83ebc36920078d9d6c54eae6fd7338c41e1bcd2a0b36d6c3d77de24a35b5545",
   // Cloud agents phase 3: workspace_default_agents and user_default_agents tables, each with one unique async index. No backfill.
-  "101_agent_default_selection": "23b59fe17c4914070c5562b7ebff24332e92266c6deddadbad369beee9bddf06"
+  "101_agent_default_selection": "23b59fe17c4914070c5562b7ebff24332e92266c6deddadbad369beee9bddf06",
+  // Cloud agents phase 3: no DDL, EXPLICIT-ONLY and TARGETED; the work is the hook (lib/migrations/shared-compass-agent-bootstrap.ts). 102 is reserved for run caps.
+  "103_shared_compass_agent_bootstrap": "5eaf5543ac6be12db4b69a3d2250d095e48f361b33e683f1752c0ca7527f0929"
 };
 
 /**
@@ -305,6 +307,11 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 101 postcondition (both tables' columns; both unique indexes valid and ready).
   "101_agent_default_selection": {
     "lib/migrations/agent-default-selection.ts": "344d4dadc297d98f6a65afafdf0a96c2c43f3205976ff7f92e7b6bab7213ae3a",
+  },
+  // The 103 hook and the refusal type it imports; editing either re-reviews the migration.
+  "103_shared_compass_agent_bootstrap": {
+    "lib/migrations/shared-compass-agent-bootstrap.ts": "1d729847d0855d68748684c8c4339dbfbd52b533098c2bb43b883594b292247e",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };
 
