@@ -30,7 +30,9 @@ import {
   deleteDocComment,
   getDocLinkedTasks,
   restoreDocVersion,
+  resolveDocEmbedRefs,
 } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
+import { DocEmbedCardsProvider } from "@/components/docs/doc-embed-cards";
 import { createDocumentSaveQueue } from "@/lib/document-save-queue";
 import { DocProperties, type DocMetadata } from "@/components/docs/doc-properties";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
@@ -82,6 +84,8 @@ interface DocEditorProps {
   decisionAction?: React.ReactNode;
   /** Follow toggle, rendered beside the decision action. */
   followAction?: React.ReactNode;
+  /** What this doc is (Spec / Discovery Plan / unscoped), for SPEC docs. Rendered above the properties; read-only. */
+  specHeader?: React.ReactNode;
   /** People and agents the @ picker offers in comments. */
   mentionOptions?: MentionOptions;
   /** Agents that already hold a task from a comment in this doc. */
@@ -131,7 +135,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {} }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, specHeader, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {} }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
@@ -271,6 +275,10 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
+
+  // Embed cards read their live data through this; the workspace is the doc's, decided on the server.
+  const docId = doc.id;
+  const resolveEmbeds = useCallback((refs: Parameters<typeof resolveDocEmbedRefs>[1]) => resolveDocEmbedRefs(docId, refs), [docId]);
 
   const editor = useEditor({
     extensions: createDocEditorExtensions(initialAnchorData),
@@ -697,6 +705,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
       {/* Editor */}
       <div className="flex-1 px-8 py-4 overflow-y-auto">
+        {specHeader}
         {/* Properties — scrolls with the content instead of pinning the viewport */}
         <DocProperties
           key={propertiesVersion}
@@ -745,7 +754,9 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           )}
         </div>
 
-        <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
+        <DocEmbedCardsProvider resolve={resolveEmbeds}>
+          <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
+        </DocEmbedCardsProvider>
       </div>
 
       </div>

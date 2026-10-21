@@ -58,7 +58,7 @@ import {
   listEvidence,
 } from "@/lib/evidence-tool-handlers"
 import { editDoc, editCanvas, buildCanvasTree, MAX_TEXT_EDITS } from "@/lib/doc-edit-tool-handlers"
-import { createSpec, listSpecs } from "@/lib/spec-tool-handlers"
+import { createSpec, listSpecs, getSpec } from "@/lib/spec-tool-handlers"
 import { SPEC_SCOPE_TYPES } from "@/lib/spec-docs/scopes"
 import { SPEC_TEMPLATE_VARIANTS } from "@/lib/spec-docs/template"
 import { CANVAS_CARD_KINDS } from "@/lib/canvas-cards"
@@ -3431,6 +3431,24 @@ const _handler = createMcpHandler(
         outputSchema: TOOL_OUTPUT_SCHEMA,
       },
       listSpecs,
+    )
+
+    register(
+      "get_spec",
+      {
+        title: "Get Spec",
+        description:
+          "Reads one SPEC doc (a Spec or Discovery Plan) resolved: its markdown (frontmatter included, exactly as the docs:// resource returns it) plus, for every `[title](compass://kind/uuid)` embed, the record's LIVE title, status and key facts, and an explicit `unavailable` list of the references that could not be resolved. " +
+          "The cached title inside each link is only a hint and is never reported. A reference that is missing, deleted, in another workspace or not accessible is reported as unavailable, indistinguishably. Archived or killed records resolve normally with their status. " +
+          "Address the doc by docId or path (docId wins when both are given); a doc that is not in workspaceId or is not a SPEC returns the same not-found message as a missing one.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          docId: z.string().uuid().optional().describe("UUID of the spec doc (from create_spec or list_specs)"),
+          path: z.string().min(1).optional().describe("Doc path (from create_spec or list_specs), as used by write_doc and the docs:// resource"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getSpec,
     )
 
     const editExpectedRevision = z.string().uuid().optional().describe("Revision from the docs:// resource read (_meta.revision) or a prior write_doc result. When given, the edit is rejected if the doc has changed since (re-read and retry). When omitted, the edit is re-applied on top of the latest revision, so it never overwrites a concurrent change.")

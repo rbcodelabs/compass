@@ -7,6 +7,8 @@ import getPrisma from "@/lib/db";
 import { createPositioningBriefCore } from "@/lib/positioning-brief";
 import { createSpecCore, scopeNotFoundMessage } from "@/lib/spec-docs/create";
 import { isSpecScopeType, type SpecScopeType } from "@/lib/spec-docs/scopes";
+import { loadScopeSpecItems, type SpecListItem } from "@/lib/spec-docs/view";
+import { resolveWorkspaceAccess } from "@/lib/workspace-context";
 import type { SpecTemplateVariant } from "@/lib/spec-docs/template";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 import { Prisma } from "@prisma/client";
@@ -21,7 +23,7 @@ import {
 import { postDocCommentWithOptionalTask, type CommentTaskRequest, type PostCommentResult } from "@/lib/doc-comment-tasks";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { parseArtifactKind } from "@/lib/artifact-kind";
-import { resolveCanvasCards, searchCanvasCardTargets } from "@/lib/canvas-card-data";
+import { resolveCanvasCards, resolveDocEmbeds, searchCanvasCardTargets, type DocEmbedResolution } from "@/lib/canvas-card-data";
 import { getCanvasOverview } from "@/lib/canvas/data";
 import { buildTreeFragment, TREE_SCOPE_KINDS, type TreeFragment, type TreeScope } from "@/lib/canvas-tree";
 import { isUuid } from "@/lib/canvas-cards";
@@ -293,6 +295,22 @@ export async function resolveCanvasCardRefs(docId: string, refs: unknown) {
   return resolveCanvasCards({ ...access, refs });
 }
 
+/** Hard bound on the references one call will even look at; the resolver then caps what it queries at MAX_CARD_REFS. */
+const MAX_EMBED_REFS_PER_CALL = 500;
+
+/**
+ * Live data for the embed cards in a Doc (spec docs phase 3). Readable by anyone who can open the doc page. The workspace is the DOC's:
+ * the references can only name a kind and an id. Unknown, deleted, foreign and not-permitted records all come back `unavailable`
+ * (identical payloads); references beyond the per-request cap come back in `deferred` for the editor to ask for as cards scroll into view.
+ */
+export async function resolveDocEmbedRefs(docId: string, refs: unknown): Promise<DocEmbedResolution> {
+  const access = await requireCanvasReader(docId);
+  if (!Array.isArray(refs)) return { cards: {}, deferred: [] };
+  const result = await resolveDocEmbeds({ docId, userId: access.userId, refs: refs.slice(0, MAX_EMBED_REFS_PER_CALL), expectedWorkspaceId: access.workspaceId });
+  if (!result) throw new Error("Document not found");
+  return result;
+}
+
 /** Picker search. Requires workspace membership (it is an editing action). */
 export async function searchCanvasCardItems(docId: string, query: string) {
   const { workspaceId } = await requireDocumentMember(docId);
@@ -435,6 +453,26 @@ export async function createSpec(
   }
   revalidatePath(revalidatePathStr);
   return { docId: result.docId };
+}
+
+/**
+ * The specs linked to one solution or opportunity, newest update first, for the "Specs" / "Discovery Plans" sections. Anyone who can open
+ * the workspace may read; `canCreate` is false for org-wide read-only members (createSpec itself still requires workspace membership).
+ * A scope that is not in the workspace reads as an empty, non-creatable list, the same as one with no specs and no rights.
+ */
+export async function loadScopeSpecs(
+  orgSlug: string,
+  workspaceSlug: string,
+  scopeType: SpecScopeType,
+  scopeId: string
+): Promise<{ workspaceId: string; canCreate: boolean; specs: SpecListItem[] }> {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const access = await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id);
+  if (!access) throw new Error("Workspace not found or access denied");
+  if (!isSpecScopeType(scopeType) || !isUuid(scopeId)) return { workspaceId: access.workspaceId, canCreate: false, specs: [] };
+  const specs = await loadScopeSpecItems({ workspaceId: access.workspaceId, orgSlug, workspaceSlug, scopeType, scopeId });
+  return { workspaceId: access.workspaceId, canCreate: !access.isReadOnly && specs !== null, specs: specs ?? [] };
 }
 
 /**

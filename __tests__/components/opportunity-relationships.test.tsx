@@ -26,6 +26,7 @@ vi.mock("@/components/decisions/request-decision-link", () => ({ RequestDecision
 // component test has no business loading (same reasoning as every other real
 // child component mocked above). Without this, next-auth's ESM `next/server`
 // import fails to resolve under Vitest's jsdom transform.
+vi.mock("@/components/specs/linked-specs-section", () => ({ LinkedSpecsSection: () => null }));
 vi.mock("@/components/tasks/linked-tasks-section", () => ({ LinkedTasksSection: () => null }));
 vi.mock("@/components/custom-fields/custom-fields-panel", () => ({ CustomFieldsPanel: () => <div>Custom fields</div> }));
 vi.mock("@/components/discovery/solutions-list", () => ({ SolutionsList: () => null }));

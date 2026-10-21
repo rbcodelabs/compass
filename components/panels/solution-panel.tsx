@@ -43,6 +43,7 @@ import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
 import { PmInterviewHistory } from "@/components/research/pm-interview-history";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
+import { LinkedSpecsSection } from "@/components/specs/linked-specs-section";
 import { SolutionKeyResultPicker } from "@/components/discovery/solution-key-result-picker";
 import { useLabels, useThinkingModel } from "@/components/thinking-model/thinking-model-provider";
 import type { CustomFieldWithValue } from "@/lib/custom-field-definitions";
@@ -290,6 +291,8 @@ export function SolutionPanel({
           />
         </Section>
       )}
+
+      <LinkedSpecsSection scopeType="SOLUTION" scopeId={data.id} orgSlug={orgSlug} workspaceSlug={workspaceSlug} {...SECTION} />
 
       <Section {...SECTION} label="Delivery tasks" count={data.deliveryTasks.length}>
         <LinkedTasksSection

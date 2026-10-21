@@ -11,11 +11,13 @@
  * a document without such a paragraph parses and serializes exactly as before.
  * The node serializes to the same single line it was parsed from.
  *
- * Phase 1 renders the node as a plain, non-interactive block; the live card is
- * a later phase.
+ * Phase 3 gives the node a read-only React node view (components/docs/spec-embed-card.tsx) that shows the record's LIVE title, status and
+ * facts; the stored title is only a cached hint. The node view changes nothing about parsing, serialization or the plain-text
+ * projection: those depend on the node's attributes alone.
  */
-import { Node } from "@tiptap/react";
+import { Node, ReactNodeViewRenderer } from "@tiptap/react";
 import { isDocEmbedKind, parseBlockEmbedLine, serializeEmbed } from "@/lib/doc-embeds";
+import { SpecEmbedNodeView } from "@/components/docs/spec-embed-card";
 
 /** The subset of markdown-it this rule touches (markdown-it is not a direct dependency). */
 type MdToken = {
@@ -131,6 +133,10 @@ export const SpecEmbed = Node.create({
       { [HTML_ATTR]: "", "data-kind": kind, "data-id": id, "data-title": title, class: "spec-embed" },
       title || `${kind} ${id}`,
     ];
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(SpecEmbedNodeView);
   },
 
   addStorage() {
