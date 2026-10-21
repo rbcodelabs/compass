@@ -77,7 +77,13 @@ describe("MCP credential expiry", () => {
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
     resetAgentColumnsAvailabilityCache()
     agent.findFirst.mockRejectedValueOnce(new Error("connection reset"))
-    await expect(validateMcpAuth(request())).rejects.toThrow("connection reset")
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    // Fails closed (and logs) rather than throwing a 500, but is not retried
+    // with the legacy select as if a column were missing.
+    await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
+    expect(agent.findFirst).toHaveBeenCalledTimes(1)
+    expect(spy).toHaveBeenCalled()
+    spy.mockRestore()
     vi.unstubAllEnvs()
   })
   it("rejects personal credentials carrying an agent identity", async () => {
@@ -213,6 +219,14 @@ describe("OAuth access tokens", () => {
     oAuthToken.findFirst.mockClear()
     await validateProgrammaticAuth(oauthRequest(), { resource: "http://localhost:3000/api/v1" })
     expect(oAuthToken.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ resource: "http://localhost:3000/api/v1" }) }))
+  })
+
+  it("resolves { valid: false } and logs when the token lookup throws a database error", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    oAuthToken.findFirst.mockRejectedValue(new Error("EMAXCONNSESSION max clients reached"))
+    await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({ valid: false })
+    expect(spy).toHaveBeenCalled()
+    spy.mockRestore()
   })
 
   it("rejects when no row matches, without falling through to the API-key lookup", async () => {

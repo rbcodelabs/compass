@@ -538,6 +538,76 @@ describe("refresh_token grant", () => {
     expect(store.oAuthToken.rows.every((row) => row.revokedAt !== null)).toBe(true)
   })
 
+  describe("transient database errors", () => {
+    let errorSpy: ReturnType<typeof vi.spyOn>
+    beforeEach(() => {
+      errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    })
+    afterEach(() => errorSpy.mockRestore())
+
+    it("answers 503 temporarily_unavailable, keeps the family, and lets the same refresh token retry", async () => {
+      const initial = await firstPair()
+      store.oAuthToken.create.mockRejectedValueOnce(new Error("EMAXCONNSESSION max clients reached"))
+
+      const failed = await refresh(initial.refresh_token)
+
+      expect(failed.status).toBe(503)
+      expect(failed.headers.get("retry-after")).toBeTruthy()
+      expect((await failed.json()).error).toBe("temporarily_unavailable")
+      expect(store.oAuthToken.rows.every((row) => row.revokedAt === null)).toBe(true)
+      expect(errorSpy).toHaveBeenCalled()
+
+      const retry = await refresh(initial.refresh_token)
+      expect(retry.status).toBe(200)
+      expect((await retry.json()).refresh_token).toMatch(/^cmp_ort_/)
+    })
+
+    it("treats a write conflict during issuance as invalid_grant and revokes, as before", async () => {
+      const initial = await firstPair()
+      store.oAuthToken.create.mockRejectedValueOnce(Object.assign(new Error("OC001"), { code: "OC001" }))
+
+      const response = await refresh(initial.refresh_token)
+
+      expect(response.status).toBe(400)
+      expect((await response.json()).error).toBe("invalid_grant")
+      expect(store.oAuthToken.rows.every((row) => row.revokedAt !== null)).toBe(true)
+    })
+
+    it("answers 503 on a non-conflict claim error without revoking anything", async () => {
+      const initial = await firstPair()
+      store.oAuthToken.updateMany.mockRejectedValueOnce(new Error("EMAXCONNSESSION"))
+
+      const response = await refresh(initial.refresh_token)
+
+      expect(response.status).toBe(503)
+      expect((await response.json()).error).toBe("temporarily_unavailable")
+      expect(store.oAuthToken.rows.every((row) => row.revokedAt === null)).toBe(true)
+    })
+
+    it("still revokes the family when a rotated token is genuinely replayed", async () => {
+      const initial = await firstPair()
+      await refresh(initial.refresh_token)
+
+      const replay = await refresh(initial.refresh_token)
+
+      expect(replay.status).toBe(400)
+      expect((await replay.json()).error).toBe("invalid_grant")
+      expect(store.oAuthToken.rows.every((row) => row.revokedAt !== null)).toBe(true)
+    })
+
+    it("answers 503 for an authorization_code exchange hit by a database error, without revoking", async () => {
+      await seedOverrideEligible()
+      const code = await issueCode()
+      store.oAuthToken.create.mockRejectedValueOnce(new Error("EMAXCONNSESSION"))
+
+      const response = await exchange(code)
+
+      expect(response.status).toBe(503)
+      expect((await response.json()).error).toBe("temporarily_unavailable")
+      expect(store.oAuthToken.updateMany).not.toHaveBeenCalled()
+    })
+  })
+
   it.each([null, "RESEARCH", "agent"])(
     "revokes the family instead of rotating invalid authorizationMode %s",
     async (authorizationMode) => {
