@@ -197,7 +197,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // hook (lib/migrations/entity-links-artifact-backfill.ts).
   "096_entity_links_backfill_artifact": "8b79a111405e48d39cb6d8afc65ffea3ec7d0612b2a7e140f76d2fa00b02edad",
   // entity_links data half for task links (ADR phase 7): no DDL, EXPLICIT-ONLY, the work is the hook (lib/migrations/entity-links-task-backfill.ts).
-  "097_entity_links_backfill_task": "ac22c83a1b21508ca49189ffbf1cda1a8c64e426c7bcb808538e0a3a85e6ecbf"
+  "097_entity_links_backfill_task": "ac22c83a1b21508ca49189ffbf1cda1a8c64e426c7bcb808538e0a3a85e6ecbf",
+  // Cloud agents PR1: six nullable agents columns, owner_user_id DROP NOT NULL (as 070) and one async owner_workspace_id index. No backfill.
+  "098_agent_kind_and_workspace_owner": "02058d4fb2f3516e901571859ed98617f126700658cda2c5537ce422c792c2b7"
 };
 
 /**
@@ -282,6 +284,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "097_entity_links_backfill_task": {
     "lib/migrations/entity-links-task-backfill.ts": "761445d5aafdfafe2d6294dfde95b36e4d1da608cf78758341d716116362196b",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 098 postcondition (six nullable columns, owner_user_id really nullable, owner_workspace_id index valid and ready before the receipt).
+  "098_agent_kind_and_workspace_owner": {
+    "lib/migrations/agent-kind-and-workspace-owner.ts": "88122aef0df129ca3df2ac25009afc8cfaeec3a753a75812ec1e58fe7bc3bcea",
   },
 };
 
