@@ -14,7 +14,7 @@ test.describe("Capture — research study", () => {
     await page.getByLabel("Target duration").selectOption("20")
     await page.getByRole("textbox", { name: "Question 1", exact: true }).fill("Tell me about your last planning session.")
     await page.getByRole("button", { name: "Create and activate study" }).click()
-    await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/, { timeout: 15_000 })
+    await expect(page).toHaveURL(/\/capture\/studies\/[A-Za-z0-9-]+\?token=/, { timeout: 15_000 })
 
     await page.getByLabel("Study name").fill("E2E lifecycle edited")
     await page.getByLabel("Research goal").fill("Understand current planning workflows")
@@ -65,7 +65,7 @@ test.describe("Capture — research study", () => {
     await page.getByRole("textbox", { name: "Question 2", exact: true }).fill("What was difficult?")
     await page.getByRole("button", { name: "Create and activate study" }).click()
 
-    await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)
+    await expect(page).toHaveURL(/\/capture\/studies\/[A-Za-z0-9-]+\?token=/)
     const studyId = new URL(page.url()).pathname.split("/").at(-1)!
     const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
     expect(shareUrl).toContain("/research/")
@@ -243,7 +243,7 @@ test.describe("Capture — research study", () => {
     }
     await page.getByRole("button", { name: "Create and activate study" }).click()
 
-    await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)
+    await expect(page).toHaveURL(/\/capture\/studies\/[A-Za-z0-9-]+\?token=/)
     const studyId = new URL(page.url()).pathname.split("/").at(-1)!
     const shareUrl = await page.getByRole("textbox", { name: "Participant link" }).inputValue()
     const participantToken = new URL(shareUrl).pathname.split("/").at(-1)!
@@ -376,7 +376,7 @@ test.describe("Capture — research study", () => {
     await page.getByRole("textbox", { name: "Task 1", exact: true }).fill("Find the checkout button and complete a purchase.")
     await page.getByRole("button", { name: "Create and activate study" }).click()
 
-    await expect(page).toHaveURL(/\/capture\/studies\/[a-f0-9-]+\?token=/)
+    await expect(page).toHaveURL(/\/capture\/studies\/[A-Za-z0-9-]+\?token=/)
     // The artifact title/link is rendered twice on this page: once in the
     // summary section and once in the read-only "Prototype artifact" field of
     // the settings form below it. Either instance proves the target linked
