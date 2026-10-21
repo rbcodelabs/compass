@@ -3030,9 +3030,17 @@ model AgentRun {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @default(now()) @map("updated_at")
 
+  /// The agents row this run acts as (bare UUID, no relation: DSQL). NULL = the built-in "Compass Agent", including every run
+  /// that predates migration 100. Read through lib/agent-runs.ts, which tolerates the migration being unapplied.
+  agentId         String?   @map("agent_id") @db.Uuid
+  /// The human who started the run. NULL reads as userId (the invoker before migration 100).
+  invokedByUserId String?   @map("invoked_by_user_id") @db.Uuid
+
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
   events       AgentRunEvent[]
 
+  @@index([agentId, createdAt], map: "agent_runs_agent_id_created_at_idx")
+  @@index([invokedByUserId], map: "agent_runs_invoked_by_user_id_idx")
   @@index([conversationId, createdAt], map: "idx_agent_runs_conversation_created")
   @@index([status, lastHeartbeatAt], map: "idx_agent_runs_status_heartbeat")
   @@index([workspaceId, userId], map: "idx_agent_runs_workspace_user")

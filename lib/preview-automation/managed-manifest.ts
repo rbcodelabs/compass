@@ -201,7 +201,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Cloud agents PR1: six nullable agents columns and one async owner_workspace_id index. No backfill.
   "098_agent_kind_and_workspace_owner": "239b13f323e305a41820e7e8c12cc6af06a723b9355cb1fb00aeaa6393cf0fe0",
   // Cloud agents PR1: owner_user_id DROP NOT NULL (as 070), split from 098 so a DSQL refusal cannot block 098's receipt.
-  "099_agent_owner_user_nullable": "9587f0d2c28ca41c92a4217c068966639aac72f722cca8943180751940ab231d"
+  "099_agent_owner_user_nullable": "9587f0d2c28ca41c92a4217c068966639aac72f722cca8943180751940ab231d",
+  // Cloud agents phase 2: nullable agent_id and invoked_by_user_id on agent_runs plus two async indexes. No backfill.
+  "100_agent_runs_agent_attribution": "a83ebc36920078d9d6c54eae6fd7338c41e1bcd2a0b36d6c3d77de24a35b5545"
 };
 
 /**
@@ -293,6 +295,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   "099_agent_owner_user_nullable": {
     "lib/migrations/agent-kind-and-workspace-owner.ts": "c91e3e799fe030d2f11066e8cac55da25844ffcd03c27686d3b7dab66dd4d7e8",
+  },
+  // The 100 postcondition (agent_id and invoked_by_user_id nullable uuid; both indexes valid and ready).
+  "100_agent_runs_agent_attribution": {
+    "lib/migrations/agent-run-attribution.ts": "c0967e0232aca1524e54a91098a1be886b6d2869f2fca171535bf28094cd7fd5",
   },
 };
 
