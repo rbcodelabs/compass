@@ -7,7 +7,7 @@ type AutoAdded = NonNullable<SolutionSyncResult["autoAdded"]>;
  * When a solution moved to Building and Building auto-sync added it to the
  * roadmap, tell the person who made the change and offer Undo. Undo archives
  * the new roadmap item only: the solution keeps its status and returns to the
- * "Ready to schedule" rail, and auto-sync will not add it again.
+ * "Not scheduled" rail, and auto-sync will not add it again.
  */
 export function announceRoadmapSync(sync: { autoAdded?: AutoAdded | null } | null | undefined): void {
   const added = sync?.autoAdded;

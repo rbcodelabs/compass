@@ -1,5 +1,5 @@
 /**
- * Open/closed state of the "Ready to schedule" rail on the roadmap timeline.
+ * Open/closed state of the "Not scheduled" rail on the roadmap timeline.
  *
  * The explicit choice lives in a cookie, not localStorage: the roadmap page is
  * a server component, so it can read the cookie and render the rail in its
