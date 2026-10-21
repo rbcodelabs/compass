@@ -4,6 +4,7 @@ import path from "node:path"
 import { createHash } from "node:crypto"
 import { WORK_ITEM_REGISTRY, WORK_ITEM_TYPES } from "@/lib/work-item-ids"
 import { expectedWorkItemIndexes } from "@/lib/migrations/work-item-ids"
+const postcondition = readFileSync(path.join(process.cwd(), "lib/migrations/work-item-ids.ts"), "utf-8")
 
 /**
  * Static guards for 092_work_item_ids. The DDL that reaches Aurora DSQL is the SQL file, not
@@ -27,6 +28,11 @@ function model(table: string): string {
 }
 
 describe(NAME, () => {
+  it("compares only primary-key key columns, not DSQL INCLUDEd columns", () => {
+    const pkQuery = postcondition.slice(postcondition.indexOf("const pk = await"), postcondition.indexOf("i.indisprimary"))
+    expect(pkQuery).toContain("k.position<=i.indnkeyatts")
+  })
+
   it("is registered exactly once, after 091", () => {
     expect([...runner.matchAll(new RegExp(`name:\\s*"${NAME}"`, "g"))]).toHaveLength(1)
     expect(existsSync(sqlPath)).toBe(true)
