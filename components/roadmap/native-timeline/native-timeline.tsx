@@ -9,6 +9,7 @@ import {
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragMoveEvent,
   type DragStartEvent,
@@ -365,11 +366,47 @@ export function NativeTimeline(props: TimelineEngineProps & {
     dragPointerCurrentX.current = null;
   }
 
+  /**
+   * pointerWithin, except that a rail card released over the docked "Not scheduled" sidebar (or
+   * past the scroller's edge) is treated as released at the scroller's nearest visible edge, on
+   * the same row. The lanes' rects run under the sidebar, but whether a collision is reported
+   * there is an accident of layout; this makes "drop at the right edge" mean the same thing
+   * whichever side the sidebar docks on.
+   */
+  const railAwareCollisionDetection: CollisionDetection = (args) => {
+    const scrollRect = scrollRef.current?.getBoundingClientRect();
+    const pointer = args.pointerCoordinates;
+    if (!pointer || !scrollRect || scrollRect.width <= 0 || !String(args.active.id).startsWith("unscheduled:")) return pointerWithin(args);
+    const x = Math.min(Math.max(pointer.x, scrollRect.left), scrollRect.right - 1);
+    return pointerWithin(x === pointer.x ? args : { ...args, pointerCoordinates: { x, y: pointer.y } });
+  };
+
+  /**
+   * Edge auto-scroll is for dragging toward the timeline's own edge. With the "Not scheduled"
+   * sidebar docked beside the chart, a pointer held over the sidebar also sits "past the edge"
+   * of the scroller, and would otherwise scroll the timeline away until the card is released on
+   * a date nowhere near the visible range.
+   */
+  const autoScroll = useMemo(() => ({
+    canScroll: (element: Element) => {
+      if (element !== scrollRef.current) return true;
+      const pointerX = dragPointerCurrentX.current;
+      const rect = element.getBoundingClientRect();
+      return pointerX === null || rect.width <= 0 || (pointerX >= rect.left && pointerX < rect.right);
+    },
+  }), []);
+
   /** The calendar date under the drag pointer, or null when it cannot be measured. */
   function dropDateUnderPointer(): CalendarDate | null {
     const canvasRect = canvasRef.current?.getBoundingClientRect();
-    const pointerX = dragPointerCurrentX.current;
-    if (!canvasRect || pointerX === null) return null;
+    const rawPointerX = dragPointerCurrentX.current;
+    if (!canvasRect || rawPointerX === null) return null;
+    // Lane rects span the whole logical canvas, wider than the visible scroller, and the docked
+    // "Not scheduled" sidebar sits beside it. A pointer released over the sidebar (or past the
+    // scroller's edge) still collides with the lane, so snap it to the nearest visible edge
+    // rather than scheduling the item at a date that is scrolled out of sight.
+    const scrollRect = scrollRef.current?.getBoundingClientRect();
+    const pointerX = scrollRect && scrollRect.width > 0 ? Math.min(Math.max(rawPointerX, scrollRect.left), scrollRect.right - 1) : rawPointerX;
     return positionToInclusiveDate(pointerClientToCanvasPosition(pointerX, canvasRect.left), controller.viewportStart, controller.viewportEnd, timelineWidth);
   }
 
@@ -428,11 +465,8 @@ export function NativeTimeline(props: TimelineEngineProps & {
       if (backlogItem) controller.setAnnouncement(`${backlogItem.title} cannot be scheduled in that lane`);
       return;
     }
-    const canvasRect = canvasRef.current?.getBoundingClientRect();
-    const currentPointerClientX = dragPointerCurrentX.current;
-    if (!canvasRect || currentPointerClientX === null) return;
-    const pointerPosition = pointerClientToCanvasPosition(currentPointerClientX, canvasRect.left);
-    const date = positionToInclusiveDate(pointerPosition, controller.viewportStart, controller.viewportEnd, timelineWidth);
+    const date = dropDateUnderPointer();
+    if (!date) return;
     void controller.scheduleBacklog(backlogItem, row.horizon, date).catch(() => undefined);
   }
 
@@ -538,7 +572,8 @@ export function NativeTimeline(props: TimelineEngineProps & {
         <DndContext
           id={dndId}
           sensors={sensors}
-          collisionDetection={pointerWithin}
+          collisionDetection={railAwareCollisionDetection}
+          autoScroll={autoScroll}
           onDragStart={handleDragStart}
           onDragMove={handleDragMove}
           onDragCancel={() => {

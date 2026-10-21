@@ -244,7 +244,26 @@ describe("NativeTimeline", () => {
   it("resolves backlog drop lanes from the pointer instead of the translated card rectangle", () => {
     renderTimeline();
 
-    expect(harness.dndProps?.collisionDetection).toBe(harness.pointerWithin);
+    const detect = harness.dndProps?.collisionDetection as (args: unknown) => unknown;
+    const args = { active: { id: "unscheduled:feedback:feedback-1" }, pointerCoordinates: { x: 50, y: 60 } };
+    detect(args);
+    expect(harness.pointerWithin).toHaveBeenLastCalledWith(args);
+  });
+
+  it("resolves a rail card released over the docked sidebar to the scroller's right edge", () => {
+    renderTimeline();
+    vi.spyOn(screen.getByTestId("native-timeline-scroll"), "getBoundingClientRect").mockReturnValue({ left: 100, right: 700, width: 600 } as DOMRect);
+    const detect = harness.dndProps?.collisionDetection as (args: unknown) => unknown;
+    const base = { active: { id: "unscheduled:solution:s1" } };
+
+    detect({ ...base, pointerCoordinates: { x: 1400, y: 60 } });
+    expect(harness.pointerWithin).toHaveBeenLastCalledWith({ ...base, pointerCoordinates: { x: 699, y: 60 } });
+    detect({ ...base, pointerCoordinates: { x: 300, y: 60 } });
+    expect(harness.pointerWithin).toHaveBeenLastCalledWith({ ...base, pointerCoordinates: { x: 300, y: 60 } });
+    // Timeline-item drags are untouched.
+    const itemDrag = { active: { id: "timeline:item:i1" }, pointerCoordinates: { x: 1400, y: 60 } };
+    detect(itemDrag);
+    expect(harness.pointerWithin).toHaveBeenLastCalledWith(itemDrag);
   });
 
   it("still announces an invalid external backlog lane", () => {
@@ -524,6 +543,41 @@ describe("NativeTimeline", () => {
       "NEXT",
       "2026-08-28",
     );
+  });
+
+  it("snaps a drop released past the scroller's edge (over the docked sidebar) to the nearest visible date", () => {
+    harness.controller.unscheduled = [{ kind: "feedback", id: "feedback-1", title: "Edge placement" }];
+    renderTimeline();
+    const scroller = screen.getByTestId("native-timeline-scroll");
+    const canvas = scroller.firstElementChild as HTMLElement;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ left: -100 } as DOMRect);
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ left: 0, right: 600, width: 600 } as DOMRect);
+
+    act(() => harness.dndProps?.onDragStart?.({
+      active: { id: "unscheduled:feedback:feedback-1" },
+      activatorEvent: new MouseEvent("pointerdown", { clientX: 120 }),
+    }));
+    // 1400 is far right of the 600px scroller, over the sidebar; it must land where 599 would.
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientX: 1400 })));
+    act(() => harness.dndProps?.onDragEnd?.({
+      active: { id: "unscheduled:feedback:feedback-1", rect: { current: { translated: { left: 0, width: 100 } } } },
+      delta: { x: 1280, y: 0 },
+      over: { id: "lane:NEXT:unassigned" },
+    }));
+    const edgeDate = vi.mocked(harness.controller.scheduleBacklog).mock.calls[0][2];
+
+    vi.mocked(harness.controller.scheduleBacklog).mockClear();
+    act(() => harness.dndProps?.onDragStart?.({
+      active: { id: "unscheduled:feedback:feedback-1" },
+      activatorEvent: new MouseEvent("pointerdown", { clientX: 120 }),
+    }));
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientX: 599 })));
+    act(() => harness.dndProps?.onDragEnd?.({
+      active: { id: "unscheduled:feedback:feedback-1", rect: { current: { translated: { left: 0, width: 100 } } } },
+      delta: { x: 479, y: 0 },
+      over: { id: "lane:NEXT:unassigned" },
+    }));
+    expect(vi.mocked(harness.controller.scheduleBacklog).mock.calls[0][2]).toBe(edgeDate);
   });
 
   it("does not double-count the horizontal activation threshold in the dropped date", () => {
