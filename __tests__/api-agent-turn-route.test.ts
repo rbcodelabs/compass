@@ -844,6 +844,96 @@ describe("agent turn route — detached runs", () => {
       expect(files.some(f => f.path.startsWith("docs/"))).toBe(false)
     })
 
+    describe("harness x model provider matrix", () => {
+      const providerVars = ["AGENT_MODEL_PROVIDER", "AGENT_MODEL_ID", "BEDROCK_API_KEY", "AWS_REGION", "ANTHROPIC_API_KEY"] as const
+      const savedProvider: Record<string, string | undefined> = {}
+      beforeEach(() => { for (const k of providerVars) savedProvider[k] = process.env[k] })
+      afterEach(() => {
+        for (const k of providerVars) {
+          if (savedProvider[k] === undefined) delete process.env[k]
+          else process.env[k] = savedProvider[k]
+        }
+      })
+      const credentialKeys = ["ANTHROPIC_API_KEY", "AWS_BEARER_TOKEN_BEDROCK", "CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "BEDROCK_API_KEY", "AI_GATEWAY_API_KEY"]
+      const secretValues = (env: Record<string, string>) => Object.values(env).join("\n")
+
+      it("claude + anthropic: only the Anthropic key; no Bedrock or gateway secret leaks even when configured", async () => {
+        process.env.AGENT_HARNESS = "claude"
+        process.env.AGENT_MODEL_PROVIDER = "anthropic"
+        process.env.BEDROCK_API_KEY = "bedrock-secret-must-not-leak"
+        process.env.AI_GATEWAY_API_KEY = "gateway-secret-must-not-leak"
+        const { runCommand } = bootstrappableSandbox()
+        await POST(req({ workspaceId: "ws-1", message: "hi" }))
+        const env = runCommand.mock.calls[0][0].env as Record<string, string>
+        expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test")
+        expect(env.AGENT_MODEL).toBe("claude-sonnet-5")
+        expect(Object.keys(env).filter(k => credentialKeys.includes(k))).toEqual(["ANTHROPIC_API_KEY"])
+        expect(secretValues(env)).not.toMatch(/must-not-leak/)
+      })
+
+      it("claude + bedrock: only the Bedrock token and routing vars; no Anthropic or gateway secret", async () => {
+        process.env.AGENT_HARNESS = "claude"
+        process.env.AGENT_MODEL_PROVIDER = "bedrock"
+        process.env.BEDROCK_API_KEY = "bedrock-token"
+        process.env.ANTHROPIC_API_KEY = "sk-ant-must-not-leak"
+        process.env.AI_GATEWAY_API_KEY = "gateway-secret-must-not-leak"
+        const { runCommand } = bootstrappableSandbox()
+        await POST(req({ workspaceId: "ws-1", message: "hi" }))
+        const env = runCommand.mock.calls[0][0].env as Record<string, string>
+        expect(env).toMatchObject({ AWS_BEARER_TOKEN_BEDROCK: "bedrock-token", CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "us-east-1", AGENT_MODEL: "global.anthropic.claude-sonnet-5-5" })
+        expect(Object.keys(env).filter(k => credentialKeys.includes(k)).sort()).toEqual(["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION", "CLAUDE_CODE_USE_BEDROCK"])
+        expect(secretValues(env)).not.toMatch(/must-not-leak/)
+      })
+
+      it("opencode ignores a Bedrock provider selection: gateway credential only, opencode model, no Bedrock/Anthropic secret", async () => {
+        process.env.AGENT_HARNESS = "opencode"
+        process.env.AGENT_MODEL_PROVIDER = "bedrock"
+        process.env.AGENT_MODEL_ID = "us.anthropic.must-not-leak"
+        process.env.BEDROCK_API_KEY = "bedrock-secret-must-not-leak"
+        process.env.ANTHROPIC_API_KEY = "sk-ant-must-not-leak"
+        process.env.AI_GATEWAY_API_KEY = "gw-key"
+        process.env.AGENT_OPENCODE_MODEL = "anthropic/claude-sonnet-5.5"
+        const { runCommand } = bootstrappableSandbox()
+        const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+        expect(response.status).toBe(202)
+        const env = runCommand.mock.calls[0][0].env as Record<string, string>
+        expect(env).toMatchObject({ AI_GATEWAY_API_KEY: "gw-key", AGENT_MODEL: "anthropic/claude-sonnet-5.5" })
+        expect(Object.keys(env).filter(k => credentialKeys.includes(k))).toEqual(["AI_GATEWAY_API_KEY"])
+        expect(secretValues(env)).not.toMatch(/must-not-leak/)
+      })
+
+      it("opencode does not require or validate the provider config (invalid provider, no provider key)", async () => {
+        process.env.AGENT_HARNESS = "opencode"
+        process.env.AGENT_MODEL_PROVIDER = "vertex"
+        delete process.env.BEDROCK_API_KEY
+        process.env.ANTHROPIC_API_KEY = "  "
+        process.env.AI_GATEWAY_API_KEY = "gw-key"
+        const { runCommand } = bootstrappableSandbox()
+        const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+        expect(response.status).toBe(202)
+        expect(runCommand.mock.calls[0][0].env).toHaveProperty("AI_GATEWAY_API_KEY", "gw-key")
+      })
+
+      it.each([
+        ["anthropic", "ANTHROPIC_API_KEY", "", "  \n\t "],
+        ["bedrock", "BEDROCK_API_KEY", "", "  \n\t "],
+      ])("claude + %s: blank %s is rejected before any sandbox boot or key mint", async (provider, keyVar, ...blanks) => {
+        for (const blank of blanks) {
+          mockBootSandbox.mockClear()
+          mockMintKey.mockClear()
+          process.env.AGENT_HARNESS = "claude"
+          process.env.AGENT_MODEL_PROVIDER = provider
+          process.env[keyVar] = blank
+          if (provider === "bedrock") process.env.ANTHROPIC_API_KEY = "sk-ant-test"
+          const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+          expect(response.status).toBe(500)
+          expect(await response.text()).toContain(keyVar)
+          expect(mockBootSandbox).not.toHaveBeenCalled()
+          expect(mockMintKey).not.toHaveBeenCalled()
+        }
+      })
+    })
+
     it("opencode: forwards connector slugs, carries pack instructions in the system prompt, ships no pack plugin files", async () => {
       process.env.AGENT_HARNESS = "opencode"
       process.env.AI_GATEWAY_API_KEY = "gw-key"

@@ -166,6 +166,12 @@ const DOCS_FILESYSTEM_PROMPT =
   `Doc comments, version history and restore still use their Compass tools, and edit_doc, edit_canvas, build_canvas_tree and capture_canvas ` +
   `(which take a docId: use the doc's \`compass_doc_id\`) act on the saved doc immediately, so do not also change that doc's file in the same turn.\n\n`
 
+function claudeProviderEnv(model: Extract<ResolvedAgentModel, { ok: true }> | undefined): Record<string, string> {
+  // Fail closed: the Claude harness without a resolved provider would boot with no credential.
+  if (!model) throw new Error("buildAgentEnv: harness claude requires a resolved model provider")
+  return providerSandboxEnv(model)
+}
+
 /**
  * The sandbox's env contract, in one place because two callers now build it.
  *
@@ -173,12 +179,6 @@ const DOCS_FILESYSTEM_PROMPT =
  * events and its result back to Compass; without it the script's only product is
  * stdout, which is exactly what the fallback path drains.
  */
-function claudeProviderEnv(model: Extract<ResolvedAgentModel, { ok: true }> | undefined): Record<string, string> {
-  // Fail closed: the Claude harness without a resolved provider would boot with no credential.
-  if (!model) throw new Error("buildAgentEnv: harness claude requires a resolved model provider")
-  return providerSandboxEnv(model)
-}
-
 function buildAgentEnv(opts: {
   /** Which harness's credential to forward: Claude gets the provider credential from `model`, opencode only the AI Gateway key. */
   harness?: AgentHarness
