@@ -14,8 +14,9 @@ export interface AgentAccessRow {
 
 /**
  * Rows for the org Settings "Agent access" section: ACTIVE agents that are
- * USER-owned by a current org member or WORKSPACE-owned by one of this org's
- * workspaces, joined with their live SCORING_MODEL_ADMIN grant.
+ * USER-owned by a current org member, joined with their live SCORING_MODEL_ADMIN grant.
+ * WORKSPACE-owned agents are not listed: an org-admin grant confers nothing on them until the
+ * run-as-agent change (PR2), so offering one would only mislead.
  * The grantor's CURRENT role is checked here for display, mirroring the
  * time-of-check rule in hasValidAgentOrgAdminGrant (ADR 0020, Risks).
  * The schema has no relations (DSQL), so joins are done in memory.
@@ -26,9 +27,8 @@ export async function listAgentAccessRows(prisma: ReturnType<typeof getPrisma>, 
     select: { userId: true, role: true },
   })
   const roleByUser = new Map(members.map((m) => [m.userId, m.role]))
-  const workspaces = await prisma.workspace.findMany({ where: { organizationId }, select: { id: true, name: true } })
-  const workspaceName = new Map(workspaces.map((w) => [w.id, w.name]))
-  const agents = await listActiveAgentsOwnedBy(prisma, { userIds: members.map((m) => m.userId), workspaceIds: workspaces.map((w) => w.id) })
+  const ownedAgents = await listActiveAgentsOwnedBy(prisma, { userIds: members.map((m) => m.userId), workspaceIds: [] })
+  const agents = ownedAgents.filter((a) => agentOwner(a)?.type === "USER")
   if (agents.length === 0) return []
   const grants = await prisma.agentOrgAdminGrant.findMany({
     where: { organizationId, capability: "SCORING_MODEL_ADMIN", revokedAt: null, agentId: { in: agents.map((a) => a.id) } },
@@ -41,8 +41,7 @@ export async function listAgentAccessRows(prisma: ReturnType<typeof getPrisma>, 
 
   const ownerLabel = (a: (typeof agents)[number]) => {
     const owner = agentOwner(a)
-    if (owner?.type === "WORKSPACE") return workspaceName.get(owner.workspaceId) ?? "Shared"
-    return (owner && label.get(owner.userId)) ?? "Unknown user"
+    return (owner?.type === "USER" && label.get(owner.userId)) || "Unknown user"
   }
 
   return agents.map((a) => {

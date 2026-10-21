@@ -688,23 +688,12 @@ describe("grantAgentScoringModelAdmin", () => {
   describe("a WORKSPACE-owned agent", () => {
     const shared = { id: "agent-1", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "ws-1", status: "ACTIVE" };
 
-    it("can be granted when its workspace belongs to this organization, with no owner membership lookup", async () => {
+    it("is refused with a clear message, even when its workspace belongs to this organization (it confers nothing until PR2)", async () => {
       mockAgent.findFirst.mockResolvedValue(shared);
       mockWorkspace.findFirst.mockResolvedValue({ id: "ws-1" });
-      await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({ ok: true });
-      expect(mockWorkspace.findFirst).toHaveBeenCalledWith({ where: { id: "ws-1", organizationId: "org-1" }, select: { id: true } });
-      // Only the caller's own admin check reads organizationMember; there is no owner to look up.
-      expect(mockOrganizationMember.findFirst).toHaveBeenCalledTimes(1);
-      // The grant still names the live human caller.
-      expect(mockAgentOrgAdminGrant.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ grantedByUserId: "user-1" }) }));
-    });
-
-    it("is refused when its workspace belongs to another organization", async () => {
-      mockAgent.findFirst.mockResolvedValue(shared);
-      mockWorkspace.findFirst.mockResolvedValue(null);
       await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
         ok: false,
-        error: "Agent must belong to a workspace in this organization",
+        error: "Shared workspace agents cannot be granted organization admin access yet",
       });
       expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
     });
