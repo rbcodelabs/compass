@@ -58,7 +58,7 @@ export async function hasValidAgentOrgAdminGrant(
   const prisma = getPrisma()
   const agent = await findAgentById(prisma, actor.agentId)
   if (!agent || !agentIdentityValidForUser(agent, actor.userId)) return false
-  // WORKSPACE-owned agents take this path too: there is no owner to compare, only the grant below.
+  // A WORKSPACE-owned agent never passes the identity check above with a user-carrying request; it gains this path with an agent-scoped credential (run-as-agent change).
   const grant = await prisma.agentOrgAdminGrant.findFirst({
     where: { agentId: actor.agentId, organizationId, capability, revokedAt: null },
     select: { id: true, grantedByUserId: true },

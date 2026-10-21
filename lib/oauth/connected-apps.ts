@@ -1,5 +1,5 @@
 import getPrisma from "@/lib/db"
-import { listUserOwnedAgents } from "@/lib/agent-ownership"
+import { findAgentsByIds, isUserOwnedBy } from "@/lib/agent-ownership"
 
 export type ConnectedAppWorkspace = {
   workspaceName: string
@@ -157,7 +157,7 @@ export async function getConnectedAppsForUser(userId: string): Promise<Connected
       select: { clientId: true, lastUsedAt: true },
     }),
     // Account-owned (USER-owned) agents only, so a corrupt consent row cannot surface someone else's agent.
-    listUserOwnedAgents(prisma, userId).then((owned) => owned.filter((agent) => agentIds.includes(agent.id))),
+    findAgentsByIds(prisma, agentIds).then((rows) => rows.filter((agent) => isUserOwnedBy(agent, userId))),
     prisma.workspace.findMany({
       where: { members: { some: { userId } } },
       select: { id: true, name: true, organization: { select: { name: true } } },

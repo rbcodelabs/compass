@@ -107,28 +107,31 @@ export function agentInvokePolicy(agent: Pick<AgentRecord, "ownerUserId" | "owne
 /**
  * Whether an ALREADY AUTHENTICATED agent identity (an agentId that mcp-auth accepted) is still
  * valid for the user the request carries. USER-owned: that user must be the owner, as before.
- * WORKSPACE-owned: there is no owning user to compare; the grant checks decide what it can reach.
+ * WORKSPACE-owned: always false here. A request that carries a user id says nothing about a shared
+ * agent, so accepting an arbitrary (or null) user would let any personal credential name it. Reaching
+ * a WORKSPACE-owned agent needs an agent-scoped credential for that exact agent, a path that arrives
+ * with the run-as-agent change (PR2) and will be checked separately from this function.
  */
 export function agentIdentityValidForUser(agent: Pick<AgentRecord, "status" | "ownerUserId" | "ownerType" | "ownerWorkspaceId">, userId: string | null | undefined): boolean {
   if (agent.status !== "ACTIVE") return false
   const owner = agentOwner(agent)
-  if (!owner) return false
-  return owner.type === "WORKSPACE" || isUserOwnedBy(agent, userId)
+  if (!owner || owner.type !== "USER") return false
+  return isUserOwnedBy(agent, userId)
 }
 
 /**
- * Whether an agent may be assigned work in a workspace. Needs a live grant either way. A USER-owned
- * agent also needs its owner to still be a workspace member; a WORKSPACE-owned agent has no owner
- * user to be a member.
+ * Whether an agent may be assigned work in `context.workspaceId`. Needs a live grant either way. A
+ * USER-owned agent also needs its owner to still be a workspace member; a WORKSPACE-owned agent has
+ * no owner user to be a member, but is usable only in the workspace that owns it.
  */
 export function agentEligibleInWorkspace(
   agent: Pick<AgentRecord, "status" | "ownerUserId" | "ownerType" | "ownerWorkspaceId">,
-  context: { hasLiveGrant: boolean; memberUserIds: ReadonlySet<string> },
+  context: { workspaceId: string; hasLiveGrant: boolean; memberUserIds: ReadonlySet<string> },
 ): boolean {
   if (agent.status !== "ACTIVE" || !context.hasLiveGrant) return false
   const owner = agentOwner(agent)
   if (!owner) return false
-  return owner.type === "WORKSPACE" || context.memberUserIds.has(owner.userId)
+  return owner.type === "WORKSPACE" ? owner.workspaceId === context.workspaceId : context.memberUserIds.has(owner.userId)
 }
 
 // ── Tolerating an unapplied migration ──────────────────────────────────────
@@ -143,17 +146,36 @@ function isMissingColumnError(error: unknown): boolean {
 }
 
 /**
+ * An interactive-transaction client has no `$transaction` (Prisma strips it, with `$connect`).
+ * Inside a transaction a failed statement aborts the whole transaction in PostgreSQL, so a retry
+ * would fail with "current transaction is aborted"; the error-driven fallback must never run there.
+ */
+function isTransactionClient(db: unknown): boolean {
+  return typeof db === "object" && db !== null && typeof (db as { $transaction?: unknown }).$transaction !== "function"
+}
+
+type ColumnContext = { select: typeof AGENT_OWNERSHIP_SELECT | typeof AGENT_LEGACY_SELECT; extended: boolean }
+
+/**
  * Runs `run` with the ownership columns selected, and falls back to the legacy column set when
  * the database has not applied migration 098 yet (Prisma selects every mapped column, so a model
  * field with no column would otherwise fail every agent query). `extended` tells the callback
  * whether it may reference the new columns in a `where`. A missing column is the only error
  * swallowed; anything else is a real fault and is rethrown.
+ *
+ * Pass the client the callback will query with. On a transaction client the function never tries
+ * the new columns speculatively: it uses them only once a non-transactional call has already
+ * proven they exist (the positive result is cached for the process), and otherwise reads the
+ * legacy set, which is all a USER-owned lookup needs. Callers that must see WORKSPACE-owned rows
+ * inside a transaction should list the agents before opening it.
  */
-export async function withAgentColumns<T>(run: (ctx: { select: typeof AGENT_OWNERSHIP_SELECT | typeof AGENT_LEGACY_SELECT; extended: boolean }) => Promise<T>): Promise<T> {
+export async function withAgentColumns<T>(db: unknown, run: (ctx: ColumnContext) => Promise<T>): Promise<T> {
   const legacy = () => run({ select: AGENT_LEGACY_SELECT, extended: false })
+  const extended = () => run({ select: AGENT_OWNERSHIP_SELECT, extended: true })
+  if (isTransactionClient(db)) return columnsAvailability?.value ? extended() : legacy()
   if (columnsAvailability && !columnsAvailability.value && Date.now() - columnsAvailability.checkedAt < AVAILABILITY_NEGATIVE_TTL_MS) return legacy()
   try {
-    const result = await run({ select: AGENT_OWNERSHIP_SELECT, extended: true })
+    const result = await extended()
     columnsAvailability = { value: true, checkedAt: Date.now() }
     return result
   } catch (error) {
@@ -171,12 +193,12 @@ export function resetAgentColumnsAvailabilityCache() {
 // ── Loading ────────────────────────────────────────────────────────────────
 
 export async function findAgentById(prisma: AgentDb, id: string): Promise<AgentRecord | null> {
-  return withAgentColumns(({ select }) => prisma.agent.findFirst({ where: { id }, select })) as Promise<AgentRecord | null>
+  return withAgentColumns(prisma, ({ select }) => prisma.agent.findFirst({ where: { id }, select })) as Promise<AgentRecord | null>
 }
 
 export async function findAgentsByIds(prisma: AgentDb, ids: string[]): Promise<AgentRecord[]> {
   if (ids.length === 0) return []
-  return withAgentColumns(({ select }) => prisma.agent.findMany({ where: { id: { in: ids } }, select })) as Promise<AgentRecord[]>
+  return withAgentColumns(prisma, ({ select }) => prisma.agent.findMany({ where: { id: { in: ids } }, select })) as Promise<AgentRecord[]>
 }
 
 /**
@@ -192,7 +214,7 @@ export async function findActiveUserOwnedAgent(prisma: AgentDb, agentId: string,
 
 /** USER-owned agents of `userId`, optionally only the ACTIVE ones. */
 export async function listUserOwnedAgents(prisma: AgentDb, userId: string, options: { status?: "ACTIVE"; orderBy?: "name" | "createdAt" } = {}): Promise<AgentRecord[]> {
-  const rows = (await withAgentColumns(({ select }) =>
+  const rows = (await withAgentColumns(prisma, ({ select }) =>
     prisma.agent.findMany({ where: { ownerUserId: userId, ...(options.status ? { status: options.status } : {}) }, select, orderBy: { [options.orderBy ?? "name"]: "asc" } }),
   )) as AgentRecord[]
   // ownerUserId alone could match a malformed WORKSPACE row, so the owner type is re-read in memory.
@@ -205,7 +227,7 @@ export async function listUserOwnedAgents(prisma: AgentDb, userId: string, optio
  * workspaces.
  */
 export async function listActiveAgentsOwnedBy(prisma: AgentDb, owners: { userIds: string[]; workspaceIds: string[] }): Promise<AgentRecord[]> {
-  const rows = (await withAgentColumns(({ select, extended }) =>
+  const rows = (await withAgentColumns(prisma, ({ select, extended }) =>
     prisma.agent.findMany({
       where: {
         status: "ACTIVE",
@@ -236,7 +258,7 @@ export async function listAgentsForWorkspace(
   workspaceId: string,
   scope: { memberUserIds: string[]; grantedAgentIds: string[]; includeGrantable: boolean },
 ): Promise<AgentRecord[]> {
-  const rows = (await withAgentColumns(({ select, extended }) =>
+  const rows = (await withAgentColumns(prisma, ({ select, extended }) =>
     prisma.agent.findMany({
       where: {
         OR: [
@@ -262,10 +284,15 @@ export async function listAgentsForWorkspace(
 
 // ── Authority (async: reads live membership) ───────────────────────────────
 
-/** Workspace admin in the same sense as resolveWorkspaceAdmin: a member who is a workspace admin or an org OWNER/ADMIN. */
+/**
+ * Workspace admin in the same sense as assertWorkspaceAdmin (lib/mcp-authz.ts): a workspace ADMIN
+ * member, or an OWNER/ADMIN of the owning organization even when not a member of the workspace. An
+ * org admin can already administer every workspace in their org (and add themselves to it), so
+ * excluding them here would only lock them out of a shared agent their organization owns.
+ */
 async function isWorkspaceAdminUser(prisma: AgentDb, userId: string, workspaceId: string): Promise<boolean> {
   const workspace = await prisma.workspace.findFirst({
-    where: { id: workspaceId, members: { some: { userId } } },
+    where: { id: workspaceId },
     select: {
       members: { where: { userId }, select: { role: true } },
       organization: { select: { members: { where: { userId }, select: { role: true } } } },

@@ -29,7 +29,7 @@ export async function assignmentUpdate(workspaceId: string, input: AssignmentInp
     // Only a USER-owned agent needs its owner to still be a member; a WORKSPACE-owned one has no owner user.
     owner?.type === "USER" ? prisma.workspaceMember.findFirst({ where: { workspaceId, userId: owner.userId }, select: { id: true } }) : null,
   ]);
-  if (!agentEligibleInWorkspace(agent, { hasLiveGrant: !!grant, memberUserIds: new Set(member && owner?.type === "USER" ? [owner.userId] : []) })) throw new Error("Agent is not enabled in this workspace");
+  if (!agentEligibleInWorkspace(agent, { workspaceId, hasLiveGrant: !!grant, memberUserIds: new Set(member && owner?.type === "USER" ? [owner.userId] : []) })) throw new Error("Agent is not enabled in this workspace");
   return { assigneeUserId: null, assigneeAgentId: assignee.id };
 }
 
@@ -64,7 +64,7 @@ export async function resolveTaskAssignees<T extends AssignedRow>(workspaceId: s
     if (task.assigneeAgentId) {
       const agent = agents.find(a => a.id === task.assigneeAgentId);
       const memberUserIds = new Set(members.map(m => m.userId));
-      assignee = { type: "AGENT", id: task.assigneeAgentId, displayName: agent?.name ?? "Unavailable agent", available: !!agent && agentEligibleInWorkspace(agent, { hasLiveGrant: grants.some(g => g.agentId === agent.id), memberUserIds }) };
+      assignee = { type: "AGENT", id: task.assigneeAgentId, displayName: agent?.name ?? "Unavailable agent", available: !!agent && agentEligibleInWorkspace(agent, { workspaceId, hasLiveGrant: grants.some(g => g.agentId === agent.id), memberUserIds }) };
     } else if (task.assigneeUserId) {
       const member = members.find(m => m.userId === task.assigneeUserId);
       assignee = { type: "USER", id: task.assigneeUserId, displayName: member?.user.name || member?.user.email || "Unavailable person", available: !!member };
@@ -80,10 +80,10 @@ export async function eligibleTaskAssignees(workspaceId: string): Promise<Resolv
   if (process.env.COMPASS_AGENTS_ENABLED !== "1") return people;
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId, revokedAt: null } });
   if (!grants.length) return people;
-  const granted = await withAgentColumns(({ select }) => prisma.agent.findMany({ where: { id: { in: grants.map(g => g.agentId) }, status: "ACTIVE" }, select, orderBy: [{ name: "asc" }, { id: "asc" }] }));
+  const granted = await withAgentColumns(prisma, ({ select }) => prisma.agent.findMany({ where: { id: { in: grants.map(g => g.agentId) }, status: "ACTIVE" }, select, orderBy: [{ name: "asc" }, { id: "asc" }] }));
   const memberUserIds = new Set(members.map(m => m.userId));
   // A grant is necessary for everyone; a USER-owned agent additionally needs its owner to still be a member.
-  const agents = (granted as AgentRecord[]).filter(agent => agentEligibleInWorkspace(agent, { hasLiveGrant: true, memberUserIds }));
+  const agents = (granted as AgentRecord[]).filter(agent => agentEligibleInWorkspace(agent, { workspaceId, hasLiveGrant: true, memberUserIds }));
   return [...people, ...agents.map(agent => {
     const owner = agentOwner(agent);
     const ownerMember = owner?.type === "USER" ? members.find(m => m.userId === owner.userId) : undefined;

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { prisma } = vi.hoisted(() => ({ prisma: {
+  $transaction: vi.fn(),
   workspaceMember: { findFirst: vi.fn(), findMany: vi.fn() },
   agent: { findFirst: vi.fn(), findMany: vi.fn() },
   agentWorkspaceGrant: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -86,7 +87,7 @@ describe("single task assignment", () => {
 });
 
 describe("WORKSPACE-owned agents", () => {
-  const shared = { id: "shared", name: "Ops", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "home-ws", status: "ACTIVE" };
+  const shared = { id: "shared", name: "Ops", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "ws", status: "ACTIVE" };
 
   it("is assignable with an ACTIVE status and a live grant, without any owner membership", async () => {
     prisma.agent.findFirst.mockResolvedValue(shared);
@@ -122,6 +123,20 @@ describe("WORKSPACE-owned agents", () => {
     const [task] = await resolveTaskAssignees("ws", [{ assigneeAgentId: "shared", assigneeUserId: null }]);
     expect(task.assignee).toMatchObject({ id: "shared", displayName: "Ops", available: true });
   });
+  it("is refused in a workspace other than the one that owns it, even with a live grant", async () => {
+    prisma.agent.findFirst.mockResolvedValue({ ...shared, ownerWorkspaceId: "other-ws" });
+    prisma.agentWorkspaceGrant.findFirst.mockResolvedValue({ id: "grant" });
+    await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "shared" } })).rejects.toThrow("workspace");
+  });
+  it("shows a foreign workspace's shared agent as unavailable in task reads and absent from the picker", async () => {
+    const foreign = { ...shared, ownerWorkspaceId: "other-ws" };
+    prisma.agent.findMany.mockResolvedValue([foreign]);
+    prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ agentId: "shared" }]);
+    prisma.workspaceMember.findMany.mockResolvedValue([]);
+    const [task] = await resolveTaskAssignees("ws", [{ assigneeAgentId: "shared", assigneeUserId: null }]);
+    expect(task.assignee).toMatchObject({ id: "shared", available: false });
+    expect((await eligibleTaskAssignees("ws")).filter((a) => a.type === "AGENT")).toEqual([]);
+  });
   it("shows an ungranted shared agent as unavailable in task reads", async () => {
     prisma.agent.findMany.mockResolvedValue([shared]);
     prisma.agentWorkspaceGrant.findMany.mockResolvedValue([]);
@@ -142,7 +157,7 @@ describe("eligibleTaskAssignees", () => {
     prisma.agent.findMany.mockResolvedValue([
       { id: "mine", name: "Mine", ownerUserId: "owner", status: "ACTIVE" },
       { id: "orphan", name: "Orphan", ownerUserId: "departed", status: "ACTIVE" },
-      { id: "shared", name: "Shared", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "home-ws", status: "ACTIVE" },
+      { id: "shared", name: "Shared", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "ws", status: "ACTIVE" },
     ]);
     const list = await eligibleTaskAssignees("ws");
     const agents = list.filter((a) => a.type === "AGENT");

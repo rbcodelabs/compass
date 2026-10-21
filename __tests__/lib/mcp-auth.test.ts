@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const apiKey = { findFirst: vi.fn(), update: vi.fn() }
 const agent = { findFirst: vi.fn() }
 const oAuthToken = { findFirst: vi.fn(), update: vi.fn() }
-vi.mock("@/lib/db", () => ({ default: () => ({ apiKey, agent, oAuthToken }) }))
+vi.mock("@/lib/db", () => ({ default: () => ({ $transaction: vi.fn(), apiKey, agent, oAuthToken }) }))
 
 import { validateMcpAuth, validateProgrammaticAuth } from "@/lib/mcp-auth"
 import { AGENT_LEGACY_SELECT, resetAgentColumnsAvailabilityCache } from "@/lib/agent-ownership"

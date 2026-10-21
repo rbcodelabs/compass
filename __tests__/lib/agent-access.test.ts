@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
-const prisma = { agent: { findFirst: vi.fn() }, agentWorkspaceGrant: { findMany: vi.fn() }, workspace: { findFirst: vi.fn() }, solutionComment: { findUnique: vi.fn() }, comment: { findUnique: vi.fn() }, docComment: { findUnique: vi.fn() }, decisionRecord: { findUnique: vi.fn() }, organizationMember: { findFirst: vi.fn() }, agentOrgAdminGrant: { findFirst: vi.fn() } }
+const prisma = { $transaction: vi.fn(), agent: { findFirst: vi.fn() }, agentWorkspaceGrant: { findMany: vi.fn() }, workspace: { findFirst: vi.fn() }, solutionComment: { findUnique: vi.fn() }, comment: { findUnique: vi.fn() }, docComment: { findUnique: vi.fn() }, decisionRecord: { findUnique: vi.fn() }, organizationMember: { findFirst: vi.fn() }, agentOrgAdminGrant: { findFirst: vi.fn() } }
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 import { agentWorkspaceWhere, hasOwnerOrgAdminRights, hasValidAgentOrgAdminGrant } from "@/lib/agent-access"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
@@ -77,15 +77,13 @@ it("a suspended agent reaches no workspace, whatever its owner type", async () =
   prisma.agent.findFirst.mockResolvedValueOnce({ ...workspaceAgent, status: "SUSPENDED" })
   expect(await agentWorkspaceWhere(actor)).toEqual({ id: { in: [] } })
 })
-it("a WORKSPACE-owned agent reaches exactly its granted workspaces (no owner comparison)", async () => {
+// Precondition for PR2: a personal credential (any user on the request) must never reach a shared agent.
+// The agent-scoped credential path that will (PR2) is checked separately from agentIdentityValidForUser.
+it("a WORKSPACE-owned agent reaches nothing through a user-carrying request, even with live grants", async () => {
   prisma.agent.findFirst.mockResolvedValueOnce(workspaceAgent)
-  expect(await agentWorkspaceWhere(actor)).toEqual({ members: { some: { userId: "owner" } }, id: { in: ["one", "two"] } })
-  expect(prisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ agentId: "agent", revokedAt: null }) }))
-})
-it("a WORKSPACE-owned agent with no grants reaches nothing", async () => {
-  prisma.agent.findFirst.mockResolvedValueOnce(workspaceAgent)
-  prisma.agentWorkspaceGrant.findMany.mockResolvedValueOnce([])
-  expect(await agentWorkspaceWhere(actor)).toEqual({ members: { some: { userId: "owner" } }, id: { in: [] } })
+  expect(await agentWorkspaceWhere(actor)).toEqual({ id: { in: [] } })
+  expect(await agentWorkspaceWhere({ ...actor, userId: "home-admin" })).toEqual({ id: { in: [] } })
+  expect(prisma.agentWorkspaceGrant.findMany).not.toHaveBeenCalled()
 })
 it("a WORKSPACE-owned agent inherits NO org-admin rights, even when the user on the request is an org owner", async () => {
   prisma.agent.findFirst.mockResolvedValue(workspaceAgent)
@@ -117,11 +115,11 @@ describe("hasValidAgentOrgAdminGrant", () => {
     prisma.agentOrgAdminGrant.findFirst.mockResolvedValue(null)
     expect(await hasValidAgentOrgAdminGrant({ ...actor }, "org-1", "SCORING_MODEL_ADMIN")).toBe(false)
   })
-  it("a WORKSPACE-owned agent with a live human grant is authorized by the grant alone", async () => {
+  it("a WORKSPACE-owned agent is not authorized by a grant through a user-carrying request (PR2 adds the agent-scoped path)", async () => {
     prisma.agent.findFirst.mockResolvedValue(workspaceAgent)
     prisma.agentOrgAdminGrant.findFirst.mockResolvedValue(grant)
     prisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "OWNER" })
-    expect(await hasValidAgentOrgAdminGrant({ ...actor }, "org-1", "SCORING_MODEL_ADMIN")).toBe(true)
+    expect(await hasValidAgentOrgAdminGrant({ ...actor }, "org-1", "SCORING_MODEL_ADMIN")).toBe(false)
   })
   it("a WORKSPACE-owned agent loses the capability the moment the granting human is demoted", async () => {
     prisma.agent.findFirst.mockResolvedValue(workspaceAgent)

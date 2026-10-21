@@ -30,27 +30,30 @@ const people: Record<string, Person | undefined> = {
   orgAdminMember: { workspaceRole: "MEMBER", orgRole: "ADMIN" },
   member: { workspaceRole: "MEMBER" },
   outsider: undefined,
-  // An org admin who is not a member of HOME is not a workspace admin there (same rule as resolveWorkspaceAdmin).
-  orgAdminOutsider: undefined,
+  // An org admin who is not a member of HOME is still a workspace admin there (same rule as assertWorkspaceAdmin).
+  orgAdminOutsider: { orgRole: "ADMIN" },
+  orgMemberOutsider: { orgRole: "MEMBER" },
 }
 
 const prisma = {
   workspace: {
-    findFirst: vi.fn(async ({ where }: { where: { id: string; members: { some: { userId: string } } } }) => {
-      const person = people[where.members.some.userId]
+    findFirst: vi.fn(async ({ where, select }: { where: { id: string }; select: { members: { where: { userId: string } } } }) => {
+      const person = people[select.members.where.userId]
       if (where.id !== HOME || !person) return null
       return {
-        members: [{ role: person.workspaceRole }],
+        members: person.workspaceRole ? [{ role: person.workspaceRole }] : [],
         organization: { members: person.orgRole ? [{ role: person.orgRole }] : [] },
       }
     }),
   },
   workspaceMember: {
     findFirst: vi.fn(async ({ where }: { where: { workspaceId: string; userId: string } }) =>
-      where.workspaceId === HOME && people[where.userId] ? { id: "m" } : null,
+      where.workspaceId === HOME && people[where.userId]?.workspaceRole ? { id: "m" } : null,
     ),
   },
   agent: { findFirst: vi.fn(), findMany: vi.fn() },
+  // A top-level client has $transaction; an interactive-transaction client does not (see txPrisma).
+  $transaction: vi.fn(),
 } as unknown as AppTransactionClient & { agent: { findFirst: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> } }
 
 const userAgent = { id: "u-agent", name: "Mine", status: "ACTIVE", ownerUserId: "owner" }
@@ -95,7 +98,12 @@ describe("agentIdentityValidForUser (an already authenticated agentId)", () => {
     ["USER-owned, the owner", userAgent, "owner", true],
     ["USER-owned, someone else", userAgent, "other", false],
     ["USER-owned, no user", userAgent, null, false],
-    ["WORKSPACE-owned, any user (the grants decide reach)", sharedAgent, "anyone", true],
+    // A user id says nothing about a shared agent: only an agent-scoped credential (PR2) can reach it.
+    ["WORKSPACE-owned, any user", sharedAgent, "anyone", false],
+    ["WORKSPACE-owned, a workspace admin", sharedAgent, "wsAdmin", false],
+    ["WORKSPACE-owned, the leftover owner_user_id holder", { ...sharedAgent, ownerUserId: "owner" }, "owner", false],
+    ["WORKSPACE-owned, no user", sharedAgent, null, false],
+    ["WORKSPACE-owned, undefined user", sharedAgent, undefined, false],
     ["suspended USER-owned", { ...userAgent, status: "SUSPENDED" }, "owner", false],
     ["suspended WORKSPACE-owned", { ...sharedAgent, status: "SUSPENDED" }, "anyone", false],
     ["inconsistent row", { ...userAgent, ownerUserId: null }, "owner", false],
@@ -115,8 +123,9 @@ describe("assignment eligibility: owner type x grant x owner membership", () => 
     ["WORKSPACE-owned, grant, suspended", { ...sharedAgent, status: "SUSPENDED" }, true, members, false],
     ["USER-owned, grant, suspended", { ...userAgent, status: "SUSPENDED" }, true, members, false],
     ["inconsistent row, grant", { ...sharedAgent, ownerWorkspaceId: null }, true, members, false],
+    ["WORKSPACE-owned by another workspace, grant here", { ...sharedAgent, ownerWorkspaceId: "other-ws" }, true, members, false],
   ])("%s", (_label, agent, hasLiveGrant, memberUserIds, expected) => {
-    expect(agentEligibleInWorkspace(agent, { hasLiveGrant, memberUserIds })).toBe(expected)
+    expect(agentEligibleInWorkspace(agent, { workspaceId: HOME, hasLiveGrant, memberUserIds })).toBe(expected)
   })
 })
 
@@ -131,7 +140,8 @@ describe("canManageAgent", () => {
     ["WORKSPACE-owned: an org admin who is a member", sharedAgent, "orgAdminMember", true],
     ["WORKSPACE-owned: a plain member", sharedAgent, "member", false],
     ["WORKSPACE-owned: a non-member", sharedAgent, "outsider", false],
-    ["WORKSPACE-owned: an org admin who is not a member", sharedAgent, "orgAdminOutsider", false],
+    ["WORKSPACE-owned: an org admin who is not a member (as assertWorkspaceAdmin)", sharedAgent, "orgAdminOutsider", true],
+    ["WORKSPACE-owned: a plain org member who is not a workspace member", sharedAgent, "orgMemberOutsider", false],
     ["WORKSPACE-owned: the leftover owner_user_id holder, now a plain member", { ...sharedAgent, ownerUserId: "owner" }, "owner", false],
   ])("%s", async (_label, agent, userId, expected) => {
     expect(await canManageAgent(prisma, { userId }, agent)).toBe(expected)
@@ -171,6 +181,22 @@ describe("canInvokeAgent", () => {
   })
   it("refuses an anonymous actor", async () => {
     expect(await canInvokeAgent(prisma, { userId: undefined }, sharedAgent)).toBe(false)
+    expect(await canInvokeAgent(prisma, { userId: null }, sharedAgent)).toBe(false)
+    expect(await canInvokeAgent(prisma, { userId: null }, userAgent)).toBe(false)
+  })
+  it("refuses a suspended agent without consulting membership", async () => {
+    expect(await canInvokeAgent(prisma, { userId: "member" }, { ...sharedAgent, status: "SUSPENDED" })).toBe(false)
+    expect(prisma.workspaceMember.findFirst).not.toHaveBeenCalled()
+  })
+  it("refuses a malformed WORKSPACE row without ownerWorkspaceId", async () => {
+    const malformed = { ...sharedAgent, ownerWorkspaceId: null }
+    expect(await canInvokeAgent(prisma, { userId: "wsAdmin" }, malformed)).toBe(false)
+    expect(await canInvokeAgent(prisma, { userId: "member" }, { ...malformed, invokePolicy: "WORKSPACE_MEMBERS" })).toBe(false)
+  })
+  it("refuses a non-member under WORKSPACE_MEMBERS, even one with org-admin rights elsewhere", async () => {
+    const open = { ...sharedAgent, invokePolicy: "WORKSPACE_MEMBERS" }
+    expect(await canInvokeAgent(prisma, { userId: "outsider" }, open)).toBe(false)
+    expect(await canInvokeAgent(prisma, { userId: "orgMemberOutsider" }, open)).toBe(false)
   })
 })
 
@@ -200,9 +226,49 @@ describe("loading, and tolerating an unapplied migration 098", () => {
     prisma.agent.findFirst.mockRejectedValueOnce(new Error("connection reset"))
     await expect(findActiveUserOwnedAgent(prisma, "u-agent", "owner")).rejects.toThrow("connection reset")
   })
+  describe("inside a transaction (a failed statement aborts it, so no error-driven retry)", () => {
+    /** Behaves like PostgreSQL: after any error every later statement fails until rollback. */
+    function abortingTx() {
+      let aborted = false
+      const guard = (fn: (args: unknown) => unknown) => vi.fn(async (args: { select: unknown }) => {
+        if (aborted) throw new Error("current transaction is aborted, commands ignored until end of transaction block")
+        if (args.select === AGENT_OWNERSHIP_SELECT) { aborted = true; throw missingColumn }
+        return fn(args)
+      })
+      return {
+        agent: { findFirst: guard(() => userAgent), findMany: guard(() => [userAgent]) },
+        agentWorkspaceGrant: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      } as unknown as AppTransactionClient & { agent: { findMany: ReturnType<typeof vi.fn> } }
+    }
+    it("reads the legacy columns when the availability is unknown, never touching the new ones", async () => {
+      const tx = abortingTx()
+      expect((await listUserOwnedAgents(tx, "owner")).map((a) => a.id)).toEqual(["u-agent"])
+      expect(tx.agent.findMany).toHaveBeenCalledTimes(1)
+      expect(tx.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ select: AGENT_LEGACY_SELECT }))
+    })
+    it("revokeMemberAgentGrants completes inside a transaction on a database without 098", async () => {
+      const { revokeMemberAgentGrants } = await import("@/lib/agent-lifecycle")
+      const tx = abortingTx()
+      await revokeMemberAgentGrants(tx, HOME, "owner")
+      expect(tx.agentWorkspaceGrant.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ agentId: { in: ["u-agent"] } }) }))
+    })
+    it("uses the new columns once a top-level call has proven they exist", async () => {
+      prisma.agent.findMany.mockResolvedValueOnce([])
+      await listUserOwnedAgents(prisma, "owner")
+      const tx = { agent: { findMany: vi.fn(async () => []) } } as unknown as AppTransactionClient & { agent: { findMany: ReturnType<typeof vi.fn> } }
+      await listUserOwnedAgents(tx, "owner")
+      expect(tx.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ select: AGENT_OWNERSHIP_SELECT }))
+    })
+    it("a transaction never records a negative availability for later top-level calls", async () => {
+      await listUserOwnedAgents(abortingTx(), "owner")
+      prisma.agent.findMany.mockResolvedValueOnce([])
+      await listUserOwnedAgents(prisma, "owner")
+      expect(prisma.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({ select: AGENT_OWNERSHIP_SELECT }))
+    })
+  })
   it("tells the callback whether the new columns may be used in a where", async () => {
     const seen: boolean[] = []
-    await withAgentColumns(async ({ extended }) => { seen.push(extended); if (extended) throw missingColumn; return null })
+    await withAgentColumns(prisma, async ({ extended }) => { seen.push(extended); if (extended) throw missingColumn; return null })
     expect(seen).toEqual([true, false])
   })
   it("does not filter on owner_workspace_id while the migration is unapplied", async () => {

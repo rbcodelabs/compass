@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const db = vi.hoisted(() => ({
+  $transaction: vi.fn(),
   oAuthConsent: { findMany: vi.fn() },
   oAuthClient: { findMany: vi.fn() },
   oAuthToken: { findMany: vi.fn() },
@@ -52,7 +53,7 @@ describe("getConnectedAppsForUser", () => {
       where: { userId: "owner", clientId: { in: ["client", "other-client"] } },
     }))
     expect(db.agent.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { ownerUserId: "owner" },
+      where: { id: { in: ["agent", "another-users-agent"] } },
     }))
     expect(db.workspace.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { members: { some: { userId: "owner" } } },
@@ -60,6 +61,11 @@ describe("getConnectedAppsForUser", () => {
     expect(db.agentWorkspaceGrant.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { agentId: { in: ["agent"] }, revokedAt: null },
     }))
+  })
+  it("does not query agents at all when no consent names one", async () => {
+    db.oAuthConsent.findMany.mockResolvedValue([])
+    await getConnectedAppsForUser("owner")
+    expect(db.agent.findMany).not.toHaveBeenCalled()
   })
   it("never loads grants for an agent the account does not own as a USER, even if the row comes back", async () => {
     db.agent.findMany.mockResolvedValue([
