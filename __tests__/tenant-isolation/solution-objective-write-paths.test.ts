@@ -443,6 +443,7 @@ const KNOWN_RAW_INSERT_SITES: Record<string, number> = {
   "__tests__/entity-links-task-backfill.integration.test.ts": 2, // the objective and solution fixtures for the 097 backfill, each listing workspace_id (a null parameter simulates a row with no workspace)
   "__tests__/entity-links-opportunity-backfill.integration.test.ts": 1, // legacy objective fixtures (one with no workspace) for the 095 backfill
   "__tests__/entity-links-artifact-backfill.integration.test.ts": 1, // legacy solution fixtures (one with no workspace) for the 096 backfill
+  "__tests__/entity-links-solution-key-result-backfill.integration.test.ts": 3, // objective, solution and bulk-solution fixtures for the 098 backfill, each listing workspace_id (a null parameter simulates a row with no workspace)
   "__tests__/work-item-ids-backfill.integration.test.ts": 3, // legacy objective/solution/task fixtures for the 093 backfill; one objective deliberately has no workspace
   "e2e/functional/fixtures/seed-e2e.ts": 2,
   "e2e/functional/specs/link-authoring.spec.ts": 2, // one objective and one solution for the synthetic workspace, each listing workspace_id

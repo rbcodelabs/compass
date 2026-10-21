@@ -8,12 +8,13 @@
  * the legacy table / column is the source of truth, the mirror joins the legacy transaction, removal never depends on the flag, and
  * reads and the generic tools ignore both types.
  *
- * Solution <-> Key Result is "new-only": the legacy Solution-Key Result table stays the source of truth and every read
+ * Solution <-> Key Result (phase 4): the legacy Solution-Key Result table stays the source of truth and every read
  * stays on it. lib/typed-links.ts writes the legacy row, then calls the functions below inside the SAME
  * transaction, so the mirror row and the legacy row commit or roll back together and neither can drift.
- * Nothing is backfilled, so entity_links holds a partial shadow (links written while the flag was on);
- * reads, summaries and the generic link tools therefore ignore the type until a later phase backfills and
- * flips reads. Rollback is the flag: with it off no new mirror rows are written and nothing reads them.
+ * Links that predate the flag are filled in by the explicit-only migration 098
+ * (lib/migrations/entity-links-solution-key-result-backfill.ts), which copies source, actor and created_at, writes origin DIRECT and takes
+ * workspace_id from the verified Solution exactly as the writer below does. Reads, summaries and the generic link tools still
+ * ignore the type until the read flip. Rollback is the flag: with it off no new mirror rows are written and nothing reads them.
  *
  * This module is the only caller that passes `viaLegacyWriter` to lib/links/service.ts.
  */

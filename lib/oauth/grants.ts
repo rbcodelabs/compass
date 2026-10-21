@@ -132,6 +132,21 @@ export async function revokeTokenFamily(familyId: string, now: Date = new Date()
   return count
 }
 
+const WRITE_CONFLICT_CODES = new Set(["P2034", "OC000", "OC001", "40001"])
+
+/**
+ * True for a database write/serialization conflict: Prisma P2034, Aurora DSQL
+ * OCC aborts (OC000/OC001), or SQLSTATE 40001. These mean a concurrent writer
+ * won the row. Every other error (pool exhaustion, timeouts, connection loss)
+ * is infrastructure, says nothing about the token, and must not be read as reuse.
+ */
+export function isWriteConflictError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false
+  const { code, message } = error as { code?: unknown; message?: unknown }
+  if (typeof code === "string" && WRITE_CONFLICT_CODES.has(code)) return true
+  return typeof message === "string" && /\b(OC00[01]|P2034)\b/.test(message)
+}
+
 /** The stored refresh token, as far as rotation cares. */
 export interface RefreshTokenRow {
   id: string
@@ -206,8 +221,11 @@ export async function claimRefreshToken(
       where: { tokenHash, revokedAt: null },
       data: { revokedAt: now },
     })
-  } catch {
-    // DSQL OCC abort — a concurrent rotation of the same token.
+  } catch (error) {
+    // Only a write conflict means a concurrent rotation of the same token.
+    // Anything else (pool exhaustion, timeout) says nothing about the token:
+    // propagate so the route answers 503 and the family survives.
+    if (!isWriteConflictError(error)) throw error
     await revokeTokenFamily(existing.familyId, now)
     return { ok: false, reason: "reused", familyId: existing.familyId }
   }
@@ -234,6 +252,41 @@ export async function claimRefreshToken(
       expiresAt: existing.expiresAt,
       revokedAt: existing.revokedAt,
     },
+  }
+}
+
+/**
+ * Undoes {@link claimRefreshToken} when the replacement pair could not be
+ * issued, so the client's only refresh token is not burned by an outage and a
+ * retry is not mistaken for reuse.
+ *
+ * Releases only if the token is still revoked at exactly `claimedAt` (the
+ * timestamp the claim wrote) and no child token descends from it. Best effort:
+ * a failure here is logged and swallowed, because the caller is already on an
+ * error path and the worst outcome is the pre-existing one (re-authorize).
+ */
+export async function releaseRefreshClaim(tokenHash: string, claimedAt: Date): Promise<void> {
+  try {
+    const prisma = getPrisma()
+    const row = await prisma.oAuthToken.findUnique({
+      where: { tokenHash },
+      select: { id: true },
+    })
+    if (!row) return
+    const child = await prisma.oAuthToken.findFirst({
+      where: { parentTokenId: row.id },
+      select: { id: true },
+    })
+    if (child) return
+    await prisma.oAuthToken.updateMany({
+      where: { tokenHash, revokedAt: claimedAt },
+      data: { revokedAt: null },
+    })
+  } catch (error) {
+    console.error(
+      "[oauth] failed to release refresh claim",
+      error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+    )
   }
 }
 

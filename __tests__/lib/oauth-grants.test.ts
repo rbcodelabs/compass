@@ -21,6 +21,8 @@ import {
   ACCESS_TOKEN_TTL_MS,
   REFRESH_TOKEN_TTL_MS,
   claimRefreshToken,
+  isWriteConflictError,
+  releaseRefreshClaim,
   findRevocationTarget,
   issueTokenPair,
   revokeTokenById,
@@ -191,6 +193,75 @@ describe("claimRefreshToken", () => {
     expect(claim.ok).toBe(false)
     if (claim.ok) return
     expect(claim.reason).toBe("reused")
+  })
+
+  it.each([
+    ["Prisma P2034", { code: "P2034" }],
+    ["DSQL OC000", { code: "OC000" }],
+    ["SQLSTATE 40001", { code: "40001" }],
+  ])("treats %s as a write conflict", (_label, extra) => {
+    expect(isWriteConflictError(Object.assign(new Error("x"), extra))).toBe(true)
+  })
+
+  it("does not treat a pool-exhaustion error as a write conflict", () => {
+    expect(isWriteConflictError(Object.assign(new Error("EMAXCONNSESSION"), { code: "XX000" }))).toBe(false)
+    expect(isWriteConflictError("boom")).toBe(false)
+  })
+
+  it("propagates a non-conflict updateMany error without revoking the family", async () => {
+    const { hash } = await issue()
+    store.oAuthToken.updateMany.mockImplementationOnce(async () => {
+      throw new Error("EMAXCONNSESSION max clients reached")
+    })
+
+    await expect(claimRefreshToken(hash)).rejects.toThrow("EMAXCONNSESSION")
+    expect(store.oAuthToken.rows.every((row) => row.revokedAt === null)).toBe(true)
+  })
+})
+
+describe("releaseRefreshClaim", () => {
+  it("makes a claimed token claimable again when no rotation was issued", async () => {
+    const tokens = await issueTokenPair(GRANT)
+    const hash = hashOAuthToken(tokens.refresh_token)
+    const claimedAt = new Date("2026-09-18T13:00:00Z")
+    expect((await claimRefreshToken(hash, claimedAt)).ok).toBe(true)
+
+    await releaseRefreshClaim(hash, claimedAt)
+
+    expect((await claimRefreshToken(hash)).ok).toBe(true)
+  })
+
+  it("leaves the token revoked once a child rotation exists", async () => {
+    const tokens = await issueTokenPair(GRANT)
+    const hash = hashOAuthToken(tokens.refresh_token)
+    const claimedAt = new Date("2026-09-18T13:00:00Z")
+    const claim = await claimRefreshToken(hash, claimedAt)
+    if (!claim.ok) throw new Error("expected claim")
+    await issueTokenPair({ ...GRANT, parentTokenId: claim.token.id })
+
+    await releaseRefreshClaim(hash, claimedAt)
+
+    const row = store.oAuthToken.rows.find((candidate) => candidate.tokenHash === hash)
+    expect(row?.revokedAt).toEqual(claimedAt)
+  })
+
+  it("does not un-revoke a token that was revoked at a different time", async () => {
+    const tokens = await issueTokenPair(GRANT)
+    const hash = hashOAuthToken(tokens.refresh_token)
+    await revokeTokenFamily(GRANT.familyId, new Date("2026-09-18T12:00:00Z"))
+
+    await releaseRefreshClaim(hash, new Date("2026-09-18T13:00:00Z"))
+
+    const row = store.oAuthToken.rows.find((candidate) => candidate.tokenHash === hash)
+    expect(row?.revokedAt).toEqual(new Date("2026-09-18T12:00:00Z"))
+  })
+
+  it("swallows and logs its own failure", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    store.oAuthToken.findUnique.mockRejectedValueOnce(new Error("db down"))
+    await expect(releaseRefreshClaim("hash", new Date())).resolves.toBeUndefined()
+    expect(spy).toHaveBeenCalled()
+    spy.mockRestore()
   })
 })
 

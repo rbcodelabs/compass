@@ -72,7 +72,7 @@ export function effectiveLegacyMode(def: LinkTypeDef): LegacyAdapterMode | null 
 export type LegacyAdapter = {
   /** The module that owns the legacy table (the only place allowed to name it). */
   legacyModule: string
-  /** The explicit-only backfill migration, or null for a new-only type (phase 4: no backfill, legacy stays the source of truth). */
+  /** The explicit-only backfill migration, or null for a type that has none (every legacy-mirrored type has one; the legacy table stays the source of truth). */
   backfillMigration: string | null
   /**
    * The static, registry-level mode. "mirror": the legacy writer module writes this table first and mirrors into entity_links in the
@@ -201,7 +201,10 @@ const experimentInformedByStudy: LinkTypeDef = {
   compat: { mcpTools: [], restOps: [] },
 }
 
-// ── SOLUTION_TARGETS_KEY_RESULT (phase 4: new-only mirror of the legacy table) ───────
+// ── SOLUTION_TARGETS_KEY_RESULT (phase 4: mirror of the legacy table, backfilled by 098) ───────
+
+/** The explicit-only backfill for SOLUTION_TARGETS_KEY_RESULT (lib/migrations/entity-links-solution-key-result-backfill.ts). */
+export const SOLUTION_KR_BACKFILL_MIGRATION = "098_entity_links_backfill_solution_key_result"
 
 /** Outside production the mirror is on so tests and E2E cover it; production needs COMPASS_ENTITY_LINKS_SOLUTION_KR_MIRROR=1. */
 export function isSolutionKeyResultMirrorEnabled(): boolean {
@@ -213,8 +216,9 @@ export function isSolutionKeyResultMirrorEnabled(): boolean {
  * A Solution targets Key Results. the legacy Solution-Key Result table stays the source of truth and every read stays on
  * it: the legacy writer (linkSolutionToKeyResult / unlinkSolutionFromKeyResult in lib/typed-links.ts) mirrors
  * each link and unlink into entity_links inside its own transaction while the flag is on (lib/links/legacy-mirror.ts).
- * New-only: nothing is backfilled, so the mirror is a partial shadow and is not offered by reads, summaries or the
- * generic link tools. Same workspace, many-to-many, idempotent, matching the legacy rules.
+ * Links written before the mirror flag was on are filled in by the explicit-only migration 098 (quarantining inconsistent legacy rows);
+ * until reads flip, the mirror is not offered by reads, summaries or the generic link tools. Same workspace, many-to-many, idempotent,
+ * matching the legacy rules.
  */
 const solutionTargetsKeyResult: LinkTypeDef = {
   key: "SOLUTION_TARGETS_KEY_RESULT",
@@ -229,7 +233,7 @@ const solutionTargetsKeyResult: LinkTypeDef = {
   lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
   summaries: {},
   restrictedContexts: "deny",
-  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: null, mode: "mirror", readFamily: "SOLUTION_KR" },
+  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: SOLUTION_KR_BACKFILL_MIGRATION, mode: "mirror", readFamily: "SOLUTION_KR" },
   compat: { mcpTools: ["link_solution_to_key_result", "unlink_solution_from_key_result"], restOps: ["linkSolutionKeyResult", "unlinkSolutionKeyResult"] },
 }
 

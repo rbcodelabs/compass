@@ -1,0 +1,65 @@
+-- READ-ONLY preflight for migration 098_entity_links_backfill_solution_key_result (entity_links ADR phase 4, data half).
+-- Counts the legacy rows the backfill would mirror and the orphans it would quarantine and report, so the owner can read the
+-- production numbers BEFORE deciding to POST 098 and who resolves the quarantined rows. It changes nothing: the transaction is
+-- READ ONLY and ends in ROLLBACK, and it selects counts and ids only (no titles, no content).
+--
+-- Usage (psql, as a read-only role; the schema is the deployment's, e.g. compass_prod):
+--   psql "$READONLY_DATABASE_URL" -v schema=compass_prod -f docs/maintenance/entity-links-solution-key-result-preflight.psql
+-- It needs tables from migrations 068 and 071 (solutions/objectives.workspace_id, solution_key_result_links). The entity_links section at
+-- the end needs 091 and is skipped by psql's ON_ERROR_STOP=off default if the table is missing; the same numbers (plus these) are served by
+-- GET /api/admin/migrate under entityLinksSolutionKeyResultBackfill once the code is deployed.
+-- Production snapshot when this was written: 9 legacy links, 0 mirrored (re-read; do not trust a stale number).
+--
+-- Classes, identical to lib/migrations/entity-links-solution-key-result-backfill.ts:
+--   ok                  Solution, Key Result and its Objective exist, Solution and Objective share a workspace, the link row agrees
+--   dangling            the Solution, the Key Result or the Key Result's Objective row is gone
+--   crossWorkspace      Solution and Objective are in different workspaces, or either has no workspace_id
+--   linkWorkspaceDrift  the link row's workspace_id differs from the Solution's
+
+\set ON_ERROR_STOP off
+BEGIN READ ONLY;
+
+\echo '== 1. Legacy solution_key_result_links by source =='
+SELECT source, count(*) AS rows FROM :"schema".solution_key_result_links GROUP BY source ORDER BY source;
+
+\echo '== 2. solution_key_result_links by class (everything but ok is quarantined and reported by 098) =='
+SELECT CASE
+         WHEN s.id IS NULL OR kr.id IS NULL OR obj.id IS NULL THEN 'dangling'
+         WHEN s.workspace_id IS NULL OR obj.workspace_id IS NULL OR s.workspace_id <> obj.workspace_id THEN 'crossWorkspace'
+         WHEN l.workspace_id <> s.workspace_id THEN 'linkWorkspaceDrift'
+         ELSE 'ok' END AS class,
+       count(*) AS rows
+  FROM :"schema".solution_key_result_links AS l
+  LEFT JOIN :"schema".solutions AS s ON s.id = l.solution_id
+  LEFT JOIN :"schema".key_results AS kr ON kr.id = l.key_result_id
+  LEFT JOIN :"schema".objectives AS obj ON obj.id = kr.objective_id
+ GROUP BY 1 ORDER BY 1;
+
+\echo '== 3. Expected orphans, ids only: solution_key_result_links.id with its class (first 200) =='
+SELECT l.id AS link_id,
+       CASE
+         WHEN s.id IS NULL OR kr.id IS NULL OR obj.id IS NULL THEN 'dangling'
+         WHEN s.workspace_id IS NULL OR obj.workspace_id IS NULL OR s.workspace_id <> obj.workspace_id THEN 'crossWorkspace'
+         ELSE 'linkWorkspaceDrift' END AS class
+  FROM :"schema".solution_key_result_links AS l
+  LEFT JOIN :"schema".solutions AS s ON s.id = l.solution_id
+  LEFT JOIN :"schema".key_results AS kr ON kr.id = l.key_result_id
+  LEFT JOIN :"schema".objectives AS obj ON obj.id = kr.objective_id
+ WHERE s.id IS NULL OR kr.id IS NULL OR obj.id IS NULL OR s.workspace_id IS NULL OR obj.workspace_id IS NULL
+    OR s.workspace_id <> obj.workspace_id OR l.workspace_id <> s.workspace_id
+ ORDER BY l.id LIMIT 200;
+
+\echo '== 4. Solutions / objectives with no workspace_id (their links are crossWorkspace orphans until 068/069 fills them) =='
+SELECT (SELECT count(*) FROM :"schema".solutions WHERE workspace_id IS NULL) AS solutions_without_workspace,
+       (SELECT count(*) FROM :"schema".objectives WHERE workspace_id IS NULL) AS objectives_without_workspace;
+
+\echo '== 5. entity_links state of the type (needs migration 091) =='
+SELECT link_type, origin, count(*) AS rows FROM :"schema".entity_links
+ WHERE link_type = 'SOLUTION_TARGETS_KEY_RESULT' GROUP BY 1, 2 ORDER BY 1, 2;
+
+\echo '== 6. Stale mirror rows (no legacy counterpart; a POST prunes them) =='
+SELECT count(*) AS stale_mirror_rows FROM :"schema".entity_links AS e
+  LEFT JOIN :"schema".solution_key_result_links AS c ON c.solution_id = e.from_id AND c.key_result_id = e.to_id
+ WHERE e.link_type = 'SOLUTION_TARGETS_KEY_RESULT' AND c.id IS NULL;
+
+ROLLBACK;

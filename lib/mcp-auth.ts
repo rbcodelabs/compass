@@ -37,10 +37,18 @@ export type McpAuthResult = {
 // Returns the userId if a per-user key matched (null for service key), or false if invalid.
 export async function validateMcpAuth(request: Request): Promise<McpAuthResult> {
   try {
-    return validateProgrammaticAuth(request, { resource: mcpResourceUri() })
-  } catch {
+    // `await` is load-bearing: without it a rejected promise bypasses this catch.
+    return await validateProgrammaticAuth(request, { resource: mcpResourceUri() })
+  } catch (error) {
+    // Auth failures return `{ valid: false }` and never reach here; this is an
+    // unexpected error (typically a transient database failure). Fail closed.
+    console.error("[mcp-auth] unexpected error validating bearer token", describeError(error))
     return { valid: false }
   }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error)
 }
 
 export async function validateProgrammaticAuth(
