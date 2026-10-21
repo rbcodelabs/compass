@@ -1,8 +1,8 @@
 -- Migration 098: agent kind and workspace ownership
 -- (ADR "Cloud agents as first-class identities", PR1 of 4).
 --
--- Additive and behavior-neutral: six nullable columns on agents, one async index, and
--- and an async index. owner_user_id nullability is split into migration 099 so a DSQL refusal of
+-- Additive and behavior-neutral: six nullable columns on agents and one async index.
+-- owner_user_id nullability is split into migration 099 so a DSQL refusal of
 -- that one statement cannot block this migration's receipt. No backfill. A row with a NULL kind reads as
 -- EXTERNAL and a NULL owner_type reads as USER (lib/agent-ownership.ts), so every existing
 -- agent keeps behaving exactly as before and the code ships before this is applied.

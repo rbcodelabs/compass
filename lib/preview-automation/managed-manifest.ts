@@ -199,7 +199,7 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // entity_links data half for task links (ADR phase 7): no DDL, EXPLICIT-ONLY, the work is the hook (lib/migrations/entity-links-task-backfill.ts).
   "097_entity_links_backfill_task": "ac22c83a1b21508ca49189ffbf1cda1a8c64e426c7bcb808538e0a3a85e6ecbf",
   // Cloud agents PR1: six nullable agents columns and one async owner_workspace_id index. No backfill.
-  "098_agent_kind_and_workspace_owner": "4f30649291130e083f396c6bb1bade1454cc9c5e69ceee2e2c0440c6e30c4aac",
+  "098_agent_kind_and_workspace_owner": "239b13f323e305a41820e7e8c12cc6af06a723b9355cb1fb00aeaa6393cf0fe0",
   // Cloud agents PR1: owner_user_id DROP NOT NULL (as 070), split from 098 so a DSQL refusal cannot block 098's receipt.
   "099_agent_owner_user_nullable": "9587f0d2c28ca41c92a4217c068966639aac72f722cca8943180751940ab231d"
 };
