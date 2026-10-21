@@ -59,12 +59,12 @@ beforeEach(() => {
 })
 
 describe("createCloudAgent", () => {
-  const base = { orgSlug: "acme", workspaceSlug: "home", name: " Triage ", instructions: "  Label new feedback.  ", model: "claude-sonnet-5-5" }
+  const base = { orgSlug: "acme", workspaceSlug: "home", name: " Triage ", instructions: "  Label new feedback.  ", model: "claude-sonnet-5" }
 
   it("lets any workspace member create a personal cloud agent owned by themselves, invoked by them alone", async () => {
     await createCloudAgent({ ...base, ownerType: "USER", invokePolicy: "WORKSPACE_MEMBERS" })
     expect(mocks.agent.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ kind: "CLOUD", ownerType: "USER", ownerUserId: "member", ownerWorkspaceId: null, invokePolicy: "OWNER", name: "Triage", instructions: "Label new feedback.", model: "claude-sonnet-5-5", status: "ACTIVE" }),
+      data: expect.objectContaining({ kind: "CLOUD", ownerType: "USER", ownerUserId: "member", ownerWorkspaceId: null, invokePolicy: "OWNER", name: "Triage", instructions: "Label new feedback.", model: "claude-sonnet-5", status: "ACTIVE" }),
     }))
     expect(mocks.admin).not.toHaveBeenCalled()
   })
@@ -145,8 +145,8 @@ describe("createCloudAgent", () => {
 describe("updateCloudAgent", () => {
   it("lets the owner update their personal agent's instructions and model", async () => {
     mocks.agent.findFirst.mockResolvedValue(personalAgent)
-    await updateCloudAgent("a-personal", { instructions: " New. ", model: "claude-sonnet-5-5" })
-    expect(mocks.agent.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "a-personal" }, data: expect.objectContaining({ instructions: "New.", model: "claude-sonnet-5-5" }) }))
+    await updateCloudAgent("a-personal", { instructions: " New. ", model: "claude-sonnet-5" })
+    expect(mocks.agent.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "a-personal" }, data: expect.objectContaining({ instructions: "New.", model: "claude-sonnet-5" }) }))
   })
 
   it("keeps a stored model that is no longer in the allowed set as long as it is unchanged", async () => {

@@ -55,6 +55,7 @@ import { DocsLibraryButton } from "@/components/docs/docs-library-button";
 import { DocCommentComposer, type ComposerPayload, type ComposerResult } from "@/components/docs/doc-comment-composer";
 import type { MentionOptions } from "@/components/docs/mention-editor";
 import { pinKind, type CommentTaskCardData } from "@/lib/comment-task-card";
+import { announceAgentRun } from "@/lib/ui/agent-run-toast";
 
 interface DocEditorProps {
   initialCommentsPin?: PanelPin;
@@ -432,6 +433,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     );
     if (!result.ok) return { ok: false, error: result.error, message: result.message ?? "Could not post the comment." };
     applyPosted(result);
+    // The comment mentioned a cloud agent on a new task: say whether its run started, was already going, or did not start and why.
+    announceAgentRun(result.agentRun);
     return { ok: true };
   }
 

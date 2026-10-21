@@ -21,6 +21,7 @@ import { createDocCommentCore, deleteDocCommentCore, type CommentAnchorFields } 
 import { mentionRoles, uniqueMentions, type MentionRef } from "@/lib/comment-mentions"
 import { eligibleTaskAssignees, resolveTaskAssignees } from "@/lib/task-assignment"
 import { createWorkspaceTask } from "@/lib/task-create"
+import { startRunForAssignedTask, type AgentRunOutcome } from "@/lib/agent-task-trigger"
 import { displayIdFromRow } from "@/lib/work-item-ids"
 import { runAfterCommit } from "@/lib/following-commit"
 import { autoFollow } from "@/lib/follows"
@@ -190,7 +191,7 @@ export type PostCommentError =
   | "PARENT_IS_REPLY"
 
 export type PostCommentResult =
-  | { ok: true; comment: DocComment; card: CommentTaskCardData | null; mentioned: { assignee: MentionRef | null; watchers: MentionRef[] } }
+  | { ok: true; comment: DocComment; card: CommentTaskCardData | null; mentioned: { assignee: MentionRef | null; watchers: MentionRef[] }; agentRun?: AgentRunOutcome }
   | { ok: false; error: PostCommentError; message?: string }
 
 const PRIORITIES: readonly string[] = ["URGENT", "HIGH", "MEDIUM", "LOW"]
@@ -268,12 +269,20 @@ export async function postDocCommentWithOptionalTask(input: PostCommentInput): P
     }
   }
 
+  // The comment mentions a cloud agent as the task's assignee: start its run, with the comment as context. The comment and
+  // task are saved either way. A comment edit never reaches this function, so editing one cannot start another run.
+  let agentRun: AgentRunOutcome | undefined
+  if (taskId && assignee?.type === "AGENT") {
+    const outcome = await startRunForAssignedTask({ taskId, actingUserId: input.userId, comment: { id: created.comment.id, docId: doc.id, body } })
+    if (outcome.status !== "skipped") agentRun = outcome
+  }
+
   await runAfterCommit(() => notifyMentions({
     workspaceId: doc.workspaceId, docId: doc.id, commentId: created.comment.id, actorId: input.userId,
     taskId, mentions: uniqueMentions(body), taskAssigneeUserId: assignee?.type === "USER" && taskId ? assignee.id : null,
   }))
 
-  return { ok: true, comment: created.comment, card, mentioned: roles }
+  return { ok: true, comment: created.comment, card, mentioned: roles, ...(agentRun ? { agentRun } : {}) }
 }
 
 /**

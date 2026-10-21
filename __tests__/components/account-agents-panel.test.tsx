@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: actions.refresh
 
 import { AccountAgentsPanel } from "@/components/settings/account-agents-panel"
 
-const models = [{ value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" }]
+const models = [{ value: "claude-sonnet-5", label: "Claude Sonnet 5" }]
 const cloud = {
   id: "c1", name: "Helper", description: null, status: "ACTIVE", keys: [], grants: [], kind: "CLOUD" as const, instructions: "Be brief.", model: null,
   workspaces: [
@@ -38,9 +38,9 @@ describe("AccountAgentsPanel cloud agents", () => {
   it("saves edited instructions and model", async () => {
     render(<AccountAgentsPanel enabled agents={[cloud]} models={models} />)
     fireEvent.change(screen.getByLabelText("Instructions"), { target: { value: "Be thorough." } })
-    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-sonnet-5-5" } })
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-sonnet-5" } })
     fireEvent.click(screen.getByRole("button", { name: "Save agent" }))
-    await waitFor(() => expect(actions.updateCloudAgent).toHaveBeenCalledWith("c1", { name: "Helper", description: "", instructions: "Be thorough.", model: "claude-sonnet-5-5" }))
+    await waitFor(() => expect(actions.updateCloudAgent).toHaveBeenCalledWith("c1", { name: "Helper", description: "", instructions: "Be thorough.", model: "claude-sonnet-5" }))
   })
 
   it("offers a personal default only in workspaces where the agent is enabled", async () => {

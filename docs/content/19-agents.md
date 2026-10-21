@@ -108,9 +108,54 @@ assignee, or can be unassigned. The board, list, detail page, and roadmap delive
 panel display the same identity. Assignee filters include people and agents.
 
 Assignment records who should do the work. It does not grant access. Cloud agents
-appear in the picker once they are enabled in the workspace. Assigning a task does not
-start a cloud agent yet; run it from chat. Your MCP client or automation decides when
-an external agent executes.
+appear in the picker once they are enabled in the workspace. Your MCP client or
+automation decides when an external agent executes.
+
+### Assigning to a cloud agent starts a run
+
+When you assign a task to a **cloud agent** in the app, Compass also starts a run as
+that agent, and tells you so ("Started a run as Triage") with a link to follow it in
+a conversation named after the task. The same happens when you @mention a cloud agent
+in a Doc comment that creates a task, and the agent is given the comment as context.
+This covers creating a task with an agent assignee, changing a task's assignee (on the
+board, the list, the detail panel, or a task linked from another object), and the
+Doc comment flow.
+
+The run is attributed to the agent and to **you** as the person who started it. It can
+use only what the agent was granted in this workspace, never your own access, and it
+ends when the run does. The conversation is an ordinary one, so you can reply to the
+agent there afterwards.
+
+The assignment is always saved. If the run cannot start, the task is still assigned
+and you are told why:
+
+- you are not allowed to run that agent (a personal agent can be run only by its owner;
+  a shared agent follows its "Who can run this agent" setting);
+- the agent is suspended or no longer enabled in this workspace;
+- the agent has reached a run limit (below), or you have reached your own daily agent limit;
+- background agent runs are not set up on this deployment.
+
+Saving the same assignee again, or editing a comment, never starts a second run, and a
+task that already has a run in progress for you starts no second one ("already working
+on this task"). An **external** agent is unchanged: assignment only queues the task for it.
+
+Only assignments made by a person in the app start a run. Assigning through the MCP
+tools or the REST API (`create_task`, `update_task`), decision follow-through and other
+automatic changes record the assignment and nothing more: the caller could itself be an
+agent, and agents assigning each other would otherwise start runs nobody asked for.
+
+### Run limits
+
+Each cloud agent has two limits, so a busy or runaway agent cannot use unbounded capacity:
+
+- **Concurrent run limit:** runs of this agent in progress at once (default 5);
+- **Daily run limit:** runs it may start in any 24 hours, whatever their outcome (default 100).
+
+A person who can manage the agent sets them under **Edit** (whole numbers up to 50 and
+5000); leave a field empty for the default. When a limit is reached, a new run is refused
+with a message that names the limit: in chat as a clear error, and for an assignment as
+a notice, with the assignment itself kept. Limits are counted per agent, so one agent
+never uses another's allowance. Your own daily agent limit still applies on top.
 
 If an agent is suspended or loses access, existing assignments remain visible as
 unavailable. Clear or reassign them explicitly. The external Owner label remains
@@ -161,8 +206,10 @@ Do not send both `assignee` and the legacy `assigneeUserId` field.
 
 Administrators must apply and verify migration `049_agent_identity` before
 this revision receives user traffic, then enable `COMPASS_AGENTS_ENABLED=1`. Cloud agents
-additionally need migrations `098`, `099`, `100` and `101`; the code tolerates any of
-them being unapplied (cloud-agent features stay unavailable and chat uses the built-in agent).
+additionally need migrations `098`, `099`, `100`, `101` and `102` (the run-limit columns); the code tolerates any of
+them being unapplied (cloud-agent features stay unavailable and chat uses the built-in agent; without `102`
+every agent simply uses the default limits and the limit fields cannot be saved).
+Assignment-started runs also need background agent runs (migration `069`) and a built agent runtime snapshot.
 `COMPASS_CLOUD_AGENT_MODELS` (comma-separated) adds models to the allowed list.
 The flag is not a substitute for installing the schema. Turning off new agent operations preserves
 existing assignment records. The built-in Compass Agent is not itself a task assignee;

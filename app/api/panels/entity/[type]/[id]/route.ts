@@ -5,6 +5,7 @@ import { getEntityDetail, isEntityType } from "@/lib/entity-detail";
 import { updateEntityField } from "@/lib/entity-mutations";
 import getPrisma from "@/lib/db";
 import { resolveWorkItem, type WorkItemResolution } from "@/lib/work-item-resolve";
+import { startRunForAssignedTask } from "@/lib/agent-task-trigger";
 
 /** A UUID or a display ID (`TASK-5`) in the URL; anything that does not resolve inside the workspace is the same 404 as before. */
 function refusal(resolved: Extract<WorkItemResolution, { ok: false }>) {
@@ -124,6 +125,12 @@ export async function PATCH(
   const resolved = await resolveWorkItem(getPrisma(), workspace.id, type, id);
   if (!resolved.ok) return refusal(resolved);
 
+  // An assignee change on a task can start a cloud agent's run; remember who was assigned before the write.
+  const assigneeEdit = type === "task" && body.field === "assignee";
+  const previousAssigneeAgentId = assigneeEdit
+    ? (await getPrisma().task.findFirst({ where: { id: resolved.id, workspaceId: workspace.id }, select: { assigneeAgentId: true } }))?.assigneeAgentId ?? null
+    : null;
+
   const result = await updateEntityField(
     type,
     resolved.id,
@@ -136,7 +143,15 @@ export async function PATCH(
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
+  const agentRun = assigneeEdit ? await startRunForAssignedTask({ taskId: resolved.id, actingUserId: session.user.id, previousAssigneeAgentId }) : null;
+
   const detail = await getEntityDetail(type, resolved.id, workspace.id);
   // A solution moving to Building can add it to the roadmap; tell the client so it can offer Undo.
-  return NextResponse.json({ ...detail, displayId: resolved.displayId, ...(result.roadmapSync ? { roadmapSync: result.roadmapSync } : {}) });
+  return NextResponse.json({
+    ...detail,
+    displayId: resolved.displayId,
+    ...(result.roadmapSync ? { roadmapSync: result.roadmapSync } : {}),
+    // Only when a run started, was already going, or was refused: the client tells the person (a "skipped" says nothing).
+    ...(agentRun && agentRun.status !== "skipped" ? { agentRun } : {}),
+  });
 }

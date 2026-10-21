@@ -385,7 +385,7 @@ export default async function SettingsPage({ params }: Props) {
         />
       </SettingsSection>
 
-      <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace, including cloud agents that run inside Compass. Assignment does not grant access.">
+      <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace, including cloud agents that run inside Compass. Assignment does not grant access; assigning a task to a cloud agent from the app starts a run, within the limits set on that agent.">
         <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} enabled={agentsEnabled()} canManage={canManageCapabilityPacks} models={allowedAgentModels()} agents={workspaceAgents.map((a) => {
           const owner = agentOwner(a);
           const ownerMember = owner?.type === "USER" ? rawMembers.find((m) => m.userId === owner.userId) : undefined;

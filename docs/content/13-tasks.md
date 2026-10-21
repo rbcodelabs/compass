@@ -45,7 +45,7 @@ Click **Add task** at the bottom of any column (or **Add subtask** on a task's d
 
 - **Title** and **Description**
 - **Priority** — Urgent / High / Medium / Low
-- **Assignee** — one Compass workspace member or registered agent, or unassigned. Agents must be enabled for this workspace; see [Agents](/help/19-agents). Assignment does not start execution.
+- **Assignee** — one Compass workspace member or registered agent, or unassigned. Agents must be enabled for this workspace; see [Agents](/help/19-agents). Assigning a task to a **cloud agent** in the app starts a run as that agent; assigning an external agent only adds the task to its queue.
 - **Owner** — a freeform name, for PM-tracked initiatives whose responsible party isn't a Compass user (an external stakeholder, an exec, etc.). Either or both of Assignee and Owner may be set on the same task.
 - **Squad** — the owning team, same convention as Objectives, Opportunities, and Roadmap Items
 - **Story points** and **Due date** — optional estimation/scheduling fields

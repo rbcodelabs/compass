@@ -24,7 +24,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: actions.refresh
 
 import { WorkspaceAgentsPanel, type WorkspaceAgentRow } from "@/components/settings/workspace-agents-panel"
 
-const models = [{ value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" }]
+const models = [{ value: "claude-sonnet-5", label: "Claude Sonnet 5" }]
 const shared: WorkspaceAgentRow = { id: "a-shared", name: "Triage", ownerName: "Shared", status: "ACTIVE", access: "READ", eligible: true, kind: "CLOUD", shared: true, canEdit: true, canUse: true, instructions: "Label feedback.", model: null, invokePolicy: "WORKSPACE_MEMBERS" }
 const external: WorkspaceAgentRow = { id: "a-ext", name: "CI bot", ownerName: "Ada", status: "ACTIVE", access: "WRITE", eligible: true, kind: "EXTERNAL", shared: false }
 const personal: WorkspaceAgentRow = { id: "a-mine", name: "Mine", ownerName: "Ada", status: "ACTIVE", access: "READ", eligible: true, kind: "CLOUD", shared: false, canEdit: true, canUse: true, instructions: "", model: "", invokePolicy: "OWNER" }
@@ -66,10 +66,10 @@ describe("WorkspaceAgentsPanel", () => {
     expect(screen.queryByLabelText("Access in this workspace")).toBeNull()
     fireEvent.change(screen.getByLabelText("Agent name"), { target: { value: "Helper" } })
     fireEvent.change(screen.getByLabelText("Instructions"), { target: { value: "Be brief." } })
-    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-sonnet-5-5" } })
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-sonnet-5" } })
     actions.createCloudAgent.mockResolvedValue({ id: "new", enabledInWorkspace: false })
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }))
-    await waitFor(() => expect(actions.createCloudAgent).toHaveBeenCalledWith(expect.objectContaining({ orgSlug: "acme", workspaceSlug: "home", name: "Helper", instructions: "Be brief.", model: "claude-sonnet-5-5", ownerType: "USER" })))
+    await waitFor(() => expect(actions.createCloudAgent).toHaveBeenCalledWith(expect.objectContaining({ orgSlug: "acme", workspaceSlug: "home", name: "Helper", instructions: "Be brief.", model: "claude-sonnet-5", ownerType: "USER" })))
     expect(await screen.findByText(/administrator needs to enable it/)).toBeInTheDocument()
     expect(actions.refresh).toHaveBeenCalled()
   })
@@ -95,10 +95,10 @@ describe("WorkspaceAgentsPanel", () => {
     renderPanel([shared], { canManage: true })
     fireEvent.click(screen.getByRole("button", { name: "Edit Triage" }))
     fireEvent.change(screen.getByLabelText("Instructions"), { target: { value: "New instructions" } })
-    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-sonnet-5-5" } })
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-sonnet-5" } })
     fireEvent.change(screen.getByLabelText("Who can run this agent"), { target: { value: "ADMINS" } })
     fireEvent.click(screen.getByRole("button", { name: "Save agent" }))
-    await waitFor(() => expect(actions.updateCloudAgent).toHaveBeenCalledWith("a-shared", { name: "Triage", description: "", instructions: "New instructions", model: "claude-sonnet-5-5", invokePolicy: "ADMINS" }))
+    await waitFor(() => expect(actions.updateCloudAgent).toHaveBeenCalledWith("a-shared", { name: "Triage", description: "", instructions: "New instructions", model: "claude-sonnet-5", invokePolicy: "ADMINS" }))
   })
 
   it("shows the stored run limits in the edit form, and sends only the ones that changed", async () => {

@@ -13,9 +13,16 @@
 
 export type AgentModelOption = { value: string; label: string }
 
-/** Claude harness ids (the default harness only holds an Anthropic key) and the opencode gateway reference. */
+/**
+ * Claude harness ids (the default harness only holds an Anthropic key) and the opencode gateway reference.
+ *
+ * These are the ids the repo really runs, not spellings of the same name: the Claude harness defaults to `claude-sonnet-5`
+ * (scripts/agent/turn-entry.ts, and AGENT_RUN_MODEL_ID in lib/agent-runs.ts which labels finished runs), and the opencode
+ * harness to `anthropic/claude-sonnet-5.5` (DEFAULT_OPENCODE_MODEL in lib/agent-harness.ts). Offer another model only after
+ * confirming its id against the SDK or the gateway; COMPASS_CLOUD_AGENT_MODELS is the way to add one per deployment.
+ */
 export const BUILT_IN_AGENT_MODELS: readonly AgentModelOption[] = [
-  { value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
+  { value: "claude-sonnet-5", label: "Claude Sonnet 5" },
   { value: "anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5 (AI Gateway)" },
 ]
 

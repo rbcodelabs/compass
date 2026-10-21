@@ -9,7 +9,9 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("@/lib/db", () => ({ default: () => ({}) }));
+const { mockDb, mockTrigger } = vi.hoisted(() => ({ mockDb: { task: { findFirst: vi.fn() } }, mockTrigger: vi.fn() }));
+vi.mock("@/lib/db", () => ({ default: () => mockDb }));
+vi.mock("@/lib/agent-task-trigger", () => ({ startRunForAssignedTask: mockTrigger }));
 vi.mock("@/lib/work-item-resolve", async () => (await import("./helpers/work-item-resolve-mock")).workItemResolveMock())
 vi.mock("@/auth", () => ({ auth: vi.fn() }));
 vi.mock("@/lib/workspace", () => ({ getWorkspace: vi.fn() }));
@@ -192,5 +194,58 @@ describe("PATCH /api/panels/entity/[type]/[id]", () => {
     const res = await patch("opportunity", "opp-1", { field: "customerSegment", value: "x".repeat(300) });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "Customer segment must be 255 characters or fewer" });
+  });
+});
+
+describe("PATCH a task's assignee (cloud agent runs)", () => {
+  const AGENT = { type: "AGENT", id: "agent-1" };
+  function arrange(previous: string | null) {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: false } as never);
+    mockDb.task.findFirst.mockResolvedValue({ assigneeAgentId: previous });
+    mockUpdateEntityField.mockResolvedValue({ ok: true } as never);
+    mockGetEntityDetail.mockResolvedValue({ type: "task", data: { id: "task-1" } } as never);
+  }
+
+  it("reads the previous agent assignee BEFORE the write, then asks the trigger with the signed-in user", async () => {
+    arrange("agent-0");
+    mockTrigger.mockResolvedValue({ status: "started", agentName: "Triage", runId: "r1", conversationId: "c1", conversationUrl: "/acme/ws/agent?c=c1" });
+    const body = await (await patch("task", "task-1", { field: "assignee", value: AGENT })).json();
+    expect(mockDb.task.findFirst).toHaveBeenCalledWith({ where: { id: "task-1", workspaceId: "ws-1" }, select: { assigneeAgentId: true } });
+    expect(mockDb.task.findFirst.mock.invocationCallOrder[0]).toBeLessThan(mockUpdateEntityField.mock.invocationCallOrder[0]);
+    expect(mockTrigger).toHaveBeenCalledWith({ taskId: "task-1", actingUserId: "user-1", previousAssigneeAgentId: "agent-0" });
+    expect(body.agentRun).toMatchObject({ status: "started", agentName: "Triage" });
+  });
+
+  it("tells the client when the run was refused, and the assignment still succeeded", async () => {
+    arrange(null);
+    mockTrigger.mockResolvedValue({ status: "refused", code: "AGENT_CAP_REACHED", message: "no run started: limit 5" });
+    const res = await patch("task", "task-1", { field: "assignee", value: AGENT });
+    expect(res.status).toBe(200);
+    expect((await res.json()).agentRun).toMatchObject({ status: "refused", code: "AGENT_CAP_REACHED" });
+  });
+
+  it("says nothing when the trigger skipped (not an agent, or unchanged)", async () => {
+    arrange("agent-1");
+    mockTrigger.mockResolvedValue({ status: "skipped" });
+    expect(await (await patch("task", "task-1", { field: "assignee", value: AGENT })).json()).toEqual({ type: "task", data: { id: "task-1" }, displayId: null });
+  });
+
+  it("does not consult the trigger for any other field or entity, nor when the write is refused", async () => {
+    arrange(null);
+    await patch("task", "task-1", { field: "title", value: "x" });
+    await patch("opportunity", "opp-1", { field: "assignee", value: AGENT });
+    mockUpdateEntityField.mockResolvedValue({ ok: false, status: 400, error: "Assignee is not in this workspace" } as never);
+    expect((await patch("task", "task-1", { field: "assignee", value: AGENT })).status).toBe(400);
+    expect(mockTrigger).not.toHaveBeenCalled();
+  });
+
+  it("starts nothing for a read-only member or a non-member", async () => {
+    signedIn();
+    mockGetWorkspace.mockResolvedValue({ id: "ws-1", isReadOnly: true } as never);
+    expect((await patch("task", "task-1", { field: "assignee", value: AGENT })).status).toBe(403);
+    mockGetWorkspace.mockResolvedValue(null as never);
+    expect((await patch("task", "task-1", { field: "assignee", value: AGENT })).status).toBe(404);
+    expect(mockTrigger).not.toHaveBeenCalled();
   });
 });
