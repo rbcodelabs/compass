@@ -4,7 +4,6 @@
  * the pixels: the cached markdown title is never displayed, the markdown is byte-for-byte unchanged by the node view, a batch of cards is
  * one server call, and the plain-text projection used for comment anchors does not depend on live card data.
  */
-import { createElement } from "react"
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -80,8 +79,15 @@ const DOC = `# Spec\n\nBefore the cards.\n\n${link("Stale cached title", "soluti
 
 function mountEditor(resolve: EmbedResolver | null, content = DOC) {
   const editor = new Editor({ extensions: createDocEditorExtensions([]), content })
-  const tree = createElement(EditorContent, { editor })
-  render(resolve ? createElement(DocEmbedCardsProvider, { resolve }, tree) : tree)
+  render(
+    resolve ? (
+      <DocEmbedCardsProvider resolve={resolve}>
+        <EditorContent editor={editor} />
+      </DocEmbedCardsProvider>
+    ) : (
+      <EditorContent editor={editor} />
+    )
+  )
   return editor
 }
 
@@ -149,7 +155,11 @@ describe("SpecEmbed node view in the editor", () => {
     const onUpdate = vi.fn()
     editor.on("update", onUpdate)
     const before = editor.state.doc
-    render(createElement(DocEmbedCardsProvider, { resolve }, createElement(EditorContent, { editor })))
+    render(
+      <DocEmbedCardsProvider resolve={resolve}>
+        <EditorContent editor={editor} />
+      </DocEmbedCardsProvider>
+    )
     await screen.findByRole("link", { name: "Live checkout" })
     expect(onUpdate).not.toHaveBeenCalled()
     expect(editor.state.doc.eq(before)).toBe(true)
