@@ -4,10 +4,12 @@ import "@testing-library/jest-dom/vitest"
 import { afterEach, expect, it, vi } from "vitest"
 
 const db = vi.hoisted(() => ({
+  workspace: { findFirst: vi.fn() },
   researchSession: { findFirst: vi.fn() },
   researchTurn: { findMany: vi.fn() },
   researchAttachment: { findMany: vi.fn() },
 }))
+vi.mock("@/lib/work-item-page", async () => (await import("./helpers/work-item-resolve-mock")).workItemPageMock())
 vi.mock("@/auth", () => ({ auth: async () => ({ user: { id: "member-1" } }) }))
 vi.mock("@/lib/db", () => ({ default: () => db }))
 vi.mock("@/lib/research-feature", () => ({ isResearchCaptureEnabled: () => true }))
@@ -16,6 +18,7 @@ import SessionPage from "@/app/[orgSlug]/[workspaceSlug]/capture/studies/[studyI
 
 afterEach(cleanup)
 it("keeps private original downloads available for HEIC and failed GIF previews in session results", async () => {
+  db.workspace.findFirst.mockResolvedValue({ id: "workspace-1" })
   db.researchSession.findFirst.mockResolvedValue({ modality: "CHAT", status: "COMPLETED", createdAt: new Date("2026-01-01"), study: { name: "Study", guide: "[]" }, _count: { turns: 0 } })
   db.researchTurn.findMany.mockResolvedValue([])
   db.researchAttachment.findMany.mockResolvedValue([

@@ -8,15 +8,20 @@ import { parseResearchPage } from "@/lib/research-analysis"
 import { deserializeResearchGuide } from "@/lib/research"
 import { SessionAnalysisResults } from "@/components/research/analysis-results"
 import { PageHeader } from "@/components/patterns/page-header"
+import { resolveWorkItemPage } from "@/lib/work-item-page"
 import { ExternalSessionMeta, isExternalSession } from "@/components/research/external-session-meta"
 
 export default async function ResearchSessionPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; studyId: string; sessionId: string }>; searchParams: Promise<{ page?: string; attachmentPage?: string; turnId?: string }> }) {
   if (!isResearchCaptureEnabled()) notFound()
   const member = await auth()
   if (!member?.user?.id) redirect("/login")
-  const { orgSlug, workspaceSlug, studyId, sessionId } = await params
+  const { orgSlug, workspaceSlug, studyId: studyParam, sessionId } = await params
   const query = await searchParams
   const prisma = getPrisma()
+  const workspace = await prisma.workspace.findFirst({ where: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: member.user.id } } }, select: { id: true } })
+  if (!workspace) notFound()
+  const resolvedStudy = await resolveWorkItemPage({ type: "researchStudy", param: studyParam, workspaceId: workspace.id, basePath: `/${orgSlug}/${workspaceSlug}/capture/studies`, searchParams: query, suffix: `/sessions/${encodeURIComponent(sessionId)}` })
+  const studyId = resolvedStudy.id
   const session = await prisma.researchSession.findFirst({ where: { id: sessionId, studyId, study: { workspace: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: member.user.id } } } } }, include: { study: true, _count: { select: { turns: true } } } })
   if (!session) notFound()
   let page = parseResearchPage(query.page)
@@ -30,7 +35,7 @@ export default async function ResearchSessionPage({ params, searchParams }: { pa
     prisma.researchAttachment.findMany({ where: { sessionId, studyId, status: "READY" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], skip: (attachmentPage - 1) * 20, take: 21 }),
   ])
   const external = isExternalSession(session)
-  const studyUrl = `/${orgSlug}/${workspaceSlug}/capture/studies/${studyId}`
+  const studyUrl = `/${orgSlug}/${workspaceSlug}/capture/studies/${resolvedStudy.canonical}`
   const url = `${studyUrl}/sessions/${sessionId}`
   return <main className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8">
     <Link className="text-sm underline" href={studyUrl}>Back to study</Link>

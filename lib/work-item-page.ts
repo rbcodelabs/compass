@@ -21,18 +21,20 @@ function queryString(searchParams: PageSearchParams): string {
  * not the canonical form (a UUID for a numbered row, or `task-5`) is a 308 to the canonical URL, with the
  * query string kept, so old links keep working and converge on `/tasks/TASK-5`.
  *
- * `basePath` is the URL up to, not including, the work item segment (`/org/ws/tasks`).
+ * `basePath` is the URL up to, not including, the work item segment (`/org/ws/tasks`). `suffix` is any
+ * path that follows the segment on a nested page (`/sessions/<id>`) and is kept on the redirect.
  */
 export async function resolveWorkItemPage(args: {
   type: WorkItemType
   param: string
   workspaceId: string
   basePath: string
+  suffix?: string
   searchParams?: PageSearchParams
 }): Promise<ResolvedWorkItem> {
   const result = await resolveWorkItem(getPrisma(), args.workspaceId, args.type, args.param)
   if (!result.ok) notFound()
   const segment = canonicalRedirectSegment(args.param, result)
-  if (segment) permanentRedirect(`${args.basePath}/${encodeURIComponent(segment)}${queryString(args.searchParams)}`)
+  if (segment) permanentRedirect(`${args.basePath}/${encodeURIComponent(segment)}${args.suffix ?? ""}${queryString(args.searchParams)}`)
   return result
 }

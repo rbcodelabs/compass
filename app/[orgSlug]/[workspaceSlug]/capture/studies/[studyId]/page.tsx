@@ -56,7 +56,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
   if (turnId) {
     const evidence = await prisma.researchTurn.findFirst({ where: { id: turnId, session: { studyId: access.id } }, select: { sessionId: true } })
     if (!evidence) notFound()
-    redirect(`/${orgSlug}/${workspaceSlug}/capture/studies/${access.id}/sessions/${evidence.sessionId}?turnId=${encodeURIComponent(turnId)}#turn-${encodeURIComponent(turnId)}`)
+    redirect(`/${orgSlug}/${workspaceSlug}/capture/studies/${resolvedStudy.canonical}/sessions/${evidence.sessionId}?turnId=${encodeURIComponent(turnId)}#turn-${encodeURIComponent(turnId)}`)
   }
   await reconcileAbandonedResearchSessions(prisma, access.id)
   const study = await prisma.researchStudy.findUnique({
