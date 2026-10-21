@@ -392,6 +392,8 @@ describe("tracked decisions", () => {
       }))
       expect(result.requests.map((request) => request.id)).toEqual(["request-unlinked"])
       expect(result.total).toBe(1)
+      // Flag unset: exactly the legacy query (linkedId only, no task join).
+      expect(prisma.taskLink.findMany).toHaveBeenCalledWith({ where: { linkedType: "DECISION", linkedId: { in: ["request-linked", "request-unlinked"] } }, select: { linkedId: true } })
     })
 
     it("returns an empty page without querying task links when there are no DECIDED candidates", async () => {
