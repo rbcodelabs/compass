@@ -78,3 +78,7 @@ has a counterpart, so kept rows (`mirrorRowsKeptForQuarantine`) never trip it.
 - Links written while the flag is off are not mirrored; 098 inserts them if it has not run yet.
 - A live writer inserting a pair between 098's select and insert is handled twice: the insert itself skips pairs that already have a mirror row,
   and a unique-index refusal re-selects (bounded). If a run still fails, a re-POST resumes it.
+
+## If the POST refuses on the stale-mirror postcondition
+
+A Solution or Key Result delete removes the legacy rows in its own transaction and drains the mirror rows afterwards. If that lands between 098's prune and its assertion, the stale-mirror postcondition can refuse for a moment and no receipt is written. The attempt stays unfinished and is safe: re-POST `{"script":"098_entity_links_backfill_solution_key_result"}` (it re-prunes and re-asserts). Nothing is lost.
