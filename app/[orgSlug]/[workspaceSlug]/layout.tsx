@@ -11,6 +11,7 @@ import { WorkItemLinkScopeProvider } from "@/components/work-item-link-scope"
 import { ThinkingModelProvider } from "@/components/thinking-model/thinking-model-provider"
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { PanelShell } from "@/components/panels/panel-shell"
+import { chainGraphEnabled } from "@/lib/chain-graph/flag"
 import { AgentRailProvider } from "@/components/agent/agent-rail-context"
 import { AgentRail } from "@/components/agent/agent-rail"
 import { initialsOf } from "@/lib/user-initials"
@@ -177,7 +178,7 @@ export default async function WorkspaceLayout({
                 beside main content rather than something floating over it. A
                 no-op for overlay mode, which portals out of the tree either
                 way. */}
-            <PanelShell initialPin={initialPanelPin} />
+            <PanelShell initialPin={initialPanelPin} chainGraphEnabled={chainGraphEnabled()} />
           </SidebarProvider>
         </TooltipProvider>
 

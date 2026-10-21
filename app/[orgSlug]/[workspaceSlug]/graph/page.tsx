@@ -5,8 +5,9 @@ import { resolveWorkspaceAccess } from "@/lib/workspace-context"
 import { getThinkingModelForSlugs } from "@/lib/thinking-model/server"
 import { WorkspacePage } from "@/components/patterns/workspace-page"
 import { ChainGraphWorkspace } from "@/components/chain-graph/chain-graph-workspace"
-import { chainGraphEnabled, parseFocus } from "@/lib/chain-graph/flag"
-import { loadChainGraph } from "@/lib/chain-graph/loader"
+import { chainGraphEnabled } from "@/lib/chain-graph/flag"
+import { parseFocusRef, resolveFocusKey } from "@/lib/chain-graph/focus"
+import { loadChainGraph, loadChainGraphForRequest } from "@/lib/chain-graph/loader"
 
 export const metadata = { title: "Chain graph" }
 
@@ -30,9 +31,17 @@ export default async function ChainGraphPage({ params, searchParams }: Props) {
   if (!access) notFound()
 
   const thinkingModel = await getThinkingModelForSlugs(orgSlug, workspaceSlug)
-  const graph = await loadChainGraph(getPrisma(), access.workspaceId, { links: thinkingModel.links })
-  const focus = parseFocus((await searchParams).focus)
-  const initialFocus = focus && graph.nodes.some((n) => n.key === focus) ? focus : null
+  const prisma = getPrisma()
+  const links = thinkingModel.links
+  // ?focus= takes a UUID or a display ID; it resolves only inside this workspace, and anything else is ignored.
+  const parsed = parseFocusRef((await searchParams).focus)
+  const focusKey = parsed ? await resolveFocusKey(prisma, access.workspaceId, parsed) : null
+  let graph = await loadChainGraph(prisma, access.workspaceId, { links })
+  // A truncated workspace view can leave a focused chain incomplete (edges to cut nodes are dropped), so load the chain itself.
+  if (focusKey && (graph.truncated || !graph.nodes.some((n) => n.key === focusKey))) {
+    graph = await loadChainGraphForRequest(prisma, access.workspaceId, { links, focusKey })
+  }
+  const initialFocus = focusKey && graph.nodes.some((n) => n.key === focusKey) ? focusKey : null
 
   return (
     <WorkspacePage title="Chain graph" description={`${thinkingModel.labels.objective.plural} through roadmap items. Select an object to trace its chain.`}>

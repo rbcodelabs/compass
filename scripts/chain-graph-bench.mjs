@@ -57,7 +57,7 @@ for (const n of sizes) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
     await page.addInitScript(SAMPLER)
     const loadStart = Date.now()
-    await page.goto(`${base}/chain-graph-bench?n=${n}&collapsed=${mode}`, { waitUntil: "load", timeout: 180000 })
+    await page.goto(`${base}/chain-graph-bench?n=${n}&collapsed=${mode}&limit=off`, { waitUntil: "load", timeout: 180000 })
     await page.waitForFunction(() => window.__chainGraphBench?.ready, null, { timeout: 120000 })
     await page.waitForSelector(".react-flow__viewport", { timeout: 30000 })
     await page.waitForTimeout(1500)

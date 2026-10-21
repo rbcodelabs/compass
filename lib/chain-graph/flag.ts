@@ -10,11 +10,3 @@ export function chainGraphEnabled(env: Record<string, string | undefined> = proc
 export function chainGraphBenchEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return env.NODE_ENV === "development" || env.COMPASS_CHAIN_GRAPH_BENCH === "1"
 }
-
-/** Parses `?focus=<TYPE>:<uuid>`; null for anything malformed or outside the v1 core chain. */
-export function parseFocus(raw: string | string[] | undefined): string | null {
-  const value = Array.isArray(raw) ? raw[0] : raw
-  if (!value) return null
-  const match = /^(OBJECTIVE|OPPORTUNITY|SOLUTION|ASSUMPTION|EXPERIMENT|ROADMAP_ITEM):([A-Za-z0-9-]{1,64})$/.exec(value)
-  return match ? `${match[1]}:${match[2]}` : null
-}

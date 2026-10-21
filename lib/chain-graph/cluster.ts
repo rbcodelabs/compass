@@ -172,3 +172,29 @@ export function defaultCollapsed(graph: ChainGraph, groupBy: GroupBy, threshold 
   if (shown.length <= threshold) return new Set()
   return new Set(listGroups({ nodes: shown }, groupBy).map((g) => g.id))
 }
+
+/** Render budget from the benchmark (design section 10.3): above this many visible elements (nodes + edges) the view shows clusters only. */
+export const CLUSTERS_ONLY_ABOVE = 1000
+
+export function elementCount(projection: Pick<ClusterProjection, "nodes" | "edges">): number {
+  return projection.nodes.length + projection.edges.length
+}
+
+export type LimitedProjection = {
+  projection: ClusterProjection
+  /** The view actually projected: the requested one, or the requested one with every group collapsed. */
+  view: ClusterView
+  /** True when the request exceeded the budget and was replaced by the clusters-only view. */
+  clustersOnly: boolean
+  /** Elements the requested view would have drawn (equal to the projected count when not limited). */
+  requestedElements: number
+}
+
+/** Projects `view`; when it would draw more than `limit` elements, falls back to every group collapsed. */
+export function projectWithLimit(graph: ChainGraph, view: ClusterView, limit: number = CLUSTERS_ONLY_ABOVE): LimitedProjection {
+  const requested = projectGraph(graph, view)
+  const requestedElements = elementCount(requested)
+  if (requestedElements <= limit) return { projection: requested, view, clustersOnly: false, requestedElements }
+  const collapsedView: ClusterView = { ...view, collapsed: new Set(listGroups(graph, view.groupBy).map((g) => g.id)) }
+  return { projection: projectGraph(graph, collapsedView), view: collapsedView, clustersOnly: true, requestedElements }
+}
