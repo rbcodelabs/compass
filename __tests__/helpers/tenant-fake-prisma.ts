@@ -229,6 +229,12 @@ export function createTenantFakePrisma() {
         if (!(row.members as string[]).includes(userId as string)) return false;
         continue;
       }
+      if (model === "artifact" && key === "links") {
+        // Prisma's to-many `links: { some }` over the legacy artifact_links rows.
+        const some = (cond as { some?: Where }).some;
+        if (!tables.artifactLink.some((link) => link.artifactId === row.id && matches("artifactLink", link, some))) return false;
+        continue;
+      }
       const related = relatedRow(model, row, key);
       if (related) {
         if (!related.row || !matches(related.model, related.row, cond as Where)) return false;

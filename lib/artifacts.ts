@@ -4,6 +4,7 @@ import type { ArtifactStorage } from "@/lib/artifact-storage"
 export { ARTIFACT_CSP, buildSandboxedHtml } from "@/lib/artifact-preview-html"
 import { assertKindAllowedForSource, readArtifactKind, storedArtifactKind, type ArtifactKind } from "@/lib/artifact-kind"
 import { runTypedLinkTransaction } from "@/lib/typed-links"
+import { readByFamilyMode } from "@/lib/links/read-switch"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
 
 export const MAX_ARTIFACT_HTML_BYTES = 2 * 1024 * 1024
@@ -380,24 +381,88 @@ export async function unlinkArtifactFromDecision(input: DecisionArtifactInput) {
   })
 }
 
+// Artifact link READS follow the ARTIFACT read-mode flag (lib/links/read-switch.ts): off = artifact_links (default), shadow = artifact_links
+// compared with entity_links, on = entity_links (artifact_links is still written, so the rollback is the flag). Same output shape and
+// ordering in every mode. The write paths above never come through here.
+const readCompare = () => import("@/lib/links/read-compare")
+const ARTIFACT_SOLUTION = "ARTIFACT_ATTACHED_TO_SOLUTION"
+const ARTIFACT_DECISION = "ARTIFACT_SUPPORTS_DECISION"
+type ArtifactLinkPair = { linkType: string; fromType: "ARTIFACT"; fromId: string; toType: "SOLUTION" | "REVIEW_REQUEST"; toId: string }
+const solutionPair = (artifactId: string, solutionId: string): ArtifactLinkPair => ({ linkType: ARTIFACT_SOLUTION, fromType: "ARTIFACT", fromId: artifactId, toType: "SOLUTION", toId: solutionId })
+const decisionPair = (artifactId: string, requestId: string): ArtifactLinkPair => ({ linkType: ARTIFACT_DECISION, fromType: "ARTIFACT", fromId: artifactId, toType: "REVIEW_REQUEST", toId: requestId })
+
+/** The Solutions an Artifact is attached to (ids; the callers resolve titles / membership under their own workspace filter). */
+export async function getArtifactSolutionIds(db: AppTransactionClient, workspaceId: string, artifactId: string): Promise<string[]> {
+  return readByFamilyMode("ARTIFACT", {
+    legacy: async () => (await db.artifactLink.findMany({ where: { workspaceId, artifactId, linkedType: "SOLUTION" }, select: { linkedId: true } })).map((link) => link.linkedId),
+    shadowScope: (ids) => ({
+      legacy: ids.map((id) => solutionPair(artifactId, id)),
+      readEntityLinks: async () => (await (await readCompare()).readEntityLinksArtifact(db, workspaceId, { artifactIds: [artifactId] })).filter((link) => link.linkType === ARTIFACT_SOLUTION),
+    }),
+    entityLinks: async () => (await (await readCompare()).readEntityLinksArtifact(db, workspaceId, { artifactIds: [artifactId] })).filter((link) => link.linkType === ARTIFACT_SOLUTION).map((link) => link.toId),
+  })
+}
+
+/** The Artifacts attached to a Solution (ids), for the Solution panel's linked / available split. */
+export async function getSolutionArtifactIds(db: AppTransactionClient, workspaceId: string, solutionId: string): Promise<string[]> {
+  return readByFamilyMode("ARTIFACT", {
+    legacy: async () => (await db.artifactLink.findMany({ where: { workspaceId, linkedType: "SOLUTION", linkedId: solutionId }, select: { artifactId: true } })).map((link) => link.artifactId),
+    shadowScope: (ids) => ({
+      legacy: ids.map((id) => solutionPair(id, solutionId)),
+      readEntityLinks: async () => (await readCompare()).readEntityLinksArtifact(db, workspaceId, { solutionIds: [solutionId] }),
+    }),
+    entityLinks: async () => (await (await readCompare()).readEntityLinksArtifact(db, workspaceId, { solutionIds: [solutionId] })).map((link) => link.fromId),
+  })
+}
+
+/**
+ * The Artifacts attached to a Decision. Callers only ask for TRACKED_DECISION requests; entity_links reads apply that rule themselves
+ * (read-compare's readEntityLinksArtifact), the legacy read relied on the caller.
+ */
 export async function getDecisionArtifacts(workspaceId: string, requestId: string) {
-  return getPrisma().artifact.findMany({
+  const prisma = getPrisma()
+  type Row = Awaited<ReturnType<typeof legacy>>
+  const select = { id: true, title: true, sourceType: true, status: true, currentRevision: { select: { revisionNumber: true } } } as const
+  const orderBy = [{ title: "asc" as const }, { id: "asc" as const }]
+  const legacy = () => prisma.artifact.findMany({
     where: { workspaceId, links: { some: { workspaceId, linkedType: "REVIEW_REQUEST", linkedId: requestId } } },
-    select: { id: true, title: true, sourceType: true, status: true, currentRevision: { select: { revisionNumber: true } } },
-    orderBy: [{ title: "asc" }, { id: "asc" }],
+    select,
+    orderBy,
+  })
+  return readByFamilyMode<Row>("ARTIFACT", {
+    legacy,
+    shadowScope: (rows) => ({
+      legacy: rows.map((row) => decisionPair(row.id, requestId)),
+      readEntityLinks: async () => (await readCompare()).readEntityLinksArtifact(prisma, workspaceId, { decisionIds: [requestId] }),
+    }),
+    entityLinks: async () => {
+      const links = await (await readCompare()).readEntityLinksArtifact(prisma, workspaceId, { decisionIds: [requestId] })
+      const ids = [...new Set(links.map((link) => link.fromId))]
+      return ids.length ? prisma.artifact.findMany({ where: { id: { in: ids }, workspaceId }, select, orderBy }) : []
+    },
   })
 }
 
 export async function getArtifactDecisions(workspaceId: string, artifactId: string) {
   const prisma = getPrisma()
-  const links = await prisma.artifactLink.findMany({ where: { workspaceId, artifactId, linkedType: "REVIEW_REQUEST" }, select: { linkedId: true } })
-  if (!links.length) return []
-  const requests = await prisma.reviewRequest.findMany({
-    where: { id: { in: links.map((link) => link.linkedId) }, workspaceId, gateType: "TRACKED_DECISION" },
-    select: { id: true, state: true, currentRevision: { select: { title: true } } },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-  })
-  return requests.map((request) => ({ id: request.id, title: request.currentRevision?.title ?? "Decision", state: request.state }))
+  const select = { id: true, state: true, currentRevision: { select: { title: true } } } as const
+  const orderBy = [{ createdAt: "asc" as const }, { id: "asc" as const }]
+  const decisionsOf = (requestIds: string[]) => prisma.reviewRequest.findMany({ where: { id: { in: requestIds }, workspaceId, gateType: "TRACKED_DECISION" }, select, orderBy })
+  type Row = Awaited<ReturnType<typeof decisionsOf>>
+  return (await readByFamilyMode<Row>("ARTIFACT", {
+    legacy: async () => {
+      const links = await prisma.artifactLink.findMany({ where: { workspaceId, artifactId, linkedType: "REVIEW_REQUEST" }, select: { linkedId: true } })
+      return links.length ? decisionsOf(links.map((link) => link.linkedId)) : []
+    },
+    shadowScope: (rows) => ({
+      legacy: rows.map((row) => decisionPair(artifactId, row.id)),
+      readEntityLinks: async () => (await (await readCompare()).readEntityLinksArtifact(prisma, workspaceId, { artifactIds: [artifactId] })).filter((link) => link.linkType === ARTIFACT_DECISION),
+    }),
+    entityLinks: async () => {
+      const links = (await (await readCompare()).readEntityLinksArtifact(prisma, workspaceId, { artifactIds: [artifactId] })).filter((link) => link.linkType === ARTIFACT_DECISION)
+      return links.length ? decisionsOf(links.map((link) => link.toId)) : []
+    },
+  })).map((request) => ({ id: request.id, title: request.currentRevision?.title ?? "Decision", state: request.state }))
 }
 
 export async function archiveArtifact(input: { artifactId: string; workspaceId: string; updatedById?: string | null }) {

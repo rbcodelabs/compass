@@ -19,6 +19,7 @@
 import type { AppPrismaClient } from "@/lib/db";
 import {
   getCanvasLinkRows,
+  getOpportunityKeyResultPointers,
   getLinkedKeyResultsBySolution,
   getLinkedObjectivesByOpportunity,
   type CanvasLinkRows,
@@ -207,7 +208,7 @@ export async function getCanvasOverview(
 
   // ── Batch 3: depends on batch 2 ids ─────────────────────────────────────
   // The typed links ride along as additive payload (workspace-filtered batch reads); edges are unchanged.
-  const [assumptionsRaw, linkedObjectives, linkedKeyResults, linkRows] = await Promise.all([
+  const [assumptionsRaw, linkedObjectives, linkedKeyResults, linkRows, keyResultPointers] = await Promise.all([
     solutionIds.length > 0
       ? prisma.assumption.findMany({
           where: { solutionId: { in: solutionIds } },
@@ -218,6 +219,8 @@ export async function getCanvasOverview(
     getLinkedKeyResultsBySolution(prisma, workspaceId, solutionIds, { preverified: true }),
     // Link rows for the edge layer (ids only; endpoints are filtered against the workspace-scoped nodes above when edges are built).
     getCanvasLinkRows(prisma, workspaceId, { opportunityIds, solutionIds, origins: options.linkOrigins ?? "ALL" }),
+    // The Opportunity -> Key Result pointer (the legacy column unless the OPPORTUNITY read flag moves it to entity_links).
+    getOpportunityKeyResultPointers(prisma, workspaceId, opportunitiesRaw),
   ]);
 
   // ── Positions: one round-trip covering every fetched entity id ─────────
@@ -284,7 +287,7 @@ export async function getCanvasOverview(
     title: opp.title,
     status: opp.status as OpportunityStatus,
     squad: opp.squadId ? (squadById.get(opp.squadId) ?? null) : null,
-    linkedKeyResultId: opp.linkedKeyResultId,
+    linkedKeyResultId: keyResultPointers.get(opp.id) ?? null,
     linkedObjectives: linkedObjectives.get(opp.id) ?? [],
     position: positionByEntity.get(`OPPORTUNITY:${opp.id}`) ?? null,
   }));
