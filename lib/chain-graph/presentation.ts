@@ -50,3 +50,8 @@ export const SERIES_COUNT = 9
 export function seriesForGroupIndex(index: number): number {
   return (((index % SERIES_COUNT) + SERIES_COUNT) % SERIES_COUNT) + 1
 }
+
+/** Type labels with the workspace thinking model's names for the entities it can rename (Objective, Opportunity, Solution). */
+export function typeLabelsFor(labels: { objective: { singular: string }; opportunity: { singular: string }; solution: { singular: string } }): Record<ChainNodeType, string> {
+  return { ...TYPE_LABEL, OBJECTIVE: labels.objective.singular, OPPORTUNITY: labels.opportunity.singular, SOLUTION: labels.solution.singular }
+}

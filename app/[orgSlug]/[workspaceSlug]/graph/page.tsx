@@ -35,7 +35,7 @@ export default async function ChainGraphPage({ params, searchParams }: Props) {
   const initialFocus = focus && graph.nodes.some((n) => n.key === focus) ? focus : null
 
   return (
-    <WorkspacePage title="Chain graph" description="Objectives through roadmap items. Select an object to trace its chain.">
+    <WorkspacePage title="Chain graph" description={`${thinkingModel.labels.objective.plural} through roadmap items. Select an object to trace its chain.`}>
       <ChainGraphWorkspace graph={graph} initialFocus={initialFocus} />
     </WorkspacePage>
   )

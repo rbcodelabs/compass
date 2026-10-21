@@ -1,6 +1,8 @@
 "use client"
 
 import { createContext } from "react"
+import { TYPE_LABEL } from "@/lib/chain-graph/presentation"
+import type { ChainNodeType } from "@/lib/chain-graph/types"
 
 /**
  * View state the node renderers read. Carried by context (not node `data`) so a selection change re-renders memoised
@@ -14,6 +16,7 @@ export type ChainGraphUi = {
   /** Visible keys matching the search box; null when the box is empty. */
   matches: ReadonlySet<string> | null
   pinned: ReadonlySet<string>
+  typeLabels: Record<ChainNodeType, string>
   onSelect: (key: string) => void
   onToggleGroup: (groupId: string) => void
 }
@@ -24,6 +27,7 @@ export const ChainGraphUiContext = createContext<ChainGraphUi>({
   hideUnrelated: false,
   matches: null,
   pinned: new Set(),
+  typeLabels: TYPE_LABEL,
   onSelect: () => {},
   onToggleGroup: () => {},
 })

@@ -22,7 +22,8 @@ import { chainNodeTypes, type ChainRFNode, type ClusterRFNode } from "./chain-gr
 import { ChainGraphUiContext, type ChainGraphUi } from "./chain-graph-context"
 import { clusterKey, defaultCollapsed, listGroups, projectGraph, type ClusterProjection } from "@/lib/chain-graph/cluster"
 import { layoutGraph, type LayoutNode, type Point } from "@/lib/chain-graph/layout"
-import { seriesForGroupIndex, TYPE_LABEL, zoomBand } from "@/lib/chain-graph/presentation"
+import { useLabels } from "@/components/thinking-model/thinking-model-provider"
+import { seriesForGroupIndex, typeLabelsFor, zoomBand } from "@/lib/chain-graph/presentation"
 import { indexGraph, traceChain } from "@/lib/chain-graph/trace"
 import { CHAIN_NODE_TYPES, type ChainGraph, type ChainNodeType, type GroupBy } from "@/lib/chain-graph/types"
 
@@ -43,7 +44,7 @@ export type ChainGraphViewProps = {
 type View = { groupBy: GroupBy; collapsed: ReadonlySet<string>; hiddenTypes: ReadonlySet<ChainNodeType>; showArchived: boolean }
 type Computed = { projection: ClusterProjection; positions: ReadonlyMap<string, Point> }
 
-const GROUP_BY_LABEL: Record<GroupBy, string> = { objective: "Objective", type: "Type", status: "Status" }
+const GROUP_BY_LABEL = (objective: string): Record<GroupBy, string> => ({ objective, type: "Type", status: "Status" })
 const NODE_RADIUS = 22
 
 function layoutNodesOf(projection: ClusterProjection): LayoutNode[] {
@@ -100,6 +101,9 @@ function buildRFNodes(projection: ClusterProjection, positions: ReadonlyMap<stri
 
 function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objective", initialCollapse = "default", onOpenDetails, benchHooks, className }: ChainGraphViewProps) {
   const flow = useReactFlow()
+  const labels = useLabels()
+  const typeLabels = useMemo(() => typeLabelsFor(labels), [labels])
+  const groupByLabel = GROUP_BY_LABEL(typeLabels.OBJECTIVE)
   const storeApi = useStoreApi()
   const rootRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -222,8 +226,8 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
 
   const pinned = useMemo(() => new Set(pins.keys()), [pins])
   const ui = useMemo<ChainGraphUi>(
-    () => ({ selectedRep, traced, hideUnrelated, matches, pinned, onSelect: (k) => select(k), onToggleGroup: toggleGroup }),
-    [selectedRep, traced, hideUnrelated, matches, pinned, select, toggleGroup],
+    () => ({ selectedRep, traced, hideUnrelated, matches, pinned, typeLabels, onSelect: (k) => select(k), onToggleGroup: toggleGroup }),
+    [selectedRep, traced, hideUnrelated, matches, pinned, typeLabels, select, toggleGroup],
   )
 
   // Counter-scale cloud labels and set the semantic-zoom band on the root, both written outside React so zooming never re-renders nodes.
@@ -363,11 +367,11 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
               }}
             >
               <SelectTrigger id="chain-group-by" className="w-32" aria-label="Group by">
-                <SelectValue>{GROUP_BY_LABEL[view.groupBy]}</SelectValue>
+                <SelectValue>{groupByLabel[view.groupBy]}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {(Object.keys(GROUP_BY_LABEL) as GroupBy[]).map((g) => (
-                  <SelectItem key={g} value={g}>{GROUP_BY_LABEL[g]}</SelectItem>
+                {(Object.keys(groupByLabel) as GroupBy[]).map((g) => (
+                  <SelectItem key={g} value={g}>{groupByLabel[g]}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -375,7 +379,7 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
           <div className="flex flex-wrap gap-1" role="group" aria-label="Object types">
             {CHAIN_NODE_TYPES.map((type) => (
               <Button key={type} size="xs" variant={view.hiddenTypes.has(type) ? "outline" : "secondary"} aria-pressed={!view.hiddenTypes.has(type)} onClick={() => toggleType(type)}>
-                {TYPE_LABEL[type]}
+                {typeLabels[type]}
               </Button>
             ))}
           </div>
@@ -439,12 +443,13 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
           </ChainGraphUiContext.Provider>
         </div>
       </div>
-      <Outline graph={graph} trace={trace} selection={selection} query={query} onSelect={(k) => select(k)} onOpenDetails={onOpenDetails} nodeByKey={nodeByKey} announcement={announcement} />
+      <Outline typeLabels={typeLabels} graph={graph} trace={trace} selection={selection} query={query} onSelect={(k) => select(k)} onOpenDetails={onOpenDetails} nodeByKey={nodeByKey} announcement={announcement} />
     </div>
   )
 }
 
 type OutlineProps = {
+  typeLabels: Record<ChainNodeType, string>
   graph: ChainGraph
   trace: ReturnType<typeof traceChain>
   selection: string | null
@@ -458,7 +463,7 @@ type OutlineProps = {
 const OUTLINE_LIMIT = 200
 
 /** The accessible representation of the graph: ordered upstream / selection / downstream lists, also the small-screen path. */
-function Outline({ graph, trace, selection, query, nodeByKey, announcement, onSelect, onOpenDetails }: OutlineProps) {
+function Outline({ typeLabels, graph, trace, selection, query, nodeByKey, announcement, onSelect, onOpenDetails }: OutlineProps) {
   const row = (key: string) => {
     const node = nodeByKey.get(key)
     if (!node) return null
@@ -466,7 +471,7 @@ function Outline({ graph, trace, selection, query, nodeByKey, announcement, onSe
       <li key={key} className="flex items-center gap-1">
         <Button variant="ghost" size="sm" className="h-auto min-w-0 flex-1 justify-start py-1 text-left" aria-current={key === selection ? "true" : undefined} onClick={() => onSelect(key)}>
           <span className="min-w-0 truncate">
-            <span className="text-text-subtle">{TYPE_LABEL[node.type]} · </span>
+            <span className="text-text-subtle">{typeLabels[node.type]} · </span>
             {node.title}
           </span>
         </Button>

@@ -13,7 +13,7 @@ import { Handle, Position, type Node, type NodeProps } from "@xyflow/react"
 import { cn } from "@/lib/utils"
 import { ChainGraphUiContext } from "./chain-graph-context"
 import type { ClusterNode, MemberNode } from "@/lib/chain-graph/cluster"
-import { seriesForGroupIndex, showsLabel, TYPE_LABEL, TYPE_SERIES } from "@/lib/chain-graph/presentation"
+import { seriesForGroupIndex, showsLabel, TYPE_SERIES } from "@/lib/chain-graph/presentation"
 import type { ChainNodeType, StatusTone } from "@/lib/chain-graph/types"
 
 export type ChainRFNode = Node<{ visible: MemberNode }, "chain">
@@ -73,7 +73,7 @@ const ChainNodeView = memo(function ChainNodeView({ data }: NodeProps<ChainRFNod
       className={cn("relative", className)}
       style={{ width: size, height: size }}
       role="button"
-      aria-label={`${TYPE_LABEL[node.type]}: ${node.title}. Status ${humanize(node.status)}.`}
+      aria-label={`${ui.typeLabels[node.type]}: ${node.title}. Status ${humanize(node.status)}.`}
       aria-pressed={selected}
       onClick={() => ui.onSelect(node.key)}
       onKeyDown={(e) => {
@@ -96,7 +96,7 @@ const ChainNodeView = memo(function ChainNodeView({ data }: NodeProps<ChainRFNod
       <span className={cn("cg-label absolute left-full top-1/2 ml-2 -translate-y-1/2 flex-col rounded-sm bg-surface-app/85 px-1 leading-tight", keyLabel && "cg-label--key")}>
         <span className="max-w-[200px] truncate text-xs font-medium text-text-primary">{node.title}</span>
         <span className="cg-detail max-w-[200px] truncate text-[10px] text-text-subtle">
-          {TYPE_LABEL[node.type]} · <span className={TONE_TEXT[node.tone]}>{humanize(node.status)}</span>
+          {ui.typeLabels[node.type]} · <span className={TONE_TEXT[node.tone]}>{humanize(node.status)}</span>
         </span>
       </span>
     </div>
