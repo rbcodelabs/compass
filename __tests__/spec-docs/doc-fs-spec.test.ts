@@ -129,7 +129,7 @@ describe("strict vs lenient embed validation", () => {
   })
 
   it("a foreign-workspace id and a missing id produce the same error, which never confirms a foreign row", async () => {
-    const attempt = async (id: string) => writePath(WS_A.id, "Spec", `${link(id, "x")}\n`, { ...actor, strictEmbeds: true }).catch((e: DocFsError) => e.message)
+    const attempt = async (id: string) => writePath(WS_A.id, "Spec", `${link(id, "x")}\n`, { ...actor, strictEmbeds: true }).then(() => "accepted", (e: DocFsError) => e.message)
     const foreign = await attempt(SOL_B)
     const missing = await attempt(MISSING)
     expect(foreign).toBe(missing.replace(MISSING, SOL_B))
