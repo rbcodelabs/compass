@@ -83,7 +83,7 @@ import { mintAgentMcpKey } from "@/lib/agent-mcp-key"
 import { invokedByForAgentActivity, withAgentActivity } from "@/lib/agent-activity"
 import { agentIdentityValidForTurn, resetAgentColumnsAvailabilityCache } from "@/lib/agent-ownership"
 import { resetAgentDefaultsAvailabilityCache } from "@/lib/agent-defaults"
-import { AgentSelectionError, LIVE_AGENT_RUN_STATUSES, resolveRunAgent } from "@/lib/agent-run-identity"
+import { AgentSelectionError, LIVE_AGENT_RUN_STATUSES, listRunnableAgents, resolveRunAgent } from "@/lib/agent-run-identity"
 import { NON_TERMINAL_AGENT_RUN_STATUSES } from "@/lib/agent-runs"
 
 const FUTURE = new Date(Date.now() + 10 * 60_000)
@@ -543,6 +543,31 @@ describe("resolveRunAgent default chain (explicit > user default > workspace def
   it("rethrows any other database fault rather than silently running the wrong agent", async () => {
     prisma.workspaceDefaultAgent.findFirst.mockRejectedValueOnce(new Error("connection reset"))
     await expect(resolve("invoker", HOME)).rejects.toThrow(/connection reset/)
+  })
+})
+
+describe("listRunnableAgents (what the pickers offer)", () => {
+  it("offers only agents the member could pick, and names the resolved default", async () => {
+    const suspended = { ...sharedAgent, id: "agent-suspended", status: "SUSPENDED", name: "Zed" }
+    const adminsOnly = { ...sharedAgent, id: "agent-admins", invokePolicy: "ADMINS", name: "Admins" }
+    const external = { ...sharedAgent, id: "agent-external", kind: "EXTERNAL", name: "Ext" }
+    db.state.agent.push(suspended, adminsOnly, external, { ...personalAgent })
+    for (const a of [suspended, adminsOnly, external, personalAgent]) db.state.agentWorkspaceGrant.push({ agentId: a.id, workspaceId: HOME, access: "READ", revokedAt: null, grantedByUserId: "admin" })
+    db.state.workspaceDefaultAgent = [{ workspaceId: HOME, agentId: sharedAgent.id }]
+    const forInvoker = await listRunnableAgents(prisma as never, { userId: "invoker", workspaceId: HOME })
+    expect(forInvoker.agents.map((a) => a.id)).toEqual([sharedAgent.id])
+    expect(forInvoker.defaultAgentId).toBe(sharedAgent.id)
+    const forAdmin = await listRunnableAgents(prisma as never, { userId: "admin", workspaceId: HOME })
+    expect(forAdmin.agents.map((a) => a.id).sort()).toEqual(["agent-admins", sharedAgent.id].sort())
+    const forOwner = await listRunnableAgents(prisma as never, { userId: "owner", workspaceId: HOME })
+    expect(forOwner.agents.map((a) => a.id)).toContain(personalAgent.id)
+  })
+
+  it("is empty, with no default, when agents are disabled or nothing is granted", async () => {
+    db.state.agentWorkspaceGrant = []
+    expect(await listRunnableAgents(prisma as never, { userId: "invoker", workspaceId: HOME })).toEqual({ agents: [], defaultAgentId: null })
+    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+    expect(await listRunnableAgents(prisma as never, { userId: "invoker", workspaceId: HOME })).toEqual({ agents: [], defaultAgentId: null })
   })
 })
 

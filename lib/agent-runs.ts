@@ -29,6 +29,7 @@
  */
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
+import { findAgentById } from "@/lib/agent-ownership"
 import type { AppPrismaClient } from "@/lib/db"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { authorColumn } from "@/lib/agent-attribution"
@@ -927,7 +928,21 @@ export async function getAgentRunForViewer({
     workspaceId: run.workspaceId,
     userId,
   })
-  return access ? run : null
+  if (!access) return null
+  return { ...run, ...(await runAgentIdentity(prisma, run.id)) }
+}
+
+/**
+ * Which agent a run acted as, for display. Behind the attribution probe: until migration 100 is applied the columns do not
+ * exist, so every run reads as the built-in agent (null) instead of failing the read. Only the agent's name is returned,
+ * and only to someone who can already see the run's conversation.
+ */
+async function runAgentIdentity(prisma: AppPrismaClient, runId: string): Promise<{ agentId: string | null; agentName: string | null }> {
+  if (!(await agentRunAttributionAvailable(prisma))) return { agentId: null, agentName: null }
+  const attribution = await prisma.agentRun.findFirst({ where: { id: runId }, select: { agentId: true } })
+  if (!attribution?.agentId) return { agentId: null, agentName: null }
+  const agent = await findAgentById(prisma, attribution.agentId)
+  return { agentId: attribution.agentId, agentName: agent?.name ?? null }
 }
 
 export async function listAgentRunEvents({

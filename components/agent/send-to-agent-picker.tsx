@@ -24,6 +24,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useAgentChoices } from "@/components/agent/use-agent-choices"
 import type { AgentHandoffEntityType, GeodeAgentHandoffPayload } from "@/lib/agent-context"
 
 declare global {
@@ -81,9 +82,15 @@ export function SendToAgentPicker({ orgSlug, workspaceSlug, entityType, entityId
     setBridgePresent(hasGeodeBridge())
   }, [])
 
+  // Cloud agents the member can pick (empty unless some exist and agents are enabled: then nothing below changes).
+  const choices = useAgentChoices({ orgSlug, workspaceSlug })
+  const hasAgentChoices = choices.agents.length > 0
   const builtInHref = `/${orgSlug}/${workspaceSlug}/agent?entityType=${entityType}&entityId=${entityId}`
 
-  if (!bridgePresent) {
+  const agentHref = (agentId: string) => `${builtInHref}&agentId=${encodeURIComponent(agentId)}`
+  const defaultAgent = choices.agents.find((agent) => agent.id === choices.defaultAgentId)
+
+  if (!bridgePresent && !hasAgentChoices) {
     return (
       <Link href={builtInHref} className={className}>
         {children}
@@ -164,11 +171,28 @@ export function SendToAgentPicker({ orgSlug, workspaceSlug, entityType, entityId
           the base min-w-32 still applies as a floor. */}
       <DropdownMenuContent className="w-auto">
         <DropdownMenuItem className="p-0">
+          {/* With a default agent, the plain link (no agentId) already resolves to it on the server, so it stays the first item. */}
           <Link href={builtInHref} className="flex w-full items-center gap-1.5 px-1.5 py-1">
-            Built-in cloud agent
+            {defaultAgent ? `${defaultAgent.name} (default)` : "Built-in cloud agent"}
           </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={handleSendToGeode}>Geode</DropdownMenuItem>
+        {defaultAgent && (
+          <DropdownMenuItem className="p-0">
+            <Link href={agentHref("builtin")} className="flex w-full items-center gap-1.5 px-1.5 py-1">
+              Built-in cloud agent
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {choices.agents
+          .filter((agent) => agent.id !== choices.defaultAgentId)
+          .map((agent) => (
+            <DropdownMenuItem key={agent.id} className="p-0">
+              <Link href={agentHref(agent.id)} className="flex w-full items-center gap-1.5 px-1.5 py-1">
+                {agent.name}
+              </Link>
+            </DropdownMenuItem>
+          ))}
+        {bridgePresent && <DropdownMenuItem onClick={handleSendToGeode}>Geode</DropdownMenuItem>}
       </DropdownMenuContent>
     </DropdownMenu>
   )

@@ -16,7 +16,7 @@
 import type { AppPrismaClient } from "@/lib/db"
 import { agentIdentityValidForActor, agentsEnabled, liveGrantedWorkspaceIds } from "@/lib/agent-access"
 import { BUILT_IN_AGENT_SELECTION, getStoredDefaultAgentIds } from "@/lib/agent-defaults"
-import { agentKind, canInvokeAgent, findAgentById, type AgentRecord } from "@/lib/agent-ownership"
+import { agentKind, canInvokeAgent, findAgentById, findAgentsByIds, type AgentRecord } from "@/lib/agent-ownership"
 
 /**
  * Statuses in which a run is still allowed to act. Mirrors NON_TERMINAL_AGENT_RUN_STATUSES in
@@ -50,8 +50,11 @@ type Runnable = { ok: true; agent: AgentRecord } | { ok: false; error: AgentSele
  * policy refusal is distinguishable, and only for an agent the caller can already see is usable here.
  */
 async function checkRunnable(prisma: AppPrismaClient, input: { userId: string; workspaceId: string; agentId: string }): Promise<Runnable> {
+  return checkRunnableAgent(prisma, await findAgentById(prisma, input.agentId), input)
+}
+
+async function checkRunnableAgent(prisma: AppPrismaClient, agent: AgentRecord | null, input: { userId: string; workspaceId: string }): Promise<Runnable> {
   const notFound: Runnable = { ok: false, error: new AgentSelectionError(NOT_AVAILABLE, 404, "AGENT_NOT_FOUND") }
-  const agent = await findAgentById(prisma, input.agentId)
   if (!agent || agent.status !== "ACTIVE" || agentKind(agent) !== "CLOUD") return notFound
   const granted = await liveGrantedWorkspaceIds(agent, "READ")
   if (!granted.includes(input.workspaceId)) return notFound
@@ -94,6 +97,25 @@ export async function resolveRunAgent(
     if (checked.ok) return checked.agent
   }
   return null
+}
+
+/**
+ * The cloud agents this user could pick right now in this workspace, for the pickers. Each goes through the same checks as
+ * an explicit pick, so the list never offers an agent the server would then refuse. `defaultAgentId` is what a run with no
+ * pick would use (null = the built-in agent).
+ */
+export async function listRunnableAgents(prisma: AppPrismaClient, input: { userId: string; workspaceId: string }): Promise<{ agents: AgentRecord[]; defaultAgentId: string | null }> {
+  if (!agentsEnabled()) return { agents: [], defaultAgentId: null }
+  const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: input.workspaceId, revokedAt: null }, select: { agentId: true } })
+  const candidates = await findAgentsByIds(prisma, grants.map((grant) => grant.agentId))
+  const agents: AgentRecord[] = []
+  for (const candidate of candidates) {
+    const checked = await checkRunnableAgent(prisma, candidate, input)
+    if (checked.ok) agents.push(checked.agent)
+  }
+  agents.sort((a, b) => a.name.localeCompare(b.name))
+  const resolved = await resolveRunAgent(prisma, input)
+  return { agents, defaultAgentId: resolved?.id ?? null }
 }
 
 /** The fields of an ApiKey row this check reads. */

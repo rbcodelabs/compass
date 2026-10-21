@@ -107,7 +107,10 @@ describe("AgentChat — seed context hand-off", () => {
           { event: "result", data: { text: "Second reply", conversationId: "c-new" } },
         ])
       )
-    vi.stubGlobal("fetch", fetchMock)
+    // The agent selector asks /api/agent/choices on mount; that is not a turn, so it is answered here and kept out of fetchMock.
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) =>
+      String(url).startsWith("/api/agent/choices") ? Promise.resolve({ ok: true, json: async () => ({ agents: [], defaultAgentId: null }) }) : fetchMock(url, init)
+    )
 
     render(<AgentChat {...baseProps({ seedEntity: SEED_ENTITY, suggestedInstruction: SUGGESTED_INSTRUCTION })} />)
 

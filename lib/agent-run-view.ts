@@ -16,6 +16,9 @@ export type SerializedAgentRun = {
   workspaceId: string
   /** Who started the run; in a shared conversation this is one participant, not the owner. */
   startedByUserId: string | null
+  /** The cloud agent the run acted as; null = the built-in agent (and every run before migration 100). */
+  agentId: string | null
+  agentName: string | null
   status: AgentRunStatus
   kind: string
   lastSeq: number
@@ -41,6 +44,8 @@ type RunRow = {
   conversationId: string
   workspaceId: string
   userId?: string | null
+  agentId?: string | null
+  agentName?: string | null
   status: string
   kind: string
   lastSeq: number
@@ -66,6 +71,8 @@ export function serializeAgentRun(run: RunRow): SerializedAgentRun {
     conversationId: run.conversationId,
     workspaceId: run.workspaceId,
     startedByUserId: run.userId ?? null,
+    agentId: run.agentId ?? null,
+    agentName: run.agentName ?? null,
     status: run.status as AgentRunStatus,
     kind: run.kind,
     lastSeq: run.lastSeq,

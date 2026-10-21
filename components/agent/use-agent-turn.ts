@@ -46,6 +46,8 @@ export type StartTurnParams = {
   message: string
   conversationId?: string | null
   seedContext?: { entityType: string; entityId: string }
+  /** A cloud agent id, or "builtin". Omitted = the server's default (personal, then workspace, then built-in). */
+  agentId?: string
   /** Which page the user is looking at, for surfaces that float over it. */
   pageUrl?: string
   retry?: boolean
@@ -335,6 +337,7 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
           message: text,
           conversationId: params.conversationId ?? undefined,
           ...(params.seedContext ? { seedContext: params.seedContext } : {}),
+          ...(params.agentId ? { agentId: params.agentId } : {}),
           ...(params.pageUrl ? { pageUrl: params.pageUrl } : {}),
           ...(params.retry ? { retry: true } : {}),
           ...(params.continueTurn ? { continue: true } : {}),

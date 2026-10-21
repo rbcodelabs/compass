@@ -79,6 +79,8 @@ export type SerializedRun = {
   deadlineAt: string
   /** Who sent the turn this run answers. Absent from an older server. */
   startedByUserId?: string | null
+  /** The cloud agent that answers this run; absent or null = the built-in agent. */
+  agentName?: string | null
 }
 
 /** The banner text for a run that ended without a result of its own. */
