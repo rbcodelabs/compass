@@ -159,7 +159,7 @@ describe("typed link models are reached only through lib/typed-links.ts", () => 
       .filter((file) => LINK_NAME.test(rejoinConcatenation(readFileSync(file, "utf-8").replaceAll("backfillOpportunityObjectiveLinks", "").replaceAll("pruneStaleLegacyLinks", ""))))
       .map(rel)
       .sort();
-    expect(hits).toEqual(["lib/migrations/entity-links-opportunity-backfill.ts", "lib/migrations/entity-links-read-parity.ts", "lib/migrations/runner.ts", "lib/migrations/typed-link-tables.ts"]);
+    expect(hits).toEqual(["lib/migrations/entity-links-opportunity-backfill.ts", "lib/migrations/entity-links-read-parity.ts", "lib/migrations/entity-links-solution-key-result-backfill.ts", "lib/migrations/runner.ts", "lib/migrations/typed-link-tables.ts"]);
     const runnerMentions = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8")
       .split("\n")
       .map((line) => line.replaceAll("backfillOpportunityObjectiveLinks", ""))

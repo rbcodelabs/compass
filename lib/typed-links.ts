@@ -3,7 +3,7 @@
  * Opportunities, Objectives, Key Results and Solutions; Phase 2):
  *
  *   opportunity_objective_links   Opportunity <-> Objective   (origin DIRECT | LEGACY)
- *   solution_key_result_links     Solution    <-> Key Result  (new-only, no legacy analogue)
+ *   solution_key_result_links     Solution    <-> Key Result  (mirrored into entity_links, backfilled by 098)
  *
  * Nothing else in the codebase may name the two link models; a guard test
  * (__tests__/typed-link-tables-unused.test.ts) pins that. Every other file goes through
