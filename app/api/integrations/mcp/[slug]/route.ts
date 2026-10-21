@@ -29,8 +29,8 @@ import {
   pickHeaders,
 } from "@/lib/mcp-connectors/gateway"
 import { requireHttpsUrl } from "@/lib/mcp-connectors/http"
-import { findGrant, mcpConnectorsAvailable } from "@/lib/mcp-connectors/store"
-import { refreshGrant, resolveConnectorToken } from "@/lib/mcp-connectors/tokens"
+import { mcpConnectorsAvailable } from "@/lib/mcp-connectors/store"
+import { refreshConnectorToken, resolveConnectorToken } from "@/lib/mcp-connectors/tokens"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import { validateMcpAuth } from "@/lib/mcp-auth"
 
@@ -98,9 +98,8 @@ async function proxy(request: NextRequest, context: { params: Promise<{ slug: st
     if (upstream.status === 401) {
       // Drain the discarded response so the connection is not left dangling.
       await upstream.body?.cancel().catch(() => {})
-      const grant = await findGrant(resolved.connector.id, userId)
-      if (!grant) return jsonRpcError(403, -32004, "This connection was removed while the turn was running.")
-      const refreshed = await refreshGrant(resolved.connector, grant)
+      const refreshed = await refreshConnectorToken(resolved, userId)
+      if (!refreshed) return jsonRpcError(403, -32004, "This connection was removed while the turn was running.")
       upstream = await forward(resolved.connector.serverUrl, request, body, refreshed)
       if (upstream.status === 401) {
         await upstream.body?.cancel().catch(() => {})

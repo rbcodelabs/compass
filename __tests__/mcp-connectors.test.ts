@@ -15,7 +15,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AppPrismaClient } from "@/lib/db"
 import { decrypt } from "@/lib/crypto-secrets"
 import {
+  CONNECTOR_DEFINITIONS,
   McpConnectorError,
+  type ConnectorDefinition,
   accessLevelForScope,
   connectorAccessView,
   connectorDefinition,
@@ -1024,7 +1026,28 @@ describe("McpConnectorError", () => {
 
 // ── Pre-registered (static) client — Google Drive ───────────────────────────
 
-describe("static-client connector (Google Drive)", () => {
+// The shipped Google Drive entry now uses Vercel Connect, so no catalog entry
+// is a static client any more. The mechanism is still supported (DCR-less
+// providers), so this suite swaps a static-client variant of the Drive entry
+// into the catalog for its duration.
+describe("static-client connector mechanism (Drive-shaped fixture)", () => {
+  const catalog = CONNECTOR_DEFINITIONS as ConnectorDefinition[]
+  const shipped = catalog.find(definition => definition.slug === "google-drive")!
+  beforeEach(() => {
+    catalog[catalog.indexOf(shipped)] = {
+      ...shipped,
+      tokenSource: undefined,
+      staticClient: {
+        clientIdEnv: "GOOGLE_CLIENT_ID",
+        clientSecretEnv: "GOOGLE_CLIENT_SECRET",
+        authorizeParams: { access_type: "offline", prompt: "consent" },
+      },
+    }
+  })
+  afterEach(() => {
+    catalog[catalog.findIndex(definition => definition.slug === "google-drive")] = shipped
+  })
+
   const drive: ConnectorRecord = {
     ...connector,
     id: "connector-drive",
@@ -1045,11 +1068,10 @@ describe("static-client connector (Google Drive)", () => {
     vi.stubEnv("GOOGLE_CLIENT_SECRET", "env-client-secret")
   })
 
-  it("is in the catalog as a static client that asks for offline access", () => {
+  it("keeps the Drive catalog entry's server and guidance", () => {
     const definition = connectorDefinition("google-drive")
     expect(definition?.serverUrl).toBe("https://drivemcp.googleapis.com/mcp/v1")
     expect(definition?.fallbackScope).toBe("https://www.googleapis.com/auth/drive")
-    expect(definition?.staticClient?.authorizeParams).toEqual({ access_type: "offline", prompt: "consent" })
     expect(definition?.agentGuidance).toMatch(/untrusted/i)
   })
 

@@ -25,6 +25,7 @@ import {
   DEFAULT_CONNECTOR_RETURN_PATH,
   McpConnectorError,
   connectorDefinition,
+  usesVercelConnect,
 } from "@/lib/mcp-connectors/config"
 import {
   CONNECTOR_CONNECTED_PARAM,
@@ -38,6 +39,7 @@ import {
   saveGrant,
 } from "@/lib/mcp-connectors/store"
 import { exchangeAuthorizationCode } from "@/lib/mcp-connectors/tokens"
+import { getConnectAccess } from "@/lib/mcp-connectors/vercel-connect"
 import { safeCallbackUrl } from "@/lib/safe-callback-url"
 
 export const runtime = "nodejs"
@@ -57,6 +59,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
     // login loop would only land them back on a dead callback. Reconnecting from
     // the start is the honest instruction.
     return NextResponse.json({ error: "Sign in and start the connection again." }, { status: 401 })
+
+  const connectDefinition = connectorDefinition(slug)
+  if (connectDefinition && usesVercelConnect(connectDefinition))
+    return landFromVercelConnect(request, slug, session.user.id)
 
   const definition = connectorDefinition(slug)
   if (!definition) return NextResponse.json({ error: `Unknown connector "${slug}".` }, { status: 404 })
@@ -139,4 +145,24 @@ function redirectTo(returnTo: string, query: Record<string, string>): NextRespon
   const url = new URL(returnTo, trustedCompassBaseUrl().origin)
   for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value)
   return NextResponse.redirect(url, { headers: { "Cache-Control": "no-store" } })
+}
+
+/**
+ * Where Vercel Connect returns the browser after consent. There is no `state`
+ * to claim and nothing to exchange — Connect already holds the grant — so this
+ * only verifies, for the *session's own* user, that a grant now exists. It
+ * creates nothing, which is why the login-CSRF check above has no analogue here.
+ */
+async function landFromVercelConnect(request: NextRequest, slug: string, userId: string): Promise<NextResponse> {
+  const returnTo = safeCallbackUrl(request.nextUrl.searchParams.get("returnTo"), DEFAULT_CONNECTOR_RETURN_PATH)
+  const definition = connectorDefinition(slug)!
+  try {
+    const access = await getConnectAccess(definition, userId)
+    if (!access) return failure(slug, returnTo, "AUTHORIZATION_FAILED")
+    return redirectTo(returnTo, { [CONNECTOR_PARAM]: slug, [CONNECTOR_CONNECTED_PARAM]: "1" })
+  } catch (error) {
+    const code = error instanceof McpConnectorError ? error.code : "AUTHORIZATION_FAILED"
+    console.error("Vercel Connect landing check failed", slug, code, error instanceof Error ? error.message : error)
+    return failure(slug, returnTo, code)
+  }
 }

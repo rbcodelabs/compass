@@ -30,10 +30,12 @@
  */
 import {
   McpConnectorError,
+  type ConnectorDefinition,
   REFRESH_SKEW_SECONDS,
   connectorDefinition,
   connectorEncryptionKey,
   staticClientCredentials,
+  usesVercelConnect,
 } from "@/lib/mcp-connectors/config"
 import { fetchJsonObject, outboundFetch, requireHttpsUrl } from "@/lib/mcp-connectors/http"
 import {
@@ -44,6 +46,7 @@ import {
   type GrantRecord,
   type GrantTokens,
 } from "@/lib/mcp-connectors/store"
+import { getConnectAccess } from "@/lib/mcp-connectors/vercel-connect"
 import { computeS256Challenge } from "@/lib/oauth/pkce"
 
 /**
@@ -201,12 +204,55 @@ export async function resolveConnectorToken(
   origin: string,
   userId: string,
 ): Promise<ResolvedConnectorToken | null> {
+  const definition = connectorDefinition(slug)
+  if (definition && usesVercelConnect(definition)) {
+    const access = await getConnectAccess(definition, userId)
+    return access ? { connector: connectBackedRecord(definition, origin, access.scope), accessToken: access.accessToken } : null
+  }
   const connector = await findConnector(slug, origin)
   if (!connector || !connector.enabled) return null
   const grant = await findGrant(connector.id, userId)
   if (!grant) return null
   if (!isExpiring(grant)) return { connector, accessToken: grant.accessToken }
   return { connector, accessToken: await refreshGrant(connector, grant) }
+}
+
+/**
+ * A Connect-backed connector has no `mcp_connectors` row — nothing was
+ * discovered or registered — so callers that want a `ConnectorRecord` (for its
+ * `serverUrl` and `displayName`) get one built from the reviewed catalog.
+ */
+function connectBackedRecord(definition: ConnectorDefinition, origin: string, scope: string): ConnectorRecord {
+  return {
+    id: `vercel-connect:${definition.slug}`,
+    slug: definition.slug,
+    origin,
+    displayName: definition.displayName,
+    serverUrl: definition.serverUrl,
+    resource: definition.serverUrl,
+    authorizationEndpoint: "",
+    tokenEndpoint: "",
+    revocationEndpoint: null,
+    scope,
+    clientId: "",
+    enabled: true,
+  }
+}
+
+/**
+ * A fresh token after the provider answered 401 to the one we just used, or
+ * `null` when the user's connection no longer exists.
+ *
+ * Connect-backed connectors ask Connect to refresh upstream (`forceRefresh`);
+ * the others rotate the stored grant. Callers retry the request exactly once.
+ */
+export async function refreshConnectorToken(resolved: ResolvedConnectorToken, userId: string): Promise<string | null> {
+  const definition = connectorDefinition(resolved.connector.slug)
+  if (definition && usesVercelConnect(definition))
+    return (await getConnectAccess(definition, userId, { forceRefresh: true }))?.accessToken ?? null
+  const grant = await findGrant(resolved.connector.id, userId)
+  if (!grant) return null
+  return refreshGrant(resolved.connector, grant)
 }
 
 function isExpiring(grant: GrantRecord): boolean {

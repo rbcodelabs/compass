@@ -14,9 +14,12 @@
  * request: the origin is the deployment's, not a header, because `redirect_uri` is
  * matched by exact string at the provider.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { NextRequest } from "next/server"
 import { McpConnectorError } from "@/lib/mcp-connectors/config"
+import { connectMocks, resetConnectMocks, UserAuthorizationRequiredError } from "./helpers/mock-vercel-connect"
+
+vi.mock("@vercel/connect", async () => (await import("./helpers/mock-vercel-connect")).connectModule())
 
 const mockAuth = vi.fn()
 vi.mock("@/auth", () => ({ auth: () => mockAuth() }))
@@ -122,32 +125,69 @@ describe("connect route", () => {
     )
   })
 
-  describe("access levels (Google Drive)", () => {
-    const driveConnector = {
-      ...connector,
-      id: "connector-drive",
-      slug: "google-drive",
-      authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
-      // What discovery stored: the default level's scope.
-      scope: "https://www.googleapis.com/auth/drive",
-    }
-    const scopeOf = (response: Response) =>
-      new URL(response.headers.get("location") ?? "").searchParams.get("scope")
+  describe("access levels (Google Drive, via Vercel Connect)", () => {
+    const consentOf = () => connectMocks.startAuthorization.mock.calls.at(-1)!
 
-    beforeEach(() => mockEnsureConnector.mockResolvedValue(driveConnector))
+    beforeEach(() => {
+      resetConnectMocks()
+      vi.stubEnv("COMPASS_GOOGLE_CONNECTOR", "google/compass")
+    })
+    afterEach(() => vi.unstubAllEnvs())
 
-    it("requests read-only scope only when the user chose it", async () => {
+    it("sends the browser to Connect's consent URL with the chosen read-only scope", async () => {
       const response = await connect(
         get("/api/connectors/google-drive/connect?access=read-only"),
         params("google-drive"),
       )
       expect(response.status).toBe(307)
-      expect(scopeOf(response)).toBe("https://www.googleapis.com/auth/drive.readonly")
+      expect(response.headers.get("location")).toBe("https://connect.vercel.com/consent?x=1")
+      const [uid, tokenParams, options] = consentOf()
+      expect(uid).toBe("google/compass")
+      expect(tokenParams).toEqual({
+        subject: { type: "user", id: "user-1" },
+        scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+      })
+      // Google only re-issues a refresh token on prompt=consent.
+      expect(options.prompt).toBe("consent")
+      // No DCR / auth-request bookkeeping for a Connect-backed connector.
+      expect(mockEnsureConnector).not.toHaveBeenCalled()
+      expect(mockCreateAuthRequest).not.toHaveBeenCalled()
     })
 
-    it("defaults to full access with no choice made", async () => {
+    it("defaults to full access with no choice made, returning via Compass's own landing route", async () => {
+      await connect(get("/api/connectors/google-drive/connect"), params("google-drive"))
+      const [, tokenParams, options] = consentOf()
+      expect(tokenParams.scopes).toEqual(["https://www.googleapis.com/auth/drive"])
+      const landing = new URL(options.callbackUrl)
+      expect(landing.origin + landing.pathname).toBe("http://localhost:3000/api/connectors/google-drive/callback")
+      expect(landing.searchParams.get("returnTo")).toBe("/settings/agents")
+    })
+
+    it("derives the subject from the session, never from the request", async () => {
+      await connect(
+        get("/api/connectors/google-drive/connect?userId=victim&subject=victim&returnTo=https://evil.example/"),
+        params("google-drive"),
+      )
+      const [, tokenParams, options] = consentOf()
+      expect(tokenParams.subject).toEqual({ type: "user", id: "user-1" })
+      // An off-origin returnTo degrades to the default page.
+      expect(new URL(options.callbackUrl).searchParams.get("returnTo")).toBe("/settings/agents")
+    })
+
+    it("is a 503, not a redirect, when COMPASS_GOOGLE_CONNECTOR is unset", async () => {
+      vi.stubEnv("COMPASS_GOOGLE_CONNECTOR", "")
       const response = await connect(get("/api/connectors/google-drive/connect"), params("google-drive"))
-      expect(scopeOf(response)).toBe("https://www.googleapis.com/auth/drive")
+      expect(response.status).toBe(503)
+      expect((await response.json()).code).toBe("CLIENT_NOT_CONFIGURED")
+      expect(connectMocks.startAuthorization).not.toHaveBeenCalled()
+    })
+
+    it("reports an unlinked project as a 503 with the operator-facing cause", async () => {
+      const { ConnectError } = await import("./helpers/mock-vercel-connect")
+      connectMocks.startAuthorization.mockRejectedValue(new ConnectError("client not linked to project", { code: "client_not_linked", status: 403 }))
+      const response = await connect(get("/api/connectors/google-drive/connect"), params("google-drive"))
+      expect(response.status).toBe(503)
+      expect((await response.json()).code).toBe("CONNECT_MISCONFIGURED")
     })
 
     it("refuses an unknown level with 400 rather than falling back to more access", async () => {
@@ -158,15 +198,34 @@ describe("connect route", () => {
       expect(response.status).toBe(400)
       const body = await response.json()
       expect(body.accessLevels).toEqual(["full", "read-only"])
-      expect(mockEnsureConnector).not.toHaveBeenCalled()
-      expect(mockCreateAuthRequest).not.toHaveBeenCalled()
+      expect(connectMocks.startAuthorization).not.toHaveBeenCalled()
     })
 
     it("ignores the parameter on a connector that offers no levels", async () => {
       mockEnsureConnector.mockResolvedValue(connector)
       const response = await connect(get("/api/connectors/v0/connect?access=read-only"), params())
       expect(response.status).toBe(307)
-      expect(scopeOf(response)).toBe("mcp")
+      expect(new URL(response.headers.get("location") ?? "").searchParams.get("scope")).toBe("mcp")
+    })
+
+    describe("landing after consent", () => {
+      it("shows connected only when Connect now holds a grant for the session user", async () => {
+        const response = await callback(get("/api/connectors/google-drive/callback?returnTo=/settings/agents"), params("google-drive"))
+        const location = new URL(response.headers.get("location") ?? "")
+        expect(location.pathname).toBe("/settings/agents")
+        expect(location.searchParams.get("connected")).toBe("1")
+        expect(connectMocks.getToken.mock.calls[0][1].subject).toEqual({ type: "user", id: "user-1" })
+        // Not the DCR callback path: nothing to claim or exchange.
+        expect(mockConsumeAuthRequest).not.toHaveBeenCalled()
+      })
+
+      it("reports a failure notice when the user abandoned consent", async () => {
+        connectMocks.getToken.mockRejectedValue(new UserAuthorizationRequiredError("consent required"))
+        const response = await callback(get("/api/connectors/google-drive/callback"), params("google-drive"))
+        const location = new URL(response.headers.get("location") ?? "")
+        expect(location.searchParams.get("connected")).toBeNull()
+        expect(location.searchParams.get("connectorError")).toBe("AUTHORIZATION_FAILED")
+      })
     })
   })
 
@@ -219,9 +278,9 @@ describe("connect route", () => {
 
   it("reports a connector with no OAuth client configured as 503, not a provider fault", async () => {
     mockEnsureConnector.mockRejectedValue(
-      new McpConnectorError("CLIENT_NOT_CONFIGURED", "Google Drive is not configured on this deployment"),
+      new McpConnectorError("CLIENT_NOT_CONFIGURED", "A static-client connector is not configured on this deployment"),
     )
-    const response = await connect(get("/api/connectors/google-drive/connect"), params("google-drive"))
+    const response = await connect(get("/api/connectors/v0/connect"), params())
     expect(response.status).toBe(503)
     expect((await response.json()).code).toBe("CLIENT_NOT_CONFIGURED")
     expect(mockCreateAuthRequest).not.toHaveBeenCalled()

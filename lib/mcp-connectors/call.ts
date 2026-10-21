@@ -22,8 +22,8 @@
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import { McpConnectorError, connectorDefinition } from "@/lib/mcp-connectors/config"
 import { requireHttpsUrl } from "@/lib/mcp-connectors/http"
-import { findGrant, mcpConnectorsAvailable } from "@/lib/mcp-connectors/store"
-import { refreshGrant, resolveConnectorToken } from "@/lib/mcp-connectors/tokens"
+import { mcpConnectorsAvailable } from "@/lib/mcp-connectors/store"
+import { refreshConnectorToken, resolveConnectorToken } from "@/lib/mcp-connectors/tokens"
 
 export const CONNECTOR_CALL_TIMEOUT_MS = 30_000
 const MAX_CALL_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -80,9 +80,8 @@ async function connectorRequest(slug: string, userId: string, method: string, pa
     return await session(resolved.connector.serverUrl, resolved.accessToken, input.method, input.params)
   } catch (error) {
     if (!(error instanceof UpstreamUnauthorized)) throw error
-    const grant = await findGrant(resolved.connector.id, input.userId)
-    if (!grant) throw new McpConnectorError("NOT_CONNECTED", "This connection was removed. Reconnect it in Settings → My agents.")
-    const refreshed = await refreshGrant(resolved.connector, grant)
+    const refreshed = await refreshConnectorToken(resolved, input.userId)
+    if (!refreshed) throw new McpConnectorError("NOT_CONNECTED", "This connection was removed. Reconnect it in Settings → My agents.")
     try {
       return await session(resolved.connector.serverUrl, refreshed, input.method, input.params)
     } catch (second) {
