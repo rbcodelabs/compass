@@ -34,9 +34,11 @@ import { PANEL_WIDTH_DEFAULT, parsePanelPin } from "@/lib/panel-pin";
 
 const push = vi.fn();
 let pathname = "/acme/product/roadmap";
+let searchString = "";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), refresh: vi.fn() }),
   usePathname: () => pathname,
+  useSearchParams: () => new URLSearchParams(searchString),
 }));
 
 // The rail now hosts the Docs Library tree, which imports the docs server actions (and through them auth).
@@ -193,6 +195,8 @@ async function selectThread(title: string) {
 
 beforeEach(() => {
   push.mockClear();
+  searchString = "";
+  window.history.replaceState(null, "", "/");
   pathname = "/acme/product/roadmap";
   detailPanelDock = { docked: false, width: 0 };
   lastChatProps = {};
@@ -324,14 +328,30 @@ describe("navigation", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it("hands the active thread to the full page on expand, and closes itself first", () => {
-    renderRail();
+  it("hands the active thread to the full page on expand without changing rail state mid-navigation", () => {
+    const { rerender } = renderRail();
     fireEvent.click(screen.getByRole("button", { name: "fire-created" }));
     fireEvent.click(screen.getByRole("button", { name: "Open in full page" }));
 
     expect(push).toHaveBeenCalledWith("/acme/product/agent?c=conv-new");
-    // Two live AgentChats would mean two streams against one conversation.
+    // Not closed here: a state change while the push is pending would make the
+    // URL mirror write the old path over the navigation.
+    expect(rail()).not.toBeNull();
+    expect(railCookie()).toBeNull();
+
+    // On arrival the route hides the rail (two live AgentChats would mean two
+    // streams against one conversation) and adopts the page's ?c=.
+    pathname = "/acme/product/agent";
+    searchString = "c=conv-new";
+    rerender(railTree());
     expect(rail()).toBeNull();
+
+    // Leaving the page brings the rail back on the same thread.
+    pathname = "/acme/product/roadmap";
+    searchString = "";
+    rerender(railTree());
+    expect(rail()).not.toBeNull();
+    expect(lastChatProps.activeConversationId).toBe("conv-new");
   });
 
   it("expands to a fresh chat when no thread is selected", () => {
@@ -609,5 +629,67 @@ describe("on the full-page Agent route", () => {
     pathname = "/acme/product/agents-overview";
     renderRail();
     expect(rail()).not.toBeNull();
+  });
+});
+
+// ── URL mirroring ────────────────────────────────────────────────────────────
+
+describe("rail state in the URL", () => {
+  it("seeds the thread from ?rc= and opens a rail whose cookie says closed", () => {
+    searchString = "rc=conv-1";
+    renderRail({ pinned: false });
+    expect(rail()).not.toBeNull();
+    expect(lastChatProps.activeConversationId).toBe("conv-1");
+  });
+
+  it("seeds the Library view from ?rail=library", () => {
+    searchString = "rail=library";
+    renderRail({ pinned: false });
+    expect(rail()).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Rail view: Library" })).toBeInTheDocument();
+  });
+
+  it("ignores a malformed rail param instead of opening on it", () => {
+    searchString = "rail=nope&rc=../x";
+    renderRail({ pinned: false });
+    expect(rail()).toBeNull();
+  });
+
+  it("mirrors the selected thread with replaceState, never router.push", async () => {
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    renderRail();
+    expect(window.location.search).toBe("");
+    await selectThread("First chat");
+    expect(window.location.search).toBe("?rc=conv-1");
+    expect(replaceState).toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    replaceState.mockRestore();
+  });
+
+  it("re-applies the params when a link-built navigation dropped them, keeping other params", async () => {
+    const { rerender } = renderRail();
+    await selectThread("First chat");
+    // A sidebar <Link> lands on a URL with its own params and none of ours.
+    window.history.replaceState(null, "", "/acme/product/okrs?status=open");
+    pathname = "/acme/product/okrs";
+    rerender(railTree());
+    expect(window.location.search).toBe("?status=open&rc=conv-1");
+    expect(chatMounts).toBe(1);
+  });
+
+  it("writes no params while the rail is closed, and drops them on close", async () => {
+    renderRail();
+    await selectThread("First chat");
+    expect(window.location.search).toBe("?rc=conv-1");
+    fireEvent.click(screen.getByRole("button", { name: "Close agent" }));
+    expect(window.location.search).toBe("");
+  });
+
+  it("leaves the URL alone on the full-page Agent route, where ?c= owns the thread", () => {
+    pathname = "/acme/product/agent";
+    window.history.replaceState(null, "", "/acme/product/agent?c=conv-1");
+    searchString = "c=conv-1";
+    renderRail();
+    expect(window.location.search).toBe("?c=conv-1");
   });
 });

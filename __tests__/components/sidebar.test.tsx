@@ -6,6 +6,7 @@ import "@testing-library/jest-dom/vitest";
 let pathname = "/rbcodelabs/compass/okrs";
 vi.mock("next/navigation", () => ({
   usePathname: () => pathname,
+  useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({ push: vi.fn() }),
 }));
 

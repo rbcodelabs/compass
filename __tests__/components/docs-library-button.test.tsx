@@ -14,6 +14,7 @@ import "@testing-library/jest-dom/vitest";
 let pathname = "/acme/product/docs";
 vi.mock("next/navigation", () => ({
   usePathname: () => pathname,
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 import { AgentRailProvider, useAgentRail } from "@/components/agent/agent-rail-context";
