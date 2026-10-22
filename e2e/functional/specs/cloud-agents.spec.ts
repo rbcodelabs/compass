@@ -223,3 +223,55 @@ test("assigning a task to a cloud agent starts an attributed run; a run limit re
     await pool.end();
   }
 });
+
+/**
+ * A 120-character agent name (the maximum) on a 390px phone. Lists wrap or scroll, never squash or clip: neither the page nor
+ * any control may extend past the viewport, in the agents list, its edit form, or the assignee picker.
+ */
+test("a 120-character agent name does not overflow the page, the agent list or the assignee picker at 390px", async ({ page, base }) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const url = new URL(process.env.DATABASE_URL!);
+  if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/compass_e2e") throw new Error("Cloud agent tests require the dedicated local compass_e2e database");
+  const pool = new pg.Pool({ connectionString: url.toString() });
+  const suffix = randomUUID().slice(0, 8);
+  const name = `${suffix}-${"W".repeat(120 - suffix.length - 1)}`;
+  expect(name).toHaveLength(120);
+  const pageFits = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+  const insideViewport = (locator: ReturnType<Page["locator"]>) => locator.evaluateAll((els) => els.every((el) => { const r = el.getBoundingClientRect(); return r.width === 0 || (r.left >= 0 && r.right <= window.innerWidth); }));
+  try {
+    await createSharedAgent(page, base, name);
+    await page.goto(`${base}/settings`);
+    const row = page.locator("li").filter({ hasText: name });
+    await row.scrollIntoViewIfNeeded();
+    await row.getByRole("button", { name: "Set as workspace default" }).click();
+    await expect(row.getByText("Workspace default", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect.poll(pageFits).toBe(true);
+    expect(await insideViewport(row.getByRole("button"))).toBe(true);
+
+    // The edit form and its run-limit fields.
+    await row.getByRole("button", { name: `Edit ${name}` }).click();
+    await expect(page.getByRole("form", { name: `Edit ${name}` })).toBeVisible();
+    await expect.poll(pageFits).toBe(true);
+    expect(await insideViewport(row.locator("button, input, select, textarea"))).toBe(true);
+
+    // The assignee picker's option for the agent is clipped inside the popup, with an ellipsis, not wider than the screen.
+    await page.goto(`${base}/tasks`);
+    await page.locator('[data-task-column="TODO"]').getByRole("button", { name: /Add task/i }).click();
+    await page.getByLabel("Assignee (optional)").click();
+    const option = page.getByRole("option", { name: new RegExp(suffix) });
+    await expect(option).toBeVisible({ timeout: 15_000 });
+    expect(await insideViewport(option)).toBe(true);
+    expect(await option.locator("span").first().evaluate((el) => getComputedStyle(el).textOverflow)).toBe("ellipsis");
+    await expect.poll(pageFits).toBe(true);
+  } finally {
+    const ids = (await pool.query("SELECT id FROM compass_dev.agents WHERE name = $1", [name])).rows.map((r) => r.id);
+    if (ids.length) {
+      await pool.query("DELETE FROM compass_dev.workspace_default_agents WHERE agent_id = ANY($1::uuid[])", [ids]).catch(() => undefined);
+      await pool.query("DELETE FROM compass_dev.agent_tool_calls WHERE agent_id = ANY($1::uuid[])", [ids]);
+      await pool.query("DELETE FROM compass_dev.agent_workspace_grants WHERE agent_id = ANY($1::uuid[])", [ids]);
+      await pool.query("DELETE FROM compass_dev.agents WHERE id = ANY($1::uuid[])", [ids]);
+    }
+    await pool.end();
+  }
+});
