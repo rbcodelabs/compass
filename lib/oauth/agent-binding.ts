@@ -274,7 +274,6 @@ export function inlineGrantAccess(requestedScopes: readonly string[]): "READ" | 
 
 /**
  * Everything the binding section needs, in two round trips.
- *
  */
 export async function loadConsentBindingOptions(userId: string): Promise<ConsentBindingOptions> {
   const prisma = getPrisma()
