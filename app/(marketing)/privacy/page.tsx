@@ -3,6 +3,7 @@ import Link from "next/link";
 import { LegalPage, type LegalSection } from "@/components/marketing/legal-page";
 import { MarketingFooter } from "@/components/marketing/marketing-footer";
 import {
+  AGENT_DATA_RETENTION_LABEL,
   GOOGLE_LIMITED_USE_STATEMENT,
   LEGAL_CONTACT_EMAIL,
   LEGAL_OPERATOR,
@@ -13,7 +14,7 @@ import { getMarketingViewer } from "@/lib/marketing-viewer";
 export const metadata: Metadata = {
   title: "Privacy Policy",
   description:
-    "How Compass, operated by RB Code Labs, collects, uses, shares and protects your data, including Google user data.",
+    "How Compass, operated by RB Code Labs LLC, collects, uses, shares and protects your data, including Google user data.",
   robots: { index: true, follow: true },
 };
 
@@ -112,11 +113,11 @@ const sections: LegalSection[] = [
           Content the agent reads from Drive can be stored in Compass. The agent&apos;s replies are saved as
           conversation messages and may quote or summarize Drive files, and the detailed event record of each agent run
           (which includes the results of tools the agent called, such as Drive file contents) is stored in the Compass
-          database. We do not currently apply an automatic retention period to conversation messages or run records:
-          they are kept until the workspace they belong to is deleted, which permanently deletes that
-          workspace&apos;s agent conversations, messages and run records. Disconnecting Google Drive does not delete
-          them. To have this content removed without deleting the workspace, or to have your account deleted, email{" "}
-          <a href={`mailto:${LEGAL_CONTACT_EMAIL}`}>{LEGAL_CONTACT_EMAIL}</a>.
+          database. We permanently delete agent conversation messages and agent run events once they are more than{" "}
+          {AGENT_DATA_RETENTION_LABEL} old, as described under{" "}
+          <a href="#retention">Retention and deletion</a>. Disconnecting Google Drive does not delete this stored
+          content; it is removed when it reaches that age, when the workspace it belongs to is deleted, or when you
+          delete your account (for conversations you own).
         </p>
         <h3 className="text-base font-semibold text-text-primary">How we protect and limit Google data</h3>
         <ul>
@@ -127,7 +128,8 @@ const sections: LegalSection[] = [
           <li>
             Separately, the tokens Google issues when you sign in with Google are stored in the Compass database as
             part of your account record and are not encrypted at the application level. They are unaffected by
-            disconnecting the Drive connector and are removed only when your account is deleted.
+            disconnecting the Drive connector. When you delete your account we ask Google to revoke them and then
+            delete them from our database (revocation is best effort; our copy is deleted regardless).
           </li>
           <li>We do not sell Google user data.</li>
           <li>We do not use Google user data for advertising, including personalized or retargeted advertising.</li>
@@ -145,13 +147,14 @@ const sections: LegalSection[] = [
         <h3 className="text-base font-semibold text-text-primary">Revoking access and deletion</h3>
         <p>
           You can disconnect Google Drive at any time in Compass under Settings, Agents. Disconnecting removes our
-          stored copy of the tokens and asks Google to revoke them (revocation is best effort). You can also remove Compass&apos;s access directly
-          at{" "}
+          stored copy of the tokens and asks Google to revoke them (revocation is best effort). You can also remove
+          Compass&apos;s access directly at{" "}
           <a href="https://myaccount.google.com/permissions" rel="noopener noreferrer">
             https://myaccount.google.com/permissions
           </a>
-          . To have your account and its data deleted, email{" "}
-          <a href={`mailto:${LEGAL_CONTACT_EMAIL}`}>{LEGAL_CONTACT_EMAIL}</a>.
+          . You can delete your Compass account yourself under Settings, Profile; see{" "}
+          <a href="#retention">Retention and deletion</a> for exactly what that removes. For other deletion requests,
+          email <a href={`mailto:${LEGAL_CONTACT_EMAIL}`}>{LEGAL_CONTACT_EMAIL}</a>.
         </p>
         <p className="font-medium text-text-primary">{GOOGLE_LIMITED_USE_STATEMENT}</p>
       </>
@@ -200,13 +203,60 @@ const sections: LegalSection[] = [
     id: "retention",
     heading: "Retention and deletion",
     body: (
-      <p>
-        We keep account and workspace data for as long as your account is active, and workspace content for as long as
-        your workspace exists. Connector tokens are removed when you disconnect the connector. You can ask us to delete
-        your account and associated personal data by emailing{" "}
-        <a href={`mailto:${LEGAL_CONTACT_EMAIL}`}>{LEGAL_CONTACT_EMAIL}</a>. We may retain limited information where
-        required by law or to resolve disputes, and backups are overwritten on the provider&apos;s normal schedule.
-      </p>
+      <>
+        <p>
+          We keep account data for as long as your account is active, and workspace content for as long as your
+          workspace exists. Connector tokens are removed when you disconnect the connector.
+        </p>
+        <h3 className="text-base font-semibold text-text-primary">Agent conversations and run records: {AGENT_DATA_RETENTION_LABEL}</h3>
+        <p>
+          An automated job runs daily and permanently deletes agent conversation messages and agent run events that
+          are more than {AGENT_DATA_RETENTION_LABEL} old. Run events include the results of tools the agent called, so
+          this is also when any Google Drive file contents captured in a run record are deleted. The saved session
+          transcript that lets the agent resume a conversation is deleted when messages from that conversation are
+          deleted, or when its most recent agent turn is more than {AGENT_DATA_RETENTION_LABEL} old, and
+          conversations left empty by this are removed. Disconnecting Google Drive does not delete stored run content before it
+          reaches this age. The job does not cover summary information about a run that does not contain
+          conversation content (such as its status, token counts and cost), records of web searches the agent made,
+          or content the agent wrote into your workspace (documents, tasks and comments), which follows the rules for
+          workspace content.
+        </p>
+        <h3 className="text-base font-semibold text-text-primary">Deleting your account</h3>
+        <p>
+          You can delete your account yourself under Settings, Profile. You confirm by typing your email address, and
+          your sessions end immediately. Deleting your account:
+        </p>
+        <ul>
+          <li>
+            removes your sign-in: sessions, passkeys and the tokens saved when you signed in with Google, after asking
+            Google to revoke them, together with any Google Drive or other connector connection, which is also revoked
+            at the provider on a best-effort basis before it is deleted;
+          </li>
+          <li>
+            permanently deletes the agent conversations you own, including their messages, run records and saved
+            transcripts, along with the messages you sent and the agent runs you started in conversations owned by
+            others, your API keys, personal agents, notifications and memberships;
+          </li>
+          <li>
+            if you are the only member of an organization or workspace, deletes it and everything in it, after you
+            explicitly agree. If other people still belong to a team you solely own or administer, deletion is blocked
+            until you make someone else an owner or administrator, so a team is never left without one.
+          </li>
+        </ul>
+        <p>
+          What we keep: content you added to a workspace that other people still use, such as documents, tasks,
+          comments, research and roadmap items, remains because it belongs to that workspace and to your teammates. It
+          is no longer linked to your account, and your name on comments and document history is replaced with
+          &quot;Deleted user&quot;. Names you typed into text yourself (for example in a task owner field or the body of
+          a comment) are not rewritten, and decision and approval records keep an internal identifier that no longer
+          points to any account, as an audit trail. Copies in backups are overwritten on the provider&apos;s normal
+          schedule.
+        </p>
+        <p>
+          We may also retain limited information where required by law or to resolve disputes. To ask about anything
+          not covered here, email <a href={`mailto:${LEGAL_CONTACT_EMAIL}`}>{LEGAL_CONTACT_EMAIL}</a>.
+        </p>
+      </>
     ),
   },
   {
@@ -224,7 +274,8 @@ const sections: LegalSection[] = [
     heading: "Your choices and rights",
     body: (
       <p>
-        You may access, correct or delete your information by using Compass or by contacting us. Depending on where you
+        You may access, correct or delete your information by using Compass (including deleting your account under
+        Settings, Profile) or by contacting us. Depending on where you
         live, you may have additional rights under local law; contact us and we will respond as required.
       </p>
     ),

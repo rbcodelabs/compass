@@ -12,7 +12,7 @@ import { getMarketingViewer } from "@/lib/marketing-viewer";
 
 export const metadata: Metadata = {
   title: "Terms of Service",
-  description: "The terms that govern your use of Compass, operated by RB Code Labs.",
+  description: "The terms that govern your use of Compass, operated by RB Code Labs LLC.",
   robots: { index: true, follow: true },
 };
 
@@ -111,7 +111,7 @@ const sections: LegalSection[] = [
     heading: "Termination",
     body: (
       <p>
-        You may stop using Compass at any time. We may suspend or terminate access if you breach these terms or if
+        You may stop using Compass at any time, and you can delete your account under Settings, Profile; what that deletes and keeps is described in the <Link href="/privacy#retention">Privacy Policy</Link>. We may suspend or terminate access if you breach these terms or if
         needed to protect the service or other users. Sections that by their nature should survive termination will
         survive.
       </p>
