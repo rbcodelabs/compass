@@ -116,7 +116,7 @@ const externalAgent = { id: "agent-ext", name: "CI bot", ownerUserId: "owner", o
 const launch = vi.fn(async () => ({ started: true }))
 const defer = vi.fn(async (task: () => Promise<unknown>) => { await task() })
 const finalize = vi.fn(async (args: Row) => { const run = db.state.agentRun.find((r) => r.id === args.runId); if (run) run.status = args.status; return { finalized: true } })
-const deps = { finalize, now: () => new Date(), getSnapshotId: async () => "snap-1", launch, defer, origin: () => "https://compass.test", env: { ANTHROPIC_API_KEY: "key", MCP_BYPASS_SECRET: "bypass" } as Record<string, string | undefined>, prisma: prisma as any }
+const deps = { finalize: finalize as unknown as typeof import("@/lib/agent-runs").finalizeAgentRun, now: () => new Date(), getSnapshotId: async () => "snap-1", launch, defer, origin: () => "https://compass.test", env: { ANTHROPIC_API_KEY: "key", MCP_BYPASS_SECRET: "bypass" } as Record<string, string | undefined>, prisma: prisma as any }
 
 function assignTo(agentId: string | null, over: Row = {}) {
   db.state.task = [{ id: "task-1", workspaceId: WS, title: "Fix the signup copy", description: "Tighten it.", seqPrefix: "TASK", seqNumber: 7, assigneeAgentId: agentId, ...over }]
@@ -411,7 +411,7 @@ describe("a run whose launch never happened", () => {
   it("does not fail the assignment when closing the dead run itself fails", async () => {
     db.state.agentRun = liveRuns(sharedAgent.id, 1, { kind: "TASK_ASSIGNMENT", status: "QUEUED", startedAt: null, statusChangedAt: OLD })
     vi.spyOn(console, "error").mockImplementation(() => {})
-    const outcome = await trigger({}, { finalize: vi.fn(async () => { throw new Error("db down") }) })
+    const outcome = await trigger({}, { finalize: vi.fn(async () => { throw new Error("db down") }) as unknown as typeof import("@/lib/agent-runs").finalizeAgentRun })
     expect(outcome.status).toBe("started")
   })
 })
