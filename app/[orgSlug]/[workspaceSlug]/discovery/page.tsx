@@ -38,9 +38,11 @@ import {
   resolveDiscoveryGroupBy,
 } from "@/lib/opportunity-field-board";
 
-export const metadata = {
-  title: "Opportunities",
-};
+export async function generateMetadata({ params }: Pick<Props, "params">) {
+  const { orgSlug, workspaceSlug } = await params;
+  const { labels } = await getThinkingModelForSlugs(orgSlug, workspaceSlug);
+  return { title: labels.opportunity.plural };
+}
 
 type Props = {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>;
@@ -321,7 +323,7 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
 
   return (
     <WorkspacePage
-      title="Opportunities"
+      title={thinkingModel.labels.opportunity.plural}
       contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}
       actions={(
         <>
