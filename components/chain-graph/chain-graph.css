@@ -55,6 +55,12 @@
   width: auto;
   border-radius: 0;
 }
+/* Nodes are dot-sized at fit-to-screen zoom; an invisible halo around the box keeps them grabbable (and draggable) there. */
+.chain-graph .react-flow__node::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
 .chain-graph .react-flow__node:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 4px;

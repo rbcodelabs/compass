@@ -122,6 +122,60 @@ test.describe("Chain graph", () => {
     expect(consoleErrors).toEqual([]);
   });
 
+  test("Group by type: a node can be dragged, stays where it was dropped, and halos do not overlap", async ({ page, base }) => {
+    const oppTitle = `E2E Graph Drag ${Date.now()}`;
+    await page.goto(`${base}/discovery`);
+    await page.waitForLoadState("networkidle");
+    await createOpportunityFromBoard(page, oppTitle);
+    await expect(page.getByText(oppTitle)).toBeVisible({ timeout: 15_000 });
+
+    await page.goto(`${base}/graph`);
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("combobox", { name: "Group by" }).click();
+    await page.getByRole("option", { name: "Type" }).click();
+    await page.getByRole("button", { name: "Expand all" }).click();
+
+    // No two group halos overlap in the Type view.
+    const halos = page.locator(".chain-halo");
+    await expect.poll(() => halos.count()).toBeGreaterThan(1);
+    const circles = await halos.evaluateAll((els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2, r: r.width / 2 };
+      }),
+    );
+    for (let i = 0; i < circles.length; i++) {
+      for (let j = i + 1; j < circles.length; j++) {
+        const a = circles[i];
+        const b = circles[j];
+        expect(Math.hypot(a.x - b.x, a.y - b.y), `halos ${i} and ${j} overlap`).toBeGreaterThanOrEqual(a.r + b.r - 1);
+      }
+    }
+
+    // Drag the opportunity's node, then relayout the view: the node stays where it was dropped.
+    const node = page.locator(".react-flow__node").filter({ has: page.getByRole("button", { name: new RegExp(`Opportunity: ${oppTitle}`) }) });
+    await expect(node).toHaveCount(1);
+    const transformOf = async () => {
+      const m = (await node.getAttribute("style"))?.match(/translate\(([-\d.]+)px,\s*([-\d.]+)px\)/);
+      return m ? { x: Number(m[1]), y: Number(m[2]) } : null;
+    };
+    const before = await transformOf();
+    const box = (await node.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2 + 30, { steps: 6 });
+    await page.mouse.move(box.x + box.width / 2 + 90, box.y + box.height / 2 + 60, { steps: 6 });
+    await page.mouse.up();
+    const dropped = await transformOf();
+    expect(dropped).not.toEqual(before);
+    expect(Math.hypot(dropped!.x - before!.x, dropped!.y - before!.y)).toBeGreaterThan(20);
+
+    await page.getByRole("button", { name: "Experiment", exact: true }).click();
+    await expect(node).toHaveCount(1);
+    const after = await transformOf();
+    expect(Math.hypot(after!.x - dropped!.x, after!.y - dropped!.y)).toBeLessThan(0.5);
+  });
+
   test("an unknown focus is ignored and another workspace's reference does not resolve", async ({ page, base }) => {
     await page.goto(`${base}/graph?focus=${encodeURIComponent("OPPORTUNITY:00000000-0000-4000-8000-000000000000")}`);
     await page.waitForLoadState("networkidle");
