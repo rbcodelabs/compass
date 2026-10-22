@@ -15,6 +15,7 @@ import {
   CommentHighlight,
   type CommentAnchorData,
 } from "@/components/docs/comment-highlight-extension";
+import { SpecEmbed } from "@/components/docs/spec-embed-extension";
 import { createMarkdownEditorExtensions } from "@/components/markdown-editor-extensions";
 
 /**
@@ -27,6 +28,8 @@ export function createDocEditorExtensions(commentAnchors: CommentAnchorData[]) {
   return [
     ...createMarkdownEditorExtensions(),
     Image.configure({ inline: false }),
+    // Inert unless a paragraph is exactly one compass:// link (see lib/doc-embeds).
+    SpecEmbed,
     CommentHighlight.configure({ comments: commentAnchors, activeId: null }),
   ];
 }
