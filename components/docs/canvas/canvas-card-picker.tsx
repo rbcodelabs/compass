@@ -6,7 +6,9 @@
  */
 import { useEffect, useRef, useState } from "react"
 import { Plus, Search } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { createCanvasCardItem, searchCanvasCardItems } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
 import { CANVAS_CARD_KIND_LABELS, type CanvasCardKind } from "@/lib/canvas-cards"
 import { creatableKinds, normalizeCreateTitle, type CanvasCreateKind } from "@/lib/canvas-create"
@@ -101,25 +103,27 @@ export function CanvasCardPicker({
         onOpenChange(next)
       }}
     >
-      <DialogContent className="max-w-lg">
+      <DialogContent className="gap-3 overflow-hidden bg-card p-5 ring-border-default sm:max-w-lg" data-testid="canvas-card-picker">
         <DialogHeader>
-          <DialogTitle>Add Compass card</DialogTitle>
+          <DialogTitle className="text-base font-semibold text-text-primary">Add Compass card</DialogTitle>
+          <DialogDescription className="text-sm text-text-secondary">Search for an existing item, or create a new one.</DialogDescription>
         </DialogHeader>
-        <div className="flex items-center gap-2 rounded-md border border-border-default px-2">
-          <Search className="size-4 text-text-subtle" aria-hidden />
-          <input
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-subtle" aria-hidden />
+          <Input
             autoFocus
             type="text"
             aria-label="Search Compass objects"
             placeholder="Search by title…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="h-9 w-full bg-transparent text-sm outline-none"
+            className="h-9 pl-8"
           />
         </div>
         <div className="max-h-72 overflow-y-auto" data-testid="canvas-card-results">
           {status === "error" && <p role="alert" className="p-2 text-sm text-status-danger">Search failed. Try again.</p>}
           {status === "loading" && items.length === 0 && <p className="p-2 text-sm text-text-subtle">Searching…</p>}
+          {status === "idle" && !query.trim() && <p className="px-1 py-2 text-sm text-text-subtle">Start typing to find an existing item.</p>}
           {status === "idle" && query.trim() && items.length === 0 && <p className="p-2 text-sm text-text-subtle">No matches.</p>}
           <ul>
             {items.map((item) => (
@@ -142,38 +146,38 @@ export function CanvasCardPicker({
             ))}
           </ul>
         </div>
-        <form onSubmit={handleCreate} className="space-y-2 border-t border-border-default pt-3" data-testid="canvas-card-create">
-          <p className="text-xs font-medium text-text-secondary">Create new</p>
-          <div className="flex items-center gap-2">
+        <form onSubmit={handleCreate} className="flex flex-col gap-2 border-t border-border-default pt-4" data-testid="canvas-card-create">
+          <p className="text-xs font-medium tracking-wide text-text-secondary uppercase">Create new</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[9rem_minmax(0,1fr)]">
             <select
               aria-label="Kind"
               value={effectiveKind}
               onChange={(event) => setCreateKind(event.target.value as CanvasCreateKind)}
-              className="h-9 shrink-0 rounded-md border border-border-default bg-transparent px-2 text-sm"
+              className="h-9 w-full min-w-0 rounded-lg border border-input bg-card px-2.5 text-sm text-text-primary outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             >
               {kinds.map((kind) => (
                 <option key={kind} value={kind}>{CANVAS_CARD_KIND_LABELS[kind]}</option>
               ))}
             </select>
-            <input
+            <Input
               type="text"
               aria-label="New item title"
               placeholder="Title…"
               value={createTitle}
               maxLength={255}
               onChange={(event) => setCreateTitle(event.target.value)}
-              className="h-9 min-w-0 flex-1 rounded-md border border-border-default bg-transparent px-2 text-sm outline-none"
+              className="h-9"
             />
-            <button
-              type="submit"
-              disabled={creating || !createTitle.trim()}
-              className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-border-default px-3 text-sm hover:bg-surface-inset disabled:opacity-50"
-            >
-              <Plus className="size-4" aria-hidden />
-              {creating ? "Creating…" : "Create"}
-            </button>
           </div>
-          {createError && <p role="alert" className="text-sm text-status-danger">{createError}</p>}
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              {createError && <p role="alert" className="text-sm text-status-danger">{createError}</p>}
+            </div>
+            <Button type="submit" size="sm" className="h-8 shrink-0" disabled={creating || !createTitle.trim()}>
+              <Plus aria-hidden />
+              {creating ? "Creating…" : "Create"}
+            </Button>
+          </div>
         </form>
       </DialogContent>
     </Dialog>
