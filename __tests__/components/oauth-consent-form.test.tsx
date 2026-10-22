@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it } from "vitest"
 import { ConsentForm } from "@/app/oauth/authorize/consent-form"
 
 const options = {
-  agentsEnabled: true,
   agents: [],
   grantable: [
     { id: "workspace-a", name: "Compass", slug: "compass", organizationId: "org", organizationName: "RB Code Labs", organizationSlug: "rbcodelabs" },

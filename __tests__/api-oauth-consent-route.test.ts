@@ -310,7 +310,6 @@ describe("re-validation between render and submit", () => {
  */
 describe("agent binding", () => {
   beforeEach(() => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
     actions.createAgent.mockClear()
     actions.createAgent.mockImplementation(async () => ({ id: "agent-new" }))
     actions.grantWorkspaceAgent.mockClear()

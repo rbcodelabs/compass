@@ -129,7 +129,6 @@ function liveRuns(agentId: string, n: number, extra: Row = {}): Row[] {
 }
 
 beforeEach(() => {
-  vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
   vi.clearAllMocks()
   resetAgentColumnsAvailabilityCache()
   resetAgentRunsAvailabilityCache()
@@ -223,12 +222,6 @@ describe("what does not start a run", () => {
     expect(await trigger()).toEqual({ status: "skipped" })
     expect(runs()).toHaveLength(0)
     expect(launch).not.toHaveBeenCalled()
-  })
-
-  it("does not when agents are disabled", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
-    expect(await trigger()).toEqual({ status: "skipped" })
-    expect(runs()).toHaveLength(0)
   })
 
   it("does not for a task with no agent assignee, or one that is gone", async () => {

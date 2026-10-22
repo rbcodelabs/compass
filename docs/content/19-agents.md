@@ -265,12 +265,12 @@ Do not send both `assignee` and the legacy `assigneeUserId` field.
 ## Deployment
 
 Administrators must apply and verify migration `049_agent_identity` before
-this revision receives user traffic, then enable `COMPASS_AGENTS_ENABLED=1`. Cloud agents
+this revision receives user traffic. Cloud agents
 additionally need migrations `098`, `099`, `100`, `101` and `102` (the run-limit columns); the code tolerates any of
 them being unapplied (cloud-agent features stay unavailable and chat uses the built-in agent; without `102`
 every agent simply uses the default limits and the limit fields cannot be saved).
 Assignment-started runs also need background agent runs (migration `069`) and a built agent runtime snapshot.
 `COMPASS_CLOUD_AGENT_MODELS` (comma-separated) adds models to the allowed list.
-The flag is not a substitute for installing the schema. Turning off new agent operations preserves
-existing assignment records. The built-in Compass Agent is not itself a task assignee;
+Agent features are always on; there is no enable flag, so the schema must be installed before deploying. The built-in
+Compass Agent is not itself a task assignee;
 create a shared cloud agent if you want one.
