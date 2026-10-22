@@ -26,7 +26,6 @@ function oauthRequest(token = OAUTH_TOKEN) {
 describe("MCP credential expiry", () => {
   beforeEach(() => vi.clearAllMocks())
   it("derives agent identity from the stored credential and checks its human owner", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
     apiKey.update.mockResolvedValue({})
     agent.findFirst.mockResolvedValueOnce({ id: "agent", ownerUserId: "user", status: "ACTIVE" })
@@ -44,7 +43,6 @@ describe("MCP credential expiry", () => {
     ["a WORKSPACE-owned agent whose row still names the key holder", { id: "agent", ownerUserId: "user", ownerType: "WORKSPACE", ownerWorkspaceId: "ws", status: "ACTIVE" }],
     ["an agent with an unrecognized owner type", { id: "agent", ownerUserId: "user", ownerType: "ORG", status: "ACTIVE" }],
   ])("rejects an AGENT key bound to %s", async (_label, row) => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
     apiKey.update.mockResolvedValue({})
     agent.findFirst.mockResolvedValueOnce(row)
@@ -52,7 +50,6 @@ describe("MCP credential expiry", () => {
     vi.unstubAllEnvs()
   })
   it("treats NULL kind and owner_type (rows from before migration 098) as an EXTERNAL, USER-owned agent", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
     apiKey.update.mockResolvedValue({})
     agent.findFirst.mockResolvedValueOnce({ id: "agent", ownerUserId: "user", status: "ACTIVE", kind: null, ownerType: null, ownerWorkspaceId: null })
@@ -60,7 +57,6 @@ describe("MCP credential expiry", () => {
     vi.unstubAllEnvs()
   })
   it("keeps authenticating existing agents while migration 098 is unapplied (a missing column falls back to the legacy select)", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
     apiKey.update.mockResolvedValue({})
     resetAgentColumnsAvailabilityCache()
@@ -73,7 +69,6 @@ describe("MCP credential expiry", () => {
     vi.unstubAllEnvs()
   })
   it("does not swallow other database errors as a missing column", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
     resetAgentColumnsAvailabilityCache()
     agent.findFirst.mockRejectedValueOnce(new Error("connection reset"))
@@ -91,12 +86,10 @@ describe("MCP credential expiry", () => {
     await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
   })
 
-  it("rejects a registered-agent key while rollout is disabled", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
-    apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
+  it("rejects an AGENT-purpose key that carries no agent id", async () => {
+    apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: null, expiresAt: null })
     apiKey.update.mockResolvedValue({})
     await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
-    vi.unstubAllEnvs()
   })
 
   it("rejects an assistant-turn credential without workspace and expiry", async () => {
@@ -276,8 +269,8 @@ describe("OAuth access tokens", () => {
  * The escalation matrix for ADR 0015. Every case below asserts the *same*
  * property from a different direction: an agent-bound token either acts as its
  * agent or does not act at all. There is no third outcome, and in particular
- * there is no downgrade to `purpose: "USER"` — that would make flipping
- * COMPASS_AGENTS_ENABLED off a privilege escalation, and would let a suspended
+ * there is no downgrade to `purpose: "USER"` — that would turn a failed agent
+ * check into a privilege escalation, and would let a suspended
  * agent keep working through OAuth while failing through its own key.
  */
 describe("OAuth access tokens bound to an agent", () => {
@@ -293,7 +286,6 @@ describe("OAuth access tokens bound to an agent", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     oAuthToken.update.mockResolvedValue({})
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
   })
   afterEach(() => vi.unstubAllEnvs())
 
@@ -327,15 +319,6 @@ describe("OAuth access tokens bound to an agent", () => {
     oAuthToken.findFirst.mockResolvedValue(agentRow)
     agent.findFirst.mockResolvedValue(null)
     await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({ valid: false })
-  })
-
-  it("refuses, and does not downgrade, while the agent rollout is disabled", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
-    oAuthToken.findFirst.mockResolvedValue(agentRow)
-    await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({ valid: false })
-    // Refused before the agent lookup — the flag is checked first, exactly as
-    // on the key path.
-    expect(agent.findFirst).not.toHaveBeenCalled()
   })
 
   it("refuses an AGENT-mode row whose agentId is missing", async () => {

@@ -34,7 +34,6 @@ import { ThemePreferenceControl } from "@/components/theme/theme-preference-cont
 import { WorkspaceAgentsPanel } from "@/components/settings/workspace-agents-panel";
 import { AgentActivity } from "@/components/settings/agent-activity";
 import { invokedByForAgentActivity } from "@/lib/agent-activity";
-import { agentsEnabled } from "@/lib/agent-access";
 import type { AgentInvokePolicy } from "@/lib/agent-ownership";
 import { loadConfiguredAgentRunCaps } from "@/lib/agent-limits";
 import { agentKind, agentOwner, canInvokeAgent, isUserOwnedBy, listAgentsForWorkspace } from "@/lib/agent-ownership";
@@ -386,7 +385,7 @@ export default async function SettingsPage({ params }: Props) {
       </SettingsSection>
 
       <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace, including cloud agents that run inside Compass. Assignment does not grant access; assigning a task to a cloud agent from the app starts a run, within the limits set on that agent.">
-        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} enabled={agentsEnabled()} canManage={canManageCapabilityPacks} models={allowedAgentModels()} agents={workspaceAgents.map((a) => {
+        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} canManage={canManageCapabilityPacks} models={allowedAgentModels()} agents={workspaceAgents.map((a) => {
           const owner = agentOwner(a);
           const ownerMember = owner?.type === "USER" ? rawMembers.find((m) => m.userId === owner.userId) : undefined;
           // Editing follows canManageAgent: the owner of a personal agent, an administrator for a shared one. Only editors receive the instructions.

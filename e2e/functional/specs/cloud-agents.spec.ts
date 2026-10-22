@@ -6,7 +6,7 @@
  * -> it is offered by the task assignee picker (the add-task form) -> the chat's Agent menu lists it and names it as the
  * default -> the page still fits a 390px viewport.
  *
- * Requires COMPASS_AGENTS_ENABLED=1 on the dev server and migrations 098, 099 and 101 on compass_e2e (the global setup
+ * Requires migrations 098, 099 and 101 on compass_e2e (the global setup
  * applies the registered migrations). Creating the agent exercises the real server actions; only cleanup touches SQL.
  */
 import { test, expect } from "../fixtures/index";

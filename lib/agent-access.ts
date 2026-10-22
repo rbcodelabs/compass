@@ -4,8 +4,6 @@ import type { McpActor } from "@/lib/mcp-authz"
 import { isOrgAdminRole } from "@/lib/roles"
 import { agentIdentityValidForTurn, agentIdentityValidForUser, agentOwner, findAgentById, isUserOwnedBy, isWorkspaceAdminUser, type AgentRecord } from "@/lib/agent-ownership"
 
-export const agentsEnabled = () => process.env.COMPASS_AGENTS_ENABLED === "1"
-
 /**
  * True for an actor that acts through an `agents` row: a personal AGENT key or OAuth binding, or an
  * AGENT_TURN credential minted for a cloud run of a specific agent. A legacy AGENT_TURN credential with
@@ -55,7 +53,6 @@ export async function liveGrantedWorkspaceIds(agent: AgentRecord, access: "READ"
  */
 export async function sharedAgentOrganizationId(actor: McpActor): Promise<string | null | undefined> {
   if (actor.purpose !== "AGENT_TURN" || !actor.agentId) return undefined
-  if (!agentsEnabled()) return null
   const prisma = getPrisma()
   const agent = await findAgentById(prisma, actor.agentId)
   if (!agent || !agentIdentityValidForActor(agent, actor)) return null
@@ -70,7 +67,7 @@ export async function agentWorkspaceWhere(actor: McpActor): Promise<Prisma.Works
   if (!actor.userId) return { id: { in: [] } }
   const membership = { members: { some: { userId: actor.userId } } }
   if (!isAgentIdentityActor(actor)) return { ...membership, ...(actor.scopeWorkspaceId ? { id: actor.scopeWorkspaceId } : {}) }
-  if (!agentsEnabled() || !actor.agentId || !actor.userId) return { id: { in: [] } }
+  if (!actor.agentId || !actor.userId) return { id: { in: [] } }
   const prisma = getPrisma()
   const agent = await findAgentById(prisma, actor.agentId)
   if (!agent || !agentIdentityValidForActor(agent, actor)) return { id: { in: [] } }
@@ -116,7 +113,7 @@ export async function hasValidAgentOrgAdminGrant(
   organizationId: string,
   capability: AgentAdminCapability,
 ): Promise<boolean> {
-  if (!agentsEnabled() || !actor.agentId || !actor.userId) return false
+  if (!actor.agentId || !actor.userId) return false
   const prisma = getPrisma()
   const agent = await findAgentById(prisma, actor.agentId)
   if (!agent || !agentIdentityValidForActor(agent, actor)) return false
@@ -163,7 +160,7 @@ export async function hasValidAgentOrgAdminGrant(
 export async function hasOwnerOrgAdminRights(actor: McpActor, organizationId: string): Promise<boolean> {
   // A run's AGENT_TURN key is always workspace-scoped (mintAgentMcpKey), so it is refused here by scopeWorkspaceId; a shared
   // agent fails the USER-owned check below. Neither can inherit org-admin rights.
-  if (!agentsEnabled() || !actor.agentId || !actor.userId || actor.scopeWorkspaceId) return false
+  if (!actor.agentId || !actor.userId || actor.scopeWorkspaceId) return false
   const prisma = getPrisma()
   const agent = await findAgentById(prisma, actor.agentId)
   // Only a USER-owned agent inherits its owner's rights; a WORKSPACE-owned one has none to inherit.

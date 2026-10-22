@@ -100,7 +100,7 @@ export async function validateProgrammaticAuth(
   // An agent id on a key is valid for exactly two purposes: a personal AGENT key, and an AGENT_TURN key minted for a cloud run.
   if (apiKey.agentId && apiKey.purpose !== "AGENT" && apiKey.purpose !== "AGENT_TURN") return { valid: false }
   if (apiKey.purpose === "AGENT") {
-    if (process.env.COMPASS_AGENTS_ENABLED !== "1" || !apiKey.agentId) return { valid: false }
+    if (!apiKey.agentId) return { valid: false }
     // A personal key reaches only a USER-owned agent; a WORKSPACE-owned one fails closed here.
     const agent = await findActiveUserOwnedAgent(prisma, apiKey.agentId, apiKey.userId)
     if (!agent) return { valid: false }
@@ -208,8 +208,8 @@ async function validateOAuthAccessToken(token: string, expectedResource: string)
     //     the hot path; the key path already pays it and there is no FK to join
     //     across (relationMode = "prisma"), so two reads it is.
     //  2. Every failure is `{ valid: false }` — **never** a downgrade to USER.
-    //     Downgrading would make flipping COMPASS_AGENTS_ENABLED off into a
-    //     privilege *escalation*, and would let a suspended agent keep working
+    //     Downgrading would turn a failed agent check into a privilege
+    //     *escalation*, and would let a suspended agent keep working
     //     through OAuth while failing through its own key. A 401 sends the
     //     client back through discovery and consent, which is the correct and
     //     recoverable outcome.
@@ -218,7 +218,7 @@ async function validateOAuthAccessToken(token: string, expectedResource: string)
     //     it, so omitting it yields a connection where every read succeeds and
     //     every write fails — a half-working credential that reads as a Compass
     //     bug rather than a missing field.
-    if (process.env.COMPASS_AGENTS_ENABLED !== "1" || !accessToken.agentId) return { valid: false }
+    if (!accessToken.agentId) return { valid: false }
     const agent = await findActiveUserOwnedAgent(prisma, accessToken.agentId, accessToken.userId)
     if (!agent) return { valid: false }
     return {
