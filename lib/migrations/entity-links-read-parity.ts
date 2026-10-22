@@ -10,6 +10,7 @@
  * poll it sparingly, like the entityLinks*Backfill statuses it sits next to.
  */
 import type { PoolClient } from "pg"
+import { usesPlainPostgres } from "@/lib/db-url"
 import { getLinkReadMode, type LinkReadFamily, type LinkReadMode } from "@/lib/links/registry"
 
 const ID_CAP = 20
@@ -158,10 +159,12 @@ async function parityFor(client: PoolClient, schema: string, spec: Spec): Promis
       (SELECT count(*) ${drift})::text AS origin_drift,
       ARRAY(SELECT l.id ${drift} ORDER BY l.id LIMIT ${ID_CAP}) AS origin_drift_ids`
   // A slow query must not hang GET /api/admin/migrate: SET LOCAL lives only inside this transaction (no session state is left on the connection).
+  // Aurora DSQL rejects statement_timeout ("setting configuration parameter not supported"), so it is plain Postgres only; DSQL bounds
+  // query time itself. Never use raw DATABASE_URL truthiness for this check (see usesPlainPostgres).
   let result
   try {
     await client.query("BEGIN")
-    await client.query(`SET LOCAL statement_timeout = ${STATEMENT_TIMEOUT_MS}`)
+    if (usesPlainPostgres(process.env)) await client.query(`SET LOCAL statement_timeout = ${STATEMENT_TIMEOUT_MS}`)
     result = await client.query<Record<string, string | string[]>>(sql)
     await client.query("COMMIT")
   } catch (error) {
