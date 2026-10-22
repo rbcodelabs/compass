@@ -247,6 +247,27 @@ describe("an agent mention that starts a run", () => {
   })
 })
 
+describe("agent kind on the card and the candidates (drives the queue-vs-run copy)", () => {
+  it("carries agentKind from the resolved assignee onto the returned card", async () => {
+    mocks.createTask.mockResolvedValue({ id: TASK, workspaceId: WS, title: "x", status: "TODO", priority: "HIGH", dueDate: null, seqPrefix: "TASK", seqNumber: 5, assigneeUserId: null, assigneeAgentId: BOT })
+    mocks.resolveAssignees.mockImplementation(async (_ws: string, tasks: Array<Record<string, unknown>>) =>
+      tasks.map(t => ({ ...t, assignee: { type: "AGENT", id: BOT, displayName: "QA Agent", available: true, agentKind: "CLOUD" } })))
+    const result = await postDocCommentWithOptionalTask({ ...base, body: `Go ${bot}`, task: withTask, agentScopeConfirmed: true })
+    expect(result).toMatchObject({ ok: true, card: { assignee: { type: "AGENT", agentKind: "CLOUD" } } })
+  })
+
+  it("offers each agent candidate with its kind", async () => {
+    mocks.eligible.mockResolvedValue([{ type: "AGENT", id: BOT, displayName: "QA Agent", available: true, agentKind: "CLOUD" }])
+    mocks.db.agent.findMany.mockResolvedValue([])
+    mocks.db.agentWorkspaceGrant.findMany.mockResolvedValue([])
+    mocks.db.user.findMany.mockResolvedValue([])
+    mocks.db.workspace.findUnique.mockResolvedValue({ organizationId: "org" })
+    mocks.db.organizationMember.findMany.mockResolvedValue([])
+    const candidates = await loadMentionCandidates(WS)
+    expect(candidates.agents[0]).toMatchObject({ id: BOT, agentKind: "CLOUD" })
+  })
+})
+
 describe("agentIdsAssignedInDoc", () => {
   it("only counts tasks linked to comments of this doc and dedupes", async () => {
     mocks.db.docComment.findMany.mockResolvedValue([{ id: "c1" }, { id: "c2" }])

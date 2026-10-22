@@ -24,6 +24,8 @@ export interface MentionOption {
   outsideWorkspace?: boolean
   /** Agents only: access level of the active grant in this workspace. */
   access?: "READ" | "WRITE"
+  /** Agents only: CLOUD agents run when assigned; EXTERNAL ones are queued. */
+  agentKind?: "EXTERNAL" | "CLOUD"
 }
 
 export interface MentionOptions {

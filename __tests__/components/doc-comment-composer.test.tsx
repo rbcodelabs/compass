@@ -208,8 +208,23 @@ describe("edge cases", () => {
     expect(confirm).toHaveTextContent("QA Agent will receive")
     expect(confirm).toHaveTextContent("Its Write grant lets it reply in the thread")
     expect(confirm).toHaveTextContent("Nothing runs on its own")
+    expect(confirm).toHaveTextContent("A task in its queue")
+    expect(confirm).not.toHaveTextContent("starts a run")
     await act(async () => { fireEvent.click(screen.getByTestId("confirm-agent-assign")) })
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ assignee: { kind: "agent", id: BOT }, agentScopeConfirmed: true, task: expect.any(Object) })
+  })
+
+  it("says a cloud agent starts a run, not that it waits in a queue", () => {
+    renderComposer({ options: { ...options, agents: [{ kind: "agent", id: BOT, name: "QA Agent", detail: "Test plans", access: "WRITE", agentKind: "CLOUD" }] } })
+    type("Pull baselines @qa")
+    pick("QA Agent")
+    fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
+    const confirm = screen.getByTestId("agent-scope-confirm")
+    expect(confirm).toHaveTextContent("a run started as this agent")
+    expect(confirm).toHaveTextContent("Assigning starts a run as this agent")
+    expect(confirm).toHaveTextContent("the task is still assigned and you are told why")
+    expect(confirm).not.toHaveTextContent("Nothing runs on its own")
+    expect(confirm).not.toHaveTextContent("in its queue")
   })
 
   it("brings the normal buttons back when the agent chip is deleted during the scope step", () => {

@@ -42,6 +42,8 @@ export interface MentionCandidate {
   outsideWorkspace?: boolean
   /** Agents only: the access level of their active grant in this workspace. */
   access?: "READ" | "WRITE"
+  /** Agents only: CLOUD agents run when assigned; EXTERNAL ones are queued. */
+  agentKind?: "EXTERNAL" | "CLOUD"
 }
 
 export interface MentionCandidates {
@@ -73,7 +75,7 @@ export async function loadMentionCandidates(workspaceId: string): Promise<Mentio
 
   return {
     people: eligible.filter(a => a.type === "USER").map(a => ({ kind: "user", id: a.id, name: a.displayName, detail: email.get(a.id) ?? null })),
-    agents: eligible.filter(a => a.type === "AGENT").map(a => ({ kind: "agent", id: a.id, name: a.displayName, detail: description.get(a.id) ?? null, access: access.get(a.id) })),
+    agents: eligible.filter(a => a.type === "AGENT").map(a => ({ kind: "agent", id: a.id, name: a.displayName, detail: description.get(a.id) ?? null, access: access.get(a.id), agentKind: a.agentKind })),
     outside: orgMembers
       .filter(m => !members.has(m.userId))
       .map(m => ({ kind: "user" as const, id: m.userId, name: m.user.name?.trim() || m.user.email, detail: m.user.email, outsideWorkspace: true })),
@@ -111,7 +113,7 @@ export async function loadCommentTaskCards(workspaceId: string, commentIds: stri
   for (const link of links) {
     if (cards[link.linkedId]) continue
     const task = byTask.get(link.taskId)
-    if (task) cards[link.linkedId] = toCard({ ...task, assignee: task.assignee ? { type: task.assignee.type, id: task.assignee.id, displayName: task.assignee.displayName, available: task.assignee.available } : null })
+    if (task) cards[link.linkedId] = toCard({ ...task, assignee: task.assignee ? { type: task.assignee.type, id: task.assignee.id, displayName: task.assignee.displayName, available: task.assignee.available, agentKind: task.assignee.agentKind } : null })
   }
   await restoreLastKnownNames(Object.values(cards))
   return cards
@@ -261,7 +263,7 @@ export async function postDocCommentWithOptionalTask(input: PostCommentInput): P
       })
       taskId = task.id
       const [resolved] = await resolveTaskAssignees(doc.workspaceId, [task])
-      card = toCard({ ...task, assignee: resolved.assignee ? { type: resolved.assignee.type, id: resolved.assignee.id, displayName: resolved.assignee.displayName, available: resolved.assignee.available } : null })
+      card = toCard({ ...task, assignee: resolved.assignee ? { type: resolved.assignee.type, id: resolved.assignee.id, displayName: resolved.assignee.displayName, available: resolved.assignee.available, agentKind: resolved.assignee.agentKind } : null })
     } catch (error) {
       // Do not leave a comment that promised a task but has none behind.
       await deleteDocCommentCore(created.comment.id).catch(cleanupError => console.error("[doc-comment-tasks] cleanup failed", cleanupError))
