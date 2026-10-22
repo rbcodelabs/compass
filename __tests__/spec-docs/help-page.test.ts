@@ -46,6 +46,13 @@ describe("Specs and Discovery Plans help page", () => {
     for (const text of ["**Specs**", "**Discovery Plans**", "**New spec**", "**New plan**", "**Spec (unscoped)**", "read-only"]) expect(raw).toContain(text)
   })
 
+  it("does not promise a label field the New buttons do not have", () => {
+    const raw = getDocRaw(SLUG)!.content
+    expect(raw).not.toMatch(/use the optional label when you create one/)
+    expect(raw).toMatch(/buttons create it without a label/)
+    expect(raw).toContain("`label` of `create_spec`")
+  })
+
   it("is linked from the MCP API section and links back to it, and the MCP reference documents get_spec", async () => {
     const mcp = getDocRaw("09-mcp-api")!.content
     expect(mcp).toContain(`(/help/${SLUG})`)

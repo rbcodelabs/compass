@@ -280,11 +280,22 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const docId = doc.id;
   const resolveEmbeds = useCallback((refs: Parameters<typeof resolveDocEmbedRefs>[1]) => resolveDocEmbedRefs(docId, refs), [docId]);
 
+  // The markdown last known to be saved (or queued to be). An editor "update" whose markdown is identical is not an edit: StarterKit's
+  // TrailingNode appends an empty paragraph to any doc that does not end in a paragraph (every Spec and Discovery Plan ends in a
+  // heading) on the first ordinary transaction, which serializes to nothing. Saving it would rewrite the doc, and bump its
+  // revision and updatedAt, every time it is merely viewed.
+  const savedMarkdown = useRef<string | null>(null);
+
   const editor = useEditor({
     extensions: createDocEditorExtensions(initialAnchorData),
     content: doc.content ?? "",
     onUpdate: ({ editor }) => {
       const markdown = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown();
+      if (markdown === savedMarkdown.current) {
+        setSelectionEmpty(editor.state.selection.empty);
+        return;
+      }
+      savedMarkdown.current = markdown;
       setCurrentContent(markdown);
       setSelectionEmpty(editor.state.selection.empty);
       debouncedSaveContent(markdown);
@@ -296,6 +307,12 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       handleDrop: () => false,
     },
   });
+
+  // Must stay above every effect that dispatches a transaction (tiptap's own "create" event is deferred past them): it records the
+  // markdown the doc was loaded with, before the first update can be emitted.
+  useEffect(() => {
+    if (editor && savedMarkdown.current === null) savedMarkdown.current = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown();
+  }, [editor]);
 
   useEffect(() => { editor?.setEditable(!isRestoring, false); }, [editor, isRestoring]);
 

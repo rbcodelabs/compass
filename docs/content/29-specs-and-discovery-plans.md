@@ -16,7 +16,7 @@ Specs and Discovery Plans are optional. A workspace that never creates one looks
 
 - **On a solution**, the **Specs** section lists every spec for it, most recently updated first, then a **New spec** button.
 - **On an opportunity**, the **Discovery Plans** section lists every plan for it in the same way, then a **New plan** button.
-- A solution can have several specs and an opportunity several plans. **New spec** and **New plan** always make another document, so use the optional label when you create one to tell them apart (for example "v2" or "Pricing").
+- A solution can have several specs and an opportunity several plans. **New spec** and **New plan** always make another document, and the buttons create it without a label. To tell several apart, rename the document, or have an agent create it with the optional `label` of `create_spec` (for example "v2" or "Pricing"); the label is then shown beside the document in the list.
 - Members with read-only access can open and read specs and plans but do not see the **New** buttons.
 
 Creating one pre-fills the document from the record's real children: a Spec starts with the key results, assumptions, experiments and prototypes already linked to the solution; a Discovery Plan starts with the opportunity, its solutions and its riskiest open assumptions. Edit the text freely.
