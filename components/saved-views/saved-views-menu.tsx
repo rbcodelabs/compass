@@ -18,9 +18,12 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import {
-  createSavedViewAction, deleteSavedViewAction, updateSavedViewAction,
-} from "@/app/[orgSlug]/saved-views-actions"
+
+/**
+ * Loaded on first use, not at module load: the actions module pulls in auth (next-auth), and
+ * importing it eagerly would drag that into every client bundle and test that merely renders a header.
+ */
+const savedViewActions = () => import("@/app/[orgSlug]/saved-views-actions")
 import { MAX_VIEW_NAME_LENGTH } from "@/lib/roadmap-views/schema"
 import type { SavedViewRecord } from "@/lib/saved-views/service"
 import { SURFACES, type SavedViewSurface } from "@/lib/saved-views/surfaces"
@@ -101,14 +104,14 @@ export function SavedViewsMenu<V extends SavedViewRecord>({
     setConflict(false)
     startTransition(async () => {
       if (dialog.kind === "create") {
-        const result = await createSavedViewAction(orgSlug, surface, surfaceWorkspaceId, { name, visibility, ...state })
+        const result = await (await savedViewActions()).createSavedViewAction(orgSlug, surface, surfaceWorkspaceId, { name, visibility, ...state })
         if (!result.ok) return fail(result)
         setDialog(null)
         onSelect(result.view as V)
       } else {
         // Renaming/re-sharing keeps the view's own saved state; it must not capture unsaved edits.
         const { view } = dialog
-        const result = await updateSavedViewAction(orgSlug, surface, surfaceWorkspaceId, view.id, {
+        const result = await (await savedViewActions()).updateSavedViewAction(orgSlug, surface, surfaceWorkspaceId, view.id, {
           name, visibility, filters: view.filters, display: view.display,
         }, view.updatedAt)
         if (!result.ok) return fail(result)
@@ -122,7 +125,7 @@ export function SavedViewsMenu<V extends SavedViewRecord>({
     setError(null)
     setConflict(false)
     startTransition(async () => {
-      const result = await updateSavedViewAction(orgSlug, surface, surfaceWorkspaceId, current.id, {
+      const result = await (await savedViewActions()).updateSavedViewAction(orgSlug, surface, surfaceWorkspaceId, current.id, {
         name: current.name, visibility: current.visibility, ...state,
       }, current.updatedAt)
       if (!result.ok) return fail(result)
@@ -134,7 +137,7 @@ export function SavedViewsMenu<V extends SavedViewRecord>({
     if (dialog?.kind !== "delete") return
     const { view } = dialog
     startTransition(async () => {
-      const result = await deleteSavedViewAction(orgSlug, surface, surfaceWorkspaceId, view.id)
+      const result = await (await savedViewActions()).deleteSavedViewAction(orgSlug, surface, surfaceWorkspaceId, view.id)
       if (!result.ok) return fail(result)
       setDialog(null)
       if (view.id === savedViewId) onSelect(null)
