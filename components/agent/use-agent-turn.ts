@@ -46,6 +46,8 @@ export type StartTurnParams = {
   message: string
   conversationId?: string | null
   seedContext?: { entityType: string; entityId: string }
+  /** A cloud agent id, or "builtin". Omitted = the server's default (personal, then workspace, then built-in). */
+  agentId?: string
   /** Which page the user is looking at, for surfaces that float over it. */
   pageUrl?: string
   retry?: boolean
@@ -61,6 +63,18 @@ type Options = {
   onConversationCreated?: (conversationId: string, info: { detached: boolean }) => void
   /** A turn finished and its reply is ready. Not called for turns that errored or were abandoned. */
   onSettled?: (settlement: TurnSettlement) => void
+}
+
+/**
+ * The turn route answers some refusals as JSON ({ error, code }: an agent cap reached, an agent the caller may not run) and
+ * others as plain text. Show the sentence either way, never the raw JSON.
+ */
+export function readTurnErrorMessage(body: string): string {
+  try {
+    const parsed: unknown = JSON.parse(body)
+    if (parsed && typeof parsed === "object" && "error" in parsed && typeof parsed.error === "string" && parsed.error) return parsed.error
+  } catch { /* plain text */ }
+  return body
 }
 
 export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: Options) {
@@ -335,6 +349,7 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
           message: text,
           conversationId: params.conversationId ?? undefined,
           ...(params.seedContext ? { seedContext: params.seedContext } : {}),
+          ...(params.agentId ? { agentId: params.agentId } : {}),
           ...(params.pageUrl ? { pageUrl: params.pageUrl } : {}),
           ...(params.retry ? { retry: true } : {}),
           ...(params.continueTurn ? { continue: true } : {}),
@@ -342,7 +357,7 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
       })
       if (controller.signal.aborted) return true
       if (!res.ok || !res.body) {
-        const serverMsg = await res.text().catch(() => "")
+        const serverMsg = readTurnErrorMessage(await res.text().catch(() => ""))
         throw new Error(
           res.status === 401
             ? "Your session expired — reload and sign in."

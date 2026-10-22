@@ -91,7 +91,7 @@ function fakePrisma(overrides: Record<string, Any> = {}) {
     },
     agentRunEvent: { findFirst: vi.fn(), findMany: vi.fn().mockResolvedValue([]), createMany: vi.fn().mockResolvedValue({}) },
     agentMessage: { create: vi.fn().mockResolvedValue({}) },
-    agentConversation: { update: vi.fn().mockResolvedValue({}) },
+    agentConversation: { update: vi.fn().mockResolvedValue({}), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     agentAuditLog: { createMany: vi.fn().mockResolvedValue({}) },
     ...overrides,
   }
@@ -210,6 +210,23 @@ describe("createAgentRun", () => {
     expect(prisma.agentRun.create).not.toHaveBeenCalled()
     // The check and the insert share one transaction, or the invariant is a race.
     expect(prisma.agentRun.findFirst.mock.calls[0][0].where.status.in).toEqual(["QUEUED", "RUNNING"])
+  })
+
+  it("with fenceConversation, writes the conversation row BEFORE the in-flight check, inside the same transaction", async () => {
+    const prisma = fakePrisma()
+    prisma.agentRun.findFirst.mockResolvedValue(null)
+    prisma.agentRun.create.mockResolvedValue({ id: "run-1" })
+    await createAgentRun({ prisma, conversationId: "c-1", workspaceId: "ws-1", userId: "user-1", fenceConversation: true, now: NOW })
+    expect(prisma.agentConversation.updateMany).toHaveBeenCalledWith({ where: { id: "c-1" }, data: { updatedAt: NOW } })
+    expect(prisma.agentConversation.updateMany.mock.invocationCallOrder[0]).toBeLessThan(prisma.agentRun.findFirst.mock.invocationCallOrder[0])
+  })
+
+  it("does not touch the conversation by default (chat's path is unchanged)", async () => {
+    const prisma = fakePrisma()
+    prisma.agentRun.findFirst.mockResolvedValue(null)
+    prisma.agentRun.create.mockResolvedValue({ id: "run-1" })
+    await createAgentRun({ prisma, conversationId: "c-1", workspaceId: "ws-1", userId: "user-1" })
+    expect(prisma.agentConversation.updateMany).not.toHaveBeenCalled()
   })
 
   it("rejects a kind that is neither CHAT nor a registered handoff", async () => {

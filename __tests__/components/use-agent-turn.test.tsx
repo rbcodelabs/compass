@@ -87,6 +87,15 @@ describe("useAgentTurn", () => {
     expect(result.current.sending.current).toBe(false)
   })
 
+  it("shows the sentence, not the JSON, when an agent cap refuses the turn (429 AGENT_CAP_REACHED)", async () => {
+    const body = { error: "This agent already has 5 runs in progress (limit 5).", code: "AGENT_CAP_REACHED", cap: "CONCURRENT", limit: 5 }
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify(body), { status: 429, headers: { "content-type": "application/json" } }))
+    const { result, onSettled } = setup()
+    await act(async () => { await result.current.start({ message: "q", agentId: "a1" }) })
+    expect(result.current.error).toBe(body.error)
+    expect(onSettled).not.toHaveBeenCalled()
+  })
+
   it("applies a Stop pressed before the run id is known", async () => {
     let release!: (r: Response) => void
     vi.mocked(fetch)

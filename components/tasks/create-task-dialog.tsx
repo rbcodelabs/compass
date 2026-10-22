@@ -21,6 +21,7 @@ import type { TaskAssignee } from "@/lib/task-assignment";
 import type { MemberData, TaskStatus } from "@/lib/types";
 import { TaskAssigneePicker } from "./task-assignee-picker";
 import type { TaskCardData } from "./task-card";
+import { announceAgentRun } from "@/lib/ui/agent-run-toast";
 
 const CREATE_STATUSES: TaskStatus[] = ["BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "IN_REVIEW", "DONE"];
 
@@ -65,6 +66,7 @@ export function CreateTaskDialog({ workspaceId, orgSlug, workspaceSlug, members 
     startTransition(async () => {
       try {
         const task = await addTask(workspaceId, { title, status, assignee }, revalidatePathStr);
+        announceAgentRun(task.agentRun);
         const card: TaskCardData = {
           id: task.id,
           title: task.title,

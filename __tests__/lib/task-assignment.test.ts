@@ -122,6 +122,14 @@ describe("WORKSPACE-owned agents", () => {
     const [task] = await resolveTaskAssignees("ws", [{ assigneeAgentId: "shared", assigneeUserId: null }]);
     expect(task.assignee).toMatchObject({ id: "shared", displayName: "Ops", available: true });
   });
+  it("tells the caller whether an assigned agent is CLOUD or EXTERNAL (a row with no kind reads as EXTERNAL)", async () => {
+    prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ agentId: "shared" }, { agentId: "old" }]);
+    prisma.workspaceMember.findMany.mockResolvedValue([]);
+    prisma.agent.findMany.mockResolvedValue([{ ...shared, kind: "CLOUD" }, { id: "old", name: "Old", ownerUserId: "owner", status: "ACTIVE" }]);
+    const rows = await resolveTaskAssignees("ws", [{ assigneeAgentId: "shared", assigneeUserId: null }, { assigneeAgentId: "old", assigneeUserId: null }]);
+    expect(rows[0].assignee).toMatchObject({ id: "shared", agentKind: "CLOUD" });
+    expect(rows[1].assignee).toMatchObject({ id: "old", agentKind: "EXTERNAL" });
+  });
   it("is refused in a workspace other than the one that owns it, even with a live grant", async () => {
     prisma.agent.findFirst.mockResolvedValue({ ...shared, ownerWorkspaceId: "other-ws" });
     prisma.agentWorkspaceGrant.findFirst.mockResolvedValue({ id: "grant" });
@@ -163,6 +171,17 @@ describe("eligibleTaskAssignees", () => {
     expect(agents.map((a) => a.id)).toEqual(["mine", "shared"]);
     expect(agents.find((a) => a.id === "mine")?.ownerName).toBe("Olive");
     expect(agents.find((a) => a.id === "shared")?.ownerName).toBeUndefined();
+  });
+  it("lists CLOUD agents (personal and shared) alongside EXTERNAL ones, so a created cloud agent is assignable", async () => {
+    prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ agentId: "cloud-mine" }, { agentId: "cloud-shared" }, { agentId: "external" }]);
+    prisma.agent.findMany.mockResolvedValue([
+      { id: "cloud-mine", name: "Cloud mine", kind: "CLOUD", ownerType: "USER", ownerUserId: "owner", status: "ACTIVE" },
+      { id: "cloud-shared", name: "Cloud shared", kind: "CLOUD", ownerType: "WORKSPACE", ownerWorkspaceId: "ws", ownerUserId: null, status: "ACTIVE" },
+      { id: "external", name: "External", kind: "EXTERNAL", ownerType: "USER", ownerUserId: "owner", status: "ACTIVE" },
+    ]);
+    const agents = (await eligibleTaskAssignees("ws")).filter((a) => a.type === "AGENT");
+    expect(agents.map((a) => a.id)).toEqual(["cloud-mine", "cloud-shared", "external"]);
+    expect(agents.every((a) => a.available)).toBe(true);
   });
   it("lists no agents with no live grants, or with agents disabled", async () => {
     prisma.agentWorkspaceGrant.findMany.mockResolvedValue([]);

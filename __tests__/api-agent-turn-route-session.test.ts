@@ -35,7 +35,7 @@ vi.mock("@/lib/capability-pack-runtime", () => ({
   prepareCapabilityPacksForTurn: vi.fn().mockResolvedValue({ files: [], pluginPaths: [], skillIds: [], provenanceJson: "[]", systemPromptAppendices: [] }),
 }))
 vi.mock("@/lib/artifact-storage", () => ({ getCapabilityPackArtifactStorage: () => ({}) }))
-vi.mock("@/lib/agent-limits", () => ({ checkAgentUsageLimit: () => Promise.resolve({ allowed: true }) }))
+vi.mock("@/lib/agent-limits", async (original) => ({ ...await original<object>(), checkAgentUsageLimit: () => Promise.resolve({ allowed: true }), checkAgentRunCaps: () => Promise.resolve({ allowed: true }) }))
 vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: vi.fn().mockResolvedValue(null) }))
 vi.mock("@/lib/entity-summary", () => ({ getEntitySummary: vi.fn().mockResolvedValue(null) }))
 vi.mock("@/lib/mcp-connectors/store", () => ({ listConnectedGrants: vi.fn().mockResolvedValue([]) }))

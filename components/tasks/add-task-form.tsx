@@ -10,6 +10,7 @@ import type { TaskAssignee } from "@/lib/task-assignment";
 import { addTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import type { TaskCardData } from "./task-card";
 import type { TaskStatus, MemberData } from "@/lib/types";
+import { announceAgentRun } from "@/lib/ui/agent-run-toast";
 
 type Props = {
   workspaceId: string;
@@ -45,6 +46,7 @@ export function AddTaskForm({ workspaceId, status, revalidatePathStr, members, o
         { title, status, assignee },
         revalidatePathStr
       );
+      announceAgentRun(task.agentRun);
 
       onAdd({
         id: task.id,

@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   deleteComment: vi.fn(),
   createTask: vi.fn(),
   eligible: vi.fn(),
+  trigger: vi.fn(),
   resolveAssignees: vi.fn(),
   autoFollow: vi.fn(),
   emit: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("@/lib/db", () => ({ default: () => mocks.db }))
 vi.mock("@/lib/doc-comments", () => ({ createDocCommentCore: mocks.createComment, deleteDocCommentCore: mocks.deleteComment }))
 vi.mock("@/lib/task-create", () => ({ createWorkspaceTask: mocks.createTask }))
 vi.mock("@/lib/task-assignment", () => ({ eligibleTaskAssignees: mocks.eligible, resolveTaskAssignees: mocks.resolveAssignees }))
+vi.mock("@/lib/agent-task-trigger", () => ({ startRunForAssignedTask: mocks.trigger }))
 vi.mock("@/lib/follows", () => ({ autoFollow: mocks.autoFollow }))
 vi.mock("@/lib/notifications", () => ({ emitSubjectEvent: mocks.emit }))
 
@@ -72,6 +74,7 @@ beforeEach(() => {
   mocks.deleteComment.mockResolvedValue({ id: COMMENT })
   mocks.autoFollow.mockResolvedValue({ status: "followed" })
   mocks.emit.mockResolvedValue({ status: "emitted" })
+  mocks.trigger.mockResolvedValue({ status: "skipped" })
 })
 
 describe("authorization", () => {
@@ -205,6 +208,63 @@ describe("agent assignment", () => {
     mocks.eligible.mockResolvedValue([{ type: "USER", id: QUINN, displayName: "Quinn Morales", available: true }])
     const result = await postDocCommentWithOptionalTask({ ...base, body: bot, task: withTask, agentScopeConfirmed: true })
     expect(result).toEqual({ ok: false, error: "ASSIGNEE_NOT_IN_WORKSPACE" })
+  })
+})
+
+describe("an agent mention that starts a run", () => {
+  beforeEach(() => {
+    mocks.createTask.mockResolvedValue({ id: TASK, workspaceId: WS, title: "x", status: "TODO", priority: "HIGH", dueDate: null, seqPrefix: "TASK", seqNumber: 5, assigneeUserId: null, assigneeAgentId: BOT })
+  })
+
+  it("asks the trigger with the task, the commenter, and the comment as context, and returns what happened", async () => {
+    const outcome = { status: "started", agentName: "QA Agent", runId: "r1", conversationId: "c1", conversationUrl: "/o/w/agent?c=c1" }
+    mocks.trigger.mockResolvedValue(outcome)
+    const body = `Pull baselines ${bot}`
+    const result = await postDocCommentWithOptionalTask({ ...base, body, task: withTask, agentScopeConfirmed: true })
+    expect(mocks.trigger).toHaveBeenCalledWith({ taskId: TASK, actingUserId: ME, comment: { id: COMMENT, docId: DOC, body } })
+    expect(result).toMatchObject({ ok: true, agentRun: outcome })
+  })
+
+  it("keeps the comment and the task when the run is refused, and reports why", async () => {
+    mocks.trigger.mockResolvedValue({ status: "refused", code: "AGENT_CAP_REACHED", message: "no run started" })
+    const result = await postDocCommentWithOptionalTask({ ...base, body: `Go ${bot}`, task: withTask, agentScopeConfirmed: true })
+    expect(result).toMatchObject({ ok: true, agentRun: { status: "refused", code: "AGENT_CAP_REACHED" } })
+    expect(mocks.deleteComment).not.toHaveBeenCalled()
+  })
+
+  it("does not ask the trigger for a person assignee, a plain comment, or a rejected comment", async () => {
+    mocks.createTask.mockResolvedValue({ id: TASK, workspaceId: WS, title: "x", status: "TODO", priority: "HIGH", dueDate: null, seqPrefix: "TASK", seqNumber: 5, assigneeUserId: QUINN, assigneeAgentId: null })
+    await postDocCommentWithOptionalTask({ ...base, body: `Please ${quinn}`, task: withTask })
+    await postDocCommentWithOptionalTask({ ...base, body: `FYI ${bot}` })
+    mocks.db.workspaceMember.findFirst.mockResolvedValue(null)
+    await postDocCommentWithOptionalTask({ ...base, body: `Go ${bot}`, task: withTask, agentScopeConfirmed: true })
+    expect(mocks.trigger).not.toHaveBeenCalled()
+  })
+
+  it("leaves `agentRun` off the result when the trigger skipped", async () => {
+    const result = await postDocCommentWithOptionalTask({ ...base, body: `Go ${bot}`, task: withTask, agentScopeConfirmed: true })
+    expect(result).not.toHaveProperty("agentRun")
+  })
+})
+
+describe("agent kind on the card and the candidates (drives the queue-vs-run copy)", () => {
+  it("carries agentKind from the resolved assignee onto the returned card", async () => {
+    mocks.createTask.mockResolvedValue({ id: TASK, workspaceId: WS, title: "x", status: "TODO", priority: "HIGH", dueDate: null, seqPrefix: "TASK", seqNumber: 5, assigneeUserId: null, assigneeAgentId: BOT })
+    mocks.resolveAssignees.mockImplementation(async (_ws: string, tasks: Array<Record<string, unknown>>) =>
+      tasks.map(t => ({ ...t, assignee: { type: "AGENT", id: BOT, displayName: "QA Agent", available: true, agentKind: "CLOUD" } })))
+    const result = await postDocCommentWithOptionalTask({ ...base, body: `Go ${bot}`, task: withTask, agentScopeConfirmed: true })
+    expect(result).toMatchObject({ ok: true, card: { assignee: { type: "AGENT", agentKind: "CLOUD" } } })
+  })
+
+  it("offers each agent candidate with its kind", async () => {
+    mocks.eligible.mockResolvedValue([{ type: "AGENT", id: BOT, displayName: "QA Agent", available: true, agentKind: "CLOUD" }])
+    mocks.db.agent.findMany.mockResolvedValue([])
+    mocks.db.agentWorkspaceGrant.findMany.mockResolvedValue([])
+    mocks.db.user.findMany.mockResolvedValue([])
+    mocks.db.workspace.findUnique.mockResolvedValue({ organizationId: "org" })
+    mocks.db.organizationMember.findMany.mockResolvedValue([])
+    const candidates = await loadMentionCandidates(WS)
+    expect(candidates.agents[0]).toMatchObject({ id: BOT, agentKind: "CLOUD" })
   })
 })
 

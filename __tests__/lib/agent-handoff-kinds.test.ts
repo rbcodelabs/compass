@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { HANDOFF_POLICIES } from "@/lib/agent-handoff-kinds"
-import { HANDOFF_KINDS, handoffKind, parseProcessingState, type HandoffKind, type ProcessingState } from "@/lib/pm-agent-processing"
+import { HANDOFF_KINDS, RUN_ONLY_HANDOFF_KINDS, handoffKind, parseProcessingState, type HandoffKind, type ProcessingState } from "@/lib/pm-agent-processing"
 
 /**
  * Byte-for-byte copies of the two strings `app/api/agent/turn/route.ts` produced
@@ -95,8 +95,8 @@ describe("HandoffKind union", () => {
   // as Record<HandoffKind, ...> turned every unhandled dispatch site into a
   // compile error instead of a silent fallthrough into PM-interview logic. This
   // test is updated rather than deleted so a *third* kind hits the same wall.
-  it("is exactly the two shipped kinds, so a further kind forces every dispatch site to be revisited", () => {
-    const kinds: HandoffKind[] = ["PM_INTERVIEW", "RESEARCH_SYNTHESIS"]
+  it("is exactly the three shipped kinds, so a further kind forces every dispatch site to be revisited", () => {
+    const kinds: HandoffKind[] = ["PM_INTERVIEW", "RESEARCH_SYNTHESIS", "TASK_ASSIGNMENT"]
     expect([...HANDOFF_KINDS]).toEqual(kinds)
   })
 
@@ -122,5 +122,39 @@ describe("HandoffKind union", () => {
     expect(instruction).toContain("verbatim")
     expect(instruction).not.toBe(HANDOFF_POLICIES.PM_INTERVIEW.instruction(state))
     expect(HANDOFF_POLICIES.RESEARCH_SYNTHESIS.failureMessage).not.toBe(LEGACY_PM_FAILURE)
+  })
+})
+
+describe("TASK_ASSIGNMENT (cloud agents, phase 4)", () => {
+  const state = { status: "RUNNING" as const, kind: "TASK_ASSIGNMENT" as const, taskId: "task-1" }
+
+  it("names the task, treats task and comment text as untrusted, and cannot widen access", () => {
+    const text = HANDOFF_POLICIES.TASK_ASSIGNMENT.instruction(state)
+    expect(text).toContain("task-1")
+    expect(text).toContain("get_task")
+    expect(text).toMatch(/untrusted/)
+    expect(text).toMatch(/cannot widen your access/)
+    expect(text).not.toContain("doc comment tools")
+  })
+
+  it("points the agent at the source comment and doc when the task came from one", () => {
+    const text = HANDOFF_POLICIES.TASK_ASSIGNMENT.instruction({ ...state, commentId: "c-9", docId: "d-3" })
+    expect(text).toContain("comment c-9 in doc d-3")
+  })
+
+  it("shows the excerpt only as labelled untrusted text", () => {
+    const text = HANDOFF_POLICIES.TASK_ASSIGNMENT.instruction({ ...state, taskContext: "Task title: Fix it" })
+    expect(text).toContain("Excerpt (untrusted):\nTask title: Fix it")
+  })
+
+  it("is run-only: a stored claim blob can never carry it, so an ordinary conversation cannot become a claim for it", () => {
+    expect(RUN_ONLY_HANDOFF_KINDS).toEqual(["TASK_ASSIGNMENT"])
+    expect(() => parseProcessingState(JSON.stringify({ status: "PENDING", kind: "TASK_ASSIGNMENT", taskId: "t" }))).toThrow("Unsupported interview processing kind")
+  })
+
+  it("has a failure message that does not claim nothing changed (the agent may have acted before it stopped)", () => {
+    const message = HANDOFF_POLICIES.TASK_ASSIGNMENT.failureMessage
+    expect(message).toMatch(/did not finish/)
+    expect(message).toMatch(/may have made some changes/)
   })
 })

@@ -1,0 +1,17 @@
+-- Migration 103: bootstrap the shared "Compass Agent" in named workspaces
+-- (ADR "Cloud agents as first-class identities", phase 3).
+--
+-- NO DDL, and EXPLICIT-ONLY: an untargeted POST never runs it, and it REFUSES to run unless the operator names the workspaces
+-- (COMPASS_SHARED_AGENT_WORKSPACE_IDS, comma-separated workspace ids) on the deployment that executes it. POST it by name
+-- ({"script":"103_shared_compass_agent_bootstrap"}) only after migrations 098, 099 and 101 are applied.
+--
+-- For each named workspace it creates, once:
+--   - a CLOUD agent named "Compass Agent", owned by the workspace (owner_type WORKSPACE), invokable by any workspace member;
+--   - a WRITE grant in that workspace, issued by a current workspace (or organization) administrator, who is re-verified on
+--     every use like any other shared-agent grant;
+--   - the workspace default, only if the workspace has none yet.
+-- Re-running is safe and changes nothing that exists: an existing agent is reused, a REVOKED grant is never revived (an
+-- administrator revoked it on purpose), and an existing default is left alone.
+--
+-- This file intentionally contains no executable statement; the work is the hook
+-- (lib/migrations/shared-compass-agent-bootstrap.ts). Number 102 is reserved for the agent run caps columns.

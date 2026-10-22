@@ -101,6 +101,9 @@ export default defineConfig({
         // this, eligibleTaskAssignees() (lib/task-assignment.ts) returns people
         // only, no agent option ever renders, and the spec hangs to timeout.
         COMPASS_AGENTS_ENABLED: "1",
+        // cloud-agents.spec.ts: assigning a task to a cloud agent starts a run only when the model credential exists. A placeholder
+        // is enough: the sandbox cannot boot in this environment, so the key is never used, only checked for presence.
+        ANTHROPIC_API_KEY: "e2e-placeholder-not-a-real-key",
         // passkeys.spec.ts needs the /login button and /settings/passkeys
         // panel visible. The underlying Passkey provider itself is only ever
         // registered in auth.ts's production/preview branch though — `pnpm

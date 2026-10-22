@@ -1124,6 +1124,12 @@ member of each workspace. See [Agents](/help/19-agents) for registration and gra
 `create_task` and `update_task` accept `assignee: { type: "USER" | "AGENT", id }`;
 null clears an assignment and omission preserves it on update. Legacy
 `assigneeUserId` remains supported, but supplying both forms is rejected.
+Assigning an agent through these tools records the assignment only. It does not start a
+cloud agent's run: a run starts when a person assigns the task in the Compass app, or
+mentions the agent in a Doc comment that creates a task. The MCP and REST callers can be
+agents or service keys, and chained assignments would otherwise start runs no person asked
+for. See [Agents](/help/19-agents).
+
 `list_tasks` supports typed assignee filters and `assignedToMe: true`; conflicting
 assignee filters are rejected. Service and unregistered runtime credentials
 cannot use the “me” filter. Existing human assignee filter URLs remain supported.

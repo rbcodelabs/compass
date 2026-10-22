@@ -13,6 +13,7 @@ import { usePanelContext, type EntityPanelType } from "@/components/panels/panel
 import type { MemberData, TaskLinkedType, TaskPriority, TaskStatus } from "@/lib/types";
 import { TaskAssigneePicker } from "@/components/tasks/task-assignee-picker";
 import type { ResolvedTaskAssignee, TaskAssignee } from "@/lib/task-assignment";
+import { announceAgentRun } from "@/lib/ui/agent-run-toast";
 
 export type LinkedTaskData = {
   id: string;
@@ -95,7 +96,8 @@ export function LinkedTasksSection({ linkedType, linkedId, orgSlug, workspaceSlu
     setError(null);
     startTransition(async () => {
       try {
-        await addLinkedTask(orgSlug, workspaceSlug, linkedType, linkedId, { title, assignee }, revalidatePathStr);
+        const added = await addLinkedTask(orgSlug, workspaceSlug, linkedType, linkedId, { title, assignee }, revalidatePathStr);
+        announceAgentRun(added.agentRun);
         await finishMutation();
         form.reset();
         setAssignee(null);

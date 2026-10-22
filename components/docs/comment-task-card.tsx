@@ -62,7 +62,9 @@ export function CommentTaskCard({ card, taskHref }: { card: CommentTaskCardData;
         <span className={cn(card.priority === "HIGH" || card.priority === "URGENT" ? "font-semibold text-status-warning" : "")}>{PRIORITY_LABELS[card.priority]}</span>
       </div>
       {agent && (card.status === "TODO" || card.status === "BACKLOG") && (
-        <p className="m-0 text-xs text-text-subtle">Waiting in the agent’s task queue.</p>
+        <p className="m-0 text-xs text-text-subtle">
+          {card.assignee?.agentKind === "CLOUD" ? "Assigned to a cloud agent: assigning starts a run. Open the task to follow it." : "Waiting in the agent’s task queue."}
+        </p>
       )}
       <Link href={taskHref} className="text-xs font-semibold text-status-info hover:underline" data-testid="open-task-link">
         Open task {"→"}

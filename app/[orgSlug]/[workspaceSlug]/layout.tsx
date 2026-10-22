@@ -32,6 +32,11 @@ import { ReadOnlyBanner } from "@/components/workspace/read-only-banner"
 import { UndoToastHost } from "@/components/ui/undo-toast-host"
 import { WorkspaceVisitRecorder } from "@/components/workspace-selector/workspace-visit-recorder"
 
+// Server actions on every page below (assigning a task, a Doc comment that mentions an agent) can start a cloud agent's run,
+// whose sandbox start is deferred with after() and shares the page's function budget. A page-level maxDuration is what sets
+// that budget for its server actions, and a layout's applies to every page under it.
+export const maxDuration = 300
+
 interface WorkspaceLayoutProps {
   children: React.ReactNode
   params: Promise<{ orgSlug: string; workspaceSlug: string }>

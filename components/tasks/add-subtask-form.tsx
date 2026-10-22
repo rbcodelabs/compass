@@ -9,6 +9,7 @@ import type { TaskCardData } from "./task-card";
 import { TaskAssigneePicker } from "./task-assignee-picker";
 import type { TaskAssignee } from "@/lib/task-assignment";
 import type { MemberData } from "@/lib/types";
+import { announceAgentRun } from "@/lib/ui/agent-run-toast";
 
 type Props = {
   workspaceId: string;
@@ -34,6 +35,7 @@ export function AddSubtaskForm({ workspaceId, parentTaskId, revalidatePathStr, o
     startTransition(async () => {
       try {
       const task = await addTask(workspaceId, { title, parentTaskId, assignee }, revalidatePathStr);
+      announceAgentRun(task.agentRun);
       onAdd({
         id: task.id,
         title: task.title,

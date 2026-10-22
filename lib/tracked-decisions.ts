@@ -282,7 +282,7 @@ async function listAwaitingFollowThrough(prisma: ReturnType<typeof getPrisma>, w
  * real linked work would be a contradictory, misleading state) or one that
  * has already been closed this way.
  */
-export async function recordDecisionNoAction(input: { workspaceId: string; requestId: string; reason: string; actorUserId: string | null }) {
+export async function recordDecisionNoAction(input: { workspaceId: string; requestId: string; reason: string; actorUserId: string | null; /** Stored before the validated reason, outside its length limit (e.g. who closed it when no user column can say). */ recordedPrefix?: string }) {
   const reason = required(input.reason, "Reason", 2_000)
   const prisma = getPrisma()
   const request = await prisma.reviewRequest.findFirst({ where: { id: input.requestId, workspaceId: input.workspaceId, gateType: TRACKED_GATE } })
@@ -294,7 +294,7 @@ export async function recordDecisionNoAction(input: { workspaceId: string; reque
   if (linked.has(request.id)) throw new TrackedDecisionError("HAS_LINKED_WORK", "This decision already has follow-up work linked to it. Unlink it first if it truly needs no action.")
   return prisma.reviewRequest.update({
     where: { id: request.id },
-    data: { noActionAt: new Date(), noActionById: input.actorUserId, noActionReason: reason, updatedAt: new Date() },
+    data: { noActionAt: new Date(), noActionById: input.actorUserId, noActionReason: `${input.recordedPrefix ?? ""}${reason}`, updatedAt: new Date() },
   })
 }
 

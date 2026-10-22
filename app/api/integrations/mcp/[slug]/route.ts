@@ -65,6 +65,9 @@ async function proxy(request: NextRequest, context: { params: Promise<{ slug: st
   if (!authResult.valid || authResult.purpose !== "AGENT_TURN" || !authResult.userId)
     return jsonRpcError(401, -32001, "This endpoint requires an agent turn credential.")
   const userId = authResult.userId
+  // Connected third-party accounts are a person's own credentials. A run acting as a named agent (personal or
+  // shared) is not that person, so it never borrows them: the agent's reach is its Compass grants only.
+  if (authResult.agentId) return jsonRpcError(403, -32004, "Connected accounts are not available to agent runs.")
 
   if (!(await mcpConnectorsAvailable()))
     return jsonRpcError(503, -32002, "Connectors are not available on this deployment.")
