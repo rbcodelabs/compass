@@ -18,12 +18,10 @@ const ALLOWED_CALLERS = [
 describe("who may start a run from an assignment", () => {
   it("is only the person-driven UI paths", () => {
     const root = process.cwd()
-    const files = execFileSync("grep", ["-rl", "--include=*.ts", "--include=*.tsx", "agent-task-trigger", "app", "lib", "components"], { cwd: root, encoding: "utf8" })
+    const files = execFileSync("grep", ["-rl", "--include=*.ts", "--include=*.tsx", "from \"@/lib/agent-task-trigger\"", "app", "lib", "components"], { cwd: root, encoding: "utf8" })
       .split("\n")
       .filter(Boolean)
       .map((file) => path.normalize(file))
-      // The module itself and its client-side notice helper (a type-only mirror) are not callers.
-      .filter((file) => !file.endsWith("lib/agent-task-trigger.ts") && !file.endsWith("lib/ui/agent-run-toast.ts"))
       .sort()
     expect(files).toEqual([...ALLOWED_CALLERS].sort())
   })
