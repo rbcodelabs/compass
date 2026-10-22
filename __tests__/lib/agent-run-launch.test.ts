@@ -13,9 +13,10 @@ const m = vi.hoisted(() => ({
   runCommand: vi.fn(),
   runUpdate: vi.fn(),
   packRows: vi.fn(),
+  stop: vi.fn(),
 }))
 
-vi.mock("@/lib/agent-sandbox", () => ({ bootSandboxFromSnapshot: (...a: unknown[]) => m.boot(...a) }))
+vi.mock("@/lib/agent-sandbox", () => ({ bootSandboxFromSnapshot: (...a: unknown[]) => m.boot(...a), stopSandboxByName: (...a: unknown[]) => m.stop(...a) }))
 vi.mock("@/lib/agent-mcp-key", () => ({ mintAgentMcpKey: (...a: unknown[]) => m.mint(...a), revokeAgentMcpKey: (...a: unknown[]) => m.revoke(...a) }))
 vi.mock("@/lib/capability-pack-runtime", () => ({ prepareCapabilityPacksForTurn: (...a: unknown[]) => m.packs(...a) }))
 vi.mock("@/lib/artifact-storage", () => ({ getCapabilityPackArtifactStorage: () => ({ get: vi.fn() }) }))
@@ -69,6 +70,7 @@ beforeEach(() => {
   m.writeFiles.mockResolvedValue(undefined)
   m.runCommand.mockResolvedValue(undefined)
   m.boot.mockResolvedValue({ writeFiles: m.writeFiles, runCommand: m.runCommand })
+  m.stop.mockResolvedValue(undefined)
 })
 
 describe("launchQueuedAgentRun", () => {
@@ -121,6 +123,26 @@ describe("launchQueuedAgentRun", () => {
     expect(env.AI_GATEWAY_API_KEY).toBe("gw")
     expect(env).not.toHaveProperty("ANTHROPIC_API_KEY")
     expect(env.AGENT_MODEL).toBe("anthropic/claude-sonnet-5.5")
+  })
+
+  it("tears the sandbox down and revokes the key when the run was closed while its start was in flight (markStarted finds it not QUEUED)", async () => {
+    m.started.mockResolvedValue(false)
+    expect(await launchQueuedAgentRun(context())).toEqual({ started: false })
+    expect(m.revoke).toHaveBeenCalledWith("key-1")
+    expect(m.stop).toHaveBeenCalledWith("compass-agent-run-run-1")
+    // The run is already terminal; it is not finalized a second time.
+    expect(m.finalize).not.toHaveBeenCalled()
+  })
+
+  it("does not stop anything when the start was recorded", async () => {
+    await launchQueuedAgentRun(context())
+    expect(m.stop).not.toHaveBeenCalled()
+  })
+
+  it("still reports not-started if tearing the orphan down itself fails", async () => {
+    m.started.mockResolvedValue(false)
+    m.stop.mockRejectedValue(new Error("sandbox gone"))
+    await expect(launchQueuedAgentRun(context())).resolves.toEqual({ started: false })
   })
 
   it("fails the run, revokes the key and does not boot when the run ended before its key could be attached", async () => {

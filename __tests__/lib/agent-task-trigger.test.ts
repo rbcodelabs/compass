@@ -103,7 +103,7 @@ vi.mock("@/lib/db", () => ({ default: () => prisma }))
 // `after` only exists inside a request; the trigger's own fallback (run inline) is exercised by passing `defer` explicitly.
 vi.mock("next/server", () => ({ after: () => { throw new Error("outside a request scope") } }))
 
-import { startRunForAssignedTask, buildTaskContext, taskConversationId, type AgentRunOutcome } from "@/lib/agent-task-trigger"
+import { startRunForAssignedTask, buildTaskContext, taskConversationId, UNSTARTED_RUN_GRACE_MS, type AgentRunOutcome } from "@/lib/agent-task-trigger"
 import { resetAgentColumnsAvailabilityCache } from "@/lib/agent-ownership"
 import { resetAgentRunAttributionAvailabilityCache, resetAgentRunsAvailabilityCache } from "@/lib/agent-runs"
 
@@ -340,11 +340,49 @@ describe("concurrent triggers", () => {
     expect(db.state.agentConversation).toHaveLength(1)
   })
 
-  it("maps a database write conflict on the conversation (DSQL aborting the loser) to already_running", async () => {
+  const conflicts: Array<[string, Error]> = [
+    ["Prisma P2034", Object.assign(new Error("write conflict"), { code: "P2034" })],
+    ["SQLSTATE 40001", Object.assign(new Error("could not serialize"), { code: "40001" })],
+    ["SQLSTATE 40001 in meta", Object.assign(new Error("failed"), { code: "P2010", meta: { code: "40001" } })],
+    ["DSQL optimistic concurrency text", new Error("change conflicts with another transaction (OC001)")],
+  ]
+
+  it.each(conflicts)("reports already_running on a write conflict (%s) ONLY because a live run exists after re-reading", async (_label, conflict) => {
     await trigger()
     prisma.agentRun.findFirst.mockResolvedValueOnce(null) // the pre-check misses
-    prisma.$transaction.mockRejectedValueOnce(Object.assign(new Error("write conflict"), { code: "P2034" }))
+    prisma.$transaction.mockRejectedValueOnce(conflict)
     expect(await trigger({ previousAssigneeAgentId: personalAgent.id })).toMatchObject({ status: "already_running" })
+  })
+
+  it.each(conflicts)("asks the person to retry on a write conflict (%s) when NO run exists, instead of claiming one is running", async (_label, conflict) => {
+    prisma.$transaction.mockRejectedValueOnce(conflict)
+    const outcome = await trigger()
+    expect(outcome).toMatchObject({ status: "refused", code: "AGENT_RUN_RETRY" })
+    expect(outcome.status === "refused" && outcome.message).toMatch(/Assign it again/)
+    expect(runs()).toHaveLength(0)
+    expect(launch).not.toHaveBeenCalled()
+  })
+
+  it("treats a write conflict on the first-time conversation create as the winner's row, when it is there", async () => {
+    prisma.agentConversation.create.mockImplementationOnce(async ({ data }: Row) => {
+      db.state.agentConversation.push({ ...data, createdAt: new Date() })
+      throw Object.assign(new Error("write conflict"), { code: "P2034" })
+    })
+    expect((await trigger()).status).toBe("started")
+    expect(db.state.agentConversation).toHaveLength(1)
+  })
+
+  it("asks to retry on a conversation-create conflict when no row is there, and writes nothing else", async () => {
+    prisma.agentConversation.create.mockRejectedValueOnce(Object.assign(new Error("write conflict"), { code: "40001" }))
+    expect(await trigger()).toMatchObject({ status: "refused", code: "AGENT_RUN_RETRY" })
+    expect(runs()).toHaveLength(0)
+    expect(db.state.agentMessage).toHaveLength(0)
+  })
+
+  it("still raises a conversation-create failure that is not a conflict (reported as a failed start, never swallowed)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    prisma.agentConversation.create.mockRejectedValueOnce(new Error("connection reset"))
+    expect(await trigger()).toMatchObject({ status: "refused", code: "AGENT_RUN_FAILED" })
   })
 
   it("different people assigning the same task get their own conversations and runs", async () => {
@@ -386,7 +424,7 @@ describe("taskConversationId", () => {
 })
 
 describe("a run whose launch never happened", () => {
-  const OLD = new Date(Date.now() - 10 * 60_000)
+  const OLD = new Date(Date.now() - 10 * 60_000) // older than the 6 minute grace
 
   it("is closed on the next trigger, freeing its concurrent slot and the conversation", async () => {
     const stuck = liveRuns(sharedAgent.id, 5, { kind: "TASK_ASSIGNMENT", status: "QUEUED", startedAt: null, statusChangedAt: OLD })
@@ -394,6 +432,22 @@ describe("a run whose launch never happened", () => {
     const outcome = await trigger()
     expect(finalize).toHaveBeenCalledTimes(5)
     expect(finalize).toHaveBeenCalledWith(expect.objectContaining({ status: "FAILED", errorCode: "RUN_START_FAILED" }))
+    expect(outcome.status).toBe("started")
+  })
+
+  it("waits longer than the 300 s function budget the start runs under: a slow legitimate start is never closed from under itself", async () => {
+    expect(UNSTARTED_RUN_GRACE_MS).toBeGreaterThan(300_000)
+    db.state.agentRun = liveRuns(sharedAgent.id, 1, { kind: "TASK_ASSIGNMENT", status: "QUEUED", startedAt: null, statusChangedAt: new Date(Date.now() - 280_000) })
+    await trigger()
+    expect(finalize).not.toHaveBeenCalled()
+  })
+
+  it("also closes a dead queued run in THIS conversation made for a different agent, which would otherwise block it", async () => {
+    const conversationId = taskConversationId("member", "task-1")
+    db.state.agentConversation = [{ id: conversationId, workspaceId: WS, userId: "member", title: "TASK-7: x", updatedAt: new Date() }]
+    db.state.agentRun = [{ id: "dead-other-agent", conversationId, agentId: personalAgent.id, kind: "TASK_ASSIGNMENT", status: "QUEUED", startedAt: null, statusChangedAt: OLD, createdAt: OLD }]
+    const outcome = await trigger()
+    expect(finalize).toHaveBeenCalledWith(expect.objectContaining({ runId: "dead-other-agent", status: "FAILED" }))
     expect(outcome.status).toBe("started")
   })
 

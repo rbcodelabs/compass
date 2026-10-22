@@ -44,6 +44,7 @@ import { HANDOFF_POLICIES } from "@/lib/agent-handoff-kinds"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import { displayIdFromRow } from "@/lib/work-item-ids"
 import { createHash } from "node:crypto"
+import { isDsqlWriteConflict } from "@/lib/dsql-conflict"
 
 export type AgentRunOutcome =
   /** Nothing to report: not an agent assignment, nothing changed, agents off, or an EXTERNAL agent (queue only). */
@@ -62,6 +63,8 @@ export type AgentRunRefusalCode =
   | "AGENT_CAP_REACHED"
   | "AGENT_RUNTIME_UNAVAILABLE"
   | "AGENT_RUN_FAILED"
+  /** A concurrent change got in the way and no run exists yet: assigning again will work. */
+  | "AGENT_RUN_RETRY"
 
 export type TriggerInput = {
   taskId: string
@@ -90,10 +93,12 @@ const EXCERPT_MAX = 600
 /**
  * A triggered run is created QUEUED and its sandbox is started after the response (`defer`). If that function instance dies
  * between the two, the run is left QUEUED with nothing behind it, and until the (once a day) sweeper collects it that run would
- * hold one of the agent's concurrent slots and block this conversation with "already running". A real start takes seconds, so a
- * run still unstarted after this long is dead and is closed here, on the next trigger, instead of waiting for the sweeper.
+ * hold one of the agent's concurrent slots and block this conversation with "already running". The grace is longer than the 300 s
+ * function budget the start runs under (app/[orgSlug]/[workspaceSlug]/layout.tsx), so a start that is merely slow is never closed
+ * from under itself; a run still unstarted after this long is dead and is closed here, on the next trigger, instead of waiting
+ * for the sweeper. (The launcher also tears down its sandbox if it finds its run already closed.)
  */
-export const UNSTARTED_RUN_GRACE_MS = 3 * 60_000
+export const UNSTARTED_RUN_GRACE_MS = 6 * 60_000
 
 function clip(text: string | null | undefined, max = EXCERPT_MAX): string {
   const clean = (text ?? "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").trim()
@@ -148,11 +153,14 @@ export function taskConversationId(userId: string, taskId: string): string {
 
 const refused = (code: AgentRunRefusalCode, message: string, agentName?: string): AgentRunOutcome => ({ status: "refused", code, message, ...(agentName ? { agentName } : {}) })
 
-/** Closes this agent's triggered runs that were queued but never started (see {@link UNSTARTED_RUN_GRACE_MS}). */
-async function reapUnstartedRuns(deps: TriggerDeps, agentId: string) {
+/**
+ * Closes triggered runs that were queued but never started (see {@link UNSTARTED_RUN_GRACE_MS}): this agent's (they hold its
+ * concurrent slots), and any in this conversation whatever agent they were for (they would block it with "already running").
+ */
+async function reapUnstartedRuns(deps: TriggerDeps, agentId: string, conversationId: string) {
   const cutoff = new Date(deps.now().getTime() - UNSTARTED_RUN_GRACE_MS)
   const stale = await deps.prisma.agentRun.findMany({
-    where: { agentId, kind: "TASK_ASSIGNMENT", status: "QUEUED", startedAt: null, statusChangedAt: { lte: cutoff } },
+    where: { kind: "TASK_ASSIGNMENT", status: "QUEUED", startedAt: null, statusChangedAt: { lte: cutoff }, OR: [{ agentId }, { conversationId }] },
     select: { id: true },
     take: 25,
   })
@@ -209,7 +217,8 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
     return refused("AGENT_RUN_UNAVAILABLE", `The task was assigned to ${runAgent.name}. Background agent runs are not available on this deployment yet, so no run started.`, runAgent.name)
   }
 
-  await reapUnstartedRuns(deps, runAgent.id)
+  const conversationId = taskConversationId(input.actingUserId, task.id)
+  await reapUnstartedRuns(deps, runAgent.id, conversationId)
 
   const harness = resolveAgentHarness(deps.env.AGENT_HARNESS)
   const anthropicApiKey = deps.env.ANTHROPIC_API_KEY
@@ -225,7 +234,6 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
 
   // One conversation per (person, task), found by its deterministic id (see taskConversationId).
   const titlePrefix = `${reference}: `
-  const conversationId = taskConversationId(input.actingUserId, task.id)
   const existing = await prisma.agentConversation.findFirst({ where: { id: conversationId, workspaceId: task.workspaceId, userId: input.actingUserId }, select: { id: true } })
   if (existing && (await findActiveAgentRun({ prisma, conversationId: existing.id }))) {
     return { status: "already_running", agentName: runAgent.name, conversationId: existing.id, conversationUrl: conversationUrl(existing.id) }
@@ -244,9 +252,12 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
         select: { id: true },
       })
     } catch (error) {
-      // A concurrent trigger for the same (person, task) created it first: that is the conversation, not a failure.
-      if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "P2002") throw error
-      conversation = { id: conversationId }
+      // A concurrent trigger for the same (person, task) created it first (unique id, or DSQL aborting the loser). Only the
+      // row actually being there makes that so; otherwise the conflict is real and the person can simply try again.
+      const duplicate = typeof error === "object" && error !== null && "code" in error && error.code === "P2002"
+      if (!duplicate && !isDsqlWriteConflict(error)) throw error
+      conversation = await prisma.agentConversation.findFirst({ where: { id: conversationId, workspaceId: task.workspaceId, userId: input.actingUserId }, select: { id: true } })
+      if (!conversation) return refused("AGENT_RUN_RETRY", `The task was assigned to ${runAgent.name}, but another change was in progress and no run started. Assign it again in a moment.`, runAgent.name)
     }
   }
 
@@ -276,9 +287,13 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
       if (error.code === "RUN_IN_FLIGHT") return { status: "already_running", agentName: runAgent.name, conversationId: conversation.id, conversationUrl: conversationUrl(conversation.id) }
       return refused("AGENT_RUN_FAILED", `The task was assigned to ${runAgent.name}, but no run started: ${error.message}`, runAgent.name)
     }
-    // Aurora DSQL aborts the loser of two concurrent writes to the conversation row (Prisma P2034): a concurrent start won.
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "P2034") {
-      return { status: "already_running", agentName: runAgent.name, conversationId: conversation.id, conversationUrl: conversationUrl(conversation.id) }
+    // Aurora DSQL aborts the loser of two concurrent writes to the conversation row. "A concurrent start won" is only true if a
+    // live run now exists, so look; if none does, nothing started and the person must be told to retry, not that it is running.
+    if (isDsqlWriteConflict(error)) {
+      if (await findActiveAgentRun({ prisma, conversationId: conversation.id })) {
+        return { status: "already_running", agentName: runAgent.name, conversationId: conversation.id, conversationUrl: conversationUrl(conversation.id) }
+      }
+      return refused("AGENT_RUN_RETRY", `The task was assigned to ${runAgent.name}, but another change was in progress and no run started. Assign it again in a moment.`, runAgent.name)
     }
     throw error
   }

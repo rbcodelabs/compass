@@ -17,7 +17,7 @@
  * sweeper would also collect it, later).
  */
 import type { AppPrismaClient } from "@/lib/db"
-import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
+import { bootSandboxFromSnapshot, stopSandboxByName } from "@/lib/agent-sandbox"
 import { agentModelForHarness, type AgentHarness } from "@/lib/agent-harness"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
@@ -113,7 +113,15 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
       detached: true,
       timeoutMs: ctx.budgetMs,
     })
-    await markAgentRunStarted({ prisma, runId: run.id, apiKeyId, sandboxName: ctx.sandboxName })
+    if (!(await markAgentRunStarted({ prisma, runId: run.id, apiKeyId, sandboxName: ctx.sandboxName }))) {
+      // The run is no longer QUEUED: it was closed (reaped as unstarted, canceled or swept) while this start was in flight. The
+      // sandbox is now running with nothing to track it and a key nothing will revoke, so tear both down here rather than leave
+      // an agent working on a run Compass considers finished.
+      console.warn("[agent-run-launch] run ended before its start was recorded; stopping the sandbox", { runId: run.id })
+      try { await revokeAgentMcpKey(apiKeyId) } catch { /* never throws in practice; teardown continues either way */ }
+      try { await stopSandboxByName(ctx.sandboxName) } catch { /* the sandbox's own timeout is the backstop */ }
+      return { started: false }
+    }
     return { started: true }
   } catch (error) {
     console.error("[agent-run-launch] triggered run failed to start", { runId: run.id, error })
