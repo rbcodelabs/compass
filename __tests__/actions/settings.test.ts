@@ -45,6 +45,9 @@ const mockCustomFieldDefinition = {
   create: vi.fn(),
   delete: vi.fn(),
   update: vi.fn(),
+  updateMany: vi.fn(),
+  findFirst: vi.fn(),
+  findUnique: vi.fn(),
   findMany: vi.fn(),
   deleteMany: vi.fn(),
 };
@@ -216,7 +219,8 @@ vi.mock("@/lib/delete-workspace-cascade", async (importOriginal) => {
 });
 // Real-helper cross-tenant denial is covered in okr-actions-tenant-isolation.test.ts.
 const mockRequireProductEntity = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/product-action-auth", () => ({ requireProductEntity: mockRequireProductEntity }));
+const mockRequireProductWorkspace = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/product-action-auth", () => ({ requireProductEntity: mockRequireProductEntity, requireProductWorkspace: mockRequireProductWorkspace }));
 
 vi.mock("@/auth", () => ({
   auth: vi.fn(),
@@ -272,6 +276,10 @@ beforeEach(() => {
   mockCustomFieldDefinition.create.mockResolvedValue({ id: "field-1" });
   mockCustomFieldDefinition.delete.mockResolvedValue({ id: "field-1" });
   mockCustomFieldDefinition.update.mockResolvedValue({ id: "field-1" });
+  mockCustomFieldDefinition.updateMany.mockResolvedValue({ count: 1 });
+  mockCustomFieldDefinition.findFirst.mockResolvedValue({ id: "field-1" });
+  mockCustomFieldDefinition.findUnique.mockResolvedValue({ workspaceId: "ws-1", objectType: "OPPORTUNITY" });
+  mockRequireProductWorkspace.mockResolvedValue("ws-1");
   mockCustomFieldValue.deleteMany.mockResolvedValue({ count: 0 });
   mockCustomFieldValue.upsert.mockResolvedValue({ id: "val-1" });
   mockApiKey.create.mockResolvedValue({ id: "key-1" });
@@ -335,7 +343,7 @@ beforeEach(() => {
   mockSolutionComment.deleteMany.mockResolvedValue({ count: 0 });
   // Custom fields
   mockCustomFieldDefinition.findMany.mockResolvedValue([]);
-  mockCustomFieldDefinition.deleteMany.mockResolvedValue({ count: 0 });
+  mockCustomFieldDefinition.deleteMany.mockResolvedValue({ count: 1 });
   // Members / Squads / Docs
   mockWorkspaceMember.deleteMany.mockResolvedValue({ count: 0 });
   mockSquad.deleteMany.mockResolvedValue({ count: 0 });
@@ -568,9 +576,16 @@ describe("deleteFieldDefinition", () => {
     expect(mockCustomFieldValue.deleteMany).toHaveBeenCalledWith({
       where: { fieldId: "field-1" },
     });
-    expect(mockCustomFieldDefinition.delete).toHaveBeenCalledWith({
-      where: { id: "field-1" },
+    expect(mockCustomFieldDefinition.deleteMany).toHaveBeenCalledWith({
+      where: { id: "field-1", workspaceId: "ws-1" },
     });
+  });
+
+  it("refuses a field outside the caller's workspace before deleting anything", async () => {
+    mockCustomFieldDefinition.findFirst.mockResolvedValue(null);
+    await expect(deleteFieldDefinition("org", "ws", "field-x")).rejects.toThrow("Field not found");
+    expect(mockCustomFieldDefinition.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "field-x", workspaceId: "ws-1" } }));
+    expect(mockCustomFieldValue.deleteMany).not.toHaveBeenCalled();
   });
 
   it("throws Unauthorized when session is missing", async () => {
@@ -578,13 +593,33 @@ describe("deleteFieldDefinition", () => {
     await expect(
       deleteFieldDefinition("org", "ws", "field-1")
     ).rejects.toThrow("Unauthorized");
-    expect(mockCustomFieldDefinition.delete).not.toHaveBeenCalled();
+    expect(mockCustomFieldDefinition.deleteMany).not.toHaveBeenCalled();
   });
 });
 
 // ─── upsertFieldValue ─────────────────────────────────────────────────────────
 
 describe("upsertFieldValue", () => {
+  it("authorizes the field's workspace and the object (same workspace, field's type) before writing", async () => {
+    await upsertFieldValue("obj-1", "field-1", "v", "/path");
+    expect(mockRequireProductWorkspace).toHaveBeenCalledWith("ws-1");
+    expect(mockRequireProductEntity).toHaveBeenCalledWith("opportunity", "obj-1", "ws-1");
+  });
+
+  it("writes nothing when the field does not exist", async () => {
+    mockCustomFieldDefinition.findUnique.mockResolvedValue(null);
+    await expect(upsertFieldValue("obj-1", "nope", "v", "/path")).rejects.toThrow("Field not found");
+    expect(mockCustomFieldValue.upsert).not.toHaveBeenCalled();
+    expect(mockCustomFieldValue.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when the object is outside the field's workspace", async () => {
+    mockRequireProductEntity.mockRejectedValue(new Error("Entity not found or access denied"));
+    await expect(upsertFieldValue("obj-x", "field-1", "v", "/path")).rejects.toThrow("access denied");
+    expect(mockCustomFieldValue.upsert).not.toHaveBeenCalled();
+    expect(mockCustomFieldValue.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("deletes when value is null", async () => {
     await upsertFieldValue("obj-1", "field-1", null, "/path");
     expect(mockCustomFieldValue.deleteMany).toHaveBeenCalledWith({

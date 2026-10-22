@@ -25,6 +25,7 @@ const mockSolution = {
   findUnique: vi.fn(),
 };
 const mockAssumption = {
+  findUnique: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   delete: vi.fn(),
@@ -103,6 +104,7 @@ beforeEach(() => {
   mockSolution.findFirst.mockResolvedValue(null); // no last item by default
   mockSolution.findUnique.mockResolvedValue({ status: "VALIDATED" });
   mockAssumption.create.mockResolvedValue({ id: "ass-1", title: "Test Assumption" });
+  mockAssumption.findUnique.mockResolvedValue({ solutionId: "sol-1" });
   mockAssumption.update.mockResolvedValue({ id: "ass-1" });
   mockAssumption.delete.mockResolvedValue({ id: "ass-1" });
   mockAuth.mockResolvedValue({ user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T>
@@ -227,7 +229,7 @@ describe("updateAssumptionStatus", () => {
   it("updates the assumption status to VALIDATED", async () => {
     await updateAssumptionStatus("ass-1", "VALIDATED", "/path");
     expect(mockAssumption.update).toHaveBeenCalledWith({
-      where: { id: "ass-1" },
+      where: { id: "ass-1", solution: { workspaceId: "ws-1" } },
       data: { status: "VALIDATED" },
     });
   });
@@ -333,7 +335,7 @@ describe("archiveSolution", () => {
 describe("deleteAssumption", () => {
   it("deletes the assumption by id", async () => {
     await deleteAssumption("ass-1", "/path");
-    expect(mockAssumption.delete).toHaveBeenCalledWith({ where: { id: "ass-1" } });
+    expect(mockAssumption.delete).toHaveBeenCalledWith({ where: { id: "ass-1", solution: { workspaceId: "ws-1" } } });
   });
 });
 
@@ -386,7 +388,7 @@ describe("reorderAssumption", () => {
   it("updates the sort order directly", async () => {
     await reorderAssumption("ass-1", 1, "/path");
     expect(mockAssumption.update).toHaveBeenCalledWith({
-      where: { id: "ass-1" },
+      where: { id: "ass-1", solution: { workspaceId: "ws-1" } },
       data: { sortOrder: 1 },
     });
   });
