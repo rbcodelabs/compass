@@ -121,9 +121,12 @@ export function buildAgentEnv(opts: {
   agent?: { name: string; instructions: string | null; model: string | null }
   /** The user's explicit per-turn model pick, already validated against the allowed set (lib/agent-turn-model.ts). Wins over the agent's own model. */
   modelOverride?: string | null
+  /** Short-lived GitHub App token env (GH_TOKEN/GITHUB_TOKEN) scoped to the workspace's approved repos; empty when unconfigured. */
+  githubEnv?: Record<string, string>
 }): Record<string, string> {
   const chosenModel = opts.modelOverride ?? opts.agent?.model ?? null
   return {
+    ...opts.githubEnv,
     ...(opts.harness === "opencode"
       ? { AI_GATEWAY_API_KEY: opts.gatewayApiKey ?? "", AGENT_MODEL: chosenModel ?? opencodeModel(process.env.AGENT_OPENCODE_MODEL) }
       : {

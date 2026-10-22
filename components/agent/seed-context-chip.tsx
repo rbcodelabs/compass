@@ -10,7 +10,6 @@
 
 import Link from "next/link"
 import { XIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
 
 type Props = {
   label: string
@@ -19,25 +18,23 @@ type Props = {
   onDismiss: () => void
 }
 
+/** A compact chip for the composer's context strip. The summary rides in the tooltip (and to screen readers) so the strip stays one line. */
 export function SeedContextChip({ label, summary, sourceUrl, onDismiss }: Props) {
   return (
-    <div className="mx-auto flex w-full max-w-3xl items-start gap-2 rounded-lg border border-default bg-surface-inset px-3 py-2 text-sm">
-      <div className="min-w-0 flex-1">
-        <Link href={sourceUrl} className="font-medium text-text-primary underline-offset-2 hover:underline">
-          {label}
-        </Link>
-        <p className="truncate text-xs text-text-subtle">{summary}</p>
-      </div>
-      <Button
+    <div title={summary || undefined} className="inline-flex h-6 min-w-0 max-w-full items-center gap-1 rounded-md border border-border bg-muted pr-0.5 pl-2 text-xs">
+      <Link href={sourceUrl} className="min-w-0 truncate font-medium text-foreground underline-offset-2 hover:underline">
+        {label}
+      </Link>
+      {/* Visible as a tooltip; always available to screen readers. */}
+      <span className="sr-only">{summary}</span>
+      <button
         type="button"
-        variant="ghost"
-        size="icon-xs"
         aria-label="Dismiss context"
-        className="shrink-0"
         onClick={onDismiss}
+        className="relative grid size-[18px] shrink-0 place-items-center after:absolute after:-inset-[3px] after:content-[''] rounded text-muted-foreground outline-none hover:bg-sunken hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <XIcon aria-hidden="true" />
-      </Button>
+        <XIcon className="size-3" aria-hidden="true" />
+      </button>
     </div>
   )
 }

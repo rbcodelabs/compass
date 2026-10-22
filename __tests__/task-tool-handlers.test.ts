@@ -94,7 +94,6 @@ beforeEach(() => {
   updateCapture.enabled = false
   mockPrisma.workspaceMember.findFirst.mockResolvedValue({ id: "member" })
   mockPrisma.squad.findFirst.mockResolvedValue({ id: "squad" })
-  vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
   mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", status: "ACTIVE", ownerUserId: "owner" })
   mockPrisma.agentWorkspaceGrant.findFirst.mockResolvedValue({ id: "grant" })
   mockWorkspace.findUnique.mockResolvedValue({ id: WORKSPACE_ID })

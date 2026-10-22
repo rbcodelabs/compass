@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { resolveWorkspaceAdmin } from "@/lib/permissions";
-import { agentsEnabled, liveGrantedWorkspaceIds } from "@/lib/agent-access";
+import { liveGrantedWorkspaceIds } from "@/lib/agent-access";
 import { AGENT_LEGACY_SELECT, agentKind, agentOwner, canManageAgent, findAgentById, isUserOwnedBy, isWorkspaceAdminUser, type AgentInvokePolicy } from "@/lib/agent-ownership";
 import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity";
 import { clearUserDefaultAgent, clearWorkspaceDefaultAgent, setUserDefaultAgent, setWorkspaceDefaultAgent } from "@/lib/agent-defaults";
@@ -17,9 +17,6 @@ async function account() {
   if (!session?.user?.id) throw new Error("Unauthorized");
   return { prisma: getPrisma(), userId: session.user.id };
 }
-function requireEnabled() {
-  if (!agentsEnabled()) throw new Error("Agent changes are currently disabled");
-}
 function nameValue(value: string) {
   if (typeof value !== "string" || !value.trim() || value.trim().length > 120) throw new Error("Name must contain 1–120 characters");
   return value.trim();
@@ -30,7 +27,6 @@ function descriptionValue(value?: string) {
 }
 export async function createAgent(input: { name: string; description?: string }) {
   const { prisma, userId } = await account();
-  requireEnabled();
   const agent = await prisma.agent.create({ data: { ownerUserId: userId, name: nameValue(input.name), description: descriptionValue(input.description), status: "ACTIVE", updatedAt: new Date() }, select: AGENT_LEGACY_SELECT });
   revalidatePath("/settings/agents");
   return agent;
@@ -38,7 +34,6 @@ export async function createAgent(input: { name: string; description?: string })
 export async function updateAgent(id: string, input: { name: string; description?: string; status: "ACTIVE" | "SUSPENDED" }) {
   const { prisma, userId } = await account();
   if (input.status !== "ACTIVE" && input.status !== "SUSPENDED") throw new Error("Invalid agent status");
-  if (input.status === "ACTIVE") requireEnabled();
   const agent = await findAgentById(prisma, id);
   if (!agent || !(await canManageAgent(prisma, { userId }, agent))) throw new Error("Agent not found");
   // select: the full row would include columns a database without migration 098 does not have.
@@ -89,7 +84,6 @@ export async function createCloudAgent(input: {
   /** Access to enable in this workspace when the creator administers it. Defaults to read only. */
   access?: "READ" | "WRITE";
 }) {
-  requireEnabled();
   if (input.ownerType !== "USER" && input.ownerType !== "WORKSPACE") throw new Error("Invalid owner type");
   const access = input.access ?? "READ";
   if (access !== "READ" && access !== "WRITE") throw new Error("Invalid access");
@@ -135,7 +129,6 @@ export async function updateCloudAgent(id: string, input: {
   maxConcurrentRuns?: number | null; maxRunsPerDay?: number | null;
 }) {
   const { prisma, userId } = await account();
-  requireEnabled();
   const agent = await findAgentById(prisma, id);
   // Same answer for "missing", "not yours" and "not a cloud agent": an id reveals nothing about an agent you cannot manage.
   if (!agent || agentKind(agent) !== "CLOUD" || !(await canManageAgent(prisma, { userId }, agent))) throw new Error("Agent not found");
@@ -175,7 +168,6 @@ export async function setWorkspaceDefaultAgentAction(orgSlug: string, workspaceS
   if (agentId === null) {
     await clearWorkspaceDefaultAgent(prisma, workspaceId);
   } else {
-    requireEnabled();
     const agent = await findAgentById(prisma, agentId);
     const owner = agent ? agentOwner(agent) : null;
     if (!agent || agent.status !== "ACTIVE" || agentKind(agent) !== "CLOUD" || owner?.type !== "WORKSPACE" || owner.workspaceId !== workspaceId) throw new Error("Choose an active shared cloud agent of this workspace");
@@ -191,7 +183,6 @@ export async function setMyDefaultAgentAction(orgSlug: string, workspaceSlug: st
   if (agentId === null) {
     await clearUserDefaultAgent(prisma, { userId, workspaceId });
   } else {
-    requireEnabled();
     try {
       // The same checks a run goes through (cloud, active, granted here, invokable by this member), so a default can never
       // name an agent the member could not pick directly.
@@ -209,7 +200,6 @@ export async function setMyDefaultAgentAction(orgSlug: string, workspaceSlug: st
 
 export async function createAgentKey(agentId: string, input: { name: string; expiresAt?: string }) {
   const { prisma, userId } = await account();
-  requireEnabled();
   const agent = await findAgentById(prisma, agentId);
   // A personal key is bound to its holder, so only a USER-owned agent can have one.
   if (!agent || !isUserOwnedBy(agent, userId)) throw new Error("Agent not found");
@@ -230,7 +220,6 @@ export async function revokeAgentKey(id: string) {
 }
 export async function grantWorkspaceAgent(orgSlug: string, workspaceSlug: string, agentId: string, access: "READ" | "WRITE") {
   const { userId } = await account();
-  requireEnabled();
   if (access !== "READ" && access !== "WRITE") throw new Error("Invalid access");
   const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
   const agent = await findAgentById(prisma, agentId);

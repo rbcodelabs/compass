@@ -84,6 +84,7 @@ test.describe("Cross-workspace roadmap and saved views", () => {
 
       // ── 1. Sidebar "All roadmaps" opens the org-wide roadmap ─────────────────
       await page.goto(`${base}/roadmap`);
+      await page.getByRole("button", { name: /Switch workspace/ }).click();
       const allRoadmaps = page.getByTestId("nav-org-roadmap");
       await expect(allRoadmaps, "a user with two workspaces gets the All roadmaps link").toBeVisible({ timeout: 30_000 });
       await allRoadmaps.click();

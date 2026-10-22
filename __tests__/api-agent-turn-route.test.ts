@@ -69,8 +69,10 @@ vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: (...args: un
 // is what the route does with the slugs, and `connectorDefinition` is left real
 // so the catalog itself is part of the assertion.
 const mockListConnectedGrants = vi.fn()
-vi.mock("@/lib/mcp-connectors/store", () => ({
-  listConnectedGrants: (...args: unknown[]) => mockListConnectedGrants(...args),
+// `listConnections` is what merges stored grants with Vercel Connect probes; its
+// own behaviour is covered in mcp-connectors-vercel-connect.test.ts.
+vi.mock("@/lib/mcp-connectors/vercel-connect", () => ({
+  listConnections: (...args: unknown[]) => mockListConnectedGrants(...args),
 }))
 
 // `agentRunsAvailable` defaults to false in beforeEach so the existing

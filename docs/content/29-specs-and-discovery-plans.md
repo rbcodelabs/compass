@@ -31,7 +31,7 @@ An embed is an ordinary markdown link to a `compass://` address:
 [Checkout redesign](compass://solution/0b7e3c9a-5d1f-4f6e-8a2b-9c4d5e6f7a8b)
 ```
 
-- **Alone in its own paragraph**, the link shows as a **card** with the record's kind, status and key facts, and a link to open it.
+- **Alone in its own paragraph**, the link shows as a **card** with the record's kind, status and key facts. Click the card's title to open the record in the **side panel**, so you stay on the document; close the panel to go back to just the document. Cmd/Ctrl-click, Shift-click or middle-click the title to open the record's full page in a new tab instead. Metric, doc and artifact cards have no side panel, so their title opens the record's own page.
 - **Anywhere else** (inside a sentence, a list or a quote), it is a plain link with that text. Other tools that read the markdown see a normal link too.
 - The text in the square brackets is a **cached title**, only a hint for readers of the raw markdown. Compass never shows it on a card: the card always shows the record's current title, so a renamed record is correct everywhere without editing the document.
 - Loading a card never edits the document. Editing a card (below) changes the record, not the document.
@@ -54,7 +54,7 @@ If you can edit the workspace (read-only members see none of this), the cards an
 
 - **Rename**: the pencil beside a card's title opens the title for editing. Press Enter to save, Escape to cancel. An empty title is not saved.
 - **Status**: the status on a card is a menu. Pick a value to change it.
-- Cards for assumptions, solutions, experiments, tasks, opportunities and objectives offer both; key result cards offer rename only. Metric, doc, artifact and roadmap item cards are not editable from a document. Open them with the card's link.
+- Cards for assumptions, solutions, experiments, tasks, opportunities and objectives offer both; key result cards offer rename only. Metric, doc, artifact and roadmap item cards are not editable from a document. Open them with the card's title.
 - Each edit shows **Saving...** and then **Saved** on the card. If it fails, the card goes back to the record's real value and says so.
 - A card edit changes the **record**, not the document. It does not trigger the document's autosave, and the cached title in the markdown is left exactly as written. The card keeps showing the live title, so nothing looks different; the cached title is only refreshed if someone edits that link on purpose.
 

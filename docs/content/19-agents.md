@@ -61,14 +61,14 @@ agents) who can run it from the same panel, or from **My agents** for personal o
 
 Chat and **Send to agent** use the first of these that applies:
 
-1. the agent you pick in the chat's **Agent** menu (or in the Send to agent menu);
+1. the agent you pick with the **Agent** chip under the message box (or in the Send to agent menu);
 2. your **personal default** ("Use as my default" on an agent you can run);
 3. the **workspace default** an administrator sets on a shared agent;
 4. the built-in **Compass Agent**.
 
 A default that is no longer usable (the agent was suspended, lost its workspace
 access, or you may no longer run it) is skipped silently and the next one applies, so
-revoking access can never break anyone's chat. Pick **Compass Agent** in the menu to
+revoking access can never break anyone's chat. Pick **Compass Agent** in the Agent list to
 use the built-in assistant for one conversation regardless of defaults. Defaults need
 the cloud-agent database update (migrations 100 and 101); until then the built-in
 agent answers.
@@ -80,21 +80,21 @@ repeat and never overrides an existing default or revives a revoked grant.
 
 ### Which model answers
 
-Next to the **Agent** menu, the chat has a **Model** menu. It uses the first of these that applies:
+The message box is one card. Its footer holds two labelled chips, **Agent** and **Model**; each opens a list (a bottom sheet on a phone). Use the arrow keys to move through a list, **Enter** to choose and **Esc** to close it. The Model chip uses the first of these that applies:
 
-1. the model you pick in the **Model** menu for this message;
+1. the model you pick with the **Model** chip for this message;
 2. the model set on the agent that answers (see **Model** when you create or edit a cloud agent);
 3. the deployment's default model.
 
 The **Default** entry always names what it currently resolves to, for example
 "Default (Claude Sonnet 5)", and changes with the agent you select until you pick a
 model yourself. Your pick is remembered in this browser for this workspace; if that
-model is later removed from the allowed list, the menu goes back to Default. Choosing a
+model is later removed from the allowed list, the chip goes back to Default. Choosing a
 model changes only which model answers: the agent's instructions, tools and access are
-unchanged. The model a run is using is shown next to the agent's name while it runs
-(for example "Triage is answering on Claude Opus 9") and is recorded on the run.
+unchanged. The model a run is using is shown in the message box while it runs
+(for example "Triage is answering on Claude Opus 9"; the chips lock until the run ends and **Esc** stops it) and is recorded on the run.
 
-The menu lists the models in the allowed list (the same list the agent form uses; see
+The Model list shows the models in the allowed list (the same list the agent form uses; see
 **Deployment**). It does not appear when there is nothing to choose, and it is not
 offered when the deployment runs on Amazon Bedrock, whose model ids differ from the
 Anthropic API's: there the deployment's configured model always answers, and a request
@@ -265,12 +265,12 @@ Do not send both `assignee` and the legacy `assigneeUserId` field.
 ## Deployment
 
 Administrators must apply and verify migration `049_agent_identity` before
-this revision receives user traffic, then enable `COMPASS_AGENTS_ENABLED=1`. Cloud agents
+this revision receives user traffic. Cloud agents
 additionally need migrations `098`, `099`, `100`, `101` and `102` (the run-limit columns); the code tolerates any of
 them being unapplied (cloud-agent features stay unavailable and chat uses the built-in agent; without `102`
 every agent simply uses the default limits and the limit fields cannot be saved).
 Assignment-started runs also need background agent runs (migration `069`) and a built agent runtime snapshot.
 `COMPASS_CLOUD_AGENT_MODELS` (comma-separated) adds models to the allowed list.
-The flag is not a substitute for installing the schema. Turning off new agent operations preserves
-existing assignment records. The built-in Compass Agent is not itself a task assignee;
+Agent features are always on; there is no enable flag, so the schema must be installed before deploying. The built-in
+Compass Agent is not itself a task assignee;
 create a shared cloud agent if you want one.

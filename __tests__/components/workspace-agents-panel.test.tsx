@@ -29,8 +29,8 @@ const shared: WorkspaceAgentRow = { id: "a-shared", name: "Triage", ownerName: "
 const external: WorkspaceAgentRow = { id: "a-ext", name: "CI bot", ownerName: "Ada", status: "ACTIVE", access: "WRITE", eligible: true, kind: "EXTERNAL", shared: false }
 const personal: WorkspaceAgentRow = { id: "a-mine", name: "Mine", ownerName: "Ada", status: "ACTIVE", access: "READ", eligible: true, kind: "CLOUD", shared: false, canEdit: true, canUse: true, instructions: "", model: "", invokePolicy: "OWNER" }
 
-function renderPanel(agents: WorkspaceAgentRow[], props: Partial<{ canManage: boolean; enabled: boolean }> = {}) {
-  return render(<WorkspaceAgentsPanel orgSlug="acme" workspaceSlug="home" agents={agents} canManage={props.canManage ?? false} enabled={props.enabled ?? true} models={models} />)
+function renderPanel(agents: WorkspaceAgentRow[], props: Partial<{ canManage: boolean }> = {}) {
+  return render(<WorkspaceAgentsPanel orgSlug="acme" workspaceSlug="home" agents={agents} canManage={props.canManage ?? false} models={models} />)
 }
 
 beforeEach(() => {
@@ -84,11 +84,6 @@ describe("WorkspaceAgentsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }))
     await waitFor(() => expect(actions.createCloudAgent).toHaveBeenCalledWith(expect.objectContaining({ ownerType: "WORKSPACE", invokePolicy: "ADMINS", access: "WRITE" })))
     expect(await screen.findByText("Agent created and enabled in this workspace.")).toBeInTheDocument()
-  })
-
-  it("hides creation entirely while agents are disabled", () => {
-    renderPanel([shared], { enabled: false })
-    expect(screen.queryByRole("button", { name: "New cloud agent" })).toBeNull()
   })
 
   it("edits instructions, model and policy of a shared agent", async () => {

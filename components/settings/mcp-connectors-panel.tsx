@@ -69,6 +69,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   DISCOVERY_FAILED: "Compass could not read the provider's OAuth metadata.",
   ENCRYPTION_NOT_CONFIGURED: "Connector storage is not configured on this deployment.",
   CLIENT_NOT_CONFIGURED: "This connector has no OAuth client configured on this deployment.",
+  CONNECT_MISCONFIGURED: "Vercel Connect refused the request. An administrator needs to link the connector to this project and environment.",
 }
 
 export function McpConnectorsPanel({

@@ -1,11 +1,12 @@
 import NextAuth from "next-auth";
 import Resend from "next-auth/providers/resend";
-import Google from "next-auth/providers/google";
+import { connect } from "@vercel/connect/authjs";
 import Credentials from "next-auth/providers/credentials";
 import Passkey from "next-auth/providers/passkey";
 import getPrisma from "@/lib/db";
 import { authConfig } from "@/auth.config";
 import { createLazyPrismaAuthAdapter } from "@/lib/lazy-prisma-auth-adapter";
+import { googleConnectorUid, requireVerifiedGoogleEmail } from "@/lib/google-signin";
 import { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "@/lib/preview-automation/cookies";
 
 /**
@@ -18,7 +19,7 @@ import { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "@/lib/preview-a
  *     provider, auth.js won't complain about MissingAdapter.
  *
  * PRODUCTION (Vercel preview / prod):
- *   • Resend (magic-link email) + Google (OAuth) + Passkey (WebAuthn) + PrismaAdapter (database sessions).
+ *   • Resend (magic-link email) + Google (OAuth via Vercel Connect, only when COMPASS_GOOGLE_CONNECTOR is set) + Passkey (WebAuthn) + PrismaAdapter (database sessions).
  *   • Credentials provider is absent — never ships in production.
  *   • Passkey registration/sign-in UI is additionally gated by
  *     lib/passkeys.ts's passkeysEnabled() — the provider itself is always
@@ -33,6 +34,38 @@ import { PREVIEW_SESSION_COOKIE, PREVIEW_SESSION_OPTIONS } from "@/lib/preview-a
  */
 
 const isDev = process.env.NODE_ENV === "development";
+
+/**
+ * Google sign-in through the Vercel Connect connector in COMPASS_GOOGLE_CONNECTOR.
+ * Empty when unset, so a deployment without the connector still offers magic link
+ * and passkey. Provider id stays `google`, keeping the callback path
+ * `/api/auth/callback/google` and the existing `Account.provider` value; the
+ * `providerAccountId` is now Connect's `sub`, so a returning Google user is
+ * matched to their existing user by email (hence the account-linking flag).
+ */
+function googleProviders() {
+  const uid = googleConnectorUid();
+  if (!uid) return [];
+  const provider = connect({
+    id: "google",
+    name: "Google",
+    connector: uid,
+    scopes: ["openid", "profile", "email"],
+  });
+  const mapProfile = provider.profile;
+  return [
+    {
+      ...provider,
+      // Same email via Resend magic-link should just link, not throw
+      // OAuthAccountNotLinked. Safe only because the profile gate below refuses
+      // an unverified email (Connect does not map `email_verified` itself).
+      allowDangerousEmailAccountLinking: true,
+      profile(profile: Parameters<NonNullable<typeof mapProfile>>[0], tokens: Parameters<NonNullable<typeof mapProfile>>[1]) {
+        return mapProfile!(requireVerifiedGoogleEmail(profile), tokens);
+      },
+    },
+  ];
+}
 
 export const { handlers, auth, signIn, signOut } = isDev
   ? // ── Dev mode: instant login via Credentials ──────────────────────────────
@@ -96,13 +129,7 @@ export const { handlers, auth, signIn, signOut } = isDev
           from:
             process.env.AUTH_EMAIL_FROM ?? "Compass <noreply@compass.app>",
         }),
-        Google({
-          clientId: process.env.AUTH_GOOGLE_ID,
-          clientSecret: process.env.AUTH_GOOGLE_SECRET,
-          // Same email via Resend magic-link should just link, not throw
-          // OAuthAccountNotLinked — safe because Google verifies email ownership.
-          allowDangerousEmailAccountLinking: true,
-        }),
+        ...googleProviders(),
         Passkey,
       ],
       adapter: createLazyPrismaAuthAdapter(),

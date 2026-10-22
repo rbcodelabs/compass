@@ -6,16 +6,14 @@ import { applyToolGate } from "@/lib/mcp-tool-gates"
 const actor = { purpose: "AGENT" as const, userId: "owner", agentId: "agent" }
 const userAgent = { id: "agent", ownerUserId: "owner", status: "ACTIVE" }
 const workspaceAgent = { id: "agent", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "home", status: "ACTIVE" }
-beforeEach(() => { vi.clearAllMocks(); prisma.organizationMember.findFirst.mockReset(); prisma.agentOrgAdminGrant.findFirst.mockReset(); vi.stubEnv("COMPASS_AGENTS_ENABLED", "1"); prisma.agent.findFirst.mockResolvedValue(userAgent); prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "one" }, { workspaceId: "two" }]) })
+beforeEach(() => { vi.clearAllMocks(); prisma.organizationMember.findFirst.mockReset(); prisma.agentOrgAdminGrant.findFirst.mockReset(); prisma.agent.findFirst.mockResolvedValue(userAgent); prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "one" }, { workspaceId: "two" }]) })
 afterEach(() => vi.unstubAllEnvs())
 it("limits aggregate workspace queries to explicit grants and current membership", async () => {
   expect(await agentWorkspaceWhere(actor)).toEqual({ members: { some: { userId: "owner" } }, id: { in: ["one", "two"] } })
   expect(prisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { agentId: "agent", revokedAt: null, access: { in: ["READ", "WRITE"] } } }))
 })
-it("suspension and rollout disablement remove all workspace access", async () => {
+it("suspension removes all workspace access", async () => {
   prisma.agent.findFirst.mockResolvedValueOnce(null)
-  expect(await agentWorkspaceWhere(actor)).toEqual({ id: { in: [] } })
-  vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
   expect(await agentWorkspaceWhere(actor)).toEqual({ id: { in: [] } })
 })
 it("requires write grants for mutation gates", async () => {
@@ -61,9 +59,6 @@ it("hasOwnerOrgAdminRights follows the owner's live role and the agent's ACTIVE 
   prisma.organizationMember.findFirst.mockResolvedValueOnce(null)
   expect(await hasOwnerOrgAdminRights(actor, "org-1")).toBe(false)
   prisma.agent.findFirst.mockResolvedValueOnce(null)
-  prisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "OWNER" })
-  expect(await hasOwnerOrgAdminRights(actor, "org-1")).toBe(false)
-  vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
   prisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "OWNER" })
   expect(await hasOwnerOrgAdminRights(actor, "org-1")).toBe(false)
 })

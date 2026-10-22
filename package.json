@@ -72,6 +72,7 @@
     "@tiptap/starter-kit": "^3.27.1",
     "@vercel/analytics": "2.0.1",
     "@vercel/blob": "^2.4.0",
+    "@vercel/connect": "^2.5.3",
     "@vercel/functions": "^3.4.3",
     "@vercel/sandbox": "2.9.2",
     "@xyflow/react": "^12.11.2",

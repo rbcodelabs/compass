@@ -41,7 +41,7 @@ import { assertWorkItemIdsMigration, WORK_ITEM_IDS_MIGRATION } from "@/lib/migra
 import { ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, assertEntityLinksSolutionKeyResultBackfill, backfillEntityLinksSolutionKeyResult, getEntityLinksSolutionKeyResultStatus } from "@/lib/migrations/entity-links-solution-key-result-backfill";
 import { ENTITY_LINKS_TASK_BACKFILL_MIGRATION, assertEntityLinksTaskBackfill, backfillEntityLinksTask, getEntityLinksTaskStatus } from "@/lib/migrations/entity-links-task-backfill";
 import { getEntityLinksReadParityStatus } from "@/lib/migrations/entity-links-read-parity";
-import { ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, assertEntityLinksOpportunityBackfill, backfillEntityLinksOpportunity, getEntityLinksOpportunityStatus } from "@/lib/migrations/entity-links-opportunity-backfill";
+import { ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, assertEntityLinksOpportunityBackfill, backfillEntityLinksOpportunity, getEntityLinksOpportunityStatus } from "@/lib/migrations/entity-links-opportunity-backfill";
 import { ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, assertEntityLinksArtifactBackfill, backfillEntityLinksArtifact, getEntityLinksArtifactStatus } from "@/lib/migrations/entity-links-artifact-backfill";
 import { assertWorkItemIdsBackfill, backfillWorkItemIds, getWorkItemIdsBackfillStatus, WORK_ITEM_IDS_BACKFILL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION } from "@/lib/migrations/work-item-ids-backfill";
 import { assertRoadmapItemProvenanceMigration } from "@/lib/migrations/roadmap-item-provenance";
@@ -699,6 +699,16 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // runs without them, only slower. The 104 postcondition proves both indexes exist and are valid.
     name: "104_agent_retention_indexes",
     filePath: path.join(process.cwd(), "prisma/migrations/104_agent_retention_indexes/migration.sql"),
+  },
+  {
+    name: "105_workspace_agent_github_repos",
+    filePath: path.join(process.cwd(), "prisma/migrations/105_workspace_agent_github_repos/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY. Residual pass for 095: re-runs the same idempotent opportunity backfill + postconditions for links written while
+    // COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR was off (the runner never re-runs an applied 095). POST it by name after the mirror flag is on.
+    name: "106_entity_links_residual_opportunity",
+    filePath: path.join(process.cwd(), "prisma/migrations/106_entity_links_residual_opportunity/migration.sql"),
   },
 ];
 
@@ -1912,10 +1922,10 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION];
 
 /**
- * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 098_entity_links_backfill_solution_key_result, 103).
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 098_entity_links_backfill_solution_key_result, 103, 106_entity_links_residual_opportunity).
  * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
  * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
  * Production-style callers (the admin route, an untargeted POST) never set it.
@@ -2259,7 +2269,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         await backfillWorkItemIds(client, schema, log)
         await assertWorkItemIdsBackfill(client, schema, migration.name)
       }
-      if (migration.name === ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION) {
+      if (migration.name === ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION || migration.name === ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION) {
         // Data half: mirror the legacy rows (quarantining the inconsistent ones), then prove it. Before the receipt below, so a failure
         // leaves an unfinished attempt and the next POST resumes.
         await backfillEntityLinksOpportunity(client, schema, log)
@@ -2291,6 +2301,11 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "090_v0_chat_artifacts") {
         const columns = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND ((table_name='artifacts' AND column_name='v0_chat_id') OR (table_name='artifact_revisions' AND column_name='v0_version_id'))", [schema])
         if (columns.rows[0]?.count !== "2") throw new Error("Migration 090 postcondition failed: v0 artifact columns missing")
+      }
+
+      if (migration.name === "105_workspace_agent_github_repos") {
+        const column = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND table_name='workspaces' AND column_name='agent_github_repos'", [schema])
+        if (column.rows[0]?.count !== "1") throw new Error("Migration 105 postcondition failed: workspaces.agent_github_repos missing")
       }
 
       // Only this distinct attempt becomes a successful receipt. A failed
