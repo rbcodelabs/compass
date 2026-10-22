@@ -33,10 +33,11 @@ import { orderCards, planDragEnd } from "@/lib/discovery-board-ordering";
 import type { OpportunityStatus } from "@/lib/types";
 
 const COLUMNS: { status: OpportunityStatus; label: string; accent: "neutral" | "info" | "warning" | "success" }[] = [
-  { status: "EXPLORING", label: "Exploring", accent: "neutral" },
-  { status: "VALIDATING", label: "Validating", accent: "warning" },
-  { status: "PRIORITIZED", label: "Prioritized", accent: "info" },
+  // Ordered by where the work happens: Active first, then back toward Exploring.
   { status: "ACTIVE", label: "Active", accent: "success" },
+  { status: "PRIORITIZED", label: "Prioritized", accent: "info" },
+  { status: "VALIDATING", label: "Validating", accent: "warning" },
+  { status: "EXPLORING", label: "Exploring", accent: "neutral" },
 ];
 
 const ALL_STATUSES: OpportunityStatus[] = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"];
