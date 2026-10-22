@@ -23,7 +23,8 @@ import { ChainGraphUiContext, type ChainGraphUi } from "./chain-graph-context"
 import { CLUSTERS_ONLY_ABOVE, clusterKey, defaultCollapsed, listGroups, projectWithLimit, type ClusterProjection } from "@/lib/chain-graph/cluster"
 import { groupCircles, layoutGraph, type LayoutNode, type Point } from "@/lib/chain-graph/layout"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
-import { seriesForGroupIndex, typeLabelsFor, zoomBand } from "@/lib/chain-graph/presentation"
+import { ALWAYS_SHOW_TIER_MAX, estimateLabelSize, labelTier, resolveLabelCollisions, type LabelCandidate } from "@/lib/chain-graph/label-collision"
+import { seriesForGroupIndex, showsLabel, typeLabelsFor, zoomBand } from "@/lib/chain-graph/presentation"
 import { indexGraph, traceChain } from "@/lib/chain-graph/trace"
 import { CHAIN_NODE_TYPES, type ChainGraph, type ChainNodeType, type GroupBy } from "@/lib/chain-graph/types"
 
@@ -273,6 +274,96 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
     }
     apply(storeApi.getState().transform[2])
     return storeApi.subscribe((s) => apply(s.transform[2]))
+  }, [storeApi])
+
+  // Label collision culling (band "label" and "full"). Labels are counter-scaled to a constant screen size, so their boxes are
+  // computed in screen space from the live node positions and viewport, then applied as data-cg-label on the node wrappers
+  // outside React (a data attribute, because React Flow rewrites the wrapper's className on drag/select). Coalesced to one pass per frame.
+  const labelInputs = useRef({ nodes, selectedRep, traced, matches, pinned, typeLabels })
+  const scheduleLabelPass = useRef<() => void>(() => {})
+  useEffect(() => {
+    labelInputs.current = { nodes, selectedRep, traced, matches, pinned, typeLabels }
+    scheduleLabelPass.current()
+  }, [nodes, selectedRep, traced, matches, pinned, typeLabels])
+
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    let frame = 0
+    let hovered: string | null = null
+
+    const run = () => {
+      frame = 0
+      const [tx, ty, zoom] = storeApi.getState().transform
+      const band = zoomBand(zoom)
+      if (band === "dot") return
+      const { nodes: current, selectedRep: sel, traced: tracedSet, matches: matchSet, pinned: pinnedSet, typeLabels: names } = labelInputs.current
+      const width = el.clientWidth
+      const height = el.clientHeight
+      const candidates: LabelCandidate[] = []
+      for (const n of current) {
+        const v = n.data.visible
+        const key = n.id
+        const selected = sel === key
+        const dim = (tracedSet !== null && !tracedSet.has(key)) || (v.kind === "node" && matchSet !== null && !matchSet.has(key))
+        if (dim && !selected) continue
+        if (!showsLabel(band, v.kind === "cluster" ? "cluster" : v.node.type)) continue
+        const size = v.kind === "cluster" ? Math.round(26 + 5 * Math.sqrt(v.count)) : v.node.type === "OBJECTIVE" ? 24 : 18
+        const cx = (n.position.x + size / 2) * zoom + tx
+        const cy = (n.position.y + size / 2) * zoom + ty
+        let box: { width: number; height: number }
+        let x: number
+        let y: number
+        if (v.kind === "cluster") {
+          const detail = band === "full" ? (Object.entries(v.toneCounts) as Array<[string, number]>).filter(([, c]) => c > 0).map(([tone, c]) => `${c} ${tone}`).join(" ") : null
+          box = estimateLabelSize(v.label, detail)
+          x = cx - box.width / 2
+          y = cy + (size / 2 + 4) * zoom
+        } else {
+          box = estimateLabelSize(v.node.title, band === "full" ? `${names[v.node.type]} · ${v.node.status}` : null)
+          x = cx + (size / 2 + 8) * zoom
+          y = cy - box.height / 2
+        }
+        if (x > width + 40 || x + box.width < -40 || y > height + 40 || y + box.height < -40) continue
+        const tier = labelTier({
+          selected,
+          hovered: hovered === key,
+          traced: tracedSet?.has(key) ?? false,
+          matched: matchSet?.has(key) ?? false,
+          pinned: pinnedSet.has(key),
+          keyType: v.kind === "cluster" || v.node.type === "OBJECTIVE" || v.node.type === "OPPORTUNITY",
+        })
+        candidates.push({ key, tier, alwaysShow: tier <= ALWAYS_SHOW_TIER_MAX, x, y, ...box })
+      }
+      const shown = resolveLabelCollisions(candidates)
+      for (const dom of el.querySelectorAll<HTMLElement>(".react-flow__node")) {
+        const want = dom.dataset.id && shown.has(dom.dataset.id) ? "on" : "off"
+        if (dom.dataset.cgLabel !== want) dom.dataset.cgLabel = want
+      }
+    }
+
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(run)
+    }
+    scheduleLabelPass.current = schedule
+    const setHovered = (next: string | null) => {
+      if (next === hovered) return
+      hovered = next
+      schedule()
+    }
+    const onOver = (e: PointerEvent) => setHovered((e.target as Element | null)?.closest?.(".react-flow__node")?.getAttribute("data-id") ?? null)
+    const onLeave = () => setHovered(null)
+    el.addEventListener("pointerover", onOver)
+    el.addEventListener("pointerleave", onLeave)
+    const unsubscribe = storeApi.subscribe(schedule)
+    schedule()
+    return () => {
+      el.removeEventListener("pointerover", onOver)
+      el.removeEventListener("pointerleave", onLeave)
+      unsubscribe()
+      if (frame) cancelAnimationFrame(frame)
+      scheduleLabelPass.current = () => {}
+    }
   }, [storeApi])
 
   useEffect(() => {
