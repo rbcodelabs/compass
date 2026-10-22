@@ -13,21 +13,12 @@ import { Handle, Position, type Node, type NodeProps } from "@xyflow/react"
 import { cn } from "@/lib/utils"
 import { ChainGraphUiContext } from "./chain-graph-context"
 import type { ClusterNode, MemberNode } from "@/lib/chain-graph/cluster"
-import { seriesForGroupIndex, showsLabel, TYPE_SERIES } from "@/lib/chain-graph/presentation"
-import type { ChainNodeType, StatusTone } from "@/lib/chain-graph/types"
+import { seriesForGroupIndex, showsLabel } from "@/lib/chain-graph/presentation"
+import { typeShapeStyle } from "./type-glyph"
+import type { StatusTone } from "@/lib/chain-graph/types"
 
 export type ChainRFNode = Node<{ visible: MemberNode }, "chain">
 export type ClusterRFNode = Node<{ visible: ClusterNode }, "cluster">
-
-/** A distinct silhouette per type so type is never colour-only. */
-const SHAPE: Record<ChainNodeType, string> = {
-  OBJECTIVE: "9999px",
-  OPPORTUNITY: "polygon(50% 0, 100% 50%, 50% 100%, 0 50%)",
-  SOLUTION: "none",
-  ASSUMPTION: "polygon(50% 0, 100% 100%, 0 100%)",
-  EXPERIMENT: "polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%)",
-  ROADMAP_ITEM: "polygon(0 0, 72% 0, 100% 50%, 72% 100%, 0 100%)",
-}
 
 const TONE_BADGE: Record<StatusTone, string> = {
   neutral: "bg-status-neutral",
@@ -87,10 +78,7 @@ const ChainNodeView = memo(function ChainNodeView({ data }: NodeProps<ChainRFNod
       <Handle type="source" position={Position.Right} isConnectable={false} />
       <div
         className={cn("size-full", selected && "outline-2 outline-offset-2 outline-primary", pinned && "outline-1 outline-offset-4 outline-border-strong")}
-        style={{
-          background: `var(--graph-series-${TYPE_SERIES[node.type]})`,
-          ...(node.type === "OBJECTIVE" ? { borderRadius: "9999px" } : node.type === "SOLUTION" ? { borderRadius: 3 } : { clipPath: SHAPE[node.type] }),
-        }}
+        style={typeShapeStyle(node.type)}
       />
       <span className={cn("absolute -right-1 -top-1 size-2 rounded-full border border-surface-app", TONE_BADGE[node.tone])} aria-hidden />
       <span className={cn("cg-label cg-label--side absolute left-full top-1/2 ml-2 -translate-y-1/2 flex-col rounded-sm bg-surface-app/85 px-1 leading-tight", keyLabel && "cg-label--key")}>

@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
+import { TypeGlyph } from "./type-glyph"
 import { chainNodeTypes, type ChainRFNode, type ClusterRFNode } from "./chain-graph-nodes"
 import { ChainGraphUiContext, type ChainGraphUi } from "./chain-graph-context"
 import { CLUSTERS_ONLY_ABOVE, clusterKey, defaultCollapsed, listGroups, projectWithLimit, type ClusterProjection } from "@/lib/chain-graph/cluster"
@@ -490,6 +491,7 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
           <div className="flex flex-wrap gap-1" role="group" aria-label="Object types">
             {CHAIN_NODE_TYPES.map((type) => (
               <Button key={type} size="xs" variant={view.hiddenTypes.has(type) ? "outline" : "secondary"} aria-pressed={!view.hiddenTypes.has(type)} onClick={() => toggleType(type)}>
+                <TypeGlyph type={type} dimmed={view.hiddenTypes.has(type)} />
                 {typeLabels[type]}
               </Button>
             ))}
