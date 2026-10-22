@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
-import { isAppInstalledOn, parseAgentRepos } from "@/lib/github-app-token";
+import { githubConnectorUid, isAppInstalledOn, parseAgentRepos } from "@/lib/github-app-token";
 import { isPermissionError, resolveOrgAdmin, resolveWorkspaceAdmin } from "@/lib/permissions";
 import { countWorkspaceAdmins, normalizeWorkspaceRole } from "@/lib/roles";
 import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
@@ -950,7 +950,7 @@ export async function updateAgentGithubRepos(
   if (!parsed.ok) return parsed;
 
   if (parsed.repos.length) {
-    if (!process.env.GITHUB_APP_ID || !process.env.GITHUB_PRIVATE_KEY) {
+    if (!githubConnectorUid()) {
       return { ok: false, error: "The GitHub App is not configured for this deployment" };
     }
     for (const repo of parsed.repos) {

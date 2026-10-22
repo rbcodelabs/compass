@@ -22,6 +22,7 @@ export class UserAuthorizationRequiredError extends ConnectError {}
 
 export const connectMocks = {
   getToken: vi.fn(),
+  getTokenResponse: vi.fn(),
   revokeToken: vi.fn(),
   startAuthorization: vi.fn(),
 }
@@ -33,6 +34,7 @@ export function connectModule() {
 /** Default: the user has consented at every level (Connect returns a token). */
 export function resetConnectMocks(): void {
   connectMocks.getToken.mockReset().mockResolvedValue("connect-token")
+  connectMocks.getTokenResponse.mockReset().mockResolvedValue({ token: "connect-token", expiresAt: 0 })
   connectMocks.revokeToken.mockReset().mockResolvedValue(undefined)
   connectMocks.startAuthorization.mockReset().mockResolvedValue({ url: "https://connect.vercel.com/consent?x=1" })
 }
