@@ -10,9 +10,12 @@ import { createContext, useCallback, useContext, useEffect, useState, useSyncExt
 import { MAX_CARD_REFS } from "@/lib/canvas-cards";
 import type { DocEmbedRef } from "@/lib/doc-embeds";
 import type { DocEmbedCardView, DocEmbedResolution } from "@/lib/canvas-card-data";
+import type { CardEntityType } from "@/lib/spec-docs/card-edit";
 
 export type EmbedEntry = { status: "ready"; card: DocEmbedCardView } | { status: "error" };
-export type EmbedResolver = (refs: DocEmbedRef[]) => Promise<DocEmbedResolution>;
+/** A resolution plus, from the server, whether the viewer may edit records in the doc's workspace (decides only what the cards offer). */
+export type EmbedBatch = DocEmbedResolution & { canEdit?: boolean };
+export type EmbedResolver = (refs: DocEmbedRef[]) => Promise<EmbedBatch>;
 
 /** Requests that arrive within this window share one call. */
 const BATCH_WINDOW_MS = 25;
@@ -26,8 +29,31 @@ export class EmbedCardStore {
   private listeners = new Set<() => void>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  private canEditValue = false;
+  /** Per reference: the newest refresh() issued, so an older answer can never overwrite a newer one. */
+  private refreshSeq = new Map<string, number>();
 
   constructor(private readonly resolver: EmbedResolver) {}
+
+  /** Whether the server said this viewer may edit records. False until the first answer, and after any answer that does not say so. */
+  canEdit = () => this.canEditValue;
+
+  /**
+   * Re-resolve one card from the server, bypassing the cache, after a write. The newest call for a reference wins. On failure the cached
+   * card is kept (it is the last thing the server told us) and the error is rethrown for the caller to report.
+   */
+  async refresh(ref: DocEmbedRef): Promise<void> {
+    const key = keyOf(ref);
+    const seq = (this.refreshSeq.get(key) ?? 0) + 1;
+    this.refreshSeq.set(key, seq);
+    const result = await this.resolver([{ kind: ref.kind, id: ref.id.toLowerCase() }]);
+    if (this.disposed || this.refreshSeq.get(key) !== seq) return;
+    const card = result.cards[key];
+    if (!card) throw new Error("Could not refresh the card");
+    this.entries.set(key, { status: "ready", card });
+    this.canEditValue = result.canEdit === true;
+    this.notify();
+  }
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -85,6 +111,7 @@ export class EmbedCardStore {
     if (batch.length === 0) return;
     try {
       const result = await this.resolver(batch);
+      this.canEditValue = result.canEdit === true;
       for (const ref of batch) {
         const key = keyOf(ref);
         const card = result.cards[key];
@@ -106,14 +133,40 @@ export class EmbedCardStore {
 
 const StoreContext = createContext<EmbedCardStore | null>(null);
 
+/** Writes one field of a record: the same call the record's own detail panel makes (patchEntityField). Throws on any refusal. */
+export type PatchRecordField = (type: CardEntityType, id: string, field: "title" | "status", value: string) => Promise<unknown>;
+
+/**
+ * What the cards in this editor may do. `editable` is the PAGE's answer (false for an org-wide read-only member); the server's per-batch
+ * `canEdit` must also be true before any control shows. `patch` is how a record write is made.
+ */
+export type EmbedEditing = { editable: boolean; patch: PatchRecordField };
+const EditingContext = createContext<EmbedEditing | null>(null);
+
 /** Wrap the editor. `resolve` is read once, so pass a stable function (the doc id never changes for a mounted editor). */
-export function DocEmbedCardsProvider({ resolve, children }: { resolve: EmbedResolver; children: ReactNode }) {
+export function DocEmbedCardsProvider({ resolve, editing, children }: { resolve: EmbedResolver; editing?: EmbedEditing; children: ReactNode }) {
   const [store] = useState(() => new EmbedCardStore(resolve));
   useEffect(() => {
     store.attach();
     return () => store.dispose();
   }, [store]);
-  return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
+  return (
+    <StoreContext.Provider value={store}>
+      <EditingContext.Provider value={editing ?? null}>{children}</EditingContext.Provider>
+    </StoreContext.Provider>
+  );
+}
+
+/** The store, and whether edit controls may show at all (page editable AND the server said the viewer can write). Fails closed. */
+export function useEmbedEditing(): { store: EmbedCardStore | null; canEdit: boolean; patch: PatchRecordField | null } {
+  const store = useContext(StoreContext);
+  const editing = useContext(EditingContext);
+  const serverCanEdit = useSyncExternalStore(
+    useCallback((listener: () => void) => (store ? store.subscribe(listener) : () => {}), [store]),
+    () => store?.canEdit() ?? false,
+    () => false
+  );
+  return { store, canEdit: Boolean(editing?.editable && serverCanEdit), patch: editing?.patch ?? null };
 }
 
 /** The cached answer for one reference and a function that asks for it. Without a provider nothing is ever loaded. */

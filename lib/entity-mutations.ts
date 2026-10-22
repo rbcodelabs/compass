@@ -305,7 +305,7 @@ export async function updateEntityField(
   return { ok: true };
 }
 
-const TASK_STATUSES: readonly TaskStatus[] = [
+export const TASK_STATUSES: readonly TaskStatus[] = [
   "BACKLOG",
   "TODO",
   "IN_PROGRESS",

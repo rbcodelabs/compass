@@ -53,6 +53,13 @@ describe("Specs and Discovery Plans help page", () => {
     expect(raw).toContain("`label` of `create_spec`")
   })
 
+  it("documents editing a card, the / menu and Remove, and that a card edit never touches the document", () => {
+    const raw = getDocRaw(SLUG)!.content
+    for (const text of ["### Editing a card", '### The "/" menu', "### Removing a card", "**Remove**", "**Create and insert**", "It never deletes the record"]) expect(raw).toContain(text)
+    expect(raw).toMatch(/does not trigger the document's autosave/)
+    expect(raw).toMatch(/read-only members see none of this/)
+  })
+
   it("is linked from the MCP API section and links back to it, and the MCP reference documents get_spec", async () => {
     const mcp = getDocRaw("09-mcp-api")!.content
     expect(mcp).toContain(`(/help/${SLUG})`)

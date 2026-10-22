@@ -32,7 +32,10 @@ import {
   restoreDocVersion,
   resolveDocEmbedRefs,
 } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
-import { DocEmbedCardsProvider } from "@/components/docs/doc-embed-cards";
+import { DocEmbedCardsProvider, type EmbedEditing } from "@/components/docs/doc-embed-cards";
+import { createSlashController } from "@/components/docs/spec-slash-extension";
+import { SpecSlashMenu, defaultRecordCreators, type RecordCreators, type SlashScope } from "@/components/docs/spec-slash-menu";
+import { patchEntityField } from "@/components/panels/panel-parts";
 import { createDocumentSaveQueue } from "@/lib/document-save-queue";
 import { DocProperties, type DocMetadata } from "@/components/docs/doc-properties";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
@@ -87,6 +90,17 @@ interface DocEditorProps {
   followAction?: React.ReactNode;
   /** What this doc is (Spec / Discovery Plan / unscoped), for SPEC docs. Rendered above the properties; read-only. */
   specHeader?: React.ReactNode;
+  /**
+   * Present only for SPEC docs: the records the doc specifies (from its scope links). It switches on the "/" menu, which offers only
+   * what these scopes allow; an empty list (an unscoped spec) offers nothing.
+   */
+  specScopes?: SlashScope[];
+  /** True for an org-wide read-only member: no edit controls on cards, no "/" menu. The page's own answer (resolveWorkspaceAccess), not a new permission model. */
+  readOnly?: boolean;
+  /** Test seam: how "/" creates records. Defaults to the existing assumption and task actions. */
+  recordCreators?: RecordCreators;
+  /** Test seam: how a card edit writes a record. Defaults to the record page's own patchEntityField. */
+  patchRecordField?: EmbedEditing["patch"];
   /** People and agents the @ picker offers in comments. */
   mentionOptions?: MentionOptions;
   /** Agents that already hold a task from a comment in this doc. */
@@ -136,7 +150,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, specHeader, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {} }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, specHeader, specScopes, readOnly = false, recordCreators, patchRecordField, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {} }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
@@ -287,8 +301,22 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   // revision and updatedAt, every time it is merely viewed.
   const savedMarkdown = useRef<string | null>(null);
 
+  // The "/" menu exists only for spec docs; the controller is shared between the editor plugin and the menu component.
+  const slashController = useMemo(() => createSlashController(), []);
+  const creators = useMemo(
+    () => recordCreators ?? defaultRecordCreators({ orgSlug, workspaceSlug, revalidatePathStr }),
+    [recordCreators, orgSlug, workspaceSlug, revalidatePathStr]
+  );
+  const embedEditing = useMemo<EmbedEditing>(
+    () => ({
+      editable: !readOnly,
+      patch: patchRecordField ?? ((type, id, field, value) => patchEntityField(type, id, orgSlug, workspaceSlug, field, value)),
+    }),
+    [readOnly, patchRecordField, orgSlug, workspaceSlug]
+  );
+
   const editor = useEditor({
-    extensions: createDocEditorExtensions(initialAnchorData),
+    extensions: createDocEditorExtensions(initialAnchorData, { slash: specScopes ? slashController : undefined }),
     content: doc.content ?? "",
     onUpdate: ({ editor }) => {
       const markdown = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown();
@@ -519,7 +547,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     <div className="flex h-full min-h-0 min-w-0">
       <div data-slot="doc-editor-column" className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Save indicator */}
-      <div className="mx-auto w-full max-w-4xl flex justify-end px-8 pt-3 min-h-7">
+      <div data-testid="doc-save-status" data-state={saveStatus} className="mx-auto w-full max-w-4xl flex justify-end px-8 pt-3 min-h-7">
         {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
         {saveStatus === "saved" && <span className="text-xs text-text-subtle">Saved</span>}
         {saveError && <span role="alert" className="text-xs text-status-danger">{saveError} <button type="button" className="underline" onClick={() => { void saveQueue.retry(); }}>Retry save</button></span>}
@@ -777,9 +805,10 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           )}
         </div>
 
-        <DocEmbedCardsProvider resolve={resolveEmbeds}>
+        <DocEmbedCardsProvider resolve={resolveEmbeds} editing={embedEditing}>
           <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
         </DocEmbedCardsProvider>
+        {specScopes && !readOnly ? <SpecSlashMenu editor={editor} controller={slashController} scopes={specScopes} creators={creators} /> : null}
       </div>
       </div>
 
