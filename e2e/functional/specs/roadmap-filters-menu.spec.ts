@@ -5,6 +5,7 @@ test("filters live in one pulldown and Clear resets every filter", async ({ page
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`${base}/roadmap`);
+  await page.getByRole("button", { name: /Switch workspace/ }).click();
   await page.getByTestId("nav-org-roadmap").click();
   await page.waitForURL("**/roadmap");
   const toolbar = page.getByTestId("cross-roadmap-toolbar");
@@ -48,6 +49,7 @@ test("mobile Account menu links to All roadmaps", async ({ page, base }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`${base}/roadmap`);
+  await page.getByRole("button", { name: /Switch workspace/ }).click();
   const href = await page.getByTestId("nav-org-roadmap").getAttribute("href");
   expect(href).toMatch(/^\/[^/]+\/roadmap$/);
 

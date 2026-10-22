@@ -104,6 +104,38 @@ export function NotificationBellNavItem({ orgSlug, workspaceSlug, initialCount, 
   )
 }
 
+/** Compact bell that sits beside Search: icon only, count badge on the corner. */
+export function NotificationBellIconButton({ orgSlug, workspaceSlug, initialCount, initialOverflow }: BellProps) {
+  const pathname = usePathname()
+  const { count, overflow } = useUnread(orgSlug, workspaceSlug, { count: initialCount, overflow: initialOverflow })
+  const href = `/${orgSlug}/${workspaceSlug}/notifications`
+  const isActive = pathname.startsWith(href)
+
+  return (
+    <div className="relative shrink-0">
+      <SidebarMenuButton
+        render={<Link href={href} />}
+        isActive={isActive}
+        tooltip={count > 0 ? `Notifications (${formatUnread(count, overflow)})` : "Notifications"}
+        aria-label={labelFor(count, overflow)}
+        className="h-9 w-9 justify-center rounded-lg p-0 text-text-secondary group-data-[collapsible=icon]:size-8!"
+        data-slot="notification-bell"
+      >
+        <Bell className={isActive ? "text-primary" : "text-text-subtle"} aria-hidden="true" />
+      </SidebarMenuButton>
+      {count > 0 && (
+        <span
+          aria-hidden="true"
+          data-testid="notification-count"
+          className="pointer-events-none absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar"
+        >
+          {formatUnread(count, overflow)}
+        </span>
+      )}
+    </div>
+  )
+}
+
 /** Mobile header button, styled like its Docs and Account neighbours. */
 export function NotificationBellHeaderLink({ orgSlug, workspaceSlug, initialCount, initialOverflow }: BellProps) {
   const pathname = usePathname()
