@@ -10,9 +10,9 @@
  * picker and leaves the literal "@" in place. With the picker closed, Enter
  * inserts a line break and Cmd/Ctrl+Enter calls onSubmitShortcut.
  */
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
-import { serializeMention, type MentionKind } from "@/lib/comment-mentions"
+import { bodySegments, serializeMention, type MentionKind } from "@/lib/comment-mentions"
 
 export interface MentionOption {
   kind: MentionKind
@@ -34,6 +34,8 @@ export interface MentionOptions {
 
 interface MentionEditorProps {
   options: MentionOptions
+  /** Serialized body to load once on mount (editing an existing comment); mention tokens become chips. */
+  initialValue?: string
   ariaLabel: string
   placeholder: string
   onChange: (body: string) => void
@@ -73,6 +75,37 @@ export function serializeEditor(root: Node): string {
     }
   })
   return out
+}
+
+function createChip(kind: MentionKind, id: string, name: string, outsideWorkspace?: boolean): HTMLSpanElement {
+  const chip = document.createElement("span")
+  chip.contentEditable = "false"
+  chip.dataset.mentionKind = kind
+  chip.dataset.mentionId = id
+  chip.dataset.mentionLabel = name
+  chip.dataset.testid = "mention-chip"
+  chip.className = cn("mention-chip", kind === "agent" && "mention-chip-agent", outsideWorkspace && "mention-chip-outside")
+  chip.textContent = `@${name}`
+  return chip
+}
+
+/** Fill the editor from a serialized body: text and line breaks as-is, each mention token as a chip with its live name. */
+function loadBody(root: HTMLElement, body: string, options: MentionOptions) {
+  const live = new Map<string, MentionOption>()
+  for (const option of [...options.people, ...options.agents, ...options.outside]) live.set(`${option.kind}:${option.id}`, option)
+  root.textContent = ""
+  for (const segment of bodySegments(body)) {
+    if (segment.type === "mention") {
+      const { kind, id, label } = segment.mention
+      const option = live.get(`${kind}:${id}`)
+      root.append(createChip(kind, id, option?.name ?? label, option?.outsideWorkspace))
+      continue
+    }
+    segment.text.split("\n").forEach((line, index) => {
+      if (index > 0) root.append(document.createElement("br"))
+      if (line) root.append(document.createTextNode(line))
+    })
+  }
 }
 
 function initials(name: string): string {
@@ -118,7 +151,7 @@ function HighlightedName({ name, query }: { name: string; query: string }): Reac
 }
 
 export function MentionEditor({
-  options, ariaLabel, placeholder, onChange, onSubmitShortcut, onEscape, autoFocus, disabled, className, testId,
+  options, initialValue, ariaLabel, placeholder, onChange, onSubmitShortcut, onEscape, autoFocus, disabled, className, testId,
 }: MentionEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const listId = useId()
@@ -183,14 +216,7 @@ export function MentionEditor({
     range.setEnd(trigger.node, trigger.end)
     range.deleteContents()
 
-    const chip = document.createElement("span")
-    chip.contentEditable = "false"
-    chip.dataset.mentionKind = option.kind
-    chip.dataset.mentionId = option.id
-    chip.dataset.mentionLabel = option.name
-    chip.dataset.testid = "mention-chip"
-    chip.className = cn("mention-chip", option.kind === "agent" && "mention-chip-agent", option.outsideWorkspace && "mention-chip-outside")
-    chip.textContent = `@${option.name}`
+    const chip = createChip(option.kind, option.id, option.name, option.outsideWorkspace)
     range.insertNode(chip)
 
     const space = document.createTextNode(" ")
@@ -206,8 +232,26 @@ export function MentionEditor({
     emit()
   }, [close, emit])
 
+  // Mount only: the editor is uncontrolled afterwards (a later initialValue or options change must never rewrite what
+  // the user is typing), so the first value is captured and chips use the options known at that moment.
+  const mountValue = useRef({ initialValue, options })
+  useLayoutEffect(() => {
+    const { initialValue: body, options: known } = mountValue.current
+    if (body && editorRef.current) loadBody(editorRef.current, body, known)
+  }, [])
+
   useEffect(() => {
-    if (autoFocus) editorRef.current?.focus()
+    if (!autoFocus) return
+    const root = editorRef.current
+    root?.focus()
+    // Editing: put the caret after the existing text.
+    if (root && mountValue.current.initialValue) {
+      const end = document.createRange()
+      end.selectNodeContents(root)
+      end.collapse(false)
+      window.getSelection()?.removeAllRanges()
+      window.getSelection()?.addRange(end)
+    }
   }, [autoFocus])
 
   // The picker sits in the flow below the editor (never overlaid), so no ancestor can clip it: it grows the

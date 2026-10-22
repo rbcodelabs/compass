@@ -10,6 +10,10 @@ const setCommentStatus = vi.fn()
 const deleteBrowserComment = vi.fn()
 const toCommentThreads = vi.fn()
 const toCommentDto = vi.fn()
+const postTargetComment = vi.fn()
+const loadMentionCandidates = vi.fn()
+const loadCommentTaskCards = vi.fn()
+const agentIdsAssignedOnTarget = vi.fn()
 
 vi.mock("@/lib/comment-browser", () => ({
   CommentHttpError: class extends Error {
@@ -27,6 +31,16 @@ vi.mock("@/lib/comments", () => ({
   createComment: (...args: unknown[]) => createComment(...args),
   updateCommentBody: (...args: unknown[]) => updateCommentBody(...args),
   setCommentStatus: (...args: unknown[]) => setCommentStatus(...args),
+}))
+
+vi.mock("@/lib/comment-target-tasks", () => ({
+  postTargetCommentWithOptionalTask: (...args: unknown[]) => postTargetComment(...args),
+  agentIdsAssignedOnTarget: (...args: unknown[]) => agentIdsAssignedOnTarget(...args),
+  targetTitle: async () => "Roadmap title",
+}))
+vi.mock("@/lib/doc-comment-tasks", () => ({
+  loadMentionCandidates: (...args: unknown[]) => loadMentionCandidates(...args),
+  loadCommentTaskCards: (...args: unknown[]) => loadCommentTaskCards(...args),
 }))
 
 import { DELETE, PATCH } from "@/app/api/comments/[id]/route"
@@ -51,6 +65,9 @@ beforeEach(() => {
   deleteBrowserComment.mockResolvedValue({ id: "comment-1", deletedReplies: 0 })
   toCommentThreads.mockReturnValue([])
   toCommentDto.mockImplementation((row) => ({ ...row, replies: [] }))
+  loadMentionCandidates.mockResolvedValue({ people: [], agents: [], outside: [] })
+  loadCommentTaskCards.mockResolvedValue({})
+  agentIdsAssignedOnTarget.mockResolvedValue([])
 })
 
 describe("GET /api/comments", () => {
@@ -71,7 +88,50 @@ describe("GET /api/comments", () => {
     const response = await GET(request("/api/comments?targetType=ROADMAP_ITEM&targetId=target-1&workspaceId=evil"))
     expect(response.status).toBe(200)
     expect(listBrowserComments).toHaveBeenCalledWith("workspace-1", "ROADMAP_ITEM", "target-1")
-    expect(await response.json()).toEqual({ items: [{ id: "comment-1", replies: [] }] })
+    expect(await response.json()).toEqual({
+      items: [{ id: "comment-1", replies: [] }],
+      mention: { options: { people: [], agents: [], outside: [] }, confirmedAgentIds: [], targetTitle: "Roadmap title" },
+      taskCards: {},
+    })
+    expect(loadMentionCandidates).toHaveBeenCalledWith("workspace-1")
+  })
+})
+
+describe("POST /api/comments with mentions", () => {
+  const MENTION = "@[Quinn](mention:user:6f1c2a40-1111-4222-8333-944455556666)"
+  const post = (body: Record<string, unknown>) => POST(request("/api/comments", { method: "POST", body: JSON.stringify({ targetType: "ROADMAP_ITEM", targetId: "target-1", ...body }) }))
+
+  it("keeps the plain path for a comment with no mention and no task", async () => {
+    expect((await post({ body: "Plain" })).status).toBe(201)
+    expect(createComment).toHaveBeenCalled()
+    expect(postTargetComment).not.toHaveBeenCalled()
+  })
+
+  it("routes a mention through the task-aware service with the server-resolved workspace and actor", async () => {
+    postTargetComment.mockResolvedValue({ ok: true, comment: { id: "comment-2" }, card: { taskId: "task-1" } })
+    const response = await post({ body: `${MENTION} please look`, task: { title: "Look", dueDate: null, priority: "HIGH" }, assignee: { kind: "user", id: "6f1c2a40-1111-4222-8333-944455556666" }, agentScopeConfirmed: true, workspaceId: "evil" })
+    expect(response.status).toBe(201)
+    expect(createComment).not.toHaveBeenCalled()
+    expect(postTargetComment).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace-1", targetType: "ROADMAP_ITEM", targetId: "target-1", userId: "user-1", agentScopeConfirmed: true,
+      task: { title: "Look", dueDate: null, priority: "HIGH" },
+    }))
+    expect(await response.json()).toMatchObject({ id: "comment-2", taskCard: { taskId: "task-1" } })
+  })
+
+  it("returns the service's error code, with 403 for a non-member", async () => {
+    postTargetComment.mockResolvedValue({ ok: false, error: "FORBIDDEN" })
+    const forbidden = await post({ body: MENTION, task: { title: "T" } })
+    expect(forbidden.status).toBe(403)
+    expect(await forbidden.json()).toEqual({ error: "FORBIDDEN", code: "FORBIDDEN" })
+    postTargetComment.mockResolvedValue({ ok: false, error: "ASSIGNEE_NOT_IN_WORKSPACE" })
+    expect((await post({ body: MENTION, task: { title: "T" } })).status).toBe(422)
+  })
+
+  it("rejects a malformed task or assignee", async () => {
+    expect((await post({ body: MENTION, task: "nope" })).status).toBe(400)
+    expect((await post({ body: MENTION, task: { title: 5 } })).status).toBe(400)
+    expect((await post({ body: MENTION, assignee: { kind: "robot", id: "x" } })).status).toBe(400)
   })
 })
 
