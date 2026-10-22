@@ -3,6 +3,7 @@ import getPrisma from "@/lib/db";
 import { decrypt } from "@/lib/crypto-secrets";
 import { verifySsoToken } from "@/lib/portal-sso";
 import { createPortalSession, upsertPortalAccountFromSsoIdentity } from "@/lib/portal-auth";
+import { escapeHtml } from "@/lib/html-escape";
 
 type Params = { orgSlug: string; workspaceSlug: string };
 
@@ -86,7 +87,7 @@ export async function GET(
   }
 
   return htmlResponse(
-    `<p>Signed in as ${portalAccount.email}. You can close this tab.</p>`,
+    `<p>Signed in as ${escapeHtml(portalAccount.email)}. You can close this tab.</p>`,
     200
   );
 }

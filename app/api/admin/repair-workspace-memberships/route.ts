@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import getPrisma from "@/lib/db"
 import { normalizeWorkspaceRole } from "@/lib/roles"
+import { secretMatches } from "@/lib/secret-compare"
 
 export async function POST(req: NextRequest) {
   const repairSecret = process.env.REPAIR_SECRET
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => null)
-  if (!body || body.secret !== repairSecret) {
+  if (!body || typeof body.secret !== "string" || !secretMatches(body.secret, repairSecret)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 

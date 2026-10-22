@@ -11,6 +11,7 @@
  */
 import { randomBytes } from "crypto";
 import { jwtVerify } from "jose";
+import { isValidPortalEmail } from "@/lib/portal-email";
 
 const SECRET_LENGTH_BYTES = 32;
 const MAX_TOKEN_AGE = "5 minutes";
@@ -44,7 +45,7 @@ export async function verifySsoToken(secret: string, token: string): Promise<Sso
     const emailClaim = payload.email;
     if (typeof emailClaim !== "string") return null;
     const email = emailClaim.trim().toLowerCase();
-    if (!email) return null;
+    if (!email || !isValidPortalEmail(email)) return null;
 
     const nameClaim = payload.name;
     if (nameClaim !== undefined && typeof nameClaim !== "string") return null;

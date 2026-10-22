@@ -24,11 +24,10 @@ import { NextRequest, NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
 import { generateSsoSecret } from "@/lib/portal-sso";
 import { encrypt } from "@/lib/crypto-secrets";
+import { secretMatches } from "@/lib/secret-compare";
 
 function checkAuth(req: NextRequest): boolean {
-  const secret = process.env.MIGRATION_SECRET;
-  if (!secret) return false;
-  return req.headers.get("x-migration-secret") === secret;
+  return secretMatches(req.headers.get("x-migration-secret"), process.env.MIGRATION_SECRET);
 }
 
 export async function POST(req: NextRequest) {
