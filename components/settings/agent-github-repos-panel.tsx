@@ -20,15 +20,18 @@ export function AgentGithubReposPanel({ orgSlug, workspaceSlug, initialRepos, ca
   const [saved, setSaved] = useState(initialRepos);
   const [text, setText] = useState(initialRepos.join("\n"));
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function handleSave() {
     setError(null);
+    setNotice(null);
     startTransition(async () => {
       const result = await updateAgentGithubRepos(orgSlug, workspaceSlug, { repos: text.split(/[\n,]+/) });
       if (result.ok) {
         setSaved(result.repos);
         setText(result.repos.join("\n"));
+        setNotice(result.repos.length ? `Saved. Agents can use ${result.repos.length} ${result.repos.length === 1 ? "repository" : "repositories"}.` : "Saved. Agents have no GitHub access.");
       } else {
         setError(result.error);
       }
@@ -50,15 +53,16 @@ export function AgentGithubReposPanel({ orgSlug, workspaceSlug, initialRepos, ca
         id="agent-github-repos"
         data-testid="agent-github-repos-input"
         className="min-h-24 rounded-md border border-border bg-background px-3 py-2 font-mono text-xs"
-        placeholder={"bankrate-prototypes/compass\nbankrate-prototypes/another-repo"}
+        placeholder={"rbcodelabs/compass\nrbcodelabs/another-repo"}
         value={text}
         disabled={isPending}
         onChange={(event) => setText(event.target.value)}
       />
       <span className="text-xs text-muted-foreground">
-        One <code>owner/name</code> per line, up to 10, all under the same GitHub owner. The Bankrate GitHub App must be installed on each.
+        One <code>owner/name</code> per line, up to 10, all under the same GitHub owner. The Compass GitHub App must be installed on each.
         Leave empty to give agents no GitHub access.
       </span>
+      {notice && <p role="status" data-testid="agent-github-repos-notice" className="text-xs text-emerald-600">{notice}</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       <div>
         <Button size="sm" onClick={handleSave} disabled={isPending} data-testid="agent-github-repos-save">
