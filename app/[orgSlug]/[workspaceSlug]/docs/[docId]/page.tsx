@@ -108,13 +108,17 @@ export default async function DocPage({ params, searchParams }: Props) {
   }
 
   // A SPEC doc says what it is (Spec / Discovery Plan / unscoped) from its live scope links. Plain docs are untouched.
-  const specHeader =
-    storedDoc.docType === "SPEC" ? <SpecDocHeader scopes={await loadSpecScopeViews({ workspaceId: workspace.id, orgSlug, workspaceSlug, docId: doc.id })} /> : undefined;
+  const specScopeViews = storedDoc.docType === "SPEC" ? await loadSpecScopeViews({ workspaceId: workspace.id, orgSlug, workspaceSlug, docId: doc.id }) : null;
+  const specHeader = specScopeViews ? <SpecDocHeader scopes={specScopeViews} /> : undefined;
+  // What the "/" menu may create comes from the live scope links, never from the client.
+  const specScopes = specScopeViews?.map(({ scopeType, scopeId, title }) => ({ scopeType, scopeId, title }));
 
   return (
     <DocEditor
       key={doc.id}
       specHeader={specHeader}
+      specScopes={specScopes}
+      readOnly={access.isReadOnly}
       doc={doc}
       initialCommentsPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsComments"))?.value)}
       initialHistoryPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsHistory"))?.value)}

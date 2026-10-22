@@ -54,10 +54,22 @@ describe("resolveDocEmbedRefs", () => {
   })
 
   it("returns an empty resolution for a non-array and bounds how many references it looks at", async () => {
-    expect(await resolveDocEmbedRefs(DOC, "nope")).toEqual({ cards: {}, deferred: [] })
+    expect(await resolveDocEmbedRefs(DOC, "nope")).toEqual({ cards: {}, deferred: [], canEdit: false })
     expect(mocks.resolveDocEmbeds).not.toHaveBeenCalled()
     await resolveDocEmbedRefs(DOC, Array.from({ length: 5000 }, (_, i) => ({ kind: "task", id: String(i) })))
     expect(mocks.resolveDocEmbeds.mock.calls[0][0].refs).toHaveLength(500)
+  })
+
+  it("canEdit (what the cards offer, phase 4): true for a direct workspace member, false for an org-wide read-only member, false when the answer is not exactly that", async () => {
+    mocks.workspaceFindFirst.mockResolvedValue({ id: WS, slug: "alpha", organization: { slug: "acme" }, members: [{ id: "m1" }] })
+    expect(await resolveDocEmbedRefs(DOC, [])).toMatchObject({ canEdit: true })
+    mocks.workspaceFindFirst.mockResolvedValue({ id: WS, slug: "alpha", organization: { slug: "acme" }, members: [] })
+    expect(await resolveDocEmbedRefs(DOC, [])).toMatchObject({ canEdit: false })
+    mocks.workspaceFindFirst.mockResolvedValue({ id: WS, slug: "alpha", organization: { slug: "acme" } })
+    expect(await resolveDocEmbedRefs(DOC, [])).toMatchObject({ canEdit: false })
+    // The membership it consults is the caller's own, never one named by the client.
+    const select = mocks.workspaceFindFirst.mock.calls[0][0].select
+    expect(select.members).toMatchObject({ where: { userId: "user-1" } })
   })
 
   it("a doc the resolver cannot find (deleted meanwhile) is an error, not an empty result", async () => {

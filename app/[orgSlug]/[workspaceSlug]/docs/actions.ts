@@ -282,10 +282,12 @@ async function requireCanvasReader(docId: string) {
         { organization: { memberWorkspaceReadOnlyAccess: true, members: { some: { userId } } } },
       ],
     },
-    select: { id: true, slug: true, organization: { select: { slug: true } } },
+    select: { id: true, slug: true, organization: { select: { slug: true } }, members: { where: { userId }, select: { id: true }, take: 1 } },
   });
   if (!workspace?.organization) throw new Error("Workspace not found or access denied");
-  return { userId, workspaceId: workspace.id, workspaceSlug: workspace.slug, orgSlug: workspace.organization.slug };
+  // A direct workspace member may edit; an org-wide read-only member may only read. Anything unexpected reads as "cannot edit".
+  const canEdit = Array.isArray(workspace.members) && workspace.members.length > 0;
+  return { userId, workspaceId: workspace.id, workspaceSlug: workspace.slug, orgSlug: workspace.organization.slug, canEdit };
 }
 
 /** Live data for the Compass cards on a canvas; unknown/foreign ids come back `unavailable`. */
@@ -295,6 +297,12 @@ export async function resolveCanvasCardRefs(docId: string, refs: unknown) {
   return resolveCanvasCards({ ...access, refs });
 }
 
+/**
+ * A resolution plus whether the caller may edit records in the doc's workspace (phase 4). It decides only whether the cards OFFER
+ * edit controls: every write is authorized again, by the record's own endpoint, when it happens.
+ */
+export type DocEmbedBatch = DocEmbedResolution & { canEdit: boolean };
+
 /** Hard bound on the references one call will even look at; the resolver then caps what it queries at MAX_CARD_REFS. */
 const MAX_EMBED_REFS_PER_CALL = 500;
 
@@ -303,12 +311,12 @@ const MAX_EMBED_REFS_PER_CALL = 500;
  * the references can only name a kind and an id. Unknown, deleted, foreign and not-permitted records all come back `unavailable`
  * (identical payloads); references beyond the per-request cap come back in `deferred` for the editor to ask for as cards scroll into view.
  */
-export async function resolveDocEmbedRefs(docId: string, refs: unknown): Promise<DocEmbedResolution> {
+export async function resolveDocEmbedRefs(docId: string, refs: unknown): Promise<DocEmbedBatch> {
   const access = await requireCanvasReader(docId);
-  if (!Array.isArray(refs)) return { cards: {}, deferred: [] };
+  if (!Array.isArray(refs)) return { cards: {}, deferred: [], canEdit: access.canEdit };
   const result = await resolveDocEmbeds({ docId, userId: access.userId, refs: refs.slice(0, MAX_EMBED_REFS_PER_CALL), expectedWorkspaceId: access.workspaceId });
   if (!result) throw new Error("Document not found");
-  return result;
+  return { ...result, canEdit: access.canEdit };
 }
 
 /** Picker search. Requires workspace membership (it is an editing action). */
