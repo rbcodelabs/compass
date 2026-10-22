@@ -4,7 +4,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 
 let pathname = "/acme/ws/okrs"
-vi.mock("next/navigation", () => ({ usePathname: () => pathname, useRouter: () => ({ push: vi.fn() }) }))
+vi.mock("next/navigation", () => ({ usePathname: () => pathname, useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push: vi.fn() }) }))
 vi.mock("@/lib/actions/auth-actions", () => ({ signOutAction: vi.fn() }))
 vi.mock("@/lib/meta-feedback-actions", () => ({ sendCompassFeedback: vi.fn() }))
 vi.mock("@/components/panels/panel-context", () => ({ usePanelContext: () => ({ openPanel: vi.fn() }) }))
