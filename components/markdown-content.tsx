@@ -4,6 +4,7 @@ import { useMemo, type ReactNode } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { parseMentionHref } from "@/lib/comment-mentions";
 import { remarkWorkItemRefs } from "@/lib/work-item-linkify";
 import { useWorkItemLinkScope } from "@/components/work-item-link-scope";
 
@@ -29,6 +30,8 @@ const PROSE = [
 ].join(" ");
 
 function safeUrl(url: string): string {
+  // Comment @mentions (see mentionsAsMarkdownLinks) carry an id-only href that is rendered as a chip, never navigated.
+  if (parseMentionHref(url)) return url;
   return defaultUrlTransform(url);
 }
 

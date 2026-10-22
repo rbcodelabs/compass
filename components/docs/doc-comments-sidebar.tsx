@@ -7,11 +7,11 @@ import type { PanelPin } from "@/lib/panel-pin"
 import { Button } from "@/components/ui/button"
 import { relativeTime } from "@/lib/relative-time"
 import { cn } from "@/lib/utils"
-import { bodySegments } from "@/lib/comment-mentions"
+import { MentionChips } from "@/components/comments/mention-chips"
 import type { CommentTaskCardData } from "@/lib/comment-task-card"
 import { CommentTaskCard } from "@/components/docs/comment-task-card"
 import { DocCommentComposer, type ComposerPayload, type ComposerResult } from "@/components/docs/doc-comment-composer"
-import type { MentionOption, MentionOptions } from "@/components/docs/mention-editor"
+import type { MentionOptions } from "@/components/docs/mention-editor"
 
 const NO_MENTION_OPTIONS: MentionOptions = { people: [], agents: [], outside: [] }
 
@@ -295,35 +295,6 @@ function CommentThread({
       )}
     </li>
   )
-}
-
-function MentionChips({ body, options }: { body: string; options: MentionOptions }) {
-  const live = new Map<string, MentionOption>()
-  for (const option of [...options.people, ...options.agents, ...options.outside]) live.set(kindKey(option.kind, option.id), option)
-  return (
-    <>
-      {bodySegments(body).map((segment, index) => {
-        if (segment.type === "text") return <span key={index}>{segment.text}</span>
-        const { kind, id, label } = segment.mention
-        const option = live.get(kindKey(kind, id))
-        // Resolve the id to the current name so renames never leave a stale label.
-        return (
-          <span
-            key={index}
-            data-testid="comment-mention"
-            data-mention-id={id}
-            className={cn("mention-chip", kind === "agent" && "mention-chip-agent", option?.outsideWorkspace && "mention-chip-outside")}
-          >
-            @{option?.name ?? label}
-          </span>
-        )
-      })}
-    </>
-  )
-}
-
-function kindKey(kind: string, id: string): string {
-  return kind + ":" + id
 }
 
 function CommentBody({ comment, mention }: { comment: DocCommentItem; mention: MentionContext }) {

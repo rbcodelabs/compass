@@ -106,6 +106,8 @@ export async function deleteBrowserComment(commentId: string, actor: Pick<Commen
     // one left behind turns this delete into a 500.
     await tx.commentElementAnchor.deleteMany({ where: { commentId: { in: ids } } })
     await tx.commentExternalAuthor.deleteMany({ where: { commentId: { in: ids } } })
+    // Tasks made from these comments keep living; only their pointer to the deleted comment goes.
+    await tx.taskLink.deleteMany({ where: { linkedType: "COMMENT", linkedId: { in: ids } } })
     if (replies.length) await tx.comment.deleteMany({ where: { parentId: commentId } })
     await tx.comment.delete({ where: { id: commentId } })
     return { id: commentId, deletedReplies: replies.length }

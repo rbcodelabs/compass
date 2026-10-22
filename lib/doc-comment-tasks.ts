@@ -81,7 +81,7 @@ export async function loadMentionCandidates(workspaceId: string): Promise<Mentio
 
 // ─── Read model ──────────────────────────────────────────────────────────────
 
-function toCard(task: {
+export function toCard(task: {
   id: string; seqPrefix: string | null; seqNumber: number | null; title: string; status: string; priority: string; dueDate: Date | null
   assignee: CommentTaskCardData["assignee"]
 }): CommentTaskCardData {
@@ -203,6 +203,32 @@ export function parseDueDate(value: string): Date | null {
   return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value ? null : date
 }
 
+/**
+ * Validate a comment's task request and resolve who it goes to, before anything is written. Shared by the Doc and
+ * the generic (Discussion) comment paths so the rules cannot drift.
+ */
+export async function planCommentTask(input: {
+  workspaceId: string
+  task: CommentTaskRequest
+  roles: { assignee: MentionRef | null }
+  agentScopeConfirmed?: boolean
+  /** Agents that already hold a task from a comment on this surface (no scope confirmation needed). */
+  knownAgentIds: () => Promise<string[]>
+}): Promise<{ ok: true; assignee: { type: "USER" | "AGENT"; id: string } } | { ok: false; error: PostCommentError }> {
+  if (!input.task.title.trim()) return { ok: false, error: "EMPTY_TITLE" }
+  if (input.task.priority !== undefined && !PRIORITIES.includes(input.task.priority)) return { ok: false, error: "INVALID_PRIORITY" }
+  if (input.task.dueDate && !parseDueDate(input.task.dueDate)) return { ok: false, error: "INVALID_DUE_DATE" }
+  const wanted = input.roles.assignee
+  if (!wanted) return { ok: false, error: "NO_ASSIGNEE" }
+  const eligible = await eligibleTaskAssignees(input.workspaceId)
+  const wantedType = wanted.kind === "agent" ? "AGENT" : "USER"
+  if (!eligible.some(a => a.type === wantedType && a.id === wanted.id)) return { ok: false, error: "ASSIGNEE_NOT_IN_WORKSPACE" }
+  if (wantedType === "AGENT" && !input.agentScopeConfirmed && !(await input.knownAgentIds()).includes(wanted.id)) {
+    return { ok: false, error: "AGENT_SCOPE_CONFIRMATION_REQUIRED" }
+  }
+  return { ok: true, assignee: { type: wantedType, id: wanted.id } }
+}
+
 export async function postDocCommentWithOptionalTask(input: PostCommentInput): Promise<PostCommentResult> {
   const prisma = getPrisma()
   const body = input.body.trim()
@@ -219,21 +245,12 @@ export async function postDocCommentWithOptionalTask(input: PostCommentInput): P
   let assignee: { type: "USER" | "AGENT"; id: string } | null = null
 
   if (input.task) {
-    const title = input.task.title.trim()
-    if (!title) return { ok: false, error: "EMPTY_TITLE" }
-    if (input.task.priority !== undefined && !PRIORITIES.includes(input.task.priority)) return { ok: false, error: "INVALID_PRIORITY" }
-    if (input.task.dueDate && !parseDueDate(input.task.dueDate)) return { ok: false, error: "INVALID_DUE_DATE" }
-    if (!roles.assignee) return { ok: false, error: "NO_ASSIGNEE" }
-    const eligible = await eligibleTaskAssignees(doc.workspaceId)
-    const wantedType = roles.assignee.kind === "agent" ? "AGENT" : "USER"
-    if (!eligible.some(a => a.type === wantedType && a.id === roles.assignee!.id)) {
-      return { ok: false, error: "ASSIGNEE_NOT_IN_WORKSPACE" }
-    }
-    assignee = { type: wantedType, id: roles.assignee.id }
-    if (assignee.type === "AGENT" && !input.agentScopeConfirmed) {
-      const known = await agentIdsAssignedInDoc(doc.workspaceId, doc.id)
-      if (!known.includes(assignee.id)) return { ok: false, error: "AGENT_SCOPE_CONFIRMATION_REQUIRED" }
-    }
+    const plan = await planCommentTask({
+      workspaceId: doc.workspaceId, task: input.task, roles, agentScopeConfirmed: input.agentScopeConfirmed,
+      knownAgentIds: () => agentIdsAssignedInDoc(doc.workspaceId, doc.id),
+    })
+    if (!plan.ok) return plan
+    assignee = plan.assignee
   }
 
   const created = await createDocCommentCore({
@@ -270,7 +287,7 @@ export async function postDocCommentWithOptionalTask(input: PostCommentInput): P
   }
 
   await runAfterCommit(() => notifyMentions({
-    workspaceId: doc.workspaceId, docId: doc.id, commentId: created.comment.id, actorId: input.userId,
+    workspaceId: doc.workspaceId, subjectType: "DOC", subjectId: doc.id, commentId: created.comment.id, actorId: input.userId,
     taskId, mentions: uniqueMentions(body), taskAssigneeUserId: assignee?.type === "USER" && taskId ? assignee.id : null,
   }))
 
@@ -284,21 +301,21 @@ export async function postDocCommentWithOptionalTask(input: PostCommentInput): P
  * followers, so they get nothing here: an agent's notification is the task in
  * its queue. Best-effort: runs after the comment committed and never throws.
  */
-async function notifyMentions(input: {
-  workspaceId: string; docId: string; commentId: string; actorId: string
+export async function notifyMentions(input: {
+  workspaceId: string; subjectType: string; subjectId: string; commentId: string; actorId: string
   taskId: string | null; mentions: MentionRef[]; taskAssigneeUserId: string | null
 }): Promise<void> {
   const users = input.mentions.filter(m => m.kind === "user" && m.id !== input.actorId)
   const recipients = users.filter(m => m.id !== input.taskAssigneeUserId)
   if (recipients.length === 0) return
   for (const mention of recipients) {
-    await autoFollow({ userId: mention.id, workspaceId: input.workspaceId, subjectType: "DOC", subjectId: input.docId, source: "AUTO_MENTION" })
+    await autoFollow({ userId: mention.id, workspaceId: input.workspaceId, subjectType: input.subjectType, subjectId: input.subjectId, source: "AUTO_MENTION" })
     if (input.taskId) await autoFollow({ userId: mention.id, workspaceId: input.workspaceId, subjectType: "TASK", subjectId: input.taskId, source: "AUTO_MENTION" })
   }
   await emitSubjectEvent({
     workspaceId: input.workspaceId,
-    subjectType: "DOC",
-    subjectId: input.docId,
+    subjectType: input.subjectType,
+    subjectId: input.subjectId,
     kind: "MENTIONED",
     actor: { type: "USER", id: input.actorId },
     payload: { commentId: input.commentId },
