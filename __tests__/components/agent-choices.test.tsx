@@ -9,6 +9,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refres
 
 import { AgentChat } from "@/components/agent/agent-chat"
 import { SendToAgentPicker } from "@/components/agent/send-to-agent-picker"
+import { choose, chipValue, optionNames, queryChipButton, findChipButton } from "./composer-chips"
 
 const CHOICES = { agents: [{ id: "a-shared", name: "Triage", shared: true }, { id: "a-mine", name: "Mine", shared: false }], defaultAgentId: "a-shared" }
 
@@ -42,22 +43,22 @@ describe("AgentChat agent selector", () => {
     stubFetch({ agents: [], defaultAgentId: null })
     render(<AgentChat {...chatProps()} />)
     await act(async () => {})
-    expect(screen.queryByLabelText("Agent")).toBeNull()
+    expect(queryChipButton("Agent")).toBeNull()
   })
 
   it("is absent when the lookup fails (the chat behaves as before)", async () => {
     stubFetch({}, { status: 500 })
     render(<AgentChat {...chatProps()} />)
     await act(async () => {})
-    expect(screen.queryByLabelText("Agent")).toBeNull()
+    expect(queryChipButton("Agent")).toBeNull()
   })
 
   it("defaults to the resolved default and sends no agentId, leaving the choice to the server", async () => {
     const turns = stubFetch(CHOICES)
     render(<AgentChat {...chatProps()} />)
-    const select = (await screen.findByLabelText("Agent")) as HTMLSelectElement
-    expect(select.value).toBe("")
-    expect(screen.getByRole("option", { name: "Default (Triage)" })).toBeInTheDocument()
+    await findChipButton("Agent")
+    expect(chipValue("Agent")).toBe("Default (Triage)")
+    expect(await optionNames("Agent")).toEqual(["Default (Triage)", "Compass Agent", "Triage (shared)", "Mine"])
     await send("hello")
     await waitFor(() => expect(turns).toHaveBeenCalled())
     expect(JSON.parse(turns.mock.calls[0][1].body)).not.toHaveProperty("agentId")
@@ -66,7 +67,8 @@ describe("AgentChat agent selector", () => {
   it("sends the chosen agent's id", async () => {
     const turns = stubFetch(CHOICES)
     render(<AgentChat {...chatProps()} />)
-    fireEvent.change(await screen.findByLabelText("Agent"), { target: { value: "a-mine" } })
+    await findChipButton("Agent")
+    await choose("Agent", "Mine")
     await send("hello")
     await waitFor(() => expect(turns).toHaveBeenCalled())
     expect(JSON.parse(turns.mock.calls[0][1].body).agentId).toBe("a-mine")
@@ -75,7 +77,8 @@ describe("AgentChat agent selector", () => {
   it('sends "builtin" when the built-in agent is chosen on purpose', async () => {
     const turns = stubFetch(CHOICES)
     render(<AgentChat {...chatProps()} />)
-    fireEvent.change(await screen.findByLabelText("Agent"), { target: { value: "builtin" } })
+    await findChipButton("Agent")
+    await choose("Agent", "Compass Agent")
     await send("hello")
     await waitFor(() => expect(turns).toHaveBeenCalled())
     expect(JSON.parse(turns.mock.calls[0][1].body).agentId).toBe("builtin")
@@ -84,11 +87,11 @@ describe("AgentChat agent selector", () => {
   it("starts with the agent from ?agentId when the member can pick it, and ignores one they cannot", async () => {
     stubFetch(CHOICES)
     render(<AgentChat {...chatProps({ initialAgentId: "a-mine" })} />)
-    await waitFor(() => expect((screen.getByLabelText("Agent") as HTMLSelectElement).value).toBe("a-mine"))
+    await waitFor(() => expect(chipValue("Agent")).toBe("Mine"))
     cleanup()
     stubFetch(CHOICES)
     render(<AgentChat {...chatProps({ initialAgentId: "someone-elses" })} />)
-    await waitFor(() => expect((screen.getByLabelText("Agent") as HTMLSelectElement).value).toBe(""))
+    await waitFor(() => expect(chipValue("Agent")).toBe("Default (Triage)"))
   })
 })
 

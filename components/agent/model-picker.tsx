@@ -1,6 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useId, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { Sparkles } from "lucide-react"
+import { ChoiceChip, type ChoiceOption } from "@/components/agent/composer/choice-chip"
 import type { AgentChoices } from "@/components/agent/use-agent-choices"
 
 /** Remembered per user per workspace, in this browser only: a preference, not data. */
@@ -84,6 +86,7 @@ export function useModelPick(input: { userId: string; workspaceId: string; choic
   return { visible, model, select, defaultModel, defaultLabel: defaultModel ? modelLabelFor(choices, defaultModel) : "deployment default" }
 }
 
+/** The Model chip in the composer tray: "Default (<model>)" first, then every model this workspace offers. */
 export function ModelPicker(props: {
   choices: AgentChoices
   value: string
@@ -91,23 +94,9 @@ export function ModelPicker(props: {
   disabled?: boolean
   onChange: (value: string) => void
 }) {
-  // The rail and the full-page chat can be mounted together, so a fixed id would label the wrong select.
-  const id = useId()
-  return (
-    <div className="flex min-w-[14rem] flex-1 items-center gap-2">
-      <label htmlFor={id} className="shrink-0">Model</label>
-      <select
-        id={id}
-        value={props.value}
-        onChange={(e) => props.onChange(e.target.value)}
-        disabled={props.disabled}
-        className="h-7 min-w-0 flex-1 truncate rounded-md border border-input bg-transparent px-2 text-xs text-foreground sm:max-w-xs"
-      >
-        <option value="">Default ({props.defaultLabel})</option>
-        {props.choices.models.map((model) => (
-          <option key={model.value} value={model.value}>{model.label}</option>
-        ))}
-      </select>
-    </div>
-  )
+  const options: ChoiceOption[] = [
+    { value: "", label: `Default (${props.defaultLabel})` },
+    ...props.choices.models.map((model) => ({ value: model.value, label: model.label })),
+  ]
+  return <ChoiceChip kind="Model" icon={<Sparkles />} options={options} value={props.value} onChange={props.onChange} disabled={props.disabled} />
 }
