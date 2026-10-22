@@ -29,14 +29,14 @@ afterEach(cleanup)
 
 describe("AccountAgentsPanel cloud agents", () => {
   it("shows a cloud agent with instructions to edit and no key generation, beside an external agent that keeps its keys", () => {
-    render(<AccountAgentsPanel enabled agents={[cloud, external]} models={models} />)
+    render(<AccountAgentsPanel agents={[cloud, external]} models={models} />)
     expect(screen.getByLabelText("Instructions")).toHaveValue("Be brief.")
     expect(screen.getAllByRole("button", { name: "Generate agent key" })).toHaveLength(1)
     expect(screen.queryByLabelText("Who can run this agent")).toBeNull()
   })
 
   it("saves edited instructions and model", async () => {
-    render(<AccountAgentsPanel enabled agents={[cloud]} models={models} />)
+    render(<AccountAgentsPanel agents={[cloud]} models={models} />)
     fireEvent.change(screen.getByLabelText("Instructions"), { target: { value: "Be thorough." } })
     fireEvent.change(screen.getByLabelText("Model"), { target: { value: "claude-sonnet-5" } })
     fireEvent.click(screen.getByRole("button", { name: "Save agent" }))
@@ -44,7 +44,7 @@ describe("AccountAgentsPanel cloud agents", () => {
   })
 
   it("offers a personal default only in workspaces where the agent is enabled", async () => {
-    render(<AccountAgentsPanel enabled agents={[cloud]} models={models} />)
+    render(<AccountAgentsPanel agents={[cloud]} models={models} />)
     expect(screen.getByText(/Not enabled/)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Use as my default in Lab" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Use as my default in Home" }))
@@ -52,13 +52,13 @@ describe("AccountAgentsPanel cloud agents", () => {
   })
 
   it("clears an existing personal default", async () => {
-    render(<AccountAgentsPanel enabled agents={[{ ...cloud, workspaces: [{ ...cloud.workspaces[0], isMyDefault: true }] }]} models={models} />)
+    render(<AccountAgentsPanel agents={[{ ...cloud, workspaces: [{ ...cloud.workspaces[0], isMyDefault: true }] }]} models={models} />)
     fireEvent.click(screen.getByRole("button", { name: "Clear my default in Home" }))
     await waitFor(() => expect(actions.setMyDefaultAgentAction).toHaveBeenCalledWith("acme", "home", null))
   })
 
   it("suspends a cloud agent", async () => {
-    render(<AccountAgentsPanel enabled agents={[cloud]} models={models} />)
+    render(<AccountAgentsPanel agents={[cloud]} models={models} />)
     fireEvent.click(screen.getByRole("button", { name: "Suspend" }))
     await waitFor(() => expect(actions.updateAgent).toHaveBeenCalledWith("c1", expect.objectContaining({ status: "SUSPENDED" })))
   })
