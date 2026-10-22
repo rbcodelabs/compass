@@ -92,7 +92,7 @@ export function NotificationBellIconButton({ orgSlug, workspaceSlug, initialCoun
           <span
             aria-hidden="true"
             data-testid="notification-count"
-            className="pointer-events-none absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar group-data-[collapsible=icon]:hidden"
+            className="pointer-events-none absolute -right-1 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar group-data-[collapsible=icon]:hidden"
           >
             {formatUnread(count, overflow)}
           </span>
