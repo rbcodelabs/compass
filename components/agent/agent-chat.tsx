@@ -674,7 +674,7 @@ export function AgentChat({
           {(agentChoices.agents.length > 0 || modelPick.visible) && (
             <div className="mx-auto mb-2 flex w-full max-w-3xl min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
               {agentChoices.agents.length > 0 && (
-              <div className="flex min-w-[10rem] flex-1 items-center gap-2">
+              <div className="flex min-w-[14rem] flex-1 items-center gap-2">
                 <label htmlFor="agent-selection" className="shrink-0">Agent</label>
                 <select
                   id="agent-selection"

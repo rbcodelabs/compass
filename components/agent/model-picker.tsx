@@ -83,7 +83,7 @@ export function ModelPicker(props: {
   onChange: (value: string) => void
 }) {
   return (
-    <div className="flex min-w-[10rem] flex-1 items-center gap-2">
+    <div className="flex min-w-[14rem] flex-1 items-center gap-2">
       <label htmlFor="model-selection" className="shrink-0">Model</label>
       <select
         id="model-selection"

@@ -40,7 +40,7 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
     await form.getByRole("button", { name: "Create agent" }).click();
     await expect(page.getByText("Agent created and enabled in this workspace.")).toBeVisible({ timeout: 20_000 });
 
-    const workspaceId = (await pool.query("SELECT id FROM compass_dev.workspaces WHERE slug='e2e-workspace'")).rows[0].id as string;
+    const workspaceId = (await pool.query("SELECT w.id FROM compass_dev.workspaces w JOIN compass_dev.organizations o ON w.organization_id = o.id WHERE w.slug = 'e2e-workspace' AND o.slug = 'e2e-test-org'")).rows[0].id as string;
     const userId = (await pool.query("SELECT id FROM compass_dev.users WHERE email = $1", [E2E_USER_EMAIL])).rows[0].id as string;
     const storageKey = `compass:agent-model:${userId}:${workspaceId}`;
 
@@ -81,6 +81,12 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
     await expect.poll(() => turnBodies.length).toBe(2);
     expect(turnBodies[1]).toMatchObject({ model: "claude-sonnet-5", agentId: expect.any(String) });
 
+    // COMPASS_CAPTURE_MODEL_PICKER=<dir> saves the composer at each width for visual review; unset, nothing is written.
+    const capture = async (label: string) => {
+      if (process.env.COMPASS_CAPTURE_MODEL_PICKER) await page.screenshot({ path: `${process.env.COMPASS_CAPTURE_MODEL_PICKER}/chat-model-picker-${label}.png` });
+    };
+    await capture("desktop-1440");
+
     // Remembered across a reload, for this user and workspace only.
     await page.goto(`${base}/agent`);
     await expect(modelMenu).toHaveValue("claude-sonnet-5");
@@ -93,7 +99,7 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
     await expect.poll(() => page.evaluate((key) => window.localStorage.getItem(key), storageKey)).toBeNull();
 
     // The real route never trusts the client: an unlisted model is a 400 before anything is written.
-    const refused = await page.request.post(`${base}/api/agent/turn`, { data: { workspaceId, message: "hi", model: "claude-made-up" } });
+    const refused = await page.request.post("/api/agent/turn", { data: { workspaceId, message: "hi", model: "claude-made-up" } });
     expect(refused.status()).toBe(400);
     expect(await refused.json()).toMatchObject({ code: "INVALID_MODEL" });
 
@@ -102,6 +108,7 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
     await page.goto(`${base}/agent`);
     await expect(modelMenu).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await capture("mobile-390");
     for (const menu of [agentMenu, modelMenu]) {
       const box = (await menu.boundingBox())!;
       expect(box.x).toBeGreaterThanOrEqual(0);
