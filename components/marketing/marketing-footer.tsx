@@ -23,37 +23,37 @@ export function MarketingFooter({ viewer }: { viewer: MarketingViewer }) {
         <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-slate-500">
           <Link
             href={isSignedOut ? "/login" : accountHref}
-            className="hover:text-slate-900 transition-colors"
+            className="hover:text-text-primary transition-colors"
           >
             {accountLabel}
           </Link>
           <Link
             href="/help"
-            className="hover:text-slate-900 transition-colors"
+            className="hover:text-text-primary transition-colors"
           >
             User Guide
           </Link>
           <Link
             href="/portal/rbcodelabs/compass/roadmap"
-            className="hover:text-slate-900 transition-colors"
+            className="hover:text-text-primary transition-colors"
           >
             Roadmap
           </Link>
           <Link
             href="/portal/rbcodelabs/compass/feedback"
-            className="hover:text-slate-900 transition-colors"
+            className="hover:text-text-primary transition-colors"
           >
             Give feedback
           </Link>
           <Link
             href="/privacy"
-            className="hover:text-slate-900 transition-colors"
+            className="hover:text-text-primary transition-colors"
           >
             Privacy
           </Link>
           <Link
             href="/terms"
-            className="hover:text-slate-900 transition-colors"
+            className="hover:text-text-primary transition-colors"
           >
             Terms
           </Link>
