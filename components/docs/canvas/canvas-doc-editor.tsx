@@ -454,7 +454,7 @@ function CanvasEditorBody({
       raw.y = Math.round(center.y - raw.height / 2 + stagger)
       const created: FlowNode = { ...nodeToFlow(raw), selected: true }
       const nextNodes = [...nodesRef.current.map((n) => ({ ...n, selected: false })), created]
-      const nextEdges = edgesRef.current.map((e) => ({ ...e, selected: false }))
+      const nextEdges: FlowEdge[] = edgesRef.current.map((e) => ({ ...e, selected: false }))
       // One commit for card + edge, so a single undo removes both.
       if (options.linkFrom && nodesRef.current.some((n) => n.id === options.linkFrom)) {
         nextEdges.push(edgeToFlow(parentEdge(newCanvasId(), options.linkFrom, raw.id), nextNodes))
