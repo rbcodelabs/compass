@@ -93,7 +93,7 @@ const ChainNodeView = memo(function ChainNodeView({ data }: NodeProps<ChainRFNod
         }}
       />
       <span className={cn("absolute -right-1 -top-1 size-2 rounded-full border border-surface-app", TONE_BADGE[node.tone])} aria-hidden />
-      <span className={cn("cg-label absolute left-full top-1/2 ml-2 -translate-y-1/2 flex-col rounded-sm bg-surface-app/85 px-1 leading-tight", keyLabel && "cg-label--key")}>
+      <span className={cn("cg-label cg-label--side absolute left-full top-1/2 ml-2 -translate-y-1/2 flex-col rounded-sm bg-surface-app/85 px-1 leading-tight", keyLabel && "cg-label--key")}>
         <span className="max-w-[200px] truncate text-xs font-medium text-text-primary">{node.title}</span>
         <span className="cg-detail max-w-[200px] truncate text-[10px] text-text-subtle">
           {ui.typeLabels[node.type]} · <span className={TONE_TEXT[node.tone]}>{humanize(node.status)}</span>
@@ -138,7 +138,7 @@ const ClusterNodeView = memo(function ClusterNodeView({ data }: NodeProps<Cluste
       >
         {cluster.count}
       </div>
-      <span className="cg-label cg-label--key absolute left-1/2 top-full mt-1 -translate-x-1/2 flex-col items-center rounded-sm bg-surface-app/85 px-1 leading-tight">
+      <span className="cg-label cg-label--key cg-label--below absolute left-1/2 top-full mt-1 -translate-x-1/2 flex-col items-center rounded-sm bg-surface-app/85 px-1 leading-tight">
         <span className="max-w-[180px] truncate text-xs font-medium text-text-primary">{cluster.label}</span>
         <span className="cg-detail text-[10px] text-text-subtle">
           {dominant.map(([tone, n]) => (

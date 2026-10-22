@@ -91,7 +91,11 @@
   white-space: nowrap;
 }
 
-/* Semantic zoom, driven by data-band on the root (see chain-graph-view.tsx). Dot band: no labels. */
+/*
+ * Semantic zoom, driven by data-band on the root (see chain-graph-view.tsx). Dot band: no labels.
+ * Label and full bands additionally require data-cg-label="on" on the node wrapper: the view's collision pass keeps a label
+ * only when it does not overlap a higher-priority one (lib/chain-graph/label-collision.ts). Dots and shapes always render.
+ */
 .chain-graph .cg-label,
 .chain-graph .cg-detail {
   display: none;
@@ -100,12 +104,22 @@
 .chain-graph .cg-label {
   pointer-events: none;
 }
-.chain-graph [data-band="label"] .cg-label--key {
+/* Constant screen size: counter-scale the flow zoom about the edge the label hangs from, so gaps between labels grow as you zoom in. */
+.chain-graph .cg-label {
+  scale: var(--cg-inv-zoom, 1);
+}
+.chain-graph .cg-label--side {
+  transform-origin: 0 50%;
+}
+.chain-graph .cg-label--below {
+  transform-origin: 50% 0;
+}
+.chain-graph [data-band="label"] [data-cg-label="on"] .cg-label--key {
   display: flex;
 }
-.chain-graph [data-band="full"] .cg-label {
+.chain-graph [data-band="full"] [data-cg-label="on"] .cg-label {
   display: flex;
 }
-.chain-graph [data-band="full"] .cg-detail {
+.chain-graph [data-band="full"] [data-cg-label="on"] .cg-detail {
   display: block;
 }
