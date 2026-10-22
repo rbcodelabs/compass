@@ -48,6 +48,7 @@ import { TYPED_LINK_RESIDUAL_MIGRATION, TYPED_LINK_TABLES_MIGRATION, assertTyped
 import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-manifest";
 import { assertBackgroundAgentRunsMigration } from "@/lib/migrations/background-agent-runs";
 import { assertArtifactScreenshotsMigration } from "@/lib/migrations/artifact-screenshots";
+import { AGENT_RETENTION_INDEXES_MIGRATION, assertAgentRetentionIndexesMigration } from "@/lib/migrations/agent-retention-indexes";
 
 
 
@@ -656,6 +657,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // untargeted. Shares the numeric prefix 098 with the agent migration (duplicate prefixes are accepted, ADR-0012); the name is unique.
     name: "098_entity_links_backfill_solution_key_result",
     filePath: path.join(process.cwd(), "prisma/migrations/098_entity_links_backfill_solution_key_result/migration.sql"),
+  },
+  {
+    // Two async created_at indexes (agent_run_events, agent_messages) for the agent-data retention job. Optional for correctness: the job
+    // runs without them, only slower. The 100 postcondition proves both indexes exist and are valid.
+    name: "100_agent_retention_indexes",
+    filePath: path.join(process.cwd(), "prisma/migrations/100_agent_retention_indexes/migration.sql"),
   },
 ];
 
@@ -2180,6 +2187,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "082_agent_conversation_participants") await assertAgentConversationParticipantsMigration(client, schema)
       if (migration.name === "098_agent_kind_and_workspace_owner") await assertAgentKindAndWorkspaceOwnerMigration(client, schema)
       if (migration.name === "099_agent_owner_user_nullable") await assertAgentOwnerUserNullableMigration(client, schema)
+      if (migration.name === AGENT_RETENTION_INDEXES_MIGRATION) await assertAgentRetentionIndexesMigration(client, schema)
       if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {
         // Data half: backfill from the parent in bounded batches, then prove it.
         // Both run before the receipt below, so a failure leaves an unfinished

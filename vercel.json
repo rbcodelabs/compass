@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/agent-run-sweeper",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/agent-retention",
+      "schedule": "30 6 * * *"
     }
   ]
 }

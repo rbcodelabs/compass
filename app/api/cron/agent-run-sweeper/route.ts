@@ -19,8 +19,8 @@
  * termination endpoint, and an anonymous caller must never be able to reach one.
  */
 
-import { timingSafeEqual } from "node:crypto"
 import getPrisma from "@/lib/db"
+import { authorizeCron, cronAuthNotConfigured } from "@/lib/cron-auth"
 import { agentRunsAvailable, sweepAgentRuns } from "@/lib/agent-runs"
 
 export const runtime = "nodejs"
@@ -33,31 +33,11 @@ const MAX_LIMIT = 100
 const json = (value: unknown, status = 200) =>
   Response.json(value, { status, headers: { "cache-control": "no-store" } })
 
-/** Length-independent, then constant-time. Never leaks which secret matched. */
-function secretMatches(presented: string | undefined, expected: string | undefined): boolean {
-  if (!presented || !expected) return false
-  const a = Buffer.from(presented)
-  const b = Buffer.from(expected)
-  return a.length === b.length && timingSafeEqual(a, b)
-}
-
-function authorize(request: Request): boolean {
-  const cronSecret = process.env.CRON_SECRET
-  const migrationSecret = process.env.MIGRATION_SECRET
-  if (!cronSecret && !migrationSecret) return false
-  const bearer = /^Bearer (.+)$/.exec(request.headers.get("authorization") ?? "")?.[1]
-  return (
-    secretMatches(bearer, cronSecret) ||
-    secretMatches(bearer, migrationSecret) ||
-    secretMatches(request.headers.get("x-migration-secret") ?? undefined, migrationSecret)
-  )
-}
-
 async function sweep(request: Request) {
-  if (!process.env.CRON_SECRET && !process.env.MIGRATION_SECRET) {
+  if (cronAuthNotConfigured()) {
     return json({ error: "Sweeper is not configured (set CRON_SECRET)" }, 503)
   }
-  if (!authorize(request)) return json({ error: "Unauthorized" }, 401)
+  if (!authorizeCron(request)) return json({ error: "Unauthorized" }, 401)
 
   const prisma = getPrisma()
   // Before migration 069 the tables do not exist, and a cron that 500s every

@@ -186,6 +186,17 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/cron/some-future-job")).toBe(false)
   });
 
+  it("allows the agent-retention cron by exact path only", () => {
+    expect(isPublicPath("/api/cron/agent-retention")).toBe(true)
+    expect(isPublicPath("/api/cron/agent-retention/extra")).toBe(false)
+    expect(isPublicPath("/api/cron/agent-retentionx")).toBe(false)
+  });
+
+  it("keeps account deletion behind login: the route authenticates the session itself and is not public", () => {
+    expect(isPublicPath("/api/account")).toBe(false)
+    expect(isPublicPath("/settings/profile")).toBe(false)
+  });
+
   it("allows the outbound MCP connector gateway, which the sandbox calls with an AGENT_TURN bearer", () => {
     expect(isPublicPath("/api/integrations/mcp/v0")).toBe(true);
     expect(isPublicPath("/api/integrations/mcp/some-provider")).toBe(true);

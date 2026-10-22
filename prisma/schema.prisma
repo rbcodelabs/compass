@@ -3057,6 +3057,7 @@ model AgentRunEvent {
 
   @@unique([runId, seq], map: "idx_agent_run_events_run_seq")
   @@index([runId, createdAt], map: "idx_agent_run_events_run_created")
+  @@index([createdAt], map: "idx_agent_run_events_created_at")
   @@map("agent_run_events")
 }
 
@@ -3087,6 +3088,7 @@ model AgentMessage {
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
 
   @@index([conversationId, createdAt])
+  @@index([createdAt], map: "idx_agent_messages_created_at")
   @@map("agent_messages")
 }
 

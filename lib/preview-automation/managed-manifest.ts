@@ -204,7 +204,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "099_agent_owner_user_nullable": "9587f0d2c28ca41c92a4217c068966639aac72f722cca8943180751940ab231d",
   // entity_links data half for Solution <-> Key Result (ADR phase 4): no DDL, EXPLICIT-ONLY, the work is the hook
   // (lib/migrations/entity-links-solution-key-result-backfill.ts). Shares the numeric prefix 098 with the agent migration; the name is unique.
-  "098_entity_links_backfill_solution_key_result": "795934c658367a187f400eec3068e1e946d13ecf37b71daf758fb1c87ba4697f" // gitleaks:allow -- reviewed public SHA256, not a credential
+  "098_entity_links_backfill_solution_key_result": "795934c658367a187f400eec3068e1e946d13ecf37b71daf758fb1c87ba4697f", // gitleaks:allow -- reviewed public SHA256, not a credential
+  // Two ASYNC created_at indexes (agent_run_events, agent_messages) for the agent-data retention job. Additive and optional: no table change,
+  // no backfill, one DDL statement per transaction. The 100 postcondition proves both indexes exist and are valid.
+  "100_agent_retention_indexes": "a6ace306d6837adb1d5d49b3ea284e81f7cbe3d1cf8bea45605eea07c11f902c"
 };
 
 /**
@@ -301,6 +304,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "098_entity_links_backfill_solution_key_result": {
     "lib/migrations/entity-links-solution-key-result-backfill.ts": "e61171d6fd196cacbb79708691aef6610a3adf6340c189a516738db498a7665d", // gitleaks:allow -- reviewed public SHA256, not a credential
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 100 postcondition (both created_at indexes exist and are valid); editing it re-reviews the migration.
+  "100_agent_retention_indexes": {
+    "lib/migrations/agent-retention-indexes.ts": "e3ac1e40a2237313610f056e6862146bf4cf3a1bc0df94c67f145e524345bbe9",
   },
 };
 
