@@ -694,10 +694,10 @@ export function AgentChat({
               (agentChoices.agents.length > 0 || modelPick.visible) && (
                 <>
                   {agentChoices.agents.length > 0 && (
-                    <AgentChip choices={agentChoices} value={agentSelection} defaultAgentName={defaultAgentName} disabled={isStreaming} onChange={setAgentPick} />
+                    <AgentChip choices={agentChoices} value={agentSelection} defaultAgentName={defaultAgentName} disabled={composerDisabled} onChange={setAgentPick} />
                   )}
                   {modelPick.visible && (
-                    <ModelPicker choices={agentChoices} value={modelPick.model} defaultLabel={modelPick.defaultLabel} disabled={isStreaming} onChange={modelPick.select} />
+                    <ModelPicker choices={agentChoices} value={modelPick.model} defaultLabel={modelPick.defaultLabel} disabled={composerDisabled} onChange={modelPick.select} />
                   )}
                 </>
               )

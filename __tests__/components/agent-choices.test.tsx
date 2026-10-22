@@ -113,6 +113,33 @@ describe("AgentChat composer layout", () => {
   })
 })
 
+describe("AgentChat chips follow the composer's disabled state", () => {
+  // Any reason the field is disabled (a run, an unreadable processing status, lost access) disables the chips too: composerDisabled.
+  for (const variant of ["page", "rail"] as const) {
+    it(`disables the Agent and Model chips when the composer is blocked (${variant})`, async () => {
+      vi.stubGlobal("fetch", (url: string) => {
+        const u = String(url)
+        if (u.startsWith("/api/agent/choices")) return Promise.resolve({ ok: true, status: 200, json: async () => ({ ...CHOICES, models: [{ value: "m1", label: "M1" }, { value: "m2", label: "M2" }], deploymentModel: "m1", modelLabels: {} }) })
+        if (u.includes("/processing")) return Promise.resolve(new Response("unavailable", { status: 503 }))
+        return Promise.resolve(new Response(JSON.stringify({ run: null, available: true })))
+      })
+      render(<AgentChat {...chatProps({ variant, activeConversationId: "c-1" })} />)
+      await findChipButton("Agent")
+      await waitFor(() => expect(screen.getByRole("textbox")).toBeDisabled())
+      expect(chipButton("Agent")).toBeDisabled()
+      expect(chipButton("Model")).toBeDisabled()
+    })
+  }
+
+  it("keeps both chips enabled when nothing blocks the composer", async () => {
+    stubFetch({ ...CHOICES, models: [{ value: "m1", label: "M1" }, { value: "m2", label: "M2" }], deploymentModel: "m1", modelLabels: {} })
+    render(<AgentChat {...chatProps()} />)
+    await findChipButton("Agent")
+    expect(chipButton("Agent")).toBeEnabled()
+    expect(chipButton("Model")).toBeEnabled()
+  })
+})
+
 describe("AgentChat in the rail", () => {
   it("renders the same composer, with its chips, in the rail variant", async () => {
     stubFetch(CHOICES)
