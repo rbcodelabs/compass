@@ -162,7 +162,7 @@ export function SavedViewsMenu<V extends SavedViewRecord>({
           <span className="max-w-40 truncate">{current ? current.name : "Views"}</span>
           {current && modified && (
             extendedActions
-              ? <span data-testid="saved-view-modified" className="rounded-sm bg-surface-sunken px-1 text-xs text-text-secondary">Modified</span>
+              ? <span data-testid="saved-view-modified" className="rounded-sm bg-muted px-1 text-xs text-text-secondary">Modified</span>
               : <span className="text-text-subtle">(modified)</span>
           )}
           <ChevronDown />

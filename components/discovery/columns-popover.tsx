@@ -65,12 +65,12 @@ export function ColumnsPopover({ savedViews, columns, countsByStatus }: Props) {
         <Columns3 />
         Columns
         {hiddenCount > 0 && (
-          <span data-testid="columns-hidden-badge" className="rounded-sm bg-surface-sunken px-1 text-xs text-text-secondary">
+          <span data-testid="columns-hidden-badge" className="rounded-sm bg-muted px-1 text-xs text-text-secondary">
             {hiddenCount} hidden
           </span>
         )}
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 rounded-lg border border-border-default bg-surface-raised p-2 shadow-md" aria-label="Columns">
+      <PopoverContent align="end" className="w-72 rounded-lg bg-popover p-2 text-popover-foreground shadow-lg ring-1 ring-foreground/10" aria-label="Columns">
         <ul className="grid gap-0.5">
           {columns.order.map((status, index) => {
             const count = countsByStatus[status] ?? 0;
