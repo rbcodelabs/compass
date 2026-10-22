@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
   bodySegments,
   mentionRoles,
+  mentionsAsMarkdownLinks,
+  parseMentionHref,
   parseMentions,
   plainTextOf,
   serializeMention,
@@ -93,5 +95,30 @@ describe("suggestTaskTitle", () => {
   it("falls back to the anchored passage when the comment is only mentions", () => {
     expect(suggestTaskTitle(quinn, "The rollout checklist")).toBe("Follow up: The rollout checklist")
     expect(suggestTaskTitle(quinn, null)).toBe("Follow up on comment")
+  })
+})
+
+describe("mentionsAsMarkdownLinks", () => {
+  it("turns each token into a markdown link a renderer can draw as a chip", () => {
+    expect(mentionsAsMarkdownLinks(`hi ${quinn} and ${bot}`)).toBe(
+      `hi [@Quinn Morales](mention:user:${QUINN}) and [@QA Agent](mention:agent:${BOT})`,
+    )
+  })
+
+  it("uses the live name and flags people outside the workspace", () => {
+    const out = mentionsAsMarkdownLinks(quinn, ref => ({ name: `${ref.label} Renamed`, outside: true }))
+    expect(out).toBe(`[@Quinn Morales Renamed](mention:user:${QUINN}#outside)`)
+  })
+
+  it("leaves text without mentions untouched", () => {
+    expect(mentionsAsMarkdownLinks("**bold** [link](https://x.test)")).toBe("**bold** [link](https://x.test)")
+  })
+
+  it("round-trips through parseMentionHref and rejects ordinary links", () => {
+    expect(parseMentionHref(`mention:user:${QUINN}`)).toEqual({ kind: "user", id: QUINN, outside: false })
+    expect(parseMentionHref(`mention:agent:${BOT}#outside`)).toEqual({ kind: "agent", id: BOT, outside: true })
+    expect(parseMentionHref("https://x.test")).toBeNull()
+    expect(parseMentionHref("mention:user:not-a-uuid")).toBeNull()
+    expect(parseMentionHref(undefined)).toBeNull()
   })
 })

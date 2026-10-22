@@ -133,3 +133,32 @@ export function suggestTaskTitle(body: string, anchorText?: string | null): stri
   if (anchor) return `Follow up: ${anchor.length > 80 ? `${anchor.slice(0, 79).trimEnd()}…` : anchor}`
   return "Follow up on comment"
 }
+
+/** Marks a mention link whose person has no access to the workspace, so the chip can be styled to match. */
+export const OUTSIDE_MENTION_FLAG = "#outside"
+
+const MENTION_HREF = new RegExp(`^mention:(user|agent):(${UUID})(#outside)?$`, "i")
+
+/** Parse the `href` produced by {@link mentionsAsMarkdownLinks}; null for any other link. */
+export function parseMentionHref(href: string | undefined): { kind: MentionKind; id: string; outside: boolean } | null {
+  const match = href ? MENTION_HREF.exec(href) : null
+  return match ? { kind: match[1].toLowerCase() as MentionKind, id: match[2].toLowerCase(), outside: Boolean(match[3]) } : null
+}
+
+/**
+ * Rewrite each `@[Name](mention:kind:id)` token as the markdown link `[@Name](mention:kind:id)` so a markdown
+ * renderer can turn it into a chip. `resolve` swaps in the live name (and outside-workspace flag) for an id.
+ */
+export function mentionsAsMarkdownLinks(
+  body: string,
+  resolve?: (ref: MentionRef) => { name?: string; outside?: boolean } | undefined,
+): string {
+  return bodySegments(body)
+    .map(segment => {
+      if (segment.type === "text") return segment.text
+      const live = resolve?.(segment.mention)
+      const label = sanitizeLabel(live?.name ?? segment.mention.label)
+      return `[@${label}](mention:${segment.mention.kind}:${segment.mention.id}${live?.outside ? OUTSIDE_MENTION_FLAG : ""})`
+    })
+    .join("")
+}
