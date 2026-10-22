@@ -113,6 +113,18 @@ describe("AgentChat composer layout", () => {
   })
 })
 
+describe("AgentChat in the rail", () => {
+  it("renders the same composer, with its chips, in the rail variant", async () => {
+    stubFetch(CHOICES)
+    const { container } = render(<AgentChat {...chatProps({ variant: "rail" })} />)
+    await findChipButton("Agent")
+    expect(container.querySelector('[data-slot="composer-card"]')).toContainElement(chipButton("Agent"))
+    expect(screen.getByRole("textbox", { name: "Message the agent" })).toBeInTheDocument()
+    await choose("Agent", "Mine")
+    expect(chipValue("Agent")).toBe("Mine")
+  })
+})
+
 describe("SendToAgentPicker with cloud agents", () => {
   const picker = () => (
     <SendToAgentPicker orgSlug="acme" workspaceSlug="product" entityType="solutionPlan" entityId="plan-1">Send to agent</SendToAgentPicker>

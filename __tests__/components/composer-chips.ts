@@ -1,5 +1,6 @@
 // Test helpers for the composer's Agent / Model chips (role=button "Agent: <value>" opening a listbox).
-import { act, fireEvent, screen } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor } from "@testing-library/react"
+import { expect } from "vitest"
 
 export type ChipKind = "Agent" | "Model"
 
@@ -13,9 +14,15 @@ export const chipValue = (kind: ChipKind) => chipButton(kind).getAttribute("aria
 /** Opens the chip's list and lists the option names (then closes it again). */
 export async function optionNames(kind: ChipKind): Promise<string[]> {
   await act(async () => { fireEvent.click(chipButton(kind)) })
-  const names = (await screen.findAllByRole("option")).map((o) => o.getAttribute("aria-label")!)
-  await act(async () => { fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" }) })
-  return names
+  try {
+    return (await screen.findAllByRole("option")).map((o) => o.getAttribute("aria-label")!)
+  } finally {
+    // Never leave a list open for the next assertion (or test): close it and wait until it is gone.
+    if (screen.queryByRole("listbox")) {
+      await act(async () => { fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" }) })
+      await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    }
+  }
 }
 
 /** Opens the chip and picks the option with exactly this accessible name. */

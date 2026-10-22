@@ -1,13 +1,13 @@
 "use client"
 
 // A labelled picker chip for the composer's footer tray (Agent, Model). One accessible pattern for both:
-// a button (aria-haspopup=listbox) that opens a listbox of options. On desktop the list is an upward popover
+// a button (aria-haspopup=dialog, aria-controls the open popup) whose popup holds a labelled listbox of options. On desktop the list is an upward popover
 // anchored to the chip; below the `sm` breakpoint it is a bottom sheet with 44px rows and a backdrop.
 //
 // Keyboard: Enter/Space/ArrowDown/ArrowUp on the chip open it; inside, ArrowUp/ArrowDown/Home/End move,
 // Enter/Space select, Escape closes and returns focus to the chip.
 
-import { useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { Check, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -96,7 +96,10 @@ export function ChoiceChip({ kind, icon, options, value, onChange, disabled = fa
   const narrow = useNarrowViewport()
   const listRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
-  // A chip that becomes disabled (a run starts) must not leave its list open.
+  const listId = useId()
+  // A chip that becomes disabled (a run starts) closes its list for good: resetting the state (not just masking it) means the
+  // list does not spring back open when the chip is re-enabled after the run.
+  if (disabled && openState) setOpen(false)
   const open = openState && !disabled
   const selected = options.find((option) => option.value === value) ?? options[0]
   const accessibleName = `${kind}: ${selected?.label ?? ""}${selected?.shared ? " (shared)" : ""}`
@@ -142,7 +145,8 @@ export function ChoiceChip({ kind, icon, options, value, onChange, disabled = fa
           className={triggerClass}
           disabled={disabled}
           aria-label={accessibleName}
-          aria-haspopup="listbox"
+          aria-haspopup="dialog"
+          aria-controls={open ? listId : undefined}
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
           onKeyDown={onTriggerKeyDown}
@@ -150,7 +154,7 @@ export function ChoiceChip({ kind, icon, options, value, onChange, disabled = fa
           {triggerBody}
         </button>
         <Sheet open={open} onOpenChange={setOpen}>
-          <SheetContent side="bottom" showCloseButton={false} initialFocus={focusSelected} className="max-h-[80dvh] gap-0 overflow-auto rounded-t-2xl p-2 pb-6" data-testid={`${kind.toLowerCase()}-sheet`}>
+          <SheetContent id={listId} aria-label={`${kind} options`} side="bottom" showCloseButton={false} initialFocus={focusSelected} className="max-h-[80dvh] gap-0 overflow-auto rounded-t-2xl p-2 pb-6" data-testid={`${kind.toLowerCase()}-sheet`}>
             <div aria-hidden="true" className="mx-auto mt-0.5 mb-2 h-1 w-9 rounded bg-border-strong" />
             <SheetTitle className="px-2.5 pt-2 pb-1 text-[10.5px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">{kind}</SheetTitle>
             <OptionList kind={kind} options={options} value={value} onSelect={select} sheet listRef={listRef} />
@@ -168,12 +172,13 @@ export function ChoiceChip({ kind, icon, options, value, onChange, disabled = fa
           className={triggerClass}
           disabled={disabled}
           aria-label={accessibleName}
-          aria-haspopup="listbox"
+          aria-haspopup="dialog"
+          aria-controls={open ? listId : undefined}
           onKeyDown={onTriggerKeyDown}
         >
           {triggerBody}
         </PopoverTrigger>
-        <PopoverContent aria-label={`${kind} options`} side="top" align="start" sideOffset={8} initialFocus={focusSelected} className="max-h-[min(360px,var(--available-height))] w-[min(340px,calc(100vw-1.5rem))] overflow-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-lg">
+        <PopoverContent id={listId} aria-label={`${kind} options`} side="top" align="start" sideOffset={8} initialFocus={focusSelected} className="max-h-[min(360px,var(--available-height))] w-[min(340px,calc(100vw-1.5rem))] overflow-auto rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-lg">
           <div className="px-2.5 pt-2 pb-1 text-[10.5px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">{kind}</div>
           <OptionList kind={kind} options={options} value={value} onSelect={select} sheet={false} listRef={listRef} />
         </PopoverContent>

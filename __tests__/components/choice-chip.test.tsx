@@ -33,7 +33,7 @@ describe("ChoiceChip", () => {
   it("is a button named for its kind and current value, with listbox semantics", () => {
     render(<Harness />)
     const chip = screen.getByRole("button", { name: "Agent: Default (Compass Agent)" })
-    expect(chip).toHaveAttribute("aria-haspopup", "listbox")
+    expect(chip).toHaveAttribute("aria-haspopup", "dialog")
     expect(chip).toHaveAttribute("aria-expanded", "false")
   })
 
@@ -113,6 +113,34 @@ describe("ChoiceChip", () => {
     await screen.findByRole("listbox")
     await act(async () => { fireEvent.click(screen.getByText("lock")) })
     await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+  })
+
+  it("points aria-controls at the open popup, which holds the listbox", async () => {
+    render(<Harness />)
+    const chip = screen.getByRole("button", { name: /^Agent:/ })
+    expect(chip).not.toHaveAttribute("aria-controls")
+    await click(chip)
+    const listbox = await screen.findByRole("listbox", { name: "Agent" })
+    const id = chip.getAttribute("aria-controls")!
+    expect(id).toBeTruthy()
+    expect(document.getElementById(id)).toContainElement(listbox)
+  })
+
+  it("stays closed when re-enabled after having been disabled while open", async () => {
+    function Toggle() {
+      const [disabled, setDisabled] = useState(false)
+      return <><button onClick={() => setDisabled((d) => !d)}>flip</button><ChoiceChip kind="Model" icon={<span />} options={OPTIONS} value="" onChange={() => {}} disabled={disabled} /></>
+    }
+    render(<Toggle />)
+    await click(screen.getByRole("button", { name: /^Model:/ }))
+    await screen.findByRole("listbox")
+    await click(screen.getByText("flip"))
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    await click(screen.getByText("flip"))
+    expect(screen.getByRole("button", { name: /^Model:/ })).toBeEnabled()
+    expect(screen.getByRole("button", { name: /^Model:/ })).toHaveAttribute("aria-expanded", "false")
+    await act(async () => {})
+    expect(screen.queryByRole("listbox")).toBeNull()
   })
 
   it("truncates the name but never the (shared) marker", () => {

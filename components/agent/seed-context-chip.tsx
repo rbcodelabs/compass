@@ -31,7 +31,7 @@ export function SeedContextChip({ label, summary, sourceUrl, onDismiss }: Props)
         type="button"
         aria-label="Dismiss context"
         onClick={onDismiss}
-        className="grid size-[18px] shrink-0 place-items-center rounded text-muted-foreground outline-none hover:bg-sunken hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        className="relative grid size-[18px] shrink-0 place-items-center after:absolute after:-inset-[3px] after:content-[''] rounded text-muted-foreground outline-none hover:bg-sunken hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
       >
         <XIcon className="size-3" aria-hidden="true" />
       </button>
