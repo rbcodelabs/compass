@@ -204,7 +204,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "099_agent_owner_user_nullable": "9587f0d2c28ca41c92a4217c068966639aac72f722cca8943180751940ab231d",
   // entity_links data half for Solution <-> Key Result (ADR phase 4): no DDL, EXPLICIT-ONLY, the work is the hook
   // (lib/migrations/entity-links-solution-key-result-backfill.ts). Shares the numeric prefix 098 with the agent migration; the name is unique.
-  "098_entity_links_backfill_solution_key_result": "795934c658367a187f400eec3068e1e946d13ecf37b71daf758fb1c87ba4697f" // gitleaks:allow -- reviewed public SHA256, not a credential
+  "098_entity_links_backfill_solution_key_result": "795934c658367a187f400eec3068e1e946d13ecf37b71daf758fb1c87ba4697f", // gitleaks:allow -- reviewed public SHA256, not a credential
+  // Generic saved views step 2: nullable surface column + async index; the backfill and postcondition are the hook in lib/migrations/saved-views-surface.ts (pinned below). Digest recorded from the shipped SQL; please review it.
+  "100_saved_views_surface": "7bc32104f7e6be93aa09b8b9b14431773eda273f8b8f17dfa6cdd347b8e64fb3"
 };
 
 /**
@@ -300,6 +302,11 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 098 solution-key-result backfill hook and the OCC retry it imports; editing either re-reviews the migration.
   "098_entity_links_backfill_solution_key_result": {
     "lib/migrations/entity-links-solution-key-result-backfill.ts": "e61171d6fd196cacbb79708691aef6610a3adf6340c189a516738db498a7665d", // gitleaks:allow -- reviewed public SHA256, not a credential
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 100 backfill + postcondition hook and the OCC retry it imports; editing either re-reviews the migration.
+  "100_saved_views_surface": {
+    "lib/migrations/saved-views-surface.ts": "05fff4ffc6e1c19769dc4b6b56451ffb263a6dc31c39928cf62183ed6e1fadf2",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };

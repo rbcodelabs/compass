@@ -22,7 +22,7 @@ const OTHER = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 
 type Row = {
   id: string; organizationId: string; workspaceId: string | null; ownerId: string; name: string
-  visibility: string; filters: unknown; display: unknown; createdAt: Date; updatedAt: Date
+  visibility: string; surface: string | null; filters: unknown; display: unknown; createdAt: Date; updatedAt: Date
 }
 
 /** Minimal in-memory stand-in for the prisma delegate; honours the where shapes the service uses. */
@@ -31,9 +31,11 @@ function makeStore(seed: Row[] = []) {
   const match = (r: Row, w: Record<string, unknown>): boolean =>
     Object.entries(w).every(([k, v]) => {
       if (k === "OR") return (v as Record<string, unknown>[]).some((c) => match(r, c))
+      if (k === "AND") return (v as Record<string, unknown>[]).every((c) => match(r, c))
+      if (k === "NOT") return !match(r, v as Record<string, unknown>)
       return (r as Record<string, unknown>)[k] === v
     })
-  const roadmapView = {
+  const savedView = {
     findMany: async ({ where }: { where: Record<string, unknown> }) => rows.filter((r) => match(r, where)),
     findFirst: async ({ where }: { where: Record<string, unknown> }) => rows.find((r) => match(r, where)) ?? null,
     count: async ({ where }: { where: Record<string, unknown> }) => rows.filter((r) => match(r, where)).length,
@@ -45,11 +47,11 @@ function makeStore(seed: Row[] = []) {
       const hit = rows.filter((r) => match(r, where)); hit.forEach((r) => rows.splice(rows.indexOf(r), 1)); return { count: hit.length }
     },
   }
-  return { rows, db: { roadmapView } as never }
+  return { rows, db: { savedView } as never }
 }
 
 const row = (over: Partial<Row>): Row => ({
-  id: "seed", organizationId: ORG, workspaceId: null, ownerId: ME, name: "Seed", visibility: "PERSONAL",
+  id: "seed", organizationId: ORG, workspaceId: null, ownerId: ME, name: "Seed", visibility: "PERSONAL", surface: null,
   filters: {}, display: {}, createdAt: new Date(0), updatedAt: new Date(0), ...over,
 })
 const actor = (over: Partial<RoadmapViewActor> = {}): RoadmapViewActor => ({
