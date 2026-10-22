@@ -673,6 +673,7 @@ export function AgentChat({
             stopDisabled={!canCancelRun}
             stopTitle={canCancelRun ? "Stop this run (Esc)" : "Only the person who asked, or the owner, can stop this run"}
             readOnly={Boolean(accessLost)}
+            runStartedByMe={!runStartedByOther}
             status={runStatusLine && (
               <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
                 <Loader2 className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />

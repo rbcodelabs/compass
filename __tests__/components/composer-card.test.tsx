@@ -32,7 +32,8 @@ describe("ComposerCard", () => {
   it("grows with its content up to 150px, then scrolls (the stylesheet caps it at max-h-[150px])", () => {
     render(<Harness />)
     const field = screen.getByRole("textbox")
-    expect(field).toHaveClass("min-h-[34px]", "max-h-[150px]", "overflow-y-auto")
+    expect(field).toHaveClass("min-h-[34px]", "overflow-y-auto")
+    expect(field.style.maxHeight).toBe("150px")
     Object.defineProperty(field, "scrollHeight", { configurable: true, get: () => 80 })
     fireEvent.change(field, { target: { value: "a\nb\nc" } })
     expect(field.style.height).toBe("80px")
@@ -53,6 +54,39 @@ describe("ComposerCard", () => {
     expect(onSend).toHaveBeenCalledTimes(1)
   })
 
+  it("does not send on the Enter that commits an IME candidate, including Safari where isComposing is already false (keyCode 229)", () => {
+    const onSend = vi.fn()
+    render(<Harness onSend={onSend} />)
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", keyCode: 229, isComposing: false })
+    expect(onSend).not.toHaveBeenCalled()
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", keyCode: 13 })
+    expect(onSend).toHaveBeenCalledTimes(1)
+  })
+
+  it("has a stable accessible name and a screen-reader description of the send keys", () => {
+    const { rerender } = render(<Harness />)
+    const field = screen.getByRole("textbox", { name: "Message the agent" })
+    expect(field).toHaveAccessibleDescription("Enter to send. Shift+Enter for a new line.")
+    rerender(<Harness running textareaDisabled />)
+    expect(screen.getByRole("textbox", { name: "Message the agent" })).toHaveAttribute("placeholder", "Waiting for the answer…")
+  })
+
+  it("recomputes the height when the field's width changes, not only its value", () => {
+    let notify: () => void = () => {}
+    vi.stubGlobal("ResizeObserver", class { constructor(cb: () => void) { notify = cb } observe() {} disconnect() {} })
+    render(<Harness />)
+    const field = screen.getByRole("textbox")
+    let width = 300
+    Object.defineProperty(field, "clientWidth", { configurable: true, get: () => width })
+    Object.defineProperty(field, "scrollHeight", { configurable: true, get: () => 60 })
+    notify() // same width as at mount (0 -> 300 counts as a change, so settle it first)
+    width = 200
+    Object.defineProperty(field, "scrollHeight", { configurable: true, get: () => 90 })
+    notify()
+    expect(field.style.height).toBe("90px")
+    vi.unstubAllGlobals()
+  })
+
   it("shows Send (disabled while empty) and swaps it for Stop in the same slot while running", () => {
     const { rerender } = render(<Harness />)
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
@@ -61,7 +95,7 @@ describe("ComposerCard", () => {
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull()
     const stop = screen.getByRole("button", { name: "Stop this agent run" })
     expect(stop).toHaveAttribute("title", "Stop this run (Esc)")
-    expect(stop).toHaveClass("size-[34px]", "bg-destructive")
+    expect(stop).toHaveClass("size-9", "bg-destructive")
     expect(screen.getByRole("textbox")).toHaveAttribute("placeholder", "Waiting for the answer…")
   })
 
@@ -90,13 +124,46 @@ describe("ComposerCard", () => {
     expect(onStop).toHaveBeenCalledTimes(1)
   })
 
-  it("moves focus from the disabled field to Stop when a run starts, and back when it ends", async () => {
+  it("Escape with a list open and a run active belongs to the list: it does not stop the run", () => {
+    const onStop = vi.fn()
+    render(<Harness running onStop={onStop} chips={<div role="dialog" aria-label="Agent options"><div role="listbox" aria-label="Agent"><div role="option" aria-selected tabIndex={-1}>Default</div></div></div>} />)
+    fireEvent.keyDown(screen.getByRole("option"), { key: "Escape" })
+    expect(onStop).not.toHaveBeenCalled()
+  })
+
+  it("moves focus to Stop only for a run this user just sent from the composer, and back to the field once it is enabled", async () => {
     const { rerender } = render(<Harness />)
     screen.getByRole("textbox").focus()
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" }) // the send that starts the run
     await act(async () => { rerender(<Harness running textareaDisabled />) })
     expect(screen.getByRole("button", { name: "Stop this agent run" })).toHaveFocus()
+    // The run ends but the field is still disabled for a render: focus waits for it.
+    await act(async () => { rerender(<Harness textareaDisabled />) })
+    expect(screen.getByRole("textbox")).not.toHaveFocus()
     await act(async () => { rerender(<Harness />) })
     expect(screen.getByRole("textbox")).toHaveFocus()
+  })
+
+  it("does not steal focus for a run it did not send (reattach, another participant, or focus elsewhere)", async () => {
+    const { rerender } = render(<><button>elsewhere</button><Harness /></>)
+    screen.getByRole("button", { name: "elsewhere" }).focus()
+    await act(async () => { rerender(<><button>elsewhere</button><Harness running runStartedByMe={false} /></>) })
+    expect(screen.getByRole("button", { name: "elsewhere" })).toHaveFocus()
+    // Even right after a send, a run owned by someone else stays put.
+    await act(async () => { rerender(<><button>elsewhere</button><Harness /></>) })
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
+    await act(async () => { rerender(<><button>elsewhere</button><Harness running runStartedByMe={false} /></>) })
+    expect(screen.getByRole("button", { name: "elsewhere" })).toHaveFocus()
+  })
+
+  it("does not pull focus back to the field when the user moved focus away from Stop", async () => {
+    const { rerender } = render(<><button>elsewhere</button><Harness /></>)
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
+    await act(async () => { rerender(<><button>elsewhere</button><Harness running textareaDisabled /></>) })
+    const elsewhere = screen.getByRole("button", { name: "elsewhere" })
+    await act(async () => { elsewhere.focus() })
+    await act(async () => { rerender(<><button>elsewhere</button><Harness /></>) })
+    expect(elsewhere).toHaveFocus()
   })
 
   it("does not grab focus when it mounts into an already-running state", () => {
