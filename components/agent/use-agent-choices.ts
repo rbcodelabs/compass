@@ -25,9 +25,12 @@ const NONE: AgentChoices = { agents: [], defaultAgentId: null, models: [], deplo
  * empty on any failure: the pickers then look and behave exactly as they did before cloud agents existed.
  */
 export function useAgentChoices(target: { workspaceId: string } | { orgSlug: string; workspaceSlug: string }): AgentChoices {
-  const [choices, setChoices] = useState<AgentChoices>(NONE)
+  // Tagged with the lookup it answered, so a workspace change reads as "not loaded" at once instead of flashing the old
+  // workspace's agents and models (or judging a remembered pick against them) until the new answer arrives.
+  const [answer, setAnswer] = useState<{ key: string; choices: AgentChoices } | null>(null)
   const query = "workspaceId" in target ? new URLSearchParams({ workspaceId: target.workspaceId }) : new URLSearchParams({ orgSlug: target.orgSlug, workspaceSlug: target.workspaceSlug })
   const key = query.toString()
+  const choices = answer?.key === key ? answer.choices : NONE
   useEffect(() => {
     if (typeof fetch !== "function") return
     let cancelled = false
@@ -37,14 +40,14 @@ export function useAgentChoices(target: { workspaceId: string } | { orgSlug: str
         if (!response?.ok) return
         const body = (await response.json()) as Partial<AgentChoices>
         if (!cancelled && Array.isArray(body.agents)) {
-          setChoices({
+          setAnswer({ key, choices: {
             agents: body.agents,
             defaultAgentId: body.defaultAgentId ?? null,
             models: Array.isArray(body.models) ? body.models : [],
             deploymentModel: body.deploymentModel ?? null,
             modelLabels: body.modelLabels && typeof body.modelLabels === "object" ? body.modelLabels : {},
             loaded: true,
-          })
+          } })
         }
       } catch {
         // Degraded to "no agents": the built-in agent still works.

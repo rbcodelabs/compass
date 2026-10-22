@@ -173,3 +173,42 @@ describe("AgentChat model picker", () => {
     await waitFor(() => expect(screen.getByLabelText("Model")).toBeDisabled())
   })
 })
+
+describe("AgentChat model picker: workspace changes and early sends", () => {
+  const OTHER_CHOICES = { ...CHOICES, agents: [], defaultAgentId: null, models: [MODELS[0], { value: "claude-haiku-9", label: "Claude Haiku 9" }], loaded: undefined }
+
+  it("does not judge workspace B's remembered pick against workspace A's models when the workspace changes", async () => {
+    window.localStorage.setItem(modelPickStorageKey("u1", "ws-2"), "claude-haiku-9")
+    vi.stubGlobal("fetch", (url: string) =>
+      String(url).startsWith("/api/agent/choices")
+        ? Promise.resolve({ ok: true, status: 200, json: async () => (String(url).includes("ws-2") ? OTHER_CHOICES : { ...CHOICES, loaded: undefined }) })
+        : Promise.reject(new Error("unexpected")),
+    )
+    const { rerender } = render(<AgentChat {...chatProps()} />)
+    fireEvent.change(await screen.findByLabelText("Model"), { target: { value: "claude-sonnet-5" } })
+    rerender(<AgentChat {...chatProps({ workspaceId: "ws-2" })} />)
+    await waitFor(() => expect((screen.getByLabelText("Model") as HTMLSelectElement).value).toBe("claude-haiku-9"))
+    // Neither workspace's memory was clobbered by the other's choices.
+    expect(window.localStorage.getItem(modelPickStorageKey("u1", "ws-2"))).toBe("claude-haiku-9")
+    expect(window.localStorage.getItem(modelPickStorageKey("u1", "ws-1"))).toBe("claude-sonnet-5")
+  })
+
+  it("sends no model before the choices have loaded, even with a remembered pick (it is validated first)", async () => {
+    window.localStorage.setItem(KEY, "claude-sonnet-5")
+    const turns = vi.fn().mockImplementation(async () => sse())
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => (String(url).startsWith("/api/agent/choices") ? new Promise(() => {}) : turns(url, init)))
+    render(<AgentChat {...chatProps()} />)
+    await send("early")
+    await waitFor(() => expect(turns).toHaveBeenCalled())
+    expect(JSON.parse(turns.mock.calls[0][1].body)).not.toHaveProperty("model")
+    expect(window.localStorage.getItem(KEY)).toBe("claude-sonnet-5")
+  })
+
+  it("gives the rail and the full page distinct select ids when both are mounted", async () => {
+    stubFetch(CHOICES)
+    render(<><AgentChat {...chatProps()} /><AgentChat {...chatProps()} /></>)
+    await waitFor(() => expect(screen.getAllByLabelText("Model")).toHaveLength(2))
+    const ids = [...screen.getAllByLabelText("Model"), ...screen.getAllByLabelText("Agent")].map((el) => el.id)
+    expect(new Set(ids).size).toBe(4)
+  })
+})

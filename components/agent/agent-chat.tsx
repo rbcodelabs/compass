@@ -19,7 +19,7 @@
 // Both reduce through lib/agent-run-stream.ts so the two views of one turn cannot
 // drift apart.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Check, Loader2, Send, Sparkles, Square } from "lucide-react"
@@ -182,6 +182,7 @@ export function AgentChat({
   // in useAgentTurn so the Cmd+K palette's quick ask runs the very same code.
   // This component only decides what a finished reply does to *its* transcript.
   // Which agent answers: "" follows the resolved default (the server decides), "builtin" is the built-in agent on purpose.
+  const agentSelectId = useId()
   const agentChoices = useAgentChoices({ workspaceId })
   const [agentPick, setAgentPick] = useState(initialAgentId ?? "")
   const agentSelection = agentPick === "builtin" || agentChoices.agents.some((agent) => agent.id === agentPick) ? agentPick : ""
@@ -675,9 +676,9 @@ export function AgentChat({
             <div className="mx-auto mb-2 flex w-full max-w-3xl min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
               {agentChoices.agents.length > 0 && (
               <div className="flex min-w-[14rem] flex-1 items-center gap-2">
-                <label htmlFor="agent-selection" className="shrink-0">Agent</label>
+                <label htmlFor={agentSelectId} className="shrink-0">Agent</label>
                 <select
-                  id="agent-selection"
+                  id={agentSelectId}
                   value={agentSelection}
                   onChange={(e) => setAgentPick(e.target.value)}
                   disabled={isStreaming}
