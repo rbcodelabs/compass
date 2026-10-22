@@ -78,6 +78,45 @@ migration `103_shared_compass_agent_bootstrap`. It never runs on its own: name t
 workspaces in `COMPASS_SHARED_AGENT_WORKSPACE_IDS` and run it by name. It is safe to
 repeat and never overrides an existing default or revives a revoked grant.
 
+### Which model answers
+
+Next to the **Agent** menu, the chat has a **Model** menu. It uses the first of these that applies:
+
+1. the model you pick in the **Model** menu for this message;
+2. the model set on the agent that answers (see **Model** when you create or edit a cloud agent);
+3. the deployment's default model.
+
+The **Default** entry always names what it currently resolves to, for example
+"Default (Claude Sonnet 5)", and changes with the agent you select until you pick a
+model yourself. Your pick is remembered in this browser for this workspace; if that
+model is later removed from the allowed list, the menu goes back to Default. Choosing a
+model changes only which model answers: the agent's instructions, tools and access are
+unchanged. The model a run is using is shown next to the agent's name while it runs
+(for example "Triage is answering on Claude Opus 9") and is recorded on the run.
+
+The menu lists the models in the allowed list (the same list the agent form uses; see
+**Deployment**). It does not appear when there is nothing to choose, and it is not
+offered when the deployment runs on Amazon Bedrock, whose model ids differ from the
+Anthropic API's: there the deployment's configured model always answers, and a request
+that names a model is refused. The server checks every pick against the allowed list,
+so a hand-edited request cannot run an unlisted model. Runs started by assigning a
+task or by an @mention keep using the agent's own model.
+
+Things to know about models:
+
+- Every model in the allowed list, including each one added with
+  `COMPASS_CLOUD_AGENT_MODELS`, can be chosen by any member who can chat in the
+  workspace. The allowed list is therefore also the list of models you are willing to pay
+  for per message. Usage limits are checked before a turn and charged after it, so a
+  single turn on an expensive model can overshoot the daily cost cap by one turn.
+- A failed, interrupted or cancelled run now keeps the model it was started with (it
+  used to be blank), so you can see which model a failed run used.
+- The model saved on an agent is checked for shape only, not against the allowed list, so
+  an agent can still run a model that was later removed from the list or typed by hand
+  elsewhere. Only the model picked in chat is checked against the allowed list.
+- If you send a message in the first moment after the page opens, before the lists have
+  loaded, the message uses Default; a remembered model is applied once the lists arrive.
+
 ### Things to know before you share an agent
 
 - **A run outlives the membership of the person who started it, until its deadline.**

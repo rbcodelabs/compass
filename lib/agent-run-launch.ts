@@ -23,6 +23,7 @@ import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
 import { prepareCapabilityPacksForTurn, type ActiveCapabilityPack } from "@/lib/capability-pack-runtime"
 import { attachAgentRunKey, finalizeAgentRun, markAgentRunStarted } from "@/lib/agent-runs"
+import { effectiveTurnModel } from "@/lib/agent-turn-model"
 import { buildAgentEnv, readEntryModules, readEntryScript, RUN_INFRA_GRACE_MS } from "@/lib/agent-run-sandbox"
 import type { AgentRecord } from "@/lib/agent-ownership"
 import type { ResolvedAgentModel } from "@/lib/agent-model"
@@ -74,7 +75,7 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
       get: (pathname) => getCapabilityPackArtifactStorage().get(pathname),
     })
     // Stamped before the sandbox exists, so no audit row derived from this run's events can read an empty provenance.
-    await prisma.agentRun.update({ where: { id: run.id }, data: { packProvenance: preparedPacks.provenanceJson, updatedAt: new Date() }, select: { id: true } })
+    await prisma.agentRun.update({ where: { id: run.id }, data: { packProvenance: preparedPacks.provenanceJson, model: effectiveTurnModel({ explicit: null, agentModel: ctx.agent.model, harness: ctx.harness }).slice(0, 100), updatedAt: new Date() }, select: { id: true } })
 
     const minted = await mintAgentMcpKey(ctx.userId, ctx.workspace.id, undefined, new Date(run.deadlineAt.getTime() + RUN_INFRA_GRACE_MS), { agentId: ctx.agent.id })
     apiKeyId = minted.apiKeyId

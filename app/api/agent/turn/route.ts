@@ -45,8 +45,9 @@ import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { agentCapReachedBody, checkAgentRunCaps, checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
 import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
-import { resolveGatewayCredential, opencodeModel, resolveAgentHarness, agentModelForHarness } from "@/lib/agent-harness"
+import { resolveGatewayCredential, resolveAgentHarness, agentModelForHarness } from "@/lib/agent-harness"
 import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity"
+import { effectiveTurnModel, parseRequestedTurnModel } from "@/lib/agent-turn-model"
 import { BUILT_IN_AGENT_SELECTION } from "@/lib/agent-defaults"
 import type { AgentRecord } from "@/lib/agent-ownership"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
@@ -215,6 +216,13 @@ export async function POST(request: NextRequest) {
     throw error
   }
 
+  // ── Which model: explicit pick > the agent's own model > the deployment default ─────────────────────────────────────
+  // The pick is validated here, before anything is written, against the allowed set the active harness can serve; the
+  // client's list is only a convenience. The effective model is settled below, once the agent is final.
+  const requestedModel = parseRequestedTurnModel(body.model, resolveAgentHarness(process.env.AGENT_HARNESS))
+  if (!requestedModel.ok) return Response.json({ error: requestedModel.message, code: requestedModel.code }, { status: 400 })
+  const explicitModel = requestedModel.model
+
   // ── Rate + cost guardrail (Phase 5): cap turns/spend per user per day ───────
   const limit = await checkAgentUsageLimit(userId).catch(async error => {
     if (typeof conversationId === "string") await failPendingInterviewProcessing(conversationId, userId, workspaceId)
@@ -336,6 +344,8 @@ export async function POST(request: NextRequest) {
       return Response.json(agentCapReachedBody(capped), { status: 429 })
     }
   }
+  // Final now (a default agent may have yielded to the built-in one above): what the run really runs on, recorded on the run.
+  const turnModel = effectiveTurnModel({ explicit: explicitModel, agentModel: runAgent?.model, harness: resolveAgentHarness(process.env.AGENT_HARNESS) })
   if (linkedConversation?.interviewProcessingJson && !explicitContinuation) {
     const leaseMs = detached ? budgetMs + RUN_INFRA_GRACE_MS : DEFAULT_INTERVIEW_CLAIM_LEASE_MS
     try { interviewClaim = await claimInterviewProcessing(conversationIdResolved, userId, workspaceId, body.retry === true, leaseMs) }
@@ -490,6 +500,7 @@ export async function POST(request: NextRequest) {
         userId,
         agentId: runAgent?.id ?? null,
         invokedByUserId: userId,
+        model: turnModel,
         kind,
         claimId: scope?.scopeClaimId ?? null,
         packProvenance: preparedPacks.provenanceJson,
@@ -571,6 +582,7 @@ export async function POST(request: NextRequest) {
           shared: attribution.shared,
           docs: Boolean(docMaterial),
           agent: runAgent ? { name: runAgent.name, instructions: runAgent.instructions ?? null, model: agentModelForHarness(runAgent.model, harness) } : undefined,
+          modelOverride: explicitModel,
         }),
         detached: true,
         timeoutMs: budgetMs,
@@ -673,6 +685,7 @@ export async function POST(request: NextRequest) {
             bypassSecret,
             shared: attribution.shared,
             docs: Boolean(docMaterial),
+            modelOverride: explicitModel,
           }),
           detached: true,
           timeoutMs: 4 * 60_000,
@@ -783,7 +796,7 @@ export async function POST(request: NextRequest) {
             conversationId: conversationIdResolved,
             role: "assistant",
             content: assistantText ?? "",
-            model: resolved?.ok ? resolved.modelId : harness === "opencode" ? opencodeModel(process.env.AGENT_OPENCODE_MODEL) : "claude-sonnet-5",
+            model: turnModel,
             inputTokens: usage?.usage?.input_tokens ?? null,
             outputTokens: usage?.usage?.output_tokens ?? null,
             numTurns: usage?.numTurns ?? null,

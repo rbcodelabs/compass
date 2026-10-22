@@ -81,6 +81,8 @@ export type SerializedRun = {
   startedByUserId?: string | null
   /** The cloud agent that answers this run; absent or null = the built-in agent. */
   agentName?: string | null
+  /** The model the run answers on (recorded when it starts); absent or null from an older server or run. */
+  model?: string | null
 }
 
 /** The banner text for a run that ended without a result of its own. */

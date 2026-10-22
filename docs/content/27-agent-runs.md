@@ -144,6 +144,18 @@ default `claude` harness.
 | `claude` | `bedrock` | Bedrock token (`AWS_BEARER_TOKEN_BEDROCK`), `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION` only | `AGENT_MODEL_ID` or `global.anthropic.claude-sonnet-5-5` |
 | `opencode` (experimental) | ignored | AI Gateway credential only (`AI_GATEWAY_API_KEY` or Vercel OIDC) | `AGENT_OPENCODE_MODEL` |
 
+### Choosing a model per message
+
+A chat turn may carry an optional `model` field (the chat's **Model** menu). It is
+validated on the server against the allowed list (the built-in models plus
+`COMPASS_CLOUD_AGENT_MODELS`) filtered to what the active harness can serve: Claude
+model ids for `claude`, `provider/model` gateway references for `opencode`. An unlisted
+value is refused with `400 INVALID_MODEL`; on the `bedrock` provider any value is
+refused with `400 MODEL_CHOICE_UNAVAILABLE`. Precedence is the explicit pick, then the
+selected agent's own model, then the deployment default. The model actually used is
+stored on the run (`model`) when it starts and is not overwritten when it finishes, so
+the run viewer and usage reporting show the real one.
+
 With `opencode`, `AGENT_MODEL_PROVIDER`, `AGENT_MODEL_ID`, `ANTHROPIC_API_KEY` and
 `BEDROCK_API_KEY` are not read: a Bedrock selection is ignored (not an error), even
 an invalid one, and neither an Anthropic nor a Bedrock credential is ever passed to
