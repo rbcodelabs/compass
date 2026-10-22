@@ -292,9 +292,9 @@ async function requireCanvasReader(docId: string) {
 
 /** Live data for the Compass cards on a canvas; unknown/foreign ids come back `unavailable`. */
 export async function resolveCanvasCardRefs(docId: string, refs: unknown) {
-  const access = await requireCanvasReader(docId);
+  const { userId, workspaceId, workspaceSlug, orgSlug } = await requireCanvasReader(docId);
   if (!Array.isArray(refs)) return {};
-  return resolveCanvasCards({ ...access, refs });
+  return resolveCanvasCards({ userId, workspaceId, workspaceSlug, orgSlug, refs });
 }
 
 /**

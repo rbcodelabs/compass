@@ -167,7 +167,7 @@ export function SpecSlashMenu({
         const solution = scopes.find((scope) => scope.scopeType === "SOLUTION");
         const taskScope = solution ?? scopes[0];
         if (command.id === "assumption") {
-          if (!solution) throw new Error("no solution scope");
+          if (!solution) throw new Error("missing scope");
           created = await creators.createAssumption(solution.scopeId, title);
         } else {
           if (!taskScope) throw new Error("no scope");
