@@ -77,6 +77,7 @@ Docs uses a Tiptap-powered rich-text editor. Supported formatting includes:
 - **Lists** — Bulleted (`-` or `*`) and numbered (`1.`)
 - **Bold / Italic / Underline** — Via toolbar buttons or `Cmd+B`, `Cmd+I`, `Cmd+U`
 - **Code blocks** — Inline code with backticks, fenced code blocks with triple backticks
+- **Mermaid diagrams** — A fenced code block whose language is `mermaid` (type ```` ```mermaid ```` followed by a space) renders as a diagram: flowcharts, sequence, ER, state, class, Gantt and the other Mermaid diagram types. Use the **Preview / Source** toggle above the block to switch between the diagram and its editable text; a new, empty block opens in Source. The diagram follows the light or dark theme. If the syntax is invalid, Compass shows the error (with the line number) together with your original text instead of a diagram. The document is still stored as an ordinary ```` ```mermaid ```` fence, so it round-trips unchanged through Markdown, MCP and export, and read-only views of the document render the same diagram. Diagrams are drawn in your browser by the open-source Pele renderer, which is only downloaded when a document contains a Mermaid block.
 - **Links** — Select text and click the link button to add a URL
 - **Horizontal rules** — Type `---` on a blank line
 - **Blockquotes** — Start a line with `>`

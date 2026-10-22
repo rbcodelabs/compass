@@ -22,7 +22,7 @@
  * `shape` handed to the builder.
  */
 import type { AppPrismaClient } from "@/lib/db"
-import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity } from "@/lib/typed-links"
+import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getOpportunityKeyResultPointers } from "@/lib/typed-links"
 import {
   buildOutcomeTree,
   type BuildOutcomeTreeInput,
@@ -62,9 +62,10 @@ export async function loadOutcomeTreeInput(
   const opportunityIds = opportunityRows.map((o) => o.id)
   const solutionIds = solutionRows.map((s) => s.id)
   // The ids come from workspace-filtered reads above, so the readers may skip re-verifying them.
-  const [linkedObjectives, linkedKeyResults] = await Promise.all([
+  const [linkedObjectives, linkedKeyResults, keyResultPointers] = await Promise.all([
     getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunityIds, { preverified: true }),
     getLinkedKeyResultsBySolution(prisma, workspaceId, solutionIds, { preverified: true }),
+    getOpportunityKeyResultPointers(prisma, workspaceId, opportunityRows),
   ])
 
   const objectiveOpportunityLinks = [...linkedObjectives].flatMap(([opportunityId, objectives]) =>
@@ -113,9 +114,10 @@ export async function loadOutcomeTreeInput(
     })),
     objectiveOpportunityLinks,
     solutionKeyResultEdges,
-    legacyPointers: opportunityRows.flatMap((o) =>
-      o.linkedKeyResultId ? [{ opportunityId: o.id, keyResultId: o.linkedKeyResultId }] : [],
-    ),
+    legacyPointers: opportunityRows.flatMap((o) => {
+      const keyResultId = keyResultPointers.get(o.id)
+      return keyResultId ? [{ opportunityId: o.id, keyResultId }] : []
+    }),
   }
 }
 
@@ -156,7 +158,10 @@ export async function loadOutcomesIndex(prisma: AppPrismaClient, workspaceId: st
     }),
   ])
   const opportunityIds = opportunityRows.map((o) => o.id)
-  const linkedObjectives = await getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunityIds, { preverified: true })
+  const [linkedObjectives, keyResultPointers] = await Promise.all([
+    getLinkedObjectivesByOpportunity(prisma, workspaceId, opportunityIds, { preverified: true }),
+    getOpportunityKeyResultPointers(prisma, workspaceId, opportunityRows),
+  ])
   const objectiveOpportunityLinks = [...linkedObjectives].flatMap(([opportunityId, objectives]) =>
     objectives.map((objective) => ({ objectiveId: objective.id, opportunityId })),
   )
@@ -175,7 +180,10 @@ export async function loadOutcomesIndex(prisma: AppPrismaClient, workspaceId: st
     solutions: [],
     objectiveOpportunityLinks,
     solutionKeyResultEdges: [],
-    legacyPointers: opportunityRows.flatMap((o) => (o.linkedKeyResultId ? [{ opportunityId: o.id, keyResultId: o.linkedKeyResultId }] : [])),
+    legacyPointers: opportunityRows.flatMap((o) => {
+      const keyResultId = keyResultPointers.get(o.id)
+      return keyResultId ? [{ opportunityId: o.id, keyResultId }] : []
+    }),
   })
   return {
     rows: tree.roots.map((root) => ({

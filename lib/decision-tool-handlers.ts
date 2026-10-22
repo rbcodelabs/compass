@@ -1,4 +1,5 @@
 import getPrisma from "@/lib/db"
+import { getTasksLinkedTo } from "@/lib/task-links-read"
 import { getDecisionArtifacts } from "@/lib/artifacts"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { isAgentIdentityActor } from "@/lib/agent-access"
@@ -76,9 +77,10 @@ async function resolveRequester(request: { requestedById: string | null; request
 }
 
 /** Follow-up work linked to a decision via the DECISION TaskLink type (item 3: reciprocal display). */
-async function resolveFollowUpTasks(requestId: string) {
+async function resolveFollowUpTasks(workspaceId: string, requestId: string) {
+  // Display-only: follows the TASK read-mode flag (lib/task-links-read.ts).
   const prisma = getPrisma()
-  const links = await prisma.taskLink.findMany({ where: { linkedType: "DECISION", linkedId: requestId }, select: { task: { select: { id: true, title: true, status: true } } } })
+  const links = await getTasksLinkedTo(prisma, { workspaceIds: [workspaceId], linkedType: "DECISION", linkedIds: [requestId] }, () => prisma.taskLink.findMany({ where: { linkedType: "DECISION", linkedId: requestId }, select: { task: { select: { id: true, title: true, status: true } } } }))
   return links.map((link) => link.task)
 }
 
@@ -208,7 +210,7 @@ export async function getDecision({ workspaceId, requestId }: { workspaceId: str
     const [artifacts, requestedBy, followUpTasks] = await Promise.all([
       getDecisionArtifacts(workspaceId, requestId),
       resolveRequester(request),
-      resolveFollowUpTasks(requestId),
+      resolveFollowUpTasks(workspaceId, requestId),
     ])
     const reviewUrl = await reviewUrlByWorkspace(workspaceId, request.id)
     const noAction = request.noActionAt ? { at: request.noActionAt, reason: request.noActionReason } : null

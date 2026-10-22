@@ -191,7 +191,7 @@ test.describe("Roadmap: schedule from discovery", () => {
     const title = `E2E Auto Solution ${stamp()}`;
     await createSolution(page, base, title, "Validated");
 
-    // Validated stays in the rail: it is ready to schedule, not auto-added.
+    // Validated stays in the sidebar: it is not scheduled yet, not auto-added.
     await openTimeline(page, base);
     await expect(railCard(page, title)).toBeVisible();
     await expect(timelineBar(page, title)).toHaveCount(0);
@@ -266,7 +266,7 @@ test.describe("Roadmap: schedule from discovery", () => {
     await openTimeline(page, base, { rail: "as-is" });
     const rail = page.getByTestId("schedule-rail");
     const scroll = page.getByTestId("native-timeline-scroll");
-    const toggle = page.getByRole("button", { name: /ready-to-schedule rail/ });
+    const toggle = page.getByRole("button", { name: /not-scheduled sidebar/ });
 
     // Default for a stacked layout: collapsed, timeline right at the top.
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -302,11 +302,11 @@ test.describe("Roadmap: schedule from discovery", () => {
     await openTimeline(page, base, { rail: "as-is" });
     const rail = page.getByTestId("schedule-rail");
     const scroll = page.getByTestId("native-timeline-scroll");
-    const toggle = page.getByRole("button", { name: /ready-to-schedule rail/ });
+    const toggle = page.getByRole("button", { name: /not-scheduled sidebar/ });
     await expect(railCard(page, title)).toBeVisible({ timeout: 10_000 });
 
     // Wide default: open, and the badge carries the same number as the rail.
-    await expect(toggle).toHaveAccessibleName("Hide ready-to-schedule rail");
+    await expect(toggle).toHaveAccessibleName("Hide not-scheduled sidebar");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     const railCount = (await page.getByTestId("schedule-rail-count").innerText()).trim();
     await expect(page.getByTestId("rail-toggle-count")).toHaveText(railCount);
@@ -315,15 +315,17 @@ test.describe("Roadmap: schedule from discovery", () => {
     // Collapse: no leftover gutter, focus stays on the toggle, nothing in the rail is reachable.
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect(toggle).toHaveAccessibleName("Show ready-to-schedule rail");
+    await expect(toggle).toHaveAccessibleName("Show not-scheduled sidebar");
     await expect(toggle).toBeFocused();
     await expect(rail).toBeHidden();
-    await expect.poll(async () => (await scroll.boundingBox())!.width, { message: "timeline takes the freed width" }).toBeGreaterThan(openWidth + 300);
+    await expect.poll(async () => (await scroll.boundingBox())!.width, { message: "timeline takes the freed width" }).toBeGreaterThan(openWidth + 200);
     await expect(page.getByTestId("rail-toggle-count"), "badge stays visible while collapsed").toHaveText(railCount);
     const chartCard = scroll.locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
     const cardBox = (await chartCard.boundingBox())!;
     const sectionBox = (await page.getByTestId("timeline-engine-native").boundingBox())!;
-    expect(cardBox.x - sectionBox.x, "no gutter is left where the rail was").toBeLessThan(12);
+    // The sidebar docks on the right and folds down to a thin tab (40px + 12px gap), not a full-width gutter.
+    expect(sectionBox.x + sectionBox.width - (cardBox.x + cardBox.width), "only the collapsed tab is left where the sidebar was").toBeLessThan(64);
+    await expect(page.getByTestId("sidebar-collapsed-tab")).toBeVisible();
 
     // The choice survives a reload, with no flash of the open rail.
     await page.reload();
@@ -368,7 +370,7 @@ test.describe("Roadmap: schedule from discovery", () => {
     const workspaceBase = await createFreshWorkspace(page, orgSlug, `E2E Rail Empty ${ts}`);
     await createSolution(page, workspaceBase, `E2E Rail Empty Solution ${ts}`);
     await openTimeline(page, workspaceBase, { rail: "as-is" });
-    const toggle = page.getByRole("button", { name: /ready-to-schedule rail/ });
+    const toggle = page.getByRole("button", { name: /not-scheduled sidebar/ });
     await expect(page.getByTestId("roadmap-empty-state")).toBeVisible();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(page.getByTestId("schedule-rail")).toBeVisible();

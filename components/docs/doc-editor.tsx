@@ -30,7 +30,9 @@ import {
   deleteDocComment,
   getDocLinkedTasks,
   restoreDocVersion,
+  resolveDocEmbedRefs,
 } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
+import { DocEmbedCardsProvider } from "@/components/docs/doc-embed-cards";
 import { createDocumentSaveQueue } from "@/lib/document-save-queue";
 import { DocProperties, type DocMetadata } from "@/components/docs/doc-properties";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
@@ -83,6 +85,8 @@ interface DocEditorProps {
   decisionAction?: React.ReactNode;
   /** Follow toggle, rendered beside the decision action. */
   followAction?: React.ReactNode;
+  /** What this doc is (Spec / Discovery Plan / unscoped), for SPEC docs. Rendered above the properties; read-only. */
+  specHeader?: React.ReactNode;
   /** People and agents the @ picker offers in comments. */
   mentionOptions?: MentionOptions;
   /** Agents that already hold a task from a comment in this doc. */
@@ -132,7 +136,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {} }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, specHeader, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {} }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
@@ -273,11 +277,26 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     []
   );
 
+  // Embed cards read their live data through this; the workspace is the doc's, decided on the server.
+  const docId = doc.id;
+  const resolveEmbeds = useCallback((refs: Parameters<typeof resolveDocEmbedRefs>[1]) => resolveDocEmbedRefs(docId, refs), [docId]);
+
+  // The markdown last known to be saved (or queued to be). An editor "update" whose markdown is identical is not an edit: StarterKit's
+  // TrailingNode appends an empty paragraph to any doc that does not end in a paragraph (every Spec and Discovery Plan ends in a
+  // heading) on the first ordinary transaction, which serializes to nothing. Saving it would rewrite the doc, and bump its
+  // revision and updatedAt, every time it is merely viewed.
+  const savedMarkdown = useRef<string | null>(null);
+
   const editor = useEditor({
     extensions: createDocEditorExtensions(initialAnchorData),
     content: doc.content ?? "",
     onUpdate: ({ editor }) => {
       const markdown = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown();
+      if (markdown === savedMarkdown.current) {
+        setSelectionEmpty(editor.state.selection.empty);
+        return;
+      }
+      savedMarkdown.current = markdown;
       setCurrentContent(markdown);
       setSelectionEmpty(editor.state.selection.empty);
       debouncedSaveContent(markdown);
@@ -289,6 +308,12 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       handleDrop: () => false,
     },
   });
+
+  // Must stay above every effect that dispatches a transaction (tiptap's own "create" event is deferred past them): it records the
+  // markdown the doc was loaded with, before the first update can be emitted.
+  useEffect(() => {
+    if (editor && savedMarkdown.current === null) savedMarkdown.current = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown();
+  }, [editor]);
 
   useEffect(() => { editor?.setEditable(!isRestoring, false); }, [editor, isRestoring]);
 
@@ -700,6 +725,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
       {/* Editor */}
       <div className="flex-1 px-8 py-4 overflow-y-auto">
+        {specHeader}
         {/* Properties — scrolls with the content instead of pinning the viewport */}
         <DocProperties
           key={propertiesVersion}
@@ -748,7 +774,9 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           )}
         </div>
 
-        <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
+        <DocEmbedCardsProvider resolve={resolveEmbeds}>
+          <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
+        </DocEmbedCardsProvider>
       </div>
 
       </div>

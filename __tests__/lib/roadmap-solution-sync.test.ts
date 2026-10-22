@@ -43,7 +43,7 @@ describe("syncRoadmapOnSolutionChange: auto-add at Building", () => {
     expect(day(state.items[1].startDate)).toBe("2026-11-01");
   });
 
-  it("does nothing for Validated: it stays in the rail as ready to schedule", async () => {
+  it("does nothing for Validated: it stays in the sidebar, not scheduled", async () => {
     const state = fresh();
     const result = await syncRoadmapOnSolutionChange(createFakePrisma(state), context, { ...building, previousStatus: "IDEA", status: "VALIDATED" });
     expect(result.autoAdded).toBeNull();

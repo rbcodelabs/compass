@@ -12,6 +12,13 @@ import { SHARED_CONVERSATION_NOTICE } from "@/lib/agent-attribution"
 import { connectorGuidance, type ConnectorDefinition } from "@/lib/mcp-connectors/config"
 import type { AgentHarness } from "@/lib/agent-harness"
 import { opencodeModel } from "@/lib/agent-harness"
+import { providerSandboxEnv, type ResolvedAgentModel } from "@/lib/agent-model"
+
+function claudeProviderEnv(model: Extract<ResolvedAgentModel, { ok: true }> | undefined): Record<string, string> {
+  // Fail closed: the Claude harness without a resolved provider would boot with no credential.
+  if (!model) throw new Error("buildAgentEnv: harness claude requires a resolved model provider")
+  return providerSandboxEnv(model)
+}
 
 /** Absolute path inside the sandbox where the doc tree is materialized (ADR 0019 §2.2). */
 export const DOCS_ROOT = "/vercel/sandbox/docs"
@@ -76,7 +83,8 @@ const DOCS_FILESYSTEM_PROMPT =
 export function buildAgentEnv(opts: {
   /** Which harness's credential to forward: Claude gets ANTHROPIC_API_KEY, opencode only the AI Gateway key. */
   harness?: AgentHarness
-  anthropicApiKey: string
+  /** Resolved model provider + credential (lib/agent-model.ts). Required for `harness: "claude"`; never read (or forwarded) on the opencode path. */
+  model?: Extract<ResolvedAgentModel, { ok: true }>
   /** Required for `harness: "opencode"`; never forwarded on the Claude path. */
   gatewayApiKey?: string
   connectors: ConnectorDefinition[]
@@ -115,7 +123,13 @@ export function buildAgentEnv(opts: {
   return {
     ...(opts.harness === "opencode"
       ? { AI_GATEWAY_API_KEY: opts.gatewayApiKey ?? "", AGENT_MODEL: opts.agent?.model ?? opencodeModel(process.env.AGENT_OPENCODE_MODEL) }
-      : { ANTHROPIC_API_KEY: opts.anthropicApiKey, ...(opts.agent?.model ? { AGENT_MODEL: opts.agent.model } : {}) }),
+      : {
+          ...claudeProviderEnv(opts.model),
+          // A named agent's own model wins, but only on the Anthropic API, where its id (validated as claude-*) is a real model name.
+          // On Bedrock the ids are inference-profile ids, so the deployment's AGENT_MODEL_ID stays in force rather than sending an
+          // Anthropic-API id to a provider that cannot serve it.
+          ...(opts.agent?.model && opts.model?.provider === "anthropic" ? { AGENT_MODEL: opts.agent.model } : {}),
+        }),
     MCP_BASE_URL: opts.mcpBaseUrl,
     MCP_TOKEN: opts.mcpToken,
     AGENT_PROMPT: opts.prompt,

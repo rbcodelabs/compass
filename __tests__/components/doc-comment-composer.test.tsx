@@ -280,3 +280,27 @@ describe("edge cases", () => {
     expect(await screen.findByTestId("composer-error")).toHaveTextContent("do not have permission")
   })
 })
+
+describe("for a non-doc target", () => {
+  it("words the task link for that target and loads a host-held draft with chips", () => {
+    renderComposer({ targetNoun: "roadmap item", docTitle: "Q4 launch", anchorText: null, initialBody: `Hi @[Quinn Morales](mention:user:${QUINN})` })
+    expect(editor().querySelector("[data-mention-id]")).toHaveTextContent("@Quinn Morales")
+    expect(screen.getByTestId("comment-task-box")).toHaveTextContent("Links back to this comment on the roadmap item Q4 launch")
+  })
+
+  it("names the target in the agent scope confirmation", async () => {
+    renderComposer({ targetNoun: "objective", docTitle: "Grow", anchorText: null })
+    type("hi @qa")
+    pick("QA Agent")
+    fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
+    expect(await screen.findByTestId("agent-scope-confirm")).toHaveTextContent("This objective, its comment thread")
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("reports every edit to a host that holds the draft", () => {
+    const onBodyChange = vi.fn()
+    renderComposer({ targetNoun: "objective", onBodyChange })
+    type("typed")
+    expect(onBodyChange).toHaveBeenLastCalledWith("typed")
+  })
+})

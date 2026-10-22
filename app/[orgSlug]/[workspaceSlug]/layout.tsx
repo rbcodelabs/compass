@@ -1,3 +1,4 @@
+import { isPlatformAdminEmail } from "@/lib/platform-admin";
 import { redirect } from "next/navigation"
 import { getUserWorkspaces } from "@/lib/workspace"
 import { requireWorkspaceContext } from "@/lib/workspace-context"
@@ -10,6 +11,7 @@ import { WorkItemLinkScopeProvider } from "@/components/work-item-link-scope"
 import { ThinkingModelProvider } from "@/components/thinking-model/thinking-model-provider"
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { PanelShell } from "@/components/panels/panel-shell"
+import { chainGraphEnabled } from "@/lib/chain-graph/flag"
 import { AgentRailProvider } from "@/components/agent/agent-rail-context"
 import { AgentRail } from "@/components/agent/agent-rail"
 import { initialsOf } from "@/lib/user-initials"
@@ -115,6 +117,7 @@ export default async function WorkspaceLayout({
           userEmail={user.email ?? ""}
           userImage={user.image ?? undefined}
           isOrgAdmin={isOrgAdmin}
+          isPlatformAdmin={isPlatformAdminEmail(user.email)}
           showOrgRoadmap={workspaces.filter((w) => w.orgSlug === orgSlug).length > 1}
           followingEnabled={followingEnabled}
           unreadNotifications={unreadNotifications}
@@ -149,6 +152,7 @@ export default async function WorkspaceLayout({
               userImage={user.image ?? undefined}
               workspaces={workspaces}
               isOrgAdmin={isOrgAdmin}
+              isPlatformAdmin={isPlatformAdminEmail(user.email)}
               researchCaptureEnabled={researchCaptureEnabled}
               updatesEnabled={updatesEnabled}
               followingEnabled={followingEnabled}
@@ -179,7 +183,7 @@ export default async function WorkspaceLayout({
                 beside main content rather than something floating over it. A
                 no-op for overlay mode, which portals out of the tree either
                 way. */}
-            <PanelShell initialPin={initialPanelPin} />
+            <PanelShell initialPin={initialPanelPin} chainGraphEnabled={chainGraphEnabled()} />
           </SidebarProvider>
         </TooltipProvider>
 

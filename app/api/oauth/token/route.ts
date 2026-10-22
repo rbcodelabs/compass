@@ -39,7 +39,9 @@ import { isUserOverrideEligible } from "@/lib/oauth/agent-binding"
 import { scopeCovers } from "@/lib/oauth/consent"
 import {
   claimRefreshToken,
+  isWriteConflictError,
   issueTokenPair,
+  releaseRefreshClaim,
   revokeTokenFamily,
   type IssueTokenPairInput,
   type TokenResponseBody,
@@ -69,7 +71,24 @@ const fail = (
   error: Parameters<typeof oauthErrorResponse>[0],
   description: string,
   status = 400,
-) => withCors(oauthErrorResponse(error, description, status), "POST")
+  extraHeaders: Record<string, string> = {},
+) => withCors(oauthErrorResponse(error, description, status, extraHeaders), "POST")
+
+/** Seconds a client should wait before retrying after a transient failure. */
+const RETRY_AFTER_SECONDS = "2"
+
+/**
+ * RFC 6749 §5.2 has no 503 code, but `temporarily_unavailable` (§4.1.2.1) is
+ * the registered "try again later" signal. Unlike `invalid_grant` it tells the
+ * client its credential is still good, so it retries instead of re-authorizing.
+ */
+const unavailable = () =>
+  fail(
+    "temporarily_unavailable",
+    "The authorization server is temporarily unable to process this request. Retry shortly.",
+    503,
+    { "Retry-After": RETRY_AFTER_SECONDS },
+  )
 
 export async function POST(request: Request) {
   let params: URLSearchParams
@@ -102,10 +121,18 @@ export async function POST(request: Request) {
     return fail("unauthorized_client", `This client is not registered for the ${grantType} grant.`)
   }
 
-  const response =
-    grantType === GRANT_AUTHORIZATION_CODE
-      ? await authorizationCodeGrant(params, client.value)
-      : await refreshTokenGrant(params, client.value)
+  let response: NextResponse
+  try {
+    response =
+      grantType === GRANT_AUTHORIZATION_CODE
+        ? await authorizationCodeGrant(params, client.value)
+        : await refreshTokenGrant(params, client.value)
+  } catch (error) {
+    // Infrastructure failure (pool exhaustion, timeout). Never revoke on this
+    // path: the failure says nothing about the credential.
+    logTransient("grant failed", error)
+    response = unavailable()
+  }
 
   // Fire-and-forget: `lastUsedAt` drives phase-2 TTL pruning and must not add
   // latency to a request Claude times out at 10 s.
@@ -115,6 +142,14 @@ export async function POST(request: Request) {
 
 export async function OPTIONS() {
   return corsPreflightResponse("POST")
+}
+
+function logTransient(what: string, error: unknown): void {
+  // Name and message only: Prisma error messages can echo query parameters.
+  console.error(
+    `[oauth/token] ${what}`,
+    error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+  )
 }
 
 type ClientAuth = { ok: true; value: RegisteredClient } | { ok: false; description: string }
@@ -239,7 +274,9 @@ async function refreshTokenGrant(
     return fail("invalid_grant", "The refresh token is invalid, expired, or has been revoked.")
   }
 
-  const claim = await claimRefreshToken(hashOAuthToken(presented))
+  const tokenHash = hashOAuthToken(presented)
+  const claimedAt = new Date()
+  const claim = await claimRefreshToken(tokenHash, claimedAt)
   if (!claim.ok) {
     if (claim.reason === "reused") {
       return fail(
@@ -249,8 +286,22 @@ async function refreshTokenGrant(
     }
     return fail("invalid_grant", "The refresh token is invalid, expired, or has been revoked.")
   }
-  const previous = claim.token
+  // The presented token is now burned. If anything below fails for an
+  // infrastructure reason, give it back so the client can retry with it.
+  try {
+    return await rotateClaimedRefreshToken(params, client, claim.token)
+  } catch (error) {
+    logTransient("refresh rotation failed after claim", error)
+    await releaseRefreshClaim(tokenHash, claimedAt)
+    return unavailable()
+  }
+}
 
+async function rotateClaimedRefreshToken(
+  params: URLSearchParams,
+  client: RegisteredClient,
+  previous: Extract<Awaited<ReturnType<typeof claimRefreshToken>>, { ok: true }>["token"],
+): Promise<NextResponse> {
   if (previous.clientId !== client.clientId) {
     await revokeTokenFamily(previous.familyId)
     return fail("invalid_grant", "This refresh token was issued to a different client.")
@@ -316,6 +367,12 @@ function scopeMatchesResource(scope: string, resource: string): boolean {
 }
 
 /**
+ * Prisma's defaults (2 s to acquire, 5 s to run) are tight for a cold function
+ * opening a pooled connection; Claude allows 10 s overall (30 s on refresh).
+ */
+const TOKEN_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 10_000 }
+
+/**
  * Consent is the durable connection record. Read and conditionally touch its
  * exact version before minting the replacement pair in one transaction, so a
  * successful Revoke/Reconnect either conflicts with issuance or observes and
@@ -366,11 +423,14 @@ async function issueTokenPairForCurrentConsent(
       if (touched.count !== 1) return null
 
       return issueTokenPair(input, new Date(), tx)
-    })
-  } catch {
-    // A DSQL write conflict means revocation or re-consent won the row. Keep
-    // the OAuth response non-disclosing and never mint outside the transaction.
-    return null
+    }, TOKEN_TRANSACTION_OPTIONS)
+  } catch (error) {
+    // A write conflict means revocation or re-consent won the row. Keep the
+    // OAuth response non-disclosing and never mint outside the transaction.
+    if (isWriteConflictError(error)) return null
+    // Anything else is infrastructure: rethrow so the caller answers 503
+    // instead of reading it as "consent gone" and revoking the family.
+    throw error
   }
 }
 

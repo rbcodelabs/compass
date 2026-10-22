@@ -12,6 +12,8 @@ const comment = (overrides: Record<string, unknown> = {}) => ({
   updatedAt: "2026-09-04T12:00:00.000Z", docAnchor: null, solutionPlanProposal: null,
   edited: false, canEdit: true, canDelete: true, canModerate: true, replies: [], ...overrides,
 })
+/** The composer is a contenteditable (MentionEditor), not a textarea: set its text and fire the input it listens to. */
+const typeInto = (editor: HTMLElement, text: string) => { editor.textContent = text; fireEvent.input(editor) }
 const jsonResponse = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }))
 
 beforeEach(() => {
@@ -28,15 +30,16 @@ describe("Discussion", () => {
   it("preserves a draft typed before the initial load starts", async () => {
     fetchMock.mockReturnValueOnce(jsonResponse({ items: [] }))
     render(<Discussion targetType="ARTIFACT" targetId="target-1" />)
-    fireEvent.change(screen.getByRole("textbox", { name: "Add comment" }), { target: { value: "Immediate draft" } })
+    typeInto(screen.getByRole("textbox", { name: "Add comment" }), "Immediate draft")
     await screen.findByText("No comments yet.")
-    expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveValue("Immediate draft")
+    expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveTextContent("Immediate draft")
   })
   it("waits for the initial discussion before allowing a post to cancel its load", async () => {
     let finishLoad!: (value: Response) => void
     fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { finishLoad = resolve }))
     render(<Discussion targetType="ARTIFACT" targetId="target-1" />)
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    typeInto(screen.getByRole("textbox", { name: "Add comment" }), "Waiting")
     expect(screen.getByRole("button", { name: "Post comment" })).toBeDisabled()
     finishLoad(await jsonResponse({ items: [] }))
     await waitFor(() => expect(screen.getByRole("button", { name: "Post comment" })).toBeEnabled())
@@ -61,7 +64,7 @@ describe("Discussion", () => {
     rerender(<Discussion targetType="ARTIFACT" targetId="target-1" refreshKey={2} />)
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
     fetchMock.mockReturnValueOnce(jsonResponse(comment({ body: "New comment" })))
-    fireEvent.change(screen.getByRole("textbox", { name: "Add comment" }), { target: { value: "New comment" } })
+    typeInto(screen.getByRole("textbox", { name: "Add comment" }), "New comment")
     fireEvent.click(screen.getByRole("button", { name: "Post comment" }))
     await screen.findByText("New comment", { selector: "p" })
     finishRefresh(await jsonResponse({ items: [] }))
@@ -75,7 +78,7 @@ describe("Discussion", () => {
     const { rerender } = render(<Discussion targetType="ARTIFACT" targetId="target-1" refreshKey={1} />)
     await screen.findByText("No comments yet.")
     fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { finishPost = resolve }))
-    fireEvent.change(screen.getByRole("textbox", { name: "Add comment" }), { target: { value: "New comment" } })
+    typeInto(screen.getByRole("textbox", { name: "Add comment" }), "New comment")
     fireEvent.click(screen.getByRole("button", { name: "Post comment" }))
     rerender(<Discussion targetType="ARTIFACT" targetId="target-1" refreshKey={2} />)
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -114,11 +117,11 @@ describe("Discussion", () => {
       .mockReturnValueOnce(jsonResponse({ items: [comment({ id: "root-b", targetId: "target-b", body: "Target B" })] }))
     const { rerender } = render(<Discussion targetType="ROADMAP_ITEM" targetId="target-a" />)
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    fireEvent.change(screen.getByRole("textbox", { name: "Add comment" }), { target: { value: "Draft for A" } })
+    typeInto(screen.getByRole("textbox", { name: "Add comment" }), "Draft for A")
 
     rerender(<Discussion targetType="ROADMAP_ITEM" targetId="target-b" />)
     expect(await screen.findByText("Target B")).toBeVisible()
-    expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveValue("")
+    expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveTextContent(/^$/)
     const firstSignal = fetchMock.mock.calls[0][1]?.signal as AbortSignal
     expect(firstSignal.aborted).toBe(true)
 
@@ -135,14 +138,14 @@ describe("Discussion", () => {
       .mockReturnValueOnce(jsonResponse({ items: [comment({ id: "root-b", targetId: "target-b", body: "Target B" })] }))
     const { rerender } = render(<Discussion targetType="ROADMAP_ITEM" targetId="target-a" />)
     await screen.findByText("No comments yet.")
-    fireEvent.change(screen.getByRole("textbox", { name: "Add comment" }), { target: { value: "Created for A" } })
+    typeInto(screen.getByRole("textbox", { name: "Add comment" }), "Created for A")
     fireEvent.click(screen.getByRole("button", { name: "Post comment" }))
 
     rerender(<Discussion targetType="ROADMAP_ITEM" targetId="target-b" />)
     expect(await screen.findByText("Target B")).toBeVisible()
     finishCreate?.(await jsonResponse(comment({ body: "Created for A" }), 201))
     await waitFor(() => expect(screen.queryByText("Created for A")).toBeNull())
-    expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveValue("")
+    expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveTextContent(/^$/)
   })
 
   it("ignores a delayed destructive continuation after switching targets", async () => {
@@ -189,19 +192,18 @@ describe("Discussion", () => {
     render(<Discussion targetType="ROADMAP_ITEM" targetId="target-1" />)
     await screen.findByText("No comments yet.")
 
-    fireEvent.click(screen.getByRole("button", { name: "Post comment" }))
-    expect(screen.getByRole("alert")).toHaveTextContent("Enter a comment")
+    expect(screen.getByRole("button", { name: "Post comment" })).toBeDisabled()
 
     const input = screen.getByRole("textbox", { name: "Add comment" })
-    fireEvent.change(input, { target: { value: "Keep this draft" } })
+    typeInto(input, "Keep this draft")
     fetchMock.mockReturnValueOnce(jsonResponse({ error: "Could not post" }, 500))
     fireEvent.click(screen.getByRole("button", { name: "Post comment" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not post")
-    expect(input).toHaveValue("Keep this draft")
+    expect(input).toHaveTextContent("Keep this draft")
 
     fetchMock.mockReturnValueOnce(jsonResponse(comment({ body: "Keep this draft" }), 201))
     fireEvent.click(screen.getByRole("button", { name: "Post comment" }))
-    await waitFor(() => expect(input).toHaveValue(""))
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveTextContent(/^$/))
     expect(screen.getByText("Keep this draft")).toBeVisible()
   })
 
@@ -211,7 +213,7 @@ describe("Discussion", () => {
     await screen.findByText("Root comment")
 
     fireEvent.click(screen.getByRole("button", { name: "Reply to Rick" }))
-    fireEvent.change(screen.getByRole("textbox", { name: "Reply to Rick" }), { target: { value: "A reply" } })
+    typeInto(screen.getByRole("textbox", { name: "Reply to Rick" }), "A reply")
     fetchMock.mockReturnValueOnce(jsonResponse(comment({ id: "reply-1", parentId: "root-1", body: "A reply" }), 201))
     fireEvent.click(screen.getByRole("button", { name: "Post reply" }))
     expect(await screen.findByText("A reply", { selector: "p" })).toBeVisible()
@@ -219,7 +221,7 @@ describe("Discussion", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Edit comment by Rick" })[0])
     const editor = screen.getByRole("textbox", { name: "Edit comment by Rick" })
-    fireEvent.change(editor, { target: { value: "Edited root" } })
+    typeInto(editor, "Edited root")
     fetchMock.mockReturnValueOnce(jsonResponse(comment({ body: "Edited root", edited: true })))
     fireEvent.click(screen.getByRole("button", { name: "Save edit" }))
     expect(await screen.findByText("Edited root", { selector: "p" })).toBeVisible()
@@ -240,11 +242,11 @@ describe("Discussion", () => {
     const trigger = screen.getByRole("button", { name: "Edit comment by Rick" })
     fireEvent.click(trigger)
     const editor = screen.getByRole("textbox", { name: "Edit comment by Rick" })
-    fireEvent.change(editor, { target: { value: "Unsaved edit" } })
+    typeInto(editor, "Unsaved edit")
     fetchMock.mockReturnValueOnce(jsonResponse({ error: "Save failed" }, 500))
     fireEvent.click(screen.getByRole("button", { name: "Save edit" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("Save failed")
-    expect(editor).toHaveValue("Unsaved edit")
+    expect(editor).toHaveTextContent("Unsaved edit")
     fireEvent.keyDown(editor, { key: "Escape" })
     expect(screen.queryByRole("textbox", { name: "Edit comment by Rick" })).toBeNull()
     await waitFor(() => expect(screen.getByRole("button", { name: "Edit comment by Rick" })).toHaveFocus())
@@ -280,5 +282,87 @@ describe("Discussion", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith("/api/comments/root-1?deleteThread=true", expect.objectContaining({ method: "DELETE" })))
     expect(confirm).toHaveBeenCalled()
     expect(screen.queryByText("Root comment")).toBeNull()
+  })
+
+  describe("mentions and task assignment", () => {
+    const QUINN = "6f1c2a40-1111-4222-8333-944455556666"
+    const BOT = "8b1c2a40-1111-4222-8333-944455556668"
+    const options = {
+      people: [{ kind: "user", id: QUINN, name: "Quinn Morales", detail: "quinn@example.com" }],
+      agents: [{ kind: "agent", id: BOT, name: "QA Agent", detail: null, access: "WRITE" }],
+      outside: [],
+    }
+    const quinnToken = `@[Quinn M](mention:user:${QUINN})`
+    const loaded = (items: unknown[], extra: Record<string, unknown> = {}) =>
+      jsonResponse({ items, mention: { options, confirmedAgentIds: [], targetTitle: "Q4 launch" }, taskCards: {}, ...extra })
+
+    it("renders stored mention tokens as chips with the live name, and a task card under the comment", async () => {
+      fetchMock.mockReturnValueOnce(loaded([comment({ body: `Please look ${quinnToken} thanks` })], {
+        taskCards: { "root-1": { taskId: "task-9", displayId: "TASK-9", title: "Look", status: "TODO", priority: "HIGH", dueDate: null, assignee: { type: "USER", id: QUINN, displayName: "Quinn Morales", available: true } } },
+      }))
+      render(<Discussion targetType="ROADMAP_ITEM" targetId="target-1" />)
+      const chip = await screen.findByTestId("comment-mention")
+      expect(chip).toHaveTextContent("@Quinn Morales")
+      expect(chip).toHaveAttribute("data-mention-id", QUINN)
+      expect(screen.queryByText(/mention:user/)).toBeNull()
+      expect(screen.getByTestId("comment-task-card")).toHaveTextContent("TASK-9")
+    })
+
+    it("loads an edited comment's mentions back into the editor as chips and saves the token form", async () => {
+      fetchMock.mockReturnValueOnce(loaded([comment({ body: `Hi ${quinnToken}\nbye` })]))
+      render(<Discussion targetType="ROADMAP_ITEM" targetId="target-1" />)
+      await screen.findByTestId("comment-mention")
+      fireEvent.click(screen.getByRole("button", { name: "Edit comment by Rick" }))
+      const editor = screen.getByRole("textbox", { name: "Edit comment by Rick" })
+      expect(editor.querySelector("[data-mention-id]")).toHaveTextContent("@Quinn Morales")
+      fireEvent.input(editor)
+      fetchMock.mockReturnValueOnce(jsonResponse(comment({ body: "x", edited: true })))
+      fireEvent.click(screen.getByRole("button", { name: "Save edit" }))
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body).body).toBe(`Hi @[Quinn Morales](mention:user:${QUINN})\nbye`)
+    })
+
+    it("posts a mention with the task fields and shows the returned task card", async () => {
+      fetchMock.mockReturnValueOnce(loaded([]))
+      render(<Discussion targetType="ROADMAP_ITEM" targetId="target-1" />)
+      await screen.findByText("No comments yet.")
+      const editor = screen.getByRole("textbox", { name: "Add comment" })
+      editor.textContent = "Can you check? @"
+      const range = document.createRange()
+      range.setStart(editor.firstChild as Text, 16)
+      range.collapse(true)
+      window.getSelection()!.removeAllRanges()
+      window.getSelection()!.addRange(range)
+      fireEvent.input(editor)
+      fireEvent.click(screen.getAllByTestId("mention-option").find((o) => o.getAttribute("data-mention-name") === "Quinn Morales")!)
+      expect(screen.getByTestId("comment-task-box")).toHaveTextContent("Assign as task to @Quinn Morales")
+      expect(screen.getByText(/Links back to this comment on the roadmap item/)).toHaveTextContent("Q4 launch")
+
+      const created = comment({ id: "new-1", body: `Can you check? @[Quinn Morales](mention:user:${QUINN}) ` })
+      fetchMock.mockReturnValueOnce(jsonResponse({ ...created, taskCard: { taskId: "task-1", displayId: "TASK-1", title: "Can you check", status: "TODO", priority: "MEDIUM", dueDate: null, assignee: { type: "USER", id: QUINN, displayName: "Quinn Morales", available: true } } }, 201))
+      fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
+      expect(await screen.findByTestId("comment-task-card")).toHaveTextContent("TASK-1")
+      const sent = JSON.parse(fetchMock.mock.calls[1][1].body)
+      expect(sent).toMatchObject({ targetType: "ROADMAP_ITEM", targetId: "target-1", task: { title: "Can you check", priority: "MEDIUM", dueDate: null }, assignee: { kind: "user", id: QUINN }, agentScopeConfirmed: false })
+    })
+
+    it("shows the server's task error on the composer and keeps the draft", async () => {
+      fetchMock.mockReturnValueOnce(loaded([]))
+      render(<Discussion targetType="ROADMAP_ITEM" targetId="target-1" />)
+      await screen.findByText("No comments yet.")
+      const editor = screen.getByRole("textbox", { name: "Add comment" })
+      editor.textContent = "x @"
+      const range = document.createRange()
+      range.setStart(editor.firstChild as Text, 3)
+      range.collapse(true)
+      window.getSelection()!.removeAllRanges()
+      window.getSelection()!.addRange(range)
+      fireEvent.input(editor)
+      fireEvent.click(screen.getAllByTestId("mention-option")[0])
+      fetchMock.mockReturnValueOnce(jsonResponse({ error: "FORBIDDEN", code: "FORBIDDEN" }, 403))
+      fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
+      expect(await screen.findByTestId("composer-error")).toHaveTextContent("You do not have permission")
+      expect(screen.getByRole("textbox", { name: "Add comment" })).toHaveTextContent("x")
+    })
   })
 })

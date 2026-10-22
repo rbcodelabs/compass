@@ -31,6 +31,7 @@ import getPrisma from "@/lib/db";
 import { commentLinkTitles } from "@/lib/comment-link-titles";
 import { isPmInterviewEnabled, isResearchCaptureEnabled } from "@/lib/research-feature";
 import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getLinkedSolutionsByKeyResult } from "@/lib/typed-links";
+import { getSolutionArtifactIds } from "@/lib/artifacts";
 import { loadThinkingModelSource, offersSolutionToKrSurfaces } from "@/lib/thinking-model/link-surfaces";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { loadEvidenceProvenance, withEvidenceProvenance } from "@/lib/evidence-provenance";
@@ -311,8 +312,8 @@ async function fetchSolution(id: string, workspaceId: string) {
     },
   });
   if (!solution) return null
-  const [links, availableArtifacts, pmInterviews, linkedTasks, evidence, customFields, scoringConfig, linkedKeyResultsBySolution] = await Promise.all([
-    prisma.artifactLink.findMany({ where: { workspaceId, linkedType: "SOLUTION", linkedId: id }, select: { artifactId: true } }),
+  const [linkedArtifactIds, availableArtifacts, pmInterviews, linkedTasks, evidence, customFields, scoringConfig, linkedKeyResultsBySolution] = await Promise.all([
+    getSolutionArtifactIds(prisma, workspaceId, id),
     prisma.artifact.findMany({ where: { workspaceId, status: "ACTIVE" }, select: { id: true, title: true, sourceType: true }, orderBy: { title: "asc" } }),
     pmInterviewHistory(workspaceId, "SOLUTION", id),
     fetchLinkedTasksBundle(workspaceId, "SOLUTION", id),
@@ -329,7 +330,7 @@ async function fetchSolution(id: string, workspaceId: string) {
     // Additive typed Solution<->Key Result links (workspace-filtered).
     getLinkedKeyResultsBySolution(prisma, workspaceId, [id], { preverified: true }),
   ])
-  const linkedIds = new Set(links.map((link) => link.artifactId))
+  const linkedIds = new Set(linkedArtifactIds)
   const solutionScoringModel = (scoringConfig?.solutionScoringModel as ScoringModelData | null) ?? null
   // Phase 4B: options for the Solution <-> Key Result picker, only for presets that offer it (CLASSIC reads nothing extra).
   // Filtered through the Key Result's Objective workspace, so a NULL / foreign row is never offered.

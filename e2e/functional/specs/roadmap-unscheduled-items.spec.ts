@@ -241,7 +241,7 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await expect(page).toHaveURL(/view=timeline/);
       await page.waitForLoadState("networkidle");
 
-      // The "Ready to schedule" rail replaced the old bottom panel on the timeline.
+      // The "Not scheduled" rail replaced the old bottom panel on the timeline.
       const timelineUnscheduledPanel = page.getByTestId("schedule-rail");
       const sol2UnscheduledCard = timelineUnscheduledPanel
         .locator('[data-testid^="unscheduled-item-solution:"]')

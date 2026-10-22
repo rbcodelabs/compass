@@ -290,6 +290,19 @@ describe("what does not start a run", () => {
     expect(runs()).toHaveLength(0)
   })
 
+  it("uses the deployment's model provider: Bedrock needs its own credential, and hands the launcher the resolved provider", async () => {
+    expect(await trigger({}, { env: { AGENT_MODEL_PROVIDER: "bedrock", ANTHROPIC_API_KEY: "key" } })).toMatchObject({ status: "refused", code: "AGENT_RUNTIME_UNAVAILABLE" })
+    expect(runs()).toHaveLength(0)
+    expect(await trigger({}, { env: { AGENT_MODEL_PROVIDER: "bedrock", BEDROCK_API_KEY: "bt" } })).toMatchObject({ status: "started" })
+    const [context] = launch.mock.calls[0] as unknown as [Row]
+    expect(context.model).toMatchObject({ ok: true, provider: "bedrock", apiKey: "bt" })
+  })
+
+  it("refuses an unknown model provider rather than guessing", async () => {
+    expect(await trigger({}, { env: { AGENT_MODEL_PROVIDER: "nope", ANTHROPIC_API_KEY: "key" } })).toMatchObject({ status: "refused", code: "AGENT_RUNTIME_UNAVAILABLE" })
+    expect(runs()).toHaveLength(0)
+  })
+
   it("refuses when the person is over their own daily agent limit", async () => {
     db.state.userTurns = Array.from({ length: 100 }, () => ({}))
     const outcome = await trigger()

@@ -33,6 +33,7 @@ import getPrisma, { type AppPrismaClient } from "@/lib/db"
 import { agentsEnabled } from "@/lib/agent-access"
 import { authorColumn } from "@/lib/agent-attribution"
 import { checkAgentRunCaps, checkAgentUsageLimit } from "@/lib/agent-limits"
+import { resolveAgentModel } from "@/lib/agent-model"
 import { agentKind, findAgentById } from "@/lib/agent-ownership"
 import { resolveGatewayCredential, resolveAgentHarness } from "@/lib/agent-harness"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
@@ -221,10 +222,11 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
   await reapUnstartedRuns(deps, runAgent.id, conversationId)
 
   const harness = resolveAgentHarness(deps.env.AGENT_HARNESS)
-  const anthropicApiKey = deps.env.ANTHROPIC_API_KEY
+  // The same provider/credential resolution the turn route uses (AGENT_MODEL_PROVIDER: anthropic or bedrock). Only the Claude harness has one.
+  const resolvedModel = harness === "claude" ? resolveAgentModel(deps.env) : null
   const gatewayApiKey = harness === "opencode" ? await resolveGatewayCredential(deps.env) : undefined
   const snapshotId = await deps.getSnapshotId()
-  if (!snapshotId || (harness === "claude" && !anthropicApiKey?.trim()) || (harness === "opencode" && !gatewayApiKey)) {
+  if (!snapshotId || (resolvedModel !== null && !resolvedModel.ok) || (harness === "opencode" && !gatewayApiKey)) {
     return refused("AGENT_RUNTIME_UNAVAILABLE", `The task was assigned to ${runAgent.name}. The agent runtime is not set up on this deployment, so no run started.`, runAgent.name)
   }
 
@@ -321,7 +323,7 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
     prompt,
     snapshotId,
     harness,
-    anthropicApiKey,
+    model: resolvedModel?.ok ? resolvedModel : undefined,
     gatewayApiKey,
     budgetMs: DEFAULT_AGENT_RUN_BUDGET_MS,
     mcpBaseUrl: deps.origin(),

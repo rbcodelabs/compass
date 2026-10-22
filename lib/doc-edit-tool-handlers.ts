@@ -14,6 +14,7 @@ import { buildTreeFragment, mergeTreeIntoCanvas, MAX_TREE_CARDS, TREE_SCOPE_KIND
 import { layoutTreeCards } from "@/lib/canvas-tree-layout"
 import { isUuid } from "@/lib/canvas-cards"
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
+import { validateSpecEmbeds } from "@/lib/spec-docs/validate"
 
 type Failed = Extract<EditOutcome<unknown>, { ok: false }>
 const editFailure = (outcome: Failed) => fail(outcome.error)
@@ -72,10 +73,16 @@ export async function editDoc({
 
   const outcome = await editDocumentBody(
     docId,
-    (doc) => {
+    async (doc) => {
       const applied = applyTextEdits(doc.content, list ?? [])
       if (!applied.ok) return applied
       let content = applied.content
+      // Agent edits of a SPEC doc are strict about compass:// embeds (UI saves and Geode sync stay lenient). The doc's own workspace
+      // is the only one an embed may resolve in, and the message never says whether a missing target exists elsewhere.
+      if (doc.docType === "SPEC") {
+        const problem = await validateSpecEmbeds({ workspaceId: doc.workspaceId, body: content })
+        if (problem) return { ok: false, error: problem }
+      }
       if (doc.docType === "CANVAS") {
         // A text edit of a canvas must still leave a valid canvas; store the canonical form.
         const canvas = normalizeCanvasContent(content, { strictCards: true })

@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 194,
-  sortedToolNamesSha256: "028f07e4e2f9e576c3d3ac1b3171d71af8b00bd157522241fa813c112526b17e",
+  toolCount: 197,
+  sortedToolNamesSha256: "2a1ad56507632f4700f72ac4b9551f8500e4b2668cb6ff7a8a419f7a6f4f0c26",
 } as const
 
 export type McpRestParityDisposition =
@@ -55,6 +55,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   create_solutions: direct("createSolutionsBatch"),
   create_research_study: composition(["createResearchStudy", "activateResearchStudy"], "Create the draft resource, then use the explicit human activation action when the MCP call requests its default ACTIVE state and one-time participant link."),
   create_scoring_model: direct("createScoringModel"),
+  create_spec: excluded("transport-convenience", "Create a document with createDoc and scope it with linkEntities (linkType DOC_SPECIFIES_SCOPE).", "Spec creation is one server-side step: it generates the template from the scope's live records, sets the SPEC docType (REST createDoc does not accept it) and compensates by deleting the doc if the scope link fails."),
   create_squad: direct("createSquad"),
   create_task: direct("createTask"),
   create_workspace: direct("createWorkspace"),
@@ -124,6 +125,8 @@ export const MCP_REST_PARITY_MANIFEST = {
   list_experiments: direct("listExperiments"),
   list_feedback: direct("listFeedback"),
   list_links: direct("listEntityLinks"),
+  get_spec: composition(["getDoc", "listEntityLinks"], "Read the document with getDoc (docType SPEC) and its scopes with listEntityLinks; each embedded record is read with its own REST operation (getOpportunity, getSolution, getTask, ...). The resolved read, with live titles and an explicit unavailable list, is one convenience call in MCP."),
+  list_specs: composition(["listEntityLinks", "getDoc"], "List the scope's DOC_SPECIFIES_SCOPE links with listEntityLinks, then read each linked document with getDoc and keep those with docType SPEC."),
   list_metric_bindings: direct("listMetricBindings"),
   list_metric_observations: direct("listMetricObservations"),
   list_metrics: direct("listMetrics"),

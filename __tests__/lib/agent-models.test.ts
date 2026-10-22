@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { allowedAgentModels, parseAgentModel } from "@/lib/agent-models"
-import { readFileSync } from "node:fs"
-import path from "node:path"
+import { DEFAULT_MODEL_IDS } from "@/lib/agent-model"
 import { agentModelForHarness, DEFAULT_OPENCODE_MODEL } from "@/lib/agent-harness"
 
 describe("agent models", () => {
@@ -35,11 +34,8 @@ describe("agent models", () => {
 
   it("offers the ids the harnesses really default to, so the picker never names a model the sandbox cannot run", () => {
     const values = allowedAgentModels({}).map((o) => o.value)
-    // The Claude harness's own default, read from the entry script that passes it to the SDK.
-    const entry = readFileSync(path.join(process.cwd(), "scripts/agent/turn-entry.ts"), "utf8")
-    const claudeDefault = entry.match(/AGENT_MODEL\?\.trim\(\) \|\| "([^"]+)"/)?.[1]
-    expect(claudeDefault).toBeTruthy()
-    expect(values).toContain(claudeDefault)
+    // The Claude harness's default on the Anthropic API: the host resolves it (lib/agent-model.ts) and the entry script takes it from AGENT_MODEL.
+    expect(values).toContain(DEFAULT_MODEL_IDS.anthropic)
     expect(values).toContain(DEFAULT_OPENCODE_MODEL)
     expect(values).not.toContain("claude-sonnet-5-5")
   })

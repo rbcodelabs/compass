@@ -37,11 +37,11 @@ export type RailMode = "open" | "closed" | "auto";
 
 // The track sizes animate (0 <-> full); the rail itself never reflows mid-transition
 // because it keeps its natural width inside a clipped child. The 0.75rem is the gap
-// to the timeline, carried as padding inside the clip so nothing is left when closed.
+// to the timeline (the rail docks on its right, like the board's sidebar), carried as padding inside the clip so nothing is left when closed.
 const REGION_CLASS: Record<RailMode, string> = {
-  open: "grid-rows-[1fr] min-[1320px]:grid-cols-[calc(20rem+0.75rem)]",
+  open: "grid-rows-[1fr] min-[1320px]:grid-cols-[calc(18rem+0.75rem)]",
   closed: "grid-rows-[0fr] min-[1320px]:grid-rows-[1fr] min-[1320px]:grid-cols-[0px]",
-  auto: "grid-rows-[0fr] min-[1320px]:grid-rows-[1fr] min-[1320px]:grid-cols-[calc(20rem+0.75rem)]",
+  auto: "grid-rows-[0fr] min-[1320px]:grid-rows-[1fr] min-[1320px]:grid-cols-[calc(18rem+0.75rem)]",
 };
 // `visibility` flips after the close animation so a closed rail leaves the tab order and the a11y tree.
 const CLIP_CLASS: Record<RailMode, string> = {
@@ -65,7 +65,8 @@ export function RailRegion({ id, mode, open, regionRef, children }: {
       data-state={open ? "open" : "closed"}
       className={cn(
         "grid grid-cols-[minmax(0,1fr)] transition-[grid-template-columns,grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
-        "min-[1320px]:sticky min-[1320px]:top-0 min-[1320px]:self-start",
+        // Below the wide breakpoint the rail stacks above the chart; at/above it, it docks on the right.
+        "order-first min-[1320px]:order-last min-[1320px]:sticky min-[1320px]:top-0 min-[1320px]:self-start",
         REGION_CLASS[mode],
       )}
     >
@@ -74,7 +75,7 @@ export function RailRegion({ id, mode, open, regionRef, children }: {
         inert={!open}
         className={cn("min-h-0 min-w-0 overflow-hidden transition-[visibility] motion-reduce:transition-none", CLIP_CLASS[mode])}
       >
-        <div className="pb-3 min-[1320px]:w-[calc(20rem+0.75rem)] min-[1320px]:pb-0 min-[1320px]:pr-3">{children}</div>
+        <div className="pb-3 min-[1320px]:w-[calc(18rem+0.75rem)] min-[1320px]:pb-0 min-[1320px]:pl-3">{children}</div>
       </div>
     </div>
   );

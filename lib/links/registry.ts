@@ -58,28 +58,8 @@ export type LinkCandidates = { canLink: boolean; items: LinkPickerItem[] } | nul
 
 export type LegacyAdapterMode = "mirror" | "shadow" | "read"
 
-/** The read-flip units. Each has its own flag, so one family can shadow or flip without touching the others. */
-export const LINK_READ_FAMILIES = ["SOLUTION_KR", "OPPORTUNITY", "ARTIFACT", "TASK"] as const
-export type LinkReadFamily = (typeof LINK_READ_FAMILIES)[number]
-export type LinkReadMode = "off" | "shadow" | "on"
-
-/** The env flag of each family. Values: off | shadow | on. Anything else is off. */
-export const LINK_READ_FLAG_NAMES: Readonly<Record<LinkReadFamily, string>> = Object.freeze({
-  SOLUTION_KR: "COMPASS_ENTITY_LINKS_SOLUTION_KR_READ",
-  OPPORTUNITY: "COMPASS_ENTITY_LINKS_OPPORTUNITY_READ",
-  ARTIFACT: "COMPASS_ENTITY_LINKS_ARTIFACT_READ",
-  TASK: "COMPASS_ENTITY_LINKS_TASK_READ",
-})
-
-/**
- * The read mode of one family. Fail-closed everywhere: only the exact strings "shadow" and "on" enable anything, and outside production
- * the default is off too (unlike the *_MIRROR flags, which default on outside production), so no read path changes unless a flag is set.
- * Matching is exact in every environment (no trimming, no case folding), so a flag cannot mean one thing in preview and another in production.
- */
-export function getLinkReadMode(family: LinkReadFamily): LinkReadMode {
-  const value = process.env[LINK_READ_FLAG_NAMES[family]]
-  return value === "shadow" || value === "on" ? value : "off"
-}
+export { LINK_READ_FAMILIES, LINK_READ_FLAG_NAMES, getLinkReadMode, type LinkReadFamily, type LinkReadMode } from "@/lib/links/read-mode"
+import { getLinkReadMode, type LinkReadFamily } from "@/lib/links/read-mode"
 
 /** The effective mode of a legacy-backed type right now: the registry's static mode, raised to "shadow" or "read" by its family's flag. */
 export function effectiveLegacyMode(def: LinkTypeDef): LegacyAdapterMode | null {
@@ -92,7 +72,7 @@ export function effectiveLegacyMode(def: LinkTypeDef): LegacyAdapterMode | null 
 export type LegacyAdapter = {
   /** The module that owns the legacy table (the only place allowed to name it). */
   legacyModule: string
-  /** The explicit-only backfill migration, or null for a new-only type (phase 4: no backfill, legacy stays the source of truth). */
+  /** The explicit-only backfill migration, or null for a type that has none (every legacy-mirrored type has one; the legacy table stays the source of truth). */
   backfillMigration: string | null
   /**
    * The static, registry-level mode. "mirror": the legacy writer module writes this table first and mirrors into entity_links in the
@@ -221,7 +201,10 @@ const experimentInformedByStudy: LinkTypeDef = {
   compat: { mcpTools: [], restOps: [] },
 }
 
-// ── SOLUTION_TARGETS_KEY_RESULT (phase 4: new-only mirror of the legacy table) ───────
+// ── SOLUTION_TARGETS_KEY_RESULT (phase 4: mirror of the legacy table, backfilled by 098) ───────
+
+/** The explicit-only backfill for SOLUTION_TARGETS_KEY_RESULT (lib/migrations/entity-links-solution-key-result-backfill.ts). */
+export const SOLUTION_KR_BACKFILL_MIGRATION = "098_entity_links_backfill_solution_key_result"
 
 /** Outside production the mirror is on so tests and E2E cover it; production needs COMPASS_ENTITY_LINKS_SOLUTION_KR_MIRROR=1. */
 export function isSolutionKeyResultMirrorEnabled(): boolean {
@@ -233,8 +216,9 @@ export function isSolutionKeyResultMirrorEnabled(): boolean {
  * A Solution targets Key Results. the legacy Solution-Key Result table stays the source of truth and every read stays on
  * it: the legacy writer (linkSolutionToKeyResult / unlinkSolutionFromKeyResult in lib/typed-links.ts) mirrors
  * each link and unlink into entity_links inside its own transaction while the flag is on (lib/links/legacy-mirror.ts).
- * New-only: nothing is backfilled, so the mirror is a partial shadow and is not offered by reads, summaries or the
- * generic link tools. Same workspace, many-to-many, idempotent, matching the legacy rules.
+ * Links written before the mirror flag was on are filled in by the explicit-only migration 098 (quarantining inconsistent legacy rows);
+ * until reads flip, the mirror is not offered by reads, summaries or the generic link tools. Same workspace, many-to-many, idempotent,
+ * matching the legacy rules.
  */
 const solutionTargetsKeyResult: LinkTypeDef = {
   key: "SOLUTION_TARGETS_KEY_RESULT",
@@ -249,7 +233,7 @@ const solutionTargetsKeyResult: LinkTypeDef = {
   lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
   summaries: {},
   restrictedContexts: "deny",
-  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: null, mode: "mirror", readFamily: "SOLUTION_KR" },
+  legacy: { legacyModule: "lib/typed-links.ts", backfillMigration: SOLUTION_KR_BACKFILL_MIGRATION, mode: "mirror", readFamily: "SOLUTION_KR" },
   compat: { mcpTools: ["link_solution_to_key_result", "unlink_solution_from_key_result"], restOps: ["linkSolutionKeyResult", "unlinkSolutionKeyResult"] },
 }
 
@@ -421,6 +405,32 @@ const taskReferences: LinkTypeDef = {
   compat: { mcpTools: ["link_task", "unlink_task", "list_task_links"], restOps: ["linkTaskResource", "unlinkTaskResource", "listTaskLinks"] },
 }
 
+// ── DOC_SPECIFIES_SCOPE (spec docs phase 2: a Spec / Discovery Plan doc is scoped to the Solution or Opportunity it specifies) ──
+
+/** The link type key for a SPEC doc's scope, shared by lib/spec-docs (the only writer and reader outside the generic tools). */
+export const DOC_SPECIFIES_SCOPE_LINK_TYPE = "DOC_SPECIFIES_SCOPE"
+
+/**
+ * A Doc specifies the Solution (a Spec) or the Opportunity (a Discovery Plan) it is about. Cardinality is deliberately NOT enforced: a
+ * solution may have many specs and an opportunity many plans, so nothing here is unique, idempotent-by-scope or to-one. The registry's
+ * generic same-workspace check is the only eligibility rule. A native type (no legacy table, no mirror, no flag): lib/spec-docs/create.ts
+ * writes it when it creates the doc. Deleting the doc or the scope removes the link and leaves the other end (an unscoped doc survives).
+ */
+const docSpecifiesScope: LinkTypeDef = {
+  key: DOC_SPECIFIES_SCOPE_LINK_TYPE,
+  from: "DOC",
+  to: ["SOLUTION", "OPPORTUNITY"],
+  direction: "directed",
+  cardinality: { from: "many", to: "many" },
+  labels: { forward: "Specifies", inverse: "Specified by" },
+  duplicatePolicy: "idempotent",
+  authorize: defaultAuthorize,
+  lifecycle: { onFromDeleted: "delete", onToDeleted: "delete", onArchive: "keep" },
+  summaries: {},
+  restrictedContexts: "deny",
+  compat: { mcpTools: [], restOps: [] },
+}
+
 /** Append-only. Add one entry per type; never edit or reuse a key. */
 const DEFINITIONS: readonly LinkTypeDef[] = [
   experimentInformedByStudy,
@@ -430,6 +440,7 @@ const DEFINITIONS: readonly LinkTypeDef[] = [
   artifactAttachedToSolution,
   artifactSupportsDecision,
   taskReferences,
+  docSpecifiesScope,
 ]
 
 export const LINK_TYPES: Readonly<Record<string, LinkTypeDef>> = Object.freeze(

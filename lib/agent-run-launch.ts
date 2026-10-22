@@ -25,6 +25,7 @@ import { prepareCapabilityPacksForTurn, type ActiveCapabilityPack } from "@/lib/
 import { attachAgentRunKey, finalizeAgentRun, markAgentRunStarted } from "@/lib/agent-runs"
 import { buildAgentEnv, readEntryModules, readEntryScript, RUN_INFRA_GRACE_MS } from "@/lib/agent-run-sandbox"
 import type { AgentRecord } from "@/lib/agent-ownership"
+import type { ResolvedAgentModel } from "@/lib/agent-model"
 
 export type LaunchContext = {
   prisma: AppPrismaClient
@@ -39,7 +40,8 @@ export type LaunchContext = {
   prompt: string
   snapshotId: string
   harness: AgentHarness
-  anthropicApiKey?: string
+  /** Resolved model provider + credential; required for the Claude harness. */
+  model?: Extract<ResolvedAgentModel, { ok: true }>
   gatewayApiKey?: string
   budgetMs: number
   mcpBaseUrl: string
@@ -94,7 +96,7 @@ export async function launchQueuedAgentRun(ctx: LaunchContext): Promise<{ starte
       args: ["entry.ts"],
       env: buildAgentEnv({
         harness: ctx.harness,
-        anthropicApiKey: ctx.anthropicApiKey ?? "",
+        model: ctx.model,
         gatewayApiKey: ctx.gatewayApiKey,
         // A named agent never borrows its invoker's connected third-party accounts, and a triggered run has no file tree.
         connectors: [],

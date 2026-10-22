@@ -14,6 +14,7 @@ import {
   workspaceRoadmapHref,
 } from "@/lib/roadmap-views/workspace";
 import getPrisma from "@/lib/db";
+import { getTasksLinkedTo } from "@/lib/task-links-read";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
 import { NativeTimeline } from "@/components/roadmap/native-timeline/native-timeline";
 import { RoadmapHeader } from "@/components/roadmap/roadmap-header";
@@ -166,7 +167,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
       orderBy: { createdAt: "asc" },
     }),
     // Every live Discovery solution, flagged by whether it already has an ACTIVE
-    // RoadmapItem. This one read feeds the "Ready to schedule" rail (validated and
+    // RoadmapItem. This one read feeds the "Not scheduled" rail (validated and
     // in-delivery solutions with no item yet, the same "ready to promote" condition
     // as the Discovery solution card), the schedule palette and the empty-roadmap
     // presets. It is deliberately not narrowed by the view filters: a solution
@@ -212,14 +213,19 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
 
   const taskLinks = items.length === 0
     ? []
-    : await prisma.taskLink.findMany({
-        where: {
-          linkedType: "ROADMAP_ITEM",
-          linkedId: { in: items.map((item) => item.id) },
-          task: { workspaceId: workspace.id },
-        },
-        select: { linkedId: true, task: { select: { status: true } } },
-      });
+    // Display-only delivery rollup: follows the TASK read-mode flag (lib/task-links-read.ts).
+    : await getTasksLinkedTo(
+        prisma,
+        { workspaceIds: [workspace.id], linkedType: "ROADMAP_ITEM", linkedIds: items.map((item) => item.id) },
+        () => prisma.taskLink.findMany({
+          where: {
+            linkedType: "ROADMAP_ITEM",
+            linkedId: { in: items.map((item) => item.id) },
+            task: { workspaceId: workspace.id },
+          },
+          select: { linkedId: true, task: { select: { status: true } } },
+        }),
+      );
   const taskStatusesByRoadmapItem = new Map<string, TaskStatus[]>();
   for (const link of taskLinks) {
     const statuses = taskStatusesByRoadmapItem.get(link.linkedId) ?? [];

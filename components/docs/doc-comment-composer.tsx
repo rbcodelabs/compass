@@ -33,9 +33,12 @@ export interface ComposerPayload {
 
 interface DocCommentComposerProps {
   options: MentionOptions
-  /** Agents that already hold a task from a comment in this doc: no scope confirmation needed. */
+  /** Agents that already hold a task from a comment on this doc/item: no scope confirmation needed. */
   confirmedAgentIds: string[]
+  /** Title of the thing being commented on (a doc by default; see `targetNoun`). */
   docTitle: string
+  /** What the comment is on, for copy only: "doc" (default), "objective", "roadmap item"... */
+  targetNoun?: string
   anchorText?: string | null
   placeholder?: string
   ariaLabel?: string
@@ -43,6 +46,14 @@ interface DocCommentComposerProps {
   /** Replies pop the picker upward and skip the passage quote. */
   compact?: boolean
   autoFocus?: boolean
+  /**
+   * Draft kept by a host whose subtree can remount (a docked/portaled panel): the editor reloads it on mount and
+   * `onBodyChange` reports every edit, so the draft survives the remount.
+   */
+  initialBody?: string
+  onBodyChange?: (body: string) => void
+  /** Blocks posting (for example while the surrounding thread is still loading). */
+  disabled?: boolean
   onSubmit: (payload: ComposerPayload) => Promise<ComposerResult>
   onCancel?: () => void
 }
@@ -69,10 +80,10 @@ function chipClass(kind: "user" | "agent", outside: boolean) {
 }
 
 export function DocCommentComposer({
-  options, confirmedAgentIds, docTitle, anchorText, placeholder = "Add a comment…", ariaLabel = "Comment",
-  idleLabel, compact, autoFocus, onSubmit, onCancel,
+  options, confirmedAgentIds, docTitle, targetNoun = "doc", anchorText, placeholder = "Add a comment…", ariaLabel = "Comment",
+  idleLabel, compact, autoFocus, disabled, initialBody = "", onBodyChange, onSubmit, onCancel,
 }: DocCommentComposerProps) {
-  const [body, setBody] = useState("")
+  const [body, setBody] = useState(initialBody)
   const [taskOn, setTaskOn] = useState(true)
   const [title, setTitle] = useState("")
   const [titleTouched, setTitleTouched] = useState(false)
@@ -88,6 +99,7 @@ export function DocCommentComposer({
   const [error, setError] = useState<string | null>(null)
   const [editorKey, setEditorKey] = useState(0)
 
+  const isDoc = targetNoun === "doc"
   const known = useMemo(() => {
     const map = new Map<string, MentionOption>()
     for (const option of [...options.people, ...options.agents, ...options.outside]) map.set(`${option.kind}:${option.id}`, option)
@@ -113,7 +125,7 @@ export function DocCommentComposer({
   const confirmingAgent = needsScopeConfirm && confirmingFor !== null && confirmingFor === assigneeKey
 
   async function post(agentScopeConfirmed: boolean) {
-    if (busy || !body.trim()) return
+    if (disabled || busy || !body.trim()) return
     setBusy(true)
     setError(null)
     try {
@@ -130,7 +142,7 @@ export function DocCommentComposer({
       }
       // Reset for the next comment: remount the editor, clear task fields.
       setEditorKey(key => key + 1)
-      setBody(""); setTitle(""); setTitleTouched(false); setDue(""); setPriority("MEDIUM")
+      setBody(""); onBodyChange?.(""); setTitle(""); setTitleTouched(false); setDue(""); setPriority("MEDIUM")
       setPromoted(null); setMentionOnlyFor(null); setTaskOn(true); setConfirmingFor(null)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not post the comment.")
@@ -156,11 +168,12 @@ export function DocCommentComposer({
       <MentionEditor
         key={editorKey}
         options={options}
+        initialValue={editorKey === 0 ? initialBody : ""}
         ariaLabel={ariaLabel}
         placeholder={placeholder}
         autoFocus={autoFocus}
         disabled={busy}
-        onChange={value => { setBody(value); setError(null); setConfirmingFor(null) }}
+        onChange={value => { setBody(value); onBodyChange?.(value); setError(null); setConfirmingFor(null) }}
         onSubmitShortcut={submit}
         onEscape={onCancel}
         testId="doc-comment-editor"
@@ -226,7 +239,10 @@ export function DocCommentComposer({
                     </label>
                   </div>
                   <p className="flex items-center gap-1.5 text-xs text-text-subtle">
-                    <Link2 className="size-3.5" aria-hidden /> Links back to this passage in <u>{docTitle || "this doc"}</u>
+                    <Link2 className="size-3.5" aria-hidden />{" "}
+                    {isDoc
+                      ? <>Links back to this passage in <u>{docTitle || "this doc"}</u></>
+                      : <>Links back to this comment on the {targetNoun} <u>{docTitle || `this ${targetNoun}`}</u></>}
                   </p>
                 </div>
               )}
@@ -266,8 +282,8 @@ export function DocCommentComposer({
             <b>{name(assignee)}</b> will receive:
           </p>
           <ul className="space-y-1 text-[13px]">
-            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> {cloudAgent ? "A task, and a run started as this agent, naming this doc and the highlighted passage" : "A task in its queue, naming this doc and the highlighted passage"}</li>
-            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> This doc, its comment thread and linked items, read through its workspace access</li>
+            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> {cloudAgent ? "A task, and a run started as this agent, naming " : "A task in its queue, naming "}{isDoc ? "this doc and the highlighted passage" : `this ${targetNoun} and your comment`}</li>
+            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> {isDoc ? "This doc" : `This ${targetNoun}`}, its comment thread and linked items, read through its workspace access</li>
             {known.get("agent:" + assignee.id)?.access === "WRITE" ? (
               <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> Its Write grant lets it reply in the thread and change content in this workspace</li>
             ) : (
@@ -297,7 +313,7 @@ export function DocCommentComposer({
           {onCancel && (
             <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Cancel</Button>
           )}
-          <Button type="button" size="sm" disabled={busy || body.trim().length === 0 || (willCreateTask && !effectiveTitle.trim())} onClick={submit}>
+          <Button type="button" size="sm" disabled={disabled || busy || body.trim().length === 0 || (willCreateTask && !effectiveTitle.trim())} onClick={submit}>
             {label}
           </Button>
         </div>

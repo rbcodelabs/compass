@@ -49,7 +49,7 @@ function context(over: Partial<LaunchContext> = {}): LaunchContext {
     prompt: "PROMPT",
     snapshotId: "snap-1",
     harness: "claude",
-    anthropicApiKey: "anthropic-key",
+    model: { ok: true, provider: "anthropic", modelId: "claude-sonnet-5", keyEnv: "ANTHROPIC_API_KEY", apiKey: "anthropic-key", env: {} },
     budgetMs: 20 * 60_000,
     mcpBaseUrl: "https://compass.test",
     bypassSecret: "bypass",
@@ -118,7 +118,7 @@ describe("launchQueuedAgentRun", () => {
   })
 
   it("uses the gateway credential, never the Anthropic key, on the opencode harness", async () => {
-    await launchQueuedAgentRun(context({ harness: "opencode", gatewayApiKey: "gw", anthropicApiKey: "anthropic-key", agent: { id: "agent-1", name: "Triage", instructions: null, model: "anthropic/claude-sonnet-5.5" } }))
+    await launchQueuedAgentRun(context({ harness: "opencode", gatewayApiKey: "gw", agent: { id: "agent-1", name: "Triage", instructions: null, model: "anthropic/claude-sonnet-5.5" } }))
     const { env } = m.runCommand.mock.calls[0][0]
     expect(env.AI_GATEWAY_API_KEY).toBe("gw")
     expect(env).not.toHaveProperty("ANTHROPIC_API_KEY")
@@ -143,6 +143,22 @@ describe("launchQueuedAgentRun", () => {
     m.started.mockResolvedValue(false)
     m.stop.mockRejectedValue(new Error("sandbox gone"))
     await expect(launchQueuedAgentRun(context())).resolves.toEqual({ started: false })
+  })
+
+  it("on Bedrock, forwards only the Bedrock credential and keeps the deployment's model id over the agent's Anthropic-API id", async () => {
+    const bedrock = { ok: true as const, provider: "bedrock" as const, modelId: "global.anthropic.claude-sonnet-5-5", keyEnv: "BEDROCK_API_KEY", apiKey: "bedrock-token", env: { AWS_REGION: "eu-west-1" } }
+    await launchQueuedAgentRun(context({ model: bedrock }))
+    const { env } = m.runCommand.mock.calls[0][0]
+    expect(env.AWS_BEARER_TOKEN_BEDROCK).toBe("bedrock-token")
+    expect(env.CLAUDE_CODE_USE_BEDROCK).toBe("1")
+    expect(env.AWS_REGION).toBe("eu-west-1")
+    expect(env).not.toHaveProperty("ANTHROPIC_API_KEY")
+    expect(env.AGENT_MODEL).toBe("global.anthropic.claude-sonnet-5-5")
+  })
+
+  it("refuses to build a Claude-harness environment with no resolved provider (fails closed, then finalizes the run)", async () => {
+    expect(await launchQueuedAgentRun(context({ model: undefined }))).toEqual({ started: false })
+    expect(m.finalize).toHaveBeenCalledWith(expect.objectContaining({ status: "FAILED", errorCode: "RUN_START_FAILED" }))
   })
 
   it("fails the run, revokes the key and does not boot when the run ended before its key could be attached", async () => {

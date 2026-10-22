@@ -54,6 +54,7 @@ vi.mock("@/components/panels/positioning-brief-row", () => ({
   PositioningBriefRow: () => null,
 }));
 vi.mock("@/components/following/follow-button", () => ({ FollowButton: () => null }));
+vi.mock("@/components/specs/linked-specs-section", () => ({ LinkedSpecsSection: () => null }));
 vi.mock("@/components/tasks/linked-tasks-section", () => ({
   LinkedTasksSection: () => null,
 }));

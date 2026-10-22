@@ -71,10 +71,10 @@ describe("ScheduleRail", () => {
 
   it("filters by search text across titles and opportunities", () => {
     render(<ScheduleRail {...baseProps()} items={items as never[]} />);
-    fireEvent.change(screen.getByRole("searchbox", { name: "Filter the ready to schedule list" }), { target: { value: "two" } });
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter the not scheduled list" }), { target: { value: "two" } });
     expect(screen.queryByTestId("unscheduled-item-solution:a")).not.toBeInTheDocument();
     expect(screen.getByTestId("unscheduled-item-solution:b")).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("searchbox", { name: "Filter the ready to schedule list" }), { target: { value: "zzz" } });
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter the not scheduled list" }), { target: { value: "zzz" } });
     expect(screen.getByTestId("schedule-rail-empty")).toHaveTextContent("Nothing matches this filter.");
   });
 

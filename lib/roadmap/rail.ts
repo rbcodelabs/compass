@@ -1,5 +1,5 @@
 /**
- * Pure view-model helpers for the "Ready to schedule" rail, the schedule
+ * Pure view-model helpers for the "Not scheduled" rail, the schedule
  * palette and the empty-roadmap presets. Client-safe: no I/O.
  */
 
