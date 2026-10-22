@@ -222,7 +222,7 @@ async function deleteSoleOwned(prisma: AppPrismaClient, plan: DeletionPlan): Pro
     const scoringModelIds = (await prisma.scoringModel.findMany({ where: { organizationId: org.id }, select: { id: true } })).map((m) => m.id)
     if (scoringModelIds.length) await prisma.scoringModelMetric.deleteMany({ where: { scoringModelId: { in: scoringModelIds } } })
     await prisma.scoringModel.deleteMany({ where: { organizationId: org.id } })
-    await prisma.roadmapView.deleteMany({ where: { organizationId: org.id } })
+    await prisma.savedView.deleteMany({ where: { organizationId: org.id } })
     await prisma.organizationMember.deleteMany({ where: { organizationId: org.id } })
     await prisma.organization.deleteMany({ where: { id: org.id } })
   }
@@ -289,7 +289,7 @@ export async function deleteAccount(prisma: AppPrismaClient, userId: string, opt
     await deleteInBatches(prisma.notification, { recipientUserId: userId })
   }, undefined)
   await tolerateMissingTable(() => prisma.workspaceUpdatesReadState.deleteMany({ where: { userId } }), { count: 0 })
-  await tolerateMissingTable(() => prisma.roadmapView.deleteMany({ where: { ownerId: userId, visibility: "PERSONAL" } }), { count: 0 })
+  await tolerateMissingTable(() => prisma.savedView.deleteMany({ where: { ownerId: userId, visibility: "PERSONAL" } }), { count: 0 })
 
   // 5. Attribution: shared content stays, the person goes.
   await updateInBatches(prisma.comment, { authorId: userId, authorType: "HUMAN", authorName: { not: DELETED_USER_LABEL } }, { authorName: DELETED_USER_LABEL })

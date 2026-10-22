@@ -75,7 +75,7 @@ function seed(extra: Record<string, Row[]> = {}) {
     docVersion: [{ id: "dv1", createdById: ME, createdByName: "Me Myself" }, { id: "dv2", createdById: OTHER, createdByName: "Other Person" }],
     task: [{ id: "t1", assigneeUserId: ME, createdById: ME }, { id: "t2", assigneeUserId: OTHER, createdById: OTHER }],
     doc: [{ id: "d1", createdById: ME }],
-    roadmapView: [{ id: "rv1", ownerId: ME, visibility: "PERSONAL" }, { id: "rv2", ownerId: ME, visibility: "WORKSPACE" }],
+    savedView: [{ id: "rv1", ownerId: ME, visibility: "PERSONAL" }, { id: "rv2", ownerId: ME, visibility: "WORKSPACE" }],
     ...extra,
   } as Record<string, Row[]>
 }
@@ -299,7 +299,7 @@ describe("deleteAccount", () => {
     expect(rows("organizationMember").map((m) => m.userId)).toEqual([OTHER])
     expect(rows("follow").map((f) => f.userId)).toEqual([OTHER])
     expect(rows("notification").map((n) => n.recipientUserId)).toEqual([OTHER])
-    expect(rows("roadmapView").map((v) => v.id)).toEqual(["rv2"])
+    expect(rows("savedView").map((v) => v.id)).toEqual(["rv2"])
 
     // Personal agent goes, the workspace agent stays.
     expect(rows("agent").map((a) => a.id)).toEqual(["agent-ws"])
@@ -369,7 +369,7 @@ describe("deleteAccount", () => {
 
   it("tolerates tables that are not migrated on this deployment", async () => {
     const { prisma, rows } = createFakePrisma(seed(), {
-      missingTables: ["follow", "notification", "mcpConnectorGrant", "mcpConnectorAuthRequest", "agentSession", "agentRun", "agentRunEvent", "agentWebSearch", "agentConversationParticipant", "roadmapView", "workspaceUpdatesReadState", "embedVisitorSession", "embedAuthHandoff", "oAuthToken", "oAuthConsent", "oAuthAuthorizationCode", "oAuthAuthorizationEvent"],
+      missingTables: ["follow", "notification", "mcpConnectorGrant", "mcpConnectorAuthRequest", "agentSession", "agentRun", "agentRunEvent", "agentWebSearch", "agentConversationParticipant", "savedView", "workspaceUpdatesReadState", "embedVisitorSession", "embedAuthHandoff", "oAuthToken", "oAuthConsent", "oAuthAuthorizationCode", "oAuthAuthorizationEvent"],
     })
     const result = await deleteAccount(prisma, ME, { fetchImpl: okFetch() })
     expect(result.ok).toBe(true)
