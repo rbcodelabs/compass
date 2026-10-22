@@ -263,6 +263,7 @@ export async function createAgentRun({
   budgetMs = DEFAULT_AGENT_RUN_BUDGET_MS,
   now = new Date(),
   fenceConversation = false,
+  model = null,
 }: {
   prisma: AgentRunPrisma
   conversationId: string
@@ -288,6 +289,8 @@ export async function createAgentRun({
    * start two runs. Off for chat, whose request path has never needed it.
    */
   fenceConversation?: boolean
+  /** The model the run is about to use (lib/agent-turn-model.ts), recorded up front so the viewer can show it while the run is live. */
+  model?: string | null
 }) {
   if (kind !== "CHAT" && !(HANDOFF_KINDS as readonly string[]).includes(kind)) {
     throw new AgentRunError("Unsupported agent run kind", 400, "INVALID_RUN_KIND")
@@ -325,6 +328,7 @@ export async function createAgentRun({
         workerTokenHash: credential.tokenHash,
         claimId,
         packProvenance,
+        ...(model ? { model: model.slice(0, 100) } : {}),
         deadlineAt,
         statusChangedAt: now,
         createdAt: now,
@@ -400,6 +404,7 @@ const AGENT_RUN_AUTH_SELECT = {
   apiKeyId: true,
   sandboxName: true,
   packProvenance: true,
+  model: true,
   workerTokenHash: true,
   deadlineAt: true,
   lastSeq: true,
@@ -706,7 +711,8 @@ export async function finalizeAgentRun({
       status,
       error: error ?? null,
       errorCode: errorCode ?? null,
-      model: status === "SUCCEEDED" ? AGENT_RUN_MODEL_ID : null,
+      // The model recorded when the run started is the one it really used; the constant only covers a run that never recorded one.
+      ...(status === "SUCCEEDED" && !run.model ? { model: AGENT_RUN_MODEL_ID } : {}),
       inputTokens: usage?.usage?.input_tokens ?? null,
       outputTokens: usage?.usage?.output_tokens ?? null,
       numTurns: usage?.numTurns ?? null,
@@ -738,7 +744,7 @@ export async function finalizeAgentRun({
         ...author,
         ...(status === "SUCCEEDED"
           ? {
-              model: AGENT_RUN_MODEL_ID,
+              model: run.model ?? AGENT_RUN_MODEL_ID,
               inputTokens: usage?.usage?.input_tokens ?? null,
               outputTokens: usage?.usage?.output_tokens ?? null,
               numTurns: usage?.numTurns ?? null,

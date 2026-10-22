@@ -69,6 +69,7 @@ function runRow(overrides: Record<string, unknown> = {}) {
     apiKeyId: "key-1" as string | null,
     sandboxName: agentRunSandboxName(RUN_ID),
     packProvenance: "[]",
+    model: null as string | null,
     workerTokenHash: hashAgentRunWorkerToken(TOKEN),
     deadlineAt: new Date(NOW.getTime() + 60_000),
     lastSeq: 0,
@@ -200,6 +201,16 @@ describe("createAgentRun", () => {
     expect(data.workerTokenHash).toBe(hashAgentRunWorkerToken(workerToken))
     expect(JSON.stringify(data)).not.toContain(workerToken)
     expect(sandboxName).toBe(agentRunSandboxName(run.id))
+  })
+
+  it("records the model the run will use at creation, and nothing when none is given", async () => {
+    const prisma = fakePrisma()
+    prisma.agentRun.findFirst.mockResolvedValue(null)
+    prisma.agentRun.create.mockImplementation(({ data }: Any) => Promise.resolve(data))
+    await createAgentRun({ prisma, conversationId: "c-1", workspaceId: "ws-1", userId: "user-1", model: "claude-opus-9", now: NOW })
+    expect(prisma.agentRun.create.mock.calls[0][0].data.model).toBe("claude-opus-9")
+    await createAgentRun({ prisma, conversationId: "c-1", workspaceId: "ws-1", userId: "user-1", now: NOW })
+    expect(prisma.agentRun.create.mock.calls[1][0].data).not.toHaveProperty("model")
   })
 
   it("refuses a second non-terminal run for the same conversation with 409 RUN_IN_FLIGHT", async () => {
@@ -445,6 +456,22 @@ describe("finalizeAgentRun", () => {
     expect(mockRevokeKey).toHaveBeenCalledWith("key-1")
     // Unconfirmed stop, so the row must not claim the sandbox was stopped.
     expect(prisma.agentRun.update).not.toHaveBeenCalled()
+  })
+
+  it("keeps the model recorded at creation instead of overwriting it with a constant, on the run and on the reply", async () => {
+    const prisma = fakePrisma()
+    prisma.agentRun.findUnique.mockResolvedValue(runRow({ model: "claude-opus-9" }))
+    await finalizeAgentRun({ prisma, runId: RUN_ID, status: "SUCCEEDED", text: "done", now: NOW, cleanup })
+    expect(prisma.agentRun.updateMany.mock.calls[0][0].data).not.toHaveProperty("model")
+    expect(prisma.agentMessage.create.mock.calls[0][0].data.model).toBe("claude-opus-9")
+  })
+
+  it("falls back to the default model label only for a run that never recorded one", async () => {
+    const prisma = fakePrisma()
+    prisma.agentRun.findUnique.mockResolvedValue(runRow())
+    await finalizeAgentRun({ prisma, runId: RUN_ID, status: "SUCCEEDED", text: "done", now: NOW, cleanup })
+    expect(prisma.agentRun.updateMany.mock.calls[0][0].data.model).toBe("claude-sonnet-5")
+    expect(prisma.agentMessage.create.mock.calls[0][0].data.model).toBe("claude-sonnet-5")
   })
 
   it("finishes a handoff claim with the run's outcome", async () => {

@@ -55,3 +55,8 @@ export function parseAgentModel(value: unknown, env: Record<string, string | und
   if (!allowedAgentModels(env).some((option) => option.value === trimmed)) throw new Error("Choose one of the available models")
   return trimmed
 }
+
+/** The human label for a model id: the allowed set's label when it has one, else the id itself (a bare id is still honest). */
+export function agentModelLabel(modelId: string, env: Record<string, string | undefined> = process.env): string {
+  return allowedAgentModels(env).find((option) => option.value === modelId)?.label ?? modelId
+}

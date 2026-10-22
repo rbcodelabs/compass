@@ -789,6 +789,95 @@ describe("agent turn route — detached runs", () => {
     expect(paths).toEqual(expect.arrayContaining(["entry.ts", "docs-path-guard.ts", "docs-final-state.ts"]))
   })
 
+  describe("per-turn model pick", () => {
+    const AGENT_ID = "22222222-2222-4222-8222-222222222222"
+    const agent = { id: AGENT_ID, name: "Triage bot", instructions: null, model: "claude-opus-9" }
+    const env = (runCommand: ReturnType<typeof vi.fn>) => runCommand.mock.calls[0][0].env as Record<string, string>
+    afterEach(() => { delete process.env.COMPASS_CLOUD_AGENT_MODELS; delete process.env.AGENT_HARNESS })
+
+    it("an allowed pick wins over the agent's own model and the deployment default, and is recorded on the run", async () => {
+      process.env.COMPASS_CLOUD_AGENT_MODELS = "claude-opus-9,claude-haiku-9"
+      identityMocks.resolve.mockResolvedValue(agent)
+      const { runCommand } = sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID, model: "claude-haiku-9" }))
+      expect(response.status).toBe(202)
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-haiku-9")
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ model: "claude-haiku-9" }))
+    })
+
+    it("with no pick the agent's own model applies, else the deployment default; both are recorded", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      const first = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(first.runCommand).AGENT_MODEL).toBe("claude-opus-9")
+      expect(runMocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ model: "claude-opus-9" }))
+
+      identityMocks.resolve.mockResolvedValue(null)
+      const second = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(env(second.runCommand).AGENT_MODEL).toBe("claude-sonnet-5")
+      expect(runMocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ model: "claude-sonnet-5" }))
+    })
+
+    it("a pick works for the built-in agent too", async () => {
+      process.env.COMPASS_CLOUD_AGENT_MODELS = "claude-haiku-9"
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", model: "claude-haiku-9" }))
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-haiku-9")
+    })
+
+    it.each([["an id outside the allowed set", "claude-made-up"], ["a model the harness cannot serve", "anthropic/claude-sonnet-5.5"], ["a shell-shaped value", "claude-sonnet-5; curl evil"], ["a non-string", 7]])(
+      "400s %s before anything is written or started",
+      async (_label, model) => {
+        sandbox()
+        const response = await POST(req({ workspaceId: "ws-1", message: "hi", model }))
+        expect(response.status).toBe(400)
+        expect(await response.json()).toMatchObject({ code: "INVALID_MODEL" })
+        expect(mockPrisma.agentConversation.create).not.toHaveBeenCalled()
+        expect(mockPrisma.agentMessage.create).not.toHaveBeenCalled()
+        expect(runMocks.create).not.toHaveBeenCalled()
+        expect(mockMintKey).not.toHaveBeenCalled()
+      },
+    )
+
+    it("a blank pick is no pick", async () => {
+      const { runCommand } = sandbox()
+      expect((await POST(req({ workspaceId: "ws-1", message: "hi", model: "  " }))).status).toBe(202)
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-sonnet-5")
+    })
+
+    it("on Bedrock a pick is refused and the deployment's profile id is what gets recorded for a run without one", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock"
+      process.env.BEDROCK_API_KEY = "bedrock-test-token"
+      sandbox()
+      const refused = await POST(req({ workspaceId: "ws-1", message: "hi", model: "claude-sonnet-5" }))
+      expect(refused.status).toBe(400)
+      expect(await refused.json()).toMatchObject({ code: "MODEL_CHOICE_UNAVAILABLE" })
+      expect(runMocks.create).not.toHaveBeenCalled()
+
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(env(runCommand).AGENT_MODEL).toBe("global.anthropic.claude-sonnet-5-5")
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ model: "global.anthropic.claude-sonnet-5-5" }))
+    })
+
+    it("on the opencode harness the pick must be a gateway id, and is forwarded as AGENT_MODEL", async () => {
+      process.env.AGENT_HARNESS = "opencode"
+      process.env.AI_GATEWAY_API_KEY = "gw-test"
+      process.env.COMPASS_CLOUD_AGENT_MODELS = "openai/gpt-9"
+      try {
+        const bad = await POST(req({ workspaceId: "ws-1", message: "hi", model: "claude-sonnet-5" }))
+        expect(bad.status).toBe(400)
+        const { runCommand } = sandbox()
+        const ok = await POST(req({ workspaceId: "ws-1", message: "hi", model: "openai/gpt-9" }))
+        expect(ok.status).toBe(202)
+        expect(env(runCommand).AGENT_MODEL).toBe("openai/gpt-9")
+      } finally {
+        delete process.env.AI_GATEWAY_API_KEY
+      }
+    })
+  })
+
   describe("running as a named agent", () => {
     const AGENT_ID = "22222222-2222-4222-8222-222222222222"
     const agent = { id: AGENT_ID, name: "Triage bot", instructions: "Always label new feedback.", model: "claude-opus-4-5" }

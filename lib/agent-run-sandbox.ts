@@ -119,16 +119,19 @@ export function buildAgentEnv(opts: {
   docs?: boolean
   /** The named cloud agent this run acts as. Absent = the built-in assistant, whose prompt and model are unchanged. */
   agent?: { name: string; instructions: string | null; model: string | null }
+  /** The user's explicit per-turn model pick, already validated against the allowed set (lib/agent-turn-model.ts). Wins over the agent's own model. */
+  modelOverride?: string | null
 }): Record<string, string> {
+  const chosenModel = opts.modelOverride ?? opts.agent?.model ?? null
   return {
     ...(opts.harness === "opencode"
-      ? { AI_GATEWAY_API_KEY: opts.gatewayApiKey ?? "", AGENT_MODEL: opts.agent?.model ?? opencodeModel(process.env.AGENT_OPENCODE_MODEL) }
+      ? { AI_GATEWAY_API_KEY: opts.gatewayApiKey ?? "", AGENT_MODEL: chosenModel ?? opencodeModel(process.env.AGENT_OPENCODE_MODEL) }
       : {
           ...claudeProviderEnv(opts.model),
           // A named agent's own model wins, but only on the Anthropic API, where its id (validated as claude-*) is a real model name.
           // On Bedrock the ids are inference-profile ids, so the deployment's AGENT_MODEL_ID stays in force rather than sending an
           // Anthropic-API id to a provider that cannot serve it.
-          ...(opts.agent?.model && opts.model?.provider === "anthropic" ? { AGENT_MODEL: opts.agent.model } : {}),
+          ...(chosenModel && opts.model?.provider === "anthropic" ? { AGENT_MODEL: chosenModel } : {}),
         }),
     MCP_BASE_URL: opts.mcpBaseUrl,
     MCP_TOKEN: opts.mcpToken,
