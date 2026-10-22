@@ -6,6 +6,21 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/")).toBe(true);
   });
 
+  it("allows exactly the public legal pages", () => {
+    expect(isPublicPath("/privacy")).toBe(true);
+    expect(isPublicPath("/terms")).toBe(true);
+    expect(isPublicPath("/privacyx")).toBe(false);
+    expect(isPublicPath("/termsx")).toBe(false);
+    expect(isPublicPath("/privacy/anything")).toBe(false);
+    expect(isPublicPath("/terms/anything")).toBe(false);
+    // A trailing slash is not matched here on purpose. Next.js (trailingSlash is
+    // unset) issues a 308 from /privacy/ to /privacy before proxy.ts runs, so the
+    // canonical path is what reaches isPublicPath. Observed with `curl` against a
+    // dev server: /privacy/ -> 308 Location: /privacy, then 200.
+    expect(isPublicPath("/privacy/")).toBe(false);
+    expect(isPublicPath("/terms/")).toBe(false);
+  });
+
   it("allows auth-related routes", () => {
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/api/auth/callback/google")).toBe(true);
@@ -169,6 +184,17 @@ describe("isPublicPath", () => {
     for (const path of [`${base}/other`, `${base}/session/extra`, `${base}/events/extra`, "/api/internal/agent/runs/not-a-uuid/events", "/api/internal/agent/other"]) expect(isPublicPath(path)).toBe(false)
     expect(isPublicPath("/api/cron/agent-run-sweeper")).toBe(true)
     expect(isPublicPath("/api/cron/some-future-job")).toBe(false)
+  });
+
+  it("allows the agent-retention cron by exact path only", () => {
+    expect(isPublicPath("/api/cron/agent-retention")).toBe(true)
+    expect(isPublicPath("/api/cron/agent-retention/extra")).toBe(false)
+    expect(isPublicPath("/api/cron/agent-retentionx")).toBe(false)
+  });
+
+  it("keeps account deletion behind login: the route authenticates the session itself and is not public", () => {
+    expect(isPublicPath("/api/account")).toBe(false)
+    expect(isPublicPath("/settings/profile")).toBe(false)
   });
 
   it("allows the outbound MCP connector gateway, which the sandbox calls with an AGENT_TURN bearer", () => {

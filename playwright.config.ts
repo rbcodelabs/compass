@@ -114,6 +114,8 @@ export default defineConfig({
         // Deterministic test-only key; production must provide its own secret.
         SSO_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
         ANALYTICS_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        // agent-retention.spec.ts calls the cron route with this bearer; test-only value.
+        CRON_SECRET: "e2e-cron-secret",
       },
       timeout: 120_000,
     },

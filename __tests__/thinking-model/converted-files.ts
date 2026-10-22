@@ -242,6 +242,7 @@ export const CANONICAL_FILES: Record<string, string> = {
   "components/roadmap/cross-workspace/roadmap-toolbar.tsx": "account-and-org-pages",
   "components/scoring-models/manage-scoring-models-panel.tsx": "account-and-org-pages",
   "app/layout.tsx": "account-and-org-pages",
+  "app/(marketing)/privacy/page.tsx": "public-surfaces",
   "app/login/page.tsx": "account-and-org-pages",
   "app/oauth/authorize/page.tsx": "account-and-org-pages",
   "app/onboarding/onboarding-form.tsx": "account-and-org-pages",

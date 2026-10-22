@@ -214,7 +214,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Cloud agents phase 4: nullable max_concurrent_runs and max_runs_per_day on agents. No index, no backfill.
   "102_agent_run_caps": "7eed74c5027f19acdb1aa1fea30d99afa1915842ccfca5ec9d8f22619db6b8a2",
   // Cloud agents phase 3: no DDL, EXPLICIT-ONLY and TARGETED; the work is the hook (lib/migrations/shared-compass-agent-bootstrap.ts).
-  "103_shared_compass_agent_bootstrap": "5eaf5543ac6be12db4b69a3d2250d095e48f361b33e683f1752c0ca7527f0929"
+  "103_shared_compass_agent_bootstrap": "5eaf5543ac6be12db4b69a3d2250d095e48f361b33e683f1752c0ca7527f0929",
+  // Two ASYNC created_at indexes (agent_run_events, agent_messages) for the agent-data retention job. Additive and optional: no table change,
+  // no backfill, one DDL statement per transaction. The 104 postcondition proves both indexes exist and are valid.
+  "104_agent_retention_indexes": "2c6da24d861aa569f3ea44aca15f2ac98718ec13c3985a3a8997a1e7a65a1813"
 };
 
 /**
@@ -333,6 +336,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "103_shared_compass_agent_bootstrap": {
     "lib/migrations/shared-compass-agent-bootstrap.ts": "1d729847d0855d68748684c8c4339dbfbd52b533098c2bb43b883594b292247e",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 104 postcondition (both created_at indexes exist and are valid); editing it re-reviews the migration.
+  "104_agent_retention_indexes": {
+    "lib/migrations/agent-retention-indexes.ts": "02b0e57b758b7c42122e199580f4ce1f9bb4e40a77841590595ca16f056faa2f",
   },
 };
 
