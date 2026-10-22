@@ -53,6 +53,8 @@ vi.mock("@/lib/agent-mcp-key", () => ({
   mintAgentMcpKey: (...args: unknown[]) => mockMintKey(...args),
   revokeAgentMcpKey: (id: string) => mockRevokeKey(id),
 }))
+const mockMintGithubEnv = vi.fn()
+vi.mock("@/lib/github-app-token", () => ({ mintAgentGithubEnv: (...args: unknown[]) => mockMintGithubEnv(...args) }))
 const mockPreparePacks = vi.fn()
 vi.mock("@/lib/capability-pack-runtime", () => ({ prepareCapabilityPacksForTurn: (...args: unknown[]) => mockPreparePacks(...args) }))
 const mockPackStorage = vi.fn()
@@ -122,6 +124,7 @@ beforeEach(() => {
   mockPrisma.agentConversation.findFirst.mockResolvedValue(null)
   mockPrisma.workspaceCapabilityPack.findMany.mockResolvedValue([])
   mockGetGoldenSnapshotId.mockResolvedValue("snap_abc")
+  mockMintGithubEnv.mockResolvedValue({})
   mockCheckLimit.mockResolvedValue({ allowed: true })
   mockMintKey.mockResolvedValue({ token: "token", apiKeyId: "key-1" })
   mockPreparePacks.mockResolvedValue({ files: [], pluginPaths: [], skillIds: [], provenanceJson: "[]", systemPromptAppendices: [] })
@@ -762,6 +765,34 @@ describe("agent turn route — detached runs", () => {
     // only <doc>/_doc.md files: no scratch files, and nothing at the docs root
     expect(runCommand.mock.calls[0][0].env.AGENT_SYSTEM_PROMPT).toMatch(/write only .*_doc\.md.* files, never scratch, notes or temp files/)
     expect(runCommand.mock.calls[0][0].env.AGENT_SYSTEM_PROMPT).toContain("nothing at its root")
+  })
+
+  describe("agent shell + GitHub access", () => {
+    const githubEnv = { GH_TOKEN: "ghs_tok", GITHUB_TOKEN: "ghs_tok", AGENT_GITHUB_REPOS: "rbcodelabs/compass" }
+
+    it("no approved repos / no token: open egress, no token, the old 'unavailable' prompt", async () => {
+      mockMintGithubEnv.mockResolvedValue({})
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(mockBootSandbox.mock.calls[0][1]).not.toHaveProperty("networkPolicy")
+      const env = runCommand.mock.calls[0][0].env
+      expect(env).not.toHaveProperty("GH_TOKEN")
+      expect(env).not.toHaveProperty("AGENT_GITHUB_SHELL")
+      expect(env.AGENT_SYSTEM_PROMPT).toContain("Unavailable capabilities include shell, GitHub")
+    })
+
+    it("approved repos + minted token: sandbox is created with an egress allowlist, and the turn gets the shell switch and token", async () => {
+      mockMintGithubEnv.mockResolvedValue(githubEnv)
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      const policy = mockBootSandbox.mock.calls[0][1].networkPolicy as { allow: string[] }
+      expect(policy.allow).toEqual(expect.arrayContaining(["github.com", "api.github.com", "codeload.github.com", "api.anthropic.com"]))
+      expect(policy.allow).not.toContain("*")
+      const env = runCommand.mock.calls[0][0].env
+      expect(env).toMatchObject({ GH_TOKEN: "ghs_tok", AGENT_GITHUB_SHELL: "1", AGENT_GITHUB_REPOS: "rbcodelabs/compass" })
+      expect(env.AGENT_SYSTEM_PROMPT).toContain("`rbcodelabs/compass`")
+      expect(env.AGENT_SYSTEM_PROMPT).not.toContain("Unavailable capabilities include shell")
+    })
   })
 
   it("keeps docs the sandbox could not read back (over 2 MiB) out of both the files and the signed baseline", async () => {

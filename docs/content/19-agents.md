@@ -262,6 +262,19 @@ For task creation or reassignment, use:
 Use `"USER"` for a person or `"assignee": null` to clear the assignment.
 Do not send both `assignee` and the legacy `assigneeUserId` field.
 
+## GitHub access
+
+By default the in-app agent has no shell and cannot reach GitHub. A workspace administrator can change that in **Settings -> Agent GitHub access** by listing the repositories (owner/name, all under one GitHub owner, at most 10) that the Compass GitHub App is installed on.
+
+When a workspace has at least one approved repository and the deployment has `COMPASS_GITHUB_CONNECTOR` configured, the in-app agent in that workspace gets a restricted shell for each turn:
+
+- **Where it can read and write:** it can clone the approved repositories (shallow clones into a dedicated working directory), read and edit files there with the shell, run `git`, and use `gh` for pull requests. It can still edit the workspace's docs as before.
+- **What it can push:** feature branches only. Pushes to `main`, `master`, the repository's default branch, force-pushes, branch deletion and merging pull requests are blocked, and commits are authored as "Compass Agent". The token is a short-lived GitHub App installation token limited to the listed repositories with contents, pull-request and metadata permissions. **Protect your default branches with GitHub branch protection** (require a pull request and block force-pushes): that is the control GitHub itself enforces; the agent-side checks are a second layer.
+- **What it cannot reach:** the shell runs as an unprivileged user that cannot read the agent's own credentials, and the sandbox's network is limited to GitHub, Compass and the model provider. A prompt-injected instruction in a repository cannot send data to an arbitrary website.
+- **What you should still treat as untrusted:** everything in a repository (code, READMEs, issues, pull-request text) is content the agent reads. Review the pull requests it opens like any other contribution.
+
+Workspaces with no approved repositories, and runs started from an assignment or mention, behave as before: no shell and no GitHub access. The agent runtime snapshot must be rebuilt after this feature is deployed so that `gh` is installed (without it the agent can still clone and push, and gives you a link to open the pull request yourself).
+
 ## Deployment
 
 Administrators must apply and verify migration `049_agent_identity` before
