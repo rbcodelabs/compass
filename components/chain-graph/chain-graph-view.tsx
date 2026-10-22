@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils"
 import { chainNodeTypes, type ChainRFNode, type ClusterRFNode } from "./chain-graph-nodes"
 import { ChainGraphUiContext, type ChainGraphUi } from "./chain-graph-context"
 import { CLUSTERS_ONLY_ABOVE, clusterKey, defaultCollapsed, listGroups, projectWithLimit, type ClusterProjection } from "@/lib/chain-graph/cluster"
-import { layoutGraph, type LayoutNode, type Point } from "@/lib/chain-graph/layout"
+import { groupCircles, layoutGraph, type LayoutNode, type Point } from "@/lib/chain-graph/layout"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { seriesForGroupIndex, typeLabelsFor, zoomBand } from "@/lib/chain-graph/presentation"
 import { indexGraph, traceChain } from "@/lib/chain-graph/trace"
@@ -140,6 +140,11 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
   const [notice, setNotice] = useState(() => (initial.clustersOnly ? limitNotice(initial.requestedElements, elementLimit) : ""))
   const [initialNodes] = useState(() => buildRFNodes(computed.projection, computed.positions))
   const [nodes, setNodes, onNodesChange] = useNodesState<ChainRFNode | ClusterRFNode>(initialNodes)
+  // Read in commitView without making it (and so the node context) change identity on every drag frame.
+  const nodesRef = useRef(nodes)
+  useEffect(() => {
+    nodesRef.current = nodes
+  })
   const [selection, setSelection] = useState<string | null>(initialFocus)
   const [hideUnrelated, setHideUnrelated] = useState(false)
   const [query, setQuery] = useState("")
@@ -154,7 +159,13 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
         return
       }
       const next = limited.view as View
-      const positions = computeLayout(graph, limited.projection, computed, view, next, nextPins)
+      // A different grouping is a fresh arrangement: pins from the old one would freeze nodes at positions that make no sense here.
+      const effectivePins = next.groupBy === view.groupBy ? nextPins : new Map<string, Point>()
+      if (effectivePins !== nextPins) setPins(effectivePins)
+      // Lay out from where nodes are NOW (drags included), not from the last settled layout, so a relayout never snaps a dragged node back.
+      const live = new Map(computed.positions)
+      for (const n of nodesRef.current) live.set(n.id, n.position)
+      const positions = computeLayout(graph, limited.projection, { projection: computed.projection, positions: live }, view, next, effectivePins)
       setNotice(limited.clustersOnly ? limitNotice(limited.requestedElements, elementLimit) : "")
       setView(next)
       setComputed({ projection: limited.projection, positions })
@@ -337,27 +348,19 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
     [select, selectedRep, togglePin, neighbour, flow],
   )
 
+  // Halos are computed from the live node positions (React Flow's own state), so they follow a drag as it happens.
   const halos = useMemo(() => {
-    const byGroup = new Map<string, { sx: number; sy: number; n: number; pts: Point[]; index: number; label: string }>()
     const groupInfo = new Map(projection.groups.map((g) => [g.id, g]))
-    for (const v of projection.nodes) {
+    const indexOf = new Map<string, number>()
+    const live: Array<{ groupId: string; x: number; y: number }> = []
+    for (const n of nodes) {
+      const v = n.data.visible
       if (v.kind !== "node") continue
-      const p = computed.positions.get(v.key)
-      if (!p) continue
-      const g = byGroup.get(v.groupId) ?? { sx: 0, sy: 0, n: 0, pts: [], index: v.groupIndex, label: groupInfo.get(v.groupId)?.label ?? v.groupId }
-      g.sx += p.x
-      g.sy += p.y
-      g.n += 1
-      g.pts.push(p)
-      byGroup.set(v.groupId, g)
+      indexOf.set(v.groupId, v.groupIndex)
+      live.push({ groupId: v.groupId, x: n.position.x, y: n.position.y })
     }
-    return [...byGroup.entries()].map(([id, g]) => {
-      const cx = g.sx / g.n
-      const cy = g.sy / g.n
-      const r = Math.max(...g.pts.map((p) => Math.hypot(p.x - cx, p.y - cy))) + 36
-      return { id, cx, cy, r, index: g.index, label: g.label, count: g.n }
-    })
-  }, [projection, computed.positions])
+    return groupCircles(live).map((c) => ({ ...c, index: indexOf.get(c.id) ?? 0, label: groupInfo.get(c.id)?.label ?? c.id }))
+  }, [projection, nodes])
 
   const allGroupIds = useMemo(() => listGroups(graph, view.groupBy).map((g) => g.id), [graph, view.groupBy])
   const toggleType = (type: ChainNodeType) => {
