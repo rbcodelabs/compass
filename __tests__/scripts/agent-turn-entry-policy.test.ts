@@ -17,14 +17,22 @@ describe("agent entry capability-pack policy", () => {
   })
 
   it("exposes WebFetch as the only built-in tool unless the host materialized docs", () => {
-    // Pinned as a literal: the failure mode is additive drift, one more
+    // The list comes from agentTools() (scripts/agent/github-access.ts), whose output is
+    // pinned in github-access.test.ts: the failure mode is additive drift, one more
     // "harmless" built-in at a time, none reviewed as a boundary change.
-    expect(source).toContain('tools: docsSession ? ["WebFetch", "Read", "Write", "Edit", "Glob"] : ["WebFetch"],')
-    // Bash can read process.env (the MCP bearer token) and would punch a hole
-    // next to the MCP-intermediated boundary rather than through it.
+    expect(source).toContain("tools: agentTools(Boolean(docsSession), githubShell),")
+    // Bash exists only through the jail: it is added by agentTools() when githubShell is
+    // true, and githubShell is set only after prepareBashJail() proved the jail user.
+    // Nothing else may name it in `tools`.
     for (const forbidden of ["Bash", "MultiEdit", "NotebookEdit", "Grep", "Task", "Skill", "WebSearch"]) {
       expect(source).not.toMatch(new RegExp(`tools:[^\\n]*"${forbidden}"`))
     }
+    expect(source).toMatch(/prepareBashJail\(\{ docsRoot, note \}\)\n\s+githubShell = true/)
+    expect(source).toContain('...(githubShell ? ["Bash"] : []),')
+    // Every Bash call goes through the policy + jail-rewrite hook, and the CLI gets the
+    // GitHub token only on a shell turn.
+    expect(source).toContain("...(githubShell ? [{ matcher: BASH_MATCHER, hooks: [createBashPreToolUseHook(process.env)] }] : []),")
+    expect(source).toContain("env: scrubbedAgentEnv(process.env, { github: githubShell }),")
   })
 
   it("ADR 0019: scopes the native file tools to the materialized doc tree via cwd", () => {
@@ -40,7 +48,7 @@ describe("agent entry capability-pack policy", () => {
     // entirely, both leave a headless agent running in bypassPermissions mode with
     // no allowlist at all. `connectorToolPrefixes` is the only sanctioned way for
     // this list to grow, and it grows per turn from the grants that user holds.
-    expect(source).toContain('...(docsSession ? ["mcp__docsfs", "Read", "Write", "Edit", "Glob"] : []),')
+    expect(source).toContain('...(docsSession ? ["mcp__docsfs", "Read", "Write", "Edit", "Glob"] : []),\n      ...(githubShell ? ["Bash"] : []),')
     expect(source).toContain('"mcp__compass",\n      "WebFetch",\n      "mcp__web_search",')
     expect(source).toContain("...connectorToolPrefixes,")
     expect(source).not.toMatch(/allowedTools:\s*\[[^\]]*\*/)
@@ -74,8 +82,8 @@ describe("agent entry capability-pack policy", () => {
   it("ADR 0019: confines the file tools with a PreToolUse path guard and keeps run credentials out of the CLI's environment", () => {
     // Without the hook, `Read /proc/self/environ` returns every secret in this process.
     expect(source).toContain('from "./docs-path-guard.ts"')
-    expect(source).toContain("{ matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot)] }")
-    expect(source).toContain("env: scrubbedAgentEnv(process.env)")
+    expect(source).toContain("{ matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot, { readOnlyRoots: githubShell ? [REPOS_DIR] : [] })] }")
+    expect(source).toContain("env: scrubbedAgentEnv(process.env, { github: githubShell }),")
     // The guard must be registered exactly when the file tools are.
     expect(source).toMatch(/docsSession && docsRoot\s*\?\s*\{\s*hooks:/)
   })

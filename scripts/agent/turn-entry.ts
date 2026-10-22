@@ -40,6 +40,10 @@
 //                              (ADR-0018). Slugs only: each is reached through a
 //                              Compass gateway path with the turn credential
 //                              above, so no provider token is passed in here.
+//   AGENT_GITHUB_SHELL         (optional) "1" when the host enabled Bash + GitHub for this
+//                              turn (workspace has an approved repo list and a token was
+//                              minted). Together with GH_TOKEN / AGENT_GITHUB_REPOS and
+//                              DOCS_ROOT it gates the shell; see github-access.ts.
 //   AGENT_RUN_ID               (optional) durable run this turn belongs to
 //   AGENT_RUN_TOKEN            (optional) that run's worker bearer token — a
 //                              separate credential from MCP_TOKEN on purpose,
@@ -84,6 +88,15 @@ import {
   WEB_FETCH_MATCHER,
   WEB_SEARCH_MATCHER,
 } from "./docs-path-guard.ts"
+import {
+  agentTools,
+  BASH_MATCHER,
+  createBashPreToolUseHook,
+  githubAccessFromEnv,
+  prepareBashJail,
+  REPOS_DIR,
+  SHELL_UNAVAILABLE_NOTICE,
+} from "./github-access.ts"
 import { collectFinalDocState, isValidDocName, type CollectedDocState } from "./docs-final-state.ts"
 import { DEFAULT_HEARTBEAT_MS, RunReporter } from "./run-reporter.ts"
 import { createHash, randomUUID } from "node:crypto"
@@ -319,7 +332,9 @@ function parseConnectors(raw: string | undefined): ConnectorRef[] {
 // Rather than add Bash (a materially larger surface -- it can read
 // process.env, which holds the MCP bearer token, and could exfiltrate it over
 // any open network egress), these two tools give the agent exactly "delete a
-// doc" and "move/rename a doc", wrapping an openWikiSession opened once at the
+// doc" and "move/rename a doc". (Bash now exists for workspaces that approved GitHub
+// repos, but only as a separate unprivileged Unix user behind an egress allowlist --
+// see github-access.ts -- so these tools are still the way to delete/move docs.), wrapping an openWikiSession opened once at the
 // top of main() -- local sandbox disk only, no network call, no DB mutation.
 // The actual deleteDocument/movePath call against Compass happens in the same
 // end-to-end reconciliation pass as every other change, after this process
@@ -528,6 +543,23 @@ async function main(): Promise<void> {
     docsSession = opened.session
   }
 
+  // ADR (agent shell + GitHub access): Bash exists only when the host enabled it AND the
+  // jail user is provably usable. Any failure here degrades to the no-shell configuration
+  // and says so in the prompt, rather than failing the turn or running Bash unconfined.
+  let githubShell = false
+  const githubAccess = githubAccessFromEnv(process.env, docsRoot)
+  if (githubAccess.enabled && docsSession && docsRoot) {
+    try {
+      prepareBashJail({ docsRoot, note })
+      githubShell = true
+      note(`shell enabled for ${githubAccess.repos.length} repository(ies)`)
+    } catch (error) {
+      note(`shell disabled: could not set up the jail user: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  } else if (process.env.AGENT_GITHUB_SHELL === "1") {
+    note(`shell disabled: ${githubAccess.enabled ? "docs session missing" : githubAccess.reason}`)
+  }
+
   // Compass's own catalog plus one HTTP entry per connected provider (and, when
   // the host materialized docs, the in-process docsfs server — ADR 0019 §2.3).
   // Each connector points at a Compass gateway path, not the provider — the
@@ -581,9 +613,12 @@ async function main(): Promise<void> {
   // Appended after the host's prompt rather than merged into it, because it is
   // scoped to *this* turn's grants: the host prompt is the same for every user,
   // and this paragraph only exists while the connector it describes is reachable.
-  const effectiveSystemPrompt = connectorGuidance.length
+  const promptWithConnectors = connectorGuidance.length
     ? `${systemPrompt}\n\n## Connected third-party tools\n\n${connectorGuidance.join("\n\n")}`
     : systemPrompt
+  // The host described a shell it expected to enable; if setup failed, retract that.
+  const effectiveSystemPrompt =
+    process.env.AGENT_GITHUB_SHELL === "1" && !githubShell ? `${promptWithConnectors}${SHELL_UNAVAILABLE_NOTICE}` : promptWithConnectors
 
   const allowedFetchUrls = createAllowedUrls(
     `${prompt}\n${existsSync(FALLBACK_PROMPT_FILE) ? readFileSync(FALLBACK_PROMPT_FILE, "utf8") : ""}`,
@@ -613,9 +648,10 @@ async function main(): Promise<void> {
     // ADR 0019 §2.2: with docs materialized, `tools` is also the real gate on file
     // access -- `allowedTools` does nothing under `permissionMode: "bypassPermissions"`
     // (confirmed against the Agent SDK's current docs). Read/Write/Edit/Glob give
-    // native access to the doc tree at `cwd`; Bash is deliberately omitted (see
-    // buildDocsFsServer for why).
-    tools: docsSession ? ["WebFetch", "Read", "Write", "Edit", "Glob"] : ["WebFetch"],
+    // native access to the doc tree at `cwd`. Bash is omitted by default (see
+    // buildDocsFsServer for why); it is added ONLY by agentTools(docs, githubShell) and only after the jail user was
+    // proven (see above); its commands are rewritten to run as that user by the Bash hook.
+    tools: agentTools(Boolean(docsSession), githubShell),
     // Scopes the agent's native file tools to the materialized doc tree.
     ...(docsSession && docsRoot ? { cwd: docsRoot } : {}),
     // `cwd` alone confines nothing: under bypassPermissions Read/Write/Edit/Glob
@@ -631,8 +667,10 @@ async function main(): Promise<void> {
       ? {
           hooks: {
             PreToolUse: [
-              { matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot)] },
+              // The cloned-repo workdir is readable (never writable) by the native file tools.
+              { matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot, { readOnlyRoots: githubShell ? [REPOS_DIR] : [] })] },
               { matcher: WEB_FETCH_MATCHER, hooks: [createWebFetchPreToolUseHook(allowedFetchUrls)] },
+              ...(githubShell ? [{ matcher: BASH_MATCHER, hooks: [createBashPreToolUseHook(process.env)] }] : []),
             ],
             PostToolUse: [{ matcher: WEB_SEARCH_MATCHER, hooks: [createSearchResultCollector(allowedFetchUrls)] }],
           },
@@ -641,7 +679,7 @@ async function main(): Promise<void> {
     // The model-facing CLI process does not need this script's own credentials
     // (the run callback token and the MCP bearer are used in-process only), so it
     // does not inherit them.
-    env: scrubbedAgentEnv(process.env),
+    env: scrubbedAgentEnv(process.env, { github: githubShell }),
     strictMcpConfig: true,
     settingSources: [],
     systemPrompt: effectiveSystemPrompt,
@@ -652,6 +690,7 @@ async function main(): Promise<void> {
       "WebFetch",
       "mcp__web_search",
       ...(docsSession ? ["mcp__docsfs", "Read", "Write", "Edit", "Glob"] : []),
+      ...(githubShell ? ["Bash"] : []),
       ...connectorToolPrefixes,
     ],
     // Safety default (Phase 5): keep the two irreversible hard-delete tools

@@ -53,6 +53,7 @@ import type { AgentRecord } from "@/lib/agent-ownership"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 import { readWorkspaceAgentRepos } from "@/lib/agent-github-repos"
 import { mintAgentGithubEnv } from "@/lib/github-app-token"
+import { agentEgressPolicy, githubShellEnabled } from "@/lib/agent-github-access"
 import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
 import { prepareCapabilityPacksForTurn, type ActiveCapabilityPack } from "@/lib/capability-pack-runtime"
 import { claimInterviewProcessing, DEFAULT_INTERVIEW_CLAIM_LEASE_MS, finishInterviewProcessing, failPendingInterviewProcessing, reportPmAgentFailure } from "@/lib/pm-agent-service"
@@ -537,10 +538,14 @@ export async function POST(request: NextRequest) {
       // An agent-scoped key is honoured only while a live run names it, so the run must name it before the sandbox exists.
       if (runAgent && !(await attachAgentRunKey({ prisma, runId: run.id, apiKeyId }))) throw new Error("agent run ended before its key could be attached")
       const githubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))
+      // Bash + GitHub only when the docs tree will be materialized (same condition as docMaterial below). It comes with an
+      // egress allowlist set at creation, so there is never a moment where the shell can run with open egress.
+      const githubShell = githubShellEnabled({ githubEnv, harness, docs: !scope && harness !== "opencode" })
       const sandbox = await bootSandboxFromSnapshot(snapshotId, {
         timeoutMs: budgetMs + 2 * RUN_INFRA_GRACE_MS,
         name: sandboxName,
         tags: { runId: run.id, workspaceId },
+        ...(githubShell ? { networkPolicy: agentEgressPolicy({ mcpBaseUrl, model: resolved?.ok ? resolved : undefined }) } : {}),
       })
       // ADR 0019: materialize the doc tree and hand the sandbox a host-signed
       // manifest of what it was shown. This request will be gone before the agent
@@ -654,7 +659,8 @@ export async function POST(request: NextRequest) {
         const preparedPacks = await step(() => prepareCapabilityPacksForTurn(activePacks, { get: (pathname) => getCapabilityPackArtifactStorage().get(pathname) }))
         packProvenance = preparedPacks.provenanceJson
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
-        sandbox = await analysisStep(() => bootSandboxFromSnapshot(snapshotId), deadline, abort, async late => { await analysisStep(() => late.stop(), Date.now() + 5_000, new AbortController()) })
+        const githubShell = githubShellEnabled({ githubEnv, harness, docs: !scope && harness !== "opencode" })
+        sandbox = await analysisStep(() => bootSandboxFromSnapshot(snapshotId, githubShell ? { networkPolicy: agentEgressPolicy({ mcpBaseUrl, model: resolved?.ok ? resolved : undefined }) } : undefined), deadline, abort, async late => { await analysisStep(() => late.stop(), Date.now() + 5_000, new AbortController()) })
 
         // ADR 0019 §2.4: read the doc tree's current state BEFORE writing
         // anything into the sandbox, so the baseline this turn reconciles

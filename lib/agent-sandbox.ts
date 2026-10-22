@@ -42,7 +42,7 @@
  */
 
 import { createHash } from "node:crypto"
-import { Sandbox, Snapshot } from "@vercel/sandbox"
+import { Sandbox, Snapshot, type NetworkPolicy } from "@vercel/sandbox"
 import { OPENCODE_PINNED_VERSION } from "@/lib/agent-harness"
 
 export const SANDBOX_RUNTIME = "node24"
@@ -80,6 +80,32 @@ export const SANDBOX_SYSTEM_PACKAGES: readonly string[] = [
   "nss",
   "pango",
 ]
+
+/**
+ * GitHub CLI baked into the snapshot for the agent's shell (workspaces with approved
+ * GitHub repos; lib/agent-github-access.ts). Pinned and checksum-verified: it is
+ * downloaded once at snapshot build, never at turn time (turn egress is allowlisted).
+ * git itself ships in the base image. Part of the snapshot fingerprint.
+ */
+export const GH_CLI = {
+  version: "2.103.0",
+  sha256: "fdd768eb70f6409f80fcfa9f3a1c0adf0fc98d827ab3ce0bed2ac22762c5d786",
+} as const
+
+/** The shell script that installs GH_CLI to /usr/local/bin and fails the build if the checksum or the binary is wrong. */
+export function ghInstallScript(): string {
+  const file = `gh_${GH_CLI.version}_linux_amd64.tar.gz`
+  return [
+    "set -euo pipefail",
+    "cd \"$(mktemp -d)\"",
+    `curl -fsSL -o ${file} https://github.com/cli/cli/releases/download/v${GH_CLI.version}/${file}`,
+    `echo "${GH_CLI.sha256}  ${file}" | sha256sum -c -`,
+    `tar -xzf ${file}`,
+    `sudo install -m 0755 gh_${GH_CLI.version}_linux_amd64/bin/gh /usr/local/bin/gh`,
+    "gh --version",
+    "git --version",
+  ].join("\n")
+}
 
 /**
  * Flags headless Chromium needs inside a container: no user namespaces for its
@@ -141,8 +167,9 @@ export function sandboxPackageJson(): string {
  */
 function snapshotRecipe(): string {
   return JSON.stringify({
-    recipeVersion: 2,
+    recipeVersion: 3,
     runtime: SANDBOX_RUNTIME,
+    ghCli: GH_CLI,
     packageJson: sandboxPackageJson(),
     systemPackages: SANDBOX_SYSTEM_PACKAGES,
   })
@@ -283,6 +310,9 @@ export async function buildGoldenSnapshot(opts?: {
     const systemDepsMs = Date.now() - systemDepsStart
     emit(`system libraries installed (${systemDepsMs}ms)`)
 
+    emit(`installing GitHub CLI ${GH_CLI.version} (checksum-verified)...`)
+    await runStep(sandbox, "gh", { cmd: "bash", args: ["-c", ghInstallScript()] }, emit)
+
     await sandbox.writeFiles([{ path: "package.json", content: sandboxPackageJson() }])
     emit("wrote package.json; running npm install (includes Chromium download)...")
 
@@ -409,15 +439,19 @@ function parseBrowserVersion(smokeOutput: string): string {
  * its starting request: the sandbox own timeout, not the function, is what ends it. The
  * 5-minute default is kept for the synchronous fallback path. `name` makes the sandbox
  * addressable later (`Sandbox.get({ name })`), which is how the sweeper reaches a run
- * nobody is watching. `tags` labels it for cost attribution.
+ * nobody is watching. `tags` labels it for cost attribution. `networkPolicy` restricts
+ * egress for the sandbox's whole lifetime; it is applied at creation so there is no
+ * window in which the shell could run before the policy.
  */
 export async function bootSandboxFromSnapshot(
   snapshotId: string,
-  opts?: { timeoutMs?: number; name?: string; tags?: Record<string, string> }
+  opts?: { timeoutMs?: number; name?: string; tags?: Record<string, string>; networkPolicy?: NetworkPolicy }
 ): Promise<Sandbox> {
   return Sandbox.create({
     source: { type: "snapshot", snapshotId },
     timeout: opts?.timeoutMs ?? SANDBOX_TIMEOUT_MS,
+    // Omitted = the platform default (full egress). Set only for shell-enabled turns (lib/agent-github-access.ts).
+    ...(opts?.networkPolicy ? { networkPolicy: opts.networkPolicy } : {}),
     ...(opts?.name ? { name: opts.name } : {}),
     ...(opts?.tags ? { tags: opts.tags } : {}),
   })

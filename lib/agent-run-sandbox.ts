@@ -13,6 +13,7 @@ import { connectorGuidance, type ConnectorDefinition } from "@/lib/mcp-connector
 import type { AgentHarness } from "@/lib/agent-harness"
 import { opencodeModel } from "@/lib/agent-harness"
 import { providerSandboxEnv, type ResolvedAgentModel } from "@/lib/agent-model"
+import { githubRepoList, githubSandboxEnv, githubShellEnabled, githubShellPrompt, shellCapabilitySentence } from "@/lib/agent-github-access"
 
 function claudeProviderEnv(model: Extract<ResolvedAgentModel, { ok: true }> | undefined): Record<string, string> {
   // Fail closed: the Claude harness without a resolved provider would boot with no credential.
@@ -56,6 +57,8 @@ export function readEntryModules(harness: AgentHarness): { path: string; content
     { path: "run-reporter.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/run-reporter.ts"), "utf8") },
     { path: "docs-path-guard.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/docs-path-guard.ts"), "utf8") },
     { path: "docs-final-state.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/docs-final-state.ts"), "utf8") },
+    { path: "bash-guard.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/bash-guard.ts"), "utf8") },
+    { path: "github-access.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/github-access.ts"), "utf8") },
   ]
 }
 
@@ -121,12 +124,17 @@ export function buildAgentEnv(opts: {
   agent?: { name: string; instructions: string | null; model: string | null }
   /** The user's explicit per-turn model pick, already validated against the allowed set (lib/agent-turn-model.ts). Wins over the agent's own model. */
   modelOverride?: string | null
-  /** Short-lived GitHub App token env (GH_TOKEN/GITHUB_TOKEN) scoped to the workspace's approved repos; empty when unconfigured. */
+  /**
+   * Short-lived GitHub App token env (GH_TOKEN/GITHUB_TOKEN + AGENT_GITHUB_REPOS) scoped to the workspace's approved repos; empty when
+   * unconfigured. It is forwarded, and Bash enabled, ONLY when githubShellEnabled() holds (Claude harness, docs materialized, token
+   * and a non-empty repo list); otherwise it is dropped here so a token never reaches a sandbox that has no sanctioned use for it.
+   */
   githubEnv?: Record<string, string>
 }): Record<string, string> {
   const chosenModel = opts.modelOverride ?? opts.agent?.model ?? null
+  const shell = githubShellEnabled({ githubEnv: opts.githubEnv, harness: opts.harness, docs: Boolean(opts.docs) })
   return {
-    ...opts.githubEnv,
+    ...githubSandboxEnv(shell, opts.githubEnv),
     ...(opts.harness === "opencode"
       ? { AI_GATEWAY_API_KEY: opts.gatewayApiKey ?? "", AGENT_MODEL: chosenModel ?? opencodeModel(process.env.AGENT_OPENCODE_MODEL) }
       : {
@@ -143,9 +151,12 @@ export function buildAgentEnv(opts: {
     AGENT_SYSTEM_PROMPT:
       `You are Compass's in-app product-discovery assistant. Compass is the sole authority for tools, credentials, and workspace access. ` +
       (opts.docs
-        ? `Operate only in workspace ${opts.workspaceId}. Available host capabilities: compass.product_state, and a local copy of this workspace's docs. ` +
-          `Unavailable capabilities include shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${WEB_CAPABILITY_SENTENCE}\n\n` +
-          DOCS_FILESYSTEM_PROMPT
+        ? (shell
+            ? shellCapabilitySentence(opts.workspaceId, WEB_CAPABILITY_SENTENCE)
+            : `Operate only in workspace ${opts.workspaceId}. Available host capabilities: compass.product_state, and a local copy of this workspace's docs. ` +
+              `Unavailable capabilities include shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${WEB_CAPABILITY_SENTENCE}\n\n`) +
+          DOCS_FILESYSTEM_PROMPT +
+          (shell ? githubShellPrompt(githubRepoList(opts.githubEnv)) : "")
         : `Operate only in workspace ${opts.workspaceId}. Available host capability: compass.product_state. ` +
           `Unavailable capabilities include local files, shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${WEB_CAPABILITY_SENTENCE}\n\n`) +
       `The following JSON contains compiled, enabled skill instructions and directly referenced text assets. ` +

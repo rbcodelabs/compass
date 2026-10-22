@@ -441,3 +441,32 @@ describe("WebFetch exfiltration guard", () => {
     expect(set.size).toBeLessThanOrEqual(500)
   })
 })
+
+describe("GitHub shell additions", () => {
+  it("lets Read/Glob/Grep (never Write/Edit) reach a read-only root, and nothing outside both roots", () => {
+    const repos = path.join(base, "repos")
+    mkdirSync(repos, { recursive: true })
+    writeFileSync(path.join(repos, "README.md"), "# repo")
+    const opts = { readOnlyRoots: [repos] }
+    expect(checkDocsToolUse("Read", { file_path: path.join(repos, "README.md") }, root, opts).allowed).toBe(true)
+    expect(checkDocsToolUse("Glob", { pattern: "*.md", path: repos }, root, opts).allowed).toBe(true)
+    expect(checkDocsToolUse("Write", { file_path: path.join(repos, "x.md") }, root, opts).allowed).toBe(false)
+    expect(checkDocsToolUse("Edit", { file_path: path.join(repos, "README.md") }, root, opts).allowed).toBe(false)
+    expect(checkDocsToolUse("Read", { file_path: path.join(outside, "secret.txt") }, root, opts).allowed).toBe(false)
+    expect(checkDocsToolUse("Read", { file_path: "/proc/self/environ" }, root, opts).allowed).toBe(false)
+    // without the option the repo directory is outside the docs tree
+    expect(checkDocsToolUse("Read", { file_path: path.join(repos, "README.md") }, root).allowed).toBe(false)
+  })
+
+  it("does not follow a symlink out of the read-only root", () => {
+    const repos = path.join(base, "repos")
+    symlinkSync(path.join(outside, "secret.txt"), path.join(repos, "escape.md"))
+    expect(checkDocsToolUse("Read", { file_path: path.join(repos, "escape.md") }, root, { readOnlyRoots: [repos] }).allowed).toBe(false)
+  })
+
+  it("passes the GitHub token to the CLI environment only on a shell turn", () => {
+    const env = { PATH: "/usr/bin", GH_TOKEN: "ghs_a", GITHUB_TOKEN: "ghs_a", AGENT_GITHUB_REPOS: "o/r", MCP_TOKEN: "m", GIT_SSL_CAINFO: "/ca.pem" }
+    expect(scrubbedAgentEnv(env)).toEqual({ PATH: "/usr/bin", GIT_SSL_CAINFO: "/ca.pem" })
+    expect(scrubbedAgentEnv(env, { github: true })).toEqual({ PATH: "/usr/bin", GH_TOKEN: "ghs_a", GITHUB_TOKEN: "ghs_a", GIT_SSL_CAINFO: "/ca.pem" })
+  })
+})
