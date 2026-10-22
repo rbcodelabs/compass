@@ -179,6 +179,22 @@ describe("ChainGraphView", () => {
     expect(within(buttons[1]).getByTestId(`type-glyph-${CHAIN_NODE_TYPES[1]}`).dataset.dimmed).toBe("false")
   })
 
+  it("filter buttons can shrink: label truncates with the full text as title, glyph stays shrink-0", () => {
+    render(<ChainGraphView graph={graph} initialCollapse="none" />)
+    const group = screen.getByRole("group", { name: "Object types" })
+    const buttons = within(group).getAllByRole("button")
+    CHAIN_NODE_TYPES.forEach((type, i) => {
+      const label = within(buttons[i]).getByTestId(`type-label-${type}`)
+      expect(label.className).toContain("truncate")
+      expect(label.className).toContain("min-w-0")
+      expect(label.getAttribute("title")).toBe(label.textContent)
+      expect(buttons[i].className).toContain("max-w-full")
+      expect(buttons[i].className).toContain("min-w-0")
+      expect(buttons[i].textContent).toBe(label.textContent)
+      expect(within(buttons[i]).getByTestId(`type-glyph-${type}`).className).toContain("shrink-0")
+    })
+  })
+
   it("outline search lists matches when nothing is selected, and Open calls onOpenDetails", () => {
     const open = vi.fn()
     render(<ChainGraphView graph={graph} initialCollapse="none" onOpenDetails={open} />)

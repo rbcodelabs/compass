@@ -488,11 +488,11 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
               </SelectContent>
             </Select>
           </div>
-          <div className="flex flex-wrap gap-1" role="group" aria-label="Object types">
+          <div className="flex min-w-0 max-w-full flex-wrap gap-1" role="group" aria-label="Object types">
             {CHAIN_NODE_TYPES.map((type) => (
-              <Button key={type} size="xs" variant={view.hiddenTypes.has(type) ? "outline" : "secondary"} aria-pressed={!view.hiddenTypes.has(type)} onClick={() => toggleType(type)}>
+              <Button key={type} size="xs" className="max-w-full min-w-0" variant={view.hiddenTypes.has(type) ? "outline" : "secondary"} aria-pressed={!view.hiddenTypes.has(type)} onClick={() => toggleType(type)}>
                 <TypeGlyph type={type} dimmed={view.hiddenTypes.has(type)} />
-                {typeLabels[type]}
+                <span className="min-w-0 truncate" title={typeLabels[type]} data-testid={`type-label-${type}`}>{typeLabels[type]}</span>
               </Button>
             ))}
           </div>
