@@ -15,6 +15,7 @@ import {
   CommentHighlight,
   type CommentAnchorData,
 } from "@/components/docs/comment-highlight-extension";
+import { MermaidCodeBlock } from "@/components/docs/mermaid-code-block-extension";
 import { SpecEmbed } from "@/components/docs/spec-embed-extension";
 import { createMarkdownEditorExtensions } from "@/components/markdown-editor-extensions";
 
@@ -26,7 +27,7 @@ import { createMarkdownEditorExtensions } from "@/components/markdown-editor-ext
  */
 export function createDocEditorExtensions(commentAnchors: CommentAnchorData[]) {
   return [
-    ...createMarkdownEditorExtensions(),
+    ...createMarkdownEditorExtensions(undefined, MermaidCodeBlock),
     Image.configure({ inline: false }),
     // Inert unless a paragraph is exactly one compass:// link (see lib/doc-embeds).
     SpecEmbed,

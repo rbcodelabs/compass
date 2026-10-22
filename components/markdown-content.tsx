@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { isValidElement, useMemo, type ReactNode } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { remarkWorkItemRefs } from "@/lib/work-item-linkify";
+import { MermaidDiagram } from "@/components/mermaid-diagram";
 import { useWorkItemLinkScope } from "@/components/work-item-link-scope";
 
 const PROSE = [
@@ -28,6 +29,23 @@ const PROSE = [
   "[&_hr]:my-3 [&_hr]:border-default",
 ].join(" ");
 
+/** Plain text of a fence's children (react-markdown hands one string child). */
+function textOf(node: ReactNode): string {
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  return "";
+}
+
+/** ```mermaid fences render as diagrams; every other <pre> is left to the default. */
+// react-markdown also passes the hast `node`; it must not reach the DOM element.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function PreBlock({ children, node: _node, ...rest }: { children?: ReactNode; node?: unknown }) {
+  if (isValidElement<{ className?: string; children?: ReactNode }>(children) && /\blanguage-mermaid\b/.test(children.props.className ?? "")) {
+    return <MermaidDiagram source={textOf(children.props.children).replace(/\n$/, "")} />;
+  }
+  return <pre {...rest}>{children}</pre>;
+}
+
 function safeUrl(url: string): string {
   return defaultUrlTransform(url);
 }
@@ -48,7 +66,7 @@ const COMPONENTS_BY_LINK = new WeakMap<LinkRenderer, Components>();
 function componentsFor(Link: LinkRenderer): Components {
   let components = COMPONENTS_BY_LINK.get(Link);
   if (!components) {
-    components = { a: ({ href, children }) => <Link href={href}>{children}</Link>, img: () => null };
+    components = { a: ({ href, children }) => <Link href={href}>{children}</Link>, img: () => null, pre: PreBlock };
     COMPONENTS_BY_LINK.set(Link, components);
   }
   return components;

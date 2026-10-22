@@ -3,7 +3,7 @@ import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import { TableKit } from "@tiptap/extension-table";
 import { Markdown, type MarkdownStorage } from "tiptap-markdown";
-import type { Editor } from "@tiptap/react";
+import type { AnyExtension, Editor } from "@tiptap/react";
 import { MarkdownAlignedTable } from "@/components/docs/markdown-table-serialization";
 
 /**
@@ -15,9 +15,12 @@ import { MarkdownAlignedTable } from "@/components/docs/markdown-table-serializa
  */
 export function createMarkdownEditorExtensions(
   placeholder: string | ((props: { editor: Editor }) => string) = "Start writing…",
+  /** Swap StarterKit's code block for an extension of it (e.g. one with a Mermaid node view). */
+  codeBlock?: AnyExtension,
 ) {
   return [
-    StarterKit.configure({ link: false, underline: false }),
+    StarterKit.configure({ link: false, underline: false, ...(codeBlock ? { codeBlock: false as const } : {}) }),
+    ...(codeBlock ? [codeBlock] : []),
     Link.configure({ openOnClick: false }),
     Placeholder.configure({ placeholder }),
     TableKit.configure({ table: false }),
