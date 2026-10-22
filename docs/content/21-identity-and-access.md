@@ -31,6 +31,65 @@ account keep their original author label.
 
 ![Profile settings on mobile, with saved display name and account navigation](/screenshots/docs/profile-mobile.png)
 
+## Delete your account
+
+You can delete your own account under **Settings → Profile → Delete account**.
+You confirm by typing your account email, and your sessions end immediately.
+The [Privacy Policy](/privacy#retention) and [Terms of Service](/terms) describe
+the same rules in legal form.
+
+**What is removed**
+
+- Your sign-in: sessions, passkeys and the tokens saved when you signed in with
+  Google. Compass asks Google to revoke those tokens, and any connected Google
+  Drive (or other connector) grant, before deleting its copy. Revocation is
+  best effort; the copy is deleted either way.
+- Your API keys, personal agents, OAuth connections, notifications, follows and
+  workspace and organization memberships.
+- The agent conversations you own, including their messages, run records and
+  saved transcripts, plus the messages you sent and the agent runs you started in
+  conversations owned by other people.
+
+**What stays**
+
+Content you added to shared workspaces (documents, tasks, comments, research,
+roadmap items) stays with your teammates. It is no longer linked to you: your name
+on comments, inline Doc comments and document history becomes "Deleted user", and
+tasks assigned to you become unassigned. Names typed into free text (for example a
+task owner field) are not rewritten, and decision and approval records keep an
+internal identifier that no longer points to any account.
+
+**When deletion is blocked**
+
+Compass never leaves a team without an owner:
+
+- You are the only **owner** of an organization other people belong to. Make
+  someone else an owner first.
+- Deleting you would leave a workspace that other people can reach with no
+  administrator (no other workspace admin and no other organization owner or admin).
+  Make someone an administrator, or delete the workspace.
+
+The panel lists each blocker with a link to the relevant settings page.
+
+**Organizations only you belong to**
+
+If nobody else belongs to an organization (or to any of its workspaces), it would
+be unreachable after you leave, so it is deleted with your account, along with its
+workspaces. You must tick a confirmation naming them first. A workspace inside an
+organization other people belong to is never deleted this way, even if you are its
+only member; it stays with the people who can still reach it.
+
+## Agent conversation retention
+
+Agent conversation messages and agent run events are kept for **one year**. A daily
+job permanently deletes anything older, including Google Drive file contents the
+agent read, because run events record tool results. Saved session transcripts (which
+embed earlier turns) are deleted when their messages are, or when the most recent
+agent turn is a year old, and conversations left empty are removed. Disconnecting
+Google Drive does not delete stored run content before it reaches that age. Run
+summaries without conversation content (status, token counts, cost), web-search
+records and agent audit records are not covered by the job.
+
 ## The client does not matter
 
 Compass authorizes a request by looking at one thing: **the API key in the
