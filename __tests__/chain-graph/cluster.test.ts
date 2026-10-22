@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { buildChainGraph } from "@/lib/chain-graph/build"
-import { clusterKey, defaultCollapsed, listGroups, projectGraph } from "@/lib/chain-graph/cluster"
+import { CLUSTERS_ONLY_ABOVE, clusterKey, defaultCollapsed, elementCount, listGroups, projectGraph, projectWithLimit } from "@/lib/chain-graph/cluster"
 import { syntheticChainGraph } from "@/lib/chain-graph/synthetic"
 import { overviewFixture } from "./fixtures"
 
@@ -87,5 +87,33 @@ describe("defaultCollapsed", () => {
     const big = syntheticChainGraph(400)
     const c = defaultCollapsed(big, "objective", 300)
     expect(c.size).toBe(listGroups(big, "objective").length)
+  })
+})
+
+describe("projectWithLimit", () => {
+  it("returns the requested view when it fits the budget", () => {
+    const r = projectWithLimit(graph, { groupBy: "objective", collapsed: new Set() }, 1000)
+    expect(r.clustersOnly).toBe(false)
+    expect(r.projection.nodes.some((v) => v.kind === "node")).toBe(true)
+  })
+
+  it("falls back to clusters only above the limit and reports what was requested", () => {
+    const big = syntheticChainGraph(1000)
+    const expanded = projectGraph(big, { groupBy: "objective", collapsed: new Set() })
+    const requested = elementCount(expanded)
+    expect(requested).toBeGreaterThan(CLUSTERS_ONLY_ABOVE)
+    const r = projectWithLimit(big, { groupBy: "objective", collapsed: new Set() })
+    expect(r.clustersOnly).toBe(true)
+    expect(r.requestedElements).toBe(requested)
+    expect(r.projection.nodes.every((v) => v.kind === "cluster")).toBe(true)
+    expect(elementCount(r.projection)).toBeLessThanOrEqual(CLUSTERS_ONLY_ABOVE)
+    expect(r.view.collapsed.size).toBe(listGroups(big, "objective").length)
+  })
+
+  it("lets a small partial expansion through", () => {
+    const big = syntheticChainGraph(1000)
+    const all = listGroups(big, "objective").map((g) => g.id)
+    const r = projectWithLimit(big, { groupBy: "objective", collapsed: new Set(all.slice(1)) })
+    expect(r.clustersOnly).toBe(false)
   })
 })

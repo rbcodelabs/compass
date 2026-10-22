@@ -20,7 +20,7 @@ import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { chainNodeTypes, type ChainRFNode, type ClusterRFNode } from "./chain-graph-nodes"
 import { ChainGraphUiContext, type ChainGraphUi } from "./chain-graph-context"
-import { clusterKey, defaultCollapsed, listGroups, projectGraph, type ClusterProjection } from "@/lib/chain-graph/cluster"
+import { CLUSTERS_ONLY_ABOVE, clusterKey, defaultCollapsed, listGroups, projectWithLimit, type ClusterProjection } from "@/lib/chain-graph/cluster"
 import { layoutGraph, type LayoutNode, type Point } from "@/lib/chain-graph/layout"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { seriesForGroupIndex, typeLabelsFor, zoomBand } from "@/lib/chain-graph/presentation"
@@ -34,6 +34,8 @@ export type ChainGraphViewProps = {
   initialGroupBy?: GroupBy
   /** "default" applies the >300 elements rule; "all"/"none" force the starting state (benchmark). */
   initialCollapse?: "default" | "all" | "none"
+  /** Visible elements (nodes + edges) above which only clusters render. Defaults to the benchmarked budget; the benchmark passes Infinity. */
+  elementLimit?: number
   /** Opens the shared detail panel. Omitted where no panel provider is mounted. */
   onOpenDetails?: (type: ChainNodeType, id: string) => void
   /** Exposes timings and viewport helpers on window.__chainGraphBench for the benchmark script. */
@@ -46,6 +48,10 @@ type Computed = { projection: ClusterProjection; positions: ReadonlyMap<string, 
 
 const GROUP_BY_LABEL = (objective: string): Record<GroupBy, string> => ({ objective, type: "Type", status: "Status" })
 const NODE_RADIUS = 22
+
+function limitNotice(elements: number, limit: number): string {
+  return `Showing groups only: expanding everything would draw ${elements.toLocaleString()} elements, above the ${limit.toLocaleString()} limit. Hide a type or archived objects, or search and trace to narrow the view.`
+}
 
 function layoutNodesOf(projection: ClusterProjection): LayoutNode[] {
   return projection.nodes.map((v) => ({
@@ -99,7 +105,7 @@ function buildRFNodes(projection: ClusterProjection, positions: ReadonlyMap<stri
   })
 }
 
-function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objective", initialCollapse = "default", onOpenDetails, benchHooks, className }: ChainGraphViewProps) {
+function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objective", initialCollapse = "default", elementLimit = CLUSTERS_ONLY_ABOVE, onOpenDetails, benchHooks, className }: ChainGraphViewProps) {
   const flow = useReactFlow()
   const labels = useLabels()
   const typeLabels = useMemo(() => typeLabelsFor(labels), [labels])
@@ -111,22 +117,27 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
   const edgeById = useMemo(() => new Map(graph.edges.map((e) => [e.id, e])), [graph])
   const nodeByKey = useMemo(() => new Map(graph.nodes.map((n) => [n.key, n])), [graph])
 
-  const [initialView] = useState<View>(() => ({
-    groupBy: initialGroupBy,
-    collapsed: initialCollapse === "none" ? new Set<string>() : initialCollapse === "all" ? new Set(listGroups(graph, initialGroupBy).map((g) => g.id)) : defaultCollapsed(graph, initialGroupBy),
-    hiddenTypes: new Set<ChainNodeType>(),
-    showArchived: false,
-  }))
+  const [initial] = useState(() => {
+    const requested: View = {
+      groupBy: initialGroupBy,
+      collapsed: initialCollapse === "none" ? new Set<string>() : initialCollapse === "all" ? new Set(listGroups(graph, initialGroupBy).map((g) => g.id)) : defaultCollapsed(graph, initialGroupBy),
+      hiddenTypes: new Set<ChainNodeType>(),
+      // A deep link to an archived object must show it.
+      showArchived: !!initialFocus && (graph.nodes.find((n) => n.key === initialFocus)?.archived ?? false),
+    }
+    return projectWithLimit(graph, requested, elementLimit)
+  })
+  const initialView = initial.view as View
   const [view, setView] = useState<View>(initialView)
   const [pins, setPins] = useState<ReadonlyMap<string, Point>>(() => new Map())
   const [computed, setComputed] = useState<Computed>(() => {
     const t0 = performance.now()
-    const v = initialView
-    const projection = projectGraph(graph, v)
-    const positions = computeLayout(graph, projection, null, null, v, new Map())
+    const projection = initial.projection
+    const positions = computeLayout(graph, projection, null, null, initialView, new Map())
     if (typeof window !== "undefined") (window as unknown as { __chainGraphLayoutMs?: number }).__chainGraphLayoutMs = performance.now() - t0
     return { projection, positions }
   })
+  const [notice, setNotice] = useState(() => (initial.clustersOnly ? limitNotice(initial.requestedElements, elementLimit) : ""))
   const [initialNodes] = useState(() => buildRFNodes(computed.projection, computed.positions))
   const [nodes, setNodes, onNodesChange] = useNodesState<ChainRFNode | ClusterRFNode>(initialNodes)
   const [selection, setSelection] = useState<string | null>(initialFocus)
@@ -135,15 +146,21 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
   const [announcement, setAnnouncement] = useState("")
 
   const commitView = useCallback(
-    (patch: Partial<View>, nextPins: ReadonlyMap<string, Point> = pins) => {
-      const next: View = { ...view, ...patch }
-      const projection = projectGraph(graph, next)
-      const positions = computeLayout(graph, projection, computed, view, next, nextPins)
+    (patch: Partial<View>, nextPins: ReadonlyMap<string, Point> = pins, options: { refuseIfLimited?: boolean } = {}) => {
+      const requested: View = { ...view, ...patch }
+      const limited = projectWithLimit(graph, requested, elementLimit)
+      if (limited.clustersOnly && options.refuseIfLimited) {
+        setNotice(`Not expanded: that group would bring the view to ${limited.requestedElements.toLocaleString()} elements, above the ${elementLimit.toLocaleString()} limit. Hide a type or collapse another group first.`)
+        return
+      }
+      const next = limited.view as View
+      const positions = computeLayout(graph, limited.projection, computed, view, next, nextPins)
+      setNotice(limited.clustersOnly ? limitNotice(limited.requestedElements, elementLimit) : "")
       setView(next)
-      setComputed({ projection, positions })
-      setNodes(buildRFNodes(projection, positions))
+      setComputed({ projection: limited.projection, positions })
+      setNodes(buildRFNodes(limited.projection, positions))
     },
-    [graph, view, computed, pins, setNodes],
+    [graph, view, computed, pins, setNodes, elementLimit],
   )
 
   const toggleGroup = useCallback(
@@ -151,7 +168,7 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
       const collapsed = new Set(view.collapsed)
       if (collapsed.has(groupId)) collapsed.delete(groupId)
       else collapsed.add(groupId)
-      commitView({ collapsed })
+      commitView({ collapsed }, undefined, { refuseIfLimited: view.collapsed.has(groupId) })
     },
     [view.collapsed, commitView],
   )
@@ -395,6 +412,11 @@ function ChainGraphInner({ graph, initialFocus = null, initialGroupBy = "objecti
           <Button size="xs" variant="outline" onClick={() => commitView({ collapsed: new Set() })}>Expand all</Button>
           <Input ref={searchRef} className="h-7 w-48" aria-label="Search objects" placeholder="Search ( / )" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
+        {notice && (
+          <p className="text-xs text-status-warning" role="status" data-testid="chain-graph-limit-notice">
+            {notice}
+          </p>
+        )}
         {trunc && (
           <p className="text-xs text-status-warning" role="status">
             Showing {trunc.shown.toLocaleString()} of {trunc.total.toLocaleString()} objects. Narrow with filters or collapse groups.
