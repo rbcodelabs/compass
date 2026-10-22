@@ -21,11 +21,41 @@ import { isDocEmbedKind, type DocEmbedKind } from "@/lib/doc-embeds";
 import type { DocEmbedCardView } from "@/lib/canvas-card-data";
 import { DOC_EMBED_KIND_LABEL, humanizeStatus } from "@/lib/spec-docs/labels";
 import { cardEditSpec, validateCardTitle } from "@/lib/spec-docs/card-edit";
+import { PANEL_ENTITY_TYPES, useOptionalPanelContext, type EntityPanelType } from "@/components/panels/panel-context";
 import { useEmbedEditing, useEmbedEntry, useNearViewport, type EmbedEntry } from "@/components/docs/doc-embed-cards";
 
 /** Server hrefs are app-relative; anything else (a scheme, a protocol-relative URL) is not rendered as a link. */
 export function safeInternalHref(href: string): string | null {
   return href.startsWith("/") && !href.startsWith("//") && !href.includes("\\") ? href : null;
+}
+
+function panelTypeOf(kind: string): EntityPanelType | null {
+  return (PANEL_ENTITY_TYPES as readonly string[]).includes(kind) ? (kind as EntityPanelType) : null;
+}
+
+/**
+ * The card title. For a record the detail side panel can show, a plain primary click opens the panel (the URL gains `?detail=`) so the
+ * reader stays on the document, as everywhere else in the app. It stays a real link with the real href, so a modified click (Cmd/Ctrl/
+ * Shift/Alt), a middle click and "open in new tab" are left to the browser and still reach the record's full page. Kinds the panel does
+ * not show (metric, doc, artifact), and a card rendered with no PanelProvider, navigate by href as before.
+ */
+function CardTitleLink({ kind, id, href, children }: { kind: string; id: string; href: string; children: React.ReactNode }) {
+  const panel = useOptionalPanelContext();
+  const panelType = panelTypeOf(kind);
+  return (
+    <Link
+      href={href}
+      onClick={(event) => {
+        if (!panel || !panelType) return;
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        panel.openPanel(panelType, id);
+      }}
+      className="block min-w-0 break-words text-sm font-medium text-text-primary hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {children}
+    </Link>
+  );
 }
 
 const CARD = "min-w-0 max-w-full rounded-lg border border-border-default bg-surface-card px-3 py-2.5 sm:px-4 sm:py-3";
@@ -212,9 +242,9 @@ function OkCard({ kind, card, edit, onRemove }: { kind: DocEmbedKind; card: Extr
       ) : (
         <div className="mt-1 flex min-w-0 items-start gap-1">
           {href ? (
-            <Link href={href} className="block min-w-0 break-words text-sm font-medium text-text-primary hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <CardTitleLink kind={card.kind} id={card.id} href={href}>
               {card.title}
-            </Link>
+            </CardTitleLink>
           ) : (
             <p className="min-w-0 break-words text-sm font-medium text-text-primary">{card.title}</p>
           )}
