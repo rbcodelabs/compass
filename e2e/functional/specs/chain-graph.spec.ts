@@ -160,15 +160,23 @@ test.describe("Chain graph", () => {
       return m ? { x: Number(m[1]), y: Number(m[2]) } : null;
     };
     const before = await transformOf();
-    const box = (await node.boundingBox())!;
+    // fitView animates the viewport after load and after Expand all; drag only once the node has stopped moving on screen.
+    let box = (await node.boundingBox())!;
+    await expect
+      .poll(async () => {
+        const next = (await node.boundingBox())!;
+        const settled = Math.abs(next.x - box.x) < 0.5 && Math.abs(next.y - box.y) < 0.5;
+        box = next;
+        return settled;
+      }, { intervals: [300, 300, 300] })
+      .toBe(true);
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2 + 30, { steps: 6 });
     await page.mouse.move(box.x + box.width / 2 + 90, box.y + box.height / 2 + 60, { steps: 6 });
     await page.mouse.up();
     const dropped = await transformOf();
-    expect(dropped).not.toEqual(before);
-    expect(Math.hypot(dropped!.x - before!.x, dropped!.y - before!.y)).toBeGreaterThan(20);
+    expect(Math.hypot(dropped!.x - before!.x, dropped!.y - before!.y), "the node moved with the pointer").toBeGreaterThan(20);
 
     await page.getByRole("button", { name: "Experiment", exact: true }).click();
     await expect(node).toHaveCount(1);

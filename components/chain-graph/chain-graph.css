@@ -96,6 +96,10 @@
 .chain-graph .cg-detail {
   display: none;
 }
+/* Labels are text only. A label that overlaps a neighbouring node must not swallow the pointer (which would grab, or fail to grab, the wrong node). */
+.chain-graph .cg-label {
+  pointer-events: none;
+}
 .chain-graph [data-band="label"] .cg-label--key {
   display: flex;
 }
