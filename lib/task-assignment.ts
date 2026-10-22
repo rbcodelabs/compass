@@ -1,10 +1,10 @@
 import getPrisma from "@/lib/db";
-import { agentEligibleInWorkspace, type AgentRecord, agentOwner, findAgentById, findAgentsByIds, withAgentColumns } from "@/lib/agent-ownership";
+import { agentEligibleInWorkspace, agentKind, type AgentRecord, agentOwner, findAgentById, findAgentsByIds, withAgentColumns } from "@/lib/agent-ownership";
 import { UNASSIGNED_ASSIGNEE_FILTER } from "@/lib/task-assignee-display";
 import type { TaskLinkRecordType } from "@/lib/types";
 
 export type TaskAssignee = { type: "USER" | "AGENT"; id: string } | null;
-export type ResolvedTaskAssignee = NonNullable<TaskAssignee> & { displayName: string; available: boolean; ownerName?: string };
+export type ResolvedTaskAssignee = NonNullable<TaskAssignee> & { displayName: string; available: boolean; ownerName?: string; /** Agents only: a CLOUD agent runs when assigned; an EXTERNAL one is only queued. */ agentKind?: "EXTERNAL" | "CLOUD" };
 export type AssignmentInput = { assignee?: TaskAssignee; assigneeUserId?: string | null };
 
 /** Both columns are always replaced in the same write, including legacy callers. */
@@ -64,7 +64,7 @@ export async function resolveTaskAssignees<T extends AssignedRow>(workspaceId: s
     if (task.assigneeAgentId) {
       const agent = agents.find(a => a.id === task.assigneeAgentId);
       const memberUserIds = new Set(members.map(m => m.userId));
-      assignee = { type: "AGENT", id: task.assigneeAgentId, displayName: agent?.name ?? "Unavailable agent", available: !!agent && agentEligibleInWorkspace(agent, { workspaceId, hasLiveGrant: grants.some(g => g.agentId === agent.id), memberUserIds }) };
+      assignee = { type: "AGENT", id: task.assigneeAgentId, displayName: agent?.name ?? "Unavailable agent", ...(agent ? { agentKind: agentKind(agent) } : {}), available: !!agent && agentEligibleInWorkspace(agent, { workspaceId, hasLiveGrant: grants.some(g => g.agentId === agent.id), memberUserIds }) };
     } else if (task.assigneeUserId) {
       const member = members.find(m => m.userId === task.assigneeUserId);
       assignee = { type: "USER", id: task.assigneeUserId, displayName: member?.user.name || member?.user.email || "Unavailable person", available: !!member };
@@ -87,7 +87,7 @@ export async function eligibleTaskAssignees(workspaceId: string): Promise<Resolv
   return [...people, ...agents.map(agent => {
     const owner = agentOwner(agent);
     const ownerMember = owner?.type === "USER" ? members.find(m => m.userId === owner.userId) : undefined;
-    return { type: "AGENT" as const, id: agent.id, displayName: agent.name, available: true, ownerName: ownerMember?.user.name || ownerMember?.user.email };
+    return { type: "AGENT" as const, id: agent.id, displayName: agent.name, agentKind: agentKind(agent), available: true, ownerName: ownerMember?.user.name || ownerMember?.user.email };
   })];
 }
 

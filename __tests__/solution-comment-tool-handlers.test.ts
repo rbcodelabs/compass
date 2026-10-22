@@ -69,6 +69,33 @@ it.each(["AGENT", "AGENT_TURN"])("derives %s comment attribution despite caller-
   expect(mockSolutionComment.create).toHaveBeenCalledWith({ data: expect.objectContaining({ authorType: "AGENT", authorName: purpose === "AGENT" ? "Registered worker" : "Compass assistant" }) })
 })
 
+describe("a cloud run of a named agent authors as that agent", () => {
+  const shared = { id: "agent-shared", name: "Triage", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "ws-1", kind: "CLOUD", status: "ACTIVE" }
+  const run = { purpose: "AGENT_TURN", userId: "invoker", agentId: "agent-shared", agentRunId: "run-1" }
+
+  it("credits the agent by name, not 'Compass assistant' and not the invoker", async () => {
+    actor.get.mockReturnValue(run)
+    mockPrisma.agent.findFirst.mockResolvedValue(shared)
+    await addSolutionComment({ solutionId: SOLUTION_ID, body: "From the agent", authorName: "Impersonated person", authorType: "HUMAN" })
+    expect(mockSolutionComment.create).toHaveBeenCalledWith({ data: expect.objectContaining({ authorType: "AGENT", authorName: "Triage" }) })
+    await addSolutionPlan({ solutionId: SOLUTION_ID, body: "Plan", authorName: "Impersonated person" })
+    expect(mockSolutionComment.create).toHaveBeenLastCalledWith({ data: expect.objectContaining({ authorType: "AGENT", authorName: "Triage" }) })
+  })
+
+  it.each([
+    ["the agent is suspended", { ...shared, status: "SUSPENDED" }, run],
+    ["the agent is gone", null, run],
+    ["the key names no live run", shared, { ...run, agentRunId: undefined }],
+    ["it is a personal agent invoked by someone other than its owner", { ...shared, ownerType: "USER", ownerUserId: "owner", ownerWorkspaceId: null }, run],
+    ["the agent is not a cloud agent", { ...shared, kind: "EXTERNAL" }, run],
+  ])("posts nothing when %s", async (_label, agent, who) => {
+    actor.get.mockReturnValue(who)
+    mockPrisma.agent.findFirst.mockResolvedValue(agent)
+    await expect(addSolutionComment({ solutionId: SOLUTION_ID, body: "x", authorName: "y" })).rejects.toThrow("Agent is unavailable")
+    expect(mockSolutionComment.create).not.toHaveBeenCalled()
+  })
+})
+
 it("derives registered-agent plan attribution", async () => {
   actor.get.mockReturnValue({ purpose: "AGENT", userId: "user", agentId: "agent" })
   await addSolutionPlan({ solutionId: SOLUTION_ID, body: "Plan", authorName: "Impersonated person" })

@@ -29,6 +29,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { type SerializedRun, type ToolStep } from "@/lib/agent-run-stream"
 import { useAgentTurn } from "@/components/agent/use-agent-turn"
+import { useAgentChoices } from "@/components/agent/use-agent-choices"
 import { Markdown } from "@/components/agent/markdown"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
@@ -69,6 +70,8 @@ type Props = {
    */
   composerSeed?: { id: number; label?: string; summary?: string; sourceUrl?: string; text: string } | null
   onComposerSeedApplied?: () => void
+  /** From `?agentId=` (the Send to agent menu): the agent to start with. Ignored if the member cannot pick it. */
+  initialAgentId?: string
   /**
    * Which surface this chat is rendered on.
    *
@@ -139,6 +142,7 @@ export function AgentChat({
   suggestedInstruction,
   composerSeed,
   onComposerSeedApplied,
+  initialAgentId,
   variant = "page",
   listOpen = true,
   onConversationCreated,
@@ -176,6 +180,11 @@ export function AgentChat({
   // The turn lifecycle (POST, detached-run viewer, inline stream fallback) lives
   // in useAgentTurn so the Cmd+K palette's quick ask runs the very same code.
   // This component only decides what a finished reply does to *its* transcript.
+  // Which agent answers: "" follows the resolved default (the server decides), "builtin" is the built-in agent on purpose.
+  const agentChoices = useAgentChoices({ workspaceId })
+  const [agentPick, setAgentPick] = useState(initialAgentId ?? "")
+  const agentSelection = agentPick === "builtin" || agentChoices.agents.some((agent) => agent.id === agentPick) ? agentPick : ""
+  const defaultAgentName = agentChoices.agents.find((agent) => agent.id === agentChoices.defaultAgentId)?.name ?? "Compass Agent"
   const turn = useAgentTurn({
     workspaceId,
     onConversationCreated: (createdId) => {
@@ -311,6 +320,7 @@ export function AgentChat({
       message: text,
       conversationId: activeConversationId,
       seedContext: seedContextForThisTurn,
+      agentId: agentSelection || undefined,
       // The rail floats over whatever page the user is on, so tell the server which one.
       // Read at send time (not from render state) so it is the page NOW, not when the
       // component last rendered. The full-page agent screen has no page behind it.
@@ -318,7 +328,7 @@ export function AgentChat({
       retry,
       continueTurn: !handoff && Boolean(processing?.canContinue),
     })
-  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, sending, startTurn])
+  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, sending, startTurn, agentSelection])
 
   // Reattach to a run already in flight for this conversation.
   //
@@ -610,6 +620,7 @@ export function AgentChat({
                 synchronous fallback still dies with this request. */}
             {activeRun && !activeRun.done && (
               <p className="pl-10 text-xs text-text-subtle">
+                {activeRun.agentName ? <span className="mr-1 font-medium">{activeRun.agentName} is answering.</span> : null}
                 {runStartedByOther
                   ? `${nameOf(runStarterId) ?? "Another participant"} asked this. You can watch, and send your own message once it finishes.`
                   : "This runs on the server — you can close this tab and pick the reply up here later."}
@@ -655,6 +666,24 @@ export function AgentChat({
                 sourceUrl={docChip.sourceUrl}
                 onDismiss={() => setDocChip(null)}
               />
+            </div>
+          )}
+          {agentChoices.agents.length > 0 && (
+            <div className="mx-auto mb-2 flex w-full max-w-3xl min-w-0 items-center gap-2 text-xs text-muted-foreground">
+              <label htmlFor="agent-selection" className="shrink-0">Agent</label>
+              <select
+                id="agent-selection"
+                value={agentSelection}
+                onChange={(e) => setAgentPick(e.target.value)}
+                disabled={isStreaming}
+                className="h-7 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-xs text-foreground sm:max-w-xs"
+              >
+                <option value="">Default ({defaultAgentName})</option>
+                <option value="builtin">Compass Agent</option>
+                {agentChoices.agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>{agent.name}{agent.shared ? " (shared)" : ""}</option>
+                ))}
+              </select>
             </div>
           )}
           <div className="mx-auto flex w-full max-w-3xl items-end gap-2">

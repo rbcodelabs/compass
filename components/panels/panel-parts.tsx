@@ -7,6 +7,7 @@
  * body is then mostly a declarative arrangement of these.
  */
 import { announceRoadmapSync } from "@/lib/ui/roadmap-sync-toast";
+import { announceAgentRun } from "@/lib/ui/agent-run-toast";
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import Link from "next/link";
 import { ExternalLinkIcon, ChevronRightIcon } from "lucide-react";
@@ -125,6 +126,7 @@ export async function patchEntityField(
   if (!res.ok) throw new Error("save failed");
   const json = await res.json();
   announceRoadmapSync(json?.roadmapSync);
+  announceAgentRun(json?.agentRun);
   return json;
 }
 

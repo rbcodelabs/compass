@@ -13,7 +13,7 @@ export interface CommentTaskCardData {
   priority: TaskPriority
   /** ISO date string (UTC midnight), or null. */
   dueDate: string | null
-  assignee: { type: "USER" | "AGENT"; id: string; displayName: string; available: boolean } | null
+  assignee: { type: "USER" | "AGENT"; id: string; displayName: string; available: boolean; /** Agents only. */ agentKind?: "EXTERNAL" | "CLOUD" } | null
 }
 
 export type CardPillTone = "neutral" | "progress" | "queued" | "review" | "done" | "blocked"

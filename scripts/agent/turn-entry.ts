@@ -590,6 +590,7 @@ async function main(): Promise<void> {
   )
 
   const baseOptions: Options = {
+    // The model comes from the host (AGENT_MODEL): the deployment provider's default, or a named cloud agent's own choice.
     model,
     // Compass's own MCP catalog, reached AS the acting user, plus this turn's
     // connectors. Built above.

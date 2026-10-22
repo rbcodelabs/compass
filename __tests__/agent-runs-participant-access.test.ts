@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 import { resetAgentParticipantsAvailabilityCache } from "@/lib/agent-conversation-participants"
-import { AgentRunError, cancelAgentRun, finalizeAgentRun, getAgentRunForViewer } from "@/lib/agent-runs"
+import { AgentRunError, cancelAgentRun, finalizeAgentRun, getAgentRunForViewer, resetAgentRunAttributionAvailabilityCache } from "@/lib/agent-runs"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -20,6 +20,7 @@ function fakePrisma(access: { userId: string } | null, run: Record<string, unkno
   const prisma: Any = {
     agentRun: {
       findFirst: vi.fn().mockResolvedValue({ id: RUN_ID, userId: "starter", conversationId: "c-1", workspaceId: "ws-1", ...run }),
+      findMany: vi.fn().mockResolvedValue([]), // the migration-100 availability probe
       findUnique: vi.fn(),
       update: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -36,6 +37,7 @@ function fakePrisma(access: { userId: string } | null, run: Record<string, unkno
 beforeEach(() => {
   vi.clearAllMocks()
   resetAgentParticipantsAvailabilityCache()
+  resetAgentRunAttributionAvailabilityCache()
 })
 
 describe("getAgentRunForViewer", () => {
@@ -46,6 +48,27 @@ describe("getAgentRunForViewer", () => {
     expect(prisma.agentConversation.findFirst.mock.calls[0][0]).toMatchObject({
       where: { id: "c-1", workspaceId: "ws-1", workspace: { members: { some: { userId: "someone-invited" } } } },
     })
+  })
+
+  it("names the cloud agent a run acted as, and reads a legacy run as the built-in agent", async () => {
+    const prisma = fakePrisma({ userId: "owner" })
+    prisma.agentRun.findFirst
+      .mockResolvedValueOnce({ id: RUN_ID, userId: "starter", conversationId: "c-1", workspaceId: "ws-1" })
+      .mockResolvedValueOnce({ agentId: "agent-1" })
+    prisma.agent = { findFirst: vi.fn().mockResolvedValue({ id: "agent-1", name: "Triage", status: "ACTIVE" }) }
+    expect(await getAgentRunForViewer({ prisma, runId: RUN_ID, userId: "owner" })).toMatchObject({ agentId: "agent-1", agentName: "Triage" })
+    prisma.agentRun.findFirst
+      .mockResolvedValueOnce({ id: RUN_ID, userId: "starter", conversationId: "c-1", workspaceId: "ws-1" })
+      .mockResolvedValueOnce({ agentId: null })
+    expect(await getAgentRunForViewer({ prisma, runId: RUN_ID, userId: "owner" })).toMatchObject({ agentId: null, agentName: null })
+  })
+
+  it("still shows the run (as the built-in agent) while migration 100 is unapplied", async () => {
+    const prisma = fakePrisma({ userId: "owner" })
+    prisma.agentRun.findMany.mockRejectedValue(Object.assign(new Error("column agent_id does not exist"), { code: "P2022" }))
+    const run = await getAgentRunForViewer({ prisma, runId: RUN_ID, userId: "owner" })
+    expect(run).toMatchObject({ id: RUN_ID, agentId: null, agentName: null })
+    expect(prisma.agentRun.findFirst).toHaveBeenCalledTimes(1)
   })
 
   it("returns null (a 404 upstream) when the viewer has no access, even to their own old run", async () => {

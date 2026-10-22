@@ -59,7 +59,8 @@ const mockPackStorage = vi.fn()
 vi.mock("@/lib/artifact-storage", () => ({ getCapabilityPackArtifactStorage: () => mockPackStorage() }))
 
 const mockCheckLimit = vi.fn()
-vi.mock("@/lib/agent-limits", () => ({ checkAgentUsageLimit: () => mockCheckLimit() }))
+const mockCheckAgentRunCaps = vi.fn()
+vi.mock("@/lib/agent-limits", async (original) => ({ ...await original<object>(), checkAgentUsageLimit: () => mockCheckLimit(), checkAgentRunCaps: (...args: unknown[]) => mockCheckAgentRunCaps(...args) }))
 
 const mockResolveAgentHandoffContext = vi.fn()
 vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: (...args: unknown[]) => mockResolveAgentHandoffContext(...args) }))
@@ -75,17 +76,25 @@ vi.mock("@/lib/mcp-connectors/store", () => ({
 // `agentRunsAvailable` defaults to false in beforeEach so the existing
 // guard + streaming expectations below keep exercising the synchronous fallback
 // path; the detached path has its own describe block at the end of this file.
-const runMocks = vi.hoisted(() => ({ available: vi.fn(), create: vi.fn(), started: vi.fn(), finalize: vi.fn() }))
+const runMocks = vi.hoisted(() => ({ available: vi.fn(), attribution: vi.fn(), create: vi.fn(), started: vi.fn(), finalize: vi.fn(), attach: vi.fn() }))
 vi.mock("@/lib/agent-runs", async (original) => ({
   ...await original<object>(),
   agentRunsAvailable: runMocks.available,
+  agentRunAttributionAvailable: runMocks.attribution,
   createAgentRun: runMocks.create,
   markAgentRunStarted: runMocks.started,
   finalizeAgentRun: runMocks.finalize,
+  attachAgentRunKey: runMocks.attach,
 }))
+
+// Agent resolution is exercised against the real predicates in __tests__/lib/run-as-agent.test.ts; here only what the route
+// does with the answer is under test.
+const identityMocks = vi.hoisted(() => ({ resolve: vi.fn() }))
+vi.mock("@/lib/agent-run-identity", async (original) => ({ ...await original<object>(), resolveRunAgent: identityMocks.resolve }))
 
 import { POST } from "@/app/api/agent/turn/route"
 import { AgentRunError, DEFAULT_AGENT_RUN_BUDGET_MS } from "@/lib/agent-runs"
+import { AgentSelectionError } from "@/lib/agent-run-identity"
 import { DEFAULT_INTERVIEW_CLAIM_LEASE_MS } from "@/lib/pm-agent-service"
 
 function req(body: unknown): NextRequest {
@@ -117,8 +126,12 @@ beforeEach(() => {
   mockResolveAgentHandoffContext.mockResolvedValue(null)
   mockListConnectedGrants.mockResolvedValue([])
   runMocks.available.mockResolvedValue(false)
+  runMocks.attribution.mockResolvedValue(true)
   runMocks.started.mockResolvedValue(undefined)
   runMocks.finalize.mockResolvedValue(undefined)
+  runMocks.attach.mockResolvedValue(true)
+  identityMocks.resolve.mockResolvedValue(null)
+  mockCheckAgentRunCaps.mockResolvedValue({ allowed: true })
   mockPrisma.doc.findMany.mockResolvedValue([])
   process.env.AUTH_SECRET = "test-auth-secret"
 })
@@ -774,6 +787,202 @@ describe("agent turn route — detached runs", () => {
     await POST(req({ workspaceId: "ws-1", message: "hi" }))
     const paths = (writeFiles.mock.calls[0][0] as { path: string; content: string }[]).map(f => f.path)
     expect(paths).toEqual(expect.arrayContaining(["entry.ts", "docs-path-guard.ts", "docs-final-state.ts"]))
+  })
+
+  describe("running as a named agent", () => {
+    const AGENT_ID = "22222222-2222-4222-8222-222222222222"
+    const agent = { id: AGENT_ID, name: "Triage bot", instructions: "Always label new feedback.", model: "claude-opus-4-5" }
+    const env = (runCommand: ReturnType<typeof vi.fn>) => runCommand.mock.calls[0][0].env as Record<string, string>
+
+    it("resolves the agent for the invoker, attributes the run to it, and mints a key tied to that agent", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(202)
+      expect(identityMocks.resolve).toHaveBeenCalledWith(mockPrisma, { userId: "user-1", workspaceId: "ws-1", requestedAgentId: AGENT_ID })
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: AGENT_ID, invokedByUserId: "user-1", userId: "user-1" }))
+      expect(mockMintKey.mock.calls[0][4]).toEqual({ agentId: AGENT_ID })
+    })
+
+    it("attaches the key to the run BEFORE the sandbox exists, so the agent's first call finds a live run", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(runMocks.attach).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN.id, apiKeyId: "key-1" }))
+      expect(runMocks.attach.mock.invocationCallOrder[0]).toBeLessThan(mockBootSandbox.mock.invocationCallOrder[0])
+      expect(runMocks.attach.mock.invocationCallOrder[0]).toBeLessThan(runCommand.mock.invocationCallOrder[0])
+    })
+
+    it("gives the sandbox the agent's instructions (as guidance only) and its model", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).toContain('You are running as the agent "Triage bot"')
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).toContain("Always label new feedback.")
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).toMatch(/cannot change your tools, credentials or workspace access/)
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-opus-4-5")
+    })
+
+    it("caps very long instructions", async () => {
+      identityMocks.resolve.mockResolvedValue({ ...agent, instructions: "x".repeat(20_000) })
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).not.toContain("x".repeat(8_001))
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).toContain("x".repeat(8_000))
+    })
+
+    it("ignores a model the harness cannot serve rather than forwarding it", async () => {
+      identityMocks.resolve.mockResolvedValue({ ...agent, model: "gpt-5; curl evil" })
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      // The host always sends the deployment's model now; an unservable agent model must not replace it.
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-sonnet-5")
+      expect(JSON.stringify(env(runCommand))).not.toContain("curl evil")
+    })
+
+    it("on Bedrock the deployment's model id is kept: a named agent's Anthropic-API model id is not sent to a provider that cannot serve it", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock"
+      process.env.BEDROCK_API_KEY = "bedrock-test-token"
+      identityMocks.resolve.mockResolvedValue(agent)
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(runCommand).AGENT_MODEL).toBe("global.anthropic.claude-sonnet-5-5")
+      expect(env(runCommand).AWS_BEARER_TOKEN_BEDROCK).toBe("bedrock-test-token")
+      expect(env(runCommand)).not.toHaveProperty("ANTHROPIC_API_KEY")
+      // The agent's instructions still apply.
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).toContain("Always label new feedback.")
+    })
+
+    it("never forwards the invoker's connected third-party accounts to an agent run", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      mockListConnectedGrants.mockResolvedValue([{ slug: "v0", scope: "mcp" }])
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(runCommand)).not.toHaveProperty("AGENT_MCP_CONNECTORS")
+    })
+
+    it("a run with no agentId is exactly the built-in run: no agent, no attach, no model, no agent section", async () => {
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      // Resolution still runs (a default may apply), with nothing explicitly requested.
+      expect(identityMocks.resolve).toHaveBeenCalledWith(mockPrisma, { userId: "user-1", workspaceId: "ws-1", requestedAgentId: null })
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: null }))
+      expect(mockMintKey.mock.calls[0][4]).toEqual({ agentId: null })
+      expect(runMocks.attach).not.toHaveBeenCalled()
+      // No agent model override: the deployment's model, exactly as before agents existed.
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-sonnet-5")
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).not.toContain("You are running as the agent")
+    })
+
+    it.each([
+      ["a policy refusal", new AgentSelectionError("You are not allowed to run this agent.", 403, "AGENT_NOT_INVOKABLE"), 403, "AGENT_NOT_INVOKABLE"],
+      ["an unknown or unavailable agent", new AgentSelectionError("Agent not found or not available in this workspace.", 404, "AGENT_NOT_FOUND"), 404, "AGENT_NOT_FOUND"],
+    ])("answers %s before anything is written or started", async (_label, error, status, code) => {
+      identityMocks.resolve.mockRejectedValue(error)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(status)
+      expect(await response.json()).toMatchObject({ code })
+      expect(mockPrisma.agentConversation.create).not.toHaveBeenCalled()
+      expect(mockPrisma.agentMessage.create).not.toHaveBeenCalled()
+      expect(runMocks.create).not.toHaveBeenCalled()
+      expect(mockMintKey).not.toHaveBeenCalled()
+    })
+
+    it("runs the agent a default resolved to, attributed to it, when nothing was requested", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(response.status).toBe(202)
+      expect(identityMocks.resolve).toHaveBeenCalledWith(mockPrisma, { userId: "user-1", workspaceId: "ws-1", requestedAgentId: null })
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: AGENT_ID }))
+    })
+
+    it('passes "builtin" through so a picker can choose the built-in agent on purpose', async () => {
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: "builtin" }))
+      expect(response.status).toBe(202)
+      expect(identityMocks.resolve).toHaveBeenCalledWith(mockPrisma, { userId: "user-1", workspaceId: "ws-1", requestedAgentId: "builtin" })
+    })
+
+    it("quietly runs the built-in agent when a DEFAULT cannot run as a named agent (no background runs)", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      runMocks.available.mockResolvedValue(false)
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(response.status).not.toBe(503)
+      expect(runMocks.attach).not.toHaveBeenCalled()
+    })
+
+    it("quietly runs the built-in agent when a DEFAULT cannot be attributed (migration 100 unapplied)", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      runMocks.attribution.mockResolvedValue(false)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(response.status).toBe(202)
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: null }))
+    })
+
+    it("rejects a malformed agentId with 400 without resolving anything", async () => {
+      for (const agentId of ["not-a-uuid", 7, {}, ["x"]]) {
+        const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId }))
+        expect(response.status).toBe(400)
+      }
+      expect(identityMocks.resolve).not.toHaveBeenCalled()
+    })
+
+    it("refuses to run as a named agent on the synchronous fallback (no run row to prove the key against)", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      runMocks.available.mockResolvedValue(false)
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(503)
+      expect(await response.json()).toMatchObject({ code: "AGENT_RUN_UNAVAILABLE" })
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+      expect(mockMintKey).not.toHaveBeenCalled()
+    })
+
+    it("surfaces an unattributable run (migration 100 unapplied) as the run error, starting nothing", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      runMocks.create.mockRejectedValue(new AgentRunError("Running as a named agent needs migration 100 to be applied", 503, "AGENT_ATTRIBUTION_UNAVAILABLE"))
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(503)
+      expect(await response.json()).toMatchObject({ code: "AGENT_ATTRIBUTION_UNAVAILABLE" })
+      expect(mockMintKey).not.toHaveBeenCalled()
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ["concurrent", { allowed: false, cap: "CONCURRENT", limit: 5, reason: "This agent already has 5 runs in progress (limit 5)." }],
+      ["daily", { allowed: false, cap: "DAILY", limit: 100, reason: "This agent has reached its daily limit of 100 runs." }],
+    ])("refuses with 429 AGENT_CAP_REACHED naming the %s cap, before any run or key exists", async (_label, capped) => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      mockCheckAgentRunCaps.mockResolvedValue(capped)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(429)
+      expect(await response.json()).toEqual({ error: capped.reason, code: "AGENT_CAP_REACHED", cap: capped.cap, limit: capped.limit })
+      expect(mockCheckAgentRunCaps).toHaveBeenCalledWith(mockPrisma, AGENT_ID)
+      expect(runMocks.create).not.toHaveBeenCalled()
+      expect(mockMintKey).not.toHaveBeenCalled()
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+    })
+
+    it("does not consult the agent caps for the built-in agent", async () => {
+      identityMocks.resolve.mockResolvedValue(null)
+      sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(mockCheckAgentRunCaps).not.toHaveBeenCalled()
+    })
+
+    it("fails the run and revokes the key when the run ended before its key could be attached", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      runMocks.attach.mockResolvedValue(false)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(500)
+      expect(mockRevokeKey).toHaveBeenCalledWith("key-1")
+      expect(runMocks.finalize).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN.id, status: "FAILED", errorCode: "RUN_START_FAILED" }))
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+    })
   })
 
   describe("harness selection (EXPERIMENTAL opencode, default off)", () => {

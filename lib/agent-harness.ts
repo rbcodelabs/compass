@@ -42,6 +42,19 @@ export function resolveAgentHarness(deploymentValue?: string | null): AgentHarne
   return deploymentValue?.trim().toLowerCase() === "opencode" ? "opencode" : DEFAULT_AGENT_HARNESS
 }
 
+/**
+ * The model an agent row asks for, or null to use the deployment default. The value is free text written by whoever
+ * manages the agent, so it is checked against the shape the harness can actually serve before it reaches the
+ * sandbox's environment: a Claude model id for the Claude harness (it only holds an Anthropic key), a gateway
+ * reference (`provider/model`) for opencode. Anything else is ignored, never forwarded.
+ */
+export function agentModelForHarness(model: string | null | undefined, harness: AgentHarness): string | null {
+  const value = model?.trim()
+  if (!value || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/.test(value)) return null
+  if (harness === "opencode") return value.includes("/") ? value : null
+  return /^claude-[A-Za-z0-9._-]+$/.test(value) ? value : null
+}
+
 export function opencodeModel(envValue?: string | null): string {
   return envValue?.trim() || DEFAULT_OPENCODE_MODEL
 }

@@ -6,14 +6,14 @@ import { applyMigrations } from "@/lib/migrations/runner"
 import { replayAllMigrations } from "./helpers/replay-migrations"
 
 /**
- * 101 through the registered runner, on a throwaway schema of this suite's own, after every earlier migration has been
+ * 104 through the registered runner, on a throwaway schema of this suite's own, after every earlier migration has been
  * replayed (the indexes need agent_run_events and agent_messages to exist).
  *
  * Set RETENTION_INDEXES_DATABASE_URL to the local compass_e2e database to enable. The guard keeps it from ever pointing
  * anywhere else: this suite creates and drops schemas, which must never happen against DSQL or a shared database.
  */
 const databaseUrl = process.env.RETENTION_INDEXES_DATABASE_URL
-const MIGRATION = "101_agent_retention_indexes"
+const MIGRATION = "104_agent_retention_indexes"
 
 describe.skipIf(!databaseUrl)("101 agent retention indexes through the registered runner", () => {
   const schema = `retention_idx_test_${randomUUID().replaceAll("-", "")}`

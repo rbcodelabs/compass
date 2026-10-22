@@ -2707,6 +2707,11 @@ model Agent {
   model String? @db.VarChar(100)
   /// WORKSPACE_MEMBERS | ADMINS | OWNER. NULL = the default for the owner type.
   invokePolicy String? @map("invoke_policy") @db.VarChar(30)
+  /// Most non-terminal runs at once (migration 102). NULL = the default (5). Read through lib/agent-limits.ts, which tolerates the
+  /// migration being unapplied; it is deliberately not in the shared agent select for that reason.
+  maxConcurrentRuns Int? @map("max_concurrent_runs")
+  /// Most runs started in a rolling 24 hours (migration 102). NULL = the default (100).
+  maxRunsPerDay Int? @map("max_runs_per_day")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @map("updated_at")
   @@index([ownerUserId])
@@ -2726,6 +2731,33 @@ model AgentWorkspaceGrant {
   @@unique([agentId, workspaceId])
   @@index([workspaceId])
   @@map("agent_workspace_grants")
+}
+
+/// The agent a run uses in a workspace when nobody picked one (migration 101). One row per workspace.
+/// Bare UUIDs, no relations (DSQL). A row pointing at an agent that is gone, suspended, ungranted or not invokable is ignored at
+/// read time, so it never needs cleanup. Read through lib/agent-defaults.ts, which tolerates the migration being unapplied.
+model WorkspaceDefaultAgent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  agentId String @map("agent_id") @db.Uuid
+  setByUserId String? @map("set_by_user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  /// Set by the application on every write (DSQL has no trigger).
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@unique([workspaceId], map: "workspace_default_agents_workspace_id_key")
+  @@map("workspace_default_agents")
+}
+
+/// A member's personal override of the workspace default (migration 101). One row per (user, workspace); same read-time rules.
+model UserDefaultAgent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  agentId String @map("agent_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@unique([userId, workspaceId], map: "user_default_agents_user_id_workspace_id_key")
+  @@map("user_default_agents")
 }
 
 /// Explicit, auditable grant of an admin-level MCP capability to a specific
@@ -3030,9 +3062,17 @@ model AgentRun {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @default(now()) @map("updated_at")
 
+  /// The agents row this run acts as (bare UUID, no relation: DSQL). NULL = the built-in "Compass Agent", including every run
+  /// that predates migration 100. Read through lib/agent-runs.ts, which tolerates the migration being unapplied.
+  agentId         String?   @map("agent_id") @db.Uuid
+  /// The human who started the run. NULL reads as userId (the invoker before migration 100).
+  invokedByUserId String?   @map("invoked_by_user_id") @db.Uuid
+
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
   events       AgentRunEvent[]
 
+  @@index([agentId, createdAt], map: "agent_runs_agent_id_created_at_idx")
+  @@index([invokedByUserId], map: "agent_runs_invoked_by_user_id_idx")
   @@index([conversationId, createdAt], map: "idx_agent_runs_conversation_created")
   @@index([status, lastHeartbeatAt], map: "idx_agent_runs_status_heartbeat")
   @@index([workspaceId, userId], map: "idx_agent_runs_workspace_user")

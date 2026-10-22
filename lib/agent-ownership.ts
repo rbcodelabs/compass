@@ -110,14 +110,37 @@ export function agentInvokePolicy(agent: Pick<AgentRecord, "ownerUserId" | "owne
  * valid for the user the request carries. USER-owned: that user must be the owner, as before.
  * WORKSPACE-owned: always false here. A request that carries a user id says nothing about a shared
  * agent, so accepting an arbitrary (or null) user would let any personal credential name it. Reaching
- * a WORKSPACE-owned agent needs an agent-scoped credential for that exact agent, a path that arrives
- * with the run-as-agent change (PR2) and will be checked separately from this function.
+ * a WORKSPACE-owned agent needs an agent-scoped AGENT_TURN credential for that exact agent, checked by
+ * {@link agentIdentityValidForTurn}, never by this function.
  */
 export function agentIdentityValidForUser(agent: Pick<AgentRecord, "status" | "ownerUserId" | "ownerType" | "ownerWorkspaceId">, userId: string | null | undefined): boolean {
   if (agent.status !== "ACTIVE") return false
   const owner = agentOwner(agent)
   if (!owner || owner.type !== "USER") return false
   return isUserOwnedBy(agent, userId)
+}
+
+/**
+ * Whether an ALREADY AUTHENTICATED AGENT_TURN credential (the key a cloud run's sandbox holds) may act as
+ * `agent`. The credential must be tied to this exact agent (`turn.agentId`) and to a live run
+ * (`turn.runId`, set by validateMcpAuth only after it found a non-terminal, unexpired run bound to the key).
+ * The agent must be a CLOUD agent and ACTIVE.
+ *
+ * USER-owned: the invoker must still be the owner, so the effective authority is the owner's own (grants
+ * intersected with the owner's live membership, enforced where the grants are read). WORKSPACE-owned: no
+ * user is involved in the identity at all; whether the invoker may run the agent was decided by
+ * {@link canInvokeAgent} when the run was created, and the authority is its explicit grants only.
+ */
+export function agentIdentityValidForTurn(
+  agent: Pick<AgentRecord, "id" | "status" | "kind" | "ownerUserId" | "ownerType" | "ownerWorkspaceId">,
+  turn: { agentId: string | null | undefined; invokerUserId: string | null | undefined; runId: string | null | undefined },
+): boolean {
+  if (agent.status !== "ACTIVE" || agentKind(agent) !== "CLOUD") return false
+  if (!turn.runId || !turn.agentId || turn.agentId !== agent.id) return false
+  const owner = agentOwner(agent)
+  if (!owner) return false
+  if (owner.type === "USER") return !!turn.invokerUserId && owner.userId === turn.invokerUserId
+  return true
 }
 
 /**
@@ -201,8 +224,8 @@ export async function findAgentsByIds(prisma: AgentDb, ids: string[]): Promise<A
 /**
  * The agent when it is ACTIVE and USER-owned by `userId`; otherwise null. This is the check for a
  * personal credential (API key, OAuth token or binding): only a USER-owned agent can be reached
- * with one in this release, so a WORKSPACE-owned agent fails closed here. Agent-scoped keys for
- * shared agents arrive with the run-as-agent change.
+ * with one in this release, so a WORKSPACE-owned agent fails closed here. A shared agent is reached only by
+ * an AGENT_TURN key tied to a live run (see agentIdentityValidForTurn).
  */
 export async function findActiveUserOwnedAgent(prisma: AgentDb, agentId: string, userId: string): Promise<AgentRecord | null> {
   const agent = await findAgentById(prisma, agentId)
@@ -287,7 +310,7 @@ export async function listAgentsForWorkspace(
  * org admin can already administer every workspace in their org (and add themselves to it), so
  * excluding them here would only lock them out of a shared agent their organization owns.
  */
-async function isWorkspaceAdminUser(prisma: AgentDb, userId: string, workspaceId: string): Promise<boolean> {
+export async function isWorkspaceAdminUser(prisma: AgentDb, userId: string, workspaceId: string): Promise<boolean> {
   const workspace = await prisma.workspace.findFirst({
     where: { id: workspaceId },
     select: {

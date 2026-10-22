@@ -25,6 +25,9 @@ const HANDOFF_RESPONSE = {
   sourceUrl: "/acme/product/discovery/opp-1?detail=solution:sol-1",
 }
 
+/** Calls other than the agent-choices lookup the picker makes on mount (which is not part of the hand-off). */
+const handoffCalls = (mock: { mock: { calls: unknown[][] } }) => mock.mock.calls.filter((call) => !String(call[0]).startsWith("/api/agent/choices"))
+
 function jsonResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   return { ok, status, json: async () => body } as Response
 }
@@ -151,7 +154,7 @@ describe("SendToAgentPicker — bridge present", () => {
     // the href lives on the nested <a>, not the wrapper.
     const builtIn = await screen.findByRole("link", { name: /built-in cloud agent/i })
     expect(builtIn).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1")
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(handoffCalls(fetchMock)).toHaveLength(0)
     expect(window.__geode?.postEvent).not.toHaveBeenCalled()
     await closeMenuAndWait()
   })
@@ -170,8 +173,8 @@ describe("SendToAgentPicker — bridge present", () => {
       fireEvent.click(geodeItem)
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const requestedUrl = fetchMock.mock.calls[0][0] as string
+    expect(handoffCalls(fetchMock)).toHaveLength(1)
+    const requestedUrl = handoffCalls(fetchMock)[0][0] as string
     expect(requestedUrl).toContain("/api/agent/handoff-context?")
     expect(requestedUrl).toContain("entityType=solutionPlan")
     expect(requestedUrl).toContain("entityId=plan-1")

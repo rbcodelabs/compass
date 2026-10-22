@@ -29,6 +29,7 @@
  */
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
+import { findAgentById } from "@/lib/agent-ownership"
 import type { AppPrismaClient } from "@/lib/db"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { authorColumn } from "@/lib/agent-attribution"
@@ -198,33 +199,102 @@ export function resetAgentRunsAvailabilityCache() {
   availabilityCache = null
 }
 
+// ── Agent attribution (migration 100) ───────────────────────────────────────
+
+let attributionCache: { value: boolean; checkedAt: number } | null = null
+
+/**
+ * Whether `100_agent_runs_agent_attribution` has been applied. Same contract as {@link agentRunsAvailable}: a positive
+ * result is permanent, a negative one is re-probed, and only a missing column (P2022) means "not yet" -- anything
+ * else is a real fault. Until it is true, runs are written without attribution (the built-in agent, which is what a
+ * NULL agent_id means anyway) and a run that NAMES an agent is refused rather than started unattributed.
+ */
+export async function agentRunAttributionAvailable(prisma: Pick<AppPrismaClient, "agentRun">): Promise<boolean> {
+  if (attributionCache?.value) return true
+  if (attributionCache && Date.now() - attributionCache.checkedAt < AVAILABILITY_NEGATIVE_TTL_MS) return false
+  try {
+    await prisma.agentRun.findMany({ take: 1, select: { agentId: true, invokedByUserId: true } })
+    attributionCache = { value: true, checkedAt: Date.now() }
+    return true
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && (error.code === "P2022" || error.code === "P2021")) {
+      attributionCache = { value: false, checkedAt: Date.now() }
+      return false
+    }
+    throw error
+  }
+}
+
+/** Test seam: forget the probe result so a suite can exercise both branches. */
+export function resetAgentRunAttributionAvailabilityCache() {
+  attributionCache = null
+}
+
+/**
+ * Columns that exist with or without migration 100. A create must name them: with no `select` Prisma
+ * RETURNs every mapped column, so the unapplied agent_id would fail every run, attributed or not.
+ */
+const AGENT_RUN_CREATE_SELECT = {
+  id: true,
+  conversationId: true,
+  workspaceId: true,
+  userId: true,
+  status: true,
+  kind: true,
+  claimId: true,
+  deadlineAt: true,
+  createdAt: true,
+} as const
+
 // ── Creation ───────────────────────────────────────────────────────────────
 
-type AgentRunPrisma = Pick<AppPrismaClient, "$transaction">
+type AgentRunPrisma = Pick<AppPrismaClient, "$transaction" | "agentRun">
 
 export async function createAgentRun({
   prisma,
   conversationId,
   workspaceId,
   userId,
+  agentId = null,
+  invokedByUserId = userId,
   kind = "CHAT",
   claimId = null,
   packProvenance = "[]",
   budgetMs = DEFAULT_AGENT_RUN_BUDGET_MS,
   now = new Date(),
+  fenceConversation = false,
 }: {
   prisma: AgentRunPrisma
   conversationId: string
   workspaceId: string
+  /** The human who started the run (kept as the invoker, as before migration 100). */
   userId: string
+  /**
+   * The agent this run acts as. Null = the built-in assistant. The caller has already resolved it with
+   * resolveRunAgent (lib/agent-run-identity.ts); this function only records it, and refuses to start an
+   * agent run it cannot attribute.
+   */
+  agentId?: string | null
+  invokedByUserId?: string
   kind?: AgentRunKind
   claimId?: string | null
   packProvenance?: string
   budgetMs?: number
   now?: Date
+  /**
+   * Write the conversation row FIRST, inside the transaction, so two concurrent starts for the same conversation serialise on
+   * it (a row lock on Postgres, a write conflict that aborts one of them on Aurora DSQL) instead of both passing the
+   * in-flight check below. For starts that nobody is watching (assignments), where a double click or two tabs would otherwise
+   * start two runs. Off for chat, whose request path has never needed it.
+   */
+  fenceConversation?: boolean
 }) {
   if (kind !== "CHAT" && !(HANDOFF_KINDS as readonly string[]).includes(kind)) {
     throw new AgentRunError("Unsupported agent run kind", 400, "INVALID_RUN_KIND")
+  }
+  const attributable = await agentRunAttributionAvailable(prisma)
+  if (agentId && !attributable) {
+    throw new AgentRunError("Running as a named agent needs migration 100 to be applied", 503, "AGENT_ATTRIBUTION_UNAVAILABLE")
   }
   const deadlineAt = new Date(now.getTime() + resolveAgentRunBudgetMs(budgetMs))
   const credential = createAgentRunCredential()
@@ -236,6 +306,7 @@ export async function createAgentRun({
     // indexes is unverified here and `assertWorkspaceUpdatesMigration` asserts
     // `predicate === null` on every unique index this repo ships — so this stays
     // an application invariant, checked inside the transaction that violates it.
+    if (fenceConversation) await tx.agentConversation.updateMany({ where: { id: conversationId }, data: { updatedAt: now } })
     const inFlight = await tx.agentRun.findFirst({
       where: { conversationId, status: { in: [...NON_TERMINAL_AGENT_RUN_STATUSES] } },
       select: { id: true, status: true, deadlineAt: true },
@@ -258,7 +329,9 @@ export async function createAgentRun({
         statusChangedAt: now,
         createdAt: now,
         updatedAt: now,
+        ...(attributable ? { agentId, invokedByUserId } : {}),
       },
+      select: AGENT_RUN_CREATE_SELECT,
     })
   })
 
@@ -298,6 +371,20 @@ export async function markAgentRunStarted({
     },
   })
   return started.count === 1
+}
+
+/**
+ * Record the run's MCP key BEFORE the sandbox can use it. An agent-scoped key is only honoured while a live run names
+ * it (lib/agent-run-identity.ts findLiveRunForTurnKey), and markAgentRunStarted runs only after the command is away.
+ * A QUEUED run is live, so the key works from the moment it is attached. Fenced on a non-terminal status so a run that
+ * was already canceled or swept cannot be handed a working key.
+ */
+export async function attachAgentRunKey({ prisma, runId, apiKeyId, now = new Date() }: { prisma: AppPrismaClient; runId: string; apiKeyId: string; now?: Date }) {
+  const attached = await prisma.agentRun.updateMany({
+    where: { id: runId, status: { in: [...NON_TERMINAL_AGENT_RUN_STATUSES] } },
+    data: { apiKeyId, updatedAt: now },
+  })
+  return attached.count === 1
 }
 
 // ── Callback authorization ─────────────────────────────────────────────────
@@ -850,7 +937,21 @@ export async function getAgentRunForViewer({
     workspaceId: run.workspaceId,
     userId,
   })
-  return access ? run : null
+  if (!access) return null
+  return { ...run, ...(await runAgentIdentity(prisma, run.id)) }
+}
+
+/**
+ * Which agent a run acted as, for display. Behind the attribution probe: until migration 100 is applied the columns do not
+ * exist, so every run reads as the built-in agent (null) instead of failing the read. Only the agent's name is returned,
+ * and only to someone who can already see the run's conversation.
+ */
+async function runAgentIdentity(prisma: AppPrismaClient, runId: string): Promise<{ agentId: string | null; agentName: string | null }> {
+  if (!(await agentRunAttributionAvailable(prisma))) return { agentId: null, agentName: null }
+  const attribution = await prisma.agentRun.findFirst({ where: { id: runId }, select: { agentId: true } })
+  if (!attribution?.agentId) return { agentId: null, agentName: null }
+  const agent = await findAgentById(prisma, attribution.agentId)
+  return { agentId: attribution.agentId, agentName: agent?.name ?? null }
 }
 
 export async function listAgentRunEvents({

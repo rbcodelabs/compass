@@ -3,6 +3,7 @@
 //
 // Endpoint: POST /api/mcp  (Streamable HTTP transport)
 
+import { currentIdentityPayload } from "@/lib/mcp-identity";
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { createMcpHandler } from "mcp-handler"
 import { z } from "zod"
@@ -290,7 +291,7 @@ const _handler = createMcpHandler(
       const prisma = getPrisma()
       const workspaces = await prisma.workspace.findMany({ where: await agentWorkspaceWhere(actor), select: { id: true, name: true, slug: true, organization: { select: { slug: true } } }, orderBy: { name: "asc" } })
       const agent = actor.agentId ? await prisma.agent.findUnique({ where: { id: actor.agentId }, select: { id: true, name: true } }) : null
-      return ok("Current authenticated identity", { purpose: actor.purpose ?? "USER", userId: actor.userId, agent, workspaces })
+      return ok("Current authenticated identity", currentIdentityPayload(actor, agent, workspaces))
     })
 
     register("get_pm_interview", { title: "Read PM Interview", description: "Reads a saved interview and the current target for an authorized interview processing attempt. Page through all turns before editing.", inputSchema: { interviewId: z.string().uuid(), offset: z.number().int().min(0).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, getPmInterviewTool)
@@ -4180,6 +4181,7 @@ async function withMcpAuth(req: Request): Promise<Response> {
     agentId: auth.agentId,
     credentialId: auth.credentialId,
     credentialType: auth.credentialType,
+    agentRunId: auth.agentRunId,
     scopeWorkspaceId: auth.scopeWorkspaceId,
     scopeConversationId: auth.scopeConversationId,
     scopeClaimId: auth.scopeClaimId,

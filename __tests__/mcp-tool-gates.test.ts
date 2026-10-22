@@ -178,7 +178,7 @@ describe("Decision Artifact mutation boundaries", () => {
         mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([])
         mockPrisma.workspace.findFirst.mockResolvedValue(null)
         await expect(applyToolGate(tool, { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1", artifactId: "art_1", requestId: "req-1" })).rejects.toThrow(/not found or access denied/)
-        expect(mockPrisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith({ where: { agentId: "agent", revokedAt: null, access: "WRITE" }, select: { workspaceId: true } })
+        expect(mockPrisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith({ where: { agentId: "agent", revokedAt: null, access: "WRITE" }, select: { workspaceId: true, grantedByUserId: true } })
       } finally { vi.unstubAllEnvs() }
     })
   }
@@ -231,7 +231,7 @@ describe("research study agent policy", () => {
       mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
       await expect(applyToolGate("list_research_studies", { userId: "user-1", purpose: "AGENT", agentId: "agent" }, { workspaceId: "ws-1" })).resolves.toBeUndefined()
       // READ policy widens the grant filter; it does not bypass workspace scoping.
-      expect(mockPrisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith({ where: { agentId: "agent", revokedAt: null, access: { in: ["READ", "WRITE"] } }, select: { workspaceId: true } })
+      expect(mockPrisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith({ where: { agentId: "agent", revokedAt: null, access: { in: ["READ", "WRITE"] } }, select: { workspaceId: true, grantedByUserId: true } })
     } finally { vi.unstubAllEnvs() }
   })
 

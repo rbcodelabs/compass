@@ -111,6 +111,8 @@ export function DocCommentComposer({
   const assignee = roles.assignee
   const assigneeOption = assignee ? known.get(`${assignee.kind}:${assignee.id}`) : undefined
   const assignable = Boolean(assigneeOption && !assigneeOption.outsideWorkspace)
+  // A cloud agent starts a run when assigned (lib/agent-task-trigger.ts); an external one only queues the task.
+  const cloudAgent = assignee?.kind === "agent" && assigneeOption?.agentKind === "CLOUD"
   const outsideAssignee = Boolean(assignee && !assignable)
   const name = (ref: MentionRef) => known.get(`${ref.kind}:${ref.id}`)?.name ?? ref.label
 
@@ -280,7 +282,7 @@ export function DocCommentComposer({
             <b>{name(assignee)}</b> will receive:
           </p>
           <ul className="space-y-1 text-[13px]">
-            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> {isDoc ? "A task in its queue, naming this doc and the highlighted passage" : `A task in its queue, naming this ${targetNoun} and your comment`}</li>
+            <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> {cloudAgent ? "A task, and a run started as this agent, naming " : "A task in its queue, naming "}{isDoc ? "this doc and the highlighted passage" : `this ${targetNoun} and your comment`}</li>
             <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> {isDoc ? "This doc" : `This ${targetNoun}`}, its comment thread and linked items, read through its workspace access</li>
             {known.get("agent:" + assignee.id)?.access === "WRITE" ? (
               <li className="flex gap-1.5"><Check className="mt-0.5 size-3.5 shrink-0 text-status-success" aria-hidden /> Its Write grant lets it reply in the thread and change content in this workspace</li>
@@ -288,7 +290,11 @@ export function DocCommentComposer({
               <li className="flex gap-1.5"><X className="mt-0.5 size-3.5 shrink-0 text-status-danger" aria-hidden /> Its grant is read-only: it cannot change content in this workspace</li>
             )}
           </ul>
-          <p className="text-xs text-text-subtle">Nothing runs on its own: the agent picks the task up from its queue.</p>
+          <p className="text-xs text-text-subtle">
+            {cloudAgent
+              ? "Assigning starts a run as this agent, within its access and run limits, if you are allowed to run it. If a run can't start, the task is still assigned and you are told why."
+              : "Nothing runs on its own: the agent picks the task up from its queue."}
+          </p>
         </div>
       )}
 

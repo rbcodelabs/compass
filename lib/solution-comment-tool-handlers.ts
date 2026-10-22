@@ -14,6 +14,7 @@
 
 import getPrisma from "@/lib/db"
 import { agentIdentityValidForUser, findAgentById } from "@/lib/agent-ownership"
+import { agentIdentityValidForActor } from "@/lib/agent-access"
 import { ok, fail } from "@/lib/mcp-output"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { deleteMirroredComment, mirrorLegacySolutionComment, updateMirroredComment, updateMirroredLegacyPlanStatus } from "@/lib/comment-compat"
@@ -24,7 +25,14 @@ type PlanStatus = "PENDING" | "APPROVED" | "REJECTED"
 
 async function resolveAuthor(authorName: string, authorType: AuthorType) {
   const actor = getMcpActor()
-  if (actor.purpose === "AGENT_TURN") return { authorName: "Compass assistant", authorType: "AGENT" as const }
+  if (actor.purpose === "AGENT_TURN") {
+    // The built-in assistant has no agent id. A cloud run of a named agent does, and is credited to that agent (checked
+    // against the live run, so a stale or foreign agent id can never author a comment).
+    if (!actor.agentId) return { authorName: "Compass assistant", authorType: "AGENT" as const }
+    const agent = await findAgentById(getPrisma(), actor.agentId)
+    if (!agent || !agentIdentityValidForActor(agent, actor)) throw new Error("Agent is unavailable")
+    return { authorName: agent.name, authorType: "AGENT" as const }
+  }
   if (actor.purpose !== "AGENT") return { authorName, authorType }
   if (!actor.agentId || !actor.userId) throw new Error("Incomplete agent identity")
   const agent = await findAgentById(getPrisma(), actor.agentId)

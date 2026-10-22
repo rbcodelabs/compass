@@ -30,6 +30,10 @@ const nextConfig: NextConfig = {
     // request time and writes them into the sandbox. Nothing imports them, so the file
     // tracer only keeps them if told to; without them every agent turn would die with ENOENT.
     "/api/agent/turn": ["./scripts/agent/**/*"],
+    // A run can also start from an assignment or a Doc comment mention (lib/agent-task-trigger.ts, lib/agent-run-launch.ts), which
+    // run inside whichever task, doc, panel or settings route the person was using, so every route that can reach them needs the
+    // same files. They are small (about 130 KB), and naming each caller would silently break the next one added.
+    "/**": ["./scripts/agent/**/*"],
   },
   async headers() {
     return [

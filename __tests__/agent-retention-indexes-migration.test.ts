@@ -3,9 +3,9 @@ import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { assertAgentRetentionIndexesMigration } from "@/lib/migrations/agent-retention-indexes"
 
-/** Static guards for 101_agent_retention_indexes: the SQL file is what reaches Aurora DSQL. */
+/** Static guards for 104_agent_retention_indexes: the SQL file is what reaches Aurora DSQL. */
 const ROOT = process.cwd()
-const NAME = "101_agent_retention_indexes"
+const NAME = "104_agent_retention_indexes"
 const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8")
 const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8")
 const sqlPath = path.join(ROOT, "prisma/migrations", NAME, "migration.sql")
@@ -16,7 +16,7 @@ describe(NAME, () => {
   it("is registered exactly once, after 099", () => {
     expect([...runner.matchAll(new RegExp(`name:\\s*"${NAME}"`, "g"))]).toHaveLength(1)
     expect(existsSync(sqlPath)).toBe(true)
-    expect(runner.indexOf(`name: "${NAME}"`)).toBeGreaterThan(runner.indexOf('name: "100_saved_views_surface"'))
+    expect(runner.indexOf(`name: "${NAME}"`)).toBeGreaterThan(runner.indexOf('name: "103_shared_compass_agent_bootstrap"'))
   })
 
   it("is two idempotent async indexes and nothing else (DSQL: one DDL per transaction, no table change)", () => {
@@ -32,8 +32,8 @@ describe(NAME, () => {
   })
 
   it("waits for the async index builds like 098 does, so the postcondition cannot fail on the first DSQL run", () => {
-    expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"101_agent_retention_indexes"/)
-    expect(runner).toMatch(/\["049_agent_identity"[^\]]*"101_agent_retention_indexes"[^\]]*\]\.includes\(migration\.name\)/)
+    expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"104_agent_retention_indexes"/)
+    expect(runner).toMatch(/\["049_agent_identity"[^\]]*"104_agent_retention_indexes"[^\]]*\]\.includes\(migration\.name\)/)
   })
 
   it("verifies before the receipt", () => {
