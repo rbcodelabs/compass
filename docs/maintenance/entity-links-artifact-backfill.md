@@ -39,9 +39,11 @@ reported separately as `mirrorRowsKeptForQuarantine` (count plus capped entity_l
 
 ## Residual pass
 
-096 re-selects from `artifact_links` on every run, so it is its own residual pass: it prunes mirror rows with no legacy counterpart, repairs
-workspace/origin drift and inserts what is missing, then proves the postconditions. If the read flip needs a re-run after the mirror has been live,
-register a DDL-free residual that calls `backfillEntityLinksArtifact` and `assertEntityLinksArtifactBackfill` (the 072/094 pattern). It is not built
+Re-POSTing 096 does nothing once its receipt exists: the runner only selects PENDING migrations (`selectMigrationsToRun` ignores applied ones).
+096's hook re-selects from `artifact_links` (prunes mirror rows with no legacy counterpart, repairs workspace/origin drift, inserts what is
+missing, then proves the postconditions), but only an unfinished attempt resumes. If the read flip needs a re-run after the mirror has been
+live, register a separately numbered, DDL-free, explicit-only residual that calls `backfillEntityLinksArtifact` and
+`assertEntityLinksArtifactBackfill` (the 072/094 pattern, as `106_entity_links_residual_opportunity` does for Opportunity). It is not built
 here because nothing yet calls for it.
 
 ## Known mirror gaps the backfill covers

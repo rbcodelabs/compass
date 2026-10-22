@@ -1,0 +1,13 @@
+-- Migration 106: residual entity_links pass for Opportunity <-> Objective and the Opportunity -> Key Result pointer
+-- (the 072 / 094 pattern; 095 is its first pass).
+--
+-- NO DDL, and EXPLICIT-ONLY: an untargeted POST never runs it. The runner never re-runs a migration once its receipt is
+-- written, so re-POSTing 095 does nothing; links written while COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR was off are picked up
+-- by this one instead. POST it by name ({"script":"106_entity_links_residual_opportunity"}) after the mirroring code is
+-- deployed and COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR=1 is live, so no new drift appears while it runs.
+--
+-- It re-runs 095's idempotent hook and the same postconditions (lib/migrations/entity-links-opportunity-backfill.ts): batches
+-- of 500, anti-join, no ON CONFLICT, inconsistent legacy rows quarantined and reported, never linked or deleted. The legacy
+-- tables stay the source of truth.
+--
+-- This file intentionally contains no executable statement; the work is the hook.
