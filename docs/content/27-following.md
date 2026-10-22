@@ -51,8 +51,9 @@ does not cover its Assumptions or Experiments. Follow each thing you care about.
 
 ## The bell and the inbox
 
-The **Notifications** entry in the navigation shows how many notifications you
-have not read (up to 99+). On a phone it is the **Inbox** button in the header.
+The **bell** beside Search at the top of the sidebar shows how many notifications you
+have not read (up to 99+); on a collapsed sidebar it shows a dot instead of the
+number. On a phone it is the **Inbox** button in the header.
 The count refreshes when you move around the app and when you return to the tab.
 
 ![Notifications inbox on desktop](/screenshots/docs/following-inbox-desktop.png)

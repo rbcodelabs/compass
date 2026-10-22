@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Bell } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatUnread } from "@/lib/notification-text"
-import { SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
+import { SidebarMenuButton } from "@/components/ui/sidebar"
 
 /** Dispatched by the inbox after it marks things read, so the bell updates without a round trip. */
 export const NOTIFICATIONS_CHANGED_EVENT = "compass:notifications-changed"
@@ -67,40 +67,43 @@ type BellProps = {
 const labelFor = (count: number, overflow: boolean) =>
   count === 0 ? "Notifications" : `Notifications, ${formatUnread(count, overflow)} unread`
 
-/** Sidebar nav row: bell icon, label, and a count badge (a dot on the icon when the nav is collapsed). */
-export function NotificationBellNavItem({ orgSlug, workspaceSlug, initialCount, initialOverflow }: BellProps) {
+/** Compact bell that sits beside Search: icon only, count badge on the corner. */
+export function NotificationBellIconButton({ orgSlug, workspaceSlug, initialCount, initialOverflow }: BellProps) {
   const pathname = usePathname()
   const { count, overflow } = useUnread(orgSlug, workspaceSlug, { count: initialCount, overflow: initialOverflow })
   const href = `/${orgSlug}/${workspaceSlug}/notifications`
   const isActive = pathname.startsWith(href)
 
   return (
-    <SidebarMenuItem>
+    <div className="relative shrink-0">
       <SidebarMenuButton
         render={<Link href={href} />}
         isActive={isActive}
         tooltip={count > 0 ? `Notifications (${formatUnread(count, overflow)})` : "Notifications"}
         aria-label={labelFor(count, overflow)}
-        className="relative h-9 rounded-lg text-text-secondary"
+        className="h-9 w-9 justify-center rounded-lg p-0 text-text-secondary group-data-[collapsible=icon]:size-8!"
         data-slot="notification-bell"
       >
-        {isActive && (
-          <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary group-data-[collapsible=icon]:hidden" aria-hidden="true" />
-        )}
-        <span className="relative">
-          <Bell className={isActive ? "text-primary" : "text-text-subtle"} aria-hidden="true" />
-          {count > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 hidden size-2 rounded-full bg-primary ring-2 ring-sidebar group-data-[collapsible=icon]:block" aria-hidden="true" />
-          )}
-        </span>
-        <span>Notifications</span>
+        <Bell className={isActive ? "text-primary" : "text-text-subtle"} aria-hidden="true" />
       </SidebarMenuButton>
       {count > 0 && (
-        <SidebarMenuBadge aria-hidden="true" data-testid="notification-count" className="bg-primary/15 text-primary">
-          {formatUnread(count, overflow)}
-        </SidebarMenuBadge>
+        <>
+          {/* Wide counts ("99+") sit fully off the icon's corner; the 56px collapsed rail swaps in a dot so nothing clips or reaches the Search button above. */}
+          <span
+            aria-hidden="true"
+            data-testid="notification-count"
+            className="pointer-events-none absolute -right-1 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar group-data-[collapsible=icon]:hidden"
+          >
+            {formatUnread(count, overflow)}
+          </span>
+          <span
+            aria-hidden="true"
+            data-testid="notification-dot"
+            className="pointer-events-none absolute right-1 top-1 hidden size-2 rounded-full bg-primary ring-2 ring-sidebar group-data-[collapsible=icon]:block"
+          />
+        </>
       )}
-    </SidebarMenuItem>
+    </div>
   )
 }
 
