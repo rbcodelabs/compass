@@ -120,13 +120,13 @@ function Empty({ children, className = "" }: { children: ReactNode; className?: 
 function KeyResultRoot({ parent, open }: { parent: Extract<ChainParent, { kind: "keyResult" }>; open: OpenEntity }) {
   return (
     <NodeCard
-      className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 flex items-center gap-2.5 w-fit max-w-sm"
+      className="rounded-lg border border-primary/20 bg-primary/10 px-3 py-2 flex items-center gap-2.5 w-fit max-w-sm"
       onOpen={() => open("keyResult", parent.id)}
     >
-      <TrendingUp className="size-3.5 shrink-0 text-indigo-500" />
+      <TrendingUp className="size-3.5 shrink-0 text-primary" />
       <div className="min-w-0">
-        <p className="text-[10px] text-indigo-400 leading-none mb-0.5 break-words">{parent.objective.title}</p>
-        <p className="text-xs font-medium text-indigo-800 leading-snug break-words">{parent.title}</p>
+        <p className="text-[10px] text-text-subtle leading-none mb-0.5 break-words">{parent.objective.title}</p>
+        <p className="text-xs font-medium text-text-primary leading-snug break-words">{parent.title}</p>
       </div>
     </NodeCard>
   );
@@ -137,12 +137,12 @@ function KeyResultNode({ kr, open }: { kr: ChainKeyResultNode; open: OpenEntity 
   return (
     <NodeCard
       className={`rounded-lg border px-3 py-1.5 flex items-center gap-2.5 w-fit max-w-full ${
-        secondary ? "border-dashed border-indigo-200 bg-indigo-50/30" : "border-indigo-100 bg-indigo-50/60"
+        secondary ? "border-dashed border-primary/20 bg-primary/5" : "border-primary/20 bg-primary/10"
       }`}
       onOpen={() => open("keyResult", kr.id)}
     >
-      <TrendingUp className="size-3.5 shrink-0 text-indigo-500" />
-      <p className="text-xs font-medium text-indigo-800 leading-snug break-words min-w-0">{kr.title}</p>
+      <TrendingUp className="size-3.5 shrink-0 text-primary" />
+      <p className="text-xs font-medium text-text-primary leading-snug break-words min-w-0">{kr.title}</p>
     </NodeCard>
   );
 }
@@ -159,11 +159,11 @@ function MetricStrip({ metrics, open }: { metrics: ChainMetric[]; open: OpenEnti
             <button
               type="button"
               onClick={() => open("keyResult", metric.id)}
-              className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-indigo-100 bg-indigo-50/60 px-2 py-0.5 text-left text-[11px] text-indigo-800 hover:bg-indigo-50"
+              className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-left text-[11px] text-text-primary hover:bg-primary/15"
             >
-              <TrendingUp aria-hidden className="size-3 shrink-0 text-indigo-500" />
+              <TrendingUp aria-hidden className="size-3 shrink-0 text-primary" />
               <span className="break-words">{metric.title}</span>
-              {metric.progress !== null && <span className="shrink-0 tabular-nums text-indigo-500">{Math.round(metric.progress * 100)}%</span>}
+              {metric.progress !== null && <span className="shrink-0 tabular-nums text-primary">{Math.round(metric.progress * 100)}%</span>}
             </button>
           </li>
         ))}
@@ -178,13 +178,13 @@ function ObjectiveNode({ parent, open }: { parent: Extract<ChainParent, { kind: 
   return (
     <div>
       <NodeCard
-        className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 flex items-center gap-2.5 w-fit max-w-full"
+        className="rounded-lg border border-primary/20 bg-primary/10 px-3 py-2 flex items-center gap-2.5 w-fit max-w-full"
         onOpen={id ? () => open("objective", id) : undefined}
       >
-        <Target className="size-3.5 shrink-0 text-indigo-500" />
+        <Target className="size-3.5 shrink-0 text-primary" />
         <div className="min-w-0">
-          <p className="text-[10px] text-indigo-400 leading-none mb-0.5">{labels.objective.singular}</p>
-          <p className="text-xs font-medium text-indigo-800 leading-snug break-words">{parent.title}</p>
+          <p className="text-[10px] text-text-subtle leading-none mb-0.5">{labels.objective.singular}</p>
+          <p className="text-xs font-medium text-text-primary leading-snug break-words">{parent.title}</p>
         </div>
       </NodeCard>
       {parent.keyResults.length > 0 && (
@@ -228,7 +228,7 @@ function RoadmapItemRow({ item, open }: { item: ChainRoadmapItem; open: OpenEnti
       className="rounded-lg border border-border/40 bg-surface-inset/50 px-3 py-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1"
       onOpen={() => open("roadmapItem", item.id)}
     >
-      <Milestone className="size-3.5 shrink-0 text-teal-600" />
+      <Milestone className="size-3.5 shrink-0 text-text-secondary" />
       <p className="min-w-[8rem] flex-1 text-xs font-medium text-text-primary leading-snug break-words">{item.title}</p>
       <Badge className="bg-surface-inset text-text-secondary">{horizonLabel(item.horizon)}</Badge>
     </NodeCard>
@@ -246,7 +246,7 @@ function TaskRows({ tasks, open }: { tasks: ChainTasks; open: OpenEntity }) {
             className="rounded-lg border border-border/40 bg-surface-inset/50 px-3 py-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1"
             onOpen={() => open("task", task.id)}
           >
-            <ListChecks className="size-3.5 shrink-0 text-slate-500" />
+            <ListChecks className="size-3.5 shrink-0 text-text-subtle" />
             <p className="min-w-[8rem] flex-1 text-xs text-text-primary leading-snug break-words">{task.title}</p>
             <Badge className="bg-surface-inset text-text-secondary">{TASK_STATUS_LABELS[task.status as TaskStatus] ?? task.status}</Badge>
           </NodeCard>
@@ -365,13 +365,13 @@ function KrChipList({ chips, open }: { chips: ChainKrChip[]; open: OpenEntity })
             type="button"
             onClick={() => open("keyResult", chip.id)}
             title={chip.crossOutcome && chip.objectiveTitle ? `${labels.objective.singular}: ${chip.objectiveTitle}` : undefined}
-            className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-left text-[11px] text-indigo-800 hover:bg-indigo-50 ${
-              chip.crossOutcome ? "border-dashed border-indigo-300 bg-transparent" : "border-indigo-100 bg-indigo-50/60"
+            className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-left text-[11px] text-text-primary hover:bg-primary/15 ${
+              chip.crossOutcome ? "border-dashed border-primary/40 bg-transparent" : "border-primary/20 bg-primary/10"
             }`}
           >
-            <TrendingUp aria-hidden className="size-3 shrink-0 text-indigo-500" />
+            <TrendingUp aria-hidden className="size-3 shrink-0 text-primary" />
             <span className="break-words">{chip.title}</span>
-            {chip.crossOutcome && chip.objectiveTitle && <span className="break-words text-indigo-400">{`· ${chip.objectiveTitle}`}</span>}
+            {chip.crossOutcome && chip.objectiveTitle && <span className="break-words text-text-subtle">{`· ${chip.objectiveTitle}`}</span>}
           </button>
         </li>
       ))}
@@ -430,15 +430,15 @@ function SolutionCard({
 // ─── Legend ──────────────────────────────────────────────────────────────────
 
 const LEGEND_ICON: Record<ChainLegendKind, { Icon: LucideIcon; cls: string }> = {
-  root: { Icon: TrendingUp, cls: "text-indigo-500" },
-  objective: { Icon: Target, cls: "text-indigo-500" },
-  keyResult: { Icon: TrendingUp, cls: "text-indigo-500" },
+  root: { Icon: TrendingUp, cls: "text-primary" },
+  objective: { Icon: Target, cls: "text-primary" },
+  keyResult: { Icon: TrendingUp, cls: "text-primary" },
   opportunity: { Icon: Lightbulb, cls: "text-violet-500" },
   solution: { Icon: Layers, cls: "text-blue-500" },
   assumption: { Icon: AlertTriangle, cls: "text-amber-500" },
   experiment: { Icon: FlaskConical, cls: "text-emerald-500" },
-  roadmapItem: { Icon: Milestone, cls: "text-teal-600" },
-  task: { Icon: ListChecks, cls: "text-slate-500" },
+  roadmapItem: { Icon: Milestone, cls: "text-text-secondary" },
+  task: { Icon: ListChecks, cls: "text-text-subtle" },
 };
 
 // ─── Root tree component ──────────────────────────────────────────────────────
