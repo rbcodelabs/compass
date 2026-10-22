@@ -125,6 +125,18 @@ describe("verifySsoToken — fails closed", () => {
     expect(await verifySsoToken(SECRET, token)).toBeNull();
   });
 
+  it.each([
+    "<img src=x onerror=alert(1)>@example.com",
+    "a<b>@example.com",
+    'a"b@example.com',
+    "a&b@example.com",
+    "not-an-email",
+    "a b@example.com",
+  ])("rejects a token whose email claim is not a plain address: %s", async (email) => {
+    const token = await mintToken({ email });
+    expect(await verifySsoToken(SECRET, token)).toBeNull();
+  });
+
   it("rejects a token with a non-string name claim", async () => {
     const token = await mintToken({ email: "a@b.com", name: 42 });
     expect(await verifySsoToken(SECRET, token)).toBeNull();

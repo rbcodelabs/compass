@@ -1,12 +1,4 @@
-import { timingSafeEqual } from "node:crypto"
-
-/** Length-independent, then constant-time. Never leaks which secret matched. */
-function secretMatches(presented: string | undefined, expected: string | undefined): boolean {
-  if (!presented || !expected) return false
-  const a = Buffer.from(presented)
-  const b = Buffer.from(expected)
-  return a.length === b.length && timingSafeEqual(a, b)
-}
+import { secretMatches } from "@/lib/secret-compare"
 
 /** True when neither secret is configured: cron routes must answer 503 rather than run unauthenticated. */
 export function cronAuthNotConfigured(): boolean {

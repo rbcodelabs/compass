@@ -105,6 +105,83 @@ describe("POST /api/portal/auth/send", () => {
     expect(data.devVerifyUrl).toBeUndefined();
   });
 
+  it("rejects an email containing markup characters with 422 and creates no token", async () => {
+    const res = await sendPOST(sendRequest({ email: "<img src=x onerror=alert(1)>@example.com" }));
+    expect(res.status).toBe(422);
+    expect(mockPortalVerificationToken.create).not.toHaveBeenCalled();
+  });
+
+  it("dev fallback never writes the verify URL to the console", async () => {
+    const spies = [
+      vi.spyOn(console, "log").mockImplementation(() => {}),
+      vi.spyOn(console, "info").mockImplementation(() => {}),
+      vi.spyOn(console, "warn").mockImplementation(() => {}),
+      vi.spyOn(console, "error").mockImplementation(() => {}),
+    ];
+    const res = await sendPOST(sendRequest({ email: "dev-quiet@example.com" }));
+    const data = await res.json();
+    expect(data.devVerifyUrl).toContain("token=");
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("production without AUTH_RESEND_KEY fails closed with 503, creates no token, and logs nothing sensitive", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const logSpies = [
+      vi.spyOn(console, "log").mockImplementation(() => {}),
+      vi.spyOn(console, "info").mockImplementation(() => {}),
+      vi.spyOn(console, "warn").mockImplementation(() => {}),
+      vi.spyOn(console, "error").mockImplementation(() => {}),
+    ];
+
+    const res = await sendPOST(sendRequest({ email: "prod@example.com" }));
+    const text = await res.text();
+
+    expect(res.status).toBe(503);
+    expect(text).not.toContain("token=");
+    expect(mockPortalVerificationToken.create).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    for (const spy of logSpies) {
+      for (const call of spy.mock.calls) expect(JSON.stringify(call)).not.toContain("token=");
+    }
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("returns 502, removes the unsent token, and leaks nothing when the Resend call is rejected", async () => {
+    process.env.AUTH_RESEND_KEY = "re_test_key";
+    vi.mocked(fetch).mockResolvedValue({ ok: false, status: 422 } as Response);
+    mockPortalVerificationToken.delete.mockResolvedValue({});
+    const logSpies = [
+      vi.spyOn(console, "log").mockImplementation(() => {}),
+      vi.spyOn(console, "error").mockImplementation(() => {}),
+    ];
+
+    const res = await sendPOST(sendRequest({ email: "rejected@example.com" }));
+    const text = await res.text();
+
+    expect(res.status).toBe(502);
+    expect(text).not.toContain("token=");
+    expect(mockPortalVerificationToken.delete).toHaveBeenCalledTimes(1);
+    for (const spy of logSpies) {
+      for (const call of spy.mock.calls) expect(JSON.stringify(call)).not.toContain("token=");
+    }
+    vi.restoreAllMocks();
+  });
+
+  it("returns 502 and removes the unsent token when the Resend call throws", async () => {
+    process.env.AUTH_RESEND_KEY = "re_test_key";
+    vi.mocked(fetch).mockRejectedValue(new Error("network down"));
+    mockPortalVerificationToken.delete.mockResolvedValue({});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await sendPOST(sendRequest({ email: "throws@example.com" }));
+
+    expect(res.status).toBe(502);
+    expect(mockPortalVerificationToken.delete).toHaveBeenCalledTimes(1);
+    vi.restoreAllMocks();
+  });
+
   it("rejects an invalid email with 422", async () => {
     const res = await sendPOST(sendRequest({ email: "not-an-email" }));
     expect(res.status).toBe(422);
@@ -212,6 +289,23 @@ describe("GET /api/portal/auth/verify", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain("Signed in as jane@example.com");
+  });
+
+  it("HTML-escapes the stored email in the confirmation page", async () => {
+    const malicious = "<img src=x onerror=alert(1)>@example.com";
+    mockPortalVerificationToken.findUnique.mockResolvedValue({
+      email: malicious,
+      tokenHash: "hash",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    mockPortalAccount.upsert.mockResolvedValue({ id: "account-1", email: malicious });
+
+    const res = await verifyGET(verifyRequest("?token=valid"));
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).not.toContain("<img");
+    expect(body).toContain("&lt;img src=x onerror=alert(1)&gt;@example.com");
   });
 
   it("rejects a protocol-relative returnTo (//evil.com)", async () => {

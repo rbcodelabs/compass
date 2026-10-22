@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import getPrisma from "@/lib/db";
 import { createPortalSession } from "@/lib/portal-auth";
+import { escapeHtml } from "@/lib/html-escape";
 
 /** Only allow relative /portal/... redirect targets — no open redirect. */
 function sanitizeReturnTo(returnTo: string | null): string | null {
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
   }
 
   return htmlResponse(
-    `<p>Signed in as ${portalAccount.email}. You can close this tab.</p>`,
+    `<p>Signed in as ${escapeHtml(portalAccount.email)}. You can close this tab.</p>`,
     200
   );
 }

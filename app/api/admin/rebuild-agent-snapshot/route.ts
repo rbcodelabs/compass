@@ -30,15 +30,14 @@
 
 import { NextRequest } from "next/server"
 import { getAgentSnapshotStatus, rebuildAgentSnapshot } from "@/lib/agent-snapshot-admin"
+import { secretMatches } from "@/lib/secret-compare"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
 
 function checkAuth(req: NextRequest): boolean {
-  const secret = process.env.MIGRATION_SECRET
-  // A missing/empty secret must never authorize — fail closed.
-  if (!secret) return false
-  return req.headers.get("x-migration-secret") === secret
+  // A missing/empty secret must never authorize; secretMatches fails closed.
+  return secretMatches(req.headers.get("x-migration-secret"), process.env.MIGRATION_SECRET)
 }
 
 export async function GET(req: NextRequest) {
