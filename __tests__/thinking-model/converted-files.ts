@@ -104,6 +104,8 @@ export const CONVERTED_FILES = [
   "components/decisions/new-decision-form.tsx",
   "components/decisions/decision-sources.tsx",
   "app/[orgSlug]/[workspaceSlug]/decisions/page.tsx",
+  "components/chain-graph/chain-graph-view.tsx",
+  "app/[orgSlug]/[workspaceSlug]/graph/page.tsx",
   "app/[orgSlug]/[workspaceSlug]/reviews/[requestId]/page.tsx",
   "components/feedback/feedback-action-cell.tsx",
   "components/feedback/feedback-composer.tsx",

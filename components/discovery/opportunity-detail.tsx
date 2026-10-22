@@ -20,6 +20,7 @@ import { ScoreBadge } from "./score-badge";
 import { toScoreSummary } from "@/lib/score-summary";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
+import { LinkedSpecsSection } from "@/components/specs/linked-specs-section";
 import { RequestDecisionLink } from "@/components/decisions/request-decision-link";
 import { FollowButton } from "@/components/following/follow-button";
 import { FleshThisOutLink } from "@/components/research/flesh-this-out-link";
@@ -122,6 +123,7 @@ function OpportunityDetailBody({ opportunityId, orgSlug, workspaceSlug, variant,
               {scoringModel && <TabsContent value="scoring" className="pt-4"><ScoringPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} opportunityId={data.id} revalidatePathStr={detailPath} scoringModel={scoringModel} existingScore={data.existingScore} onSaved={refresh} /></TabsContent>}
               {customFields.length > 0 && <TabsContent value="details" className="pt-4"><CustomFieldsPanel fields={customFields} objectId={data.id} revalidatePathStr={detailPath} onSaved={refresh} /></TabsContent>}
             </Tabs>
+            <LinkedSpecsSection scopeType="OPPORTUNITY" scopeId={data.id} orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
             <Section label="Delivery tasks" count={data.deliveryTasks.length}><LinkedTasksSection linkedType="OPPORTUNITY" linkedId={data.id} orgSlug={orgSlug} workspaceSlug={workspaceSlug} revalidatePathStr={detailPath} tasks={data.deliveryTasks} linkableTasks={data.linkableTasks} members={data.members} onChanged={refresh} /></Section>
             <PmInterviewHistory orgSlug={orgSlug} workspaceSlug={workspaceSlug} interviews={data.pmInterviews} />
             <LinkedFeedback feedback={data.feedback} />

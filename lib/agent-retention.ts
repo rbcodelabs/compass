@@ -21,7 +21,7 @@
  *     simply continued by the next one.
  *   - Batched. Deletes are by id page (lib/batched-delete.ts), never one unbounded statement, so DSQL's
  *     ~3,000-rows-per-transaction ceiling holds; works unchanged on plain Postgres.
- *   - Safe before the optional indexes (migration 100) exist: queries are correct either way, only slower.
+ *   - Safe before the optional indexes (migration 101) exist: queries are correct either way, only slower.
  */
 import type { AppPrismaClient } from "@/lib/db"
 import { AGENT_DATA_RETENTION_DAYS } from "@/lib/legal-config"

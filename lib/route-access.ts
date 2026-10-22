@@ -131,6 +131,9 @@ export function isPublicPath(pathname: string): boolean {
     // unless COMPASS_UI_REGISTRY=1; keeping the route public makes the enabled
     // registry deterministic and independent of session/database fixtures.
     pathname === "/ui" ||
+    // Chain graph renderer benchmark: synthetic data only, no database or session. The page itself returns 404 unless
+    // NODE_ENV=development or COMPASS_CHAIN_GRAPH_BENCH=1 (same posture as the UI registry above).
+    pathname === "/chain-graph-bench" ||
     // Images referenced by the public product docs (e.g. /help/02-discovery
     // embeds /screenshots/docs/discovery-board.png) — served from public/,
     // so the middleware matcher catches them like any other route. Without

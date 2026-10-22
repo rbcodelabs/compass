@@ -7,6 +7,7 @@ const tx = {
   // `onDelete: Restrict`, so either one left behind turns the delete into a 500.
   commentElementAnchor: { deleteMany: vi.fn() },
   commentExternalAuthor: { deleteMany: vi.fn() },
+  taskLink: { deleteMany: vi.fn() },
 }
 const runTransaction = async (operation: (client: typeof tx) => unknown, options?: { isolationLevel: string }) => {
   // Match production DSQL rather than silently accepting PostgreSQL-only modes.
@@ -30,6 +31,7 @@ beforeEach(() => {
   tx.docCommentAnchor.deleteMany.mockResolvedValue({ count: 0 })
   tx.commentElementAnchor.deleteMany.mockResolvedValue({ count: 0 })
   tx.commentExternalAuthor.deleteMany.mockResolvedValue({ count: 0 })
+  tx.taskLink.deleteMany.mockResolvedValue({ count: 0 })
 })
 
 describe("atomic browser comment deletion", () => {
@@ -65,6 +67,8 @@ describe("atomic browser comment deletion", () => {
     for (const model of [tx.docCommentAnchor, tx.commentElementAnchor, tx.commentExternalAuthor]) {
       expect(model.deleteMany).toHaveBeenCalledWith({ where: { commentId: { in: ["reply-1", "root-1"] } } })
     }
+    // Tasks made from the thread keep living; only their COMMENT links go.
+    expect(tx.taskLink.deleteMany).toHaveBeenCalledWith({ where: { linkedType: "COMMENT", linkedId: { in: ["reply-1", "root-1"] } } })
   })
 
   it("never permits generic deletion of a specialized plan row", async () => {

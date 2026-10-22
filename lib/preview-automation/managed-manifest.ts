@@ -205,9 +205,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // entity_links data half for Solution <-> Key Result (ADR phase 4): no DDL, EXPLICIT-ONLY, the work is the hook
   // (lib/migrations/entity-links-solution-key-result-backfill.ts). Shares the numeric prefix 098 with the agent migration; the name is unique.
   "098_entity_links_backfill_solution_key_result": "795934c658367a187f400eec3068e1e946d13ecf37b71daf758fb1c87ba4697f", // gitleaks:allow -- reviewed public SHA256, not a credential
+  // Generic saved views step 2: nullable surface column + async index; the backfill and postcondition are the hook in lib/migrations/saved-views-surface.ts (pinned below). Digest recorded from the shipped SQL; please review it.
+  "100_saved_views_surface": "7bc32104f7e6be93aa09b8b9b14431773eda273f8b8f17dfa6cdd347b8e64fb3",
   // Two ASYNC created_at indexes (agent_run_events, agent_messages) for the agent-data retention job. Additive and optional: no table change,
-  // no backfill, one DDL statement per transaction. The 100 postcondition proves both indexes exist and are valid.
-  "100_agent_retention_indexes": "a6ace306d6837adb1d5d49b3ea284e81f7cbe3d1cf8bea45605eea07c11f902c"
+  // no backfill, one DDL statement per transaction. The 101 postcondition proves both indexes exist and are valid.
+  "101_agent_retention_indexes": "3e82c231d57d462f622c03989d7efabe1dadee600c47b4ca95c77a86f69127e9"
 };
 
 /**
@@ -305,9 +307,14 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
     "lib/migrations/entity-links-solution-key-result-backfill.ts": "e61171d6fd196cacbb79708691aef6610a3adf6340c189a516738db498a7665d", // gitleaks:allow -- reviewed public SHA256, not a credential
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
-  // The 100 postcondition (both created_at indexes exist and are valid); editing it re-reviews the migration.
-  "100_agent_retention_indexes": {
-    "lib/migrations/agent-retention-indexes.ts": "e3ac1e40a2237313610f056e6862146bf4cf3a1bc0df94c67f145e524345bbe9",
+  // The 100 backfill + postcondition hook and the OCC retry it imports; editing either re-reviews the migration.
+  "100_saved_views_surface": {
+    "lib/migrations/saved-views-surface.ts": "05fff4ffc6e1c19769dc4b6b56451ffb263a6dc31c39928cf62183ed6e1fadf2",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 101 postcondition (both created_at indexes exist and are valid); editing it re-reviews the migration.
+  "101_agent_retention_indexes": {
+    "lib/migrations/agent-retention-indexes.ts": "512d5eb12776aa462ac0605c9df021263c5069cec1c62520f7b667f43fba999b",
   },
 };
 

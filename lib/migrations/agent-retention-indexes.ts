@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg"
 
-export const AGENT_RETENTION_INDEXES_MIGRATION = "100_agent_retention_indexes"
+export const AGENT_RETENTION_INDEXES_MIGRATION = "101_agent_retention_indexes"
 
 const EXPECTED_INDEXES = ["idx_agent_run_events_created_at", "idx_agent_messages_created_at"] as const
 
@@ -20,6 +20,6 @@ export async function assertAgentRetentionIndexesMigration(client: PoolClient, s
   const validity = new Map(rows.map((row) => [row.name, row.valid]))
   const missing = EXPECTED_INDEXES.filter((name) => validity.get(name) !== true)
   if (missing.length) {
-    throw new Error(`Migration 100 postcondition failed: indexes missing or not ACTIVE: ${missing.join(", ")}`)
+    throw new Error(`Migration 101 postcondition failed: indexes missing or not ACTIVE: ${missing.join(", ")}`)
   }
 }
