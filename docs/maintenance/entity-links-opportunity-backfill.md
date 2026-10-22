@@ -30,10 +30,20 @@ left untouched and reported on every run; the postconditions allow them only bec
 
 ## Residual pass
 
-095 re-selects from the legacy tables on every run, so it is its own residual pass: it prunes mirror rows with no legacy counterpart, repairs
-origin/workspace drift and inserts what is missing, then proves the postconditions. If the read flip needs a re-run after the mirror has been live, register a
-DDL-free `096_..._residual` that calls `backfillEntityLinksOpportunity` and `assertEntityLinksOpportunityBackfill` (the 072/094 pattern). It is not built
-here because nothing yet calls for it.
+Re-POSTing 095 does nothing once its receipt exists: the runner only selects PENDING migrations (`selectMigrationsToRun` ignores applied ones).
+Drift that appeared after the receipt (links written while `COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR` was off) is repaired by the separately
+numbered, DDL-free, explicit-only **`106_entity_links_residual_opportunity`**. It calls the same `backfillEntityLinksOpportunity` and
+`assertEntityLinksOpportunityBackfill` (the 072/094 pattern): it re-selects from the legacy tables, prunes mirror rows with no legacy
+counterpart, repairs origin/workspace drift, inserts what is missing, and proves the postconditions before its receipt is written.
+
+When to POST it:
+
+1. Deploy the build that contains 106 and set `COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR=1` (so no new drift appears while it runs).
+2. `GET /api/admin/migrate`: note `entityLinksOpportunityBackfill` and the opportunity entries of `entityLinksReadParity`.
+3. `POST /api/admin/migrate` with `{"script":"106_entity_links_residual_opportunity"}` (full name; an untargeted POST skips it).
+4. `GET` again: expect zero `onlyLegacy`, `onlyEntityLinks` and `originDrift` for the opportunity families.
+
+Like 072/094, 106 is a one-shot: a later round of drift needs another separately numbered residual.
 
 ## Known mirror gaps the backfill covers
 

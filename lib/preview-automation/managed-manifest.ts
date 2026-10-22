@@ -220,7 +220,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "104_agent_retention_indexes": "2c6da24d861aa569f3ea44aca15f2ac98718ec13c3985a3a8997a1e7a65a1813",
   // Per-workspace agent GitHub repo allowlist: one nullable TEXT column on workspaces (JSON array of "owner/name"). No index, no backfill.
   // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
-  "105_workspace_agent_github_repos": "ed1b4077170a09220767762c3756c763bd6db1031896dd7f6e44da07b17bdd80"
+  "105_workspace_agent_github_repos": "ed1b4077170a09220767762c3756c763bd6db1031896dd7f6e44da07b17bdd80",
+  // Residual entity_links pass for Opportunity (095 is the first pass): no DDL, EXPLICIT-ONLY, the work is the 095 hook.
+  "106_entity_links_residual_opportunity": "f9f553644f14b68a81c3ebb2df46f1b8348eb7db3a45adbdf1c3f8d90857c71c"
 };
 
 /**
@@ -293,7 +295,12 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 095 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
   "095_entity_links_backfill_opportunity": {
-    "lib/migrations/entity-links-opportunity-backfill.ts": "31720625e69bfca38bed0b230ae61aa421ae4c105db588141105d715d8beb857",
+    "lib/migrations/entity-links-opportunity-backfill.ts": "f456a0bda766ad7227e81c93ca857804682e120a8ac6195257469bf7bf89b5b5",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 106 residual pass runs the same hook as 095.
+  "106_entity_links_residual_opportunity": {
+    "lib/migrations/entity-links-opportunity-backfill.ts": "f456a0bda766ad7227e81c93ca857804682e120a8ac6195257469bf7bf89b5b5",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
   // The 096 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
