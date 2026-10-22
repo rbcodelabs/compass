@@ -31,13 +31,7 @@ import {
 } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { orderCards, planDragEnd } from "@/lib/discovery-board-ordering";
 import type { OpportunityStatus } from "@/lib/types";
-
-const COLUMNS: { status: OpportunityStatus; label: string; accent: "neutral" | "info" | "warning" | "success" }[] = [
-  { status: "EXPLORING", label: "Exploring", accent: "neutral" },
-  { status: "VALIDATING", label: "Validating", accent: "warning" },
-  { status: "PRIORITIZED", label: "Prioritized", accent: "info" },
-  { status: "ACTIVE", label: "Active", accent: "success" },
-];
+import { DEFAULT_VISIBLE_COLUMNS, OPPORTUNITY_COLUMN_META } from "@/lib/saved-views/opportunity-columns";
 
 const ALL_STATUSES: OpportunityStatus[] = ["EXPLORING", "VALIDATING", "PRIORITIZED", "ACTIVE"];
 
@@ -86,7 +80,9 @@ function DiscoveryColumn({
   workspaceSlug,
   showScore,
   dragEnabled,
+  forcedVisible,
 }: {
+  forcedVisible: boolean;
   status: OpportunityStatus;
   label: string;
   accent: "neutral" | "info" | "warning" | "success";
@@ -126,7 +122,18 @@ function DiscoveryColumn({
 
   return (
     <BoardColumn
-      title={label}
+      title={
+        forcedVisible ? (
+          <>
+            {label}
+            <span data-testid="forced-visible-marker" className="ml-1.5 text-xs font-normal text-text-subtle">
+              hidden in view, has cards
+            </span>
+          </>
+        ) : (
+          label
+        )
+      }
       count={items.length}
       accent={accent}
       className="w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"
@@ -156,6 +163,10 @@ type Props = {
   hasActiveScoringModel?: boolean;
   /** "Sort by score" view mode. Never persisted — see planDragEnd. */
   sortByScore?: boolean;
+  /** Columns to render, in order (the resolved saved-view / URL layout). Defaults to the Active-first order. */
+  columnOrder?: readonly OpportunityStatus[];
+  /** Columns the layout hides that are shown because they hold cards. */
+  forcedVisibleColumns?: readonly OpportunityStatus[];
 };
 
 export function OpportunityBoard({
@@ -165,6 +176,8 @@ export function OpportunityBoard({
   workspaceId,
   hasActiveScoringModel = false,
   sortByScore = false,
+  columnOrder = DEFAULT_VISIBLE_COLUMNS,
+  forcedVisibleColumns = [],
 }: Props) {
   const labels = useLabels();
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/discovery`;
@@ -308,12 +321,13 @@ export function OpportunityBoard({
             data-slot="opportunity-board-track"
             className="flex h-full w-max min-w-full items-stretch gap-3 px-3 pt-3 pb-3 sm:px-4 sm:pt-4 md:px-4 md:pt-3"
           >
-            {COLUMNS.map(({ status, label, accent }) => (
+            {columnOrder.map((status) => (
               <DiscoveryColumn
                 key={status}
                 status={status}
-                label={label}
-                accent={accent}
+                label={OPPORTUNITY_COLUMN_META[status].label}
+                accent={OPPORTUNITY_COLUMN_META[status].accent}
+                forcedVisible={forcedVisibleColumns.includes(status)}
                 items={visibleColumns[status]}
                 orgSlug={orgSlug}
                 workspaceSlug={workspaceSlug}

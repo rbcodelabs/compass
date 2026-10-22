@@ -1,10 +1,10 @@
 import getPrisma from "@/lib/db";
-import { agentEligibleInWorkspace, type AgentRecord, agentOwner, findAgentById, findAgentsByIds, withAgentColumns } from "@/lib/agent-ownership";
+import { agentEligibleInWorkspace, agentKind, type AgentRecord, agentOwner, findAgentById, findAgentsByIds, withAgentColumns } from "@/lib/agent-ownership";
 import { UNASSIGNED_ASSIGNEE_FILTER } from "@/lib/task-assignee-display";
 import type { TaskLinkRecordType } from "@/lib/types";
 
 export type TaskAssignee = { type: "USER" | "AGENT"; id: string } | null;
-export type ResolvedTaskAssignee = NonNullable<TaskAssignee> & { displayName: string; available: boolean; ownerName?: string };
+export type ResolvedTaskAssignee = NonNullable<TaskAssignee> & { displayName: string; available: boolean; ownerName?: string; /** Agents only: a CLOUD agent runs when assigned; an EXTERNAL one is only queued. */ agentKind?: "EXTERNAL" | "CLOUD" };
 export type AssignmentInput = { assignee?: TaskAssignee; assigneeUserId?: string | null };
 
 /** Both columns are always replaced in the same write, including legacy callers. */
@@ -20,7 +20,6 @@ export async function assignmentUpdate(workspaceId: string, input: AssignmentInp
     if (!member) throw new Error("Assignee is not in this workspace");
     return { assigneeUserId: assignee.id, assigneeAgentId: null };
   }
-  if (process.env.COMPASS_AGENTS_ENABLED !== "1") throw new Error("Agent assignments are not enabled");
   const agent = await findAgentById(prisma, assignee.id);
   if (!agent || agent.status !== "ACTIVE") throw new Error("Assignee agent is not active");
   const owner = agentOwner(agent);
@@ -64,7 +63,7 @@ export async function resolveTaskAssignees<T extends AssignedRow>(workspaceId: s
     if (task.assigneeAgentId) {
       const agent = agents.find(a => a.id === task.assigneeAgentId);
       const memberUserIds = new Set(members.map(m => m.userId));
-      assignee = { type: "AGENT", id: task.assigneeAgentId, displayName: agent?.name ?? "Unavailable agent", available: !!agent && agentEligibleInWorkspace(agent, { workspaceId, hasLiveGrant: grants.some(g => g.agentId === agent.id), memberUserIds }) };
+      assignee = { type: "AGENT", id: task.assigneeAgentId, displayName: agent?.name ?? "Unavailable agent", ...(agent ? { agentKind: agentKind(agent) } : {}), available: !!agent && agentEligibleInWorkspace(agent, { workspaceId, hasLiveGrant: grants.some(g => g.agentId === agent.id), memberUserIds }) };
     } else if (task.assigneeUserId) {
       const member = members.find(m => m.userId === task.assigneeUserId);
       assignee = { type: "USER", id: task.assigneeUserId, displayName: member?.user.name || member?.user.email || "Unavailable person", available: !!member };
@@ -77,7 +76,6 @@ export async function eligibleTaskAssignees(workspaceId: string): Promise<Resolv
   const prisma = getPrisma();
   const members = await prisma.workspaceMember.findMany({ where: { workspaceId }, include: { user: { select: { name: true, email: true } } }, orderBy: { userId: "asc" } });
   const people: ResolvedTaskAssignee[] = members.map(m => ({ type: "USER", id: m.userId, displayName: m.user.name || m.user.email, available: true }));
-  if (process.env.COMPASS_AGENTS_ENABLED !== "1") return people;
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId, revokedAt: null } });
   if (!grants.length) return people;
   const granted = await withAgentColumns(({ select }) => prisma.agent.findMany({ where: { id: { in: grants.map(g => g.agentId) }, status: "ACTIVE" }, select, orderBy: [{ name: "asc" }, { id: "asc" }] }));
@@ -87,7 +85,7 @@ export async function eligibleTaskAssignees(workspaceId: string): Promise<Resolv
   return [...people, ...agents.map(agent => {
     const owner = agentOwner(agent);
     const ownerMember = owner?.type === "USER" ? members.find(m => m.userId === owner.userId) : undefined;
-    return { type: "AGENT" as const, id: agent.id, displayName: agent.name, available: true, ownerName: ownerMember?.user.name || ownerMember?.user.email };
+    return { type: "AGENT" as const, id: agent.id, displayName: agent.name, agentKind: agentKind(agent), available: true, ownerName: ownerMember?.user.name || ownerMember?.user.email };
   })];
 }
 
@@ -108,8 +106,8 @@ export async function validateTaskLink(workspaceId: string, linkedType: TaskLink
     : linkedType === "DOC" ? prisma.doc.findFirst({ where, select: { id: true } })
     : linkedType === "EXPERIMENT" ? prisma.experiment.findFirst({ where })
     : linkedType === "DECISION" ? prisma.reviewRequest.findFirst({ where })
-    // Only Doc comments are linkable; the Comment row carries its own workspaceId.
-    : linkedType === "COMMENT" ? prisma.comment.findFirst({ where: { id: linkedId, workspaceId, targetType: "DOC" }, select: { id: true } })
+    // Any comment in the workspace is linkable (Doc comments and Discussion comments); the Comment row carries its own workspaceId.
+    : linkedType === "COMMENT" ? prisma.comment.findFirst({ where: { id: linkedId, workspaceId }, select: { id: true } })
     : prisma.feedbackItem.findFirst({ where }));
   if (!target) throw new Error("Linked object belongs to a different workspace or does not exist");
   return target;

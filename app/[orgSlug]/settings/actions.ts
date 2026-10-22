@@ -9,7 +9,6 @@ import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { SLUG_PATTERN } from "@/lib/slug";
 import { validateOrgSlug } from "@/lib/org-slug";
 import { createWorkspaceInOrg, type WorkspaceMemberSeeding } from "@/lib/workspace-service";
-import { agentsEnabled } from "@/lib/agent-access";
 import { agentOwner, findAgentById } from "@/lib/agent-ownership";
 
 export interface ScoringMetricInput {
@@ -499,7 +498,7 @@ export async function deleteOrganization(
     await prisma.scoringModel.deleteMany({ where: { organizationId } });
     // Org-wide saved roadmap views have a null workspaceId, so the per-workspace
     // cascade above cannot reach them (no FK cascade on DSQL).
-    await prisma.roadmapView.deleteMany({ where: { organizationId } });
+    await prisma.savedView.deleteMany({ where: { organizationId } });
     await prisma.organizationMember.deleteMany({ where: { organizationId } });
     await prisma.organization.delete({ where: { id: organizationId } });
 
@@ -534,7 +533,6 @@ export async function grantAgentScoringModelAdmin(
     const session = await auth();
     if (!session?.user?.id) throw new PermissionError("Unauthorized");
     const { prisma, organizationId } = await resolveOrgAdmin(orgSlug);
-    if (!agentsEnabled()) return { ok: false, error: "Agent changes are currently disabled" };
 
     const agent = await findAgentById(prisma, agentId);
     if (!agent || agent.status !== "ACTIVE") return { ok: false, error: "Agent not found" };

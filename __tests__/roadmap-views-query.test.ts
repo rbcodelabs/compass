@@ -61,10 +61,10 @@ describe("loadCrossWorkspaceRoadmap", () => {
     launchChecklist: null, workspaceId, workspace: { id: workspaceId, name: workspaceId, slug: workspaceId },
   })
   const fakeDb = (rows: unknown[], links: unknown[] = []) => {
-    const seen: { where?: unknown; take?: number; linkWhere?: unknown } = {}
+    const seen: { where?: unknown; take?: number; linkWhere?: unknown; linkArgs?: unknown } = {}
     const db = {
       roadmapItem: { findMany: async (args: { where: unknown; take: number }) => { seen.where = args.where; seen.take = args.take; return rows } },
-      taskLink: { findMany: async (args: { where: unknown }) => { seen.linkWhere = args.where; return links } },
+      taskLink: { findMany: async (args: { where: unknown }) => { seen.linkArgs = args; seen.linkWhere = args.where; return links } },
     } as never
     return { db, seen }
   }
@@ -74,6 +74,8 @@ describe("loadCrossWorkspaceRoadmap", () => {
     const out = await loadCrossWorkspaceRoadmap(["a", "b"], { ...DEFAULT_ROADMAP_FILTERS, workspaceIds: ["b", "zzz"] }, DEFAULT_ROADMAP_DISPLAY, db)
     expect((seen.where as { workspaceId: unknown }).workspaceId).toEqual({ in: ["b"] })
     expect((seen.linkWhere as { task: unknown }).task).toEqual({ workspaceId: { in: ["b"] } })
+    // Flag unset: exactly the legacy query (no extra columns).
+    expect(seen.linkArgs).toEqual({ where: { linkedType: "ROADMAP_ITEM", linkedId: { in: ["r1"] }, task: { workspaceId: { in: ["b"] } } }, select: { linkedId: true, task: { select: { status: true } } } })
     expect(out.items.map((i) => i.workspace.slug)).toEqual(["b"])
   })
 

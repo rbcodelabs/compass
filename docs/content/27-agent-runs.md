@@ -111,8 +111,55 @@ only an exit code. Error output from a turn that succeeds is ignored. Output is 
 so a very noisy failure shows its beginning, not its end. Runs that execute in the
 background do not include sandbox error output.
 
-A blank or whitespace-only `ANTHROPIC_API_KEY` is treated the same as a missing one:
+A blank or whitespace-only API key for the selected model provider (see below; Claude harness only) is treated the same as a missing one:
 the turn is rejected up front with a configuration error, before a sandbox is started.
+
+## Model provider
+
+The agent uses Anthropic's API by default. A deployment can opt in to AWS Bedrock
+instead with environment variables:
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `AGENT_MODEL_PROVIDER` | `anthropic` or `bedrock` | `anthropic` |
+| `ANTHROPIC_API_KEY` | Required when the provider is `anthropic` | none |
+| `BEDROCK_API_KEY` | Required when the provider is `bedrock`: a Bedrock long-lived API key (bearer token) | none |
+| `AWS_REGION` | Bedrock region | `us-east-1` |
+| `AGENT_MODEL_ID` | Overrides the model id | `claude-sonnet-5` (anthropic), `global.anthropic.claude-sonnet-5-5` (bedrock) |
+
+Only the selected provider's key is needed and only that key is passed into the
+sandbox. An unrecognised `AGENT_MODEL_PROVIDER` is rejected with a configuration
+error, the same as a missing key. The Bedrock default is a cross-region inference
+profile id; set `AGENT_MODEL_ID` if your account uses a different profile. The model
+recorded on each assistant message is the one the turn actually ran with.
+
+### Harness and provider
+
+`AGENT_HARNESS` is the outer choice; the model provider only applies inside the
+default `claude` harness.
+
+| `AGENT_HARNESS` | `AGENT_MODEL_PROVIDER` | Credential passed into the sandbox | Model |
+|---|---|---|---|
+| `claude` (default) | `anthropic` (default) | `ANTHROPIC_API_KEY` only | `AGENT_MODEL_ID` or `claude-sonnet-5` |
+| `claude` | `bedrock` | Bedrock token (`AWS_BEARER_TOKEN_BEDROCK`), `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION` only | `AGENT_MODEL_ID` or `global.anthropic.claude-sonnet-5-5` |
+| `opencode` (experimental) | ignored | AI Gateway credential only (`AI_GATEWAY_API_KEY` or Vercel OIDC) | `AGENT_OPENCODE_MODEL` |
+
+### Choosing a model per message
+
+A chat turn may carry an optional `model` field (the chat's **Model** menu). It is
+validated on the server against the allowed list (the built-in models plus
+`COMPASS_CLOUD_AGENT_MODELS`) filtered to what the active harness can serve: Claude
+model ids for `claude`, `provider/model` gateway references for `opencode`. An unlisted
+value is refused with `400 INVALID_MODEL`; on the `bedrock` provider any value is
+refused with `400 MODEL_CHOICE_UNAVAILABLE`. Precedence is the explicit pick, then the
+selected agent's own model, then the deployment default. The model actually used is
+stored on the run (`model`) when it starts and is not overwritten when it finishes, so
+the run viewer and usage reporting show the real one.
+
+With `opencode`, `AGENT_MODEL_PROVIDER`, `AGENT_MODEL_ID`, `ANTHROPIC_API_KEY` and
+`BEDROCK_API_KEY` are not read: a Bedrock selection is ignored (not an error), even
+an invalid one, and neither an Anthropic nor a Bedrock credential is ever passed to
+that harness. The blank-key check described above applies only to `claude`.
 
 ## Deployment
 

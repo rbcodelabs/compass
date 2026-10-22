@@ -38,6 +38,7 @@ import { isComposerPanelType } from "./composer-panel-types";
 import { TaskDetail } from "@/components/tasks/task-detail";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { panelTitles } from "./panel-titles";
+import { ViewChainAction } from "./view-chain-action";
 
 /**
  * Upper bound on how long the deep-link panel waits for a browser idle period
@@ -65,9 +66,11 @@ export interface PanelShellProps {
    * a caller that has not been wired up yet gets exactly today's behaviour.
    */
   initialPin?: PanelPin;
+  /** Show "View chain" for core-chain entities. Decided on the server (lib/chain-graph/flag.ts); the graph is flag-gated and not in the nav. */
+  chainGraphEnabled?: boolean;
 }
 
-export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps = {}) {
+export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled = false }: PanelShellProps = {}) {
   const { panel, closePanel, orgSlug, workspaceSlug, setDetailPanelDock } = usePanelContext();
   const labels = useLabels();
   const [hydrated, setHydrated] = useState(false);
@@ -228,6 +231,8 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
     </Link>
   ) : null;
 
+  const chainAction = panel ? <ViewChainAction enabled={chainGraphEnabled} orgSlug={orgSlug} workspaceSlug={workspaceSlug} type={panel.type} id={panel.id} /> : null;
+
   const body = (
     <>
       {panel?.type === "objective" && <ObjectivePanel id={panel.id} {...common} />}
@@ -324,6 +329,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
           </h2>
           <div className="flex items-center gap-1">
             {fullPageAction}
+            {chainAction}
             {escHint}
             {!isComposer && pinToggle}
             <Button
@@ -369,6 +375,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN }: PanelShellProps =
                 it. */}
             <div className="flex items-center gap-1">
               {fullPageAction}
+              {chainAction}
               {escHint}
               {!isComposer && <div className="hidden lg:flex items-center">{pinToggle}</div>}
               {hasCompactHeader && (

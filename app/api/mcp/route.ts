@@ -3,6 +3,7 @@
 //
 // Endpoint: POST /api/mcp  (Streamable HTTP transport)
 
+import { currentIdentityPayload } from "@/lib/mcp-identity";
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { createMcpHandler } from "mcp-handler"
 import { z } from "zod"
@@ -58,6 +59,9 @@ import {
   listEvidence,
 } from "@/lib/evidence-tool-handlers"
 import { editDoc, editCanvas, buildCanvasTree, MAX_TEXT_EDITS } from "@/lib/doc-edit-tool-handlers"
+import { createSpec, listSpecs, getSpec } from "@/lib/spec-tool-handlers"
+import { SPEC_SCOPE_TYPES } from "@/lib/spec-docs/scopes"
+import { SPEC_TEMPLATE_VARIANTS } from "@/lib/spec-docs/template"
 import { CANVAS_CARD_KINDS } from "@/lib/canvas-cards"
 import { CANVAS_SIDES, CANVAS_ENDS } from "@/lib/json-canvas"
 import { MAX_CANVAS_OPS, type CanvasOp } from "@/lib/canvas-edit"
@@ -287,7 +291,7 @@ const _handler = createMcpHandler(
       const prisma = getPrisma()
       const workspaces = await prisma.workspace.findMany({ where: await agentWorkspaceWhere(actor), select: { id: true, name: true, slug: true, organization: { select: { slug: true } } }, orderBy: { name: "asc" } })
       const agent = actor.agentId ? await prisma.agent.findUnique({ where: { id: actor.agentId }, select: { id: true, name: true } }) : null
-      return ok("Current authenticated identity", { purpose: actor.purpose ?? "USER", userId: actor.userId, agent, workspaces })
+      return ok("Current authenticated identity", currentIdentityPayload(actor, agent, workspaces))
     })
 
     register("get_pm_interview", { title: "Read PM Interview", description: "Reads a saved interview and the current target for an authorized interview processing attempt. Page through all turns before editing.", inputSchema: { interviewId: z.string().uuid(), offset: z.number().int().min(0).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, getPmInterviewTool)
@@ -3339,7 +3343,8 @@ const _handler = createMcpHandler(
           "writing to a path that already exists updates it, writing to a new path creates it. Missing parent " +
           "directories in the path are created implicitly. Content may include a YAML frontmatter block; " +
           "compass_-prefixed keys are reserved and reflected back on read, never accepted as input. " +
-          "Discover paths via the docs://{workspaceId}/{path} resource.",
+          "Discover paths via the docs://{workspaceId}/{path} resource. " +
+          "Writing to an existing SPEC doc (create_spec) is strict about `[title](compass://kind/uuid)` embeds: a malformed link, an unknown kind or a record that is not in the workspace is rejected. compass_scopes is read-only.",
         inputSchema: {
           workspaceId: z.string().uuid().describe("UUID of the workspace"),
           path: z.string().min(1).describe("Doc path, e.g. \"Product/Roadmap/Q3 Plan\" (no extension)"),
@@ -3391,6 +3396,62 @@ const _handler = createMcpHandler(
       moveDoc
     )
 
+    register(
+      "create_spec",
+      {
+        title: "Create Spec",
+        description:
+          "Creates a NEW Spec doc for a Solution (scopeType SOLUTION) or a Discovery Plan doc for an Opportunity (scopeType OPPORTUNITY), pre-filled from that record's real children " +
+          "(key results, assumptions, experiments, prototypes; or the opportunity, its solutions and riskiest open assumptions) as `[title](compass://kind/uuid)` embeds. " +
+          "Not idempotent: every call makes another doc, because a solution can have several specs and an opportunity several plans (use `label` to tell them apart; call list_specs first if you only need the existing one). " +
+          "The scope must be in workspaceId. The doc has docType SPEC; read and edit it by its path (docs:// resource, write_doc) or id (edit_doc). The response ends with `ID: <doc uuid>`.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          scopeType: z.enum(SPEC_SCOPE_TYPES).describe("SOLUTION creates a Spec; OPPORTUNITY creates a Discovery Plan"),
+          scopeId: z.string().uuid().describe("UUID of the solution or opportunity"),
+          template: z.enum(SPEC_TEMPLATE_VARIANTS).optional().describe("default (sections filled from the scope's records) or blank (the same headings, no embeds). Defaults to default."),
+          label: z.string().min(1).max(100).optional().describe("Short distinguishing label, e.g. \"v2\"; appended to the title and stored in the doc's metadata"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      createSpec,
+    )
+
+    register(
+      "list_specs",
+      {
+        title: "List Specs",
+        description:
+          "Lists the SPEC docs (Specs or Discovery Plans) linked to one Solution or Opportunity, oldest first: id, title, path, label, updatedAt and url. " +
+          "A thin view over the DOC_SPECIFIES_SCOPE links. A doc's own scopes are also listed in its docs:// frontmatter as compass_scopes.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          scopeType: z.enum(SPEC_SCOPE_TYPES).describe("SOLUTION or OPPORTUNITY"),
+          scopeId: z.string().uuid().describe("UUID of the solution or opportunity"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      listSpecs,
+    )
+
+    register(
+      "get_spec",
+      {
+        title: "Get Spec",
+        description:
+          "Reads one SPEC doc (a Spec or Discovery Plan) resolved: its markdown (frontmatter included, exactly as the docs:// resource returns it) plus, for every `[title](compass://kind/uuid)` embed, the record's LIVE title, status and key facts, and an explicit `unavailable` list of the references that could not be resolved. " +
+          "The cached title inside each link is only a hint and is never reported. A reference that is missing, deleted, in another workspace or not accessible is reported as unavailable, indistinguishably. Archived or killed records resolve normally with their status. " +
+          "Address the doc by docId or path (docId wins when both are given); a doc that is not in workspaceId or is not a SPEC returns the same not-found message as a missing one.",
+        inputSchema: {
+          workspaceId: z.string().uuid().describe("UUID of the workspace"),
+          docId: z.string().uuid().optional().describe("UUID of the spec doc (from create_spec or list_specs)"),
+          path: z.string().min(1).optional().describe("Doc path (from create_spec or list_specs), as used by write_doc and the docs:// resource"),
+        },
+        outputSchema: TOOL_OUTPUT_SCHEMA,
+      },
+      getSpec,
+    )
+
     const editExpectedRevision = z.string().uuid().optional().describe("Revision from the docs:// resource read (_meta.revision) or a prior write_doc result. When given, the edit is rejected if the doc has changed since (re-read and retry). When omitted, the edit is re-applied on top of the latest revision, so it never overwrites a concurrent change.")
 
     register(
@@ -3401,7 +3462,8 @@ const _handler = createMcpHandler(
           "Edits a doc's body by exact text replacement instead of re-sending the whole document. " +
           "Give oldString + newString (oldString must match exactly once unless replaceAll), or an edits array to apply several replacements atomically in order. " +
           "The server applies the change to the current body and saves it with a revision check. Only the body is edited: frontmatter properties are changed with write_doc. " +
-          "Works on CANVAS docs too (the result must still be valid JSON Canvas), but prefer edit_canvas for canvases.",
+          "Works on CANVAS docs too (the result must still be valid JSON Canvas), but prefer edit_canvas for canvases. " +
+          "On a SPEC doc the result must keep every `[title](compass://kind/uuid)` embed well formed and pointing at a record in the doc's workspace.",
         inputSchema: {
           docId: z.string().uuid().describe("UUID of the doc to edit (the compass_doc_id in its docs:// frontmatter)"),
           oldString: z.string().min(1).optional().describe("Exact text to replace. Must be unique in the body unless replaceAll is true"),
@@ -3741,7 +3803,8 @@ const _handler = createMcpHandler(
         title: "Compass Doc",
         description:
           "A single Compass doc, addressed by workspace and path. Frontmatter carries compass_doc_id, " +
-          "compass_doc_type, and (if linked) compass_roadmap_item_id, plus ordinary user metadata.",
+          "compass_doc_type, and (if linked) compass_roadmap_item_id, plus ordinary user metadata. A SPEC doc also carries the read-only " +
+          "compass_scopes list (solution:<uuid> / opportunity:<uuid>) it specifies; like every compass_ key it is ignored on write.",
         mimeType: "text/markdown",
       },
       async (uri, variables) => {
@@ -4118,6 +4181,7 @@ async function withMcpAuth(req: Request): Promise<Response> {
     agentId: auth.agentId,
     credentialId: auth.credentialId,
     credentialType: auth.credentialType,
+    agentRunId: auth.agentRunId,
     scopeWorkspaceId: auth.scopeWorkspaceId,
     scopeConversationId: auth.scopeConversationId,
     scopeClaimId: auth.scopeClaimId,

@@ -100,7 +100,11 @@ export default defineConfig({
         // tasks-agent-assignment.spec.ts needs agent assignment live: without
         // this, eligibleTaskAssignees() (lib/task-assignment.ts) returns people
         // only, no agent option ever renders, and the spec hangs to timeout.
-        COMPASS_AGENTS_ENABLED: "1",
+        // cloud-agents.spec.ts: assigning a task to a cloud agent starts a run only when the model credential exists. A placeholder
+        // is enough: the sandbox cannot boot in this environment, so the key is never used, only checked for presence.
+        ANTHROPIC_API_KEY: "e2e-placeholder-not-a-real-key",
+        // chat-model-picker.spec.ts: a second model so the chat's Model menu has something to offer next to the built-in one.
+        COMPASS_CLOUD_AGENT_MODELS: "claude-opus-4-5",
         // passkeys.spec.ts needs the /login button and /settings/passkeys
         // panel visible. The underlying Passkey provider itself is only ever
         // registered in auth.ts's production/preview branch though — `pnpm
@@ -111,6 +115,8 @@ export default defineConfig({
         // Deterministic test-only key; production must provide its own secret.
         SSO_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
         ANALYTICS_SECRET_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        // agent-retention.spec.ts calls the cron route with this bearer; test-only value.
+        CRON_SECRET: "e2e-cron-secret",
       },
       timeout: 120_000,
     },

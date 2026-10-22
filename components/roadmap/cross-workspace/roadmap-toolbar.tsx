@@ -17,7 +17,10 @@ import {
   type RoadmapViewDisplay, type RoadmapViewFilters,
 } from "@/lib/roadmap-views/schema"
 import type { RoadmapViewRecord } from "@/lib/roadmap-views/service"
-import { SavedViewsMenu, type RoadmapViewState } from "./saved-views-menu"
+import { SavedViewsMenu } from "@/components/saved-views/saved-views-menu"
+import { roadmapSurfaceFor } from "@/lib/saved-views/surfaces"
+
+export type RoadmapViewState = { filters: RoadmapViewFilters; display: RoadmapViewDisplay }
 
 type Facets = {
   workspaces: { id: string; name: string; slug: string }[]
@@ -136,6 +139,8 @@ export function RoadmapToolbar({
       <div aria-label="Roadmap controls" className="flex min-w-0 flex-wrap items-center gap-2 md:flex-nowrap">
         <SavedViewsMenu
           orgSlug={orgSlug}
+          surface={roadmapSurfaceFor(surfaceWorkspaceId)}
+          deleteNote="Roadmap items are not affected."
           surfaceWorkspaceId={surfaceWorkspaceId}
           views={views}
           savedViewId={savedViewId}

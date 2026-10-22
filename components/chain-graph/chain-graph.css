@@ -1,0 +1,125 @@
+/*
+ * Chain graph chrome. Every colour is a token (surface/border/text/status/primary roles) or a --graph-series-* data colour;
+ * React Flow's own variables are overridden here in the graph's scope so its stylesheet does not introduce raw colours.
+ */
+.chain-graph .react-flow {
+  --xy-background-color: var(--surface-app);
+  --xy-background-color-default: var(--surface-app);
+  --xy-edge-stroke-default: var(--border-strong);
+  --xy-node-border-radius-default: 0;
+  --xy-node-boxshadow-selected-default: none;
+  --xy-controls-button-background-color-default: var(--surface-panel);
+  --xy-controls-button-background-color-hover-default: var(--surface-interactive-hover);
+  --xy-controls-button-color-default: var(--text-primary);
+  --xy-controls-button-border-color-default: var(--border-default);
+  --xy-minimap-background-color-default: var(--surface-panel);
+}
+
+/* Edges are drawn centre to centre: both handles sit at the middle of the (dot-sized) node box and are invisible. */
+.chain-graph .react-flow__handle {
+  left: 50%;
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  width: 1px;
+  height: 1px;
+  min-width: 1px;
+  min-height: 1px;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.chain-graph .react-flow__edge-path {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+.chain-graph .chain-edge--secondary .react-flow__edge-path,
+.chain-graph .chain-edge--link .react-flow__edge-path {
+  stroke-dasharray: 4 3;
+}
+.chain-graph .chain-edge--traced .react-flow__edge-path {
+  stroke: var(--primary);
+  stroke-width: 2;
+  stroke-dasharray: none;
+}
+.chain-graph .chain-edge--dim .react-flow__edge-path {
+  opacity: 0.12;
+}
+
+.chain-graph .react-flow__node {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  width: auto;
+  border-radius: 0;
+}
+/* Nodes are dot-sized at fit-to-screen zoom; an invisible halo around the box keeps them grabbable (and draggable) there. */
+.chain-graph .react-flow__node::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+.chain-graph .react-flow__node:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.chain-graph .chain-node--dim {
+  opacity: 0.15;
+}
+.chain-graph .chain-node--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Cloud halos live in the viewport layer; their labels counter-scale so they stay readable while zooming. */
+.chain-graph .chain-halo {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+}
+.chain-graph .chain-halo__label {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, -100%) scale(min(var(--cg-inv-zoom, 1), 3));
+  transform-origin: 50% 100%;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+/*
+ * Semantic zoom, driven by data-band on the root (see chain-graph-view.tsx). Dot band: no labels.
+ * Label and full bands additionally require data-cg-label="on" on the node wrapper: the view's collision pass keeps a label
+ * only when it does not overlap a higher-priority one (lib/chain-graph/label-collision.ts). Dots and shapes always render.
+ */
+.chain-graph .cg-label,
+.chain-graph .cg-detail {
+  display: none;
+}
+/* Labels are text only. A label that overlaps a neighbouring node must not swallow the pointer (which would grab, or fail to grab, the wrong node). */
+.chain-graph .cg-label {
+  pointer-events: none;
+}
+/* Constant screen size: counter-scale the flow zoom about the edge the label hangs from, so gaps between labels grow as you zoom in. */
+.chain-graph .cg-label {
+  scale: var(--cg-inv-zoom, 1);
+}
+.chain-graph .cg-label--side {
+  transform-origin: 0 50%;
+}
+.chain-graph .cg-label--below {
+  transform-origin: 50% 0;
+}
+.chain-graph [data-band="label"] [data-cg-label="on"] .cg-label--key {
+  display: flex;
+}
+.chain-graph [data-band="full"] [data-cg-label="on"] .cg-label {
+  display: flex;
+}
+.chain-graph [data-band="full"] [data-cg-label="on"] .cg-detail {
+  display: block;
+}

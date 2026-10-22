@@ -68,6 +68,8 @@ interface SidebarProps {
   workspaces: SelectorWorkspace[]
   /** Org admins/owners see an "Org Settings" link in the account menu. */
   isOrgAdmin?: boolean
+  /** Platform admins (PLATFORM_ADMIN_EMAILS) see an "Agent snapshot" link in the account menu. */
+  isPlatformAdmin?: boolean
   researchCaptureEnabled?: boolean
   updatesEnabled?: boolean
   /** Following is on and available: show the notifications bell. Absent in the settings tree. */
@@ -146,6 +148,7 @@ export function Sidebar({
   userImage,
   workspaces,
   isOrgAdmin = false,
+  isPlatformAdmin = false,
   researchCaptureEnabled = true,
   updatesEnabled = false,
   followingEnabled = false,
@@ -354,6 +357,11 @@ export function Sidebar({
                 <DropdownMenuItem className="cursor-pointer p-0">
                   <Link href="/settings/passkeys" className="flex w-full items-center px-1.5 py-1">Passkeys</Link>
                 </DropdownMenuItem>
+                {isPlatformAdmin && (
+                  <DropdownMenuItem className="cursor-pointer p-0">
+                    <Link href="/settings/admin/agent-snapshot" className="flex w-full items-center px-1.5 py-1">Agent snapshot</Link>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem className="cursor-pointer p-0">
                   <form action={signOutAction} className="w-full">
                     <Button type="submit" variant="ghost" size="sm" className="w-full justify-start">

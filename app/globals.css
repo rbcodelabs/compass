@@ -99,6 +99,16 @@
   --status-warning-surface: oklch(0.9506 0.0253 86.9); /* #F6EEDC */
   --status-danger: var(--destructive);                 /* #A32C22 */
   --status-danger-surface: oklch(0.9451 0.0169 31.1);  /* #F8E9E6 */
+  /* Chain graph categorical series (object types and group clouds). Data colour, not UI chrome: cycled by stable index. */
+  --graph-series-1: oklch(0.5 0.12 255);
+  --graph-series-2: oklch(0.5 0.12 165);
+  --graph-series-3: oklch(0.5 0.12 75);
+  --graph-series-4: oklch(0.5 0.12 25);
+  --graph-series-5: oklch(0.5 0.12 300);
+  --graph-series-6: oklch(0.5 0.12 205);
+  --graph-series-7: oklch(0.5 0.12 115);
+  --graph-series-8: oklch(0.5 0.12 345);
+  --graph-series-9: oklch(0.5 0.05 60);
   /* Agent identity (mention chips, task pins, Agent badges). Distinct from the
      info blue used for people so an agent reads as an agent at a glance. */
   --agent-accent: oklch(0.4733 0.1672 295);
@@ -160,6 +170,16 @@ html.dark:has(.workspace-theme-scope) {
   --status-warning-surface: oklch(0.29 0.05 71.2);
   --status-danger: var(--destructive);
   --status-danger-surface: oklch(0.28 0.06 29);
+  /* Chain graph categorical series (object types and group clouds). Data colour, not UI chrome: cycled by stable index. */
+  --graph-series-1: oklch(0.76 0.11 255);
+  --graph-series-2: oklch(0.76 0.11 165);
+  --graph-series-3: oklch(0.76 0.11 75);
+  --graph-series-4: oklch(0.76 0.11 25);
+  --graph-series-5: oklch(0.76 0.11 300);
+  --graph-series-6: oklch(0.76 0.11 205);
+  --graph-series-7: oklch(0.76 0.11 115);
+  --graph-series-8: oklch(0.76 0.11 345);
+  --graph-series-9: oklch(0.76 0.05 60);
   --agent-accent: oklch(0.76 0.12 295);
   --agent-accent-surface: oklch(0.29 0.06 295);
   --shadow-card: none;
@@ -222,6 +242,15 @@ html.dark:has(.workspace-theme-scope) {
   --color-status-warning-surface: var(--status-warning-surface);
   --color-status-danger: var(--status-danger);
   --color-status-danger-surface: var(--status-danger-surface);
+  --color-graph-series-1: var(--graph-series-1);
+  --color-graph-series-2: var(--graph-series-2);
+  --color-graph-series-3: var(--graph-series-3);
+  --color-graph-series-4: var(--graph-series-4);
+  --color-graph-series-5: var(--graph-series-5);
+  --color-graph-series-6: var(--graph-series-6);
+  --color-graph-series-7: var(--graph-series-7);
+  --color-graph-series-8: var(--graph-series-8);
+  --color-graph-series-9: var(--graph-series-9);
   --color-agent-accent: var(--agent-accent);
   --color-agent-accent-surface: var(--agent-accent-surface);
   --color-sidebar: var(--sidebar);

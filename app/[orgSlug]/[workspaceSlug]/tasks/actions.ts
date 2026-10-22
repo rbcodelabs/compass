@@ -11,21 +11,28 @@ import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
 import { allocateOneSeq } from "@/lib/work-item-sequence"
 import { createWorkspaceTask } from "@/lib/task-create"
 import { createTaskLink, deleteTaskLink, mirrorTaskLinks, upsertTaskLink } from "@/lib/task-link-writes"
+import { startRunForAssignedTask, type AgentRunOutcome } from "@/lib/agent-task-trigger"
+
+/** Only an outcome worth telling the person about; "skipped" (not an agent, nothing changed) is dropped. */
+function reportableRun(outcome: AgentRunOutcome): { agentRun?: AgentRunOutcome } {
+  return outcome.status === "skipped" ? {} : { agentRun: outcome };
+}
 
 async function requireTaskWorkspace(workspaceId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
   const membership = await getPrisma().workspaceMember.findFirst({ where: { workspaceId, userId: session.user.id }, select: { id: true } });
   if (!membership) throw new Error("Not found");
+  return session.user.id;
 }
 
 async function requireTask(taskId: string) {
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
-  const task = await getPrisma().task.findUnique({ where: { id: taskId }, select: { workspaceId: true, status: true } });
+  const task = await getPrisma().task.findUnique({ where: { id: taskId }, select: { workspaceId: true, status: true, assigneeAgentId: true } });
   if (!task) throw new Error("Not found");
   await requireTaskWorkspace(task.workspaceId);
-  return task;
+  return { ...task, userId: session.user.id };
 }
 
 // ─── Add Task ─────────────────────────────────────────────────────────────────
@@ -48,11 +55,13 @@ export async function addTask(
   },
   revalidatePathStr: string
 ) {
-  await requireTaskWorkspace(workspaceId);
+  const userId = await requireTaskWorkspace(workspaceId);
   const task = await createWorkspaceTask(workspaceId, data);
+  // A person assigned the new task to a cloud agent: start its run (the task is saved either way).
+  const agentRun: { agentRun?: AgentRunOutcome } = task.assigneeAgentId ? reportableRun(await startRunForAssignedTask({ taskId: task.id, actingUserId: userId })) : {};
 
   revalidatePath(revalidatePathStr);
-  return (await resolveTaskAssignees(workspaceId, [task]))[0];
+  return { ...(await resolveTaskAssignees(workspaceId, [task]))[0], ...agentRun };
 }
 
 // ─── Update Task ──────────────────────────────────────────────────────────────
@@ -92,8 +101,13 @@ export async function updateTask(
     data: updateData,
   }));
 
+  // The assignee became a (different) cloud agent: start its run. Re-saving the same assignee starts nothing.
+  const agentRun: { agentRun?: AgentRunOutcome } = task.assigneeAgentId && task.assigneeAgentId !== existing.assigneeAgentId
+    ? reportableRun(await startRunForAssignedTask({ taskId, actingUserId: existing.userId, previousAssigneeAgentId: existing.assigneeAgentId }))
+    : {};
+
   revalidatePath(revalidatePathStr);
-  return (await resolveTaskAssignees(existing.workspaceId, [task]))[0];
+  return { ...(await resolveTaskAssignees(existing.workspaceId, [task]))[0], ...agentRun };
 }
 
 // ─── Move Task Status ─────────────────────────────────────────────────────────
@@ -187,6 +201,7 @@ export async function linkTask(
   const prisma = getPrisma();
   const task = await requireTask(taskId);
   await validateTaskLink(task.workspaceId, linkedType, linkedId);
+  // Stays on task_links (not the TASK read flip): idempotency check before a write, returns the legacy row.
   const existing = await prisma.taskLink.findFirst({ where: { taskId, linkedType, linkedId } });
   if (existing) {
     revalidatePath(revalidatePathStr);
@@ -204,6 +219,7 @@ export async function unlinkTask(linkId: string, revalidatePathStr: string) {
   const prisma = getPrisma();
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
+  // Stays on task_links (not the TASK read flip): looks the legacy row up by id to delete it.
   const link = await prisma.taskLink.findUnique({ where: { id: linkId }, select: { id: true, taskId: true, linkedType: true, linkedId: true } });
   if (!link) throw new Error("Not found");
   const task = await requireTask(link.taskId);
@@ -246,6 +262,7 @@ export async function addLinkedTask(
   revalidatePathStr: string
 ) {
   const workspace = await requireLinkedEntityWorkspace(orgSlug, workspaceSlug, linkedType, linkedId);
+  const actingUserId = (await auth())?.user?.id;
   const title = data.title.trim();
   if (!title) throw new Error("Title is required");
   const assignment = await assignmentUpdate(workspace.id, data);
@@ -271,8 +288,9 @@ export async function addLinkedTask(
     await mirrorTaskLinks(tx, { workspaceId: workspace.id, links: [{ taskId: created.id, linkedType, linkedId }] });
     return created;
   });
+  const agentRun: { agentRun?: AgentRunOutcome } = task.assigneeAgentId && actingUserId ? reportableRun(await startRunForAssignedTask({ taskId: task.id, actingUserId })) : {};
   revalidatePath(revalidatePathStr);
-  return task;
+  return { ...task, ...agentRun };
 }
 
 export async function linkExistingTask(

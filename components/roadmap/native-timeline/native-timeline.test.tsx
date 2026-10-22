@@ -74,7 +74,7 @@ vi.mock("@dnd-kit/core", () => ({
 
 vi.mock("../schedule/schedule-rail", () => ({
   ScheduleRail: (props: { items: unknown[]; autoAdded: unknown[]; className?: string }) => (
-    <aside aria-label="Ready to schedule" data-testid="schedule-rail" data-count={props.items.length} data-auto={props.autoAdded.length} className={props.className}><button type="button">Rail action</button></aside>
+    <aside aria-label="Not scheduled" data-testid="schedule-rail" data-count={props.items.length} data-auto={props.autoAdded.length} className={props.className}><button type="button">Rail action</button></aside>
   ),
 }));
 vi.mock("../schedule/schedule-palette", () => ({
@@ -244,7 +244,26 @@ describe("NativeTimeline", () => {
   it("resolves backlog drop lanes from the pointer instead of the translated card rectangle", () => {
     renderTimeline();
 
-    expect(harness.dndProps?.collisionDetection).toBe(harness.pointerWithin);
+    const detect = harness.dndProps?.collisionDetection as (args: unknown) => unknown;
+    const args = { active: { id: "unscheduled:feedback:feedback-1" }, pointerCoordinates: { x: 50, y: 60 } };
+    detect(args);
+    expect(harness.pointerWithin).toHaveBeenLastCalledWith(args);
+  });
+
+  it("resolves a rail card released over the docked sidebar to the scroller's right edge", () => {
+    renderTimeline();
+    vi.spyOn(screen.getByTestId("native-timeline-scroll"), "getBoundingClientRect").mockReturnValue({ left: 100, right: 700, width: 600 } as DOMRect);
+    const detect = harness.dndProps?.collisionDetection as (args: unknown) => unknown;
+    const base = { active: { id: "unscheduled:solution:s1" } };
+
+    detect({ ...base, pointerCoordinates: { x: 1400, y: 60 } });
+    expect(harness.pointerWithin).toHaveBeenLastCalledWith({ ...base, pointerCoordinates: { x: 699, y: 60 } });
+    detect({ ...base, pointerCoordinates: { x: 300, y: 60 } });
+    expect(harness.pointerWithin).toHaveBeenLastCalledWith({ ...base, pointerCoordinates: { x: 300, y: 60 } });
+    // Timeline-item drags are untouched.
+    const itemDrag = { active: { id: "timeline:item:i1" }, pointerCoordinates: { x: 1400, y: 60 } };
+    detect(itemDrag);
+    expect(harness.pointerWithin).toHaveBeenLastCalledWith(itemDrag);
   });
 
   it("still announces an invalid external backlog lane", () => {
@@ -371,15 +390,17 @@ describe("NativeTimeline", () => {
     expect(scrollRegion).toHaveAttribute("tabindex", "0");
   });
 
-  it("puts the Ready to schedule rail beside the timeline on desktop and stacks it above on mobile", () => {
+  it("docks the Not scheduled sidebar on the right of the timeline on desktop and stacks it above on mobile", () => {
     renderTimeline();
 
     const engine = screen.getByTestId("timeline-engine-native");
+    const region = screen.getByTestId("schedule-rail-region");
     expect(engine).toHaveClass("flex-col", "min-[1320px]:flex-row");
-    // The rail comes first in the DOM so it stacks above the timeline below the wide-desktop breakpoint.
-    expect(engine.firstElementChild).toBe(screen.getByTestId("schedule-rail-region"));
-    expect(screen.getByTestId("schedule-rail-region")).toContainElement(screen.getByTestId("schedule-rail"));
-    expect(screen.getByTestId("schedule-rail")).toHaveClass("min-[1320px]:w-80");
+    // The region follows the chart in the DOM (so it docks on the right); `order-first` lifts it above the chart when stacked.
+    expect(engine.firstElementChild).not.toBe(region);
+    expect(region).toHaveClass("order-first", "min-[1320px]:order-last");
+    expect(region).toContainElement(screen.getByTestId("schedule-rail"));
+    expect(screen.getByTestId("schedule-rail")).toHaveClass("w-full");
   });
 
   it("measures a bounded window before paint and refreshes it after resize and zoom", () => {
@@ -522,6 +543,41 @@ describe("NativeTimeline", () => {
       "NEXT",
       "2026-08-28",
     );
+  });
+
+  it("snaps a drop released past the scroller's edge (over the docked sidebar) to the nearest visible date", () => {
+    harness.controller.unscheduled = [{ kind: "feedback", id: "feedback-1", title: "Edge placement" }];
+    renderTimeline();
+    const scroller = screen.getByTestId("native-timeline-scroll");
+    const canvas = scroller.firstElementChild as HTMLElement;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ left: -100 } as DOMRect);
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ left: 0, right: 600, width: 600 } as DOMRect);
+
+    act(() => harness.dndProps?.onDragStart?.({
+      active: { id: "unscheduled:feedback:feedback-1" },
+      activatorEvent: new MouseEvent("pointerdown", { clientX: 120 }),
+    }));
+    // 1400 is far right of the 600px scroller, over the sidebar; it must land where 599 would.
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientX: 1400 })));
+    act(() => harness.dndProps?.onDragEnd?.({
+      active: { id: "unscheduled:feedback:feedback-1", rect: { current: { translated: { left: 0, width: 100 } } } },
+      delta: { x: 1280, y: 0 },
+      over: { id: "lane:NEXT:unassigned" },
+    }));
+    const edgeDate = vi.mocked(harness.controller.scheduleBacklog).mock.calls[0][2];
+
+    vi.mocked(harness.controller.scheduleBacklog).mockClear();
+    act(() => harness.dndProps?.onDragStart?.({
+      active: { id: "unscheduled:feedback:feedback-1" },
+      activatorEvent: new MouseEvent("pointerdown", { clientX: 120 }),
+    }));
+    act(() => window.dispatchEvent(new MouseEvent("pointermove", { clientX: 599 })));
+    act(() => harness.dndProps?.onDragEnd?.({
+      active: { id: "unscheduled:feedback:feedback-1", rect: { current: { translated: { left: 0, width: 100 } } } },
+      delta: { x: 479, y: 0 },
+      over: { id: "lane:NEXT:unassigned" },
+    }));
+    expect(vi.mocked(harness.controller.scheduleBacklog).mock.calls[0][2]).toBe(edgeDate);
   });
 
   it("does not double-count the horizontal activation threshold in the dropped date", () => {
@@ -1061,7 +1117,7 @@ describe("NativeTimeline: scheduling from discovery", () => {
   });
 });
 
-describe("NativeTimeline: collapsible Ready to schedule rail", () => {
+describe("NativeTimeline: collapsible Not scheduled sidebar", () => {
   const cookieWrites: string[] = [];
   let wide = true;
   const solution = (id: string) => ({ kind: "solution" as const, id, title: `Solution ${id}`, opportunityId: "o", opportunityTitle: "O", squadId: null, status: "VALIDATED", score: 50 });
@@ -1093,7 +1149,7 @@ describe("NativeTimeline: collapsible Ready to schedule rail", () => {
     wide = false;
     renderRail();
     expect(toggle()).toHaveAttribute("aria-expanded", "false");
-    expect(toggle()).toHaveAccessibleName("Show ready-to-schedule rail");
+    expect(toggle()).toHaveAccessibleName("Show not-scheduled sidebar");
     expect(region().firstElementChild).toHaveAttribute("inert");
     expect(screen.getByTestId("timeline-grid")).toBeInTheDocument();
   });
@@ -1103,7 +1159,7 @@ describe("NativeTimeline: collapsible Ready to schedule rail", () => {
     harness.controller.items = [{ id: "auto-1", title: "Auto one", horizon: "NOW", squad: null, viewStart: "2026-07-10", viewEnd: "2026-07-20", hasDates: true, autoCreated: true, updatedAt: "2026-07-01T00:00:00Z" }] as never;
     renderRail({ initialRailPreference: "closed" });
     expect(screen.getByTestId("rail-toggle-count")).toHaveTextContent("1");
-    expect(toggle()).toHaveAccessibleDescription("1 ready to schedule, 1 auto-added");
+    expect(toggle()).toHaveAccessibleDescription("1 not scheduled, 1 auto-added");
     expect(screen.getByTestId("auto-added-count")).toHaveTextContent("1 added");
   });
 
@@ -1118,6 +1174,18 @@ describe("NativeTimeline: collapsible Ready to schedule rail", () => {
     expect(toggle()).toHaveAttribute("aria-expanded", "true");
     expect(region().firstElementChild).not.toHaveAttribute("inert");
     expect(cookieWrites.at(-1)).toMatch(/^compass_roadmap_rail=open;/);
+  });
+
+  it("leaves the same thin tab the board does when collapsed, and expands from it", () => {
+    harness.controller.unscheduled = [solution("a"), solution("b")];
+    renderRail();
+    expect(screen.queryByTestId("sidebar-collapsed-tab")).not.toBeInTheDocument();
+    fireEvent.click(toggle());
+    const tab = screen.getByTestId("sidebar-collapsed-tab");
+    expect(tab).toHaveAccessibleName("Expand Not scheduled (2)");
+    fireEvent.click(tab);
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByTestId("sidebar-collapsed-tab")).not.toBeInTheDocument();
   });
 
   it("lets an explicit saved choice override the viewport default in both directions", () => {

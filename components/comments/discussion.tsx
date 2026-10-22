@@ -3,12 +3,24 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { MarkdownContent } from "@/components/markdown-content"
+import { MentionAwareLink, mentionLookup } from "@/components/comments/mention-chips"
+import { CommentTaskCard } from "@/components/docs/comment-task-card"
+import { DocCommentComposer, type ComposerPayload, type ComposerResult } from "@/components/docs/doc-comment-composer"
+import { MentionEditor, type MentionOptions } from "@/components/docs/mention-editor"
+import { useWorkItemLinkScope } from "@/components/work-item-link-scope"
+import { mentionsAsMarkdownLinks } from "@/lib/comment-mentions"
+import type { CommentTaskCardData } from "@/lib/comment-task-card"
 import type { BrowserCommentDto } from "@/lib/comment-browser"
 import type { CommentTargetType } from "@/lib/comments"
 
 type Editor = { kind: "reply" | "edit"; commentId: string } | null
+type MentionContext = { options: MentionOptions; confirmedAgentIds: string[]; targetTitle: string | null }
+type LoadedDiscussion = { items: BrowserCommentDto[]; mention?: MentionContext; taskCards?: Record<string, CommentTaskCardData> }
+
+const NO_OPTIONS: MentionOptions = { people: [], agents: [], outside: [] }
+/** Singular, lower-case noun for the composer copy ("Links back to this comment on the roadmap item"). */
+const targetNoun = (targetType: CommentTargetType) => targetType.toLowerCase().replace(/_/g, " ")
 
 function chronological(items: BrowserCommentDto[]): BrowserCommentDto[] {
   return [...items]
@@ -51,7 +63,11 @@ export function Discussion({ targetType, targetId, refreshKey, render }: {
   const [items, setItems] = useState<BrowserCommentDto[] | null>(null)
   const [loadError, setLoadError] = useState("")
   const [actionError, setActionError] = useState("")
-  const [rootBody, setRootBody] = useState("")
+  const [mention, setMention] = useState<MentionContext>({ options: NO_OPTIONS, confirmedAgentIds: [], targetTitle: null })
+  const [taskCards, setTaskCards] = useState<Record<string, CommentTaskCardData>>({})
+  const taskScope = useWorkItemLinkScope()
+  // Tagged with its target so a draft typed for one target can never seed the composer of the next.
+  const [rootDraftState, setRootDraft] = useState({ key: "", text: "" })
   const [editor, setEditor] = useState<Editor>(null)
   const [editorBody, setEditorBody] = useState("")
   const [busy, setBusy] = useState("")
@@ -71,7 +87,9 @@ export function Discussion({ targetType, targetId, refreshKey, render }: {
       setItems(null)
       setLoadError("")
       setActionError("")
-      setRootBody("")
+      setMention({ options: NO_OPTIONS, confirmedAgentIds: [], targetTitle: null })
+      setTaskCards({})
+      setRootDraft({ key: "", text: "" })
       setEditor(null)
       setEditorBody("")
       setBusy("")
@@ -80,9 +98,11 @@ export function Discussion({ targetType, targetId, refreshKey, render }: {
     setLoadError("")
     try {
       const query = new URLSearchParams({ targetType, targetId })
-      const payload = await responseJson<{ items: BrowserCommentDto[] }>(await fetch(`/api/comments?${query}`, { signal: controller.signal }))
+      const payload = await responseJson<LoadedDiscussion>(await fetch(`/api/comments?${query}`, { signal: controller.signal }))
       if (controller.signal.aborted || generation !== requestGeneration.current) return
       setItems(chronological(payload.items))
+      if (payload.mention) setMention(payload.mention)
+      if (payload.taskCards) setTaskCards(payload.taskCards)
     } catch (error) {
       if (controller.signal.aborted || generation !== requestGeneration.current) return
       setLoadError(error instanceof Error ? error.message : "Could not load discussion.")
@@ -131,22 +151,34 @@ export function Discussion({ targetType, targetId, refreshKey, render }: {
     setActionError("")
   }
 
-  async function post(body: string, parentId: string | null) {
+  /** Posts through the composer. Failures come back as values so the composer can show its own copy. */
+  async function post(payload: ComposerPayload, parentId: string | null): Promise<ComposerResult> {
     const generation = requestGeneration.current
     const key = parentId ? `reply:${parentId}` : "root"
-    if (!body.trim()) {
-      setActionError(parentId ? "Enter a reply." : "Enter a comment.")
-      return
-    }
     activeLoad.current?.abort()
     setBusy(key)
     setActionError("")
     try {
-      const created = await responseJson<BrowserCommentDto>(await fetch("/api/comments", {
+      const response = await fetch("/api/comments", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetType, targetId, parentId, body }),
-      }))
-      if (generation !== requestGeneration.current) return
+        body: JSON.stringify({
+          targetType, targetId, parentId, body: payload.body,
+          ...(payload.task ? { task: payload.task, assignee: payload.assignee, agentScopeConfirmed: payload.agentScopeConfirmed } : {}),
+        }),
+      })
+      const result: unknown = await response.json().catch(() => null)
+      if (!response.ok) {
+        const failure = typeof result === "object" && result ? result as { error?: unknown; code?: unknown } : {}
+        const message = typeof failure.error === "string" ? failure.error : "The comment could not be posted."
+        return { ok: false, error: typeof failure.code === "string" ? failure.code : "ERROR", message }
+      }
+      const { taskCard, ...created } = result as BrowserCommentDto & { taskCard?: CommentTaskCardData | null }
+      if (generation !== requestGeneration.current) return { ok: true }
+      if (taskCard) {
+        setTaskCards((current) => ({ ...current, [created.id]: taskCard }))
+        const agentId = taskCard.assignee?.type === "AGENT" ? taskCard.assignee.id : null
+        if (agentId) setMention((current) => ({ ...current, confirmedAgentIds: [...new Set([...current.confirmedAgentIds, agentId])] }))
+      }
       if (parentId) {
         setItems((current) => (current ?? []).map((root) => root.id === parentId
           ? { ...root, canDelete: false, replies: chronological([...root.replies, created]) }
@@ -154,11 +186,10 @@ export function Discussion({ targetType, targetId, refreshKey, render }: {
         closeEditor()
       } else {
         setItems((current) => chronological([...(current ?? []), created]))
-        setRootBody("")
       }
+      return { ok: true }
     } catch (error) {
-      if (generation !== requestGeneration.current) return
-      setActionError(error instanceof Error ? error.message : "The comment could not be posted.")
+      return { ok: false, error: "ERROR", message: error instanceof Error ? error.message : "The comment could not be posted." }
     } finally { if (generation === requestGeneration.current) setBusy("") }
   }
 
@@ -219,6 +250,16 @@ export function Discussion({ targetType, targetId, refreshKey, render }: {
     } finally { if (generation === requestGeneration.current) setBusy("") }
   }
 
+  // Escape in a reply/edit editor closes just that editor, never the panel around the discussion.
+  const swallowEscape = (event: React.KeyboardEvent) => { if (event.key === "Escape") event.stopPropagation() }
+  const liveMentions = mentionLookup(mention.options)
+  const renderedBody = (body: string) => mentionsAsMarkdownLinks(body, (ref) => {
+    const option = liveMentions.get(`${ref.kind}:${ref.id}`)
+    return option ? { name: option.name, outside: option.outsideWorkspace } : undefined
+  })
+
+  const draftKey = `${targetType}:${targetId}`
+
   const renderComment = (comment: BrowserCommentDto, isRoot: boolean) => {
     const resolved = comment.status === "RESOLVED"
     const collapsed = isRoot && resolved && !expandedResolved.has(comment.id)
@@ -243,10 +284,13 @@ export function Discussion({ targetType, targetId, refreshKey, render }: {
             {resolved && isRoot && <Button type="button" variant="ghost" size="xs" className="mt-2" aria-label={`Collapse resolved thread by ${comment.authorName}`} onClick={() => setExpandedResolved((current) => { const next = new Set(current); next.delete(comment.id); return next })}>Collapse thread</Button>}
             {editing ? (
               <form className="mt-2 space-y-2" onSubmit={(event) => { event.preventDefault(); void edit(comment.id) }}>
-                <Textarea autoFocus aria-label={`Edit comment by ${comment.authorName}`} value={editorBody} disabled={busy === `edit:${comment.id}`} onChange={(event) => setEditorBody(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeEditor() } }} />
+                <div onKeyDown={swallowEscape}>
+                  <MentionEditor autoFocus options={mention.options} initialValue={editorBody} ariaLabel={`Edit comment by ${comment.authorName}`} placeholder="Edit comment…" disabled={busy === `edit:${comment.id}`} onChange={setEditorBody} onSubmitShortcut={() => void edit(comment.id)} onEscape={closeEditor} />
+                </div>
                 <div className="flex flex-wrap gap-2"><Button size="sm" type="submit" disabled={busy === `edit:${comment.id}`}>Save edit</Button><Button size="sm" variant="ghost" type="button" onClick={closeEditor}>Cancel</Button></div>
               </form>
-            ) : <MarkdownContent className="mt-2">{comment.body}</MarkdownContent>}
+            ) : <MarkdownContent className="mt-2" linkComponent={MentionAwareLink}>{renderedBody(comment.body)}</MarkdownContent>}
+            {!editing && taskCards[comment.id] && <CommentTaskCard card={taskCards[comment.id]} taskHref={`${taskScope ? `/${taskScope.orgSlug}/${taskScope.workspaceSlug}` : ""}/tasks/${taskCards[comment.id].taskId}`} />}
 
             {!editing && <div className="mt-2 flex flex-wrap gap-1">
               {isRoot && <Button type="button" variant="ghost" size="xs" aria-label={`Reply to ${comment.authorName}`} disabled={Boolean(busy)} onClick={(event) => openEditor({ kind: "reply", commentId: comment.id }, "", event.currentTarget)}>Reply</Button>}
@@ -256,10 +300,15 @@ export function Discussion({ targetType, targetId, refreshKey, render }: {
             </div>}
 
             {isRoot && editor?.kind === "reply" && editor.commentId === comment.id && (
-              <form className="mt-3 space-y-2 border-l-2 border-border pl-3" onSubmit={(event) => { event.preventDefault(); void post(editorBody, comment.id) }}>
-                <Textarea autoFocus aria-label={`Reply to ${comment.authorName}`} value={editorBody} disabled={busy === `reply:${comment.id}`} onChange={(event) => setEditorBody(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeEditor() } }} />
-                <div className="flex flex-wrap gap-2"><Button size="sm" type="submit" disabled={busy === `reply:${comment.id}`}>Post reply</Button><Button size="sm" variant="ghost" type="button" onClick={closeEditor}>Cancel</Button></div>
-              </form>
+              <div className="mt-3 border-l-2 border-border pl-3" onKeyDown={swallowEscape}>
+                <DocCommentComposer
+                  compact autoFocus initialBody={editorBody} onBodyChange={setEditorBody}
+                  options={mention.options} confirmedAgentIds={mention.confirmedAgentIds}
+                  docTitle={mention.targetTitle ?? ""} targetNoun={targetNoun(targetType)}
+                  ariaLabel={`Reply to ${comment.authorName}`} placeholder="Reply…" idleLabel="Post reply"
+                  onSubmit={(payload) => post(payload, comment.id)} onCancel={closeEditor}
+                />
+              </div>
             )}
             {isRoot && comment.replies.length > 0 && <div className="mt-3 space-y-2 border-l-2 border-border pl-3">{chronological(comment.replies).map((reply) => renderComment(reply, false))}</div>}
           </>
@@ -276,10 +325,14 @@ export function Discussion({ targetType, targetId, refreshKey, render }: {
       {items?.length === 0 && <p className="text-sm text-muted-foreground">No comments yet.</p>}
       {items && items.length > 0 && <div className="space-y-3">{chronological(items).map((item) => renderComment(item, true))}</div>}
       {actionError && <p role="alert" className="text-sm text-destructive">{actionError}</p>}
-      <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); void post(rootBody, null) }}>
-        <Textarea aria-label="Add comment" placeholder="Add to the discussion…" value={rootBody} disabled={busy === "root"} onChange={(event) => setRootBody(event.target.value)} />
-        <div className="flex justify-end"><Button size="sm" type="submit" disabled={items === null || busy === "root"}>{busy === "root" ? "Posting…" : "Post comment"}</Button></div>
-      </form>
+      <DocCommentComposer
+        key={draftKey}
+        options={mention.options} confirmedAgentIds={mention.confirmedAgentIds}
+        docTitle={mention.targetTitle ?? ""} targetNoun={targetNoun(targetType)}
+        ariaLabel="Add comment" placeholder="Add to the discussion…" idleLabel="Post comment"
+        initialBody={rootDraftState.key === draftKey ? rootDraftState.text : ""} onBodyChange={(text) => setRootDraft({ key: draftKey, text })}
+        disabled={items === null} onSubmit={(payload) => post(payload, null)}
+      />
     </section>
   )
   return render ? render(content) : content

@@ -21,6 +21,7 @@ import { createDocCommentCore, deleteDocCommentCore, type CommentAnchorFields } 
 import { mentionRoles, uniqueMentions, type MentionRef } from "@/lib/comment-mentions"
 import { eligibleTaskAssignees, resolveTaskAssignees } from "@/lib/task-assignment"
 import { createWorkspaceTask } from "@/lib/task-create"
+import { startRunForAssignedTask, type AgentRunOutcome } from "@/lib/agent-task-trigger"
 import { displayIdFromRow } from "@/lib/work-item-ids"
 import { runAfterCommit } from "@/lib/following-commit"
 import { autoFollow } from "@/lib/follows"
@@ -41,6 +42,8 @@ export interface MentionCandidate {
   outsideWorkspace?: boolean
   /** Agents only: the access level of their active grant in this workspace. */
   access?: "READ" | "WRITE"
+  /** Agents only: CLOUD agents run when assigned; EXTERNAL ones are queued. */
+  agentKind?: "EXTERNAL" | "CLOUD"
 }
 
 export interface MentionCandidates {
@@ -72,7 +75,7 @@ export async function loadMentionCandidates(workspaceId: string): Promise<Mentio
 
   return {
     people: eligible.filter(a => a.type === "USER").map(a => ({ kind: "user", id: a.id, name: a.displayName, detail: email.get(a.id) ?? null })),
-    agents: eligible.filter(a => a.type === "AGENT").map(a => ({ kind: "agent", id: a.id, name: a.displayName, detail: description.get(a.id) ?? null, access: access.get(a.id) })),
+    agents: eligible.filter(a => a.type === "AGENT").map(a => ({ kind: "agent", id: a.id, name: a.displayName, detail: description.get(a.id) ?? null, access: access.get(a.id), agentKind: a.agentKind })),
     outside: orgMembers
       .filter(m => !members.has(m.userId))
       .map(m => ({ kind: "user" as const, id: m.userId, name: m.user.name?.trim() || m.user.email, detail: m.user.email, outsideWorkspace: true })),
@@ -81,7 +84,7 @@ export async function loadMentionCandidates(workspaceId: string): Promise<Mentio
 
 // ─── Read model ──────────────────────────────────────────────────────────────
 
-function toCard(task: {
+export function toCard(task: {
   id: string; seqPrefix: string | null; seqNumber: number | null; title: string; status: string; priority: string; dueDate: Date | null
   assignee: CommentTaskCardData["assignee"]
 }): CommentTaskCardData {
@@ -99,6 +102,7 @@ function toCard(task: {
 /** Task card per comment id (one task per comment; the earliest link wins if data ever has more). */
 export async function loadCommentTaskCards(workspaceId: string, commentIds: string[]): Promise<Record<string, CommentTaskCardData>> {
   if (commentIds.length === 0) return {}
+  // Stays on task_links (not the TASK read flip): COMMENT links are legacy-only by design and never mirrored to entity_links.
   const links = await getPrisma().taskLink.findMany({
     where: { linkedType: "COMMENT", linkedId: { in: commentIds }, task: { workspaceId } },
     include: { task: true },
@@ -110,7 +114,7 @@ export async function loadCommentTaskCards(workspaceId: string, commentIds: stri
   for (const link of links) {
     if (cards[link.linkedId]) continue
     const task = byTask.get(link.taskId)
-    if (task) cards[link.linkedId] = toCard({ ...task, assignee: task.assignee ? { type: task.assignee.type, id: task.assignee.id, displayName: task.assignee.displayName, available: task.assignee.available } : null })
+    if (task) cards[link.linkedId] = toCard({ ...task, assignee: task.assignee ? { type: task.assignee.type, id: task.assignee.id, displayName: task.assignee.displayName, available: task.assignee.available, agentKind: task.assignee.agentKind } : null })
   }
   await restoreLastKnownNames(Object.values(cards))
   return cards
@@ -190,7 +194,7 @@ export type PostCommentError =
   | "PARENT_IS_REPLY"
 
 export type PostCommentResult =
-  | { ok: true; comment: DocComment; card: CommentTaskCardData | null; mentioned: { assignee: MentionRef | null; watchers: MentionRef[] } }
+  | { ok: true; comment: DocComment; card: CommentTaskCardData | null; mentioned: { assignee: MentionRef | null; watchers: MentionRef[] }; agentRun?: AgentRunOutcome }
   | { ok: false; error: PostCommentError; message?: string }
 
 const PRIORITIES: readonly string[] = ["URGENT", "HIGH", "MEDIUM", "LOW"]
@@ -200,6 +204,32 @@ export function parseDueDate(value: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
   const date = new Date(`${value}T00:00:00.000Z`)
   return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value ? null : date
+}
+
+/**
+ * Validate a comment's task request and resolve who it goes to, before anything is written. Shared by the Doc and
+ * the generic (Discussion) comment paths so the rules cannot drift.
+ */
+export async function planCommentTask(input: {
+  workspaceId: string
+  task: CommentTaskRequest
+  roles: { assignee: MentionRef | null }
+  agentScopeConfirmed?: boolean
+  /** Agents that already hold a task from a comment on this surface (no scope confirmation needed). */
+  knownAgentIds: () => Promise<string[]>
+}): Promise<{ ok: true; assignee: { type: "USER" | "AGENT"; id: string } } | { ok: false; error: PostCommentError }> {
+  if (!input.task.title.trim()) return { ok: false, error: "EMPTY_TITLE" }
+  if (input.task.priority !== undefined && !PRIORITIES.includes(input.task.priority)) return { ok: false, error: "INVALID_PRIORITY" }
+  if (input.task.dueDate && !parseDueDate(input.task.dueDate)) return { ok: false, error: "INVALID_DUE_DATE" }
+  const wanted = input.roles.assignee
+  if (!wanted) return { ok: false, error: "NO_ASSIGNEE" }
+  const eligible = await eligibleTaskAssignees(input.workspaceId)
+  const wantedType = wanted.kind === "agent" ? "AGENT" : "USER"
+  if (!eligible.some(a => a.type === wantedType && a.id === wanted.id)) return { ok: false, error: "ASSIGNEE_NOT_IN_WORKSPACE" }
+  if (wantedType === "AGENT" && !input.agentScopeConfirmed && !(await input.knownAgentIds()).includes(wanted.id)) {
+    return { ok: false, error: "AGENT_SCOPE_CONFIRMATION_REQUIRED" }
+  }
+  return { ok: true, assignee: { type: wantedType, id: wanted.id } }
 }
 
 export async function postDocCommentWithOptionalTask(input: PostCommentInput): Promise<PostCommentResult> {
@@ -218,21 +248,12 @@ export async function postDocCommentWithOptionalTask(input: PostCommentInput): P
   let assignee: { type: "USER" | "AGENT"; id: string } | null = null
 
   if (input.task) {
-    const title = input.task.title.trim()
-    if (!title) return { ok: false, error: "EMPTY_TITLE" }
-    if (input.task.priority !== undefined && !PRIORITIES.includes(input.task.priority)) return { ok: false, error: "INVALID_PRIORITY" }
-    if (input.task.dueDate && !parseDueDate(input.task.dueDate)) return { ok: false, error: "INVALID_DUE_DATE" }
-    if (!roles.assignee) return { ok: false, error: "NO_ASSIGNEE" }
-    const eligible = await eligibleTaskAssignees(doc.workspaceId)
-    const wantedType = roles.assignee.kind === "agent" ? "AGENT" : "USER"
-    if (!eligible.some(a => a.type === wantedType && a.id === roles.assignee!.id)) {
-      return { ok: false, error: "ASSIGNEE_NOT_IN_WORKSPACE" }
-    }
-    assignee = { type: wantedType, id: roles.assignee.id }
-    if (assignee.type === "AGENT" && !input.agentScopeConfirmed) {
-      const known = await agentIdsAssignedInDoc(doc.workspaceId, doc.id)
-      if (!known.includes(assignee.id)) return { ok: false, error: "AGENT_SCOPE_CONFIRMATION_REQUIRED" }
-    }
+    const plan = await planCommentTask({
+      workspaceId: doc.workspaceId, task: input.task, roles, agentScopeConfirmed: input.agentScopeConfirmed,
+      knownAgentIds: () => agentIdsAssignedInDoc(doc.workspaceId, doc.id),
+    })
+    if (!plan.ok) return plan
+    assignee = plan.assignee
   }
 
   const created = await createDocCommentCore({
@@ -260,7 +281,7 @@ export async function postDocCommentWithOptionalTask(input: PostCommentInput): P
       })
       taskId = task.id
       const [resolved] = await resolveTaskAssignees(doc.workspaceId, [task])
-      card = toCard({ ...task, assignee: resolved.assignee ? { type: resolved.assignee.type, id: resolved.assignee.id, displayName: resolved.assignee.displayName, available: resolved.assignee.available } : null })
+      card = toCard({ ...task, assignee: resolved.assignee ? { type: resolved.assignee.type, id: resolved.assignee.id, displayName: resolved.assignee.displayName, available: resolved.assignee.available, agentKind: resolved.assignee.agentKind } : null })
     } catch (error) {
       // Do not leave a comment that promised a task but has none behind.
       await deleteDocCommentCore(created.comment.id).catch(cleanupError => console.error("[doc-comment-tasks] cleanup failed", cleanupError))
@@ -268,12 +289,20 @@ export async function postDocCommentWithOptionalTask(input: PostCommentInput): P
     }
   }
 
+  // The comment mentions a cloud agent as the task's assignee: start its run, with the comment as context. The comment and
+  // task are saved either way. A comment edit never reaches this function, so editing one cannot start another run.
+  let agentRun: AgentRunOutcome | undefined
+  if (taskId && assignee?.type === "AGENT") {
+    const outcome = await startRunForAssignedTask({ taskId, actingUserId: input.userId, comment: { id: created.comment.id, docId: doc.id, body } })
+    if (outcome.status !== "skipped") agentRun = outcome
+  }
+
   await runAfterCommit(() => notifyMentions({
-    workspaceId: doc.workspaceId, docId: doc.id, commentId: created.comment.id, actorId: input.userId,
+    workspaceId: doc.workspaceId, subjectType: "DOC", subjectId: doc.id, commentId: created.comment.id, actorId: input.userId,
     taskId, mentions: uniqueMentions(body), taskAssigneeUserId: assignee?.type === "USER" && taskId ? assignee.id : null,
   }))
 
-  return { ok: true, comment: created.comment, card, mentioned: roles }
+  return { ok: true, comment: created.comment, card, mentioned: roles, ...(agentRun ? { agentRun } : {}) }
 }
 
 /**
@@ -283,21 +312,21 @@ export async function postDocCommentWithOptionalTask(input: PostCommentInput): P
  * followers, so they get nothing here: an agent's notification is the task in
  * its queue. Best-effort: runs after the comment committed and never throws.
  */
-async function notifyMentions(input: {
-  workspaceId: string; docId: string; commentId: string; actorId: string
+export async function notifyMentions(input: {
+  workspaceId: string; subjectType: string; subjectId: string; commentId: string; actorId: string
   taskId: string | null; mentions: MentionRef[]; taskAssigneeUserId: string | null
 }): Promise<void> {
   const users = input.mentions.filter(m => m.kind === "user" && m.id !== input.actorId)
   const recipients = users.filter(m => m.id !== input.taskAssigneeUserId)
   if (recipients.length === 0) return
   for (const mention of recipients) {
-    await autoFollow({ userId: mention.id, workspaceId: input.workspaceId, subjectType: "DOC", subjectId: input.docId, source: "AUTO_MENTION" })
+    await autoFollow({ userId: mention.id, workspaceId: input.workspaceId, subjectType: input.subjectType, subjectId: input.subjectId, source: "AUTO_MENTION" })
     if (input.taskId) await autoFollow({ userId: mention.id, workspaceId: input.workspaceId, subjectType: "TASK", subjectId: input.taskId, source: "AUTO_MENTION" })
   }
   await emitSubjectEvent({
     workspaceId: input.workspaceId,
-    subjectType: "DOC",
-    subjectId: input.docId,
+    subjectType: input.subjectType,
+    subjectId: input.subjectId,
     kind: "MENTIONED",
     actor: { type: "USER", id: input.actorId },
     payload: { commentId: input.commentId },

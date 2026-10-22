@@ -5,6 +5,11 @@ import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import getPrisma from "@/lib/db";
 import { createPositioningBriefCore } from "@/lib/positioning-brief";
+import { createSpecCore, scopeNotFoundMessage } from "@/lib/spec-docs/create";
+import { isSpecScopeType, type SpecScopeType } from "@/lib/spec-docs/scopes";
+import { loadScopeSpecItems, type SpecListItem } from "@/lib/spec-docs/view";
+import { resolveWorkspaceAccess } from "@/lib/workspace-context";
+import type { SpecTemplateVariant } from "@/lib/spec-docs/template";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 import { Prisma } from "@prisma/client";
 import { followAfterCreate } from "@/lib/following-hooks";
@@ -18,10 +23,15 @@ import {
 import { postDocCommentWithOptionalTask, type CommentTaskRequest, type PostCommentResult } from "@/lib/doc-comment-tasks";
 import { getArtifactStorage } from "@/lib/artifact-storage";
 import { parseArtifactKind } from "@/lib/artifact-kind";
-import { resolveCanvasCards, searchCanvasCardTargets } from "@/lib/canvas-card-data";
+import { resolveCanvasCards, resolveDocEmbeds, searchCanvasCardTargets, type DocEmbedResolution } from "@/lib/canvas-card-data";
 import { getCanvasOverview } from "@/lib/canvas/data";
 import { buildTreeFragment, TREE_SCOPE_KINDS, type TreeFragment, type TreeScope } from "@/lib/canvas-tree";
 import { isUuid } from "@/lib/canvas-cards";
+import { CANVAS_CREATE_PARENT_KIND, isCanvasCreateKind, normalizeCreateTitle, type CanvasCreateKind } from "@/lib/canvas-create";
+import { createOpportunityBatch, createSolutionBatch, type BatchItemResult } from "@/lib/opportunity-batch-create";
+import { createWorkspaceTask } from "@/lib/task-create";
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations";
+import { allocateOneSeq } from "@/lib/work-item-sequence";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { validateTaskLink } from "@/lib/task-assignment";
@@ -277,17 +287,41 @@ async function requireCanvasReader(docId: string) {
         { organization: { memberWorkspaceReadOnlyAccess: true, members: { some: { userId } } } },
       ],
     },
-    select: { id: true, slug: true, organization: { select: { slug: true } } },
+    select: { id: true, slug: true, organization: { select: { slug: true } }, members: { where: { userId }, select: { id: true }, take: 1 } },
   });
   if (!workspace?.organization) throw new Error("Workspace not found or access denied");
-  return { userId, workspaceId: workspace.id, workspaceSlug: workspace.slug, orgSlug: workspace.organization.slug };
+  // A direct workspace member may edit; an org-wide read-only member may only read. Anything unexpected reads as "cannot edit".
+  const canEdit = Array.isArray(workspace.members) && workspace.members.length > 0;
+  return { userId, workspaceId: workspace.id, workspaceSlug: workspace.slug, orgSlug: workspace.organization.slug, canEdit };
 }
 
 /** Live data for the Compass cards on a canvas; unknown/foreign ids come back `unavailable`. */
 export async function resolveCanvasCardRefs(docId: string, refs: unknown) {
-  const access = await requireCanvasReader(docId);
+  const { userId, workspaceId, workspaceSlug, orgSlug } = await requireCanvasReader(docId);
   if (!Array.isArray(refs)) return {};
-  return resolveCanvasCards({ ...access, refs });
+  return resolveCanvasCards({ userId, workspaceId, workspaceSlug, orgSlug, refs });
+}
+
+/**
+ * A resolution plus whether the caller may edit records in the doc's workspace (phase 4). It decides only whether the cards OFFER
+ * edit controls: every write is authorized again, by the record's own endpoint, when it happens.
+ */
+export type DocEmbedBatch = DocEmbedResolution & { canEdit: boolean };
+
+/** Hard bound on the references one call will even look at; the resolver then caps what it queries at MAX_CARD_REFS. */
+const MAX_EMBED_REFS_PER_CALL = 500;
+
+/**
+ * Live data for the embed cards in a Doc (spec docs phase 3). Readable by anyone who can open the doc page. The workspace is the DOC's:
+ * the references can only name a kind and an id. Unknown, deleted, foreign and not-permitted records all come back `unavailable`
+ * (identical payloads); references beyond the per-request cap come back in `deferred` for the editor to ask for as cards scroll into view.
+ */
+export async function resolveDocEmbedRefs(docId: string, refs: unknown): Promise<DocEmbedBatch> {
+  const access = await requireCanvasReader(docId);
+  if (!Array.isArray(refs)) return { cards: {}, deferred: [], canEdit: access.canEdit };
+  const result = await resolveDocEmbeds({ docId, userId: access.userId, refs: refs.slice(0, MAX_EMBED_REFS_PER_CALL), expectedWorkspaceId: access.workspaceId });
+  if (!result) throw new Error("Document not found");
+  return { ...result, canEdit: access.canEdit };
 }
 
 /** Picker search. Requires workspace membership (it is an editing action). */
@@ -295,6 +329,57 @@ export async function searchCanvasCardItems(docId: string, query: string) {
   const { workspaceId } = await requireDocumentMember(docId);
   if (typeof query !== "string") return [];
   return searchCanvasCardTargets({ workspaceId, query });
+}
+
+/**
+ * Create a new Compass object from a canvas ("Create new" in the card picker). Same gate as searchCanvasCardItems: the
+ * viewer must be a member of the DOC's workspace (org-wide read-only access cannot create). The workspace comes from the doc,
+ * never from the client; a parent (solution under an opportunity, assumption under a solution) is looked up inside that
+ * workspace, so a foreign id fails like a missing one. Returns the reference for the client to add as a card: the canvas
+ * stores only {kind,id}. Experiments are not creatable here (they require hypothesis, method and kill condition).
+ */
+export async function createCanvasCardItem(
+  docId: string,
+  input: { kind: unknown; title: unknown; parentId?: unknown },
+): Promise<{ kind: CanvasCreateKind; id: string; title: string }> {
+  const { user, workspaceId } = await requireDocumentMember(docId);
+  if (!input || typeof input !== "object") throw new Error("Invalid request");
+  const { kind } = input;
+  if (!isCanvasCreateKind(kind)) throw new Error("This kind cannot be created from a canvas");
+  const parsedTitle = normalizeCreateTitle(input.title);
+  if (!parsedTitle.ok) throw new Error(parsedTitle.error);
+  const { title } = parsedTitle;
+  const needsParent = CANVAS_CREATE_PARENT_KIND[kind] !== undefined;
+  const parentId = typeof input.parentId === "string" && isUuid(input.parentId) ? input.parentId.toLowerCase() : null;
+  if (needsParent && !parentId) throw new Error("Select a parent card to create this under");
+
+  const prisma = getPrisma();
+  const context = { workspace: { id: workspaceId, isReadOnly: false }, caller: "human" as const, source: "UI" as const, mutationSource: "UI" as const, createdById: user.id ?? null };
+  const unwrap = (result: BatchItemResult): string => {
+    if (!result.ok) throw new Error(result.error);
+    return result.id;
+  };
+
+  let id: string;
+  if (kind === "opportunity") {
+    id = unwrap((await createOpportunityBatch(prisma, context, [{ title }])).results[0]);
+    revalidatePath("/[orgSlug]/[workspaceSlug]/discovery", "layout");
+  } else if (kind === "solution") {
+    id = unwrap((await createSolutionBatch(prisma, context, [{ parent: { id: parentId! }, title }])).results[0]);
+    revalidatePath("/[orgSlug]/[workspaceSlug]/discovery", "layout");
+  } else if (kind === "assumption") {
+    const parent = await prisma.solution.findFirst({ where: { id: parentId!, workspaceId }, select: { id: true } });
+    if (!parent) throw new Error("That parent was not found in this workspace.");
+    const assumption = await captureWorkspaceMutation(prisma, "assumption", "create", "UI", undefined, async tx => tx.assumption.create({
+      data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "assumption")), solutionId: parent.id, title, source: "UI" },
+    }));
+    id = assumption.id;
+    revalidatePath("/[orgSlug]/[workspaceSlug]/discovery", "layout");
+  } else {
+    id = (await createWorkspaceTask(workspaceId, { title })).id;
+    revalidatePath("/[orgSlug]/[workspaceSlug]/tasks", "page");
+  }
+  return { kind, id, title };
 }
 
 /**
@@ -407,6 +492,51 @@ export async function createPositioningBrief(
 
   revalidatePath(revalidatePathStr);
   return { docId: result.docId };
+}
+
+/**
+ * Create a NEW Spec (Solution scope) or Discovery Plan (Opportunity scope) doc. Always a new doc, never an existing one: a solution may have
+ * many specs. An explicit action, never run from a page load. Failures are returned as values (production masks a thrown server-action
+ * message); the scope check is in the caller's workspace, so a foreign scope and a missing one read identically.
+ */
+export async function createSpec(
+  workspaceId: string,
+  scopeType: SpecScopeType,
+  scopeId: string,
+  revalidatePathStr: string,
+  options: { template?: SpecTemplateVariant; label?: string } = {}
+): Promise<{ docId: string } | { error: string }> {
+  const user = await requireWorkspaceMember(workspaceId);
+  if (!isSpecScopeType(scopeType)) return { error: "Choose a valid scope for the spec." };
+  const result = await createSpecCore(
+    { workspaceId, scopeType, scopeId, template: options.template, label: options.label },
+    { userId: user.id ?? null, authorName: user.name ?? user.email ?? "Unknown", source: "UI" }
+  );
+  if (!result.ok) {
+    return { error: result.error === "scope_not_found" ? scopeNotFoundMessage(scopeType) : "Could not create the spec. Try again." };
+  }
+  revalidatePath(revalidatePathStr);
+  return { docId: result.docId };
+}
+
+/**
+ * The specs linked to one solution or opportunity, newest update first, for the "Specs" / "Discovery Plans" sections. Anyone who can open
+ * the workspace may read; `canCreate` is false for org-wide read-only members (createSpec itself still requires workspace membership).
+ * A scope that is not in the workspace reads as an empty, non-creatable list, the same as one with no specs and no rights.
+ */
+export async function loadScopeSpecs(
+  orgSlug: string,
+  workspaceSlug: string,
+  scopeType: SpecScopeType,
+  scopeId: string
+): Promise<{ workspaceId: string; canCreate: boolean; specs: SpecListItem[] }> {
+  const session = await auth();
+  if (!session?.user?.id) throw new Error("Unauthorized");
+  const access = await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id);
+  if (!access) throw new Error("Workspace not found or access denied");
+  if (!isSpecScopeType(scopeType) || !isUuid(scopeId)) return { workspaceId: access.workspaceId, canCreate: false, specs: [] };
+  const specs = await loadScopeSpecItems({ workspaceId: access.workspaceId, orgSlug, workspaceSlug, scopeType, scopeId });
+  return { workspaceId: access.workspaceId, canCreate: !access.isReadOnly && specs !== null, specs: specs ?? [] };
 }
 
 /**

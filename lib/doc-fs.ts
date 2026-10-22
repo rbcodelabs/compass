@@ -25,7 +25,9 @@ import { createHash, randomUUID } from "node:crypto"
 import { safeMatter, stringifyFrontMatter } from "@/lib/safe-matter"
 import { normalizeCanvasContent } from "@/lib/json-canvas"
 import { followAfterCreate, mcpFollowActor } from "@/lib/following-hooks"
-import type { DocType } from "@/lib/doc-types"
+import { normalizeDocType, type DocType } from "@/lib/doc-types"
+import { listScopeFrontmatterForDoc } from "@/lib/spec-docs/scopes"
+import { validateSpecEmbeds } from "@/lib/spec-docs/validate"
 import getPrisma from "@/lib/db"
 import { Prisma } from "@prisma/client"
 import { createDocument, updateDocument, deleteDocument, hydrateDocument, documentRevision, DocumentError } from "@/lib/document-service"
@@ -71,6 +73,12 @@ export type DocFsMutationOptions = {
    * themselves being moved or deleted in the same reconciliation pass.
    */
   occupantMayLeave?: ReadonlySet<string>
+  /**
+   * Agent write paths only (MCP write_doc): a write that leaves a SPEC doc with a malformed compass:// link, an unknown embed kind or an
+   * embed whose record is not in the doc's workspace is refused. Absent (UI saves, Geode sync, the sandbox reconciler) the write stays
+   * lenient: a bad link is kept exactly as written, never rejected and never stripped.
+   */
+  strictEmbeds?: boolean
 }
 
 /** Builds the shared authorId/authorName/actorKey slice of DocumentMutationOptions from a DocFsMutationOptions. */
@@ -141,7 +149,8 @@ function buildTree(docs: DocRow[]): DocFsNode[] {
         title: d.title,
         parentId: d.parentId,
         roadmapItemId: d.roadmapItemId,
-        docType: d.docType === "GTM_POSITIONING_BRIEF" || d.docType === "CANVAS" ? d.docType : "STANDARD",
+        // The column is free-form; only a known type survives, so a SPEC doc is not flattened to STANDARD for the filesystem and agents.
+        docType: normalizeDocType(d.docType),
         hasChildren: (childrenByParent.get(d.id) ?? []).length > 0,
         updatedAt: d.updatedAt,
       })
@@ -215,9 +224,18 @@ export async function readDocById(workspaceId: string, docId: string): Promise<D
     compass_doc_id: doc.id,
     compass_doc_type: doc.docType,
     ...(doc.roadmapItemId ? { compass_roadmap_item_id: doc.roadmapItemId } : {}),
+    // Read-only and derived from the doc's DOC_SPECIFIES_SCOPE links on every read. Like the other compass_ keys it is stripped on
+    // ingest (stripReservedKeys) and set last here, so it can be neither spoofed through a write nor shadowed by user metadata.
+    ...(doc.docType === "SPEC" ? await specScopesFrontmatter(workspaceId, doc.id) : {}),
   }
+  // A stored `compass_scopes` that reached metadata by some other route (a UI properties save) is never reflected on a non-SPEC doc.
+  if (doc.docType !== "SPEC") delete frontmatter.compass_scopes
   const content = stringifyFrontMatter(hydrated.content ?? "", frontmatter)
   return { docId: doc.id, content, revision: documentRevision(doc) }
+}
+
+async function specScopesFrontmatter(workspaceId: string, docId: string): Promise<{ compass_scopes: string[] }> {
+  return { compass_scopes: await listScopeFrontmatterForDoc(getPrisma(), workspaceId, docId) }
 }
 
 /** Strips reserved `compass_`-prefixed keys from a parsed frontmatter object. */
@@ -301,6 +319,11 @@ async function ensureParentChain(
   return parentId
 }
 
+async function assertSpecEmbeds(workspaceId: string, body: string): Promise<void> {
+  const problem = await validateSpecEmbeds({ workspaceId, body })
+  if (problem) throw new DocFsError("invalid-embeds", problem)
+}
+
 export type WritePathResult = { docId: string; created: boolean; revision: string | null; path: string }
 
 /**
@@ -331,6 +354,7 @@ export async function writePath(
 
   const existing = await resolvePath(workspaceId, segments.join("/"))
   const effectiveDocType: DocType = existing ? existing.docType : (opts.docType ?? "STANDARD")
+  if (opts.strictEmbeds && effectiveDocType === "SPEC") await assertSpecEmbeds(workspaceId, body)
   // A CANVAS doc's body is a JSON Canvas document, not markdown: validate it
   // (strict Compass card references; blank canvas when empty) before storing.
   if (effectiveDocType === "CANVAS") {
@@ -428,6 +452,7 @@ export async function writeDocById(
     if (!canvas.ok) throw new DocFsError("invalid-canvas", canvas.error)
     body = canvas.content
   }
+  if (opts.strictEmbeds && node.docType === "SPEC") await assertSpecEmbeds(workspaceId, body)
   const updated = await updateDocument(
     docId,
     { content: body, metadata: metadata ? toJsonInput(metadata) : undefined },

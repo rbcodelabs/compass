@@ -204,7 +204,23 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "099_agent_owner_user_nullable": "9587f0d2c28ca41c92a4217c068966639aac72f722cca8943180751940ab231d",
   // entity_links data half for Solution <-> Key Result (ADR phase 4): no DDL, EXPLICIT-ONLY, the work is the hook
   // (lib/migrations/entity-links-solution-key-result-backfill.ts). Shares the numeric prefix 098 with the agent migration; the name is unique.
-  "098_entity_links_backfill_solution_key_result": "795934c658367a187f400eec3068e1e946d13ecf37b71daf758fb1c87ba4697f" // gitleaks:allow -- reviewed public SHA256, not a credential
+  "098_entity_links_backfill_solution_key_result": "795934c658367a187f400eec3068e1e946d13ecf37b71daf758fb1c87ba4697f", // gitleaks:allow -- reviewed public SHA256, not a credential
+  // Generic saved views step 2: nullable surface column + async index; the backfill and postcondition are the hook in lib/migrations/saved-views-surface.ts (pinned below). Digest recorded from the shipped SQL; please review it.
+  "100_saved_views_surface": "7bc32104f7e6be93aa09b8b9b14431773eda273f8b8f17dfa6cdd347b8e64fb3",
+  // Cloud agents phase 2: nullable agent_id and invoked_by_user_id on agent_runs plus two async indexes. No backfill.
+  "100_agent_runs_agent_attribution": "a83ebc36920078d9d6c54eae6fd7338c41e1bcd2a0b36d6c3d77de24a35b5545",
+  // Cloud agents phase 3: workspace_default_agents and user_default_agents tables, each with one unique async index. No backfill.
+  "101_agent_default_selection": "23b59fe17c4914070c5562b7ebff24332e92266c6deddadbad369beee9bddf06",
+  // Cloud agents phase 4: nullable max_concurrent_runs and max_runs_per_day on agents. No index, no backfill.
+  "102_agent_run_caps": "7eed74c5027f19acdb1aa1fea30d99afa1915842ccfca5ec9d8f22619db6b8a2",
+  // Cloud agents phase 3: no DDL, EXPLICIT-ONLY and TARGETED; the work is the hook (lib/migrations/shared-compass-agent-bootstrap.ts).
+  "103_shared_compass_agent_bootstrap": "5eaf5543ac6be12db4b69a3d2250d095e48f361b33e683f1752c0ca7527f0929",
+  // Two ASYNC created_at indexes (agent_run_events, agent_messages) for the agent-data retention job. Additive and optional: no table change,
+  // no backfill, one DDL statement per transaction. The 104 postcondition proves both indexes exist and are valid.
+  "104_agent_retention_indexes": "2c6da24d861aa569f3ea44aca15f2ac98718ec13c3985a3a8997a1e7a65a1813",
+  // Per-workspace agent GitHub repo allowlist: one nullable TEXT column on workspaces (JSON array of "owner/name"). No index, no backfill.
+  // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
+  "105_workspace_agent_github_repos": "ed1b4077170a09220767762c3756c763bd6db1031896dd7f6e44da07b17bdd80"
 };
 
 /**
@@ -301,6 +317,32 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   "098_entity_links_backfill_solution_key_result": {
     "lib/migrations/entity-links-solution-key-result-backfill.ts": "e61171d6fd196cacbb79708691aef6610a3adf6340c189a516738db498a7665d", // gitleaks:allow -- reviewed public SHA256, not a credential
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 100 backfill + postcondition hook and the OCC retry it imports; editing either re-reviews the migration.
+  "100_saved_views_surface": {
+    "lib/migrations/saved-views-surface.ts": "05fff4ffc6e1c19769dc4b6b56451ffb263a6dc31c39928cf62183ed6e1fadf2",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 100 postcondition (agent_id and invoked_by_user_id nullable uuid; both indexes valid and ready).
+  "100_agent_runs_agent_attribution": {
+    "lib/migrations/agent-run-attribution.ts": "c0967e0232aca1524e54a91098a1be886b6d2869f2fca171535bf28094cd7fd5",
+  },
+  // The 101 postcondition (both tables' columns; both unique indexes valid and ready).
+  "101_agent_default_selection": {
+    "lib/migrations/agent-default-selection.ts": "344d4dadc297d98f6a65afafdf0a96c2c43f3205976ff7f92e7b6bab7213ae3a",
+  },
+  // The 102 postcondition (both cap columns are nullable integers).
+  "102_agent_run_caps": {
+    "lib/migrations/agent-run-caps.ts": "b3f416406fcddcd94b82b48a8aba4a111d1e7f7458b86cefb85cf7ae3624fdf9",
+  },
+  // The 103 hook and the refusal type it imports; editing either re-reviews the migration.
+  "103_shared_compass_agent_bootstrap": {
+    "lib/migrations/shared-compass-agent-bootstrap.ts": "1d729847d0855d68748684c8c4339dbfbd52b533098c2bb43b883594b292247e",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 104 postcondition (both created_at indexes exist and are valid); editing it re-reviews the migration.
+  "104_agent_retention_indexes": {
+    "lib/migrations/agent-retention-indexes.ts": "02b0e57b758b7c42122e199580f4ce1f9bb4e40a77841590595ca16f056faa2f",
   },
 };
 

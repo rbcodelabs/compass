@@ -12,7 +12,7 @@ export const metadata = { title: "Agent" }
 
 interface AgentPageProps {
   params: Promise<{ orgSlug: string; workspaceSlug: string }>
-  searchParams: Promise<{ c?: string; entityType?: string; entityId?: string }>
+  searchParams: Promise<{ c?: string; entityType?: string; entityId?: string; agentId?: string }>
 }
 
 export default async function AgentPage({ params, searchParams }: AgentPageProps) {
@@ -20,7 +20,7 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
   if (!session?.user?.id) redirect("/login")
 
   const { orgSlug, workspaceSlug } = await params
-  const { c: conversationId, entityType, entityId } = await searchParams
+  const { c: conversationId, entityType, entityId, agentId } = await searchParams
   const prisma = getPrisma()
 
   // Membership is enforced by the workspace layout; scope by org+workspace slug here.
@@ -85,6 +85,7 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
       userInitials={initialsOf(session.user.name ?? session.user.email)}
       seedEntity={seedEntity}
       suggestedInstruction={suggestedInstruction}
+      initialAgentId={agentId}
       initialListOpen={listOpen}
     />
   )

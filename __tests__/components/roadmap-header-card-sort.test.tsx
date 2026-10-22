@@ -12,6 +12,12 @@ vi.mock("@/app/[orgSlug]/roadmap/actions", () => ({
   deleteRoadmapViewAction: vi.fn(),
 }));
 
+vi.mock("@/app/[orgSlug]/saved-views-actions", () => ({
+  createSavedViewAction: vi.fn(),
+  updateSavedViewAction: vi.fn(),
+  deleteSavedViewAction: vi.fn(),
+}));
+
 vi.mock("@/hooks/use-url-state", () => ({
   useUrlState: () => ({ params: new URLSearchParams(), set: vi.fn() }),
 }))

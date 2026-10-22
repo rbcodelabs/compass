@@ -15,13 +15,15 @@ vi.mock("@/lib/db", () => ({ default: () => prisma }))
 const refreshV0Artifact = vi.fn()
 const createV0Artifact = vi.fn()
 vi.mock("@/lib/v0-artifacts", () => ({ refreshV0Artifact: (...a: unknown[]) => refreshV0Artifact(...a), createV0Artifact: (...a: unknown[]) => createV0Artifact(...a) }))
-vi.mock("@/lib/mcp-authz", async (orig) => ({ ...(await orig<typeof import("@/lib/mcp-authz")>()), getMcpActor: () => ({ userId: "user-1", purpose: "AGENT", agentId: "agent" }) }))
+const actorState = vi.hoisted(() => ({ actor: { userId: "user-1", purpose: "USER" } as { userId: string; purpose: string; agentId?: string | null; agentRunId?: string } }))
+vi.mock("@/lib/mcp-authz", async (orig) => ({ ...(await orig<typeof import("@/lib/mcp-authz")>()), getMcpActor: () => actorState.actor }))
 vi.mock("@/lib/artifact-storage", () => ({ getArtifactStorage: () => storage }))
 
 import { createArtifact, getArtifact, listArtifacts, refreshArtifactFromV0, updateArtifact } from "@/lib/artifact-tool-handlers"
 
 beforeEach(() => {
   vi.clearAllMocks()
+  actorState.actor = { userId: "user-1", purpose: "USER" }
   prisma.$transaction.mockImplementation(async (callback) => callback(prisma))
   prisma.artifactRevision.findFirst.mockResolvedValue(null)
   prisma.artifactLink.findMany.mockResolvedValue([])
@@ -79,6 +81,44 @@ describe("Artifact MCP output redaction", () => {
     const result = await getArtifact({ artifactId: "art-1" })
     expect(JSON.stringify(result)).not.toContain("private/")
     expect(JSON.stringify(result)).not.toContain("blobPathname")
+  })
+})
+
+describe("V0_CHAT is refused to agent identities (they must never borrow the invoker's v0 credential)", () => {
+  const identities: Array<[string, { userId: string; purpose: string; agentId?: string | null; agentRunId?: string }]> = [
+    ["a cloud run of a named agent", { userId: "invoker", purpose: "AGENT_TURN", agentId: "agent-shared", agentRunId: "run-1" }],
+    ["a personal agent key", { userId: "owner", purpose: "AGENT", agentId: "agent-personal" }],
+  ]
+
+  it.each(identities)("create_artifact refuses %s without touching v0", async (_label, actor) => {
+    actorState.actor = actor
+    const result = await createArtifact({ workspaceId: "ws-1", title: "", sourceType: "V0_CHAT", url: "https://v0.app/chat/abc123" })
+    expect(result.structuredContent.ok).toBe(false)
+    expect(result.content[0].text).toMatch(/person's connected v0 account/)
+    expect(createV0Artifact).not.toHaveBeenCalled()
+  })
+
+  it.each(identities)("refresh_artifact_from_v0 refuses %s without touching v0", async (_label, actor) => {
+    actorState.actor = actor
+    const result = await refreshArtifactFromV0({ artifactId: "art-1", workspaceId: "ws-1" })
+    expect(result.structuredContent.ok).toBe(false)
+    expect(result.content[0].text).toMatch(/person's connected v0 account/)
+    expect(refreshV0Artifact).not.toHaveBeenCalled()
+  })
+
+  it("still lets the built-in assistant (AGENT_TURN with no agent id) act for the person, and people themselves", async () => {
+    createV0Artifact.mockResolvedValue({ id: "art-9", title: "Chat" })
+    actorState.actor = { userId: "user-1", purpose: "AGENT_TURN", agentId: null }
+    expect((await createArtifact({ workspaceId: "ws-1", title: "", sourceType: "V0_CHAT", url: "https://v0.app/chat/abc123" })).structuredContent.ok).toBe(true)
+    actorState.actor = { userId: "user-1", purpose: "USER" }
+    expect((await createArtifact({ workspaceId: "ws-1", title: "", sourceType: "V0_CHAT", url: "https://v0.app/chat/abc123" })).structuredContent.ok).toBe(true)
+    expect(createV0Artifact).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not refuse non-v0 artifact creation for an agent", async () => {
+    actorState.actor = identities[0][1]
+    const result = await createArtifact({ workspaceId: "ws-1", title: "Doc", sourceType: "EXTERNAL_LINK", url: "not a url" })
+    expect(result.content[0].text).not.toMatch(/v0 account/)
   })
 })
 

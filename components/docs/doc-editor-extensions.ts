@@ -15,6 +15,9 @@ import {
   CommentHighlight,
   type CommentAnchorData,
 } from "@/components/docs/comment-highlight-extension";
+import { MermaidCodeBlock } from "@/components/docs/mermaid-code-block-extension";
+import { SpecEmbed } from "@/components/docs/spec-embed-extension";
+import { SpecSlashCommand, type SlashController } from "@/components/docs/spec-slash-extension";
 import { createMarkdownEditorExtensions } from "@/components/markdown-editor-extensions";
 
 /**
@@ -23,10 +26,15 @@ import { createMarkdownEditorExtensions } from "@/components/markdown-editor-ext
  * `commentAnchors` seeds the highlight decorations; later changes are pushed
  * imperatively via setCommentHighlights rather than by rebuilding this list.
  */
-export function createDocEditorExtensions(commentAnchors: CommentAnchorData[]) {
+export function createDocEditorExtensions(commentAnchors: CommentAnchorData[], options: { slash?: SlashController } = {}) {
+  const { slash } = options;
   return [
-    ...createMarkdownEditorExtensions(),
+    ...createMarkdownEditorExtensions(undefined, MermaidCodeBlock),
     Image.configure({ inline: false }),
+    // Inert unless a paragraph is exactly one compass:// link (see lib/doc-embeds).
+    SpecEmbed,
     CommentHighlight.configure({ comments: commentAnchors, activeId: null }),
+    // Only a spec doc gets the "/" menu (spec docs phase 4); it never changes the document on its own.
+    ...(slash ? [SpecSlashCommand.configure({ getController: () => slash })] : []),
   ];
 }

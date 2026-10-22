@@ -59,7 +59,8 @@ const mockPackStorage = vi.fn()
 vi.mock("@/lib/artifact-storage", () => ({ getCapabilityPackArtifactStorage: () => mockPackStorage() }))
 
 const mockCheckLimit = vi.fn()
-vi.mock("@/lib/agent-limits", () => ({ checkAgentUsageLimit: () => mockCheckLimit() }))
+const mockCheckAgentRunCaps = vi.fn()
+vi.mock("@/lib/agent-limits", async (original) => ({ ...await original<object>(), checkAgentUsageLimit: () => mockCheckLimit(), checkAgentRunCaps: (...args: unknown[]) => mockCheckAgentRunCaps(...args) }))
 
 const mockResolveAgentHandoffContext = vi.fn()
 vi.mock("@/lib/agent-context", () => ({ resolveAgentHandoffContext: (...args: unknown[]) => mockResolveAgentHandoffContext(...args) }))
@@ -77,17 +78,25 @@ vi.mock("@/lib/mcp-connectors/vercel-connect", () => ({
 // `agentRunsAvailable` defaults to false in beforeEach so the existing
 // guard + streaming expectations below keep exercising the synchronous fallback
 // path; the detached path has its own describe block at the end of this file.
-const runMocks = vi.hoisted(() => ({ available: vi.fn(), create: vi.fn(), started: vi.fn(), finalize: vi.fn() }))
+const runMocks = vi.hoisted(() => ({ available: vi.fn(), attribution: vi.fn(), create: vi.fn(), started: vi.fn(), finalize: vi.fn(), attach: vi.fn() }))
 vi.mock("@/lib/agent-runs", async (original) => ({
   ...await original<object>(),
   agentRunsAvailable: runMocks.available,
+  agentRunAttributionAvailable: runMocks.attribution,
   createAgentRun: runMocks.create,
   markAgentRunStarted: runMocks.started,
   finalizeAgentRun: runMocks.finalize,
+  attachAgentRunKey: runMocks.attach,
 }))
+
+// Agent resolution is exercised against the real predicates in __tests__/lib/run-as-agent.test.ts; here only what the route
+// does with the answer is under test.
+const identityMocks = vi.hoisted(() => ({ resolve: vi.fn() }))
+vi.mock("@/lib/agent-run-identity", async (original) => ({ ...await original<object>(), resolveRunAgent: identityMocks.resolve }))
 
 import { POST } from "@/app/api/agent/turn/route"
 import { AgentRunError, DEFAULT_AGENT_RUN_BUDGET_MS } from "@/lib/agent-runs"
+import { AgentSelectionError } from "@/lib/agent-run-identity"
 import { DEFAULT_INTERVIEW_CLAIM_LEASE_MS } from "@/lib/pm-agent-service"
 
 function req(body: unknown): NextRequest {
@@ -104,6 +113,10 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockPackStorage.mockReturnValue({})
   process.env.ANTHROPIC_API_KEY = "sk-ant-test"
+  delete process.env.AGENT_MODEL_PROVIDER
+  delete process.env.AGENT_MODEL_ID
+  delete process.env.BEDROCK_API_KEY
+  delete process.env.AWS_REGION
   mockAuth.mockResolvedValue(SESSION)
   mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
   mockPrisma.agentConversation.findFirst.mockResolvedValue(null)
@@ -115,8 +128,12 @@ beforeEach(() => {
   mockResolveAgentHandoffContext.mockResolvedValue(null)
   mockListConnectedGrants.mockResolvedValue([])
   runMocks.available.mockResolvedValue(false)
+  runMocks.attribution.mockResolvedValue(true)
   runMocks.started.mockResolvedValue(undefined)
   runMocks.finalize.mockResolvedValue(undefined)
+  runMocks.attach.mockResolvedValue(true)
+  identityMocks.resolve.mockResolvedValue(null)
+  mockCheckAgentRunCaps.mockResolvedValue({ allowed: true })
   mockPrisma.doc.findMany.mockResolvedValue([])
   process.env.AUTH_SECRET = "test-auth-secret"
 })
@@ -279,6 +296,86 @@ describe("agent turn route — guards", () => {
     expect(await res.text()).toMatch(/ANTHROPIC_API_KEY/)
     expect(mockBootSandbox).not.toHaveBeenCalled()
     expect(mockMintKey).not.toHaveBeenCalled()
+  })
+
+  describe("model provider selection", () => {
+    function setupRun() {
+      const runCommand = vi.fn().mockResolvedValue({ async *logs() { yield { stream: "stdout", data: 'AGENT_ERROR {"message":"test stop"}\n' } }, wait: vi.fn() })
+      mockBootSandbox.mockResolvedValue({ writeFiles: vi.fn(), runCommand, stop: vi.fn() })
+      mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1", name: "Test", slug: "test", organization: { slug: "org" } })
+      mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+      mockPrisma.agentMessage.findMany.mockResolvedValue([{ role: "user", content: "hi" }])
+      return runCommand
+    }
+
+    it("defaults to the Anthropic API: key and model forwarded, no Bedrock env", async () => {
+      const runCommand = setupRun()
+      await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+      const env = runCommand.mock.calls[0][0].env as Record<string, string>
+      expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test")
+      expect(env.AGENT_MODEL).toBe("claude-sonnet-5")
+      expect(env).not.toHaveProperty("CLAUDE_CODE_USE_BEDROCK")
+      expect(env).not.toHaveProperty("AWS_BEARER_TOKEN_BEDROCK")
+    })
+
+    it("routes the sandbox at Bedrock when AGENT_MODEL_PROVIDER=bedrock", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock"
+      process.env.BEDROCK_API_KEY = "bedrock-test-token"
+      const runCommand = setupRun()
+      await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+      const env = runCommand.mock.calls[0][0].env as Record<string, string>
+      expect(env.AWS_BEARER_TOKEN_BEDROCK).toBe("bedrock-test-token")
+      expect(env.CLAUDE_CODE_USE_BEDROCK).toBe("1")
+      expect(env.AWS_REGION).toBe("us-east-1")
+      expect(env.AGENT_MODEL).toBe("global.anthropic.claude-sonnet-5-5")
+      // The other provider's credential never enters the sandbox.
+      expect(env).not.toHaveProperty("ANTHROPIC_API_KEY")
+    })
+
+    it("honors AGENT_MODEL_ID and AWS_REGION", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock"
+      process.env.BEDROCK_API_KEY = "bedrock-test-token"
+      process.env.AGENT_MODEL_ID = "us.anthropic.custom"
+      process.env.AWS_REGION = "us-west-2"
+      const runCommand = setupRun()
+      await (await POST(req({ workspaceId: "ws-1", message: "hi" }))).text()
+      const env = runCommand.mock.calls[0][0].env as Record<string, string>
+      expect(env.AGENT_MODEL).toBe("us.anthropic.custom")
+      expect(env.AWS_REGION).toBe("us-west-2")
+    })
+
+    it.each([
+      ["missing", undefined],
+      ["empty", ""],
+      ["whitespace", " \n\t "],
+    ])("500 naming BEDROCK_API_KEY when it is %s, without booting a sandbox", async (_label, value) => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock"
+      if (value === undefined) delete process.env.BEDROCK_API_KEY
+      else process.env.BEDROCK_API_KEY = value
+      mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+      const res = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(res.status).toBe(500)
+      expect(await res.text()).toMatch(/BEDROCK_API_KEY/)
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+      expect(mockMintKey).not.toHaveBeenCalled()
+    })
+
+    it("does not accept the Anthropic key as a stand-in for the Bedrock one", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock" // ANTHROPIC_API_KEY is set by beforeEach
+      mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+      const res = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(res.status).toBe(500)
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+    })
+
+    it("500 on an unknown AGENT_MODEL_PROVIDER", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "vertex"
+      mockPrisma.agentConversation.create.mockResolvedValue({ id: "c-1" })
+      const res = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(res.status).toBe(500)
+      expect(await res.text()).toMatch(/AGENT_MODEL_PROVIDER/)
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+    })
   })
 
   it("revokes the acting-user MCP key when capability-pack preparation fails", async () => {
@@ -694,6 +791,331 @@ describe("agent turn route — detached runs", () => {
     expect(paths).toEqual(expect.arrayContaining(["entry.ts", "docs-path-guard.ts", "docs-final-state.ts"]))
   })
 
+  describe("per-turn model pick", () => {
+    const AGENT_ID = "22222222-2222-4222-8222-222222222222"
+    const agent = { id: AGENT_ID, name: "Triage bot", instructions: null, model: "claude-opus-9" }
+    const env = (runCommand: ReturnType<typeof vi.fn>) => runCommand.mock.calls[0][0].env as Record<string, string>
+    afterEach(() => { delete process.env.COMPASS_CLOUD_AGENT_MODELS; delete process.env.AGENT_HARNESS })
+
+    it("an allowed pick wins over the agent's own model and the deployment default, and is recorded on the run", async () => {
+      process.env.COMPASS_CLOUD_AGENT_MODELS = "claude-opus-9,claude-haiku-9"
+      identityMocks.resolve.mockResolvedValue(agent)
+      const { runCommand } = sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID, model: "claude-haiku-9" }))
+      expect(response.status).toBe(202)
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-haiku-9")
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ model: "claude-haiku-9" }))
+    })
+
+    it("with no pick the agent's own model applies, else the deployment default; both are recorded", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      const first = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(first.runCommand).AGENT_MODEL).toBe("claude-opus-9")
+      expect(runMocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ model: "claude-opus-9" }))
+
+      identityMocks.resolve.mockResolvedValue(null)
+      const second = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(env(second.runCommand).AGENT_MODEL).toBe("claude-sonnet-5")
+      expect(runMocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ model: "claude-sonnet-5" }))
+    })
+
+    it("a pick works for the built-in agent too", async () => {
+      process.env.COMPASS_CLOUD_AGENT_MODELS = "claude-haiku-9"
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", model: "claude-haiku-9" }))
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-haiku-9")
+    })
+
+    it.each([["an id outside the allowed set", "claude-made-up"], ["a model the harness cannot serve", "anthropic/claude-sonnet-5.5"], ["a shell-shaped value", "claude-sonnet-5; curl evil"], ["a non-string", 7]])(
+      "400s %s before anything is written or started",
+      async (_label, model) => {
+        sandbox()
+        const response = await POST(req({ workspaceId: "ws-1", message: "hi", model }))
+        expect(response.status).toBe(400)
+        expect(await response.json()).toMatchObject({ code: "INVALID_MODEL" })
+        expect(mockPrisma.agentConversation.create).not.toHaveBeenCalled()
+        expect(mockPrisma.agentMessage.create).not.toHaveBeenCalled()
+        expect(runMocks.create).not.toHaveBeenCalled()
+        expect(mockMintKey).not.toHaveBeenCalled()
+      },
+    )
+
+    it("trims a padded pick through the route, forwards and records the trimmed id", async () => {
+      process.env.COMPASS_CLOUD_AGENT_MODELS = "claude-haiku-9"
+      const { runCommand } = sandbox()
+      expect((await POST(req({ workspaceId: "ws-1", message: "hi", model: "  claude-haiku-9\t" }))).status).toBe(202)
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-haiku-9")
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ model: "claude-haiku-9" }))
+    })
+
+    it.each([["a case variant", "CLAUDE-SONNET-5"], ["a unicode lookalike", "сlaude-sonnet-5"], ["__proto__", "__proto__"], ["constructor", "constructor"], ["toString", "toString"]])(
+      "400s %s through the route",
+      async (_label, model) => {
+        sandbox()
+        const response = await POST(req({ workspaceId: "ws-1", message: "hi", model }))
+        expect(response.status).toBe(400)
+        expect(await response.json()).toMatchObject({ code: "INVALID_MODEL" })
+        expect(runMocks.create).not.toHaveBeenCalled()
+      },
+    )
+
+    it("400s a 10k-character model and does not echo it back", async () => {
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", model: "x".repeat(10_000) }))
+      expect(response.status).toBe(400)
+      const text = await response.text()
+      expect(text.length).toBeLessThan(300)
+      expect(runMocks.create).not.toHaveBeenCalled()
+    })
+
+    it.each([null, "", "   "])("an agent whose saved model is %j still honours an explicit pick, and otherwise runs on the default", async (agentModel) => {
+      identityMocks.resolve.mockResolvedValue({ ...agent, model: agentModel })
+      process.env.COMPASS_CLOUD_AGENT_MODELS = "claude-haiku-9"
+      const first = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID, model: "claude-haiku-9" }))
+      expect(env(first.runCommand).AGENT_MODEL).toBe("claude-haiku-9")
+      const second = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(second.runCommand).AGENT_MODEL).toBe("claude-sonnet-5")
+      expect(runMocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ model: "claude-sonnet-5" }))
+    })
+
+    it("a blank pick is no pick", async () => {
+      const { runCommand } = sandbox()
+      expect((await POST(req({ workspaceId: "ws-1", message: "hi", model: "  " }))).status).toBe(202)
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-sonnet-5")
+    })
+
+    it("on Bedrock a pick is refused and the deployment's profile id is what gets recorded for a run without one", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock"
+      process.env.BEDROCK_API_KEY = "bedrock-test-token"
+      sandbox()
+      const refused = await POST(req({ workspaceId: "ws-1", message: "hi", model: "claude-sonnet-5" }))
+      expect(refused.status).toBe(400)
+      expect(await refused.json()).toMatchObject({ code: "MODEL_CHOICE_UNAVAILABLE" })
+      expect(runMocks.create).not.toHaveBeenCalled()
+
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(env(runCommand).AGENT_MODEL).toBe("global.anthropic.claude-sonnet-5-5")
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ model: "global.anthropic.claude-sonnet-5-5" }))
+    })
+
+    it("on the opencode harness the pick must be a gateway id, and is forwarded as AGENT_MODEL", async () => {
+      process.env.AGENT_HARNESS = "opencode"
+      process.env.AI_GATEWAY_API_KEY = "gw-test"
+      process.env.COMPASS_CLOUD_AGENT_MODELS = "openai/gpt-9"
+      try {
+        const bad = await POST(req({ workspaceId: "ws-1", message: "hi", model: "claude-sonnet-5" }))
+        expect(bad.status).toBe(400)
+        const { runCommand } = sandbox()
+        const ok = await POST(req({ workspaceId: "ws-1", message: "hi", model: "openai/gpt-9" }))
+        expect(ok.status).toBe(202)
+        expect(env(runCommand).AGENT_MODEL).toBe("openai/gpt-9")
+      } finally {
+        delete process.env.AI_GATEWAY_API_KEY
+      }
+    })
+  })
+
+  describe("running as a named agent", () => {
+    const AGENT_ID = "22222222-2222-4222-8222-222222222222"
+    const agent = { id: AGENT_ID, name: "Triage bot", instructions: "Always label new feedback.", model: "claude-opus-4-5" }
+    const env = (runCommand: ReturnType<typeof vi.fn>) => runCommand.mock.calls[0][0].env as Record<string, string>
+
+    it("resolves the agent for the invoker, attributes the run to it, and mints a key tied to that agent", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(202)
+      expect(identityMocks.resolve).toHaveBeenCalledWith(mockPrisma, { userId: "user-1", workspaceId: "ws-1", requestedAgentId: AGENT_ID })
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: AGENT_ID, invokedByUserId: "user-1", userId: "user-1" }))
+      expect(mockMintKey.mock.calls[0][4]).toEqual({ agentId: AGENT_ID })
+    })
+
+    it("attaches the key to the run BEFORE the sandbox exists, so the agent's first call finds a live run", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(runMocks.attach).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN.id, apiKeyId: "key-1" }))
+      expect(runMocks.attach.mock.invocationCallOrder[0]).toBeLessThan(mockBootSandbox.mock.invocationCallOrder[0])
+      expect(runMocks.attach.mock.invocationCallOrder[0]).toBeLessThan(runCommand.mock.invocationCallOrder[0])
+    })
+
+    it("gives the sandbox the agent's instructions (as guidance only) and its model", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).toContain('You are running as the agent "Triage bot"')
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).toContain("Always label new feedback.")
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).toMatch(/cannot change your tools, credentials or workspace access/)
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-opus-4-5")
+    })
+
+    it("caps very long instructions", async () => {
+      identityMocks.resolve.mockResolvedValue({ ...agent, instructions: "x".repeat(20_000) })
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).not.toContain("x".repeat(8_001))
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).toContain("x".repeat(8_000))
+    })
+
+    it("ignores a model the harness cannot serve rather than forwarding it", async () => {
+      identityMocks.resolve.mockResolvedValue({ ...agent, model: "gpt-5; curl evil" })
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      // The host always sends the deployment's model now; an unservable agent model must not replace it.
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-sonnet-5")
+      expect(JSON.stringify(env(runCommand))).not.toContain("curl evil")
+    })
+
+    it("on Bedrock the deployment's model id is kept: a named agent's Anthropic-API model id is not sent to a provider that cannot serve it", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock"
+      process.env.BEDROCK_API_KEY = "bedrock-test-token"
+      identityMocks.resolve.mockResolvedValue(agent)
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(runCommand).AGENT_MODEL).toBe("global.anthropic.claude-sonnet-5-5")
+      expect(env(runCommand).AWS_BEARER_TOKEN_BEDROCK).toBe("bedrock-test-token")
+      expect(env(runCommand)).not.toHaveProperty("ANTHROPIC_API_KEY")
+      // The agent's instructions still apply.
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).toContain("Always label new feedback.")
+    })
+
+    it("never forwards the invoker's connected third-party accounts to an agent run", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      mockListConnectedGrants.mockResolvedValue([{ slug: "v0", scope: "mcp" }])
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(runCommand)).not.toHaveProperty("AGENT_MCP_CONNECTORS")
+    })
+
+    it("a run with no agentId is exactly the built-in run: no agent, no attach, no model, no agent section", async () => {
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      // Resolution still runs (a default may apply), with nothing explicitly requested.
+      expect(identityMocks.resolve).toHaveBeenCalledWith(mockPrisma, { userId: "user-1", workspaceId: "ws-1", requestedAgentId: null })
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: null }))
+      expect(mockMintKey.mock.calls[0][4]).toEqual({ agentId: null })
+      expect(runMocks.attach).not.toHaveBeenCalled()
+      // No agent model override: the deployment's model, exactly as before agents existed.
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-sonnet-5")
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).not.toContain("You are running as the agent")
+    })
+
+    it.each([
+      ["a policy refusal", new AgentSelectionError("You are not allowed to run this agent.", 403, "AGENT_NOT_INVOKABLE"), 403, "AGENT_NOT_INVOKABLE"],
+      ["an unknown or unavailable agent", new AgentSelectionError("Agent not found or not available in this workspace.", 404, "AGENT_NOT_FOUND"), 404, "AGENT_NOT_FOUND"],
+    ])("answers %s before anything is written or started", async (_label, error, status, code) => {
+      identityMocks.resolve.mockRejectedValue(error)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(status)
+      expect(await response.json()).toMatchObject({ code })
+      expect(mockPrisma.agentConversation.create).not.toHaveBeenCalled()
+      expect(mockPrisma.agentMessage.create).not.toHaveBeenCalled()
+      expect(runMocks.create).not.toHaveBeenCalled()
+      expect(mockMintKey).not.toHaveBeenCalled()
+    })
+
+    it("runs the agent a default resolved to, attributed to it, when nothing was requested", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(response.status).toBe(202)
+      expect(identityMocks.resolve).toHaveBeenCalledWith(mockPrisma, { userId: "user-1", workspaceId: "ws-1", requestedAgentId: null })
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: AGENT_ID }))
+    })
+
+    it('passes "builtin" through so a picker can choose the built-in agent on purpose', async () => {
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: "builtin" }))
+      expect(response.status).toBe(202)
+      expect(identityMocks.resolve).toHaveBeenCalledWith(mockPrisma, { userId: "user-1", workspaceId: "ws-1", requestedAgentId: "builtin" })
+    })
+
+    it("quietly runs the built-in agent when a DEFAULT cannot run as a named agent (no background runs)", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      runMocks.available.mockResolvedValue(false)
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(response.status).not.toBe(503)
+      expect(runMocks.attach).not.toHaveBeenCalled()
+    })
+
+    it("quietly runs the built-in agent when a DEFAULT cannot be attributed (migration 100 unapplied)", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      runMocks.attribution.mockResolvedValue(false)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(response.status).toBe(202)
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: null }))
+    })
+
+    it("rejects a malformed agentId with 400 without resolving anything", async () => {
+      for (const agentId of ["not-a-uuid", 7, {}, ["x"]]) {
+        const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId }))
+        expect(response.status).toBe(400)
+      }
+      expect(identityMocks.resolve).not.toHaveBeenCalled()
+    })
+
+    it("refuses to run as a named agent on the synchronous fallback (no run row to prove the key against)", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      runMocks.available.mockResolvedValue(false)
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(503)
+      expect(await response.json()).toMatchObject({ code: "AGENT_RUN_UNAVAILABLE" })
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+      expect(mockMintKey).not.toHaveBeenCalled()
+    })
+
+    it("surfaces an unattributable run (migration 100 unapplied) as the run error, starting nothing", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      runMocks.create.mockRejectedValue(new AgentRunError("Running as a named agent needs migration 100 to be applied", 503, "AGENT_ATTRIBUTION_UNAVAILABLE"))
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(503)
+      expect(await response.json()).toMatchObject({ code: "AGENT_ATTRIBUTION_UNAVAILABLE" })
+      expect(mockMintKey).not.toHaveBeenCalled()
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ["concurrent", { allowed: false, cap: "CONCURRENT", limit: 5, reason: "This agent already has 5 runs in progress (limit 5)." }],
+      ["daily", { allowed: false, cap: "DAILY", limit: 100, reason: "This agent has reached its daily limit of 100 runs." }],
+    ])("refuses with 429 AGENT_CAP_REACHED naming the %s cap, before any run or key exists", async (_label, capped) => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      mockCheckAgentRunCaps.mockResolvedValue(capped)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(429)
+      expect(await response.json()).toEqual({ error: capped.reason, code: "AGENT_CAP_REACHED", cap: capped.cap, limit: capped.limit })
+      expect(mockCheckAgentRunCaps).toHaveBeenCalledWith(mockPrisma, AGENT_ID)
+      expect(runMocks.create).not.toHaveBeenCalled()
+      expect(mockMintKey).not.toHaveBeenCalled()
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+    })
+
+    it("does not consult the agent caps for the built-in agent", async () => {
+      identityMocks.resolve.mockResolvedValue(null)
+      sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi" }))
+      expect(mockCheckAgentRunCaps).not.toHaveBeenCalled()
+    })
+
+    it("fails the run and revokes the key when the run ended before its key could be attached", async () => {
+      identityMocks.resolve.mockResolvedValue(agent)
+      runMocks.attach.mockResolvedValue(false)
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(response.status).toBe(500)
+      expect(mockRevokeKey).toHaveBeenCalledWith("key-1")
+      expect(runMocks.finalize).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN.id, status: "FAILED", errorCode: "RUN_START_FAILED" }))
+      expect(mockBootSandbox).not.toHaveBeenCalled()
+    })
+  })
+
   describe("harness selection (EXPERIMENTAL opencode, default off)", () => {
     const savedEnv = { harness: process.env.AGENT_HARNESS, gateway: process.env.AI_GATEWAY_API_KEY, model: process.env.AGENT_OPENCODE_MODEL }
     afterEach(() => {
@@ -760,6 +1182,96 @@ describe("agent turn route — detached runs", () => {
       expect(files.find(f => f.path === "entry.ts")?.content).toContain("[opencode-turn-entry]")
       expect(files.map(f => f.path)).toEqual(expect.arrayContaining(["opencode-adapter.ts", "run-reporter.ts"]))
       expect(files.some(f => f.path.startsWith("docs/"))).toBe(false)
+    })
+
+    describe("harness x model provider matrix", () => {
+      const providerVars = ["AGENT_MODEL_PROVIDER", "AGENT_MODEL_ID", "BEDROCK_API_KEY", "AWS_REGION", "ANTHROPIC_API_KEY"] as const
+      const savedProvider: Record<string, string | undefined> = {}
+      beforeEach(() => { for (const k of providerVars) savedProvider[k] = process.env[k] })
+      afterEach(() => {
+        for (const k of providerVars) {
+          if (savedProvider[k] === undefined) delete process.env[k]
+          else process.env[k] = savedProvider[k]
+        }
+      })
+      const credentialKeys = ["ANTHROPIC_API_KEY", "AWS_BEARER_TOKEN_BEDROCK", "CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "BEDROCK_API_KEY", "AI_GATEWAY_API_KEY"]
+      const secretValues = (env: Record<string, string>) => Object.values(env).join("\n")
+
+      it("claude + anthropic: only the Anthropic key; no Bedrock or gateway secret leaks even when configured", async () => {
+        process.env.AGENT_HARNESS = "claude"
+        process.env.AGENT_MODEL_PROVIDER = "anthropic"
+        process.env.BEDROCK_API_KEY = "bedrock-secret-must-not-leak"
+        process.env.AI_GATEWAY_API_KEY = "gateway-secret-must-not-leak"
+        const { runCommand } = bootstrappableSandbox()
+        await POST(req({ workspaceId: "ws-1", message: "hi" }))
+        const env = runCommand.mock.calls[0][0].env as Record<string, string>
+        expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-test")
+        expect(env.AGENT_MODEL).toBe("claude-sonnet-5")
+        expect(Object.keys(env).filter(k => credentialKeys.includes(k))).toEqual(["ANTHROPIC_API_KEY"])
+        expect(secretValues(env)).not.toMatch(/must-not-leak/)
+      })
+
+      it("claude + bedrock: only the Bedrock token and routing vars; no Anthropic or gateway secret", async () => {
+        process.env.AGENT_HARNESS = "claude"
+        process.env.AGENT_MODEL_PROVIDER = "bedrock"
+        process.env.BEDROCK_API_KEY = "bedrock-token"
+        process.env.ANTHROPIC_API_KEY = "sk-ant-must-not-leak"
+        process.env.AI_GATEWAY_API_KEY = "gateway-secret-must-not-leak"
+        const { runCommand } = bootstrappableSandbox()
+        await POST(req({ workspaceId: "ws-1", message: "hi" }))
+        const env = runCommand.mock.calls[0][0].env as Record<string, string>
+        expect(env).toMatchObject({ AWS_BEARER_TOKEN_BEDROCK: "bedrock-token", CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "us-east-1", AGENT_MODEL: "global.anthropic.claude-sonnet-5-5" })
+        expect(Object.keys(env).filter(k => credentialKeys.includes(k)).sort()).toEqual(["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION", "CLAUDE_CODE_USE_BEDROCK"])
+        expect(secretValues(env)).not.toMatch(/must-not-leak/)
+      })
+
+      it("opencode ignores a Bedrock provider selection: gateway credential only, opencode model, no Bedrock/Anthropic secret", async () => {
+        process.env.AGENT_HARNESS = "opencode"
+        process.env.AGENT_MODEL_PROVIDER = "bedrock"
+        process.env.AGENT_MODEL_ID = "us.anthropic.must-not-leak"
+        process.env.BEDROCK_API_KEY = "bedrock-secret-must-not-leak"
+        process.env.ANTHROPIC_API_KEY = "sk-ant-must-not-leak"
+        process.env.AI_GATEWAY_API_KEY = "gw-key"
+        process.env.AGENT_OPENCODE_MODEL = "anthropic/claude-sonnet-5.5"
+        const { runCommand } = bootstrappableSandbox()
+        const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+        expect(response.status).toBe(202)
+        const env = runCommand.mock.calls[0][0].env as Record<string, string>
+        expect(env).toMatchObject({ AI_GATEWAY_API_KEY: "gw-key", AGENT_MODEL: "anthropic/claude-sonnet-5.5" })
+        expect(Object.keys(env).filter(k => credentialKeys.includes(k))).toEqual(["AI_GATEWAY_API_KEY"])
+        expect(secretValues(env)).not.toMatch(/must-not-leak/)
+      })
+
+      it("opencode does not require or validate the provider config (invalid provider, no provider key)", async () => {
+        process.env.AGENT_HARNESS = "opencode"
+        process.env.AGENT_MODEL_PROVIDER = "vertex"
+        delete process.env.BEDROCK_API_KEY
+        process.env.ANTHROPIC_API_KEY = "  "
+        process.env.AI_GATEWAY_API_KEY = "gw-key"
+        const { runCommand } = bootstrappableSandbox()
+        const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+        expect(response.status).toBe(202)
+        expect(runCommand.mock.calls[0][0].env).toHaveProperty("AI_GATEWAY_API_KEY", "gw-key")
+      })
+
+      it.each([
+        ["anthropic", "ANTHROPIC_API_KEY", "", "  \n\t "],
+        ["bedrock", "BEDROCK_API_KEY", "", "  \n\t "],
+      ])("claude + %s: blank %s is rejected before any sandbox boot or key mint", async (provider, keyVar, ...blanks) => {
+        for (const blank of blanks) {
+          mockBootSandbox.mockClear()
+          mockMintKey.mockClear()
+          process.env.AGENT_HARNESS = "claude"
+          process.env.AGENT_MODEL_PROVIDER = provider
+          process.env[keyVar] = blank
+          if (provider === "bedrock") process.env.ANTHROPIC_API_KEY = "sk-ant-test"
+          const response = await POST(req({ workspaceId: "ws-1", message: "hi" }))
+          expect(response.status).toBe(500)
+          expect(await response.text()).toContain(keyVar)
+          expect(mockBootSandbox).not.toHaveBeenCalled()
+          expect(mockMintKey).not.toHaveBeenCalled()
+        }
+      })
     })
 
     it("opencode: forwards connector slugs, carries pack instructions in the system prompt, ships no pack plugin files", async () => {

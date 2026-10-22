@@ -16,6 +16,7 @@ import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assig
 import { TASK_PRIORITY_LABELS, TASK_STATUS_LABELS } from "@/lib/task-meta";
 import type { TaskCardData } from "./task-card";
 import type { MemberData } from "@/lib/types";
+import { announceAgentRun, type AgentRunNotice } from "@/lib/ui/agent-run-toast";
 
 type Props = {
   tasks: TaskCardData[];
@@ -128,8 +129,11 @@ async function saveTaskField(
         body: JSON.stringify({ field, value }),
       },
     );
-    if (response.ok) return { ok: true };
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    const body = (await response.json().catch(() => null)) as { error?: string; agentRun?: AgentRunNotice } | null;
+    if (response.ok) {
+      announceAgentRun(body?.agentRun);
+      return { ok: true };
+    }
     return { ok: false, error: body?.error ?? "Couldn't save that change." };
   } catch {
     return { ok: false, error: "Couldn't save that change." };

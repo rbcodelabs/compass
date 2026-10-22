@@ -11,7 +11,6 @@ import { UNASSIGNED_ASSIGNEE_FILTER } from "@/lib/task-assignee-display";
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.stubEnv("COMPASS_AGENTS_ENABLED", "1");
   prisma.workspaceMember.findFirst.mockResolvedValue({ id: "member" });
   prisma.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "owner", status: "ACTIVE" });
   prisma.agentWorkspaceGrant.findFirst.mockResolvedValue({ id: "grant" });
@@ -45,9 +44,7 @@ describe("single task assignment", () => {
     prisma.agentWorkspaceGrant.findFirst.mockResolvedValue(null);
     await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "agent" } })).rejects.toThrow("workspace");
   });
-  it("feature-off prevents new agent assignment but allows clearing", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0");
-    await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "agent" } })).rejects.toThrow("enabled");
+  it("allows clearing an assignee", async () => {
     expect(await assignmentUpdate("ws", { assignee: null })).toEqual({ assigneeUserId: null, assigneeAgentId: null });
   });
   it("parses old and typed filters without confusing agents and humans", () => {
@@ -122,6 +119,14 @@ describe("WORKSPACE-owned agents", () => {
     const [task] = await resolveTaskAssignees("ws", [{ assigneeAgentId: "shared", assigneeUserId: null }]);
     expect(task.assignee).toMatchObject({ id: "shared", displayName: "Ops", available: true });
   });
+  it("tells the caller whether an assigned agent is CLOUD or EXTERNAL (a row with no kind reads as EXTERNAL)", async () => {
+    prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ agentId: "shared" }, { agentId: "old" }]);
+    prisma.workspaceMember.findMany.mockResolvedValue([]);
+    prisma.agent.findMany.mockResolvedValue([{ ...shared, kind: "CLOUD" }, { id: "old", name: "Old", ownerUserId: "owner", status: "ACTIVE" }]);
+    const rows = await resolveTaskAssignees("ws", [{ assigneeAgentId: "shared", assigneeUserId: null }, { assigneeAgentId: "old", assigneeUserId: null }]);
+    expect(rows[0].assignee).toMatchObject({ id: "shared", agentKind: "CLOUD" });
+    expect(rows[1].assignee).toMatchObject({ id: "old", agentKind: "EXTERNAL" });
+  });
   it("is refused in a workspace other than the one that owns it, even with a live grant", async () => {
     prisma.agent.findFirst.mockResolvedValue({ ...shared, ownerWorkspaceId: "other-ws" });
     prisma.agentWorkspaceGrant.findFirst.mockResolvedValue({ id: "grant" });
@@ -164,10 +169,19 @@ describe("eligibleTaskAssignees", () => {
     expect(agents.find((a) => a.id === "mine")?.ownerName).toBe("Olive");
     expect(agents.find((a) => a.id === "shared")?.ownerName).toBeUndefined();
   });
-  it("lists no agents with no live grants, or with agents disabled", async () => {
+  it("lists CLOUD agents (personal and shared) alongside EXTERNAL ones, so a created cloud agent is assignable", async () => {
+    prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ agentId: "cloud-mine" }, { agentId: "cloud-shared" }, { agentId: "external" }]);
+    prisma.agent.findMany.mockResolvedValue([
+      { id: "cloud-mine", name: "Cloud mine", kind: "CLOUD", ownerType: "USER", ownerUserId: "owner", status: "ACTIVE" },
+      { id: "cloud-shared", name: "Cloud shared", kind: "CLOUD", ownerType: "WORKSPACE", ownerWorkspaceId: "ws", ownerUserId: null, status: "ACTIVE" },
+      { id: "external", name: "External", kind: "EXTERNAL", ownerType: "USER", ownerUserId: "owner", status: "ACTIVE" },
+    ]);
+    const agents = (await eligibleTaskAssignees("ws")).filter((a) => a.type === "AGENT");
+    expect(agents.map((a) => a.id)).toEqual(["cloud-mine", "cloud-shared", "external"]);
+    expect(agents.every((a) => a.available)).toBe(true);
+  });
+  it("lists no agents with no live grants", async () => {
     prisma.agentWorkspaceGrant.findMany.mockResolvedValue([]);
-    expect((await eligibleTaskAssignees("ws")).filter((a) => a.type === "AGENT")).toEqual([]);
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0");
     expect((await eligibleTaskAssignees("ws")).filter((a) => a.type === "AGENT")).toEqual([]);
   });
 });

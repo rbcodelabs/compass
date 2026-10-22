@@ -22,13 +22,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Check, Loader2, Send, Sparkles, Square } from "lucide-react"
+import { Check, Loader2, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { type SerializedRun, type ToolStep } from "@/lib/agent-run-stream"
 import { useAgentTurn } from "@/components/agent/use-agent-turn"
+import { useAgentChoices } from "@/components/agent/use-agent-choices"
+import { ModelPicker, modelLabelFor, useModelPick } from "@/components/agent/model-picker"
+import { AgentChip } from "@/components/agent/composer/agent-chip"
+import { ComposerCard } from "@/components/agent/composer/composer-card"
 import { Markdown } from "@/components/agent/markdown"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
@@ -69,6 +72,8 @@ type Props = {
    */
   composerSeed?: { id: number; label?: string; summary?: string; sourceUrl?: string; text: string } | null
   onComposerSeedApplied?: () => void
+  /** From `?agentId=` (the Send to agent menu): the agent to start with. Ignored if the member cannot pick it. */
+  initialAgentId?: string
   /**
    * Which surface this chat is rendered on.
    *
@@ -139,6 +144,7 @@ export function AgentChat({
   suggestedInstruction,
   composerSeed,
   onComposerSeedApplied,
+  initialAgentId,
   variant = "page",
   listOpen = true,
   onConversationCreated,
@@ -176,6 +182,12 @@ export function AgentChat({
   // The turn lifecycle (POST, detached-run viewer, inline stream fallback) lives
   // in useAgentTurn so the Cmd+K palette's quick ask runs the very same code.
   // This component only decides what a finished reply does to *its* transcript.
+  // Which agent answers: "" follows the resolved default (the server decides), "builtin" is the built-in agent on purpose.
+  const agentChoices = useAgentChoices({ workspaceId })
+  const [agentPick, setAgentPick] = useState(initialAgentId ?? "")
+  const agentSelection = agentPick === "builtin" || agentChoices.agents.some((agent) => agent.id === agentPick) ? agentPick : ""
+  const defaultAgentName = agentChoices.agents.find((agent) => agent.id === agentChoices.defaultAgentId)?.name ?? "Compass Agent"
+  const modelPick = useModelPick({ userId, workspaceId, choices: agentChoices, agentSelection })
   const turn = useAgentTurn({
     workspaceId,
     onConversationCreated: (createdId) => {
@@ -311,6 +323,8 @@ export function AgentChat({
       message: text,
       conversationId: activeConversationId,
       seedContext: seedContextForThisTurn,
+      agentId: agentSelection || undefined,
+      model: modelPick.model || undefined,
       // The rail floats over whatever page the user is on, so tell the server which one.
       // Read at send time (not from render state) so it is the page NOW, not when the
       // component last rendered. The full-page agent screen has no page behind it.
@@ -318,7 +332,7 @@ export function AgentChat({
       retry,
       continueTurn: !handoff && Boolean(processing?.canContinue),
     })
-  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, sending, startTurn])
+  }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, sending, startTurn, agentSelection, modelPick.model])
 
   // Reattach to a run already in flight for this conversation.
   //
@@ -491,6 +505,16 @@ export function AgentChat({
   const runStarterId = activeRun?.startedByUserId ?? null
   const runStartedByOther = Boolean(runStarterId && runStarterId !== userId)
   const canCancelRun = !runStartedByOther || roster?.viewerRole === "OWNER"
+  const composerDisabled = isStreaming || composerBlocked || Boolean(accessLost)
+  // Who is answering and on what, shown in the composer card while a detached run is live.
+  const runStatusLine =
+    activeRun && !activeRun.done
+      ? activeRun.agentName
+        ? `${activeRun.agentName} is answering${activeRun.model ? ` on ${modelLabelFor(agentChoices, activeRun.model)}` : ""}.`
+        : activeRun.model
+          ? `Answering on ${modelLabelFor(agentChoices, activeRun.model)}.`
+          : null
+      : null
 
   return (
     <div
@@ -637,59 +661,48 @@ export function AgentChat({
         </ScrollArea>
 
         <div className={`border-t border-default bg-surface-panel ${isRail ? "p-3" : "p-3 sm:p-4"}`}>
-          {pendingSeedEntity && (
-            <div className="mb-2">
-              <SeedContextChip
-                label={pendingSeedEntity.label}
-                summary={pendingSeedEntity.summary}
-                sourceUrl={pendingSeedEntity.sourceUrl}
-                onDismiss={() => setPendingSeedEntity(undefined)}
-              />
-            </div>
-          )}
-          {docChip && (
-            <div className="mb-2">
-              <SeedContextChip
-                label={docChip.label}
-                summary={docChip.summary}
-                sourceUrl={docChip.sourceUrl}
-                onDismiss={() => setDocChip(null)}
-              />
-            </div>
-          )}
-          <div className="mx-auto flex w-full max-w-3xl items-end gap-2">
-            <Textarea
-              ref={composerRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault()
-                  void send()
-                }
-              }}
-              placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
-              rows={1}
-              disabled={isStreaming || composerBlocked || Boolean(accessLost)}
-              className="max-h-40 flex-1"
-            />
-            {activeRun && !activeRun.done ? (
-              <Button
-                size="icon"
-                variant="outline"
-                disabled={!canCancelRun}
-                onClick={() => void cancelRun(activeRun.id)}
-                aria-label="Stop this agent run"
-                title={canCancelRun ? "Stop this run" : "Only the person who asked, or the owner, can stop this run"}
-              >
-                <Square className="size-4" aria-hidden="true" />
-              </Button>
-            ) : (
-              <Button size="icon" onClick={() => void send()} disabled={isStreaming || composerBlocked || Boolean(accessLost) || !input.trim()} aria-label="Send message">
-                <Send className="size-4" aria-hidden="true" />
-              </Button>
+          <ComposerCard
+            textareaRef={composerRef}
+            value={input}
+            onChange={setInput}
+            onSend={() => { if (!composerDisabled && input.trim()) void send() }}
+            textareaDisabled={composerDisabled}
+            sendDisabled={composerDisabled || !input.trim()}
+            running={Boolean(activeRun && !activeRun.done)}
+            onStop={() => { if (activeRun) void cancelRun(activeRun.id) }}
+            stopDisabled={!canCancelRun}
+            stopTitle={canCancelRun ? "Stop this run (Esc)" : "Only the person who asked, or the owner, can stop this run"}
+            readOnly={Boolean(accessLost)}
+            runStartedByMe={!runStartedByOther}
+            status={runStatusLine && (
+              <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
+                <Loader2 className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                <span className="min-w-0 truncate font-medium text-foreground">{runStatusLine}</span>
+              </span>
             )}
-          </div>
+            contextChips={
+              pendingSeedEntity || docChip ? (
+                <>
+                  {pendingSeedEntity && (
+                    <SeedContextChip label={pendingSeedEntity.label} summary={pendingSeedEntity.summary} sourceUrl={pendingSeedEntity.sourceUrl} onDismiss={() => setPendingSeedEntity(undefined)} />
+                  )}
+                  {docChip && <SeedContextChip label={docChip.label} summary={docChip.summary} sourceUrl={docChip.sourceUrl} onDismiss={() => setDocChip(null)} />}
+                </>
+              ) : null
+            }
+            chips={
+              (agentChoices.agents.length > 0 || modelPick.visible) && (
+                <>
+                  {agentChoices.agents.length > 0 && (
+                    <AgentChip choices={agentChoices} value={agentSelection} defaultAgentName={defaultAgentName} disabled={composerDisabled} onChange={setAgentPick} />
+                  )}
+                  {modelPick.visible && (
+                    <ModelPicker choices={agentChoices} value={modelPick.model} defaultLabel={modelPick.defaultLabel} disabled={composerDisabled} onChange={modelPick.select} />
+                  )}
+                </>
+              )
+            }
+          />
         </div>
       </div>
     </div>

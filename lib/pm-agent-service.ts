@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import getPrisma, { type AppTransactionClient } from "@/lib/db"
 import { getMcpActor, McpAuthzError, assertWorkspaceMember, type McpActor } from "@/lib/mcp-authz"
-import { assertInterviewToolInput, assertPmInterviewKind, handoffKind, parseProcessingState, processingStatus, type ProcessingState } from "@/lib/pm-agent-processing"
+import { assertInterviewToolInput, assertPmInterviewKind, handoffKind, isRunOnlyHandoffKind, parseProcessingState, processingStatus, type ProcessingState } from "@/lib/pm-agent-processing"
 import { assertResearchSynthesisToolInput } from "@/lib/research-handoff-scope"
 import { PM_INTERVIEW_ALLOWED_FIELDS, parsePmInterviewTargetType } from "@/lib/pm-interview-contracts"
 import { withToolTransaction } from "@/lib/mcp-tool-db"
@@ -112,6 +112,8 @@ export async function gateInterviewTool(actor: McpActor, tool: string, args: Rec
   // union a compile error here rather than a silent fallthrough into PM logic.
   const kind = handoffKind(resolved.state)
   if (kind === "RESEARCH_SYNTHESIS") return assertResearchSynthesisToolInput(resolved.state, tool, args)
+  // A run-only kind never holds a claim (parseProcessingState refuses it), so reaching here is a bug or an attack: fail closed.
+  if (isRunOnlyHandoffKind(kind)) throw new McpAuthzError(`Handoff kind ${kind} has no claim-scoped tools`)
   assertExhaustiveKind(kind)
   const { interview } = await pmInterviewFor(resolved, prisma)
   if (tool === "get_pm_interview") {
@@ -175,6 +177,7 @@ export async function withInterviewMutation<T>(tool: string, args: Record<string
   // artifact is the leased ResearchSynthesis row, not a product mutation. So the
   // PM receipt machinery must not run — the handler executes untouched.
   if (kind === "RESEARCH_SYNTHESIS") return handler()
+  if (isRunOnlyHandoffKind(kind)) throw new McpAuthzError(`Handoff kind ${kind} has no claim-scoped tools`)
   assertExhaustiveKind(kind)
   // Following effects (notifications, auto-follow) queued by the handler run
   // only after this transaction commits, and are dropped if it rolls back.

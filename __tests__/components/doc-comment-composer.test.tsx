@@ -208,8 +208,23 @@ describe("edge cases", () => {
     expect(confirm).toHaveTextContent("QA Agent will receive")
     expect(confirm).toHaveTextContent("Its Write grant lets it reply in the thread")
     expect(confirm).toHaveTextContent("Nothing runs on its own")
+    expect(confirm).toHaveTextContent("A task in its queue")
+    expect(confirm).not.toHaveTextContent("starts a run")
     await act(async () => { fireEvent.click(screen.getByTestId("confirm-agent-assign")) })
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ assignee: { kind: "agent", id: BOT }, agentScopeConfirmed: true, task: expect.any(Object) })
+  })
+
+  it("says a cloud agent starts a run, not that it waits in a queue", () => {
+    renderComposer({ options: { ...options, agents: [{ kind: "agent", id: BOT, name: "QA Agent", detail: "Test plans", access: "WRITE", agentKind: "CLOUD" }] } })
+    type("Pull baselines @qa")
+    pick("QA Agent")
+    fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
+    const confirm = screen.getByTestId("agent-scope-confirm")
+    expect(confirm).toHaveTextContent("a run started as this agent")
+    expect(confirm).toHaveTextContent("Assigning starts a run as this agent")
+    expect(confirm).toHaveTextContent("the task is still assigned and you are told why")
+    expect(confirm).not.toHaveTextContent("Nothing runs on its own")
+    expect(confirm).not.toHaveTextContent("in its queue")
   })
 
   it("brings the normal buttons back when the agent chip is deleted during the scope step", () => {
@@ -263,5 +278,29 @@ describe("edge cases", () => {
     pick("Quinn Morales")
     fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
     expect(await screen.findByTestId("composer-error")).toHaveTextContent("do not have permission")
+  })
+})
+
+describe("for a non-doc target", () => {
+  it("words the task link for that target and loads a host-held draft with chips", () => {
+    renderComposer({ targetNoun: "roadmap item", docTitle: "Q4 launch", anchorText: null, initialBody: `Hi @[Quinn Morales](mention:user:${QUINN})` })
+    expect(editor().querySelector("[data-mention-id]")).toHaveTextContent("@Quinn Morales")
+    expect(screen.getByTestId("comment-task-box")).toHaveTextContent("Links back to this comment on the roadmap item Q4 launch")
+  })
+
+  it("names the target in the agent scope confirmation", async () => {
+    renderComposer({ targetNoun: "objective", docTitle: "Grow", anchorText: null })
+    type("hi @qa")
+    pick("QA Agent")
+    fireEvent.click(screen.getByRole("button", { name: "Comment & create task" }))
+    expect(await screen.findByTestId("agent-scope-confirm")).toHaveTextContent("This objective, its comment thread")
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("reports every edit to a host that holds the draft", () => {
+    const onBodyChange = vi.fn()
+    renderComposer({ targetNoun: "objective", onBodyChange })
+    type("typed")
+    expect(onBodyChange).toHaveBeenLastCalledWith("typed")
   })
 })

@@ -27,9 +27,14 @@ import { assertWorkspaceUpdatesMigration } from "@/lib/migrations/workspace-upda
 import { assertFollowsNotificationsMigration } from "@/lib/migrations/follows-notifications";
 import { assertPortalHomeLayoutMigration } from "@/lib/migrations/portal-home-layout";
 import { assertRoadmapViewsMigration } from "@/lib/migrations/roadmap-views";
+import { SAVED_VIEWS_SURFACE_MIGRATION, assertSavedViewsSurfaceMigration, backfillSavedViewsSurface } from "@/lib/migrations/saved-views-surface";
 import { assertAgentSessionsMigration } from "@/lib/migrations/agent-sessions";
 import { assertAgentWebSearchesMigration } from "@/lib/migrations/agent-web-searches";
 import { assertAgentConversationParticipantsMigration } from "@/lib/migrations/agent-conversation-participants";
+import { assertAgentRunAttributionMigration } from "@/lib/migrations/agent-run-attribution";
+import { assertAgentDefaultSelectionMigration } from "@/lib/migrations/agent-default-selection";
+import { assertAgentRunCapsMigration } from "@/lib/migrations/agent-run-caps";
+import { SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, runSharedCompassAgentBootstrap } from "@/lib/migrations/shared-compass-agent-bootstrap";
 import { assertAgentKindAndWorkspaceOwnerMigration, assertAgentOwnerUserNullableMigration } from "@/lib/migrations/agent-kind-and-workspace-owner";
 import { assertEntityLinksMigration } from "@/lib/migrations/entity-links";
 import { assertWorkItemIdsMigration, WORK_ITEM_IDS_MIGRATION } from "@/lib/migrations/work-item-ids";
@@ -48,6 +53,7 @@ import { TYPED_LINK_RESIDUAL_MIGRATION, TYPED_LINK_TABLES_MIGRATION, assertTyped
 import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-manifest";
 import { assertBackgroundAgentRunsMigration } from "@/lib/migrations/background-agent-runs";
 import { assertArtifactScreenshotsMigration } from "@/lib/migrations/artifact-screenshots";
+import { AGENT_RETENTION_INDEXES_MIGRATION, assertAgentRetentionIndexesMigration } from "@/lib/migrations/agent-retention-indexes";
 
 
 
@@ -657,6 +663,47 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "098_entity_links_backfill_solution_key_result",
     filePath: path.join(process.cwd(), "prisma/migrations/098_entity_links_backfill_solution_key_result/migration.sql"),
   },
+  {
+    // Generic saved views, step 2: one nullable surface column on roadmap_views plus one async (org, workspace, surface) index.
+    // The hook backfills legacy rows (NULL workspace -> ROADMAP_ORG, else ROADMAP_WORKSPACE) in bounded batches and proves
+    // the column, the index and zero NULLs before the receipt. NULL stays readable as legacy, so code does not wait on it.
+    name: "100_saved_views_surface",
+    filePath: path.join(process.cwd(), "prisma/migrations/100_saved_views_surface/migration.sql"),
+  },
+  {
+    // Cloud agents phase 2 (run as the agent): nullable agent_id and invoked_by_user_id on agent_runs plus two async indexes. No backfill:
+    // NULL agent_id reads as the built-in agent. The postcondition proves the columns and that both indexes are valid and ready.
+    name: "100_agent_runs_agent_attribution",
+    filePath: path.join(process.cwd(), "prisma/migrations/100_agent_runs_agent_attribution/migration.sql"),
+  },
+  {
+    // Cloud agents phase 3 (defaults): workspace_default_agents and user_default_agents, each with one unique async index. No backfill:
+    // no row means "no default" and falls through to the built-in agent. The postcondition proves the columns and both unique indexes.
+    name: "101_agent_default_selection",
+    filePath: path.join(process.cwd(), "prisma/migrations/101_agent_default_selection/migration.sql"),
+  },
+  {
+    // Cloud agents phase 4 (caps): two nullable integer columns on agents (max_concurrent_runs, max_runs_per_day); NULL = the default cap.
+    // No index (the counts use migration 100's agent_runs index) and no backfill. The postcondition proves both columns.
+    name: "102_agent_run_caps",
+    filePath: path.join(process.cwd(), "prisma/migrations/102_agent_run_caps/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY and TARGETED. Creates the shared "Compass Agent" (CLOUD, WORKSPACE-owned, WRITE grant by a current administrator,
+    // workspace default if none) in the workspaces named by COMPASS_SHARED_AGENT_WORKSPACE_IDS; refuses when none are named. Idempotent.
+    name: "103_shared_compass_agent_bootstrap",
+    filePath: path.join(process.cwd(), "prisma/migrations/103_shared_compass_agent_bootstrap/migration.sql"),
+  },
+  {
+    // Two async created_at indexes (agent_run_events, agent_messages) for the agent-data retention job. Optional for correctness: the job
+    // runs without them, only slower. The 104 postcondition proves both indexes exist and are valid.
+    name: "104_agent_retention_indexes",
+    filePath: path.join(process.cwd(), "prisma/migrations/104_agent_retention_indexes/migration.sql"),
+  },
+  {
+    name: "105_workspace_agent_github_repos",
+    filePath: path.join(process.cwd(), "prisma/migrations/105_workspace_agent_github_repos/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));
@@ -809,7 +856,7 @@ const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record
 const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_decision_evidence_refs_subject", "idx_now_policy_evidence_workspace_created", "idx_now_gate_evaluations_workspace_created", "idx_now_gate_evaluations_workspace_outcome_created", "idx_now_gate_evaluations_item_created", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
 const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "decision_evidence_refs_pkey", "idx_decision_evidence_refs_revision_authority", "now_policy_application_evidence_pkey", "idx_now_policy_evidence_receipt", "now_gate_evaluations_pkey", "chk_now_gate_evaluations_mode", "chk_now_gate_evaluations_outcome", "chk_now_gate_evaluations_actor", "chk_roadmap_items_commitment_provenance_not_null", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
 const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger", "042_native_decision_gates_repair", "043_decision_evidence_refs", "044_now_policy_application_evidence", "045_now_gate_shadow_evaluations"] as const;
-const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_agent_identity", "049_research_participant_voice", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "060_workspace_updates", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_work_item_ids", "098_agent_kind_and_workspace_owner"] as const;
+const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_agent_identity", "049_research_participant_voice", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "060_workspace_updates", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_work_item_ids", "098_agent_kind_and_workspace_owner", "100_saved_views_surface", "100_agent_runs_agent_attribution", "101_agent_default_selection", "104_agent_retention_indexes"] as const;
 /** ADR-0012 step 5. Unique first: the idempotency lookup promotion depends on. */
 const RESEARCH_EVIDENCE_PROMOTION_INDEXES = ["idx_evidence_workspace_finding_key", "idx_evidence_research_sources_evidence_turn", "idx_evidence_research_synthesis", "idx_evidence_research_sources_turn"] as const;
 const RESEARCH_VOICE_CONTROL_PLANE_INDEXES = [
@@ -1869,10 +1916,10 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION];
 
 /**
- * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 098_entity_links_backfill_solution_key_result).
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 098_entity_links_backfill_solution_key_result, 103).
  * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
  * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
  * Production-style callers (the admin route, an untargeted POST) never set it.
@@ -2102,7 +2149,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
             const jobId = result.rows[0]?.job_id
             // IF NOT EXISTS returns no job for an already-created agent index.
             // Its validity is checked before a completion receipt is written.
-            if (!jobId && ["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_work_item_ids", "098_agent_kind_and_workspace_owner"].includes(migration.name)) continue
+            if (!jobId && ["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_work_item_ids", "098_agent_kind_and_workspace_owner", "100_saved_views_surface", "100_agent_runs_agent_attribution", "101_agent_default_selection", "104_agent_retention_indexes"].includes(migration.name)) continue
             if (!jobId) throw new Error(`Migration ${migration.name} async DDL returned no job_id.`)
             await client.query("CALL sys.wait_for_job($1)", [jobId])
             const waited = await client.query<{ status: string }>("SELECT status FROM sys.jobs WHERE job_id = $1", [jobId])
@@ -2175,11 +2222,20 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "074_portal_home_layout") await assertPortalHomeLayoutMigration(client, schema)
       if (migration.name === "075_roadmap_item_provenance") await assertRoadmapItemProvenanceMigration(client, schema)
       if (migration.name === "079_roadmap_views") await assertRoadmapViewsMigration(client, schema)
+      if (migration.name === SAVED_VIEWS_SURFACE_MIGRATION) {
+        // Data half: stamp the surface on legacy rows, then prove it. Before the receipt, so a failure leaves an unfinished attempt.
+        await backfillSavedViewsSurface(client, schema, log)
+        await assertSavedViewsSurfaceMigration(client, schema)
+      }
       if (migration.name === "080_agent_sessions") await assertAgentSessionsMigration(client, schema)
       if (migration.name === "081_agent_web_searches") await assertAgentWebSearchesMigration(client, schema)
       if (migration.name === "082_agent_conversation_participants") await assertAgentConversationParticipantsMigration(client, schema)
       if (migration.name === "098_agent_kind_and_workspace_owner") await assertAgentKindAndWorkspaceOwnerMigration(client, schema)
       if (migration.name === "099_agent_owner_user_nullable") await assertAgentOwnerUserNullableMigration(client, schema)
+      if (migration.name === "100_agent_runs_agent_attribution") await assertAgentRunAttributionMigration(client, schema)
+      if (migration.name === "101_agent_default_selection") await assertAgentDefaultSelectionMigration(client, schema)
+      if (migration.name === "102_agent_run_caps") await assertAgentRunCapsMigration(client, schema)
+      if (migration.name === AGENT_RETENTION_INDEXES_MIGRATION) await assertAgentRetentionIndexesMigration(client, schema)
       if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {
         // Data half: backfill from the parent in bounded batches, then prove it.
         // Both run before the receipt below, so a failure leaves an unfinished
@@ -2231,9 +2287,19 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         await backfillEntityLinksSolutionKeyResult(client, schema, log)
         await assertEntityLinksSolutionKeyResultBackfill(client, schema)
       }
+      if (migration.name === SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION) {
+        // Data half: create the shared Compass Agent in the NAMED workspaces, then prove it. Before the receipt below, so a failure leaves an
+        // unfinished attempt and the next POST resumes.
+        await runSharedCompassAgentBootstrap(client, schema, log)
+      }
       if (migration.name === "090_v0_chat_artifacts") {
         const columns = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND ((table_name='artifacts' AND column_name='v0_chat_id') OR (table_name='artifact_revisions' AND column_name='v0_version_id'))", [schema])
         if (columns.rows[0]?.count !== "2") throw new Error("Migration 090 postcondition failed: v0 artifact columns missing")
+      }
+
+      if (migration.name === "105_workspace_agent_github_repos") {
+        const column = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND table_name='workspaces' AND column_name='agent_github_repos'", [schema])
+        if (column.rows[0]?.count !== "1") throw new Error("Migration 105 postcondition failed: workspaces.agent_github_repos missing")
       }
 
       // Only this distinct attempt becomes a successful receipt. A failed

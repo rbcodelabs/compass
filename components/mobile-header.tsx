@@ -36,6 +36,8 @@ interface MobileHeaderProps {
   userImage?: string
   /** Org admins/owners see an "Org Settings" link in the account menu. */
   isOrgAdmin?: boolean
+  /** Platform admins (PLATFORM_ADMIN_EMAILS) see an "Agent snapshot" link in the account menu. */
+  isPlatformAdmin?: boolean
   /** The org has more than one workspace, so the cross-workspace "All roadmaps" page is offered. */
   showOrgRoadmap?: boolean
   /** Following is on and available: show the notifications bell. */
@@ -51,6 +53,7 @@ export function MobileHeader({
   userEmail,
   userImage,
   isOrgAdmin = false,
+  isPlatformAdmin = false,
   showOrgRoadmap = false,
   followingEnabled = false,
   unreadNotifications = { count: 0, overflow: false },
@@ -202,6 +205,11 @@ export function MobileHeader({
             <DropdownMenuItem className="p-0 cursor-pointer">
               <Link href="/settings/passkeys" className="flex w-full items-center px-1.5 py-1">Passkeys</Link>
             </DropdownMenuItem>
+            {isPlatformAdmin && (
+              <DropdownMenuItem className="p-0 cursor-pointer">
+                <Link href="/settings/admin/agent-snapshot" className="flex w-full items-center px-1.5 py-1">Agent snapshot</Link>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem className="cursor-pointer p-0">
               <form action={signOutAction} className="w-full">
                 <button

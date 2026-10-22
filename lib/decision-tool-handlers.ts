@@ -1,6 +1,9 @@
 import getPrisma from "@/lib/db"
+import { getTasksLinkedTo } from "@/lib/task-links-read"
 import { getDecisionArtifacts } from "@/lib/artifacts"
 import { getMcpActor } from "@/lib/mcp-authz"
+import { isAgentIdentityActor } from "@/lib/agent-access"
+import { findAgentById } from "@/lib/agent-ownership"
 import { ok, fail } from "@/lib/mcp-output"
 import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator, type ReleaseScope } from "@/lib/release-authorization"
 import { applyTrackedDecision, createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, recordDecisionNoAction, TrackedDecisionError, type TrackedDecisionOptionInput, type TrackedDecisionQuestionInput, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
@@ -74,9 +77,10 @@ async function resolveRequester(request: { requestedById: string | null; request
 }
 
 /** Follow-up work linked to a decision via the DECISION TaskLink type (item 3: reciprocal display). */
-async function resolveFollowUpTasks(requestId: string) {
+async function resolveFollowUpTasks(workspaceId: string, requestId: string) {
+  // Display-only: follows the TASK read-mode flag (lib/task-links-read.ts).
   const prisma = getPrisma()
-  const links = await prisma.taskLink.findMany({ where: { linkedType: "DECISION", linkedId: requestId }, select: { task: { select: { id: true, title: true, status: true } } } })
+  const links = await getTasksLinkedTo(prisma, { workspaceIds: [workspaceId], linkedType: "DECISION", linkedIds: [requestId] }, () => prisma.taskLink.findMany({ where: { linkedType: "DECISION", linkedId: requestId }, select: { task: { select: { id: true, title: true, status: true } } } }))
   return links.map((link) => link.task)
 }
 
@@ -145,8 +149,12 @@ export async function requestDecision(input: {
     // requestedByAgentId. Only persist an agent id when the actor is
     // genuinely acting as an agent, so a suggested assignee later points at
     // the agent that was blocked waiting on this decision, not its owner.
-    const requestedByAgentId = actor.purpose === "AGENT" ? (actor.agentId ?? null) : null
-    const revision = await createTrackedDecisionRequest({ ...input, requestedById: actor.userId, requestedByAgentId })
+    // A cloud run (AGENT_TURN with an agentId) is the agent acting, with the invoker only the person who started it, so the
+    // request is recorded as the agent's and the human column is left empty (requested_by_id is nullable). A personal agent
+    // key keeps its established shape: owner in requestedById, agent in requestedByAgentId.
+    const cloudAgentRun = actor.purpose === "AGENT_TURN" && !!actor.agentId
+    const requestedByAgentId = isAgentIdentityActor(actor) ? (actor.agentId ?? null) : null
+    const revision = await createTrackedDecisionRequest({ ...input, requestedById: cloudAgentRun ? null : actor.userId, requestedByAgentId })
     const reviewUrl = await reviewUrlByWorkspace(input.workspaceId, revision.requestId)
     return ok(
       withUrlLine(`Decision requested.\nID: ${revision.requestId}\nRevision ID: ${revision.id}${input.options?.length ? `\nOptions: ${input.options.map((option) => option.label.trim()).join(" | ")}` : ""}${input.questions?.length ? `\nQuestions: ${input.questions.length}` : ""}`, reviewUrl),
@@ -202,7 +210,7 @@ export async function getDecision({ workspaceId, requestId }: { workspaceId: str
     const [artifacts, requestedBy, followUpTasks] = await Promise.all([
       getDecisionArtifacts(workspaceId, requestId),
       resolveRequester(request),
-      resolveFollowUpTasks(requestId),
+      resolveFollowUpTasks(workspaceId, requestId),
     ])
     const reviewUrl = await reviewUrlByWorkspace(workspaceId, request.id)
     const noAction = request.noActionAt ? { at: request.noActionAt, reason: request.noActionReason } : null
@@ -229,7 +237,16 @@ export async function getDecision({ workspaceId, requestId }: { workspaceId: str
 export async function closeDecisionNoAction({ workspaceId, requestId, reason }: { workspaceId: string; requestId: string; reason: string }) {
   const actor = getMcpActor()
   try {
-    const request = await recordDecisionNoAction({ workspaceId, requestId, reason, actorUserId: actor.userId })
+    // There is no "closed by agent" column. For a cloud run the human column stays empty rather than naming the invoker as
+    // the closer, and the agent is named in the recorded reason instead.
+    const cloudAgentRun = actor.purpose === "AGENT_TURN" && !!actor.agentId
+    const agentName = cloudAgentRun ? (await findAgentById(getPrisma(), actor.agentId!))?.name ?? "an agent" : null
+    // The person's reason is validated as typed (2,000 characters); the agent note is added after, so it can never push a valid
+    // reason over the limit.
+    const request = await recordDecisionNoAction({
+      workspaceId, requestId, reason, actorUserId: cloudAgentRun ? null : actor.userId,
+      ...(agentName ? { recordedPrefix: `[Closed by agent ${agentName} (${actor.agentId})] ` } : {}),
+    })
     const reviewUrl = await reviewUrlByWorkspace(workspaceId, request.id)
     return ok(
       withUrlLine(`**Closed, no action needed.**\nReason: ${reason}\nID: ${request.id}`, reviewUrl),
@@ -245,7 +262,10 @@ export async function closeDecisionNoAction({ workspaceId, requestId, reason }: 
 export async function requestReleaseAuthorization(scope: ReleaseScope) {
   const actor = getMcpActor()
   try {
-    const result = await prepareReleaseRun({ ...scope, requestedById: actor.userId })
+    // A cloud run is the agent acting, not the person who started it: no human requester is recorded for it (both columns
+    // are nullable), matching request_decision. Personal agent keys and people keep requestedById as before.
+    const cloudAgentRun = actor.purpose === "AGENT_TURN" && !!actor.agentId
+    const result = await prepareReleaseRun({ ...scope, requestedById: cloudAgentRun ? null : actor.userId })
     if (result.status === "BLOCKED") return fail(`Release authorization blocked: ${result.code}`)
     const reviewUrl = await reviewUrlByWorkspace(scope.workspaceId, result.requestId)
     return ok(

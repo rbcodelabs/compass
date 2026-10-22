@@ -6,8 +6,25 @@
  * union turns each unhandled site into a compile error rather than a silent
  * fallthrough into PM-interview logic — that forcing function is the point.
  */
-export const HANDOFF_KINDS = ["PM_INTERVIEW", "RESEARCH_SYNTHESIS"] as const
+export const HANDOFF_KINDS = ["PM_INTERVIEW", "RESEARCH_SYNTHESIS", "TASK_ASSIGNMENT"] as const
 export type HandoffKind = (typeof HANDOFF_KINDS)[number]
+
+/**
+ * Kinds that start a run but never put a claim on a conversation (cloud agents, phase 4).
+ *
+ * `TASK_ASSIGNMENT`: a person assigned a task (or mentioned an agent in a doc comment that became a task) to a cloud agent.
+ * The run's authority is the agent's own workspace grants, not a claim-scoped credential, so there is no
+ * `interview_processing_json` blob, no claim lease and no tool fence: the one-non-terminal-run-per-conversation rule in
+ * createAgentRun is its single-flight guard, and the conversation stays an ordinary chat the person can continue.
+ * `parseProcessingState` refuses these kinds, so a stored blob can never turn an ordinary conversation into a claim
+ * for one.
+ */
+export const RUN_ONLY_HANDOFF_KINDS = ["TASK_ASSIGNMENT"] as const satisfies readonly HandoffKind[]
+export type RunOnlyHandoffKind = (typeof RUN_ONLY_HANDOFF_KINDS)[number]
+
+export function isRunOnlyHandoffKind(kind: string): kind is RunOnlyHandoffKind {
+  return (RUN_ONLY_HANDOFF_KINDS as readonly string[]).includes(kind)
+}
 
 /**
  * Carried inside the conversation's `interview_processing_json` blob. The column
@@ -24,6 +41,12 @@ export type ProcessingState = {
   interviewId?: string
   /** `RESEARCH_SYNTHESIS` only: the single study this claim is bound to. */
   studyId?: string
+  /** `TASK_ASSIGNMENT` only (a run, never a stored claim): the task, and the doc comment it came from if any. */
+  taskId?: string
+  commentId?: string
+  docId?: string
+  /** `TASK_ASSIGNMENT` only: a capped, already-rendered excerpt of the task and comment. Untrusted text. */
+  taskContext?: string
   targetUrl?: string
   receipt?: { changedFields: string[]; targetUrl: string; payloadHash?: string; before?: Record<string, unknown>; after?: Record<string, unknown> }
 }
@@ -62,7 +85,7 @@ export function parseProcessingState(raw: string | null | undefined): Processing
   const state = JSON.parse(raw) as ProcessingState
   if (!["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "INTERRUPTED"].includes(state.status)) throw new Error("Invalid interview processing state")
   // Absent `kind` is the legacy shape and stays valid; anything present must be known.
-  if (state.kind !== undefined && !(HANDOFF_KINDS as readonly unknown[]).includes(state.kind)) throw new Error("Unsupported interview processing kind")
+  if (state.kind !== undefined && (!(HANDOFF_KINDS as readonly unknown[]).includes(state.kind) || isRunOnlyHandoffKind(state.kind))) throw new Error("Unsupported interview processing kind")
   return state
 }
 import { PM_INTERVIEW_ALLOWED_FIELDS, type PmInterviewTargetType } from "@/lib/pm-interview-contracts"

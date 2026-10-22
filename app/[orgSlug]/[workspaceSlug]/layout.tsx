@@ -1,3 +1,4 @@
+import { isPlatformAdminEmail } from "@/lib/platform-admin";
 import { redirect } from "next/navigation"
 import { getUserWorkspaces } from "@/lib/workspace"
 import { requireWorkspaceContext } from "@/lib/workspace-context"
@@ -10,6 +11,7 @@ import { WorkItemLinkScopeProvider } from "@/components/work-item-link-scope"
 import { ThinkingModelProvider } from "@/components/thinking-model/thinking-model-provider"
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve"
 import { PanelShell } from "@/components/panels/panel-shell"
+import { chainGraphEnabled } from "@/lib/chain-graph/flag"
 import { AgentRailProvider } from "@/components/agent/agent-rail-context"
 import { AgentRail } from "@/components/agent/agent-rail"
 import { initialsOf } from "@/lib/user-initials"
@@ -29,6 +31,11 @@ import { unreadCount } from "@/lib/notifications"
 import { ReadOnlyBanner } from "@/components/workspace/read-only-banner"
 import { UndoToastHost } from "@/components/ui/undo-toast-host"
 import { WorkspaceVisitRecorder } from "@/components/workspace-selector/workspace-visit-recorder"
+
+// Server actions on every page below (assigning a task, a Doc comment that mentions an agent) can start a cloud agent's run,
+// whose sandbox start is deferred with after() and shares the page's function budget. A page-level maxDuration is what sets
+// that budget for its server actions, and a layout's applies to every page under it.
+export const maxDuration = 300
 
 interface WorkspaceLayoutProps {
   children: React.ReactNode
@@ -110,6 +117,7 @@ export default async function WorkspaceLayout({
           userEmail={user.email ?? ""}
           userImage={user.image ?? undefined}
           isOrgAdmin={isOrgAdmin}
+          isPlatformAdmin={isPlatformAdminEmail(user.email)}
           showOrgRoadmap={workspaces.filter((w) => w.orgSlug === orgSlug).length > 1}
           followingEnabled={followingEnabled}
           unreadNotifications={unreadNotifications}
@@ -144,6 +152,7 @@ export default async function WorkspaceLayout({
               userImage={user.image ?? undefined}
               workspaces={workspaces}
               isOrgAdmin={isOrgAdmin}
+              isPlatformAdmin={isPlatformAdminEmail(user.email)}
               researchCaptureEnabled={researchCaptureEnabled}
               updatesEnabled={updatesEnabled}
               followingEnabled={followingEnabled}
@@ -174,7 +183,7 @@ export default async function WorkspaceLayout({
                 beside main content rather than something floating over it. A
                 no-op for overlay mode, which portals out of the tree either
                 way. */}
-            <PanelShell initialPin={initialPanelPin} />
+            <PanelShell initialPin={initialPanelPin} chainGraphEnabled={chainGraphEnabled()} />
           </SidebarProvider>
         </TooltipProvider>
 

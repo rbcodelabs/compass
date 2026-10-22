@@ -48,8 +48,8 @@ describe(NAME, () => {
   it("maps the same table and index in schema.prisma", () => {
     expect(schema).toContain('@@map("roadmap_views")')
     expect(schema).toContain('map: "idx_roadmap_views_org_surface"')
-    expect(schema).not.toMatch(/model RoadmapView \{[^}]*@relation/)
-    expect(schema).not.toMatch(/model RoadmapView \{[^}]*@updatedAt/)
+    expect(schema).not.toMatch(/model SavedView \{[^}]*@relation/)
+    expect(schema).not.toMatch(/model SavedView \{[^}]*@updatedAt/)
   })
 
   it("waits for its async index and verifies before the receipt", () => {

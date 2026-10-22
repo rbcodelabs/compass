@@ -42,6 +42,8 @@ parent doc in the `rbcodelabs/compass` workspace. This is what
   - It clears *Vercel's* SSO gate only — it is **not** app auth. NextAuth login is still required for any authenticated page.
   - Unlike the secrets above, this one is not consumed by the app at runtime, so there is nothing to redeploy after changing it.
 
+- **`PLATFORM_ADMIN_EMAILS`** (comma-separated, case-insensitive; not a secret, but an access allowlist): emails of signed-in users who may open **Settings → Agent snapshot** (`/settings/admin/agent-snapshot`) to view and rebuild the in-app agent's golden Vercel Sandbox snapshot. Unset or empty authorizes nobody. The page calls the session-gated `/api/admin/agent-snapshot`; the `x-migration-secret` route `/api/admin/rebuild-agent-snapshot` is unchanged and still the server-to-server path. Both share `lib/agent-snapshot-admin.ts`. Changing the var needs a redeploy.
+
 **Standing rule for any secret in this project:** the moment you rotate a value in Vercel, save it to 1Password *before* doing anything else with it (before testing, before moving to the next step) — a dropped connection or a session that dies mid-task should never mean losing the value again. If a saved 1Password copy no longer matches what's live in Vercel (write-only vars can't be read back to confirm), treat it as an incident: rotate fresh, save immediately, redeploy, and verify live — don't assume the stale copy might still work.
 
 ### Reading a secret: the only correct order

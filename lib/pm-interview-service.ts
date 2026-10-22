@@ -1,3 +1,4 @@
+import { isDsqlWriteConflict } from "@/lib/dsql-conflict"
 import { createHash, randomUUID } from "node:crypto"
 import getPrisma, { type AppPrismaClient, type AppTransactionClient } from "@/lib/db"
 import { runResearchInterviewAgent } from "@/lib/research-agent"
@@ -336,10 +337,6 @@ function liveBaseline(targetType: PmInterviewTargetType, target: Record<string, 
   }
 }
 
-function isDsqlWriteConflict(error: unknown) {
-  const value = error as { code?: string; meta?: { code?: string }; message?: string }
-  return value?.code === "P2034" || value?.code === "40001" || value?.meta?.code === "40001" || /OC00\d|serialization/i.test(value?.message ?? "")
-}
 
 export async function applyPmInterview(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string, input: { selectedFields: string[]; editedValues?: Record<string, string | null>; idempotencyKey: unknown }, testHooks?: { failReceiptFinalization?: boolean }) {
   const idempotencyKey = assertIdempotencyKey(input.idempotencyKey)

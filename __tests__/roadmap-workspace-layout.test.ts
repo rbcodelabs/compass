@@ -51,6 +51,11 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/roadmap/actions", () => ({
 }));
 
 // The header's saved-views menu calls the org-level saved-view actions, which import auth too.
+vi.mock("@/app/[orgSlug]/saved-views-actions", () => ({
+  createSavedViewAction: vi.fn(),
+  updateSavedViewAction: vi.fn(),
+  deleteSavedViewAction: vi.fn(),
+}));
 vi.mock("@/app/[orgSlug]/roadmap/actions", () => ({
   createRoadmapViewAction: vi.fn(),
   updateRoadmapViewAction: vi.fn(),

@@ -5,7 +5,7 @@ import { useUrlState } from "@/hooks/use-url-state";
 import { ROADMAP_URL_PARAMS } from "@/lib/roadmap-views/schema";
 import type { RoadmapViewRecord } from "@/lib/roadmap-views/service";
 import { resolveWorkspaceRoadmapState } from "@/lib/roadmap-views/workspace";
-import { SavedViewsMenu } from "./cross-workspace/saved-views-menu";
+import { SavedViewsMenu } from "@/components/saved-views/saved-views-menu";
 
 /** What the workspace roadmap page hands the header so it can offer saved views. */
 export type WorkspaceSavedViews = {
@@ -37,6 +37,8 @@ export function WorkspaceSavedViewsMenu({ savedViews }: { savedViews: WorkspaceS
   return (
     <SavedViewsMenu
       orgSlug={savedViews.orgSlug}
+      surface="ROADMAP_WORKSPACE"
+      deleteNote="Roadmap items are not affected."
       surfaceWorkspaceId={savedViews.workspaceId}
       views={savedViews.views}
       savedViewId={savedViews.savedViewId}

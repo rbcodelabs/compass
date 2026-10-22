@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { COMMENT_TARGET_TYPES, createComment, type CommentTargetType, type ElementAnchorInput } from "@/lib/comments"
 import { authorizeCommentTarget, CommentHttpError, listBrowserComments, toCommentDto, toCommentThreads } from "@/lib/comment-browser"
+import { agentIdsAssignedOnTarget, postTargetCommentWithOptionalTask, targetTitle } from "@/lib/comment-target-tasks"
+import { loadCommentTaskCards, loadMentionCandidates, type CommentTaskRequest } from "@/lib/doc-comment-tasks"
+import { parseMentions } from "@/lib/comment-mentions"
+import type { TaskPriority } from "@/lib/types"
 
 function errorResponse(error: unknown) {
   if (error instanceof CommentHttpError) return NextResponse.json({ error: error.message }, { status: error.status })
@@ -72,12 +76,40 @@ function parseSlideIndex(value: unknown): number | null {
   return value
 }
 
+/** Optional "create a task from this comment" request; the service validates the values. */
+function parseTaskRequest(value: unknown): CommentTaskRequest | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== "object" || Array.isArray(value)) throw new CommentHttpError(400, "task must be an object")
+  const input = value as Record<string, unknown>
+  if (typeof input.title !== "string") throw new CommentHttpError(400, "task.title must be a string")
+  if (input.dueDate !== undefined && input.dueDate !== null && typeof input.dueDate !== "string") throw new CommentHttpError(400, "task.dueDate must be a string")
+  if (input.priority !== undefined && typeof input.priority !== "string") throw new CommentHttpError(400, "task.priority must be a string")
+  return { title: input.title, dueDate: (input.dueDate as string | null | undefined) ?? null, priority: input.priority as TaskPriority | undefined }
+}
+
+function parseAssignee(value: unknown): { kind: "user" | "agent"; id: string } | null {
+  if (value === undefined || value === null) return null
+  const input = value as Record<string, unknown>
+  if (typeof value !== "object" || (input.kind !== "user" && input.kind !== "agent") || typeof input.id !== "string") throw new CommentHttpError(400, "assignee must be { kind, id }")
+  return { kind: input.kind, id: input.id }
+}
+
+const POST_ERROR_STATUS: Record<string, number> = { FORBIDDEN: 403, PARENT_NOT_FOUND: 404, COMMENT_FAILED: 500 }
+
 export async function GET(request: NextRequest) {
   try {
     const targetType = parseTargetType(request.nextUrl.searchParams.get("targetType"))
     const targetId = requireString(request.nextUrl.searchParams.get("targetId"), "targetId")
     const actor = await authorizeCommentTarget(targetType, targetId)
-    return NextResponse.json({ items: toCommentThreads(await listBrowserComments(actor.workspaceId, targetType, targetId), actor) })
+    const rows = await listBrowserComments(actor.workspaceId, targetType, targetId)
+    // Mention picker options, task cards and known agents ride along so the composer needs no second round trip.
+    const [options, taskCards, confirmedAgentIds, title] = await Promise.all([
+      loadMentionCandidates(actor.workspaceId),
+      loadCommentTaskCards(actor.workspaceId, rows.map((row) => row.id)),
+      agentIdsAssignedOnTarget(actor.workspaceId, targetType, targetId),
+      targetTitle(actor.workspaceId, targetType, targetId),
+    ])
+    return NextResponse.json({ items: toCommentThreads(rows, actor), mention: { options, confirmedAgentIds, targetTitle: title }, taskCards })
   } catch (error) { return errorResponse(error) }
 }
 
@@ -98,7 +130,19 @@ export async function POST(request: NextRequest) {
       throw new CommentHttpError(400, "elementAnchor is only supported on a root comment")
     }
     const elementAnchor = parseElementAnchor(values.elementAnchor)
+    const task = parseTaskRequest(values.task)
+    const assignee = parseAssignee(values.assignee)
     const actor = await authorizeCommentTarget(targetType, targetId)
+    if (task || (!elementAnchor && parseMentions(body).length > 0)) {
+      const result = await postTargetCommentWithOptionalTask({
+        workspaceId: actor.workspaceId, targetType, targetId, userId: actor.userId, userName: actor.name,
+        body, parentId, task, assignee, agentScopeConfirmed: values.agentScopeConfirmed === true,
+      })
+      if (!result.ok) {
+        return NextResponse.json({ error: result.message ?? result.error, code: result.error }, { status: POST_ERROR_STATUS[result.error] ?? 422 })
+      }
+      return NextResponse.json({ ...toCommentDto(result.comment, actor), taskCard: result.card }, { status: 201 })
+    }
     const comment = await createComment({
       workspaceId: actor.workspaceId, targetType, targetId, parentId, body,
       authorId: actor.userId, authorName: actor.name, authorType: "HUMAN", source: "UI",

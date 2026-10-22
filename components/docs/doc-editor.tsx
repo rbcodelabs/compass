@@ -30,7 +30,12 @@ import {
   deleteDocComment,
   getDocLinkedTasks,
   restoreDocVersion,
+  resolveDocEmbedRefs,
 } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
+import { DocEmbedCardsProvider, type EmbedEditing } from "@/components/docs/doc-embed-cards";
+import { createSlashController } from "@/components/docs/spec-slash-extension";
+import { SpecSlashMenu, defaultRecordCreators, type RecordCreators, type SlashScope } from "@/components/docs/spec-slash-menu";
+import { patchEntityField } from "@/components/panels/panel-parts";
 import { createDocumentSaveQueue } from "@/lib/document-save-queue";
 import { DocProperties, type DocMetadata } from "@/components/docs/doc-properties";
 import { LinkedTasksSection, type LinkedTaskData } from "@/components/tasks/linked-tasks-section";
@@ -55,6 +60,7 @@ import { DocsLibraryButton } from "@/components/docs/docs-library-button";
 import { DocCommentComposer, type ComposerPayload, type ComposerResult } from "@/components/docs/doc-comment-composer";
 import type { MentionOptions } from "@/components/docs/mention-editor";
 import { pinKind, type CommentTaskCardData } from "@/lib/comment-task-card";
+import { announceAgentRun } from "@/lib/ui/agent-run-toast";
 
 interface DocEditorProps {
   initialCommentsPin?: PanelPin;
@@ -82,6 +88,19 @@ interface DocEditorProps {
   decisionAction?: React.ReactNode;
   /** Follow toggle, rendered beside the decision action. */
   followAction?: React.ReactNode;
+  /** What this doc is (Spec / Discovery Plan / unscoped), for SPEC docs. Rendered above the properties; read-only. */
+  specHeader?: React.ReactNode;
+  /**
+   * Present only for SPEC docs: the records the doc specifies (from its scope links). It switches on the "/" menu, which offers only
+   * what these scopes allow; an empty list (an unscoped spec) offers nothing.
+   */
+  specScopes?: SlashScope[];
+  /** True for an org-wide read-only member: no edit controls on cards, no "/" menu. The page's own answer (resolveWorkspaceAccess), not a new permission model. */
+  readOnly?: boolean;
+  /** Test seam: how "/" creates records. Defaults to the existing assumption and task actions. */
+  recordCreators?: RecordCreators;
+  /** Test seam: how a card edit writes a record. Defaults to the record page's own patchEntityField. */
+  patchRecordField?: EmbedEditing["patch"];
   /** People and agents the @ picker offers in comments. */
   mentionOptions?: MentionOptions;
   /** Agents that already hold a task from a comment in this doc. */
@@ -131,7 +150,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {} }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, specHeader, specScopes, readOnly = false, recordCreators, patchRecordField, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {} }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
@@ -272,11 +291,40 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     []
   );
 
+  // Embed cards read their live data through this; the workspace is the doc's, decided on the server.
+  const docId = doc.id;
+  const resolveEmbeds = useCallback((refs: Parameters<typeof resolveDocEmbedRefs>[1]) => resolveDocEmbedRefs(docId, refs), [docId]);
+
+  // The markdown last known to be saved (or queued to be). An editor "update" whose markdown is identical is not an edit: StarterKit's
+  // TrailingNode appends an empty paragraph to any doc that does not end in a paragraph (every Spec and Discovery Plan ends in a
+  // heading) on the first ordinary transaction, which serializes to nothing. Saving it would rewrite the doc, and bump its
+  // revision and updatedAt, every time it is merely viewed.
+  const savedMarkdown = useRef<string | null>(null);
+
+  // The "/" menu exists only for spec docs; the controller is shared between the editor plugin and the menu component.
+  const slashController = useMemo(() => createSlashController(), []);
+  const creators = useMemo(
+    () => recordCreators ?? defaultRecordCreators({ orgSlug, workspaceSlug, revalidatePathStr }),
+    [recordCreators, orgSlug, workspaceSlug, revalidatePathStr]
+  );
+  const embedEditing = useMemo<EmbedEditing>(
+    () => ({
+      editable: !readOnly,
+      patch: patchRecordField ?? ((type, id, field, value) => patchEntityField(type, id, orgSlug, workspaceSlug, field, value)),
+    }),
+    [readOnly, patchRecordField, orgSlug, workspaceSlug]
+  );
+
   const editor = useEditor({
-    extensions: createDocEditorExtensions(initialAnchorData),
+    extensions: createDocEditorExtensions(initialAnchorData, { slash: specScopes ? slashController : undefined }),
     content: doc.content ?? "",
     onUpdate: ({ editor }) => {
       const markdown = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown();
+      if (markdown === savedMarkdown.current) {
+        setSelectionEmpty(editor.state.selection.empty);
+        return;
+      }
+      savedMarkdown.current = markdown;
       setCurrentContent(markdown);
       setSelectionEmpty(editor.state.selection.empty);
       debouncedSaveContent(markdown);
@@ -288,6 +336,12 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       handleDrop: () => false,
     },
   });
+
+  // Must stay above every effect that dispatches a transaction (tiptap's own "create" event is deferred past them): it records the
+  // markdown the doc was loaded with, before the first update can be emitted.
+  useEffect(() => {
+    if (editor && savedMarkdown.current === null) savedMarkdown.current = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown();
+  }, [editor]);
 
   useEffect(() => { editor?.setEditable(!isRestoring, false); }, [editor, isRestoring]);
 
@@ -432,6 +486,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     );
     if (!result.ok) return { ok: false, error: result.error, message: result.message ?? "Could not post the comment." };
     applyPosted(result);
+    // The comment mentioned a cloud agent on a new task: say whether its run started, was already going, or did not start and why.
+    announceAgentRun(result.agentRun);
     return { ok: true };
   }
 
@@ -491,14 +547,14 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     <div className="flex h-full min-h-0 min-w-0">
       <div data-slot="doc-editor-column" className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Save indicator */}
-      <div className="flex justify-end px-8 pt-3 min-h-7">
+      <div data-testid="doc-save-status" data-state={saveStatus} className="mx-auto w-full max-w-4xl flex justify-end px-8 pt-3 min-h-7">
         {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
         {saveStatus === "saved" && <span className="text-xs text-text-subtle">Saved</span>}
         {saveError && <span role="alert" className="text-xs text-status-danger">{saveError} <button type="button" className="underline" onClick={() => { void saveQueue.retry(); }}>Retry save</button></span>}
       </div>
 
       {/* Icon + title on a single row */}
-      <div className="flex items-center gap-2 px-8 pb-2">
+      <div className="mx-auto w-full max-w-4xl flex items-center gap-2 px-8 pb-2">
         <DocsLibraryButton />
         {/* Icon picker */}
         <div className="relative shrink-0">
@@ -541,7 +597,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       </div>
 
       {/* Toolbar */}
-      <div className="sticky top-0 z-10 flex items-center gap-1 px-4 sm:px-8 py-1.5 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
+      <div className="sticky top-0 z-10 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
+        <div className="mx-auto flex w-full max-w-4xl items-center gap-1 px-4 py-1.5 sm:px-8">
         {/* Buttons scroll horizontally on narrow screens instead of wrapping to a
             second row (which used to eat viewport height) or shrinking to the
             point of being unreadable/untappable. */}
@@ -684,6 +741,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           )}
         </div>
         {(followAction || decisionAction) && <div className="flex shrink-0 items-center gap-1.5 pl-1">{followAction}{decisionAction}</div>}
+        </div>
       </div>
 
       {/* Hidden file input */}
@@ -696,7 +754,9 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       />
 
       {/* Editor */}
-      <div className="flex-1 px-8 py-4 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
+      <div className="mx-auto w-full max-w-4xl px-8 py-4">
+        {specHeader}
         {/* Properties — scrolls with the content instead of pinning the viewport */}
         <DocProperties
           key={propertiesVersion}
@@ -745,7 +805,11 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           )}
         </div>
 
-        <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
+        <DocEmbedCardsProvider resolve={resolveEmbeds} editing={embedEditing}>
+          <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
+        </DocEmbedCardsProvider>
+        {specScopes && !readOnly ? <SpecSlashMenu editor={editor} controller={slashController} scopes={specScopes} creators={creators} /> : null}
+      </div>
       </div>
 
       </div>

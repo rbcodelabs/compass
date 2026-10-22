@@ -9,6 +9,7 @@ import {
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragMoveEvent,
   type DragStartEvent,
@@ -24,6 +25,7 @@ import { parseUnscheduledDragId, type UnscheduledItem } from "../unscheduled-ite
 import { ScheduleRail, type BulkPlacement, type SolutionRailItem } from "../schedule/schedule-rail";
 import { SchedulePalette, type PaletteDates } from "../schedule/schedule-palette";
 import { RailRegion, useRailState } from "../schedule/rail-region";
+import { CollapsedSidebarTab } from "../schedule/sidebar-chrome";
 import type { RailPreference } from "@/lib/roadmap/rail-state";
 import { RangeSchedulePopover } from "../schedule/range-schedule-popover";
 import type { WorkspaceSavedViews } from "../workspace-saved-views";
@@ -120,7 +122,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
   scheduleCatalog?: ScheduleCatalog;
   /** The workspace has no ACTIVE roadmap items at all (not merely none matching the current filter). */
   roadmapEmpty?: boolean;
-  /** The user's explicit open/closed choice for the Ready to schedule rail (server-read cookie); null follows the viewport default. */
+  /** The user's explicit open/closed choice for the Not scheduled sidebar (server-read cookie); null follows the viewport default. */
   initialRailPreference?: RailPreference | null;
 }) {
   const labels = useLabels();
@@ -364,11 +366,47 @@ export function NativeTimeline(props: TimelineEngineProps & {
     dragPointerCurrentX.current = null;
   }
 
+  /**
+   * pointerWithin, except that a rail card released over the docked "Not scheduled" sidebar (or
+   * past the scroller's edge) is treated as released at the scroller's nearest visible edge, on
+   * the same row. The lanes' rects run under the sidebar, but whether a collision is reported
+   * there is an accident of layout; this makes "drop at the right edge" mean the same thing
+   * whichever side the sidebar docks on.
+   */
+  const railAwareCollisionDetection: CollisionDetection = (args) => {
+    const scrollRect = scrollRef.current?.getBoundingClientRect();
+    const pointer = args.pointerCoordinates;
+    if (!pointer || !scrollRect || scrollRect.width <= 0 || !String(args.active.id).startsWith("unscheduled:")) return pointerWithin(args);
+    const x = Math.min(Math.max(pointer.x, scrollRect.left), scrollRect.right - 1);
+    return pointerWithin(x === pointer.x ? args : { ...args, pointerCoordinates: { x, y: pointer.y } });
+  };
+
+  /**
+   * Edge auto-scroll is for dragging toward the timeline's own edge. With the "Not scheduled"
+   * sidebar docked beside the chart, a pointer held over the sidebar also sits "past the edge"
+   * of the scroller, and would otherwise scroll the timeline away until the card is released on
+   * a date nowhere near the visible range.
+   */
+  const autoScroll = useMemo(() => ({
+    canScroll: (element: Element) => {
+      if (element !== scrollRef.current) return true;
+      const pointerX = dragPointerCurrentX.current;
+      const rect = element.getBoundingClientRect();
+      return pointerX === null || rect.width <= 0 || (pointerX >= rect.left && pointerX < rect.right);
+    },
+  }), []);
+
   /** The calendar date under the drag pointer, or null when it cannot be measured. */
   function dropDateUnderPointer(): CalendarDate | null {
     const canvasRect = canvasRef.current?.getBoundingClientRect();
-    const pointerX = dragPointerCurrentX.current;
-    if (!canvasRect || pointerX === null) return null;
+    const rawPointerX = dragPointerCurrentX.current;
+    if (!canvasRect || rawPointerX === null) return null;
+    // Lane rects span the whole logical canvas, wider than the visible scroller, and the docked
+    // "Not scheduled" sidebar sits beside it. A pointer released over the sidebar (or past the
+    // scroller's edge) still collides with the lane, so snap it to the nearest visible edge
+    // rather than scheduling the item at a date that is scrolled out of sight.
+    const scrollRect = scrollRef.current?.getBoundingClientRect();
+    const pointerX = scrollRect && scrollRect.width > 0 ? Math.min(Math.max(rawPointerX, scrollRect.left), scrollRect.right - 1) : rawPointerX;
     return positionToInclusiveDate(pointerClientToCanvasPosition(pointerX, canvasRect.left), controller.viewportStart, controller.viewportEnd, timelineWidth);
   }
 
@@ -427,11 +465,8 @@ export function NativeTimeline(props: TimelineEngineProps & {
       if (backlogItem) controller.setAnnouncement(`${backlogItem.title} cannot be scheduled in that lane`);
       return;
     }
-    const canvasRect = canvasRef.current?.getBoundingClientRect();
-    const currentPointerClientX = dragPointerCurrentX.current;
-    if (!canvasRect || currentPointerClientX === null) return;
-    const pointerPosition = pointerClientToCanvasPosition(currentPointerClientX, canvasRect.left);
-    const date = positionToInclusiveDate(pointerPosition, controller.viewportStart, controller.viewportEnd, timelineWidth);
+    const date = dropDateUnderPointer();
+    if (!date) return;
     void controller.scheduleBacklog(backlogItem, row.horizon, date).catch(() => undefined);
   }
 
@@ -537,7 +572,8 @@ export function NativeTimeline(props: TimelineEngineProps & {
         <DndContext
           id={dndId}
           sensors={sensors}
-          collisionDetection={pointerWithin}
+          collisionDetection={railAwareCollisionDetection}
+          autoScroll={autoScroll}
           onDragStart={handleDragStart}
           onDragMove={handleDragMove}
           onDragCancel={() => {
@@ -555,19 +591,6 @@ export function NativeTimeline(props: TimelineEngineProps & {
           }}
         >
           <section data-testid="timeline-engine-native" className="flex min-w-0 flex-col p-1 min-[1320px]:flex-row min-[1320px]:items-start">
-            <RailRegion id={railId} mode={rail.mode} open={rail.open} regionRef={railRegionRef}>
-            <ScheduleRail
-              className="max-h-80 min-[1320px]:max-h-[calc(100dvh-9rem)] min-[1320px]:w-80"
-              items={controller.unscheduled}
-              squads={props.headerSquads ?? props.squads}
-              autoAdded={autoAdded}
-              pendingItemKeys={controller.pendingBacklogIds}
-              onScheduleOne={(item) => { void controller.scheduleSolutions([{ solutionId: item.id }]).catch(() => undefined); }}
-              onBulkSchedule={scheduleFromRail}
-              onQuickAddFeedback={(item, horizon) => controller.quickAdd(item satisfies UnscheduledItem, horizon)}
-              onUndoAuto={(item) => { void controller.undoCreated([item.id]).catch(() => undefined); }}
-            />
-            </RailRegion>
             <div className="flex min-w-0 flex-1 flex-col gap-3">
             {controller.reconciliationRequiredIds.size > 0 && <p role="alert" className="text-sm text-muted-foreground">An item changed elsewhere. Reload the timeline before editing it again.</p>}
             {showEmptyState ? (
@@ -577,7 +600,7 @@ export function NativeTimeline(props: TimelineEngineProps & {
                 onBuild={(preset) => controller.buildFromDiscovery(preset)}
                 onAddManually={() => {
                   setManualMode(true);
-                  pushUndoToast({ message: "Blank roadmap. Draw on a row, press / to search, or open the Ready to schedule rail to drag items." });
+                  pushUndoToast({ message: "Blank roadmap. Draw on a row, press / to search, or open the Not scheduled sidebar to drag items." });
                 }}
               />
             ) : (
@@ -733,6 +756,29 @@ export function NativeTimeline(props: TimelineEngineProps & {
               onSave={(horizon, start, end) => controller.reschedule(editing!.id, horizon, start, end)}
             />
             </div>
+            <RailRegion id={railId} mode={rail.mode} open={rail.open} regionRef={railRegionRef}>
+            <ScheduleRail
+              className="max-h-80 w-full min-[1320px]:max-h-[calc(100dvh-9rem)]"
+              onCollapse={toggleRail}
+              controlsId={railId}
+              items={controller.unscheduled}
+              squads={props.headerSquads ?? props.squads}
+              autoAdded={autoAdded}
+              pendingItemKeys={controller.pendingBacklogIds}
+              onScheduleOne={(item) => { void controller.scheduleSolutions([{ solutionId: item.id }]).catch(() => undefined); }}
+              onBulkSchedule={scheduleFromRail}
+              onQuickAddFeedback={(item, horizon) => controller.quickAdd(item satisfies UnscheduledItem, horizon)}
+              onUndoAuto={(item) => { void controller.undoCreated([item.id]).catch(() => undefined); }}
+            />
+            </RailRegion>
+            {!rail.open && (
+              <CollapsedSidebarTab
+                className="ml-3 hidden min-[1320px]:flex"
+                count={controller.unscheduled.length}
+                controls={railId}
+                onClick={toggleRail}
+              />
+            )}
             <SchedulePalette
               open={paletteOpen}
               onOpenChange={setPaletteOpen}

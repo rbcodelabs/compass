@@ -574,7 +574,7 @@ export async function buildRoadmapFromDiscovery(
 /**
  * Undo for any create above (and for an auto-added item): archive the items.
  * The source solutions are never touched, so each one simply returns to the
- * "Ready to schedule" rail. An archived auto-created item stays behind as the
+ * "Not scheduled" rail. An archived auto-created item stays behind as the
  * marker that stops Building auto-sync re-adding it.
  */
 export async function undoRoadmapCreate(workspaceId: string, itemIds: string[]): Promise<{ archived: string[] }> {

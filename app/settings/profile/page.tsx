@@ -4,17 +4,22 @@ import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { PageHeader } from "@/components/patterns/page-header"
 import { ProfileForm } from "@/components/settings/profile-form"
+import { DeleteAccountPanel } from "@/components/settings/delete-account-panel"
+import { planAccountDeletion } from "@/lib/account-deletion"
 
 export const metadata = { title: "Profile" }
 
 export default async function ProfilePage() {
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
-  const profile = await getPrisma().user.findUnique({ where: { id: session.user.id }, select: { name: true, email: true } })
+  const prisma = getPrisma()
+  const profile = await prisma.user.findUnique({ where: { id: session.user.id }, select: { name: true, email: true } })
   if (!profile) redirect("/login")
+  const deletionPlan = await planAccountDeletion(prisma, session.user.id)
   return <main className="mx-auto flex max-w-3xl flex-col gap-6 p-4 sm:p-8">
     <Link href="/dashboard" className="text-sm text-text-subtle underline">Back to Compass</Link>
     <PageHeader title="Profile" description="Your name across Compass." />
     <ProfileForm name={profile.name} email={profile.email} />
+    <DeleteAccountPanel email={profile.email} plan={deletionPlan} />
   </main>
 }

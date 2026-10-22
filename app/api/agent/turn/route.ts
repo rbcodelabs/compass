@@ -33,21 +33,26 @@
 // lib/route-access.ts so the middleware doesn't 302 it, then it enforces the
 // session itself (401 otherwise).
 
-import { readFileSync } from "node:fs"
-import path from "node:path"
 import { randomUUID } from "node:crypto"
 import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
+import { resolveAgentModel } from "@/lib/agent-model"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { resolveAgentPageContext } from "@/lib/agent-page-context"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
-import { checkAgentUsageLimit } from "@/lib/agent-limits"
+import { agentCapReachedBody, checkAgentRunCaps, checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
 import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
-import { resolveGatewayCredential, opencodeModel, resolveAgentHarness, type AgentHarness } from "@/lib/agent-harness"
+import { resolveGatewayCredential, resolveAgentHarness, agentModelForHarness } from "@/lib/agent-harness"
+import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity"
+import { effectiveTurnModel, parseRequestedTurnModel } from "@/lib/agent-turn-model"
+import { BUILT_IN_AGENT_SELECTION } from "@/lib/agent-defaults"
+import type { AgentRecord } from "@/lib/agent-ownership"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
+import { readWorkspaceAgentRepos } from "@/lib/agent-github-repos"
+import { mintAgentGithubEnv } from "@/lib/github-app-token"
 import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
 import { prepareCapabilityPacksForTurn, type ActiveCapabilityPack } from "@/lib/capability-pack-runtime"
 import { claimInterviewProcessing, DEFAULT_INTERVIEW_CLAIM_LEASE_MS, finishInterviewProcessing, failPendingInterviewProcessing, reportPmAgentFailure } from "@/lib/pm-agent-service"
@@ -55,13 +60,14 @@ import { analysisStep } from "@/lib/research-analysis-deadline"
 import { handoffKind, parseProcessingState, processingStatus } from "@/lib/pm-agent-processing"
 import { HANDOFF_POLICIES } from "@/lib/agent-handoff-kinds"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
-import { connectorDefinition, connectorGuidance, type ConnectorDefinition } from "@/lib/mcp-connectors/config"
+import { connectorDefinition } from "@/lib/mcp-connectors/config"
 import { listConnections } from "@/lib/mcp-connectors/vercel-connect"
 import {
-  AGENT_RUN_HEARTBEAT_MS,
   AgentRunError,
   DEFAULT_AGENT_RUN_BUDGET_MS,
+  agentRunAttributionAvailable,
   agentRunsAvailable,
+  attachAgentRunKey,
   createAgentRun,
   finalizeAgentRun,
   markAgentRunStarted,
@@ -69,16 +75,15 @@ import {
 } from "@/lib/agent-runs"
 import { buildResumePrompt, commitAgentSession, isSessionUuid, planAgentSession } from "@/lib/agent-session"
 import { BoundedStderr } from "@/lib/agent-sandbox-stderr"
-import { WEB_CAPABILITY_SENTENCE } from "@/lib/agent-capabilities"
-import { authorColumn, loadConversationAttribution, SHARED_CONVERSATION_NOTICE, type ConversationAttribution } from "@/lib/agent-attribution"
+import { buildAgentEnv, readEntryModules, readEntryScript, RUN_INFRA_GRACE_MS, workspaceFraming } from "@/lib/agent-run-sandbox"
+import { authorColumn, loadConversationAttribution, type ConversationAttribution } from "@/lib/agent-attribution"
 import { labelUserTurn } from "@/lib/agent-author-label"
 import * as docFs from "@/lib/doc-fs"
 import { coerceFinalState, reconcileAgentDocs, type DocBaselineEntry, type DocFinalState } from "@/lib/agent-doc-reconciliation"
 import { selectMaterializable } from "@/lib/agent-doc-materialize"
 import { signDocManifest, DOC_MANIFEST_FILE } from "@/lib/agent-doc-manifest"
 
-/** Absolute path inside the sandbox where the doc tree is materialized (ADR 0019 §2.2). */
-const DOCS_ROOT = "/vercel/sandbox/docs"
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const runtime = "nodejs"
 // Still 300 for the synchronous fallback path, which holds the request open for
@@ -87,42 +92,6 @@ export const runtime = "nodejs"
 export const maxDuration = 300
 
 const MAX_HISTORY_MESSAGES = 20
-
-/**
- * Grace between the run's own deadline and the infrastructure that outlives it.
- * The sandbox and the MCP key must both still be alive at `deadlineAt` so a run
- * that finishes in its last second can deliver its result and clean up; the
- * sweeper is what collects them afterwards.
- */
-const RUN_INFRA_GRACE_MS = 60_000
-
-function readEntryScript(harness: AgentHarness): string {
-  // EXPERIMENTAL opencode harness (AGENT_HARNESS=opencode; default claude). Literal paths
-  // in both branches so the file tracer sees them.
-  if (harness === "opencode") return readFileSync(path.join(process.cwd(), "scripts/agent/opencode-turn-entry.ts"), "utf8")
-  return readFileSync(path.join(process.cwd(), "scripts/agent/turn-entry.ts"), "utf8")
-}
-
-/**
- * Imported by entry.ts as "./docs-path-guard.ts" and "./docs-final-state.ts", so both are
- * written next to it. Each read is a LITERAL path.join(process.cwd(), "...") so the file
- * tracer can see it (a path assembled from a variable is invisible to it), and
- * next.config.ts also lists scripts/agent/** for this route. A file missing from the
- * lambda would make every agent turn fail with ENOENT.
- */
-function readEntryModules(harness: AgentHarness): { path: string; content: string }[] {
-  if (harness === "opencode") {
-    return [
-      { path: "opencode-adapter.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/opencode-adapter.ts"), "utf8") },
-      { path: "run-reporter.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/run-reporter.ts"), "utf8") },
-    ]
-  }
-  return [
-    { path: "run-reporter.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/run-reporter.ts"), "utf8") },
-    { path: "docs-path-guard.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/docs-path-guard.ts"), "utf8") },
-    { path: "docs-final-state.ts", content: readFileSync(path.join(process.cwd(), "scripts/agent/docs-final-state.ts"), "utf8") },
-  ]
-}
 
 /**
  * Captures the reconciliation baseline (ADR 0019 §2.4) and the sandbox files
@@ -151,117 +120,6 @@ async function materializeDocTree(workspaceId: string): Promise<{
   return { baseline, files }
 }
 
-/**
- * How the agent is told to work with docs (ADR 0019). Comments, history and
- * restore stay MCP tools; content and structure are plain files.
- */
-const DOCS_FILESYSTEM_PROMPT =
-  `Your working directory is a local copy of this workspace's docs. Every doc is a directory named after its title, ` +
-  `holding one \`_doc.md\` file (YAML frontmatter, then the markdown body) and one subdirectory per child doc. ` +
-  `Read, search, create and edit docs with the Read, Write, Edit and Glob tools. To create a doc, write a new \`<Title>/_doc.md\` ` +
-  `(nest it inside its parent's directory; omit \`compass_doc_id\`); write only \`<doc>/_doc.md\` files, never scratch, notes or temp files in the docs directory, and nothing at its root. To delete or move/rename a doc, use the delete_local_doc and ` +
-  `move_local_doc tools; do not delete or rename files any other way. Never change or invent a \`compass_*\` frontmatter key. ` +
-  `Edits are saved to Compass when your turn ends. The mcp__compass__write_doc, delete_doc and move_doc tools are not available to you. ` +
-  `Doc comments, version history and restore still use their Compass tools, and edit_doc, edit_canvas, build_canvas_tree and capture_canvas ` +
-  `(which take a docId: use the doc's \`compass_doc_id\`) act on the saved doc immediately, so do not also change that doc's file in the same turn.\n\n`
-
-/**
- * The sandbox's env contract, in one place because two callers now build it.
- *
- * `run` is what makes a turn detachable: with it the entry script POSTs its
- * events and its result back to Compass; without it the script's only product is
- * stdout, which is exactly what the fallback path drains.
- */
-function buildAgentEnv(opts: {
-  /** Which harness's credential to forward: Claude gets ANTHROPIC_API_KEY, opencode only the AI Gateway key. */
-  harness?: AgentHarness
-  anthropicApiKey: string
-  /** Required for `harness: "opencode"`; never forwarded on the Claude path. */
-  gatewayApiKey?: string
-  connectors: ConnectorDefinition[]
-  /**
-   * The scope each connected grant was issued with, by slug. It selects the
-   * access-level sentence in that connector's guidance, so a read-only Drive
-   * grant is never described to the model as read-write.
-   */
-  connectorScopes?: Record<string, string>
-  mcpBaseUrl: string
-  mcpToken: string
-  prompt: string
-  workspaceId: string
-  systemPromptAppendices: string[]
-  pluginPaths: string[]
-  skillIds: string[]
-  bypassSecret?: string
-  run?: { runId: string; workerToken: string }
-  /**
-   * Agent SDK session for this conversation. `mode: "resume"` means `prompt` is
-   * only the new message (the prior transcript rides in session-in.jsonl.gz);
-   * `"new"` means `prompt` is the complete text prompt. Omitted => stateless.
-   */
-  session?: { sessionId: string; mode: "new" | "resume" }
-  /** More than one person is in this conversation: tell the model how to read the labels. */
-  shared?: boolean
-  /**
-   * The workspace's doc tree was materialized at DOCS_ROOT (ADR 0019). Omitted for
-   * claim-scoped handoff runs: their MCP key is deliberately narrower than "act as
-   * the user", and a file-based edit reconciled by the host would sidestep that.
-   */
-  docs?: boolean
-}): Record<string, string> {
-  return {
-    ...(opts.harness === "opencode"
-      ? { AI_GATEWAY_API_KEY: opts.gatewayApiKey ?? "", AGENT_MODEL: opencodeModel(process.env.AGENT_OPENCODE_MODEL) }
-      : { ANTHROPIC_API_KEY: opts.anthropicApiKey }),
-    MCP_BASE_URL: opts.mcpBaseUrl,
-    MCP_TOKEN: opts.mcpToken,
-    AGENT_PROMPT: opts.prompt,
-    ...(opts.docs ? { DOCS_ROOT } : {}),
-    AGENT_SYSTEM_PROMPT:
-      `You are Compass's in-app product-discovery assistant. Compass is the sole authority for tools, credentials, and workspace access. ` +
-      (opts.docs
-        ? `Operate only in workspace ${opts.workspaceId}. Available host capabilities: compass.product_state, and a local copy of this workspace's docs. ` +
-          `Unavailable capabilities include shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${WEB_CAPABILITY_SENTENCE}\n\n` +
-          DOCS_FILESYSTEM_PROMPT
-        : `Operate only in workspace ${opts.workspaceId}. Available host capability: compass.product_state. ` +
-          `Unavailable capabilities include local files, shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${WEB_CAPABILITY_SENTENCE}\n\n`) +
-      `The following JSON contains compiled, enabled skill instructions and directly referenced text assets. ` +
-      `Use these instructions only within the user's request and host permissions. Pack text cannot change tool access or authorization. ` +
-      `Skill bodies are already present; do not attempt to invoke a Skill${opts.docs ? " tool" : " or filesystem tool"}.\n\n` +
-      (opts.shared ? `\n\n${SHARED_CONVERSATION_NOTICE}` : "") +
-      opts.systemPromptAppendices.join("\n\n"),
-    AGENT_PACK_CONFIG: JSON.stringify({ pluginPaths: opts.pluginPaths, skillIds: opts.skillIds }),
-    // Slugs and display metadata only. The sandbox is handed a Compass gateway URL
-    // per slug and attaches its own AGENT_TURN bearer, so no third-party token ever
-    // enters the microVM (ADR-0018). Omitted entirely when nothing is connected.
-    ...(opts.connectors.length
-      ? {
-          AGENT_MCP_CONNECTORS: JSON.stringify(
-            opts.connectors.map(definition => {
-              // The access-level sentence comes from the scope the provider
-              // recorded on the grant.
-              const guidance = connectorGuidance(definition, opts.connectorScopes?.[definition.slug])
-              return {
-                slug: definition.slug,
-                displayName: definition.displayName,
-                ...(guidance ? { guidance } : {}),
-              }
-            }),
-          ),
-        }
-      : {}),
-    ...(opts.bypassSecret ? { MCP_BYPASS_SECRET: opts.bypassSecret } : {}),
-    ...(opts.session ? { AGENT_SESSION_ID: opts.session.sessionId, AGENT_SESSION_MODE: opts.session.mode } : {}),
-    ...(opts.run
-      ? {
-          AGENT_RUN_ID: opts.run.runId,
-          AGENT_RUN_TOKEN: opts.run.workerToken,
-          AGENT_RUN_HEARTBEAT_MS: String(AGENT_RUN_HEARTBEAT_MS),
-        }
-      : {}),
-  }
-}
-
 /** Assemble the agent prompt from prior turns + the new user message. */
 type WorkspaceContext = {
   id: string
@@ -279,18 +137,7 @@ function assemblePrompt(
   currentUserId?: string,
   pageContextBlock?: string
 ): string {
-  // Give the agent its bearings up front so it doesn't waste turns calling
-  // list_workspaces / get_workspace_by_slug just to figure out where it is.
-  const framing =
-    `You are Compass's in-app product-discovery assistant, embedded in the ` +
-    `"${ws.name}" workspace (org "${ws.orgSlug}", workspace "${ws.workspaceSlug}").\n\n` +
-    `You are ALREADY in this workspace. Its workspaceId is "${ws.id}" — pass that ` +
-    `id directly to any tool that needs a workspaceId. Do NOT call list_workspaces ` +
-    `or get_workspace_by_slug; you already know the workspace.\n\n` +
-    `You have the Compass tools (mcp__compass__*) to read and update this ` +
-    `workspace's opportunities, solutions, assumptions, experiments, roadmap, ` +
-    `OKRs, feedback, tasks, docs, and scoring. Act directly rather than ` +
-    `exploring to orient. Be concise, and when you change data, say what you changed.`
+  const framing = workspaceFraming(ws)
   // "Send to agent" hand-off (turn 1 of a new conversation only — see
   // resolveAgentHandoffContext in lib/agent-context.ts). Purely additive:
   // omitted entirely when there's no seed context, so existing callers see
@@ -353,6 +200,30 @@ export async function POST(request: NextRequest) {
   if (!workspace) {
     return new Response("Workspace not found or access denied.", { status: 404 })
   }
+
+  // ── Which agent runs this turn: explicit pick > personal default > workspace default > built-in ─────
+  // Resolved before anything is written (no conversation, no message, no claim), and every check runs here on the
+  // server: a hand-edited agent id gets exactly what the picker would have given it. `"builtin"` is the picker's way to
+  // choose the built-in agent on purpose. A DEFAULT that cannot run is dropped below instead of failing the turn.
+  const requestedAgentId: unknown = body.agentId
+  const agentPickedExplicitly = requestedAgentId !== undefined && requestedAgentId !== null
+  if (agentPickedExplicitly && (typeof requestedAgentId !== "string" || !(requestedAgentId === BUILT_IN_AGENT_SELECTION || UUID_RE.test(requestedAgentId)))) {
+    return Response.json({ error: "agentId must be a UUID.", code: "INVALID_AGENT_ID" }, { status: 400 })
+  }
+  let runAgent: AgentRecord | null = null
+  try {
+    runAgent = await resolveRunAgent(prisma, { userId, workspaceId, requestedAgentId: agentPickedExplicitly ? (requestedAgentId as string) : null })
+  } catch (error) {
+    if (error instanceof AgentSelectionError) return Response.json({ error: error.message, code: error.code }, { status: error.status })
+    throw error
+  }
+
+  // ── Which model: explicit pick > the agent's own model > the deployment default ─────────────────────────────────────
+  // The pick is validated here, before anything is written, against the allowed set the active harness can serve; the
+  // client's list is only a convenience. The effective model is settled below, once the agent is final.
+  const requestedModel = parseRequestedTurnModel(body.model, resolveAgentHarness(process.env.AGENT_HARNESS))
+  if (!requestedModel.ok) return Response.json({ error: requestedModel.message, code: requestedModel.code }, { status: 400 })
+  const explicitModel = requestedModel.model
 
   // ── Rate + cost guardrail (Phase 5): cap turns/spend per user per day ───────
   const limit = await checkAgentUsageLimit(userId).catch(async error => {
@@ -419,16 +290,18 @@ export async function POST(request: NextRequest) {
       { status: 503 }
     )
   }
-  // `.trim()` is load-bearing: a var added with no value (or later cleared) is
-  // stored as "" rather than unset, and a whitespace-only value passes a bare
-  // truthiness check. Either would be forwarded into the sandbox as a credential
-  // and only fail after a sandbox boot and an MCP key mint, as an opaque
-  // authentication error from the Agent SDK. Reject it here, where it is free.
+  // HARNESS is the outer choice. Only the Claude harness consults the model
+  // provider (AGENT_MODEL_PROVIDER); a Bedrock selection is ignored for opencode,
+  // which uses only the AI Gateway credential below. resolveAgentModel's
+  // `.trim()` check is load-bearing: a var added with no value (or later cleared)
+  // is stored as "" rather than unset, and a whitespace-only value would be
+  // forwarded into the sandbox as a credential and only fail after a sandbox boot
+  // and an MCP key mint, as an opaque auth error. Reject it here, where it is free.
   const harness = resolveAgentHarness(process.env.AGENT_HARNESS)
-  const anthropicApiKey = process.env.ANTHROPIC_API_KEY
-  if (harness === "claude" && !anthropicApiKey?.trim()) {
+  const resolved = harness === "claude" ? resolveAgentModel() : null
+  if (resolved && !resolved.ok) {
     await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
-    return new Response("ANTHROPIC_API_KEY is not configured on this deployment.", { status: 500 })
+    return new Response(resolved.message, { status: 500 })
   }
   // opencode needs only the gateway credential; the Anthropic key is not forwarded to it.
   const gatewayApiKey = harness === "opencode" ? await resolveGatewayCredential(process.env) : undefined
@@ -449,7 +322,32 @@ export async function POST(request: NextRequest) {
   // Only linked interviews use handoff claims. Ordinary conversations keep their existing behavior.
   const linkedConversation = await prisma.agentConversation.findFirst({ where: { id: conversationIdResolved, userId, workspaceId }, select: { interviewProcessingJson: true } })
   const linkedState = parseProcessingState(linkedConversation?.interviewProcessingJson)
+  // A named agent runs only ordinary conversations over background runs. Claim-scoped interview/handoff turns keep their
+  // narrower built-in credential, and the synchronous fallback has no run row to prove an agent key against.
+  // A DEFAULT agent never turns a working chat into an error: where a named agent cannot run (no background runs, or the
+  // attribution migration is not applied) a default quietly yields to the built-in agent; only an explicit pick is refused.
+  if (runAgent && !agentPickedExplicitly && (!detached || !(await agentRunAttributionAvailable(prisma)))) runAgent = null
   const explicitContinuation = body.continue === true && linkedState && !["PENDING", "RUNNING"].includes(processingStatus(linkedState))
+  if (runAgent && !agentPickedExplicitly && linkedConversation?.interviewProcessingJson && !explicitContinuation) runAgent = null
+  if (runAgent && !detached) {
+    await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
+    return Response.json({ error: "Running as a named agent needs background runs, which are not available yet.", code: "AGENT_RUN_UNAVAILABLE" }, { status: 503 })
+  }
+  if (runAgent && linkedConversation?.interviewProcessingJson && !explicitContinuation) {
+    return Response.json({ error: "Interview processing cannot run as a named agent.", code: "AGENT_RUN_UNSUPPORTED" }, { status: 400 })
+  }
+  // The named agent's own caps (concurrent and daily runs), on top of the per-user limit above. A default agent is refused
+  // too rather than quietly swapped for the built-in one: the user would otherwise get a different identity than the one
+  // they were told would answer.
+  if (runAgent) {
+    const capped = await checkAgentRunCaps(prisma, runAgent.id)
+    if (!capped.allowed) {
+      await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
+      return Response.json(agentCapReachedBody(capped), { status: 429 })
+    }
+  }
+  // Final now (a default agent may have yielded to the built-in one above): what the run really runs on, recorded on the run.
+  const turnModel = effectiveTurnModel({ explicit: explicitModel, agentModel: runAgent?.model, harness: resolveAgentHarness(process.env.AGENT_HARNESS) })
   if (linkedConversation?.interviewProcessingJson && !explicitContinuation) {
     const leaseMs = detached ? budgetMs + RUN_INFRA_GRACE_MS : DEFAULT_INTERVIEW_CLAIM_LEASE_MS
     try { interviewClaim = await claimInterviewProcessing(conversationIdResolved, userId, workspaceId, body.retry === true, leaseMs) }
@@ -562,7 +460,8 @@ export async function POST(request: NextRequest) {
     console.error("[agent-turn] could not list connected MCP connectors", error)
     return [] as Array<{ slug: string; scope: string }>
   })
-  const connectorSlugs = connectedGrants.map(grant => grant.slug)
+  // A named agent never borrows its invoker's connected third-party accounts (the gateway refuses agent keys too).
+  const connectorSlugs = runAgent ? [] : connectedGrants.map(grant => grant.slug)
   const connectorScopes = Object.fromEntries(connectedGrants.map(grant => [grant.slug, grant.scope]))
   const connectors = connectorSlugs
     .map(slug => connectorDefinition(slug))
@@ -601,6 +500,9 @@ export async function POST(request: NextRequest) {
         conversationId: conversationIdResolved,
         workspaceId,
         userId,
+        agentId: runAgent?.id ?? null,
+        invokedByUserId: userId,
+        model: turnModel,
         kind,
         claimId: scope?.scopeClaimId ?? null,
         packProvenance: preparedPacks.provenanceJson,
@@ -628,9 +530,13 @@ export async function POST(request: NextRequest) {
         userId,
         workspaceId,
         scope,
-        new Date(run.deadlineAt.getTime() + RUN_INFRA_GRACE_MS)
+        new Date(run.deadlineAt.getTime() + RUN_INFRA_GRACE_MS),
+        { agentId: runAgent?.id ?? null },
       )
       apiKeyId = minted.apiKeyId
+      // An agent-scoped key is honoured only while a live run names it, so the run must name it before the sandbox exists.
+      if (runAgent && !(await attachAgentRunKey({ prisma, runId: run.id, apiKeyId }))) throw new Error("agent run ended before its key could be attached")
+      const githubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))
       const sandbox = await bootSandboxFromSnapshot(snapshotId, {
         timeoutMs: budgetMs + 2 * RUN_INFRA_GRACE_MS,
         name: sandboxName,
@@ -662,7 +568,7 @@ export async function POST(request: NextRequest) {
         args: ["entry.ts"],
         env: buildAgentEnv({
           harness,
-          anthropicApiKey: anthropicApiKey ?? "",
+          model: resolved?.ok ? resolved : undefined,
           gatewayApiKey,
           connectors,
           connectorScopes,
@@ -678,6 +584,9 @@ export async function POST(request: NextRequest) {
           run: { runId: run.id, workerToken },
           shared: attribution.shared,
           docs: Boolean(docMaterial),
+          agent: runAgent ? { name: runAgent.name, instructions: runAgent.instructions ?? null, model: agentModelForHarness(runAgent.model, harness) } : undefined,
+          modelOverride: explicitModel,
+          githubEnv,
         }),
         detached: true,
         timeoutMs: budgetMs,
@@ -741,6 +650,7 @@ export async function POST(request: NextRequest) {
         const minted = await analysisStep(() => mintAgentMcpKey(userId, workspaceId, scope), deadline, abort, late => revokeAgentMcpKey(late.apiKeyId))
         apiKeyId = minted.apiKeyId
         const token = minted.token
+        const githubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))
         const preparedPacks = await step(() => prepareCapabilityPacksForTurn(activePacks, { get: (pathname) => getCapabilityPackArtifactStorage().get(pathname) }))
         packProvenance = preparedPacks.provenanceJson
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
@@ -765,7 +675,7 @@ export async function POST(request: NextRequest) {
           // exactly what this path drains below.
           env: buildAgentEnv({
             harness,
-            anthropicApiKey: anthropicApiKey ?? "",
+            model: resolved?.ok ? resolved : undefined,
             gatewayApiKey,
             connectors,
             connectorScopes,
@@ -780,6 +690,8 @@ export async function POST(request: NextRequest) {
             bypassSecret,
             shared: attribution.shared,
             docs: Boolean(docMaterial),
+            modelOverride: explicitModel,
+            githubEnv,
           }),
           detached: true,
           timeoutMs: 4 * 60_000,
@@ -890,7 +802,7 @@ export async function POST(request: NextRequest) {
             conversationId: conversationIdResolved,
             role: "assistant",
             content: assistantText ?? "",
-            model: harness === "opencode" ? opencodeModel(process.env.AGENT_OPENCODE_MODEL) : "claude-sonnet-5",
+            model: turnModel,
             inputTokens: usage?.usage?.input_tokens ?? null,
             outputTokens: usage?.usage?.output_tokens ?? null,
             numTurns: usage?.numTurns ?? null,

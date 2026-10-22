@@ -341,6 +341,20 @@ describe("tracked decisions", () => {
       })
     })
 
+    it("stores a recordedPrefix before the reason, after validating the reason on its own (so 2,000 characters still work)", async () => {
+      prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", noActionAt: null })
+      prisma.taskLink.findMany.mockResolvedValue([])
+      prisma.reviewRequest.update.mockResolvedValue({ id: "request-1" })
+      const reason = "r".repeat(2000)
+      await recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason, actorUserId: null, recordedPrefix: "[Closed by agent A (id)] " })
+      expect(prisma.reviewRequest.update.mock.calls[0][0].data).toMatchObject({ noActionById: null, noActionReason: `[Closed by agent A (id)] ${reason}` })
+    })
+
+    it("still rejects a reason over 2,000 characters or blank, prefix or not", async () => {
+      await expect(recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "r".repeat(2001), actorUserId: null, recordedPrefix: "[x] " })).rejects.toThrow()
+      await expect(recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "   ", actorUserId: null, recordedPrefix: "[x] " })).rejects.toThrow()
+    })
+
     it("rejects a missing decision", async () => {
       prisma.reviewRequest.findFirst.mockResolvedValue(null)
       await expect(recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "Why", actorUserId: "user-1" }))
@@ -392,6 +406,8 @@ describe("tracked decisions", () => {
       }))
       expect(result.requests.map((request) => request.id)).toEqual(["request-unlinked"])
       expect(result.total).toBe(1)
+      // Flag unset: exactly the legacy query (linkedId only, no task join).
+      expect(prisma.taskLink.findMany).toHaveBeenCalledWith({ where: { linkedType: "DECISION", linkedId: { in: ["request-linked", "request-unlinked"] } }, select: { linkedId: true } })
     })
 
     it("returns an empty page without querying task links when there are no DECIDED candidates", async () => {

@@ -256,6 +256,9 @@ model Workspace {
   // workflow and found the always-on surface noisy. See
   // Claude/2026-07-21-compass-gtm-planning-design.md for original context.
   launchWorkflowEnabled Boolean?               @default(false) @map("launch_workflow_enabled")
+  // JSON array of "owner/name" repos a workspace admin approved for agent
+  // sandboxes (migration 105). NULL/empty = agents get no GitHub token.
+  agentGithubRepos     String?                 @map("agent_github_repos") @db.Text
   // Ciphertext of the raw SSO shared secret (reversible AES-256-GCM
   // encryption via lib/crypto-secrets.ts, not a hash) — Compass must be
   // able to decrypt it to verify inbound customer-signed JWTs. The
@@ -2707,6 +2710,11 @@ model Agent {
   model String? @db.VarChar(100)
   /// WORKSPACE_MEMBERS | ADMINS | OWNER. NULL = the default for the owner type.
   invokePolicy String? @map("invoke_policy") @db.VarChar(30)
+  /// Most non-terminal runs at once (migration 102). NULL = the default (5). Read through lib/agent-limits.ts, which tolerates the
+  /// migration being unapplied; it is deliberately not in the shared agent select for that reason.
+  maxConcurrentRuns Int? @map("max_concurrent_runs")
+  /// Most runs started in a rolling 24 hours (migration 102). NULL = the default (100).
+  maxRunsPerDay Int? @map("max_runs_per_day")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @map("updated_at")
   @@index([ownerUserId])
@@ -2726,6 +2734,33 @@ model AgentWorkspaceGrant {
   @@unique([agentId, workspaceId])
   @@index([workspaceId])
   @@map("agent_workspace_grants")
+}
+
+/// The agent a run uses in a workspace when nobody picked one (migration 101). One row per workspace.
+/// Bare UUIDs, no relations (DSQL). A row pointing at an agent that is gone, suspended, ungranted or not invokable is ignored at
+/// read time, so it never needs cleanup. Read through lib/agent-defaults.ts, which tolerates the migration being unapplied.
+model WorkspaceDefaultAgent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  agentId String @map("agent_id") @db.Uuid
+  setByUserId String? @map("set_by_user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  /// Set by the application on every write (DSQL has no trigger).
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@unique([workspaceId], map: "workspace_default_agents_workspace_id_key")
+  @@map("workspace_default_agents")
+}
+
+/// A member's personal override of the workspace default (migration 101). One row per (user, workspace); same read-time rules.
+model UserDefaultAgent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  agentId String @map("agent_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@unique([userId, workspaceId], map: "user_default_agents_user_id_workspace_id_key")
+  @@map("user_default_agents")
 }
 
 /// Explicit, auditable grant of an admin-level MCP capability to a specific
@@ -3030,9 +3065,17 @@ model AgentRun {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @default(now()) @map("updated_at")
 
+  /// The agents row this run acts as (bare UUID, no relation: DSQL). NULL = the built-in "Compass Agent", including every run
+  /// that predates migration 100. Read through lib/agent-runs.ts, which tolerates the migration being unapplied.
+  agentId         String?   @map("agent_id") @db.Uuid
+  /// The human who started the run. NULL reads as userId (the invoker before migration 100).
+  invokedByUserId String?   @map("invoked_by_user_id") @db.Uuid
+
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
   events       AgentRunEvent[]
 
+  @@index([agentId, createdAt], map: "agent_runs_agent_id_created_at_idx")
+  @@index([invokedByUserId], map: "agent_runs_invoked_by_user_id_idx")
   @@index([conversationId, createdAt], map: "idx_agent_runs_conversation_created")
   @@index([status, lastHeartbeatAt], map: "idx_agent_runs_status_heartbeat")
   @@index([workspaceId, userId], map: "idx_agent_runs_workspace_user")
@@ -3057,6 +3100,7 @@ model AgentRunEvent {
 
   @@unique([runId, seq], map: "idx_agent_run_events_run_seq")
   @@index([runId, createdAt], map: "idx_agent_run_events_run_created")
+  @@index([createdAt], map: "idx_agent_run_events_created_at")
   @@map("agent_run_events")
 }
 
@@ -3087,6 +3131,7 @@ model AgentMessage {
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
 
   @@index([conversationId, createdAt])
+  @@index([createdAt], map: "idx_agent_messages_created_at")
   @@map("agent_messages")
 }
 
@@ -3693,7 +3738,7 @@ model PortalHomeLayout {
   @@map("portal_home_layouts")
 }
 
-/// A saved roadmap view (migration 079): a named, reusable filter + display
+/// A saved view (migrations 079 + 100; table kept as roadmap_views so ids and ?saved= links survive): a named, reusable filter + display
 /// configuration. workspaceId NULL = the org-level cross-workspace roadmap
 /// (/{org}/roadmap); workspaceId set = that workspace's own roadmap. visibility is
 /// PERSONAL (owner only) or SHARED (everyone who can reach that surface). `filters`
@@ -3703,18 +3748,22 @@ model PortalHomeLayout {
 /// No relations: Aurora DSQL enforces no foreign keys, so ids are validated in
 /// application code and workspace/org deletion removes rows explicitly. updatedAt is
 /// set by the application on every write.
-model RoadmapView {
+model SavedView {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId String   @map("organization_id") @db.Uuid
   workspaceId    String?  @map("workspace_id") @db.Uuid
   ownerId        String   @map("owner_id") @db.Uuid
   name           String   @db.VarChar(120)
   visibility     String   @default("PERSONAL") @db.VarChar(20)
+  /// OPPORTUNITIES_BOARD | SOLUTIONS_BOARD | ROADMAP_WORKSPACE | ROADMAP_ORG (lib/saved-views/surfaces.ts).
+  /// NULL = legacy row, read as ROADMAP_ORG (no workspace) or ROADMAP_WORKSPACE. Writes always set it.
+  surface        String?  @db.VarChar(40)
   filters        Json     @default("{}")
   display        Json     @default("{}")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @default(now()) @map("updated_at")
 
   @@index([organizationId, workspaceId], map: "idx_roadmap_views_org_surface")
+  @@index([organizationId, workspaceId, surface], map: "idx_roadmap_views_org_surface_kind")
   @@map("roadmap_views")
 }
