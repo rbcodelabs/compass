@@ -9,13 +9,24 @@ import { NewOpportunityButton } from "@/components/discovery/new-opportunity-but
 import { WorkspaceMoreMenu } from "@/components/patterns/workspace-header-controls";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { DiscoveryTableView, type DiscoveryTableOpportunity } from "@/components/discovery/discovery-table-view";
-import { DiscoveryViewToggle, type DiscoveryView } from "@/components/discovery/discovery-view-toggle";
+import { DiscoveryViewToggle } from "@/components/discovery/discovery-view-toggle";
 import { DiscoveryGroupByToggle } from "@/components/discovery/discovery-group-by-toggle";
 import { OpportunityFieldBoard, type FieldBoardOpportunity } from "@/components/discovery/opportunity-field-board";
-import { DiscoverySortToggle, type DiscoverySort } from "@/components/discovery/discovery-sort-toggle";
+import { DiscoverySortToggle } from "@/components/discovery/discovery-sort-toggle";
 import { resolveWorkspaceScoringModel, toScoreSummary } from "@/lib/scoring-model";
 import type { OpportunityStatus, SolutionStatus, SquadData } from "@/lib/types";
 import type { OpportunityCardData } from "@/components/discovery/opportunity-card";
+import { DiscoverySavedViewsMenu } from "@/components/discovery/discovery-saved-views";
+import { ColumnsPopover } from "@/components/discovery/columns-popover";
+import {
+  needsSavedViewExpansion,
+  opportunitiesHref,
+  opportunitiesPageParams,
+  resolveSurfaceState,
+  type OpportunitiesState,
+} from "@/lib/saved-views/opportunities-state";
+import { resolveOpportunityColumns } from "@/lib/saved-views/opportunity-columns";
+import { listSavedViews, resolveSavedViewActor } from "@/lib/saved-views/service";
 import { WorkspacePage } from "@/components/patterns/workspace-page";
 import { getThinkingModelForSlugs } from "@/lib/thinking-model/server";
 import { ChevronRight, Download, FolderTree, Shuffle } from "lucide-react";
@@ -53,6 +64,10 @@ type Props = {
     sort?: string;
     field?: string;
     fieldValue?: string;
+    saved?: string;
+    edited?: string;
+    order?: string;
+    hide?: string;
   }>;
 };
 
@@ -68,25 +83,17 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
   if (!session) redirect("/login");
 
   const { orgSlug, workspaceSlug } = await params;
-  const {
-    squad: squadFilter,
-    view: requestedView,
-    groupBy: requestedGroupBy,
-    sort: requestedSort,
-    field: fieldParam,
-    fieldValue: fieldValueParam,
-  } = await searchParams;
+  const search = await searchParams;
+  const { squad: legacySquad, groupBy: legacyGroupBy, field: legacyField, fieldValue: legacyFieldValue } = search;
   // The Solution swimlane ("Group by: Opportunity") moved to its own backlog;
   // old bookmarks and shared links land there instead of on a silent Status board.
-  if (requestedGroupBy === "opportunity") {
+  if (legacyGroupBy === "opportunity") {
     redirect(legacySwimlaneRedirectPath(orgSlug, workspaceSlug, {
-      squad: squadFilter,
-      field: fieldParam,
-      fieldValue: fieldValueParam,
+      squad: legacySquad,
+      field: legacyField,
+      fieldValue: legacyFieldValue,
     }));
   }
-  const view: DiscoveryView = requestedView === "table" ? "table" : "board";
-  const sort: DiscoverySort = requestedSort === "score" ? "score" : "manual";
   const prisma = getPrisma();
 
   const workspace = await prisma.workspace.findFirst({
@@ -101,6 +108,29 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
 
   // Org-wide read-only access hides the table's editors and draft area (the server still refuses the write).
   const workspaceAccess = session.user?.id ? await resolveWorkspaceAccess(orgSlug, workspaceSlug, session.user.id) : null;
+
+  // Saved views (personal for now). A stale, foreign or invisible `?saved=` id finds nothing and
+  // falls through to the defaults rather than erroring.
+  const savedActor = session.user?.id ? await resolveSavedViewActor(session.user.id, orgSlug) : null;
+  const savedViews = savedActor ? await listSavedViews(savedActor, "OPPORTUNITIES_BOARD", workspace.id) : [];
+  const savedParam = Array.isArray(search.saved) ? search.saved[0] : search.saved;
+  const selectedView = savedParam ? (savedViews.find((v) => v.id === savedParam) ?? null) : null;
+  const selectedState: OpportunitiesState | null = selectedView
+    ? { filters: selectedView.filters as OpportunitiesState["filters"], display: selectedView.display as OpportunitiesState["display"] }
+    : null;
+  const boardState = resolveSurfaceState("OPPORTUNITIES_BOARD", search, selectedState);
+  // A bare `?saved=<id>` becomes the full (`edited=1`) form, so every control below keeps editing single params.
+  if (selectedView && needsSavedViewExpansion(search)) {
+    redirect(opportunitiesHref(`/${orgSlug}/${workspaceSlug}/discovery`, boardState, selectedView.id));
+  }
+  const {
+    squad: squadFilter,
+    view,
+    groupBy: requestedGroupBy,
+    sort,
+    field: fieldParam,
+    fieldValue: fieldValueParam,
+  } = opportunitiesPageParams(boardState);
 
   // The workspace tree exists only for the presets whose tree is not the classic KR-rooted one.
   const thinkingModel = await getThinkingModelForSlugs(orgSlug, workspaceSlug);
@@ -311,6 +341,9 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
         }))
       : [];
 
+  const columnCounts = Object.fromEntries(ACTIVE_STATUSES.map((status) => [status, opportunitiesByStatus[status].length]));
+  const boardColumns = resolveOpportunityColumns(boardState.display.columns.status, columnCounts);
+
   // The export carries the filters the page is showing (squad and tag), so the
   // file matches the screen. View, group-by and sort are presentation only.
   const exportParams = new URLSearchParams({ orgSlug, workspaceSlug });
@@ -328,6 +361,15 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
       actions={(
         <>
           <Suspense>
+            <DiscoverySavedViewsMenu
+              savedViews={{
+                orgSlug,
+                workspaceId: workspace.id,
+                views: savedViews,
+                savedViewId: selectedView?.id ?? null,
+                canSave: !(workspaceAccess?.isReadOnly ?? true),
+              }}
+            />
             <DiscoveryViewToggle view={view} />
             {view === "board" && <DiscoveryGroupByToggle
                 groupBy={groupBy}
@@ -335,6 +377,13 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
               />}
             {view === "board" && groupBy === "status" && hasActiveScoringModel && (
               <DiscoverySortToggle sort={sort} />
+            )}
+            {view === "board" && !groupField && (
+              <ColumnsPopover
+                savedViews={{ views: savedViews, savedViewId: selectedView?.id ?? null }}
+                columns={boardColumns}
+                countsByStatus={columnCounts}
+              />
             )}
             <DiscoveryFilters
               squads={squads}
@@ -390,6 +439,8 @@ export default async function DiscoveryPage({ params, searchParams }: Props) {
           workspaceId={workspace.id}
           hasActiveScoringModel={hasActiveScoringModel}
           sortByScore={sort === "score"}
+          columnOrder={boardColumns.visible}
+          forcedVisibleColumns={boardColumns.forcedVisible}
         />
       )}
 

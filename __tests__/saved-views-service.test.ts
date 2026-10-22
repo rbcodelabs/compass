@@ -241,7 +241,7 @@ describe("generalized server actions", () => {
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/acme/[workspaceSlug]/discovery", "page")
 
     const stale = await updateSavedViewAction("acme", "OPPORTUNITIES_BOARD", WS_A, created.view.id, input({ name: "X" }), new Date(1).toISOString())
-    expect(stale).toMatchObject({ ok: false, error: expect.stringMatching(/changed elsewhere/) })
+    expect(stale).toMatchObject({ ok: false, code: "CONFLICT", error: expect.stringMatching(/changed elsewhere/) })
 
     const fresh = await updateSavedViewAction("acme", "OPPORTUNITIES_BOARD", WS_A, created.view.id, input({ name: "X" }), created.view.updatedAt)
     expect(fresh).toMatchObject({ ok: true, view: { name: "X" } })

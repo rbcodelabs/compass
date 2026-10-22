@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { Bookmark, Check, ChevronDown, Pencil, Trash2, Users } from "lucide-react"
+import { Bookmark, Check, ChevronDown, Pencil, RotateCcw, Trash2, Users } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -18,39 +19,54 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import {
-  createRoadmapViewAction, deleteRoadmapViewAction, updateRoadmapViewAction,
-} from "@/app/[orgSlug]/roadmap/actions"
-import { MAX_VIEW_NAME_LENGTH, type RoadmapViewDisplay, type RoadmapViewFilters } from "@/lib/roadmap-views/schema"
-import type { RoadmapViewRecord } from "@/lib/roadmap-views/service"
+  createSavedViewAction, deleteSavedViewAction, updateSavedViewAction,
+} from "@/app/[orgSlug]/saved-views-actions"
+import { MAX_VIEW_NAME_LENGTH } from "@/lib/roadmap-views/schema"
+import type { SavedViewRecord } from "@/lib/saved-views/service"
+import { SURFACES, type SavedViewSurface } from "@/lib/saved-views/surfaces"
 
-export type RoadmapViewState = { filters: RoadmapViewFilters; display: RoadmapViewDisplay }
+/** The live (possibly unsaved) filter + display state; this is what "Save" captures. */
+export type SavedViewState = { filters: unknown; display: unknown }
 
-type DialogState =
+type DialogState<V> =
   | { kind: "create" }
-  | { kind: "edit"; view: RoadmapViewRecord }
-  | { kind: "delete"; view: RoadmapViewRecord }
+  | { kind: "edit"; view: V }
+  | { kind: "delete"; view: V }
   | null
 
-type Props = {
+type Props<V extends SavedViewRecord> = {
   orgSlug: string
-  /** null = the org-level cross-workspace roadmap; otherwise the workspace whose roadmap this is. */
+  surface: SavedViewSurface
+  /** null = an org-level surface (the cross-workspace roadmap); otherwise the workspace this surface belongs to. */
   surfaceWorkspaceId: string | null
-  views: RoadmapViewRecord[]
+  views: V[]
   savedViewId: string | null
   /** The URL state differs from the selected saved view. */
   modified: boolean
-  /** The live (possibly unsaved) filter + display state; this is what "Save" captures. */
-  state: RoadmapViewState
+  state: SavedViewState
+  /** The actor may share on this surface. Ignored for surfaces that do not support sharing at all. */
   canShare: boolean
+  /** False for read-only members: they can use views but not create, change or delete them. Defaults to true. */
+  canSave?: boolean
+  /** Adds the board-style affordances: a Reset action and a "Modified" badge. The roadmap keeps its original look. */
+  extendedActions?: boolean
+  /** Said in the delete confirmation, after the view name ("... will be removed. <note>"). */
+  deleteNote: string
   /** Navigate to a saved view (clean link) or, with null, to the unsaved default. */
-  onSelect: (view: RoadmapViewRecord | null) => void
+  onSelect: (view: V | null) => void
 }
 
-export function SavedViewsMenu({ orgSlug, surfaceWorkspaceId, views, savedViewId, modified, state, canShare, onSelect }: Props) {
-  const [dialog, setDialog] = useState<DialogState>(null)
+export function SavedViewsMenu<V extends SavedViewRecord>({
+  orgSlug, surface, surfaceWorkspaceId, views, savedViewId, modified, state, canShare, canSave = true,
+  extendedActions = false, deleteNote, onSelect,
+}: Props<V>) {
+  const router = useRouter()
+  const sharingAvailable = canShare && canSave && SURFACES[surface].sharing
+  const [dialog, setDialog] = useState<DialogState<V>>(null)
   const [name, setName] = useState("")
   const [shared, setShared] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [conflict, setConflict] = useState(false)
   const [pending, startTransition] = useTransition()
 
   const current = views.find((v) => v.id === savedViewId) ?? null
@@ -61,33 +77,41 @@ export function SavedViewsMenu({ orgSlug, surfaceWorkspaceId, views, savedViewId
     setName("")
     setShared(false)
     setError(null)
+    setConflict(false)
     setDialog({ kind: "create" })
   }
 
-  function openEdit(view: RoadmapViewRecord) {
+  function openEdit(view: V) {
     setName(view.name)
     setShared(view.visibility === "SHARED")
     setError(null)
+    setConflict(false)
     setDialog({ kind: "edit", view })
+  }
+
+  function fail(result: { error: string; code?: string }) {
+    setError(result.error)
+    setConflict(result.code === "CONFLICT")
   }
 
   function submit() {
     if (!dialog || dialog.kind === "delete") return
     const visibility = shared ? "SHARED" : "PERSONAL"
     setError(null)
+    setConflict(false)
     startTransition(async () => {
       if (dialog.kind === "create") {
-        const result = await createRoadmapViewAction(orgSlug, surfaceWorkspaceId, { name, visibility, ...state })
-        if (!result.ok) return setError(result.error)
+        const result = await createSavedViewAction(orgSlug, surface, surfaceWorkspaceId, { name, visibility, ...state })
+        if (!result.ok) return fail(result)
         setDialog(null)
-        onSelect(result.view)
+        onSelect(result.view as V)
       } else {
         // Renaming/re-sharing keeps the view's own saved state; it must not capture unsaved edits.
         const { view } = dialog
-        const result = await updateRoadmapViewAction(orgSlug, surfaceWorkspaceId, view.id, {
+        const result = await updateSavedViewAction(orgSlug, surface, surfaceWorkspaceId, view.id, {
           name, visibility, filters: view.filters, display: view.display,
-        })
-        if (!result.ok) return setError(result.error)
+        }, view.updatedAt)
+        if (!result.ok) return fail(result)
         setDialog(null)
       }
     })
@@ -96,12 +120,13 @@ export function SavedViewsMenu({ orgSlug, surfaceWorkspaceId, views, savedViewId
   function saveChanges() {
     if (!current) return
     setError(null)
+    setConflict(false)
     startTransition(async () => {
-      const result = await updateRoadmapViewAction(orgSlug, surfaceWorkspaceId, current.id, {
+      const result = await updateSavedViewAction(orgSlug, surface, surfaceWorkspaceId, current.id, {
         name: current.name, visibility: current.visibility, ...state,
-      })
-      if (!result.ok) return setError(result.error)
-      onSelect(result.view)
+      }, current.updatedAt)
+      if (!result.ok) return fail(result)
+      onSelect(result.view as V)
     })
   }
 
@@ -109,14 +134,14 @@ export function SavedViewsMenu({ orgSlug, surfaceWorkspaceId, views, savedViewId
     if (dialog?.kind !== "delete") return
     const { view } = dialog
     startTransition(async () => {
-      const result = await deleteRoadmapViewAction(orgSlug, surfaceWorkspaceId, view.id)
-      if (!result.ok) return setError(result.error)
+      const result = await deleteSavedViewAction(orgSlug, surface, surfaceWorkspaceId, view.id)
+      if (!result.ok) return fail(result)
       setDialog(null)
       if (view.id === savedViewId) onSelect(null)
     })
   }
 
-  const renderView = (view: RoadmapViewRecord) => (
+  const renderView = (view: V) => (
     <DropdownMenuItem key={view.id} onClick={() => onSelect(view)} data-testid="saved-view-option">
       <span className="flex size-4 shrink-0 items-center justify-center">
         {view.id === savedViewId && <Check className="size-3.5" />}
@@ -132,7 +157,11 @@ export function SavedViewsMenu({ orgSlug, surfaceWorkspaceId, views, savedViewId
         <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="min-h-11 md:min-h-0" data-testid="saved-views-trigger" />}>
           <Bookmark />
           <span className="max-w-40 truncate">{current ? current.name : "Views"}</span>
-          {current && modified && <span className="text-text-subtle">(modified)</span>}
+          {current && modified && (
+            extendedActions
+              ? <span data-testid="saved-view-modified" className="rounded-sm bg-surface-sunken px-1 text-xs text-text-secondary">Modified</span>
+              : <span className="text-text-subtle">(modified)</span>
+          )}
           <ChevronDown />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-64">
@@ -157,28 +186,45 @@ export function SavedViewsMenu({ orgSlug, surfaceWorkspaceId, views, savedViewId
             </DropdownMenuGroup>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={openCreate} data-testid="save-view-new">
-            Save current filters as new view…
-          </DropdownMenuItem>
+          {canSave && (
+            <DropdownMenuItem onClick={openCreate} data-testid="save-view-new">
+              Save current filters as new view…
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {current?.isOwner && modified && (
+      {extendedActions && current && modified && (
+        <Button variant="ghost" size="sm" onClick={() => onSelect(current)} data-testid="reset-view">
+          <RotateCcw />
+          Reset
+        </Button>
+      )}
+      {canSave && current?.isOwner && modified && (
         <Button size="sm" onClick={saveChanges} disabled={pending} data-testid="save-view-changes">
           Save changes
         </Button>
       )}
-      {current?.isOwner && (
+      {canSave && current?.isOwner && (
         <Button variant="ghost" size="icon-sm" aria-label={`Edit view ${current.name}`} onClick={() => openEdit(current)}>
           <Pencil />
         </Button>
       )}
-      {current?.canDelete && (
-        <Button variant="ghost" size="icon-sm" aria-label={`Delete view ${current.name}`} onClick={() => { setError(null); setDialog({ kind: "delete", view: current }) }}>
+      {canSave && current?.canDelete && (
+        <Button variant="ghost" size="icon-sm" aria-label={`Delete view ${current.name}`} onClick={() => { setError(null); setConflict(false); setDialog({ kind: "delete", view: current }) }}>
           <Trash2 />
         </Button>
       )}
-      {!dialog && error && <span role="alert" className="text-xs text-destructive">{error}</span>}
+      {!dialog && error && (
+        <span role="alert" className="flex items-center gap-1.5 text-xs text-destructive">
+          {error}
+          {conflict && (
+            <Button variant="outline" size="xs" onClick={() => { setError(null); setConflict(false); router.refresh() }} data-testid="reload-view">
+              Reload
+            </Button>
+          )}
+        </span>
+      )}
 
       <Dialog open={dialog?.kind === "create" || dialog?.kind === "edit"} onOpenChange={(open) => !open && setDialog(null)}>
         <DialogContent>
@@ -205,7 +251,7 @@ export function SavedViewsMenu({ orgSlug, surfaceWorkspaceId, views, savedViewId
                 required
               />
             </div>
-            {canShare && (
+            {sharingAvailable && (
               <div className="flex items-center justify-between gap-3">
                 <Label htmlFor="roadmap-view-shared" className="flex flex-col items-start gap-0.5">
                   <span>Share with everyone</span>
@@ -216,7 +262,16 @@ export function SavedViewsMenu({ orgSlug, surfaceWorkspaceId, views, savedViewId
                 <Switch id="roadmap-view-shared" checked={shared} onCheckedChange={setShared} />
               </div>
             )}
-            {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+            {error && (
+              <p role="alert" className="text-xs text-destructive">
+                {error}
+                {conflict && (
+                  <Button type="button" variant="link" size="xs" onClick={() => { setDialog(null); setError(null); setConflict(false); router.refresh() }}>
+                    Reload
+                  </Button>
+                )}
+              </p>
+            )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
               <Button type="submit" disabled={pending || !name.trim()}>{pending ? "Saving…" : "Save"}</Button>
@@ -231,7 +286,7 @@ export function SavedViewsMenu({ orgSlug, surfaceWorkspaceId, views, savedViewId
             <AlertDialogTitle>Delete view?</AlertDialogTitle>
             <AlertDialogDescription>
               “{dialog?.kind === "delete" ? dialog.view.name : ""}” will be removed
-              {dialog?.kind === "delete" && dialog.view.visibility === "SHARED" ? " for everyone it is shared with" : ""}. Roadmap items are not affected.
+              {dialog?.kind === "delete" && dialog.view.visibility === "SHARED" ? " for everyone it is shared with" : ""}. {deleteNote}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
