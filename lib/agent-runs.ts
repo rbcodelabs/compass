@@ -262,6 +262,7 @@ export async function createAgentRun({
   packProvenance = "[]",
   budgetMs = DEFAULT_AGENT_RUN_BUDGET_MS,
   now = new Date(),
+  fenceConversation = false,
 }: {
   prisma: AgentRunPrisma
   conversationId: string
@@ -280,6 +281,13 @@ export async function createAgentRun({
   packProvenance?: string
   budgetMs?: number
   now?: Date
+  /**
+   * Write the conversation row FIRST, inside the transaction, so two concurrent starts for the same conversation serialise on
+   * it (a row lock on Postgres, a write conflict that aborts one of them on Aurora DSQL) instead of both passing the
+   * in-flight check below. For starts that nobody is watching (assignments), where a double click or two tabs would otherwise
+   * start two runs. Off for chat, whose request path has never needed it.
+   */
+  fenceConversation?: boolean
 }) {
   if (kind !== "CHAT" && !(HANDOFF_KINDS as readonly string[]).includes(kind)) {
     throw new AgentRunError("Unsupported agent run kind", 400, "INVALID_RUN_KIND")
@@ -298,6 +306,7 @@ export async function createAgentRun({
     // indexes is unverified here and `assertWorkspaceUpdatesMigration` asserts
     // `predicate === null` on every unique index this repo ships — so this stays
     // an application invariant, checked inside the transaction that violates it.
+    if (fenceConversation) await tx.agentConversation.updateMany({ where: { id: conversationId }, data: { updatedAt: now } })
     const inFlight = await tx.agentRun.findFirst({
       where: { conversationId, status: { in: [...NON_TERMINAL_AGENT_RUN_STATUSES] } },
       select: { id: true, status: true, deadlineAt: true },

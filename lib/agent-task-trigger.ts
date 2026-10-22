@@ -43,6 +43,7 @@ import { workspaceFraming } from "@/lib/agent-run-sandbox"
 import { HANDOFF_POLICIES } from "@/lib/agent-handoff-kinds"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import { displayIdFromRow } from "@/lib/work-item-ids"
+import { createHash } from "node:crypto"
 
 export type AgentRunOutcome =
   /** Nothing to report: not an agent assignment, nothing changed, agents off, or an EXTERNAL agent (queue only). */
@@ -119,6 +120,20 @@ function defaultDeps(): TriggerDeps {
   }
 }
 
+/**
+ * The conversation for (person, task), as a deterministic UUID. Its primary key is the dedup: two concurrent first
+ * assignments both compute the same id, exactly one insert wins, and the other reads the winner's row. (A lookup by title
+ * could not do this: it raced, and it would also have adopted a chat the person had merely named like the task. Advisory
+ * locks are not an option on Aurora DSQL.) The hash input includes the person, so nobody can land on another person's row.
+ */
+export function taskConversationId(userId: string, taskId: string): string {
+  const bytes = createHash("sha256").update(JSON.stringify(["compass:task-run-conversation", userId, taskId])).digest().subarray(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4 layout
+  bytes[8] = (bytes[8] & 0x3f) | 0x80 // RFC 4122 variant
+  const hex = bytes.toString("hex")
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 const refused = (code: AgentRunRefusalCode, message: string, agentName?: string): AgentRunOutcome => ({ status: "refused", code, message, ...(agentName ? { agentName } : {}) })
 
 export async function startRunForAssignedTask(input: TriggerInput, overrides: Partial<TriggerDeps> = {}): Promise<AgentRunOutcome> {
@@ -179,13 +194,10 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
   const basePath = `/${task.workspace.organization.slug}/${task.workspace.slug}`
   const conversationUrl = (id: string) => `${basePath}/agent?c=${id}`
 
-  // One conversation per (person, task): the reference prefix is how a later assignment finds it again.
+  // One conversation per (person, task), found by its deterministic id (see taskConversationId).
   const titlePrefix = `${reference}: `
-  const existing = await prisma.agentConversation.findFirst({
-    where: { workspaceId: task.workspaceId, userId: input.actingUserId, title: { startsWith: titlePrefix } },
-    orderBy: { updatedAt: "desc" },
-    select: { id: true },
-  })
+  const conversationId = taskConversationId(input.actingUserId, task.id)
+  const existing = await prisma.agentConversation.findFirst({ where: { id: conversationId, workspaceId: task.workspaceId, userId: input.actingUserId }, select: { id: true } })
   if (existing && (await findActiveAgentRun({ prisma, conversationId: existing.id }))) {
     return { status: "already_running", agentName: runAgent.name, conversationId: existing.id, conversationUrl: conversationUrl(existing.id) }
   }
@@ -195,10 +207,19 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
   const capped = await checkAgentRunCaps(prisma, runAgent.id)
   if (!capped.allowed) return refused("AGENT_CAP_REACHED", `The task was assigned to ${runAgent.name}, but no run started: ${capped.reason}`, runAgent.name)
 
-  const conversation = existing ?? await prisma.agentConversation.create({
-    data: { workspaceId: task.workspaceId, userId: input.actingUserId, title: `${titlePrefix}${task.title}`.slice(0, 80), updatedAt: new Date() },
-    select: { id: true },
-  })
+  let conversation = existing
+  if (!conversation) {
+    try {
+      conversation = await prisma.agentConversation.create({
+        data: { id: conversationId, workspaceId: task.workspaceId, userId: input.actingUserId, title: `${titlePrefix}${task.title}`.slice(0, 80), updatedAt: new Date() },
+        select: { id: true },
+      })
+    } catch (error) {
+      // A concurrent trigger for the same (person, task) created it first: that is the conversation, not a failure.
+      if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "P2002") throw error
+      conversation = { id: conversationId }
+    }
+  }
 
   const instruction = HANDOFF_POLICIES.TASK_ASSIGNMENT.instruction({
     status: "RUNNING",
@@ -219,11 +240,16 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
       invokedByUserId: input.actingUserId,
       kind: "TASK_ASSIGNMENT",
       budgetMs: DEFAULT_AGENT_RUN_BUDGET_MS,
+      fenceConversation: true,
     })
   } catch (error) {
     if (error instanceof AgentRunError) {
       if (error.code === "RUN_IN_FLIGHT") return { status: "already_running", agentName: runAgent.name, conversationId: conversation.id, conversationUrl: conversationUrl(conversation.id) }
       return refused("AGENT_RUN_FAILED", `The task was assigned to ${runAgent.name}, but no run started: ${error.message}`, runAgent.name)
+    }
+    // Aurora DSQL aborts the loser of two concurrent writes to the conversation row (Prisma P2034): a concurrent start won.
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "P2034") {
+      return { status: "already_running", agentName: runAgent.name, conversationId: conversation.id, conversationUrl: conversationUrl(conversation.id) }
     }
     throw error
   }

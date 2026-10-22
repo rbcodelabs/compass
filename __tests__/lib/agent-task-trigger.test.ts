@@ -31,6 +31,7 @@ function matches(row: Row, where: Row | undefined): boolean {
 const pick = (row: Row, select?: Row) => (select ? Object.fromEntries(Object.keys(select).map((key) => [key, row[key]])) : row)
 const table = (name: string) => ({
   findFirst: vi.fn(async ({ where, select, orderBy }: Row = {}) => {
+    await Promise.resolve()
     let rows = (db.state[name] ?? []).filter((candidate) => matches(candidate, where))
     if (orderBy?.updatedAt === "desc") rows = [...rows].sort((a, b) => b.updatedAt - a.updatedAt)
     return rows[0] ? pick(rows[0], select) : null
@@ -38,12 +39,16 @@ const table = (name: string) => ({
   findMany: vi.fn(async ({ where, select }: Row = {}) => (db.state[name] ?? []).filter((candidate) => matches(candidate, where)).map((row) => pick(row, select))),
   count: vi.fn(async ({ where }: Row = {}) => (db.state[name] ?? []).filter((candidate) => matches(candidate, where)).length),
   create: vi.fn(async ({ data, select }: Row) => {
+    await Promise.resolve()
+    // The primary key is unique, as in the database: this is what makes the deterministic conversation id a real dedup.
+    if (data.id && (db.state[name] ?? []).some((existing) => existing.id === data.id)) throw Object.assign(new Error("Unique constraint failed on the fields: (`id`)"), { code: "P2002" })
     const row = { id: data.id ?? `${name}-${++db.seq}`, createdAt: new Date(), updatedAt: new Date(), ...data }
     ;(db.state[name] ??= []).push(row)
     return pick(row, select)
   }),
 })
 
+const rowLocks = new Map<string, Promise<void>>()
 const prisma: Row = {
   agent: table("agent"),
   agentWorkspaceGrant: table("agentWorkspaceGrant"),
@@ -71,13 +76,33 @@ const prisma: Row = {
       }
     }),
   },
-  $transaction: vi.fn(async (fn: (tx: Row) => unknown) => fn(prisma)),
+  // A transaction that behaves like the real thing for the one property under test: writing a conversation row takes a row
+  // lock that is held until the transaction ends, so a second transaction touching the same conversation waits for the first.
+  $transaction: vi.fn(async (fn: (tx: Row) => unknown) => {
+    const releases: Array<() => void> = []
+    const tx: Row = {
+      ...prisma,
+      agentConversation: {
+        ...prisma.agentConversation,
+        updateMany: async ({ where }: Row) => {
+          const previous = rowLocks.get(where.id) ?? Promise.resolve()
+          let release!: () => void
+          const mine = new Promise<void>((resolve) => { release = resolve })
+          rowLocks.set(where.id, previous.then(() => mine))
+          await previous
+          releases.push(release)
+          return { count: 1 }
+        },
+      },
+    }
+    try { return await fn(tx) } finally { releases.forEach((release) => release()) }
+  }),
 }
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 // `after` only exists inside a request; the trigger's own fallback (run inline) is exercised by passing `defer` explicitly.
 vi.mock("next/server", () => ({ after: () => { throw new Error("outside a request scope") } }))
 
-import { startRunForAssignedTask, buildTaskContext, type AgentRunOutcome } from "@/lib/agent-task-trigger"
+import { startRunForAssignedTask, buildTaskContext, taskConversationId, type AgentRunOutcome } from "@/lib/agent-task-trigger"
 import { resetAgentColumnsAvailabilityCache } from "@/lib/agent-ownership"
 import { resetAgentRunAttributionAvailabilityCache, resetAgentRunsAvailabilityCache } from "@/lib/agent-runs"
 
@@ -290,6 +315,71 @@ describe("idempotency and the one-run-per-conversation fence", () => {
     const raced = await trigger({ previousAssigneeAgentId: personalAgent.id })
     expect(raced.status === "already_running" || raced.status === "started").toBe(true)
     if (raced.status === "started") expect(runs().filter((r) => r.status === "QUEUED")).toHaveLength(1)
+  })
+})
+
+describe("concurrent triggers", () => {
+  it("two simultaneous assignments of the same task by the same person start one run in one conversation", async () => {
+    const outcomes = await Promise.all([trigger(), trigger()])
+    expect(outcomes.map((o) => o.status).sort()).toEqual(["already_running", "started"])
+    expect(runs()).toHaveLength(1)
+    expect(db.state.agentConversation).toHaveLength(1)
+    expect(db.state.agentMessage).toHaveLength(1)
+    expect(launch).toHaveBeenCalledTimes(1)
+    const [a, b] = outcomes
+    expect((a as { conversationId: string }).conversationId).toBe((b as { conversationId: string }).conversationId)
+  })
+
+  it("five at once still start exactly one", async () => {
+    const outcomes = await Promise.all([1, 2, 3, 4, 5].map(() => trigger()))
+    expect(outcomes.filter((o) => o.status === "started")).toHaveLength(1)
+    expect(outcomes.filter((o) => o.status === "already_running")).toHaveLength(4)
+    expect(runs()).toHaveLength(1)
+    expect(db.state.agentConversation).toHaveLength(1)
+  })
+
+  it("maps a database write conflict on the conversation (DSQL aborting the loser) to already_running", async () => {
+    await trigger()
+    prisma.agentRun.findFirst.mockResolvedValueOnce(null) // the pre-check misses
+    prisma.$transaction.mockRejectedValueOnce(Object.assign(new Error("write conflict"), { code: "P2034" }))
+    expect(await trigger({ previousAssigneeAgentId: personalAgent.id })).toMatchObject({ status: "already_running" })
+  })
+
+  it("different people assigning the same task get their own conversations and runs", async () => {
+    const a = await trigger({ actingUserId: "member" })
+    const b = await trigger({ actingUserId: "admin" })
+    expect([a.status, b.status]).toEqual(["started", "started"])
+    expect(db.state.agentConversation).toHaveLength(2)
+    expect(new Set(db.state.agentConversation.map((c) => c.userId))).toEqual(new Set(["member", "admin"]))
+  })
+
+  it("one person assigning two tasks gets two conversations", async () => {
+    await trigger()
+    db.state.task.push({ ...db.state.task[0], id: "task-2", seqNumber: 8, title: "Another" })
+    await trigger({ taskId: "task-2" })
+    expect(db.state.agentConversation).toHaveLength(2)
+  })
+
+  it("never adopts a chat the person merely named like the task", async () => {
+    db.state.agentConversation = [{ id: "their-own-chat", workspaceId: WS, userId: "member", title: "TASK-7: Fix the signup copy", updatedAt: new Date() }]
+    const outcome = await trigger()
+    expect(outcome.status).toBe("started")
+    expect(db.state.agentConversation).toHaveLength(2)
+    expect(runs()[0].conversationId).not.toBe("their-own-chat")
+  })
+})
+
+describe("taskConversationId", () => {
+  it("is a stable v4-shaped UUID that depends on both the person and the task", () => {
+    const id = taskConversationId("u1", "t1")
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(taskConversationId("u1", "t1")).toBe(id)
+    expect(taskConversationId("u2", "t1")).not.toBe(id)
+    expect(taskConversationId("u1", "t2")).not.toBe(id)
+  })
+
+  it("cannot be steered by delimiter tricks between the two inputs", () => {
+    expect(taskConversationId("a:b", "c")).not.toBe(taskConversationId("a", "b:c"))
   })
 })
 
