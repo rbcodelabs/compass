@@ -3,11 +3,11 @@ import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 
 /**
- * Static guards for 082_artifact_external_share. The DDL that reaches Aurora DSQL is the SQL
+ * Static guards for 105_artifact_external_share. The DDL that reaches Aurora DSQL is the SQL
  * file, not schema.prisma, so the two are pinned to each other here.
  */
 const ROOT = process.cwd()
-const NAME = "082_artifact_external_share"
+const NAME = "105_artifact_external_share"
 const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8")
 const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8")
 const sqlPath = path.join(ROOT, "prisma/migrations", NAME, "migration.sql")
@@ -62,9 +62,9 @@ describe(NAME, () => {
   })
 
   it("waits for its async indexes and verifies before the receipt", () => {
-    expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"082_artifact_external_share"/)
-    expect(runner).toMatch(/\["049_agent_identity"[^\]]*"082_artifact_external_share"[^\]]*\]\.includes\(migration\.name\)/)
-    const assertion = runner.indexOf('migration.name === "082_artifact_external_share") await assertArtifactExternalShareMigration')
+    expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"105_artifact_external_share"/)
+    expect(runner).toMatch(/\["049_agent_identity"[^\]]*"105_artifact_external_share"[^\]]*\]\.includes\(migration\.name\)/)
+    const assertion = runner.indexOf('migration.name === "105_artifact_external_share") await assertArtifactExternalShareMigration')
     expect(assertion).toBeGreaterThan(-1)
     expect(assertion).toBeLessThan(runner.indexOf('UPDATE "${schema}"._prisma_migrations SET finished_at = CURRENT_TIMESTAMP'))
   })
