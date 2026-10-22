@@ -95,7 +95,6 @@ function actorFromAuth(auth: McpAuthResult): McpActor {
 describe("a mutation through an agent-bound OAuth token", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
     oAuthToken.findFirst.mockResolvedValue(TOKEN_ROW)
     oAuthToken.update.mockResolvedValue({})
     agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "user-1", status: "ACTIVE" })
@@ -209,7 +208,6 @@ describe("a mutation through an agent-bound OAuth token", () => {
 describe("an agent-bound OAuth token engages the agent authorization model", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
     oAuthToken.findFirst.mockResolvedValue(TOKEN_ROW)
     oAuthToken.update.mockResolvedValue({})
     agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "user-1", status: "ACTIVE" })

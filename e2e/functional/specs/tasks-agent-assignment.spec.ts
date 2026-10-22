@@ -13,10 +13,6 @@
  * a `<button>` that opens the shared slide-over panel (matching every other
  * entity card), there is no "Edit task" dialog any more, and every field is
  * edited inline through the panel's PATCH endpoint.
- *
- * Requires COMPASS_AGENTS_ENABLED=1 on the dev server — without it
- * `eligibleTaskAssignees` returns people only and no agent option is ever
- * offered.
  */
 import { test, expect } from "../fixtures/index";
 import pg from "pg";

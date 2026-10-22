@@ -11,8 +11,8 @@
  * request body (what the client really sent) is what is asserted. Server-side validation and precedence are covered against the
  * real route handler in __tests__/api-agent-turn-route.test.ts, plus one live 400 here.
  *
- * Needs COMPASS_AGENTS_ENABLED=1 and COMPASS_CLOUD_AGENT_MODELS=claude-opus-4-5 on the dev server (playwright.config.ts sets
- * both); without a second model the picker rightly has nothing to offer.
+ * Needs COMPASS_CLOUD_AGENT_MODELS=claude-opus-4-5 on the dev server (playwright.config.ts sets it); without a second
+ * model the picker rightly has nothing to offer.
  */
 import { test, expect } from "../fixtures/index";
 import pg from "pg";

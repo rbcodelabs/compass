@@ -89,6 +89,35 @@ async function registerClient(overrides: Record<string, unknown> = {}) {
   })
 }
 
+async function seedAdminMembership() {
+  await store.workspaceMember.create({
+    data: {
+      userId: "user-1",
+      role: "ADMIN",
+      workspace: {
+        id: "ws-1",
+        name: "Compass",
+        slug: "compass",
+        organization: { id: "org-1", name: "rbcodelabs", slug: "rbcodelabs", members: [] },
+      },
+    },
+  })
+  await store.workspace.create({ data: { id: "ws-1", members: [{ userId: "user-1" }] } })
+}
+
+/**
+ * Agent features are always on, so an approval must always carry a binding. These tests exercise the
+ * generic approval plumbing (code, consent, redirect), and use the admin override because it needs the
+ * least setup: an Owner/Admin in every organization, plus the typed email confirmation.
+ */
+async function seedOverrideEligible() {
+  await store.organizationMember.create({
+    data: { organizationId: "org-1", userId: "user-1", role: "OWNER" },
+  })
+  await seedAdminMembership()
+}
+const AS_USER = { binding: "user", confirmation: "rick@example.com" } as const
+
 beforeEach(async () => {
   store.reset()
   session.value = { user: { id: "user-1", email: "rick@example.com" } }
@@ -100,10 +129,13 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllEnvs())
 
 describe("approval", () => {
+  beforeEach(seedOverrideEligible)
+
   it("issues a code and redirects to the client with state and iss", async () => {
     const response = await submit({
       decision: "allow",
       request: signAuthorizationRequest(REQUEST, "user-1"),
+      ...AS_USER,
     })
 
     // 303, so the browser follows up with a GET — which is what a loopback
@@ -118,7 +150,7 @@ describe("approval", () => {
   })
 
   it("binds the code to the signed-in user and the signed request", async () => {
-    await submit({ decision: "allow", request: signAuthorizationRequest(REQUEST, "user-1") })
+    await submit({ decision: "allow", request: signAuthorizationRequest(REQUEST, "user-1"), ...AS_USER })
 
     const [code] = store.oAuthAuthorizationCode.rows
     expect(code.userId).toBe("user-1")
@@ -129,7 +161,7 @@ describe("approval", () => {
   })
 
   it("records the consent so the next authorization can skip the screen", async () => {
-    await submit({ decision: "allow", request: signAuthorizationRequest(REQUEST, "user-1") })
+    await submit({ decision: "allow", request: signAuthorizationRequest(REQUEST, "user-1"), ...AS_USER })
     expect(store.oAuthConsent.rows).toHaveLength(1)
     expect(store.oAuthConsent.rows[0]).toMatchObject({
       userId: "user-1",
@@ -139,7 +171,7 @@ describe("approval", () => {
   })
 
   it("audits an interactive USER authorization without storing request secrets", async () => {
-    await submit({ decision: "allow", request: signAuthorizationRequest(REQUEST, "user-1") })
+    await submit({ decision: "allow", request: signAuthorizationRequest(REQUEST, "user-1"), ...AS_USER })
 
     const [code] = store.oAuthAuthorizationCode.rows
     expect(store.oAuthAuthorizationEvent.rows).toEqual([
@@ -166,7 +198,7 @@ describe("approval", () => {
     store.oAuthAuthorizationEvent.create.mockRejectedValueOnce(new Error("event write failed"))
 
     await expect(
-      submit({ decision: "allow", request: signAuthorizationRequest(REQUEST, "user-1") }),
+      submit({ decision: "allow", request: signAuthorizationRequest(REQUEST, "user-1"), ...AS_USER }),
     ).rejects.toThrow("event write failed")
 
     expect(store.oAuthAuthorizationCode.rows).toHaveLength(0)
@@ -184,7 +216,9 @@ describe("approval", () => {
     const response = await submit({
       decision: "allow",
       request: signAuthorizationRequest(REQUEST, "user-1"),
+      ...AS_USER,
     })
+    expect(response.status).toBe(303)
     expect(response.headers.get("set-cookie")).toBeNull()
   })
 })
@@ -250,11 +284,13 @@ describe("CSRF and tampering", () => {
   })
 
   it("cannot have its redirect_uri swapped between the screen and the submit", async () => {
+    await seedOverrideEligible()
     // The canonical attack: the consent screen shows 127.0.0.1, the POST tries
     // to deliver the code somewhere else. There are no unsigned fields to swap.
     const response = await submit({
       decision: "allow",
       request: signAuthorizationRequest(REQUEST, "user-1"),
+      ...AS_USER,
       redirect_uri: "https://evil.example.com/callback",
       client_id: "cmp_oc_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       scope: "mcp:read mcp:write offline_access",
@@ -290,12 +326,13 @@ describe("re-validation between render and submit", () => {
   })
 
   it("refuses when the redirect URI was de-registered after the screen rendered", async () => {
+    await seedOverrideEligible()
     const blob = signAuthorizationRequest(REQUEST, "user-1")
     store.oAuthClient.rows[0].redirectUris = ["https://claude.ai/api/mcp/auth_callback"]
 
     // A signature proves the request was authentic when rendered, not that it
     // is still authorized now.
-    const response = await submit({ decision: "allow", request: blob })
+    const response = await submit({ decision: "allow", request: blob, ...AS_USER })
     expect(response.status).toBe(400)
     expect(store.oAuthAuthorizationCode.rows).toHaveLength(0)
   })
@@ -310,28 +347,11 @@ describe("re-validation between render and submit", () => {
  */
 describe("agent binding", () => {
   beforeEach(() => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
     actions.createAgent.mockClear()
     actions.createAgent.mockImplementation(async () => ({ id: "agent-new" }))
     actions.grantWorkspaceAgent.mockClear()
     actions.grantWorkspaceAgent.mockImplementation(async () => {})
   })
-
-  async function seedAdminMembership() {
-    await store.workspaceMember.create({
-      data: {
-        userId: "user-1",
-        role: "ADMIN",
-        workspace: {
-          id: "ws-1",
-          name: "Compass",
-          slug: "compass",
-          organization: { id: "org-1", name: "rbcodelabs", slug: "rbcodelabs", members: [] },
-        },
-      },
-    })
-    await store.workspace.create({ data: { id: "ws-1", members: [{ userId: "user-1" }] } })
-  }
 
   async function seedGrantedAgent() {
     await seedAdminMembership()
