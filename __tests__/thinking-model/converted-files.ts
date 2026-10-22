@@ -240,6 +240,7 @@ export const CANONICAL_FILES: Record<string, string> = {
   "components/roadmap/cross-workspace/roadmap-toolbar.tsx": "account-and-org-pages",
   "components/scoring-models/manage-scoring-models-panel.tsx": "account-and-org-pages",
   "app/layout.tsx": "account-and-org-pages",
+  "app/(marketing)/privacy/page.tsx": "public-surfaces",
   "app/login/page.tsx": "account-and-org-pages",
   "app/oauth/authorize/page.tsx": "account-and-org-pages",
   "app/onboarding/onboarding-form.tsx": "account-and-org-pages",
@@ -248,7 +249,6 @@ export const CANONICAL_FILES: Record<string, string> = {
 export const CANONICAL_PREFIXES: Array<[prefix: string, categoryId: string]> = [
   ["app/api/", "agents-and-api"],
   ["components/marketing/", "public-surfaces"],
-  ["app/(marketing)/", "public-surfaces"],
   ["components/research/", "research-and-agent-chat"],
   ["app/[orgSlug]/settings/", "account-and-org-pages"],
 ]

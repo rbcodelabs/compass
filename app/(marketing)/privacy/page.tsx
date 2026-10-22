@@ -108,11 +108,26 @@ const sections: LegalSection[] = [
           the conversation in order to produce a response, and is not otherwise copied into your workspace unless you
           ask the agent to do so.
         </p>
+        <p>
+          Content the agent reads from Drive can be stored in Compass. The agent&apos;s replies are saved as
+          conversation messages and may quote or summarize Drive files, and the detailed event record of each agent run
+          (which includes the results of tools the agent called, such as Drive file contents) is stored in the Compass
+          database. We do not currently apply an automatic retention period to conversation messages or run records:
+          they are kept until the workspace they belong to is deleted, which permanently deletes that
+          workspace&apos;s agent conversations, messages and run records. Disconnecting Google Drive does not delete
+          them. To have this content removed without deleting the workspace, or to have your account deleted, email{" "}
+          <a href={`mailto:${LEGAL_CONTACT_EMAIL}`}>{LEGAL_CONTACT_EMAIL}</a>.
+        </p>
         <h3 className="text-base font-semibold text-text-primary">How we protect and limit Google data</h3>
         <ul>
           <li>
             Access and refresh tokens for the Drive connector are stored encrypted in the Compass database and are used
             only to call Google Drive on your behalf.
+          </li>
+          <li>
+            Separately, the tokens Google issues when you sign in with Google are stored in the Compass database as
+            part of your account record and are not encrypted at the application level. They are unaffected by
+            disconnecting the Drive connector and are removed only when your account is deleted.
           </li>
           <li>We do not sell Google user data.</li>
           <li>We do not use Google user data for advertising, including personalized or retargeted advertising.</li>
@@ -123,14 +138,14 @@ const sections: LegalSection[] = [
           <li>
             We share Google user data only as needed to provide the feature you enabled (for example, with our AI model
             provider while the agent processes your request), to comply with applicable law, or as part of a merger or
-            sale with notice to you. We do not allow humans to read your Google data except with your consent, for
-            security purposes or to comply with law.
+            sale with notice to you. Our staff do not routinely read your Google data, and we access it only as
+            needed to provide support you request, to investigate security or abuse, or to comply with law.
           </li>
         </ul>
         <h3 className="text-base font-semibold text-text-primary">Revoking access and deletion</h3>
         <p>
-          You can disconnect Google Drive at any time in Compass under Settings, Agents. Disconnecting deletes the
-          stored tokens from Compass and asks Google to revoke them. You can also remove Compass&apos;s access directly
+          You can disconnect Google Drive at any time in Compass under Settings, Agents. Disconnecting removes our
+          stored copy of the tokens and asks Google to revoke them (revocation is best effort). You can also remove Compass&apos;s access directly
           at{" "}
           <a href="https://myaccount.google.com/permissions" rel="noopener noreferrer">
             https://myaccount.google.com/permissions
@@ -148,7 +163,7 @@ const sections: LegalSection[] = [
     body: (
       <>
         <p>
-          We use the following providers to operate Compass. Each receives only the data needed for its function.
+          We use the following providers to operate Compass. Each receives the data needed for the function it performs.
         </p>
         <ul>
           <li>
@@ -171,7 +186,7 @@ const sections: LegalSection[] = [
           </li>
           <li>
             <strong>Perplexity</strong>: web search requests made by the agent, routed through the Vercel AI gateway.
-            Search queries are sent to the provider; Drive content is not intended to be.
+            Search queries written by the agent are sent to the provider, and a query could include information from your conversation.
           </li>
           <li>
             <strong>Connectors you enable</strong>, such as Google Drive or v0, which exchange data with Compass at your

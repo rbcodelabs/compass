@@ -13,6 +13,12 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/termsx")).toBe(false);
     expect(isPublicPath("/privacy/anything")).toBe(false);
     expect(isPublicPath("/terms/anything")).toBe(false);
+    // A trailing slash is not matched here on purpose. Next.js (trailingSlash is
+    // unset) issues a 308 from /privacy/ to /privacy before proxy.ts runs, so the
+    // canonical path is what reaches isPublicPath. Observed with `curl` against a
+    // dev server: /privacy/ -> 308 Location: /privacy, then 200.
+    expect(isPublicPath("/privacy/")).toBe(false);
+    expect(isPublicPath("/terms/")).toBe(false);
   });
 
   it("allows auth-related routes", () => {
