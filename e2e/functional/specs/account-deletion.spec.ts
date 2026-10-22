@@ -221,7 +221,7 @@ test("deletion is blocked for the sole administrator of a shared workspace, and 
     await expect(submit, "typing the email is not enough without consent").toBeDisabled();
     expect((await wContext.request.delete("/api/account", { headers: { origin: baseURL }, data: { confirmEmail: wEmail } })).status(), "the API demands consent too").toBe(409);
     expect(await count(`SELECT count(*) AS n FROM "${S}".organizations WHERE id = $1`, [soloOrg.id])).toBe(1);
-    await wPage.getByLabel(/I understand these organizations will be permanently deleted/).check();
+    await wPage.getByRole("checkbox", { name: /I understand these organizations will be permanently deleted/ }).check();
     await wPage.screenshot({ path: testInfo.outputPath("account-deletion-sole-owned.png"), fullPage: true });
     await expect(submit).toBeEnabled();
     await Promise.all([wPage.waitForURL((url) => url.pathname === "/", { timeout: 120_000 }), submit.click()]);
