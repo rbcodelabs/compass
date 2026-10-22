@@ -35,10 +35,15 @@ import { PANEL_WIDTH_DEFAULT, parsePanelPin } from "@/lib/panel-pin";
 const push = vi.fn();
 let pathname = "/acme/product/roadmap";
 let searchString = "";
+let searchCache: { key: string; params: URLSearchParams } | null = null;
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), refresh: vi.fn() }),
   usePathname: () => pathname,
-  useSearchParams: () => new URLSearchParams(searchString),
+  // Stable identity per value, like the real hook: the provider keys effects on it.
+  useSearchParams: () => {
+    if (searchCache?.key !== searchString) searchCache = { key: searchString, params: new URLSearchParams(searchString) };
+    return searchCache.params;
+  },
 }));
 
 // The rail now hosts the Docs Library tree, which imports the docs server actions (and through them auth).
@@ -675,6 +680,25 @@ describe("rail state in the URL", () => {
     rerender(railTree());
     expect(window.location.search).toBe("?status=open&rc=conv-1");
     expect(chatMounts).toBe(1);
+  });
+
+  it("holds URL writes while a link navigation is pending, then applies them once it lands", async () => {
+    const { rerender } = renderRail();
+    const link = document.createElement("a");
+    link.href = "/acme/product/okrs";
+    document.body.appendChild(link);
+    // Next's <Link> preventDefaults and router.pushes; the mirror must not
+    // replaceState the old path over that push while it is in flight.
+    link.addEventListener("click", (event) => event.preventDefault());
+    fireEvent.click(link);
+    await selectThread("First chat");
+    expect(window.location.search, "no write mid-navigation").toBe("");
+
+    window.history.replaceState(null, "", "/acme/product/okrs");
+    pathname = "/acme/product/okrs";
+    rerender(railTree());
+    expect(window.location.search).toBe("?rc=conv-1");
+    link.remove();
   });
 
   it("writes no params while the rail is closed, and drops them on close", async () => {

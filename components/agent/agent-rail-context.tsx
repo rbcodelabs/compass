@@ -287,8 +287,45 @@ export function AgentRailProvider({
   // skipped when the URL is already right, so the replaceState -> searchParams
   // update it causes settles on the next pass instead of looping.
   // Not on the agent page: the rail is hidden there and `?c=` owns the thread.
+  //
+  // Held while an in-app link navigation is pending (see below). A
+  // replaceState of the *old* path during that window supersedes the push, so
+  // the navigation silently never lands. Once it commits, `pathname` or
+  // `searchParams` changes, this effect reruns and applies the latest state.
+  const navigationPending = useRef(false);
+  const [flush, setFlush] = useState(0);
   useEffect(() => {
-    if (!available) return;
+    navigationPending.current = false;
+  }, [pathname, searchParams]);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Capture phase: Next's <Link> calls preventDefault() in its own handler, so
+    // by bubble time a handled link is indistinguishable from a dead one.
+    const onClick = (event: MouseEvent) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = (event.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!link || (link.target && link.target !== "_self") || link.hasAttribute("download")) return;
+      const url = new URL(link.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      if (url.pathname === window.location.pathname && url.search === window.location.search) return;
+      navigationPending.current = true;
+      // Backstop for a click that never navigates (the link's handler bailed):
+      // stop holding writes after a generous wait, then flush the latest state.
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        navigationPending.current = false;
+        setFlush((n) => n + 1);
+      }, 10_000);
+    };
+    document.addEventListener("click", onClick, true);
+    return () => {
+      document.removeEventListener("click", onClick, true);
+      clearTimeout(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!available || navigationPending.current) return;
     const href = railUrlFor(window.location.pathname, window.location.search, window.location.hash, {
       open,
       view,
@@ -296,7 +333,7 @@ export function AgentRailProvider({
       helpArticle,
     });
     if (href) window.history.replaceState(null, "", href);
-  }, [available, open, view, conversationId, helpArticle, pathname, searchParams]);
+  }, [available, open, view, conversationId, helpArticle, pathname, searchParams, flush]);
 
   // The full page's `?c=` is the same thread the rail would show; adopt it so
   // leaving the page and reopening the rail is lossless.
