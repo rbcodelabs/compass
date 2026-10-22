@@ -63,6 +63,7 @@ import { mergeTreeIntoCanvas, MAX_TREE_CARDS, type TreeScope } from "@/lib/canva
 import { layoutTreeCards } from "@/lib/canvas-tree-layout"
 import { CanvasCardPicker } from "@/components/docs/canvas/canvas-card-picker"
 import {
+  CANVAS_CARD_DEFAULT_SIZE,
   CANVAS_CARD_DRAG_TYPE,
   MAX_CARD_REFS,
   canvasCardKey,
@@ -100,6 +101,7 @@ import {
   type FlowNode,
 } from "@/lib/json-canvas-flow"
 import { Checkbox } from "@/components/ui/checkbox"
+import { childCenterBelow, parentEdge, parentFor, type CanvasCreateKind } from "@/lib/canvas-create"
 import { createHistory } from "@/lib/json-canvas-history"
 import { canvasNodeTypes, CanvasUiContext, type CanvasUi } from "@/components/docs/canvas/canvas-nodes"
 import { DocsLibraryButton } from "@/components/docs/docs-library-button"
@@ -184,6 +186,8 @@ function CanvasEditorBody({
   // "pan": dragging empty canvas pans, as before (Shift-drag still selects).
   const [tool, setTool] = useState<"select" | "pan">("select")
   const [pickerOpen, setPickerOpen] = useState(false)
+  // Where the picker was opened from: a double-click position, and/or the Compass card that was selected (a potential parent).
+  const [pickerContext, setPickerContext] = useState<{ at?: { x: number; y: number }; parent: { nodeId: string; kind: CanvasCardRef["kind"]; id: string } | null }>({ parent: null })
   const labels = useLabels()
   const [treeOpen, setTreeOpen] = useState(false)
   const [treeNotice, setTreeNotice] = useState<string | null>(null)
@@ -437,7 +441,7 @@ function CanvasEditorBody({
 
   /** Insert a new node centered on `at` (flow coordinates, default: viewport center). */
   const insertNode = useCallback(
-    (raw: JsonCanvasNode, options: { at?: { x: number; y: number }; edit?: boolean } = {}) => {
+    (raw: JsonCanvasNode, options: { at?: { x: number; y: number }; edit?: boolean; linkFrom?: string } = {}) => {
       const rect = wrapperRef.current?.getBoundingClientRect()
       const center =
         options.at ??
@@ -449,10 +453,13 @@ function CanvasEditorBody({
       raw.x = Math.round(center.x - raw.width / 2 + stagger)
       raw.y = Math.round(center.y - raw.height / 2 + stagger)
       const created: FlowNode = { ...nodeToFlow(raw), selected: true }
-      commit(
-        [...nodesRef.current.map((n) => ({ ...n, selected: false })), created],
-        edgesRef.current.map((e) => ({ ...e, selected: false }))
-      )
+      const nextNodes = [...nodesRef.current.map((n) => ({ ...n, selected: false })), created]
+      const nextEdges: FlowEdge[] = edgesRef.current.map((e) => ({ ...e, selected: false }))
+      // One commit for card + edge, so a single undo removes both.
+      if (options.linkFrom && nodesRef.current.some((n) => n.id === options.linkFrom)) {
+        nextEdges.push(edgeToFlow(parentEdge(newCanvasId(), options.linkFrom, raw.id), nextNodes))
+      }
+      commit(nextNodes, nextEdges)
       setEditingId(options.edit ? raw.id : null)
     },
     [commit, flow]
@@ -467,6 +474,43 @@ function CanvasEditorBody({
     (ref: CanvasCardRef, title: string | undefined, at?: { x: number; y: number }) =>
       insertNode(createCanvasCardNode(newCanvasId(), ref, title, { x: 0, y: 0 }), { at }),
     [insertNode]
+  )
+
+  /** Open the picker / quick-create, remembering the selected Compass card as the possible parent. Does nothing while locked. */
+  const openPicker = useCallback(
+    (at?: { x: number; y: number }) => {
+      if (locked) return
+      const selected = nodesRef.current.filter((n) => n.selected)
+      const card = selected.length === 1 ? decodeCanvasCard(selected[0].data.raw) : null
+      setPickerContext({ at, parent: card ? { nodeId: selected[0].id, kind: card.kind, id: card.id } : null })
+      setPickerOpen(true)
+    },
+    [locked]
+  )
+
+  const onCardCreated = useCallback(
+    (item: { kind: CanvasCreateKind; id: string; title: string }) => {
+      if (locked) return
+      const { at, parent } = pickerContext
+      const linked = parent && parentFor(item.kind, parent.kind) ? parent : null
+      const parentNode = linked ? nodesRef.current.find((n) => n.id === linked.nodeId) : undefined
+      const place =
+        at ??
+        (parentNode
+          ? childCenterBelow({ ...parentNode.position, width: parentNode.width, height: parentNode.height }, CANVAS_CARD_DEFAULT_SIZE)
+          : undefined)
+      insertNode(createCanvasCardNode(newCanvasId(), { kind: item.kind, id: item.id }, item.title, { x: 0, y: 0 }), { at: place, linkFrom: linked?.nodeId })
+    },
+    [insertNode, locked, pickerContext]
+  )
+
+  // Double-clicking empty canvas opens quick-create at that spot (it replaces double-click zoom, which scroll/pinch still cover).
+  const onCanvasDoubleClick = useCallback(
+    (event: React.MouseEvent) => {
+      if (locked || !(event.target as HTMLElement).classList.contains("react-flow__pane")) return
+      openPicker(flow.screenToFlowPosition({ x: event.clientX, y: event.clientY }))
+    },
+    [flow, locked, openPicker]
   )
 
   // Cards dragged from the page tree (see doc-tree-sidebar.tsx) drop onto the canvas.
@@ -702,7 +746,7 @@ function CanvasEditorBody({
             <FileText className="size-4" />
             <span className="hidden lg:inline">File</span>
           </ToolButton>
-          <ToolButton label="Add Compass card" disabled={locked} onClick={() => setPickerOpen(true)}>
+          <ToolButton label="Add Compass card" disabled={locked} onClick={() => openPicker()}>
             <Boxes className="size-4" />
             <span className="hidden lg:inline">Compass</span>
           </ToolButton>
@@ -781,7 +825,9 @@ function CanvasEditorBody({
         docId={doc.id}
         open={pickerOpen}
         onOpenChange={setPickerOpen}
-        onPick={(item) => addCard({ kind: item.kind, id: item.id }, item.title)}
+        onPick={(item) => addCard({ kind: item.kind, id: item.id }, item.title, pickerContext.at)}
+        parent={pickerContext.parent}
+        onCreated={onCardCreated}
       />
 
       <CanvasTreeDialog docId={doc.id} open={treeOpen} onOpenChange={setTreeOpen} onBuild={handleBuildTree} />
@@ -864,6 +910,8 @@ function CanvasEditorBody({
             onNodeDrag={onNodeDrag}
             onNodeDragStop={onNodeDragStop}
             onConnect={onConnect}
+            onDoubleClick={onCanvasDoubleClick}
+            zoomOnDoubleClick={false}
             onDelete={onDelete}
             connectionMode={ConnectionMode.Loose}
             nodesDraggable={!locked}
