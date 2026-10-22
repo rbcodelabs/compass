@@ -45,7 +45,7 @@ function CloudAgentEditor({ agent, models, disabled, onSave }: { agent: Workspac
   </form>;
 }
 
-export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage, enabled, models = [] }: { orgSlug: string; workspaceSlug: string; agents: WorkspaceAgentRow[]; canManage: boolean; enabled: boolean; models?: CloudAgentModelOption[] }) {
+export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage, models = [] }: { orgSlug: string; workspaceSlug: string; agents: WorkspaceAgentRow[]; canManage: boolean; models?: CloudAgentModelOption[] }) {
   const router = useRouter();
   const [selected, setSelected] = useState("");
   const [access, setAccess] = useState<"READ" | "WRITE">("READ");
@@ -82,16 +82,16 @@ export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage
           {a.kind === "CLOUD" && a.canEdit && <Button variant="outline" size="sm" aria-expanded={editing === a.id} aria-label={editing === a.id ? `Close ${a.name}` : `Edit ${a.name}`} title={editing === a.id ? undefined : `Edit ${a.name}`} disabled={pending} onClick={() => setEditing(editing === a.id ? null : a.id)}>{editing === a.id ? "Close" : "Edit"}</Button>}
           {a.kind === "CLOUD" && a.canUse && (a.isMyDefault
             ? <Button variant="outline" size="sm" disabled={pending} onClick={() => run(() => setMyDefaultAgentAction(orgSlug, workspaceSlug, null))}>Clear my default</Button>
-            : <Button variant="outline" size="sm" disabled={pending || !enabled} onClick={() => run(() => setMyDefaultAgentAction(orgSlug, workspaceSlug, a.id))}>Use as my default</Button>)}
+            : <Button variant="outline" size="sm" disabled={pending} onClick={() => run(() => setMyDefaultAgentAction(orgSlug, workspaceSlug, a.id))}>Use as my default</Button>)}
           {a.kind === "CLOUD" && canManage && a.shared && (a.isWorkspaceDefault
             ? <Button variant="outline" size="sm" disabled={pending} onClick={() => run(() => setWorkspaceDefaultAgentAction(orgSlug, workspaceSlug, null))}>Clear workspace default</Button>
-            : a.status === "ACTIVE" && <Button variant="outline" size="sm" disabled={pending || !enabled} onClick={() => run(() => setWorkspaceDefaultAgentAction(orgSlug, workspaceSlug, a.id))}>Set as workspace default</Button>)}
+            : a.status === "ACTIVE" && <Button variant="outline" size="sm" disabled={pending} onClick={() => run(() => setWorkspaceDefaultAgentAction(orgSlug, workspaceSlug, a.id))}>Set as workspace default</Button>)}
           {canManage && <Button variant="outline" size="sm" aria-label={`Revoke access to ${a.name}`} disabled={pending} onClick={() => run(() => revokeWorkspaceAgent(orgSlug, workspaceSlug, a.id))}>Revoke access</Button>}
         </div>
       </div>
-      {editing === a.id && <CloudAgentEditor agent={a} models={models} disabled={pending || !enabled} onSave={(values) => run(() => updateCloudAgent(a.id, { name: values.name, description: values.description, instructions: values.instructions, model: values.model || null, ...(a.shared ? { invokePolicy: values.invokePolicy === "OWNER" ? "ADMINS" : values.invokePolicy } : {}), ...changedRunLimits(values, a) }), () => setEditing(null))} />}
+      {editing === a.id && <CloudAgentEditor agent={a} models={models} disabled={pending} onSave={(values) => run(() => updateCloudAgent(a.id, { name: values.name, description: values.description, instructions: values.instructions, model: values.model || null, ...(a.shared ? { invokePolicy: values.invokePolicy === "OWNER" ? "ADMINS" : values.invokePolicy } : {}), ...changedRunLimits(values, a) }), () => setEditing(null))} />}
     </li>)}</ul>
-    {enabled && (creating
+    {(creating
       ? <form className="min-w-0 space-y-2 rounded-md border border-border-default p-3" aria-label="New cloud agent" onSubmit={(e) => {
           e.preventDefault();
           run(async () => {
@@ -116,7 +116,7 @@ export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage
         <div className="flex flex-wrap gap-2"><Button type="submit" disabled={pending || !draft.name.trim()}>Create agent</Button><Button type="button" variant="outline" disabled={pending} onClick={() => setCreating(false)}>Cancel</Button></div>
       </form>
       : <Button variant="outline" onClick={() => setCreating(true)}>New cloud agent</Button>)}
-    {canManage && <div className="flex min-w-0 flex-col gap-2"><p className="text-sm">Enable an agent belonging to a current workspace member, or update its access.</p><Select value={selected} onValueChange={(v) => setSelected(v ?? "")} disabled={pending || !enabled}><SelectTrigger aria-label="Workspace agent" className="max-w-full"><SelectValue placeholder="Choose an agent" /></SelectTrigger><SelectContent>{agents.filter((a) => a.eligible && a.status === "ACTIVE").map((a) => <SelectItem key={a.id} value={a.id}>{a.name} · {a.ownerName} · {a.id.slice(0, 8)}</SelectItem>)}</SelectContent></Select><Select value={access} onValueChange={(v) => setAccess(v as "READ" | "WRITE")} disabled={pending || !enabled}><SelectTrigger aria-label="Agent access"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="READ">Read only</SelectItem><SelectItem value="WRITE">Read and write</SelectItem></SelectContent></Select><Button disabled={pending || !enabled || !selected} onClick={() => run(() => grantWorkspaceAgent(orgSlug, workspaceSlug, selected, access))}>Save agent access</Button></div>}
+    {canManage && <div className="flex min-w-0 flex-col gap-2"><p className="text-sm">Enable an agent belonging to a current workspace member, or update its access.</p><Select value={selected} onValueChange={(v) => setSelected(v ?? "")} disabled={pending}><SelectTrigger aria-label="Workspace agent" className="max-w-full"><SelectValue placeholder="Choose an agent" /></SelectTrigger><SelectContent>{agents.filter((a) => a.eligible && a.status === "ACTIVE").map((a) => <SelectItem key={a.id} value={a.id}>{a.name} · {a.ownerName} · {a.id.slice(0, 8)}</SelectItem>)}</SelectContent></Select><Select value={access} onValueChange={(v) => setAccess(v as "READ" | "WRITE")} disabled={pending}><SelectTrigger aria-label="Agent access"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="READ">Read only</SelectItem><SelectItem value="WRITE">Read and write</SelectItem></SelectContent></Select><Button disabled={pending || !selected} onClick={() => run(() => grantWorkspaceAgent(orgSlug, workspaceSlug, selected, access))}>Save agent access</Button></div>}
     {notice && <p role="status" className="text-sm text-text-muted">{notice}</p>}
     {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
   </div>;

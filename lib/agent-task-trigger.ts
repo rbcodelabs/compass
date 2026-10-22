@@ -30,7 +30,6 @@
  */
 import { after } from "next/server"
 import getPrisma, { type AppPrismaClient } from "@/lib/db"
-import { agentsEnabled } from "@/lib/agent-access"
 import { authorColumn } from "@/lib/agent-attribution"
 import { checkAgentRunCaps, checkAgentUsageLimit } from "@/lib/agent-limits"
 import { resolveAgentModel } from "@/lib/agent-model"
@@ -183,7 +182,6 @@ export async function startRunForAssignedTask(input: TriggerInput, overrides: Pa
 }
 
 async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutcome> {
-  if (!agentsEnabled()) return { status: "skipped" }
   const { prisma } = deps
   const task = await prisma.task.findFirst({
     where: { id: input.taskId },
