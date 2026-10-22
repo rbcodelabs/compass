@@ -102,6 +102,21 @@ that names a model is refused. The server checks every pick against the allowed 
 so a hand-edited request cannot run an unlisted model. Runs started by assigning a
 task or by an @mention keep using the agent's own model.
 
+Things to know about models:
+
+- Every model in the allowed list, including each one added with
+  `COMPASS_CLOUD_AGENT_MODELS`, can be chosen by any member who can chat in the
+  workspace. The allowed list is therefore also the list of models you are willing to pay
+  for per message. Usage limits are checked before a turn and charged after it, so a
+  single turn on an expensive model can overshoot the daily cost cap by one turn.
+- A failed, interrupted or cancelled run now keeps the model it was started with (it
+  used to be blank), so you can see which model a failed run used.
+- The model saved on an agent is checked for shape only, not against the allowed list, so
+  an agent can still run a model that was later removed from the list or typed by hand
+  elsewhere. Only the model picked in chat is checked against the allowed list.
+- If you send a message in the first moment after the page opens, before the lists have
+  loaded, the message uses Default; a remembered model is applied once the lists arrive.
+
 ### Things to know before you share an agent
 
 - **A run outlives the membership of the person who started it, until its deadline.**
