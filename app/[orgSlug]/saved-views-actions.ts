@@ -19,7 +19,7 @@ import { SAVED_VIEW_SURFACES, SURFACES, isConsistentScope, type SavedViewSurface
  */
 export type SavedViewActionResult =
   | { ok: true; view: SavedViewRecord }
-  | { ok: false; error: string }
+  | { ok: false; error: string; code?: string }
 
 const surfaceSchema = z.enum(SAVED_VIEW_SURFACES)
 const workspaceIdSchema = z.string().uuid().nullable()
@@ -40,7 +40,7 @@ async function run<T>(
   surfaceInput: unknown,
   workspaceIdInput: unknown,
   fn: (ctx: { actor: NonNullable<Awaited<ReturnType<typeof resolveSavedViewActor>>>; surface: SavedViewSurface; workspaceId: string | null }) => Promise<T>,
-): Promise<{ ok: true; value: T } | { ok: false; error: string }> {
+): Promise<{ ok: true; value: T } | { ok: false; error: string; code?: string }> {
   const session = await auth()
   if (!session?.user?.id) return { ok: false, error: "Unauthorized" }
   const surface = surfaceSchema.safeParse(surfaceInput)
@@ -58,7 +58,11 @@ async function run<T>(
     }
     return { ok: true, value }
   } catch (error) {
-    if (isSavedViewError(error)) return { ok: false, error: error.message }
+    if (isSavedViewError(error)) {
+      // Only CONFLICT carries a code: the UI offers a reload for it, and every other failure keeps its historical shape.
+      if (error.code === "CONFLICT") return { ok: false, error: error.message, code: error.code }
+      return { ok: false, error: error.message }
+    }
     throw error
   }
 }
@@ -77,7 +81,7 @@ export async function updateSavedViewAction(
   return result.ok ? { ok: true, view: result.value } : result
 }
 
-export async function deleteSavedViewAction(orgSlug: string, surface: SavedViewSurface, workspaceId: string | null, viewId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function deleteSavedViewAction(orgSlug: string, surface: SavedViewSurface, workspaceId: string | null, viewId: string): Promise<{ ok: true } | { ok: false; error: string; code?: string }> {
   if (!idSchema.safeParse(viewId).success) return { ok: false, error: "View not found" }
   const result = await run(orgSlug, surface, workspaceId, (ctx) => deleteSavedView(ctx.actor, ctx.surface, ctx.workspaceId, viewId))
   return result.ok ? { ok: true } : result
