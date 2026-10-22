@@ -192,7 +192,7 @@ export function WorkspacePicker({ workspaces, orgSlug, workspaceSlug, workspaceN
 
           <div className="wsx-pop-foot">
             {orgRoadmapHref && (
-              <Link href={orgRoadmapHref} className="wsx-act" data-wsx-item="" data-testid="nav-org-roadmap" onClick={close}>
+              <Link href={orgRoadmapHref} className="wsx-act" aria-current={pathname === orgRoadmapHref ? "page" : undefined} data-wsx-item="" data-testid="nav-org-roadmap" onClick={close}>
                 <Layers className="wsx-icon" aria-hidden="true" />
                 All roadmaps
               </Link>

@@ -12,39 +12,53 @@ vi.mock("@/components/panels/panel-context", () => ({ usePanelContext: () => ({ 
 import { NOTIFICATIONS_CHANGED_EVENT, NotificationBellHeaderLink, NotificationBellNavItem } from "@/components/notifications/notification-bell"
 import { Sidebar } from "@/components/sidebar"
 import { MobileHeader } from "@/components/mobile-header"
-import { SidebarMenu, SidebarProvider } from "@/components/ui/sidebar"
+import { SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AgentRailProvider } from "@/components/agent/agent-rail-context"
 
 const fetchMock = vi.fn()
 const unread = (count: number, overflow = false) => Promise.resolve({ ok: true, json: async () => ({ available: true, count, overflow }) })
 const props = { orgSlug: "acme", workspaceSlug: "ws", initialCount: 3, initialOverflow: false }
-const renderNav = (over: Partial<typeof props> = {}) =>
-  render(<TooltipProvider><SidebarProvider><SidebarMenu><NotificationBellNavItem {...props} {...over} /></SidebarMenu></SidebarProvider></TooltipProvider>)
+const renderIcon = (over: Partial<typeof props> = {}) =>
+  render(<TooltipProvider><SidebarProvider><NotificationBellIconButton {...props} {...over} /></SidebarProvider></TooltipProvider>)
 
 beforeEach(() => { pathname = "/acme/ws/okrs"; vi.stubGlobal("fetch", fetchMock); fetchMock.mockReturnValue(unread(3)) })
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals() })
 
-describe("NotificationBellNavItem", () => {
-  it("links to the inbox and shows the server-seeded count without fetching on first paint", () => {
-    renderNav()
+describe("NotificationBellIconButton (beside Search)", () => {
+  it("links to the inbox with the unread count in its accessible name and a badge, without fetching on first paint", () => {
+    renderIcon()
     expect(screen.getByRole("link", { name: "Notifications, 3 unread" })).toHaveAttribute("href", "/acme/ws/notifications")
     expect(screen.getByTestId("notification-count")).toHaveTextContent("3")
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it("shows no badge at zero and 99+ when the count overflows", () => {
-    const { unmount } = renderNav({ initialCount: 0 })
+  it("has a plain label and no badge or dot at zero", () => {
+    renderIcon({ initialCount: 0 })
+    expect(screen.getByRole("link", { name: "Notifications" })).toHaveAttribute("href", "/acme/ws/notifications")
     expect(screen.queryByTestId("notification-count")).not.toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Notifications" })).toBeInTheDocument()
-    unmount()
-    renderNav({ initialCount: 99, initialOverflow: true })
+    expect(screen.queryByTestId("notification-dot")).not.toBeInTheDocument()
+  })
+
+  it("caps the badge at 99+ on overflow and keeps a dot for the collapsed rail", () => {
+    renderIcon({ initialCount: 99, initialOverflow: true })
     expect(screen.getByTestId("notification-count")).toHaveTextContent("99+")
+    expect(screen.getByTestId("notification-dot")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Notifications, 99\+ unread/ })).toBeInTheDocument()
+  })
+
+  it("is marked active only on the inbox route", () => {
+    const { unmount } = renderIcon()
+    expect(screen.getByRole("link", { name: /Notifications/ })).not.toHaveAttribute("data-active")
+    unmount()
+    pathname = "/acme/ws/notifications"
+    renderIcon()
+    expect(screen.getByRole("link", { name: /Notifications/ })).toHaveAttribute("data-active")
   })
 
   it("refetches the bounded count when the tab becomes visible again", async () => {
     fetchMock.mockReturnValue(unread(7))
-    renderNav()
+    renderIcon()
     await act(async () => { document.dispatchEvent(new Event("visibilitychange")) })
     await waitFor(() => expect(screen.getByTestId("notification-count")).toHaveTextContent("7"))
     expect(fetchMock).toHaveBeenCalledWith("/api/notifications/unread?orgSlug=acme&workspaceSlug=ws")
@@ -52,14 +66,14 @@ describe("NotificationBellNavItem", () => {
 
   it("refetches when the inbox marks things read", async () => {
     fetchMock.mockReturnValue(unread(0))
-    renderNav()
+    renderIcon()
     await act(async () => { window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT)) })
     await waitFor(() => expect(screen.queryByTestId("notification-count")).not.toBeInTheDocument())
   })
 
   it("keeps the last known count when a refetch fails rather than flashing zero", async () => {
     fetchMock.mockReturnValue(Promise.reject(new Error("offline")))
-    renderNav()
+    renderIcon()
     await act(async () => { window.dispatchEvent(new Event(NOTIFICATIONS_CHANGED_EVENT)) })
     expect(screen.getByTestId("notification-count")).toHaveTextContent("3")
   })
