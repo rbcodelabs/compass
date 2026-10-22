@@ -29,6 +29,10 @@ export function isPublicPath(pathname: string): boolean {
     pathname === "/preview-login" ||
     pathname === "/api/preview-login/start" ||
     pathname === "/" ||
+    // Public legal pages required for Google OAuth verification. Exact paths,
+    // not prefixes, so /privacy/anything and /privacyx stay behind login.
+    pathname === "/privacy" ||
+    pathname === "/terms" ||
     pathname.startsWith("/login") ||
     pathname.startsWith("/api/auth") ||
     // MCP route uses Bearer token auth — let it through so the route

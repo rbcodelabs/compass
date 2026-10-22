@@ -20,7 +20,7 @@ export function MarketingFooter({ viewer }: { viewer: MarketingViewer }) {
         </div>
 
         {/* Right: nav links */}
-        <nav className="flex items-center gap-6 text-sm text-slate-500">
+        <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-slate-500">
           <Link
             href={isSignedOut ? "/login" : accountHref}
             className="hover:text-slate-900 transition-colors"
@@ -44,6 +44,18 @@ export function MarketingFooter({ viewer }: { viewer: MarketingViewer }) {
             className="hover:text-slate-900 transition-colors"
           >
             Give feedback
+          </Link>
+          <Link
+            href="/privacy"
+            className="hover:text-slate-900 transition-colors"
+          >
+            Privacy
+          </Link>
+          <Link
+            href="/terms"
+            className="hover:text-slate-900 transition-colors"
+          >
+            Terms
           </Link>
         </nav>
       </div>

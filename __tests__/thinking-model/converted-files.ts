@@ -248,6 +248,7 @@ export const CANONICAL_FILES: Record<string, string> = {
 export const CANONICAL_PREFIXES: Array<[prefix: string, categoryId: string]> = [
   ["app/api/", "agents-and-api"],
   ["components/marketing/", "public-surfaces"],
+  ["app/(marketing)/", "public-surfaces"],
   ["components/research/", "research-and-agent-chat"],
   ["app/[orgSlug]/settings/", "account-and-org-pages"],
 ]

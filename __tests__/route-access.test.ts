@@ -6,6 +6,15 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/")).toBe(true);
   });
 
+  it("allows exactly the public legal pages", () => {
+    expect(isPublicPath("/privacy")).toBe(true);
+    expect(isPublicPath("/terms")).toBe(true);
+    expect(isPublicPath("/privacyx")).toBe(false);
+    expect(isPublicPath("/termsx")).toBe(false);
+    expect(isPublicPath("/privacy/anything")).toBe(false);
+    expect(isPublicPath("/terms/anything")).toBe(false);
+  });
+
   it("allows auth-related routes", () => {
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/api/auth/callback/google")).toBe(true);
