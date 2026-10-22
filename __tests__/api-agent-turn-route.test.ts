@@ -835,7 +835,22 @@ describe("agent turn route — detached runs", () => {
       identityMocks.resolve.mockResolvedValue({ ...agent, model: "gpt-5; curl evil" })
       const { runCommand } = sandbox()
       await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
-      expect(env(runCommand)).not.toHaveProperty("AGENT_MODEL")
+      // The host always sends the deployment's model now; an unservable agent model must not replace it.
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-sonnet-5")
+      expect(JSON.stringify(env(runCommand))).not.toContain("curl evil")
+    })
+
+    it("on Bedrock the deployment's model id is kept: a named agent's Anthropic-API model id is not sent to a provider that cannot serve it", async () => {
+      process.env.AGENT_MODEL_PROVIDER = "bedrock"
+      process.env.BEDROCK_API_KEY = "bedrock-test-token"
+      identityMocks.resolve.mockResolvedValue(agent)
+      const { runCommand } = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(runCommand).AGENT_MODEL).toBe("global.anthropic.claude-sonnet-5-5")
+      expect(env(runCommand).AWS_BEARER_TOKEN_BEDROCK).toBe("bedrock-test-token")
+      expect(env(runCommand)).not.toHaveProperty("ANTHROPIC_API_KEY")
+      // The agent's instructions still apply.
+      expect(env(runCommand).AGENT_SYSTEM_PROMPT).toContain("Always label new feedback.")
     })
 
     it("never forwards the invoker's connected third-party accounts to an agent run", async () => {
@@ -854,7 +869,8 @@ describe("agent turn route — detached runs", () => {
       expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: null }))
       expect(mockMintKey.mock.calls[0][4]).toEqual({ agentId: null })
       expect(runMocks.attach).not.toHaveBeenCalled()
-      expect(env(runCommand)).not.toHaveProperty("AGENT_MODEL")
+      // No agent model override: the deployment's model, exactly as before agents existed.
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-sonnet-5")
       expect(env(runCommand).AGENT_SYSTEM_PROMPT).not.toContain("You are running as the agent")
     })
 
