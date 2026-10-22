@@ -85,6 +85,24 @@ export interface ConnectorDefinition {
    */
   accessLevels?: readonly ConnectorAccessLevel[]
   /**
+   * Where this connector's access tokens come from. Absent means the ADR-0018
+   * default: Compass runs the OAuth flow itself and stores the grant (encrypted)
+   * in `mcp_connector_grants`.
+   *
+   * `vercel-connect` hands the whole credential lifecycle to a Vercel Connect
+   * connector instead: Connect owns the OAuth client credentials, the consent
+   * screen, token storage and refresh, and Compass only asks it for a short-lived
+   * access token for a given Compass user. No client secret, refresh token or
+   * grant row lives in Compass, which is why discovery, DCR and the callback route
+   * are all skipped for such a connector.
+   *
+   * `uidEnv` names the env var holding the Connect connector UID (for example
+   * `google/compass`). It is an env var rather than a constant because the UID
+   * differs per deployment, and it has no default: unset means "not configured
+   * on this deployment", never "fall back to something else".
+   */
+  tokenSource?: { kind: "vercel-connect"; uidEnv: string }
+  /**
    * A **pre-registered confidential client**, for providers with no Dynamic
    * Client Registration (Google's authorization server advertises no
    * `registration_endpoint`). Absent means the ADR-0018 default: register a
@@ -106,6 +124,13 @@ export interface ConnectorDefinition {
     authorizeParams?: Readonly<Record<string, string>>
   }
 }
+
+/**
+ * Env var naming the Vercel Connect connector (`google/compass`) that holds
+ * Compass's Google OAuth client. Shared by the Drive connector and Google
+ * sign-in so one Google client serves both; required, with no default.
+ */
+export const GOOGLE_CONNECTOR_ENV = "COMPASS_GOOGLE_CONNECTOR"
 
 export const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
   {
@@ -146,11 +171,8 @@ export const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     // time (see accessLevels). Full is also what makes a prompt-injected document
     // dangerous, hence the guidance below.
     fallbackScope: "https://www.googleapis.com/auth/drive",
-    staticClient: {
-      clientIdEnv: "GOOGLE_CLIENT_ID",
-      clientSecretEnv: "GOOGLE_CLIENT_SECRET",
-      authorizeParams: { access_type: "offline", prompt: "consent" },
-    },
+    // Credentials live in Vercel Connect, not in Compass env vars.
+    tokenSource: { kind: "vercel-connect", uidEnv: GOOGLE_CONNECTOR_ENV },
     accessLevels: [
       {
         id: "full",
@@ -265,8 +287,23 @@ export function staticClientCredentials(definition: ConnectorDefinition): Static
   return { clientId, clientSecret }
 }
 
+/**
+ * The Vercel Connect connector UID for a Connect-backed connector; `null` when
+ * the connector is not Connect-backed *or* its env var is unset. Use
+ * {@link usesVercelConnect} to tell the two apart.
+ */
+export function vercelConnectUid(definition: ConnectorDefinition): string | null {
+  if (definition.tokenSource?.kind !== "vercel-connect") return null
+  return process.env[definition.tokenSource.uidEnv]?.trim() || null
+}
+
+export function usesVercelConnect(definition: ConnectorDefinition): boolean {
+  return definition.tokenSource?.kind === "vercel-connect"
+}
+
 /** Whether the connector can start a flow here. DCR connectors always can. */
 export function isConnectorConfigured(definition: ConnectorDefinition): boolean {
+  if (usesVercelConnect(definition)) return vercelConnectUid(definition) !== null
   try {
     staticClientCredentials(definition)
     return true
@@ -301,6 +338,12 @@ export type McpConnectorErrorCode =
   | "ENCRYPTION_NOT_CONFIGURED"
   /** A `staticClient` connector whose client ID / secret env vars are unset. */
   | "CLIENT_NOT_CONFIGURED"
+  /**
+   * A Connect-backed connector whose Vercel Connect side is broken: the UID env
+   * var is unset, or the project/environment is not linked to the connector.
+   * An operator problem, not something the user can fix by reconnecting.
+   */
+  | "CONNECT_MISCONFIGURED"
   | "DISCOVERY_FAILED"
   | "REGISTRATION_FAILED"
   | "NOT_CONNECTED"

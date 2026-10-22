@@ -10,6 +10,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { McpConnectorError } from "@/lib/mcp-connectors/config"
+import { connectMocks, resetConnectMocks, UserAuthorizationRequiredError } from "./helpers/mock-vercel-connect"
+
+vi.mock("@vercel/connect", async () => (await import("./helpers/mock-vercel-connect")).connectModule())
 
 const mockAuth = vi.fn()
 vi.mock("@/auth", () => ({ auth: () => mockAuth() }))
@@ -32,6 +35,7 @@ vi.mock("@/lib/mcp-connectors/tokens", () => ({
   revokeAtProvider: (...args: unknown[]) => mockRevokeAtProvider(...args),
 }))
 
+const { resetConnectLevelMemo: resetLevelMemo } = await import("@/lib/mcp-connectors/vercel-connect")
 const { GET: listConnectors } = await import("@/app/api/connectors/route")
 const { DELETE: disconnect } = await import("@/app/api/connectors/[slug]/route")
 
@@ -50,6 +54,12 @@ beforeEach(() => {
   mockListConnectedGrants.mockResolvedValue([])
   vi.spyOn(console, "error").mockImplementation(() => {})
   vi.unstubAllEnvs()
+  resetConnectMocks()
+  // Drive is Connect-backed: the connector UID is what makes it configured.
+  vi.stubEnv("COMPASS_GOOGLE_CONNECTOR", "google/compass")
+  // Not consented at any level unless a test says otherwise.
+  connectMocks.getToken.mockRejectedValue(new UserAuthorizationRequiredError("consent required"))
+  resetLevelMemo()
 })
 
 describe("GET /api/connectors", () => {
@@ -65,14 +75,16 @@ describe("GET /api/connectors", () => {
     ])
     // A preview deployment must not report a production grant: that registration
     // has a different client_id and redirect_uri entirely.
-    expect(mockListConnectedGrants).toHaveBeenCalledWith("user-1", "http://localhost:3000")
+    expect(mockListConnectedGrants).toHaveBeenCalledWith("user-1", "http://localhost:3000", undefined)
     expect(response.headers.get("cache-control")).toBe("no-store")
   })
 
   it("reports the access choice, and the level a connected grant actually holds", async () => {
-    mockListConnectedGrants.mockResolvedValue([
-      { slug: "google-drive", scope: "https://www.googleapis.com/auth/drive.readonly" },
-    ])
+    // Connect has a grant only at the read-only scope.
+    connectMocks.getToken.mockImplementation(async (_uid: string, params: { scopes: string[] }) => {
+      if (params.scopes.join(" ") === "https://www.googleapis.com/auth/drive.readonly") return "ro-token"
+      throw new UserAuthorizationRequiredError("consent required")
+    })
     const body = await (await listConnectors()).json()
     const drive = body.connectors.find((c: { slug: string }) => c.slug === "google-drive")
     expect(drive.accessLevels.map((level: { id: string }) => level.id)).toEqual(["full", "read-only"])
@@ -87,22 +99,36 @@ describe("GET /api/connectors", () => {
     expect(v0.accessLevel).toBeNull()
   })
 
-  it("flags a static-client connector as unconfigured until its env vars exist, and never leaks them", async () => {
-    vi.stubEnv("GOOGLE_CLIENT_ID", "")
-    vi.stubEnv("GOOGLE_CLIENT_SECRET", "")
+  it("flags a Connect-backed connector as unconfigured until its connector UID exists, and never leaks it", async () => {
+    vi.stubEnv("COMPASS_GOOGLE_CONNECTOR", "")
     const unconfigured = await (await listConnectors()).json()
     const drive = (body: typeof unconfigured) => body.connectors.find((c: { slug: string }) => c.slug === "google-drive")
     expect(drive(unconfigured).configured).toBe(false)
+    expect(drive(unconfigured).connected).toBe(false)
+    // Unconfigured means no Connect call at all.
+    expect(connectMocks.getToken).not.toHaveBeenCalled()
     // A DCR connector is always startable.
     expect(unconfigured.connectors.find((c: { slug: string }) => c.slug === "v0").configured).toBe(true)
 
-    vi.stubEnv("GOOGLE_CLIENT_ID", "id.apps.googleusercontent.com")
-    vi.stubEnv("GOOGLE_CLIENT_SECRET", "super-secret-value")
-    const configuredResponse = await listConnectors()
-    const text = await configuredResponse.text()
+    vi.stubEnv("COMPASS_GOOGLE_CONNECTOR", "google/secret-uid-value")
+    const text = await (await listConnectors()).text()
     expect(drive(JSON.parse(text)).configured).toBe(true)
-    expect(text).not.toContain("super-secret-value")
-    expect(text).not.toContain("id.apps.googleusercontent.com")
+    expect(text).not.toContain("secret-uid-value")
+  })
+
+  it("shows Drive as connected from a Connect token, and ignores a stale stored grant", async () => {
+    connectMocks.getToken.mockResolvedValue("full-token")
+    // A grant row from before the move to Connect must not count.
+    mockListConnectedGrants.mockResolvedValue([{ slug: "google-drive", scope: "https://www.googleapis.com/auth/drive.readonly" }])
+    const body = await (await listConnectors()).json()
+    const drive = body.connectors.find((c: { slug: string }) => c.slug === "google-drive")
+    expect(drive.connected).toBe(true)
+    expect(drive.accessLevel).toBe("full")
+    expect(connectMocks.getToken).toHaveBeenCalledWith(
+      "google/compass",
+      expect.objectContaining({ subject: { type: "user", id: "user-1" } }),
+      undefined,
+    )
   })
 
   it("renders the catalog as not-connected when the migration is unapplied", async () => {
@@ -208,5 +234,23 @@ describe("DELETE /api/connectors/[slug]", () => {
   it("disconnects the caller's own grant, never one named in the request", async () => {
     await disconnect(request(), params())
     expect(mockDisconnectGrant).toHaveBeenCalledWith(connector.id, "user-1")
+  })
+})
+
+describe("DELETE /api/connectors/[slug] — Vercel Connect-backed", () => {
+  it("revokes at Connect for the session user and never reads stored grants", async () => {
+    const response = await disconnect(request(), params("google-drive"))
+    expect(await response.json()).toEqual({ disconnected: true, revokedAtProvider: true })
+    expect(connectMocks.revokeToken).toHaveBeenCalledWith("google/compass", { subject: { type: "user", id: "user-1" } })
+    expect(mockFindGrant).not.toHaveBeenCalled()
+    expect(mockDisconnectGrant).not.toHaveBeenCalled()
+  })
+
+  it("503s with the operator-facing code when Connect is not linked", async () => {
+    const { ConnectError } = await import("./helpers/mock-vercel-connect")
+    connectMocks.revokeToken.mockRejectedValue(new ConnectError("not linked", { code: "client_not_linked", status: 403 }))
+    const response = await disconnect(request(), params("google-drive"))
+    expect(response.status).toBe(503)
+    expect((await response.json()).code).toBe("CONNECT_MISCONFIGURED")
   })
 })

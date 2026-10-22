@@ -55,13 +55,22 @@ with no connections is identical to one before this feature existed.
 
 ## Disconnect
 
-**Disconnect** always removes Compass's copy of the token immediately. Where the
+For a Vercel Connect-backed server (Google Drive), **Disconnect** revokes your
+authorization in Vercel Connect, which holds the token; Compass keeps no copy.
+
+For other servers, **Disconnect** always removes Compass's copy of the token immediately. Where the
 provider supports it, Compass also revokes the token at the provider and says so.
 Where it does not, the message tells you the token is gone from Compass and that
 you may also want to remove Compass from that provider's own list of authorized
 applications.
 
 ## Emergency revocation
+
+This applies to connectors whose tokens Compass stores itself (v0). Google Drive
+tokens live in Vercel Connect, not in Compass, so the sweep below cannot reach
+them: to cut off Drive for everyone, revoke or delete the grants (or the whole
+connector) in the Vercel Connect dashboard. Rows left in `mcp_connector_grants`
+from before the move to Connect are unused and are still wiped by the sweep.
 
 If `MCP_CONNECTOR_SECRET_ENCRYPTION_KEY` may have leaked, or a database dump may
 have left the environment, treat every stored third-party token as compromised.
@@ -111,7 +120,7 @@ already issued. For anything counted in `providerNotConfirmed` or `undecryptable
 (always the case if the old key is already gone), also:
 
 - delete or rotate the OAuth client at the provider (for Google Drive, the OAuth
-  client in Google Cloud Console; rotating only `GOOGLE_CLIENT_SECRET` does
+  client in Google Cloud Console; rotating only the client secret does
   **not** invalidate refresh tokens that were already issued), and/or
 - ask users to remove Compass at the provider's authorized-apps page (for Google,
   myaccount.google.com/permissions).
@@ -179,10 +188,33 @@ A link can also pick the level directly: `/api/connectors/google-drive/connect?a
 falling back to broader access. Connections made before access levels existed
 hold the broad scope and show as **Read and write**.
 
-Unlike v0, Google offers no self-registration, so Compass uses a pre-registered
-OAuth client. Administrators set `GOOGLE_CLIENT_ID` and
-`GOOGLE_CLIENT_SECRET` for each environment, add
-`<origin>/api/connectors/google-drive/callback` to that client's authorized
-redirect URIs, and enable the Google Drive MCP API in its Google Cloud project.
-Until the variables are set, Google Drive shows as **Not configured on this
-deployment** and cannot be connected.
+Unlike v0, Google offers no self-registration, and Compass does not hold a
+Google OAuth client itself. Google Drive is served by a
+[Vercel Connect](https://vercel.com/docs/connect) connector: Connect owns the
+client id and secret, the consent screen, token storage and refresh, and Compass
+asks it for a short-lived access token for the signed-in user each time the agent
+needs one.
+
+Administrators:
+
+1. Create the Connect connector (for example `google/compass`), set
+   `https://connect.vercel.com/callback` as an authorized redirect URI on the
+   Google OAuth client, and enable the Google Drive MCP API in its Google Cloud
+   project.
+2. Link the connector to the Compass project for **each** environment that should
+   offer Drive (Production and Preview are separate).
+3. Set `COMPASS_GOOGLE_CONNECTOR` to the connector UID for those environments and
+   redeploy. The UID differs per deployment, so there is no default.
+
+Until `COMPASS_GOOGLE_CONNECTOR` is set, Google Drive shows as **Not configured
+on this deployment** and cannot be connected. If the connector is not linked to
+the project or environment, connecting fails with a message naming that cause.
+Connecting Drive through the earlier Compass-hosted flow is gone: anyone who
+connected before the move to Connect reconnects once in Settings → Agents.
+
+The same variable enables **Continue with Google** on the sign-in page; with it
+unset that button is hidden and magic link and passkey sign-in are unaffected.
+
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_GOOGLE_ID` and
+`AUTH_GOOGLE_SECRET` are no longer read by Compass and can be removed from each
+environment once production has been verified.

@@ -23,6 +23,8 @@ import {
   connectorDefinition,
   connectorRedirectUri,
   defaultAccessLevel,
+  isConnectorConfigured,
+  usesVercelConnect,
 } from "@/lib/mcp-connectors/config"
 import {
   createAuthRequest,
@@ -31,6 +33,7 @@ import {
   pruneExpiredAuthRequests,
 } from "@/lib/mcp-connectors/store"
 import { buildAuthorizeUrl } from "@/lib/mcp-connectors/tokens"
+import { startConnectConsent } from "@/lib/mcp-connectors/vercel-connect"
 import { safeCallbackUrl } from "@/lib/safe-callback-url"
 
 export const runtime = "nodejs"
@@ -66,6 +69,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       },
       { status: 400 },
     )
+
+  if (usesVercelConnect(definition)) return connectViaVercelConnect(request, slug, session.user.id, level?.scope ?? definition.fallbackScope)
 
   if (!(await mcpConnectorsAvailable()))
     return NextResponse.json(
@@ -114,6 +119,38 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       return NextResponse.json({ error: error.message, code: error.code }, { status: 503 })
     if (error instanceof McpConnectorError)
       return NextResponse.json({ error: error.message, code: error.code }, { status: 502 })
+    throw error
+  }
+}
+
+/**
+ * Connect-backed connectors skip discovery, DCR and `mcp_connector_auth_requests`
+ * entirely: Vercel Connect runs the consent flow and keeps the grant. Connect
+ * sends the browser back to this connector's own callback route, which checks
+ * that a grant now exists and renders the success or failure notice, so a user
+ * who abandons the consent screen is not told they connected.
+ */
+async function connectViaVercelConnect(request: NextRequest, slug: string, userId: string, scope: string) {
+  const definition = connectorDefinition(slug)!
+  if (!isConnectorConfigured(definition))
+    return NextResponse.json(
+      { error: `${definition.displayName} is not configured on this deployment.`, code: "CLIENT_NOT_CONFIGURED" },
+      { status: 503 },
+    )
+  const returnTo = safeCallbackUrl(request.nextUrl.searchParams.get("returnTo"), DEFAULT_CONNECTOR_RETURN_PATH)
+  const landing = new URL(`/api/connectors/${encodeURIComponent(slug)}/callback`, trustedCompassBaseUrl().origin)
+  landing.searchParams.set("returnTo", returnTo)
+  try {
+    const consentUrl = await startConnectConsent(definition, userId, scope, landing.toString())
+    return NextResponse.redirect(consentUrl, { headers: { "Cache-Control": "no-store" } })
+  } catch (error) {
+    if (error instanceof McpConnectorError) {
+      console.error("Vercel Connect consent could not be started", slug, error.code, error.message)
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.code === "CLIENT_NOT_CONFIGURED" || error.code === "CONNECT_MISCONFIGURED" ? 503 : 502 },
+      )
+    }
     throw error
   }
 }

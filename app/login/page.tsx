@@ -7,6 +7,7 @@ import { FormField } from "@/components/patterns/form-field"
 import { safeCallbackUrl } from "@/lib/safe-callback-url"
 import { PasskeyLoginButton } from "@/components/auth/passkey-login-button"
 import { passkeysEnabled } from "@/lib/passkeys"
+import { googleSignInEnabled } from "@/lib/google-signin"
 
 export const metadata = {
   title: "Sign in",
@@ -112,28 +113,30 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             {/* Google sign-in — production only; dev mode has no Google provider registered */}
             {!isDev && (
               <>
-                <form
-                  action={async () => {
-                    "use server"
-                    // `redirectTo`, not `callbackUrl`: Auth.js v5 builds the
-                    // POST body as `{ ...rest, callbackUrl }` where its own
-                    // callbackUrl is `redirectTo ?? Referer ?? "/"`, so an
-                    // options.callbackUrl is always overwritten. The previous
-                    // hardcoded "/dashboard" here never took effect — the
-                    // destination came from the Referer header and happened to
-                    // land on /dashboard by way of /login.
-                    await signIn("google", { redirectTo: callbackUrl })
-                  }}
-                >
-                  <Button
-                    type="submit"
-                    variant="outline"
-                    className="w-full h-11 gap-2 font-semibold"
+                {googleSignInEnabled() && (
+                  <form
+                    action={async () => {
+                      "use server"
+                      // `redirectTo`, not `callbackUrl`: Auth.js v5 builds the
+                      // POST body as `{ ...rest, callbackUrl }` where its own
+                      // callbackUrl is `redirectTo ?? Referer ?? "/"`, so an
+                      // options.callbackUrl is always overwritten. The previous
+                      // hardcoded "/dashboard" here never took effect — the
+                      // destination came from the Referer header and happened to
+                      // land on /dashboard by way of /login.
+                      await signIn("google", { redirectTo: callbackUrl })
+                    }}
                   >
-                    <GoogleIcon />
-                    Continue with Google
-                  </Button>
-                </form>
+                    <Button
+                      type="submit"
+                      variant="outline"
+                      className="w-full h-11 gap-2 font-semibold"
+                    >
+                      <GoogleIcon />
+                      Continue with Google
+                    </Button>
+                  </form>
+                )}
 
                 {passkeysEnabled() && <PasskeyLoginButton />}
 

@@ -61,7 +61,7 @@ import { handoffKind, parseProcessingState, processingStatus } from "@/lib/pm-ag
 import { HANDOFF_POLICIES } from "@/lib/agent-handoff-kinds"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import { connectorDefinition } from "@/lib/mcp-connectors/config"
-import { listConnectedGrants } from "@/lib/mcp-connectors/store"
+import { listConnections } from "@/lib/mcp-connectors/vercel-connect"
 import {
   AgentRunError,
   DEFAULT_AGENT_RUN_BUDGET_MS,
@@ -456,7 +456,7 @@ export async function POST(request: NextRequest) {
   // Failure is non-fatal on purpose: a connector lookup that throws must not cost
   // the user their turn, so it degrades to "no connectors" and the turn proceeds
   // exactly as it did before this feature existed.
-  const connectedGrants = await listConnectedGrants(userId, trustedCompassBaseUrl().origin, prisma).catch(error => {
+  const connectedGrants = await listConnections(userId, trustedCompassBaseUrl().origin, prisma).catch(error => {
     console.error("[agent-turn] could not list connected MCP connectors", error)
     return [] as Array<{ slug: string; scope: string }>
   })

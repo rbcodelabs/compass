@@ -19,7 +19,8 @@ import { CONNECTOR_DEFINITIONS, connectorAccessView, isConnectorConfigured } fro
 // Shared with the callback route that produces these params, so the two cannot
 // disagree about their names again (ADR-0018).
 import { readConnectorNotice } from "@/lib/mcp-connectors/notice";
-import { listConnectedGrants, mcpConnectorsAvailable } from "@/lib/mcp-connectors/store";
+import { mcpConnectorsAvailable } from "@/lib/mcp-connectors/store";
+import { listConnections } from "@/lib/mcp-connectors/vercel-connect";
 
 export const metadata = { title: "My agents" };
 
@@ -39,7 +40,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
   // Origin-scoped: a grant registered on production is a different OAuth client
   // from one registered on a preview branch, so a preview must not show it.
   const connectedConnectorScopes = new Map(
-    (connectorsAvailable ? await listConnectedGrants(userId, trustedCompassBaseUrl().origin, prisma) : []).map((grant) => [grant.slug, grant.scope]),
+    (await listConnections(userId, trustedCompassBaseUrl().origin, prisma, connectorsAvailable)).map((grant) => [grant.slug, grant.scope]),
   );
   const workspaceIds = workspaces.map((w) => w.id);
   const agentIds = agents.map((a) => a.id);
