@@ -44,6 +44,25 @@ describe("reading stored defaults", () => {
     await expect(agentDefaultsAvailable(prisma)).resolves.toBe(false)
   })
 
+  it.each([["P2021", "table"], ["P2022", "column"]])("answers 'no default' for a missing %s (%s) alike, on every read and on the probe", async (code) => {
+    const prisma = fakePrisma()
+    const missing = () => Object.assign(new Error("does not exist"), { code })
+    prisma.userDefaultAgent.findFirst.mockRejectedValue(missing())
+    prisma.workspaceDefaultAgent.findFirst.mockRejectedValue(missing())
+    await expect(getStoredDefaultAgentIds(prisma, { userId: "u1", workspaceId: "w1" })).resolves.toEqual({ userDefaultAgentId: null, workspaceDefaultAgentId: null })
+    resetAgentDefaultsAvailabilityCache()
+    await expect(agentDefaultsAvailable(prisma)).resolves.toBe(false)
+    resetAgentDefaultsAvailabilityCache()
+    await expect(setWorkspaceDefaultAgent(prisma, { workspaceId: "w1", agentId: "a1", setByUserId: "admin" })).rejects.toBeInstanceOf(AgentDefaultsUnavailableError)
+  })
+
+  it.each(["P2002", "P2025", "P1001"])("still rethrows an unrelated database error (%s)", async (code) => {
+    const prisma = fakePrisma()
+    prisma.userDefaultAgent.findFirst.mockRejectedValue(Object.assign(new Error("boom"), { code }))
+    prisma.workspaceDefaultAgent.findFirst.mockResolvedValue(null)
+    await expect(getStoredDefaultAgentIds(prisma, { userId: "u1", workspaceId: "w1" })).rejects.toThrow("boom")
+  })
+
   it("rethrows a fault that is not a missing table", async () => {
     const prisma = fakePrisma()
     prisma.userDefaultAgent.findFirst.mockRejectedValue(new Error("connection reset"))

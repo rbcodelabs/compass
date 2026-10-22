@@ -12,7 +12,8 @@
  * and a stale default silently falls through there instead of failing a chat.
  *
  * Tolerates migration 101 being unapplied: reads answer "no default"; writes refuse with a clear message. Only a
- * missing table (P2021) means "not yet" -- anything else is a real fault and is rethrown.
+ * missing table (P2021) or a missing column on one (P2022, e.g. a partially applied or older shape) means "not yet" -- anything else
+ * is a real fault and is rethrown.
  */
 
 import type { AppPrismaClient } from "@/lib/db"
@@ -33,7 +34,7 @@ const NEGATIVE_TTL_MS = 30_000
 let availability: { value: boolean; checkedAt: number } | null = null
 
 function isMissingTable(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "P2021"
+  return typeof error === "object" && error !== null && "code" in error && (error.code === "P2021" || error.code === "P2022")
 }
 
 /** Test seam: forget the probe result so a suite can exercise both branches. */

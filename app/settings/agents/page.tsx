@@ -44,7 +44,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
   );
   const workspaceIds = workspaces.map((w) => w.id);
   const agentIds = agents.map((a) => a.id);
-  const userDefaults = agentIds.length ? await prisma.userDefaultAgent.findMany({ where: { userId, workspaceId: { in: workspaceIds } }, select: { workspaceId: true, agentId: true } }).catch((error: unknown) => { if (typeof error === "object" && error !== null && "code" in error && error.code === "P2021") return []; throw error; }) : [];
+  const userDefaults = agentIds.length ? await prisma.userDefaultAgent.findMany({ where: { userId, workspaceId: { in: workspaceIds } }, select: { workspaceId: true, agentId: true } }).catch((error: unknown) => { if (typeof error === "object" && error !== null && "code" in error && (error.code === "P2021" || error.code === "P2022")) return []; throw error; }) : [];
   const runCaps = await loadConfiguredAgentRunCaps(prisma, agents.filter((a) => agentKind(a) === "CLOUD").map((a) => a.id));
   const [grants, activity] = await Promise.all([
     prisma.agentWorkspaceGrant.findMany({ where: { agentId: { in: agentIds }, workspaceId: { in: workspaceIds } } }),

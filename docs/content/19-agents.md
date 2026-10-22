@@ -78,6 +78,27 @@ migration `103_shared_compass_agent_bootstrap`. It never runs on its own: name t
 workspaces in `COMPASS_SHARED_AGENT_WORKSPACE_IDS` and run it by name. It is safe to
 repeat and never overrides an existing default or revives a revoked grant.
 
+### Things to know before you share an agent
+
+- **A run outlives the membership of the person who started it, until its deadline.**
+  Removing someone from a workspace stops them starting new runs and revokes access to
+  the conversation, but a run already in progress keeps going (up to 20 minutes) with the
+  agent's own grants. A shared agent's grants are re-checked on every request, though: if
+  the administrator who issued a grant stops administering the workspace, or you revoke
+  the grant, the agent loses that access immediately, mid-run. To stop a run right away,
+  suspend the agent or revoke its workspace access.
+- **The shared Compass Agent becomes the workspace's default chat agent.** The
+  bootstrap (migration `103`) makes it the workspace default when none is set, so
+  everyone's chat and Send to agent use it until they pick another. It acts only through
+  its own grants, not each person's access, so check what it was granted before you run
+  the bootstrap.
+- **Do not give an organization-admin grant to an agent that any workspace member may
+  run.** An organization-admin grant lets the agent do administrator-level work, and a
+  shared agent whose invoke policy is "Any workspace member" lets every member direct it.
+  Today the product refuses this combination (a shared agent cannot be granted
+  organization-admin access at all, and a personal agent can be run only by its owner);
+  if that ever changes, restrict such an agent to "Workspace admins only".
+
 ## Workspace access
 
 Workspace administrators, or organization administrators with workspace access,
