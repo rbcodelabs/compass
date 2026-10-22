@@ -40,6 +40,7 @@ import { loadCustomFieldsForObject } from "@/lib/custom-field-definitions";
 import { toOpportunityScoreData, toScoreSummary, toSolutionScoreData } from "@/lib/score-summary";
 import type { ScoringModelData } from "@/lib/types";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
+import { loadOpportunityChainExtras } from "@/lib/thinking-model/opportunity-chain-data";
 
 /**
  * ADR-0012 step 6a — the three OST detail fetchers that carry Evidence resolve
@@ -196,6 +197,12 @@ async function fetchOpportunity(id: string, workspaceId: string) {
         include: {
           _count: { select: { assumptions: true, evidence: true } },
           score: { select: { normalizedScore: true, modelVersion: true } },
+          // OST tab: roadmap items scheduled for this Solution (scoped on the item's own workspace).
+          roadmapItems: {
+            where: { workspaceId, status: { not: "ARCHIVED" } },
+            select: { id: true, title: true, horizon: true, status: true },
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          },
           assumptions: {
             orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
             include: {
@@ -237,11 +244,12 @@ async function fetchOpportunity(id: string, workspaceId: string) {
         select: { id: true, title: true, type: true, status: true },
         orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       },
-      roadmapItems: { select: { id: true, title: true, horizon: true } },
+      roadmapItems: { where: { workspaceId }, select: { id: true, title: true, horizon: true, status: true, solutionId: true } },
     },
   });
   if (!item) return null;
-  const offersObjectivePicker = resolveThinkingModel(item.workspace ?? {}).links.oppToObjective === "primary";
+  const thinkingModel = resolveThinkingModel(item.workspace ?? {});
+  const offersObjectivePicker = thinkingModel.links.oppToObjective === "primary";
   const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields, linkedObjectivesByOpportunity, pickerObjectives] = await Promise.all([
     pmInterviewHistory(workspaceId, "OPPORTUNITY", id),
     fetchLinkedTasksBundle(workspaceId, "OPPORTUNITY", id),
@@ -263,6 +271,14 @@ async function fetchOpportunity(id: string, workspaceId: string) {
   const solutionScoringModel = item.workspace?.scoringConfig?.solutionScoringModel ?? null;
   // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
   const linkedKeyResult = item.linkedKeyResult && item.linkedKeyResult.objective.workspaceId === workspaceId ? item.linkedKeyResult : null;
+  // OST tab extras (typed Solution->KR chips, solution tasks, the Objectives the chain touches): batch reads, no N+1.
+  const chain = await loadOpportunityChainExtras(
+    getPrisma(),
+    workspaceId,
+    thinkingModel,
+    { linkedObjectives: linkedObjectivesByOpportunity.get(id) ?? [], linkedKeyResult },
+    item.solutions ?? [],
+  );
   return {
     ...item, ...(item.linkedKeyResult ? { linkedKeyResult } : {}), evidence, ...linkedTasks, squads, customFields,
     linkedObjectives: linkedObjectivesByOpportunity.get(id) ?? [],
@@ -275,7 +291,10 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     solutions: (item.solutions ?? []).map((solution) => ({
       ...solution,
       score: toScoreSummary(solution.score, solutionScoringModel),
+      ...(chain.keyResultsBySolution.has(solution.id) ? { linkedKeyResults: chain.keyResultsBySolution.get(solution.id) } : {}),
+      deliveryTasks: chain.tasksBySolution.get(solution.id) ?? [],
     })),
+    ...(chain.chainObjectives.length > 0 ? { chainObjectives: chain.chainObjectives } : {}),
     hasActiveSolutionScoringModel: solutionScoringModel !== null,
     availableKeyResults: keyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })),
     pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews,
