@@ -204,6 +204,59 @@ describe("the status picker", () => {
   })
 })
 
+describe("save messages are per attempt, never stale", () => {
+  it("fail title, then fail status: only the status message shows; then a success clears everything", async () => {
+    const server = fakeServer()
+    server.patch.mockRejectedValueOnce(new Error("title denied")).mockRejectedValueOnce(new Error("status denied"))
+    const { editor } = mount(server)
+    await screen.findByRole("group", { name: "Task: Live task" })
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename Live task" }))
+    fireEvent.change(screen.getByTestId("embed-title-input"), { target: { value: "Nope" } })
+    fireEvent.keyDown(screen.getByTestId("embed-title-input"), { key: "Enter" })
+    expect(await screen.findByTestId("embed-save-error")).toHaveTextContent("Could not save the title")
+
+    fireEvent.change(within(cardOf("Task: Live task")).getByTestId("embed-status-select"), { target: { value: "DONE" } })
+    await waitFor(() => expect(screen.getByTestId("embed-save-error")).toHaveTextContent("Could not save the status"))
+    expect(screen.queryByText(/Could not save the title/)).toBeNull()
+    expect(screen.getAllByTestId("embed-save-error")).toHaveLength(1)
+
+    fireEvent.change(within(cardOf("Task: Live task")).getByTestId("embed-status-select"), { target: { value: "DONE" } })
+    await waitFor(() => expect(screen.getByTestId("embed-save-state")).toHaveAttribute("data-state", "saved"))
+    expect(screen.queryByTestId("embed-save-error")).toBeNull()
+    editor.destroy()
+  })
+
+  it("a new attempt clears the previous error as soon as it starts", async () => {
+    const server = fakeServer()
+    let release!: () => void
+    server.patch.mockRejectedValueOnce(new Error("x")).mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({}) }))
+    const { editor } = mount(server)
+    await screen.findByRole("group", { name: "Task: Live task" })
+    fireEvent.change(within(cardOf("Task: Live task")).getByTestId("embed-status-select"), { target: { value: "DONE" } })
+    expect(await screen.findByTestId("embed-save-error")).toBeInTheDocument()
+    fireEvent.change(within(cardOf("Task: Live task")).getByTestId("embed-status-select"), { target: { value: "DONE" } })
+    await waitFor(() => expect(screen.getByTestId("embed-save-state")).toHaveAttribute("data-state", "saving"))
+    expect(screen.queryByTestId("embed-save-error")).toBeNull()
+    await act(async () => release())
+    editor.destroy()
+  })
+})
+
+describe("menus use an opaque surface", () => {
+  it("the card overflow menu has a solid popover background, not the translucent overlay token or any alpha", async () => {
+    const server = fakeServer()
+    const { editor } = mount(server)
+    const card = await screen.findByRole("group", { name: "Task: Live task" })
+    fireEvent.click(within(card).getByTestId("embed-card-menu"))
+    const cls = within(card).getByRole("menu").className
+    expect(cls).toContain("bg-popover")
+    expect(cls).not.toContain("surface-overlay")
+    expect(cls).not.toMatch(/\bbg-[\w-]+\/\d+/)
+    editor.destroy()
+  })
+})
+
 describe("who sees controls", () => {
   it("the page says read-only: no buttons, no select, no input anywhere in any card", async () => {
     const server = fakeServer()
@@ -213,6 +266,8 @@ describe("who sees controls", () => {
     for (const wrapper of document.querySelectorAll("[data-compass-embed]")) {
       expect(within(wrapper as HTMLElement).queryByRole("button")).toBeNull()
       expect(wrapper.querySelector("select,input,textarea")).toBeNull()
+      for (const id of ["embed-card-menu", "embed-remove", "embed-title-edit", "embed-status-select"]) expect(within(wrapper as HTMLElement).queryByTestId(id)).toBeNull()
+      expect(within(wrapper as HTMLElement).queryByRole("menu")).toBeNull()
     }
     editor.destroy()
   })

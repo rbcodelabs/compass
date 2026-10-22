@@ -127,6 +127,9 @@ test.describe("Spec docs: editing", () => {
     await expect(menu).toBeVisible();
     // Typed on the last line of a long doc: the menu must flip above the caret rather than hang off the bottom.
     await expectMenuFullyInViewport(page, menu);
+    // Opaque: card text and the mobile nav must not show through.
+    const background = await menu.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(background).not.toMatch(/\/\s*0?\.\d+\)|rgba\(.*,\s*0?\.\d+\)/);
     await expect(menu.getByTestId("spec-slash-assumption")).toBeVisible();
     await menu.getByTestId("spec-slash-assumption").getByRole("button").click();
     await page.getByTestId("spec-slash-title").fill(assumptionTitle);

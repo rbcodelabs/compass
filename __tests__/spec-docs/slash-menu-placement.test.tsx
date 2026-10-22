@@ -62,6 +62,13 @@ describe('"/" menu placement', () => {
     const box = await open({ top: 680, bottom: 700, left: 100 }, { width: 1280, height: 720 })
     expect(box.top + box.height).toBeLessThanOrEqual(680)
   })
+  it("the menu has a solid popover surface, never the translucent overlay token or an alpha background", async () => {
+    await open({ top: 100, bottom: 120, left: 100 }, { width: 1280, height: 720 })
+    const cls = screen.getByTestId("spec-slash-menu").className
+    expect(cls).toContain("bg-popover")
+    expect(cls).not.toContain("surface-overlay")
+    expect(cls).not.toMatch(/\bbg-[\w-]+\/\d+/)
+  })
   it("a caret near the top keeps the menu below it", async () => {
     const box = await open({ top: 100, bottom: 120, left: 100 }, { width: 1280, height: 720 })
     expect(box.top).toBeGreaterThanOrEqual(120)

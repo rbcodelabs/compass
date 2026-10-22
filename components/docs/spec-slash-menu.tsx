@@ -234,7 +234,7 @@ export function SpecSlashMenu({
       ref={menuRef}
       data-testid="spec-slash-menu"
       style={{ position: "fixed", ...style }}
-      className="z-50 overflow-y-auto rounded-lg border border-border-default bg-surface-overlay p-1 shadow-lg"
+      className="z-50 overflow-y-auto rounded-lg border border-border-default bg-popover p-1 text-popover-foreground shadow-lg ring-1 ring-foreground/10"
       // Clicking the menu must not move the editor selection (that would close it before the click lands).
       onMouseDown={(event) => { if (!(event.target instanceof HTMLInputElement)) event.preventDefault(); }}
     >

@@ -83,7 +83,7 @@ function CardMenu({ label, onRemove }: { label: string; onRemove: () => void }) 
         <MoreHorizontal className="size-4" aria-hidden="true" />
       </button>
       {open ? (
-        <div id={menuId} role="menu" className="absolute right-0 top-full z-20 mt-1 min-w-44 rounded-md border border-border-default bg-surface-overlay p-1 shadow-md">
+        <div id={menuId} role="menu" className="absolute right-0 top-full z-20 mt-1 min-w-44 rounded-md border border-border-default bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10">
           <button type="button" role="menuitem" data-testid="embed-remove" autoFocus onClick={() => { setOpen(false); onRemove(); }} className="flex min-h-9 w-full items-center rounded px-2 text-left text-sm text-text-primary hover:bg-surface-interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             Remove from document
           </button>
@@ -115,6 +115,9 @@ function OkCard({ kind, card, edit, onRemove }: { kind: DocEmbedKind; card: Extr
 
   async function run(field: "title" | "status", value: string, set: (state: FieldState) => void, failure: string) {
     if (!edit) return;
+    // Messages belong to the latest attempt: starting one wipes what an earlier attempt (on either field) left behind.
+    setTitleField((previous) => (previous.saving ? previous : IDLE));
+    setStatusField((previous) => (previous.saving ? previous : IDLE));
     set({ saving: true, saved: false, error: null });
     try {
       await edit.save(field, value);
