@@ -700,6 +700,10 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "104_agent_retention_indexes",
     filePath: path.join(process.cwd(), "prisma/migrations/104_agent_retention_indexes/migration.sql"),
   },
+  {
+    name: "105_workspace_agent_github_repos",
+    filePath: path.join(process.cwd(), "prisma/migrations/105_workspace_agent_github_repos/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));
@@ -2291,6 +2295,11 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "090_v0_chat_artifacts") {
         const columns = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND ((table_name='artifacts' AND column_name='v0_chat_id') OR (table_name='artifact_revisions' AND column_name='v0_version_id'))", [schema])
         if (columns.rows[0]?.count !== "2") throw new Error("Migration 090 postcondition failed: v0 artifact columns missing")
+      }
+
+      if (migration.name === "105_workspace_agent_github_repos") {
+        const column = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND table_name='workspaces' AND column_name='agent_github_repos'", [schema])
+        if (column.rows[0]?.count !== "1") throw new Error("Migration 105 postcondition failed: workspaces.agent_github_repos missing")
       }
 
       // Only this distinct attempt becomes a successful receipt. A failed

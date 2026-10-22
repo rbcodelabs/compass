@@ -256,6 +256,9 @@ model Workspace {
   // workflow and found the always-on surface noisy. See
   // Claude/2026-07-21-compass-gtm-planning-design.md for original context.
   launchWorkflowEnabled Boolean?               @default(false) @map("launch_workflow_enabled")
+  // JSON array of "owner/name" repos a workspace admin approved for agent
+  // sandboxes (migration 105). NULL/empty = agents get no GitHub token.
+  agentGithubRepos     String?                 @map("agent_github_repos") @db.Text
   // Ciphertext of the raw SSO shared secret (reversible AES-256-GCM
   // encryption via lib/crypto-secrets.ts, not a hash) — Compass must be
   // able to decrypt it to verify inbound customer-signed JWTs. The

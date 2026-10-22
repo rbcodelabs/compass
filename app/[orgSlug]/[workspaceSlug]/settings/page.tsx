@@ -11,6 +11,8 @@ import { OrgReadOnlyAccessPanel } from "@/components/settings/org-readonly-acces
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
 import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
 import { DeliveryLimitsPanel } from "@/components/settings/delivery-limits-panel";
+import { parseStoredRepos } from "@/lib/agent-github-repos";
+import { AgentGithubReposPanel } from "@/components/settings/agent-github-repos-panel";
 import { LaunchWorkflowSettingsPanel } from "@/components/settings/launch-workflow-settings-panel";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { ThinkingModelPanel } from "@/components/settings/thinking-model-panel";
@@ -83,6 +85,7 @@ export default async function SettingsPage({ params }: Props) {
       artifactFeedbackPublic: true,
       ssoEnabled: true,
       launchWorkflowEnabled: true,
+      agentGithubRepos: true,
       ssoSecretEncrypted: true,
       ssoSecretUpdatedAt: true,
       brandingPaletteId: true,
@@ -445,6 +448,15 @@ export default async function SettingsPage({ params }: Props) {
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
           launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
+        />
+      </SettingsSection>
+
+      <SettingsSection title="Agent GitHub access" description="Repositories agents in this workspace may push branches and open pull requests to. Agents get a short-lived token limited to exactly these repos.">
+        <AgentGithubReposPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          initialRepos={parseStoredRepos(workspace.agentGithubRepos)}
+          canEdit={canManageCapabilityPacks}
         />
       </SettingsSection>
 
