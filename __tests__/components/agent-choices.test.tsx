@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refres
 
 import { AgentChat } from "@/components/agent/agent-chat"
 import { SendToAgentPicker } from "@/components/agent/send-to-agent-picker"
-import { choose, chipValue, optionNames, queryChipButton, findChipButton } from "./composer-chips"
+import { choose, chipButton, chipValue, optionNames, queryChipButton, findChipButton } from "./composer-chips"
 
 const CHOICES = { agents: [{ id: "a-shared", name: "Triage", shared: true }, { id: "a-mine", name: "Mine", shared: false }], defaultAgentId: "a-shared" }
 
@@ -92,6 +92,24 @@ describe("AgentChat agent selector", () => {
     stubFetch(CHOICES)
     render(<AgentChat {...chatProps({ initialAgentId: "someone-elses" })} />)
     await waitFor(() => expect(chipValue("Agent")).toBe("Default (Triage)"))
+  })
+})
+
+describe("AgentChat composer layout", () => {
+  it("has no context strip until there is a status or a chip to show, and no footer without choices", async () => {
+    stubFetch({ agents: [], defaultAgentId: null })
+    const { container } = render(<AgentChat {...chatProps()} />)
+    await act(async () => {})
+    expect(container.querySelector('[data-slot="composer-strip"]')).toBeNull()
+    expect(container.querySelector('[data-slot="composer-footer"]')).toBeNull()
+  })
+
+  it("shows the Agent chip in the footer once there are agents to pick", async () => {
+    stubFetch(CHOICES)
+    const { container } = render(<AgentChat {...chatProps()} />)
+    await findChipButton("Agent")
+    expect(container.querySelector('[data-slot="composer-footer"]')).toContainElement(chipButton("Agent"))
+    expect(container.querySelector('[data-slot="composer-strip"]')).toBeNull()
   })
 })
 

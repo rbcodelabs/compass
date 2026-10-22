@@ -680,12 +680,14 @@ export function AgentChat({
               </span>
             )}
             contextChips={
-              <>
-                {pendingSeedEntity && (
-                  <SeedContextChip label={pendingSeedEntity.label} summary={pendingSeedEntity.summary} sourceUrl={pendingSeedEntity.sourceUrl} onDismiss={() => setPendingSeedEntity(undefined)} />
-                )}
-                {docChip && <SeedContextChip label={docChip.label} summary={docChip.summary} sourceUrl={docChip.sourceUrl} onDismiss={() => setDocChip(null)} />}
-              </>
+              pendingSeedEntity || docChip ? (
+                <>
+                  {pendingSeedEntity && (
+                    <SeedContextChip label={pendingSeedEntity.label} summary={pendingSeedEntity.summary} sourceUrl={pendingSeedEntity.sourceUrl} onDismiss={() => setPendingSeedEntity(undefined)} />
+                  )}
+                  {docChip && <SeedContextChip label={docChip.label} summary={docChip.summary} sourceUrl={docChip.sourceUrl} onDismiss={() => setDocChip(null)} />}
+                </>
+              ) : null
             }
             chips={
               (agentChoices.agents.length > 0 || modelPick.visible) && (

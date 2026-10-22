@@ -110,7 +110,7 @@ export function ChoiceChip({ kind, icon, options, value, onChange, disabled = fa
   const focusSelected = () => listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]') ?? listRef.current?.querySelector<HTMLElement>('[role="option"]') ?? undefined
 
   const triggerClass = cn(
-    "inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-border bg-card px-2 text-[12.5px] text-foreground outline-none transition-colors",
+    "inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-border bg-card px-1.5 text-[12.5px] text-foreground outline-none transition-colors",
     "hover:not-disabled:border-border-strong focus-visible:ring-2 focus-visible:ring-ring aria-expanded:border-ring aria-expanded:ring-[3px] aria-expanded:ring-ring/20",
     "disabled:cursor-not-allowed disabled:opacity-55 motion-reduce:transition-none",
     "max-sm:h-9 @max-md/composer:w-full",
@@ -130,7 +130,8 @@ export function ChoiceChip({ kind, icon, options, value, onChange, disabled = fa
       setOpen(true)
     }
   }
-  const wrap = "flex min-w-0 flex-none @max-md/composer:flex-1"
+  // Shrinkable: a long agent name must truncate inside the card, never push the tray past its edge.
+  const wrap = "flex min-w-0 flex-[0_1_auto] @max-md/composer:flex-1"
 
   if (narrow) {
     return (

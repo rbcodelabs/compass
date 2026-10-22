@@ -143,12 +143,18 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
     await expect(rail).toBeVisible({ timeout: 15_000 });
     const railModel = rail.getByRole("button", { name: /^Model:/ });
     await expect(railModel).toBeVisible({ timeout: 15_000 });
-    await expect.poll(() => rail.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    // The composer card itself fits the rail (the rail's own resize handle makes the <aside>'s scrollWidth a few px wider, so
+    // measure the card and its chips, not the aside).
+    const card = rail.locator('[data-slot="composer-card"]');
+    await expect.poll(() => card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     const railBox = (await rail.boundingBox())!;
+    const cardBox = (await card.boundingBox())!;
+    expect(cardBox.x).toBeGreaterThanOrEqual(railBox.x);
+    expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(railBox.x + railBox.width);
     for (const chip of [rail.getByRole("button", { name: /^Agent:/ }), railModel]) {
       const box = (await chip.boundingBox())!;
-      expect(box.x).toBeGreaterThanOrEqual(railBox.x);
-      expect(box.x + box.width).toBeLessThanOrEqual(railBox.x + railBox.width);
+      expect(box.x).toBeGreaterThanOrEqual(cardBox.x);
+      expect(box.x + box.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
     }
     await railModel.click();
     await expect(page.getByRole("listbox", { name: "Model" })).toBeVisible();
