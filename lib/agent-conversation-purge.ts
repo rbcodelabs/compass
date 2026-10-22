@@ -11,6 +11,11 @@ import type { AppPrismaClient } from "@/lib/db"
 import { getAgentSessionStorage, type ArtifactStorage } from "@/lib/artifact-storage"
 import { DELETE_BATCH_SIZE, deleteInBatches, isMissingTable, pages } from "@/lib/batched-delete"
 
+/** Run-event payloads can be large (tool results, Drive file contents), so their pages are smaller than the default. */
+export const RUN_EVENT_BATCH_SIZE = 100
+/** Blob deletions in flight at once; a page of 500 unbounded requests would hammer the blob API. */
+export const BLOB_DELETE_CONCURRENCY = 10
+
 export async function tolerateMissingTable<T>(work: () => Promise<T>, fallback: T): Promise<T> {
   try {
     return await work()
@@ -28,10 +33,27 @@ export async function deleteRunsWhere(prisma: AppPrismaClient, where: Record<str
       const runs = await prisma.agentRun.findMany({ where, select: { id: true }, take: DELETE_BATCH_SIZE })
       if (runs.length === 0) return removed
       const runIds = runs.map((run) => run.id)
-      await deleteInBatches(prisma.agentRunEvent, { runId: { in: runIds } })
+      await deleteInBatches(prisma.agentRunEvent, { runId: { in: runIds } }, { batchSize: RUN_EVENT_BATCH_SIZE })
       const result = await prisma.agentRun.deleteMany({ where: { id: { in: runIds } } })
       removed += result.count
       if (runs.length < DELETE_BATCH_SIZE) return removed
+    }
+  }, 0)
+}
+
+/**
+ * Web-search audit rows (composite key credentialId + seq, no id column), deleted in bounded pages by key so a user or
+ * conversation with a very large history cannot exceed DSQL's per-statement row cap and make deletion unretryable.
+ */
+export async function deleteWebSearchesWhere(prisma: AppPrismaClient, where: Record<string, unknown>): Promise<number> {
+  return tolerateMissingTable(async () => {
+    let total = 0
+    for (;;) {
+      const rows = await prisma.agentWebSearch.findMany({ where, select: { credentialId: true, seq: true }, take: DELETE_BATCH_SIZE })
+      if (rows.length === 0) return total
+      const deleted = await prisma.agentWebSearch.deleteMany({ where: { OR: rows.map((row) => ({ credentialId: row.credentialId, seq: row.seq })) } })
+      total += deleted.count
+      if (rows.length < DELETE_BATCH_SIZE) return total
     }
   }, 0)
 }
@@ -51,11 +73,14 @@ export async function deleteSessionTranscripts(
   prisma: AppPrismaClient,
   where: Record<string, unknown>,
   storage?: () => ArtifactStorage,
+  /** Epoch ms; stop before starting another page once reached (the retention cron's time budget). */
+  deadline?: number,
 ): Promise<TranscriptRemoval> {
   return tolerateMissingTable(async () => {
     const result: TranscriptRemoval = { removed: 0, failed: 0 }
     const failedConversationIds = new Set<string>()
     for (;;) {
+      if (deadline !== undefined && Date.now() >= deadline) return result
       const rows = await prisma.agentSession.findMany({
         where: failedConversationIds.size ? { AND: [where, { conversationId: { notIn: [...failedConversationIds] } }] } : where,
         select: { conversationId: true, blobKey: true },
@@ -69,18 +94,20 @@ export async function deleteSessionTranscripts(
         // Blob storage is not configured on this deployment, so no transcript object can exist.
       }
       const deletable: string[] = []
-      await Promise.all(
-        rows.map(async (row) => {
-          try {
-            if (blobs) await blobs.del(row.blobKey)
-            deletable.push(row.conversationId)
-          } catch (error) {
-            result.failed++
-            failedConversationIds.add(row.conversationId)
-            console.error("[agent-purge] could not delete a transcript object", error)
-          }
-        }),
-      )
+      for (const group of pages(rows, BLOB_DELETE_CONCURRENCY)) {
+        await Promise.all(
+          group.map(async (row) => {
+            try {
+              if (blobs) await blobs.del(row.blobKey)
+              deletable.push(row.conversationId)
+            } catch (error) {
+              result.failed++
+              failedConversationIds.add(row.conversationId)
+              console.error("[agent-purge] could not delete a transcript object", error)
+            }
+          }),
+        )
+      }
       if (deletable.length) {
         const deleted = await prisma.agentSession.deleteMany({ where: { conversationId: { in: deletable } } })
         result.removed += deleted.count
@@ -121,7 +148,7 @@ export async function purgeConversations(
     await deleteInBatches(prisma.agentMessage, { conversationId: { in: ids } })
     await tolerateMissingTable(() => deleteInBatches(prisma.agentConversationParticipant, { conversationId: { in: ids } }), 0)
     await deleteInBatches(prisma.agentAuditLog, { conversationId: { in: ids } })
-    await tolerateMissingTable(() => prisma.agentWebSearch.deleteMany({ where: { conversationId: { in: ids } } }), { count: 0 })
+    await deleteWebSearchesWhere(prisma, { conversationId: { in: ids } })
     await prisma.agentConversation.deleteMany({ where: { id: { in: ids } } })
     purged.push(...ids)
   }

@@ -28,3 +28,8 @@ export function authorizeCron(request: Request): boolean {
     secretMatches(request.headers.get("x-migration-secret") ?? undefined, migrationSecret)
   )
 }
+
+/** Vercel Cron identifies itself with a `vercel-cron/1.0` user agent. Informational only: never an authorization signal. */
+export function looksLikeVercelCron(request: Request): boolean {
+  return /^vercel-cron\//i.test(request.headers.get("user-agent") ?? "")
+}

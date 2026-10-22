@@ -13,13 +13,13 @@ function blockerText(blocker: DeletionBlocker) {
   if (blocker.kind === "ORGANIZATION_SOLE_OWNER") {
     return {
       key: `org-${blocker.organization.slug}`,
-      text: `You are the only owner of the organization "${blocker.organization.name}", which other people still belong to. Make someone else an owner, or remove them, first.`,
+      text: `You are the only owner of the organization "${blocker.organization.name}", which other people still belong to. Make someone else an owner first.`,
       href: `/${blocker.organization.slug}/settings`,
     }
   }
   return {
     key: `ws-${blocker.workspace.orgSlug}-${blocker.workspace.slug}`,
-    text: `You are the only administrator of the workspace "${blocker.workspace.name}", which other people still belong to. Make someone else an administrator, or remove them, first.`,
+    text: `Once you are gone, nobody would be able to administer the workspace "${blocker.workspace.name}", which other people can still reach. Make someone else a workspace administrator (or an organization owner or admin) first, or delete the workspace.`,
     href: `/${blocker.workspace.orgSlug}/${blocker.workspace.slug}/settings`,
   }
 }
@@ -32,7 +32,7 @@ export function DeleteAccountPanel({ email, plan }: { email: string; plan: Delet
   const [pending, startTransition] = useTransition()
 
   const blocked = plan.blockers.length > 0
-  const soleOwnedCount = plan.soleOwned.organizations.length + plan.soleOwned.workspaces.length
+  const soleOwnedCount = plan.soleOwned.organizations.length
   const needsSoleOwnedConsent = soleOwnedCount > 0
   const emailMatches = confirmEmail.trim().toLowerCase() === email.trim().toLowerCase()
   const canDelete = !blocked && emailMatches && (!needsSoleOwnedConsent || deleteSoleOwned) && !pending
@@ -45,7 +45,7 @@ export function DeleteAccountPanel({ email, plan }: { email: string; plan: Delet
         const response = await fetch("/api/account", {
           method: "DELETE",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ confirmEmail, deleteSoleOwned }),
+          body: JSON.stringify({ confirmEmail, soleOwnedOrganizationIds: deleteSoleOwned ? plan.soleOwned.organizations.map((org) => org.id) : [] }),
         })
         if (response.ok) {
           // The session is gone server-side: go to the public home page and drop cached authenticated pages.
@@ -56,7 +56,7 @@ export function DeleteAccountPanel({ email, plan }: { email: string; plan: Delet
         const body = (await response.json().catch(() => null)) as { error?: string } | null
         setError(
           response.status === 409
-            ? "Your account cannot be deleted yet. Reload this page to see what needs to change first."
+            ? "Your teams changed since this page loaded, so your account was not deleted. Reload this page to review what would be removed."
             : (body?.error ?? "Your account could not be deleted. Please try again."),
         )
       } catch {
@@ -113,17 +113,12 @@ export function DeleteAccountPanel({ email, plan }: { email: string; plan: Delet
 
         {needsSoleOwnedConsent && (
           <div className="flex flex-col gap-3 rounded-lg border border-border-default px-4 py-3 text-sm">
-            <p className="font-medium text-text-primary">Only you belong to these, so they would be deleted too</p>
+            <p className="font-medium text-text-primary">Only you belong to these organizations, so they would be deleted too</p>
             <ul className="list-disc space-y-1 pl-5 text-text-secondary">
               {plan.soleOwned.organizations.map((org) => (
                 <li key={org.id}>
                   Organization <strong>{org.name}</strong>
                   {org.workspaceNames.length > 0 && <> and its workspaces ({org.workspaceNames.join(", ")})</>}
-                </li>
-              ))}
-              {plan.soleOwned.workspaces.map((workspace) => (
-                <li key={workspace.id}>
-                  Workspace <strong>{workspace.name}</strong>
                 </li>
               ))}
             </ul>
@@ -135,7 +130,7 @@ export function DeleteAccountPanel({ email, plan }: { email: string; plan: Delet
                 onChange={(event) => setDeleteSoleOwned(event.target.checked)}
                 disabled={pending}
               />
-              <span>I understand these will be permanently deleted along with all of their data.</span>
+              <span>I understand these organizations will be permanently deleted along with all of their data.</span>
             </label>
           </div>
         )}

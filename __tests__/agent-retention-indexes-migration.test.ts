@@ -31,6 +31,11 @@ describe(NAME, () => {
     expect(schema).toContain('@@index([createdAt], map: "idx_agent_messages_created_at")')
   })
 
+  it("waits for the async index builds like 098 does, so the postcondition cannot fail on the first DSQL run", () => {
+    expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"100_agent_retention_indexes"/)
+    expect(runner).toMatch(/\["049_agent_identity"[^\]]*"100_agent_retention_indexes"[^\]]*\]\.includes\(migration\.name\)/)
+  })
+
   it("verifies before the receipt", () => {
     const assertion = runner.indexOf("migration.name === AGENT_RETENTION_INDEXES_MIGRATION) await assertAgentRetentionIndexesMigration")
     expect(assertion).toBeGreaterThan(-1)

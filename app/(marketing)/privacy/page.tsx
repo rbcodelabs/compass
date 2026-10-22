@@ -174,8 +174,12 @@ const sections: LegalSection[] = [
             product analytics and an AI gateway.
           </li>
           <li>
-            <strong>Amazon Web Services</strong>: the Aurora DSQL database that stores account and workspace data, and
-            optionally Amazon Bedrock as an AI model provider.
+            <strong>Supabase</strong>: the managed PostgreSQL database that stores account and workspace data for the
+            main Compass deployment.
+          </li>
+          <li>
+            <strong>Amazon Web Services</strong>: Amazon Aurora DSQL, the database that stores that data for some
+            deployments, and optionally Amazon Bedrock as an AI model provider.
           </li>
           <li>
             <strong>Anthropic</strong>: the AI models that power the Compass agent (directly, or through Amazon Bedrock
@@ -218,7 +222,8 @@ const sections: LegalSection[] = [
           conversations left empty by this are removed. Disconnecting Google Drive does not delete stored run content before it
           reaches this age. The job does not cover summary information about a run that does not contain
           conversation content (such as its status, token counts and cost), records of web searches the agent made,
-          or content the agent wrote into your workspace (documents, tasks and comments), which follows the rules for
+          audit records of the actions the agent took on your behalf (which include a truncated summary of the tool
+          input), or content the agent wrote into your workspace (documents, tasks and comments), which follows the rules for
           workspace content.
         </p>
         <h3 className="text-base font-semibold text-text-primary">Deleting your account</h3>
@@ -238,9 +243,12 @@ const sections: LegalSection[] = [
             others, your API keys, personal agents, notifications and memberships;
           </li>
           <li>
-            if you are the only member of an organization or workspace, deletes it and everything in it, after you
-            explicitly agree. If other people still belong to a team you solely own or administer, deletion is blocked
-            until you make someone else an owner or administrator, so a team is never left without one.
+            if you are the only member of an organization (nobody else belongs to it or to any of its workspaces),
+            deletes that organization and everything in it, after you explicitly agree. A workspace inside an
+            organization that other people belong to is never deleted this way, even if you are its only member: it
+            stays with the people who can still reach it. If deleting your account would leave a team with no owner,
+            or a workspace that others can reach with no administrator, deletion is blocked until you make someone
+            else an owner or administrator.
           </li>
         </ul>
         <p>

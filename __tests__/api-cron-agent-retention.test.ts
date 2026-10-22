@@ -28,6 +28,17 @@ describe("/api/cron/agent-retention", () => {
     expect(pruneAgentData).not.toHaveBeenCalled()
   })
 
+  it("requires CRON_SECRET itself: MIGRATION_SECRET alone is a 503, and a Vercel Cron call logs loudly", async () => {
+    process.env.MIGRATION_SECRET = "migration-secret"
+    const response = await GET(request({ "x-migration-secret": "migration-secret" }))
+    expect(response.status).toBe(503)
+    expect(console.error).not.toHaveBeenCalled()
+    const cron = await GET(request({ "user-agent": "vercel-cron/1.0" }))
+    expect(cron.status).toBe(503)
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("RETENTION IS NOT RUNNING"))
+    expect(pruneAgentData).not.toHaveBeenCalled()
+  })
+
   it("401s without or with the wrong credential", async () => {
     process.env.CRON_SECRET = "cron-secret"
     expect((await GET(request())).status).toBe(401)

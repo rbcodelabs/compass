@@ -26,7 +26,9 @@ import { RetryableDeletionError } from "@/lib/account-deletion"
 
 const PLAN = { blockers: [], soleOwned: { organizations: [], workspaces: [] } }
 
-function del(body: unknown, headers: Record<string, string> = { "content-type": "application/json" }) {
+const SAME_ORIGIN = { origin: "http://localhost", host: "localhost" }
+
+function del(body: unknown, headers: Record<string, string> = { "content-type": "application/json", ...SAME_ORIGIN }) {
   return DELETE(new Request("http://localhost/api/account", { method: "DELETE", headers, body: typeof body === "string" ? body : JSON.stringify(body) }))
 }
 
@@ -67,9 +69,22 @@ describe("DELETE /api/account", () => {
   })
 
   it("rejects a non-JSON content type (a cross-site form post cannot set application/json)", async () => {
-    const response = await del("confirmEmail=me@example.com", { "content-type": "application/x-www-form-urlencoded" })
+    const response = await del("confirmEmail=me@example.com", { "content-type": "application/x-www-form-urlencoded", ...SAME_ORIGIN })
     expect(response.status).toBe(415)
     expect(deleteAccount).not.toHaveBeenCalled()
+  })
+
+  it("rejects cross-site and origin-less requests before reading anything", async () => {
+    const json = { "content-type": "application/json" }
+    expect((await del({ confirmEmail: "me@example.com" }, { ...json, origin: "https://evil.example", host: "localhost" })).status).toBe(403)
+    expect((await del({ confirmEmail: "me@example.com" }, { ...json, host: "localhost" })).status, "no Origin").toBe(403)
+    expect((await del({ confirmEmail: "me@example.com" }, { ...json, ...SAME_ORIGIN, "sec-fetch-site": "cross-site" })).status).toBe(403)
+    expect((await del({ confirmEmail: "me@example.com" }, { ...json, ...SAME_ORIGIN, "sec-fetch-site": "same-site" })).status).toBe(403)
+    expect(findUnique).not.toHaveBeenCalled()
+    expect(deleteAccount).not.toHaveBeenCalled()
+    deleteAccount.mockResolvedValue({ ok: true, revocation: {} })
+    expect((await del({ confirmEmail: "me@example.com" }, { ...json, ...SAME_ORIGIN, "sec-fetch-site": "same-origin" })).status).toBe(200)
+    expect((await del({ confirmEmail: "me@example.com" }, { ...json, origin: "https://compass.example", "x-forwarded-host": "compass.example", host: "internal" })).status, "behind a proxy").toBe(200)
   })
 
   it("rejects malformed JSON and a missing confirmation", async () => {
@@ -87,15 +102,16 @@ describe("DELETE /api/account", () => {
     deleteAccount.mockResolvedValue({ ok: true, revocation: { googleSignInRevoked: 1 } })
     const ok = await del({ confirmEmail: "  me@EXAMPLE.com " })
     expect(ok.status).toBe(200)
-    expect(deleteAccount).toHaveBeenCalledWith(expect.anything(), "user-1", { deleteSoleOwned: false })
+    expect(deleteAccount).toHaveBeenCalledWith(expect.anything(), "user-1", { soleOwnedOrganizationIds: [] })
   })
 
-  it("passes sole-owned consent only when it is exactly true", async () => {
+  it("passes the confirmed sole-owned organization ids through, and rejects a malformed list", async () => {
     deleteAccount.mockResolvedValue({ ok: true, revocation: {} })
-    await del({ confirmEmail: "me@example.com", deleteSoleOwned: "yes" })
-    expect(deleteAccount).toHaveBeenLastCalledWith(expect.anything(), "user-1", { deleteSoleOwned: false })
-    await del({ confirmEmail: "me@example.com", deleteSoleOwned: true })
-    expect(deleteAccount).toHaveBeenLastCalledWith(expect.anything(), "user-1", { deleteSoleOwned: true })
+    expect((await del({ confirmEmail: "me@example.com", soleOwnedOrganizationIds: "org-1" })).status).toBe(400)
+    expect((await del({ confirmEmail: "me@example.com", soleOwnedOrganizationIds: [1] })).status).toBe(400)
+    expect(deleteAccount).not.toHaveBeenCalled()
+    await del({ confirmEmail: "me@example.com", soleOwnedOrganizationIds: ["org-1"] })
+    expect(deleteAccount).toHaveBeenLastCalledWith(expect.anything(), "user-1", { soleOwnedOrganizationIds: ["org-1"] })
   })
 
   it("never lets the request name another user", async () => {
@@ -122,6 +138,13 @@ describe("DELETE /api/account", () => {
   it("409s when sole-owned resources need consent", async () => {
     deleteAccount.mockResolvedValue({ ok: false, reason: "SOLE_OWNED_NEEDS_CONFIRMATION", plan: PLAN })
     expect((await del({ confirmEmail: "me@example.com" })).status).toBe(409)
+  })
+
+  it("409s when the confirmed organizations no longer match", async () => {
+    deleteAccount.mockResolvedValue({ ok: false, reason: "SOLE_OWNED_CHANGED", plan: PLAN })
+    const response = await del({ confirmEmail: "me@example.com", soleOwnedOrganizationIds: ["org-1"] })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: "SOLE_OWNED_CHANGED" })
   })
 
   it("404s when the account no longer exists", async () => {

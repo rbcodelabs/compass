@@ -26,7 +26,7 @@
 import type { AppPrismaClient } from "@/lib/db"
 import { AGENT_DATA_RETENTION_DAYS } from "@/lib/legal-config"
 import { DELETE_BATCH_SIZE, deleteInBatches } from "@/lib/batched-delete"
-import { deleteSessionTranscripts, purgeConversations, tolerateMissingTable } from "@/lib/agent-conversation-purge"
+import { RUN_EVENT_BATCH_SIZE, deleteSessionTranscripts, purgeConversations, tolerateMissingTable } from "@/lib/agent-conversation-purge"
 import type { ArtifactStorage } from "@/lib/artifact-storage"
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -76,7 +76,7 @@ export async function pruneAgentData(options: PruneOptions): Promise<PruneResult
 
   // 1. Run events: the Drive-content-bearing trace.
   result.runEventsDeleted = await tolerateMissingTable(
-    () => deleteInBatches(prisma.agentRunEvent, { createdAt: { lt: cutoff } }, { batchSize, deadline }),
+    () => deleteInBatches(prisma.agentRunEvent, { createdAt: { lt: cutoff } }, { batchSize: Math.min(batchSize, RUN_EVENT_BATCH_SIZE), deadline }),
     0,
   )
 
@@ -93,9 +93,12 @@ export async function pruneAgentData(options: PruneOptions): Promise<PruneResult
     })
     if (rows.length === 0) break
     const conversationIds = [...new Set(rows.map((row) => row.conversationId))]
-    const transcripts = await deleteSessionTranscripts(prisma, { conversationId: { in: conversationIds } }, options.storage)
+    const transcripts = await deleteSessionTranscripts(prisma, { conversationId: { in: conversationIds } }, options.storage, deadline)
     result.transcriptsDeleted += transcripts.removed
     result.transcriptsFailed += transcripts.failed
+    // The transcript step may have stopped at the deadline with objects still present. Never delete the messages they embed
+    // in that case; the next run starts from the same rows.
+    if (expired()) break
     if (transcripts.failed > 0) {
       // Keep this conversation's messages until its transcript object is really gone; retried next run.
       const stuck = await tolerateMissingTable(
@@ -114,7 +117,7 @@ export async function pruneAgentData(options: PruneOptions): Promise<PruneResult
 
   // 3. Idle transcripts: a conversation nobody has touched for the whole period keeps no resumable copy.
   if (!expired()) {
-    const idle = await deleteSessionTranscripts(prisma, { updatedAt: { lt: cutoff } }, options.storage)
+    const idle = await deleteSessionTranscripts(prisma, { updatedAt: { lt: cutoff } }, options.storage, deadline)
     result.transcriptsDeleted += idle.removed
     result.transcriptsFailed += idle.failed
   }

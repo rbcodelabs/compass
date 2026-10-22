@@ -165,4 +165,47 @@ describe("pruneAgentData", () => {
     await pruneAgentData({ prisma, now: NOW, storage, retentionDays: 30 })
     expect(rows("agentMessage").map((m) => m.id)).toEqual(["m-new", "m-new-in-old-conv"])
   })
+
+  it("caps blob-delete concurrency", async () => {
+    let inFlight = 0
+    let peak = 0
+    del.mockImplementation(async () => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 2))
+      inFlight--
+    })
+    const sessions = Array.from({ length: 40 }, (_, i) => ({ conversationId: `idle-${i}`, blobKey: `blob/idle-${i}`, updatedAt: ago(500) }))
+    const { prisma, rows } = createFakePrisma({ agentSession: sessions })
+    const result = await pruneAgentData({ prisma, now: NOW, storage })
+    expect(result.transcriptsDeleted).toBe(40)
+    expect(rows("agentSession")).toEqual([])
+    expect(peak).toBeGreaterThan(1)
+    expect(peak).toBeLessThanOrEqual(10)
+  })
+
+  it("uses small pages for run events, whose payloads are large", async () => {
+    const events = Array.from({ length: 250 }, (_, i) => ({ id: `ev-${i}`, runId: "run-x", createdAt: ago(600) }))
+    const { prisma, calls } = createFakePrisma({ agentRunEvent: events })
+    await pruneAgentData({ prisma, now: NOW, storage })
+    const deletes = calls.filter((c) => c.model === "agentRunEvent" && c.op === "deleteMany")
+    expect(deletes.length).toBeGreaterThanOrEqual(3)
+    for (const call of deletes) expect((call.where as { id: { in: string[] } }).id.in.length).toBeLessThanOrEqual(100)
+  })
+
+  it("never deletes messages whose transcript step ran out of time before finishing", async () => {
+    const base = Date.now()
+    let jumped = false
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => base + (jumped ? 10_000_000 : 0))
+    del.mockImplementation(async () => { jumped = true })
+    try {
+      const { prisma, rows } = createFakePrisma(seed())
+      const result = await pruneAgentData({ prisma, now: NOW, storage, budgetMs: 60_000 })
+      expect(result.truncated).toBe(true)
+      expect(rows("agentMessage").map((m) => m.id)).toEqual(expect.arrayContaining(["m-old-1", "m-old-2"]))
+      expect(result.messagesDeleted).toBe(0)
+    } finally {
+      clock.mockRestore()
+    }
+  })
 })

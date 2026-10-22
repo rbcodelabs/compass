@@ -80,6 +80,12 @@ function seed(extra: Record<string, Row[]> = {}) {
   } as Record<string, Row[]>
 }
 
+/** An org whose only OWNER/ADMIN-capable person is NOT the other member: nobody but the workspace's own admins can administer it. */
+const ORG_WITHOUT_OTHER_ADMINS = [
+  { id: "om-me", organizationId: "org-1", userId: ME, role: "MEMBER" },
+  { id: "om-other", organizationId: "org-1", userId: OTHER, role: "MEMBER" },
+]
+
 const okFetch = () => vi.fn(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch
 
 beforeEach(() => {
@@ -92,7 +98,7 @@ describe("planAccountDeletion", () => {
     const { prisma } = createFakePrisma(seed())
     const plan = await planAccountDeletion(prisma, ME)
     expect(plan.blockers).toEqual([])
-    expect(plan.soleOwned).toEqual({ organizations: [], workspaces: [] })
+    expect(plan.soleOwned).toEqual({ organizations: [] })
   })
 
   it("blocks when the user is the only owner of an organization other people belong to", async () => {
@@ -116,8 +122,9 @@ describe("planAccountDeletion", () => {
     expect((await planAccountDeletion(prisma, ME)).blockers).toEqual([])
   })
 
-  it("blocks when the user is the only workspace administrator and others remain", async () => {
+  it("blocks when the user is the only workspace administrator and nobody else (workspace admin or org owner/admin) can administer", async () => {
     const { prisma } = createFakePrisma(seed({
+      organizationMember: ORG_WITHOUT_OTHER_ADMINS,
       workspaceMember: [
         { id: "wm-me", workspaceId: "ws-1", userId: ME, role: "ADMIN" },
         { id: "wm-other", workspaceId: "ws-1", userId: OTHER, role: "MEMBER" },
@@ -127,8 +134,9 @@ describe("planAccountDeletion", () => {
     expect(plan.blockers).toEqual([{ kind: "WORKSPACE_SOLE_ADMIN", workspace: { slug: "main", name: "Main", orgSlug: "acme" }, otherMembers: 1 }])
   })
 
-  it("treats a legacy OWNER role on another member as an administrator", async () => {
+  it("treats a legacy OWNER role on another workspace member as an administrator", async () => {
     const { prisma } = createFakePrisma(seed({
+      organizationMember: ORG_WITHOUT_OTHER_ADMINS,
       workspaceMember: [
         { id: "wm-me", workspaceId: "ws-1", userId: ME, role: "ADMIN" },
         { id: "wm-other", workspaceId: "ws-1", userId: OTHER, role: "OWNER" },
@@ -145,7 +153,6 @@ describe("planAccountDeletion", () => {
     const plan = await planAccountDeletion(prisma, ME)
     expect(plan.blockers).toEqual([])
     expect(plan.soleOwned.organizations).toEqual([{ id: "org-1", slug: "acme", name: "Acme", workspaceNames: ["Main"] }])
-    expect(plan.soleOwned.workspaces).toEqual([])
   })
 
   it("does not call an organization sole-owned while another person is in one of its workspaces", async () => {
@@ -157,10 +164,53 @@ describe("planAccountDeletion", () => {
     expect(plan.blockers[0]).toMatchObject({ kind: "ORGANIZATION_SOLE_OWNER", otherMembers: 1 })
   })
 
-  it("lists a workspace only the user belongs to (in an org with other members) as sole-owned", async () => {
+  it("never treats a workspace inside a shared organization as sole-owned, even when the user is its only member", async () => {
     const { prisma } = createFakePrisma(seed({ workspaceMember: [{ id: "wm-me", workspaceId: "ws-1", userId: ME, role: "ADMIN" }] }))
     const plan = await planAccountDeletion(prisma, ME)
-    expect(plan.soleOwned.workspaces).toEqual([{ id: "ws-1", slug: "main", name: "Main", orgSlug: "acme" }])
+    expect(plan.soleOwned.organizations).toEqual([])
+    // Another org OWNER can still administer it, so nothing blocks either.
+    expect(plan.blockers).toEqual([])
+  })
+
+  it("two-OWNER organization: the user's only-member workspace is kept for the other OWNER, not deleted, and does not block", async () => {
+    const seeded = seed({
+      organizationMember: [
+        { id: "om-me", organizationId: "org-1", userId: ME, role: "OWNER" },
+        { id: "om-other", organizationId: "org-1", userId: OTHER, role: "OWNER" },
+      ],
+      workspaceMember: [{ id: "wm-me", workspaceId: "ws-1", userId: ME, role: "ADMIN" }],
+    })
+    const { prisma, rows } = createFakePrisma(seeded)
+    const plan = await planAccountDeletion(prisma, ME)
+    expect(plan.blockers).toEqual([])
+    expect(plan.soleOwned.organizations).toEqual([])
+    const result = await deleteAccount(prisma, ME, { fetchImpl: okFetch() })
+    expect(result.ok).toBe(true)
+    expect(cascade).not.toHaveBeenCalled()
+    expect(rows("workspace").map((w) => w.id)).toEqual(["ws-1"])
+    expect(rows("organization").map((o) => o.id)).toEqual(["org-1"])
+    expect(rows("workspaceMember")).toEqual([])
+    expect(rows("organizationMember").map((m) => m.userId)).toEqual([OTHER])
+  })
+
+  it("blocks when dropping the user would leave a workspace others can reach with no administrator at all", async () => {
+    const { prisma } = createFakePrisma(seed({
+      organizationMember: ORG_WITHOUT_OTHER_ADMINS,
+      workspaceMember: [{ id: "wm-me", workspaceId: "ws-1", userId: ME, role: "ADMIN" }],
+    }))
+    const plan = await planAccountDeletion(prisma, ME)
+    expect(plan.blockers).toEqual([{ kind: "WORKSPACE_SOLE_ADMIN", workspace: { slug: "main", name: "Main", orgSlug: "acme" }, otherMembers: 1 }])
+  })
+
+  it("lets an org ADMIN (not only OWNER) count as the remaining administrator", async () => {
+    const { prisma } = createFakePrisma(seed({
+      organizationMember: [
+        { id: "om-me", organizationId: "org-1", userId: ME, role: "MEMBER" },
+        { id: "om-other", organizationId: "org-1", userId: OTHER, role: "ADMIN" },
+      ],
+      workspaceMember: [{ id: "wm-me", workspaceId: "ws-1", userId: ME, role: "ADMIN" }],
+    }))
+    expect((await planAccountDeletion(prisma, ME)).blockers).toEqual([])
   })
 })
 
@@ -173,6 +223,7 @@ describe("deleteAccount", () => {
   it("refuses while blocked and deletes nothing, not even provider tokens", async () => {
     const fetchImpl = okFetch()
     const { prisma, calls, rows } = createFakePrisma(seed({
+      organizationMember: ORG_WITHOUT_OTHER_ADMINS,
       workspaceMember: [
         { id: "wm-me", workspaceId: "ws-1", userId: ME, role: "ADMIN" },
         { id: "wm-other", workspaceId: "ws-1", userId: OTHER, role: "MEMBER" },
@@ -186,7 +237,7 @@ describe("deleteAccount", () => {
     expect(rows("user")).toHaveLength(2)
   })
 
-  it("requires explicit consent before deleting sole-owned organizations and workspaces", async () => {
+  it("requires explicit consent before deleting sole-owned organizations", async () => {
     const { prisma, rows } = createFakePrisma(seed({
       organizationMember: [{ id: "om-me", organizationId: "org-1", userId: ME, role: "OWNER" }],
       workspaceMember: [{ id: "wm-me", workspaceId: "ws-1", userId: ME, role: "ADMIN" }],
@@ -197,13 +248,29 @@ describe("deleteAccount", () => {
     expect(rows("user").some((u) => u.id === ME)).toBe(true)
   })
 
+  it("refuses when what the user confirmed differs from what would be deleted now (stale page or changed membership)", async () => {
+    const soloOrg = {
+      organizationMember: [{ id: "om-me", organizationId: "org-1", userId: ME, role: "OWNER" }],
+      workspaceMember: [{ id: "wm-me", workspaceId: "ws-1", userId: ME, role: "ADMIN" }],
+    }
+    const stale = createFakePrisma(seed(soloOrg))
+    expect(await deleteAccount(stale.prisma, ME, { soleOwnedOrganizationIds: ["some-other-org"], fetchImpl: okFetch() })).toMatchObject({ ok: false, reason: "SOLE_OWNED_CHANGED" })
+    expect(await deleteAccount(stale.prisma, ME, { soleOwnedOrganizationIds: ["org-1", "extra"], fetchImpl: okFetch() })).toMatchObject({ ok: false, reason: "SOLE_OWNED_CHANGED" })
+    expect(stale.rows("organization")).toHaveLength(1)
+    // The org gained a member after the page rendered: the confirmed id is no longer sole-owned.
+    const joined = createFakePrisma(seed())
+    expect(await deleteAccount(joined.prisma, ME, { soleOwnedOrganizationIds: ["org-1"], fetchImpl: okFetch() })).toMatchObject({ ok: false, reason: "SOLE_OWNED_CHANGED" })
+    expect(cascade).not.toHaveBeenCalled()
+    expect(joined.rows("user").some((u) => u.id === ME)).toBe(true)
+  })
+
   it("deletes sole-owned organizations (workspaces via the cascade, then org rows) when the caller consents", async () => {
     const { prisma, rows } = createFakePrisma(seed({
       organizationMember: [{ id: "om-me", organizationId: "org-1", userId: ME, role: "OWNER" }],
       workspaceMember: [{ id: "wm-me", workspaceId: "ws-1", userId: ME, role: "ADMIN" }],
       scoringModel: [{ id: "sm1", organizationId: "org-1" }],
     }))
-    const result = await deleteAccount(prisma, ME, { deleteSoleOwned: true, fetchImpl: okFetch() })
+    const result = await deleteAccount(prisma, ME, { soleOwnedOrganizationIds: ["org-1"], fetchImpl: okFetch() })
     expect(result.ok).toBe(true)
     expect(cascade).toHaveBeenCalledTimes(1)
     expect(cascade).toHaveBeenCalledWith(prisma, "ws-1")
@@ -345,5 +412,19 @@ describe("deleteAccount", () => {
     const messageDeletes = calls.filter((c) => c.model === "agentMessage" && c.op === "deleteMany" && (c.where as { id?: { in: string[] } })?.id)
     expect(messageDeletes.length).toBeGreaterThanOrEqual(3)
     for (const call of messageDeletes) expect((call.where as { id: { in: string[] } }).id.in.length).toBeLessThanOrEqual(500)
+  })
+
+  it("deletes web-search, OAuth and consent rows in bounded pages too", async () => {
+    const searches = Array.from({ length: 1_100 }, (_, i) => ({ credentialId: `cred-${i}`, seq: 1, userId: ME, conversationId: null }))
+    const tokens = Array.from({ length: 1_100 }, (_, i) => ({ id: `tok-${i}`, userId: ME }))
+    const { prisma, calls, rows } = createFakePrisma(seed({ agentWebSearch: searches, oAuthToken: tokens }))
+    await deleteAccount(prisma, ME, { fetchImpl: okFetch() })
+    expect(rows("agentWebSearch")).toEqual([])
+    const searchDeletes = calls.filter((c) => c.model === "agentWebSearch" && c.op === "deleteMany" && (c.where as { OR?: unknown[] })?.OR)
+    expect(searchDeletes.length).toBeGreaterThanOrEqual(3)
+    for (const call of searchDeletes) expect((call.where as { OR: unknown[] }).OR.length).toBeLessThanOrEqual(500)
+    const tokenDeletes = calls.filter((c) => c.model === "oAuthToken" && c.op === "deleteMany" && (c.where as { id?: unknown })?.id)
+    expect(tokenDeletes.length).toBeGreaterThanOrEqual(3)
+    expect(calls.some((c) => c.model === "oAuthToken" && c.op === "deleteMany" && !(c.where as { id?: unknown })?.id)).toBe(false)
   })
 })

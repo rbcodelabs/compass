@@ -131,7 +131,7 @@ test("a user deletes their account: personal data and session go, teammates and 
     disposables.push(replay);
     const replayed = await replay.get("/api/account", { maxRedirects: 0 });
     expect([302, 307, 401, 404]).toContain(replayed.status());
-    const replayedDelete = await replay.delete("/api/account", { data: { confirmEmail: email }, maxRedirects: 0 });
+    const replayedDelete = await replay.delete("/api/account", { headers: { origin: baseURL }, data: { confirmEmail: email }, maxRedirects: 0 });
     expect([302, 307, 401, 404]).toContain(replayedDelete.status());
   } finally {
     await pool.query(`DELETE FROM "${S}".tasks WHERE id = $1`, [own.task]).catch(() => undefined);
@@ -200,26 +200,28 @@ test("deletion is blocked for the sole administrator of a shared workspace, and 
     await expect(zPage.getByRole("button", { name: "Delete my account" })).toBeDisabled();
     await expect(zPage.getByLabel(/Type .* to confirm/)).toBeDisabled();
     await zPage.screenshot({ path: testInfo.outputPath("account-deletion-blocked.png"), fullPage: true });
-    const refused = await zContext.request.delete("/api/account", { data: { confirmEmail: zEmail } });
+    const refused = await zContext.request.delete("/api/account", { headers: { origin: baseURL }, data: { confirmEmail: zEmail } });
     expect(refused.status(), "the API refuses even if the UI is bypassed").toBe(409);
     const refusedBody = await refused.json();
     expect(refusedBody.blockers.map((b: { kind: string }) => b.kind)).toContain("ORGANIZATION_SOLE_OWNER");
     expect(await count(`SELECT count(*) AS n FROM "${S}".users WHERE id = $1`, [z])).toBe(1);
-    expect((await zContext.request.delete("/api/account", { data: { confirmEmail: "wrong@example.com" } })).status()).toBe(400);
-    expect((await zContext.request.delete("/api/account", { headers: { "content-type": "text/plain" }, data: "x" })).status()).toBe(415);
+    expect((await zContext.request.delete("/api/account", { headers: { origin: baseURL }, data: { confirmEmail: "wrong@example.com" } })).status()).toBe(400);
+    expect((await zContext.request.delete("/api/account", { headers: { "content-type": "text/plain", origin: baseURL }, data: "x" })).status()).toBe(415);
+    expect((await zContext.request.delete("/api/account", { headers: { origin: "https://evil.example" }, data: { confirmEmail: zEmail } })).status(), "foreign origin").toBe(403);
+    expect((await zContext.request.delete("/api/account", { data: { confirmEmail: zEmail } })).status(), "no origin").toBe(403);
 
     // ── W: consent required, then the solo organization and workspace go with the account ─
     const wPage = await wContext.newPage();
     await wPage.setViewportSize({ width: 1280, height: 1000 });
     await wPage.goto("/settings/profile");
-    await expect(wPage.getByText("Only you belong to these, so they would be deleted too")).toBeVisible({ timeout: 45_000 });
+    await expect(wPage.getByText("Only you belong to these organizations, so they would be deleted too")).toBeVisible({ timeout: 45_000 });
     await expect(wPage.getByText("Solo Team", { exact: true }).first()).toBeVisible();
     const submit = wPage.getByRole("button", { name: "Delete my account" });
     await wPage.getByLabel(/Type .* to confirm/).fill(wEmail);
     await expect(submit, "typing the email is not enough without consent").toBeDisabled();
-    expect((await wContext.request.delete("/api/account", { data: { confirmEmail: wEmail } })).status(), "the API demands consent too").toBe(409);
+    expect((await wContext.request.delete("/api/account", { headers: { origin: baseURL }, data: { confirmEmail: wEmail } })).status(), "the API demands consent too").toBe(409);
     expect(await count(`SELECT count(*) AS n FROM "${S}".organizations WHERE id = $1`, [soloOrg.id])).toBe(1);
-    await wPage.getByLabel(/I understand these will be permanently deleted/).check();
+    await wPage.getByLabel(/I understand these organizations will be permanently deleted/).check();
     await wPage.screenshot({ path: testInfo.outputPath("account-deletion-sole-owned.png"), fullPage: true });
     await expect(submit).toBeEnabled();
     await Promise.all([wPage.waitForURL((url) => url.pathname === "/", { timeout: 120_000 }), submit.click()]);
@@ -235,6 +237,57 @@ test("deletion is blocked for the sole administrator of a shared workspace, and 
       await pool.query(`DELETE FROM "${S}".organizations WHERE id = $1`, [org.id]).catch(() => undefined);
     }
     await pool.query(`DELETE FROM "${S}".users WHERE email = ANY($1::text[])`, [[zEmail, wEmail]]).catch(() => undefined);
+    for (const context of contexts) await context.close().catch(() => undefined);
+    for (const api of disposables) await api.dispose().catch(() => undefined);
+    await pool.end();
+  }
+});
+
+test("in an organization with two OWNERs, deleting one OWNER's account keeps the organization and the workspace they alone belonged to", async ({ browser, playwright }) => {
+  test.setTimeout(240_000);
+  const pool = new pg.Pool({ connectionString: isolatedE2EConnectionString() });
+  const baseURL = test.info().project.use.baseURL as string;
+  const suffix = randomUUID().slice(0, 8);
+  const vEmail = `del-owner-${suffix}@localhost.dev`;
+  const org = { id: randomUUID(), slug: `del-two-owners-${suffix}`, ws: randomUUID() };
+  const disposables: APIRequestContext[] = [];
+  const contexts: BrowserContext[] = [];
+  const count = async (sql: string, params: unknown[]) => Number((await pool.query<{ n: string }>(sql, params)).rows[0].n);
+  try {
+    const login = await playwright.request.newContext({ baseURL });
+    disposables.push(login);
+    const csrf = (await (await login.get("/api/auth/csrf")).json()) as { csrfToken: string };
+    const response = await login.post("/api/auth/callback/dev-credentials", { form: { csrfToken: csrf.csrfToken, email: vEmail, callbackUrl: `${baseURL}/dashboard` }, maxRedirects: 0 });
+    expect([200, 302]).toContain(response.status());
+    const context = await browser.newContext({ storageState: await login.storageState(), baseURL });
+    contexts.push(context);
+    const v = (await pool.query<{ id: string }>(`SELECT id FROM "${S}".users WHERE email = $1`, [vEmail])).rows[0].id;
+    const a = (await pool.query<{ id: string }>(`SELECT id FROM "${S}".users WHERE email = 'dev@localhost.dev'`)).rows[0].id;
+    await pool.query(`INSERT INTO "${S}".organizations (id, slug, name) VALUES ($1, $2, 'Two Owners')`, [org.id, org.slug]);
+    await pool.query(`INSERT INTO "${S}".workspaces (id, organization_id, slug, name) VALUES ($1, $2, 'main', 'Two Owners Workspace')`, [org.ws, org.id]);
+    await pool.query(`INSERT INTO "${S}".organization_members (id, organization_id, user_id, role, created_at) VALUES (gen_random_uuid(), $1, $2, 'OWNER', NOW()), (gen_random_uuid(), $1, $3, 'OWNER', NOW())`, [org.id, v, a]);
+    // V is the ONLY workspace member; A reaches the workspace as an org OWNER.
+    await pool.query(`INSERT INTO "${S}".workspace_members (id, workspace_id, user_id, role, created_at) VALUES (gen_random_uuid(), $1, $2, 'ADMIN', NOW())`, [org.ws, v]);
+
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await page.goto("/settings/profile");
+    await expect(page.getByRole("heading", { name: "Delete account" })).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByRole("alert"), "the other OWNER keeps the workspace administrable: no blocker").toHaveCount(0);
+    await expect(page.getByText("would be deleted too"), "and it is not offered for deletion").toHaveCount(0);
+    await page.getByLabel(/Type .* to confirm/).fill(vEmail);
+    await Promise.all([page.waitForURL((url) => url.pathname === "/", { timeout: 90_000 }), page.getByRole("button", { name: "Delete my account" }).click()]);
+    expect(await count(`SELECT count(*) AS n FROM "${S}".users WHERE id = $1`, [v])).toBe(0);
+    expect(await count(`SELECT count(*) AS n FROM "${S}".workspaces WHERE id = $1`, [org.ws]), "workspace kept").toBe(1);
+    expect(await count(`SELECT count(*) AS n FROM "${S}".organizations WHERE id = $1`, [org.id]), "organization kept").toBe(1);
+    expect(await count(`SELECT count(*) AS n FROM "${S}".workspace_members WHERE workspace_id = $1`, [org.ws]), "membership dropped").toBe(0);
+    expect(await count(`SELECT count(*) AS n FROM "${S}".organization_members WHERE organization_id = $1 AND user_id = $2`, [org.id, a])).toBe(1);
+  } finally {
+    await pool.query(`DELETE FROM "${S}".workspace_members WHERE workspace_id = $1`, [org.ws]).catch(() => undefined);
+    await pool.query(`DELETE FROM "${S}".organization_members WHERE organization_id = $1`, [org.id]).catch(() => undefined);
+    await pool.query(`DELETE FROM "${S}".workspaces WHERE id = $1`, [org.ws]).catch(() => undefined);
+    await pool.query(`DELETE FROM "${S}".organizations WHERE id = $1`, [org.id]).catch(() => undefined);
+    await pool.query(`DELETE FROM "${S}".users WHERE email = $1`, [vEmail]).catch(() => undefined);
     for (const context of contexts) await context.close().catch(() => undefined);
     for (const api of disposables) await api.dispose().catch(() => undefined);
     await pool.end();

@@ -26,12 +26,18 @@
  *
  * ## Workspaces and organizations the user owns
  *
- * Deletion never silently orphans or deletes a team's data:
- *   - Sole owner of an organization, or sole administrator of a workspace, that other people still belong to:
- *     BLOCKED. The user must promote someone else (or remove the other members) first.
- *   - Organization or workspace in which the user is the ONLY member: it would be unreachable afterward, so it is
- *     deleted along with the account, but only when the caller opts in (`deleteSoleOwned`). Without the opt-in the
- *     request is refused and the exact list is returned so the UI can show it.
+ * Deletion never silently orphans or deletes a team's data, and "only member" is not the same as "nobody else can
+ * reach it": org OWNER/ADMINs can administer every workspace in their org (resolveWorkspaceAdmin) and, with
+ * org-wide read access, any org member can read it.
+ *   - An ORGANIZATION that no one else belongs to (no other org member, no other member of any of its workspaces) is
+ *     unreachable afterward, so it is deleted with the account, but only when the caller names it explicitly
+ *     (`soleOwnedOrganizationIds`, which must equal the set recomputed at delete time). Without that the request is
+ *     refused and the exact list is returned so the UI can show it.
+ *   - A WORKSPACE inside an organization other people belong to is NEVER deleted here, even if the user is its only
+ *     member: the user's membership is dropped and the workspace stays with the people who can still reach it.
+ *   - BLOCKED instead, when dropping the user would leave a workspace others can reach with no administrator at all
+ *     (counting other workspace admins and other org OWNER/ADMINs), or leave an organization others belong to with
+ *     no OWNER. The user must promote someone first.
  *
  * ## Ordering and failure
  *
@@ -41,10 +47,10 @@
  */
 import type { AppPrismaClient } from "@/lib/db"
 import { deleteInBatches, updateInBatches } from "@/lib/batched-delete"
-import { deleteRunsWhere, purgeConversations, tolerateMissingTable } from "@/lib/agent-conversation-purge"
+import { deleteRunsWhere, deleteWebSearchesWhere, purgeConversations, tolerateMissingTable } from "@/lib/agent-conversation-purge"
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade"
 import { revokeAllConnectorGrants } from "@/lib/mcp-connectors/revoke-all"
-import { countWorkspaceAdmins, normalizeOrgRole, normalizeWorkspaceRole } from "@/lib/roles"
+import { isOrgAdminRole, normalizeOrgRole, normalizeWorkspaceRole } from "@/lib/roles"
 
 export const DELETED_USER_LABEL = "Deleted user"
 
@@ -57,15 +63,14 @@ export type DeletionBlocker =
 
 export interface DeletionPlan {
   blockers: DeletionBlocker[]
-  /** Resources the user alone belongs to; deleted with the account when the caller opts in. */
+  /** Organizations nobody else can reach; deleted with the account when the caller names them. */
   soleOwned: {
     organizations: { id: string; slug: string; name: string; workspaceNames: string[] }[]
-    workspaces: { id: string; slug: string; name: string; orgSlug: string }[]
   }
 }
 
 export async function planAccountDeletion(prisma: AppPrismaClient, userId: string): Promise<DeletionPlan> {
-  const plan: DeletionPlan = { blockers: [], soleOwned: { organizations: [], workspaces: [] } }
+  const plan: DeletionPlan = { blockers: [], soleOwned: { organizations: [] } }
 
   // ── Organizations ──────────────────────────────────────────────────────────
   const orgMemberships = await prisma.organizationMember.findMany({ where: { userId }, select: { organizationId: true, role: true } })
@@ -104,23 +109,34 @@ export async function planAccountDeletion(prisma: AppPrismaClient, userId: strin
   const workspaceIds = workspaceMemberships.map((m) => m.workspaceId)
   const workspaces = workspaceIds.length ? await prisma.workspace.findMany({ where: { id: { in: workspaceIds } }, select: { id: true, slug: true, name: true, organizationId: true } }) : []
   const workspaceMembers = workspaceIds.length ? await prisma.workspaceMember.findMany({ where: { workspaceId: { in: workspaceIds } }, select: { workspaceId: true, userId: true, role: true } }) : []
-  const workspaceOrgs = workspaces.length ? await prisma.organization.findMany({ where: { id: { in: [...new Set(workspaces.map((w) => w.organizationId))] } }, select: { id: true, slug: true } }) : []
+  const workspaceOrgIds = [...new Set(workspaces.map((w) => w.organizationId))]
+  const workspaceOrgs = workspaceOrgIds.length ? await prisma.organization.findMany({ where: { id: { in: workspaceOrgIds } }, select: { id: true, slug: true } }) : []
+  const workspaceOrgMembers = workspaceOrgIds.length ? await prisma.organizationMember.findMany({ where: { organizationId: { in: workspaceOrgIds } }, select: { organizationId: true, userId: true, role: true } }) : []
   for (const membership of workspaceMemberships) {
     const workspace = workspaces.find((w) => w.id === membership.workspaceId)
     if (!workspace || soloOrgIds.has(workspace.organizationId)) continue
     const orgSlug = workspaceOrgs.find((o) => o.id === workspace.organizationId)?.slug ?? ""
     const others = workspaceMembers.filter((m) => m.workspaceId === workspace.id && m.userId !== userId)
-    if (others.length === 0) {
-      plan.soleOwned.workspaces.push({ id: workspace.id, slug: workspace.slug, name: workspace.name, orgSlug })
-    } else if (normalizeWorkspaceRole(membership.role) === "ADMIN" && countWorkspaceAdmins(others.map((m) => m.role)) === 0) {
-      plan.blockers.push({ kind: "WORKSPACE_SOLE_ADMIN", workspace: { slug: workspace.slug, name: workspace.name, orgSlug }, otherMembers: others.length })
+    const otherOrgMembers = workspaceOrgMembers.filter((m) => m.organizationId === workspace.organizationId && m.userId !== userId)
+    // Everyone who can still reach this workspace once the user is gone.
+    const reachable = new Set([...others.map((m) => m.userId), ...otherOrgMembers.map((m) => m.userId)])
+    if (reachable.size === 0) continue
+    // Everyone who can still administer it: other workspace admins and other org OWNER/ADMINs.
+    const admins = new Set([
+      ...others.filter((m) => normalizeWorkspaceRole(m.role) === "ADMIN").map((m) => m.userId),
+      ...otherOrgMembers.filter((m) => isOrgAdminRole(m.role)).map((m) => m.userId),
+    ])
+    const userAdministers = normalizeWorkspaceRole(membership.role) === "ADMIN" || others.length === 0
+    if (userAdministers && admins.size === 0) {
+      plan.blockers.push({ kind: "WORKSPACE_SOLE_ADMIN", workspace: { slug: workspace.slug, name: workspace.name, orgSlug }, otherMembers: reachable.size })
     }
   }
   return plan
 }
 
 export interface AccountDeletionOptions {
-  deleteSoleOwned?: boolean
+  /** Ids of the sole-owned organizations the user confirmed. Must equal the set recomputed at delete time. */
+  soleOwnedOrganizationIds?: string[]
   /** Test seam; defaults to global fetch. */
   fetchImpl?: typeof fetch
 }
@@ -129,7 +145,7 @@ export type AccountDeletionResult =
   | { ok: true; revocation: RevocationSummary }
   | { ok: false; reason: "NOT_FOUND" }
   | { ok: false; reason: "BLOCKED"; plan: DeletionPlan }
-  | { ok: false; reason: "SOLE_OWNED_NEEDS_CONFIRMATION"; plan: DeletionPlan }
+  | { ok: false; reason: "SOLE_OWNED_NEEDS_CONFIRMATION" | "SOLE_OWNED_CHANGED"; plan: DeletionPlan }
 
 export interface RevocationSummary {
   /** Google sign-in tokens Google accepted the revocation of (best effort). */
@@ -197,12 +213,10 @@ async function deleteOwnedConversations(prisma: AppPrismaClient, userId: string)
 }
 
 async function deleteSoleOwned(prisma: AppPrismaClient, plan: DeletionPlan): Promise<void> {
-  const deletedWorkspaceIds = new Set<string>()
   for (const org of plan.soleOwned.organizations) {
     const workspaces = await prisma.workspace.findMany({ where: { organizationId: org.id }, select: { id: true } })
     for (const workspace of workspaces) {
       await deleteWorkspaceCascade(prisma, workspace.id)
-      deletedWorkspaceIds.add(workspace.id)
     }
     // Same tail as deleteOrganization in app/[orgSlug]/settings/actions.ts: org-level rows have no FK cascade.
     const scoringModelIds = (await prisma.scoringModel.findMany({ where: { organizationId: org.id }, select: { id: true } })).map((m) => m.id)
@@ -211,9 +225,6 @@ async function deleteSoleOwned(prisma: AppPrismaClient, plan: DeletionPlan): Pro
     await prisma.roadmapView.deleteMany({ where: { organizationId: org.id } })
     await prisma.organizationMember.deleteMany({ where: { organizationId: org.id } })
     await prisma.organization.deleteMany({ where: { id: org.id } })
-  }
-  for (const workspace of plan.soleOwned.workspaces) {
-    if (!deletedWorkspaceIds.has(workspace.id)) await deleteWorkspaceCascade(prisma, workspace.id)
   }
 }
 
@@ -227,8 +238,12 @@ export async function deleteAccount(prisma: AppPrismaClient, userId: string, opt
 
   const plan = await planAccountDeletion(prisma, userId)
   if (plan.blockers.length > 0) return { ok: false, reason: "BLOCKED", plan }
-  const hasSoleOwned = plan.soleOwned.organizations.length > 0 || plan.soleOwned.workspaces.length > 0
-  if (hasSoleOwned && !options.deleteSoleOwned) return { ok: false, reason: "SOLE_OWNED_NEEDS_CONFIRMATION", plan }
+  const hasSoleOwned = plan.soleOwned.organizations.length > 0
+  const confirmed = new Set(options.soleOwnedOrganizationIds ?? [])
+  const planned = new Set(plan.soleOwned.organizations.map((org) => org.id))
+  if (confirmed.size === 0 && hasSoleOwned) return { ok: false, reason: "SOLE_OWNED_NEEDS_CONFIRMATION", plan }
+  // What the user confirmed on screen must be exactly what would be deleted now: membership can change in between.
+  if (confirmed.size !== planned.size || [...confirmed].some((id) => !planned.has(id))) return { ok: false, reason: "SOLE_OWNED_CHANGED", plan }
 
   // 1. Tell providers first, while the tokens still exist to be named.
   const revocation = await revokeProviderAccess(prisma, userId, options.fetchImpl ?? fetch)
@@ -243,7 +258,7 @@ export async function deleteAccount(prisma: AppPrismaClient, userId: string, opt
   await tolerateMissingTable(() => deleteInBatches(prisma.agentConversationParticipant, { userId }), 0)
   await deleteInBatches(prisma.agentAuditLog, { userId })
   await deleteInBatches(prisma.agentToolCall, { userId })
-  await tolerateMissingTable(() => prisma.agentWebSearch.deleteMany({ where: { userId } }), { count: 0 })
+  await deleteWebSearchesWhere(prisma, { userId })
   const personalAgents = (await prisma.agent.findMany({ where: { ownerUserId: userId }, select: { id: true } })).map((a) => a.id)
   if (personalAgents.length) {
     await prisma.agentWorkspaceGrant.deleteMany({ where: { agentId: { in: personalAgents } } })
@@ -255,11 +270,11 @@ export async function deleteAccount(prisma: AppPrismaClient, userId: string, opt
   // 4. Credentials and per-user state.
   await deleteInBatches(prisma.apiKey, { userId })
   await tolerateMissingTable(async () => {
-    await prisma.oAuthToken.deleteMany({ where: { userId } })
-    if (personalAgents.length) await prisma.oAuthToken.deleteMany({ where: { agentId: { in: personalAgents } } })
-    await prisma.oAuthConsent.deleteMany({ where: { userId } })
-    await prisma.oAuthAuthorizationCode.deleteMany({ where: { userId } })
-    await prisma.oAuthAuthorizationEvent.deleteMany({ where: { userId } })
+    await deleteInBatches(prisma.oAuthToken, { userId })
+    if (personalAgents.length) await deleteInBatches(prisma.oAuthToken, { agentId: { in: personalAgents } })
+    await deleteInBatches(prisma.oAuthConsent, { userId })
+    await deleteInBatches(prisma.oAuthAuthorizationCode, { userId })
+    await deleteInBatches(prisma.oAuthAuthorizationEvent, { userId })
   }, undefined)
   await tolerateMissingTable(async () => {
     await prisma.mcpConnectorGrant.deleteMany({ where: { userId } })

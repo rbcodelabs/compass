@@ -48,5 +48,11 @@ describe("legal config", () => {
     expect(privacy).not.toMatch(/do not currently apply an automatic retention period/)
     expect(privacy).toMatch(/Disconnecting Google Drive does not delete/)
     expect(privacy).toMatch(/Settings, Profile/)
+    // Production runs on Supabase Postgres; Aurora DSQL is only some deployments.
+    expect(privacy).toMatch(/<strong>Supabase<\/strong>/)
+    expect(privacy).toMatch(/Aurora DSQL, the database that stores that data for some/)
+    expect(privacy).not.toMatch(/the Aurora DSQL database that stores account and workspace data/)
+    // Disclosed as outside the retention job: the agent audit log carries a truncated tool-input summary.
+    expect(privacy).toMatch(/audit records of the actions the agent took/)
   })
 })
