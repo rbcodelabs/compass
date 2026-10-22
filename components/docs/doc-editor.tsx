@@ -516,14 +516,14 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     <div className="flex h-full min-h-0 min-w-0">
       <div data-slot="doc-editor-column" className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* Save indicator */}
-      <div className="flex justify-end px-8 pt-3 min-h-7">
+      <div className="mx-auto w-full max-w-4xl flex justify-end px-8 pt-3 min-h-7">
         {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
         {saveStatus === "saved" && <span className="text-xs text-text-subtle">Saved</span>}
         {saveError && <span role="alert" className="text-xs text-status-danger">{saveError} <button type="button" className="underline" onClick={() => { void saveQueue.retry(); }}>Retry save</button></span>}
       </div>
 
       {/* Icon + title on a single row */}
-      <div className="flex items-center gap-2 px-8 pb-2">
+      <div className="mx-auto w-full max-w-4xl flex items-center gap-2 px-8 pb-2">
         <DocsLibraryButton />
         {/* Icon picker */}
         <div className="relative shrink-0">
@@ -566,7 +566,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       </div>
 
       {/* Toolbar */}
-      <div className="sticky top-0 z-10 flex items-center gap-1 px-4 sm:px-8 py-1.5 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
+      <div className="sticky top-0 z-10 border-b border-border-default bg-surface-panel/90 backdrop-blur-sm">
+        <div className="mx-auto flex w-full max-w-4xl items-center gap-1 px-4 py-1.5 sm:px-8">
         {/* Buttons scroll horizontally on narrow screens instead of wrapping to a
             second row (which used to eat viewport height) or shrinking to the
             point of being unreadable/untappable. */}
@@ -709,6 +710,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
           )}
         </div>
         {(followAction || decisionAction) && <div className="flex shrink-0 items-center gap-1.5 pl-1">{followAction}{decisionAction}</div>}
+        </div>
       </div>
 
       {/* Hidden file input */}
@@ -721,7 +723,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       />
 
       {/* Editor */}
-      <div className="flex-1 px-8 py-4 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
+      <div className="mx-auto w-full max-w-4xl px-8 py-4">
         {specHeader}
         {/* Properties — scrolls with the content instead of pinning the viewport */}
         <DocProperties
@@ -774,6 +777,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         <DocEmbedCardsProvider resolve={resolveEmbeds}>
           <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
         </DocEmbedCardsProvider>
+      </div>
       </div>
 
       </div>
