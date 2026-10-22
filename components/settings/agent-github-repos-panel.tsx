@@ -62,7 +62,7 @@ export function AgentGithubReposPanel({ orgSlug, workspaceSlug, initialRepos, ca
         One <code>owner/name</code> per line, up to 10, all under the same GitHub owner. The Compass GitHub App must be installed on each.
         Leave empty to give agents no GitHub access.
       </span>
-      {notice && <p role="status" data-testid="agent-github-repos-notice" className="text-xs text-emerald-600">{notice}</p>}
+      {notice && <p role="status" data-testid="agent-github-repos-notice" className="text-xs text-status-success">{notice}</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       <div>
         <Button size="sm" onClick={handleSave} disabled={isPending} data-testid="agent-github-repos-save">
