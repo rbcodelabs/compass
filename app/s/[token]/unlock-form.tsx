@@ -19,7 +19,7 @@ export function UnlockForm({ token }: { token: string }) {
         maxLength={200}
         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
       />
-      {state.error ? <p role="alert" className="text-sm text-red-600">{state.error}</p> : null}
+      {state.error ? <p role="alert" className="text-sm text-destructive">{state.error}</p> : null}
       <button
         type="submit"
         disabled={pending}

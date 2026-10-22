@@ -98,7 +98,7 @@ export function ShareComments({ token }: { token: string }) {
               </form>
             </>
           ) : null}
-          {message ? <p role="alert" className="text-red-600">{message}</p> : null}
+          {message ? <p role="alert" className="text-destructive">{message}</p> : null}
         </div>
       ) : null}
     </div>
