@@ -74,11 +74,15 @@ test("an admin creates a shared cloud agent that is listed, defaultable, assigna
 
     // Selectable in chat, named as the default.
     await page.goto(`${base}/agent`);
-    const agentMenu = page.getByLabel("Agent", { exact: true });
+    const agentMenu = page.getByRole("button", { name: /^Agent:/ });
     await expect(agentMenu).toBeVisible({ timeout: 15_000 });
-    await expect(agentMenu.getByRole("option", { name: `Default (${name})` })).toHaveCount(1);
-    await expect(agentMenu.getByRole("option", { name: `${name} (shared)` })).toHaveCount(1);
-    await expect(agentMenu.getByRole("option", { name: "Compass Agent" })).toHaveCount(1);
+    await expect(agentMenu).toHaveAccessibleName(`Agent: Default (${name})`);
+    await agentMenu.click();
+    const agentOptions = page.getByRole("listbox", { name: "Agent" });
+    await expect(agentOptions.getByRole("option", { name: `Default (${name})`, exact: true })).toHaveCount(1);
+    await expect(agentOptions.getByRole("option", { name: `${name} (shared)`, exact: true })).toHaveCount(1);
+    await expect(agentOptions.getByRole("option", { name: "Compass Agent", exact: true })).toHaveCount(1);
+    await page.keyboard.press("Escape");
 
     // Mobile: nothing overflows horizontally.
     await page.setViewportSize({ width: 390, height: 844 });
