@@ -17,6 +17,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/react";
 import { normalizeEmbedTitle, type DocEmbedKind } from "@/lib/doc-embeds";
+import { placeMenu, type MenuPlacement } from "@/lib/spec-docs/menu-placement";
 import { dismissSlash, getSlashState, type SlashController, type SlashState } from "@/components/docs/spec-slash-extension";
 
 export type SlashScope = { scopeType: "SOLUTION" | "OPPORTUNITY"; scopeId: string; title: string };
@@ -93,7 +94,8 @@ export function SpecSlashMenu({
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [step, setStep] = useState<Step>({ phase: "pick" });
   const [highlight, setHighlight] = useState(0);
-  const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [box, setBox] = useState<MenuPlacement | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef(-1);
   const slashRef = useRef<SlashState | null>(null);
   const stepRef = useRef(step);
@@ -204,30 +206,35 @@ export function SpecSlashMenu({
     if (!editor || !active) return;
     const place = () => {
       const pos = Math.min(Math.max((slash?.active ? slash.from : anchorRef.current) + 1, 0), editor.state.doc.content.size);
-      let coords: { bottom: number; left: number };
-      try { coords = editor.view.coordsAtPos(pos); } catch { coords = { bottom: 0, left: 0 }; }
+      let coords: { top: number; bottom: number; left: number };
+      try { coords = editor.view.coordsAtPos(pos); } catch { coords = { top: 0, bottom: 0, left: 0 }; }
       const vv = window.visualViewport;
-      const vw = vv?.width ?? window.innerWidth;
-      const ox = vv?.offsetLeft ?? 0;
-      const margin = 8;
-      const width = Math.min(320, vw - margin * 2);
-      setBox({ top: coords.bottom + 6, left: Math.min(Math.max(coords.left, ox + margin), ox + vw - width - margin), width });
+      const viewport = {
+        width: vv?.width ?? window.innerWidth,
+        height: vv?.height ?? window.innerHeight,
+        offsetLeft: vv?.offsetLeft ?? 0,
+        offsetTop: vv?.offsetTop ?? 0,
+      };
+      // The menu's current height (already capped by max-height); 0 before the first measure, when a conservative height is assumed.
+      const next = placeMenu({ caret: coords, viewport, menuHeight: menuRef.current?.offsetHeight ?? 0 });
+      setBox((previous) => (previous && previous.top === next.top && previous.left === next.left && previous.width === next.width && previous.maxHeight === next.maxHeight ? previous : next));
     };
     place();
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
     return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
-  }, [editor, active, slash]);
+  }, [editor, active, slash, step.phase, visible.length]);
 
   if (!editor || !active || commands.length === 0 || typeof document === "undefined") return null;
   if (step.phase === "pick" && visible.length === 0) return null;
 
-  const style = box ? { top: box.top, left: box.left, width: box.width } : { top: 0, left: 0, width: 280, visibility: "hidden" as const };
+  const style = box ? { top: box.top, left: box.left, width: box.width, maxHeight: box.maxHeight } : { top: 0, left: 0, width: 280, visibility: "hidden" as const };
   return createPortal(
     <div
+      ref={menuRef}
       data-testid="spec-slash-menu"
       style={{ position: "fixed", ...style }}
-      className="z-50 max-h-[min(320px,60vh)] overflow-y-auto rounded-lg border border-border-default bg-surface-overlay p-1 shadow-lg"
+      className="z-50 overflow-y-auto rounded-lg border border-border-default bg-surface-overlay p-1 shadow-lg"
       // Clicking the menu must not move the editor selection (that would close it before the click lands).
       onMouseDown={(event) => { if (!(event.target instanceof HTMLInputElement)) event.preventDefault(); }}
     >

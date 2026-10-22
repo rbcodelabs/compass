@@ -11,7 +11,7 @@
 import { test, expect } from "../fixtures/index";
 import { createOpportunityFromBoard } from "../fixtures/opportunity-composer";
 import { openFullPage } from "../fixtures/full-page";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 const SAVE_STATUS = '[data-testid="doc-save-status"]';
 const EMBED_CARD = '[data-slot="spec-embed-card"]';
@@ -80,6 +80,20 @@ async function cursorToNewLastParagraph(page: Page) {
   await expect(page.locator(".ProseMirror")).toBeFocused();
 }
 
+/** The whole menu box (every edge) is inside the window: nothing hangs off the bottom, top, left or right. */
+async function expectMenuFullyInViewport(page: Page, menu: Locator) {
+  const viewport = page.viewportSize();
+  expect(viewport, "the page has a viewport size").not.toBeNull();
+  await expect(async () => {
+    const box = await menu.boundingBox();
+    expect(box, "menu has a bounding box").not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.y).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
+  }).toPass({ timeout: 5_000 });
+}
+
 test.describe("Spec docs: editing", () => {
   test("rename from a card, add with '/', delete elsewhere, then Remove", async ({ page, base }) => {
     const stamp = Date.now();
@@ -111,6 +125,8 @@ test.describe("Spec docs: editing", () => {
     await page.keyboard.type("/");
     const menu = page.getByTestId("spec-slash-menu");
     await expect(menu).toBeVisible();
+    // Typed on the last line of a long doc: the menu must flip above the caret rather than hang off the bottom.
+    await expectMenuFullyInViewport(page, menu);
     await expect(menu.getByTestId("spec-slash-assumption")).toBeVisible();
     await menu.getByTestId("spec-slash-assumption").getByRole("button").click();
     await page.getByTestId("spec-slash-title").fill(assumptionTitle);
@@ -164,10 +180,8 @@ test.describe("Spec docs: editing", () => {
     const menu = page.getByTestId("spec-slash-menu");
     await expect(menu).toBeVisible();
 
-    const box = await menu.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+    expect(page.viewportSize()).toEqual({ width: 390, height: 844 });
+    await expectMenuFullyInViewport(page, menu);
     // The menu floats over the page: nothing above the cursor moved.
     expect(await heading.boundingBox()).toEqual(before);
 
