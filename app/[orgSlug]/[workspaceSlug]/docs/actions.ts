@@ -27,6 +27,11 @@ import { resolveCanvasCards, resolveDocEmbeds, searchCanvasCardTargets, type Doc
 import { getCanvasOverview } from "@/lib/canvas/data";
 import { buildTreeFragment, TREE_SCOPE_KINDS, type TreeFragment, type TreeScope } from "@/lib/canvas-tree";
 import { isUuid } from "@/lib/canvas-cards";
+import { CANVAS_CREATE_PARENT_KIND, isCanvasCreateKind, normalizeCreateTitle, type CanvasCreateKind } from "@/lib/canvas-create";
+import { createOpportunityBatch, createSolutionBatch, type BatchItemResult } from "@/lib/opportunity-batch-create";
+import { createWorkspaceTask } from "@/lib/task-create";
+import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations";
+import { allocateOneSeq } from "@/lib/work-item-sequence";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { validateTaskLink } from "@/lib/task-assignment";
@@ -324,6 +329,57 @@ export async function searchCanvasCardItems(docId: string, query: string) {
   const { workspaceId } = await requireDocumentMember(docId);
   if (typeof query !== "string") return [];
   return searchCanvasCardTargets({ workspaceId, query });
+}
+
+/**
+ * Create a new Compass object from a canvas ("Create new" in the card picker). Same gate as searchCanvasCardItems: the
+ * viewer must be a member of the DOC's workspace (org-wide read-only access cannot create). The workspace comes from the doc,
+ * never from the client; a parent (solution under an opportunity, assumption under a solution) is looked up inside that
+ * workspace, so a foreign id fails like a missing one. Returns the reference for the client to add as a card: the canvas
+ * stores only {kind,id}. Experiments are not creatable here (they require hypothesis, method and kill condition).
+ */
+export async function createCanvasCardItem(
+  docId: string,
+  input: { kind: unknown; title: unknown; parentId?: unknown },
+): Promise<{ kind: CanvasCreateKind; id: string; title: string }> {
+  const { user, workspaceId } = await requireDocumentMember(docId);
+  if (!input || typeof input !== "object") throw new Error("Invalid request");
+  const { kind } = input;
+  if (!isCanvasCreateKind(kind)) throw new Error("This kind cannot be created from a canvas");
+  const parsedTitle = normalizeCreateTitle(input.title);
+  if (!parsedTitle.ok) throw new Error(parsedTitle.error);
+  const { title } = parsedTitle;
+  const needsParent = CANVAS_CREATE_PARENT_KIND[kind] !== undefined;
+  const parentId = typeof input.parentId === "string" && isUuid(input.parentId) ? input.parentId.toLowerCase() : null;
+  if (needsParent && !parentId) throw new Error(`Select the ${CANVAS_CREATE_PARENT_KIND[kind]} to create this ${kind} under`);
+
+  const prisma = getPrisma();
+  const context = { workspace: { id: workspaceId, isReadOnly: false }, caller: "human" as const, source: "UI" as const, mutationSource: "UI" as const, createdById: user.id ?? null };
+  const unwrap = (result: BatchItemResult): string => {
+    if (!result.ok) throw new Error(result.error);
+    return result.id;
+  };
+
+  let id: string;
+  if (kind === "opportunity") {
+    id = unwrap((await createOpportunityBatch(prisma, context, [{ title }])).results[0]);
+    revalidatePath("/[orgSlug]/[workspaceSlug]/discovery", "layout");
+  } else if (kind === "solution") {
+    id = unwrap((await createSolutionBatch(prisma, context, [{ parent: { id: parentId! }, title }])).results[0]);
+    revalidatePath("/[orgSlug]/[workspaceSlug]/discovery", "layout");
+  } else if (kind === "assumption") {
+    const parent = await prisma.solution.findFirst({ where: { id: parentId!, workspaceId }, select: { id: true } });
+    if (!parent) throw new Error("That solution was not found in this workspace.");
+    const assumption = await captureWorkspaceMutation(prisma, "assumption", "create", "UI", undefined, async tx => tx.assumption.create({
+      data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "assumption")), solutionId: parent.id, title, source: "UI" },
+    }));
+    id = assumption.id;
+    revalidatePath("/[orgSlug]/[workspaceSlug]/discovery", "layout");
+  } else {
+    id = (await createWorkspaceTask(workspaceId, { title })).id;
+    revalidatePath("/[orgSlug]/[workspaceSlug]/tasks", "page");
+  }
+  return { kind, id, title };
 }
 
 /**
