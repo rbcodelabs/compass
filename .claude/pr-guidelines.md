@@ -234,14 +234,27 @@ User-facing docs live in `docs/content/` (rendered at `/help/[slug]`).
 
 No Linear integration — track work in Compass itself.
 
-**Every PR must link the Compass Task/Solution/Roadmap Item it delivers before
-it is opened.** This is enforced by the shared `pr-checklist` skill's Step 0.5
-(delivery tracking link), which resolves the `delivery` provider from
-`Products/Compass/pm-config.md` (`compass_tasks` here) and treats a missing
-link as an incomplete checklist — not something to defer or skip because none
-was named. If the work genuinely has no Compass counterpart (e.g. a one-line
-typo fix or CI-only change), say so explicitly in the PR description with a
-real reason; don't just omit the line.
+**Every PR must trace to the full Compass chain before it is opened:** an
+**Opportunity**, a **Solution** under it, and a **Roadmap Item**, with the
+delivery **Task** linked to each (`link_task`). This is enforced by the shared
+`pr-checklist` skill's Step 0.5 (delivery tracking link), which resolves the
+`delivery` provider from `Products/Compass/pm-config.md` (`compass_tasks`
+here) and treats a missing link as an incomplete checklist — not something to
+defer or skip because none was named.
+
+- **Reuse first.** For each missing piece, look for an existing one
+  (`list_opportunities`, `list_solutions`, `list_roadmap_items`) before
+  creating one (`create_opportunity`, `add_solution`, `add_to_roadmap`,
+  `create_task`). Link the Roadmap Item to the Solution (`promote_to_roadmap`
+  or `add_to_roadmap` with `solutionId`).
+- **Do not mis-attach.** Never attach work to a Solution it does not actually
+  deliver just to satisfy this rule; create a new Solution instead.
+- **After merge.** Move the Task to Done and set the Roadmap Item's horizon to
+  match reality — SHIPPED only once it is actually deployed.
+- **The only skip** is an explicit exception in the PR description that names
+  the missing piece and gives a real reason (e.g. `No delivery link — <one-line
+  reason>`). Don't just omit the line, and don't write "not routed through
+  Compass PM" as if that were itself a reason.
 
 This exists because five PRs merged here on 2026-09-26 (#296, #303, #305,
 #306, #308) with no Task or Solution link at all, silently drifting Compass's
