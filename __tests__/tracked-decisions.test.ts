@@ -341,6 +341,20 @@ describe("tracked decisions", () => {
       })
     })
 
+    it("stores a recordedPrefix before the reason, after validating the reason on its own (so 2,000 characters still work)", async () => {
+      prisma.reviewRequest.findFirst.mockResolvedValue({ id: "request-1", workspaceId: "ws-1", gateType: "TRACKED_DECISION", state: "DECIDED", noActionAt: null })
+      prisma.taskLink.findMany.mockResolvedValue([])
+      prisma.reviewRequest.update.mockResolvedValue({ id: "request-1" })
+      const reason = "r".repeat(2000)
+      await recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason, actorUserId: null, recordedPrefix: "[Closed by agent A (id)] " })
+      expect(prisma.reviewRequest.update.mock.calls[0][0].data).toMatchObject({ noActionById: null, noActionReason: `[Closed by agent A (id)] ${reason}` })
+    })
+
+    it("still rejects a reason over 2,000 characters or blank, prefix or not", async () => {
+      await expect(recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "r".repeat(2001), actorUserId: null, recordedPrefix: "[x] " })).rejects.toThrow()
+      await expect(recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "   ", actorUserId: null, recordedPrefix: "[x] " })).rejects.toThrow()
+    })
+
     it("rejects a missing decision", async () => {
       prisma.reviewRequest.findFirst.mockResolvedValue(null)
       await expect(recordDecisionNoAction({ workspaceId: "ws-1", requestId: "request-1", reason: "Why", actorUserId: "user-1" }))

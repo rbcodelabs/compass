@@ -239,8 +239,12 @@ export async function closeDecisionNoAction({ workspaceId, requestId, reason }: 
     // the closer, and the agent is named in the recorded reason instead.
     const cloudAgentRun = actor.purpose === "AGENT_TURN" && !!actor.agentId
     const agentName = cloudAgentRun ? (await findAgentById(getPrisma(), actor.agentId!))?.name ?? "an agent" : null
-    const recordedReason = agentName ? `[Closed by agent ${agentName}] ${reason}` : reason
-    const request = await recordDecisionNoAction({ workspaceId, requestId, reason: recordedReason, actorUserId: cloudAgentRun ? null : actor.userId })
+    // The person's reason is validated as typed (2,000 characters); the agent note is added after, so it can never push a valid
+    // reason over the limit.
+    const request = await recordDecisionNoAction({
+      workspaceId, requestId, reason, actorUserId: cloudAgentRun ? null : actor.userId,
+      ...(agentName ? { recordedPrefix: `[Closed by agent ${agentName} (${actor.agentId})] ` } : {}),
+    })
     const reviewUrl = await reviewUrlByWorkspace(workspaceId, request.id)
     return ok(
       withUrlLine(`**Closed, no action needed.**\nReason: ${reason}\nID: ${request.id}`, reviewUrl),
@@ -256,7 +260,10 @@ export async function closeDecisionNoAction({ workspaceId, requestId, reason }: 
 export async function requestReleaseAuthorization(scope: ReleaseScope) {
   const actor = getMcpActor()
   try {
-    const result = await prepareReleaseRun({ ...scope, requestedById: actor.userId })
+    // A cloud run is the agent acting, not the person who started it: no human requester is recorded for it (both columns
+    // are nullable), matching request_decision. Personal agent keys and people keep requestedById as before.
+    const cloudAgentRun = actor.purpose === "AGENT_TURN" && !!actor.agentId
+    const result = await prepareReleaseRun({ ...scope, requestedById: cloudAgentRun ? null : actor.userId })
     if (result.status === "BLOCKED") return fail(`Release authorization blocked: ${result.code}`)
     const reviewUrl = await reviewUrlByWorkspace(scope.workspaceId, result.requestId)
     return ok(
