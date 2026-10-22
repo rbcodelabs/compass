@@ -63,9 +63,12 @@ export async function assertWorkItemIdsMigration(client: PoolClient, schema: str
     }
   }
 
+  // Key columns only: on Aurora DSQL the primary-key index also carries the remaining columns as
+  // INCLUDEd attributes, which sit past indnkeyatts and must not be compared.
   const pk = await client.query<{ columns: string[] }>(
     `SELECT ARRAY(SELECT a.attname::text FROM unnest(i.indkey) WITH ORDINALITY k(attnum,position)
-      JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum ORDER BY k.position) AS columns
+      JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum
+      WHERE k.position<=i.indnkeyatts ORDER BY k.position) AS columns
      FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace
      WHERE n.nspname=$1 AND t.relname=$2 AND i.indisprimary`,
     [schema, WORKSPACE_SEQUENCES_TABLE],

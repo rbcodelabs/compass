@@ -68,7 +68,7 @@ export function localToday(): string {
 }
 
 /**
- * Open the timeline. The "Ready to schedule" rail is collapsed by default below 1320px, so by
+ * Open the timeline. The "Not scheduled" rail is collapsed by default below 1320px, so by
  * default this opens it when it is closed, for the many journeys that work from the rail.
  * Pass `{ rail: "as-is" }` to observe the default state instead.
  */
@@ -77,7 +77,7 @@ export async function openTimeline(page: Page, base: string, options: { rail?: "
   await page.waitForLoadState("networkidle");
   await expect(page.getByTestId("timeline-engine-native").filter({ visible: true })).toBeVisible();
   if ((options.rail ?? "open") === "open") {
-    const toggle = page.getByRole("button", { name: /ready-to-schedule rail/ });
+    const toggle = page.getByRole("button", { name: /not-scheduled sidebar/ });
     if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(page.getByTestId("schedule-rail")).toBeVisible();

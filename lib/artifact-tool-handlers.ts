@@ -12,6 +12,7 @@ import {
   linkArtifactToDecision,
   unlinkArtifactFromDecision,
   getArtifactDecisions,
+  getArtifactSolutionIds,
   replaceExternalArtifactRevision,
   replaceHtmlArtifactRevision,
   unlinkArtifactFromSolution,
@@ -59,9 +60,10 @@ export async function listArtifacts({ workspaceId, includeArchived = false }: { 
 
 export async function getArtifact({ artifactId }: { artifactId: string }) {
   const prisma = getPrisma()
-  const artifact = await prisma.artifact.findUnique({ where: { id: artifactId }, include: { currentRevision: true, revisions: { orderBy: { revisionNumber: "desc" } }, links: { where: { linkedType: "SOLUTION" } } } })
+  const artifact = await prisma.artifact.findUnique({ where: { id: artifactId }, include: { currentRevision: true, revisions: { orderBy: { revisionNumber: "desc" } } } })
   if (!artifact) return fail(`Artifact "${artifactId}" not found.`)
-  const solutions = artifact.links.length ? await prisma.solution.findMany({ where: { id: { in: artifact.links.map((link) => link.linkedId) }, workspaceId: artifact.workspaceId }, select: { id: true, title: true } }) : []
+  const solutionIds = await getArtifactSolutionIds(prisma, artifact.workspaceId, artifact.id)
+  const solutions = solutionIds.length ? await prisma.solution.findMany({ where: { id: { in: solutionIds }, workspaceId: artifact.workspaceId }, select: { id: true, title: true } }) : []
   const decisions = await getArtifactDecisions(artifact.workspaceId, artifact.id)
   // Blob pathnames are private storage keys, not caller-facing data. thumbnailPathname
   // is stripped for exactly the same reason blobPathname always has been — it was added

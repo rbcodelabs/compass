@@ -102,6 +102,12 @@ const surfaceTokens = [
   ["Interactive", "bg-surface-interactive"], ["Interactive hover", "bg-surface-interactive-hover"],
 ] as const;
 
+// Static class names so Tailwind generates them. Categorical data colours for the chain graph (object types and group clouds).
+const graphSeries = [
+  "bg-graph-series-1", "bg-graph-series-2", "bg-graph-series-3", "bg-graph-series-4", "bg-graph-series-5",
+  "bg-graph-series-6", "bg-graph-series-7", "bg-graph-series-8", "bg-graph-series-9",
+] as const;
+
 const statuses = [
   ["Neutral", "bg-status-neutral-surface text-status-neutral", CircleHelp],
   ["Info", "bg-status-info-surface text-status-info", Info],
@@ -345,6 +351,9 @@ export function UIRegistry() {
                 <Example title="Borders and elevation"><div className="grid grid-cols-2 gap-3 text-center text-xs text-text-subtle"><div className="rounded-lg border border-border-default p-5">Default</div><div className="rounded-lg border border-border-strong p-5">Strong</div><div className="rounded-lg border border-border-interactive p-5">Interactive</div><div className="rounded-lg border-2 border-border-focus p-5">Focus</div><div className="col-span-2 rounded-lg bg-surface-card p-5 shadow-[var(--shadow-panel)]">Panel elevation</div></div></Example>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{statuses.map(([name, classes, Icon]) => <div key={name} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${classes}`}><Icon className="size-4" />{name}</div>)}</div>
+              <h3 className="mt-6 text-sm font-medium">Graph series</h3>
+              <p className="mt-1 text-sm text-text-subtle">Categorical data colours for the chain graph. Always paired with a distinct shape and a text label; never the only signal.</p>
+              <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-9">{graphSeries.map((cls, i) => <div key={cls} className={`flex h-12 items-end rounded-md px-2 py-1 text-xs text-text-inverse ${cls}`}>Series {i + 1}</div>)}</div>
             </Section>
 
             <Section id="typography" title="Typography" description="Inter is the default; workspace branding may replace the sans role without changing hierarchy.">

@@ -265,7 +265,7 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 092 postcondition (columns on 14 tables, the counter table and every unique index valid and ready before the receipt).
   "092_work_item_ids": {
-    "lib/migrations/work-item-ids.ts": "283438c7811dbb3d2b37970315563beae7069ab8962f347968494b90c3dc214f",
+    "lib/migrations/work-item-ids.ts": "b18c0f7f38436fd8a37caf5e15626bcda5f288e0d3cce4ad59d1e490c64a4f47",
   },
   "094_work_item_ids_residual_backfill": {
     "lib/migrations/work-item-ids-backfill.ts": "bfb0533167f1c9fac0d0ab72da59adb559eccb1c6ac169f83091a69642a46c5a",

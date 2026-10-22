@@ -102,39 +102,39 @@ describe("Roadmap header on the shared workspace frame", () => {
   });
 });
 
-describe("Ready-to-schedule rail toggle", () => {
+describe("Not-scheduled sidebar toggle", () => {
   const rail = (over: Record<string, unknown> = {}) => ({ open: true, onToggle: vi.fn(), count: 3, autoAdded: 0, controlsId: "rail-region", ...over });
   const renderRail = (railProps = rail(), autoSync = true) => render(<RoadmapHeader squads={squads} timeline={{ zoom: "month", onZoom: vi.fn(), onShift: vi.fn(), onToday: vi.fn(), saving: false, schedule: { onOpen: vi.fn(), autoSync, rail: railProps } }} />);
 
   it("names the action for the current state and wires aria-expanded and aria-controls", () => {
     const { rerender } = renderRail();
-    const hide = screen.getByRole("button", { name: "Hide ready-to-schedule rail" });
+    const hide = screen.getByRole("button", { name: "Hide not-scheduled sidebar" });
     expect(hide).toHaveAttribute("aria-expanded", "true");
     expect(hide).toHaveAttribute("aria-controls", "rail-region");
     expect(hide).toHaveAttribute("aria-keyshortcuts", "[");
     rerender(<RoadmapHeader squads={squads} timeline={{ zoom: "month", onZoom: vi.fn(), onShift: vi.fn(), onToday: vi.fn(), saving: false, schedule: { onOpen: vi.fn(), autoSync: true, rail: rail({ open: false }) } }} />);
-    expect(screen.getByRole("button", { name: "Show ready-to-schedule rail" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Show not-scheduled sidebar" })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("shows the unscheduled count on the button and describes it for screen readers", () => {
     renderRail(rail({ open: false, count: 7, autoAdded: 2 }));
-    const button = screen.getByRole("button", { name: "Show ready-to-schedule rail" });
+    const button = screen.getByRole("button", { name: "Show not-scheduled sidebar" });
     expect(screen.getByTestId("rail-toggle-count")).toHaveTextContent("7");
-    expect(button).toHaveAccessibleDescription("7 ready to schedule, 2 auto-added");
+    expect(button).toHaveAccessibleDescription("7 not scheduled, 2 auto-added");
   });
 
   it("hides the badge when nothing is waiting", () => {
     renderRail(rail({ count: 0 }));
     expect(screen.queryByTestId("rail-toggle-count")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Hide ready-to-schedule rail" })).toHaveAccessibleDescription("Nothing waiting to schedule");
+    expect(screen.getByRole("button", { name: "Hide not-scheduled sidebar" })).toHaveAccessibleDescription("Nothing not scheduled");
   });
 
   it("calls onToggle on click and shows a tooltip on focus", async () => {
     const props = rail();
     renderRail(props);
-    const button = screen.getByRole("button", { name: "Hide ready-to-schedule rail" });
+    const button = screen.getByRole("button", { name: "Hide not-scheduled sidebar" });
     act(() => button.focus());
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("Hide ready-to-schedule rail");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Hide not-scheduled sidebar");
     fireEvent.click(button);
     expect(props.onToggle).toHaveBeenCalledOnce();
   });
@@ -146,6 +146,6 @@ describe("Ready-to-schedule rail toggle", () => {
 
   it("renders no toggle when the timeline has no rail", () => {
     renderRail(null as never);
-    expect(screen.queryByRole("button", { name: /ready-to-schedule rail/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /not-scheduled sidebar/ })).not.toBeInTheDocument();
   });
 });
