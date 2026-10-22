@@ -522,6 +522,8 @@ export const TOOL_GATES: Record<string, Gate> = {
   // and createSpecCore/listSpecDocs verify it again with the workspace in the WHERE clause).
   create_spec: (a, x) => assertChildInDeclaredWorkspace(a, x.scopeType === "OPPORTUNITY" ? "opportunity" : "solution", x.scopeId, x.workspaceId),
   list_specs: (a, x) => assertChildInDeclaredWorkspace(a, x.scopeType === "OPPORTUNITY" ? "opportunity" : "solution", x.scopeId, x.workspaceId),
+  // get_spec (phase 3): a docId is resolved IN the declared workspace here; a path is workspace-scoped inside the handler, so membership is the gate.
+  get_spec: (a, x) => (x.docId ? assertChildInDeclaredWorkspace(a, "doc", x.docId, x.workspaceId) : assertWorkspaceMember(a, x.workspaceId)),
   edit_doc: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
   edit_canvas: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
   build_canvas_tree: async (a, x) => void (await assertEntityAccess(a, "doc", x.docId)),
@@ -645,6 +647,7 @@ const READ_TOOLS = [
   "list_links",
   "list_notifications",
   "list_specs",
+  "get_spec",
 ] as const
 
 /**
@@ -783,7 +786,7 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ...["generate_research_guide", "create_research_study", "update_research_study", "generate_research_synthesis", "promote_research_finding_to_evidence"].map(name => [name, "WRITE"]),
   ...["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
-    "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_doc_history", "capture_canvas", "list_doc_comments", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values", "list_links", "list_specs",
+    "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_doc_history", "capture_canvas", "list_doc_comments", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values", "list_links", "list_specs", "get_spec",
   ].map(name => [name, "READ"]),
   ...[
     "link_artifact_to_decision", "unlink_artifact_from_decision",

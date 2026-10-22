@@ -15,6 +15,8 @@ import { listDocDecisions } from "@/lib/tracked-decisions";
 import { fetchLinkedTasksBundle } from "@/lib/linked-tasks";
 import { agentIdsAssignedInDoc, loadCommentTaskCards, loadMentionCandidates } from "@/lib/doc-comment-tasks";
 import { documentRevision, hydrateDocument } from "@/lib/document-service";
+import { SpecDocHeader } from "@/components/docs/spec-doc-header";
+import { loadSpecScopeViews } from "@/lib/spec-docs/view";
 
 type Props = {
   params: Promise<{
@@ -105,9 +107,14 @@ export default async function DocPage({ params, searchParams }: Props) {
     );
   }
 
+  // A SPEC doc says what it is (Spec / Discovery Plan / unscoped) from its live scope links. Plain docs are untouched.
+  const specHeader =
+    storedDoc.docType === "SPEC" ? <SpecDocHeader scopes={await loadSpecScopeViews({ workspaceId: workspace.id, orgSlug, workspaceSlug, docId: doc.id })} /> : undefined;
+
   return (
     <DocEditor
       key={doc.id}
+      specHeader={specHeader}
       doc={doc}
       initialCommentsPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsComments"))?.value)}
       initialHistoryPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsHistory"))?.value)}

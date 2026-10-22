@@ -1050,6 +1050,44 @@ describe("create_spec and list_specs gate the scope entity in the declared works
   })
 })
 
+// ── Spec docs (phase 3): get_spec ───────────────────────────────────────────
+describe("get_spec gates the doc in the declared workspace", () => {
+  const doc = (workspaceId: string | null) => mockPrisma.doc.findUnique.mockResolvedValue(workspaceId ? { workspaceId } : null)
+
+  it("is a registered read, available to delegated agents", () => {
+    expect("get_spec" in registeredTools).toBe(true)
+    expect("get_spec" in TOOL_GATES).toBe(true)
+    expect(requiredToolScope("get_spec")).toBe("mcp:read")
+    expect(AGENT_TOOL_POLICY.get_spec).toBe("READ")
+  })
+
+  it("admits a member when the doc is in the declared workspace", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    doc("ws-1")
+    await expect(applyToolGate("get_spec", MEMBER, { workspaceId: "ws-1", docId: "d" })).resolves.toBeUndefined()
+  })
+
+  it("denies a doc in another workspace and a missing doc", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "member-of-both" })
+    doc("ws-2")
+    await expect(applyToolGate("get_spec", MEMBER, { workspaceId: "ws-1", docId: "d" })).rejects.toThrow(/does not belong to workspace/)
+    doc(null)
+    await expect(applyToolGate("get_spec", MEMBER, { workspaceId: "ws-1", docId: "d" })).rejects.toThrow(/not found or access denied/)
+  })
+
+  it("by path, requires membership of the declared workspace", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    await expect(applyToolGate("get_spec", MEMBER, { workspaceId: "ws-1", path: "Spec - X" })).resolves.toBeUndefined()
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate("get_spec", MEMBER, { workspaceId: "ws-1", path: "Spec - X" })).rejects.toThrow()
+  })
+
+  it("public research credentials are denied (embedded record data never reaches a research context)", async () => {
+    await expect(applyToolGate("get_spec", RESEARCH, { workspaceId: "ws-1", docId: "d" })).rejects.toThrow(/not available to research interviews/)
+    await expect(applyToolGate("get_spec", RESEARCH, { workspaceId: "ws-1", path: "Spec - X" })).rejects.toThrow(/not available to research interviews/)
+  })
+})
+
 describe("link_opportunity_to_kr and create_opportunity reject a key result from another workspace", () => {
   it("rejects a cross-workspace KR for a member of both workspaces (the gate used to check access to each independently)", async () => {
     mockPrisma.workspace.findFirst.mockResolvedValue({ id: "member-of-both" })

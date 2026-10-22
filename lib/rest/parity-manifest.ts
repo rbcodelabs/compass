@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 196,
-  sortedToolNamesSha256: "7b995ca5beac575dfaf5e49711e64f113c557a399230d35b71f03c65067fee68",
+  toolCount: 197,
+  sortedToolNamesSha256: "2a1ad56507632f4700f72ac4b9551f8500e4b2668cb6ff7a8a419f7a6f4f0c26",
 } as const
 
 export type McpRestParityDisposition =
@@ -125,6 +125,7 @@ export const MCP_REST_PARITY_MANIFEST = {
   list_experiments: direct("listExperiments"),
   list_feedback: direct("listFeedback"),
   list_links: direct("listEntityLinks"),
+  get_spec: composition(["getDoc", "listEntityLinks"], "Read the document with getDoc (docType SPEC) and its scopes with listEntityLinks; each embedded record is read with its own REST operation (getOpportunity, getSolution, getTask, ...). The resolved read, with live titles and an explicit unavailable list, is one convenience call in MCP."),
   list_specs: composition(["listEntityLinks", "getDoc"], "List the scope's DOC_SPECIFIES_SCOPE links with listEntityLinks, then read each linked document with getDoc and keep those with docType SPEC."),
   list_metric_bindings: direct("listMetricBindings"),
   list_metric_observations: direct("listMetricObservations"),
