@@ -34,7 +34,7 @@ export async function createAgent(input: { name: string; description?: string })
 export async function updateAgent(id: string, input: { name: string; description?: string; status: "ACTIVE" | "SUSPENDED" }) {
   const { prisma, userId } = await account();
   if (input.status !== "ACTIVE" && input.status !== "SUSPENDED") throw new Error("Invalid agent status");
-    const agent = await findAgentById(prisma, id);
+  const agent = await findAgentById(prisma, id);
   if (!agent || !(await canManageAgent(prisma, { userId }, agent))) throw new Error("Agent not found");
   // select: the full row would include columns a database without migration 098 does not have.
   await prisma.agent.update({ where: { id }, data: { name: nameValue(input.name), description: descriptionValue(input.description), status: input.status, updatedAt: new Date() }, select: { id: true } });
