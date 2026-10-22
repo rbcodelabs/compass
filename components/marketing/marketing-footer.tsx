@@ -16,7 +16,7 @@ export function MarketingFooter({ viewer }: { viewer: MarketingViewer }) {
         <div className="flex items-center gap-2 text-slate-600">
           <span className="font-semibold text-slate-900">Compass</span>
           <span className="text-slate-300">·</span>
-          <span className="text-sm">© 2026 RB Code Labs</span>
+          <span className="text-sm">© 2026 RB Code Labs LLC</span>
         </div>
 
         {/* Right: nav links */}
