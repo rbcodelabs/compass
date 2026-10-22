@@ -169,7 +169,8 @@ describe("Experiments and Discovery board layout", () => {
     it("defaults unknown Discovery views to the board and gives the table normal page padding", () => {
       const page = source("app/[orgSlug]/[workspaceSlug]/discovery/page.tsx");
 
-      expect(page).toContain('requestedView === "table" ? "table" : "board"');
+      // The view param is resolved with the saved-view state (unknown values fall back to board; see saved-views-opportunities-state.test.ts).
+      expect(page).toContain('resolveSurfaceState("OPPORTUNITIES_BOARD"');
       expect(page).toContain('contentClassName={view === "board" ? "p-0 sm:p-0 md:p-0" : undefined}');
     });
   });
