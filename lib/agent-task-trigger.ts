@@ -37,7 +37,7 @@ import { agentKind, findAgentById } from "@/lib/agent-ownership"
 import { resolveGatewayCredential, resolveAgentHarness } from "@/lib/agent-harness"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
 import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity"
-import { AgentRunError, DEFAULT_AGENT_RUN_BUDGET_MS, agentRunAttributionAvailable, agentRunsAvailable, createAgentRun, findActiveAgentRun } from "@/lib/agent-runs"
+import { AgentRunError, DEFAULT_AGENT_RUN_BUDGET_MS, agentRunAttributionAvailable, agentRunsAvailable, createAgentRun, finalizeAgentRun, findActiveAgentRun } from "@/lib/agent-runs"
 import { launchQueuedAgentRun, type LaunchContext } from "@/lib/agent-run-launch"
 import { workspaceFraming } from "@/lib/agent-run-sandbox"
 import { HANDOFF_POLICIES } from "@/lib/agent-handoff-kinds"
@@ -79,11 +79,21 @@ export type TriggerDeps = {
   /** Runs `task` after the caller has its answer; falls back to running it inline outside a request scope. */
   defer: (task: () => Promise<unknown>) => Promise<void> | void
   launch: (context: LaunchContext) => Promise<unknown>
+  finalize: typeof finalizeAgentRun
+  now: () => Date
   origin: () => string
   env: Record<string, string | undefined>
 }
 
 const EXCERPT_MAX = 600
+
+/**
+ * A triggered run is created QUEUED and its sandbox is started after the response (`defer`). If that function instance dies
+ * between the two, the run is left QUEUED with nothing behind it, and until the (once a day) sweeper collects it that run would
+ * hold one of the agent's concurrent slots and block this conversation with "already running". A real start takes seconds, so a
+ * run still unstarted after this long is dead and is closed here, on the next trigger, instead of waiting for the sweeper.
+ */
+export const UNSTARTED_RUN_GRACE_MS = 3 * 60_000
 
 function clip(text: string | null | undefined, max = EXCERPT_MAX): string {
   const clean = (text ?? "").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ").trim()
@@ -115,6 +125,8 @@ function defaultDeps(): TriggerDeps {
     getSnapshotId: getGoldenSnapshotId,
     defer: defaultDefer,
     launch: launchQueuedAgentRun,
+    finalize: finalizeAgentRun,
+    now: () => new Date(),
     origin: () => trustedCompassBaseUrl().origin,
     env: process.env,
   }
@@ -135,6 +147,21 @@ export function taskConversationId(userId: string, taskId: string): string {
 }
 
 const refused = (code: AgentRunRefusalCode, message: string, agentName?: string): AgentRunOutcome => ({ status: "refused", code, message, ...(agentName ? { agentName } : {}) })
+
+/** Closes this agent's triggered runs that were queued but never started (see {@link UNSTARTED_RUN_GRACE_MS}). */
+async function reapUnstartedRuns(deps: TriggerDeps, agentId: string) {
+  const cutoff = new Date(deps.now().getTime() - UNSTARTED_RUN_GRACE_MS)
+  const stale = await deps.prisma.agentRun.findMany({
+    where: { agentId, kind: "TASK_ASSIGNMENT", status: "QUEUED", startedAt: null, statusChangedAt: { lte: cutoff } },
+    select: { id: true },
+    take: 25,
+  })
+  for (const { id } of stale) {
+    await deps.finalize({ prisma: deps.prisma, runId: id, status: "FAILED", error: "The agent run could not start.", errorCode: "RUN_START_FAILED", now: deps.now() }).catch((error: unknown) => {
+      console.error("[agent-task-trigger] could not close an unstarted run", { runId: id, error })
+    })
+  }
+}
 
 export async function startRunForAssignedTask(input: TriggerInput, overrides: Partial<TriggerDeps> = {}): Promise<AgentRunOutcome> {
   try {
@@ -181,6 +208,8 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
   if (!(await agentRunsAvailable(prisma)) || !(await agentRunAttributionAvailable(prisma))) {
     return refused("AGENT_RUN_UNAVAILABLE", `The task was assigned to ${runAgent.name}. Background agent runs are not available on this deployment yet, so no run started.`, runAgent.name)
   }
+
+  await reapUnstartedRuns(deps, runAgent.id)
 
   const harness = resolveAgentHarness(deps.env.AGENT_HARNESS)
   const anthropicApiKey = deps.env.ANTHROPIC_API_KEY

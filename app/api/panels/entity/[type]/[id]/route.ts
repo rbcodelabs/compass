@@ -12,6 +12,10 @@ function refusal(resolved: Extract<WorkItemResolution, { ok: false }>) {
   return NextResponse.json({ error: resolved.reason === "not_found" ? "Not found" : resolved.message }, { status: resolved.reason === "not_found" ? 404 : 400 });
 }
 
+// An assignee edit can start a cloud agent's run; its sandbox start is deferred with after() and shares this function's budget,
+// so give it room rather than the platform default (a function killed mid-start leaves the run QUEUED).
+export const maxDuration = 300;
+
 /**
  * Detail-panel data source for every entity type. GET
  *   /api/panels/entity/<type>/<id>?orgSlug=<>&workspaceSlug=<>

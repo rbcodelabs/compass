@@ -19,6 +19,7 @@ function matches(row: Row, where: Row | undefined): boolean {
     const value = row[key]
     if (condition !== null && typeof condition === "object" && !(condition instanceof Date)) {
       if ("in" in condition) return (condition.in as unknown[]).includes(value)
+      if ("lte" in condition) return value instanceof Date && value.getTime() <= (condition.lte as Date).getTime()
       if ("gte" in condition) return value instanceof Date && value.getTime() >= (condition.gte as Date).getTime()
       if ("startsWith" in condition) return typeof value === "string" && value.startsWith(condition.startsWith as string)
       if ("not" in condition) return value !== condition.not
@@ -114,7 +115,8 @@ const externalAgent = { id: "agent-ext", name: "CI bot", ownerUserId: "owner", o
 
 const launch = vi.fn(async () => ({ started: true }))
 const defer = vi.fn(async (task: () => Promise<unknown>) => { await task() })
-const deps = { getSnapshotId: async () => "snap-1", launch, defer, origin: () => "https://compass.test", env: { ANTHROPIC_API_KEY: "key", MCP_BYPASS_SECRET: "bypass" } as Record<string, string | undefined>, prisma: prisma as any }
+const finalize = vi.fn(async (args: Row) => { const run = db.state.agentRun.find((r) => r.id === args.runId); if (run) run.status = args.status; return { finalized: true } })
+const deps = { finalize, now: () => new Date(), getSnapshotId: async () => "snap-1", launch, defer, origin: () => "https://compass.test", env: { ANTHROPIC_API_KEY: "key", MCP_BYPASS_SECRET: "bypass" } as Record<string, string | undefined>, prisma: prisma as any }
 
 function assignTo(agentId: string | null, over: Row = {}) {
   db.state.task = [{ id: "task-1", workspaceId: WS, title: "Fix the signup copy", description: "Tighten it.", seqPrefix: "TASK", seqNumber: 7, assigneeAgentId: agentId, ...over }]
@@ -380,6 +382,37 @@ describe("taskConversationId", () => {
 
   it("cannot be steered by delimiter tricks between the two inputs", () => {
     expect(taskConversationId("a:b", "c")).not.toBe(taskConversationId("a", "b:c"))
+  })
+})
+
+describe("a run whose launch never happened", () => {
+  const OLD = new Date(Date.now() - 10 * 60_000)
+
+  it("is closed on the next trigger, freeing its concurrent slot and the conversation", async () => {
+    const stuck = liveRuns(sharedAgent.id, 5, { kind: "TASK_ASSIGNMENT", status: "QUEUED", startedAt: null, statusChangedAt: OLD })
+    db.state.agentRun = stuck
+    const outcome = await trigger()
+    expect(finalize).toHaveBeenCalledTimes(5)
+    expect(finalize).toHaveBeenCalledWith(expect.objectContaining({ status: "FAILED", errorCode: "RUN_START_FAILED" }))
+    expect(outcome.status).toBe("started")
+  })
+
+  it("leaves a run that is merely young, already started, or someone else's alone", async () => {
+    db.state.agentRun = [
+      ...liveRuns(sharedAgent.id, 1, { id: "young", kind: "TASK_ASSIGNMENT", status: "QUEUED", startedAt: null, statusChangedAt: new Date() }),
+      ...liveRuns(sharedAgent.id, 1, { id: "started", kind: "TASK_ASSIGNMENT", status: "RUNNING", startedAt: OLD, statusChangedAt: OLD }),
+      ...liveRuns(personalAgent.id, 1, { id: "other-agent", kind: "TASK_ASSIGNMENT", status: "QUEUED", startedAt: null, statusChangedAt: OLD }),
+      ...liveRuns(sharedAgent.id, 1, { id: "chat", kind: "CHAT", status: "QUEUED", startedAt: null, statusChangedAt: OLD }),
+    ]
+    await trigger()
+    expect(finalize.mock.calls.map(([args]) => (args as Row).runId)).toEqual([])
+  })
+
+  it("does not fail the assignment when closing the dead run itself fails", async () => {
+    db.state.agentRun = liveRuns(sharedAgent.id, 1, { kind: "TASK_ASSIGNMENT", status: "QUEUED", startedAt: null, statusChangedAt: OLD })
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const outcome = await trigger({}, { finalize: vi.fn(async () => { throw new Error("db down") }) })
+    expect(outcome.status).toBe("started")
   })
 })
 
