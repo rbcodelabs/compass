@@ -11,7 +11,7 @@ import { usePanelContext } from "@/components/panels/panel-context";
 import { OpportunityHeader } from "./opportunity-header";
 import { SolutionsList } from "./solutions-list";
 import { AddSolutionForm } from "./add-solution-form";
-import { OSTTreeView, type OSTSolutionNode } from "./ost-tree-view";
+import { OSTTreeView, type OSTOpportunityNode, type OSTSolutionNode } from "./ost-tree-view";
 import { EvidenceList, type EvidenceListItem } from "./evidence-list";
 import { AddEvidenceDialog } from "./add-evidence-dialog";
 import { LinkedFeedback, type LinkedFeedbackItem } from "./linked-feedback";
@@ -36,6 +36,8 @@ type OpportunityData = ComponentProps<typeof OpportunityHeader>["opportunity"] &
   squads: ComponentProps<typeof OpportunityHeader>["squads"];
   availableKeyResults: ComponentProps<typeof OpportunityHeader>["availableKeyResults"];
   linkedObjectives?: ComponentProps<typeof OpportunityHeader>["linkedObjectives"];
+  chainObjectives?: OSTOpportunityNode["chainObjectives"];
+  roadmapItems?: OSTOpportunityNode["roadmapItems"];
   availableObjectives?: ComponentProps<typeof OpportunityHeader>["availableObjectives"];
   customFields: ComponentProps<typeof CustomFieldsPanel>["fields"];
   score: { normalizedScore: number; modelVersion: number } | null;

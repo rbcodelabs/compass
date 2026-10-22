@@ -174,7 +174,7 @@ Views are **personal** by default. The owner can share a view with the workspace
 
 ## All Roadmaps (Cross-Workspace)
 
-**All roadmaps** in the sidebar opens a read-only roadmap at `/[org]/roadmap` that combines every workspace in the organization you can read. Filter by workspace, horizon, squad, status, date range, or linked key result or solution, then group and sort the results. Each item links back to its own workspace, where you edit it. The same saved views menu is available here.
+**All roadmaps**, in the workspace picker (the menu at the top of the sidebar) and in the account menu on a phone, opens a read-only roadmap at `/[org]/roadmap` that combines every workspace in the organization you can read. Filter by workspace, horizon, squad, status, date range, or linked key result or solution, then group and sort the results. Each item links back to its own workspace, where you edit it. The same saved views menu is available here.
 
 Because `roadmap` and `settings` are used by these organization pages, they cannot be used as workspace slugs.
 

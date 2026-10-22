@@ -246,3 +246,22 @@ real reason; don't just omit the line.
 This exists because five PRs merged here on 2026-09-26 (#296, #303, #305,
 #306, #308) with no Task or Solution link at all, silently drifting Compass's
 roadmap/solution state out of sync with what had actually shipped.
+
+## QA report screenshots
+
+QA Report Docs in the `rbcodelabs/compass` workspace must carry real
+screenshots, not vault paths. Compass has private Docs image storage:
+
+1. `prepare_doc_image_upload(workspaceId, filename, fileType, fileSize)` (MCP).
+   PNG/JPEG/GIF/WebP only, exact byte size, 10 MiB max. It returns `pathname`,
+   `clientToken` (valid about 10 minutes), and ready-made `markdown`.
+2. Upload the bytes with `@vercel/blob/client`:
+   `put(pathname, new Blob([bytes], { type }), { access: "private", token: clientToken, contentType: type })`.
+   Use a throwaway Node script under `/tmp` (install `@vercel/blob` there, name
+   the file `.mts` for top-level await). Never print the token. The browser
+   route `POST /api/docs/upload` (session-gated multipart: `workspaceId`, `file`)
+   also works but needs a signed-in session.
+3. Embed the returned markdown (`![name](/api/docs/images/<workspaceId>/<uuid>.png)`)
+   with `edit_doc`. Images are private: `GET /api/docs/images/...` returns 404
+   unless the request carries a session of a workspace member.
+4. Read the doc back signed in and confirm each image renders.
