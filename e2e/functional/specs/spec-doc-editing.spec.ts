@@ -53,11 +53,31 @@ function editorMarkdown(page: Page) {
   });
 }
 
-/** Put the cursor in a fresh empty paragraph at the very end of the document. */
+/**
+ * Put the caret in an empty top-level paragraph at the very end of the document, deterministically (no pixel click: at phone width the
+ * centre of the editor can be a card). Reuses the empty trailing paragraph when there is one, else appends one. Asserts the result so a
+ * helper failure is reported as such, not as a missing menu.
+ */
 async function cursorToNewLastParagraph(page: Page) {
-  await page.locator(".ProseMirror").click();
-  await page.keyboard.press("Control+End");
-  await page.keyboard.press("Enter");
+  const placed = await page.evaluate(() => {
+    const dom = document.querySelector(".ProseMirror") as unknown as {
+      editor: {
+        commands: { focus(position: "end"): boolean };
+        chain(): { insertContentAt(pos: number, content: unknown): { focus(position: "end"): { run(): boolean } } };
+        state: { doc: { content: { size: number } }; selection: { empty: boolean; $from: { depth: number; parent: { type: { name: string }; content: { size: number } } } } };
+      };
+    };
+    const { editor } = dom;
+    const inEmptyTopLevelParagraph = () => {
+      const { empty, $from } = editor.state.selection;
+      return empty && $from.depth === 1 && $from.parent.type.name === "paragraph" && $from.parent.content.size === 0;
+    };
+    editor.commands.focus("end");
+    if (!inEmptyTopLevelParagraph()) editor.chain().insertContentAt(editor.state.doc.content.size, { type: "paragraph" }).focus("end").run();
+    return inEmptyTopLevelParagraph();
+  });
+  expect(placed, "caret should be in an empty top-level paragraph at the end of the document").toBe(true);
+  await expect(page.locator(".ProseMirror")).toBeFocused();
 }
 
 test.describe("Spec docs: editing", () => {
