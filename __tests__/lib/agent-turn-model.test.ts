@@ -50,3 +50,36 @@ describe("effectiveTurnModel precedence", () => {
     expect(deploymentDefaultModel("claude", env)).toBe("global.anthropic.claude-sonnet-5-5")
   })
 })
+
+describe("parseRequestedTurnModel: hostile and odd input", () => {
+  const env = { COMPASS_CLOUD_AGENT_MODELS: "claude-opus-9" }
+  it.each([
+    ["case variants", "CLAUDE-SONNET-5"],
+    ["mixed case", "Claude-Sonnet-5"],
+    ["a unicode lookalike (Cyrillic с)", "сlaude-sonnet-5"],
+    ["a fullwidth lookalike", "ｃｌａｕｄｅ-sonnet-5"],
+    ["a zero-width character inside", "claude-sonnet​-5"],
+    ["__proto__", "__proto__"],
+    ["constructor", "constructor"],
+    ["toString", "toString"],
+  ])("refuses %s", (_label, value) => {
+    expect(parseRequestedTurnModel(value, "claude", env)).toMatchObject({ ok: false, code: "INVALID_MODEL" })
+  })
+
+  it("caps how much of a huge value the error echoes", () => {
+    const result = parseRequestedTurnModel("x".repeat(10_000), "claude", env)
+    expect(result).toMatchObject({ ok: false, code: "INVALID_MODEL" })
+    if (!result.ok) expect(result.message.length).toBeLessThan(120)
+  })
+
+  it("trims surrounding whitespace, including tabs and newlines", () => {
+    expect(parseRequestedTurnModel("\t claude-opus-9\n", "claude", env)).toEqual({ ok: true, model: "claude-opus-9" })
+  })
+})
+
+describe("effectiveTurnModel with a null-ish agent model", () => {
+  it.each([null, undefined, "", "   "])("an agent model of %j never hides an explicit pick or the default", (agentModel) => {
+    expect(effectiveTurnModel({ explicit: "claude-opus-9", agentModel, harness: "claude", env: {} })).toBe("claude-opus-9")
+    expect(effectiveTurnModel({ explicit: null, agentModel, harness: "claude", env: {} })).toBe("claude-sonnet-5")
+  })
+})

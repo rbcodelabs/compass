@@ -840,6 +840,46 @@ describe("agent turn route — detached runs", () => {
       },
     )
 
+    it("trims a padded pick through the route, forwards and records the trimmed id", async () => {
+      process.env.COMPASS_CLOUD_AGENT_MODELS = "claude-haiku-9"
+      const { runCommand } = sandbox()
+      expect((await POST(req({ workspaceId: "ws-1", message: "hi", model: "  claude-haiku-9\t" }))).status).toBe(202)
+      expect(env(runCommand).AGENT_MODEL).toBe("claude-haiku-9")
+      expect(runMocks.create).toHaveBeenCalledWith(expect.objectContaining({ model: "claude-haiku-9" }))
+    })
+
+    it.each([["a case variant", "CLAUDE-SONNET-5"], ["a unicode lookalike", "сlaude-sonnet-5"], ["__proto__", "__proto__"], ["constructor", "constructor"], ["toString", "toString"]])(
+      "400s %s through the route",
+      async (_label, model) => {
+        sandbox()
+        const response = await POST(req({ workspaceId: "ws-1", message: "hi", model }))
+        expect(response.status).toBe(400)
+        expect(await response.json()).toMatchObject({ code: "INVALID_MODEL" })
+        expect(runMocks.create).not.toHaveBeenCalled()
+      },
+    )
+
+    it("400s a 10k-character model and does not echo it back", async () => {
+      sandbox()
+      const response = await POST(req({ workspaceId: "ws-1", message: "hi", model: "x".repeat(10_000) }))
+      expect(response.status).toBe(400)
+      const text = await response.text()
+      expect(text.length).toBeLessThan(300)
+      expect(runMocks.create).not.toHaveBeenCalled()
+    })
+
+    it.each([null, "", "   "])("an agent whose saved model is %j still honours an explicit pick, and otherwise runs on the default", async (agentModel) => {
+      identityMocks.resolve.mockResolvedValue({ ...agent, model: agentModel })
+      process.env.COMPASS_CLOUD_AGENT_MODELS = "claude-haiku-9"
+      const first = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID, model: "claude-haiku-9" }))
+      expect(env(first.runCommand).AGENT_MODEL).toBe("claude-haiku-9")
+      const second = sandbox()
+      await POST(req({ workspaceId: "ws-1", message: "hi", agentId: AGENT_ID }))
+      expect(env(second.runCommand).AGENT_MODEL).toBe("claude-sonnet-5")
+      expect(runMocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ model: "claude-sonnet-5" }))
+    })
+
     it("a blank pick is no pick", async () => {
       const { runCommand } = sandbox()
       expect((await POST(req({ workspaceId: "ws-1", message: "hi", model: "  " }))).status).toBe(202)

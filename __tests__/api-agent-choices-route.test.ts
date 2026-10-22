@@ -56,6 +56,13 @@ describe("GET /api/agent/choices", () => {
       expect(body.modelLabels).toMatchObject({ "claude-sonnet-5": "Claude Sonnet 5", "claude-opus-9": "claude-opus-9" })
     })
 
+    it("returns no models to a non-member, even when the deployment offers several", async () => {
+      process.env.COMPASS_CLOUD_AGENT_MODELS = "claude-opus-9"
+      mockPrisma.workspace.findFirst.mockResolvedValue(null)
+      const body = await (await get("workspaceId=ws-9")).json()
+      expect(body).toEqual({ agents: [], defaultAgentId: null, models: [], deploymentModel: null, modelLabels: {} })
+    })
+
     it("follows AGENT_MODEL_ID for the default", async () => {
       process.env.AGENT_MODEL_ID = "claude-opus-9"
       expect((await (await get("workspaceId=ws-1")).json()).deploymentModel).toBe("claude-opus-9")
