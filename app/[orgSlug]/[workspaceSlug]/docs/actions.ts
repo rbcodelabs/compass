@@ -5,6 +5,9 @@ import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import getPrisma from "@/lib/db";
 import { createPositioningBriefCore } from "@/lib/positioning-brief";
+import { createSpecCore, scopeNotFoundMessage } from "@/lib/spec-docs/create";
+import { isSpecScopeType, type SpecScopeType } from "@/lib/spec-docs/scopes";
+import type { SpecTemplateVariant } from "@/lib/spec-docs/template";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
 import { Prisma } from "@prisma/client";
 import { followAfterCreate } from "@/lib/following-hooks";
@@ -405,6 +408,31 @@ export async function createPositioningBrief(
     );
   }
 
+  revalidatePath(revalidatePathStr);
+  return { docId: result.docId };
+}
+
+/**
+ * Create a NEW Spec (Solution scope) or Discovery Plan (Opportunity scope) doc. Always a new doc, never an existing one: a solution may have
+ * many specs. An explicit action, never run from a page load. Failures are returned as values (production masks a thrown server-action
+ * message); the scope check is in the caller's workspace, so a foreign scope and a missing one read identically.
+ */
+export async function createSpec(
+  workspaceId: string,
+  scopeType: SpecScopeType,
+  scopeId: string,
+  revalidatePathStr: string,
+  options: { template?: SpecTemplateVariant; label?: string } = {}
+): Promise<{ docId: string } | { error: string }> {
+  const user = await requireWorkspaceMember(workspaceId);
+  if (!isSpecScopeType(scopeType)) return { error: "Choose a valid scope for the spec." };
+  const result = await createSpecCore(
+    { workspaceId, scopeType, scopeId, template: options.template, label: options.label },
+    { userId: user.id ?? null, authorName: user.name ?? user.email ?? "Unknown", source: "UI" }
+  );
+  if (!result.ok) {
+    return { error: result.error === "scope_not_found" ? scopeNotFoundMessage(scopeType) : "Could not create the spec. Try again." };
+  }
   revalidatePath(revalidatePathStr);
   return { docId: result.docId };
 }

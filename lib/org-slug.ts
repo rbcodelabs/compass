@@ -35,6 +35,7 @@ export const RESERVED_ORG_SLUGS: ReadonlySet<string> = new Set([
   "preview-login",
   "research",
   "settings",
+  "chain-graph-bench",
   "ui",
   // Served by the proxy / public/ or routed specially; not app/ directories.
   "auth",

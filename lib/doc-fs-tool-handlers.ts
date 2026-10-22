@@ -102,6 +102,8 @@ export async function writeDoc({
       operationId,
       expectedRevision,
       docType,
+      // Agent writes are strict about compass:// embeds in SPEC docs; UI saves and Geode sync call doc-fs without this flag.
+      strictEmbeds: true,
       ...documentMcpActor(),
     })
   } catch (error) {

@@ -559,6 +559,7 @@ export async function linkTask({
   try { await validateTaskLink(task.workspaceId, linkedType, linkedId) }
   catch (error) { return fail(error instanceof Error ? error.message : "Invalid task link") }
 
+  // Stays on task_links (not the TASK read flip): the existence check of a write, and it reports the legacy row id.
   const existingLink = await prisma.taskLink.findFirst({
     where: { taskId, linkedType, linkedId },
   })
@@ -589,6 +590,7 @@ export async function unlinkTask({
 }) {
   const prisma = getPrisma()
 
+  // Stays on task_links (not the TASK read flip): finds the legacy row to delete by id.
   const link = await prisma.taskLink.findFirst({ where: { taskId, linkedType, linkedId } })
   if (!link) {
     return fail(`No link found between task "${taskId}" and ${linkedType} "${linkedId}".`)
@@ -615,6 +617,7 @@ export async function listTaskLinks({ taskId }: { taskId: string }) {
     return fail(`Task "${taskId}" not found.`)
   }
 
+  // Stays on task_links (not the TASK read flip): the listing exposes the legacy link id and includes COMMENT links, which entity_links never carries.
   const rawLinks = await prisma.taskLink.findMany({ where: { taskId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] })
   if (!rawLinks.length) {
     return ok(`Task "${task.title}" has no links.`, { items: [], count: 0 })

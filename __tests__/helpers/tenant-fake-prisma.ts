@@ -121,9 +121,9 @@ export function createTenantFakePrisma() {
     { id: "kr-null", objectiveId: "obj-null", title: "Key result under an unbackfilled objective", target: 10, current: 0, sortOrder: 0 },
   ];
   const assumptions: Graph[] = [
-    { id: "asm-a", solutionId: "sol-a", title: "A assumption" },
-    { id: "asm-b", solutionId: "sol-b", title: "B assumption" },
-    { id: "asm-null", solutionId: "sol-null", title: "Assumption under an unbackfilled solution" },
+    { id: "asm-a", solutionId: "sol-a", title: "A assumption", status: "UNTESTED", riskLevel: "MEDIUM", sortOrder: 0, createdAt: new Date(1) },
+    { id: "asm-b", solutionId: "sol-b", title: "B assumption", status: "UNTESTED", riskLevel: "MEDIUM", sortOrder: 0, createdAt: new Date(1) },
+    { id: "asm-null", solutionId: "sol-null", title: "Assumption under an unbackfilled solution", status: "UNTESTED", riskLevel: "MEDIUM", sortOrder: 0, createdAt: new Date(1) },
   ];
   const solutionComments: Graph[] = [
     { id: "scm-a", solutionId: "sol-a", body: "A comment" },
@@ -137,9 +137,9 @@ export function createTenantFakePrisma() {
   // Generic links (ADR phase 2): experiments, research studies and the entity_links rows between them. The pair
   // (fromId, toId) is unique like the real (from_id, link_type, to_id) index; tests use one link type at a time.
   const experiments: Graph[] = [
-    { id: "exp-a", workspaceId: WS_A.id, title: "A experiment", status: "DESIGNING", updatedAt: new Date(1) },
-    { id: "exp-a2", workspaceId: WS_A.id, title: "A experiment 2", status: "DESIGNING", updatedAt: new Date(1) },
-    { id: "exp-b", workspaceId: WS_B.id, title: "B experiment", status: "DESIGNING", updatedAt: new Date(1) },
+    { id: "exp-a", workspaceId: WS_A.id, title: "A experiment", status: "DESIGNING", updatedAt: new Date(1), assumptionId: null, createdAt: new Date(1) },
+    { id: "exp-a2", workspaceId: WS_A.id, title: "A experiment 2", status: "DESIGNING", updatedAt: new Date(1), assumptionId: null, createdAt: new Date(1) },
+    { id: "exp-b", workspaceId: WS_B.id, title: "B experiment", status: "DESIGNING", updatedAt: new Date(1), assumptionId: null, createdAt: new Date(1) },
   ];
   const researchStudies: Graph[] = [
     { id: "study-a", workspaceId: WS_A.id, name: "A interviews", studyType: "CUSTOMER_INTERVIEW", status: "ACTIVE", updatedAt: new Date(1) },
@@ -169,6 +169,19 @@ export function createTenantFakePrisma() {
     { id: "rr-b", workspaceId: WS_B.id, gateType: "TRACKED_DECISION", currentRevisionId: "rev-b" },
   ];
   const artifactLinks: Graph[] = [];
+  // Task links (ADR phase 7): tasks, roadmap items and the legacy task_links rows (the `task` relation resolves through taskId).
+  const tasks: Graph[] = [
+    { id: "task-a", workspaceId: WS_A.id, title: "A task", status: "TODO" },
+    { id: "task-a2", workspaceId: WS_A.id, title: "A task 2", status: "DONE" },
+    { id: "task-a3", workspaceId: WS_A.id, title: "A task 3", status: "IN_PROGRESS" },
+    { id: "task-b", workspaceId: WS_B.id, title: "B task", status: "TODO" },
+  ];
+  const roadmapItems: Graph[] = [
+    { id: "ri-a", workspaceId: WS_A.id, title: "A roadmap item" },
+    { id: "ri-a2", workspaceId: WS_A.id, title: "A roadmap item 2" },
+    { id: "ri-b", workspaceId: WS_B.id, title: "B roadmap item" },
+  ];
+  const taskLinks: Graph[] = [];
   const workspaceRows = workspaces as unknown as Graph[];
   const tables: Record<string, Graph[]> = {
     opportunityObjectiveLink: opportunityObjectiveLinks,
@@ -178,6 +191,9 @@ export function createTenantFakePrisma() {
     reviewRequest: reviewRequests,
     reviewRevision: reviewRevisions,
     artifactLink: artifactLinks,
+    task: tasks,
+    roadmapItem: roadmapItems,
+    taskLink: taskLinks,
     experiment: experiments,
     researchStudy: researchStudies,
     workspace: workspaceRows,
@@ -200,6 +216,7 @@ export function createTenantFakePrisma() {
     assumption: { solution: { model: "solution", fk: "solutionId" } },
     solutionComment: { solution: { model: "solution", fk: "solutionId" } },
     reviewRequest: { currentRevision: { model: "reviewRevision", fk: "currentRevisionId" } },
+    taskLink: { task: { model: "task", fk: "taskId" } },
   };
   const relatedRow = (model: string, row: Graph, relation: string): { model: string; row: Graph | null } | null => {
     const rel = relations[model]?.[relation];
@@ -367,10 +384,13 @@ export function createTenantFakePrisma() {
     return true;
   };
 
-  const docs = [
-    { id: "doc-a", workspaceId: WS_A.id },
-    { id: "doc-b", workspaceId: WS_B.id },
+  // Docs are a modelled table (spec docs phase 2: DOC is an endpoint of DOC_SPECIFIES_SCOPE). doc-null is a row whose workspace is NULL.
+  const docs: Graph[] = [
+    { id: "doc-a", workspaceId: WS_A.id, title: "A doc", docType: "STANDARD", metadata: null, storageProvider: null, parentId: null, sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },
+    { id: "doc-b", workspaceId: WS_B.id, title: "B doc", docType: "STANDARD", metadata: null, storageProvider: null, parentId: null, sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },
+    { id: "doc-null", workspaceId: null, title: "Unbackfilled doc", docType: "STANDARD", metadata: null, storageProvider: null, parentId: null, sortOrder: 0, createdAt: new Date(1), updatedAt: new Date(1) },
   ];
+  tables.doc = docs;
   const docVersions = [
     { id: "ver-a", docId: "doc-a", content: "A secret", title: "A doc" },
     { id: "ver-b", docId: "doc-b", content: "B secret", title: "B doc" },
@@ -473,9 +493,7 @@ export function createTenantFakePrisma() {
         return { count: rows.length };
       },
     },
-    doc: {
-      findUnique: async ({ where }: { where: { id: string } }) => docs.find((d) => d.id === where.id) ?? null,
-    },
+    doc: delegate("doc"),
     docVersion: {
       findUnique: async ({ where }: { where: { id: string } }) => docVersions.find((v) => v.id === where.id) ?? null,
     },
@@ -494,6 +512,9 @@ export function createTenantFakePrisma() {
     artifact: delegate("artifact"),
     reviewRequest: delegate("reviewRequest"),
     artifactLink: delegate("artifactLink"),
+    task: delegate("task"),
+    roadmapItem: delegate("roadmapItem"),
+    taskLink: delegate("taskLink"),
     experiment: delegate("experiment"),
     researchStudy: delegate("researchStudy"),
     $transaction: async (work: (tx: unknown) => unknown) => work(client),
@@ -521,7 +542,7 @@ export function createTenantFakePrisma() {
       const workspace = workspaces.find((w) => w.id === workspaceId);
       if (workspace && !workspace.members.includes(userId)) workspace.members.push(userId);
     },
-    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks, workspaces, experiments, researchStudies, entityLinks, artifacts, reviewRequests, artifactLinks },
+    state: { feedback, opportunities, squads, writes, solutions: graphSolutions, objectives, keyResults, assumptions, solutionComments, okrCycles, opportunityObjectiveLinks, solutionKeyResultLinks, workspaces, experiments, researchStudies, entityLinks, artifacts, reviewRequests, artifactLinks, tasks, roadmapItems, taskLinks, docs },
     /** Snapshot of every feedback row, for before/after "nothing changed" assertions. */
     snapshotFeedback: () => JSON.parse(JSON.stringify(feedback)) as unknown,
   };
