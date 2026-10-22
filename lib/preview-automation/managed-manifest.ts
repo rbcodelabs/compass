@@ -217,7 +217,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "103_shared_compass_agent_bootstrap": "5eaf5543ac6be12db4b69a3d2250d095e48f361b33e683f1752c0ca7527f0929",
   // Two ASYNC created_at indexes (agent_run_events, agent_messages) for the agent-data retention job. Additive and optional: no table change,
   // no backfill, one DDL statement per transaction. The 104 postcondition proves both indexes exist and are valid.
-  "104_agent_retention_indexes": "2c6da24d861aa569f3ea44aca15f2ac98718ec13c3985a3a8997a1e7a65a1813"
+  "104_agent_retention_indexes": "2c6da24d861aa569f3ea44aca15f2ac98718ec13c3985a3a8997a1e7a65a1813",
+  // Per-workspace agent GitHub repo allowlist: one nullable TEXT column on workspaces (JSON array of "owner/name"). No index, no backfill.
+  // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
+  "105_workspace_agent_github_repos": "ed1b4077170a09220767762c3756c763bd6db1031896dd7f6e44da07b17bdd80"
 };
 
 /**

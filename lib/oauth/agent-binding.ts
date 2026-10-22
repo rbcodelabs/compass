@@ -72,8 +72,6 @@ export interface BindableAgent {
 
 /** Everything the consent screen needs in order to render the binding section. */
 export interface ConsentBindingOptions {
-  /** `COMPASS_AGENTS_ENABLED`. Off means Phase 1 behavior verbatim. */
-  agentsEnabled: boolean
   agents: BindableAgent[]
   grantable: GrantableWorkspace[]
   /** True when the admin-override disclosure may be rendered at all. */
@@ -272,26 +270,13 @@ export function inlineGrantAccess(requestedScopes: readonly string[]): "READ" | 
   return requestedScopes.includes(SCOPE_MCP_WRITE) || requestedScopes.includes(SCOPE_API_WRITE) ? "WRITE" : "READ"
 }
 
-export const AGENTS_ENABLED_ENV = "COMPASS_AGENTS_ENABLED"
-
-/** Read directly rather than imported from lib/agent-access, which pulls in Prisma types. */
-function agentsAreEnabled(): boolean {
-  return process.env[AGENTS_ENABLED_ENV] === "1"
-}
-
 // ── loading ───────────────────────────────────────────────────────────────
 
 /**
  * Everything the binding section needs, in two round trips.
- *
- * When agents are disabled the agent queries are skipped entirely: the section
- * is not rendered, so there is nothing to populate, and the consent screen
- * falls back to exactly its Phase 1 behavior. The flag's off-state being the
- * currently shipped behavior is what makes it usable as a rollout control.
  */
 export async function loadConsentBindingOptions(userId: string): Promise<ConsentBindingOptions> {
   const prisma = getPrisma()
-  const agentsEnabled = agentsAreEnabled()
 
   const [memberships, orgMemberships] = await Promise.all([
     prisma.workspaceMember.findMany({
@@ -325,10 +310,6 @@ export async function loadConsentBindingOptions(userId: string): Promise<Consent
   const { grantable, unresolved } = selectGrantableWorkspaces(rows)
   const overrideAvailable = overridePredicateHolds(overrideRolesForMemberships(rows, orgMemberships))
 
-  if (!agentsEnabled) {
-    return { agentsEnabled, agents: [], grantable, overrideAvailable, unresolvedMemberships: unresolved }
-  }
-
   // Personal OAuth bindings reach only the account's own (USER-owned) agents.
   const agentRows = await listUserOwnedAgents(prisma, userId, { status: "ACTIVE" })
   const grants = agentRows.length
@@ -349,7 +330,6 @@ export async function loadConsentBindingOptions(userId: string): Promise<Consent
   const reachByAgent = selectAgentReach(grants, memberWorkspaces)
 
   return {
-    agentsEnabled,
     agents: agentRows.map((agent) => ({ ...agent, reach: reachByAgent.get(agent.id) ?? [] })),
     grantable,
     overrideAvailable,
@@ -459,13 +439,6 @@ export async function resolveConsentBinding(
   effects: BindingEffects,
 ): Promise<ResolvedBinding> {
   const { options } = context
-
-  // The flag is checked before the choice, not after. With agents off there is
-  // no binding section on the screen, so any binding field in the body is
-  // either a stale form or a hand-rolled POST; both get Phase 1 behavior.
-  if (!options.agentsEnabled) {
-    return { ok: true, binding: { authorizationMode: "USER", agentId: null }, createdAgentId: null }
-  }
 
   switch (submitted.binding) {
     case "agent": {
@@ -587,14 +560,13 @@ export async function revalidateRememberedBinding(
   if (stored.authorizationMode === "USER") {
     // The override predicate is re-checked, so losing org-admin rights narrows
     // the next reconnect rather than the next 30 days.
-    if (!agentsAreEnabled()) return { authorizationMode: "USER", agentId: null }
     if (!(await isUserOverrideEligible(userId))) return null
     return { authorizationMode: "USER", agentId: null }
   }
 
   if (stored.authorizationMode !== "AGENT") return null
 
-  if (!agentsAreEnabled() || !stored.agentId) return null
+  if (!stored.agentId) return null
   const prisma = getPrisma()
   const agent = await findActiveUserOwnedAgent(prisma, stored.agentId, userId)
   if (!agent) return null

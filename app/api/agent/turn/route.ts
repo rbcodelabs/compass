@@ -51,6 +51,8 @@ import { effectiveTurnModel, parseRequestedTurnModel } from "@/lib/agent-turn-mo
 import { BUILT_IN_AGENT_SELECTION } from "@/lib/agent-defaults"
 import type { AgentRecord } from "@/lib/agent-ownership"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
+import { readWorkspaceAgentRepos } from "@/lib/agent-github-repos"
+import { mintAgentGithubEnv } from "@/lib/github-app-token"
 import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
 import { prepareCapabilityPacksForTurn, type ActiveCapabilityPack } from "@/lib/capability-pack-runtime"
 import { claimInterviewProcessing, DEFAULT_INTERVIEW_CLAIM_LEASE_MS, finishInterviewProcessing, failPendingInterviewProcessing, reportPmAgentFailure } from "@/lib/pm-agent-service"
@@ -59,7 +61,7 @@ import { handoffKind, parseProcessingState, processingStatus } from "@/lib/pm-ag
 import { HANDOFF_POLICIES } from "@/lib/agent-handoff-kinds"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import { connectorDefinition } from "@/lib/mcp-connectors/config"
-import { listConnectedGrants } from "@/lib/mcp-connectors/store"
+import { listConnections } from "@/lib/mcp-connectors/vercel-connect"
 import {
   AgentRunError,
   DEFAULT_AGENT_RUN_BUDGET_MS,
@@ -454,7 +456,7 @@ export async function POST(request: NextRequest) {
   // Failure is non-fatal on purpose: a connector lookup that throws must not cost
   // the user their turn, so it degrades to "no connectors" and the turn proceeds
   // exactly as it did before this feature existed.
-  const connectedGrants = await listConnectedGrants(userId, trustedCompassBaseUrl().origin, prisma).catch(error => {
+  const connectedGrants = await listConnections(userId, trustedCompassBaseUrl().origin, prisma).catch(error => {
     console.error("[agent-turn] could not list connected MCP connectors", error)
     return [] as Array<{ slug: string; scope: string }>
   })
@@ -534,6 +536,7 @@ export async function POST(request: NextRequest) {
       apiKeyId = minted.apiKeyId
       // An agent-scoped key is honoured only while a live run names it, so the run must name it before the sandbox exists.
       if (runAgent && !(await attachAgentRunKey({ prisma, runId: run.id, apiKeyId }))) throw new Error("agent run ended before its key could be attached")
+      const githubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))
       const sandbox = await bootSandboxFromSnapshot(snapshotId, {
         timeoutMs: budgetMs + 2 * RUN_INFRA_GRACE_MS,
         name: sandboxName,
@@ -583,6 +586,7 @@ export async function POST(request: NextRequest) {
           docs: Boolean(docMaterial),
           agent: runAgent ? { name: runAgent.name, instructions: runAgent.instructions ?? null, model: agentModelForHarness(runAgent.model, harness) } : undefined,
           modelOverride: explicitModel,
+          githubEnv,
         }),
         detached: true,
         timeoutMs: budgetMs,
@@ -646,6 +650,7 @@ export async function POST(request: NextRequest) {
         const minted = await analysisStep(() => mintAgentMcpKey(userId, workspaceId, scope), deadline, abort, late => revokeAgentMcpKey(late.apiKeyId))
         apiKeyId = minted.apiKeyId
         const token = minted.token
+        const githubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))
         const preparedPacks = await step(() => prepareCapabilityPacksForTurn(activePacks, { get: (pathname) => getCapabilityPackArtifactStorage().get(pathname) }))
         packProvenance = preparedPacks.provenanceJson
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
@@ -686,6 +691,7 @@ export async function POST(request: NextRequest) {
             shared: attribution.shared,
             docs: Boolean(docMaterial),
             modelOverride: explicitModel,
+            githubEnv,
           }),
           detached: true,
           timeoutMs: 4 * 60_000,

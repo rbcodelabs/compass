@@ -18,6 +18,9 @@ const mockPrisma = {
   agentMessage: { create: vi.fn(), findMany: vi.fn() },
   agentAuditLog: { createMany: vi.fn() },
   workspaceCapabilityPack: { findMany: vi.fn() },
+  // Agent features are always on, so every turn consults the stored agent defaults (none here).
+  userDefaultAgent: { findFirst: vi.fn().mockResolvedValue(null) },
+  workspaceDefaultAgent: { findFirst: vi.fn().mockResolvedValue(null) },
   // ADR 0019: the route materializes the doc tree (via lib/doc-fs.ts) before every turn.
   doc: { findMany: vi.fn(), findUnique: vi.fn() },
 }

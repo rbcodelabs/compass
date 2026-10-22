@@ -22,17 +22,15 @@ vi.mock("@/lib/mcp-auth", () => ({
 }))
 
 const mockAvailable = vi.fn()
-const mockFindGrant = vi.fn()
 vi.mock("@/lib/mcp-connectors/store", () => ({
   mcpConnectorsAvailable: () => mockAvailable(),
-  findGrant: (...args: unknown[]) => mockFindGrant(...args),
 }))
 
 const mockResolveToken = vi.fn()
-const mockRefreshGrant = vi.fn()
+const mockRefreshToken = vi.fn()
 vi.mock("@/lib/mcp-connectors/tokens", () => ({
   resolveConnectorToken: (...args: unknown[]) => mockResolveToken(...args),
-  refreshGrant: (...args: unknown[]) => mockRefreshGrant(...args),
+  refreshConnectorToken: (...args: unknown[]) => mockRefreshToken(...args),
 }))
 
 const { DELETE, GET, POST } = await import("@/app/api/integrations/mcp/[slug]/route")
@@ -287,8 +285,7 @@ describe("MCP connector gateway — the single 401 retry", () => {
       () => new Response("unauthorized", { status: 401 }),
       () => new Response('{"jsonrpc":"2.0"}', { status: 200 }),
     )
-    mockFindGrant.mockResolvedValue({ id: "grant-1", generation: 1 })
-    mockRefreshGrant.mockResolvedValue("refreshed-token")
+    mockRefreshToken.mockResolvedValue("refreshed-token")
 
     const response = await POST(request({ body: TOOLS_CALL }), params())
 
@@ -298,13 +295,12 @@ describe("MCP connector gateway — the single 401 retry", () => {
     expect(calls[1].headers.get("authorization")).toBe("Bearer refreshed-token")
     // The body was buffered up front precisely so the replay is a real replay.
     expect(calls[1].init.body).toBeDefined()
-    expect(mockRefreshGrant).toHaveBeenCalledTimes(1)
+    expect(mockRefreshToken).toHaveBeenCalledTimes(1)
   })
 
   it("stops after the second 401 instead of looping on refresh tokens", async () => {
     const calls = stubFetch(() => new Response("unauthorized", { status: 401 }))
-    mockFindGrant.mockResolvedValue({ id: "grant-1", generation: 1 })
-    mockRefreshGrant.mockResolvedValue("refreshed-token")
+    mockRefreshToken.mockResolvedValue("refreshed-token")
 
     const response = await POST(request({ body: TOOLS_CALL }), params())
 
@@ -315,18 +311,18 @@ describe("MCP connector gateway — the single 401 retry", () => {
     // Exactly two: the second 401 is the provider saying the grant is gone, and a
     // loop would spend rotating refresh tokens against a wall.
     expect(calls).toHaveLength(2)
-    expect(mockRefreshGrant).toHaveBeenCalledTimes(1)
+    expect(mockRefreshToken).toHaveBeenCalledTimes(1)
   })
 
   it("reports a grant disconnected mid-turn as a missing connection", async () => {
     stubFetch(() => new Response("unauthorized", { status: 401 }))
-    mockFindGrant.mockResolvedValue(null)
+    mockRefreshToken.mockResolvedValue(null)
 
     const response = await POST(request({ body: TOOLS_CALL }), params())
 
     expect(response.status).toBe(403)
     expect((await errorBody(response)).code).toBe(-32004)
-    expect(mockRefreshGrant).not.toHaveBeenCalled()
+    expect(mockRefreshToken).toHaveBeenCalledTimes(1)
   })
 
   it("does not retry a 403, which is the provider's answer about scope not staleness", async () => {
@@ -334,7 +330,7 @@ describe("MCP connector gateway — the single 401 retry", () => {
     const response = await POST(request({ body: TOOLS_CALL }), params())
     expect(response.status).toBe(403)
     expect(calls).toHaveLength(1)
-    expect(mockRefreshGrant).not.toHaveBeenCalled()
+    expect(mockRefreshToken).not.toHaveBeenCalled()
   })
 })
 

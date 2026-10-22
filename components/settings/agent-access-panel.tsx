@@ -18,12 +18,10 @@ export function AgentAccessPanel({
   orgSlug,
   rows,
   canManage,
-  agentsEnabled,
 }: {
   orgSlug: string;
   rows: AgentAccessRow[];
   canManage: boolean;
-  agentsEnabled: boolean;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -44,9 +42,6 @@ export function AgentAccessPanel({
         scoring models and assign one to a workspace. The grant lapses automatically if the admin who
         granted it loses their Owner/Admin role.
       </p>
-      {!agentsEnabled && (
-        <p className="text-sm text-text-muted">Agent changes are currently disabled; grants can be revoked but not issued.</p>
-      )}
       {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
       {rows.length === 0 ? (
         <p className="text-sm text-text-muted">No active agents owned by organization members.</p>
@@ -80,12 +75,12 @@ export function AgentAccessPanel({
                         Revoke
                       </Button>
                     ) : (
-                      <Button variant="outline" size="sm" disabled={isPending || !agentsEnabled} onClick={() => run(grantAgentScoringModelAdmin, row.agentId)}>
+                      <Button variant="outline" size="sm" disabled={isPending} onClick={() => run(grantAgentScoringModelAdmin, row.agentId)}>
                         Allow scoring-model admin
                       </Button>
                     )}
                     {row.granted && row.inactive && (
-                      <Button className="ml-2" size="sm" disabled={isPending || !agentsEnabled} onClick={() => run(grantAgentScoringModelAdmin, row.agentId)}>
+                      <Button className="ml-2" size="sm" disabled={isPending} onClick={() => run(grantAgentScoringModelAdmin, row.agentId)}>
                         Re-grant as me
                       </Button>
                     )}

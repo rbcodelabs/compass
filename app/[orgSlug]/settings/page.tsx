@@ -10,7 +10,6 @@ import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
 import { AgentAccessPanel } from "@/components/settings/agent-access-panel";
 import { listAgentAccessRows } from "@/lib/agent-org-admin-access";
-import { agentsEnabled } from "@/lib/agent-access";
 import { getSessionUser } from "@/lib/session";
 
 export const metadata = { title: "Organization Settings" };
@@ -124,7 +123,7 @@ export default async function OrgSettingsPage({ params }: Props) {
           title="Agent access"
           description="Delegate narrow organization-admin capabilities to a specific agent."
         >
-          <AgentAccessPanel orgSlug={orgSlug} rows={agentRows} canManage={canManageAgents} agentsEnabled={agentsEnabled()} />
+          <AgentAccessPanel orgSlug={orgSlug} rows={agentRows} canManage={canManageAgents} />
         </SettingsSection>
       )}
 

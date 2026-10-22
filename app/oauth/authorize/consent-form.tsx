@@ -63,7 +63,7 @@ export function ConsentForm({
   inlineAccess,
   userEmail,
 }: ConsentFormProps) {
-  const { agents, grantable, overrideAvailable, agentsEnabled } = options
+  const { agents, grantable, overrideAvailable } = options
 
   const firstUsableAgent = agents.find((agent) => agent.reach.length > 0) ?? agents[0]
   const [mode, setMode] = useState<Mode>(() => {
@@ -89,7 +89,6 @@ export function ConsentForm({
     () =>
       blockReason({
         mode: effectiveMode,
-        agentsEnabled,
         selectedAgentName: selectedAgent?.name ?? null,
         selectedAgentReach: selectedAgent?.reach.length ?? 0,
         hasAgents: agents.length > 0,
@@ -101,7 +100,6 @@ export function ConsentForm({
       }),
     [
       effectiveMode,
-      agentsEnabled,
       selectedAgent,
       agents.length,
       agentName,
@@ -163,51 +161,45 @@ export function ConsentForm({
           >
             {details}
 
-            {agentsEnabled ? (
-              <>
-                <ActAsSection
-                  agents={agents}
-                  grantable={grantable}
-                  inlineAccess={inlineAccess}
-                  mode={mode}
-                  agentId={agentId}
-                  agentName={agentName}
-                  checked={checked}
-                  disabled={overrideArmed}
-                  onMode={setMode}
-                  onAgent={(id) => {
-                    setMode("agent")
-                    setAgentId(id)
-                  }}
-                  onName={setAgentName}
-                  onToggle={toggle}
-                />
-                <EffectiveReachSection
-                  mode={effectiveMode}
-                  selectedReach={selectedAgent?.reach ?? []}
-                  newGrants={grantable.filter((workspace) => checked.has(workspace.id))}
-                  inlineAccess={inlineAccess}
-                  overrideReach={overrideReach}
-                />
-                {overrideAvailable ? (
-                  <OverrideDisclosure
-                    armed={overrideArmed}
-                    onArm={setOverrideArmed}
-                    confirmation={confirmation}
-                    onConfirmation={setConfirmation}
-                    userEmail={userEmail}
-                    reach={overrideReach}
-                  />
-                ) : (
-                  <p className="text-sm text-text-subtle">
-                    Authorizing as yourself, with your full account access, is only offered to
-                    owners and administrators of every organization they belong to. Connecting as
-                    an agent is the option available to you.
-                  </p>
-                )}
-              </>
+            <ActAsSection
+              agents={agents}
+              grantable={grantable}
+              inlineAccess={inlineAccess}
+              mode={mode}
+              agentId={agentId}
+              agentName={agentName}
+              checked={checked}
+              disabled={overrideArmed}
+              onMode={setMode}
+              onAgent={(id) => {
+                setMode("agent")
+                setAgentId(id)
+              }}
+              onName={setAgentName}
+              onToggle={toggle}
+            />
+            <EffectiveReachSection
+              mode={effectiveMode}
+              selectedReach={selectedAgent?.reach ?? []}
+              newGrants={grantable.filter((workspace) => checked.has(workspace.id))}
+              inlineAccess={inlineAccess}
+              overrideReach={overrideReach}
+            />
+            {overrideAvailable ? (
+              <OverrideDisclosure
+                armed={overrideArmed}
+                onArm={setOverrideArmed}
+                confirmation={confirmation}
+                onConfirmation={setConfirmation}
+                userEmail={userEmail}
+                reach={overrideReach}
+              />
             ) : (
-              overrideReach
+              <p className="text-sm text-text-subtle">
+                Authorizing as yourself, with your full account access, is only offered to
+                owners and administrators of every organization they belong to. Connecting as
+                an agent is the option available to you.
+              </p>
             )}
           </div>
         </form>
@@ -260,7 +252,6 @@ export function ConsentForm({
  */
 export function blockReason(state: {
   mode: Mode
-  agentsEnabled: boolean
   selectedAgentName: string | null
   selectedAgentReach: number
   hasAgents: boolean
@@ -270,7 +261,6 @@ export function blockReason(state: {
   confirmation: string
   userEmail: string | null
 }): string | null {
-  if (!state.agentsEnabled) return null
   switch (state.mode) {
     case "agent":
       if (!state.hasAgents || !state.selectedAgentName) return "Choose an agent to continue."
