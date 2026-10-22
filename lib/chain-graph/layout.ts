@@ -3,8 +3,11 @@
  * always yield the same positions (no Math.random: initial jitter is a hash of the node key, and d3-force's own source of
  * randomness is replaced with a seeded LCG). Positions are never pushed to React per tick; the caller gets the final map.
  *
- * Forces: Barnes-Hut many-body repulsion, links, collision by node radius, and a pull toward a per-group anchor so each
- * group forms a cloud. Anchors sit on a golden-angle spiral ordered by group index, spaced by the group's size.
+ * Forces: Barnes-Hut many-body repulsion, links (weak across groups, so a view where most edges cross groups, such as
+ * "Group by type", does not collapse the clouds together), collision by node radius, and a pull toward a per-group anchor so
+ * each group forms a cloud. Anchors sit on a golden-angle spiral, spaced so estimated clouds do not touch. A final
+ * deterministic pass then pushes any still-overlapping group circles (see groupCircles) apart, so separation is a property
+ * of the result and not just a tendency of the forces.
  */
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type SimulationLinkDatum, type SimulationNodeDatum } from "d3-force"
 
@@ -21,6 +24,8 @@ export type LayoutOptions = {
   ticks?: number
 }
 
+const CROSS_GROUP_LINK_STRENGTH = 0.03
+const GROUP_PULL = 0.14
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
 /**
  * Settle budget by size. The simulation runs on the main thread (a worker is a later phase), and cost grows with nodes x ticks
@@ -50,7 +55,12 @@ function seededRandom(seed: number): () => number {
   }
 }
 
-/** Anchor per group on a golden-angle spiral; bigger groups push the spiral outward so clouds do not overlap. */
+/** Estimated cloud radius for a group of n nodes (used to space anchors; the real extent is settled by the separation pass). */
+function cloudRadius(count: number): number {
+  return 40 * Math.sqrt(count) + 40
+}
+
+/** Anchor per group, placed greedily along a golden-angle spiral at the first spot whose estimated cloud clears all earlier ones. */
 export function groupAnchors(nodes: readonly LayoutNode[]): Map<string, Point> {
   const sizes = new Map<string, number>()
   const order: string[] = []
@@ -59,16 +69,102 @@ export function groupAnchors(nodes: readonly LayoutNode[]): Map<string, Point> {
     sizes.set(n.groupId, (sizes.get(n.groupId) ?? 0) + 1)
   }
   const anchors = new Map<string, Point>()
-  let travelled = 0
-  order.forEach((id, i) => {
-    const cloud = 52 * Math.sqrt(sizes.get(id) ?? 1) + 40
-    // Radius grows with the cumulative cloud area so far (sum of previous clouds), keeping spacing proportional to size.
-    const radius = i === 0 ? 0 : Math.sqrt(travelled) * 1.9
-    const angle = i * GOLDEN_ANGLE
-    anchors.set(id, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius })
-    travelled += cloud * cloud
+  const placed: Array<{ p: Point; r: number }> = []
+  order.forEach((id) => {
+    const r = cloudRadius(sizes.get(id) ?? 1)
+    let spot: Point = { x: 0, y: 0 }
+    for (let step = placed.length === 0 ? 0 : 1; ; step++) {
+      const radius = 24 * Math.sqrt(step) * 4
+      const angle = step * GOLDEN_ANGLE
+      spot = { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
+      if (placed.every((o) => Math.hypot(o.p.x - spot.x, o.p.y - spot.y) >= o.r + r + GROUP_GAP)) break
+    }
+    anchors.set(id, spot)
+    placed.push({ p: spot, r })
   })
   return anchors
+}
+
+/** Padding between a group's members and its halo, and the minimum clear gap kept between two halos. */
+export const HALO_PADDING = 36
+export const GROUP_GAP = 16
+
+export type GroupCircle = { id: string; cx: number; cy: number; r: number; count: number }
+
+/**
+ * Halo circle per group: centred on the member centroid, radius from the 90th-percentile member distance plus padding, so a
+ * single outlier (a node dragged out by a cross-group link, or by the user) does not inflate the circle. Shared by the layout's
+ * separation pass, the renderer (computed from live positions so halos follow drags) and the tests.
+ */
+export function groupCircles(items: Iterable<{ groupId: string; x: number; y: number }>): GroupCircle[] {
+  const byGroup = new Map<string, Point[]>()
+  for (const it of items) {
+    const list = byGroup.get(it.groupId)
+    if (list) list.push({ x: it.x, y: it.y })
+    else byGroup.set(it.groupId, [{ x: it.x, y: it.y }])
+  }
+  return [...byGroup.entries()].map(([id, pts]) => {
+    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length
+    const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length
+    const dist = pts.map((p) => Math.hypot(p.x - cx, p.y - cy)).sort((a, b) => a - b)
+    const p90 = dist[Math.max(0, Math.ceil(dist.length * 0.9) - 1)]
+    return { id, cx, cy, r: p90 + HALO_PADDING, count: pts.length }
+  })
+}
+
+/**
+ * Pushes overlapping group circles apart by translating whole groups (never reshaping them). Groups holding a pinned node stay
+ * put; if both circles are fixed they are left overlapping. Deterministic: fixed pair order, no randomness.
+ */
+function separateGroups(positions: Map<string, Point>, nodes: readonly LayoutNode[], fixed: ReadonlySet<string>): void {
+  const members = new Map<string, string[]>()
+  for (const n of nodes) {
+    const list = members.get(n.groupId)
+    if (list) list.push(n.key)
+    else members.set(n.groupId, [n.key])
+  }
+  const frozen = new Set<string>()
+  for (const [id, keys] of members) if (keys.some((k) => fixed.has(k))) frozen.add(id)
+  const shift = (id: string, dx: number, dy: number) => {
+    for (const k of members.get(id) ?? []) {
+      const p = positions.get(k)
+      if (p) positions.set(k, { x: p.x + dx, y: p.y + dy })
+    }
+  }
+  for (let pass = 0; pass < 400; pass++) {
+    const circles = groupCircles(nodes.map((n) => ({ groupId: n.groupId, ...positions.get(n.key)! })))
+    let moved = false
+    for (let i = 0; i < circles.length; i++) {
+      for (let j = i + 1; j < circles.length; j++) {
+        const a = circles[i]
+        const b = circles[j]
+        const need = a.r + b.r + GROUP_GAP
+        let dx = b.cx - a.cx
+        let dy = b.cy - a.cy
+        let d = Math.hypot(dx, dy)
+        if (d >= need - 0.01) continue
+        if (frozen.has(a.id) && frozen.has(b.id)) continue
+        if (d < 1e-6) {
+          const angle = (i * 7 + j) * GOLDEN_ANGLE
+          dx = Math.cos(angle)
+          dy = Math.sin(angle)
+          d = 1
+        }
+        const push = need - d
+        const ux = dx / d
+        const uy = dy / d
+        const share = frozen.has(a.id) || frozen.has(b.id) ? 1 : 0.5
+        if (!frozen.has(a.id)) shift(a.id, -ux * push * share, -uy * push * share)
+        if (!frozen.has(b.id)) shift(b.id, ux * push * share, uy * push * share)
+        a.cx -= frozen.has(a.id) ? 0 : ux * push * share
+        a.cy -= frozen.has(a.id) ? 0 : uy * push * share
+        b.cx += frozen.has(b.id) ? 0 : ux * push * share
+        b.cy += frozen.has(b.id) ? 0 : uy * push * share
+        moved = true
+      }
+    }
+    if (!moved) return
+  }
 }
 
 type SimNode = SimulationNodeDatum & { key: string; groupId: string; radius: number }
@@ -114,14 +210,17 @@ export function layoutGraph(nodes: readonly LayoutNode[], edges: readonly Layout
       forceLink<SimNode, (typeof links)[number]>(links)
         .id((d) => d.key)
         .distance(70)
-        .strength(0.25),
+        // Weak across groups: in "Group by type" nearly every edge crosses groups and a strong link would drag the clouds together.
+        .strength((l) => ((l.source as SimNode).groupId === (l.target as SimNode).groupId ? 0.25 : CROSS_GROUP_LINK_STRENGTH)),
     )
     .force("collide", forceCollide<SimNode>((d) => d.radius + 4).strength(0.9))
-    .force("x", forceX<SimNode>((d) => anchors.get(d.groupId)!.x).strength(0.09))
-    .force("y", forceY<SimNode>((d) => anchors.get(d.groupId)!.y).strength(0.09))
+    .force("x", forceX<SimNode>((d) => anchors.get(d.groupId)!.x).strength(GROUP_PULL))
+    .force("y", forceY<SimNode>((d) => anchors.get(d.groupId)!.y).strength(GROUP_PULL))
 
   simulation.tick(options.ticks ?? defaultTicks(nodes.length))
 
-  for (const node of sim) result.set(node.key, { x: Math.round((node.x ?? 0) * 100) / 100, y: Math.round((node.y ?? 0) * 100) / 100 })
+  for (const node of sim) result.set(node.key, { x: node.x ?? 0, y: node.y ?? 0 })
+  separateGroups(result, nodes, new Set(options.pinned?.keys() ?? []))
+  for (const [key, p] of result) result.set(key, { x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 })
   return result
 }

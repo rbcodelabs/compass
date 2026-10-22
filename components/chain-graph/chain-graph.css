@@ -55,6 +55,12 @@
   width: auto;
   border-radius: 0;
 }
+/* Nodes are dot-sized at fit-to-screen zoom; an invisible halo around the box keeps them grabbable (and draggable) there. */
+.chain-graph .react-flow__node::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
 .chain-graph .react-flow__node:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 4px;
@@ -89,6 +95,10 @@
 .chain-graph .cg-label,
 .chain-graph .cg-detail {
   display: none;
+}
+/* Labels are text only. A label that overlaps a neighbouring node must not swallow the pointer (which would grab, or fail to grab, the wrong node). */
+.chain-graph .cg-label {
+  pointer-events: none;
 }
 .chain-graph [data-band="label"] .cg-label--key {
   display: flex;

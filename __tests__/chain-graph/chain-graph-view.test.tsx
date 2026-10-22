@@ -6,9 +6,14 @@
  */
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { createElement, useState, type ReactNode } from "react"
+import { act } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-const flowStore = vi.hoisted(() => ({ transform: [0, 0, 1] as [number, number, number], listeners: new Set<(s: { transform: number[] }) => void>() }))
+const flowStore = vi.hoisted(() => ({
+  transform: [0, 0, 1] as [number, number, number],
+  listeners: new Set<(s: { transform: number[] }) => void>(),
+  props: null as null | { onNodesChange: (changes: unknown[]) => void; onNodeDragStop: (e: unknown, node: unknown) => void },
+}))
 
 vi.mock("@xyflow/react/dist/style.css", () => ({}))
 vi.mock("@xyflow/react", () => ({
@@ -26,18 +31,23 @@ vi.mock("@xyflow/react", () => ({
       return () => flowStore.listeners.delete(fn)
     },
   }),
+  // Applies position changes like the real hook, so a simulated drag moves the node in the view's own state.
   useNodesState: (initial: unknown[]) => {
     const [nodes, setNodes] = useState(initial)
-    return [nodes, setNodes, vi.fn()]
+    const onNodesChange = (changes: Array<{ type: string; id: string; position?: { x: number; y: number } }>) =>
+      setNodes((cur) => (cur as Array<{ id: string }>).map((n) => ({ ...n, ...(changes.find((c) => c.type === "position" && c.id === n.id && c.position) ? { position: changes.find((c) => c.id === n.id)!.position } : {}) })))
+    return [nodes, setNodes, onNodesChange]
   },
-  ReactFlow: ({ nodes, edges, nodeTypes, children }: { nodes: Array<{ id: string; type: string; data: unknown }>; edges: Array<{ id: string; className?: string }>; nodeTypes: Record<string, React.ComponentType<{ data: unknown }>>; children?: ReactNode }) =>
-    createElement(
+  ReactFlow: ({ nodes, edges, nodeTypes, children, onNodesChange, onNodeDragStop }: { onNodesChange: (c: unknown[]) => void; onNodeDragStop: (e: unknown, n: unknown) => void; nodes: Array<{ id: string; type: string; data: unknown; position: { x: number; y: number } }>; edges: Array<{ id: string; className?: string }>; nodeTypes: Record<string, React.ComponentType<{ data: unknown }>>; children?: ReactNode }) => {
+    flowStore.props = { onNodesChange, onNodeDragStop }
+    return createElement(
       "div",
       { "data-testid": "rf" },
-      nodes.map((n) => createElement("div", { key: n.id, "data-id": n.id, "data-node-type": n.type }, createElement(nodeTypes[n.type], { data: n.data }))),
+      nodes.map((n) => createElement("div", { key: n.id, "data-id": n.id, "data-node-type": n.type, "data-x": n.position.x, "data-y": n.position.y }, createElement(nodeTypes[n.type], { data: n.data }))),
       edges.map((e) => createElement("i", { key: e.id, "data-edge": e.id, className: e.className })),
       children,
-    ),
+    )
+  },
 }))
 
 import { ChainGraphView } from "@/components/chain-graph/chain-graph-view"
@@ -155,6 +165,42 @@ describe("ChainGraphView", () => {
     const matches = screen.getByRole("region", { name: "Search results" })
     fireEvent.click(within(matches).getByRole("button", { name: /Open details for Checklist/ }))
     expect(open).toHaveBeenCalledWith("SOLUTION", "s1")
+  })
+
+  describe("dragging", () => {
+    const pos = (id: string) => {
+      const el = document.querySelector(`[data-id="${id}"]`)!
+      return { x: Number(el.getAttribute("data-x")), y: Number(el.getAttribute("data-y")) }
+    }
+    const haloTransforms = () => [...document.querySelectorAll(".chain-halo")].map((h) => (h as HTMLElement).style.transform)
+    const drag = (id: string, by: { x: number; y: number }) => {
+      const from = pos(id)
+      const to = { x: from.x + by.x, y: from.y + by.y }
+      act(() => flowStore.props!.onNodesChange([{ type: "position", id, position: to }]))
+      act(() => flowStore.props!.onNodeDragStop({}, { id, position: to }))
+      return to
+    }
+
+    it("a dragged node moves, and its group halo follows it from live positions", () => {
+      render(<ChainGraphView graph={syntheticChainGraph(120)} initialCollapse="none" initialGroupBy="type" />)
+      const id = "SOLUTION:o0-p0-s0"
+      const haloBefore = haloTransforms()
+      const to = drag(id, { x: 400, y: 250 })
+      expect(pos(id)).toEqual(to)
+      expect(haloTransforms()).not.toEqual(haloBefore)
+    })
+
+    it("a dropped node stays pinned and other nodes do not move when the view relayouts", () => {
+      render(<ChainGraphView graph={syntheticChainGraph(120)} initialCollapse="none" initialGroupBy="type" />)
+      const id = "SOLUTION:o0-p0-s0"
+      const others = nodeIds().filter((n) => n !== id && n !== "ROADMAP_ITEM:o0-p0-s0-r")
+      const snapshot = new Map(others.map((n) => [n!, pos(n!)]))
+      const to = drag(id, { x: 400, y: 250 })
+      // Hiding a type relayouts the view: the dragged node must stay where it was dropped and the other groups must not be reshuffled.
+      fireEvent.click(screen.getByRole("button", { name: "Roadmap" }))
+      expect(pos(id)).toEqual(to)
+      for (const [n, p] of snapshot) if (document.querySelector(`[data-id="${n}"]`)) expect(pos(n)).toEqual(p)
+    })
   })
 
   it("reports truncation", () => {
