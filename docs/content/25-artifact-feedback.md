@@ -98,6 +98,23 @@ appear in the **Comments** panel like any other comment. **View full screen**
 and **Back to artifact** keep you on the current slide, as does a link with
 `?slide=N` (counting from 1).
 
+## Sharing an artifact with people outside Compass
+
+Owners can share an HTML artifact with people who have no Compass login. Open
+the artifact and use the **Share externally** panel:
+
+- **Turn on sharing** creates a secret link and one shared password. Leave the
+  password blank to have one generated; it is shown once, along with the link.
+  Passwords are 10 to 200 characters.
+- Visitors open the link, enter the password, and see the artifact view-only
+  for 12 hours. After 5 wrong passwords the link locks for 15 minutes.
+- **Change password**, **Replace link** and **Turn off** immediately sign out
+  everyone who is currently viewing.
+- **Allow comments** lets visitors leave comments after confirming their email
+  address through a one-time sign-in link. Visitors see only their own
+  comments and replies, never your internal comments. This option needs email
+  sending (`AUTH_RESEND_KEY`) and is unavailable on deployments without it.
+
 ## What this does not cover
 
 - **External reviewers and portal visitors** cannot use this picker — it
