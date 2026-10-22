@@ -9,7 +9,7 @@ vi.mock("@/lib/actions/auth-actions", () => ({ signOutAction: vi.fn() }))
 vi.mock("@/lib/meta-feedback-actions", () => ({ sendCompassFeedback: vi.fn() }))
 vi.mock("@/components/panels/panel-context", () => ({ usePanelContext: () => ({ openPanel: vi.fn() }) }))
 
-import { NOTIFICATIONS_CHANGED_EVENT, NotificationBellHeaderLink, NotificationBellNavItem } from "@/components/notifications/notification-bell"
+import { NOTIFICATIONS_CHANGED_EVENT, NotificationBellHeaderLink, NotificationBellIconButton } from "@/components/notifications/notification-bell"
 import { Sidebar } from "@/components/sidebar"
 import { MobileHeader } from "@/components/mobile-header"
 import { SidebarProvider } from "@/components/ui/sidebar"
