@@ -2,6 +2,7 @@ import getPrisma from "@/lib/db"
 import { fail, ok } from "@/lib/mcp-output"
 import { getArtifactStorage } from "@/lib/artifact-storage"
 import { getMcpActor } from "@/lib/mcp-authz"
+import { isAgentIdentityActor } from "@/lib/agent-access"
 import { createV0Artifact, refreshV0Artifact } from "@/lib/v0-artifacts"
 import { loadStagedArtifactUpload, prepareArtifactUpload } from "@/lib/artifact-upload"
 import {
@@ -92,9 +93,17 @@ export async function prepareArtifactUploadTool(input: { workspaceId: string; fi
   } catch (error) { return fail(error instanceof Error ? error.message : "Could not prepare artifact upload.") }
 }
 
+/**
+ * v0 reads and writes go through the INVOKING PERSON'S connected v0 credential (lib/v0-artifacts.ts). An agent identity
+ * (a cloud run of a named agent, or a personal agent key) is not that person acting, so it must never borrow the credential;
+ * this mirrors the 403 the connector gateway gives agent keys (app/api/integrations/mcp/[slug]/route.ts).
+ */
+const V0_REFUSED_FOR_AGENTS = "v0 artifacts use a person's connected v0 account, so an agent cannot create or refresh them. Ask a person to do this from Compass."
+
 export async function createArtifact(input: { workspaceId: string; title: string; description?: string; sourceType: "HTML_UPLOAD" | "EXTERNAL_LINK" | "V0_CHAT"; kind?: string; html?: string; uploadReceipt?: string; filename?: string; url?: string }) {
   try {
     if (input.sourceType === "V0_CHAT") {
+      if (isAgentIdentityActor(getMcpActor())) return fail(V0_REFUSED_FOR_AGENTS)
       if (input.html !== undefined || input.uploadReceipt !== undefined || input.filename !== undefined || input.url === undefined) return fail("V0_CHAT requires url (a https://v0.app/chat/<id> link) and does not accept html, uploadReceipt or filename.")
       // The title is optional for a v0 chat (it defaults to the chat name), but a supplied one must be valid.
       if (input.title.trim()) validateArtifactTitle(input.title)
@@ -164,6 +173,7 @@ export async function updateArtifact(input: { artifactId: string; workspaceId: s
 
 export async function refreshArtifactFromV0({ artifactId, workspaceId }: { artifactId: string; workspaceId: string }) {
   try {
+    if (isAgentIdentityActor(getMcpActor())) return fail(V0_REFUSED_FOR_AGENTS)
     const result = await refreshV0Artifact({ artifactId, workspaceId, userId: getMcpActor().userId, source: "MCP" })
     return result.changed
       ? ok(`New v0 version captured as revision ${result.revisionNumber}.\nID: ${artifactId}`, { id: artifactId, changed: true, revisionId: result.revisionId, revisionNumber: result.revisionNumber, v0VersionId: result.versionId })
@@ -241,7 +251,7 @@ export async function archiveArtifact({ artifactId, workspaceId }: { artifactId:
 
 export async function linkArtifactDecision(input: { workspaceId: string; artifactId: string; requestId: string }) {
   try {
-    const link = await linkArtifactToDecision({ ...input, createdById: getMcpActor().userId, source: "MCP" })
+    const link = await linkArtifactToDecision({ ...input, createdById: isAgentIdentityActor(getMcpActor()) ? null : getMcpActor().userId, source: "MCP" })
     return ok(`Artifact linked to Decision as live supporting material.\nID: ${input.artifactId}`, { ...input, linkId: link.id, created: link.created })
   } catch (error) { return fail(error instanceof Error ? error.message : "Could not link artifact") }
 }
