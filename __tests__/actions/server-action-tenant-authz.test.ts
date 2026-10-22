@@ -249,7 +249,7 @@ describe("workspace settings actions", () => {
 });
 
 describe("organization scoring-model actions", () => {
-  const metric = { key: "k", label: "K", minValue: 1, maxValue: 5, weight: 1, direction: "HIGHER_IS_BETTER" as const };
+  const metric = { key: "k", label: "K", minValue: 1, maxValue: 5, weight: 1, direction: "POSITIVE" as const };
 
   it.each([
     ["updateScoringModelDetails", () => orgSettings.updateScoringModelDetails("acme", "sm-b", { name: "pwned" })],
