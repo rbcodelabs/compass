@@ -4,6 +4,7 @@ import { useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SettingsSection } from "@/components/patterns/settings-section"
@@ -122,16 +123,18 @@ export function DeleteAccountPanel({ email, plan }: { email: string; plan: Delet
                 </li>
               ))}
             </ul>
-            <label className="flex items-start gap-2 text-text-primary">
-              <input
-                type="checkbox"
-                className="mt-1 size-4"
+            <div className="flex items-start gap-2 text-text-primary">
+              <Checkbox
+                id="delete-account-sole-owned"
+                className="mt-1"
                 checked={deleteSoleOwned}
-                onChange={(event) => setDeleteSoleOwned(event.target.checked)}
+                onCheckedChange={(checked) => setDeleteSoleOwned(checked === true)}
                 disabled={pending}
               />
-              <span>I understand these organizations will be permanently deleted along with all of their data.</span>
-            </label>
+              <Label htmlFor="delete-account-sole-owned" className="font-normal">
+                I understand these organizations will be permanently deleted along with all of their data.
+              </Label>
+            </div>
           </div>
         )}
 
