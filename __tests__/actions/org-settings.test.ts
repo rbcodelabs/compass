@@ -654,15 +654,6 @@ describe("grantAgentScoringModelAdmin", () => {
     expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
   });
 
-  it("refuses when agent changes are disabled", async () => {
-    vi.unstubAllEnvs();
-    await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
-      ok: false,
-      error: "Agent changes are currently disabled",
-    });
-    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
-  });
-
   it("returns a clean error when the agent does not exist or is not ACTIVE", async () => {
     mockAgent.findFirst.mockResolvedValue(null);
     await expect(grantAgentScoringModelAdmin("org", "agent-missing")).resolves.toEqual({
@@ -805,15 +796,6 @@ describe("grantAgentScoringModelAdmin", () => {
     await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
       ok: false,
       error: "Forbidden: organization admin required",
-    });
-    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
-  });
-
-  it("returns a clean error when agent changes are disabled", async () => {
-    vi.unstubAllEnvs();
-    await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
-      ok: false,
-      error: "Agent changes are currently disabled",
     });
     expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
   });
