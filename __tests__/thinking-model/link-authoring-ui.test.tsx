@@ -405,21 +405,26 @@ describe("additive linked-Objective marks", () => {
     expect(html(railOpp({ linkedKeyResultId: "kr-1", linkedObjectives: objectives }))).toBe(bare)
   })
 
-  it("OST tab: shows linked Objectives above the Key Result under non-CLASSIC, and renders exactly the old tree under CLASSIC", () => {
+  it("OST tab: shows linked Objectives as parents under non-CLASSIC (Key Result per emphasis), and renders exactly the old tree under CLASSIC", () => {
     const opportunity = (extra: Record<string, unknown> = {}) => ({
       id: "opp-1",
       title: "Onboarding",
       status: "EXPLORING" as const,
-      linkedKeyResult: { id: "kr-1", title: "Activation", objective: { title: "Grow" } },
+      linkedKeyResult: { id: "kr-1", title: "Activation", objective: { id: "obj-9", title: "Grow" } },
       solutions: [],
       ...extra,
     })
     const html = (source: Parameters<typeof resolveThinkingModel>[0], extra?: Record<string, unknown>) =>
       render(withModel(source, <OSTTreeView opportunity={opportunity(extra)} orgSlug="acme" workspaceSlug="alpha" />)).container
+    // OPPORTUNITY_FIRST_OKR: the typed Objective is the parent; the legacy Key Result stays visible (secondary) under its own Objective.
+    const ofo = html(OFO, { linkedObjectives: objectives })
+    expect(within(ofo).getByTestId("ost-parents")).toHaveTextContent("Grow retention")
+    expect(within(ofo).getByText("Activation")).toBeInTheDocument()
+    cleanup()
+    // TORRES_OST: Key Result links are hidden, so that level is not drawn; the Outcome is.
     const torres = html(TORRES, { linkedObjectives: objectives })
-    expect(within(torres).getByTestId("linked-objectives")).toBeInTheDocument()
-    // The legacy Key Result display is kept.
-    expect(within(torres).getByText("Activation")).toBeInTheDocument()
+    expect(within(torres).getByTestId("ost-parents")).toHaveTextContent("Grow retention")
+    expect(within(torres).queryByText("Activation")).toBeNull()
     cleanup()
     const bare = stableHtml(html(CLASSIC))
     cleanup()
