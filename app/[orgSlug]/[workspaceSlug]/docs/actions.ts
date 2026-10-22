@@ -351,7 +351,7 @@ export async function createCanvasCardItem(
   const { title } = parsedTitle;
   const needsParent = CANVAS_CREATE_PARENT_KIND[kind] !== undefined;
   const parentId = typeof input.parentId === "string" && isUuid(input.parentId) ? input.parentId.toLowerCase() : null;
-  if (needsParent && !parentId) throw new Error(`Select the ${CANVAS_CREATE_PARENT_KIND[kind]} to create this ${kind} under`);
+  if (needsParent && !parentId) throw new Error("Select a parent card to create this under");
 
   const prisma = getPrisma();
   const context = { workspace: { id: workspaceId, isReadOnly: false }, caller: "human" as const, source: "UI" as const, mutationSource: "UI" as const, createdById: user.id ?? null };
@@ -369,7 +369,7 @@ export async function createCanvasCardItem(
     revalidatePath("/[orgSlug]/[workspaceSlug]/discovery", "layout");
   } else if (kind === "assumption") {
     const parent = await prisma.solution.findFirst({ where: { id: parentId!, workspaceId }, select: { id: true } });
-    if (!parent) throw new Error("That solution was not found in this workspace.");
+    if (!parent) throw new Error("That parent was not found in this workspace.");
     const assumption = await captureWorkspaceMutation(prisma, "assumption", "create", "UI", undefined, async tx => tx.assumption.create({
       data: { workspaceId, ...(await allocateOneSeq(tx, workspaceId, "assumption")), solutionId: parent.id, title, source: "UI" },
     }));

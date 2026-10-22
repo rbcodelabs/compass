@@ -173,7 +173,6 @@ export function CanvasCardPicker({
               {creating ? "Creating…" : "Create"}
             </button>
           </div>
-          {parent && kinds.length > 2 && <p className="text-xs text-text-subtle">Solutions and assumptions are added under the selected card.</p>}
           {createError && <p role="alert" className="text-sm text-status-danger">{createError}</p>}
         </form>
       </DialogContent>

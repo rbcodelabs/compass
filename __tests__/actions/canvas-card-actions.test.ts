@@ -194,8 +194,8 @@ describe("createCanvasCardItem", () => {
   });
 
   it("requires a valid parent for solutions and assumptions", async () => {
-    await expect(createCanvasCardItem("doc", { kind: "solution", title: "S" })).rejects.toThrow(/Select the opportunity/);
-    await expect(createCanvasCardItem("doc", { kind: "assumption", title: "A", parentId: "nope" })).rejects.toThrow(/Select the solution/);
+    await expect(createCanvasCardItem("doc", { kind: "solution", title: "S" })).rejects.toThrow(/Select a parent card/);
+    await expect(createCanvasCardItem("doc", { kind: "assumption", title: "A", parentId: "nope" })).rejects.toThrow(/Select a parent card/);
     expect(h.createSolutionBatch).not.toHaveBeenCalled();
   });
 
