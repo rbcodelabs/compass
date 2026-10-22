@@ -67,7 +67,7 @@ export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage
     {/* A list of wrapping rows rather than a fixed-width table: nothing squashes, and a long name or badge row wraps instead of clipping. */}
     <ul className="space-y-2">{granted.map((a) => <li key={a.id} className="min-w-0 rounded-md border border-border-default p-3">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0 break-words text-sm font-medium [overflow-wrap:anywhere]">{a.name}
+        <div className="min-w-0 max-w-full flex-1 basis-48 break-words text-sm font-medium [overflow-wrap:anywhere]">{a.name}
           <div className="mt-1 flex flex-wrap items-center gap-1">
             <Badge variant="outline">{a.kind === "CLOUD" ? "Cloud" : "External"}</Badge>
             <Badge variant="secondary">{a.shared ? "Shared" : "Personal"}</Badge>
@@ -76,8 +76,10 @@ export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage
           </div>
           <p className="mt-1 text-xs font-normal text-text-muted">{a.shared ? "Workspace" : a.ownerName} · {a.access === "WRITE" ? "Read and write" : "Read only"}{a.status !== "ACTIVE" || !a.eligible ? " · Unavailable" : ""}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {a.kind === "CLOUD" && a.canEdit && <Button variant="outline" size="sm" aria-expanded={editing === a.id} disabled={pending} onClick={() => setEditing(editing === a.id ? null : a.id)}>{editing === a.id ? "Close" : `Edit ${a.name}`}</Button>}
+        <div className="flex min-w-0 max-w-full flex-wrap gap-2">
+          {/* The visible label is short on purpose: a 120-character agent name inside a button cannot wrap and pushed the whole card
+              past a phone's edge. The accessible name still carries it. */}
+          {a.kind === "CLOUD" && a.canEdit && <Button variant="outline" size="sm" aria-expanded={editing === a.id} aria-label={editing === a.id ? `Close ${a.name}` : `Edit ${a.name}`} title={editing === a.id ? undefined : `Edit ${a.name}`} disabled={pending} onClick={() => setEditing(editing === a.id ? null : a.id)}>{editing === a.id ? "Close" : "Edit"}</Button>}
           {a.kind === "CLOUD" && a.canUse && (a.isMyDefault
             ? <Button variant="outline" size="sm" disabled={pending} onClick={() => run(() => setMyDefaultAgentAction(orgSlug, workspaceSlug, null))}>Clear my default</Button>
             : <Button variant="outline" size="sm" disabled={pending || !enabled} onClick={() => run(() => setMyDefaultAgentAction(orgSlug, workspaceSlug, a.id))}>Use as my default</Button>)}

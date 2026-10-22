@@ -169,11 +169,13 @@ export function SendToAgentPicker({ orgSlug, workspaceSlug, entityType, entityId
           trigger's width. These triggers are narrower than "Built-in cloud
           agent", which then wrapped to two lines. Size to content instead;
           the base min-w-32 still applies as a floor. */}
-      <DropdownMenuContent className="w-auto">
+      {/* max-w keeps a long agent name from pushing the menu past a phone's edge (it was 5px wider than a 390px page); the names
+          truncate inside it instead. */}
+      <DropdownMenuContent className="w-auto max-w-[calc(100vw-1rem)]">
         <DropdownMenuItem className="p-0">
           {/* With a default agent, the plain link (no agentId) already resolves to it on the server, so it stays the first item. */}
           <Link href={builtInHref} className="flex w-full items-center gap-1.5 px-1.5 py-1">
-            {defaultAgent ? `${defaultAgent.name} (default)` : "Built-in cloud agent"}
+            <span className="min-w-0 truncate" title={defaultAgent ? `${defaultAgent.name} (default)` : undefined}>{defaultAgent ? `${defaultAgent.name} (default)` : "Built-in cloud agent"}</span>
           </Link>
         </DropdownMenuItem>
         {defaultAgent && (
@@ -188,7 +190,7 @@ export function SendToAgentPicker({ orgSlug, workspaceSlug, entityType, entityId
           .map((agent) => (
             <DropdownMenuItem key={agent.id} className="p-0">
               <Link href={agentHref(agent.id)} className="flex w-full items-center gap-1.5 px-1.5 py-1">
-                {agent.name}
+                <span className="min-w-0 truncate" title={agent.name}>{agent.name}</span>
               </Link>
             </DropdownMenuItem>
           ))}
