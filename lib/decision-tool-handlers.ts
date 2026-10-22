@@ -1,6 +1,8 @@
 import getPrisma from "@/lib/db"
 import { getDecisionArtifacts } from "@/lib/artifacts"
 import { getMcpActor } from "@/lib/mcp-authz"
+import { isAgentIdentityActor } from "@/lib/agent-access"
+import { findAgentById } from "@/lib/agent-ownership"
 import { ok, fail } from "@/lib/mcp-output"
 import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator, type ReleaseScope } from "@/lib/release-authorization"
 import { applyTrackedDecision, createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, recordDecisionNoAction, TrackedDecisionError, type TrackedDecisionOptionInput, type TrackedDecisionQuestionInput, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
@@ -145,8 +147,12 @@ export async function requestDecision(input: {
     // requestedByAgentId. Only persist an agent id when the actor is
     // genuinely acting as an agent, so a suggested assignee later points at
     // the agent that was blocked waiting on this decision, not its owner.
-    const requestedByAgentId = actor.purpose === "AGENT" ? (actor.agentId ?? null) : null
-    const revision = await createTrackedDecisionRequest({ ...input, requestedById: actor.userId, requestedByAgentId })
+    // A cloud run (AGENT_TURN with an agentId) is the agent acting, with the invoker only the person who started it, so the
+    // request is recorded as the agent's and the human column is left empty (requested_by_id is nullable). A personal agent
+    // key keeps its established shape: owner in requestedById, agent in requestedByAgentId.
+    const cloudAgentRun = actor.purpose === "AGENT_TURN" && !!actor.agentId
+    const requestedByAgentId = isAgentIdentityActor(actor) ? (actor.agentId ?? null) : null
+    const revision = await createTrackedDecisionRequest({ ...input, requestedById: cloudAgentRun ? null : actor.userId, requestedByAgentId })
     const reviewUrl = await reviewUrlByWorkspace(input.workspaceId, revision.requestId)
     return ok(
       withUrlLine(`Decision requested.\nID: ${revision.requestId}\nRevision ID: ${revision.id}${input.options?.length ? `\nOptions: ${input.options.map((option) => option.label.trim()).join(" | ")}` : ""}${input.questions?.length ? `\nQuestions: ${input.questions.length}` : ""}`, reviewUrl),
@@ -229,7 +235,12 @@ export async function getDecision({ workspaceId, requestId }: { workspaceId: str
 export async function closeDecisionNoAction({ workspaceId, requestId, reason }: { workspaceId: string; requestId: string; reason: string }) {
   const actor = getMcpActor()
   try {
-    const request = await recordDecisionNoAction({ workspaceId, requestId, reason, actorUserId: actor.userId })
+    // There is no "closed by agent" column. For a cloud run the human column stays empty rather than naming the invoker as
+    // the closer, and the agent is named in the recorded reason instead.
+    const cloudAgentRun = actor.purpose === "AGENT_TURN" && !!actor.agentId
+    const agentName = cloudAgentRun ? (await findAgentById(getPrisma(), actor.agentId!))?.name ?? "an agent" : null
+    const recordedReason = agentName ? `[Closed by agent ${agentName}] ${reason}` : reason
+    const request = await recordDecisionNoAction({ workspaceId, requestId, reason: recordedReason, actorUserId: cloudAgentRun ? null : actor.userId })
     const reviewUrl = await reviewUrlByWorkspace(workspaceId, request.id)
     return ok(
       withUrlLine(`**Closed, no action needed.**\nReason: ${reason}\nID: ${request.id}`, reviewUrl),
