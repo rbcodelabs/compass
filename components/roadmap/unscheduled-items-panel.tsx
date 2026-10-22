@@ -3,12 +3,13 @@
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import * as React from "react";
 import { useDraggable } from "@dnd-kit/core";
-import { GripVertical, Layers, Bug, MoreHorizontal, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { GripVertical, Layers, Bug, MoreHorizontal } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
 import { BoardColumn, EmptyState } from "@/components/patterns";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { CollapsedSidebarTab, NOT_SCHEDULED_TITLE, SIDEBAR_WIDTH_CLASS, SidebarCollapseButton } from "./schedule/sidebar-chrome";
 import { HORIZON_META, QUICK_ADD_HORIZONS } from "@/lib/roadmap";
 import type { Horizon } from "@/lib/types";
 
@@ -120,25 +121,14 @@ export function UnscheduledItemsColumn({
 }) {
   return (
     <BoardColumn
-      title="Not scheduled"
+      title={NOT_SCHEDULED_TITLE}
       count={items.length}
       accent="neutral"
       data-testid="roadmap-unscheduled-column"
-      actions={
-        onCollapse ? (
-          <button
-            type="button"
-            onClick={onCollapse}
-            aria-label="Collapse Not scheduled"
-            className="inline-flex size-6 items-center justify-center rounded text-text-subtle hover:bg-surface-panel hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <PanelRightClose aria-hidden className="size-4" />
-          </button>
-        ) : undefined
-      }
+      actions={onCollapse ? <SidebarCollapseButton onClick={onCollapse} /> : undefined}
       className={
         layout === "sidebar"
-          ? "h-full w-72 min-w-0 flex-none overflow-hidden"
+          ? `h-full ${SIDEBAR_WIDTH_CLASS} min-w-0 flex-none overflow-hidden`
           : "w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:w-72 md:min-w-[280px] md:flex-1 md:overflow-hidden md:h-full"
       }
       bodyId="unscheduled-items-column"
@@ -173,23 +163,13 @@ export function UnscheduledItemsSidebar(props: Props) {
   return (
     <aside
       data-testid="roadmap-unscheduled-sidebar"
-      aria-label="Not scheduled"
+      aria-label={NOT_SCHEDULED_TITLE}
       className="hidden min-h-0 shrink-0 py-3 pr-3 md:flex lg:pr-4"
     >
       {open ? (
         <UnscheduledItemsColumn {...props} layout="sidebar" onCollapse={() => setOpen(false)} />
       ) : (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label={`Expand Not scheduled (${props.items.length})`}
-          aria-expanded={false}
-          className="flex h-fit w-10 flex-col items-center gap-2 rounded-xl border border-border-default bg-surface-inset py-3 text-text-subtle hover:bg-surface-panel hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <PanelRightOpen aria-hidden className="size-4" />
-          <span className="rounded-full bg-surface-panel px-1.5 py-0.5 text-xs tabular-nums">{props.items.length}</span>
-          <span className="text-xs font-semibold [writing-mode:vertical-rl]">Not scheduled</span>
-        </button>
+        <CollapsedSidebarTab count={props.items.length} onClick={() => setOpen(true)} />
       )}
     </aside>
   );

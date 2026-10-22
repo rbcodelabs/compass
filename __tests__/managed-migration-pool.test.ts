@@ -19,3 +19,14 @@ describe("managed migration pool", () => {
     expect(timeout).toBeLessThan(maxDuration * 1000);
   });
 });
+
+describe("admin migrate DSQL pool", () => {
+  it("lets one async-index wait outlast 40s but stay inside the route budget", () => {
+    const route = readFileSync("app/api/admin/migrate/route.ts", "utf8");
+    const maxDuration = Number(/export const maxDuration = (\d+);/.exec(route)?.[1]);
+    const timeout = Number(/const DSQL_QUERY_TIMEOUT_MS = ([\d_]+);/.exec(route)?.[1].replaceAll("_", ""));
+    expect(timeout).toBeGreaterThan(120_000);
+    expect(timeout).toBeLessThan(maxDuration * 1000);
+    expect(route).toContain("query_timeout: DSQL_QUERY_TIMEOUT_MS");
+  });
+});

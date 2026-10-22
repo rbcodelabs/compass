@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({ link: vi.fn(), unlink: vi.fn(), artifacts: vi.fn(), decisions: vi.fn(), tracked: vi.fn(), review: vi.fn(), artifact: vi.fn(), taskLink: vi.fn(), agent: vi.fn(), user: vi.fn() }))
-vi.mock("@/lib/artifacts", () => ({ linkArtifactToDecision: mocks.link, unlinkArtifactFromDecision: mocks.unlink, getDecisionArtifacts: mocks.artifacts, getArtifactDecisions: mocks.decisions }))
+vi.mock("@/lib/artifacts", () => ({ linkArtifactToDecision: mocks.link, unlinkArtifactFromDecision: mocks.unlink, getDecisionArtifacts: mocks.artifacts, getArtifactDecisions: mocks.decisions, getArtifactSolutionIds: async () => [] }))
 vi.mock("@/lib/tracked-decisions", () => ({ getTrackedDecision: mocks.tracked }))
 vi.mock("@/lib/mcp-authz", () => ({ getMcpActor: () => ({ userId: "agent-owner" }) }))
 vi.mock("@/lib/db", () => ({ default: () => ({
@@ -43,6 +43,8 @@ it.each(["decision", "review"])("adds live artifact metadata to the %s getter wi
   const extra = { options: [], chosenOption: null, questions: [], answers: [], ...(kind === "decision" ? { requestedBy: null, followUpTasks: [], noAction: null } : {}) }
   expect(result.structuredContent.data).toEqual({ ...request, reviewUrl: null, artifacts: [{ id: "artifact", title: "Prototype", status: "ACTIVE", currentRevision: { revisionNumber: 2 } }], ...extra })
   expect(mocks.artifacts).toHaveBeenCalledWith("workspace", "decision")
+  // Flag unset: the follow-up read is exactly the legacy query.
+  if (kind === "decision") expect(mocks.taskLink).toHaveBeenCalledWith({ where: { linkedType: "DECISION", linkedId: "decision" }, select: { task: { select: { id: true, title: true, status: true } } } })
 })
 it("does not expose supporting links for legacy reviews", async () => {
   mocks.review.mockResolvedValue({ id: "decision", gateType: "RELEASE_AUTHORIZATION" })

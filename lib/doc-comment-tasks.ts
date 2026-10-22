@@ -99,6 +99,7 @@ function toCard(task: {
 /** Task card per comment id (one task per comment; the earliest link wins if data ever has more). */
 export async function loadCommentTaskCards(workspaceId: string, commentIds: string[]): Promise<Record<string, CommentTaskCardData>> {
   if (commentIds.length === 0) return {}
+  // Stays on task_links (not the TASK read flip): COMMENT links are legacy-only by design and never mirrored to entity_links.
   const links = await getPrisma().taskLink.findMany({
     where: { linkedType: "COMMENT", linkedId: { in: commentIds }, task: { workspaceId } },
     include: { task: true },

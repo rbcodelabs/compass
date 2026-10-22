@@ -31,7 +31,7 @@ describe("native timeline default", () => {
     expect(find(await render({ view: "timeline", squad: "squad-2" }), NativeTimeline)?.key).not.toBe(first?.key);
     expect(find(await render({ view: "timeline", squad: "all" }), NativeTimeline)?.key).not.toBe(first?.key);
   });
-  it("seeds the Ready to schedule rail's open/closed choice from the cookie, ignoring junk", async () => {
+  it("seeds the Not scheduled sidebar's open/closed choice from the cookie, ignoring junk", async () => {
     const preference = async () => find(await render({ view: "timeline" }), NativeTimeline)?.props as { initialRailPreference?: string | null };
     try {
       expect((await preference()).initialRailPreference).toBeNull();

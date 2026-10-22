@@ -496,8 +496,8 @@ test.describe("Native timeline default", () => {
   test("native backlog quick-add persists on the roadmap", async ({ page }) => {
     await page.goto(`${nativeBase}/roadmap?view=timeline`);
     await page.waitForLoadState("networkidle"); // aria-expanded is only accurate once hydrated
-    // Below 1320px the Ready to schedule rail is collapsed until the header button opens it.
-    const railToggle = page.getByRole("button", { name: /ready-to-schedule rail/ });
+    // Below 1320px the Not scheduled sidebar is collapsed until the header button opens it.
+    const railToggle = page.getByRole("button", { name: /not-scheduled sidebar/ });
     if ((await railToggle.getAttribute("aria-expanded")) === "false") await railToggle.click();
     const backlog = page.locator('[data-testid^="unscheduled-item-"]').filter({ hasText: "Native backlog bug" });
     await backlog.getByRole("button", { name: "Card actions" }).click();

@@ -11,3 +11,11 @@ describe("UI registry route access", () => {
     expect(isPublicPath("/ui/components")).toBe(false);
   });
 });
+
+describe("chain graph benchmark route access", () => {
+  it("allows only the exact synthetic benchmark route", () => {
+    expect(isPublicPath("/chain-graph-bench")).toBe(true);
+    expect(isPublicPath("/chain-graph-bench/x")).toBe(false);
+    expect(isPublicPath("/acme/ws/graph")).toBe(false);
+  });
+});
