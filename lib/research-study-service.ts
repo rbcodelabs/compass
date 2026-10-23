@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client"
 import getPrisma from "@/lib/db"
 import { createResearchToken, normalizeResearchAppUrl, parseResearchGuide, type ResearchStudyType } from "@/lib/research"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
+import { moduleDisabledMessage } from "@/lib/modules/registry"
 import { runResearchInterviewAgent } from "@/lib/research-agent"
 import { readSessionAnalysis, readStudySynthesis } from "@/lib/research-analysis"
 import { decodeCursor, encodeCursor } from "@/lib/rest/cursor"
@@ -11,6 +12,11 @@ import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequenc
 
 export class ResearchStudyError extends Error {}
 export class ResearchCursorError extends ResearchStudyError {}
+
+/** Research capture is a workspace module: refused with an actionable message once the caller is known to belong to the workspace. */
+async function assertResearchCapture(workspaceId: string) {
+  if (!(await isResearchCaptureEnabled(workspaceId))) throw new ResearchStudyError(moduleDisabledMessage("research_capture"))
+}
 
 /** Lifecycle states a ResearchSession row can hold (schema: VarChar(20)). */
 export const RESEARCH_SESSION_STATUSES = ["PENDING", "IN_PROGRESS", "COMPLETED", "ABANDONED", "EXPIRED"] as const
@@ -100,13 +106,13 @@ export async function generateResearchGuide(
   input: { studyType: ResearchStudyType; goal: string; appUrl?: string; artifactId?: string; artifactTitle?: string; targetMinutes: number },
   deadline?: number,
 ) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findFirst({
     where: workspaceWhere(scope, actor),
     select: { id: true },
   })
   if (!workspace) throw new ResearchStudyError("Workspace not found")
+  await assertResearchCapture(workspace.id)
   assertStudyType(input.studyType)
   const goal = input.goal.trim()
   if (!goal || goal.length > 5_000) throw new ResearchStudyError("Enter a research goal")
@@ -160,10 +166,10 @@ Write neutral, open-ended questions about concrete past behavior and real experi
 }
 
 export async function createResearchStudy(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, input: ResearchStudyInput) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findFirst({ where: workspaceWhere(scope, actor), select: { id: true } })
   if (!workspace) throw new ResearchStudyError("Workspace not found")
+  await assertResearchCapture(workspace.id)
   const name = String(input.name ?? "").trim()
   const goal = String(input.goal ?? "").trim()
   const studyType = String(input.studyType ?? "CUSTOMER_INTERVIEW")
@@ -212,6 +218,7 @@ async function findMemberStudy(scope: ResearchWorkspaceScope, actor: ResearchStu
   })
   if (!study) throw new ResearchStudyError("Study not found")
   if (study.studyType === "PM_INTERVIEW") throw new ResearchStudyError("Study not found")
+  await assertResearchCapture(study.workspaceId)
   return { prisma, userId: actor.userId, study }
 }
 
@@ -221,7 +228,6 @@ function assertNativeStudy(study: { studyType: string }) {
 }
 
 export async function updateResearchStudy(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string, input: ResearchStudyInput) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, userId, study } = await findMemberStudy(scope, actor, studyId)
   if (study.status === "ARCHIVED") throw new ResearchStudyError("Archived studies cannot be edited")
   const name = String(input.name ?? "").trim()
@@ -282,7 +288,6 @@ export async function updateResearchStudy(scope: ResearchWorkspaceScope, actor: 
 }
 
 async function endResearchStudy(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string, status: "CLOSED" | "ARCHIVED") {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, userId, study } = await findMemberStudy(scope, actor, studyId)
   if (study.status === "ARCHIVED") throw new ResearchStudyError("Archived studies cannot change lifecycle state")
   if (status === "CLOSED" && study.status !== "ACTIVE") throw new ResearchStudyError("Only active studies can be closed")
@@ -305,7 +310,6 @@ export async function archiveResearchStudy(scope: ResearchWorkspaceScope, actor:
 }
 
 export async function activateResearchStudy(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, userId, study } = await findMemberStudy(scope, actor, studyId)
   assertNativeStudy(study)
   if (study.status !== "CLOSED" && study.status !== "DRAFT") throw new ResearchStudyError("Only draft or closed studies can be activated")
@@ -321,7 +325,6 @@ export async function activateResearchStudy(scope: ResearchWorkspaceScope, actor
 }
 
 export async function regenerateResearchLink(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, userId, study } = await findMemberStudy(scope, actor, studyId)
   assertNativeStudy(study)
   if (study.status !== "ACTIVE") throw new ResearchStudyError("Participant links can only be rotated for an active study")
@@ -337,7 +340,6 @@ export async function regenerateResearchLink(scope: ResearchWorkspaceScope, acto
 }
 
 export async function revokeResearchLinks(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, userId, study } = await findMemberStudy(scope, actor, studyId)
   if (study.status !== "ACTIVE") throw new ResearchStudyError("Participant links can only be revoked for an active study")
   const now = new Date()
@@ -350,7 +352,6 @@ export async function revokeResearchLinks(scope: ResearchWorkspaceScope, actor: 
 }
 
 export async function issueResearchLink(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, userId, study } = await findMemberStudy(scope, actor, studyId)
   assertNativeStudy(study)
   if (study.status !== "ACTIVE") throw new ResearchStudyError("Participant links require an active study")
@@ -373,7 +374,6 @@ function publicMetadata(study: StudyMetadata) {
 }
 
 export async function getResearchStudy(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, studyId: string) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   return publicMetadata((await findMemberStudy(scope, actor, studyId)).study)
 }
 
@@ -439,7 +439,6 @@ export async function listResearchSessions(
   studyId: string,
   { status, offset = 0, limit }: { status?: ResearchSessionStatus; offset?: number; limit?: number } = {},
 ) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   // findMemberStudy enforces workspace membership AND excludes PM_INTERVIEW
   // studies, which reuse these tables but have their own owner-scoped
   // authorization path (ADR-0011). Resolving through it is what stops these
@@ -464,7 +463,6 @@ export async function getResearchSession(
   sessionId: string,
   { offset = 0, limit }: { offset?: number; limit?: number } = {},
 ) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, study } = await findMemberStudy(scope, actor, studyId)
   assertOffset(offset)
   const take = pageSize(limit)
@@ -510,7 +508,6 @@ export async function listResearchSyntheses(
   studyId: string,
   { offset = 0, limit }: { offset?: number; limit?: number } = {},
 ) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, study } = await findMemberStudy(scope, actor, studyId)
   assertOffset(offset)
   const take = pageSize(limit)
@@ -530,10 +527,10 @@ export async function listResearchSyntheses(
 }
 
 export async function listResearchStudies(scope: ResearchWorkspaceScope, actor: ResearchStudyActor, { limit = 20, status, cursor }: { limit?: number; status?: "DRAFT" | "ACTIVE" | "CLOSED" | "ARCHIVED"; cursor?: string }) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findFirst({ where: workspaceWhere(scope, actor), select: { id: true } })
   if (!workspace) throw new ResearchStudyError("Workspace not found")
+  await assertResearchCapture(workspace.id)
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new ResearchStudyError("Limit must be between 1 and 100")
   const cursorContext = `research-studies:${workspace.id}:${status ?? "active"}`
   let after: { createdAt: string; id: string } | undefined
@@ -566,10 +563,10 @@ export async function createExternalResearchStudy(
   actor: ResearchStudyActor,
   input: { name?: unknown; goal?: unknown; externalProvider?: unknown; externalUrl?: unknown },
 ) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const prisma = getPrisma()
   const workspace = await prisma.workspace.findFirst({ where: workspaceWhere(scope, actor), select: { id: true } })
   if (!workspace) throw new ResearchStudyError("Workspace not found")
+  await assertResearchCapture(workspace.id)
   const data = normalizeExternalStudyInput(input)
   const id = randomUUID()
   // ACTIVE with no participant token: the status only means "accepting imported sessions".
@@ -589,7 +586,6 @@ export async function addExternalResearchSession(
   studyId: string,
   input: Parameters<typeof normalizeExternalSessionInput>[0],
 ) {
-  if (!isResearchCaptureEnabled()) throw new ResearchStudyError("Research capture is not enabled")
   const { prisma, study } = await findMemberStudy(scope, actor, studyId)
   if (study.studyType !== "EXTERNAL") throw new ResearchStudyError("Sessions can only be added manually to an external study")
   if (study.status === "ARCHIVED") throw new ResearchStudyError("Archived studies cannot be changed")

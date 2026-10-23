@@ -133,7 +133,16 @@ export function voiceAnswerRetentionPatch(
   return null
 }
 
-type VoiceControlPlanePrisma = Pick<AppPrismaClient, "$transaction">
+type VoiceControlPlanePrisma = Pick<AppPrismaClient, "$transaction" | "researchSession">
+
+/**
+ * Authoritative voice is a per-workspace module. A voice session belongs to a study, and the study to a workspace; a session that
+ * cannot be resolved reads as disabled (fail closed). Resolved on a plain read, never inside the caller's transaction.
+ */
+export async function authoritativeVoiceEnabledForSession(prisma: Pick<AppPrismaClient, "researchSession">, sessionId: string): Promise<boolean> {
+  const session = await prisma.researchSession.findUnique({ where: { id: sessionId }, select: { study: { select: { workspaceId: true } } } })
+  return session?.study?.workspaceId ? isResearchAuthoritativeVoiceEnabled(session.study.workspaceId) : false
+}
 
 function validIdempotencyKey(value: string) {
   return value.length > 0 && value.length <= 128 && /^[A-Za-z0-9_.:-]+$/.test(value)
@@ -168,7 +177,7 @@ export async function allocateResearchVoiceCall({
   targetMinutes: number
   now?: Date
 }) {
-  if (!isResearchAuthoritativeVoiceEnabled()) {
+  if (!(await authoritativeVoiceEnabledForSession(prisma, sessionId))) {
     throw new ResearchVoiceControlPlaneError("Authoritative voice is unavailable", 409, "VOICE_DISABLED")
   }
   if (!validIdempotencyKey(idempotencyKey) || !offerSdp.trim()) {
@@ -474,6 +483,8 @@ export async function appendCanonicalVoiceBatch({
   if (events.some((event) => !event.providerEventId)) {
     throw new ResearchVoiceControlPlaneError("Provider event IDs are required", 400, "INVALID_CALLBACK_EVENT")
   }
+  // Only a worker-authenticated append is gated here (it is the authoritative transport); resolved before the transaction opens.
+  const authoritativeVoice = workerToken !== undefined ? await authoritativeVoiceEnabledForSession(prisma, sessionId) : true
   return prisma.$transaction(async (tx) => {
     const call = await tx.researchVoiceCall.findFirst({
       where: { id: voiceCallId, sessionId },
@@ -481,7 +492,7 @@ export async function appendCanonicalVoiceBatch({
     })
     if (!call) throw new ResearchVoiceControlPlaneError("Voice call not found", 404, "CALL_NOT_FOUND")
     if (workerToken !== undefined) {
-      if (!isResearchAuthoritativeVoiceEnabled() || !voiceWorkerTokenIsBound({ rawToken: workerToken, expectedTokenHash: call.workerTokenHash, presentedCallId: voiceCallId, expectedCallId: call.id, callStatus: call.status, expiresAt: call.leaseExpiresAt, now })) {
+      if (!authoritativeVoice || !voiceWorkerTokenIsBound({ rawToken: workerToken, expectedTokenHash: call.workerTokenHash, presentedCallId: voiceCallId, expectedCallId: call.id, callStatus: call.status, expiresAt: call.leaseExpiresAt, now })) {
         throw new ResearchVoiceControlPlaneError("Invalid research voice worker token", 401, "INVALID_WORKER_TOKEN")
       }
       const fenced = await tx.researchVoiceCall.updateMany({

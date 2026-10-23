@@ -14,8 +14,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ int
   try {
     const route = await pmRouteContext(request), { interviewId } = await params, body = await readBoundedResearchJson(request)
     if (Object.keys(body).some(key => !["sessionId", "resumeToken"].includes(key)) || typeof body.sessionId !== "string" || typeof body.resumeToken !== "string") return NextResponse.json({ error: "Invalid request" }, { status: 400 })
-    if (!isResearchParticipantVoiceEnabled() || !isResearchBrowserVoiceEnabled()) return NextResponse.json({ error: "Voice is not available for this interview" }, { status: 409 })
     const context = await pmInterviewVoiceContext(route.scope, route.actor, interviewId)
+    const voiceWorkspaceId = context.study.workspaceId
+    if (!(await isResearchParticipantVoiceEnabled(voiceWorkspaceId)) || !(await isResearchBrowserVoiceEnabled(voiceWorkspaceId))) return NextResponse.json({ error: "Voice is not available for this interview" }, { status: 409 })
     voiceContext = context
     sessionInput = { sessionId: body.sessionId, resumeToken: body.resumeToken }
     const lease = await createResearchVoiceLease({ context, sessionId: body.sessionId, resumeToken: body.resumeToken })

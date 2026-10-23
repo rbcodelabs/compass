@@ -30,6 +30,7 @@
 import getPrisma from "@/lib/db";
 import { commentLinkTitles } from "@/lib/comment-link-titles";
 import { isPmInterviewEnabled, isResearchCaptureEnabled } from "@/lib/research-feature";
+import { isModuleEnabled } from "@/lib/modules/server";
 import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getLinkedSolutionsByKeyResult } from "@/lib/typed-links";
 import { getSolutionArtifactIds } from "@/lib/artifacts";
 import { loadThinkingModelSource, offersSolutionToKrSurfaces } from "@/lib/thinking-model/link-surfaces";
@@ -278,7 +279,7 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     })),
     hasActiveSolutionScoringModel: solutionScoringModel !== null,
     availableKeyResults: keyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })),
-    pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews,
+    pmInterviewEnabled: await isPmInterviewEnabled(workspaceId), pmInterviews,
   };
 }
 
@@ -351,7 +352,7 @@ async function fetchSolution(id: string, workspaceId: string) {
       ? { availableKeyResults: pickerKeyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })) }
       : {}),
     artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts,
-    pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews, customFields,
+    pmInterviewEnabled: await isPmInterviewEnabled(workspaceId), pmInterviews, customFields,
     scoringModel: solutionScoringModel,
     existingScore: toSolutionScoreData(solution.score, solutionScoringModel),
   }
@@ -377,7 +378,7 @@ async function fetchAssumption(id: string, workspaceId: string) {
     pmInterviewHistory(workspaceId, "ASSUMPTION", id),
     resolveEvidenceProvenance(item.evidence),
   ])
-  return { ...item, evidence, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews }
+  return { ...item, evidence, pmInterviewEnabled: await isPmInterviewEnabled(workspaceId), pmInterviews }
 }
 
 async function fetchExperiment(id: string, workspaceId: string) {
@@ -405,7 +406,7 @@ async function fetchExperiment(id: string, workspaceId: string) {
     pmInterviewHistory(workspaceId, "EXPERIMENT", id),
     fetchLinkedTasksBundle(workspaceId, "EXPERIMENT", id),
   ]);
-  return { ...item, ...linkedTasks, researchCaptureEnabled: isResearchCaptureEnabled(), pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews };
+  return { ...item, ...linkedTasks, researchCaptureEnabled: await isResearchCaptureEnabled(workspaceId), pmInterviewEnabled: await isPmInterviewEnabled(workspaceId), pmInterviews };
 }
 
 async function fetchRoadmapItem(id: string, workspaceId: string) {
@@ -423,7 +424,6 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
       // positioning brief, if either exists. `horizon` is already a scalar.
       launchChecklist: { include: { items: { orderBy: { order: "asc" } } } },
       positioningBrief: { select: { id: true, title: true } },
-      workspace: { select: { launchWorkflowEnabled: true } },
       _count: { select: { votes: true } },
     },
   });
@@ -444,16 +444,16 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
     }),
   ]);
 
-  const { workspace, ...rest } = item;
+  const launchWorkflowEnabled = await isModuleEnabled(workspaceId, "launch_workflow");
   return {
-    ...rest,
+    ...item,
     ...linkedTasks,
     customFields,
     squads,
     availableOpportunities,
     // Flattened onto the panel payload so the client doesn't need a second
     // fetch just to know whether to render the Launch section.
-    launchWorkflowEnabled: workspace.launchWorkflowEnabled ?? false,
+    launchWorkflowEnabled,
   };
 }
 

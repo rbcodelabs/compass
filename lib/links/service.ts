@@ -26,7 +26,8 @@ import { resolveEndpoints, touchEndpoint } from "@/lib/links/endpoints"
 import {
   getLinkType,
   isLinkTypeEnabled,
-  linkTypesForEntity,
+  isLinkTypeEnabledInWorkspace,
+  linkTypesForEntityInWorkspace,
   requireLinkType,
   toTypesOf,
   type LinkEndpoint,
@@ -64,6 +65,7 @@ export type EntityLinkRow = {
 }
 
 const FEATURE_OFF = "This link type cannot be used: it is not enabled for this deployment."
+const MODULE_OFF = "This link type cannot be used: it is not enabled for this workspace. A workspace admin can enable the module it belongs to in Settings > Modules."
 
 /** A legacy-mirrored type is written only by its legacy writer (lib/links/legacy-mirror.ts), which passes viaLegacyWriter. */
 function assertWritableHere(def: LinkTypeDef, viaLegacyWriter: boolean | undefined) {
@@ -73,8 +75,9 @@ function assertWritableHere(def: LinkTypeDef, viaLegacyWriter: boolean | undefin
   }
 }
 
-function assertEnabled(def: LinkTypeDef) {
+async function assertEnabled(def: LinkTypeDef, workspaceId: string) {
   if (!isLinkTypeEnabled(def)) throw new TypedLinkError(FEATURE_OFF, "INVALID")
+  if (!(await isLinkTypeEnabledInWorkspace(def, workspaceId))) throw new TypedLinkError(MODULE_OFF, "INVALID")
 }
 
 function typeLabel(type: LinkableEntityType): string {
@@ -136,7 +139,7 @@ export type LinkEntitiesResult = { link: EntityLinkRow; created: boolean; from: 
 export async function linkEntities(tx: Tx, input: LinkEntitiesInput): Promise<LinkEntitiesResult> {
   const def = requireLinkType(input.linkType)
   assertWritableHere(def, input.viaLegacyWriter)
-  assertEnabled(def)
+  await assertEnabled(def, input.expectedWorkspaceId)
   const origin = input.origin ?? "DIRECT"
   if (def.origins && !def.origins.includes(origin)) throw new TypedLinkError(`${def.key} does not allow origin ${origin}.`, "INVALID")
   const toType = resolveToType(def, input.toType)
@@ -224,7 +227,7 @@ export async function unlinkEntities(tx: Tx, input: UnlinkEntitiesInput): Promis
   const def = requireLinkType(input.linkType)
   assertWritableHere(def, input.viaLegacyWriter)
   // A mirror row must stay removable after the flag is turned off, or the legacy unlink would strand it.
-  if (!input.viaLegacyWriter) assertEnabled(def)
+  if (!input.viaLegacyWriter) await assertEnabled(def, input.expectedWorkspaceId)
   const from = await requireEndpoint(tx, def.from, input.expectedWorkspaceId, input.fromId)
   const pair = { linkType: def.key, workspaceId: from.workspaceId }
   const where =
@@ -374,13 +377,13 @@ export async function listLinks(db: Tx, input: ListEntityLinksInput): Promise<{ 
   if (!entityType) throw new TypedLinkError(`Unknown entity type "${input.entityType}".`, "INVALID")
   await requireEndpoint(db, entityType, input.workspaceId, input.entityId)
 
-  const applicable = linkTypesForEntity(entityType)
+  const applicable = await linkTypesForEntityInWorkspace(entityType, input.workspaceId)
   let scoped = applicable
   if (input.linkType !== undefined) {
     const def = requireLinkType(input.linkType)
     scoped = applicable.filter((entry) => entry.def.key === def.key)
     // Disabled, or legacy-mirrored (reads stay on the legacy table): nothing to list, and not an error.
-    if (scoped.length === 0 && (def.legacy || !isLinkTypeEnabled(def))) return { items: [], nextCursor: null }
+    if (scoped.length === 0 && (def.legacy || !(await isLinkTypeEnabledInWorkspace(def, input.workspaceId)))) return { items: [], nextCursor: null }
     if (scoped.length === 0) throw new TypedLinkError(`${def.key} does not link ${entityType} entities.`, "INVALID")
   }
   if (scoped.length === 0) return { items: [], nextCursor: null }
