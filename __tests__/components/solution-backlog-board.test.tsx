@@ -5,6 +5,8 @@ import "@testing-library/jest-dom/vitest";
 
 import { SolutionBacklogBoard, type SolutionBacklogItem } from "@/components/solutions/solution-backlog-board";
 
+// The boards poll for live updates via useLiveRefresh, which needs the app router.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/panels/panel-context", () => ({
   usePanelContext: () => ({ openPanel: vi.fn() }),
 }));

@@ -123,3 +123,31 @@ describe("ColumnsPopover", () => {
     expect(lastHref()).toBe("/acme/core/discovery?hide=EXPLORING&saved=v1&edited=1")
   })
 })
+
+describe("OpportunityBoard live sync", () => {
+  afterEach(cleanup)
+
+  const column = (title: string) => screen.getByRole("heading", { level: 3, name: title }).closest("section")!
+  const board = (byStatus: typeof BY_STATUS) => (
+    <OpportunityBoard opportunitiesByStatus={byStatus} orgSlug="acme" workspaceSlug="core" workspaceId="w1" />
+  )
+
+  it("moves a card to the new column when the server sends a changed status", () => {
+    const view = render(board(BY_STATUS))
+    expect(column("Exploring")).toHaveTextContent("Card e1")
+
+    view.rerender(board({ ...BY_STATUS, EXPLORING: [], ACTIVE: [card("e1", "ACTIVE")] }))
+
+    expect(column("Exploring")).not.toHaveTextContent("Card e1")
+    expect(column("Active")).toHaveTextContent("Card e1")
+  })
+
+  it("shows a card created elsewhere and drops one deleted elsewhere", () => {
+    const view = render(board(BY_STATUS))
+
+    view.rerender(board({ ...BY_STATUS, EXPLORING: [card("e2", "EXPLORING")] }))
+
+    expect(screen.queryByText("Card e1")).not.toBeInTheDocument()
+    expect(screen.getByText("Card e2")).toBeInTheDocument()
+  })
+})

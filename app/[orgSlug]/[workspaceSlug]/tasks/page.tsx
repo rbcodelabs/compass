@@ -198,11 +198,9 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           {/*
-            The board seeds its column state on mount and is intentionally not
-            reactive to `initialTasks`, so that optimistic drag-and-drop
-            survives revalidation. Keying it on the active filters remounts it
-            when — and only when — the filter changes, which is the one moment
-            the client should drop its optimistic state and show server truth.
+            Keyed on the active filters so a filter change remounts the board
+            (dropping view state such as "show cancelled"). Server data changes
+            without a filter change are followed by the board itself.
           */}
           <TaskBoard
             key={taskBoardFilterKey({

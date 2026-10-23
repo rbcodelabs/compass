@@ -2,6 +2,9 @@
 
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
 import { useState, useTransition, useId } from "react";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import { useServerSyncedState } from "@/hooks/use-server-synced-state";
+import { useFlipAnimation } from "@/hooks/use-flip-animation";
 import {
   DndContext,
   DragOverlay,
@@ -41,7 +44,7 @@ function buildColumnMap(
   opportunitiesByStatus: Record<OpportunityStatus, OpportunityCardData[]>
 ): ColumnMap {
   return ALL_STATUSES.reduce((acc, status) => {
-    acc[status] = (opportunitiesByStatus[status] ?? []).sort(
+    acc[status] = [...(opportunitiesByStatus[status] ?? [])].sort(
       (a, b) => a.sortOrder - b.sortOrder
     );
     return acc;
@@ -186,13 +189,21 @@ export function OpportunityBoard({
   const scoreSortActive = hasActiveScoringModel && sortByScore;
   const dragEnabled = !scoreSortActive;
 
-  const [columns, setColumns] = useState<ColumnMap>(() =>
-    buildColumnMap(opportunitiesByStatus)
-  );
   const [activeItem, setActiveItem] = useState<OpportunityCardData | null>(null);
   const [dragSourceStatus, setDragSourceStatus] = useState<OpportunityStatus | null>(null);
 
-  const [, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();
+
+  // Follow the server (another user or an agent moved a card) except while the
+  // user is dragging or a local write is in flight - see useServerSyncedState.
+  const busy = activeItem !== null || dragSourceStatus !== null || isPending;
+  const {
+    state: columns,
+    setState: setColumns,
+    generation,
+  } = useServerSyncedState(opportunitiesByStatus, buildColumnMap, busy);
+  const { containerRef, capture } = useFlipAnimation(generation);
+  useLiveRefresh({ orgSlug, workspaceSlug, scope: "opportunities", paused: busy, onBeforeRefresh: capture });
 
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
@@ -304,7 +315,7 @@ export function OpportunityBoard({
   const visibleColumns = displayColumns(columns, scoreSortActive);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
+    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
       <DndContext
         id={dndId}
         sensors={sensors}
