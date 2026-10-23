@@ -1,4 +1,5 @@
 "use client"
+// Agent board: columns by status for the Agent page (see lib/agent-board.ts for the bucketing rules).
 
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
