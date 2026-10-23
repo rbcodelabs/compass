@@ -38,6 +38,7 @@
  * client, the user and the logs all agree it worked. Both the screen and
  * {@link resolveConsentBinding} refuse it.
  */
+import { isModuleEnabled, isModuleEnabledInAnyMemberWorkspace } from "@/lib/modules/server"
 import getPrisma from "@/lib/db"
 import { findActiveUserOwnedAgent, listUserOwnedAgents } from "@/lib/agent-ownership"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
@@ -72,7 +73,7 @@ export interface BindableAgent {
 
 /** Everything the consent screen needs in order to render the binding section. */
 export interface ConsentBindingOptions {
-  /** `COMPASS_AGENTS_ENABLED`. Off means Phase 1 behavior verbatim. */
+  /** The agents module is on in at least one workspace the user belongs to. Off means Phase 1 behavior verbatim. */
   agentsEnabled: boolean
   agents: BindableAgent[]
   grantable: GrantableWorkspace[]
@@ -272,12 +273,6 @@ export function inlineGrantAccess(requestedScopes: readonly string[]): "READ" | 
   return requestedScopes.includes(SCOPE_MCP_WRITE) || requestedScopes.includes(SCOPE_API_WRITE) ? "WRITE" : "READ"
 }
 
-export const AGENTS_ENABLED_ENV = "COMPASS_AGENTS_ENABLED"
-
-/** Read directly rather than imported from lib/agent-access, which pulls in Prisma types. */
-function agentsAreEnabled(): boolean {
-  return process.env[AGENTS_ENABLED_ENV] === "1"
-}
 
 // ── loading ───────────────────────────────────────────────────────────────
 
@@ -291,7 +286,6 @@ function agentsAreEnabled(): boolean {
  */
 export async function loadConsentBindingOptions(userId: string): Promise<ConsentBindingOptions> {
   const prisma = getPrisma()
-  const agentsEnabled = agentsAreEnabled()
 
   const [memberships, orgMemberships] = await Promise.all([
     prisma.workspaceMember.findMany({
@@ -325,6 +319,15 @@ export async function loadConsentBindingOptions(userId: string): Promise<Consent
   const { grantable, unresolved } = selectGrantableWorkspaces(rows)
   const overrideAvailable = overridePredicateHolds(overrideRolesForMemberships(rows, orgMemberships))
 
+  // The consent screen is account-level, so it has no workspace: the binding section is offered while any workspace the user belongs to
+  // has the agents module on. The memberships are already loaded, so this costs only the module reads.
+  let agentsEnabled = false
+  for (const row of rows) {
+    if (row.workspace && (await isModuleEnabled(row.workspace.id, "agents"))) {
+      agentsEnabled = true
+      break
+    }
+  }
   if (!agentsEnabled) {
     return { agentsEnabled, agents: [], grantable, overrideAvailable, unresolvedMemberships: unresolved }
   }
@@ -587,14 +590,14 @@ export async function revalidateRememberedBinding(
   if (stored.authorizationMode === "USER") {
     // The override predicate is re-checked, so losing org-admin rights narrows
     // the next reconnect rather than the next 30 days.
-    if (!agentsAreEnabled()) return { authorizationMode: "USER", agentId: null }
+    if (!(await isModuleEnabledInAnyMemberWorkspace(userId, "agents"))) return { authorizationMode: "USER", agentId: null }
     if (!(await isUserOverrideEligible(userId))) return null
     return { authorizationMode: "USER", agentId: null }
   }
 
   if (stored.authorizationMode !== "AGENT") return null
 
-  if (!agentsAreEnabled() || !stored.agentId) return null
+  if (!stored.agentId || !(await isModuleEnabledInAnyMemberWorkspace(userId, "agents"))) return null
   const prisma = getPrisma()
   const agent = await findActiveUserOwnedAgent(prisma, stored.agentId, userId)
   if (!agent) return null
@@ -606,10 +609,18 @@ export async function revalidateRememberedBinding(
     select: { workspaceId: true },
   })
   if (grants.length === 0) return null
-  const reachable = await prisma.workspace.findFirst({
+  const reachable = await prisma.workspace.findMany({
     where: { id: { in: grants.map((grant) => grant.workspaceId) }, members: { some: { userId } } },
     select: { id: true },
   })
-  if (!reachable) return null
+  // Reach also needs the agents module in the workspace itself (agentWorkspaceWhere narrows every request the same way).
+  let reachesAnEnabledWorkspace = false
+  for (const { id } of reachable) {
+    if (await isModuleEnabled(id, "agents")) {
+      reachesAnEnabledWorkspace = true
+      break
+    }
+  }
+  if (!reachesAnEnabledWorkspace) return null
   return { authorizationMode: "AGENT", agentId: stored.agentId }
 }

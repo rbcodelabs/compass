@@ -21,7 +21,8 @@
 import { randomBytes, createHash } from "node:crypto"
 import getPrisma from "@/lib/db"
 import { agentIdentityValidForTurn, agentKind, agentOwner, findAgentById } from "@/lib/agent-ownership"
-import { agentsEnabled, liveGrantedWorkspaceIds } from "@/lib/agent-access"
+import { agentsEnabledInWorkspace, liveGrantedWorkspaceIds } from "@/lib/agent-access"
+import { moduleDisabledMessage } from "@/lib/modules/registry"
 
 export type MintedAgentKey = { token: string; apiKeyId: string }
 
@@ -97,7 +98,7 @@ export class AgentKeyMintError extends Error {
  * workspace it is scoped to, and a USER-owned agent to anyone but its owner.
  */
 async function assertAgentKeyMintable(agentId: string, userId: string, workspaceId: string) {
-  if (!agentsEnabled()) throw new AgentKeyMintError("Agents are not enabled.")
+  if (!(await agentsEnabledInWorkspace(workspaceId))) throw new AgentKeyMintError(moduleDisabledMessage("agents"))
   const agent = await findAgentById(getPrisma(), agentId)
   // runId is a placeholder: liveness of the run is proven per request by validateMcpAuth, not at mint time.
   if (!agent || agentKind(agent) !== "CLOUD" || !agentIdentityValidForTurn(agent, { agentId, invokerUserId: userId, runId: "mint" })) {

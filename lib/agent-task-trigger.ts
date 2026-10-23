@@ -30,7 +30,7 @@
  */
 import { after } from "next/server"
 import getPrisma, { type AppPrismaClient } from "@/lib/db"
-import { agentsEnabled } from "@/lib/agent-access"
+import { agentsEnabledInWorkspace } from "@/lib/agent-access"
 import { authorColumn } from "@/lib/agent-attribution"
 import { checkAgentRunCaps, checkAgentUsageLimit } from "@/lib/agent-limits"
 import { resolveAgentModel } from "@/lib/agent-model"
@@ -183,7 +183,6 @@ export async function startRunForAssignedTask(input: TriggerInput, overrides: Pa
 }
 
 async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutcome> {
-  if (!agentsEnabled()) return { status: "skipped" }
   const { prisma } = deps
   const task = await prisma.task.findFirst({
     where: { id: input.taskId },
@@ -194,6 +193,8 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
   })
   const agentId = task?.assigneeAgentId
   if (!task || !agentId) return { status: "skipped" }
+  // The agents module belongs to the task's workspace; with it off an assignment is only a queue entry.
+  if (!(await agentsEnabledInWorkspace(task.workspaceId))) return { status: "skipped" }
   // Re-saving the same assignee (or any save that leaves it as it was) starts nothing.
   if (agentId === (input.previousAssigneeAgentId ?? null)) return { status: "skipped" }
 

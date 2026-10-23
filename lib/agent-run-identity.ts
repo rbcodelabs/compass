@@ -14,7 +14,7 @@
  */
 
 import type { AppPrismaClient } from "@/lib/db"
-import { agentIdentityValidForActor, agentsEnabled, liveGrantedWorkspaceIds } from "@/lib/agent-access"
+import { agentIdentityValidForActor, agentsEnabledInWorkspace, liveGrantedWorkspaceIds } from "@/lib/agent-access"
 import { BUILT_IN_AGENT_SELECTION, getStoredDefaultAgentIds } from "@/lib/agent-defaults"
 import { agentKind, canInvokeAgent, findAgentById, findAgentsByIds, type AgentRecord } from "@/lib/agent-ownership"
 
@@ -83,12 +83,12 @@ export async function resolveRunAgent(
 ): Promise<AgentRecord | null> {
   if (input.requestedAgentId === BUILT_IN_AGENT_SELECTION) return null
   if (input.requestedAgentId != null) {
-    if (!agentsEnabled()) throw new AgentSelectionError(NOT_AVAILABLE, 404, "AGENT_NOT_FOUND")
+    if (!(await agentsEnabledInWorkspace(input.workspaceId))) throw new AgentSelectionError(NOT_AVAILABLE, 404, "AGENT_NOT_FOUND")
     const checked = await checkRunnable(prisma, { userId: input.userId, workspaceId: input.workspaceId, agentId: input.requestedAgentId })
     if (!checked.ok) throw checked.error
     return checked.agent
   }
-  if (!agentsEnabled()) return null
+  if (!(await agentsEnabledInWorkspace(input.workspaceId))) return null
   const stored = await getStoredDefaultAgentIds(prisma, input)
   // De-duplicated so a personal default equal to the workspace default is checked once.
   const candidates = [...new Set([stored.userDefaultAgentId, stored.workspaceDefaultAgentId].filter((id): id is string => !!id))]
@@ -105,7 +105,7 @@ export async function resolveRunAgent(
  * pick would use (null = the built-in agent).
  */
 export async function listRunnableAgents(prisma: AppPrismaClient, input: { userId: string; workspaceId: string }): Promise<{ agents: AgentRecord[]; defaultAgentId: string | null }> {
-  if (!agentsEnabled()) return { agents: [], defaultAgentId: null }
+  if (!(await agentsEnabledInWorkspace(input.workspaceId))) return { agents: [], defaultAgentId: null }
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: input.workspaceId, revokedAt: null }, select: { agentId: true } })
   const candidates = await findAgentsByIds(prisma, grants.map((grant) => grant.agentId))
   const agents: AgentRecord[] = []
@@ -154,8 +154,10 @@ export async function findLiveRunForTurnKey(prisma: AppPrismaClient, key: AgentT
  * error (including migration 100 being unapplied) all reject. Never downgrades to a plain user turn.
  */
 export async function authorizeAgentTurnKey(prisma: AppPrismaClient, key: AgentTurnKeyRow, now: Date = new Date()): Promise<string | null> {
-  if (!agentsEnabled() || !key.agentId) return null
+  // An AGENT_TURN key is always bound to a workspace (mintAgentMcpKey); the agents module is that workspace's.
+  if (!key.agentId || !key.scopeWorkspaceId) return null
   try {
+    if (!(await agentsEnabledInWorkspace(key.scopeWorkspaceId))) return null
     const run = await findLiveRunForTurnKey(prisma, key, now)
     if (!run) return null
     const agent = await findAgentById(prisma, key.agentId)

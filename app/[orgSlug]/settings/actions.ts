@@ -9,7 +9,8 @@ import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { SLUG_PATTERN } from "@/lib/slug";
 import { validateOrgSlug } from "@/lib/org-slug";
 import { createWorkspaceInOrg, type WorkspaceMemberSeeding } from "@/lib/workspace-service";
-import { agentsEnabled } from "@/lib/agent-access";
+import { isModuleEnabledInAnyOrgWorkspace } from "@/lib/modules/server";
+import { moduleDisabledMessage } from "@/lib/modules/registry";
 import { agentOwner, findAgentById } from "@/lib/agent-ownership";
 
 export interface ScoringMetricInput {
@@ -534,7 +535,7 @@ export async function grantAgentScoringModelAdmin(
     const session = await auth();
     if (!session?.user?.id) throw new PermissionError("Unauthorized");
     const { prisma, organizationId } = await resolveOrgAdmin(orgSlug);
-    if (!agentsEnabled()) return { ok: false, error: "Agent changes are currently disabled" };
+    if (!(await isModuleEnabledInAnyOrgWorkspace(organizationId, "agents"))) return { ok: false, error: moduleDisabledMessage("agents") };
 
     const agent = await findAgentById(prisma, agentId);
     if (!agent || agent.status !== "ACTIVE") return { ok: false, error: "Agent not found" };
