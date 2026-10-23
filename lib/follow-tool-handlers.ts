@@ -3,6 +3,7 @@ import { optionalCompassUrl, trustedCompassBaseUrl } from "@/lib/compass-url"
 import { workspaceBasePath } from "@/lib/entity-links"
 import { FollowError, followSubject, unfollowSubject, type FollowTarget } from "@/lib/follows"
 import { followingAvailable } from "@/lib/following-flag"
+import { moduleDisabledMessage } from "@/lib/modules/registry"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { fail, ok } from "@/lib/mcp-output"
 import { listNotifications, markAllRead, markRead, unreadCount } from "@/lib/notifications"
@@ -54,7 +55,7 @@ export async function listNotificationsTool(input: { workspaceId: string; limit?
   const caller = callerUser()
   if (!caller.ok) return fail(caller.error)
   const prisma = getPrisma()
-  if (!(await followingAvailable(prisma))) return fail("Following is not enabled.")
+  if (!(await followingAvailable(prisma, input.workspaceId))) return fail(moduleDisabledMessage("following"))
 
   const [page, unread, workspace] = await Promise.all([
     listNotifications(caller.userId, input.workspaceId, { limit: input.limit ?? 25, cursor: input.cursor, unreadOnly: input.unreadOnly }),
@@ -86,7 +87,7 @@ export async function markReadTool(input: { workspaceId: string; notificationIds
   const hasIds = Array.isArray(input.notificationIds) && input.notificationIds.length > 0
   if (hasIds === Boolean(input.all)) return fail("Pass exactly one of notificationIds or all: true.")
   const prisma = getPrisma()
-  if (!(await followingAvailable(prisma))) return fail("Following is not enabled.")
+  if (!(await followingAvailable(prisma, input.workspaceId))) return fail(moduleDisabledMessage("following"))
   const marked = input.all
     ? (await markAllRead(caller.userId, input.workspaceId)).marked
     : await markRead(caller.userId, input.workspaceId, input.notificationIds!)

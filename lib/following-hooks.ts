@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import getPrisma from "@/lib/db"
-import { followingAvailable, followingEnabled } from "@/lib/following-flag"
+import { followingAvailable } from "@/lib/following-flag"
 import { runAfterCommit } from "@/lib/following-commit"
 import { getMcpActor } from "@/lib/mcp-authz"
 import { autoFollow, type AutoFollowSource, type FollowTarget } from "@/lib/follows"
@@ -171,8 +171,8 @@ export async function followAfterCreate(input: {
   actor: FollowActor | (() => Promise<FollowActor>)
 }): Promise<void> {
   try {
-    if (!followingEnabled() || !followingTracksModel(input.model)) return
-    if (!(await followingAvailable(getPrisma()))) return
+    if (!followingTracksModel(input.model)) return
+    if (!(await followingAvailable(getPrisma(), input.workspaceId))) return
     const actor = typeof input.actor === "function" ? await input.actor() : input.actor
     const effects = await buildFollowingEffects({
       model: input.model, operation: "create", before: null, after: input.row, actor,

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { moduleDisabledMessage } from "@/lib/modules/registry";
 import type { AppPrismaClient } from "./db";
 import {
   retryUpdatesTransaction,
@@ -29,7 +30,7 @@ export async function getUpdatesPage(
   mode: "unread" | "week",
   cursor?: string,
 ): Promise<UpdatesPage> {
-  if (!(await workspaceUpdatesAvailable(prisma)))
+  if (!(await workspaceUpdatesAvailable(prisma, workspaceId)))
     return {
       available: false,
       items: [],
@@ -112,8 +113,8 @@ export async function markUpdatesCaughtUp(
   const snapshot = readUpdatesToken(token, workspaceId, userId);
   if (!snapshot.complete || snapshot.mode !== "unread")
     throw new Error("Load all unread updates before marking caught up");
-  if (!(await workspaceUpdatesAvailable(prisma)))
-    throw new Error("Updates is not available");
+  if (!(await workspaceUpdatesAvailable(prisma, workspaceId)))
+    throw new Error(moduleDisabledMessage("workspace_updates"));
   return retryUpdatesTransaction(prisma, async (tx) => {
     const state = await tx.workspaceUpdatesReadState.findUnique({
       where: { workspaceId_userId: { workspaceId, userId } },
@@ -154,8 +155,8 @@ export async function undoUpdatesCaughtUp(
   receipt: string,
 ) {
   if (!/^[0-9a-f-]{36}$/i.test(receipt)) throw new Error("Invalid receipt");
-  if (!(await workspaceUpdatesAvailable(prisma)))
-    throw new Error("Updates is not available");
+  if (!(await workspaceUpdatesAvailable(prisma, workspaceId)))
+    throw new Error(moduleDisabledMessage("workspace_updates"));
   return retryUpdatesTransaction(prisma, async (tx) => {
     const state = await tx.workspaceUpdatesReadState.findUnique({
       where: { workspaceId_userId: { workspaceId, userId } },

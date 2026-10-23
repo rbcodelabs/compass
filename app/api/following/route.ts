@@ -31,7 +31,7 @@ export async function GET(req: Request) {
 
   const prisma = getPrisma()
   // Off, or this type's slice has not shipped: not an error, the button just stays hidden.
-  if (!(await followingAvailable(prisma)) || !isSubjectTypeActive(subjectType)) return NextResponse.json({ available: false })
+  if (!(await followingAvailable(prisma, caller.workspaceId)) || !isSubjectTypeActive(subjectType)) return NextResponse.json({ available: false })
   const subject = await getFollowable(subjectType)?.resolveWorkspace(subjectId)
   if (!subject || subject.workspaceId !== caller.workspaceId) return NextResponse.json({ error: "Not found" }, { status: 404 })
 

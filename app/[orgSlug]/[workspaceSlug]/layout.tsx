@@ -21,7 +21,7 @@ import { cookies } from "next/headers"
 import { panelPinCookieName, parsePanelPin } from "@/lib/panel-pin"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { isResearchCaptureEnabled } from "@/lib/research-feature"
+import { getWorkspaceModuleStates } from "@/lib/modules/server"
 import { ThemeProvider } from "@/components/theme/theme-provider"
 import { workspaceThemeInitScript } from "@/lib/theme"
 import getPrisma from "@/lib/db"
@@ -81,10 +81,12 @@ export default async function WorkspaceLayout({
   // Resolved once from the already-loaded workspace (no extra query) and handed
   // to client components as plain data.
   const thinkingModel = resolveThinkingModel(workspace)
-  const researchCaptureEnabled = isResearchCaptureEnabled()
+  // The nav shows what this workspace has switched on (Settings > Modules); updates and following also need their tables.
+  const modules = await getWorkspaceModuleStates(workspace.id)
+  const researchCaptureEnabled = modules.research_capture.enabled
   const [updatesEnabled, followingEnabled] = await Promise.all([
-    workspaceUpdatesAvailable(getPrisma()),
-    followingAvailable(getPrisma()),
+    modules.workspace_updates.enabled ? workspaceUpdatesAvailable(getPrisma(), workspace.id) : false,
+    modules.following.enabled ? followingAvailable(getPrisma(), workspace.id) : false,
   ])
   // Seeds the bell for the first painted frame; the client refetches on
   // navigation and when the tab becomes visible. Zero cost with following off.
