@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import getPrisma from "@/lib/db";
+import { loadCardSortBoard } from "@/lib/card-sort";
+import { listCardSortNewEntries } from "@/lib/card-sort-new-entries";
 
 /**
  * Cheap "did anything on this board change?" fingerprint for live refresh.
@@ -16,7 +18,7 @@ import getPrisma from "@/lib/db";
  * page filter: it is a superset signal, so a filtered board may refresh once
  * for a change it cannot see (a harmless no-op re-render), never miss one.
  */
-export const LIVE_SCOPES = ["opportunities", "solutions", "tasks", "experiments"] as const;
+export const LIVE_SCOPES = ["opportunities", "solutions", "tasks", "experiments", "roadmap", "cardSort"] as const;
 export type LiveScope = (typeof LIVE_SCOPES)[number];
 
 export function isLiveScope(value: string | null): value is LiveScope {
@@ -35,9 +37,58 @@ export function hashRows(groups: ReadonlyArray<ReadonlyArray<unknown>>): string 
   return hash.digest("hex");
 }
 
-export async function computeChangeToken(scope: LiveScope, workspaceId: string): Promise<string> {
+/** Per-request context for scopes whose visibility depends on who is asking. */
+export type ChangeTokenContext = { userId: string; roundId?: string | null };
+
+export async function computeChangeToken(
+  scope: LiveScope,
+  workspaceId: string,
+  context?: ChangeTokenContext,
+): Promise<string> {
   const prisma = getPrisma();
   switch (scope) {
+    case "roadmap": {
+      const [items, solutions, bugs] = await Promise.all([
+        prisma.roadmapItem.findMany({
+          where: { workspaceId },
+          select: {
+            id: true, horizon: true, status: true, sortOrder: true, title: true, squadId: true,
+            isPrivate: true, startDate: true, endDate: true, solutionId: true, updatedAt: true,
+          },
+        }),
+        prisma.solution.findMany({
+          where: { workspaceId, status: { not: "KILLED" } },
+          select: { id: true, title: true, status: true },
+        }),
+        prisma.feedbackItem.findMany({
+          where: { workspaceId, type: "BUG" },
+          select: { id: true, title: true },
+        }),
+      ]);
+      // Swimlanes grouped by a custom field read the lane from these values.
+      const laneValues = items.length === 0
+        ? []
+        : await prisma.customFieldValue.findMany({
+            where: { objectId: { in: items.map((item) => item.id) } },
+            select: { fieldId: true, objectId: true, value: true, updatedAt: true },
+          });
+      return hashRows([items, solutions, bugs, laneValues]);
+    }
+    case "cardSort": {
+      if (!context?.roundId) throw new Error("cardSort scope requires a roundId");
+      // Hash exactly what this user may see (loadCardSortBoard applies the
+      // blind-proposal gate), so the token can never reveal a hidden proposal.
+      const [board, newEntries] = await Promise.all([
+        loadCardSortBoard({ workspaceId, roundId: context.roundId, userId: context.userId }),
+        listCardSortNewEntries({ workspaceId, roundId: context.roundId, userId: context.userId }),
+      ]);
+      return hashRows([
+        [board.round],
+        board.rows,
+        board.proposals,
+        newEntries,
+      ]);
+    }
     case "opportunities": {
       const [opportunities, solutions, evidenceCount] = await Promise.all([
         prisma.opportunity.findMany({

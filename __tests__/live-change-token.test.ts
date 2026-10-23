@@ -32,6 +32,8 @@ describe("isLiveScope", () => {
   it("accepts known scopes only", () => {
     expect(isLiveScope("tasks")).toBe(true);
     expect(isLiveScope("opportunities")).toBe(true);
+    expect(isLiveScope("roadmap")).toBe(true);
+    expect(isLiveScope("cardSort")).toBe(true);
     expect(isLiveScope("users")).toBe(false);
     expect(isLiveScope(null)).toBe(false);
   });

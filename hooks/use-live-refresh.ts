@@ -21,6 +21,8 @@ type Options = {
   orgSlug: string;
   workspaceSlug: string;
   scope: LiveScope;
+  /** Required for the `cardSort` scope. */
+  roundId?: string;
   /**
    * True while the UI holds state a refresh must not disturb (a drag in flight,
    * a pending local mutation). A change seen while paused is *not* consumed:
@@ -46,6 +48,7 @@ export function useLiveRefresh({
   orgSlug,
   workspaceSlug,
   scope,
+  roundId,
   paused = false,
   onBeforeRefresh,
   intervalMs = LIVE_REFRESH_INTERVAL_MS,
@@ -71,7 +74,8 @@ export function useLiveRefresh({
 
     const url =
       `/api/live/change-token?orgSlug=${encodeURIComponent(orgSlug)}` +
-      `&workspaceSlug=${encodeURIComponent(workspaceSlug)}&scope=${encodeURIComponent(scope)}`;
+      `&workspaceSlug=${encodeURIComponent(workspaceSlug)}&scope=${encodeURIComponent(scope)}` +
+      (roundId ? `&roundId=${encodeURIComponent(roundId)}` : "");
 
     function clearTimer() {
       if (timer !== null) clearTimeout(timer);
@@ -129,5 +133,5 @@ export function useLiveRefresh({
       document.removeEventListener("visibilitychange", onVisibilityOrFocus);
       window.removeEventListener("focus", onVisibilityOrFocus);
     };
-  }, [orgSlug, workspaceSlug, scope, intervalMs]);
+  }, [orgSlug, workspaceSlug, scope, roundId, intervalMs]);
 }

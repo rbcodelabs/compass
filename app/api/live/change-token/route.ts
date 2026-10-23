@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
+import { CardSortError } from "@/lib/card-sort";
 import { computeChangeToken, isLiveScope } from "@/lib/live-change-token";
 
 /**
@@ -31,6 +32,19 @@ export async function GET(request: Request) {
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const token = await computeChangeToken(scope, workspace.id);
+  const roundId = params.get("roundId");
+  if (scope === "cardSort" && !roundId) {
+    return NextResponse.json({ error: "Missing roundId" }, { status: 400 });
+  }
+
+  let token: string;
+  try {
+    token = await computeChangeToken(scope, workspace.id, { userId: session.user.id, roundId });
+  } catch (error) {
+    if (error instanceof CardSortError && error.code === "NOT_FOUND") {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    throw error;
+  }
   return NextResponse.json({ token }, { headers: { "Cache-Control": "no-store" } });
 }

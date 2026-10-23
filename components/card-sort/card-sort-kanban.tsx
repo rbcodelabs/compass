@@ -50,6 +50,9 @@ import { useLabels } from "@/components/thinking-model/thinking-model-provider"
  */
 
 import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useLiveRefresh } from "@/hooks/use-live-refresh"
+import { useServerSyncedState } from "@/hooks/use-server-synced-state"
+import { useFlipAnimation } from "@/hooks/use-flip-animation"
 import {
   DndContext,
   DragOverlay,
@@ -309,7 +312,7 @@ function SolidCard({ card, ctx }: { card: PlacedCard; ctx: CardContext }) {
   )
 
   return (
-    <div ref={setNodeRef} data-dragging={isDragging || undefined} className="data-dragging:opacity-40">
+    <div ref={setNodeRef} data-flip-id={card.objectId} data-dragging={isDragging || undefined} className="data-dragging:opacity-40">
       {ctx.draggable ? (
         <ProposeContextMenu {...menu} className="block">
           {article}
@@ -597,7 +600,7 @@ export function CardSortKanban({
   canProposeNewEntries = false,
   canResolveNewEntries = false,
 }: Props) {
-  const { propose, withdraw, error, setError } = useCardSortProposals({
+  const { propose, withdraw, error, setError, working } = useCardSortProposals({
     orgSlug,
     workspaceSlug,
     roundId: round.id,
@@ -694,6 +697,16 @@ export function CardSortKanban({
   // macOS and a mouse wheel has no horizontal axis, so wide boards read as cut
   // off with no way across. These buttons are the explicit route.
   const rootRef = useRef<HTMLDivElement>(null)
+
+  // Columns are derived from props (no local copy), so live updates only need a
+  // refresh plus a FLIP. Hold both while a drag or a proposal save is in flight.
+  // useServerSyncedState is used here just for its generation counter, which
+  // tells the FLIP hook that fresh server data has been adopted.
+  const busy = draggingId !== null || working
+  const rowsSync = useServerSyncedState(rows, (source) => source, busy)
+  const proposalsSync = useServerSyncedState(proposals, (source) => source, busy)
+  const { capture } = useFlipAnimation(rowsSync.generation + proposalsSync.generation, rootRef)
+  useLiveRefresh({ orgSlug, workspaceSlug, scope: "cardSort", roundId: round.id, paused: busy, onBeforeRefresh: capture })
   function scrollColumns(direction: -1 | 1) {
     const board = rootRef.current?.querySelector<HTMLElement>('[role="region"]')
     board?.scrollBy({ left: direction * board.clientWidth * 0.8, behavior: "smooth" })

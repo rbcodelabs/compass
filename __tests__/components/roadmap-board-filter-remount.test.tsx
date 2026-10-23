@@ -170,17 +170,15 @@ describe("RoadmapBoard filter remount", () => {
     expect(screen.getByText("Billing exports")).toBeVisible();
   });
 
-  it("leaves its client state alone when revalidation lands under an unchanged filter", () => {
-    // The deliberate tradeoff of keying on the filter inputs rather than on the
-    // resulting item set: an unrelated create arriving via revalidation must not
-    // rebuild the columns, because that is also what would discard a pending
-    // optimistic drag. This asserts the board really is seeded once per key —
-    // which is exactly why the missing key made filtering a no-op.
+  it("follows the server when an item arrives under an unchanged filter", () => {
+    // Live updates: a roadmap item created elsewhere (another user, an agent)
+    // shows up on the next refresh. A pending drag or save is protected by the
+    // busy guard in useServerSyncedState, not by ignoring the server.
     const { rerender } = render(<Page items={[payments]} />);
 
     rerender(<Page items={[payments, billing]} />);
 
     expect(screen.getByText("Payments revamp")).toBeVisible();
-    expect(screen.queryByText("Billing exports")).not.toBeInTheDocument();
+    expect(screen.getByText("Billing exports")).toBeVisible();
   });
 });

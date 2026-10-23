@@ -74,9 +74,10 @@ describe("planFlip", () => {
     expect(plan.entering).toEqual([]);
   });
 
-  it("reports cards that only exist after as entering and ignores removed ones", () => {
+  it("reports cards that only exist after as entering and cards only before as leaving", () => {
     const plan = planFlip(new Map([["gone", pt(0, 0)]]), new Map([["new", pt(5, 5)]]));
     expect(plan.moves).toEqual([]);
     expect(plan.entering).toEqual(["new"]);
+    expect(plan.leaving).toEqual(["gone"]);
   });
 });

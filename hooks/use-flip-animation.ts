@@ -7,22 +7,25 @@ export const FLIP_EASING = "cubic-bezier(0.2, 0, 0, 1)";
 /** A snapshot older than this predates the data that arrived, so it is discarded rather than animated from. */
 const SNAPSHOT_MAX_AGE_MS = 10_000;
 
-export type FlipPoint = { left: number; top: number };
+export type FlipPoint = { left: number; top: number; width?: number; height?: number };
 
 export type FlipPlan = {
   moves: Array<{ id: string; dx: number; dy: number }>;
   entering: string[];
+  /** Present before, absent after: the card was removed. */
+  leaving: string[];
 };
 
 /**
  * Pure diff of two position snapshots. A card present in both that shifted by
  * more than a pixel is a move (the inverse delta is what the animation starts
- * from); a card only in `next` is new. Cards only in `prev` are gone - their
- * DOM node no longer exists, so there is nothing left to animate.
+ * from); a card only in `next` is new; a card only in `prev` was removed (its
+ * DOM node is gone, so the hook fades out a ghost clone captured earlier).
  */
 export function planFlip(prev: ReadonlyMap<string, FlipPoint>, next: ReadonlyMap<string, FlipPoint>): FlipPlan {
   const moves: FlipPlan["moves"] = [];
   const entering: string[] = [];
+  const leaving = [...prev.keys()].filter((id) => !next.has(id));
   for (const [id, to] of next) {
     const from = prev.get(id);
     if (!from) {
@@ -33,18 +36,46 @@ export function planFlip(prev: ReadonlyMap<string, FlipPoint>, next: ReadonlyMap
     const dy = from.top - to.top;
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1) moves.push({ id, dx, dy });
   }
-  return { moves, entering };
+  return { moves, entering, leaving };
 }
 
-function measure(container: HTMLElement): Map<string, FlipPoint> {
+function measure(container: HTMLElement, clones?: Map<string, HTMLElement>): Map<string, FlipPoint> {
   const points = new Map<string, FlipPoint>();
   for (const el of container.querySelectorAll<HTMLElement>("[data-flip-id]")) {
     const id = el.dataset.flipId;
     if (!id) continue;
     const rect = el.getBoundingClientRect();
-    points.set(id, { left: rect.left, top: rect.top });
+    points.set(id, { left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+    clones?.set(id, el.cloneNode(true) as HTMLElement);
   }
   return points;
+}
+
+/**
+ * Fades a removed card out where it used to be, using the clone captured
+ * before the refresh. Fixed-positioned on <body> so it survives the
+ * column/list that owned it being re-rendered; inert and hidden from AT.
+ */
+function playGhostFadeOut(clone: HTMLElement, at: FlipPoint, timing: KeyframeAnimationOptions) {
+  if (typeof clone.animate !== "function") return;
+  clone.removeAttribute("data-flip-id");
+  clone.setAttribute("aria-hidden", "true");
+  clone.inert = true;
+  Object.assign(clone.style, {
+    position: "fixed",
+    left: `${at.left}px`,
+    top: `${at.top}px`,
+    width: `${at.width ?? 0}px`,
+    margin: "0",
+    pointerEvents: "none",
+    zIndex: "50",
+    transform: "none",
+  });
+  document.body.appendChild(clone);
+  const animation = clone.animate([{ opacity: 1 }, { opacity: 0 }], { ...timing, fill: "forwards" });
+  const remove = () => clone.remove();
+  animation.onfinish = remove;
+  animation.oncancel = remove;
 }
 
 function prefersReducedMotion(): boolean {
@@ -69,18 +100,30 @@ function prefersReducedMotion(): boolean {
  * the Web Animations API, which composes with (and cleans up after) inline
  * transforms without touching them.
  */
-export function useFlipAnimation(generation: number): {
+export function useFlipAnimation(
+  generation: number,
+  /** Reuse a ref the component already attaches to its root instead of the returned one. */
+  existingRef?: RefObject<HTMLDivElement | null>,
+): {
   containerRef: RefObject<HTMLDivElement | null>;
   capture: () => void;
 } {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const snapshotRef = useRef<{ points: Map<string, FlipPoint>; at: number } | null>(null);
+  const ownRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = existingRef ?? ownRef;
+  const snapshotRef = useRef<{
+    points: Map<string, FlipPoint>;
+    clones: Map<string, HTMLElement>;
+    at: number;
+  } | null>(null);
   const handledGenerationRef = useRef(generation);
 
   const capture = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
-    snapshotRef.current = { points: measure(container), at: Date.now() };
+    const clones = new Map<string, HTMLElement>();
+    snapshotRef.current = { points: measure(container, clones), clones, at: Date.now() };
+    // containerRef is a stable ref object
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useLayoutEffect(() => {
@@ -106,7 +149,12 @@ export function useFlipAnimation(generation: number): {
     for (const id of plan.entering) {
       byId.get(id)?.animate?.([{ opacity: 0, transform: "scale(0.96)" }, { opacity: 1, transform: "scale(1)" }], timing);
     }
-  }, [generation]);
+    for (const id of plan.leaving) {
+      const clone = snapshot.clones.get(id);
+      const at = snapshot.points.get(id);
+      if (clone && at) playGhostFadeOut(clone, at, timing);
+    }
+  }, [generation, containerRef]);
 
   return { containerRef, capture };
 }
