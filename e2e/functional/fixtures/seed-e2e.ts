@@ -5,6 +5,7 @@
  * operate against. All data lives under `e2e-test-org` so teardown can
  * safely delete it without touching real dev data.
  */
+import { MODULE_KEYS } from "../../../lib/modules/registry";
 import pg from "pg";
 import { createHash } from "node:crypto";
 import { orgNameForToken } from "./run-token";
@@ -96,6 +97,18 @@ export async function seedE2E(
     VALUES (gen_random_uuid(), $1, $2, 'ADMIN', NOW())
     ON CONFLICT (workspace_id, user_id) DO NOTHING
   `, [ws.id, user.id]);
+
+  // ── Workspace modules ─────────────────────────────────────────────────────
+  // Product features are workspace modules now (Settings > Modules), off by default. The functional suite exercises all of them in the
+  // fixture workspace, except the marketing launch workflow, whose spec turns it on and off through the real Settings page and expects
+  // it to start off. Reset on every seed so a run interrupted mid-toggle cannot leak state into the next.
+  for (const key of MODULE_KEYS) {
+    await pool.query(`
+      INSERT INTO "${S}".workspace_modules (workspace_id, module_key, enabled, created_at, updated_at)
+      VALUES ($1, $2, $3, NOW(), NOW())
+      ON CONFLICT (workspace_id, module_key) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()
+    `, [ws.id, key, key !== "launch_workflow"]);
+  }
 
   // A second membership makes the marketing homepage exercise its workspace
   // selector instead of the single-workspace shortcut.

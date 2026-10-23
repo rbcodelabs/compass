@@ -18,6 +18,7 @@ import {
   resolvePmInterviewApplyInput,
 } from "@/lib/pm-interview-contracts"
 import { isPmInterviewEnabled } from "@/lib/research-feature"
+import { moduleDisabledMessage } from "@/lib/modules/registry"
 import { instrumentActivityClient } from "@/lib/analytics/activity"
 import { getLinkedObjectivesByOpportunity } from "@/lib/typed-links"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
@@ -166,15 +167,15 @@ export async function targetSnapshot(prisma: AppPrismaClient, workspaceId: strin
   return boundPmInterviewContext({ version: 1, capturedAt, target: { type: targetType, id: item.id, fields: { title: item.title, hypothesis: item.hypothesis, method: item.method, killCondition: item.killCondition, status: item.status } }, parents, outcome: outcomeOf(linked, workspaceId), ...(item.assumption ? await linkedObjectivesField(prisma, workspaceId, item.assumption.solution.opportunity.id) : {}), evidence: evidence.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.excerpt) })), feedback: feedback.slice(0, 20).map(row => ({ id: row.id, excerpt: excerpt(row.description ?? row.title) })), omissions: item.assumption ? [...(evidence.length > 20 ? ["Additional directly linked evidence was omitted."] : []), ...(feedback.length > 20 ? ["Additional directly linked feedback was omitted."] : [])] : ["This experiment has no linked assumption, so no discovery parent chain was available."] })
 }
 
-function assertEnabled() {
-  if (!isPmInterviewEnabled()) throw new PmInterviewError("PM interviews are not enabled", 404)
+async function assertEnabled(workspaceId: string) {
+  if (!(await isPmInterviewEnabled(workspaceId))) throw new PmInterviewError(moduleDisabledMessage("pm_interview"), 404)
 }
 
 export async function createPmInterview(scope: PmInterviewScope, actor: PmInterviewActor, input: { targetType: unknown; targetId: string }) {
-  assertEnabled()
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.targetId)) throw new PmInterviewError("Invalid PM interview target", 400)
   const prisma = getPrisma(), targetType = parsePmInterviewTargetType(input.targetType)
   const workspaceId = await memberWorkspace(prisma, scope, actor.userId)
+  await assertEnabled(workspaceId)
   const snapshot = await targetSnapshot(prisma, workspaceId, targetType, input.targetId)
   const baselineTarget = await liveTarget(prisma, workspaceId, targetType, input.targetId)
   if (!baselineTarget) throw new PmInterviewError("PM interview target not found", 404)
@@ -194,8 +195,8 @@ export async function createPmInterview(scope: PmInterviewScope, actor: PmInterv
 }
 
 async function loadInterview(scope: PmInterviewScope, actor: PmInterviewActor, interviewId: string, ownerOnly = false) {
-  assertEnabled()
   const prisma = getPrisma(), workspaceId = await memberWorkspace(prisma, scope, actor.userId)
+  await assertEnabled(workspaceId)
   const interview = await prisma.pMInterview.findFirst({ where: { id: interviewId, workspaceId }, include: { session: { include: { turns: { orderBy: { sequence: "asc" } } } }, study: true } })
   if (!interview || (ownerOnly && interview.initiatingUserId !== actor.userId)) throw new PmInterviewError("PM interview not found", 404)
   return { prisma, interview }

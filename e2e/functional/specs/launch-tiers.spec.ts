@@ -17,7 +17,7 @@
  *
  * Journey (flag OFF — the default): confirms the whole marketing-launch
  *          surface (card menu item/chip, panel Launch section, LAUNCHING/
- *          LAUNCHED board columns) is absent when Workspace.launchWorkflowEnabled
+ *          LAUNCHED board columns) is absent when the launch_workflow module
  *          is off, per Compass solution 8303c3df-498d-4503-b92b-c7fd7a0fa62d.
  *
  * This is the first user-facing journey for the GTM launch UI (the feature
@@ -29,15 +29,15 @@ import { test, expect } from "../fixtures/index";
 import type { Page } from "@playwright/test";
 
 /**
- * The Settings → Marketing launch toggle has an accessible name via
- * data-testid (see launch-workflow-settings-panel.tsx), same pattern as the
+ * The Settings → Modules launch toggle has an accessible name via
+ * data-testid (see components/settings/modules-panel.tsx), same pattern as the
  * pre-existing portal-toggle-roadmap helper below. Returns the toggle's state
  * *before* this call so the caller can restore it afterward.
  */
 async function setLaunchWorkflowEnabled(page: Page, base: string, enabled: boolean): Promise<boolean> {
-  await page.goto(`${base}/settings`);
+  await page.goto(`${base}/settings/modules`);
   await page.waitForLoadState("networkidle");
-  const toggle = page.getByTestId("launch-workflow-toggle");
+  const toggle = page.getByTestId("module-toggle-launch_workflow");
   const wasEnabled = (await toggle.getAttribute("aria-checked")) === "true";
   if (wasEnabled !== enabled) {
     await toggle.click();

@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { Button } from "@/components/ui/button";
 import getPrisma from "@/lib/db";
 import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-panel";
 import { SharedOptionSetsPanel } from "@/components/custom-fields/shared-option-sets-panel";
@@ -13,7 +15,6 @@ import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel
 import { DeliveryLimitsPanel } from "@/components/settings/delivery-limits-panel";
 import { parseStoredRepos } from "@/lib/agent-github-repos";
 import { AgentGithubReposPanel } from "@/components/settings/agent-github-repos-panel";
-import { LaunchWorkflowSettingsPanel } from "@/components/settings/launch-workflow-settings-panel";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { ThinkingModelPanel } from "@/components/settings/thinking-model-panel";
 import { inspectStoredLabels, resolveThinkingModel } from "@/lib/thinking-model/resolve";
@@ -84,7 +85,6 @@ export default async function SettingsPage({ params }: Props) {
       portalAuthRequired: true,
       artifactFeedbackPublic: true,
       ssoEnabled: true,
-      launchWorkflowEnabled: true,
       agentGithubRepos: true,
       ssoSecretEncrypted: true,
       ssoSecretUpdatedAt: true,
@@ -435,20 +435,9 @@ export default async function SettingsPage({ params }: Props) {
         />
       </SettingsSection>
 
-      {/*
-        Placed after Portal, not before: several functional E2E specs
-        (feedback-attachments, feedback-bug-roadmap, roadmap-unscheduled-items)
-        select Portal's toggles by positional index
-        (page.getByRole("switch").nth(1), etc.) since PortalSettingsPanel's
-        toggles have no stable accessible name. Inserting a new switch above
-        Portal would silently shift those indices and break those specs.
-      */}
-      <SettingsSection title="Marketing launch" description="Turn on launch tiers, checklists, and positioning briefs for teams that run a formal marketing-launch process.">
-        <LaunchWorkflowSettingsPanel
-          orgSlug={orgSlug}
-          workspaceSlug={workspaceSlug}
-          launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
-        />
+      {/* Links to the Modules page. No switch here, so it cannot shift the positional switch indices the Portal specs rely on. */}
+      <SettingsSection title="Modules" description="Turn product modules on or off for this workspace: research, voice, notifications, the marketing launch workflow and more. Workspace administrators only.">
+        <Button variant="outline" render={<Link href={`/${orgSlug}/${workspaceSlug}/settings/modules`} />}>Manage modules</Button>
       </SettingsSection>
 
       <SettingsSection title="Agent GitHub access" description="Repositories agents in this workspace may push branches and open pull requests to. Agents get a short-lived token limited to exactly these repos.">

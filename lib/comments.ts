@@ -4,7 +4,7 @@ import { MAX_SLIDES } from "@/lib/deck-contract"
 import { resolveCommentAuthors } from "@/lib/comment-authors"
 import { withWorkspaceUpdates, recordWorkspaceUpdate } from "@/lib/workspace-updates-capture"
 import { workspaceMutationActor } from "@/lib/workspace-update-mutations"
-import { followingAvailable, followingEnabled } from "@/lib/following-flag"
+import { followingAvailable } from "@/lib/following-flag"
 import { runAfterCommit } from "@/lib/following-commit"
 import { applyFollowingEffects, buildCommentEffects, resolveCommentFollowActor } from "@/lib/following-hooks"
 import { isSubjectTypeActive } from "@/lib/followable"
@@ -212,7 +212,7 @@ export async function createComment(input: CreateCommentInput, options: { before
     if (parent.parentId) throw new Error("Comment threads are only one level deep.")
   }
 
-  const comment = await withWorkspaceUpdates(prisma, async (tx, capture) => {
+  const comment = await withWorkspaceUpdates(prisma, input.workspaceId, async (tx, capture) => {
   let createdId: string | undefined
   let comment
   try {
@@ -253,8 +253,8 @@ export async function createComment(input: CreateCommentInput, options: { before
  */
 export async function followAfterComment(input: CreateCommentInput, commentId: string) {
   try {
-    if (input.source === "MIGRATION" || !followingEnabled() || !isSubjectTypeActive(input.targetType)) return
-    if (!(await followingAvailable(getPrisma()))) return
+    if (input.source === "MIGRATION" || !isSubjectTypeActive(input.targetType)) return
+    if (!(await followingAvailable(getPrisma(), input.workspaceId))) return
     const effects = buildCommentEffects({
       workspaceId: input.workspaceId, targetType: input.targetType, targetId: input.targetId, commentId,
       parentId: input.parentId, source: input.source, actor: resolveCommentFollowActor(input),

@@ -9,7 +9,7 @@ files to `docs/decisions/`.
 
 Slice 1 (data model and infrastructure) is merged. Slice 2 (Opportunities,
 Solutions, Tasks, Docs) wires it up: `followableConfig.shippedSlice` is 2, so
-those four types are active wherever `FOLLOWING_ENABLED=1` and the tables exist.
+those four types are active in every workspace that has the Following module on (Settings > Modules) and the tables exist.
 Slice 3 flips it to 3 and must delete the `PENDING_SLICE_3` entries from
 `__tests__/following-status-bypass-guard.test.ts` (the test forces this).
 
@@ -17,7 +17,7 @@ Slice 2 pieces:
 
 | Piece | Where |
 | --- | --- |
-| Status, creation and assignment hook | `captureWorkspaceMutation` in `lib/workspace-update-mutations.ts`, planning in `lib/following-hooks.ts` (`buildFollowingEffects`), independent of `WORKSPACE_UPDATES_ENABLED`. Dedupe key is a hash of subject, from, to and `updatedAt` |
+| Status, creation and assignment hook | `captureWorkspaceMutation` in `lib/workspace-update-mutations.ts`, planning in `lib/following-hooks.ts` (`buildFollowingEffects`), independent of the Workspace updates module. Dedupe key is a hash of subject, from, to and `updatedAt` |
 | Comment hook (roots and replies) | `followAfterComment` at the tail of `createComment` in `lib/comments.ts` |
 | Creation outside the adapter | `followAfterCreate` for Docs (UI action, `create_doc`) and the decision follow-up Task |
 | Commit-scoped queue | `lib/following-commit.ts`; `withInterviewMutation` wraps the PM receipt transaction so MCP effects flush only after commit |
@@ -31,7 +31,7 @@ follows no one (the human owner is not auto-followed); a user's own MCP key is
 that user, so they follow what they create and are not notified of their own
 change.
 
-Everything is gated by `FOLLOWING_ENABLED=1` and by the registry slice gate
+Everything is gated by the per-workspace Following module (plus the tables existing) and by the registry slice gate
 (`followableConfig.shippedSlice` in `lib/followable.ts`).
 
 | Piece | Where |
@@ -61,7 +61,7 @@ Everything is gated by `FOLLOWING_ENABLED=1` and by the registry slice gate
 
 `lib/status-transitions.ts` now holds the pure "did a tracked field change" logic
 that used to be inline in `captureWorkspaceMutation`. It is behavior-preserving
-and has no dependency on `WORKSPACE_UPDATES_ENABLED`. Decoupling the adapter
+and has no dependency on the Workspace updates module. Decoupling the adapter
 itself from the Updates flag is slice 2 work, and these are the things that will
 bite:
 

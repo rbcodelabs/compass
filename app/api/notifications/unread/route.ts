@@ -14,7 +14,7 @@ export async function GET(req: Request) {
   const caller = await resolveFollowingCaller(searchParams.get("orgSlug"), searchParams.get("workspaceSlug"))
   if (!isFollowingCaller(caller)) return caller
   const prisma = getPrisma()
-  if (!(await followingAvailable(prisma))) return NextResponse.json({ available: false, count: 0, overflow: false })
+  if (!(await followingAvailable(prisma, caller.workspaceId))) return NextResponse.json({ available: false, count: 0, overflow: false })
   const { count, overflow } = await unreadCount(caller.userId, caller.workspaceId, prisma)
   return NextResponse.json({ available: true, count, overflow })
 }

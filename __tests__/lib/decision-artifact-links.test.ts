@@ -9,7 +9,9 @@ const mirror = vi.hoisted(() => ({ link: vi.fn(), unlink: vi.fn() }))
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 // The legacy write and its entity_links mirror share ONE transaction (ADR phase 6); the mirror has its own tests (links/artifact-link-mirror.test.ts).
 vi.mock("@/lib/workspace-updates-capture", () => ({
-  withWorkspaceUpdates: async (client: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(client, false),
+  withWorkspaceUpdates: async (client: unknown, _workspaceId: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(client, false),
+  withAtomicRetry: async (client: unknown, callback: (tx: unknown) => unknown) => callback(client),
+  withUpdatesTables: async (client: unknown, callback: (tx: unknown, tablesExist: boolean) => unknown) => callback(client, false),
 }))
 vi.mock("@/lib/links/legacy-mirror", () => ({ mirrorArtifactLink: mirror.link, unmirrorArtifactLink: mirror.unlink }))
 import * as artifacts from "@/lib/artifacts"

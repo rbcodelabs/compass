@@ -50,6 +50,7 @@ import {
   updateRoadmapItem,
   updateSortOrder,
 } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
+import { setModules } from "../helpers/modules"
 
 vi.mock("@/lib/work-item-sequence", async () => (await import("../helpers/work-item-sequence-mock")).workItemSequenceMock())
 
@@ -79,7 +80,7 @@ beforeEach(() => {
   // existing LAUNCHING/LAUNCHED rejection tests below exercise the
   // pre-existing "use a launch tier" message. The disabled-feature message
   // gets its own describe block.
-  workspace.findUnique.mockResolvedValue({ launchWorkflowEnabled: true });
+  setModules({ launch_workflow: true });
   portfolioCapacityReservation.findUnique.mockResolvedValue(null);
   portfolioCapacityPlan.updateMany.mockResolvedValue({ count: 1 });
   prisma.$transaction.mockImplementation((callback: (tx: typeof prisma) => unknown) => callback(prisma));
@@ -163,7 +164,7 @@ describe("roadmap mutation authorization", () => {
   it.each(["LAUNCHING", "LAUNCHED"] as const)(
     "rejects direct creation in %s with the disabled-feature message when the workspace's launch workflow is off",
     async (horizon) => {
-      workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+      setModules({ launch_workflow: false });
       await expect(addRoadmapItem(WS, { title: "No", horizon })).rejects.toThrow(/launch workflow is disabled/i);
       expect(roadmapItem.create).not.toHaveBeenCalled();
       expect(revalidatePath).not.toHaveBeenCalled();
@@ -171,7 +172,7 @@ describe("roadmap mutation authorization", () => {
   );
 
   it("rejects a direct move into LAUNCHING with the disabled-feature message when off", async () => {
-    workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    setModules({ launch_workflow: false });
     await expect(moveItem(ITEM, "LAUNCHING", WS)).rejects.toThrow(/launch workflow is disabled/i);
     expect(roadmapItem.update).not.toHaveBeenCalled();
   });
@@ -393,7 +394,7 @@ describe("rescheduleRoadmapItem", () => {
   });
 
   it("rejects launch horizons with the disabled-feature message (not 'use a launch tier') when the workspace's launch workflow is off", async () => {
-    workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    setModules({ launch_workflow: false });
     await expect(
       rescheduleRoadmapItem(ITEM, WS, {
         horizon: "LAUNCHING",

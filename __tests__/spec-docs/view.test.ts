@@ -7,7 +7,9 @@ const docService = vi.hoisted(() => ({ created: 0 }))
 
 vi.mock("@/lib/db", () => ({ default: () => fake.current!.client }))
 vi.mock("@/lib/workspace-updates-capture", () => ({
-  withWorkspaceUpdates: async (prisma: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(prisma, false),
+  withWorkspaceUpdates: async (prisma: unknown, _workspaceId: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(prisma, false),
+  withAtomicRetry: async (prisma: unknown, callback: (tx: unknown) => unknown) => callback(prisma),
+  withUpdatesTables: async (prisma: unknown, callback: (tx: unknown, tablesExist: boolean) => unknown) => callback(prisma, false),
 }))
 vi.mock("@/lib/document-service", () => ({
   documentRevision: (doc: { revision: string | null }) => doc.revision ?? "legacy",

@@ -1,40 +1,20 @@
 import type { AppPrismaClient } from "@/lib/db"
+import { followingTablesExist, resetFeatureTablesCache } from "@/lib/feature-tables"
+import { isModuleEnabled } from "@/lib/modules/server"
 
 /**
- * FOLLOWING_ENABLED gate for Following and in-app notifications, modeled on
- * WORKSPACE_UPDATES_ENABLED. Off, every entry point is a no-op or hidden, so the
- * code can deploy before migration 068 is applied. Rolling back is turning the
- * flag off; the additive tables can stay.
+ * The Following and in-app notifications gate. Following is the workspace module `following` (Settings > Modules); the other half of
+ * "available" is that the additive tables exist (lib/feature-tables.ts), so the code can deploy before migration 068 is applied. Off,
+ * every entry point is a no-op or hidden. Rolling back is turning the module off; the additive tables can stay.
  */
-export function followingEnabled(): boolean {
-  return process.env.FOLLOWING_ENABLED === "1"
-}
 
-let tablesKnownToExist = false
-
-/**
- * Flag on AND both tables exist. Only a positive answer is cached, so the feature
- * comes alive on its own once the migration lands without a restart. Must be
- * called with a plain client, never inside a caller's transaction: a missing
- * table error would abort that transaction.
- */
-export async function followingAvailable(prisma: AppPrismaClient): Promise<boolean> {
-  if (!followingEnabled()) return false
-  if (tablesKnownToExist) return true
-  try {
-    await Promise.all([
-      prisma.follow.findFirst({ select: { id: true } }),
-      prisma.notification.findFirst({ select: { id: true } }),
-    ])
-    tablesKnownToExist = true
-    return true
-  } catch (error) {
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "P2021") return false
-    throw error
-  }
+/** The `following` module is enabled for the workspace AND both tables exist. */
+export async function followingAvailable(prisma: AppPrismaClient, workspaceId: string): Promise<boolean> {
+  if (!(await isModuleEnabled(workspaceId, "following"))) return false
+  return followingTablesExist(prisma)
 }
 
 /** Test seam: forget the cached positive availability answer. */
 export function resetFollowingAvailabilityCache(): void {
-  tablesKnownToExist = false
+  resetFeatureTablesCache()
 }

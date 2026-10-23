@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { auth } from "@/auth"
-import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { readBoundedResearchJson } from "@/lib/research-request"
 import { ResearchAnalysisError } from "@/lib/research-analysis-service"
 import { startStudySynthesisHandoff } from "@/lib/research-synthesis-handoff"
@@ -16,7 +15,6 @@ import { startStudySynthesisHandoff } from "@/lib/research-synthesis-handoff"
 const input = z.object({ studyId: z.string().uuid() }).strict()
 
 export async function POST(request: Request) {
-  if (!isResearchCaptureEnabled()) return NextResponse.json({ error: "Not found" }, { status: 404 })
   if (request.headers.get("origin") !== new URL(request.url).origin) return NextResponse.json({ error: "Invalid request origin" }, { status: 403 })
   const member = await auth()
   if (!member?.user?.id) return NextResponse.json({ error: "Authentication required" }, { status: 401 })

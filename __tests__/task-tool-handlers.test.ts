@@ -6,9 +6,12 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { runWithMcpActor } from "@/lib/mcp-authz"
+import { setModules } from "./helpers/modules"
 const updateCapture = vi.hoisted(() => ({ record: vi.fn(), enabled: false }))
 vi.mock("@/lib/workspace-updates-capture", () => ({
-  withWorkspaceUpdates: (db: unknown, callback: (db: unknown, enabled: boolean) => unknown) => callback(db, updateCapture.enabled),
+  withWorkspaceUpdates: (db: unknown, _workspaceId: string, callback: (db: unknown, enabled: boolean) => unknown) => callback(db, updateCapture.enabled),
+  withUpdatesTables: (db: unknown, callback: (db: unknown, enabled: boolean) => unknown) => callback(db, updateCapture.enabled),
+  withAtomicRetry: (db: unknown, callback: (db: unknown) => unknown) => callback(db),
   recordWorkspaceUpdate: updateCapture.record,
 }))
 
@@ -80,6 +83,7 @@ const OPP_ID = "opp-1"
 
 it("captures MCP task status changes with the actual actor and previous state", async () => {
   updateCapture.enabled = true
+  setModules({ workspace_updates: true })
   mockTask.update.mockResolvedValue({ id: TASK_ID, workspaceId: WORKSPACE_ID, status: "DONE", parentTaskId: "parent" })
   await runWithMcpActor({ userId: "owner", purpose: "AGENT", agentId: "agent-1" }, () => moveTaskStatus({ taskId: TASK_ID, status: "DONE" }))
   expect(updateCapture.record).toHaveBeenCalledWith(mockPrisma, expect.objectContaining({ entityType: "TASK", entityId: TASK_ID, groupId: "parent", before: "TODO", after: "DONE", actorType: "AGENT", actorId: "agent-1" }))

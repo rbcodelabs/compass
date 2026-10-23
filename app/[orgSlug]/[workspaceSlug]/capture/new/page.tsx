@@ -8,7 +8,6 @@ import getPrisma from "@/lib/db"
 import { isResearchCaptureEnabled } from "@/lib/research-feature"
 
 export default async function NewStudyPage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string }> }) {
-  if (!isResearchCaptureEnabled()) notFound()
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
   const { orgSlug, workspaceSlug } = await params
@@ -18,6 +17,7 @@ export default async function NewStudyPage({ params }: { params: Promise<{ orgSl
     select: { id: true },
   })
   if (!workspace) notFound()
+  if (!(await isResearchCaptureEnabled(workspace.id))) notFound()
   const action = createResearchStudy.bind(null, orgSlug, workspaceSlug)
   const guideAction = generateResearchGuide.bind(null, orgSlug, workspaceSlug)
   // Scoped to the same workspace + status + sourceType filter

@@ -46,6 +46,7 @@ import {
   type ResolvedTemplate,
 } from "@/lib/launch-checklist";
 import { DEFAULT_CHECKLIST_TEMPLATES } from "@/lib/launch-defaults";
+import { setModules } from "./helpers/modules";
 
 const WORKSPACE_ID = "ws-1";
 const ITEM_ID = "item-1";
@@ -62,24 +63,24 @@ beforeEach(() => {
   mockRoadmapItem.update.mockResolvedValue({ id: ITEM_ID, horizon: "LAUNCHING" });
   // Default every test to a workspace with the launch workflow turned on —
   // the specific "disabled" behavior gets its own describe block below.
-  mockWorkspace.findUnique.mockResolvedValue({ launchWorkflowEnabled: true });
+  setModules({ launch_workflow: true });
 });
 
 // ─── assertLaunchWorkflowEnabled ─────────────────────────────────────────────
 
 describe("assertLaunchWorkflowEnabled", () => {
   it("resolves when the workspace has the launch workflow on", async () => {
-    mockWorkspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: true });
+    setModules({ launch_workflow: true });
     await expect(assertLaunchWorkflowEnabled(WORKSPACE_ID)).resolves.toBeUndefined();
   });
 
   it("throws the shared disabled-feature message when off", async () => {
-    mockWorkspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    setModules({ launch_workflow: false });
     await expect(assertLaunchWorkflowEnabled(WORKSPACE_ID)).rejects.toThrow(LAUNCH_WORKFLOW_DISABLED_MESSAGE);
   });
 
   it("throws when the workspace has never set the flag (null)", async () => {
-    mockWorkspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: null });
+    setModules({ launch_workflow: false });
     await expect(assertLaunchWorkflowEnabled(WORKSPACE_ID)).rejects.toThrow(LAUNCH_WORKFLOW_DISABLED_MESSAGE);
   });
 });
@@ -227,7 +228,7 @@ describe("setLaunchTierCore", () => {
   });
 
   it("rejects with the disabled-feature message and writes nothing when the workspace has the launch workflow off", async () => {
-    mockWorkspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    setModules({ launch_workflow: false });
     await expect(setLaunchTierCore(ITEM_ID, "TIER_1", template, WORKSPACE_ID)).rejects.toThrow(
       LAUNCH_WORKFLOW_DISABLED_MESSAGE
     );

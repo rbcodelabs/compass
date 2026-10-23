@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const resolveActiveResearchStudy = vi.hoisted(() => vi.fn())
 const resolveResearchVoiceCleanupStudy = vi.hoisted(() => vi.fn())
+const findResearchTokenWorkspaceId = vi.hoisted(() => vi.fn())
 const createResearchVoiceLease = vi.hoisted(() => vi.fn())
 const appendFinalResearchVoiceEvent = vi.hoisted(() => vi.fn())
 const releaseResearchVoiceLease = vi.hoisted(() => vi.fn())
 const verifyParticipantVoiceLease = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/research-participant-voice", () => ({ verifyParticipantVoiceLease, appendParticipantVoiceEvent: vi.fn() }))
 
-vi.mock("@/lib/research-access", () => ({ resolveActiveResearchStudy, resolveResearchVoiceCleanupStudy }))
+vi.mock("@/lib/research-access", () => ({ resolveActiveResearchStudy, resolveResearchVoiceCleanupStudy, findResearchTokenWorkspaceId }))
 vi.mock("@/lib/research-voice", () => ({
   ResearchVoiceError: class ResearchVoiceError extends Error { constructor(message: string, readonly status: number) { super(message) } },
   createResearchVoiceLease,
@@ -18,6 +19,7 @@ vi.mock("@/lib/research-voice", () => ({
 
 import { POST as createVoice } from "@/app/api/research/voice-session/route"
 import { POST as persistVoice } from "@/app/api/research/voice-event/route"
+import { setModules } from "./helpers/modules"
 
 function request(path: string, body: unknown) {
   return new Request(`http://localhost${path}`, {
@@ -28,10 +30,11 @@ function request(path: string, body: unknown) {
 describe("research voice APIs", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    setModules({ research_voice_authoritative: true })
     vi.stubEnv("E2E_FUNCTIONAL", "1")
     vi.stubEnv("OPENAI_API_KEY", "long-lived-secret")
-    resolveActiveResearchStudy.mockResolvedValue({ study: { id: "study-1" }, prisma: {} })
+    findResearchTokenWorkspaceId.mockResolvedValue("workspace-1")
+    resolveActiveResearchStudy.mockResolvedValue({ study: { id: "study-1", workspaceId: "workspace-1" }, prisma: {} })
     createResearchVoiceLease.mockResolvedValue({
       leaseId: "lease-1", expiresAt: new Date("2026-08-30T12:02:00Z"), instructions: "SERVER GUIDED INSTRUCTIONS",
     })
@@ -40,7 +43,7 @@ describe("research voice APIs", () => {
 
   it("allows the separately enabled browser path in production with a short-lived credential", async () => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    setModules({ research_voice_browser: true })
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ value: "ephemeral-only", expires_at: Math.floor(Date.now() / 1000) + 60 }))
     vi.stubGlobal("fetch", fetchMock)
     const response = await createVoice(request("/api/research/voice-session", {
@@ -56,8 +59,8 @@ describe("research voice APIs", () => {
 
   it.each(["CUSTOMER_INTERVIEW", "USABILITY_TEST"])("lets %s participants finish their thought while retaining automatic replies and participant interruption", async (studyType) => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
-    resolveActiveResearchStudy.mockResolvedValue({ study: { id: "study-1", studyType }, prisma: {} })
+    setModules({ research_voice_browser: true })
+    resolveActiveResearchStudy.mockResolvedValue({ study: { id: "study-1", workspaceId: "workspace-1", studyType }, prisma: {} })
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ value: "ephemeral-only", expires_at: Math.floor(Date.now() / 1000) + 60 }))
     vi.stubGlobal("fetch", fetchMock)
 
@@ -76,9 +79,9 @@ describe("research voice APIs", () => {
   })
 
   it.each(["revoked", "expired", "closed"])("permits only cleanup through a %s participant link", async () => {
-    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    setModules({ research_voice_browser: true })
     resolveActiveResearchStudy.mockResolvedValue(null)
-    const context = { study: { id: "original-study" }, participantToken: { id: "original-token" }, prisma: {} }
+    const context = { study: { id: "original-study", workspaceId: "workspace-1" }, participantToken: { id: "original-token" }, prisma: {} }
     resolveResearchVoiceCleanupStudy.mockResolvedValue(context)
     releaseResearchVoiceLease.mockResolvedValue({ released: true })
     const base = { token: "original-token-secret", sessionId: "original-session", resumeToken: "resume-secret", leaseId: "exact-lease" }
@@ -92,7 +95,7 @@ describe("research voice APIs", () => {
 
   it("releases the claimed lease when the credential request throws", async () => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    setModules({ research_voice_browser: true })
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network unavailable")))
     const response = await createVoice(request("/api/research/voice-session", {
       token: "study-token", sessionId: "session-1", resumeToken: "resume-secret",
@@ -102,7 +105,7 @@ describe("research voice APIs", () => {
   })
   it("does not release credentials after authorization was revoked during provider creation", async () => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    setModules({ research_voice_browser: true })
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ value: "ephemeral-only", expires_at: Math.floor(Date.now() / 1000) + 60 })))
     verifyParticipantVoiceLease.mockRejectedValueOnce(new Error("revoked"))
     const response = await createVoice(request("/api/research/voice-session", { token: "study-token", sessionId: "session-1", resumeToken: "resume-secret" }))
@@ -111,7 +114,7 @@ describe("research voice APIs", () => {
   })
 
   it("rejects credential and event APIs while authoritative voice is disabled", async () => {
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    setModules({ research_voice_authoritative: false })
     const credential = await createVoice(request("/api/research/voice-session", {
       token: "study-token", sessionId: "session-1", resumeToken: "resume-secret",
     }))
@@ -121,7 +124,20 @@ describe("research voice APIs", () => {
     }))
     expect(credential.status).toBe(409)
     expect(event.status).toBe(409)
-    expect(resolveActiveResearchStudy).not.toHaveBeenCalled()
+    // The workspace module is checked after the token resolves; nothing past the gate runs.
+    expect(createResearchVoiceLease).not.toHaveBeenCalled()
+    expect(appendFinalResearchVoiceEvent).not.toHaveBeenCalled()
+    expect(releaseResearchVoiceLease).not.toHaveBeenCalled()
+    expect(resolveResearchVoiceCleanupStudy).not.toHaveBeenCalled()
+  })
+
+  it("returns not found for an unknown token before consulting any workspace module", async () => {
+    findResearchTokenWorkspaceId.mockResolvedValue(null)
+    resolveActiveResearchStudy.mockResolvedValue(null)
+    const credential = await createVoice(request("/api/research/voice-session", { token: "nope", sessionId: "s", resumeToken: "r" }))
+    const event = await persistVoice(request("/api/research/voice-event", { token: "nope", sessionId: "s", resumeToken: "r", leaseId: "l", action: "DISCONNECT" }))
+    expect(credential.status).toBe(404)
+    expect(event.status).toBe(404)
   })
 
   it("keeps legacy credential and event APIs closed in production even when the authoritative flag is enabled", async () => {
@@ -135,7 +151,11 @@ describe("research voice APIs", () => {
     }))
     expect(credential.status).toBe(409)
     expect(event.status).toBe(409)
-    expect(resolveActiveResearchStudy).not.toHaveBeenCalled()
+    // The workspace module is checked after the token resolves; nothing past the gate runs.
+    expect(createResearchVoiceLease).not.toHaveBeenCalled()
+    expect(appendFinalResearchVoiceEvent).not.toHaveBeenCalled()
+    expect(releaseResearchVoiceLease).not.toHaveBeenCalled()
+    expect(resolveResearchVoiceCleanupStudy).not.toHaveBeenCalled()
   })
 
   it("does not expose paid legacy provider credentials outside the E2E harness", async () => {

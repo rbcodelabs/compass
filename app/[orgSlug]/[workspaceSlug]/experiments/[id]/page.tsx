@@ -99,12 +99,17 @@ export default async function ExperimentDetailPage({
     notFound()
   }
 
+  const [pmInterviewEnabled, researchCaptureEnabled] = await Promise.all([
+    isPmInterviewEnabled(workspace.id),
+    isResearchCaptureEnabled(workspace.id),
+  ])
+
   const squads: SquadData[] = rawSquads.map((s) => ({
     id: s.id,
     name: s.name,
     color: s.color,
   }))
-  const pmInterviews = isPmInterviewEnabled() ? await prisma.pMInterview.findMany({
+  const pmInterviews = pmInterviewEnabled ? await prisma.pMInterview.findMany({
     where: { workspaceId: workspace.id, targetType: "EXPERIMENT", targetId: resolved.id },
     orderBy: { createdAt: "desc" }, take: 20,
     select: { id: true, disposition: true, generationState: true, agentConversationId: true, createdAt: true },
@@ -183,7 +188,7 @@ export default async function ExperimentDetailPage({
             </>
           )}
         />
-        {isPmInterviewEnabled() && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="EXPERIMENT" targetId={resolved.id} />}
+        {pmInterviewEnabled && <FleshThisOutLink orgSlug={orgSlug} workspaceSlug={workspaceSlug} targetType="EXPERIMENT" targetId={resolved.id} />}
 
         {/* Conclusion rationale — the durable "why" behind the conclusion,
             most important for NOT_PURSUED where no evidence was generated. */}
@@ -263,7 +268,7 @@ export default async function ExperimentDetailPage({
           <MarkdownContent className="text-foreground/80">{experiment.method}</MarkdownContent>
         </section>
 
-        {isResearchCaptureEnabled() && <LinkedEntitiesSection orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ linkType: "EXPERIMENT_INFORMED_BY_STUDY", entityType: "EXPERIMENT", entityId: id }} />}
+        {researchCaptureEnabled && <LinkedEntitiesSection orgSlug={orgSlug} workspaceSlug={workspaceSlug} target={{ linkType: "EXPERIMENT_INFORMED_BY_STUDY", entityType: "EXPERIMENT", entityId: id }} />}
 
         {/* Kill condition shown again in body when not active (collapsed after conclusion) */}
         {!isActive && (

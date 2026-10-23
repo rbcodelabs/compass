@@ -28,7 +28,6 @@ import { ResearchAnalysisError } from "@/lib/research-analysis-service"
  * would be the wrong way round.
  */
 export async function startStudySynthesisHandoff(studyId: string, userId: string) {
-  if (!isResearchCaptureEnabled()) throw new ResearchAnalysisError("Study not found", 404)
   if (!userId) throw new ResearchAnalysisError("Authentication required", 401)
   const prisma = getPrisma()
   const study = await prisma.researchStudy.findFirst({
@@ -40,6 +39,7 @@ export async function startStudySynthesisHandoff(studyId: string, userId: string
   // read access to a PM transcript. Indistinguishable from "no such study", so
   // membership and existence do not leak either.
   if (!study || study.studyType === "PM_INTERVIEW") throw new ResearchAnalysisError("Study not found", 404)
+  if (!(await isResearchCaptureEnabled(study.workspaceId))) throw new ResearchAnalysisError("Study not found", 404)
   // Without a COMPLETED session the synthesis can only ever fail at
   // `assertSourceSize` — but not before a whole agent turn has been spent booting
   // a sandbox and reading. Fail here in milliseconds instead of minting a

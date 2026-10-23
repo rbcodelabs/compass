@@ -1,4 +1,5 @@
 import { redirect, notFound } from "next/navigation";
+import { researchNavEnabled } from "@/lib/modules/server";
 import { cookies } from "next/headers";
 import { getUserWorkspaces } from "@/lib/workspace";
 import { getSessionUser } from "@/lib/session";
@@ -44,6 +45,7 @@ export default async function OrgRoadmapLayout({ children, params }: OrgRoadmapL
   const anchorWorkspace = workspaces.find((ws) => ws.orgSlug === orgSlug);
   if (!anchorWorkspace) notFound();
 
+  const researchCaptureEnabled = await researchNavEnabled(anchorWorkspace.id);
   const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
   const initialPanelPin = parsePanelPin(cookieStore.get(panelPinCookieName("detail"))?.value);
@@ -70,6 +72,7 @@ export default async function OrgRoadmapLayout({ children, params }: OrgRoadmapL
           } as React.CSSProperties}
         >
           <Sidebar
+            researchCaptureEnabled={researchCaptureEnabled}
             orgSlug={orgSlug}
             workspaceSlug={anchorWorkspace.slug}
             workspaceName={anchorWorkspace.name}
@@ -88,7 +91,7 @@ export default async function OrgRoadmapLayout({ children, params }: OrgRoadmapL
         </SidebarProvider>
       </TooltipProvider>
 
-      <BottomNav orgSlug={orgSlug} workspaceSlug={anchorWorkspace.slug} />
+      <BottomNav orgSlug={orgSlug} workspaceSlug={anchorWorkspace.slug} researchCaptureEnabled={researchCaptureEnabled} />
     </PanelProvider>
   );
 }

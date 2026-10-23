@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+
+// The public routes resolve the study (and so its workspace) before checking the workspace's modules.
+vi.mock("@/lib/research-access", () => ({
+  resolveActiveResearchStudy: vi.fn(async () => ({ study: { id: "study-1", workspaceId: "workspace-1" } })),
+}))
 import { POST as start } from "@/app/api/research/start/route"
 import { POST as respond } from "@/app/api/research/respond/route"
 import { POST as complete } from "@/app/api/research/complete/route"
+import { setModules } from "./helpers/modules"
 
 function request(body: unknown) {
   return new Request("http://localhost/api/research", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
@@ -32,14 +38,14 @@ describe("research participant API validation", () => {
   })
 
   it("rejects legacy browser-authoritative voice starts while the global gate is disabled", async () => {
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    setModules({ research_voice_authoritative: false })
     const response = await start(request({ token: "token", modality: "VOICE" }))
     expect(response.status).toBe(409)
   })
 
   it("rejects legacy voice starts in production even when the authoritative flag is enabled", async () => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    setModules({ research_voice_authoritative: true })
     vi.stubEnv("E2E_FUNCTIONAL", "1")
     const response = await start(request({ token: "token", modality: "VOICE" }))
     expect(response.status).toBe(409)

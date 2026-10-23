@@ -222,7 +222,12 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
   "105_workspace_agent_github_repos": "ed1b4077170a09220767762c3756c763bd6db1031896dd7f6e44da07b17bdd80",
   // Residual entity_links pass for Opportunity (095 is the first pass): no DDL, EXPLICIT-ONLY, the work is the 095 hook.
-  "106_entity_links_residual_opportunity": "f9f553644f14b68a81c3ebb2df46f1b8348eb7db3a45adbdf1c3f8d90857c71c"
+  "106_entity_links_residual_opportunity": "f9f553644f14b68a81c3ebb2df46f1b8348eb7db3a45adbdf1c3f8d90857c71c",
+  // Workspace modules (docs/adr-workspace-modules.md): one table plus one unique ASYNC index, IF NOT EXISTS, no foreign key. The hook carries
+  // workspaces.launch_workflow_enabled into launch_workflow rows (insert-if-missing) and is pinned in REVIEWED_MIGRATION_CODE_SHA256.
+  "107_workspace_modules": "0b29bd1bb85b4691225fece68f3f176692a990388490a53eee6a9a62012258a4",
+  // No DDL, EXPLICIT-ONLY; the work is the hook (lib/migrations/workspace-modules.ts): enables modules from the legacy env flags that are exactly "1".
+  "108_workspace_modules_legacy_flag_backfill": "7feab31f2a3d7456db6d3439b631621cb3dace106b1885efc8894346d42cce8d"
 };
 
 /**
@@ -350,6 +355,16 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 104 postcondition (both created_at indexes exist and are valid); editing it re-reviews the migration.
   "104_agent_retention_indexes": {
     "lib/migrations/agent-retention-indexes.ts": "02b0e57b758b7c42122e199580f4ce1f9bb4e40a77841590595ca16f056faa2f",
+  },
+  // The 107 hook (launch carry-over + postcondition) and the refusal type it imports; editing either re-reviews the migration.
+  "107_workspace_modules": {
+    "lib/migrations/workspace-modules.ts": "10dbe1f96ce6cf5813a942569095b672355d50b2436a5b4fcac4373ed418a4d1",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 108 hook (legacy env flag backfill + postcondition); same file as 107's hook.
+  "108_workspace_modules_legacy_flag_backfill": {
+    "lib/migrations/workspace-modules.ts": "10dbe1f96ce6cf5813a942569095b672355d50b2436a5b4fcac4373ed418a4d1",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };
 

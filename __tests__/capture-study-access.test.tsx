@@ -23,6 +23,7 @@ vi.mock("@/lib/research-session", async (importOriginal) => ({
   reconcileAbandonedResearchSessions,
 }))
 
+import { setModules } from "./helpers/modules"
 import StudyPage from "@/app/[orgSlug]/[workspaceSlug]/capture/studies/[studyId]/page"
 
 const props = {
@@ -57,13 +58,14 @@ describe("researcher study access", () => {
     vi.unstubAllEnvs()
   })
 
-  it("returns not found before authentication when the production rollout gate is disabled", async () => {
-    vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_CAPTURE_ENABLED", "")
+  it("returns not found, before any study lookup, when the workspace has research capture off", async () => {
+    // The module is per workspace, so membership resolves the workspace first; a non-member still gets not found.
+    setModules({ research_capture: false })
 
     await expect(StudyPage(props)).rejects.toThrow("NEXT_NOT_FOUND")
-    expect(auth).not.toHaveBeenCalled()
-    vi.unstubAllEnvs()
+    expect(workspace.findFirst).toHaveBeenCalled()
+    expect(researchStudy.findFirst).not.toHaveBeenCalled()
+    expect(researchStudy.findUnique).not.toHaveBeenCalled()
   })
 
   it("returns not found, before any study lookup, when the signed-in user is not a member of the path workspace", async () => {

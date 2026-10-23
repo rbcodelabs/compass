@@ -75,6 +75,7 @@ import {
   getLaunchChecklist,
   updateLaunchChecklistItem,
 } from "@/lib/roadmap-tool-handlers"
+import { setModules } from "./helpers/modules"
 
 vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
 
@@ -109,9 +110,10 @@ beforeEach(() => {
   mockPrisma.portfolioCapacityReservation.findUnique.mockResolvedValue(null)
 
   // setLaunchTier routes through the real (unmocked) setLaunchTierCore, which
-  // now gates on Workspace.launchWorkflowEnabled — default this mock to "on"
+  // now gates on the workspace's launch_workflow module — default it to "on"
   // so the existing happy-path tests below aren't exercising that gate.
-  mockWorkspace.findUnique.mockResolvedValue({ id: WORKSPACE_ID, launchWorkflowEnabled: true })
+  setModules({ launch_workflow: true })
+  mockWorkspace.findUnique.mockResolvedValue({ id: WORKSPACE_ID })
   mockRoadmapItem.findUnique.mockResolvedValue({
     id: ITEM_ID,
     title: "Ship payments",
@@ -431,7 +433,7 @@ describe("setLaunchTier", () => {
   })
 
   it("propagates setLaunchTierCore's disabled-feature rejection instead of writing", async () => {
-    mockWorkspace.findUnique.mockResolvedValueOnce({ id: WORKSPACE_ID, launchWorkflowEnabled: false })
+    setModules({ launch_workflow: false })
 
     await expect(setLaunchTier({ itemId: ITEM_ID, tier: "TIER_1" })).rejects.toThrow(/launch workflow is disabled/)
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()

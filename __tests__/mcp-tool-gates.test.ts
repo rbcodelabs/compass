@@ -1216,3 +1216,39 @@ describe("docs:// resource — read/list", () => {
     await expect(runWithMcpActor(RESEARCH, () => list())).rejects.toThrow(/not available to research interviews/)
   })
 })
+
+describe("workspace module tools", () => {
+  it("list_workspace_modules is a READ tool, so agents may call it to learn why a feature is off", () => {
+    expect(AGENT_TOOL_POLICY.list_workspace_modules).toBe("READ")
+    expect(requiredToolScope("list_workspace_modules")).toBe("mcp:read")
+  })
+
+  it("update_workspace_module is a WRITE-scope tool that is DENY for agent identities", () => {
+    expect(requiredToolScope("update_workspace_module")).toBe("mcp:write")
+    expect(AGENT_TOOL_POLICY.update_workspace_module).toBe("DENY")
+  })
+
+  it("list_workspace_modules requires membership of the declared workspace", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    await expect(applyToolGate("list_workspace_modules", MEMBER, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate("list_workspace_modules", MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(/not found or access denied/)
+  })
+
+  it("update_workspace_module requires a workspace admin, not just a member", async () => {
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "MEMBER" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate("update_workspace_module", MEMBER, { workspaceId: "ws-1", moduleKey: "following", enabled: true })).rejects.toThrow(/workspace admin required/)
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    await expect(applyToolGate("update_workspace_module", MEMBER, { workspaceId: "ws-1", moduleKey: "following", enabled: true })).resolves.toBeUndefined()
+  })
+
+  it("update_workspace_module refuses an agent identity even when its owner is a workspace admin", async () => {
+    mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "user-1", status: "ACTIVE" })
+    mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }])
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    mockPrisma.agentToolCall.create.mockResolvedValue({ id: "activity-1" })
+    await expect(applyToolGate("update_workspace_module", { userId: "user-1", purpose: "AGENT" as const, agentId: "agent-1" }, { workspaceId: "ws-1", moduleKey: "following", enabled: true }))
+      .rejects.toThrow(/human identity/)
+  })
+})

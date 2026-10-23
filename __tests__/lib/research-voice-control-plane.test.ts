@@ -17,6 +17,7 @@ import {
   voiceCallTransitionPatch,
   voiceWorkerTokenIsBound,
 } from "@/lib/research-voice-control-plane"
+import { setModules } from "../helpers/modules"
 
 function allocationFixture() {
   const prisma = {
@@ -25,6 +26,7 @@ function allocationFixture() {
       create: vi.fn().mockImplementation(async ({ data }) => ({ ...data })),
     },
     researchSession: {
+      findUnique: vi.fn().mockResolvedValue({ study: { workspaceId: "workspace-1" } }),
       findFirst: vi.fn().mockResolvedValue({
         id: "session-1",
         participantTokenId: "token-1",
@@ -53,7 +55,7 @@ function allocationFixture() {
 }
 
 describe("authoritative research voice control plane", () => {
-  beforeEach(() => vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1"))
+  beforeEach(() => setModules({ research_voice_authoritative: true }))
   afterEach(() => vi.unstubAllEnvs())
 
   it("permits only forward call transitions and clears the SDP on media ready", () => {
@@ -422,7 +424,7 @@ describe("authoritative research voice control plane", () => {
       },
       researchTurn: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
     }
-    const prisma = { $transaction: vi.fn(async (fn: (value: typeof tx) => Promise<unknown>) => fn(tx)) }
+    const prisma = { researchSession: { findUnique: vi.fn().mockResolvedValue({ study: { workspaceId: "workspace-1" } }) }, $transaction: vi.fn(async (fn: (value: typeof tx) => Promise<unknown>) => fn(tx)) }
     const event = {
       voiceCallId: "call-1", sessionId: "session-1", providerEventId: "event-1", providerOrdinal: 0,
       providerItemId: "item-1", providerPreviousItemId: null, providerStatus: "COMPLETED",

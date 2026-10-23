@@ -69,6 +69,7 @@ interface SidebarProps {
   isOrgAdmin?: boolean
   /** Platform admins (PLATFORM_ADMIN_EMAILS) see an "Agent snapshot" link in the account menu. */
   isPlatformAdmin?: boolean
+  /** The research_capture module is enabled in this workspace (Settings > Modules); resolved by the layout. */
   researchCaptureEnabled?: boolean
   updatesEnabled?: boolean
   /** Following is on and available: show the notifications bell. Absent in the settings tree. */
@@ -148,7 +149,7 @@ export function Sidebar({
   workspaces,
   isOrgAdmin = false,
   isPlatformAdmin = false,
-  researchCaptureEnabled = true,
+  researchCaptureEnabled = false,
   updatesEnabled = false,
   followingEnabled = false,
   unreadNotifications = { count: 0, overflow: false },

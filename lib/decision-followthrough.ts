@@ -103,7 +103,7 @@ export async function createDecisionFollowUpTask(input: {
   // Same end-of-column placement convention as addTask in tasks/actions.ts.
   const last = await prisma.task.findFirst({ where: { workspaceId: input.workspaceId, status: "TODO" }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } })
   const sortOrder = last ? last.sortOrder + 1 : 0
-  const capture = await workspaceUpdatesAvailable(prisma)
+  const capture = await workspaceUpdatesAvailable(prisma, input.workspaceId)
   const actor = capture ? await workspaceMutationActor("UI") : null
 
   const created = await retryUpdatesTransaction(prisma, async (tx) => {

@@ -5,6 +5,7 @@
  * the `ID: <uuid>` line, and the legacy list_links contract is unchanged.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setModules } from "../helpers/modules"
 import { USERS, WS_A, WS_B, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
 import { runWithMcpActor } from "@/lib/mcp-authz";
 
@@ -23,7 +24,9 @@ vi.mock("mcp-handler", () => ({
 }));
 vi.mock("@/lib/mcp-auth", () => ({ validateMcpAuth: vi.fn().mockResolvedValue({ valid: true }) }));
 vi.mock("@/lib/workspace-updates-capture", () => ({
-  withWorkspaceUpdates: async (prisma: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(prisma, false),
+  withWorkspaceUpdates: async (prisma: unknown, _workspaceId: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(prisma, false),
+  withAtomicRetry: async (prisma: unknown, callback: (tx: unknown) => unknown) => callback(prisma),
+  withUpdatesTables: async (prisma: unknown, callback: (tx: unknown, tablesExist: boolean) => unknown) => callback(prisma, false),
 }));
 
 await import("@/app/api/mcp/route");
@@ -107,7 +110,7 @@ describe("link_entities", () => {
 
   it("refuses when the research feature flag is off, and an unknown link type is a failed result (after the gate rejects it)", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("COMPASS_RESEARCH_CAPTURE_ENABLED", "");
+    setModules({ research_capture: false });
     const off = await call("link_entities", link);
     expect(off.structuredContent.ok).toBe(false);
     expect(off.content[0].text).toMatch(/not enabled/);

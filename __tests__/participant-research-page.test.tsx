@@ -30,6 +30,7 @@ vi.mock("@/components/research/research-experience", () => ({
 }))
 
 import ParticipantResearchPage from "@/app/research/[token]/page"
+import { setModules } from "./helpers/modules"
 
 describe("participant research page", () => {
   beforeEach(() => vi.clearAllMocks())
@@ -51,8 +52,8 @@ describe("participant research page", () => {
 
   it("keeps legacy voice hidden in production even when both future voice gates are enabled", async () => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
-    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "1")
+    setModules({ research_voice_authoritative: true })
+    setModules({ research_voice_discovery: true })
     resolveActiveResearchStudy.mockResolvedValue({
       study: { name: "Planning study", goal: "Understand planning", targetMinutes: 15, studyType: "CUSTOMER_INTERVIEW", appUrl: null, artifactId: null },
       participantToken: { id: "token-row-1" },

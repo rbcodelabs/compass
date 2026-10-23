@@ -55,6 +55,8 @@ import { addEvidence, linkEvidence, listEvidence } from "@/lib/evidence-tool-han
 import { createFeedbackSourceTool, updateFeedbackSourceTool } from "@/lib/feedback-source-tool-handlers"
 import { getDocRaw, getHelpTopic, searchHelp as searchHelpDocs } from "@/lib/docs"
 import { createWorkspaceInOrg } from "@/lib/workspace-service"
+import { ModuleToggleError } from "@/lib/modules/registry"
+import { describeModules, setWorkspaceModule } from "@/lib/modules/server"
 import { RoadmapPromotionConflict } from "@/lib/roadmap-promotion"
 import { thinkingModelForMcp } from "@/lib/thinking-model/mcp"
 import { allocateOneSeq, withSequenceTransaction } from "@/lib/work-item-sequence"
@@ -153,6 +155,12 @@ export async function executeRestRoute(route: RestRoute, input: Input): Promise<
       ])
       if (!workspace) throw new RestNotFoundError()
       return serialize({ name: workspace.name, thinkingModel: thinkingModelForMcp(workspace).structured, activeOkrCycle, opportunityCount, experimentCount, activeExperiments, roadmapItemCount, okrCycleCount, squads })
+    }
+    case "listWorkspaceModules": return arrayPage(`workspace-modules:${workspaceId}`, input.query, await describeModules(workspaceId))
+    case "updateWorkspaceModule": {
+      try { await setWorkspaceModule({ workspaceId, key: input.params.moduleKey, enabled: body.enabled as boolean, userId: actor.userId ?? null }) }
+      catch (error) { if (error instanceof ModuleToggleError) { if (error.code === "UNKNOWN_MODULE") throw new RestNotFoundError(); throw new RestConflictError(error.message) } throw error }
+      return serialize(found((await describeModules(workspaceId, { fresh: true })).find(module => module.key === input.params.moduleKey)))
     }
     case "listEvidence": {
       await assertEvidenceTargetWorkspace(prisma, workspaceId, String(input.query.nodeType), String(input.query.nodeId))

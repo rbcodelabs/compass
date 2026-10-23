@@ -132,8 +132,8 @@ Persisted transcript:
 ${persisted || "No finalized prior turns."}`
 }
 
-function assertVoiceStudy(study: ResearchStudy) {
-  if (!isResearchParticipantVoiceEnabled()) {
+async function assertVoiceStudy(study: ResearchStudy) {
+  if (!(await isResearchParticipantVoiceEnabled(study.workspaceId))) {
     throw new ResearchVoiceError("Voice is not available for this study", 409)
   }
   if (study.studyType === "CUSTOMER_INTERVIEW" || study.studyType === "PM_INTERVIEW") return
@@ -142,9 +142,9 @@ function assertVoiceStudy(study: ResearchStudy) {
   }
 }
 
-function assertVoiceLeaseAllowed(study: ResearchStudy) {
-  assertVoiceStudy(study)
-  if (study.studyType === "CUSTOMER_INTERVIEW" && !isResearchDiscoveryVoiceEnabled()) {
+async function assertVoiceLeaseAllowed(study: ResearchStudy) {
+  await assertVoiceStudy(study)
+  if (study.studyType === "CUSTOMER_INTERVIEW" && !(await isResearchDiscoveryVoiceEnabled(study.workspaceId))) {
     throw new ResearchVoiceError("Voice is not available for this study", 409)
   }
 }
@@ -158,8 +158,8 @@ export async function createResearchVoiceLease({
   sessionId: string
   resumeToken: string
 }) {
-  assertVoiceLeaseAllowed(context.study)
-  if (isResearchBrowserVoiceEnabled()) {
+  await assertVoiceLeaseAllowed(context.study)
+  if (await isResearchBrowserVoiceEnabled(context.study.workspaceId)) {
     const guide = deserializeResearchGuide(context.study.guide)
     if (!guide.length) throw new ResearchVoiceError("Study guide is unavailable", 409)
     const lease = await claimParticipantVoiceLease({ context, sessionId, resumeToken })
@@ -258,7 +258,7 @@ export async function appendFinalResearchVoiceEvent({
   content: string
   attachmentId?: string
 }) {
-  assertVoiceLeaseAllowed(context.study)
+  await assertVoiceLeaseAllowed(context.study)
   const normalized = assertFinalEvent({ providerEventId, role, content })
   if (attachmentId && (role !== "PARTICIPANT" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attachmentId))) {
     throw new ResearchVoiceError("Invalid voice attachment", 400)
@@ -375,8 +375,8 @@ export async function releaseResearchVoiceLease({
   resumeToken: string
   leaseId: string
 }) {
-  assertVoiceLeaseAllowed(context.study)
-  if (isResearchBrowserVoiceEnabled()) return releaseParticipantVoiceLease({ context, sessionId, resumeToken, leaseId })
+  await assertVoiceLeaseAllowed(context.study)
+  if (await isResearchBrowserVoiceEnabled(context.study.workspaceId)) return releaseParticipantVoiceLease({ context, sessionId, resumeToken, leaseId })
   const now = new Date()
   const result = await context.prisma.researchSession.updateMany({
     where: {

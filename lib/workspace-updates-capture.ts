@@ -2,6 +2,8 @@ import type { AppPrismaClient, AppTransactionClient } from "./db";
 import getPrisma from "./db";
 import { hasToolTransaction } from "./mcp-tool-db";
 import { getMcpActivityPrisma } from "./analytics/activity";
+import { isModuleEnabled } from "@/lib/modules/server";
+import { resetFeatureTablesCache, workspaceUpdatesTablesExist } from "@/lib/feature-tables";
 export interface WorkspaceUpdateInput {
   workspaceId: string;
   entityType: string;
@@ -14,30 +16,18 @@ export interface WorkspaceUpdateInput {
   before?: string | null;
   after?: string | null;
 }
+/** Test seam: forget the cached positive table-existence answer. */
+export function resetWorkspaceUpdatesAvailabilityCache(): void {
+  resetFeatureTablesCache();
+}
+
+/** The `workspace_updates` module is enabled for the workspace AND the tables exist. */
 export async function workspaceUpdatesAvailable(
   prisma: AppPrismaClient,
+  workspaceId: string,
 ): Promise<boolean> {
-  if (process.env.WORKSPACE_UPDATES_ENABLED !== "1") return false;
-  const database = hasToolTransaction() ? getPrisma() : prisma;
-  try {
-    await Promise.all([
-      database.workspaceUpdatesState.findFirst({
-        select: { workspaceId: true },
-      }),
-      database.workspaceUpdateEvent.findFirst({ select: { id: true } }),
-      database.workspaceUpdatesReadState.findFirst({ select: { id: true } }),
-    ]);
-    return true;
-  } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "P2021"
-    )
-      return false;
-    throw error;
-  }
+  if (!(await isModuleEnabled(workspaceId, "workspace_updates"))) return false;
+  return workspaceUpdatesTablesExist(prisma);
 }
 
 export async function recordWorkspaceUpdate(
@@ -101,20 +91,55 @@ export type WorkspaceUpdatesOptions = {
   atomic?: boolean;
 };
 
+/**
+ * Runs `callback` for a write whose workspace is known up front. `capture` says whether update capture is on for THAT workspace
+ * (module enabled and tables present).
+ */
 export async function withWorkspaceUpdates<T>(
   prisma: AppPrismaClient,
+  workspaceId: string,
   callback: (tx: AppTransactionClient, capture: boolean) => Promise<T>,
   options: WorkspaceUpdatesOptions = {},
 ): Promise<T> {
   // A PM tool may already run inside its receipt transaction. Reuse that
   // transaction (and its commit-scoped analytics), never nest or replay it.
   if (hasToolTransaction()) {
-    const enabled = await workspaceUpdatesAvailable(getPrisma());
+    const enabled = await workspaceUpdatesAvailable(getPrisma(), workspaceId);
     return callback(getMcpActivityPrisma(), enabled);
   }
-  if (!(await workspaceUpdatesAvailable(prisma)))
+  if (!(await workspaceUpdatesAvailable(prisma, workspaceId)))
     return options.atomic
       ? retryUpdatesTransaction(prisma, (tx) => callback(tx, false))
       : callback(prisma, false);
   return retryUpdatesTransaction(prisma, (tx) => callback(tx, true));
+}
+
+/**
+ * Like `withWorkspaceUpdates` for a write whose workspace is only known once it has run (the generic mutation adapter). The
+ * transaction is opened whenever the update tables exist; `tablesExist` tells the callback so, and it decides per workspace
+ * (`workspaceUpdatesAvailable`-style) once the row it wrote names one.
+ */
+export async function withUpdatesTables<T>(
+  prisma: AppPrismaClient,
+  callback: (tx: AppTransactionClient, tablesExist: boolean) => Promise<T>,
+  options: WorkspaceUpdatesOptions = {},
+): Promise<T> {
+  if (hasToolTransaction()) {
+    const exist = await workspaceUpdatesTablesExist(getPrisma());
+    return callback(getMcpActivityPrisma(), exist);
+  }
+  if (!(await workspaceUpdatesTablesExist(prisma)))
+    return options.atomic
+      ? retryUpdatesTransaction(prisma, (tx) => callback(tx, false))
+      : callback(prisma, false);
+  return retryUpdatesTransaction(prisma, (tx) => callback(tx, true));
+}
+
+/** The bounded OCC retry alone, for writes that only need a replayable transaction and never record updates. */
+export async function withAtomicRetry<T>(
+  prisma: AppPrismaClient,
+  callback: (tx: AppTransactionClient) => Promise<T>,
+): Promise<T> {
+  if (hasToolTransaction()) return callback(getMcpActivityPrisma());
+  return retryUpdatesTransaction(prisma, callback);
 }

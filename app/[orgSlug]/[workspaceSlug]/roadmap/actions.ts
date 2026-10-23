@@ -9,6 +9,7 @@ import { getHumanActivityPrisma as getPrisma } from "@/lib/analytics/activity";
 import type { Horizon } from "@/lib/types";
 import { isLaunchHorizon } from "@/lib/roadmap";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
+import { isModuleEnabled } from "@/lib/modules/server"
 import { calendarDateToUtcMilliseconds } from "@/lib/roadmap-timeline/calendar-geometry";
 import { durationDaysFor, proposeBatch } from "@/lib/roadmap/scheduling";
 import { createRoadmapItemsFromSolutions, utcToday, type SolutionScheduleRequest } from "@/lib/roadmap/create-from-solution";
@@ -70,11 +71,7 @@ function revalidateRoadmap(): void {
 async function assertDirectLaunchWriteBlocked(workspaceId: string, horizon: Horizon): Promise<void> {
   if (!isLaunchHorizon(horizon)) return;
 
-  const workspace = await getPrisma().workspace.findUnique({
-    where: { id: workspaceId },
-    select: { launchWorkflowEnabled: true },
-  });
-  if (!workspace?.launchWorkflowEnabled) {
+  if (!(await isModuleEnabled(workspaceId, "launch_workflow"))) {
     throw new Error(LAUNCH_WORKFLOW_DISABLED_MESSAGE);
   }
   throw new Error("Use a launch tier to enter LAUNCHING/LAUNCHED");
@@ -335,7 +332,7 @@ export async function rescheduleRoadmapItem(
   await assertDirectLaunchWriteBlocked(workspaceId, data.horizon);
   validateInclusiveDates(data.startDate, data.endDate);
   const prisma = getPrisma();
-  const capture = await workspaceUpdatesAvailable(prisma);
+  const capture = await workspaceUpdatesAvailable(prisma, workspaceId);
   const actor = capture ? await workspaceMutationActor("UI") : null;
   const item = await retryUpdatesTransaction(prisma, async (tx) => {
     const database = tx as unknown as Database;

@@ -48,7 +48,7 @@ async function resetWorkspaceToClassic() {
 
 /**
  * Remove exactly what this run created, by id / unique title: the rows, and the workspace-update events written for them
- * (WORKSPACE_UPDATES_ENABLED is on for the e2e server, so creating an entity appends an event keyed by its id).
+ * (the workspace_updates module is on for the e2e workspace, so creating an entity appends an event keyed by its id).
  */
 async function cleanup(created: { opportunityId?: string; cycleTitle: string }) {
   await withPool(async (pool) => {

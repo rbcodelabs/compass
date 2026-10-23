@@ -1,6 +1,6 @@
 # Workspace Updates capture coverage
 
-Capture starts only after `WORKSPACE_UPDATES_ENABLED=1` and the registered
+Capture starts only after a workspace administrator turns on the Workspace updates module (Settings > Modules) and the registered
 Updates tables are available. No historical transitions are reconstructed.
 All integrations below are explicit call sites, not a database interceptor.
 The adapter reads before-state, writes the record, and writes metadata-only

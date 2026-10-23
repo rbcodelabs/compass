@@ -22,6 +22,7 @@ vi.mock("@/lib/research-participant-voice", () => ({ verifyParticipantVoiceLease
 
 import { POST as provision } from "@/app/api/pm-interviews/[interviewId]/voice-session/route"
 import { POST as event } from "@/app/api/pm-interviews/[interviewId]/voice-event/route"
+import { setModules } from "./helpers/modules"
 
 const params = { params: Promise.resolve({ interviewId: "interview-1" }) }
 function request(path: string, body: unknown) { return new Request(`http://localhost${path}?orgSlug=acme&workspaceSlug=product`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) }
@@ -34,8 +35,8 @@ describe("authenticated PM interview voice", () => {
     createResearchVoiceLease.mockResolvedValue({ leaseId: "lease-1", expiresAt: new Date("2026-09-11T13:00:00Z"), instructions: "PM ONLY" })
     appendParticipantVoiceEvent.mockResolvedValue({ replayed: false, turn: { id: "turn-1" } })
     markPmInterviewSpeechPending.mockResolvedValue({ version: 1, phase: "SPEECH_PENDING", leaseId: "lease-1", speechId: "input:item-1", at: "2026-09-11T12:00:00.000Z" })
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
-    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    setModules({ research_voice_authoritative: true })
+    setModules({ research_voice_browser: true })
     vi.stubEnv("E2E_FUNCTIONAL", "1")
     vi.stubEnv("NODE_ENV", "development")
   })
