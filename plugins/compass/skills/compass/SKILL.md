@@ -124,6 +124,8 @@ The API key is stored in the Vercel project settings and in `.env.local` as `MCP
 | `get_workspace_by_slug` | Direct lookup of a single workspace's ID/name/description by orgSlug + workspaceSlug — skip `list_workspaces` when you already know both slugs (e.g. from a URL). Also returns `thinkingModel` |
 | `get_workspace_summary` | Counts, active OKR cycle, squad list. Also returns `thinkingModel` (read-only; see *Thinking models*) |
 | `create_workspace` | Create a new workspace in an org (orgSlug, name, slug, optional description) |
+| `list_workspace_modules` | (workspaceId) Every workspace module with `enabled`, `selected`, requirements and `blockedBy`. Call it when a tool errors with "... is not enabled for this workspace"; then tell the person which module a workspace admin should enable in Settings > Modules |
+| `update_workspace_module` | (workspaceId, moduleKey, enabled) Toggle a module. Workspace admins only and never for agent identities (refused): do not retry, ask the person to enable it in Settings > Modules. Enabling needs its requirements on first; disabling also turns off dependents |
 
 #### OKRs
 | Tool | Description |
@@ -225,7 +227,7 @@ rather than landing silently.
 | `reject_solution_plan` | Mark a PLAN entry as REJECTED (only applies to PLAN entries, not COMMENT replies) |
 
 #### Following and notifications
-Acts on the calling **person's** follows and inbox; agent-scoped tokens are refused with an error. Gated by `FOLLOWING_ENABLED`. Followable today: `OPPORTUNITY`, `SOLUTION`, `TASK`, `DOC`.
+Acts on the calling **person's** follows and inbox; agent-scoped tokens are refused with an error. Gated by the Following module (a workspace admin enables it in Settings > Modules; see `list_workspace_modules`). Followable today: `OPPORTUNITY`, `SOLUTION`, `TASK`, `DOC`.
 | Tool | Description |
 |---|---|
 | `follow` | Follow an object (`workspaceId`, `subjectType`, `subjectId`) so its status changes and comments reach the inbox; idempotent, clears an earlier unfollow |

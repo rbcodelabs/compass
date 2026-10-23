@@ -22,7 +22,7 @@ const STUDY = { id: STUDY_ID, studyType: "CUSTOMER_INTERVIEW", workspaceId: "wor
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.auth.mockResolvedValue({ user: { id: "member" } })
-  mocks.enabled.mockReturnValue(true)
+  mocks.enabled.mockResolvedValue(true)
   mocks.study.mockResolvedValue(STUDY)
   mocks.sessions.mockResolvedValue(2)
   mocks.create.mockResolvedValue({ id: "conversation-1" })
@@ -92,9 +92,11 @@ describe("research synthesis handoff route", () => {
   })
 
   it("is absent when research capture is disabled", async () => {
-    mocks.enabled.mockReturnValue(false)
+    mocks.enabled.mockResolvedValue(false)
     expect((await POST(request({ studyId: STUDY_ID }))).status).toBe(404)
-    expect(mocks.study).not.toHaveBeenCalled()
+    // The module is the study's workspace's, so the study is found first and nothing is created.
+    expect(mocks.enabled).toHaveBeenCalledWith("workspace")
+    expect(mocks.create).not.toHaveBeenCalled()
   })
 
   it("does not expose internal failure detail", async () => {

@@ -1,3 +1,4 @@
+import { setModules } from "./helpers/modules"
 import { beforeEach, describe, expect, it } from "vitest"
 import { vi } from "vitest"
 import { deleteMemberFollowState, deleteSubjectFollowState, deleteWorkspaceNotifications } from "@/lib/follow-cleanup"
@@ -96,11 +97,10 @@ describe("deleteWorkspaceNotifications", () => {
     await expect(deleteWorkspaceNotifications(prisma, WS)).rejects.toThrow("connection lost")
   })
 
-  it("works with the feature flag off, because cleanup must survive a rollback", async () => {
-    vi.stubEnv("FOLLOWING_ENABLED", "0")
+  it("works with the following module off, because cleanup must survive a rollback", async () => {
+    setModules({ following: false })
     notification(WS, U1, TASK)
     await deleteWorkspaceNotifications(fake.db, WS)
     expect(fake.tables.notification).toHaveLength(0)
-    vi.unstubAllEnvs()
   })
 })

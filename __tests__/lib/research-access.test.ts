@@ -5,23 +5,36 @@ vi.mock("@/lib/db", () => ({
   default: () => ({ researchParticipantToken: participantToken }),
 }))
 
-import { resolveActiveResearchStudy, resolveResearchVoiceCleanupStudy } from "@/lib/research-access"
+import { findResearchTokenWorkspaceId, resolveActiveResearchStudy, resolveResearchVoiceCleanupStudy } from "@/lib/research-access"
+import { setModules } from "../helpers/modules"
 import { hashResearchToken } from "@/lib/research"
 
 describe("resolveActiveResearchStudy", () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it("fails closed in production while research capture is not enabled", async () => {
-    vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_CAPTURE_ENABLED", "")
+  it("fails closed while the study's workspace has research capture off, without recording use", async () => {
+    setModules({ research_capture: false })
+    participantToken.findUnique.mockResolvedValue({
+      id: "token-1", kind: "PRIMARY", expiresAt: new Date(Date.now() + 60_000), revokedAt: null,
+      study: { id: "study-1", workspaceId: "workspace-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" },
+    })
 
     await expect(resolveActiveResearchStudy("raw-token")).resolves.toBeNull()
-    expect(participantToken.findUnique).not.toHaveBeenCalled()
-    vi.unstubAllEnvs()
+    expect(participantToken.update).not.toHaveBeenCalled()
+  })
+
+  it("fails the cleanup resolver closed while the study's workspace has research capture off", async () => {
+    setModules({ research_capture: false })
+    participantToken.findUnique.mockResolvedValue({
+      id: "token-1", kind: "PRIMARY",
+      study: { id: "study-1", workspaceId: "workspace-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" },
+    })
+
+    await expect(resolveResearchVoiceCleanupStudy("raw-token")).resolves.toBeNull()
   })
 
   it("resolves an active, unexpired, unrevoked participant token and records use", async () => {
-    const study = { id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" }
+    const study = { id: "study-1", workspaceId: "workspace-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" }
     participantToken.findUnique.mockResolvedValue({
       id: "token-1",
       kind: "PRIMARY",
@@ -63,7 +76,7 @@ describe("resolveActiveResearchStudy", () => {
       kind: "PRIMARY",
       expiresAt: now,
       revokedAt: null,
-      study: { id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" },
+      study: { id: "study-1", workspaceId: "workspace-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" },
     })
 
     await expect(resolveActiveResearchStudy("raw-token")).resolves.toBeNull()
@@ -76,7 +89,7 @@ describe("resolveActiveResearchStudy", () => {
       kind: "LEGACY_HELIO",
       expiresAt: new Date(Date.now() + 60_000),
       revokedAt: null,
-      study: { id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" },
+      study: { id: "study-1", workspaceId: "workspace-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" },
     })
     participantToken.update.mockResolvedValue({})
 
@@ -86,7 +99,7 @@ describe("resolveActiveResearchStudy", () => {
   })
 
   it("does not fail a valid request when last-used bookkeeping conflicts", async () => {
-    const study = { id: "study-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" }
+    const study = { id: "study-1", workspaceId: "workspace-1", status: "ACTIVE", studyType: "CUSTOMER_INTERVIEW" }
     participantToken.findUnique.mockResolvedValue({
       id: "token-1",
       kind: "PRIMARY",
@@ -119,5 +132,20 @@ describe("resolveActiveResearchStudy", () => {
     })
 
     await expect(resolveResearchVoiceCleanupStudy("copied-token")).resolves.toBeNull()
+  })
+})
+
+describe("findResearchTokenWorkspaceId", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it("returns the study's workspace by token hash, whatever the token's status", async () => {
+    participantToken.findUnique.mockResolvedValue({ study: { workspaceId: "workspace-9" } })
+    await expect(findResearchTokenWorkspaceId("raw-token")).resolves.toBe("workspace-9")
+    expect(participantToken.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { tokenHash: hashResearchToken("raw-token") } }))
+  })
+
+  it("returns null for an unknown token", async () => {
+    participantToken.findUnique.mockResolvedValue(null)
+    await expect(findResearchTokenWorkspaceId("nope")).resolves.toBeNull()
   })
 })

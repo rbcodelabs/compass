@@ -1,35 +1,46 @@
-export function isResearchCaptureEnabled(): boolean {
-  if (process.env.NODE_ENV !== "production") return true
-  return process.env.COMPASS_RESEARCH_CAPTURE_ENABLED === "1"
+import { isModuleEnabled } from "@/lib/modules/server"
+
+/**
+ * Workspace-scoped research and PM-interview feature checks, built on workspace modules (lib/modules). Every function takes the
+ * workspace the work belongs to: a study's workspaceId, the workspace a page was routed to, or a session's study.
+ *
+ * Voice stays fail-closed on every path:
+ *  - the three voice modules default off and each requires research capture (and discovery requires authoritative voice), so a
+ *    missing row, an unreadable table or a disabled requirement all read as "disabled";
+ *  - the legacy browser-authoritative harness remains confined to non-production AND the functional e2e run
+ *    (E2E_FUNCTIONAL=1): those are runtime-environment guards on a test-only transport, not product gating, and they are
+ *    deliberately kept as environment checks.
+ */
+
+export async function isResearchCaptureEnabled(workspaceId: string): Promise<boolean> {
+  return isModuleEnabled(workspaceId, "research_capture")
 }
 
-export function isPmInterviewEnabled(): boolean {
-  if (process.env.NODE_ENV !== "production") return process.env.COMPASS_PM_INTERVIEW_ENABLED !== "0"
-  return process.env.COMPASS_PM_INTERVIEW_ENABLED === "1"
+export async function isPmInterviewEnabled(workspaceId: string): Promise<boolean> {
+  return isModuleEnabled(workspaceId, "pm_interview")
 }
 
-export function isResearchAuthoritativeVoiceEnabled(): boolean {
-  return process.env.COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED === "1"
+export async function isResearchAuthoritativeVoiceEnabled(workspaceId: string): Promise<boolean> {
+  return isModuleEnabled(workspaceId, "research_voice_authoritative")
 }
 
-export function isResearchLegacyVoiceHarnessEnabled(): boolean {
+export async function isResearchLegacyVoiceHarnessEnabled(workspaceId: string): Promise<boolean> {
   return process.env.NODE_ENV !== "production" &&
     process.env.E2E_FUNCTIONAL === "1" &&
-    isResearchAuthoritativeVoiceEnabled()
+    await isResearchAuthoritativeVoiceEnabled(workspaceId)
 }
 
 // Browser transcripts are participant-submitted evidence, not authoritative voice events.
-export function isResearchBrowserVoiceEnabled(): boolean {
-  return process.env.COMPASS_RESEARCH_BROWSER_VOICE_ENABLED === "1"
+export async function isResearchBrowserVoiceEnabled(workspaceId: string): Promise<boolean> {
+  return isModuleEnabled(workspaceId, "research_voice_browser")
 }
 
-export function isResearchParticipantVoiceEnabled(): boolean {
-  return isResearchBrowserVoiceEnabled() || isResearchLegacyVoiceHarnessEnabled()
+export async function isResearchParticipantVoiceEnabled(workspaceId: string): Promise<boolean> {
+  return (await isResearchBrowserVoiceEnabled(workspaceId)) || (await isResearchLegacyVoiceHarnessEnabled(workspaceId))
 }
 
-export function isResearchDiscoveryVoiceEnabled(): boolean {
-  if (isResearchBrowserVoiceEnabled()) return true
-  if (!isResearchAuthoritativeVoiceEnabled()) return false
-  if (process.env.NODE_ENV !== "production") return true
-  return process.env.COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED === "1"
+export async function isResearchDiscoveryVoiceEnabled(workspaceId: string): Promise<boolean> {
+  if (await isResearchBrowserVoiceEnabled(workspaceId)) return true
+  // The discovery module requires the authoritative-voice module, so this is both gates.
+  return isModuleEnabled(workspaceId, "research_voice_discovery")
 }

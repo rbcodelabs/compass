@@ -69,16 +69,21 @@ export function AgentBoard({ workspaceId, basePath, initialCards, onOpenConversa
   const [cards, setCards] = useState<AgentBoardCard[] | null>(initialCards)
   const [failed, setFailed] = useState(false)
   const [now, setNow] = useState(() => Date.now())
-  const lastBody = useRef<string | null>(initialCards ? JSON.stringify(initialCards) : null)
+  const lastBody = useRef<string | null>(initialCards ? JSON.stringify({ cards: initialCards }) : null)
+  // Polls can overlap on a slow connection; only the newest request may write, so an older answer never overwrites a newer one.
+  const latestRequest = useRef(0)
 
   const refresh = useCallback(async () => {
+    const request = ++latestRequest.current
     try {
       const res = await fetch(`/api/agent/board?workspaceId=${encodeURIComponent(workspaceId)}`)
+      if (request !== latestRequest.current) return
       if (!res.ok) {
         setFailed(true)
         return
       }
       const text = await res.text()
+      if (request !== latestRequest.current) return
       setFailed(false)
       // An unchanged poll must not re-render the whole board (and reset a column's scroll position).
       if (text === lastBody.current) return

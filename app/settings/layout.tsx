@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { researchNavEnabled } from "@/lib/modules/server";
 import { redirect } from "next/navigation";
 import { isPlatformAdminSession } from "@/lib/platform-admin";
 import { getUserWorkspaces } from "@/lib/workspace";
@@ -52,6 +53,7 @@ export default async function SettingsLayout({ children }: SettingsLayoutProps) 
     return <>{children}</>;
   }
 
+  const researchCaptureEnabled = await researchNavEnabled(anchorWorkspace.id);
   const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
   // Same server-seeded read as the workspace and org-settings layouts.
@@ -86,6 +88,7 @@ export default async function SettingsLayout({ children }: SettingsLayoutProps) 
           } as React.CSSProperties}
         >
           <Sidebar
+            researchCaptureEnabled={researchCaptureEnabled}
             orgSlug={anchorWorkspace.orgSlug}
             workspaceSlug={anchorWorkspace.slug}
             workspaceName={anchorWorkspace.name}
@@ -106,7 +109,7 @@ export default async function SettingsLayout({ children }: SettingsLayoutProps) 
         </SidebarProvider>
       </TooltipProvider>
 
-      <BottomNav orgSlug={anchorWorkspace.orgSlug} workspaceSlug={anchorWorkspace.slug} />
+      <BottomNav orgSlug={anchorWorkspace.orgSlug} workspaceSlug={anchorWorkspace.slug} researchCaptureEnabled={researchCaptureEnabled} />
     </PanelProvider>
   );
 }

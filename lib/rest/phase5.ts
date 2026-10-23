@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { MODULE_KEYS } from "@/lib/modules/registry"
 import { collectionOf, uuid, workspaceSchema } from "@/lib/rest/schemas"
 
 const timestamp = z.string().datetime()
@@ -36,6 +37,14 @@ export const workspaceSummary = z.object({
   okrCycleCount: z.number().int().nonnegative(),
   squads: z.array(z.object({ id: uuid, name: z.string(), color: z.string() }).strict()),
 }).strict()
+
+export const workspaceModule = z.object({
+  key: z.enum(MODULE_KEYS), label: z.string(), description: z.string(), group: z.string(), sensitive: z.boolean(),
+  enabled: z.boolean(), selected: z.boolean(), explicit: z.boolean(), defaultEnabled: z.boolean(),
+  requires: z.array(z.object({ key: z.enum(MODULE_KEYS), label: z.string(), enabled: z.boolean() }).strict()),
+  blockedBy: z.array(z.enum(MODULE_KEYS)),
+}).strict()
+export const workspaceModuleCollection = collectionOf(workspaceModule)
 
 const evidenceParent = z.object({ type: z.enum(["opportunity", "solution", "assumption"]), id: uuid }).strict()
 const evidenceResearchSource = z.object({ researchTurnId: uuid, studyId: uuid.nullable(), sessionId: uuid.nullable(), sequence: z.number().int().nullable(), role: z.string().nullable(), resolved: z.boolean() }).strict()

@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest"
+import { setModules } from "./helpers/modules"
 const mocks = vi.hoisted(() => ({ record: vi.fn(), member: vi.fn(), create: vi.fn(), auth: vi.fn() }))
 const db = {
   workspaceMember: { findFirst: mocks.member },
@@ -9,7 +10,7 @@ vi.mock("@/lib/db", () => ({ default: () => db }))
 vi.mock("@/auth", () => ({ auth: mocks.auth }))
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 vi.mock("@/lib/task-assignment", () => ({ assignmentUpdate: async () => ({}), validateTaskReferences: async () => {}, resolveTaskAssignees: async (_workspace: string, tasks: unknown[]) => tasks }))
-vi.mock("@/lib/workspace-updates-capture", () => ({ withWorkspaceUpdates: (tx: unknown, fn: (tx: unknown, enabled: boolean) => unknown) => fn(tx, true), recordWorkspaceUpdate: mocks.record }))
+vi.mock("@/lib/workspace-updates-capture", () => ({ withWorkspaceUpdates: (tx: unknown, _workspaceId: unknown, fn: (tx: unknown, enabled: boolean) => unknown) => fn(tx, true), withUpdatesTables: (tx: unknown, fn: (tx: unknown, tablesExist: boolean) => unknown) => fn(tx, true), recordWorkspaceUpdate: mocks.record }))
 import { addTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions"
 import { createTask } from "@/lib/task-tool-handlers"
 import { runWithMcpActor } from "@/lib/mcp-authz"
@@ -17,6 +18,7 @@ import { runWithMcpActor } from "@/lib/mcp-authz"
 vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
 beforeEach(() => {
   vi.clearAllMocks()
+  setModules({ workspace_updates: true })
   mocks.member.mockResolvedValue({ id: "membership" })
   mocks.auth.mockResolvedValue({ user: { id: "human" } })
   mocks.create.mockResolvedValue({ id: "t", workspaceId: "w", status: "TODO", title: "Work", priority: "MEDIUM" })

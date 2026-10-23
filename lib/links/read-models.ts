@@ -12,8 +12,8 @@ import type { AppTransactionClient } from "@/lib/db"
 import { resolveEndpoints } from "@/lib/links/endpoints"
 import { normalizeEntityType, type LinkableEntityType } from "@/lib/entity-types"
 import {
-  isLinkTypeEnabled,
-  linkTypesForEntity,
+  isLinkTypeEnabledInWorkspace,
+  linkTypesForEntityInWorkspace,
   requireLinkType,
   toTypesOf,
   type LinkPickerItem,
@@ -85,7 +85,7 @@ export async function loadLinkSummaries(tx: Tx, input: { workspaceId: string; en
   const entityType = normalizeEntityType(input.entityType)
   if (!entityType) return {}
   const out: Record<string, Row[]> = {}
-  for (const { def } of linkTypesForEntity(entityType)) {
+  for (const { def } of await linkTypesForEntityInWorkspace(entityType, input.workspaceId)) {
     const side = sideOf(def, entityType)
     const spec = side === "from" ? def.summaries.onFrom : def.summaries.onTo
     if (!side || !spec) continue
@@ -141,7 +141,7 @@ export async function getLinkedEntitiesView(tx: Tx, input: LinkedEntitiesViewInp
   const entityType = normalizeEntityType(input.entityType)
   if (!entityType) throw new TypedLinkError(`Unknown entity type "${input.entityType}".`, "INVALID")
   const def = requireLinkType(input.linkType)
-  if (!isLinkTypeEnabled(def)) return null
+  if (!(await isLinkTypeEnabledInWorkspace(def, input.workspaceId))) return null
   const side = sideOf(def, entityType)
   if (!side || !def.candidates) return null
 

@@ -3,17 +3,22 @@ const mocks = vi.hoisted(() => ({ auth: vi.fn(), heartbeat: vi.fn(), append: vi.
 vi.mock("@/lib/research-voice-operations", () => ({ authorizeResearchVoiceWorker: mocks.auth, recordResearchVoiceHeartbeat: mocks.heartbeat, claimResearchVoiceCommand: mocks.claim, completeResearchVoiceCommand: mocks.result }))
 vi.mock("@/lib/research-voice-control-plane", async (original) => ({ ...await original<object>(), appendCanonicalVoiceBatch: mocks.append }))
 import { handleResearchVoiceCallback } from "@/lib/research-voice-callback"
+import { ResearchVoiceControlPlaneError } from "@/lib/research-voice-control-plane"
+import { setModules } from "./helpers/modules"
 const callId = "00000000-0000-4000-8000-000000000001", token = "a".repeat(43)
 const request = (body: unknown, authorization = `Bearer ${token}`) => new Request(`https://compass.example/api/internal/research/voice/${callId}/heartbeat`, { method: "POST", headers: { authorization, "content-type": "application/json" }, body: JSON.stringify(body) })
 const handle = (req: Request, action: "heartbeat" | "events" | "claim" | "result" = "heartbeat") => handleResearchVoiceCallback(req, callId, action, {} as never)
-beforeEach(() => { vi.clearAllMocks(); vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1"); mocks.auth.mockResolvedValue({ id: callId, sessionId: "session-1" }); mocks.heartbeat.mockResolvedValue({ accepted: true }); mocks.claim.mockResolvedValue(null); mocks.result.mockResolvedValue({ status: "APPLIED" }) })
+beforeEach(() => { vi.clearAllMocks(); setModules({ research_voice_authoritative: true }); mocks.auth.mockResolvedValue({ id: callId, sessionId: "session-1" }); mocks.heartbeat.mockResolvedValue({ accepted: true }); mocks.claim.mockResolvedValue(null); mocks.result.mockResolvedValue({ status: "APPLIED" }) })
 afterEach(() => vi.unstubAllEnvs())
 
 describe("internal research voice callback boundary", () => {
-  it("stops disabled callbacks before any credential lookup", async () => {
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "0")
-    expect((await handle(request({}))).status).toBe(404)
-    expect(mocks.auth).not.toHaveBeenCalled()
+  it("stops disabled callbacks before reading the body (the workspace module is enforced once the bearer is bound to a call)", async () => {
+    setModules({ research_voice_authoritative: false })
+    mocks.auth.mockRejectedValue(new ResearchVoiceControlPlaneError("Authoritative voice is unavailable", 404, "VOICE_DISABLED"))
+    const req = request({}); const reader = vi.spyOn(req.body!, "getReader")
+    expect((await handle(req)).status).toBe(404)
+    expect(reader).not.toHaveBeenCalled()
+    expect(mocks.heartbeat).not.toHaveBeenCalled()
   })
   it("rejects missing bearer before reading the body or querying auth", async () => {
     const req = request({}, ""); const reader = vi.spyOn(req.body!, "getReader")

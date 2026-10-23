@@ -60,7 +60,8 @@ export function AgentPageShell({
       if (next === "board" && activeConversationId) {
         // Leaving a conversation for the board means you have seen it: record that first, so the board's
         // first fetch doesn't show the chat you were just reading as New.
-        void markReviewed(workspaceId, activeConversationId).then(() => setView(next))
+        // Bounded: a slow write must not leave the toggle looking dead; the board just shows it as New for a moment.
+        void Promise.race([markReviewed(workspaceId, activeConversationId), new Promise((resolve) => setTimeout(resolve, 1500))]).then(() => setView(next))
         return
       }
       setView(next)

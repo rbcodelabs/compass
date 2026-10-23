@@ -22,11 +22,11 @@ export async function POST(request: Request) {
     Object.keys(body).some((key) => !ALLOWED_KEYS.has(key)) ||
     typeof body.token !== "string" || typeof body.sessionId !== "string" || typeof body.resumeToken !== "string"
   ) return NextResponse.json({ error: "Invalid request" }, { status: 400 })
-  if (!isResearchParticipantVoiceEnabled()) {
-    return NextResponse.json({ error: "Voice is not available for this study" }, { status: 409 })
-  }
   const resolved = await resolveActiveResearchStudy(body.token)
   if (!resolved) return NextResponse.json({ error: "Study not found" }, { status: 404 })
+  if (!(await isResearchParticipantVoiceEnabled(resolved.study.workspaceId))) {
+    return NextResponse.json({ error: "Voice is not available for this study" }, { status: 409 })
+  }
   let claimedLeaseId: string | null = null
   try {
     const lease = await createResearchVoiceLease({
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
         leaseId: lease.leaseId,
         leaseExpiresAt: lease.expiresAt.toISOString(),
         providerExpiresAt: null,
-        evidenceMode: isResearchBrowserVoiceEnabled() ? "PARTICIPANT_SUBMITTED" : "LEGACY_HARNESS",
+        evidenceMode: (await isResearchBrowserVoiceEnabled(resolved.study.workspaceId)) ? "PARTICIPANT_SUBMITTED" : "LEGACY_HARNESS",
         targetMinutes: resolved.study.targetMinutes,
       })
     }

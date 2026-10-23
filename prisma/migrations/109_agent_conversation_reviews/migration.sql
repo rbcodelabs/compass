@@ -1,4 +1,4 @@
--- Migration 107: per-user "reviewed" flag for the agent board.
+-- Migration 109: per-user "reviewed" flag for the agent board.
 -- Additive: one new table and two async indexes. No backfill and no change to an existing
 -- table: a conversation with no row here simply reads as "not reviewed by this user", so the
 -- code can ship before this is applied (the board degrades to every card being New).

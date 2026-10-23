@@ -1,6 +1,5 @@
 import { z } from "zod"
 import getPrisma, { type AppPrismaClient } from "@/lib/db"
-import { isResearchAuthoritativeVoiceEnabled } from "@/lib/research-feature"
 import { appendCanonicalVoiceBatch, ResearchVoiceControlPlaneError } from "@/lib/research-voice-control-plane"
 import { authorizeResearchVoiceWorker, claimResearchVoiceCommand, completeResearchVoiceCommand, recordResearchVoiceHeartbeat } from "@/lib/research-voice-operations"
 
@@ -43,7 +42,7 @@ export async function handleResearchVoiceCallback(request: Request, callId: stri
     if (!uuid.test(callId) || new URL(request.url).search) return respond({ error: "Invalid callback URL" }, 400)
     const bearer = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.get("authorization") ?? "")
     if (!bearer) return respond({ error: "Worker bearer token required" }, 401)
-    if (!isResearchAuthoritativeVoiceEnabled()) return respond({ error: "Authoritative voice is unavailable" }, 404)
+    // The workspace's authoritative-voice module is enforced inside authorizeResearchVoiceWorker, once the bearer is bound to a call.
     const prisma = database ?? getPrisma(), rawToken = bearer[1]
     // Authenticate before reading potentially streamed input. Mutators fence again.
     const call = await authorizeResearchVoiceWorker({ prisma, callId, rawToken })

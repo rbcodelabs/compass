@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { setFeatureTables, setModules } from "./helpers/modules"
 import { followableConfig, getFollowable } from "@/lib/followable"
 import { resetFollowingAvailabilityCache } from "@/lib/following-flag"
 import { runWithMcpActor, type McpActor } from "@/lib/mcp-authz"
@@ -20,7 +21,7 @@ const asUser = <T>(fn: () => T, actor: Partial<McpActor> = {}) => runWithMcpActo
 const data = (result: { structuredContent: { data: unknown } }) => result.structuredContent.data as Record<string, unknown>
 
 beforeEach(() => {
-  vi.stubEnv("FOLLOWING_ENABLED", "1")
+  setModules({ following: true }); setFeatureTables({ following: true })
   followableConfig.shippedSlice = 2
   resetFollowingAvailabilityCache()
   fake = createFakeFollowDb()
@@ -76,7 +77,7 @@ describe("follow and unfollow", () => {
   })
 
   it("tells the caller when following is not enabled", async () => {
-    vi.stubEnv("FOLLOWING_ENABLED", "0")
+    setModules({ following: false })
     const result = await asUser(() => followTool({ workspaceId: WS, subjectType: "TASK", subjectId: TASK }))
     expect(result.structuredContent.ok).toBe(false)
     expect(result.content[0].text).toMatch(/not enabled/i)

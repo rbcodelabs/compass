@@ -19,8 +19,8 @@ type ParticipantVoicePrisma = Pick<AppPrismaClient,
   "$transaction" | "researchSession" | "researchVoiceCall" | "researchVoiceCommand" |
   "researchAttachment" | "researchParticipantToken">
 
-function requireAuthoritativeVoice() {
-  if (!isResearchAuthoritativeVoiceEnabled()) {
+async function requireAuthoritativeVoice(workspaceId: string | undefined) {
+  if (!workspaceId || !(await isResearchAuthoritativeVoiceEnabled(workspaceId))) {
     throw new ResearchVoiceControlPlaneError("Authoritative voice is unavailable", 404, "VOICE_DISABLED")
   }
 }
@@ -36,25 +36,29 @@ export async function authorizeResearchVoiceWorker({
   rawToken: string
   now?: Date
 }) {
-  requireAuthoritativeVoice()
-  const call = await prisma.researchVoiceCall.findUnique({
+  const found = await prisma.researchVoiceCall.findUnique({
     where: { id: callId },
     select: {
+      session: { select: { study: { select: { workspaceId: true } } } },
       id: true, sessionId: true, participantTokenId: true, workerTokenHash: true,
       status: true, transcriptIntegrity: true, leaseExpiresAt: true,
       nextProviderOrdinal: true, lastProviderItemId: true, lastHeartbeatAt: true,
       commandPendingCount: true,
     },
   })
-  if (!call || !voiceWorkerTokenIsBound({
+  if (!found || !voiceWorkerTokenIsBound({
     rawToken,
-    expectedTokenHash: call.workerTokenHash,
+    expectedTokenHash: found.workerTokenHash,
     presentedCallId: callId,
-    expectedCallId: call.id,
-    callStatus: call.status,
-    expiresAt: call.leaseExpiresAt,
+    expectedCallId: found.id,
+    callStatus: found.status,
+    expiresAt: found.leaseExpiresAt,
     now,
   })) throw new ResearchVoiceControlPlaneError("Invalid research voice worker token", 401, "INVALID_WORKER_TOKEN")
+  // The bound token proves the caller; only then does the call's workspace decide whether voice is on (404, as before).
+  await requireAuthoritativeVoice(found.session?.study?.workspaceId)
+  const { session: _session, ...call } = found
+  void _session
   return { ...call, status: call.status as ResearchVoiceCallStatus }
 }
 
@@ -222,8 +226,7 @@ export async function authorizeResearchVoiceParticipant({
   resumeToken: string
   allowTerminal?: boolean
 }) {
-  requireAuthoritativeVoice()
-  const session = await prisma.researchSession.findFirst({
+  const found = await prisma.researchSession.findFirst({
     where: {
       id: sessionId,
       participantTokenId,
@@ -231,9 +234,12 @@ export async function authorizeResearchVoiceParticipant({
       status: allowTerminal ? { in: ["IN_PROGRESS", "COMPLETED"] } : "IN_PROGRESS",
       modality: "VOICE",
     },
-    select: { id: true, status: true, voiceLeaseId: true },
+    select: { id: true, status: true, voiceLeaseId: true, study: { select: { workspaceId: true } } },
   })
-  if (!session) throw new ResearchVoiceControlPlaneError("Voice session not found", 404, "SESSION_NOT_FOUND")
+  if (!found) throw new ResearchVoiceControlPlaneError("Voice session not found", 404, "SESSION_NOT_FOUND")
+  await requireAuthoritativeVoice(found.study?.workspaceId)
+  const { study: _study, ...session } = found
+  void _study
   return session
 }
 

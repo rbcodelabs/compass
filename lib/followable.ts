@@ -62,7 +62,7 @@ export type FollowableDefinition = {
  * The highest rollout slice that has shipped. Slice 2 activates Task,
  * Opportunity, Solution and Doc (follow creation, emission and listing alike);
  * slice 3 sets this to 3 and activates the rest. Nothing is user-visible while
- * FOLLOWING_ENABLED is off. A mutable holder rather than a constant so tests can
+ * the following module is off. A mutable holder rather than a constant so tests can
  * exercise other slices without a build-time switch.
  */
 export const followableConfig: { shippedSlice: 1 | 2 | 3 } = { shippedSlice: 2 }
@@ -189,7 +189,7 @@ const definitions: Record<FollowableSubjectType, FollowableDefinition> = {
     // The study page is behind both workspace membership and the research
     // capture feature. lib/research-access.ts only resolves participant-token
     // access and has no per-user check to delegate to.
-    canView: () => isResearchCaptureEnabled(),
+    canView: (_userId, subject) => isResearchCaptureEnabled(subject.workspaceId),
   },
   // Artifacts are commentable and status-bearing but were not in the product
   // owner's list (ADR open question 3, no recommendation). Registered so the

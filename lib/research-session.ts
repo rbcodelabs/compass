@@ -291,7 +291,7 @@ export async function startOrResumeResearchSession(
     const session = await loadParticipantSession(context, resume.sessionId, resume.resumeToken, {
       allowCompleted: true,
     })
-    if (session.modality === "VOICE" && !isResearchParticipantVoiceEnabled()) {
+    if (session.modality === "VOICE" && !(await isResearchParticipantVoiceEnabled(context.study.workspaceId))) {
       throw new ResearchSessionError("Voice is not available for this study", 409)
     }
     return {
@@ -308,6 +308,10 @@ export async function startOrResumeResearchSession(
   const openingTurnId = modality === "CHAT" ? randomUUID() : null
   const resumeSecret = createResumeToken()
   let message = ""
+  // Module reads use their own connection, so they are resolved before the transaction opens rather than inside it.
+  const voice = modality === "VOICE"
+    ? { participant: await isResearchParticipantVoiceEnabled(context.study.workspaceId), discovery: await isResearchDiscoveryVoiceEnabled(context.study.workspaceId) }
+    : null
   await retryDsql(() => context.prisma.$transaction(async (tx) => {
     const locked = await tx.researchStudy.updateMany({
       where: { id: context.study.id, status: "ACTIVE" },
@@ -327,9 +331,9 @@ export async function startOrResumeResearchSession(
     if (!token) throw new ResearchSessionError("Study not found", 404)
     const study = await tx.researchStudy.findUnique({ where: { id: context.study.id } })
     if (!study || study.status !== "ACTIVE") throw new ResearchSessionError("Study not found", 404)
-    if (modality === "VOICE" && (
-      !isResearchParticipantVoiceEnabled() ||
-      (study.studyType === "CUSTOMER_INTERVIEW" && !isResearchDiscoveryVoiceEnabled()) ||
+    if (voice && (
+      !voice.participant ||
+      (study.studyType === "CUSTOMER_INTERVIEW" && !voice.discovery) ||
       (study.studyType === "USABILITY_TEST" && !study.appUrl)
     )) {
       throw new ResearchSessionError("Voice is not available for this study", 409)

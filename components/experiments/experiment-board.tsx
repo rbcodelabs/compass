@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useTransition, useId } from "react";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import { useServerSyncedState } from "@/hooks/use-server-synced-state";
+import { useFlipAnimation } from "@/hooks/use-flip-animation";
 import {
   DndContext,
   DragOverlay,
@@ -120,13 +123,16 @@ export function ExperimentBoard({
 }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/experiments`;
 
-  const [columns, setColumns] = useState<ColumnMap>(() =>
-    buildColumnMap(experiments)
-  );
   const [activeItem, setActiveItem] = useState<ExperimentCardData | null>(null);
   const [dragSourceStatus, setDragSourceStatus] = useState<ExperimentStatus | null>(null);
 
-  const [, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();
+
+  // Follow the server unless a drag or local write is in flight (see useServerSyncedState).
+  const busy = activeItem !== null || dragSourceStatus !== null || isPending;
+  const { state: columns, setState: setColumns, generation } = useServerSyncedState(experiments, buildColumnMap, busy);
+  const { containerRef, capture } = useFlipAnimation(generation);
+  useLiveRefresh({ orgSlug, workspaceSlug, scope: "experiments", paused: busy, onBeforeRefresh: capture });
 
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
@@ -240,7 +246,7 @@ export function ExperimentBoard({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
+    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
       <DndContext
         id={dndId}
         sensors={sensors}

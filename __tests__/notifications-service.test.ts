@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { setFeatureTables, setModules } from "./helpers/modules"
 import { followableConfig, getFollowable } from "@/lib/followable"
 import { resetFollowingAvailabilityCache } from "@/lib/following-flag"
 import {
@@ -42,7 +43,7 @@ const statusEvent = (overrides: Partial<SubjectEvent> = {}): SubjectEvent => ({
 })
 
 beforeEach(() => {
-  vi.stubEnv("FOLLOWING_ENABLED", "1")
+  setModules({ following: true }); setFeatureTables({ following: true })
   followableConfig.shippedSlice = 3
   research.enabled = true
   resetFollowingAvailabilityCache()
@@ -190,7 +191,7 @@ describe("emitSubjectEvent payload", () => {
 describe("emitSubjectEvent gating", () => {
   it("does nothing when the flag is off", async () => {
     follow(U1)
-    vi.stubEnv("FOLLOWING_ENABLED", "0")
+    setModules({ following: false })
     expect(await emitSubjectEvent(statusEvent(), fake.db)).toEqual({ status: "skipped", reason: "disabled" })
     expect(fake.tables.notification).toHaveLength(0)
   })
@@ -257,7 +258,7 @@ describe("listNotifications", () => {
     await seed(U1, 1)
     expect((await listNotifications(U1, WS, { prisma: fake.db })).items).toHaveLength(1)
     expect((await listNotifications("ex-member", WS, { prisma: fake.db })).items).toEqual([])
-    vi.stubEnv("FOLLOWING_ENABLED", "0")
+    setModules({ following: false })
     expect((await listNotifications(U1, WS, { prisma: fake.db })).items).toEqual([])
   })
 
@@ -355,7 +356,7 @@ describe("unreadCount", () => {
   it("is zero for a non-member or when the flag is off", async () => {
     await seedUnread(3)
     expect(await unreadCount("ex-member", WS, fake.db)).toEqual({ count: 0, overflow: false })
-    vi.stubEnv("FOLLOWING_ENABLED", "0")
+    setModules({ following: false })
     expect(await unreadCount(U1, WS, fake.db)).toEqual({ count: 0, overflow: false })
   })
 })

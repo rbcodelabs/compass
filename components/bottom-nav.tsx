@@ -27,7 +27,7 @@ const buildBaseNavItems = (okrsLabel: string, discoveryLabel: string, solutionsL
   { label: "Decisions", path: "decisions", Icon: MessageSquareCheck },
 ], discoveryFirst)
 
-export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = true, updatesEnabled = false }: BottomNavProps) {
+export function BottomNav({ orgSlug, workspaceSlug, researchCaptureEnabled = false, updatesEnabled = false }: BottomNavProps) {
   const pathname = usePathname()
   const activeRef = useRef<HTMLAnchorElement>(null)
   const base = `/${orgSlug}/${workspaceSlug}`

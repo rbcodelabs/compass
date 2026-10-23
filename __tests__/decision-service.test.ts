@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-const updates = vi.hoisted(() => ({ enabled: false, record: vi.fn() }))
-vi.mock("@/lib/workspace-updates-capture", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/workspace-updates-capture")>(), workspaceUpdatesAvailable: async () => updates.enabled, recordWorkspaceUpdate: updates.record }))
+import { setFeatureTables, setModules } from "./helpers/modules"
+const updates = vi.hoisted(() => ({ record: vi.fn() }))
+vi.mock("@/lib/workspace-updates-capture", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/workspace-updates-capture")>(), recordWorkspaceUpdate: updates.record }))
 
 const mockPrisma = {
   reviewRevision: { findUnique: vi.fn() },
@@ -29,7 +30,6 @@ const revision = {
 describe("recordDecision", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    updates.enabled = false
     mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma))
   })
 
@@ -111,7 +111,8 @@ describe("recordDecision", () => {
   })
 
   it("commits the decision and terminal request state in one transaction", async () => {
-    updates.enabled = true
+    setModules({ workspace_updates: true })
+    setFeatureTables({ updates: true })
     mockPrisma.decisionRecord.findUnique.mockResolvedValue(null)
     mockPrisma.reviewRevision.findUnique.mockResolvedValue(revision)
     mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
@@ -125,6 +126,22 @@ describe("recordDecision", () => {
     expect(mockPrisma.decisionRecord.create).toHaveBeenCalledOnce()
     expect(mockPrisma.reviewRequest.update).toHaveBeenCalledOnce()
     expect(updates.record).toHaveBeenCalledWith(mockPrisma, expect.objectContaining({ entityType: "DECISION", entityId: "request-1", kind: "DECISION_RECORDED", actorType: "USER", actorId: "user-1" }))
+  })
+
+  it("does not record an update when the tables exist but the workspace has the module off", async () => {
+    setFeatureTables({ updates: true })
+    setModules({ workspace_updates: false })
+    mockPrisma.decisionRecord.findUnique.mockResolvedValue(null)
+    mockPrisma.reviewRevision.findUnique.mockResolvedValue(revision)
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
+    mockPrisma.decisionRecord.findFirst.mockResolvedValue(null)
+    mockPrisma.decisionRecord.create.mockResolvedValue({ id: "decision-off" })
+
+    await recordDecision({ actor: { kind: "USER", userId: "user-1" }, revisionId: "rev-1", fingerprint: "fp-1", optionId: "option-1", idempotencyKey: "key-off" })
+
+    expect(mockPrisma.decisionRecord.create).toHaveBeenCalledOnce()
+    expect(updates.record).not.toHaveBeenCalled()
   })
 
   it("records an authorized admin decision with a role snapshot", async () => {
@@ -274,7 +291,6 @@ describe("recordDecision with per-question answers", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    updates.enabled = false
     mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) => fn(mockPrisma))
     mockPrisma.decisionRecord.findUnique.mockResolvedValue(null)
     mockPrisma.reviewRevision.findUnique.mockResolvedValue(multiRevision)

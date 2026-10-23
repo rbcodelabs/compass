@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const capture = vi.hoisted(() => ({ enabled: false, record: vi.fn() }))
-vi.mock("@/lib/workspace-updates-capture", () => ({ withWorkspaceUpdates: (db: unknown, fn: (db: unknown, enabled: boolean) => unknown) => fn(db, capture.enabled), recordWorkspaceUpdate: capture.record }))
+vi.mock("@/lib/workspace-updates-capture", () => ({ withWorkspaceUpdates: (db: unknown, _workspaceId: unknown, fn: (db: unknown, enabled: boolean) => unknown) => fn(db, capture.enabled), recordWorkspaceUpdate: capture.record }))
 vi.mock("@/lib/workspace-update-mutations", () => ({ workspaceMutationActor: async () => ({ actorType: "USER", actorId: "user-1" }) }))
 
 const prisma = {

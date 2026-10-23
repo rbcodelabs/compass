@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { setFeatureTables, setModules } from "./helpers/modules"
 import { followableConfig, getFollowable } from "@/lib/followable"
 import { resetFollowingAvailabilityCache } from "@/lib/following-flag"
 import { autoFollow, FollowError, followSubject, getFollowState, isFollowing, listFollowers, unfollowSubject } from "@/lib/follows"
@@ -14,7 +15,7 @@ const subject = { workspaceId: WS, subjectType: "TASK", subjectId: TASK }
 let fake: ReturnType<typeof createFakeFollowDb>
 
 beforeEach(() => {
-  vi.stubEnv("FOLLOWING_ENABLED", "1")
+  setModules({ following: true }); setFeatureTables({ following: true })
   followableConfig.shippedSlice = 3
   resetFollowingAvailabilityCache()
   fake = createFakeFollowDb()
@@ -142,7 +143,7 @@ describe("autoFollow", () => {
     followableConfig.shippedSlice = 1
     await expect(autoFollow({ userId: USER, ...subject, source: "AUTO_CREATE" }, fake.db)).resolves.toEqual({ status: "skipped", reason: "inactive_subject_type" })
     followableConfig.shippedSlice = 3
-    vi.stubEnv("FOLLOWING_ENABLED", "0")
+    setModules({ following: false })
     await expect(autoFollow({ userId: USER, ...subject, source: "AUTO_CREATE" }, fake.db)).resolves.toEqual({ status: "skipped", reason: "disabled" })
     expect(rows()).toHaveLength(0)
   })
@@ -152,7 +153,7 @@ describe("validation of manual follows", () => {
   const code = async (promise: Promise<unknown>) => promise.then(() => null, (error: FollowError) => error.code)
 
   it("fails loudly when the feature is off", async () => {
-    vi.stubEnv("FOLLOWING_ENABLED", "0")
+    setModules({ following: false })
     expect(await code(followSubject({ userId: USER, ...subject }, fake.db))).toBe("FOLLOWING_DISABLED")
   })
 

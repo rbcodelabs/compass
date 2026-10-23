@@ -3,9 +3,9 @@ import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { assertAgentConversationReviewsMigration } from "@/lib/migrations/agent-conversation-reviews"
 
-/** Static guards for 107_agent_conversation_reviews: the SQL file is what reaches Aurora DSQL / Postgres. */
+/** Static guards for 109_agent_conversation_reviews: the SQL file is what reaches Aurora DSQL / Postgres. */
 const ROOT = process.cwd()
-const NAME = "107_agent_conversation_reviews"
+const NAME = "109_agent_conversation_reviews"
 const runner = readFileSync(path.join(ROOT, "lib/migrations/runner.ts"), "utf-8")
 const schema = readFileSync(path.join(ROOT, "prisma/schema.prisma"), "utf-8")
 const sqlPath = path.join(ROOT, "prisma/migrations", NAME, "migration.sql")
@@ -13,10 +13,10 @@ const sql = existsSync(sqlPath) ? readFileSync(sqlPath, "utf-8").split("\n").map
 const statements = sql.split(";").map((s) => s.trim()).filter(Boolean)
 
 describe(NAME, () => {
-  it("is registered exactly once, after 106", () => {
+  it("is registered exactly once, after 108", () => {
     expect([...runner.matchAll(new RegExp(`name:\\s*"${NAME}"`, "g"))]).toHaveLength(1)
     expect(existsSync(sqlPath)).toBe(true)
-    expect(runner.indexOf(`name: "${NAME}"`)).toBeGreaterThan(runner.indexOf('name: "106_entity_links_residual_opportunity"'))
+    expect(runner.indexOf(`name: "${NAME}"`)).toBeGreaterThan(runner.indexOf('name: "108_workspace_modules_legacy_flag_backfill"'))
   })
 
   it("is one idempotent table plus two async indexes, with no foreign key, trigger or existing-table change (DSQL rules)", () => {
@@ -38,8 +38,8 @@ describe(NAME, () => {
   })
 
   it("waits for the async index builds like 098 does, so the postcondition cannot fail on the first DSQL run", () => {
-    expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"107_agent_conversation_reviews"/)
-    expect(runner).toMatch(/\["049_agent_identity"[^\]]*"107_agent_conversation_reviews"[^\]]*\]\.includes\(migration\.name\)/)
+    expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"109_agent_conversation_reviews"/)
+    expect(runner).toMatch(/\["049_agent_identity"[^\]]*"109_agent_conversation_reviews"[^\]]*\]\.includes\(migration\.name\)/)
   })
 
   it("verifies before the receipt", () => {

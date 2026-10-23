@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { resolveActiveResearchStudy, resolveResearchVoiceCleanupStudy } from "@/lib/research-access"
+import { findResearchTokenWorkspaceId, resolveActiveResearchStudy, resolveResearchVoiceCleanupStudy } from "@/lib/research-access"
 import { readBoundedResearchJson, ResearchRequestBodyError } from "@/lib/research-request"
 import { appendFinalResearchVoiceEvent, releaseResearchVoiceLease, ResearchVoiceError } from "@/lib/research-voice"
 import { isResearchBrowserVoiceEnabled, isResearchParticipantVoiceEnabled } from "@/lib/research-feature"
@@ -19,15 +19,18 @@ export async function POST(request: Request) {
     BASE_KEYS.some((key) => typeof body[key] !== "string") ||
     (body.action !== "FINAL" && body.action !== "DISCONNECT")
   ) return NextResponse.json({ error: "Invalid request" }, { status: 400 })
+  const workspaceId = await findResearchTokenWorkspaceId(body.token as string)
+  if (!workspaceId) return NextResponse.json({ error: "Study not found" }, { status: 404 })
+  const browserVoice = await isResearchBrowserVoiceEnabled(workspaceId)
   const allowed = new Set<string>(BASE_KEYS)
-  if (body.action === "FINAL") [...(isResearchBrowserVoiceEnabled() ? ["clientEventId", "reportedOrdinal"] : ["providerEventId"]), "role", "content", "attachmentId"].forEach((key) => allowed.add(key))
+  if (body.action === "FINAL") [...(browserVoice ? ["clientEventId", "reportedOrdinal"] : ["providerEventId"]), "role", "content", "attachmentId"].forEach((key) => allowed.add(key))
   if (Object.keys(body).some((key) => !allowed.has(key))) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 })
   }
-  if (!isResearchParticipantVoiceEnabled()) {
+  if (!(await isResearchParticipantVoiceEnabled(workspaceId))) {
     return NextResponse.json({ error: "Voice is not available for this study" }, { status: 409 })
   }
-  const resolved = await (body.action === "DISCONNECT" && isResearchBrowserVoiceEnabled()
+  const resolved = await (body.action === "DISCONNECT" && browserVoice
     ? resolveResearchVoiceCleanupStudy(body.token as string)
     : resolveActiveResearchStudy(body.token as string))
   if (!resolved) return NextResponse.json({ error: "Study not found" }, { status: 404 })
@@ -40,7 +43,7 @@ export async function POST(request: Request) {
         leaseId: body.leaseId as string,
       }))
     }
-    if (isResearchBrowserVoiceEnabled()) {
+    if (browserVoice) {
       if (typeof body.clientEventId !== "string" || typeof body.reportedOrdinal !== "number" || typeof body.content !== "string" ||
         (body.role !== "PARTICIPANT" && body.role !== "INTERVIEWER") || (body.attachmentId !== undefined && typeof body.attachmentId !== "string")) return NextResponse.json({ error: "Invalid participant voice event" }, { status: 400 })
       return NextResponse.json(await appendParticipantVoiceEvent({ context: resolved, sessionId: body.sessionId as string, resumeToken: body.resumeToken as string, leaseId: body.leaseId as string, clientEventId: body.clientEventId, reportedOrdinal: body.reportedOrdinal, role: body.role, content: body.content, ...(typeof body.attachmentId === "string" ? { attachmentId: body.attachmentId } : {}) }))

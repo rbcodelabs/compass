@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import type { AppPrismaClient } from "./db";
+import { setFeatureTables, setModules } from "../__tests__/helpers/modules";
 import {
   getUpdatesPage,
   markUpdatesCaughtUp,
@@ -59,7 +60,8 @@ const snapshot = (complete = true) =>
     complete,
   });
 beforeEach(() => {
-  vi.stubEnv("WORKSPACE_UPDATES_ENABLED", "1");
+  setModules({ workspace_updates: true });
+  setFeatureTables({ updates: true });
   vi.stubEnv("AUTH_SECRET", "synthetic-test-secret");
 });
 afterEach(() => vi.unstubAllEnvs());

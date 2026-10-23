@@ -1,9 +1,9 @@
 import type { PoolClient } from "pg"
 
-export const AGENT_CONVERSATION_REVIEWS_MIGRATION = "107_agent_conversation_reviews"
+export const AGENT_CONVERSATION_REVIEWS_MIGRATION = "109_agent_conversation_reviews"
 export const AGENT_REVIEW_TABLE = "agent_conversation_reviews"
 
-/** Columns 107 must leave behind, with their nullability. */
+/** Columns 109 must leave behind, with their nullability. */
 const EXPECTED_COLUMNS: { column: string; nullable: boolean }[] = [
   { column: "id", nullable: false },
   { column: "conversation_id", nullable: false },
@@ -34,7 +34,7 @@ export async function assertAgentConversationReviewsMigration(client: PoolClient
   const actual = new Map(result.rows.map((row) => [row.column_name, row.is_nullable === "YES"]))
   for (const { column, nullable } of EXPECTED_COLUMNS) {
     if (actual.get(column) !== nullable) {
-      throw new Error(`Migration 107 postcondition failed: ${AGENT_REVIEW_TABLE}.${column} is missing or has the wrong nullability`)
+      throw new Error(`Migration 109 postcondition failed: ${AGENT_REVIEW_TABLE}.${column} is missing or has the wrong nullability`)
     }
   }
 
@@ -67,7 +67,7 @@ export async function assertAgentConversationReviewsMigration(client: PoolClient
       row.predicate !== null ||
       row.expression !== null
     ) {
-      throw new Error(`Migration 107 postcondition failed: index ${expected.name} is missing, not ready, or has drifted`)
+      throw new Error(`Migration 109 postcondition failed: index ${expected.name} is missing, not ready, or has drifted`)
     }
   }
 }

@@ -304,7 +304,7 @@ export async function concludeExperiment(
         ? "NOT_PURSUED"
         : "COMPLETE"
 
-  const capture = await workspaceUpdatesAvailable(prisma)
+  const capture = await workspaceUpdatesAvailable(prisma, workspaceId)
   const actor = capture ? await workspaceMutationActor("UI") : null
   const experiment = await retryUpdatesTransaction(prisma, async tx => {
   const current = await tx.experiment.findFirst({ where: { id: experimentId, workspaceId }, select: { assumptionId: true, status: true } })

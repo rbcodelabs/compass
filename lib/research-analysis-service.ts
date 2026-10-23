@@ -3,6 +3,7 @@ import getPrisma from "@/lib/db"
 import { deserializeResearchGuide } from "@/lib/research"
 import { analysisFingerprint, buildAnalysisPrompt, parseAnalysisResult, readSessionAnalysis, type AnalysisSource, type SessionAnalysis } from "@/lib/research-analysis"
 import { runResearchAnalysisAgent } from "@/lib/research-analysis-agent"
+import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { analysisOperationMs, assertAnalysisDeadline } from "@/lib/research-analysis-deadline"
 
 export class ResearchAnalysisError extends Error {
@@ -16,6 +17,9 @@ async function studyAccess(studyId: string, userId?: string) {
     where: { id: studyId, ...(userId ? { workspace: { members: { some: { userId } } } } : {}) },
   })
   if (!study || study.studyType === "PM_INTERVIEW") throw new ResearchAnalysisError("Study not found", 404)
+  // A member-initiated call needs the workspace's research module; the internal completion replay (no userId) follows a participant
+  // completion that was itself gated, and is deliberately not re-gated here.
+  if (userId && !(await isResearchCaptureEnabled(study.workspaceId))) throw new ResearchAnalysisError("Study not found", 404)
   return study
 }
 

@@ -6,7 +6,7 @@
  */
 import { describe, expect, it, vi } from "vitest"
 
-import { listAgentBoardCards, markConversationReviewed } from "@/lib/agent-board-data"
+import { deleteWorkspaceConversationReviews, listAgentBoardCards, markConversationReviewed } from "@/lib/agent-board-data"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -129,5 +129,23 @@ describe("listAgentBoardCards", () => {
     const cards = await listAgentBoardCards(prisma, { workspaceId: WS, userId: "me" })
     expect(cards).toHaveLength(1)
     expect(cards[0].reviewedAt).toBeNull()
+  })
+})
+
+describe("deleteWorkspaceConversationReviews", () => {
+  it("deletes every review in the workspace (and only that workspace)", async () => {
+    const prisma = fakePrisma()
+    prisma.agentConversationReview.deleteMany = vi.fn().mockResolvedValue({ count: 3 })
+    await deleteWorkspaceConversationReviews(prisma, WS)
+    expect(prisma.agentConversationReview.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: WS } })
+  })
+
+  it("is a no-op while the reviews migration is unapplied, and rethrows anything else", async () => {
+    const missing = fakePrisma()
+    missing.agentConversationReview.deleteMany = vi.fn().mockRejectedValue(Object.assign(new Error("no table"), { code: "P2021" }))
+    await expect(deleteWorkspaceConversationReviews(missing, WS)).resolves.toBeUndefined()
+    const broken = fakePrisma()
+    broken.agentConversationReview.deleteMany = vi.fn().mockRejectedValue(new Error("connection reset"))
+    await expect(deleteWorkspaceConversationReviews(broken, WS)).rejects.toThrow("connection reset")
   })
 })

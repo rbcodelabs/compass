@@ -7,7 +7,7 @@
  * predicate the chat uses, so the board can never show or mark a conversation the chat
  * would refuse (including after the caller leaves the workspace).
  *
- * The reviews table arrives with migration 107. Until it is applied the board still works
+ * The reviews table arrives with migration 109. Until it is applied the board still works
  * and every card reads as unreviewed; marking returns "unavailable" instead of erroring.
  */
 
@@ -85,4 +85,20 @@ export async function markConversationReviewed(
     throw error
   }
   return { ok: true }
+}
+
+/**
+ * Removes every review row in a workspace. Workspace deletion calls this before it deletes the conversations the
+ * rows point at (relationMode "prisma" enforces nothing in the database, so nothing cascades). Tolerates the
+ * reviews migration being unapplied, so a deployment that has not applied it can still delete a workspace.
+ */
+export async function deleteWorkspaceConversationReviews(
+  prisma: Pick<AppPrismaClient, "agentConversationReview">,
+  workspaceId: string
+): Promise<void> {
+  try {
+    await prisma.agentConversationReview.deleteMany({ where: { workspaceId } })
+  } catch (error) {
+    if (!isMissingTable(error)) throw error
+  }
 }

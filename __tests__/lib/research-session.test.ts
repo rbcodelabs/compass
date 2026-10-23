@@ -20,6 +20,7 @@ import {
   completeResearchSession,
   reconcileAbandonedResearchSessions,
 } from "@/lib/research-session"
+import { setModules } from "../helpers/modules"
 
 function context(overrides: Record<string, unknown> = {}) {
   const prisma = {
@@ -225,7 +226,7 @@ describe("canonical research persistence", () => {
   })
 
   it("creates a guided voice session over the same canonical domain", async () => {
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    setModules({ research_voice_authoritative: true })
     vi.stubEnv("E2E_FUNCTIONAL", "1")
     const fixture = context()
     const guidedStudy = (fixture.value as unknown as { study: { studyType: string; appUrl: string | null } }).study
@@ -243,7 +244,7 @@ describe("canonical research persistence", () => {
   })
 
   it("creates a customer-discovery voice session when its rollout gate is enabled", async () => {
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    setModules({ research_voice_authoritative: true, research_voice_discovery: true })
     vi.stubEnv("E2E_FUNCTIONAL", "1")
     const fixture = context()
     const result = await startOrResumeResearchSession(fixture.value, undefined, "VOICE")
@@ -255,9 +256,9 @@ describe("canonical research persistence", () => {
 
   it("creates a production browser voice session without the legacy authoritative flag", async () => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
-    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    setModules({ research_voice_browser: true })
+    setModules({ research_voice_authoritative: false })
+    setModules({ research_voice_discovery: false })
     vi.stubEnv("E2E_FUNCTIONAL", "")
     try {
       const fixture = context()
@@ -275,9 +276,9 @@ describe("canonical research persistence", () => {
 
   it("rejects a new customer-discovery voice session when its production rollout gate is disabled", async () => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    setModules({ research_voice_authoritative: true })
     vi.stubEnv("E2E_FUNCTIONAL", "1")
-    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    setModules({ research_voice_discovery: false })
     try {
       const fixture = context()
       await expect(startOrResumeResearchSession(fixture.value, undefined, "VOICE"))
@@ -290,9 +291,9 @@ describe("canonical research persistence", () => {
 
   it("does not spend the final successful start slot on an unavailable voice modality", async () => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    setModules({ research_voice_authoritative: true })
     vi.stubEnv("E2E_FUNCTIONAL", "1")
-    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    setModules({ research_voice_discovery: false })
     try {
       const fixture = context()
       let startCount = MAX_RESEARCH_STARTS_PER_MINUTE - 1
@@ -320,7 +321,7 @@ describe("canonical research persistence", () => {
   })
 
   it("rejects guided voice before spending start quota while the global gate is disabled", async () => {
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    setModules({ research_voice_authoritative: false })
     const fixture = context()
     const guidedStudy = (fixture.value as unknown as { study: { studyType: string; appUrl: string | null } }).study
     guidedStudy.studyType = "USABILITY_TEST"
@@ -398,9 +399,9 @@ describe("canonical research persistence", () => {
 
   it("rejects a persisted voice resume in production when the request omits modality", async () => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "")
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
-    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "1")
+    setModules({ research_voice_browser: false })
+    setModules({ research_voice_authoritative: true })
+    setModules({ research_voice_discovery: true })
     vi.stubEnv("E2E_FUNCTIONAL", "1")
     try {
       const fixture = context()
@@ -424,9 +425,9 @@ describe("canonical research persistence", () => {
 
   it("resumes a production browser voice session without the legacy authoritative flag", async () => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
-    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    setModules({ research_voice_browser: true })
+    setModules({ research_voice_authoritative: false })
+    setModules({ research_voice_discovery: false })
     vi.stubEnv("E2E_FUNCTIONAL", "")
     try {
       const fixture = context()

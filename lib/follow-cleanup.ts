@@ -6,7 +6,7 @@ import type { AppPrismaClient } from "@/lib/db"
  * membership and access checks stay the authority; these keep the tables from
  * accumulating rows for subjects, members and workspaces that are gone.
  *
- * Every helper works regardless of FOLLOWING_ENABLED and tolerates the tables not
+ * Every helper works regardless of the following module and tolerates the tables not
  * existing yet (P2021), exactly like deleteWorkspaceUpdates: a workspace or
  * member delete must still succeed before the migration is applied or after a
  * rollback. They also must not run inside a caller's transaction, because a

@@ -33,6 +33,9 @@ import type { CardSortBoardProposal } from "@/lib/card-sort"
 
 const refresh = vi.fn()
 
+// Live polling issues its own fetches; these tests count the board's requests.
+vi.mock("@/hooks/use-live-refresh", () => ({ useLiveRefresh: () => {} }))
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh, push: vi.fn() }),
   usePathname: () => "/acme/strategy/card-sort/round-1",

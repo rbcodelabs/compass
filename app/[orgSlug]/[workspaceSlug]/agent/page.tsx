@@ -79,7 +79,9 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
   // A ?c= deep link is the chat; otherwise the saved view decides. The board's cards are only loaded when it
   // is the first frame, so a chat page load pays for no extra query.
   const initialView = resolveInitialAgentView(cookieStore.get(AGENT_VIEW_COOKIE)?.value, conversationId)
-  const initialBoardCards = initialView === "board" ? await listAgentBoardCards(prisma, { workspaceId: workspace.id, userId }) : null
+  // A failed board query must not take the whole page (chat included) down: null makes the board fetch for itself.
+  const initialBoardCards =
+    initialView === "board" ? await listAgentBoardCards(prisma, { workspaceId: workspace.id, userId }).catch(() => null) : null
 
   return (
     <AgentPageShell

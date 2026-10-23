@@ -1,6 +1,9 @@
 "use client";
 
 import { useId, useState, useTransition } from "react";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import { useServerSyncedState } from "@/hooks/use-server-synced-state";
+import { useFlipAnimation } from "@/hooks/use-flip-animation";
 import {
   DndContext,
   DragOverlay,
@@ -189,6 +192,8 @@ function GroupedBacklogBoard({
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/solutions`;
   const ctx: CardContext = { orgSlug, workspaceSlug, revalidatePathStr, showScore: hasActiveScoringModel };
   const dndId = useId();
+  // Read-only and derived straight from props, so a refresh is all it needs.
+  useLiveRefresh({ orgSlug, workspaceSlug, scope: "solutions" });
   // A stale field id is resolved to Status by the page; defend anyway so a bad
   // prop never renders a board with no columns.
   const usable = groupBy !== "status" && (solutionGroupByFieldId(groupBy) === null || groupField !== null);
@@ -264,10 +269,19 @@ function StatusBacklogBoard({
 
   // Canonical (manual-order) state; score order is derived at render so
   // toggling it off restores the manual order with nothing re-persisted.
-  const [columns, setColumns] = useState(() => buildSolutionBacklogColumns(solutions, false));
   const [activeItem, setActiveItem] = useState<SolutionBacklogItem | null>(null);
   const [dragSourceStatus, setDragSourceStatus] = useState<SolutionStatus | null>(null);
-  const [, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();
+
+  // Follow the server unless a drag or local write is in flight (see useServerSyncedState).
+  const busy = activeItem !== null || dragSourceStatus !== null || isPending;
+  const {
+    state: columns,
+    setState: setColumns,
+    generation,
+  } = useServerSyncedState(solutions, (source) => buildSolutionBacklogColumns(source, false), busy);
+  const { containerRef, capture } = useFlipAnimation(generation);
+  useLiveRefresh({ orgSlug, workspaceSlug, scope: "solutions", paused: busy, onBeforeRefresh: capture });
 
   // Stable across server and client, or dnd-kit's counter-based ids mismatch on hydration.
   const dndId = useId();
@@ -347,7 +361,7 @@ function StatusBacklogBoard({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
+    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
       <DndContext
         id={dndId}
         sensors={sensors}

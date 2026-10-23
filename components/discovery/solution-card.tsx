@@ -128,7 +128,7 @@ export function SolutionCard({ solution, revalidatePathStr, showStatus = true, s
   const hasMetadata = showScore || solution._count.assumptions > 0 || solution._count.evidence > 0;
 
   return (
-    <div ref={setNodeRef} style={style} className="group">
+    <div ref={setNodeRef} style={style} className="group" data-flip-id={solution.id}>
       <EntityCard
         interactive
         title={

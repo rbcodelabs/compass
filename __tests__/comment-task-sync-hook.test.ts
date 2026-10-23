@@ -4,7 +4,8 @@ import type { AppPrismaClient } from "@/lib/db"
 const mocks = vi.hoisted(() => ({ sync: vi.fn(), update: vi.fn() }))
 
 vi.mock("@/lib/workspace-updates-capture", () => ({
-  withWorkspaceUpdates: (db: unknown, callback: (db: unknown, enabled: boolean) => unknown) => callback(db, false),
+  withWorkspaceUpdates: (db: unknown, _workspaceId: unknown, callback: (db: unknown, enabled: boolean) => unknown) => callback(db, false),
+  withUpdatesTables: (db: unknown, callback: (db: unknown, tablesExist: boolean) => unknown) => callback(db, false),
   recordWorkspaceUpdate: vi.fn(),
 }))
 vi.mock("@/auth", () => ({ auth: vi.fn() }))

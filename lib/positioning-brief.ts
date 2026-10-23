@@ -7,6 +7,7 @@
  * (byte-identical text output preserved by leaving that handler untouched).
  */
 import getPrisma from "@/lib/db";
+import { isModuleEnabled } from "@/lib/modules/server"
 import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates";
 import { createDocument } from "@/lib/document-service";
 import { isDocumentPilotWorkspace } from "@/lib/document-storage";
@@ -41,11 +42,7 @@ export async function createPositioningBriefCore(
   });
   if (!item) return { ok: false, error: "item_not_found" };
 
-  const workspace = await prisma.workspace.findUnique({
-    where: { id: workspaceId },
-    select: { launchWorkflowEnabled: true },
-  });
-  if (!workspace?.launchWorkflowEnabled) {
+  if (!(await isModuleEnabled(workspaceId, "launch_workflow"))) {
     return { ok: false, error: "launch_workflow_disabled" };
   }
 

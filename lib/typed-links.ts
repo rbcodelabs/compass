@@ -26,7 +26,7 @@
  *    read sees the winner and the call is an idempotent no-op.
  */
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db"
-import { withWorkspaceUpdates } from "@/lib/workspace-updates-capture"
+import { withAtomicRetry } from "@/lib/workspace-updates-capture"
 import { getLinkReadMode } from "@/lib/links/read-mode"
 import { readByFamilyMode } from "@/lib/links/read-switch"
 import type { ComparableLink } from "@/lib/links/read-compare"
@@ -147,13 +147,13 @@ export function isLinkUniqueRace(error: unknown): boolean {
 
 /**
  * Runs `work` as one transaction with Compass's bounded OCC retry (40001 / OC000 / OC001 / P2034, via
- * withWorkspaceUpdates), and re-runs it when two writers raced to insert the same pair: the retry's
+ * withAtomicRetry), and re-runs it when two writers raced to insert the same pair: the retry's
  * read then finds the winner, which makes the call an idempotent no-op instead of an error.
  */
 export async function runTypedLinkTransaction<T>(prisma: AppPrismaClient, work: (tx: Tx) => Promise<T>): Promise<T> {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await withWorkspaceUpdates(prisma, (tx) => work(tx), { atomic: true })
+      return await withAtomicRetry(prisma, (tx) => work(tx))
     } catch (error) {
       if (!isLinkUniqueRace(error) || attempt >= 3) throw error
     }

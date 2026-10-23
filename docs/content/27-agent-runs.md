@@ -190,7 +190,7 @@ exactly as it did before — turns run inside the browser request, with the
 previous few-minute ceiling — so deploying ahead of the migration is safe and
 changes nothing for users.
 
-The board's per-person "looked at" state needs migration `107_agent_conversation_reviews`.
+The board's per-person "looked at" state needs migration `109_agent_conversation_reviews`.
 Until it is applied the board still works, but every finished conversation shows as **New**.
 
 Two settings matter for a deployed environment:
