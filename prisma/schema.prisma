@@ -2911,6 +2911,7 @@ model AgentConversation {
   messages  AgentMessage[]
   runs      AgentRun[]
   participants AgentConversationParticipant[]
+  reviews      AgentConversationReview[]
 
   @@index([workspaceId, userId])
   @@map("agent_conversations")
@@ -2940,6 +2941,27 @@ model AgentConversationParticipant {
   @@unique([conversationId, userId], map: "idx_agent_conversation_participants_conversation_user")
   @@index([userId, workspaceId], map: "idx_agent_conversation_participants_user_workspace")
   @@map("agent_conversation_participants")
+}
+
+/// When a user last reviewed an agent conversation: the agent board's per-user "New vs Done" flag
+/// (migration 107). One row per (conversation, user), written only after the shared conversation access
+/// check, so a participant's review never marks the owner's board. "Reviewed" is `reviewedAt` compared with
+/// the conversation's last activity, so new activity after review needs no write to make it New again.
+/// DSQL: no FKs, no @updatedAt (set explicitly).
+model AgentConversationReview {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  reviewedAt     DateTime @map("reviewed_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id])
+
+  @@unique([conversationId, userId], map: "idx_agent_conversation_reviews_conversation_user")
+  @@index([userId, workspaceId], map: "idx_agent_conversation_reviews_user_workspace")
+  @@map("agent_conversation_reviews")
 }
 
 /// Generic typed association link between two entities of one workspace (ADR "One generic

@@ -39,6 +39,7 @@ function seed(extra: Record<string, Row[]> = {}) {
       { conversationId: "conv-active", blobKey: "blob/active", updatedAt: ago(1) },
     ],
     agentConversationParticipant: [{ id: "p1", conversationId: "conv-old-empty" }],
+    agentConversationReview: [{ id: "rv1", conversationId: "conv-old-empty", userId: "u1" }],
     ...extra,
   } as Record<string, Row[]>
 }
@@ -94,6 +95,7 @@ describe("pruneAgentData", () => {
     expect(rows("agentConversation").map((c) => c.id).sort()).toEqual(["conv-active", "conv-old-with-new-message", "conv-old-with-recent-run"])
     expect(rows("agentRun").map((r) => r.id).sort()).toEqual(["run-active", "run-recent"])
     expect(rows("agentConversationParticipant")).toEqual([])
+    expect(rows("agentConversationReview")).toEqual([])
   })
 
   it("never deletes a stale-looking conversation that still has a message or a recent run", async () => {
@@ -154,7 +156,7 @@ describe("pruneAgentData", () => {
   })
 
   it("tolerates deployments where the run or session tables are not migrated", async () => {
-    const { prisma, rows } = createFakePrisma(seed(), { missingTables: ["agentRun", "agentRunEvent", "agentSession", "agentConversationParticipant"] })
+    const { prisma, rows } = createFakePrisma(seed(), { missingTables: ["agentRun", "agentRunEvent", "agentSession", "agentConversationParticipant", "agentConversationReview"] })
     const result = await pruneAgentData({ prisma, now: NOW, storage })
     expect(result.messagesDeleted).toBe(2)
     expect(rows("agentMessage").some((m) => m.id === "m-old-1")).toBe(false)

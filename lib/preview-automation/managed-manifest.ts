@@ -222,7 +222,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
   "105_workspace_agent_github_repos": "ed1b4077170a09220767762c3756c763bd6db1031896dd7f6e44da07b17bdd80",
   // Residual entity_links pass for Opportunity (095 is the first pass): no DDL, EXPLICIT-ONLY, the work is the 095 hook.
-  "106_entity_links_residual_opportunity": "f9f553644f14b68a81c3ebb2df46f1b8348eb7db3a45adbdf1c3f8d90857c71c"
+  "106_entity_links_residual_opportunity": "f9f553644f14b68a81c3ebb2df46f1b8348eb7db3a45adbdf1c3f8d90857c71c",
+  // Per-user "reviewed" flag for the agent board: one new table plus two ASYNC indexes (unique (conversation, user), non-unique (user, workspace)).
+  // Additive: no existing table touched, no backfill, one DDL statement per transaction. The 107 postcondition proves the columns and both indexes.
+  // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
+  "107_agent_conversation_reviews": "79eb3a54a5bb23a02e8eacefd6511ec4b26c04303282f8e59eaacb90ec0afeda"
 };
 
 /**
@@ -350,6 +354,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 104 postcondition (both created_at indexes exist and are valid); editing it re-reviews the migration.
   "104_agent_retention_indexes": {
     "lib/migrations/agent-retention-indexes.ts": "02b0e57b758b7c42122e199580f4ce1f9bb4e40a77841590595ca16f056faa2f",
+  },
+  // The 107 postcondition (columns, plus both indexes valid, ready, and the right shape); editing it re-reviews the migration.
+  "107_agent_conversation_reviews": {
+    "lib/migrations/agent-conversation-reviews.ts": "789849422b71ed5181a4afa34ada579465e524ecabf9f414ecc3daab7a5ac8f6",
   },
 };
 
