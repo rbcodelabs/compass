@@ -146,9 +146,9 @@ export function AgentBoard({ workspaceId, basePath, initialCards, onOpenConversa
               title={column.label}
               count={column.cards.length}
               accent={COLUMN_ACCENT[column.id]}
-              // One column fills the screen below md and a second peeks in (a scroll cue); from md they sit at a
+              // One column nearly fills the screen below md and the next peeks in (a scroll cue); from md they sit at a
               // 280px minimum and the board scrolls once they no longer fit, instead of squashing.
-              className="w-[calc(100cqw-1.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-2rem)] md:h-full md:w-72 md:min-w-[280px] md:flex-1"
+              className="w-[calc(100cqw-3.5rem)] min-w-0 flex-none sm:w-[calc(100cqw-4rem)] md:h-full md:w-72 md:min-w-[280px] md:flex-1"
               // py gives a card's shadow room inside the scroll box, so the first and last card are not clipped.
               bodyClassName="min-h-44 py-1 md:min-h-0 md:max-h-none md:flex-1 md:overflow-y-auto"
             >
