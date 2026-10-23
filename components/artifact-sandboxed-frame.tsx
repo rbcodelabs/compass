@@ -75,6 +75,7 @@ export function ArtifactSandboxedFrame({
   fill = false,
   transparent = false,
   onSettled,
+  onReady,
 }: {
   title: string
   html: string
@@ -95,6 +96,8 @@ export function ArtifactSandboxedFrame({
   transparent?: boolean
   /** The slide's fit has settled (or bailed): it is on screen in its final position. */
   onSettled?: () => void
+  /** The document finished loading and handshook (before any slide fit). */
+  onReady?: () => void
 }) {
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [attempt, setAttempt] = useState(0)
@@ -113,8 +116,10 @@ export function ArtifactSandboxedFrame({
   const onAnchorsResolvedRef = useRef(onAnchorsResolved)
   const anchorsToResolveRef = useRef(anchorsToResolve)
   const onSettledRef = useRef(onSettled)
+  const onReadyRef = useRef(onReady)
   useEffect(() => {
     onSettledRef.current = onSettled
+    onReadyRef.current = onReady
     onElementPickedRef.current = onElementPicked
     onPickModeExitedRef.current = onPickModeExited
     onAnchorsResolvedRef.current = onAnchorsResolved
@@ -141,6 +146,7 @@ export function ArtifactSandboxedFrame({
       if (message.state === "READY") {
         ready = true
         setState("ready")
+        onReadyRef.current?.()
         return
       }
       if (message.type === ARTIFACT_PICK_MESSAGE_TYPES.ELEMENT_PICKED) {

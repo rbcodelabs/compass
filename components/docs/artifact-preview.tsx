@@ -46,6 +46,7 @@ export function ArtifactPreview({
   renderPin,
   fill,
   holdPrevious = false,
+  settleOnReady = false,
 }: {
   title: string
   html?: string
@@ -64,6 +65,8 @@ export function ArtifactPreview({
   fill?: boolean
   /** Keep the previous HTML on screen until the new one has loaded and fitted (slide decks), instead of blanking between. */
   holdPrevious?: boolean
+  /** Plain documents never report a slide fit, so release the held frame when the new one is ready instead. */
+  settleOnReady?: boolean
 }) {
   const drive = externalUrl ? parseGoogleDriveLink(externalUrl) : null
   if (externalUrl && drive) {
@@ -113,6 +116,7 @@ export function ArtifactPreview({
     title={title}
     html={html}
     holdPrevious={holdPrevious}
+    settleOnReady={settleOnReady}
     pickMode={pickMode}
     onElementPicked={onElementPicked}
     onPickModeExited={onPickModeExited}
@@ -180,10 +184,11 @@ type StackedFrame = { id: number; html: string }
  * settled, so stepping between slides never shows a blank or black frame while
  * the next slide loads and is hidden awaiting its fit.
  */
-function ArtifactFrameStack({ html, holdPrevious, ...frameProps }: {
+function ArtifactFrameStack({ html, holdPrevious, settleOnReady, ...frameProps }: {
   title: string
   html: string
   holdPrevious: boolean
+  settleOnReady: boolean
   pickMode?: boolean
   onElementPicked?: (picked: PickedElement) => void
   onPickModeExited?: () => void
@@ -217,7 +222,7 @@ function ArtifactFrameStack({ html, holdPrevious, ...frameProps }: {
       const current = index === frames.length - 1
       return <div key={frame.id} aria-hidden={current ? undefined : true} className={current ? (frameProps.fill ? "relative h-full" : "relative") : "pointer-events-none absolute inset-0"}>
         {current
-          ? <ArtifactSandboxedFrame {...frameProps} html={frame.html} transparent={stacked} onSettled={() => settle(frame.id)} />
+          ? <ArtifactSandboxedFrame {...frameProps} html={frame.html} transparent={stacked} onSettled={() => settle(frame.id)} onReady={settleOnReady ? () => settle(frame.id) : undefined} />
           : <ArtifactSandboxedFrame title={frameProps.title} html={frame.html} fill={frameProps.fill} />}
       </div>
     })}

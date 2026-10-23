@@ -340,7 +340,8 @@ export function ArtifactViewer({
       thumbnail={thumbnail}
       livePreviewSrc={livePreviewSrc}
       fill={fill}
-      holdPrevious={isDeck}
+      holdPrevious
+      settleOnReady={!isDeck}
       pickMode={picking}
       onElementPicked={(element) => {
         setPicked(element)

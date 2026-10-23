@@ -151,4 +151,29 @@ describe("useLiveRefresh", () => {
     await tick(LIVE_REFRESH_INTERVAL_MS * 3);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("polls an entity-scoped token with the scope URL-encoded", async () => {
+    mount({ scope: "artifact:abc" });
+    await tick(0);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/live/change-token?orgSlug=acme&workspaceSlug=web&scope=artifact%3Aabc");
+  });
+
+  it("calls onChange instead of router.refresh when provided", async () => {
+    const onChange = vi.fn();
+    mount({ scope: "docs-tree", onChange });
+    await tick(0);
+    token = "t2";
+    await tick(LIVE_REFRESH_INTERVAL_MS);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("does not poll while disabled, and starts once enabled", async () => {
+    const hook = mount({ enabled: false });
+    await tick(LIVE_REFRESH_INTERVAL_MS * 2);
+    expect(fetchMock).not.toHaveBeenCalled();
+    hook.rerender({ orgSlug: "acme", workspaceSlug: "web", scope: "tasks", enabled: true });
+    await tick(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
