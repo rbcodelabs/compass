@@ -1,0 +1,16 @@
+-- Migration 106: backfill workspace modules from the legacy environment flags (docs/adr-workspace-modules.md).
+--
+-- NO DDL, and EXPLICIT-ONLY: an untargeted POST never runs it. POST it by name
+-- ({"script":"106_workspace_modules_legacy_flag_backfill"}) only after 105_workspace_modules is applied, ON A DEPLOYMENT THAT STILL
+-- HAS THE OLD FLAGS IN ITS ENVIRONMENT (they are read at run time; the application code no longer reads them).
+--
+-- For each legacy flag that is exactly "1" in the executing environment, every existing workspace gets an ENABLED row for the
+-- matching module unless it already has a row of any kind. Dependencies are NOT enabled on the module's behalf: a voice flag that was
+-- on while research capture was off stays effectively off, exactly as before. A flag that is unset or any other value writes nothing
+-- (conservative: the module stays at its registry default, which is off). Existing rows, including an administrator's deliberate
+-- "off", are never changed. Re-running is safe and changes nothing that exists.
+--
+-- The legacy "always on outside production" behaviour is not reproduced here; local development enables modules in Settings > Modules
+-- (or through the e2e seed).
+--
+-- This file intentionally contains no executable statement; the work is the hook (lib/migrations/workspace-modules.ts).

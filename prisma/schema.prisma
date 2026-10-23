@@ -3764,3 +3764,22 @@ model SavedView {
   @@index([organizationId, workspaceId, surface], map: "idx_roadmap_views_org_surface_kind")
   @@map("roadmap_views")
 }
+
+/// Per-workspace opt-in/out of a product module (migration 105). One row per (workspace, module_key); NO row means "the registry
+/// default" (lib/modules/registry.ts), so a new module needs no migration. module_key is free text validated in application code
+/// against the registry: a key the code no longer knows is ignored on read. Bare UUIDs, no relations (DSQL). Read through
+/// lib/modules/server.ts, which tolerates the migration being unapplied (everything reads as disabled except the launch workflow,
+/// which falls back to the legacy workspaces.launch_workflow_enabled column that stays readable until a follow-up drops it).
+model WorkspaceModule {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  moduleKey String @map("module_key") @db.VarChar(64)
+  enabled Boolean
+  /// The last administrator to change it; NULL for a backfilled row.
+  updatedByUserId String? @map("updated_by_user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  /// Set by the application on every write (DSQL has no trigger).
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@unique([workspaceId, moduleKey], map: "workspace_modules_workspace_id_module_key_key")
+  @@map("workspace_modules")
+}

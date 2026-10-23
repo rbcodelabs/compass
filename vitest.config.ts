@@ -15,6 +15,8 @@ export default defineConfig({
       "**/.claude/worktrees/**",
     ],
     environment: "node",
+    // Workspace modules and feature-table probes are stubbed for every test (see the file for the defaults and how to override).
+    setupFiles: ["./__tests__/setup/modules.ts"],
     // The workspace-layout / faceted-filter suites mount real component trees
     // (dnd-kit, the roadmap timeline, DataGrid). Those cold imports are paid
     // inside the first test of each file and routinely exceed the 5s default
