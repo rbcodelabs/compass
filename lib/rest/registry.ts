@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { MODULE_KEYS } from "@/lib/modules/registry"
 import {
   assumptionSchema, checkInSchema, collectionOf, cursorQuery, customFieldDefinitionSchema, customFieldValueSchema,
   experimentResultSchema, experimentSchema, feedbackSchema, identitySchema, keyResultSchema, metricBindingSchema, metricObservationSchema, metricSchema,
@@ -236,6 +237,8 @@ const allowedOrigins = z.array(z.string().url()).max(20).superRefine((value, con
 const feedbackSourceCreate = z.object({ artifactId: uuid, name: z.string().trim().min(1).max(255), allowedOrigins, authMode: z.enum(["INTERNAL_SSO", "PORTAL"]).optional() }).strict()
 const feedbackSourcePatch = z.object({ allowedOrigins: allowedOrigins.optional(), enabled: z.boolean().optional(), name: z.string().trim().min(1).max(255).optional(), authMode: z.enum(["INTERNAL_SSO", "PORTAL"]).optional() }).strict().refine(value => Object.keys(value).length > 0, { message: "Provide at least one change." })
 const rankingQuery = cursorQuery.strict()
+const workspaceModulePath = z.object({ workspaceId: uuid, moduleKey: z.enum(MODULE_KEYS) })
+const workspaceModulePatch = z.object({ enabled: z.boolean() }).strict()
 
 export const REST_ROUTES: readonly RestRoute[] = [
   read("searchHelp", "/api/v1/help-topics", "Search the Compass user guide", phase5.helpSearchResults, z.object({}), helpQuery, "authenticated-actor"),
@@ -244,6 +247,8 @@ export const REST_ROUTES: readonly RestRoute[] = [
   write("POST", "createWorkspace", "/api/v1/organizations/{orgSlug}/workspaces", "Create a workspace as a human organization administrator", workspaceSchema, organizationPath, workspaceCreate, 201, "human-org-admin"),
   read("getWorkspaceBySlug", "/api/v1/organizations/{orgSlug}/workspaces/{workspaceSlug}", "Resolve an accessible workspace by organization and workspace slug", phase5.workspaceBySlug, organizationWorkspacePath, undefined, "org-member"),
   read("getWorkspaceSummary", "/api/v1/workspaces/{workspaceId}/summary", "Get privacy-minimal workspace activity counts", phase5.workspaceSummary, workspacePath),
+  read("listWorkspaceModules", "/api/v1/workspaces/{workspaceId}/modules", "List workspace modules and whether each is enabled", phase5.workspaceModuleCollection, workspacePath, cursorQuery.strict()),
+  write("PATCH", "updateWorkspaceModule", "/api/v1/workspaces/{workspaceId}/modules/{moduleKey}", "Enable or disable a workspace module as a human workspace administrator", phase5.workspaceModule, workspaceModulePath, workspaceModulePatch, 200, "human-admin"),
   read("listEvidence", "/api/v1/workspaces/{workspaceId}/evidence", "List evidence for one discovery node", phase5.evidenceCollection, workspacePath, evidenceQuery),
   write("POST", "createEvidence", "/api/v1/workspaces/{workspaceId}/evidence", "Create evidence attached to exactly one discovery node", phase5.evidence, workspacePath, evidenceCreate, 201),
   write("PATCH", "updateEvidenceTarget", "/api/v1/workspaces/{workspaceId}/evidence/{id}", "Move evidence to exactly one discovery node", phase5.evidence, itemPath, evidencePatch),

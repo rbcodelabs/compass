@@ -14,6 +14,7 @@ import {
   workspaceRoadmapHref,
 } from "@/lib/roadmap-views/workspace";
 import getPrisma from "@/lib/db";
+import { isModuleEnabled } from "@/lib/modules/server"
 import { getTasksLinkedTo } from "@/lib/task-links-read";
 import { RoadmapBoard } from "@/components/roadmap/roadmap-board";
 import { NativeTimeline } from "@/components/roadmap/native-timeline/native-timeline";
@@ -64,6 +65,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
   });
 
   if (!workspace) notFound();
+  const launchWorkflowEnabled = await isModuleEnabled(workspace.id, "launch_workflow");
 
   // Saved views: resolve the selected view (if any) into the same squad / field /
   // groupBy / view params the page has always read, so everything below is unchanged.
@@ -345,7 +347,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
             groupByField={resolvedGroupBy.mode === "customField" ? { id: resolvedGroupBy.field.id, name: resolvedGroupBy.field.name, options: resolvedGroupBy.field.options ?? [] } : undefined}
             customFieldValuesByItemId={customFieldValuesByItemId}
             groupByOptions={groupByOptions}
-            launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
+            launchWorkflowEnabled={launchWorkflowEnabled}
             savedViews={savedViewsProps}
           />
         </Suspense>
@@ -378,7 +380,7 @@ export default async function RoadmapPage({ params, searchParams }: RoadmapPageP
               squads={squads}
               nowLimit={workspace.nowLimit}
               nextLimit={workspace.nextLimit}
-              launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
+              launchWorkflowEnabled={launchWorkflowEnabled}
             />
           </div>
         </div>

@@ -17,6 +17,7 @@ import { entityScopeWhere, type EntityType } from "@/lib/entity-detail";
 import { TypedLinkError, setOpportunityKeyResult } from "@/lib/typed-links";
 import { SETTABLE_HORIZONS, isLaunchHorizon } from "@/lib/roadmap";
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist";
+import { isModuleEnabled } from "@/lib/modules/server"
 import { syncRoadmapOnSolutionChange, type SolutionSyncResult } from "@/lib/roadmap/solution-sync";
 import { assignmentUpdate, type TaskAssignee } from "@/lib/task-assignment";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
@@ -208,11 +209,7 @@ export async function updateEntityField(
     // on. Checked before the LAUNCHING-specific guard so the more relevant
     // message wins.
     if (type === "roadmapItem" && field === "horizon" && typeof value === "string" && isLaunchHorizon(value)) {
-      const workspace = await getPrisma().workspace.findUnique({
-        where: { id: workspaceId },
-        select: { launchWorkflowEnabled: true },
-      });
-      if (!workspace?.launchWorkflowEnabled) {
+      if (!(await isModuleEnabled(workspaceId, "launch_workflow"))) {
         return { ok: false, status: 400, error: LAUNCH_WORKFLOW_DISABLED_MESSAGE };
       }
     }

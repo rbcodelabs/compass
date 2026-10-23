@@ -15,6 +15,7 @@ import { ok, fail } from "@/lib/mcp-output"
 import { captureWorkspaceMutation } from "@/lib/workspace-update-mutations"
 import { withWorkspaceUpdates } from "@/lib/workspace-updates-capture"
 import { LAUNCH_WORKFLOW_DISABLED_MESSAGE } from "@/lib/launch-checklist"
+import { isModuleEnabled } from "@/lib/modules/server"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { safeEntityUrl, withUrlLine } from "@/lib/compass-url"
 import { randomUUID } from "node:crypto"
@@ -168,8 +169,7 @@ export async function updateRoadmapItem(input: {
   const item = await prisma.roadmapItem.findUnique({ where: { id: input.itemId }, select: { id: true, workspaceId: true } })
   if (!item) return fail(`Roadmap item "${input.itemId}" not found.`)
   if (input.horizon === "LAUNCHING" || input.horizon === "LAUNCHED") {
-    const workspace = await prisma.workspace.findUnique({ where: { id: item.workspaceId }, select: { launchWorkflowEnabled: true } })
-    if (!workspace?.launchWorkflowEnabled) return fail(LAUNCH_WORKFLOW_DISABLED_MESSAGE)
+    if (!(await isModuleEnabled(item.workspaceId, "launch_workflow"))) return fail(LAUNCH_WORKFLOW_DISABLED_MESSAGE)
     if (input.horizon === "LAUNCHING") return fail("Cannot set horizon to LAUNCHING directly — use set_launch_tier, which also picks a launch tier and attaches a checklist.")
     return fail("Cannot set horizon to LAUNCHED — the launch-readiness gate for this transition isn't implemented yet.")
   }
@@ -227,7 +227,7 @@ export async function createChecklistTemplate({
     return fail(`Workspace "${workspaceId}" not found.`)
   }
 
-  const template = await withWorkspaceUpdates(prisma, async tx => {
+  const template = await withWorkspaceUpdates(prisma, workspaceId, async tx => {
     const created = await tx.checklistTemplate.create({ data: { workspaceId, tier, name: name.trim(), description } })
     if (items.length > 0) {
       await tx.checklistTemplateItem.createMany({

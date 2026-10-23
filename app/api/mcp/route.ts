@@ -188,6 +188,8 @@ import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
 import { thinkingModelForMcp } from "@/lib/thinking-model/mcp"
 import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
 import { followTool, listNotificationsTool, markReadTool, unfollowTool } from "@/lib/follow-tool-handlers"
+import { listWorkspaceModulesTool, updateWorkspaceModuleTool } from "@/lib/module-tool-handlers"
+import { MODULE_KEYS } from "@/lib/modules/registry"
 import { FOLLOWABLE_SUBJECT_TYPES } from "@/lib/followable"
 import {
   listCustomFieldDefinitions,
@@ -343,6 +345,10 @@ const _handler = createMcpHandler(
     register("unfollow", { title: "Unfollow", description: "Stops notifications for an object. The unfollow is remembered, so commenting on or being assigned the object later does not silently re-follow it. Agent-scoped tokens are refused.", inputSchema: followSubjectSchema, outputSchema: TOOL_OUTPUT_SCHEMA }, unfollowTool)
     register("list_notifications", { title: "List Notifications", description: "Lists the calling user's notifications in one workspace, newest first, with an unread count. Pass the returned nextCursor to page. Agent-scoped tokens are refused.", inputSchema: { workspaceId: z.string().uuid(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional(), unreadOnly: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, listNotificationsTool)
     register("mark_read", { title: "Mark Notifications Read", description: "Marks the calling user's notifications read: pass notificationIds (up to 100) or all: true, not both. Agent-scoped tokens are refused.", inputSchema: { workspaceId: z.string().uuid(), notificationIds: z.array(z.string().uuid()).min(1).max(100).optional(), all: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, markReadTool)
+
+    // Workspace modules (Settings > Modules): what is switched on, and why something is off. See docs/adr-workspace-modules.md.
+    register("list_workspace_modules", { title: "List Workspace Modules", description: "Lists every module of a workspace (research capture, PM interviews, research voice, workspace updates, following, agents, the marketing launch workflow) with whether it is enabled, the administrator's choice, its requirements and what blocks it. Call this when a tool says a feature \"is not enabled for this workspace\"; a workspace admin turns modules on in Settings > Modules.", inputSchema: { workspaceId: z.string().uuid().describe("UUID of the workspace") }, outputSchema: TOOL_OUTPUT_SCHEMA }, listWorkspaceModulesTool)
+    register("update_workspace_module", { title: "Update Workspace Module", description: "Switches one module on or off for a workspace. Workspace administrators only, and only a human identity: agent-scoped credentials are refused. Enabling needs the module's requirements enabled first (the error names them); disabling also disables the modules that depend on it.", inputSchema: { workspaceId: z.string().uuid().describe("UUID of the workspace"), moduleKey: z.enum(MODULE_KEYS).describe("Module key from list_workspace_modules"), enabled: z.boolean().describe("true to enable, false to disable") }, outputSchema: TOOL_OUTPUT_SCHEMA }, updateWorkspaceModuleTool)
 
     // ════════════════════════════════════════════════════════════════
     // WORKSPACE
