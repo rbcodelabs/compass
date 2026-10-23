@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({ moveTaskStatus: vi.fn(), updateSortOrder: vi.fn() }));
+// The board polls for live updates via useLiveRefresh, which needs the app router.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/panels/panel-context", () => ({ usePanelContext: () => ({ subscribeEntityMutated: () => () => {} }) }));
 vi.mock("./task-column", () => ({
   TaskColumn: ({ status, tasks }: { status: string; tasks: { id: string; title: string }[] }) => (
