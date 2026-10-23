@@ -27,6 +27,7 @@ export type FlowNode = {
   zIndex: number
   data: { raw: JsonCanvasNode }
   selected?: boolean
+  className?: string
 }
 
 export type FlowEdge = {
@@ -41,6 +42,7 @@ export type FlowEdge = {
   style?: { stroke: string }
   data: { raw: JsonCanvasEdge; autoFrom: boolean; autoTo: boolean }
   selected?: boolean
+  className?: string
 }
 
 type Box = { x: number; y: number; width: number; height: number }

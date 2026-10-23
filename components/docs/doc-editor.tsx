@@ -61,6 +61,9 @@ import { DocCommentComposer, type ComposerPayload, type ComposerResult } from "@
 import type { MentionOptions } from "@/components/docs/mention-editor";
 import { pinKind, type CommentTaskCardData } from "@/lib/comment-task-card";
 import { announceAgentRun } from "@/lib/ui/agent-run-toast";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import { describeRemoteWriter, isTypingNow, type DocLastWriter } from "@/lib/doc-remote-update";
+import { RemoteUpdateBanner, UpdatedJustNow } from "@/components/docs/remote-update-banner";
 
 interface DocEditorProps {
   initialCommentsPin?: PanelPin;
@@ -107,7 +110,23 @@ interface DocEditorProps {
   confirmedAgentIds?: string[];
   /** Task card per comment id. */
   taskCards?: Record<string, CommentTaskCardData>;
+  /** Who last wrote the doc, to name them when a live update arrives while the user has unsaved work. */
+  lastWriter?: DocLastWriter;
 }
+
+/** A newer server copy of the doc than the one the editor was seeded from, held back because the user has unsaved work. */
+interface RemoteDoc {
+  revision: string;
+  content: string | null;
+  title: string;
+  icon: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  metadata: any;
+  writer: string;
+}
+
+const UPDATED_INDICATOR_MS = 4_000;
+const TYPING_RECHECK_MS = 500;
 
 const NO_MENTION_OPTIONS: MentionOptions = { people: [], agents: [], outside: [] };
 
@@ -150,7 +169,7 @@ function captureAnchor(editor: Editor): PendingAnchor | null {
   };
 }
 
-export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, specHeader, specScopes, readOnly = false, recordCreators, patchRecordField, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {} }: DocEditorProps) {
+export function DocEditor({ doc, versions, comments: initialComments, revalidatePathStr, orgSlug, workspaceSlug, workspaceId, linkedTasks, decisionAction, followAction, specHeader, specScopes, readOnly = false, recordCreators, patchRecordField, initialCommentsPin, initialHistoryPin, mentionOptions = NO_MENTION_OPTIONS, confirmedAgentIds: initialConfirmedAgentIds = [], taskCards: initialTaskCards = {}, lastWriter }: DocEditorProps) {
   const [title, setTitle] = useState(doc.title);
   const [icon, setIcon] = useState(doc.icon ?? "");
   const [showIconInput, setShowIconInput] = useState(false);
@@ -225,6 +244,28 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   const [taskCards, setTaskCards] = useState<Record<string, CommentTaskCardData>>(initialTaskCards);
   const [confirmedAgentIds, setConfirmedAgentIds] = useState<string[]>(initialConfirmedAgentIds);
 
+  // Comments are independent of the draft: a refresh that brings new, resolved or deleted comments applies even while the editor is dirty.
+  // Only a change against the PREVIOUS server snapshot applies, so a refresh that started before the user's own optimistic post cannot
+  // roll it back. The highlight and orphan effects below re-run from `comments`, which re-resolves every anchor.
+  const commentsSignature = JSON.stringify([initialComments, initialTaskCards, initialConfirmedAgentIds]);
+  const [seenCommentsSignature, setSeenCommentsSignature] = useState(commentsSignature);
+  if (seenCommentsSignature !== commentsSignature) {
+    setSeenCommentsSignature(commentsSignature);
+    setComments(initialComments);
+    setTaskCards(initialTaskCards);
+    setConfirmedAgentIds(initialConfirmedAgentIds);
+  }
+
+  // ── Live updates from other writers (agents, other tabs, other people) ─────
+  const [remote, setRemote] = useState<RemoteDoc | null>(null);
+  const [justUpdated, setJustUpdated] = useState(false);
+  const lastTypedAt = useRef(0);
+  const queueState = useRef<"saving" | "saved" | "error" | "idle">("idle");
+  const reconcileRef = useRef<() => void>(() => {});
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const lastSavedTitle = useRef(doc.title);
+  const shownMetadata = useRef(JSON.stringify(doc.metadata ?? null));
+
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingContent = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -247,6 +288,9 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       return updateDoc(doc.id, change.data, revalidatePathStr, token);
     },
     onState: (state) => {
+      queueState.current = state;
+      // A save settling is the moment a held-back server copy can be judged (our own revision is now known, or the save conflicted).
+      if (state !== "saving") queueMicrotask(() => reconcileRef.current());
       setSaveStatus(state === "saved" && pendingContent.current !== null ? "saving" : state);
       setSaveError(state === "error" ? "Changes could not be saved. Your draft is still here. Retry; if another editor changed this page, copy your draft before reloading." : null);
     },
@@ -325,6 +369,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         return;
       }
       savedMarkdown.current = markdown;
+      lastTypedAt.current = Date.now();
       setCurrentContent(markdown);
       setSelectionEmpty(editor.state.selection.empty);
       debouncedSaveContent(markdown);
@@ -344,6 +389,101 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   }, [editor]);
 
   useEffect(() => { editor?.setEditable(!isRestoring, false); }, [editor, isRestoring]);
+
+  /**
+   * Put a server copy on screen. Silent by construction: emitUpdate:false, and savedMarkdown is reset to what the editor now serializes
+   * (TrailingNode and normalization included), so the adopted text is never mistaken for a user edit, never saved, never bumps the
+   * revision, and so cannot ping-pong with whoever wrote it.
+   */
+  const applyServerDoc = useCallback((incoming: Omit<RemoteDoc, "writer">) => {
+    if (!editor) return;
+    const markdown = incoming.content ?? "";
+    if (markdown !== savedMarkdown.current) {
+      const { from, to } = editor.state.selection;
+      const scrollTop = scrollRef.current?.scrollTop;
+      editor.commands.setContent(markdown, { emitUpdate: false });
+      savedMarkdown.current = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown();
+      const max = editor.state.doc.content.size;
+      if (editor.isFocused) editor.commands.setTextSelection({ from: Math.min(from, max), to: Math.min(to, max) });
+      if (scrollRef.current && scrollTop !== undefined) scrollRef.current.scrollTop = scrollTop;
+      setCurrentContent(markdown);
+    }
+    // Only replace a title the user is not in the middle of editing.
+    setTitle((current) => (current === lastSavedTitle.current ? incoming.title : current));
+    lastSavedTitle.current = incoming.title;
+    setIcon(incoming.icon ?? "");
+    const metadata = JSON.stringify(incoming.metadata ?? null);
+    if (metadata !== shownMetadata.current) {
+      shownMetadata.current = metadata;
+      setRestoredMetadata((incoming.metadata as DocMetadata | null) ?? null);
+      setPropertiesVersion((value) => value + 1);
+    }
+    saveQueue.setRevision(incoming.revision);
+  }, [editor, saveQueue]);
+
+  const latestServerDoc = useRef<RemoteDoc | null>(null);
+  const reconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconcileServerDoc = useCallback(() => {
+    if (reconcileTimer.current) clearTimeout(reconcileTimer.current);
+    reconcileTimer.current = null;
+    const incoming = latestServerDoc.current;
+    if (!editor || !incoming) return;
+    // Our own saves (and anything older) come back through refresh carrying a revision we already held: nothing new.
+    if (saveQueue.hasSeen(incoming.revision)) { setRemote(null); return; }
+    // A save is on the wire: the refresh may simply be carrying its result. Judge again when it settles (onState).
+    if (queueState.current === "saving") return;
+    // Unsaved work of any kind (typed but not yet queued, in flight, queued, or parked after an error) is never overwritten.
+    if (pendingContent.current !== null || saveQueue.pending()) { setRemote(incoming); return; }
+    // Mid-sentence is not the moment to swap the text; look again shortly.
+    if (isTypingNow(editor.isFocused, lastTypedAt.current, Date.now())) {
+      reconcileTimer.current = setTimeout(() => reconcileRef.current(), TYPING_RECHECK_MS);
+      return;
+    }
+    applyServerDoc(incoming);
+    setRemote(null);
+    setJustUpdated(true);
+  }, [editor, saveQueue, applyServerDoc]);
+  useEffect(() => { reconcileRef.current = reconcileServerDoc; }, [reconcileServerDoc]);
+
+  // Every server render of the page hands us the doc again; only an unseen revision is news.
+  const writerLabel = describeRemoteWriter(lastWriter);
+  useEffect(() => {
+    if (!doc.revision) return;
+    latestServerDoc.current = { revision: doc.revision, content: doc.content, title: doc.title, icon: doc.icon, metadata: doc.metadata, writer: writerLabel };
+    reconcileServerDoc();
+  }, [doc.revision, doc.content, doc.title, doc.icon, doc.metadata, writerLabel, reconcileServerDoc]);
+  useEffect(() => () => { if (reconcileTimer.current) clearTimeout(reconcileTimer.current); }, []);
+
+  useEffect(() => {
+    if (!justUpdated) return;
+    const timer = setTimeout(() => setJustUpdated(false), UPDATED_INDICATOR_MS);
+    return () => clearTimeout(timer);
+  }, [justUpdated]);
+
+  useLiveRefresh({ orgSlug, workspaceSlug, scope: `doc:${doc.id}`, paused: isRestoring });
+
+  function handleReloadRemote() {
+    if (!remote) return;
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = null;
+    pendingContent.current = null;
+    saveQueue.discard(remote.revision);
+    setSaveStatus("idle");
+    setSaveError(null);
+    applyServerDoc(remote);
+    setRemote(null);
+    setJustUpdated(true);
+  }
+
+  function handleKeepMine() {
+    if (!remote) return;
+    // Re-base first (also replaces a parked conflicting save's stale token), then let a not-yet-queued draft join behind it.
+    const rebased = saveQueue.rebase(remote.revision);
+    flushContent();
+    setSaveError(null);
+    setRemote(null);
+    void rebased.catch(() => {});
+  }
 
   // Keep the highlight decorations in sync with the live comment set + focus.
   const openAnchorData = useMemo(() => toAnchorData(comments, taskCards), [comments, taskCards]);
@@ -401,7 +541,8 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   }
 
   async function handleSaveTitle() {
-    if (title === doc.title) return;
+    if (title === lastSavedTitle.current) return;
+    lastSavedTitle.current = title;
     await saveQueue.enqueue({ kind: "update", data: { title } }).catch(() => {});
   }
 
@@ -439,6 +580,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
     editor?.commands.setContent(content ?? "", { emitUpdate: false });
     setCurrentContent(content);
     setTitle(restoredTitle);
+    lastSavedTitle.current = restoredTitle;
   }
 
   // ── Comment handlers ────────────────────────────────────────────────────────
@@ -550,8 +692,10 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       <div data-testid="doc-save-status" data-state={saveStatus} className="mx-auto w-full max-w-4xl flex justify-end px-8 pt-3 min-h-7">
         {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
         {saveStatus === "saved" && <span className="text-xs text-text-subtle">Saved</span>}
-        {saveError && <span role="alert" className="text-xs text-status-danger">{saveError} <button type="button" className="underline" onClick={() => { void saveQueue.retry(); }}>Retry save</button></span>}
+        {justUpdated && !remote && <UpdatedJustNow />}
+        {saveError && !remote && <span role="alert" className="text-xs text-status-danger">{saveError} <button type="button" className="underline" onClick={() => { void saveQueue.retry(); }}>Retry save</button></span>}
       </div>
+      {remote && <RemoteUpdateBanner writer={remote.writer} onReload={handleReloadRemote} onKeepMine={handleKeepMine} />}
 
       {/* Icon + title on a single row */}
       <div className="mx-auto w-full max-w-4xl flex items-center gap-2 px-8 pb-2">
@@ -754,7 +898,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
       />
 
       {/* Editor */}
-      <div className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-8 py-4">
         {specHeader}
         {/* Properties — scrolls with the content instead of pinning the viewport */}
