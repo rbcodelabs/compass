@@ -256,6 +256,7 @@ export async function deleteAccount(prisma: AppPrismaClient, userId: string, opt
   await deleteRunsWhere(prisma, { userId })
   await deleteInBatches(prisma.agentMessage, { authorUserId: userId })
   await tolerateMissingTable(() => deleteInBatches(prisma.agentConversationParticipant, { userId }), 0)
+  await tolerateMissingTable(() => deleteInBatches(prisma.agentConversationReview, { userId }), 0)
   await deleteInBatches(prisma.agentAuditLog, { userId })
   await deleteInBatches(prisma.agentToolCall, { userId })
   await deleteWebSearchesWhere(prisma, { userId })

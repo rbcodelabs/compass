@@ -227,7 +227,11 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // workspaces.launch_workflow_enabled into launch_workflow rows (insert-if-missing) and is pinned in REVIEWED_MIGRATION_CODE_SHA256.
   "107_workspace_modules": "0b29bd1bb85b4691225fece68f3f176692a990388490a53eee6a9a62012258a4",
   // No DDL, EXPLICIT-ONLY; the work is the hook (lib/migrations/workspace-modules.ts): enables modules from the legacy env flags that are exactly "1".
-  "108_workspace_modules_legacy_flag_backfill": "7feab31f2a3d7456db6d3439b631621cb3dace106b1885efc8894346d42cce8d"
+  "108_workspace_modules_legacy_flag_backfill": "7feab31f2a3d7456db6d3439b631621cb3dace106b1885efc8894346d42cce8d",
+  // Per-user "reviewed" flag for the agent board: one new table plus two ASYNC indexes (unique (conversation, user), non-unique (user, workspace)).
+  // Additive: no existing table touched, no backfill, one DDL statement per transaction. The 109 postcondition proves the columns and both indexes.
+  // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
+  "109_agent_conversation_reviews": "bde4475d8cd9ce2284029356db322a96967573dee058a963f76a147ce94595a9"
 };
 
 /**
@@ -362,6 +366,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
   // The 108 hook (legacy env flag backfill + postcondition); same file as 107's hook.
+  // The 109 postcondition (columns, plus both indexes valid, ready, and the right shape); editing it re-reviews the migration.
+  "109_agent_conversation_reviews": {
+    "lib/migrations/agent-conversation-reviews.ts": "970ff2d900951977feefd21dc9592b49b5d59dc0819c9b2e66e0e911718503ed",
+  },
   "108_workspace_modules_legacy_flag_backfill": {
     "lib/migrations/workspace-modules.ts": "10dbe1f96ce6cf5813a942569095b672355d50b2436a5b4fcac4373ed418a4d1",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",

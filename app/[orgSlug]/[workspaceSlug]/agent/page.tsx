@@ -3,6 +3,8 @@ import { notFound, redirect } from "next/navigation"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { AGENT_LIST_COOKIE, parseAgentListOpen } from "@/lib/agent-list-pref"
+import { AGENT_VIEW_COOKIE, resolveInitialAgentView } from "@/lib/agent-view-pref"
+import { listAgentBoardCards } from "@/lib/agent-board-data"
 import { AgentPageShell } from "@/components/agent/agent-page-shell"
 import { listAgentConversations, getAgentConversationMessages } from "@/lib/agent-conversations"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
@@ -72,7 +74,14 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
     }
   }
 
-  const listOpen = parseAgentListOpen((await cookies()).get(AGENT_LIST_COOKIE)?.value)
+  const cookieStore = await cookies()
+  const listOpen = parseAgentListOpen(cookieStore.get(AGENT_LIST_COOKIE)?.value)
+  // A ?c= deep link is the chat; otherwise the saved view decides. The board's cards are only loaded when it
+  // is the first frame, so a chat page load pays for no extra query.
+  const initialView = resolveInitialAgentView(cookieStore.get(AGENT_VIEW_COOKIE)?.value, conversationId)
+  // A failed board query must not take the whole page (chat included) down: null makes the board fetch for itself.
+  const initialBoardCards =
+    initialView === "board" ? await listAgentBoardCards(prisma, { workspaceId: workspace.id, userId }).catch(() => null) : null
 
   return (
     <AgentPageShell
@@ -87,6 +96,8 @@ export default async function AgentPage({ params, searchParams }: AgentPageProps
       suggestedInstruction={suggestedInstruction}
       initialAgentId={agentId}
       initialListOpen={listOpen}
+      initialView={initialView}
+      initialBoardCards={initialBoardCards}
     />
   )
 }

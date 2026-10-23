@@ -54,6 +54,27 @@ elsewhere shows up without re-asking the agent. A link to another site, to a
 page rather than one item, or to something you don't have access to stays an
 ordinary link.
 
+## The board
+
+The **Agent** page has a **Chat | Board** switch in its title bar. **Board** replaces the
+chat with your conversations laid out by status, newest activity first in each column:
+
+- **Working**: a run is queued or going. The card shows a spinner.
+- **New**: finished, and you have not looked at it since it last changed.
+- **Done**: finished, and you have looked at it since.
+- **Failed**: the latest run failed or was interrupted. It stays here until the conversation runs again.
+- **Ready**: a conversation with no messages yet.
+
+**Working** and **New** are always shown; the other columns appear only when they have a card.
+Columns keep a minimum width and the board scrolls sideways, so on a phone you swipe between
+them. The board refreshes itself every few seconds, so a run finishing moves its card without
+a reload.
+
+Click a card to open that conversation in the chat; it counts as looked at. Whether you have
+looked at a conversation is yours alone: when a conversation is shared, your opening it does not
+mark it Done for anyone else, and new activity after you looked makes it **New** for you again.
+The switch is remembered across visits.
+
 ## Sharing a conversation
 
 A conversation starts private to the person who began it. The owner, or anyone
@@ -168,6 +189,9 @@ before this behavior is available. Until it is applied, the agent keeps working
 exactly as it did before — turns run inside the browser request, with the
 previous few-minute ceiling — so deploying ahead of the migration is safe and
 changes nothing for users.
+
+The board's per-person "looked at" state needs migration `109_agent_conversation_reviews`.
+Until it is applied the board still works, but every finished conversation shows as **New**.
 
 Two settings matter for a deployed environment:
 

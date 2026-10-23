@@ -65,6 +65,7 @@ function seed(extra: Record<string, Row[]> = {}) {
     agentRunEvent: [{ id: "e1", runId: "r1" }, { id: "e2", runId: "r2" }, { id: "e3", runId: "r3" }],
     agentSession: [{ conversationId: "conv-mine", blobKey: "blob/mine" }, { conversationId: "conv-theirs", blobKey: "blob/theirs" }],
     agentConversationParticipant: [{ id: "p1", conversationId: "conv-theirs", userId: ME }, { id: "p2", conversationId: "conv-mine", userId: OTHER }],
+    agentConversationReview: [{ id: "rv1", conversationId: "conv-theirs", userId: ME }, { id: "rv2", conversationId: "conv-mine", userId: OTHER }, { id: "rv3", conversationId: "conv-theirs", userId: OTHER }],
     agentAuditLog: [{ id: "al1", userId: ME, conversationId: "conv-mine" }, { id: "al2", userId: OTHER, conversationId: "conv-theirs" }],
     comment: [
       { id: "c1", authorId: ME, authorType: "HUMAN", authorName: "Me Myself" },
@@ -312,6 +313,8 @@ describe("deleteAccount", () => {
     expect(rows("agentRunEvent").map((e) => e.id)).toEqual(["e2"])
     expect(rows("agentSession").map((s) => s.conversationId)).toEqual(["conv-theirs"])
     expect(rows("agentConversationParticipant")).toEqual([])
+    // The user's own reviews, and everyone's reviews of the conversation that was deleted; another user's review of a surviving one stays.
+    expect(rows("agentConversationReview").map((r) => r.id)).toEqual(["rv3"])
     expect(rows("agentAuditLog").map((a) => a.id)).toEqual(["al2"])
     expect(blobDel).toHaveBeenCalledWith("blob/mine")
     expect(blobDel).not.toHaveBeenCalledWith("blob/theirs")
@@ -369,7 +372,7 @@ describe("deleteAccount", () => {
 
   it("tolerates tables that are not migrated on this deployment", async () => {
     const { prisma, rows } = createFakePrisma(seed(), {
-      missingTables: ["follow", "notification", "mcpConnectorGrant", "mcpConnectorAuthRequest", "agentSession", "agentRun", "agentRunEvent", "agentWebSearch", "agentConversationParticipant", "savedView", "workspaceUpdatesReadState", "embedVisitorSession", "embedAuthHandoff", "oAuthToken", "oAuthConsent", "oAuthAuthorizationCode", "oAuthAuthorizationEvent"],
+      missingTables: ["follow", "notification", "mcpConnectorGrant", "mcpConnectorAuthRequest", "agentSession", "agentRun", "agentRunEvent", "agentWebSearch", "agentConversationParticipant", "agentConversationReview", "savedView", "workspaceUpdatesReadState", "embedVisitorSession", "embedAuthHandoff", "oAuthToken", "oAuthConsent", "oAuthAuthorizationCode", "oAuthAuthorizationEvent"],
     })
     const result = await deleteAccount(prisma, ME, { fetchImpl: okFetch() })
     expect(result.ok).toBe(true)

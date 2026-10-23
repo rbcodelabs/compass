@@ -147,6 +147,7 @@ export async function purgeConversations(
     await deleteRunsWhere(prisma, { conversationId: { in: ids } })
     await deleteInBatches(prisma.agentMessage, { conversationId: { in: ids } })
     await tolerateMissingTable(() => deleteInBatches(prisma.agentConversationParticipant, { conversationId: { in: ids } }), 0)
+    await tolerateMissingTable(() => deleteInBatches(prisma.agentConversationReview, { conversationId: { in: ids } }), 0)
     await deleteInBatches(prisma.agentAuditLog, { conversationId: { in: ids } })
     await deleteWebSearchesWhere(prisma, { conversationId: { in: ids } })
     await prisma.agentConversation.deleteMany({ where: { id: { in: ids } } })
