@@ -56,7 +56,7 @@ export default async function DocPage({ params, searchParams }: Props) {
 
   const storedDoc = await prisma.doc.findFirst({
     where: { id: docId, workspaceId: workspace.id },
-    select: { id: true, title: true, content: true, icon: true, metadata: true, storageProvider: true, contentRef: true, revision: true, updatedAt: true, docType: true },
+    select: { id: true, title: true, content: true, icon: true, metadata: true, storageProvider: true, contentRef: true, revision: true, updatedAt: true, docType: true, updatedById: true, source: true },
   });
 
   if (!storedDoc) notFound();
@@ -64,6 +64,12 @@ export default async function DocPage({ params, searchParams }: Props) {
   // Docs created before revisions existed have a null revision; the save path expects the `legacy:<updatedAt>` form
   // documentRevision() derives, so always hand the editor that, never the raw null.
   const doc = { ...hydrated, revision: documentRevision(storedDoc) };
+
+  // Who last wrote the doc, so a live update can say "Updated by <name>". A failed lookup only loses the name.
+  const lastWriterUser = storedDoc.updatedById
+    ? await prisma.user.findUnique({ where: { id: storedDoc.updatedById }, select: { name: true } }).catch(() => null)
+    : null;
+  const lastWriter = { name: lastWriterUser?.name ?? null, source: storedDoc.source ?? null };
 
   // An unavailable lookup is distinct from a document with no decisions.
   const decisions = await listDocDecisions(workspace.id, doc.id).catch(() => null);
@@ -101,6 +107,9 @@ export default async function DocPage({ params, searchParams }: Props) {
         doc={{ id: doc.id, title: doc.title, content: doc.content, icon: doc.icon, revision: doc.revision }}
         versions={versions}
         revalidatePathStr={revalidatePathStr}
+        orgSlug={orgSlug}
+        workspaceSlug={workspaceSlug}
+        lastWriter={lastWriter}
         initialHistoryPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsHistory"))?.value)}
         decisionAction={<DocDecisionAction orgSlug={orgSlug} workspaceSlug={workspaceSlug} docId={doc.id} docTitle={doc.title} decisions={decisions} />}
       />
@@ -120,6 +129,7 @@ export default async function DocPage({ params, searchParams }: Props) {
       specScopes={specScopes}
       readOnly={access.isReadOnly}
       doc={doc}
+      lastWriter={lastWriter}
       initialCommentsPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsComments"))?.value)}
       initialHistoryPin={parsePanelPin(cookieStore.get(panelPinCookieName("docsHistory"))?.value)}
       versions={versions}

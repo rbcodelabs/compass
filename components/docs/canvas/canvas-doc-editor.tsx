@@ -105,11 +105,19 @@ import { childCenterBelow, parentEdge, parentFor, type CanvasCreateKind } from "
 import { createHistory } from "@/lib/json-canvas-history"
 import { canvasNodeTypes, CanvasUiContext, type CanvasUi } from "@/components/docs/canvas/canvas-nodes"
 import { DocsLibraryButton } from "@/components/docs/docs-library-button"
+import { useLiveRefresh } from "@/hooks/use-live-refresh"
+import { describeRemoteWriter, type DocLastWriter } from "@/lib/doc-remote-update"
+import { diffCanvas, isCanvasDiffEmpty } from "@/lib/json-canvas-diff"
+import { RemoteUpdateBanner, UpdatedJustNow } from "@/components/docs/remote-update-banner"
 
 interface CanvasDocEditorProps {
   doc: { id: string; title: string; content: string | null; icon: string | null; revision?: string | null }
   versions: DocVersionListItem[]
   revalidatePathStr: string
+  orgSlug: string
+  workspaceSlug: string
+  /** Who last wrote the doc, to name them when a live update arrives while the user has unsaved work. */
+  lastWriter?: DocLastWriter
   initialHistoryPin?: PanelPin
   decisionAction?: React.ReactNode
 }
@@ -121,6 +129,17 @@ type SaveChange =
   | { kind: "restore"; versionId: string; onDone: (result: Awaited<ReturnType<typeof restoreDocVersion>>) => void }
 
 const SAVE_DEBOUNCE_MS = 1200
+const UPDATED_INDICATOR_MS = 4_000
+const MOTION_MS = 260
+const BUSY_RECHECK_MS = 500
+
+/** A newer server copy of the canvas than the one the editor holds; kept aside while the user has unsaved work. */
+interface RemoteCanvas {
+  revision: string
+  content: string | null
+  title: string
+  writer: string
+}
 
 const NARROW_QUERY = "(max-width: 767px)"
 function subscribeNarrowViewport(onChange: () => void) {
@@ -140,8 +159,10 @@ export function CanvasDocEditor(props: CanvasDocEditorProps) {
   )
 }
 
-function CanvasSurface({ doc, versions, revalidatePathStr, initialHistoryPin, decisionAction }: CanvasDocEditorProps) {
-  const initial = useMemo(() => normalizeCanvasContent(doc.content ?? ""), [doc.content])
+function CanvasSurface({ doc, versions, revalidatePathStr, orgSlug, workspaceSlug, lastWriter, initialHistoryPin, decisionAction }: CanvasDocEditorProps) {
+  // Parsed once: later content arrives through the editor's own live-update path, and a remote canvas that cannot be read must never
+  // replace a working editor with this error screen.
+  const [initial] = useState(() => normalizeCanvasContent(doc.content ?? ""))
   if (!initial.ok) {
     return (
       <div role="alert" className="m-8 max-w-xl rounded-lg border border-status-danger/40 p-4 text-sm text-status-danger">
@@ -155,6 +176,9 @@ function CanvasSurface({ doc, versions, revalidatePathStr, initialHistoryPin, de
       initialCanvas={initial.canvas}
       versions={versions}
       revalidatePathStr={revalidatePathStr}
+      orgSlug={orgSlug}
+      workspaceSlug={workspaceSlug}
+      lastWriter={lastWriter}
       initialHistoryPin={initialHistoryPin}
       decisionAction={decisionAction}
     />
@@ -166,6 +190,9 @@ function CanvasEditorBody({
   initialCanvas,
   versions,
   revalidatePathStr,
+  orgSlug,
+  workspaceSlug,
+  lastWriter,
   initialHistoryPin,
   decisionAction,
 }: Omit<CanvasDocEditorProps, never> & { initialCanvas: JsonCanvas }) {
@@ -205,7 +232,18 @@ function CanvasEditorBody({
   const edgesRef = useRef(edges)
   const baseRef = useRef<JsonCanvas>(initialCanvas)
   const latestCanvasRef = useRef<JsonCanvas>(initialCanvas)
-  const [history] = useState(() => createHistory<JsonCanvas>(initialCanvas))
+  const [history, setHistory] = useState(() => createHistory<JsonCanvas>(initialCanvas))
+
+  // Live updates from other writers.
+  const [remote, setRemote] = useState<RemoteCanvas | null>(null)
+  const [justUpdated, setJustUpdated] = useState(false)
+  const [motion, setMotion] = useState(false)
+  const queueState = useRef<"saving" | "saved" | "error" | "idle">("idle")
+  const reconcileRef = useRef<() => void>(() => {})
+  const lastSavedTitle = useRef(doc.title)
+  // Nodes/edges kept on screen only to fade out; they are not part of the canvas and must never be saved.
+  const leavingRef = useRef<{ nodes: Set<string>; edges: Set<string> }>({ nodes: new Set(), edges: new Set() })
+  const editingIdRef = useRef<string | null>(null)
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingContent = useRef<string | null>(null)
@@ -236,6 +274,9 @@ function CanvasEditorBody({
           return updateDoc(doc.id, change.data, revalidatePathStr, token)
         },
         onState: (state) => {
+          queueState.current = state
+          // A save settling is the moment a held-back server copy can be judged.
+          if (state !== "saving") queueMicrotask(() => reconcileRef.current())
           setSaveStatus(state === "saved" && pendingContent.current !== null ? "saving" : state)
           setSaveError(
             state === "error"
@@ -294,7 +335,11 @@ function CanvasEditorBody({
 
   /** Record a committed change: update graph, push history, autosave. */
   const commit = useCallback(
-    (nextNodes: FlowNode[], nextEdges: FlowEdge[]) => {
+    (rawNodes: FlowNode[], rawEdges: FlowEdge[]) => {
+      // A node still fading out after a remote delete is already gone from the canvas; drop it before it can be written back.
+      const leaving = leavingRef.current
+      const nextNodes = leaving.nodes.size ? rawNodes.filter((n) => !leaving.nodes.has(n.id)) : rawNodes
+      const nextEdges = leaving.edges.size || leaving.nodes.size ? rawEdges.filter((e) => !leaving.edges.has(e.id)) : rawEdges
       const refreshed = refreshAutoSides(nextNodes, nextEdges)
       setGraph(nextNodes, refreshed)
       const canvas = fromFlow(baseRef.current, nextNodes, refreshed)
@@ -372,6 +417,145 @@ function CanvasEditorBody({
     groupDragRef.current = null
     commit(nodesRef.current, edgesRef.current)
   }, [commit])
+
+  // ── Live updates from other writers (agents, other tabs, other people) ─────
+  useEffect(() => { editingIdRef.current = editingId }, [editingId])
+  const motionTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const latestServerDoc = useRef<RemoteCanvas | null>(null)
+
+  /**
+   * Replace the on-screen graph with the server's, animated by node/edge id: moved nodes glide (CSS transition on the node transform
+   * while `canvas-live-motion` is set), new ones fade in, removed ones stay briefly and fade out. The viewport is left alone (no
+   * fitView) and selection survives for ids that still exist. Everything that remembers the old graph is reset: the save base, the
+   * latest-canvas ref and the undo history (an undo across someone else's edit would silently revert it).
+   */
+  const adoptCanvas = useCallback((canvas: JsonCanvas) => {
+    const diff = diffCanvas(latestCanvasRef.current, canvas)
+    const prevNodes = nodesRef.current
+    const prevEdges = edgesRef.current
+    const selectedNodes = new Set(prevNodes.filter((n) => n.selected).map((n) => n.id))
+    const selectedEdges = new Set(prevEdges.filter((e) => e.selected).map((e) => e.id))
+    const target = toFlow(canvas)
+    const nodes = target.nodes.map((n) => (selectedNodes.has(n.id) ? { ...n, selected: true } : n))
+    const edges = target.edges.map((e) => (selectedEdges.has(e.id) ? { ...e, selected: true } : e))
+
+    baseRef.current = canvas
+    latestCanvasRef.current = canvas
+    setHistory(createHistory<JsonCanvas>(canvas))
+    setEditingId(null)
+    setCurrentContent(serializeJsonCanvas(canvas))
+    bumpHistory((n) => n + 1)
+
+    if (isCanvasDiffEmpty(diff)) {
+      setGraph(nodes, edges)
+      return
+    }
+    const removedNodes = new Set(diff.removedNodes)
+    const removedEdges = new Set(diff.removedEdges)
+    const leavingNodes = prevNodes.filter((n) => removedNodes.has(n.id)).map((n) => ({ ...n, className: "canvas-live-leave" }))
+    const leavingEdges = prevEdges
+      .filter((e) => removedEdges.has(e.id) || removedNodes.has(e.source) || removedNodes.has(e.target))
+      .map((e) => ({ ...e, className: "canvas-live-leave" }))
+    leavingRef.current = { nodes: new Set(leavingNodes.map((n) => n.id)), edges: new Set(leavingEdges.map((e) => e.id)) }
+    const entering = new Set(diff.addedNodes)
+    setGraph(
+      [...nodes.map((n) => (entering.has(n.id) ? { ...n, className: "canvas-live-enter" } : n)), ...leavingNodes],
+      [...edges, ...leavingEdges]
+    )
+    setMotion(true)
+    if (motionTimer.current) clearTimeout(motionTimer.current)
+    motionTimer.current = setTimeout(() => {
+      const gone = leavingRef.current
+      leavingRef.current = { nodes: new Set(), edges: new Set() }
+      const clean = <T extends { id: string; className?: string }>(items: T[], drop: Set<string>) =>
+        items.filter((item) => !drop.has(item.id)).map((item) => (item.className?.startsWith("canvas-live-") ? { ...item, className: undefined } : item))
+      setGraph(clean(nodesRef.current, gone.nodes), clean(edgesRef.current, gone.edges))
+      setMotion(false)
+    }, MOTION_MS)
+  }, [setGraph])
+
+  const applyServerDoc = useCallback((incoming: RemoteCanvas, canvas: JsonCanvas) => {
+    if (serializeJsonCanvas(canvas) !== serializeJsonCanvas(latestCanvasRef.current)) adoptCanvas(canvas)
+    // Only replace a title the user is not in the middle of editing.
+    setTitle((current) => (current === lastSavedTitle.current ? incoming.title : current))
+    lastSavedTitle.current = incoming.title
+    saveQueue.setRevision(incoming.revision)
+  }, [adoptCanvas, saveQueue])
+
+  const reconcileServerDoc = useCallback(() => {
+    if (reconcileTimer.current) clearTimeout(reconcileTimer.current)
+    reconcileTimer.current = null
+    const incoming = latestServerDoc.current
+    if (!incoming) return
+    // Our own saves (and anything older) come back through refresh carrying a revision we already held: nothing new.
+    if (saveQueue.hasSeen(incoming.revision)) {
+      setRemote(null)
+      return
+    }
+    // A save is on the wire: the refresh may simply be carrying its result. Judge again when it settles (onState).
+    if (queueState.current === "saving") return
+    // Unsaved work of any kind is never overwritten.
+    if (pendingContent.current !== null || saveQueue.pending()) {
+      setRemote(incoming)
+      return
+    }
+    // Mid-gesture (dragging, or typing in a card) is not the moment to swap the graph; look again shortly.
+    if (editingIdRef.current !== null || groupDragRef.current) {
+      reconcileTimer.current = setTimeout(() => reconcileRef.current(), BUSY_RECHECK_MS)
+      return
+    }
+    // A canvas that cannot be read is never adopted; the editor keeps what it has.
+    const parsed = normalizeCanvasContent(incoming.content ?? "")
+    if (!parsed.ok) return
+    applyServerDoc(incoming, parsed.canvas)
+    setRemote(null)
+    setJustUpdated(true)
+  }, [saveQueue, applyServerDoc])
+  useEffect(() => { reconcileRef.current = reconcileServerDoc }, [reconcileServerDoc])
+
+  const writerLabel = describeRemoteWriter(lastWriter)
+  useEffect(() => {
+    if (!doc.revision) return
+    latestServerDoc.current = { revision: doc.revision, content: doc.content, title: doc.title, writer: writerLabel }
+    reconcileServerDoc()
+  }, [doc.revision, doc.content, doc.title, writerLabel, reconcileServerDoc])
+  useEffect(() => () => {
+    if (reconcileTimer.current) clearTimeout(reconcileTimer.current)
+    if (motionTimer.current) clearTimeout(motionTimer.current)
+  }, [])
+  useEffect(() => {
+    if (!justUpdated) return
+    const timer = setTimeout(() => setJustUpdated(false), UPDATED_INDICATOR_MS)
+    return () => clearTimeout(timer)
+  }, [justUpdated])
+
+  useLiveRefresh({ orgSlug, workspaceSlug, scope: `doc:${doc.id}`, paused: isRestoring })
+
+  const handleReloadRemote = useCallback(() => {
+    if (!remote) return
+    const parsed = normalizeCanvasContent(remote.content ?? "")
+    if (!parsed.ok) return
+    if (debounceTimer.current) clearTimeout(debounceTimer.current)
+    debounceTimer.current = null
+    pendingContent.current = null
+    saveQueue.discard(remote.revision)
+    setSaveStatus("idle")
+    setSaveError(null)
+    applyServerDoc(remote, parsed.canvas)
+    setRemote(null)
+    setJustUpdated(true)
+  }, [remote, saveQueue, applyServerDoc])
+
+  const handleKeepMine = useCallback(() => {
+    if (!remote) return
+    // Re-base first (also replaces a parked conflicting save's stale token), then let a not-yet-queued draft join behind it.
+    const rebased = saveQueue.rebase(remote.revision)
+    flushContent()
+    setSaveError(null)
+    setRemote(null)
+    void rebased.catch(() => {})
+  }, [remote, saveQueue, flushContent])
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -627,7 +811,8 @@ function CanvasEditorBody({
 
   // ── Title, versions, export ─────────────────────────────────────────────────
   async function handleSaveTitle() {
-    if (title === doc.title) return
+    if (title === lastSavedTitle.current) return
+    lastSavedTitle.current = title
     await saveQueue.enqueue({ kind: "update", data: { title } }).catch(() => {})
   }
 
@@ -661,6 +846,7 @@ function CanvasEditorBody({
       loadCanvas(parsed.canvas, { save: false })
     }
     setTitle(restoredTitle)
+    lastSavedTitle.current = restoredTitle
   }
 
   // ── Selection inspector ─────────────────────────────────────────────────────
@@ -700,14 +886,15 @@ function CanvasEditorBody({
 
   return (
     <div
-      className="flex h-full min-h-[520px] min-w-0 flex-col"
+      className={cn("flex h-full min-h-[520px] min-w-0 flex-col", motion && "canvas-live-motion")}
       data-testid="canvas-doc-editor"
       onKeyDown={onKeyDown}
     >
       <div className="flex min-h-7 justify-end px-4 pt-3 sm:px-8">
+        {justUpdated && !remote && <UpdatedJustNow />}
         {saveStatus === "saving" && <span className="text-xs text-text-subtle">Saving…</span>}
         {saveStatus === "saved" && <span className="text-xs text-text-subtle">Saved</span>}
-        {saveError && (
+        {saveError && !remote && (
           <span role="alert" className="text-xs text-status-danger">
             {saveError}{" "}
             <button type="button" className="underline" onClick={() => void saveQueue.retry()}>
@@ -716,6 +903,11 @@ function CanvasEditorBody({
           </span>
         )}
       </div>
+      {remote && (
+        <div className="px-4 sm:px-8">
+          <RemoteUpdateBanner writer={remote.writer} onReload={handleReloadRemote} onKeepMine={handleKeepMine} />
+        </div>
+      )}
 
       <div className="flex items-center gap-2 px-4 pb-2 sm:px-8">
         <DocsLibraryButton />
