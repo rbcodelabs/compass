@@ -6,7 +6,8 @@
  * passed to server.registerTool.  We call the callback directly with
  * controlled inputs and assert on the returned text.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { setModules } from "./helpers/modules"
 import { runWithMcpActor } from "@/lib/mcp-authz"
 
 // ── Prisma mock ─────────────────────────────────────────────────────────────
@@ -30,6 +31,7 @@ const mockPrisma = {
   },
   agentWorkspaceGrant: {
     create: vi.fn(),
+    findMany: vi.fn(),
   },
   $transaction: vi.fn(),
 }
@@ -235,7 +237,9 @@ describe("create_workspace called by an owner-delegated agent", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
+    // The agent already holds a live grant in a workspace with the agents module on (otherwise it could not have authenticated).
+    mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-existing", grantedByUserId: "owner-1" }])
     mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "owner-1", status: "ACTIVE" })
     mockPrisma.agentToolCall.create.mockResolvedValue({ id: "call-1" })
     mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "OWNER", organizationId: "org-uuid-1" })
@@ -245,8 +249,6 @@ describe("create_workspace called by an owner-delegated agent", () => {
     mockPrisma.workspace.create.mockResolvedValue({ id: "ws-new", name: "Agent WS", slug: "agent-ws" })
     mockPrisma.organizationMember.findMany.mockResolvedValue([{ userId: "owner-1", role: "OWNER" }])
   })
-
-  afterEach(() => vi.unstubAllEnvs())
 
   it("records an auditable WRITE grant for the creating agent, granted by its owner, in the same transaction", async () => {
     const result = await agentHandler(AGENT_ACTOR)({ orgSlug: "rbcodelabs", name: "Agent WS", slug: "agent-ws" })

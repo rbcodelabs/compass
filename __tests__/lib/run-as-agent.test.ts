@@ -7,7 +7,8 @@
  * organization, and a USER-owned agent invoked by someone other than its owner each have to fail closed.
  */
 import { createHash } from "node:crypto"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { setModules } from "../helpers/modules"
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Row = Record<string, any>
@@ -107,7 +108,7 @@ function liveRun(overrides: Row = {}): Row {
 }
 
 beforeEach(() => {
-  vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+  setModules({ agents: true })
   vi.clearAllMocks()
   resetAgentColumnsAvailabilityCache()
   resetAgentDefaultsAvailabilityCache()
@@ -124,7 +125,6 @@ beforeEach(() => {
     organization: [{ id: ORG, slug: "acme" }, { id: OTHER_ORG, slug: "other" }],
   }
 })
-afterEach(() => vi.unstubAllEnvs())
 
 async function authenticate(): Promise<McpActor> {
   const auth = await validateMcpAuth(request())
@@ -188,7 +188,7 @@ describe("validateMcpAuth for an agent-scoped AGENT_TURN key", () => {
   })
 
   it("rejects the key when the rollout flag is off (never downgrades to a plain user turn)", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+    setModules({ agents: false })
     await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
   })
 
@@ -377,7 +377,7 @@ describe("mintAgentMcpKey with an agent", () => {
   })
 
   it("refuses when agents are disabled", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+    setModules({ agents: false })
     await expect(mintAgentMcpKey("invoker", HOME, undefined, FUTURE, { agentId: sharedAgent.id })).rejects.toThrow(/not enabled/)
   })
 })
@@ -447,7 +447,7 @@ describe("resolveRunAgent (who may start a run as which agent)", () => {
   })
 
   it("answers 404 when agents are disabled", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+    setModules({ agents: false })
     expect(await refusal(resolve("invoker", HOME, sharedAgent.id))).toMatchObject({ status: 404 })
   })
 })
@@ -528,7 +528,7 @@ describe("resolveRunAgent default chain (explicit > user default > workspace def
 
   it("does not consult defaults at all when agents are disabled (built-in), though an explicit pick is refused", async () => {
     setWorkspaceDefault(sharedAgent.id)
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+    setModules({ agents: false })
     expect(await resolve("invoker", HOME)).toBeNull()
     await expect(resolve("invoker", HOME, sharedAgent.id)).rejects.toMatchObject({ status: 404 })
   })
@@ -566,7 +566,7 @@ describe("listRunnableAgents (what the pickers offer)", () => {
   it("is empty, with no default, when agents are disabled or nothing is granted", async () => {
     db.state.agentWorkspaceGrant = []
     expect(await listRunnableAgents(prisma as never, { userId: "invoker", workspaceId: HOME })).toEqual({ agents: [], defaultAgentId: null })
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+    setModules({ agents: false })
     expect(await listRunnableAgents(prisma as never, { userId: "invoker", workspaceId: HOME })).toEqual({ agents: [], defaultAgentId: null })
   })
 })

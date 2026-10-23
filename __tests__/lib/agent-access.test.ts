@@ -1,22 +1,35 @@
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 const prisma = { agent: { findFirst: vi.fn() }, agentWorkspaceGrant: { findMany: vi.fn() }, workspace: { findFirst: vi.fn() }, solutionComment: { findUnique: vi.fn() }, comment: { findUnique: vi.fn() }, docComment: { findUnique: vi.fn() }, decisionRecord: { findUnique: vi.fn() }, organizationMember: { findFirst: vi.fn() }, agentOrgAdminGrant: { findFirst: vi.fn() } }
 vi.mock("@/lib/db", () => ({ default: () => prisma }))
 import { agentWorkspaceWhere, hasOwnerOrgAdminRights, hasValidAgentOrgAdminGrant } from "@/lib/agent-access"
 import { applyToolGate } from "@/lib/mcp-tool-gates"
+import { isModuleEnabled } from "@/lib/modules/server"
+import { setModules } from "../helpers/modules"
 const actor = { purpose: "AGENT" as const, userId: "owner", agentId: "agent" }
 const userAgent = { id: "agent", ownerUserId: "owner", status: "ACTIVE" }
 const workspaceAgent = { id: "agent", ownerUserId: null, ownerType: "WORKSPACE", ownerWorkspaceId: "home", status: "ACTIVE" }
-beforeEach(() => { vi.clearAllMocks(); prisma.organizationMember.findFirst.mockReset(); prisma.agentOrgAdminGrant.findFirst.mockReset(); vi.stubEnv("COMPASS_AGENTS_ENABLED", "1"); prisma.agent.findFirst.mockResolvedValue(userAgent); prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "one" }, { workspaceId: "two" }]) })
-afterEach(() => vi.unstubAllEnvs())
+beforeEach(() => { vi.clearAllMocks(); prisma.organizationMember.findFirst.mockReset(); prisma.agentOrgAdminGrant.findFirst.mockReset(); setModules({ agents: true }); prisma.agent.findFirst.mockResolvedValue(userAgent); prisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "one" }, { workspaceId: "two" }]) })
 it("limits aggregate workspace queries to explicit grants and current membership", async () => {
   expect(await agentWorkspaceWhere(actor)).toEqual({ members: { some: { userId: "owner" } }, id: { in: ["one", "two"] } })
   expect(prisma.agentWorkspaceGrant.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { agentId: "agent", revokedAt: null, access: { in: ["READ", "WRITE"] } } }))
 })
-it("suspension and rollout disablement remove all workspace access", async () => {
+it("suspension and the agents module being off remove all workspace access", async () => {
   prisma.agent.findFirst.mockResolvedValueOnce(null)
   expect(await agentWorkspaceWhere(actor)).toEqual({ id: { in: [] } })
-  vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
-  expect(await agentWorkspaceWhere(actor)).toEqual({ id: { in: [] } })
+  setModules({ agents: false })
+  expect(await agentWorkspaceWhere(actor)).toEqual({ members: { some: { userId: "owner" } }, id: { in: [] } })
+})
+it("narrows reach to the granted workspaces that have the agents module on", async () => {
+  const stub = vi.mocked(isModuleEnabled)
+  const original = stub.getMockImplementation()
+  try {
+    stub.mockImplementation(async (workspaceId) => workspaceId === "two")
+    expect(await agentWorkspaceWhere(actor)).toEqual({ members: { some: { userId: "owner" } }, id: { in: ["two"] } })
+    stub.mockImplementation(async () => false)
+    expect(await agentWorkspaceWhere(actor)).toEqual({ members: { some: { userId: "owner" } }, id: { in: [] } })
+  } finally {
+    stub.mockImplementation(original!)
+  }
 })
 it("requires write grants for mutation gates", async () => {
   prisma.workspace.findFirst.mockResolvedValue({ id: "one" })
@@ -63,7 +76,7 @@ it("hasOwnerOrgAdminRights follows the owner's live role and the agent's ACTIVE 
   prisma.agent.findFirst.mockResolvedValueOnce(null)
   prisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "OWNER" })
   expect(await hasOwnerOrgAdminRights(actor, "org-1")).toBe(false)
-  vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+  setModules({ agents: false })
   prisma.organizationMember.findFirst.mockResolvedValueOnce({ role: "OWNER" })
   expect(await hasOwnerOrgAdminRights(actor, "org-1")).toBe(false)
 })

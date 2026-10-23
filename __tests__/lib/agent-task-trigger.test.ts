@@ -5,7 +5,8 @@
  * refusals below are decided by the production predicates (canInvokeAgent, live grants, the caps, the one-run-per-
  * conversation fence), not by mock call counts. Only the sandbox launch, the snapshot lookup and the scheduler are stubbed.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { setModules } from "../helpers/modules"
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Row = Record<string, any>
@@ -129,7 +130,7 @@ function liveRuns(agentId: string, n: number, extra: Row = {}): Row[] {
 }
 
 beforeEach(() => {
-  vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+  setModules({ agents: true })
   vi.clearAllMocks()
   resetAgentColumnsAvailabilityCache()
   resetAgentRunsAvailabilityCache()
@@ -152,7 +153,6 @@ beforeEach(() => {
   }
   assignTo(sharedAgent.id)
 })
-afterEach(() => vi.unstubAllEnvs())
 
 const runs = () => db.state.agentRun
 
@@ -225,8 +225,8 @@ describe("what does not start a run", () => {
     expect(launch).not.toHaveBeenCalled()
   })
 
-  it("does not when agents are disabled", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+  it("does not when the agents module is off in the task's workspace", async () => {
+    setModules({ agents: false })
     expect(await trigger()).toEqual({ status: "skipped" })
     expect(runs()).toHaveLength(0)
   })

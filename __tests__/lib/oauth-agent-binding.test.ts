@@ -31,6 +31,7 @@
  * design warns about.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { setModules } from "../helpers/modules"
 
 const agent = { findFirst: vi.fn() }
 const oAuthToken = { findFirst: vi.fn(), update: vi.fn() }
@@ -95,12 +96,14 @@ function actorFromAuth(auth: McpAuthResult): McpActor {
 describe("a mutation through an agent-bound OAuth token", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     oAuthToken.findFirst.mockResolvedValue(TOKEN_ROW)
     oAuthToken.update.mockResolvedValue({})
     agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "user-1", status: "ACTIVE" })
     agentToolCall.create.mockResolvedValue({ id: "call-1" })
     agentToolCall.update.mockResolvedValue({})
+    // Authentication fails closed unless one live-granted workspace has the agents module on.
+    agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "granted-1", grantedByUserId: "user-1" }])
   })
 
   it("succeeds, and records an audit row naming the OAuth token as the credential", async () => {
@@ -209,7 +212,7 @@ describe("a mutation through an agent-bound OAuth token", () => {
 describe("an agent-bound OAuth token engages the agent authorization model", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     oAuthToken.findFirst.mockResolvedValue(TOKEN_ROW)
     oAuthToken.update.mockResolvedValue({})
     agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "user-1", status: "ACTIVE" })

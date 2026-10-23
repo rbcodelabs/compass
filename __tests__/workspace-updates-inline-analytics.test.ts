@@ -10,11 +10,12 @@ const clients=vi.hoisted(()=>{
 })
 vi.mock("@/lib/db",()=>({default:()=>clients.raw}))
 vi.mock("@/lib/analytics/activity",()=>({getHumanActivityPrisma:()=>clients.activity,getMcpActivityPrisma:()=>clients.activity}))
+import { setFeatureTables, setModules } from "./helpers/modules"
 import { updateEntityField } from "@/lib/entity-mutations"
-afterEach(()=>{vi.unstubAllEnvs();vi.clearAllMocks()})
+afterEach(()=>{vi.clearAllMocks()})
 describe("inline analytics and Updates composition",()=>{
- it.each(["0","1"])("preserves the human activity client with Updates flag %s",async flag=>{
-  vi.stubEnv("WORKSPACE_UPDATES_ENABLED",flag)
+ it.each(["0","1"])("preserves the human activity client with the Updates module %s",async flag=>{
+  setModules({ workspace_updates: flag === "1" }); setFeatureTables({ updates: flag === "1" })
   expect(await updateEntityField("opportunity","item","ws","status","ACTIVE",{kind:"USER",id:"user"})).toEqual({ok:true})
   expect(clients.activity.opportunity.update).toHaveBeenCalledTimes(1)
   expect(clients.raw.opportunity.update).not.toHaveBeenCalled()

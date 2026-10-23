@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setModules } from "../helpers/modules";
+import { moduleDisabledMessage } from "@/lib/modules/registry";
 
 const { prisma } = vi.hoisted(() => ({ prisma: {
   workspaceMember: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -11,7 +13,7 @@ import { UNASSIGNED_ASSIGNEE_FILTER } from "@/lib/task-assignee-display";
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.stubEnv("COMPASS_AGENTS_ENABLED", "1");
+  setModules({ agents: true });
   prisma.workspaceMember.findFirst.mockResolvedValue({ id: "member" });
   prisma.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "owner", status: "ACTIVE" });
   prisma.agentWorkspaceGrant.findFirst.mockResolvedValue({ id: "grant" });
@@ -45,9 +47,9 @@ describe("single task assignment", () => {
     prisma.agentWorkspaceGrant.findFirst.mockResolvedValue(null);
     await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "agent" } })).rejects.toThrow("workspace");
   });
-  it("feature-off prevents new agent assignment but allows clearing", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0");
-    await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "agent" } })).rejects.toThrow("enabled");
+  it("agents module off prevents new agent assignment but allows clearing", async () => {
+    setModules({ agents: false });
+    await expect(assignmentUpdate("ws", { assignee: { type: "AGENT", id: "agent" } })).rejects.toThrow(moduleDisabledMessage("agents"));
     expect(await assignmentUpdate("ws", { assignee: null })).toEqual({ assigneeUserId: null, assigneeAgentId: null });
   });
   it("parses old and typed filters without confusing agents and humans", () => {
@@ -183,10 +185,10 @@ describe("eligibleTaskAssignees", () => {
     expect(agents.map((a) => a.id)).toEqual(["cloud-mine", "cloud-shared", "external"]);
     expect(agents.every((a) => a.available)).toBe(true);
   });
-  it("lists no agents with no live grants, or with agents disabled", async () => {
+  it("lists no agents with no live grants, or with the agents module off", async () => {
     prisma.agentWorkspaceGrant.findMany.mockResolvedValue([]);
     expect((await eligibleTaskAssignees("ws")).filter((a) => a.type === "AGENT")).toEqual([]);
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0");
+    setModules({ agents: false });
     expect((await eligibleTaskAssignees("ws")).filter((a) => a.type === "AGENT")).toEqual([]);
   });
 });

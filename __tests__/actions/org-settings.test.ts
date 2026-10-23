@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { setModules } from "../helpers/modules";
+import { moduleDisabledMessage } from "@/lib/modules/registry";
 
 const mockScoringModel = {
   create: vi.fn(),
@@ -605,13 +607,11 @@ describe("archiveScoringModel", () => {
 
 describe("grantAgentScoringModelAdmin", () => {
   beforeEach(() => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1");
+    setModules({ agents: true });
     mockAgent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "owner-1", status: "ACTIVE" });
     mockOrganizationMember.findFirst.mockResolvedValue({ role: "ADMIN", organizationId: "org-1" });
     mockAgentOrgAdminGrant.upsert.mockResolvedValue({ id: "grant-1" });
   });
-  afterEach(() => vi.unstubAllEnvs());
-
   it("upserts a live grant naming the session caller as grantor", async () => {
     const result = await grantAgentScoringModelAdmin("org", "agent-1");
 
@@ -655,11 +655,11 @@ describe("grantAgentScoringModelAdmin", () => {
     expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
   });
 
-  it("refuses when agent changes are disabled", async () => {
-    vi.unstubAllEnvs();
+  it("refuses when the agents module is off", async () => {
+    setModules({ agents: false });
     await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
       ok: false,
-      error: "Agent changes are currently disabled",
+      error: moduleDisabledMessage("agents"),
     });
     expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
   });
@@ -754,7 +754,7 @@ describe("revokeAgentScoringModelAdmin", () => {
 // organization member" is a separate, explicit check below.
 describe("grantAgentScoringModelAdmin", () => {
   beforeEach(() => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1");
+    setModules({ agents: true });
     mockAgent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "owner-1", status: "ACTIVE" });
     // First call (resolveOrgAdmin's own gate) resolves the caller; the second
     // (this action's explicit owner-membership check) resolves the agent
@@ -762,10 +762,6 @@ describe("grantAgentScoringModelAdmin", () => {
     // either shape.
     mockOrganizationMember.findFirst.mockResolvedValue({ role: "ADMIN", organizationId: "org-1", id: "member-1" });
     mockAgentOrgAdminGrant.upsert.mockResolvedValue({ id: "grant-1" });
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
   });
 
   it("upserts a live grant for an active agent whose owner is a current org member", async () => {
@@ -811,11 +807,11 @@ describe("grantAgentScoringModelAdmin", () => {
     expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
   });
 
-  it("returns a clean error when agent changes are disabled", async () => {
-    vi.unstubAllEnvs();
+  it("returns a clean error when the agents module is off", async () => {
+    setModules({ agents: false });
     await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
       ok: false,
-      error: "Agent changes are currently disabled",
+      error: moduleDisabledMessage("agents"),
     });
     expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
   });

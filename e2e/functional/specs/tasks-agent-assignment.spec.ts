@@ -14,7 +14,7 @@
  * entity card), there is no "Edit task" dialog any more, and every field is
  * edited inline through the panel's PATCH endpoint.
  *
- * Requires COMPASS_AGENTS_ENABLED=1 on the dev server — without it
+ * Requires the agents module on the fixture workspace (seeded) — without it
  * `eligibleTaskAssignees` returns people only and no agent option is ever
  * offered.
  */

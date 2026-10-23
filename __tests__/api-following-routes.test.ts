@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { setFeatureTables, setModules } from "./helpers/modules"
 import { followableConfig, getFollowable } from "@/lib/followable"
 import { resetFollowingAvailabilityCache } from "@/lib/following-flag"
 import { createFakeFollowDb } from "./helpers/fake-follow-db"
@@ -27,7 +28,7 @@ const get = (path: string, handler: typeof getFollowing) => handler(new Request(
 const send = (path: string, handler: typeof putFollowing, body: unknown, method = "PUT") => handler(new Request(`http://localhost${path}`, { method, body: JSON.stringify(body) }))
 
 beforeEach(() => {
-  vi.stubEnv("FOLLOWING_ENABLED", "1")
+  setModules({ following: true }); setFeatureTables({ following: true })
   followableConfig.shippedSlice = 2
   resetFollowingAvailabilityCache()
   fake = createFakeFollowDb()
@@ -57,9 +58,9 @@ describe("GET /api/following", () => {
   })
 
   it("is available:false (not an error) when the flag is off or the subject type has not shipped", async () => {
-    vi.stubEnv("FOLLOWING_ENABLED", "0")
+    setModules({ following: false })
     expect(await (await get(url, getFollowing)).json()).toEqual({ available: false })
-    vi.stubEnv("FOLLOWING_ENABLED", "1")
+    setModules({ following: true }); setFeatureTables({ following: true })
     followableConfig.shippedSlice = 1
     expect(await (await get(url, getFollowing)).json()).toEqual({ available: false })
   })
@@ -124,9 +125,9 @@ describe("notifications bell routes", () => {
   })
 
   it("GET unread is available:false when following is off, and count 0 for a non-member", async () => {
-    vi.stubEnv("FOLLOWING_ENABLED", "0")
+    setModules({ following: false })
     expect(await (await get(`/api/notifications/unread?${Q}`, getUnread)).json()).toEqual({ available: false, count: 0, overflow: false })
-    vi.stubEnv("FOLLOWING_ENABLED", "1")
+    setModules({ following: true }); setFeatureTables({ following: true })
     member(false)
     expect((await get(`/api/notifications/unread?${Q}`, getUnread)).status).toBe(404)
     signedIn(null)

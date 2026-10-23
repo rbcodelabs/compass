@@ -23,6 +23,7 @@
  * screen whose entire job is to state it accurately.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { setModules } from "../helpers/modules"
 import { createOAuthStore } from "../helpers/oauth-store"
 
 const store = createOAuthStore()
@@ -214,12 +215,11 @@ async function seedMembership(overrides: Parameters<typeof membership>[0] = {}) 
 
 beforeEach(() => {
   store.reset()
-  vi.unstubAllEnvs()
 })
 
 describe("loadConsentBindingOptions", () => {
-  it("renders no agent options when COMPASS_AGENTS_ENABLED is off", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "")
+  it("renders no agent options when the agents module is off", async () => {
+    setModules({ agents: false })
     await seedMembership({ role: "ADMIN" })
     await store.agent.create({ data: { ownerUserId: "user-1", name: "Existing" } })
 
@@ -232,7 +232,7 @@ describe("loadConsentBindingOptions", () => {
   })
 
   it("lists live agents with the reach they actually hold", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     await seedMembership({ workspaceId: "ws-1", workspaceName: "Compass", role: "ADMIN" })
     const granted = await store.agent.create({
       data: { ownerUserId: "user-1", name: "Granted" },
@@ -254,7 +254,7 @@ describe("loadConsentBindingOptions", () => {
   })
 
   it("excludes a suspended agent entirely", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     await seedMembership({ role: "ADMIN" })
     await store.agent.create({
       data: { ownerUserId: "user-1", name: "Suspended", status: "SUSPENDED" },
@@ -263,7 +263,7 @@ describe("loadConsentBindingOptions", () => {
   })
 
   it("withholds the override when a workspace membership has no matching organization membership", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     await store.organizationMember.create({
       data: { organizationId: "org-1", userId: "user-1", role: "OWNER" },
     })
@@ -526,7 +526,7 @@ describe("resolveConsentBinding — every unsigned field is re-validated", () =>
 })
 
 describe("revalidateRememberedBinding — a reconnect re-checks the world", () => {
-  beforeEach(() => vi.stubEnv("COMPASS_AGENTS_ENABLED", "1"))
+  beforeEach(() => setModules({ agents: true }))
 
   async function seedHealthyAgent() {
     await store.workspace.create({ data: { id: "ws-1", members: [{ userId: "user-1" }] } })
@@ -574,8 +574,8 @@ describe("revalidateRememberedBinding — a reconnect re-checks the world", () =
 
   it("refuses to replay an agent binding while agents are switched off", async () => {
     await seedHealthyAgent()
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "")
-    // Never downgraded to USER: that would make flipping the flag off an
+    setModules({ agents: false })
+    // Never downgraded to USER: that would make switching the module off an
     // upgrade from a grant-scoped token to an account-wide one.
     expect(
       await revalidateRememberedBinding({ authorizationMode: "AGENT", agentId: "agent-1" }, "user-1"),

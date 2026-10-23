@@ -16,6 +16,7 @@ vi.mock("@/lib/db", () => ({ default: () => mockPrisma }));
 
 import { createPositioningBriefCore } from "@/lib/positioning-brief";
 import { GTM_POSITIONING_BRIEF_TEMPLATE } from "@/lib/gtm-templates";
+import { setModules } from "./helpers/modules"
 
 vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
 
@@ -31,7 +32,7 @@ beforeEach(() => {
   // Positioning briefs are part of the marketing-launch surface — default the
   // fixture workspace to "on" so the existing tests below exercise the doc
   // creation path, not the gate. The gate itself gets its own test.
-  mockWorkspace.findUnique.mockResolvedValue({ launchWorkflowEnabled: true });
+  setModules({ launch_workflow: true });
 });
 
 describe("createPositioningBriefCore", () => {
@@ -81,7 +82,7 @@ describe("createPositioningBriefCore", () => {
   });
 
   it("returns launch_workflow_disabled and creates nothing when the workspace has the launch workflow off", async () => {
-    mockWorkspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    setModules({ launch_workflow: false });
 
     const result = await createPositioningBriefCore(ITEM_ID, WORKSPACE_ID);
 

@@ -7,6 +7,7 @@ import {
   getParticipantResearchVoiceCall,
   recordResearchVoiceHeartbeat,
 } from "@/lib/research-voice-operations"
+import { setModules } from "../helpers/modules"
 import { createVoiceWorkerCredential } from "@/lib/research-voice-control-plane"
 
 function fixture() {
@@ -18,6 +19,7 @@ function fixture() {
     lastProviderItemId: "item-1", lastHeartbeatAt: null,
     commandPendingCount: 0, commandTotalCount: 0, commandWindowAt: null,
     commandWindowCount: 0, hangupCommandId: null,
+    session: { study: { workspaceId: "workspace-1" } },
   }
   const command = {
     id: "command-1", voiceCallId: "call-1", sessionId: "session-1", kind: "HANGUP",
@@ -44,7 +46,7 @@ function fixture() {
 }
 
 describe("research voice worker operations", () => {
-  beforeEach(() => vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1"))
+  beforeEach(() => setModules({ research_voice_authoritative: true }))
   afterEach(() => vi.unstubAllEnvs())
 
   it("authenticates the raw callback bearer only against its live call hash and lease", async () => {
@@ -92,7 +94,7 @@ describe("research voice worker operations", () => {
 
   it("binds participant status and attachment commands to the resume credential and active call", async () => {
     const { prisma, tx, call } = fixture()
-    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", voiceLeaseId: "call-1" }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) }
+    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", study: { workspaceId: "workspace-1" }, voiceLeaseId: "call-1" }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) }
     const researchAttachment = { findFirst: vi.fn().mockResolvedValue({ id: "attachment-1" }) }
     Object.assign(prisma, { researchSession, researchAttachment })
     Object.assign(tx, { researchSession, researchAttachment })
@@ -113,7 +115,7 @@ describe("research voice worker operations", () => {
 
   it("preserves terminal status acknowledgement after lease release and binds the explicit call id", async () => {
     const { prisma, tx, call } = fixture()
-    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", voiceLeaseId: null }) }
+    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", study: { workspaceId: "workspace-1" }, voiceLeaseId: null }) }
     Object.assign(prisma, { researchSession })
     Object.assign(tx, { researchSession })
     tx.researchVoiceCall.findFirst.mockResolvedValue({ ...call, status: "COMPLETED" })
@@ -128,7 +130,7 @@ describe("research voice worker operations", () => {
 
   it("transactionally rejects commands after participant-token revocation", async () => {
     const { prisma, tx } = fixture()
-    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", voiceLeaseId: "call-1" }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) }
+    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", study: { workspaceId: "workspace-1" }, voiceLeaseId: "call-1" }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) }
     const researchAttachment = { findFirst: vi.fn() }
     Object.assign(prisma, { researchSession, researchAttachment })
     Object.assign(tx, { researchSession, researchAttachment })
@@ -142,7 +144,7 @@ describe("research voice worker operations", () => {
 
   it("turns the first HANGUP into a singleton DISCONNECTING barrier", async () => {
     const { prisma, tx } = fixture()
-    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", voiceLeaseId: "call-1" }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) }
+    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", study: { workspaceId: "workspace-1" }, voiceLeaseId: "call-1" }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) }
     const researchAttachment = { findFirst: vi.fn() }
     Object.assign(prisma, { researchSession, researchAttachment })
     Object.assign(tx, { researchSession, researchAttachment })
@@ -189,7 +191,7 @@ describe("research voice worker operations", () => {
 
   it("replays a bound command receipt after the session completes and its lease is released", async () => {
     const { prisma, tx, call, command } = fixture()
-    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", status: "COMPLETED", voiceLeaseId: null }) }
+    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", study: { workspaceId: "workspace-1" }, status: "COMPLETED", voiceLeaseId: null }) }
     Object.assign(prisma, { researchSession })
     Object.assign(tx, { researchSession })
     tx.researchVoiceCall.findUnique.mockResolvedValue({ ...call, status: "COMPLETED" })
@@ -215,7 +217,7 @@ describe("research voice worker operations", () => {
 
   it("reserves the singleton hangup even when all attachment command quotas are exhausted", async () => {
     const { prisma, tx, call } = fixture()
-    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", status: "IN_PROGRESS", voiceLeaseId: "call-1" }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) }
+    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", study: { workspaceId: "workspace-1" }, status: "IN_PROGRESS", voiceLeaseId: "call-1" }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) }
     Object.assign(prisma, { researchSession })
     Object.assign(tx, { researchSession })
     tx.researchVoiceCall.findUnique.mockResolvedValue({
@@ -250,7 +252,7 @@ describe("research voice worker operations", () => {
 
   it("reads a concurrent idempotent receipt only after the failed transaction has rolled back", async () => {
     const { prisma, tx, command } = fixture()
-    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", voiceLeaseId: "call-1" }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) }
+    const researchSession = { findFirst: vi.fn().mockResolvedValue({ id: "session-1", study: { workspaceId: "workspace-1" }, voiceLeaseId: "call-1" }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) }
     Object.assign(prisma, { researchSession })
     Object.assign(tx, { researchSession })
     let transactionOpen = false
@@ -272,7 +274,7 @@ describe("research voice worker operations", () => {
   it.each(["token", "session", "call"])("creates no command when the %s write fence loses", async (fence) => {
     const { prisma, tx } = fixture()
     const researchSession = {
-      findFirst: vi.fn().mockResolvedValue({ id: "session-1", voiceLeaseId: "call-1" }),
+      findFirst: vi.fn().mockResolvedValue({ id: "session-1", study: { workspaceId: "workspace-1" }, voiceLeaseId: "call-1" }),
       updateMany: vi.fn().mockResolvedValue({ count: fence === "session" ? 0 : 1 }),
     }
     Object.assign(prisma, { researchSession })

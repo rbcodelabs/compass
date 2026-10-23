@@ -78,6 +78,7 @@ import {
   scopesSatisfy,
 } from "@/lib/mcp-tool-gates"
 import { runWithMcpActor } from "@/lib/mcp-authz"
+import { setModules } from "./helpers/modules"
 
 const MEMBER = { userId: "user-1" }
 const SERVICE = { userId: null, purpose: "SERVICE" as const }
@@ -110,7 +111,7 @@ describe("update_roadmap_item source-workspace link boundaries", () => {
     })
     for (const [field, model, row] of targets) {
       it(`${purpose} accepts same-workspace ${field}`, async () => {
-        vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+        setModules({ agents: true })
         try {
           mockPrisma[model].findUnique.mockResolvedValue(row("ws-1"))
           await expect(applyToolGate("update_roadmap_item", actor(), { itemId: "item-1", [field]: "target" })).resolves.toBeUndefined()
@@ -118,7 +119,7 @@ describe("update_roadmap_item source-workspace link boundaries", () => {
         } finally { vi.unstubAllEnvs() }
       })
       it(`${purpose} rejects foreign ${field} through the registered wrapper without writing`, async () => {
-        vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+        setModules({ agents: true })
         try {
           mockPrisma[model].findUnique.mockResolvedValue(row("ws-2"))
           await expect(callTool("update_roadmap_item", actor(), {
@@ -129,7 +130,7 @@ describe("update_roadmap_item source-workspace link boundaries", () => {
         } finally { vi.unstubAllEnvs() }
       })
       it(`${purpose} rejects missing ${field}`, async () => {
-        vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+        setModules({ agents: true })
         try {
           mockPrisma[model].findUnique.mockResolvedValue(null)
           await expect(applyToolGate("update_roadmap_item", actor(), { itemId: "item-1", [field]: "missing" })).rejects.toThrow(/not found or access denied/)
@@ -137,14 +138,14 @@ describe("update_roadmap_item source-workspace link boundaries", () => {
       })
     }
     it(`${purpose} allows null and omitted links without target lookups`, async () => {
-      vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+      setModules({ agents: true })
       try {
         await expect(applyToolGate("update_roadmap_item", actor(), { itemId: "item-1", keyResultId: null, solutionId: null })).resolves.toBeUndefined()
         for (const [, model] of targets) expect(mockPrisma[model].findUnique).not.toHaveBeenCalled()
       } finally { vi.unstubAllEnvs() }
     })
     it(`${purpose} cannot clear links without access to the source item`, async () => {
-      vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+      setModules({ agents: true })
       try {
         mockPrisma.workspace.findFirst.mockResolvedValue(null)
         await expect(callTool("update_roadmap_item", actor(), { itemId: "item-1", squadId: null })).rejects.toThrow(/not found or access denied/)
@@ -172,7 +173,7 @@ describe("Decision Artifact mutation boundaries", () => {
       await expect(applyToolGate(tool, MEMBER, { workspaceId: "ws-1", artifactId: "art_1", requestId: "req-1" })).rejects.toThrow(/not found or access denied/)
     })
     it(`${tool} excludes read-only agent grants`, async () => {
-      vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+      setModules({ agents: true })
       try {
         mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "user-1", status: "ACTIVE" })
         mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([])
@@ -193,7 +194,7 @@ describe("apply_recorded_decision service-actor access", () => {
   })
   it("lets an agent identity reach the decisionRecord workspace gate", async () => {
     mockPrisma.decisionRecord.findUnique.mockResolvedValue({ workspaceId: "ws-1" })
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     try {
       mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "user-1", status: "ACTIVE" })
       mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }])
@@ -224,7 +225,7 @@ describe("research study agent policy", () => {
   })
 
   it("lets an agent identity reach the workspace gate for list_research_studies", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     try {
       mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "user-1", status: "ACTIVE" })
       mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }])
@@ -236,7 +237,7 @@ describe("research study agent policy", () => {
   })
 
   it("list_research_studies still denies an agent without a grant on the workspace", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     try {
       mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "user-1", status: "ACTIVE" })
       mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([])
@@ -271,8 +272,10 @@ describe("ADR 0020: AgentOrgAdminGrant for delegated scoring-model admin", () =>
   }
 
   beforeEach(() => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "agent-owner", status: "ACTIVE" })
+    // The agents module is per workspace: the agent is live-granted in a workspace that has it on.
+    mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }])
     mockPrisma.organization.findUnique.mockResolvedValue({ id: "org-1" })
     mockPrisma.workspace.findUnique.mockResolvedValue({ organizationId: "org-1" })
     mockPrisma.scoringModel.findUnique.mockResolvedValue({ organizationId: "org-1" })
@@ -319,8 +322,10 @@ describe("agents inherit their owner's live org admin rights (create_workspace)"
   const ARGS = { orgSlug: "acme" }
 
   beforeEach(() => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "agent-owner", status: "ACTIVE" })
+    // The agents module is per workspace: the agent is live-granted in a workspace that has it on.
+    mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }])
     mockPrisma.organization.findUnique.mockResolvedValue({ id: "org-1" })
     // No per-agent AgentOrgAdminGrant exists: inheritance must not need one.
     mockPrisma.agentOrgAdminGrant.findFirst.mockResolvedValue(null)
@@ -370,8 +375,8 @@ describe("agents inherit their owner's live org admin rights (create_workspace)"
     )
   })
 
-  it("denies when agents are disabled by rollout flag", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+  it("denies when the agents module is off in every workspace the agent is granted", async () => {
+    setModules({ agents: false })
     mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "OWNER" })
     await expect(applyToolGate("create_workspace", AGENT, ARGS)).rejects.toThrow("Human administrator required.")
   })
@@ -515,6 +520,43 @@ describe("TOOL_SCOPES completeness", () => {
     expect(scopesSatisfy(["mcp:write"], "mcp:write")).toBe(true)
     expect(scopesSatisfy(["offline_access"], "mcp:read")).toBe(false)
     expect(scopesSatisfy([], "mcp:read")).toBe(false)
+  })
+})
+
+describe("workspace module tools", () => {
+  it("list_workspace_modules is a READ tool, so agents may call it to learn why a feature is off", () => {
+    expect(AGENT_TOOL_POLICY.list_workspace_modules).toBe("READ")
+    expect(requiredToolScope("list_workspace_modules")).toBe("mcp:read")
+  })
+
+  it("update_workspace_module is a WRITE-scope tool that is DENY for agent identities", () => {
+    expect(requiredToolScope("update_workspace_module")).toBe("mcp:write")
+    expect(AGENT_TOOL_POLICY.update_workspace_module).toBe("DENY")
+  })
+
+  it("list_workspace_modules requires membership of the declared workspace", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
+    await expect(applyToolGate("list_workspace_modules", MEMBER, { workspaceId: "ws-1" })).resolves.toBeUndefined()
+    mockPrisma.workspace.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate("list_workspace_modules", MEMBER, { workspaceId: "ws-1" })).rejects.toThrow(/not found or access denied/)
+  })
+
+  it("update_workspace_module requires a workspace admin, not just a member", async () => {
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "MEMBER" })
+    mockPrisma.organizationMember.findFirst.mockResolvedValue(null)
+    await expect(applyToolGate("update_workspace_module", MEMBER, { workspaceId: "ws-1", moduleKey: "following", enabled: true })).rejects.toThrow(/workspace admin required/)
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    await expect(applyToolGate("update_workspace_module", MEMBER, { workspaceId: "ws-1", moduleKey: "following", enabled: true })).resolves.toBeUndefined()
+  })
+
+  it("update_workspace_module refuses an agent identity even when its owner is a workspace admin", async () => {
+    setModules({ agents: true })
+    mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "user-1", status: "ACTIVE" })
+    mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }])
+    mockPrisma.workspaceMember.findFirst.mockResolvedValue({ role: "ADMIN" })
+    mockPrisma.agentToolCall.create.mockResolvedValue({ id: "activity-1" })
+    await expect(applyToolGate("update_workspace_module", { userId: "user-1", purpose: "AGENT" as const, agentId: "agent-1" }, { workspaceId: "ws-1", moduleKey: "following", enabled: true }))
+      .rejects.toThrow(/human identity/)
   })
 })
 
@@ -896,7 +938,7 @@ describe("typed link tools are classified, gated, and same-workspace", () => {
   })
 
   it("agents without a write grant are denied the write tools at the workspace gate", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     try {
       mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "user-1", status: "ACTIVE" })
       mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([])
@@ -997,7 +1039,7 @@ describe("generic link tools resolve the link type from the registry and apply i
   })
 
   it("agents without a write grant are denied at the workspace gate", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     try {
       mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "user-1", status: "ACTIVE" })
       mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([])
@@ -1151,7 +1193,7 @@ describe("card sort tool policy", () => {
   })
 
   it.each(WRITE_TOOLS)("%s is refused for an agent identity even with a workspace grant", async (tool) => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     try {
       mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "user-1", status: "ACTIVE" })
       mockPrisma.agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1" }])

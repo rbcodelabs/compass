@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { setModules } from "../helpers/modules"
+import { isModuleEnabled } from "@/lib/modules/server"
 
 const apiKey = { findFirst: vi.fn(), update: vi.fn() }
 const agent = { findFirst: vi.fn() }
 const oAuthToken = { findFirst: vi.fn(), update: vi.fn() }
-vi.mock("@/lib/db", () => ({ default: () => ({ apiKey, agent, oAuthToken }) }))
+const agentWorkspaceGrant = { findMany: vi.fn() }
+vi.mock("@/lib/db", () => ({ default: () => ({ apiKey, agent, oAuthToken, agentWorkspaceGrant }) }))
 
 import { validateMcpAuth, validateProgrammaticAuth } from "@/lib/mcp-auth"
 import { AGENT_LEGACY_SELECT, resetAgentColumnsAvailabilityCache } from "@/lib/agent-ownership"
@@ -24,9 +27,13 @@ function oauthRequest(token = OAUTH_TOKEN) {
 }
 
 describe("MCP credential expiry", () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // An agent is only a valid identity while one workspace it is live-granted in has the agents module on.
+    agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1", grantedByUserId: "user" }])
+  })
   it("derives agent identity from the stored credential and checks its human owner", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
     apiKey.update.mockResolvedValue({})
     agent.findFirst.mockResolvedValueOnce({ id: "agent", ownerUserId: "user", status: "ACTIVE" })
@@ -35,7 +42,6 @@ describe("MCP credential expiry", () => {
     expect(agent.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "agent" } }))
     agent.findFirst.mockResolvedValueOnce(null)
     await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
-    vi.unstubAllEnvs()
   })
   it.each([
     ["someone else's agent", { id: "agent", ownerUserId: "other", status: "ACTIVE" }],
@@ -44,23 +50,21 @@ describe("MCP credential expiry", () => {
     ["a WORKSPACE-owned agent whose row still names the key holder", { id: "agent", ownerUserId: "user", ownerType: "WORKSPACE", ownerWorkspaceId: "ws", status: "ACTIVE" }],
     ["an agent with an unrecognized owner type", { id: "agent", ownerUserId: "user", ownerType: "ORG", status: "ACTIVE" }],
   ])("rejects an AGENT key bound to %s", async (_label, row) => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
     apiKey.update.mockResolvedValue({})
     agent.findFirst.mockResolvedValueOnce(row)
     await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
-    vi.unstubAllEnvs()
   })
   it("treats NULL kind and owner_type (rows from before migration 098) as an EXTERNAL, USER-owned agent", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
     apiKey.update.mockResolvedValue({})
     agent.findFirst.mockResolvedValueOnce({ id: "agent", ownerUserId: "user", status: "ACTIVE", kind: null, ownerType: null, ownerWorkspaceId: null })
     await expect(validateMcpAuth(request())).resolves.toMatchObject({ valid: true, agentId: "agent" })
-    vi.unstubAllEnvs()
   })
   it("keeps authenticating existing agents while migration 098 is unapplied (a missing column falls back to the legacy select)", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
     apiKey.update.mockResolvedValue({})
     resetAgentColumnsAvailabilityCache()
@@ -70,10 +74,9 @@ describe("MCP credential expiry", () => {
     await expect(validateMcpAuth(request())).resolves.toMatchObject({ valid: true, agentId: "agent" })
     expect(agent.findFirst).toHaveBeenLastCalledWith({ where: { id: "agent" }, select: AGENT_LEGACY_SELECT })
     resetAgentColumnsAvailabilityCache()
-    vi.unstubAllEnvs()
   })
   it("does not swallow other database errors as a missing column", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
     resetAgentColumnsAvailabilityCache()
     agent.findFirst.mockRejectedValueOnce(new Error("connection reset"))
@@ -84,19 +87,43 @@ describe("MCP credential expiry", () => {
     expect(agent.findFirst).toHaveBeenCalledTimes(1)
     expect(spy).toHaveBeenCalled()
     spy.mockRestore()
-    vi.unstubAllEnvs()
   })
   it("rejects personal credentials carrying an agent identity", async () => {
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: null, agentId: "agent", expiresAt: null })
     await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
   })
 
-  it("rejects a registered-agent key while rollout is disabled", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+  it("rejects a registered-agent key while the agents module is off", async () => {
+    setModules({ agents: false })
     apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
     apiKey.update.mockResolvedValue({})
+    agent.findFirst.mockResolvedValueOnce({ id: "agent", ownerUserId: "user", status: "ACTIVE" })
     await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
-    vi.unstubAllEnvs()
+  })
+
+  it("accepts an AGENT key while at least one live-granted workspace has agents on, and ignores the workspaces that do not", async () => {
+    apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
+    apiKey.update.mockResolvedValue({})
+    agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "user", status: "ACTIVE" })
+    agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-off", grantedByUserId: "user" }, { workspaceId: "ws-on", grantedByUserId: "user" }])
+    const stub = vi.mocked(isModuleEnabled)
+    const original = stub.getMockImplementation()
+    try {
+      stub.mockImplementation(async (workspaceId) => workspaceId === "ws-on")
+      await expect(validateMcpAuth(request())).resolves.toMatchObject({ valid: true, purpose: "AGENT", agentId: "agent" })
+      stub.mockImplementation(async () => false)
+      await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
+    } finally {
+      stub.mockImplementation(original!)
+    }
+  })
+
+  it("fails closed for an AGENT key whose agent holds no live grant, even with agents on", async () => {
+    apiKey.findFirst.mockResolvedValue({ id: "key", userId: "user", purpose: "AGENT", agentId: "agent", expiresAt: null })
+    apiKey.update.mockResolvedValue({})
+    agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "user", status: "ACTIVE" })
+    agentWorkspaceGrant.findMany.mockResolvedValue([])
+    await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
   })
 
   it("rejects an assistant-turn credential without workspace and expiry", async () => {
@@ -276,8 +303,8 @@ describe("OAuth access tokens", () => {
  * The escalation matrix for ADR 0015. Every case below asserts the *same*
  * property from a different direction: an agent-bound token either acts as its
  * agent or does not act at all. There is no third outcome, and in particular
- * there is no downgrade to `purpose: "USER"` — that would make flipping
- * COMPASS_AGENTS_ENABLED off a privilege escalation, and would let a suspended
+ * there is no downgrade to `purpose: "USER"` — that would make switching
+ * the agents module off a privilege escalation, and would let a suspended
  * agent keep working through OAuth while failing through its own key.
  */
 describe("OAuth access tokens bound to an agent", () => {
@@ -293,7 +320,8 @@ describe("OAuth access tokens bound to an agent", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     oAuthToken.update.mockResolvedValue({})
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
+    agentWorkspaceGrant.findMany.mockResolvedValue([{ workspaceId: "ws-1", grantedByUserId: "user-1" }])
   })
   afterEach(() => vi.unstubAllEnvs())
 
@@ -329,13 +357,11 @@ describe("OAuth access tokens bound to an agent", () => {
     await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({ valid: false })
   })
 
-  it("refuses, and does not downgrade, while the agent rollout is disabled", async () => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "0")
+  it("refuses, and does not downgrade, while no workspace the agent is granted in has the agents module on", async () => {
+    setModules({ agents: false })
     oAuthToken.findFirst.mockResolvedValue(agentRow)
+    agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "user-1", status: "ACTIVE" })
     await expect(validateMcpAuth(oauthRequest())).resolves.toEqual({ valid: false })
-    // Refused before the agent lookup — the flag is checked first, exactly as
-    // on the key path.
-    expect(agent.findFirst).not.toHaveBeenCalled()
   })
 
   it("refuses an AGENT-mode row whose agentId is missing", async () => {

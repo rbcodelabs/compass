@@ -265,7 +265,7 @@ Do not send both `assignee` and the legacy `assigneeUserId` field.
 ## Deployment
 
 Administrators must apply and verify migration `049_agent_identity` before
-this revision receives user traffic, then enable `COMPASS_AGENTS_ENABLED=1`. Cloud agents
+this revision receives user traffic, then a workspace administrator turns on the Agents module for each workspace in Settings > Modules. Cloud agents
 additionally need migrations `098`, `099`, `100`, `101` and `102` (the run-limit columns); the code tolerates any of
 them being unapplied (cloud-agent features stay unavailable and chat uses the built-in agent; without `102`
 every agent simply uses the default limits and the limit fields cannot be saved).

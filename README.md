@@ -47,7 +47,7 @@ remain in page memory. See the [explorer guide](docs/content/09-api-explorer.md)
 The opt-in **[Updates](docs/content/22-updates.md)** landing page groups recent
 workspace activity into inspectable stories, with personal catch-up state and
 explicit Mark caught up / Undo controls. It requires the registered
-`060_workspace_updates` migration and `WORKSPACE_UPDATES_ENABLED=1`; capture is
+`060_workspace_updates` migration and the Workspace updates module (Settings > Modules); capture is
 prospective, with no historical backfill.
 
 Full product documentation lives in [`docs/content/`](docs/content/), starting

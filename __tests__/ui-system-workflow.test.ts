@@ -12,7 +12,10 @@ describe("UI system workflow integration", () => {
     const workflow = readFileSync(new URL("../.github/workflows/ui-system.yml", import.meta.url), "utf8")
     const capture = workflow.split("  authenticated-capture:")[1].split("\n  screenshots:")[0]
     expect(capture).toContain("e2e/functional/specs/capture-research.spec.ts e2e/functional/specs/research-browser-voice.spec.ts")
-    expect(capture).toContain('COMPASS_RESEARCH_BROWSER_VOICE_ENABLED: "1"')
+    // Browser voice is a workspace module now: the functional seed enables every module, not a workflow environment variable.
+    expect(capture).not.toContain("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED")
+    const seed = readFileSync(new URL("../e2e/functional/fixtures/seed-e2e.ts", import.meta.url), "utf8")
+    expect(seed).toContain("for (const key of MODULE_KEYS)")
   })
   it("declares each required authentication gate exactly once", () => {
     const workflow = readFileSync(new URL("../.github/workflows/ui-system.yml", import.meta.url), "utf8")

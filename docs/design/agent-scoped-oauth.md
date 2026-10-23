@@ -571,7 +571,13 @@ proves a value was authentic when rendered, not that it is still authorized.
 Recommend the single screen; record the two-step as the fallback if review
 disagrees.
 
-### `COMPASS_AGENTS_ENABLED`
+### `COMPASS_AGENTS_ENABLED` (superseded)
+
+> **Superseded by the per-workspace `agents` module** (docs/adr-workspace-modules.md). The environment flag no longer exists. An agent
+> key or agent-bound OAuth token is valid while at least one workspace the agent holds a live grant in has the module on, and every
+> request is narrowed to the granted workspaces that have it on (`agentWorkspaceWhere`). The consent screen shows the "Act as"
+> section while any workspace the user belongs to has the module on. The fail-closed rules below (401, never a downgrade to USER)
+> are unchanged. The original text follows.
 
 Agent keys require it (`lib/mcp-auth.ts:61`), and `agentWorkspaceWhere` returns
 `{ id: { in: [] } }` without it (`lib/agent-access.ts:12`).

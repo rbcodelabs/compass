@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { setFeatureTables, setModules } from "./helpers/modules"
+import { followingTablesExist } from "@/lib/feature-tables"
 import { followableConfig } from "@/lib/followable"
 import { withFollowingCommit } from "@/lib/following-commit"
 
-const mocks = vi.hoisted(() => ({ available: vi.fn(), apply: vi.fn() }))
-vi.mock("@/lib/workspace-updates-capture", () => ({ withWorkspaceUpdates: (db: unknown, fn: (db: unknown, enabled: boolean) => unknown) => fn(db, false), recordWorkspaceUpdate: vi.fn() }))
+const mocks = vi.hoisted(() => ({ apply: vi.fn() }))
+vi.mock("@/lib/workspace-updates-capture", () => ({ withWorkspaceUpdates: (db: unknown, _workspaceId: unknown, fn: (db: unknown, enabled: boolean) => unknown) => fn(db, false), recordWorkspaceUpdate: vi.fn() }))
 vi.mock("@/lib/workspace-update-mutations", () => ({ workspaceMutationActor: async () => ({ actorType: "USER", actorId: "user-1" }) }))
-vi.mock("@/lib/following-flag", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/following-flag")>()), followingAvailable: mocks.available }))
 vi.mock("@/lib/following-hooks", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/following-hooks")>()), applyFollowingEffects: mocks.apply }))
 
 const prisma = {
@@ -30,9 +31,8 @@ const AGENT = "55555555-5555-5555-5555-555555555555"
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.stubEnv("FOLLOWING_ENABLED", "1")
+  setModules({ following: true }); setFeatureTables({ following: true })
   followableConfig.shippedSlice = 2
-  mocks.available.mockResolvedValue(true)
   mocks.apply.mockResolvedValue(undefined)
   prisma.task.findUnique.mockResolvedValue({ workspaceId: WS })
   prisma.experiment.findUnique.mockResolvedValue({ workspaceId: WS })
@@ -78,10 +78,10 @@ describe("createComment following hook", () => {
   it("is silent for migration imports, unshipped subject types, FOLLOWING off and missing tables", async () => {
     await createComment({ ...comment, source: "MIGRATION" })
     await createComment({ ...comment, targetType: "EXPERIMENT" })
-    mocks.available.mockResolvedValue(false)
+    setFeatureTables({ following: false })
     await createComment(comment)
-    vi.stubEnv("FOLLOWING_ENABLED", "0")
-    mocks.available.mockResolvedValue(true)
+    setModules({ following: false })
+    setFeatureTables({ following: true })
     await createComment(comment)
     expect(mocks.apply).not.toHaveBeenCalled()
   })
@@ -102,7 +102,7 @@ describe("createComment following hook", () => {
 
   it("does not fail the comment when the availability probe throws", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
-    mocks.available.mockRejectedValue(new Error("probe down"))
+    vi.mocked(followingTablesExist).mockRejectedValue(new Error("probe down"))
     await expect(createComment(comment)).resolves.toBeTruthy()
     expect(mocks.apply).not.toHaveBeenCalled()
   })

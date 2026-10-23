@@ -7,6 +7,7 @@
  * cross-workspace edit can't slip through (the write-side IDOR guard).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { setModules } from "../helpers/modules";
 
 // The entity_links mirror (ADR phase 5) has its own tests; this file pins the legacy writes against hand-written fakes.
 process.env.COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR = "0";
@@ -63,7 +64,7 @@ beforeEach(() => {
   // existing LAUNCHING/LAUNCHED tests below exercise the pre-existing
   // validation rather than the new disabled-feature gate (which gets its own
   // describe block).
-  database.workspace.findUnique.mockResolvedValue({ launchWorkflowEnabled: true });
+  setModules({ launch_workflow: true });
   database.portfolioCapacityReservation.findUnique.mockResolvedValue(null);
   database.$transaction.mockImplementation((fn: (value: typeof database) => unknown) => fn(database));
 });
@@ -242,9 +243,9 @@ describe("updateEntityField: solution edits reach the roadmap", () => {
   });
 });
 
-describe("updateEntityField — launch horizon gated by Workspace.launchWorkflowEnabled", () => {
+describe("updateEntityField — launch horizon gated by the launch_workflow module", () => {
   it("rejects LAUNCHING with the disabled-feature message (not the 'use a launch tier' message) when the workspace's launch workflow is off", async () => {
-    database.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    setModules({ launch_workflow: false });
     const r = await updateEntityField("roadmapItem", "e1", WS, "horizon", "LAUNCHING");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/launch workflow is disabled/i);
@@ -252,7 +253,7 @@ describe("updateEntityField — launch horizon gated by Workspace.launchWorkflow
   });
 
   it("rejects LAUNCHED with the disabled-feature message when the workspace's launch workflow is off", async () => {
-    database.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false });
+    setModules({ launch_workflow: false });
     const r = await updateEntityField("roadmapItem", "e1", WS, "horizon", "LAUNCHED");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/launch workflow is disabled/i);
@@ -260,7 +261,7 @@ describe("updateEntityField — launch horizon gated by Workspace.launchWorkflow
   });
 
   it("still accepts LAUNCHED when the workspace's launch workflow is on", async () => {
-    database.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: true });
+    setModules({ launch_workflow: true });
     const r = await updateEntityField("roadmapItem", "e1", WS, "horizon", "LAUNCHED");
     expect(r.ok).toBe(true);
   });

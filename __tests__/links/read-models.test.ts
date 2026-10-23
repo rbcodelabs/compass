@@ -3,6 +3,7 @@
  * workspace scoping, PM_INTERVIEW and EXTERNAL exclusion, archived-study rules and the feature flag.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setModules } from "../helpers/modules"
 import { WS_A, WS_B, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
 import type { AppTransactionClient } from "@/lib/db";
 import { getLinkedEntitiesView, loadLinkSummaries } from "@/lib/links/read-models";
@@ -45,7 +46,7 @@ describe("loadLinkSummaries", () => {
     expect(await loadLinkSummaries(tx(), { workspaceId: WS_A.id, entityType: "TASK", entityId: "t" })).toEqual({});
     link("exp-a", "study-a");
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("COMPASS_RESEARCH_CAPTURE_ENABLED", "0");
+    setModules({ research_capture: false });
     expect(await loadLinkSummaries(tx(), { workspaceId: WS_A.id, entityType: "EXPERIMENT", entityId: "exp-a" })).toEqual({});
   });
 });
@@ -81,7 +82,7 @@ describe("getLinkedEntitiesView", () => {
     expect(await view("RESEARCH_STUDY", "study-a-external")).toBeNull();
     expect(await view("EXPERIMENT", "exp-b")).toBeNull();
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("COMPASS_RESEARCH_CAPTURE_ENABLED", "0");
+    setModules({ research_capture: false });
     expect(await view("EXPERIMENT", "exp-a")).toBeNull();
   });
 });

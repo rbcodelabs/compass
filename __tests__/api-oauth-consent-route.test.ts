@@ -9,6 +9,7 @@
  * now carries a binding and has to stay server-revocable.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { setModules } from "./helpers/modules"
 import { createOAuthStore } from "./helpers/oauth-store"
 
 const store = createOAuthStore()
@@ -310,7 +311,7 @@ describe("re-validation between render and submit", () => {
  */
 describe("agent binding", () => {
   beforeEach(() => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
+    setModules({ agents: true })
     actions.createAgent.mockClear()
     actions.createAgent.mockImplementation(async () => ({ id: "agent-new" }))
     actions.grantWorkspaceAgent.mockClear()
