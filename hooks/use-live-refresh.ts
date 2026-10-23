@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, startTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { LiveScope } from "@/lib/live-change-token";
+import type { EntityLiveScope, LiveScope } from "@/lib/live-change-token";
 
 export const LIVE_REFRESH_INTERVAL_MS = 5_000;
 export const LIVE_REFRESH_MAX_BACKOFF_MS = 60_000;
@@ -20,7 +20,7 @@ export function nextPollDelay(
 type Options = {
   orgSlug: string;
   workspaceSlug: string;
-  scope: LiveScope;
+  scope: LiveScope | EntityLiveScope;
   /** Required for the `cardSort` scope. */
   roundId?: string;
   /**
@@ -29,6 +29,13 @@ type Options = {
    * the next poll sees it again and refreshes once the pause lifts.
    */
   paused?: boolean;
+  /** False stops polling entirely (e.g. the surface is mounted but not showing). Default true. */
+  enabled?: boolean;
+  /**
+   * Replaces `router.refresh()` when the token changes. For client-fetched data
+   * (e.g. the rail's Library tree) that a server refresh would not reach.
+   */
+  onChange?: () => void;
   /** Runs right before `router.refresh()`, e.g. to snapshot card positions for FLIP. */
   onBeforeRefresh?: () => void;
   intervalMs?: number;
@@ -50,7 +57,9 @@ export function useLiveRefresh({
   scope,
   roundId,
   paused = false,
+  enabled = true,
   onBeforeRefresh,
+  onChange,
   intervalMs = LIVE_REFRESH_INTERVAL_MS,
 }: Options): void {
   const router = useRouter();
@@ -58,14 +67,17 @@ export function useLiveRefresh({
   // Latest values read by the long-lived poll loop without restarting it.
   const pausedRef = useRef(paused);
   const beforeRefreshRef = useRef(onBeforeRefresh);
+  const onChangeRef = useRef(onChange);
   const routerRef = useRef(router);
   useEffect(() => {
     pausedRef.current = paused;
     beforeRefreshRef.current = onBeforeRefresh;
+    onChangeRef.current = onChange;
     routerRef.current = router;
   });
 
   useEffect(() => {
+    if (!enabled) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let controller: AbortController | null = null;
     let lastToken: string | null = null;
@@ -104,7 +116,9 @@ export function useLiveRefresh({
         } else if (body.token !== lastToken && !pausedRef.current) {
           lastToken = body.token;
           beforeRefreshRef.current?.();
-          startTransition(() => routerRef.current.refresh());
+          const handler = onChangeRef.current;
+          if (handler) handler();
+          else startTransition(() => routerRef.current.refresh());
         }
       } catch (error) {
         if ((error as { name?: string }).name === "AbortError") return;
@@ -133,5 +147,5 @@ export function useLiveRefresh({
       document.removeEventListener("visibilitychange", onVisibilityOrFocus);
       window.removeEventListener("focus", onVisibilityOrFocus);
     };
-  }, [orgSlug, workspaceSlug, scope, roundId, intervalMs]);
+  }, [enabled, orgSlug, workspaceSlug, scope, roundId, intervalMs]);
 }

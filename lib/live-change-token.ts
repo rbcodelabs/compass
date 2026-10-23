@@ -25,6 +25,27 @@ export function isLiveScope(value: string | null): value is LiveScope {
   return value !== null && (LIVE_SCOPES as readonly string[]).includes(value);
 }
 
+/**
+ * Entity-scoped tokens for docs and artifacts, passed as the same `scope` query
+ * param: `doc:<id>`, `artifact:<id>`, or the workspace-level `docs-tree`.
+ */
+export type EntityLiveTarget =
+  | { kind: "doc"; id: string }
+  | { kind: "artifact"; id: string }
+  | { kind: "docs-tree" };
+export type EntityLiveScope = `doc:${string}` | `artifact:${string}` | "docs-tree";
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Parses an entity scope; null for anything else (including a malformed id, which must not reach Prisma). */
+export function parseEntityScope(value: string | null): EntityLiveTarget | null {
+  if (value === "docs-tree") return { kind: "docs-tree" };
+  if (value === null) return null;
+  const match = /^(doc|artifact):(.+)$/.exec(value);
+  if (!match || !UUID_PATTERN.test(match[2])) return null;
+  return { kind: match[1] as "doc" | "artifact", id: match[2] };
+}
+
 /** Order-independent, stable fingerprint of groups of plain rows. */
 export function hashRows(groups: ReadonlyArray<ReadonlyArray<unknown>>): string {
   const hash = createHash("sha1");
@@ -131,6 +152,64 @@ export async function computeChangeToken(
         },
       });
       return hashRows([tasks]);
+    }
+  }
+}
+
+/**
+ * Token for one doc, one artifact, or the Docs library tree. Returns null when
+ * the entity does not exist *in this workspace*, so a caller cannot probe ids
+ * from another workspace (the route answers 404 either way).
+ *
+ * The doc token never selects `content`: reading it can mean a storage
+ * round-trip per poll. `revision` is the content version, but legacy rows have
+ * a null revision, so `updatedAt` is hashed as well. Comments contribute their
+ * status and updatedAt, never their body.
+ */
+export async function computeEntityChangeToken(
+  target: EntityLiveTarget,
+  workspaceId: string,
+): Promise<string | null> {
+  const prisma = getPrisma();
+  switch (target.kind) {
+    case "doc": {
+      const doc = await prisma.doc.findFirst({
+        where: { id: target.id, workspaceId },
+        select: { id: true, revision: true, updatedAt: true, docType: true, title: true },
+      });
+      if (!doc) return null;
+      const comments = await prisma.docComment.findMany({
+        where: { docId: doc.id },
+        select: { id: true, status: true, updatedAt: true },
+      });
+      return hashRows([[doc], comments]);
+    }
+    case "artifact": {
+      const artifact = await prisma.artifact.findFirst({
+        where: { id: target.id, workspaceId },
+        select: {
+          id: true, currentRevisionId: true, updatedAt: true, status: true, title: true,
+          description: true, kind: true,
+        },
+      });
+      if (!artifact) return null;
+      return hashRows([[artifact]]);
+    }
+    case "docs-tree": {
+      // Mirrors app/api/docs-tree/route.ts: exactly the fields the Library
+      // renders. Doc updatedAt is deliberately absent: it is not displayed and
+      // would refetch the tree on every autosave of any doc.
+      const [docs, artifacts] = await Promise.all([
+        prisma.doc.findMany({
+          where: { workspaceId },
+          select: { id: true, title: true, icon: true, parentId: true, sortOrder: true, docType: true },
+        }),
+        prisma.artifact.findMany({
+          where: { workspaceId, status: "ACTIVE" },
+          select: { id: true, title: true, sourceType: true, updatedAt: true },
+        }),
+      ]);
+      return hashRows([docs, artifacts]);
     }
   }
 }

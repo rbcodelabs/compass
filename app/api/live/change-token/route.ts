@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getWorkspace } from "@/lib/workspace";
 import { CardSortError } from "@/lib/card-sort";
-import { computeChangeToken, isLiveScope } from "@/lib/live-change-token";
+import { computeChangeToken, computeEntityChangeToken, isLiveScope, parseEntityScope } from "@/lib/live-change-token";
 
 /**
  * Change token for live board refresh (see lib/live-change-token.ts).
@@ -27,10 +27,19 @@ export async function GET(request: Request) {
   if (!orgSlug || !workspaceSlug) {
     return NextResponse.json({ error: "Missing orgSlug or workspaceSlug" }, { status: 400 });
   }
-  if (!isLiveScope(scope)) return NextResponse.json({ error: "Unknown scope" }, { status: 400 });
+  const entity = parseEntityScope(scope);
+  if (!entity && !isLiveScope(scope)) return NextResponse.json({ error: "Unknown scope" }, { status: 400 });
 
   const workspace = await getWorkspace(orgSlug, workspaceSlug, session.user.id);
   if (!workspace) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  if (entity) {
+    // null = the entity is not in this workspace; indistinguishable from absent.
+    const entityToken = await computeEntityChangeToken(entity, workspace.id);
+    if (entityToken === null) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ token: entityToken }, { headers: { "Cache-Control": "no-store" } });
+  }
+  if (!isLiveScope(scope)) return NextResponse.json({ error: "Unknown scope" }, { status: 400 });
 
   const roundId = params.get("roundId");
   if (scope === "cardSort" && !roundId) {
