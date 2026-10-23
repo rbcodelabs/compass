@@ -12,7 +12,7 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/tasks/actions", () => ({
 }));
 vi.mock("@/lib/task-assignees-client", () => ({ fetchTaskAssigneeOptions: vi.fn().mockResolvedValue([]) }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
   usePathname: () => "/rbcodelabs/compass/tasks",
   useSearchParams: () => new URLSearchParams(),
 }));
@@ -141,47 +141,39 @@ describe("TaskBoard filter remount", () => {
     expect(screen.queryByText("Bob task")).not.toBeInTheDocument();
   });
 
-  it("does not revert an optimistic move when revalidation re-sends the pre-move task set", async () => {
+  it("adopts server truth when revalidation disagrees with an idle optimistic move", async () => {
+    // Moves in flight are protected by the busy guard in useServerSyncedState
+    // (drag / pending transition). Once the board is idle the server is
+    // authoritative, which is what lets an agent's change show up live.
     const { rerender } = render(<Page tasks={[alice, bob]} />);
     const todoColumn = () => document.querySelector<HTMLElement>('[data-task-column="TODO"]')!;
-    expect(todoColumn().textContent).toContain("Alice task");
 
-    // Drive a real optimistic column move through the card menu. This is the
-    // same setColumns path drag-and-drop uses: the client moves the task
-    // immediately, and the server props still describe the pre-move state.
     fireEvent.click(within(todoColumn()).getAllByRole("button", { name: "Card actions" })[0]);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Cancel" }));
     expect(todoColumn().textContent).not.toContain("Alice task");
-    expect(screen.getByRole("button", { name: /Show cancelled \(1\)/ })).toBeVisible();
 
-    // Revalidation lands under an unchanged filter, so the key is unchanged and
-    // the board must leave its optimistic state alone.
     rerender(<Page tasks={[alice, bob]} />);
 
-    expect(todoColumn().textContent).not.toContain("Alice task");
-    expect(screen.getByRole("button", { name: /Show cancelled \(1\)/ })).toBeVisible();
+    expect(todoColumn().textContent).toContain("Alice task");
   });
 
-  it("also holds its optimistic state when revalidation changes the task set under an unchanged filter", async () => {
-    // The deliberate tradeoff of keying on the filter instead of on the task
-    // set: a task appearing from elsewhere (another session, an MCP write) does
-    // not force a rebuild, so a pending optimistic move is never discarded by
-    // an unrelated change. The new task simply is not shown until something
-    // does remount the board.
+  it("picks up a task that arrives from elsewhere under an unchanged filter", () => {
     const { rerender } = render(<Page tasks={[alice, bob]} />);
-    const todoColumn = () => document.querySelector<HTMLElement>('[data-task-column="TODO"]')!;
-
-    fireEvent.click(within(todoColumn()).getAllByRole("button", { name: "Card actions" })[0]);
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Cancel" }));
-    expect(todoColumn().textContent).not.toContain("Alice task");
 
     const carol = task({ id: "t-carol", title: "Carol task", sortOrder: 2 });
     rerender(<Page tasks={[alice, bob, carol]} />);
 
-    // Optimistic state preserved …
-    expect(todoColumn().textContent).not.toContain("Alice task");
-    expect(screen.getByRole("button", { name: /Show cancelled \(1\)/ })).toBeVisible();
-    // … at the cost of not picking up the newly arrived task.
-    expect(screen.queryByText("Carol task")).not.toBeInTheDocument();
+    expect(screen.getByText("Carol task")).toBeVisible();
+  });
+
+  it("moves a card to another column when the server reports a new status", () => {
+    const { rerender } = render(<Page tasks={[alice, bob]} />);
+    const column = (status: string) => document.querySelector<HTMLElement>(`[data-task-column="${status}"]`)!;
+    expect(column("TODO").textContent).toContain("Alice task");
+
+    rerender(<Page tasks={[{ ...alice, status: "IN_PROGRESS" }, bob]} />);
+
+    expect(column("TODO").textContent).not.toContain("Alice task");
+    expect(column("IN_PROGRESS").textContent).toContain("Alice task");
   });
 });

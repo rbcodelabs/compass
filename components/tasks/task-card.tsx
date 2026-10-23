@@ -94,7 +94,7 @@ export function TaskCard({ task, revalidatePathStr, members, onCancel }: Props) 
   const dueLabel = formatDueDate(task.dueDate);
 
   return (
-    <div ref={setNodeRef} style={style} className="group">
+    <div ref={setNodeRef} style={style} className="group" data-flip-id={task.id}>
       <EntityCard
         interactive
         className="w-full p-3 data-[dragging=true]:shadow-[var(--shadow-panel)] data-[dragging=true]:ring-2 data-[dragging=true]:ring-ring/30"
