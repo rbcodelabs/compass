@@ -124,7 +124,7 @@ describe("immutable document service", () => {
     const legacyOpts = { ...opts, expectedRevision: documentRevision(legacy) }
     await updateDocument("doc-a", { title: "new" }, legacyOpts)
     expect(mocks.db.doc.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ revision: null, updatedAt: legacy.updatedAt }),
+      where: expect.objectContaining({ revision: null, updatedAt: { gte: legacy.updatedAt, lt: new Date(legacy.updatedAt.getTime() + 1) } }),
       data: expect.objectContaining({ revision: expect.any(String) }),
     }))
   })
@@ -220,7 +220,7 @@ describe("immutable document service", () => {
     mocks.db.doc.findUnique.mockResolvedValue(legacy)
     mocks.db.doc.findFirst.mockResolvedValue(null) // no children
     await deleteDocument("doc-a", { authorName: "Agent", expectedRevision: documentRevision(legacy) })
-    expect(mocks.db.doc.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "doc-a", workspaceId: "workspace-a", revision: null, updatedAt: legacy.updatedAt } }))
+    expect(mocks.db.doc.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "doc-a", workspaceId: "workspace-a", revision: null, updatedAt: { gte: legacy.updatedAt, lt: new Date(legacy.updatedAt.getTime() + 1) } } }))
     expect(mocks.db.doc.delete).toHaveBeenCalledWith({ where: { id: "doc-a" } })
   })
 
