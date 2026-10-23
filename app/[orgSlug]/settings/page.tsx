@@ -10,7 +10,6 @@ import { PageHeader } from "@/components/patterns/page-header";
 import { SettingsSection } from "@/components/patterns/settings-section";
 import { AgentAccessPanel } from "@/components/settings/agent-access-panel";
 import { listAgentAccessRows } from "@/lib/agent-org-admin-access";
-import { isModuleEnabledInAnyOrgWorkspace } from "@/lib/modules/server";
 import { getSessionUser } from "@/lib/session";
 
 export const metadata = { title: "Organization Settings" };
@@ -59,8 +58,6 @@ export default async function OrgSettingsPage({ params }: Props) {
     : null;
   const canManageAgents = isOrgAdminRole(viewerMembership?.role);
   const agentRows = canManageAgents ? await listAgentAccessRows(prisma, organization.id) : [];
-  // Org-level agent access has no single workspace: available while any workspace of the organization has the agents module on.
-  const agentsAvailable = await isModuleEnabledInAnyOrgWorkspace(organization.id, "agents");
 
   // Drives the "who starts as a member" choice in CreateWorkspacePanel, so the
   // admin sees how many people each option adds before they pick.
@@ -126,7 +123,7 @@ export default async function OrgSettingsPage({ params }: Props) {
           title="Agent access"
           description="Delegate narrow organization-admin capabilities to a specific agent."
         >
-          <AgentAccessPanel orgSlug={orgSlug} rows={agentRows} canManage={canManageAgents} agentsEnabled={agentsAvailable} />
+          <AgentAccessPanel orgSlug={orgSlug} rows={agentRows} canManage={canManageAgents} />
         </SettingsSection>
       )}
 

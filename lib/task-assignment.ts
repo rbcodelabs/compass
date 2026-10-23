@@ -1,6 +1,4 @@
 import getPrisma from "@/lib/db";
-import { agentsEnabledInWorkspace } from "@/lib/agent-access";
-import { moduleDisabledMessage } from "@/lib/modules/registry";
 import { agentEligibleInWorkspace, agentKind, type AgentRecord, agentOwner, findAgentById, findAgentsByIds, withAgentColumns } from "@/lib/agent-ownership";
 import { UNASSIGNED_ASSIGNEE_FILTER } from "@/lib/task-assignee-display";
 import type { TaskLinkRecordType } from "@/lib/types";
@@ -22,7 +20,6 @@ export async function assignmentUpdate(workspaceId: string, input: AssignmentInp
     if (!member) throw new Error("Assignee is not in this workspace");
     return { assigneeUserId: assignee.id, assigneeAgentId: null };
   }
-  if (!(await agentsEnabledInWorkspace(workspaceId))) throw new Error(moduleDisabledMessage("agents"));
   const agent = await findAgentById(prisma, assignee.id);
   if (!agent || agent.status !== "ACTIVE") throw new Error("Assignee agent is not active");
   const owner = agentOwner(agent);
@@ -79,7 +76,6 @@ export async function eligibleTaskAssignees(workspaceId: string): Promise<Resolv
   const prisma = getPrisma();
   const members = await prisma.workspaceMember.findMany({ where: { workspaceId }, include: { user: { select: { name: true, email: true } } }, orderBy: { userId: "asc" } });
   const people: ResolvedTaskAssignee[] = members.map(m => ({ type: "USER", id: m.userId, displayName: m.user.name || m.user.email, available: true }));
-  if (!(await agentsEnabledInWorkspace(workspaceId))) return people;
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId, revokedAt: null } });
   if (!grants.length) return people;
   const granted = await withAgentColumns(({ select }) => prisma.agent.findMany({ where: { id: { in: grants.map(g => g.agentId) }, status: "ACTIVE" }, select, orderBy: [{ name: "asc" }, { id: "asc" }] }));

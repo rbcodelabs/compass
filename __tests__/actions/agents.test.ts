@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  auth: vi.fn(), admin: vi.fn(), enabled: vi.fn(),
+  auth: vi.fn(), admin: vi.fn(),
   agent: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   apiKey: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   oAuthConsent: { findFirst: vi.fn(), deleteMany: vi.fn() },
@@ -15,16 +15,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/db", () => ({ default: () => mocks }));
 vi.mock("@/lib/permissions", () => ({ resolveWorkspaceAdmin: mocks.admin }));
-vi.mock("@/lib/agent-access", async (original) => ({ ...(await original<object>()), agentsEnabledForUser: mocks.enabled, agentsEnabledInWorkspace: mocks.enabled, agentHasEnabledWorkspace: mocks.enabled }));
+vi.mock("@/lib/agent-access", () => ({ liveGrantedWorkspaceIds: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 import { createAgent, updateAgent, createAgentKey, revokeAgentKey, grantWorkspaceAgent, revokeWorkspaceAgent, reconnectOAuthConnection, revokeOAuthConnection } from "@/app/settings/agents/actions";
 import { validateMcpAuth } from "@/lib/mcp-auth";
-import { moduleDisabledMessage } from "@/lib/modules/registry";
 
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.auth.mockResolvedValue({ user: { id: "owner" } });
-  mocks.enabled.mockResolvedValue(true);
   mocks.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "owner", status: "ACTIVE" });
   mocks.admin.mockResolvedValue({ prisma: mocks, workspaceId: "workspace" });
   mocks.workspaceMember.findFirst.mockResolvedValue({ id: "member", role: "MEMBER" });
@@ -39,7 +37,7 @@ beforeEach(() => {
 
 describe("agent account and workspace management", () => {
   it("authenticates a key minted by the account UI with the MCP validator", async () => {
-    {
+    try {
       mocks.apiKey.create.mockImplementation(async ({ data }) => {
         mocks.apiKey.findFirst.mockImplementation(async ({ where }) => where.keyPrefix === data.keyPrefix && where.keyHash === data.keyHash ? { id: "persisted-key", ...data, scopeWorkspaceId: null } : null);
         return { id: "persisted-key" };
@@ -47,7 +45,7 @@ describe("agent account and workspace management", () => {
       mocks.apiKey.update.mockResolvedValue({});
       const { rawKey } = await createAgentKey("agent", { name: "Integration" });
       await expect(validateMcpAuth(new Request("https://compass.test/api/mcp", { headers: { authorization: `Bearer ${rawKey}` } }))).resolves.toMatchObject({ valid: true, purpose: "AGENT", agentId: "agent", userId: "owner", credentialId: "persisted-key" });
-    }
+    } finally { vi.unstubAllEnvs(); }
   });
   it("creates an account identity without workspace membership", async () => {
     await createAgent({ name: " Engineer " });
@@ -77,10 +75,6 @@ describe("agent account and workspace management", () => {
   it("does not mint keys for suspended agents", async () => {
     mocks.agent.findFirst.mockResolvedValue({ id: "agent", ownerUserId: "owner", status: "SUSPENDED" });
     await expect(createAgentKey("agent", { name: "Laptop" })).rejects.toThrow("suspended");
-  });
-  it("prevents grant expansion when the agents module is off", async () => {
-    mocks.enabled.mockResolvedValue(false);
-    await expect(grantWorkspaceAgent("org", "ws", "agent", "WRITE")).rejects.toThrow(moduleDisabledMessage("agents"));
   });
   it("requires admin authority and owner membership for grants", async () => {
     mocks.workspaceMember.findFirst.mockResolvedValue(null);
@@ -128,8 +122,7 @@ describe("agent account and workspace management", () => {
       expect(mocks.apiKey.create).not.toHaveBeenCalled();
     });
   });
-  it("allows revocation while the agents module is off", async () => {
-    mocks.enabled.mockResolvedValue(false);
+  it("revokes a key and a workspace grant", async () => {
     mocks.apiKey.findFirst.mockResolvedValue({ id: "key" });
     await revokeAgentKey("key");
     await revokeWorkspaceAgent("org", "ws", "agent");

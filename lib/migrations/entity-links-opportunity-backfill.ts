@@ -28,10 +28,12 @@ import { WorkspaceIdBackfillRefusal, withOccRetry } from "@/lib/migrations/works
  * pointer row per opportunity), every mirror row's workspace_id equals both endpoints', and no mirror row has a missing endpoint
  * unless its legacy counterpart is one of the reported quarantined rows.
  *
- * A residual re-run migration (the 072 / 094 pattern) is NOT built here. If the dual-write code turns out to leave drift between
- * this migration and the read flip, register a DDL-free "096_..._residual" that calls the same two exported functions.
+ * RESIDUAL PASS. The runner never re-runs an applied migration, so re-POSTing 095 does nothing. Rows written while the mirror flag was
+ * off are picked up by the DDL-free, explicit-only "106_entity_links_residual_opportunity" (the 072 / 094 pattern), which calls the same
+ * two exported functions.
  */
 export const ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION = "095_entity_links_backfill_opportunity"
+export const ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION = "106_entity_links_residual_opportunity"
 
 export const OPPORTUNITY_OBJECTIVE_KEY = "OPPORTUNITY_TARGETS_OBJECTIVE"
 export const OPPORTUNITY_KEY_RESULT_KEY = "OPPORTUNITY_TARGETS_KEY_RESULT"

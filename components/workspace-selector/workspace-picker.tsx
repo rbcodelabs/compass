@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ChevronDown, LayoutGrid, Plus, Search, X } from "lucide-react"
+import { ChevronDown, LayoutGrid, Layers, Plus, Search, X } from "lucide-react"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { SidebarMenuButton } from "@/components/ui/sidebar"
@@ -22,6 +22,8 @@ interface WorkspacePickerProps {
   workspaceName: string
   /** Scopes the "Recent" history to one account (browsers are shared). */
   userScope?: string
+  /** Cross-workspace roadmap for this org; omit when there is nothing to compare. */
+  orgRoadmapHref?: string
 }
 
 /**
@@ -29,7 +31,7 @@ interface WorkspacePickerProps {
  * links to the full gallery. Rows keep the current top-level section when
  * switching (see getWorkspaceSwitchPath).
  */
-export function WorkspacePicker({ workspaces, orgSlug, workspaceSlug, workspaceName, userScope }: WorkspacePickerProps) {
+export function WorkspacePicker({ workspaces, orgSlug, workspaceSlug, workspaceName, userScope, orgRoadmapHref }: WorkspacePickerProps) {
   const pathname = usePathname()
   const visits = useWorkspaceVisits(userScope)
   const [open, setOpen] = useState(false)
@@ -189,6 +191,12 @@ export function WorkspacePicker({ workspaces, orgSlug, workspaceSlug, workspaceN
           </div>
 
           <div className="wsx-pop-foot">
+            {orgRoadmapHref && (
+              <Link href={orgRoadmapHref} className="wsx-act" aria-current={pathname === orgRoadmapHref ? "page" : undefined} data-wsx-item="" data-testid="nav-org-roadmap" onClick={close}>
+                <Layers className="wsx-icon" aria-hidden="true" />
+                All roadmaps
+              </Link>
+            )}
             {workspaces.length > 1 && (
               <Link href="/dashboard" className="wsx-act" data-wsx-item="" onClick={close}>
                 <LayoutGrid className="wsx-icon" aria-hidden="true" />

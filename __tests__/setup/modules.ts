@@ -28,8 +28,6 @@ vi.mock("@/lib/modules/server", async () => {
     getWorkspaceModuleStates: vi.fn(async () => states()),
     enabledModuleKeys: vi.fn(async () => MODULE_KEYS.filter((key) => states()[key].enabled)),
     researchNavEnabled: vi.fn(async () => states().research_capture.enabled),
-    isModuleEnabledInAnyMemberWorkspace: vi.fn(enabled),
-    isModuleEnabledInAnyOrgWorkspace: vi.fn(enabled),
     describeModules: vi.fn(async () => MODULE_KEYS.map((key) => ({
       key, label: MODULE_REGISTRY[key].label, description: MODULE_REGISTRY[key].description, group: MODULE_REGISTRY[key].group,
       sensitive: MODULE_REGISTRY[key].sensitive === true, enabled: states()[key].enabled, selected: states()[key].selected,

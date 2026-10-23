@@ -51,7 +51,7 @@ to none of them:
 | Reach limited to workspaces with an unrevoked `AgentWorkspaceGrant`, per-workspace READ or WRITE | `agentWorkspaceWhere`, `lib/agent-access.ts:12-17` | No |
 | `assertWorkspaceAdmin` / `assertOrgAdminBySlug` / admin `assertScoringModelAccess` throw *"Human administrator required."* | `lib/mcp-authz.ts:122`, `:195`, `:380` | No |
 | 17 `DENY` entries barring agent identities from specific tools | `AGENT_TOOL_POLICY`, `lib/mcp-tool-gates.ts:615` and `:624`, applied at `:637-639` | No |
-| Requires `COMPASS_AGENTS_ENABLED=1` and `Agent.status === "ACTIVE"`, re-checked on every request | `lib/mcp-auth.ts:60-64`, `lib/agent-access.ts:12-15` | No |
+| Requires `Agent.status === "ACTIVE"`, re-checked on every request | `lib/mcp-auth.ts:60-64`, `lib/agent-access.ts:12-15` | No |
 | Every mutation writes an `AgentToolCall` audit row | `withAgentActivity`, `lib/agent-activity.ts:6-21` | No |
 
 > **Correction to the brief.** The framing task said "4 `DENY` entries". The
@@ -303,10 +303,10 @@ One branch, in the one file ADR 0014 designated for it:
 // lib/mcp-auth.ts, inside validateOAuthAccessToken
 if (accessToken.authorizationMode === "AGENT") {
   // Mirrors the ApiKey AGENT path at lib/mcp-auth.ts:60-64 exactly. A token
-  // whose agent has been suspended, or whose deployment has agents switched
-  // off, is INVALID — never silently downgraded to USER. Downgrading would
-  // make an env-var flip a privilege escalation.
-  if (!agentsEnabled() || !accessToken.agentId) return { valid: false }
+  // whose agent has been suspended or deleted is INVALID — never silently
+  // downgraded to USER. Downgrading would turn a failed agent check into a
+  // privilege escalation.
+  if (!accessToken.agentId) return { valid: false }
   const agent = await prisma.agent.findFirst({
     where: { id: accessToken.agentId, ownerUserId: accessToken.userId, status: "ACTIVE" },
     select: { id: true },
@@ -571,29 +571,17 @@ proves a value was authentic when rendered, not that it is still authorized.
 Recommend the single screen; record the two-step as the fallback if review
 disagrees.
 
-### `COMPASS_AGENTS_ENABLED` (superseded)
+### Agent availability
 
-> **Superseded by the per-workspace `agents` module** (docs/adr-workspace-modules.md). The environment flag no longer exists. An agent
-> key or agent-bound OAuth token is valid while at least one workspace the agent holds a live grant in has the module on, and every
-> request is narrowed to the granted workspaces that have it on (`agentWorkspaceWhere`). The consent screen shows the "Act as"
-> section while any workspace the user belongs to has the module on. The fail-closed rules below (401, never a downgrade to USER)
-> are unchanged. The original text follows.
+Agent features are always on; there is no deployment-level enable flag. The
+consent screen always renders the "Act as" section, and an agent-bound token is
+valid only while its agent is `ACTIVE` and owned by the token's user, re-checked
+on every request.
 
-Agent keys require it (`lib/mcp-auth.ts:61`), and `agentWorkspaceWhere` returns
-`{ id: { in: [] } }` without it (`lib/agent-access.ts:12`).
-
-- **At the consent screen:** when the flag is off, the "Act as" section is not
-  rendered and consent behaves exactly as Phase 1 does today — user-mode, no
-  ceremony. The flag is the rollout control, and its off-state is the current
-  shipped behavior, which is the right thing for it to be.
-- **At validation:** an agent-bound token presented while the flag is off is
-  **invalid**, returning 401. Not downgraded to `purpose: "USER"`. This mirrors
-  `lib/mcp-auth.ts:61` and is the whole reason the branch is written as
+- **At validation:** an agent-bound token whose agent is suspended, deleted or
+  owned by someone else is **invalid**, returning 401. Not downgraded to
+  `purpose: "USER"`. This is the whole reason the branch is written as
   `return { valid: false }` above.
-
-The consequence Rick should accept explicitly: once agent-bound tokens exist,
-turning the flag off 401s every one of them. That is the correct failure
-direction, but it makes the flag a one-way door in practice. See open question 5.
 
 ### `AGENT_TURN` is out of scope
 
@@ -769,7 +757,7 @@ narrowing of per-user `cmp_…` keys.
 
 - `validateOAuthAccessToken` returns `{ valid: false }` — never a `USER` actor —
   for each of: agent suspended, agent deleted, agent owned by a different user,
-  `COMPASS_AGENTS_ENABLED` unset, `authorizationMode` absent or unrecognised.
+  `authorizationMode` absent or unrecognised.
   One test per failure mode; these are the escalation tests.
 - An agent-mode result carries a `credentialId`, asserted directly, because its
   absence fails only at mutation time and only through
@@ -858,10 +846,7 @@ deliberately rather than incidental complexity.
    organization the user belongs to, re-evaluated on refresh. Stricter than
    alternatives and stricter than minting a key.
 
-5. **`COMPASS_AGENTS_ENABLED` in production.** Two parts: confirm it is `1`
-   today (not verifiable from the code, and the live `get_current_identity` call
-   took the `USER` path, which does not exercise it), and accept that once
-   agent-bound tokens exist, turning it off 401s all of them.
+5. **Retired.** The `COMPASS_AGENTS_ENABLED` flag no longer exists; agent features are always on.
 
 6. **Does Geode re-prompt when refresh fails, or dead-end?** The Phase 1 design
    records that the proxy auto-refreshes on a 401

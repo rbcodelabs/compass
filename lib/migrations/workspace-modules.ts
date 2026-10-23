@@ -1,8 +1,8 @@
 import type { PoolClient } from "pg"
 import { WorkspaceIdBackfillRefusal } from "@/lib/migrations/workspace-id-on-solution-objective"
 
-export const WORKSPACE_MODULES_MIGRATION = "105_workspace_modules"
-export const WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION = "106_workspace_modules_legacy_flag_backfill"
+export const WORKSPACE_MODULES_MIGRATION = "107_workspace_modules"
+export const WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION = "108_workspace_modules_legacy_flag_backfill"
 
 /**
  * The environment flags the modules replace, mapped to the module each one switched on. Only the exact value "1" counts: the old
@@ -17,7 +17,6 @@ export const LEGACY_FLAG_MODULES = [
   { env: "COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", moduleKey: "research_voice_discovery" },
   { env: "WORKSPACE_UPDATES_ENABLED", moduleKey: "workspace_updates" },
   { env: "FOLLOWING_ENABLED", moduleKey: "following" },
-  { env: "COMPASS_AGENTS_ENABLED", moduleKey: "agents" },
 ] as const
 
 const COLUMNS = [
@@ -57,7 +56,7 @@ async function insertMissingEnabledRows(client: PoolClient, schema: string, modu
   }
 }
 
-/** Data half of 105: fold the legacy workspaces.launch_workflow_enabled column into launch_workflow rows. Idempotent. */
+/** Data half of 107: fold the legacy workspaces.launch_workflow_enabled column into launch_workflow rows. Idempotent. */
 export async function backfillLaunchWorkflowModules(client: PoolClient, schema: string, log: string[]): Promise<number> {
   const inserted = await insertMissingEnabledRows(client, schema, "launch_workflow", "w.launch_workflow_enabled IS TRUE")
   log.push(`  launch_workflow: ${inserted} workspace(s) carried over from workspaces.launch_workflow_enabled`)
@@ -65,7 +64,7 @@ export async function backfillLaunchWorkflowModules(client: PoolClient, schema: 
 }
 
 /**
- * Postcondition for 105, run before its receipt: the table has exactly the intended columns, its unique index is valid, ready, unique,
+ * Postcondition for 107, run before its receipt: the table has exactly the intended columns, its unique index is valid, ready, unique,
  * non-partial and on (workspace_id, module_key), and every workspace whose legacy launch column is on has a launch_workflow row (any
  * value: an administrator may already have switched it off).
  */
@@ -78,7 +77,7 @@ export async function assertWorkspaceModulesMigration(client: PoolClient, schema
   for (const { column, nullable, type } of COLUMNS) {
     const row = actual.get(column)
     if (!row || (row.is_nullable === "YES") !== nullable || row.data_type !== type) {
-      throw new Error(`Migration 105 postcondition failed: workspace_modules.${column} is missing or has the wrong type or nullability`)
+      throw new Error(`Migration 107 postcondition failed: workspace_modules.${column} is missing or has the wrong type or nullability`)
     }
   }
 
@@ -93,7 +92,7 @@ export async function assertWorkspaceModulesMigration(client: PoolClient, schema
   )
   const row = index.rows[0]
   if (index.rows.length !== 1 || !row.valid || !row.ready || !row.unique || row.table_name !== "workspace_modules" || row.columns.join(",") !== "workspace_id,module_key" || row.predicate !== null) {
-    throw new Error(`Migration 105 postcondition failed: index ${INDEX} is not ready or has drifted`)
+    throw new Error(`Migration 107 postcondition failed: index ${INDEX} is not ready or has drifted`)
   }
 
   const missing = await client.query<{ n: string }>(
@@ -101,7 +100,7 @@ export async function assertWorkspaceModulesMigration(client: PoolClient, schema
       AND NOT EXISTS (SELECT 1 FROM "${schema}"."workspace_modules" m WHERE m.workspace_id = w.id AND m.module_key = 'launch_workflow')`,
   )
   if (Number(missing.rows[0]?.n ?? "0") !== 0) {
-    throw new Error(`Migration 105 postcondition failed: ${missing.rows[0].n} workspace(s) with the launch workflow on have no launch_workflow module row`)
+    throw new Error(`Migration 107 postcondition failed: ${missing.rows[0].n} workspace(s) with the launch workflow on have no launch_workflow module row`)
   }
 }
 
@@ -111,9 +110,9 @@ export function legacyFlagsSetIn(env: Record<string, string | undefined>): strin
 }
 
 /**
- * 106: for every legacy flag that is exactly "1" in the executing environment, give every existing workspace without a row an ENABLED
+ * 108: for every legacy flag that is exactly "1" in the executing environment, give every existing workspace without a row an ENABLED
  * row for its module. Writes nothing for a flag that is unset or anything else. Dependencies are not enabled on a module's behalf.
- * Refuses unless 105 has been applied. Returns the rows inserted per module.
+ * Refuses unless 107 has been applied. Returns the rows inserted per module.
  */
 export async function backfillLegacyFlagModules(client: PoolClient, schema: string, log: string[], env: Record<string, string | undefined> = process.env): Promise<Record<string, number>> {
   const table = await client.query("SELECT 1 FROM information_schema.tables WHERE table_schema=$1 AND table_name='workspace_modules'", [schema])
@@ -128,7 +127,7 @@ export async function backfillLegacyFlagModules(client: PoolClient, schema: stri
   return inserted
 }
 
-/** Postcondition for 106: every workspace has a row for each module whose legacy flag was set. */
+/** Postcondition for 108: every workspace has a row for each module whose legacy flag was set. */
 export async function assertLegacyFlagBackfill(client: PoolClient, schema: string, env: Record<string, string | undefined> = process.env) {
   for (const moduleKey of legacyFlagsSetIn(env)) {
     const missing = await client.query<{ n: string }>(
@@ -137,7 +136,7 @@ export async function assertLegacyFlagBackfill(client: PoolClient, schema: strin
       [moduleKey],
     )
     if (Number(missing.rows[0]?.n ?? "0") !== 0) {
-      throw new Error(`Migration 106 postcondition failed: ${missing.rows[0].n} workspace(s) have no ${moduleKey} module row`)
+      throw new Error(`Migration 108 postcondition failed: ${missing.rows[0].n} workspace(s) have no ${moduleKey} module row`)
     }
   }
 }

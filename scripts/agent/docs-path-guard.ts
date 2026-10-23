@@ -21,6 +21,8 @@ const PATH_FIELDS = ["file_path", "path", "notebook_path"]
 /** Tools that MUST name a file; a missing path is a deny, not a default to cwd. */
 const FILE_TOOLS = new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"])
 const GLOB_TOOLS = new Set(["Glob", "Grep"])
+/** Tools that only read: the only ones allowed into `readOnlyRoots` (the repo workdir, when the agent has a shell). */
+const READ_ONLY_TOOLS = new Set(["Read", "Glob", "Grep"])
 
 /**
  * The real location of `target`, with every symlink on its existing prefix
@@ -85,7 +87,7 @@ function rawValueProblem(value: string, field: string): string | null {
   return null
 }
 
-function checkPath(value: unknown, field: string, realRoot: string): string | null {
+function checkPath(value: unknown, field: string, realRoot: string, extraRealRoots: string[] = []): string | null {
   if (typeof value !== "string" || value.length === 0) return `${field} must be a non-empty string`
   const raw = rawValueProblem(value, field)
   if (raw) return raw
@@ -101,7 +103,7 @@ function checkPath(value: unknown, field: string, realRoot: string): string | nu
   const real = resolveReal(resolved)
   if (real === null) return `${field} is a dangling symlink`
   if (DENIED_ROOTS.some((root) => real === root || real.startsWith(root + "/"))) return `${field} is a system path`
-  return insideRoot(realRoot, real) ? null : `${field} is outside the docs directory`
+  return insideRoot(realRoot, real) || extraRealRoots.some((root) => insideRoot(root, real)) ? null : `${field} is outside the docs directory`
 }
 
 /** Glob/Grep patterns can carry an absolute or parent-relative anchor of their own, including inside braces. */
@@ -114,12 +116,24 @@ function checkPattern(value: unknown): string | null {
   return null
 }
 
-export function checkDocsToolUse(toolName: string, toolInput: unknown, docsRoot: string): GuardDecision {
+export function checkDocsToolUse(toolName: string, toolInput: unknown, docsRoot: string, opts: { readOnlyRoots?: string[] } = {}): GuardDecision {
   let realRoot: string
   try {
     realRoot = realpathSync(docsRoot)
   } catch {
     return { allowed: false, reason: "docs directory is unavailable" }
+  }
+  // Extra roots (the cloned-repo workdir) are readable, never writable, by the file tools; an
+  // unresolvable one is simply not granted rather than failing the whole check.
+  const extraRealRoots: string[] = []
+  if (READ_ONLY_TOOLS.has(toolName)) {
+    for (const root of opts.readOnlyRoots ?? []) {
+      try {
+        extraRealRoots.push(realpathSync(root))
+      } catch {
+        /* not there yet: no access */
+      }
+    }
   }
   const input = toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : {}
   const reasons: string[] = []
@@ -128,7 +142,7 @@ export function checkDocsToolUse(toolName: string, toolInput: unknown, docsRoot:
   for (const field of PATH_FIELDS) {
     if (!(field in input)) continue
     sawPath = true
-    const reason = checkPath(input[field], field, realRoot)
+    const reason = checkPath(input[field], field, realRoot, extraRealRoots)
     if (reason) reasons.push(reason)
   }
   if (FILE_TOOLS.has(toolName) && !sawPath) reasons.push("a file path is required")
@@ -146,14 +160,14 @@ export function checkDocsToolUse(toolName: string, toolInput: unknown, docsRoot:
 }
 
 /** The PreToolUse hook the Agent SDK calls before every matched tool use. */
-export function createDocsPreToolUseHook(docsRoot: string) {
+export function createDocsPreToolUseHook(docsRoot: string, opts: { readOnlyRoots?: string[] } = {}) {
   return async function docsPreToolUse(input: unknown): Promise<Record<string, unknown>> {
     let decision: GuardDecision
     try {
       const event = (input ?? {}) as { tool_name?: unknown; tool_input?: unknown }
       decision =
         typeof event.tool_name === "string" && event.tool_name.length > 0
-          ? checkDocsToolUse(event.tool_name, event.tool_input, docsRoot)
+          ? checkDocsToolUse(event.tool_name, event.tool_input, docsRoot, opts)
           : { allowed: false, reason: "Blocked: malformed tool call" }
     } catch {
       // An exception must never read as "no objection".
@@ -176,11 +190,14 @@ export const DOCS_GUARDED_TOOLS_MATCHER = "Read|Write|Edit|MultiEdit|NotebookEdi
 /** Credentials of the entry script itself: never handed to the model-facing CLI process, whatever else is. */
 export const AGENT_PRIVATE_ENV = ["AGENT_RUN_TOKEN", "MCP_TOKEN", "MCP_BYPASS_SECRET"]
 
+/** Passed through to the CLI process only for a turn that has a shell. */
+export const GITHUB_ENV_NAMES = ["GH_TOKEN", "GITHUB_TOKEN"]
+
 /** Exact names the CLI process legitimately needs (runtime, locale, TLS, proxies). */
 const CLI_ENV_NAMES = new Set([
   "PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "LANG", "LANGUAGE", "TERM", "COLORTERM", "TMPDIR", "TMP", "TEMP", "TZ", "CI",
   "NODE_OPTIONS", "NODE_PATH", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
-  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+  "GIT_SSL_CAINFO", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy",
 ])
 /** Families of names: locale, XDG dirs, Node, and everything the Anthropic SDK / Claude Code read. */
 const CLI_ENV_PREFIXES = ["LC_", "XDG_", "NODE_", "ANTHROPIC_", "CLAUDE_", "CLAUDECODE", "DISABLE_"]
@@ -191,10 +208,16 @@ const CLI_ENV_PREFIXES = ["LC_", "XDG_", "NODE_", "ANTHROPIC_", "CLAUDE_", "CLAU
  * by default. ANTHROPIC_API_KEY is in it because the CLI cannot call the model
  * without it; the file-tool guard, not secrecy, is what protects that one.
  */
-export function scrubbedAgentEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
+export function scrubbedAgentEnv(env: Record<string, string | undefined>, opts: { github?: boolean } = {}): Record<string, string | undefined> {
   const out: Record<string, string | undefined> = {}
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined || AGENT_PRIVATE_ENV.includes(name)) continue
+    // The GitHub token rides in the CLI's environment ONLY when the turn has a shell: the Bash
+    // hook (github-access.ts) reads it from here and hands it to the jail user, never in command text.
+    if (opts.github && GITHUB_ENV_NAMES.includes(name)) {
+      out[name] = value
+      continue
+    }
     if (CLI_ENV_NAMES.has(name) || CLI_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))) out[name] = value
   }
   return out

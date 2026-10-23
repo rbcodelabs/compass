@@ -34,9 +34,9 @@ describe(WORKSPACE_MODULES_MIGRATION, () => {
   })
 
   it("is registered, waits for its async index and verifies before the receipt", () => {
-    expect([...runner.matchAll(/name:\s*"105_workspace_modules"/g)]).toHaveLength(1)
-    expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"105_workspace_modules"/)
-    expect(runner).toMatch(/\["049_agent_identity"[^\]]*"105_workspace_modules"[^\]]*\]\.includes\(migration\.name\)/)
+    expect([...runner.matchAll(/name:\s*"107_workspace_modules"/g)]).toHaveLength(1)
+    expect(runner).toMatch(/const ASYNC_WAIT_MIGRATIONS = \[[^\]]*"107_workspace_modules"/)
+    expect(runner).toMatch(/\["049_agent_identity"[^\]]*"107_workspace_modules"[^\]]*\]\.includes\(migration\.name\)/)
     const assertion = runner.indexOf("await assertWorkspaceModulesMigration(client, schema)")
     expect(assertion).toBeGreaterThan(-1)
     expect(assertion).toBeLessThan(runner.indexOf('UPDATE "${schema}"._prisma_migrations SET finished_at = CURRENT_TIMESTAMP'))
@@ -62,7 +62,7 @@ describe(WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION, () => {
 
   it("maps only real modules, and only an exact '1' counts", () => {
     for (const { moduleKey } of LEGACY_FLAG_MODULES) expect(MODULE_KEYS).toContain(moduleKey)
-    expect(legacyFlagsSetIn({ COMPASS_RESEARCH_CAPTURE_ENABLED: "1", FOLLOWING_ENABLED: "true", WORKSPACE_UPDATES_ENABLED: "0", COMPASS_AGENTS_ENABLED: "" })).toEqual(["research_capture"])
+    expect(legacyFlagsSetIn({ COMPASS_RESEARCH_CAPTURE_ENABLED: "1", FOLLOWING_ENABLED: "true", WORKSPACE_UPDATES_ENABLED: "0", COMPASS_PM_INTERVIEW_ENABLED: "" })).toEqual(["research_capture"])
     expect(legacyFlagsSetIn({})).toEqual([])
   })
 })
@@ -132,9 +132,9 @@ describe("backfillLegacyFlagModules", () => {
     expect(rows.map((r) => r.key)).toEqual(["research_voice_browser"])
   })
 
-  it("refuses to run before 105 is applied", async () => {
+  it("refuses to run before 107 is applied", async () => {
     const { client } = fakeDb([], [], false)
-    await expect(backfillLegacyFlagModules(client, "s", [], { COMPASS_AGENTS_ENABLED: "1" })).rejects.toThrow(/apply 105_workspace_modules first/)
+    await expect(backfillLegacyFlagModules(client, "s", [], { FOLLOWING_ENABLED: "1" })).rejects.toThrow(/apply 107_workspace_modules first/)
   })
 
   it("the postcondition fails when a flagged module is missing from a workspace", async () => {

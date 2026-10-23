@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   admin: vi.fn(),
-  enabled: vi.fn(),
   liveGrants: vi.fn(),
   resolveRunAgent: vi.fn(),
   defaults: { setWs: vi.fn(), clearWs: vi.fn(), setUser: vi.fn(), clearUser: vi.fn() },
@@ -17,7 +16,7 @@ const FakePermissionError = Error
 vi.mock("@/auth", () => ({ auth: mocks.auth }))
 vi.mock("@/lib/db", () => ({ default: () => mocks }))
 vi.mock("@/lib/permissions", () => ({ resolveWorkspaceAdmin: mocks.admin }))
-vi.mock("@/lib/agent-access", () => ({ agentsEnabledForUser: mocks.enabled, agentsEnabledInWorkspace: mocks.enabled, liveGrantedWorkspaceIds: mocks.liveGrants }))
+vi.mock("@/lib/agent-access", () => ({ liveGrantedWorkspaceIds: mocks.liveGrants }))
 vi.mock("@/lib/agent-defaults", () => ({
   setWorkspaceDefaultAgent: mocks.defaults.setWs,
   clearWorkspaceDefaultAgent: mocks.defaults.clearWs,
@@ -28,7 +27,6 @@ vi.mock("@/lib/agent-run-identity", async (original) => ({ ...(await original<ob
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
 import { createCloudAgent, setMyDefaultAgentAction, setWorkspaceDefaultAgentAction, updateCloudAgent } from "@/app/settings/agents/actions"
-import { moduleDisabledMessage } from "@/lib/modules/registry"
 import { AgentSelectionError } from "@/lib/agent-run-identity"
 
 const WS = "ws-1"
@@ -51,7 +49,6 @@ function signIn(userId: string) {
 beforeEach(() => {
   vi.resetAllMocks()
   signIn("member")
-  mocks.enabled.mockResolvedValue(true)
   mocks.$transaction.mockImplementation((operation: any) => operation(mocks))
   mocks.agent.create.mockResolvedValue({ id: "new-agent" })
   mocks.admin.mockRejectedValue(new FakePermissionError("Forbidden: workspace admin required"))
@@ -129,12 +126,9 @@ describe("createCloudAgent", () => {
     expect(mocks.agent.create.mock.calls[0][0].data.model).toBeNull()
   })
 
-  it("requires sign-in and the agents module", async () => {
+  it("requires sign-in", async () => {
     mocks.auth.mockResolvedValue(null)
     await expect(createCloudAgent({ ...base, ownerType: "USER" })).rejects.toThrow("Unauthorized")
-    signIn("member")
-    mocks.enabled.mockResolvedValue(false)
-    await expect(createCloudAgent({ ...base, ownerType: "USER" })).rejects.toThrow(moduleDisabledMessage("agents"))
   })
 
   it("explains an unapplied migration 098 instead of surfacing a database error", async () => {
@@ -294,8 +288,7 @@ describe("setWorkspaceDefaultAgentAction", () => {
     expect(mocks.defaults.setWs).not.toHaveBeenCalled()
   })
 
-  it("clears the default (also while the agents module is off)", async () => {
-    mocks.enabled.mockResolvedValue(false)
+  it("clears the default", async () => {
     await setWorkspaceDefaultAgentAction("acme", "home", null)
     expect(mocks.defaults.clearWs).toHaveBeenCalledWith(mocks, WS)
   })

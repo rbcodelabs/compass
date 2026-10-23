@@ -195,4 +195,37 @@ test.describe("Spec docs: editing", () => {
     await page.keyboard.press("Escape");
     await expect(menu).toBeHidden();
   });
+
+  test("a card title opens the record in the side panel and keeps the reader on the doc", async ({ page, base }) => {
+    const { solTitle, docUrl } = await createSpecFromSolution(page, base, Date.now());
+    const status = page.locator(SAVE_STATUS);
+    const docPath = new URL(docUrl).pathname;
+    // Located by CSS, not role: with the modal panel open the document behind it is aria-hidden, but it must still be on screen.
+    const solutionCard = page.locator(`${EMBED_CARD}[data-state="ok"]`).filter({ hasText: solTitle });
+    await expect(solutionCard).toBeVisible({ timeout: 15_000 });
+    await expect(status).toHaveAttribute("data-state", "idle");
+    const before = await editorMarkdown(page);
+
+    // A plain click on the title opens the panel; the page does not navigate away.
+    await solutionCard.getByRole("link", { name: solTitle }).click();
+    await page.waitForURL(/[?&]detail=solution(%3A|:)[0-9a-f-]{36}/, { timeout: 15_000 });
+    expect(new URL(page.url()).pathname).toBe(docPath);
+    const panel = page.locator('[data-slot="sheet-content"]');
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+    await expect(panel).toContainText(solTitle);
+
+    // The document is untouched: still on screen, same markdown, and no autosave started.
+    await expect(page.locator(".ProseMirror")).toBeVisible();
+    await expect(solutionCard).toBeVisible();
+    await expect(status).toHaveAttribute("data-state", "idle");
+    expect(await editorMarkdown(page)).toBe(before);
+
+    // Closing the panel removes ?detail= and leaves the reader on the doc.
+    await panel.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(panel).toBeHidden();
+    await expect(page).not.toHaveURL(/detail=/);
+    expect(new URL(page.url()).pathname).toBe(docPath);
+    await expect(page.locator(".ProseMirror")).toBeVisible();
+    await expect(status).toHaveAttribute("data-state", "idle");
+  });
 });

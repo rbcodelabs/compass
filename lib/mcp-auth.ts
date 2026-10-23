@@ -1,7 +1,6 @@
 import { createHash } from "crypto"
 import getPrisma from "@/lib/db"
 import { findActiveUserOwnedAgent } from "@/lib/agent-ownership"
-import { agentHasEnabledWorkspace } from "@/lib/agent-access"
 import { authorizeAgentTurnKey } from "@/lib/agent-run-identity"
 import { mcpResourceUri, parseScope } from "@/lib/oauth/constants"
 import { ACCESS_TOKEN_PREFIX, hashOAuthToken } from "@/lib/oauth/tokens"
@@ -105,9 +104,6 @@ export async function validateProgrammaticAuth(
     // A personal key reaches only a USER-owned agent; a WORKSPACE-owned one fails closed here.
     const agent = await findActiveUserOwnedAgent(prisma, apiKey.agentId, apiKey.userId)
     if (!agent) return { valid: false }
-    // The agents module is per workspace and authentication has none yet: the key is valid only while at least one workspace the agent
-    // is live-granted in has the module on (a workspace that has it off is also unreachable afterwards; see agentWorkspaceWhere).
-    if (!(await agentHasEnabledWorkspace(agent))) return { valid: false }
   }
   // A turn key tied to an agent is only the agent while its run is live; a WORKSPACE-owned agent is reachable ONLY this way.
   let agentRunId: string | undefined
@@ -212,8 +208,8 @@ async function validateOAuthAccessToken(token: string, expectedResource: string)
     //     the hot path; the key path already pays it and there is no FK to join
     //     across (relationMode = "prisma"), so two reads it is.
     //  2. Every failure is `{ valid: false }` — **never** a downgrade to USER.
-    //     Downgrading would make switching the agents module off into a
-    //     privilege *escalation*, and would let a suspended agent keep working
+    //     Downgrading would turn a failed agent check into a privilege
+    //     *escalation*, and would let a suspended agent keep working
     //     through OAuth while failing through its own key. A 401 sends the
     //     client back through discovery and consent, which is the correct and
     //     recoverable outcome.
@@ -225,7 +221,6 @@ async function validateOAuthAccessToken(token: string, expectedResource: string)
     if (!accessToken.agentId) return { valid: false }
     const agent = await findActiveUserOwnedAgent(prisma, accessToken.agentId, accessToken.userId)
     if (!agent) return { valid: false }
-    if (!(await agentHasEnabledWorkspace(agent))) return { valid: false }
     return {
       valid: true,
       userId: accessToken.userId,

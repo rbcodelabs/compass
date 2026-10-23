@@ -15,8 +15,8 @@ export const dynamic = "force-dynamic"
  *
  * `models` is empty when the deployment cannot honour a choice (Bedrock), which is also when the chat hides its model picker.
  * `modelLabels` names every model id the client may need to display (the options, the deployment default and each agent's own
- * model), so the client never guesses a label. The model lists are not behind the agents module: the built-in assistant
- * can be pinned too, and they carry nothing workspace-specific.
+ * model), so the client never guesses a label. The model lists carry nothing workspace-specific: the built-in assistant
+ * can be pinned too.
  */
 export async function GET(request: Request) {
   const session = await auth()

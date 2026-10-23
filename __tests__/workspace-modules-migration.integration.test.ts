@@ -6,13 +6,13 @@ import { applyMigrations } from "@/lib/migrations/runner"
 import { replayAllMigrations } from "./helpers/replay-migrations"
 
 /**
- * 105 and 106 through the registered runner, on a throwaway schema of this suite's own, after every earlier migration has been replayed.
+ * 107 and 108 through the registered runner, on a throwaway schema of this suite's own, after every earlier migration has been replayed.
  *
  * Set WORKSPACE_MODULES_DATABASE_URL to the local compass_e2e database to enable. The guard keeps it from ever pointing anywhere else:
  * this suite creates and drops schemas, which must never happen against DSQL or a shared database.
  */
 const databaseUrl = process.env.WORKSPACE_MODULES_DATABASE_URL
-const BACKFILL = "106_workspace_modules_legacy_flag_backfill"
+const BACKFILL = "108_workspace_modules_legacy_flag_backfill"
 
 describe.skipIf(!databaseUrl)("workspace modules migrations through the registered runner", () => {
   const schema = `workspace_modules_test_${randomUUID().replaceAll("-", "")}`
@@ -42,7 +42,7 @@ describe.skipIf(!databaseUrl)("workspace modules migrations through the register
     else process.env.FOLLOWING_ENABLED = previousFlag
   })
 
-  it("replays every migration and earns the 105 receipt with a valid table and index", async () => {
+  it("replays every migration and earns the 107 receipt with a valid table and index", async () => {
     const result = await replayAllMigrations(pool, schema)
     expect((await result.json()).error).toBeUndefined()
     const client = await pool.connect()
@@ -69,7 +69,7 @@ describe.skipIf(!databaseUrl)("workspace modules migrations through the register
     expect(rows.rows).toEqual([{ workspace_id: launchOn, enabled: true }])
   })
 
-  it("106 enables the flagged module in every workspace, only when named, and is idempotent", async () => {
+  it("108 enables the flagged module in every workspace, only when named, and is idempotent", async () => {
     process.env.FOLLOWING_ENABLED = "1"
     const first = await applyMigrations(pool, schema, BACKFILL)
     expect(first.status).toBe(200)

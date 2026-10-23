@@ -87,7 +87,7 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       env: {
         PORT: String(FUNCTIONAL_PORT),
-        // Product features (research capture, voice, PM interviews, workspace updates, following, agents) are workspace modules, not
+        // Product features (research capture, voice, PM interviews, workspace updates, following) are workspace modules, not
         // environment flags: e2e/functional/fixtures/seed-e2e.ts enables them for the fixture workspace.
         // cloud-agents.spec.ts: assigning a task to a cloud agent starts a run only when the model credential exists. A placeholder
         // is enough: the sandbox cannot boot in this environment, so the key is never used, only checked for presence.

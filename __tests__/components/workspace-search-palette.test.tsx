@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const push = vi.fn()
 let pathname = "/acme/product/feedback"
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push }), usePathname: () => pathname }))
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }), usePathname: () => pathname, useSearchParams: () => new URLSearchParams() }))
 
 import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
 import { AgentRailProvider, useAgentRail } from "@/components/agent/agent-rail-context"

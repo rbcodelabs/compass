@@ -72,33 +72,9 @@ export async function enabledModuleKeys(workspaceId: string): Promise<ModuleKey[
   return MODULE_KEYS.filter((key) => states[key].enabled)
 }
 
-/**
- * User-level questions (an agent key, the OAuth consent screen, "My agents") have no single workspace. A module counts as available
- * to the user when it is enabled in at least one workspace they belong to; the workspace-scoped checks still apply on every access.
- * Fail closed on the same terms as the workspace read.
- */
-export async function isModuleEnabledInAnyMemberWorkspace(userId: string, key: ModuleKey): Promise<boolean> {
-  const prisma = getPrisma()
-  const memberships = await prisma.workspaceMember.findMany({ where: { userId }, select: { workspaceId: true } })
-  for (const { workspaceId } of memberships) {
-    if (await isModuleEnabled(workspaceId, key)) return true
-  }
-  return false
-}
-
 /** The workspace-scoped booleans navigation needs for the module-gated entries it can show without table checks. */
 export async function researchNavEnabled(workspaceId: string): Promise<boolean> {
   return isModuleEnabled(workspaceId, "research_capture")
-}
-
-/** At least one workspace of the organization has the module on. For org-level surfaces that have no single workspace. */
-export async function isModuleEnabledInAnyOrgWorkspace(organizationId: string, key: ModuleKey): Promise<boolean> {
-  const prisma = getPrisma()
-  const workspaces = await prisma.workspace.findMany({ where: { organizationId }, select: { id: true } })
-  for (const { id } of workspaces) {
-    if (await isModuleEnabled(id, key)) return true
-  }
-  return false
 }
 
 export interface ModuleChange { key: ModuleKey; enabled: boolean }

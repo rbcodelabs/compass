@@ -18,7 +18,6 @@ export const MODULE_KEYS = [
   "research_voice_discovery",
   "workspace_updates",
   "following",
-  "agents",
   "launch_workflow",
 ] as const
 
@@ -33,7 +32,7 @@ export interface ModuleDefinition {
   /** Modules that must be effectively enabled for this one to be. Enforced on read (fail closed) and on toggle. */
   requires: readonly ModuleKey[]
   /** Settings grouping only. */
-  group: "Research" | "Collaboration" | "Agents" | "Delivery"
+  group: "Research" | "Collaboration" | "Delivery"
   /** Voice modules guard security-sensitive paths; the Settings page says so. */
   sensitive?: boolean
 }
@@ -97,14 +96,6 @@ export const MODULE_REGISTRY: Readonly<Record<ModuleKey, ModuleDefinition>> = {
     defaultEnabled: false,
     requires: [],
     group: "Collaboration",
-  },
-  agents: {
-    key: "agents",
-    label: "Agents",
-    description: "Personal and shared agents can act in this workspace, be assigned tasks, and appear in the OAuth consent screen.",
-    defaultEnabled: false,
-    requires: [],
-    group: "Agents",
   },
   launch_workflow: {
     key: "launch_workflow",

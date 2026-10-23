@@ -14,7 +14,7 @@
  */
 
 import type { AppPrismaClient } from "@/lib/db"
-import { agentIdentityValidForActor, agentsEnabledInWorkspace, liveGrantedWorkspaceIds } from "@/lib/agent-access"
+import { agentIdentityValidForActor, liveGrantedWorkspaceIds } from "@/lib/agent-access"
 import { BUILT_IN_AGENT_SELECTION, getStoredDefaultAgentIds } from "@/lib/agent-defaults"
 import { agentKind, canInvokeAgent, findAgentById, findAgentsByIds, type AgentRecord } from "@/lib/agent-ownership"
 
@@ -75,7 +75,6 @@ async function checkRunnableAgent(prisma: AppPrismaClient, agent: AgentRecord | 
  *  - A DEFAULT is only a convenience. One that is gone, suspended, no longer granted here, or not invokable by this
  *    user falls through to the next level without an error, so revoking a grant or suspending an agent can never break
  *    anyone's chat.
- *  - With agents disabled, defaults are not consulted at all (built-in), but an explicit pick is refused.
  */
 export async function resolveRunAgent(
   prisma: AppPrismaClient,
@@ -83,12 +82,10 @@ export async function resolveRunAgent(
 ): Promise<AgentRecord | null> {
   if (input.requestedAgentId === BUILT_IN_AGENT_SELECTION) return null
   if (input.requestedAgentId != null) {
-    if (!(await agentsEnabledInWorkspace(input.workspaceId))) throw new AgentSelectionError(NOT_AVAILABLE, 404, "AGENT_NOT_FOUND")
     const checked = await checkRunnable(prisma, { userId: input.userId, workspaceId: input.workspaceId, agentId: input.requestedAgentId })
     if (!checked.ok) throw checked.error
     return checked.agent
   }
-  if (!(await agentsEnabledInWorkspace(input.workspaceId))) return null
   const stored = await getStoredDefaultAgentIds(prisma, input)
   // De-duplicated so a personal default equal to the workspace default is checked once.
   const candidates = [...new Set([stored.userDefaultAgentId, stored.workspaceDefaultAgentId].filter((id): id is string => !!id))]
@@ -105,7 +102,6 @@ export async function resolveRunAgent(
  * pick would use (null = the built-in agent).
  */
 export async function listRunnableAgents(prisma: AppPrismaClient, input: { userId: string; workspaceId: string }): Promise<{ agents: AgentRecord[]; defaultAgentId: string | null }> {
-  if (!(await agentsEnabledInWorkspace(input.workspaceId))) return { agents: [], defaultAgentId: null }
   const grants = await prisma.agentWorkspaceGrant.findMany({ where: { workspaceId: input.workspaceId, revokedAt: null }, select: { agentId: true } })
   const candidates = await findAgentsByIds(prisma, grants.map((grant) => grant.agentId))
   const agents: AgentRecord[] = []
@@ -149,15 +145,13 @@ export async function findLiveRunForTurnKey(prisma: AppPrismaClient, key: AgentT
 
 /**
  * Authorize an agent-scoped AGENT_TURN key. Returns the run id to carry on the actor, or null to reject.
- * Fail-closed throughout: agents disabled, a missing/overdue/terminal run, an agent that is gone,
+ * Fail-closed throughout: a missing/overdue/terminal run, an agent that is gone,
  * suspended or not a CLOUD agent, a USER-owned agent whose owner is not the key's user, or any database
  * error (including migration 100 being unapplied) all reject. Never downgrades to a plain user turn.
  */
 export async function authorizeAgentTurnKey(prisma: AppPrismaClient, key: AgentTurnKeyRow, now: Date = new Date()): Promise<string | null> {
-  // An AGENT_TURN key is always bound to a workspace (mintAgentMcpKey); the agents module is that workspace's.
-  if (!key.agentId || !key.scopeWorkspaceId) return null
+  if (!key.agentId) return null
   try {
-    if (!(await agentsEnabledInWorkspace(key.scopeWorkspaceId))) return null
     const run = await findLiveRunForTurnKey(prisma, key, now)
     if (!run) return null
     const agent = await findAgentById(prisma, key.agentId)

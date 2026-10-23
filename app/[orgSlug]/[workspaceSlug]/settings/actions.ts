@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import getPrisma from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { randomBytes, createHash } from "crypto";
+import { githubConnectorUid, isAppInstalledOn, parseAgentRepos } from "@/lib/github-app-token";
 import { isPermissionError, resolveOrgAdmin, resolveWorkspaceAdmin } from "@/lib/permissions";
 import { countWorkspaceAdmins, normalizeWorkspaceRole } from "@/lib/roles";
 import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
@@ -907,6 +908,46 @@ export async function updateWorkspaceLimits(
 // ─── Marketing launch workflow ─────────────────────────────────────────────────
 // The launch workflow is the `launch_workflow` workspace module now: toggled in Settings > Modules
 // (settings/modules/actions.ts), which also keeps the legacy workspaces.launch_workflow_enabled column in step.
+
+// ─── Agent GitHub repositories ───────────────────────────────────────────────
+
+/**
+ * Sets the repos agents in this workspace may push to. Admin-only: this widens
+ * what a model-driven sandbox can write. Every repo must be under one owner and
+ * have the GitHub App installed, so the list can never exceed what the app
+ * itself can reach. Returns a value on validation failure rather than throwing.
+ */
+export async function updateAgentGithubRepos(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: { repos: string[] }
+): Promise<{ ok: true; repos: string[] } | { ok: false; error: string }> {
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
+
+  const parsed = parseAgentRepos(input.repos);
+  if (!parsed.ok) return parsed;
+
+  if (parsed.repos.length) {
+    if (!githubConnectorUid()) {
+      return { ok: false, error: "The GitHub App is not configured for this deployment" };
+    }
+    for (const repo of parsed.repos) {
+      const [owner, name] = repo.split("/");
+      if (!(await isAppInstalledOn({ owner, name }))) {
+        return { ok: false, error: `The GitHub App is not installed on ${repo}` };
+      }
+    }
+  }
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: { agentGithubRepos: parsed.repos.length ? JSON.stringify(parsed.repos) : null },
+    select: { id: true },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  return { ok: true, repos: parsed.repos };
+}
 
 // ─── Organization: member read-only workspace access ──────────────────────────
 

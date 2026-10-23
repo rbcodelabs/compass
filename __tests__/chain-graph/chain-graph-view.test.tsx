@@ -4,6 +4,7 @@
  * real one cannot measure nodes): the stub renders each node through the view's own nodeTypes, so the node components,
  * context wiring, layout, trace and cluster logic are the real ones.
  */
+import { CHAIN_NODE_TYPES } from "@/lib/chain-graph/types"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { createElement, useState, type ReactNode } from "react"
 import { act } from "react"
@@ -156,6 +157,42 @@ describe("ChainGraphView", () => {
   it("labels types with the thinking model's names (default CLASSIC copy)", () => {
     render(<ChainGraphView graph={graph} initialCollapse="none" />)
     expect(screen.getByRole("group", { name: "Object types" }).textContent).toMatch(/Opportunity/)
+  })
+
+  it("renders each type's glyph inside its filter button; hiding a type dims the glyph and keeps toggling", () => {
+    render(<ChainGraphView graph={graph} initialCollapse="none" />)
+    const group = screen.getByRole("group", { name: "Object types" })
+    const buttons = within(group).getAllByRole("button")
+    expect(buttons).toHaveLength(CHAIN_NODE_TYPES.length)
+    CHAIN_NODE_TYPES.forEach((type, i) => {
+      const glyph = within(buttons[i]).getByTestId(`type-glyph-${type}`)
+      expect(glyph.getAttribute("aria-hidden")).toBe("true")
+      expect(glyph.dataset.dimmed).toBe("false")
+      expect(glyph.style.background).toContain("--graph-series-")
+    })
+    fireEvent.click(buttons[1])
+    expect(buttons[1].getAttribute("aria-pressed")).toBe("false")
+    expect(within(buttons[1]).getByTestId(`type-glyph-${CHAIN_NODE_TYPES[1]}`).dataset.dimmed).toBe("true")
+    expect(within(buttons[0]).getByTestId(`type-glyph-${CHAIN_NODE_TYPES[0]}`).dataset.dimmed).toBe("false")
+    fireEvent.click(buttons[1])
+    expect(buttons[1].getAttribute("aria-pressed")).toBe("true")
+    expect(within(buttons[1]).getByTestId(`type-glyph-${CHAIN_NODE_TYPES[1]}`).dataset.dimmed).toBe("false")
+  })
+
+  it("filter buttons can shrink: label truncates with the full text as title, glyph stays shrink-0", () => {
+    render(<ChainGraphView graph={graph} initialCollapse="none" />)
+    const group = screen.getByRole("group", { name: "Object types" })
+    const buttons = within(group).getAllByRole("button")
+    CHAIN_NODE_TYPES.forEach((type, i) => {
+      const label = within(buttons[i]).getByTestId(`type-label-${type}`)
+      expect(label.className).toContain("truncate")
+      expect(label.className).toContain("min-w-0")
+      expect(label.getAttribute("title")).toBe(label.textContent)
+      expect(buttons[i].className).toContain("max-w-full")
+      expect(buttons[i].className).toContain("min-w-0")
+      expect(buttons[i].textContent).toBe(label.textContent)
+      expect(within(buttons[i]).getByTestId(`type-glyph-${type}`).className).toContain("shrink-0")
+    })
   })
 
   it("outline search lists matches when nothing is selected, and Open calls onOpenDetails", () => {

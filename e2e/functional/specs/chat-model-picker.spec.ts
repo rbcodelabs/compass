@@ -1,17 +1,18 @@
 /**
  * Chat model picker (TASK-44).
  *
- * Journey: a shared cloud agent is created with its own model -> the chat's Model menu names what Default resolves to and
- * follows the Agent menu -> an explicit pick is carried on the turn request and survives a reload -> a remembered model that is
+ * Journey: a shared cloud agent is created with its own model -> the composer's Model chip names what Default resolves to and
+ * follows the Agent chip -> an explicit pick is carried on the turn request and survives a reload -> a remembered model that is
  * no longer offered resets to Default -> the real turn route refuses an unlisted model with a 400 -> a 390px phone does not
- * overflow.
+ * overflow, and its pickers become bottom sheets with 44px rows. The docked agent rail (a narrow column) holds the same composer
+ * without overflow.
  *
  * The sandbox is stubbed at the browser: the turn request is intercepted and answered with a canned event stream, so the
  * request body (what the client really sent) is what is asserted. Server-side validation and precedence are covered against the
  * real route handler in __tests__/api-agent-turn-route.test.ts, plus one live 400 here.
  *
- * Needs the agents module (seeded) and COMPASS_CLOUD_AGENT_MODELS=claude-opus-4-5 on the dev server (playwright.config.ts sets
- * both); without a second model the picker rightly has nothing to offer.
+ * Needs COMPASS_CLOUD_AGENT_MODELS=claude-opus-4-5 on the dev server (playwright.config.ts sets it); without a second
+ * model the picker rightly has nothing to offer.
  */
 import { test, expect } from "../fixtures/index";
 import pg from "pg";
@@ -53,18 +54,29 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
     });
 
     await page.goto(`${base}/agent`);
-    const agentMenu = page.getByLabel("Agent", { exact: true });
-    const modelMenu = page.getByLabel("Model", { exact: true });
+    // The composer's footer tray: always-visible labelled chips, each opening a listbox.
+    const agentMenu = page.getByRole("button", { name: /^Agent:/ });
+    const modelMenu = page.getByRole("button", { name: /^Model:/ });
+    const choose = async (chip: typeof agentMenu, option: string) => {
+      await chip.click();
+      await page.getByRole("option", { name: option, exact: true }).click();
+      await expect(page.getByRole("listbox")).toHaveCount(0);
+    };
     await expect(agentMenu).toBeVisible({ timeout: 15_000 });
     await expect(modelMenu).toBeVisible();
 
     // Default names what it resolves to, and follows the agent until a model is picked.
-    await expect(modelMenu.getByRole("option", { name: "Default (Claude Sonnet 5)" })).toHaveCount(1);
-    await agentMenu.selectOption({ label: `${name} (shared)` });
-    await expect(modelMenu.getByRole("option", { name: `Default (${OPUS})` })).toHaveCount(1);
-    await agentMenu.selectOption({ label: "Compass Agent" });
-    await expect(modelMenu.getByRole("option", { name: "Default (Claude Sonnet 5)" })).toHaveCount(1);
-    await expect(modelMenu.getByRole("option")).toHaveText(["Default (Claude Sonnet 5)", "Claude Sonnet 5", OPUS]);
+    await expect(modelMenu).toHaveAccessibleName("Model: Default (Claude Sonnet 5)");
+    await choose(agentMenu, `${name} (shared)`);
+    await expect(modelMenu).toHaveAccessibleName(`Model: Default (${OPUS})`);
+    await choose(agentMenu, "Compass Agent");
+    await expect(modelMenu).toHaveAccessibleName("Model: Default (Claude Sonnet 5)");
+    await modelMenu.click();
+    await expect(page.getByRole("listbox", { name: "Model" }).getByRole("option")).toHaveText(["Default (Claude Sonnet 5)", "Claude Sonnet 5", OPUS]);
+    // Keyboard: Escape closes the list and returns focus to the chip.
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await expect(modelMenu).toBeFocused();
 
     // Default sends no model.
     await page.getByPlaceholder(/message the agent/i).fill("first");
@@ -74,8 +86,8 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
 
     // An explicit pick, with the agent that has a different model of its own, is what the turn carries.
     await page.goto(`${base}/agent`);
-    await agentMenu.selectOption({ label: `${name} (shared)` });
-    await modelMenu.selectOption("claude-sonnet-5");
+    await choose(agentMenu, `${name} (shared)`);
+    await choose(modelMenu, "Claude Sonnet 5");
     await page.getByPlaceholder(/message the agent/i).fill("second");
     await page.getByRole("button", { name: "Send message" }).click();
     await expect.poll(() => turnBodies.length).toBe(2);
@@ -89,13 +101,13 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
 
     // Remembered across a reload, for this user and workspace only.
     await page.goto(`${base}/agent`);
-    await expect(modelMenu).toHaveValue("claude-sonnet-5");
+    await expect(modelMenu).toHaveAccessibleName("Model: Claude Sonnet 5");
     expect(await page.evaluate((key) => window.localStorage.getItem(key), storageKey)).toBe("claude-sonnet-5");
 
     // A remembered model that is no longer offered resets to Default and is forgotten.
     await page.evaluate((key) => window.localStorage.setItem(key, "claude-retired-1"), storageKey);
     await page.goto(`${base}/agent`);
-    await expect(modelMenu).toHaveValue("");
+    await expect(modelMenu).toHaveAccessibleName("Model: Default (Claude Sonnet 5)");
     await expect.poll(() => page.evaluate((key) => window.localStorage.getItem(key), storageKey)).toBeNull();
 
     // The real route never trusts the client: an unlisted model is a 400 before anything is written.
@@ -103,7 +115,7 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
     expect(refused.status()).toBe(400);
     expect(await refused.json()).toMatchObject({ code: "INVALID_MODEL" });
 
-    // Phone: both menus fit, nothing overflows.
+    // Phone: both chips fit, nothing overflows, and a chip opens a bottom sheet with 44px rows.
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}/agent`);
     await expect(modelMenu).toBeVisible();
@@ -114,6 +126,41 @@ test("the chat model picker shows the effective model, sends an explicit pick, r
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(390);
     }
+    await agentMenu.click();
+    const sheetRows = page.getByRole("listbox", { name: "Agent" }).getByRole("option");
+    await expect(sheetRows.first()).toBeVisible();
+    for (const row of await sheetRows.all()) expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await capture("mobile-390-sheet");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+
+    // The docked agent rail (a narrow column on a wide screen) holds the same composer without overflowing.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${base}/`);
+    await page.keyboard.press("ControlOrMeta+j");
+    const rail = page.locator('[data-slot="agent-rail"]');
+    await expect(rail).toBeVisible({ timeout: 15_000 });
+    const railModel = rail.getByRole("button", { name: /^Model:/ });
+    await expect(railModel).toBeVisible({ timeout: 15_000 });
+    // The composer card itself fits the rail (the rail's own resize handle makes the <aside>'s scrollWidth a few px wider, so
+    // measure the card and its chips, not the aside).
+    const card = rail.locator('[data-slot="composer-card"]');
+    await expect.poll(() => card.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    const railBox = (await rail.boundingBox())!;
+    const cardBox = (await card.boundingBox())!;
+    expect(cardBox.x).toBeGreaterThanOrEqual(railBox.x);
+    expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(railBox.x + railBox.width);
+    for (const chip of [rail.getByRole("button", { name: /^Agent:/ }), railModel]) {
+      const box = (await chip.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(cardBox.x);
+      expect(box.x + box.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+    }
+    await railModel.click();
+    await expect(page.getByRole("listbox", { name: "Model" })).toBeVisible();
+    await capture("rail");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toHaveCount(0);
   } finally {
     const ids = (await pool.query("SELECT id FROM compass_dev.agents WHERE name = $1", [name])).rows.map((r) => r.id);
     if (ids.length) {

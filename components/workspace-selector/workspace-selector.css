@@ -275,6 +275,8 @@
   text-align: left; width: 100%; text-decoration: none; cursor: pointer;
 }
 .wsx-act:hover { background: var(--wsx-sunken); }
+.wsx-act[aria-current="page"] { background: var(--wsx-sunken); color: var(--wsx-accent); }
+.wsx-act[aria-current="page"] .wsx-icon { color: var(--wsx-accent); }
 .wsx-act:focus-visible { outline: 2px solid var(--wsx-accent); outline-offset: -2px; }
 .wsx-act .wsx-icon { color: var(--wsx-ink-2); }
 

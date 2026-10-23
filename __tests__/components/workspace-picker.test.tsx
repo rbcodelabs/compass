@@ -28,12 +28,12 @@ const many = [
   ws("eps", "Epsilon", "globex", "Globex"), ws("zeta", "Zeta", "globex", "Globex", { isReadOnly: true }),
 ]
 
-function renderPicker(workspaces: SelectorWorkspace[]) {
+function renderPicker(workspaces: SelectorWorkspace[], orgRoadmapHref?: string) {
   return render(
     <TooltipProvider>
       <SidebarProvider>
         <SidebarMenu><SidebarMenuItem>
-          <WorkspacePicker workspaces={workspaces} orgSlug="acme" workspaceSlug="alpha" workspaceName="Alpha" />
+          <WorkspacePicker workspaces={workspaces} orgSlug="acme" workspaceSlug="alpha" workspaceName="Alpha" orgRoadmapHref={orgRoadmapHref} />
         </SidebarMenuItem></SidebarMenu>
       </SidebarProvider>
     </TooltipProvider>
@@ -46,6 +46,42 @@ const open = async () => {
 
 beforeEach(() => { pathname = "/acme/alpha/roadmap"; memory.clear() })
 afterEach(() => cleanup())
+
+describe("WorkspacePicker All roadmaps footer link", () => {
+  it("shows All roadmaps pointing at the org roadmap when an href is supplied", async () => {
+    renderPicker(few, "/acme/roadmap")
+    const dialog = await open()
+    const link = within(dialog).getByRole("link", { name: "All roadmaps" })
+    expect(link).toHaveAttribute("href", "/acme/roadmap")
+    expect(link).toHaveAttribute("data-testid", "nav-org-roadmap")
+  })
+
+  it("omits All roadmaps when there is no org roadmap to open (single-workspace org)", async () => {
+    renderPicker([ws("alpha", "Alpha")])
+    const dialog = await open()
+    expect(within(dialog).queryByRole("link", { name: "All roadmaps" })).not.toBeInTheDocument()
+  })
+
+  it("marks All roadmaps current only on the org roadmap", async () => {
+    pathname = "/acme/roadmap"
+    renderPicker(few, "/acme/roadmap")
+    const dialog = await open()
+    expect(within(dialog).getByRole("link", { name: "All roadmaps" })).toHaveAttribute("aria-current", "page")
+  })
+
+  it("does not mark All roadmaps current elsewhere", async () => {
+    renderPicker(few, "/acme/roadmap")
+    const dialog = await open()
+    expect(within(dialog).getByRole("link", { name: "All roadmaps" })).not.toHaveAttribute("aria-current")
+  })
+
+  it("closes the popover after All roadmaps is chosen", async () => {
+    renderPicker(few, "/acme/roadmap")
+    const dialog = await open()
+    fireEvent.click(within(dialog).getByRole("link", { name: "All roadmaps" }))
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Switch workspace" })).not.toBeInTheDocument())
+  })
+})
 
 describe("WorkspacePicker", () => {
   it("keeps the trigger's accessible name and shows the current workspace", () => {

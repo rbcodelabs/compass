@@ -13,7 +13,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
-import { McpConnectorError, connectorDefinition } from "@/lib/mcp-connectors/config"
+import { McpConnectorError, connectorDefinition, usesVercelConnect } from "@/lib/mcp-connectors/config"
 import {
   disconnectGrant,
   findConnector,
@@ -21,6 +21,7 @@ import {
   mcpConnectorsAvailable,
 } from "@/lib/mcp-connectors/store"
 import { revokeAtProvider } from "@/lib/mcp-connectors/tokens"
+import { revokeConnectGrant } from "@/lib/mcp-connectors/vercel-connect"
 
 export const runtime = "nodejs"
 
@@ -29,8 +30,22 @@ export async function DELETE(_request: Request, context: { params: Promise<{ slu
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const { slug } = await context.params
-  if (!connectorDefinition(slug))
-    return NextResponse.json({ error: `Unknown connector "${slug}".` }, { status: 404 })
+  const definition = connectorDefinition(slug)
+  if (!definition) return NextResponse.json({ error: `Unknown connector "${slug}".` }, { status: 404 })
+  if (usesVercelConnect(definition)) {
+    // Connect holds the grant and the refresh token, so revoking there is the
+    // whole disconnect; there is no local copy to drop first.
+    try {
+      const revoked = await revokeConnectGrant(definition, session.user.id)
+      return NextResponse.json({ disconnected: revoked, revokedAtProvider: revoked }, { headers: { "Cache-Control": "no-store" } })
+    } catch (error) {
+      if (error instanceof McpConnectorError) {
+        console.error("Vercel Connect revoke failed", slug, error.code, error.message)
+        return NextResponse.json({ error: error.message, code: error.code }, { status: error.code === "CLIENT_NOT_CONFIGURED" || error.code === "CONNECT_MISCONFIGURED" ? 503 : 502 })
+      }
+      throw error
+    }
+  }
   if (!(await mcpConnectorsAvailable()))
     // Nothing can be connected if the tables do not exist, so this is already
     // the state the caller asked for.

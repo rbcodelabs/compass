@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => "/acme/product/discovery" }))
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => "/acme/product/discovery", useSearchParams: () => new URLSearchParams() }))
 
 import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
 import { AgentRailProvider, useAgentRail } from "@/components/agent/agent-rail-context"

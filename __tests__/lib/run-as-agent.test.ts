@@ -7,8 +7,7 @@
  * organization, and a USER-owned agent invoked by someone other than its owner each have to fail closed.
  */
 import { createHash } from "node:crypto"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { setModules } from "../helpers/modules"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Row = Record<string, any>
@@ -108,7 +107,6 @@ function liveRun(overrides: Row = {}): Row {
 }
 
 beforeEach(() => {
-  setModules({ agents: true })
   vi.clearAllMocks()
   resetAgentColumnsAvailabilityCache()
   resetAgentDefaultsAvailabilityCache()
@@ -125,6 +123,7 @@ beforeEach(() => {
     organization: [{ id: ORG, slug: "acme" }, { id: OTHER_ORG, slug: "other" }],
   }
 })
+afterEach(() => vi.unstubAllEnvs())
 
 async function authenticate(): Promise<McpActor> {
   const auth = await validateMcpAuth(request())
@@ -184,11 +183,6 @@ describe("validateMcpAuth for an agent-scoped AGENT_TURN key", () => {
     ["an inconsistent WORKSPACE row with no workspace", { ownerWorkspaceId: null }],
   ])("rejects a key for an agent that is %s", async (_label, patch) => {
     db.state.agent = [{ ...sharedAgent, ...patch }]
-    await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
-  })
-
-  it("rejects the key when the rollout flag is off (never downgrades to a plain user turn)", async () => {
-    setModules({ agents: false })
     await expect(validateMcpAuth(request())).resolves.toEqual({ valid: false })
   })
 
@@ -376,10 +370,6 @@ describe("mintAgentMcpKey with an agent", () => {
     await expect(mintAgentMcpKey("owner", HOME, undefined, FUTURE, { agentId: personalAgent.id })).resolves.toMatchObject({ apiKeyId: "new-key" })
   })
 
-  it("refuses when agents are disabled", async () => {
-    setModules({ agents: false })
-    await expect(mintAgentMcpKey("invoker", HOME, undefined, FUTURE, { agentId: sharedAgent.id })).rejects.toThrow(/not enabled/)
-  })
 })
 
 describe("activity logging for cloud runs", () => {
@@ -446,10 +436,6 @@ describe("resolveRunAgent (who may start a run as which agent)", () => {
     expect(await refusal(resolve("invoker", OTHER_WS, sharedAgent.id))).toMatchObject({ status: 404, code: "AGENT_NOT_FOUND" })
   })
 
-  it("answers 404 when agents are disabled", async () => {
-    setModules({ agents: false })
-    expect(await refusal(resolve("invoker", HOME, sharedAgent.id))).toMatchObject({ status: 404 })
-  })
 })
 
 describe("resolveRunAgent default chain (explicit > user default > workspace default > built-in)", () => {
@@ -526,13 +512,6 @@ describe("resolveRunAgent default chain (explicit > user default > workspace def
     expect(await resolve("invoker", HOME)).toBeNull()
   })
 
-  it("does not consult defaults at all when agents are disabled (built-in), though an explicit pick is refused", async () => {
-    setWorkspaceDefault(sharedAgent.id)
-    setModules({ agents: false })
-    expect(await resolve("invoker", HOME)).toBeNull()
-    await expect(resolve("invoker", HOME, sharedAgent.id)).rejects.toMatchObject({ status: 404 })
-  })
-
   it("tolerates migration 101 being unapplied: no default, built-in agent", async () => {
     const missing = Object.assign(new Error("The table does not exist"), { code: "P2021" })
     prisma.workspaceDefaultAgent.findFirst.mockRejectedValueOnce(missing)
@@ -563,10 +542,8 @@ describe("listRunnableAgents (what the pickers offer)", () => {
     expect(forOwner.agents.map((a) => a.id)).toContain(personalAgent.id)
   })
 
-  it("is empty, with no default, when agents are disabled or nothing is granted", async () => {
+  it("is empty, with no default, when nothing is granted", async () => {
     db.state.agentWorkspaceGrant = []
-    expect(await listRunnableAgents(prisma as never, { userId: "invoker", workspaceId: HOME })).toEqual({ agents: [], defaultAgentId: null })
-    setModules({ agents: false })
     expect(await listRunnableAgents(prisma as never, { userId: "invoker", workspaceId: HOME })).toEqual({ agents: [], defaultAgentId: null })
   })
 })

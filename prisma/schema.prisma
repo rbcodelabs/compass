@@ -256,6 +256,9 @@ model Workspace {
   // workflow and found the always-on surface noisy. See
   // Claude/2026-07-21-compass-gtm-planning-design.md for original context.
   launchWorkflowEnabled Boolean?               @default(false) @map("launch_workflow_enabled")
+  // JSON array of "owner/name" repos a workspace admin approved for agent
+  // sandboxes (migration 105). NULL/empty = agents get no GitHub token.
+  agentGithubRepos     String?                 @map("agent_github_repos") @db.Text
   // Ciphertext of the raw SSO shared secret (reversible AES-256-GCM
   // encryption via lib/crypto-secrets.ts, not a hash) — Compass must be
   // able to decrypt it to verify inbound customer-signed JWTs. The
@@ -3765,7 +3768,7 @@ model SavedView {
   @@map("roadmap_views")
 }
 
-/// Per-workspace opt-in/out of a product module (migration 105). One row per (workspace, module_key); NO row means "the registry
+/// Per-workspace opt-in/out of a product module (migration 107). One row per (workspace, module_key); NO row means "the registry
 /// default" (lib/modules/registry.ts), so a new module needs no migration. module_key is free text validated in application code
 /// against the registry: a key the code no longer knows is ignored on read. Bare UUIDs, no relations (DSQL). Read through
 /// lib/modules/server.ts, which tolerates the migration being unapplied (everything reads as disabled except the launch workflow,

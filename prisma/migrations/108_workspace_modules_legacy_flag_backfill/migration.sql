@@ -1,7 +1,7 @@
--- Migration 106: backfill workspace modules from the legacy environment flags (docs/adr-workspace-modules.md).
+-- Migration 108: backfill workspace modules from the legacy environment flags (docs/adr-workspace-modules.md).
 --
 -- NO DDL, and EXPLICIT-ONLY: an untargeted POST never runs it. POST it by name
--- ({"script":"106_workspace_modules_legacy_flag_backfill"}) only after 105_workspace_modules is applied, ON A DEPLOYMENT THAT STILL
+-- ({"script":"108_workspace_modules_legacy_flag_backfill"}) only after 107_workspace_modules is applied, ON A DEPLOYMENT THAT STILL
 -- HAS THE OLD FLAGS IN ITS ENVIRONMENT (they are read at run time; the application code no longer reads them).
 --
 -- For each legacy flag that is exactly "1" in the executing environment, every existing workspace gets an ENABLED row for the

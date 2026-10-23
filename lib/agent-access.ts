@@ -2,39 +2,7 @@ import getPrisma from "@/lib/db"
 import type { Prisma } from "@prisma/client"
 import type { McpActor } from "@/lib/mcp-authz"
 import { isOrgAdminRole } from "@/lib/roles"
-import { isModuleEnabled, isModuleEnabledInAnyMemberWorkspace } from "@/lib/modules/server"
 import { agentIdentityValidForTurn, agentIdentityValidForUser, agentOwner, findAgentById, isUserOwnedBy, isWorkspaceAdminUser, type AgentRecord } from "@/lib/agent-ownership"
-
-/**
- * Agents are the workspace module `agents` (Settings > Modules). An agent acts in the workspaces it holds a live grant in, so the
- * question is always asked about a workspace, never about the deployment:
- *
- *  - `agentsEnabledInWorkspace`: the workspace-scoped answer, for anything that happens in one workspace (task assignment, runs, key
- *    minting, the workspace settings panel).
- *  - `agentHasEnabledWorkspace`: authentication has an agent but no workspace yet (a personal key or OAuth binding). The agent counts
- *    as enabled when at least one of ITS live-granted workspaces has the module on. It is only an entry check; every access
- *    afterwards is narrowed to the workspaces that have it (see agentWorkspaceWhere), so a workspace that turned agents off is
- *    unreachable even though the agent can still authenticate elsewhere.
- *  - `agentsEnabledForUser`: user-level surfaces ("My agents", the consent screen) have no workspace at all; enabled when any
- *    workspace the user belongs to has the module on.
- */
-export const agentsEnabledInWorkspace = (workspaceId: string) => isModuleEnabled(workspaceId, "agents")
-export const agentsEnabledForUser = (userId: string) => isModuleEnabledInAnyMemberWorkspace(userId, "agents")
-
-export async function agentHasEnabledWorkspace(agent: AgentRecord): Promise<boolean> {
-  for (const workspaceId of await liveGrantedWorkspaceIds(agent, "READ")) {
-    if (await agentsEnabledInWorkspace(workspaceId)) return true
-  }
-  return false
-}
-
-/**
- * The agent module check for an already-authenticated agent actor: the workspace the actor is bound to when it has one (every cloud
- * run key does), otherwise any workspace the agent is live-granted in.
- */
-export async function agentsAvailableToActor(actor: McpActor, agent: AgentRecord): Promise<boolean> {
-  return actor.scopeWorkspaceId ? agentsEnabledInWorkspace(actor.scopeWorkspaceId) : agentHasEnabledWorkspace(agent)
-}
 
 /**
  * True for an actor that acts through an `agents` row: a personal AGENT key or OAuth binding, or an
@@ -88,7 +56,6 @@ export async function sharedAgentOrganizationId(actor: McpActor): Promise<string
   const prisma = getPrisma()
   const agent = await findAgentById(prisma, actor.agentId)
   if (!agent || !agentIdentityValidForActor(agent, actor)) return null
-  if (!(await agentsAvailableToActor(actor, agent))) return null
   const owner = agentOwner(agent)
   if (owner?.type !== "WORKSPACE") return undefined
   const workspace = await prisma.workspace.findFirst({ where: { id: owner.workspaceId }, select: { organizationId: true } })
@@ -104,10 +71,7 @@ export async function agentWorkspaceWhere(actor: McpActor): Promise<Prisma.Works
   const prisma = getPrisma()
   const agent = await findAgentById(prisma, actor.agentId)
   if (!agent || !agentIdentityValidForActor(agent, actor)) return { id: { in: [] } }
-  const live = (await liveGrantedWorkspaceIds(agent, actor.requiredAgentAccess === "WRITE" ? "WRITE" : "READ")).filter(id => !actor.scopeWorkspaceId || id === actor.scopeWorkspaceId)
-  // The agents module is per workspace: an agent reaches only the granted workspaces that have it switched on.
-  const granted: string[] = []
-  for (const id of live) if (await agentsEnabledInWorkspace(id)) granted.push(id)
+  const granted = (await liveGrantedWorkspaceIds(agent, actor.requiredAgentAccess === "WRITE" ? "WRITE" : "READ")).filter(id => !actor.scopeWorkspaceId || id === actor.scopeWorkspaceId)
   // A shared agent has no inherited authority, so the invoker's own membership is deliberately NOT part of
   // its reach: it sees exactly its live grants, however the invoker's access changes during the run.
   const sharedAgent = agentOwner(agent)?.type === "WORKSPACE"
@@ -153,7 +117,6 @@ export async function hasValidAgentOrgAdminGrant(
   const prisma = getPrisma()
   const agent = await findAgentById(prisma, actor.agentId)
   if (!agent || !agentIdentityValidForActor(agent, actor)) return false
-  if (!(await agentsAvailableToActor(actor, agent))) return false
   // A WORKSPACE-owned agent passes the identity check above only as an AGENT_TURN credential tied to a live run of that exact
   // agent. Its grant must then be in the organization that owns the agent's workspace, never another organization.
   const owner = agentOwner(agent)
@@ -202,7 +165,6 @@ export async function hasOwnerOrgAdminRights(actor: McpActor, organizationId: st
   const agent = await findAgentById(prisma, actor.agentId)
   // Only a USER-owned agent inherits its owner's rights; a WORKSPACE-owned one has none to inherit.
   if (!agent || agent.status !== "ACTIVE" || !isUserOwnedBy(agent, actor.userId)) return false
-  if (!(await agentHasEnabledWorkspace(agent))) return false
   const owner = await prisma.organizationMember.findFirst({
     where: { organizationId, userId: actor.userId },
     select: { role: true },

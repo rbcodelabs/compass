@@ -87,7 +87,7 @@ The fastest path to value is:
 
 ## Help and docs in the side panel
 
-The panel beside the navigation shows one view at a time: **Agent**, **Help** or **Library**. Open it with **Agent** beside your account menu (or **⌘J**), then use the menu on the panel's title to switch views, or press **?** anywhere outside a text field to land on Help directly.
+The panel beside the navigation shows one view at a time: **Agent**, **Help** or **Library**. Open it with **Agent** beside your account menu (or **⌘J**), then use the menu on the panel's title to switch views, or press **?** anywhere outside a text field to land on Help directly. The panel remembers which view and conversation you had open: refresh the page, or share the address, and it reopens on the same view, thread or Help article.
 
 - **Library** is the same tree of Docs, diagrams and artifacts you see on the Docs screen, available from any page. Choosing an item opens it in the main area and leaves the panel where it is.
 - **Search** the whole user guide, or browse it by section. Guides that cover the screen you are on are suggested first under **For this page**.
