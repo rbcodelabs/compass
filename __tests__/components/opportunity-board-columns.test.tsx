@@ -128,7 +128,7 @@ describe("OpportunityBoard live sync", () => {
   afterEach(cleanup)
 
   const column = (title: string) => screen.getByRole("heading", { level: 3, name: title }).closest("section")!
-  const board = (byStatus: typeof BY_STATUS) => (
+  const board = (byStatus: React.ComponentProps<typeof OpportunityBoard>["opportunitiesByStatus"]) => (
     <OpportunityBoard opportunitiesByStatus={byStatus} orgSlug="acme" workspaceSlug="core" workspaceId="w1" />
   )
 
