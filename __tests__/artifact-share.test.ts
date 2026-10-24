@@ -6,6 +6,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+// Loose in-memory prisma row stand-in; fields vary by table.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>
 const tables: Record<string, Row[]> = { artifactShare: [], artifactShareSession: [], artifactShareCommenter: [], artifactShareEvent: [], artifact: [] }
 let counter = 0
@@ -170,7 +172,7 @@ describe("sessions", () => {
   })
 
   it("password change, rotate, and revoke each sign viewers out", async () => {
-    let { rawToken, sessionToken } = await unlocked()
+    const { rawToken, sessionToken } = await unlocked()
     await changeArtifactSharePassword({ ...owner, password: "another long password" })
     expect(tables.artifactShareSession).toHaveLength(0)
     expect(await unlockShare(rawToken, PASSWORD)).toMatchObject({ ok: false })

@@ -6,6 +6,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+// Loose in-memory prisma row stand-in; fields vary by table.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>
 const tables: Record<string, Row[]> = { comment: [], portalVerificationToken: [], portalAccount: [], artifactShare: [], artifactShareCommenter: [] }
 let counter = 0
