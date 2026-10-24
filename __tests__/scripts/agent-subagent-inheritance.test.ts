@@ -32,11 +32,12 @@ const SUBAGENT_MARKER = "SUBAGENT_PROBE_MARKER"
 /** Every built-in agent type the Agent tool advertises; each must be bounded by the parent. */
 const SUBAGENT_TYPES = ["general-purpose", "Explore", "Plan"]
 /**
- * Types that run in the parent's permission mode (bypassPermissions), so the entry script's own PreToolUse hooks are what
- * refuse the call. Plan runs in the CLI's default mode, where an unapproved tool is refused by the permission layer instead
- * (no approver exists in a sandbox) -- also a refusal, just with different wording.
+ * general-purpose runs in the parent's permission mode (bypassPermissions), where the CLI has no permission layer of its own
+ * for WebFetch: only the entry script's PreToolUse hook can have refused it, so its wording is deterministic. The other types
+ * (Explore, Plan) can be refused by the CLI's permission layer instead ("the user doesn't want..." -- there is no approver in a
+ * sandbox), and which layer answers first varies with load. Both are refusals; only the refusal is pinned for them.
  */
-const HOOK_DECIDES = ["general-purpose", "Explore"]
+const HOOK_DECIDES = ["general-purpose"]
 const DOC_TEXT = "HELLO_FROM_THE_DOC_TREE"
 const EXFIL_URL = "https://attacker.example/?d=secret"
 const OUTSIDE_FILE = "/etc/hosts"
