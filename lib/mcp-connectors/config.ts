@@ -132,6 +132,13 @@ export interface ConnectorDefinition {
  */
 export const GOOGLE_CONNECTOR_ENV = "COMPASS_GOOGLE_CONNECTOR"
 
+/**
+ * Env var naming the Vercel Connect connector (`vercel/vercel-admin`) that holds
+ * the deployment's grant to Vercel's MCP server. Optional: unset leaves the
+ * connector unconfigured and it is not offered.
+ */
+export const VERCEL_CONNECTOR_ENV = "COMPASS_VERCEL_CONNECTOR"
+
 export const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
   {
     slug: "v0",
@@ -154,6 +161,18 @@ export const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
       "mcp__v0__getChat to check before creating anything a second time, and never tell the user to rebuild",
       "something by hand without checking first.",
     ].join(" "),
+  },
+  {
+    slug: "vercel",
+    displayName: "Vercel",
+    // The protected-resource document names https://vercel.com as the
+    // authorization server and lists `openid`; it supports PKCE S256.
+    serverUrl: "https://mcp.vercel.com",
+    fallbackScope: "openid",
+    // Vercel's authorization server only registers clients it has reviewed, so
+    // dynamic registration is not available to a self-hosted Compass; the grant
+    // is held by a Vercel Connect connector instead.
+    tokenSource: { kind: "vercel-connect", uidEnv: VERCEL_CONNECTOR_ENV },
   },
   {
     slug: "google-drive",
