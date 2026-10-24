@@ -195,6 +195,8 @@ test.describe("Roadmap — not yet on the roadmap", () => {
       await page.goto(`${base}/roadmap`);
       await page.waitForLoadState("networkidle");
 
+      // The pane starts collapsed; expand it before interacting.
+      await page.getByRole("button", { name: /^Expand Not scheduled/ }).click();
       await expect(page.getByRole("heading", { name: "Not scheduled" })).toBeVisible({ timeout: 10_000 });
       // From md up the pane is docked beside the board (outside the scrolling track) so a drag never needs
       // a mid-drag scroll; below md it stays the last column in the track (kanban-mobile-scroll covers that).
