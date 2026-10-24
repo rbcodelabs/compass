@@ -11,6 +11,7 @@ import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity";
 import { clearUserDefaultAgent, clearWorkspaceDefaultAgent, setUserDefaultAgent, setWorkspaceDefaultAgent } from "@/lib/agent-defaults";
 import { parseAgentModel } from "@/lib/agent-models";
 import { parseAgentCap } from "@/lib/agent-limits";
+import { readWorkspaceDeveloperSandboxEnabled } from "@/lib/agent-sandbox-class";
 
 async function account() {
   const session = await auth();
@@ -83,6 +84,8 @@ export async function createCloudAgent(input: {
   invokePolicy?: AgentInvokePolicy;
   /** Access to enable in this workspace when the creator administers it. Defaults to read only. */
   access?: "READ" | "WRITE";
+  /** Shared agents only. DEVELOPER needs the workspace to have the developer sandbox enabled. Omitted = STANDARD. */
+  sandboxClass?: "STANDARD" | "DEVELOPER";
 }) {
   if (input.ownerType !== "USER" && input.ownerType !== "WORKSPACE") throw new Error("Invalid owner type");
   const access = input.access ?? "READ";
@@ -90,7 +93,16 @@ export async function createCloudAgent(input: {
   // Shared agents are an administrator action: resolveWorkspaceAdmin refuses anyone else before any input is read.
   const admin = input.ownerType === "WORKSPACE" ? await resolveWorkspaceAdmin(input.orgSlug, input.workspaceSlug) : null;
   const { prisma, userId, workspaceId } = admin ? { ...admin, userId: (await account()).userId } : await memberWorkspace(input.orgSlug, input.workspaceSlug);
+  const wantsDeveloper = input.sandboxClass === "DEVELOPER";
+  if (input.sandboxClass !== undefined && input.sandboxClass !== "STANDARD" && !wantsDeveloper) throw new Error("Unknown sandbox class");
+  if (wantsDeveloper) {
+    // Same rule as updateCloudAgent: a shared agent in a workspace whose admin allowed it.
+    if (input.ownerType !== "WORKSPACE") throw new Error("Only shared agents can use the developer sandbox");
+    if (!(await readWorkspaceDeveloperSandboxEnabled(prisma, workspaceId))) throw new Error("Enable the developer sandbox for this workspace first");
+  }
   const data = {
+    // Written only when asked for, so creating a standard agent never touches the new column.
+    ...(wantsDeveloper ? { sandboxClass: "DEVELOPER" } : {}),
     name: nameValue(input.name),
     description: descriptionValue(input.description),
     instructions: instructionsValue(input.instructions),
@@ -118,6 +130,7 @@ export async function createCloudAgent(input: {
     revalidatePath("/settings/agents");
     return { id: agent.id, enabledInWorkspace: grantNow };
   } catch (error) {
+    if (wantsDeveloper && isMissingColumn(error)) throw new Error("The developer sandbox is not available yet. Try again after the database update finishes.");
     if (isMissingColumn(error)) throw new Error("Cloud agents are not available yet. Try again after the database update finishes.");
     throw error;
   }
@@ -127,6 +140,8 @@ export async function updateCloudAgent(id: string, input: {
   name?: string; description?: string; instructions?: string; model?: string | null; invokePolicy?: AgentInvokePolicy;
   /** Run caps (migration 102). null = back to the default; omitted = unchanged. */
   maxConcurrentRuns?: number | null; maxRunsPerDay?: number | null;
+  /** Sandbox class (migration 110). DEVELOPER needs a shared agent in a workspace that has the developer sandbox enabled. */
+  sandboxClass?: "STANDARD" | "DEVELOPER";
 }) {
   const { prisma, userId } = await account();
   const agent = await findAgentById(prisma, id);
@@ -152,9 +167,18 @@ export async function updateCloudAgent(id: string, input: {
     if (input.maxConcurrentRuns !== undefined) data.maxConcurrentRuns = parseAgentCap(input.maxConcurrentRuns, "maxConcurrentRuns");
     if (input.maxRunsPerDay !== undefined) data.maxRunsPerDay = parseAgentCap(input.maxRunsPerDay, "maxRunsPerDay");
   }
+  const sandboxClassRequested = input.sandboxClass !== undefined;
+  if (sandboxClassRequested) {
+    if (input.sandboxClass !== "STANDARD" && input.sandboxClass !== "DEVELOPER") throw new Error("Unknown sandbox class");
+    // The larger sandbox is a cost decision, so it is an administrator's call, and only a shared agent has a workspace to check it against.
+    if (owner?.type !== "WORKSPACE" || !(await isWorkspaceAdminUser(prisma, userId, owner.workspaceId))) throw new Error("Agent not found");
+    if (input.sandboxClass === "DEVELOPER" && !(await readWorkspaceDeveloperSandboxEnabled(prisma, owner.workspaceId))) throw new Error("Enable the developer sandbox for this workspace first");
+    data.sandboxClass = input.sandboxClass;
+  }
   try {
     await prisma.agent.update({ where: { id }, data, select: { id: true } });
   } catch (error) {
+    if (sandboxClassRequested && isMissingColumn(error)) throw new Error("The developer sandbox is not available yet. Try again after the database update finishes.");
     if (capsRequested && isMissingColumn(error)) throw new Error("Run limits are not available yet. Try again after the database update finishes.");
     throw error;
   }

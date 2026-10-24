@@ -236,7 +236,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
   "110_workspace_anthropic_api_key": "10eeaf45578415a34a20c7616318231957a2ac76e8c7f438d75796ef751499be", // gitleaks:allow -- reviewed public SHA256, not a credential
   // Agent UI control: two new tables plus ASYNC indexes, additive only (IF NOT EXISTS, no data writes, no FKs). Digest recorded from the shipped SQL; please review this line.
-  "110_agent_ui_control": "77d6623c31b682918b954421e3957b8b3c8eef6c1bc665a60d8e5817d6e77587"
+  "110_agent_ui_control": "77d6623c31b682918b954421e3957b8b3c8eef6c1bc665a60d8e5817d6e77587",
+  // Developer sandbox class: two nullable ADD COLUMNs (agents, workspaces) plus the agent_runtime_snapshots table and one unique ASYNC index. Additive, no backfill.
+  "110_agent_sandbox_class": "3756f4a2853f5b8a9d09322c94b24bfd220ea7def3d4809afecd385196a03f1e"
 };
 
 /**
@@ -372,6 +374,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 108 hook (legacy env flag backfill + postcondition); same file as 107's hook.
   // The 109 postcondition (columns, plus both indexes valid, ready, and the right shape); editing it re-reviews the migration.
+  // The 110 postcondition (columns on all three tables, plus the unique index valid, ready, and the right shape); editing it re-reviews the migration.
+  "110_agent_sandbox_class": {
+    "lib/migrations/agent-sandbox-class.ts": "b13ec90b93946d87cd60772420b47d5a52b067fa6f85e859ccd262525a91d3f1",
+  },
   "109_agent_conversation_reviews": {
     "lib/migrations/agent-conversation-reviews.ts": "970ff2d900951977feefd21dc9592b49b5d59dc0819c9b2e66e0e911718503ed",
   },

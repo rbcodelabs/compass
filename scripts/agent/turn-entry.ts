@@ -618,7 +618,7 @@ async function main(): Promise<void> {
   const githubAccess = githubAccessFromEnv(process.env, docsRoot)
   if (githubAccess.enabled && docsSession && docsRoot) {
     try {
-      prepareBashJail({ docsRoot, note })
+      prepareBashJail({ docsRoot, note, npmToken: process.env.AGENT_SANDBOX_CLASS === "DEVELOPER" && Boolean(process.env.NPM_TOKEN?.trim()) })
       githubShell = true
       note(`shell enabled for ${githubAccess.repos.length} repository(ies)`)
     } catch (error) {
@@ -749,7 +749,7 @@ async function main(): Promise<void> {
     // The model-facing CLI process does not need this script's own credentials
     // (the run callback token and the MCP bearer are used in-process only), so it
     // does not inherit them.
-    env: scrubbedAgentEnv(process.env, { github: githubShell }),
+    env: scrubbedAgentEnv(process.env, { github: githubShell, npm: githubShell && process.env.AGENT_SANDBOX_CLASS === "DEVELOPER" }),
     strictMcpConfig: true,
     settingSources: [],
     systemPrompt: effectiveSystemPrompt,

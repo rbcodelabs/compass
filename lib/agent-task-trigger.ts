@@ -36,6 +36,8 @@ import { resolveWorkspaceAgentModel } from "@/lib/workspace-anthropic-key"
 import { agentKind, findAgentById } from "@/lib/agent-ownership"
 import { resolveGatewayCredential, resolveAgentHarness } from "@/lib/agent-harness"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
+import { resolveRunSnapshot } from "@/lib/agent-sandbox-class"
+import { getRuntimeSnapshot } from "@/lib/agent-runtime-snapshots"
 import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity"
 import { AgentRunError, DEFAULT_AGENT_RUN_BUDGET_MS, agentRunAttributionAvailable, agentRunsAvailable, createAgentRun, finalizeAgentRun, findActiveAgentRun } from "@/lib/agent-runs"
 import { launchQueuedAgentRun, type LaunchContext } from "@/lib/agent-run-launch"
@@ -227,6 +229,10 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
   if (!snapshotId || (resolvedModel !== null && !resolvedModel.ok) || (harness === "opencode" && !gatewayApiKey)) {
     return refused("AGENT_RUNTIME_UNAVAILABLE", `The task was assigned to ${runAgent.name}. The agent runtime is not set up on this deployment, so no run started.`, runAgent.name)
   }
+  // The named agent may be a DEVELOPER-class agent: that boots the developer snapshot, or the run is refused (lib/agent-sandbox-class.ts).
+  const picked = await resolveRunSnapshot(prisma, { workspaceId: task.workspaceId, agentId: runAgent.id }, { getStandardSnapshotId: async () => snapshotId, getDeveloperSnapshotId: async () => (await getRuntimeSnapshot("DEVELOPER"))?.snapshotId ?? null })
+  if (!picked.ok) return refused("AGENT_RUNTIME_UNAVAILABLE", `The task was assigned to ${runAgent.name}, but no run started: ${picked.message}`, runAgent.name)
+  const snapshotIdToUse = picked.snapshotId
 
   const reference = displayIdFromRow("task", task) ?? `Task ${task.id.slice(0, 8)}`
   const basePath = `/${task.workspace.organization.slug}/${task.workspace.slug}`
@@ -319,7 +325,7 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
     workspace: { id: task.workspace.id },
     agent: runAgent,
     prompt,
-    snapshotId,
+    snapshotId: snapshotIdToUse,
     harness,
     model: resolvedModel?.ok ? resolvedModel : undefined,
     gatewayApiKey,

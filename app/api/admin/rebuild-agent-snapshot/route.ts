@@ -29,7 +29,7 @@
 // adds a build step.
 
 import { NextRequest } from "next/server"
-import { getAgentSnapshotStatus, rebuildAgentSnapshot } from "@/lib/agent-snapshot-admin"
+import { getAgentSnapshotStatus, getDeveloperSnapshotStatus, rebuildAgentSnapshot, rebuildDeveloperSnapshot } from "@/lib/agent-snapshot-admin"
 import { secretMatches } from "@/lib/secret-compare"
 
 export const runtime = "nodejs"
@@ -40,13 +40,18 @@ function checkAuth(req: NextRequest): boolean {
   return secretMatches(req.headers.get("x-migration-secret"), process.env.MIGRATION_SECRET)
 }
 
+// ?class=developer targets the layered developer snapshot; anything else (or nothing) is the STANDARD golden snapshot.
+function isDeveloper(req: NextRequest): boolean {
+  return new URL(req.url).searchParams.get("class") === "developer"
+}
+
 export async function GET(req: NextRequest) {
   if (!checkAuth(req)) return new Response("Unauthorized", { status: 401 })
-  return Response.json(await getAgentSnapshotStatus())
+  return Response.json(isDeveloper(req) ? await getDeveloperSnapshotStatus() : await getAgentSnapshotStatus())
 }
 
 export async function POST(req: NextRequest) {
   if (!checkAuth(req)) return new Response("Unauthorized", { status: 401 })
-  const result = await rebuildAgentSnapshot()
+  const result = isDeveloper(req) ? await rebuildDeveloperSnapshot() : await rebuildAgentSnapshot()
   return Response.json(result, { status: result.ok ? 200 : 500 })
 }

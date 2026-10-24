@@ -112,6 +112,8 @@ function req(body: unknown): NextRequest {
 const SESSION = { user: { id: "user-1" } }
 
 beforeEach(() => {
+  // These tests are about the per-run sandbox (the reuse kill switch restores exactly that); conversation-sandbox reuse is covered in agent-sandbox-reuse.test.ts.
+  process.env.AGENT_SANDBOX_REUSE = "0"
   vi.clearAllMocks()
   mockPackStorage.mockReturnValue({})
   process.env.ANTHROPIC_API_KEY = "sk-ant-test"

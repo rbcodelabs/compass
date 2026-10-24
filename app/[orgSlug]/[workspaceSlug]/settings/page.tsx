@@ -17,6 +17,8 @@ import { parseStoredRepos } from "@/lib/agent-github-repos";
 import { AgentGithubReposPanel } from "@/components/settings/agent-github-repos-panel";
 import { AnthropicKeyPanel } from "@/components/settings/anthropic-key-panel";
 import { readAnthropicKeyLast4 } from "@/lib/workspace-anthropic-key";
+import { AgentDeveloperSandboxPanel } from "@/components/settings/agent-developer-sandbox-panel";
+import { loadAgentSandboxClasses, readWorkspaceDeveloperSandboxEnabled } from "@/lib/agent-sandbox-class";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { ThinkingModelPanel } from "@/components/settings/thinking-model-panel";
 import { inspectStoredLabels, resolveThinkingModel } from "@/lib/thinking-model/resolve";
@@ -211,6 +213,9 @@ export default async function SettingsPage({ params }: Props) {
   const workspaceAgents = await listAgentsForWorkspace(prisma, workspace.id, { memberUserIds: rawMembers.map((m) => m.userId), grantedAgentIds: grants.map((g) => g.agentId), includeGrantable: canManageCapabilityPacks });
   // Only the cloud agents this viewer may edit are sent their limits, but one tolerant query covers the lot.
   const runCaps = await loadConfiguredAgentRunCaps(prisma, workspaceAgents.filter((a) => agentKind(a) === "CLOUD").map((a) => a.id));
+  // Both read tolerantly: the settings page must keep rendering on a deployment where migration 110 is not applied yet.
+  const developerSandboxEnabled = await readWorkspaceDeveloperSandboxEnabled(prisma, workspace.id);
+  const sandboxClasses = await loadAgentSandboxClasses(prisma, workspaceAgents.filter((a) => agentKind(a) === "CLOUD").map((a) => a.id));
   const storedDefaults = await getStoredDefaultAgentIds(prisma, { userId: session.user.id, workspaceId: workspace.id });
   const usableAgentIds = new Set((await Promise.all(workspaceAgents.map(async (a) => (agentKind(a) === "CLOUD" && a.status === "ACTIVE" && grants.some((g) => g.agentId === a.id) && (await canInvokeAgent(prisma, { userId: session.user!.id }, a)) ? a.id : null)))).filter((id): id is string => !!id));
   const agentActivity = canManageCapabilityPacks ? await prisma.agentToolCall.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "desc" }, take: 25 }) : [];
@@ -390,7 +395,7 @@ export default async function SettingsPage({ params }: Props) {
       </SettingsSection>
 
       <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace, including cloud agents that run inside Compass. Assignment does not grant access; assigning a task to a cloud agent from the app starts a run, within the limits set on that agent.">
-        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} canManage={canManageCapabilityPacks} models={allowedAgentModels()} agents={workspaceAgents.map((a) => {
+        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} canManage={canManageCapabilityPacks} developerSandboxEnabled={developerSandboxEnabled} models={allowedAgentModels()} agents={workspaceAgents.map((a) => {
           const owner = agentOwner(a);
           const ownerMember = owner?.type === "USER" ? rawMembers.find((m) => m.userId === owner.userId) : undefined;
           // Editing follows canManageAgent: the owner of a personal agent, an administrator for a shared one. Only editors receive the instructions.
@@ -401,7 +406,7 @@ export default async function SettingsPage({ params }: Props) {
             eligible: owner?.type === "WORKSPACE" || !!ownerMember,
             access: grants.find((g) => g.agentId === a.id)?.access ?? null,
             kind: agentKind(a), shared: owner?.type === "WORKSPACE", description: a.description ?? null,
-            ...(canEdit && agentKind(a) === "CLOUD" ? { instructions: a.instructions ?? null, model: a.model ?? null, invokePolicy: (a.invokePolicy as AgentInvokePolicy | null) ?? null, ...(runCaps.get(a.id) ?? {}) } : {}),
+            ...(canEdit && agentKind(a) === "CLOUD" ? { instructions: a.instructions ?? null, model: a.model ?? null, invokePolicy: (a.invokePolicy as AgentInvokePolicy | null) ?? null, ...(runCaps.get(a.id) ?? {}), sandboxClass: sandboxClasses.get(a.id) ?? "STANDARD" } : {}),
             canEdit: canEdit && agentKind(a) === "CLOUD",
             canUse: usableAgentIds.has(a.id),
             isWorkspaceDefault: storedDefaults.workspaceDefaultAgentId === a.id,
@@ -449,6 +454,10 @@ export default async function SettingsPage({ params }: Props) {
           initialLast4={await readAnthropicKeyLast4(prisma, workspace.id)}
           canEdit={canManageCapabilityPacks}
         />
+      </SettingsSection>
+
+      <SettingsSection title="Developer sandbox" description="Let shared agents in this workspace run in the developer sandbox, with a local PostgreSQL, pnpm and build tools. Workspace administrators only.">
+        <AgentDeveloperSandboxPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} initialEnabled={developerSandboxEnabled} canEdit={canManageCapabilityPacks} />
       </SettingsSection>
 
       <SettingsSection title="Agent GitHub access" description="Repositories agents in this workspace may push branches and open pull requests to. Agents get a short-lived token limited to exactly these repos.">
