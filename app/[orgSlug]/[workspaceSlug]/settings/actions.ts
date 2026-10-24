@@ -11,7 +11,7 @@ import { countWorkspaceAdmins, normalizeWorkspaceRole } from "@/lib/roles";
 import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
 import { encrypt } from "@/lib/crypto-secrets";
 import { generateSsoSecret } from "@/lib/portal-sso";
-import { requireProductEntity } from "@/lib/product-action-auth";
+import { requireProductEntity, requireProductWorkspace, type ProductEntityKind } from "@/lib/product-action-auth";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
 import { revokeMemberAgentGrants } from "@/lib/agent-lifecycle";
 import { deleteMemberFollowState } from "@/lib/follow-cleanup";
@@ -463,11 +463,17 @@ export async function deleteFieldDefinition(
   workspaceSlug: string,
   fieldId: string
 ) {
-  const { prisma } = await resolveWorkspace(orgSlug, workspaceSlug);
+  const { prisma, workspaceId } = await resolveWorkspace(orgSlug, workspaceSlug);
+
+  // The field id is client-supplied: prove it belongs to the caller's workspace
+  // before touching its values, then keep the tenant filter on the delete itself.
+  const field = await prisma.customFieldDefinition.findFirst({ where: { id: fieldId, workspaceId }, select: { id: true } });
+  if (!field) throw new Error("Field not found");
 
   // Delete values first (cascade not enforced at DB level with DSQL relationMode=prisma)
   await prisma.customFieldValue.deleteMany({ where: { fieldId } });
-  await prisma.customFieldDefinition.delete({ where: { id: fieldId } });
+  const deleted = await prisma.customFieldDefinition.deleteMany({ where: { id: fieldId, workspaceId } });
+  if (deleted.count !== 1) throw new Error("Field not found");
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }
@@ -514,8 +520,8 @@ export async function updateFieldDefinition(
     }
   }
 
-  await prisma.customFieldDefinition.update({
-    where: { id: fieldId },
+  const updated = await prisma.customFieldDefinition.updateMany({
+    where: { id: fieldId, workspaceId },
     data: {
       ...(input.name !== undefined && { name: input.name }),
       ...(input.options !== undefined && {
@@ -527,11 +533,24 @@ export async function updateFieldDefinition(
       ...linkData,
     },
   });
+  // Zero rows means the id is not in the caller's workspace: fail closed.
+  if (updated.count !== 1) throw new Error("Field not found");
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
 }
 
 // ─── Field Values ─────────────────────────────────────────────────────────────
+
+/** Which product entity a custom field's `objectType` addresses. */
+const CUSTOM_FIELD_ENTITY_KIND: Record<CustomFieldObjectType, ProductEntityKind> = {
+  OPPORTUNITY: "opportunity",
+  SOLUTION: "solution",
+  EXPERIMENT: "experiment",
+  OBJECTIVE: "objective",
+  KEY_RESULT: "keyResult",
+  ROADMAP_ITEM: "roadmapItem",
+  TASK: "task",
+};
 
 /**
  * Upsert the value for one custom field on one object.
@@ -547,6 +566,15 @@ export async function upsertFieldValue(
   if (!session?.user?.id) throw new Error("Unauthorized");
 
   const prisma = getPrisma();
+
+  // Both ids come from the client. The caller must be a member of the field's
+  // workspace, and the object must be of the field's type and live in that
+  // same workspace, so neither id can reach into another tenant.
+  const field = await prisma.customFieldDefinition.findUnique({ where: { id: fieldId }, select: { workspaceId: true, objectType: true } });
+  const kind = field ? CUSTOM_FIELD_ENTITY_KIND[field.objectType as CustomFieldObjectType] : undefined;
+  if (!field || !kind) throw new Error("Field not found");
+  await requireProductWorkspace(field.workspaceId);
+  await requireProductEntity(kind, objectId, field.workspaceId);
 
   if (value === null || value === "" || (Array.isArray(value) && value.length === 0)) {
     // Clear: delete if exists
