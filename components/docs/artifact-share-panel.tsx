@@ -12,7 +12,10 @@ import {
 } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions"
 import type { OwnerShareState } from "@/lib/artifact-share"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 
 const EVENT_LABELS: Record<string, string> = {
   ENABLED: "Sharing turned on",
@@ -95,13 +98,16 @@ export function ArtifactSharePanel({ workspaceId, artifactId, basePath, state }:
       </div>
 
       <div className="space-y-1 border-t pt-3">
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={state.commentsEnabled} disabled={pending || !state.commentingAvailable} onChange={(event) => run(() => setArtifactShareCommentsAction(workspaceId, artifactId, event.target.checked, basePath))} />Let viewers leave feedback (they verify by email)</label>
+        <div className="flex items-center gap-2 text-sm">
+          <Checkbox id={`share-comments-${artifactId}`} checked={state.commentsEnabled} disabled={pending || !state.commentingAvailable} onCheckedChange={(checked) => run(() => setArtifactShareCommentsAction(workspaceId, artifactId, checked === true, basePath))} />
+          <Label htmlFor={`share-comments-${artifactId}`}>Let viewers leave feedback (they verify by email)</Label>
+        </div>
         {state.commentingAvailable
           ? <p className="text-xs text-muted-foreground">Viewers only ever see their own comments, never yours or anyone else&apos;s.</p>
           : <p className="text-xs text-muted-foreground">Unavailable: this deployment has no email provider configured, so viewers can&apos;t verify an address.</p>}
       </div>
 
-      {state.events.length > 0 && <details className="text-sm"><summary className="cursor-pointer text-text-subtle">Activity</summary><ul className="mt-2 space-y-1">{state.events.map((event) => <li key={event.id} className="flex justify-between gap-2"><span>{EVENT_LABELS[event.eventType] ?? event.eventType}</span><time className="text-xs text-muted-foreground">{new Date(event.createdAt).toLocaleString()}</time></li>)}</ul></details>}
+      {state.events.length > 0 && <Collapsible className="text-sm"><CollapsibleTrigger className="cursor-pointer text-text-subtle">Activity</CollapsibleTrigger><CollapsibleContent><ul className="mt-2 space-y-1">{state.events.map((event) => <li key={event.id} className="flex justify-between gap-2"><span>{EVENT_LABELS[event.eventType] ?? event.eventType}</span><time className="text-xs text-muted-foreground">{new Date(event.createdAt).toLocaleString()}</time></li>)}</ul></CollapsibleContent></Collapsible>}
     </div>}
     {error && <p role="alert" className="text-sm text-status-danger">{error}</p>}
   </section>
