@@ -259,6 +259,8 @@ model Workspace {
   // JSON array of "owner/name" repos a workspace admin approved for agent
   // sandboxes (migration 105). NULL/empty = agents get no GitHub token.
   agentGithubRepos     String?                 @map("agent_github_repos") @db.Text
+  // Admin opt-in letting this workspace's agents use the DEVELOPER sandbox class (migration 110). NULL reads as off.
+  agentDeveloperSandboxEnabled Boolean?        @map("agent_developer_sandbox_enabled")
   // Ciphertext of the raw SSO shared secret (reversible AES-256-GCM
   // encryption via lib/crypto-secrets.ts, not a hash) — Compass must be
   // able to decrypt it to verify inbound customer-signed JWTs. The
@@ -2715,6 +2717,8 @@ model Agent {
   maxConcurrentRuns Int? @map("max_concurrent_runs")
   /// Most runs started in a rolling 24 hours (migration 102). NULL = the default (100).
   maxRunsPerDay Int? @map("max_runs_per_day")
+  /// STANDARD | DEVELOPER (migration 110). Which sandbox snapshot runs boot from. NULL = STANDARD.
+  sandboxClass String? @map("sandbox_class") @db.VarChar(20)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @map("updated_at")
   @@index([ownerUserId])
@@ -2888,6 +2892,25 @@ model AgentRuntimeConfig {
   updatedAt        DateTime  @default(now()) @map("updated_at")
 
   @@map("agent_runtime_config")
+}
+
+/// One row per sandbox class (STANDARD | DEVELOPER) holding the current Vercel Sandbox snapshot for that class (migration 110).
+/// The DEVELOPER snapshot is layered on STANDARD: baseSnapshotId records the STANDARD snapshot it was built from, so a
+/// STANDARD rebuild leaves it stale. A derived snapshot survives deletion of its base (verified by spike), so no
+/// deletion ordering is needed. agent_runtime_config remains the STANDARD source of truth until a later migration.
+/// DSQL: no FKs, no @updatedAt (set explicitly).
+model AgentRuntimeSnapshot {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sandboxClass    String    @map("sandbox_class") @db.VarChar(20)
+  snapshotId      String?   @map("snapshot_id") @db.VarChar(255)
+  depsFingerprint String?   @map("deps_fingerprint") @db.VarChar(64)
+  baseSnapshotId  String?   @map("base_snapshot_id") @db.VarChar(255)
+  snapshotBuiltAt DateTime? @map("snapshot_built_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @map("updated_at")
+
+  @@unique([sandboxClass], map: "idx_agent_runtime_snapshots_class")
+  @@map("agent_runtime_snapshots")
 }
 
 // ─── In-app agent conversations ──────────────────────────────────────────────

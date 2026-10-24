@@ -39,6 +39,7 @@ import { HANDOFF_KINDS, type HandoffKind } from "@/lib/pm-agent-processing"
 import { revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 import { finishInterviewProcessing, reportPmAgentFailure } from "@/lib/pm-agent-service"
 import { stopSandboxByName } from "@/lib/agent-sandbox"
+import { AGENT_SANDBOX_IDLE_MS, agentSandboxReuseEnabled, type PreviousRunState } from "@/lib/agent-sandbox-reuse"
 
 // ── Budgets and caps ────────────────────────────────────────────────────────
 //
@@ -151,6 +152,44 @@ export function agentRunWorkerTokenIsBound({
  */
 export function agentRunSandboxName(runId: string) {
   return `compass-agent-run-${runId}`
+}
+
+/**
+ * Name of the sandbox shared by every CHAT turn of one conversation (SOL-11, see the sandbox reuse ADR).
+ * Distinct prefix from agentRunSandboxName so the finalizer and sweeper can tell a reusable sandbox from a
+ * per-run one by name alone, with no new column.
+ */
+export const CONVERSATION_SANDBOX_PREFIX = "compass-agent-conv-"
+
+/**
+ * DEVELOPER-class conversations get their own name so a persisted disk is never resumed under a different class
+ * (different snapshot, egress policy and npm token). The shared prefix keeps finalize and the sweeper treating both alike.
+ */
+export function agentConversationSandboxName(conversationId: string, opts?: { developer?: boolean }) {
+  return `${CONVERSATION_SANDBOX_PREFIX}${opts?.developer ? "dev-" : ""}${conversationId}`
+}
+
+export function isConversationSandboxName(name: string | null | undefined): name is string {
+  return typeof name === "string" && name.startsWith(CONVERSATION_SANDBOX_PREFIX)
+}
+
+/**
+ * The conversation's most recent run before `excludeRunId`, as the sandbox reuse decision needs it.
+ * "Last used" for a conversation sandbox is that run's `finishedAt`: it is written when the run reaches a
+ * terminal status, it is exactly the moment the sandbox went idle, and it needs no new column (a sandbox
+ * tag cannot be updated after creation).
+ */
+export async function findPreviousRunForSandboxReuse(
+  prisma: Pick<AppPrismaClient, "agentRun">,
+  conversationId: string,
+  excludeRunId: string,
+): Promise<PreviousRunState | null> {
+  const previous = await prisma.agentRun.findFirst({
+    where: { conversationId, id: { not: excludeRunId } },
+    orderBy: { createdAt: "desc" },
+    select: { status: true, finishedAt: true, sandboxName: true },
+  })
+  return previous ?? null
 }
 
 export function resolveAgentRunBudgetMs(requestedMs?: unknown) {
@@ -633,6 +672,7 @@ export type AgentRunCleanup = {
 }
 
 const defaultCleanup: Required<AgentRunCleanup> = {
+  // Stopping a conversation sandbox PAUSES it (persistent: the disk is snapshotted and the next turn resumes it); nothing deletes one.
   stopSandbox: (sandboxName) => stopSandboxByName(sandboxName),
   revokeKey: (apiKeyId) => revokeAgentMcpKey(apiKeyId),
   finishClaim: async (conversationId, claimId, successful) => {
@@ -769,8 +809,15 @@ export async function finalizeAgentRun({
   if (run.apiKeyId) {
     try { await effects.revokeKey(run.apiKeyId) } catch { /* revokeAgentMcpKey never throws, but the seam might */ }
   }
+  // A conversation sandbox that just finished a turn cleanly stays up for the next one; finishedAt (written above)
+  // is its idle clock and the sweeper reaps it after AGENT_SANDBOX_IDLE_MS. Every other outcome pauses it (stop; the
+  // disk is kept): after a failure, cancel or sweep its state is unknown, and a process left from a timed-out run
+  // must not survive into the next turn. The kill switch applies at finalize time too, so turning reuse off drains warm sandboxes.
+  const sandboxName = run.sandboxName ?? agentRunSandboxName(runId)
+  const keepWarm = status === "SUCCEEDED" && isConversationSandboxName(sandboxName) && agentSandboxReuseEnabled()
+  if (keepWarm) return { finalized: true as const, status }
   try {
-    await effects.stopSandbox(run.sandboxName ?? agentRunSandboxName(runId))
+    await effects.stopSandbox(sandboxName)
     await prisma.agentRun.update({ where: { id: runId }, data: { sandboxStoppedAt: now, updatedAt: now } })
   } catch {
     /* A sandbox that is already gone, or unreachable, still hits its own
@@ -888,7 +935,83 @@ export async function sweepAgentRuns({
   }
   // `examined` vs `swept` is how a caller sees that `limit` truncated the batch
   // rather than that there was nothing left to do.
-  return { examined: candidates.length, swept, failed, truncated: candidates.length === limit }
+  const idleSandboxes = await reapIdleConversationSandboxes({ prisma, now, limit, cleanup }).catch((error) => ({
+    examined: 0,
+    stopped: [] as string[],
+    failed: [{ sandboxName: "*", error: error instanceof Error ? error.message : String(error) }],
+  }))
+
+  return { examined: candidates.length, swept, failed, truncated: candidates.length === limit, idleSandboxes }
+}
+
+/** Idle conversation sandboxes are only looked for this far back; the platform timeout is the backstop beyond it. */
+const IDLE_SANDBOX_LOOKBACK_MS = 2 * 60 * 60_000
+
+/**
+ * Stop conversation sandboxes that have sat unused for longer than `idleMs`.
+ *
+ * A candidate is a SUCCEEDED run on a conversation sandbox that finalize left warm (sandboxStoppedAt null) and
+ * that finished more than `idleMs` ago. It is reaped only if its conversation has no other run that is
+ * non-terminal OR was created after it, i.e. nothing is using the sandbox and nothing newer owns its state.
+ * That check is the safety property: a sandbox with an active run is never stopped here. A turn that starts
+ * concurrently is protected by the check above: createAgentRun makes the new run non-terminal before the turn touches the
+ * sandbox, so a sweep that starts after it skips the conversation. Only a sweep already between its check and its stop
+ * can still meet a starting turn (a milliseconds-wide window; the turn then fails visibly and the next one resumes).
+ */
+export async function reapIdleConversationSandboxes({
+  prisma,
+  now = new Date(),
+  idleMs = AGENT_SANDBOX_IDLE_MS,
+  limit = 25,
+  cleanup,
+}: {
+  prisma: AppPrismaClient
+  now?: Date
+  idleMs?: number
+  limit?: number
+  cleanup?: AgentRunCleanup
+}) {
+  const effects = { ...defaultCleanup, ...cleanup }
+  const candidates = await prisma.agentRun.findMany({
+    where: {
+      status: "SUCCEEDED",
+      sandboxStoppedAt: null,
+      sandboxName: { startsWith: CONVERSATION_SANDBOX_PREFIX },
+      finishedAt: { lte: new Date(now.getTime() - idleMs), gte: new Date(now.getTime() - IDLE_SANDBOX_LOOKBACK_MS) },
+    },
+    orderBy: { finishedAt: "asc" },
+    take: limit,
+    select: { id: true, conversationId: true, sandboxName: true, finishedAt: true },
+  })
+
+  const stopped: string[] = []
+  const failed: { sandboxName: string; error: string }[] = []
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    const sandboxName = candidate.sandboxName
+    if (!isConversationSandboxName(sandboxName) || !candidate.finishedAt || seen.has(sandboxName)) continue
+    seen.add(sandboxName)
+    try {
+      const newer = await prisma.agentRun.findFirst({
+        where: {
+          conversationId: candidate.conversationId,
+          id: { not: candidate.id },
+          OR: [{ status: { in: [...NON_TERMINAL_AGENT_RUN_STATUSES] } }, { createdAt: { gt: candidate.finishedAt } }],
+        },
+        select: { id: true },
+      })
+      if (newer) continue
+      await effects.stopSandbox(sandboxName)
+      await prisma.agentRun.updateMany({
+        where: { conversationId: candidate.conversationId, sandboxName, sandboxStoppedAt: null },
+        data: { sandboxStoppedAt: now, updatedAt: now },
+      })
+      stopped.push(sandboxName)
+    } catch (error) {
+      failed.push({ sandboxName, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return { examined: candidates.length, stopped, failed }
 }
 
 // ── Viewer reads ───────────────────────────────────────────────────────────

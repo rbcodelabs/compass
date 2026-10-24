@@ -231,7 +231,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Per-user "reviewed" flag for the agent board: one new table plus two ASYNC indexes (unique (conversation, user), non-unique (user, workspace)).
   // Additive: no existing table touched, no backfill, one DDL statement per transaction. The 109 postcondition proves the columns and both indexes.
   // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
-  "109_agent_conversation_reviews": "bde4475d8cd9ce2284029356db322a96967573dee058a963f76a147ce94595a9"
+  "109_agent_conversation_reviews": "bde4475d8cd9ce2284029356db322a96967573dee058a963f76a147ce94595a9",
+  // Developer sandbox class: two nullable ADD COLUMNs (agents, workspaces) plus the agent_runtime_snapshots table and one unique ASYNC index. Additive, no backfill.
+  "110_agent_sandbox_class": "3756f4a2853f5b8a9d09322c94b24bfd220ea7def3d4809afecd385196a03f1e"
 };
 
 /**
@@ -367,6 +369,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 108 hook (legacy env flag backfill + postcondition); same file as 107's hook.
   // The 109 postcondition (columns, plus both indexes valid, ready, and the right shape); editing it re-reviews the migration.
+  // The 110 postcondition (columns on all three tables, plus the unique index valid, ready, and the right shape); editing it re-reviews the migration.
+  "110_agent_sandbox_class": {
+    "lib/migrations/agent-sandbox-class.ts": "b13ec90b93946d87cd60772420b47d5a52b067fa6f85e859ccd262525a91d3f1",
+  },
   "109_agent_conversation_reviews": {
     "lib/migrations/agent-conversation-reviews.ts": "970ff2d900951977feefd21dc9592b49b5d59dc0819c9b2e66e0e911718503ed",
   },
