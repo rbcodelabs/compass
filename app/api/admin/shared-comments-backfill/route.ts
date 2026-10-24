@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { withAdminDsqlClient } from "@/lib/admin-dsql-pool"
+import { secretMatches } from "@/lib/secret-compare"
 import { runSharedCommentsBackfill, type SharedCommentsBackfillOperation } from "@/lib/shared-comments-backfill"
 
 export const maxDuration = 60
 
 function authorized(req: NextRequest) {
-  const secret = process.env.MIGRATION_SECRET
-  return Boolean(secret) && req.headers.get("x-migration-secret") === secret
+  return secretMatches(req.headers.get("x-migration-secret"), process.env.MIGRATION_SECRET)
 }
 
 export async function POST(req: NextRequest) {

@@ -16,21 +16,15 @@
  *
  * Resumable: if the response says `truncated: true`, POST the same body again.
  */
-import { timingSafeEqual } from "node:crypto"
 import { NextRequest, NextResponse } from "next/server"
 import { revokeAllConnectorGrants } from "@/lib/mcp-connectors/revoke-all"
+import { secretMatches } from "@/lib/secret-compare"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
 function checkAuth(req: NextRequest): boolean {
-  const secret = process.env.MIGRATION_SECRET
-  if (!secret) return false
-  const provided = req.headers.get("x-migration-secret")
-  if (!provided) return false
-  const a = Buffer.from(provided)
-  const b = Buffer.from(secret)
-  return a.length === b.length && timingSafeEqual(a, b)
+  return secretMatches(req.headers.get("x-migration-secret"), process.env.MIGRATION_SECRET)
 }
 
 export async function POST(req: NextRequest) {

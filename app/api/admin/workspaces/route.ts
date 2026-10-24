@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { DsqlSigner } from "@aws-sdk/dsql-signer";
 import { awsCredentialsProvider } from "@vercel/functions/oidc";
 import { getActiveSchema } from "@/lib/schema";
+import { secretMatches } from "@/lib/secret-compare";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -30,9 +31,7 @@ async function getPool(): Promise<Pool> {
 }
 
 function checkAuth(req: NextRequest): boolean {
-  const secret = process.env.MIGRATION_SECRET;
-  if (!secret) return false;
-  return req.headers.get("x-migration-secret") === secret;
+  return secretMatches(req.headers.get("x-migration-secret"), process.env.MIGRATION_SECRET);
 }
 
 /** POST body: { orgSlug, orgName, workspaceSlug, workspaceName, userEmail, apiKeyLabel? } */

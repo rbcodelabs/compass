@@ -1,5 +1,5 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { secretMatches } from "@/lib/secret-compare";
 import { Pool } from "pg";
 import { DsqlSigner } from "@aws-sdk/dsql-signer";
 import { awsCredentialsProvider } from "@vercel/functions/oidc";
@@ -61,11 +61,7 @@ async function getPool(): Promise<Pool> {
 }
 
 function checkAuth(req: NextRequest): boolean {
-  const secret = process.env.MIGRATION_SECRET;
-  if (!secret) return false;
-  // Constant-time compare (over fixed-length digests, so length is not leaked either).
-  const given = createHash("sha256").update(req.headers.get("x-migration-secret") ?? "").digest();
-  return timingSafeEqual(given, createHash("sha256").update(secret).digest());
+  return secretMatches(req.headers.get("x-migration-secret"), process.env.MIGRATION_SECRET);
 }
 
 export async function GET(req: NextRequest) {
