@@ -185,6 +185,7 @@ beforeAll(async () => {
   const child = spawn(process.execPath, ["--experimental-strip-types", path.join(process.cwd(), "scripts/agent/turn-entry.ts")], {
     cwd: process.cwd(),
     env: {
+      NODE_ENV: "test",
       PATH: process.env.PATH,
       HOME: scratch,
       MCP_BASE_URL: baseUrl,
@@ -198,6 +199,7 @@ beforeAll(async () => {
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       DISABLE_AUTOUPDATER: "1",
     },
+    stdio: ["ignore", "pipe", "pipe"],
   })
   child.stdout.on("data", (d) => (stdout += d))
   child.stderr.on("data", (d) => (stderr += d))
