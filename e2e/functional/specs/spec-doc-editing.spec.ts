@@ -104,6 +104,8 @@ test.describe("Spec docs: editing", () => {
     // 1. Rename the solution from its card. The record changes; the document does not.
     const renamed = `${solTitle} (renamed)`;
     await expect(page.getByRole("group", { name: `Solution: ${solTitle}` })).toBeVisible({ timeout: 15_000 });
+    // Cards start compact; open this one to reach its controls.
+    await page.getByRole("group", { name: `Solution: ${solTitle}` }).getByTestId("embed-card-toggle").click();
     await page.getByRole("button", { name: `Rename ${solTitle}` }).click();
     const titleInput = page.getByTestId("embed-title-input");
     await titleInput.fill(renamed);

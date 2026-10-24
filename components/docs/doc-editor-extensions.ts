@@ -18,6 +18,7 @@ import {
 import { MermaidCodeBlock } from "@/components/docs/mermaid-code-block-extension";
 import { SpecEmbed } from "@/components/docs/spec-embed-extension";
 import { SpecSlashCommand, type SlashController } from "@/components/docs/spec-slash-extension";
+import { CompassLinkPicker, type LinkPickerController } from "@/components/docs/compass-link-picker-extension";
 import { createMarkdownEditorExtensions } from "@/components/markdown-editor-extensions";
 
 /**
@@ -26,8 +27,8 @@ import { createMarkdownEditorExtensions } from "@/components/markdown-editor-ext
  * `commentAnchors` seeds the highlight decorations; later changes are pushed
  * imperatively via setCommentHighlights rather than by rebuilding this list.
  */
-export function createDocEditorExtensions(commentAnchors: CommentAnchorData[], options: { slash?: SlashController } = {}) {
-  const { slash } = options;
+export function createDocEditorExtensions(commentAnchors: CommentAnchorData[], options: { slash?: SlashController; linkPicker?: LinkPickerController } = {}) {
+  const { slash, linkPicker } = options;
   return [
     ...createMarkdownEditorExtensions(undefined, MermaidCodeBlock),
     Image.configure({ inline: false }),
@@ -35,6 +36,8 @@ export function createDocEditorExtensions(commentAnchors: CommentAnchorData[], o
     SpecEmbed,
     CommentHighlight.configure({ comments: commentAnchors, activeId: null }),
     // Only a spec doc gets the "/" menu (spec docs phase 4); it never changes the document on its own.
+    // "[[" links an existing record in any doc; inert unless a controller is supplied (and never edits the doc by itself).
+    ...(linkPicker ? [CompassLinkPicker.configure({ getController: () => linkPicker })] : []),
     ...(slash ? [SpecSlashCommand.configure({ getController: () => slash })] : []),
   ];
 }
