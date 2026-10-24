@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 199,
-  sortedToolNamesSha256: "dfa573de084c8480e6a007735c0bb37c604fcbcb5a79221203a850665f2862fd",
+  toolCount: 203,
+  sortedToolNamesSha256: "ee195e09de7bd75d0643cfb4eff8fd84c4ddd3ec0049a5f3a8c80db0e54310eb",
 } as const
 
 export type McpRestParityDisposition =
@@ -13,6 +13,8 @@ const docs = "docs/content/09-rest-api.md#mcp-parity-and-transport-exclusions"
 const direct = (operationId: string): McpRestParityDisposition => ({ kind: "direct", operationId })
 const composition = (operationIds: readonly string[], rationale: string): McpRestParityDisposition => ({ kind: "composition", operationIds, documentationAnchor: docs, rationale })
 const excluded = (category: "human-governance" | "execution-boundary" | "model-orchestration" | "transport-convenience", restAlternative: string, rationale: string): McpRestParityDisposition => ({ kind: "excluded", category, documentationAnchor: docs, restAlternative, rationale })
+
+const slackExcluded = excluded("execution-boundary", "None; read Slack directly, or ask an agent that has the MCP slack_* tools.", "These tools act through the deployment's single Slack bot credential (Vercel Connect), scoped by Slack channel invitation rather than Compass resources; REST exposes only Compass resources and has no per-caller Slack authorization to offer.")
 
 export const MCP_REST_PARITY_MANIFEST = {
   activate_research_study: direct("activateResearchStudy"),
@@ -176,6 +178,10 @@ export const MCP_REST_PARITY_MANIFEST = {
   score_opportunity: direct("scoreOpportunity"),
   score_solution: direct("scoreSolution"),
   search_help: direct("searchHelp"),
+  slack_list_channels: slackExcluded,
+  slack_read_channel: slackExcluded,
+  slack_read_thread: slackExcluded,
+  slack_search_users: slackExcluded,
   set_card_sort_round_state: composition(["revealCardSortRound", "closeCardSortRound"], "Use the explicit irreversible reveal or close action; REST has no generic state PATCH or unreveal operation."),
   set_custom_field_value: direct("setCustomFieldValue"),
   set_launch_tier: direct("setLaunchTier"),

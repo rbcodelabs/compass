@@ -67,6 +67,8 @@ vi.mock("mcp-handler", () => ({
 }))
 vi.mock("@/lib/mcp-auth", () => ({ validateMcpAuth: vi.fn().mockResolvedValue({ valid: true, userId: "u1" }) }))
 
+// Slack tools register only when a connector is configured; enable it so the catalog is complete.
+process.env.COMPASS_SLACK_CONNECTOR = "slack/test"
 await import("@/app/api/mcp/route")
 import {
   AGENT_TOOL_POLICY,
