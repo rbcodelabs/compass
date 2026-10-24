@@ -240,6 +240,11 @@ export const TOOL_GATES: Record<string, Gate> = {
   update_workspace_module: async (a, x) => void (await assertWorkspaceAdmin(a, x.workspaceId)),
   // Workspace ---------------------------------------------------------------
   get_workspace_summary: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  // UI control: acts on the caller's own opted-in tab; membership of
+  // the workspace is the gate, the per-session opt-in is the consent.
+  ui_navigate: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  ui_screenshot: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  ui_get_state: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   // list_workspaces additionally filters its results to the caller's
   // memberships in the handler; org membership is the gate.
   list_workspaces: async (a, x) => void (await assertOrgMemberBySlug(a, x.orgSlug)),
@@ -708,6 +713,9 @@ const WRITE_TOOLS = [
   "update_solution_status", "update_squad", "update_task", "write_doc",
   // Following changes the caller's own follow rows and read state only.
   "follow", "unfollow", "mark_read",
+  // Even the observers need write scope: a screenshot exposes whatever
+  // the user has on screen, which a read-only token was never granted.
+  "ui_navigate", "ui_screenshot", "ui_get_state",
 ] as const
 
 export type ToolScope = typeof SCOPE_MCP_READ | typeof SCOPE_MCP_WRITE
@@ -746,6 +754,8 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ...["list_analytics_connections", "list_metrics", "get_metric", "list_metric_bindings", "get_metric_binding", "list_metric_observations", "get_metric_observation"].map(name => [name, "READ"]),
   ...["create_metric", "update_metric", "archive_metric", "link_metric", "update_metric_binding", "unlink_metric", "refresh_metric_binding"].map(name => [name, "WRITE"]),
   ["get_pm_interview", "READ"],
+  // Observing the screen is READ; moving the user is WRITE.
+  ["ui_get_state", "READ"], ["ui_screenshot", "READ"], ["ui_navigate", "WRITE"],
   ["update_experiment", "WRITE"],
   // Research tools reviewed 2026-09-13. Reads return only publicMetadata()
   // (id, workspaceId, name, goal, studyType, guide, targetMinutes, appUrl,

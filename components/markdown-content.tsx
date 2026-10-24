@@ -64,30 +64,49 @@ function DefaultLink({ href, children }: { href?: string; children?: ReactNode }
 // Module-level so the renderer identity is stable across renders. react-markdown
 // treats a new component function as a new element type and remounts it, which
 // for a streaming chat reply would reset any stateful link renderer every chunk.
-const COMPONENTS_BY_LINK = new WeakMap<LinkRenderer, Components>();
+type ImageRenderer = (props: { src?: string | Blob; alt?: string }) => ReactNode;
 
-function componentsFor(Link: LinkRenderer): Components {
-  let components = COMPONENTS_BY_LINK.get(Link);
+const COMPONENTS_BY_LINK = new WeakMap<LinkRenderer, WeakMap<object, Components>>();
+/** Stands in for "no image renderer" as a WeakMap key. */
+const NO_IMAGE_RENDERER = {};
+
+function componentsFor(Link: LinkRenderer, Image?: ImageRenderer): Components {
+  let byImage = COMPONENTS_BY_LINK.get(Link);
+  if (!byImage) {
+    byImage = new WeakMap();
+    COMPONENTS_BY_LINK.set(Link, byImage);
+  }
+  const key = Image ?? NO_IMAGE_RENDERER;
+  let components = byImage.get(key);
   if (!components) {
-    components = { a: ({ href, children }) => <Link href={href}>{children}</Link>, img: () => null, pre: PreBlock };
-    COMPONENTS_BY_LINK.set(Link, components);
+    components = {
+      a: ({ href, children }) => <Link href={href}>{children}</Link>,
+      // Images are dropped unless the caller supplies a renderer that vets the source:
+      // markdown is often model- or user-authored, and an <img> is a request the browser
+      // makes on its own.
+      img: Image ? ({ src, alt }) => <Image src={src} alt={alt} /> : () => null,
+    };
+    byImage.set(key, components);
   }
   return components;
 }
 
 /**
  * `linkComponent` swaps the renderer for every link (the agent transcript uses it
- * to show Compass entity links as cards). It must be a stable, module-level
- * component — not an inline function.
+ * to show Compass entity links as cards). `imageComponent` opts in to images, which
+ * are otherwise not rendered at all; it is responsible for restricting the source.
+ * Both must be stable, module-level components — not inline functions.
  */
 export function MarkdownContent({
   children,
   className,
   linkComponent = DefaultLink,
+  imageComponent,
 }: {
   children: string | null | undefined;
   className?: string;
   linkComponent?: LinkRenderer;
+  imageComponent?: ImageRenderer;
 }) {
   // Inside a workspace, display IDs in prose (TASK-12) become links; elsewhere (portal, marketing) text is untouched.
   const scope = useWorkItemLinkScope();
@@ -97,7 +116,7 @@ export function MarkdownContent({
   );
   return (
     <div className={cn(PROSE, className)}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} urlTransform={safeUrl} components={componentsFor(linkComponent)}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} urlTransform={safeUrl} components={componentsFor(linkComponent, imageComponent)}>
         {children ?? ""}
       </ReactMarkdown>
     </div>

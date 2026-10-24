@@ -5,7 +5,10 @@ import { useEffect, useState } from "react"
 /** `model` is the model the agent runs on here (null = the deployment default). */
 export type AgentChoice = { id: string; name: string; shared: boolean; model?: string | null }
 export type ModelChoice = { value: string; label: string }
+/** A third-party account the signed-in user has connected (Settings → Agents). `access` is the connected access-level id, if any. */
+export type ConnectorChoice = { slug: string; name: string; access: string | null }
 export type AgentChoices = {
+  connectors: ConnectorChoice[]
   agents: AgentChoice[]
   defaultAgentId: string | null
   /** The models a turn may be pinned to; empty = the deployment cannot honour a choice, so there is no model picker. */
@@ -18,7 +21,7 @@ export type AgentChoices = {
   loaded: boolean
 }
 
-const NONE: AgentChoices = { agents: [], defaultAgentId: null, models: [], deploymentModel: null, modelLabels: {}, loaded: false }
+const NONE: AgentChoices = { connectors: [], agents: [], defaultAgentId: null, models: [], deploymentModel: null, modelLabels: {}, loaded: false }
 
 /**
  * The agents a member can pick in a workspace plus the resolved default (GET /api/agent/choices). Starts empty and stays
@@ -42,6 +45,7 @@ export function useAgentChoices(target: { workspaceId: string } | { orgSlug: str
         if (!cancelled && Array.isArray(body.agents)) {
           setAnswer({ key, choices: {
             agents: body.agents,
+            connectors: Array.isArray(body.connectors) ? body.connectors : [],
             defaultAgentId: body.defaultAgentId ?? null,
             models: Array.isArray(body.models) ? body.models : [],
             deploymentModel: body.deploymentModel ?? null,
