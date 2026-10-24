@@ -15,12 +15,14 @@
  */
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
-import { MoreHorizontal, Pencil } from "lucide-react";
+import { ChevronRight, MoreHorizontal, Pencil } from "lucide-react";
 import { NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
 import { isDocEmbedKind, type DocEmbedKind } from "@/lib/doc-embeds";
 import type { DocEmbedCardView } from "@/lib/canvas-card-data";
 import { DOC_EMBED_KIND_LABEL, humanizeStatus } from "@/lib/spec-docs/labels";
 import { cardEditSpec, validateCardTitle } from "@/lib/spec-docs/card-edit";
+import { peekFact, statusVisual } from "@/lib/spec-docs/embed-visual";
+import { KIND_ICON, StatusGlyphIcon, TONE_CLASS } from "@/components/docs/embed-card-icons";
 import { PANEL_ENTITY_TYPES, useOptionalPanelContext, type EntityPanelType } from "@/components/panels/panel-context";
 import { useEmbedEditing, useEmbedEntry, useNearViewport, type EmbedEntry } from "@/components/docs/doc-embed-cards";
 
@@ -34,30 +36,32 @@ function panelTypeOf(kind: string): EntityPanelType | null {
 }
 
 /**
- * The card title. For a record the detail side panel can show, a plain primary click opens the panel (the URL gains `?detail=`) so the
+ * The "Open record" link in an expanded card. For a record the detail side panel can show, a plain primary click opens the panel (the URL gains `?detail=`) so the
  * reader stays on the document, as everywhere else in the app. It stays a real link with the real href, so a modified click (Cmd/Ctrl/
  * Shift/Alt), a middle click and "open in new tab" are left to the browser and still reach the record's full page. Kinds the panel does
  * not show (metric, doc, artifact), and a card rendered with no PanelProvider, navigate by href as before.
  */
-function CardTitleLink({ kind, id, href, children }: { kind: string; id: string; href: string; children: React.ReactNode }) {
+function CardTitleLink({ kind, id, href, label, children }: { kind: string; id: string; href: string; label: string; children: React.ReactNode }) {
   const panel = useOptionalPanelContext();
   const panelType = panelTypeOf(kind);
   return (
     <Link
       href={href}
+      aria-label={label}
       onClick={(event) => {
         if (!panel || !panelType) return;
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
         panel.openPanel(panelType, id);
       }}
-      className="block min-w-0 break-words text-sm font-medium text-text-primary hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex min-h-9 items-center text-sm text-primary hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-7"
     >
       {children}
     </Link>
   );
 }
 
+const CARD_BOX = "min-w-0 max-w-full rounded-lg border border-border-default bg-surface-card";
 const CARD = "min-w-0 max-w-full rounded-lg border border-border-default bg-surface-card px-3 py-2.5 sm:px-4 sm:py-3";
 const KIND = "text-xs font-medium uppercase tracking-wide text-text-subtle";
 const BUTTON =
@@ -87,6 +91,20 @@ function KindRow({ kind, status, trailing }: { kind: DocEmbedKind; status?: Reac
       {status}
       {trailing ? <span className="ml-auto flex items-center gap-1">{trailing}</span> : null}
     </div>
+  );
+}
+
+/** A decorative icon with a hover/focus tooltip. `ariaLabel` names it for assistive tech; the tooltip text is for sighted pointer users. */
+function IconTip({ ariaLabel, tip, className, children }: { ariaLabel: string; tip: string | null; className?: string; children: React.ReactNode }) {
+  return (
+    <span role="img" aria-label={ariaLabel} className={`group/tip relative inline-flex shrink-0 items-center justify-center ${className ?? ""}`}>
+      {children}
+      {tip ? (
+        <span aria-hidden="true" className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-1.5 py-0.5 text-[11px] text-background opacity-0 transition-opacity group-hover/tip:opacity-100">
+          {tip}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -124,8 +142,11 @@ function CardMenu({ label, onRemove }: { label: string; onRemove: () => void }) 
   );
 }
 
-function OkCard({ kind, card, edit, onRemove }: { kind: DocEmbedKind; card: Extract<DocEmbedCardView, { state: "ok" }>; edit: CardEditControls | null; onRemove: (() => void) | null }) {
+function OkCard({ kind, card, edit, onRemove, defaultExpanded }: { kind: DocEmbedKind; card: Extract<DocEmbedCardView, { state: "ok" }>; edit: CardEditControls | null; onRemove: (() => void) | null; defaultExpanded: boolean }) {
   const href = safeInternalHref(card.href);
+  // View state only: opening or closing a card never makes an editor transaction, so it cannot trigger the doc's autosave.
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const bodyId = useId();
   const [titleField, setTitleField] = useState<FieldState>(IDLE);
   const [statusField, setStatusField] = useState<FieldState>(IDLE);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -218,59 +239,93 @@ function OkCard({ kind, card, edit, onRemove }: { kind: DocEmbedKind; card: Extr
   const saved = !saving && (titleField.saved || statusField.saved);
   const error = titleField.error ?? statusField.error;
 
+  const KindIcon = KIND_ICON[kind];
+  const kindLabel = DOC_EMBED_KIND_LABEL[kind];
+  const visual = statusVisual(kind, card.status);
+  const peek = peekFact(kind, card.facts);
+
   return (
-    <div data-slot="spec-embed-card" data-state="ok" role="group" aria-label={label} className={CARD}>
-      <KindRow kind={kind} status={status} trailing={onRemove ? <CardMenu label={label} onRemove={onRemove} /> : null} />
-      {editingTitle ? (
-        <div className="mt-1">
-          <input
-            data-testid="embed-title-input"
-            aria-label="Title"
-            aria-invalid={titleError ? true : undefined}
-            autoFocus
-            value={draft}
-            onChange={(event) => { setDraft(event.target.value); setTitleError(null); }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") { event.preventDefault(); commitTitle(); }
-              else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cancelTitle(); }
-            }}
-            onBlur={() => { if (!validateCardTitle(draft).ok) cancelTitle(); else commitTitle(); }}
-            className="min-h-9 w-full rounded-md border border-border-interactive bg-surface-card px-2 text-base text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8 sm:text-sm"
-          />
-          {titleError ? <p role="alert" data-testid="embed-title-error" className="mt-1 text-xs text-status-danger">{titleError}</p> : null}
-        </div>
-      ) : (
-        <div className="mt-1 flex min-w-0 items-start gap-1">
-          {href ? (
-            <CardTitleLink kind={card.kind} id={card.id} href={href}>
-              {card.title}
-            </CardTitleLink>
-          ) : (
-            <p className="min-w-0 break-words text-sm font-medium text-text-primary">{card.title}</p>
-          )}
-          {edit ? (
-            <button type="button" data-testid="embed-title-edit" aria-label={`Rename ${card.title}`} onClick={beginTitle} className={`${BUTTON} -my-1 shrink-0`}>
-              <Pencil className="size-3.5" aria-hidden="true" />
-            </button>
-          ) : null}
-        </div>
-      )}
-      {card.facts.length > 0 ? (
-        <dl className="mt-1.5 flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
-          {card.facts.map((fact) => (
-            <div key={fact.label} className="flex min-w-0 gap-1">
-              <dt className="text-text-subtle">{fact.label}</dt>
-              <dd className="min-w-0 break-words">{fact.value}</dd>
+    <div data-slot="spec-embed-card" data-state="ok" data-expanded={expanded} role="group" aria-label={label} className={CARD_BOX}>
+      <button
+        type="button"
+        data-testid="embed-card-toggle"
+        aria-expanded={expanded}
+        aria-controls={expanded ? bodyId : undefined}
+        onClick={() => setExpanded((value) => !value)}
+        className="group/head flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg px-3 py-1.5 text-left hover:bg-surface-interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4"
+      >
+        <IconTip ariaLabel={kindLabel} tip={expanded ? null : kindLabel} className="h-6 min-w-6 gap-1.5 rounded-md bg-surface-inset px-1 text-text-secondary">
+          <KindIcon className="size-3.5" aria-hidden="true" />
+          {expanded ? <span aria-hidden="true" className="pr-1 text-xs font-medium uppercase tracking-wide">{kindLabel}</span> : null}
+        </IconTip>
+        {visual ? (
+          <IconTip ariaLabel={`Status: ${visual.label}`} tip={expanded ? null : visual.label} className={TONE_CLASS[visual.tone]}>
+            <StatusGlyphIcon glyph={visual.glyph} className="size-[18px]" />
+          </IconTip>
+        ) : card.status ? (
+          <StatusPill status={card.status} />
+        ) : (
+          <span aria-hidden="true" className="size-[18px] shrink-0" />
+        )}
+        <span className={`min-w-0 flex-1 text-sm font-medium text-text-primary ${expanded ? "break-words" : "truncate"}`}>{card.title}</span>
+        {!expanded && peek ? <span className="hidden max-w-40 shrink-0 truncate text-xs text-text-subtle sm:inline">{peek}</span> : null}
+        <ChevronRight className={`size-4 shrink-0 text-text-subtle transition-transform ${expanded ? "rotate-90" : ""}`} aria-hidden="true" />
+      </button>
+      {expanded ? (
+        <div id={bodyId} className="px-3 pb-3 sm:px-4">
+          {editingTitle ? (
+            <div>
+              <input
+                data-testid="embed-title-input"
+                aria-label="Title"
+                aria-invalid={titleError ? true : undefined}
+                autoFocus
+                value={draft}
+                onChange={(event) => { setDraft(event.target.value); setTitleError(null); }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") { event.preventDefault(); commitTitle(); }
+                  else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cancelTitle(); }
+                }}
+                onBlur={() => { if (!validateCardTitle(draft).ok) cancelTitle(); else commitTitle(); }}
+                className="min-h-9 w-full rounded-md border border-border-interactive bg-surface-card px-2 text-base text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8 sm:text-sm"
+              />
+              {titleError ? <p role="alert" data-testid="embed-title-error" className="mt-1 text-xs text-status-danger">{titleError}</p> : null}
             </div>
-          ))}
-        </dl>
-      ) : null}
-      {edit ? (
-        // Always rendered while editable so a save never shifts the card's layout.
-        <div className="mt-1 min-h-4 text-xs" aria-live="polite">
-          {saving ? <span data-testid="embed-save-state" data-state="saving" className="text-text-subtle">Saving...</span> : null}
-          {saved ? <span data-testid="embed-save-state" data-state="saved" className="text-status-success">Saved</span> : null}
-          {error ? <span role="alert" data-testid="embed-save-error" className="text-status-danger">{error}</span> : null}
+          ) : null}
+          {card.facts.length > 0 ? (
+            <dl className="mt-1 flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
+              {card.facts.map((fact) => (
+                <div key={fact.label} className="flex min-w-0 gap-1">
+                  <dt className="text-text-subtle">{fact.label}</dt>
+                  <dd className="min-w-0 break-words">{fact.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            {statusControl || visual ? status : null}
+            {edit ? (
+              <button type="button" data-testid="embed-title-edit" aria-label={`Rename ${card.title}`} onClick={beginTitle} className={BUTTON}>
+                <Pencil className="size-3.5" aria-hidden="true" />
+              </button>
+            ) : null}
+            {onRemove ? <CardMenu label={label} onRemove={onRemove} /> : null}
+            {href ? (
+              <span className="ml-auto">
+                <CardTitleLink kind={card.kind} id={card.id} href={href} label={`Open ${card.title}`}>
+                  Open record
+                </CardTitleLink>
+              </span>
+            ) : null}
+          </div>
+          {edit ? (
+            // Always rendered while editable so a save never shifts the card's layout.
+            <div className="mt-1 min-h-4 text-xs" aria-live="polite">
+              {saving ? <span data-testid="embed-save-state" data-state="saving" className="text-text-subtle">Saving...</span> : null}
+              {saved ? <span data-testid="embed-save-state" data-state="saved" className="text-status-success">Saved</span> : null}
+              {error ? <span role="alert" data-testid="embed-save-error" className="text-status-danger">{error}</span> : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -278,7 +333,7 @@ function OkCard({ kind, card, edit, onRemove }: { kind: DocEmbedKind; card: Extr
 }
 
 /** Presentational: `entry` undefined is the loading state. `edit` and `onRemove` are given only to viewers who may use them. */
-export function SpecEmbedCard({ kind, entry, edit = null, onRemove = null }: { kind: DocEmbedKind; entry: EmbedEntry | undefined; edit?: CardEditControls | null; onRemove?: (() => void) | null }) {
+export function SpecEmbedCard({ kind, entry, edit = null, onRemove = null, defaultExpanded = false }: { kind: DocEmbedKind; entry: EmbedEntry | undefined; edit?: CardEditControls | null; onRemove?: (() => void) | null; defaultExpanded?: boolean }) {
   if (!entry) {
     return (
       <div data-slot="spec-embed-card" data-state="loading" aria-busy="true" className={CARD}>
@@ -314,7 +369,7 @@ export function SpecEmbedCard({ kind, entry, edit = null, onRemove = null }: { k
       </div>
     );
   }
-  return <OkCard kind={kind} card={card} edit={edit} onRemove={onRemove} />;
+  return <OkCard kind={kind} card={card} edit={edit} onRemove={onRemove} defaultExpanded={defaultExpanded} />;
 }
 
 function SpecEmbedLive({ kind, id, onRemove }: { kind: DocEmbedKind; id: string; onRemove: () => void }) {

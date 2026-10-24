@@ -4,7 +4,7 @@
  * the pixels: the cached markdown title is never displayed, the markdown is byte-for-byte unchanged by the node view, a batch of cards is
  * one server call, and the plain-text projection used for comment anchors does not depend on live card data.
  */
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { Editor, EditorContent } from "@tiptap/react"
@@ -27,8 +27,8 @@ const okCard = (extra: Partial<Extract<DocEmbedCardView, { state: "ok" }>> = {})
 
 describe("SpecEmbedCard states", () => {
   it("ok: live title as a link, humanized status and key facts", () => {
-    render(<SpecEmbedCard kind="solution" entry={ready(okCard())} />)
-    const link = screen.getByRole("link", { name: "Live checkout" })
+    render(<SpecEmbedCard kind="solution" entry={ready(okCard())} defaultExpanded />)
+    const link = screen.getByRole("link", { name: "Open Live checkout" })
     expect(link).toHaveAttribute("href", "/acme/alpha/discovery/opp-1")
     expect(screen.getByText("Solution")).toBeInTheDocument()
     expect(screen.getByText("In progress")).toBeInTheDocument()
@@ -38,7 +38,7 @@ describe("SpecEmbedCard states", () => {
   })
 
   it("ok: a card with no status and no facts is just kind and title", () => {
-    const { container } = render(<SpecEmbedCard kind="keyResult" entry={ready(okCard({ kind: "keyResult", status: null, facts: [] }))} />)
+    const { container } = render(<SpecEmbedCard kind="keyResult" entry={ready(okCard({ kind: "keyResult", status: null, facts: [] }))} defaultExpanded />)
     expect(container.querySelector("dl")).toBeNull()
     expect(screen.getByText("Key result")).toBeInTheDocument()
   })
@@ -49,6 +49,31 @@ describe("SpecEmbedCard states", () => {
     render(<SpecEmbedCard kind="task" entry={ready(okCard({ kind: "task", href: "javascript:alert(1)" }))} />)
     expect(screen.queryByRole("link")).toBeNull()
     expect(screen.getByText("Live checkout")).toBeInTheDocument()
+  })
+
+  it("compact by default: icons, title and one fact; the body (facts, link) appears only when expanded, and the toggle is keyboard-operable", () => {
+    render(<SpecEmbedCard kind="solution" entry={ready(okCard({ status: "IN_DELIVERY" }))} />)
+    const toggle = screen.getByTestId("embed-card-toggle")
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByRole("img", { name: "Solution" })).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "Status: In delivery" })).toBeInTheDocument()
+    expect(screen.getByText("Live checkout")).toBeInTheDocument()
+    expect(screen.getByText("Score 82%")).toBeInTheDocument() // the one peek fact
+    expect(screen.queryByRole("link")).toBeNull()
+    expect(screen.queryByText("Opportunity")).toBeNull()
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByRole("link", { name: "Open Live checkout" })).toBeInTheDocument()
+    expect(screen.getByText("Opportunity")).toBeInTheDocument()
+    expect(screen.queryByText("Score 82%")).toBeNull()
+    fireEvent.click(toggle)
+    expect(screen.queryByRole("link")).toBeNull()
+  })
+
+  it("an unknown status falls back to a text pill instead of a wrong glyph", () => {
+    render(<SpecEmbedCard kind="solution" entry={ready(okCard({ status: "SOMETHING_NEW" }))} />)
+    expect(screen.getByText("Something new")).toBeInTheDocument()
+    expect(screen.queryByRole("img", { name: /^Status:/ })).toBeNull()
   })
 
   it("unavailable: 'Record unavailable' with no link and no edit action", () => {
@@ -99,8 +124,8 @@ describe("SpecEmbed node view in the editor", () => {
       answer([okCard(), { state: "ok", kind: "task", id: ID2, title: "Live task", status: "TODO", facts: [], href: "/acme/alpha/tasks/t1" }])
     )
     const editor = mountEditor(resolve)
-    expect(await screen.findByRole("link", { name: "Live checkout" })).toBeInTheDocument()
-    expect(await screen.findByRole("link", { name: "Live task" })).toBeInTheDocument()
+    expect(await screen.findByText("Live checkout")).toBeInTheDocument()
+    expect(await screen.findByText("Live task")).toBeInTheDocument()
     expect(screen.queryByText("Stale cached title")).toBeNull()
     expect(screen.queryByText("Old task name")).toBeNull()
     expect(resolve).toHaveBeenCalledTimes(1)
@@ -143,7 +168,7 @@ describe("SpecEmbed node view in the editor", () => {
     withoutView.destroy()
     const editor = mountEditor(resolve)
     expect(markdownOf(editor)).toBe(baseline)
-    await screen.findByRole("link", { name: "Live checkout" })
+    await screen.findByText("Live checkout")
     expect(markdownOf(editor)).toBe(baseline)
     expect(markdownOf(editor)).toBe(DOC)
     editor.destroy()
@@ -160,7 +185,7 @@ describe("SpecEmbed node view in the editor", () => {
         <EditorContent editor={editor} />
       </DocEmbedCardsProvider>
     )
-    await screen.findByRole("link", { name: "Live checkout" })
+    await screen.findByText("Live checkout")
     expect(onUpdate).not.toHaveBeenCalled()
     expect(editor.state.doc.eq(before)).toBe(true)
     editor.destroy()
@@ -168,12 +193,13 @@ describe("SpecEmbed node view in the editor", () => {
 
   it("the card is not editable text: no input, no button, and the wrapper is contenteditable=false", async () => {
     const editor = mountEditor(async () => answer([okCard(), { state: "unavailable", kind: "task", id: ID2 }]))
-    await screen.findByRole("link", { name: "Live checkout" })
+    await screen.findByText("Live checkout")
     const wrappers = document.querySelectorAll("[data-compass-embed]")
     expect(wrappers.length).toBe(2)
     for (const w of wrappers) {
       expect(w.getAttribute("contenteditable")).toBe("false")
-      expect(within(w as HTMLElement).queryByRole("button")).toBeNull()
+      // The only button on a card is the compact row's expand/collapse toggle (which edits nothing).
+      expect(within(w as HTMLElement).queryAllByRole("button").filter((b) => b.getAttribute("data-testid") !== "embed-card-toggle")).toHaveLength(0)
       expect(w.querySelector("input,textarea")).toBeNull()
     }
     editor.destroy()
@@ -186,7 +212,7 @@ describe("comment anchors and embeds", () => {
     const editor = mountEditor(resolve)
     const textOf = () => editor.state.doc.textBetween(0, editor.state.doc.content.size, "\n", "\n")
     const before = { text: textOf(), projected: projectDocText(editor.state.doc).text }
-    await screen.findByRole("link", { name: /much longer live title/ })
+    await screen.findByText(/much longer live title/)
     expect(textOf()).toBe(before.text)
     expect(projectDocText(editor.state.doc).text).toBe(before.projected)
     expect(before.text).not.toContain("much longer live title")

@@ -34,6 +34,8 @@ import {
 } from "@/app/[orgSlug]/[workspaceSlug]/docs/actions";
 import { DocEmbedCardsProvider, type EmbedEditing } from "@/components/docs/doc-embed-cards";
 import { createSlashController } from "@/components/docs/spec-slash-extension";
+import { LinkPickerController } from "@/components/docs/compass-link-picker-extension";
+import { CompassLinkPickerMenu } from "@/components/docs/compass-link-picker";
 import { SpecSlashMenu, defaultRecordCreators, type RecordCreators, type SlashScope } from "@/components/docs/spec-slash-menu";
 import { patchEntityField } from "@/components/panels/panel-parts";
 import { createDocumentSaveQueue } from "@/lib/document-save-queue";
@@ -347,6 +349,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
 
   // The "/" menu exists only for spec docs; the controller is shared between the editor plugin and the menu component.
   const slashController = useMemo(() => createSlashController(), []);
+  const linkPickerController = useMemo(() => new LinkPickerController(), []);
   const creators = useMemo(
     () => recordCreators ?? defaultRecordCreators({ orgSlug, workspaceSlug, revalidatePathStr }),
     [recordCreators, orgSlug, workspaceSlug, revalidatePathStr]
@@ -360,7 +363,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
   );
 
   const editor = useEditor({
-    extensions: createDocEditorExtensions(initialAnchorData, { slash: specScopes ? slashController : undefined }),
+    extensions: createDocEditorExtensions(initialAnchorData, { slash: specScopes ? slashController : undefined, linkPicker: linkPickerController }),
     content: doc.content ?? "",
     onUpdate: ({ editor }) => {
       const markdown = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown();
@@ -952,6 +955,7 @@ export function DocEditor({ doc, versions, comments: initialComments, revalidate
         <DocEmbedCardsProvider resolve={resolveEmbeds} editing={embedEditing}>
           <EditorContent editor={editor} className="min-h-[400px] prose-custom" />
         </DocEmbedCardsProvider>
+        {!readOnly ? <CompassLinkPickerMenu editor={editor} controller={linkPickerController} orgSlug={orgSlug} workspaceSlug={workspaceSlug} /> : null}
         {specScopes && !readOnly ? <SpecSlashMenu editor={editor} controller={slashController} scopes={specScopes} creators={creators} /> : null}
       </div>
       </div>
