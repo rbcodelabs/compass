@@ -5,7 +5,15 @@ import { assertCommentingOpen, ShareCommentError } from "@/lib/artifact-share-co
 /** State-changing requests must come from this origin. SameSite=Lax already blocks cross-site POSTs; this is the second lock. */
 export function sameOriginOrNull(request: NextRequest): NextResponse | null {
   const origin = request.headers.get("origin")
-  if (origin && new URL(origin).host !== request.headers.get("host")) {
+  if (!origin) return null
+  // Browsers send the literal "null" from sandboxed/opaque contexts; that must be a 403, not a throw (500).
+  let originHost: string | null = null
+  try {
+    originHost = new URL(origin).host
+  } catch {
+    originHost = null
+  }
+  if (originHost !== request.headers.get("host")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
   return null
