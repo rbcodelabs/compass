@@ -184,6 +184,7 @@ import { linkEntitiesTool, linkSummariesForCaller, listLinksTool, unlinkEntities
 import { ENTITY_TYPE_VOCABULARY } from "@/lib/entity-types"
 import { decisionOptionsInputSchema, decisionQuestionsInputSchema } from "@/lib/decision-option-schema"
 import { applyRecordedDecision, closeDecisionNoAction, getDecision, getReviewRequest, listDecisions, listReviewRequests, requestDecision, requestReleaseAuthorization } from "@/lib/decision-tool-handlers"
+import { uiGetState, uiNavigate, uiScreenshot } from "@/lib/ui-control-tool-handlers"
 import { listReleaseRuns } from "@/lib/release-query-tool-handlers"
 import { thinkingModelForMcp } from "@/lib/thinking-model/mcp"
 import { addComment, deleteCommentTool, getCommentTool, listCommentsTool, reopenComment, resolveComment, updateComment } from "@/lib/comment-tool-handlers"
@@ -296,6 +297,12 @@ const _handler = createMcpHandler(
       return ok("Current authenticated identity", currentIdentityPayload(actor, agent, workspaces))
     })
 
+    // control of the user's live UI. Requires the user to have turned on
+    // "Let agent drive" in a tab; otherwise each call fails with instructions.
+    const uiScope = { workspaceId: z.string().uuid().describe("UUID of the workspace the user's tab is in") }
+    register("ui_navigate", { title: "Move User To Screen", description: "Navigates the user's open Compass tab to a path inside this workspace (e.g. /{org}/{workspace}/roadmap, or an entity link from a tool's URL line). Visible to the user immediately. Requires the user to have enabled 'Let agent drive'; fails otherwise. Same-origin workspace paths only.", inputSchema: { ...uiScope, path: z.string().min(1).max(500).describe("Workspace path starting with '/', optionally with ?query or #hash") }, outputSchema: TOOL_OUTPUT_SCHEMA }, uiNavigate)
+    register("ui_screenshot", { title: "Screenshot User's Screen", description: "Returns a PNG of what the user currently sees in their Compass tab, captured by their browser (so it includes unsaved client state). Cross-origin images and canvases may render blank. Requires the user to have enabled 'Let agent drive'.", inputSchema: uiScope, outputSchema: TOOL_OUTPUT_SCHEMA }, uiScreenshot)
+    register("ui_get_state", { title: "Get User's Screen State", description: "Returns the URL path, page title and visible headings of the user's Compass tab. Cheaper than a screenshot when you only need to know where the user is. Requires the user to have enabled 'Let agent drive'.", inputSchema: uiScope, outputSchema: TOOL_OUTPUT_SCHEMA }, uiGetState)
     register("get_pm_interview", { title: "Read PM Interview", description: "Reads a saved interview and the current target for an authorized interview processing attempt. Page through all turns before editing.", inputSchema: { interviewId: z.string().uuid(), offset: z.number().int().min(0).optional() }, outputSchema: TOOL_OUTPUT_SCHEMA }, getPmInterviewTool)
     register("update_experiment", { title: "Update Experiment", description: "Updates descriptive protocol fields of a DESIGNING experiment. Does not record results or change status.", inputSchema: z.object({ experimentId: z.string().uuid(), expectedUpdatedAt: z.string().datetime().optional(), expectedFieldsFingerprint: z.string().regex(/^[0-9a-f]{64}$/).optional(), title: z.string().trim().min(1).max(255).optional(), hypothesis: z.string().trim().min(1).max(5000).optional(), method: z.string().trim().min(1).max(5000).optional(), killCondition: z.string().trim().min(1).max(5000).optional() }).strict(), outputSchema: TOOL_OUTPUT_SCHEMA }, updateExperiment)
     const taskAssigneeSchema = z.object({ type: z.enum(["USER", "AGENT"]), id: z.string().uuid() })

@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 199,
-  sortedToolNamesSha256: "dfa573de084c8480e6a007735c0bb37c604fcbcb5a79221203a850665f2862fd",
+  toolCount: 202,
+  sortedToolNamesSha256: "e4c42e42d5fdc8e43f7695f7bc3524ed2799c651acf6b610f5f438cb30386233",
 } as const
 
 export type McpRestParityDisposition =
@@ -33,6 +33,9 @@ export const MCP_REST_PARITY_MANIFEST = {
   archive_research_study: direct("archiveResearchStudy"),
   archive_scoring_model: direct("archiveScoringModel"),
   assign_squad: composition(["updateOpportunity", "updateExperiment", "updateRoadmapItem", "updateObjective", "updateTask"], "Assign through the PATCH operation for the selected resource type; no polymorphic RPC endpoint is needed."),
+  ui_navigate: excluded("execution-boundary", "Read the resource the user is viewing through its REST operation; screen control exists only inside the browser session.", "Acts on the calling user's own opted-in browser tab through a live SSE session; there is no REST resource to read or write, and a stateless REST client has no tab to drive."),
+  ui_screenshot: excluded("execution-boundary", "Read the resource the user is viewing through its REST operation; screen control exists only inside the browser session.", "Acts on the calling user's own opted-in browser tab through a live SSE session; there is no REST resource to read or write, and a stateless REST client has no tab to drive."),
+  ui_get_state: excluded("execution-boundary", "Read the resource the user is viewing through its REST operation; screen control exists only inside the browser session.", "Acts on the calling user's own opted-in browser tab through a live SSE session; there is no REST resource to read or write, and a stateless REST client has no tab to drive."),
   capture_screenshot: excluded("execution-boundary", "Read the artifact resource; its stored thumbnail is captured server-side.", "Screenshot capture boots a Vercel Sandbox and renders a stored artifact revision in headless Chromium; that is an execution boundary REST must not expose as an ordinary resource mutation."),
   build_canvas_tree: composition(["getDoc", "updateDoc"], "Server-side OST-to-Canvas layout is an MCP convenience; over REST read the canvas, merge the tree client-side and write it back with updateDoc and expectedRevision."),
   capture_canvas: excluded("execution-boundary", "Read the canvas doc through getDoc; the JSON Canvas content is the source of truth.", "Rendering a canvas boots a Vercel Sandbox and rasterizes it in headless Chromium; that is an execution boundary REST must not expose as an ordinary resource read, and the result is an image, not a REST resource."),

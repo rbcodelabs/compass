@@ -231,7 +231,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Per-user "reviewed" flag for the agent board: one new table plus two ASYNC indexes (unique (conversation, user), non-unique (user, workspace)).
   // Additive: no existing table touched, no backfill, one DDL statement per transaction. The 109 postcondition proves the columns and both indexes.
   // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
-  "109_agent_conversation_reviews": "bde4475d8cd9ce2284029356db322a96967573dee058a963f76a147ce94595a9"
+  "109_agent_conversation_reviews": "bde4475d8cd9ce2284029356db322a96967573dee058a963f76a147ce94595a9",
+  // Agent UI control: two new tables plus ASYNC indexes, additive only (IF NOT EXISTS, no data writes, no FKs). Digest recorded from the shipped SQL; please review this line.
+  "110_agent_ui_control": "77d6623c31b682918b954421e3957b8b3c8eef6c1bc665a60d8e5817d6e77587"
 };
 
 /**

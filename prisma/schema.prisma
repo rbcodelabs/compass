@@ -3808,3 +3808,45 @@ model WorkspaceModule {
   @@unique([workspaceId, moduleKey], map: "workspace_modules_workspace_id_module_key_key")
   @@map("workspace_modules")
 }
+
+/// a tab the user has opted in to agent control. Addressable by an
+/// agent only while ACTIVE and unexpired; a missed heartbeat lets it lapse.
+model UiSession {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tabId       String    @map("tab_id") @db.VarChar(64)
+  /// ACTIVE | ENDED
+  status      String    @default("ACTIVE") @db.VarChar(12)
+  currentPath String?   @map("current_path") @db.VarChar(500)
+  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
+  expiresAt   DateTime  @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  endedAt     DateTime? @map("ended_at")
+
+  @@unique([userId, workspaceId, tabId], map: "idx_ui_sessions_user_ws_tab")
+  @@index([userId, workspaceId, status], map: "idx_ui_sessions_user_ws_status")
+  @@map("ui_sessions")
+}
+
+/// one command an agent queued for a UiSession's tab.
+model UiCommand {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId   String    @map("session_id") @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  /// navigate | screenshot | get_state
+  kind        String    @db.VarChar(20)
+  argsJson    String    @default("{}") @map("args_json") @db.Text
+  /// PENDING | DELIVERED | DONE | FAILED | EXPIRED
+  status      String    @default("PENDING") @db.VarChar(12)
+  deliveredAt DateTime? @map("delivered_at")
+  completedAt DateTime? @map("completed_at")
+  resultJson  String?   @map("result_json") @db.Text
+  error       String?   @db.Text
+  expiresAt   DateTime  @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([sessionId, status, createdAt], map: "idx_ui_commands_session_status")
+  @@map("ui_commands")
+}
