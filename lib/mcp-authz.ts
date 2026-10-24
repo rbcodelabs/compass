@@ -78,6 +78,11 @@ export function runWithMcpActor<T>(actor: McpActor, fn: () => T): T {
   return actorStore.run(actor, fn)
 }
 
+/** Like getMcpActor but returns undefined outside an auth scope (e.g. building the tool catalog for introspection). */
+export function peekMcpActor(): McpActor | undefined {
+  return actorStore.getStore()
+}
+
 /**
  * Read the ambient acting identity. Throws if called outside a
  * `runWithMcpActor` scope — a fail-closed guard against a handler being
