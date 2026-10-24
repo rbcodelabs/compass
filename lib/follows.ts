@@ -1,6 +1,7 @@
 import getPrisma from "@/lib/db"
 import type { AppPrismaClient } from "@/lib/db"
 import { followingAvailable } from "@/lib/following-flag"
+import { moduleDisabledMessage } from "@/lib/modules/registry"
 import { getFollowable, isSubjectTypeActive } from "@/lib/followable"
 
 /**
@@ -59,7 +60,7 @@ const isUniqueViolation = (error: unknown) =>
  * as not found so existence never leaks across workspaces.
  */
 async function assertFollowable(target: FollowTarget, prisma: AppPrismaClient): Promise<void> {
-  if (!(await followingAvailable(prisma))) throw new FollowError("FOLLOWING_DISABLED", "Following is not enabled.")
+  if (!(await followingAvailable(prisma, target.workspaceId))) throw new FollowError("FOLLOWING_DISABLED", moduleDisabledMessage("following"))
   const def = getFollowable(target.subjectType)
   if (!def) throw new FollowError("UNKNOWN_SUBJECT_TYPE", `${target.subjectType} cannot be followed.`)
   if (!isSubjectTypeActive(target.subjectType)) throw new FollowError("INACTIVE_SUBJECT_TYPE", `${target.subjectType} cannot be followed yet.`)

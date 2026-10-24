@@ -1,15 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { setFeatureTables, setModules } from "./helpers/modules"
+import { followingTablesExist } from "@/lib/feature-tables"
 import { followableConfig } from "@/lib/followable"
 import { withFollowingCommit } from "@/lib/following-commit"
 
-const mocks = vi.hoisted(() => ({ available: vi.fn(), apply: vi.fn(), auth: vi.fn() }))
+const mocks = vi.hoisted(() => ({ apply: vi.fn(), auth: vi.fn() }))
 vi.mock("@/lib/db", () => ({ default: () => ({}) }))
 vi.mock("@/auth", () => ({ auth: mocks.auth }))
-vi.mock("@/lib/following-flag", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/following-flag")>()), followingAvailable: mocks.available }))
 vi.mock("@/lib/follows", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/follows")>()), autoFollow: mocks.apply }))
 
 import { followAfterCreate, mcpFollowActor, sessionFollowActor } from "@/lib/following-hooks"
 import { runWithMcpActor } from "@/lib/mcp-authz"
+import { isModuleEnabled } from "@/lib/modules/server"
 
 const WS = "00000000-0000-4000-8000-000000000001"
 const ME = "00000000-0000-4000-8000-0000000000a1"
@@ -18,9 +20,8 @@ const AGENT = "00000000-0000-4000-8000-0000000000c1"
 
 beforeEach(() => {
   vi.resetAllMocks()
-  vi.stubEnv("FOLLOWING_ENABLED", "1")
+  setModules({ following: true }); setFeatureTables({ following: true })
   followableConfig.shippedSlice = 2
-  mocks.available.mockResolvedValue(true)
   mocks.apply.mockResolvedValue({ status: "followed" })
 })
 afterEach(() => {
@@ -46,19 +47,28 @@ describe("followAfterCreate", () => {
   })
 
   it("is silent with the flag off, before the tables exist, or for unknown models", async () => {
-    vi.stubEnv("FOLLOWING_ENABLED", "0")
+    setModules({ following: false })
     await followAfterCreate({ model: "doc", workspaceId: WS, row: { id: "d1" }, actor: { type: "USER", id: ME } })
-    vi.stubEnv("FOLLOWING_ENABLED", "1")
-    mocks.available.mockResolvedValue(false)
+    setModules({ following: true }); setFeatureTables({ following: true })
+    setFeatureTables({ following: false })
     await followAfterCreate({ model: "doc", workspaceId: WS, row: { id: "d1" }, actor: { type: "USER", id: ME } })
-    mocks.available.mockResolvedValue(true)
+    setFeatureTables({ following: true })
     await followAfterCreate({ model: "evidence", workspaceId: WS, row: { id: "x" }, actor: { type: "USER", id: ME } })
     expect(mocks.apply).not.toHaveBeenCalled()
   })
 
+  it("decides per workspace: follows where the module is on and not where it is off", async () => {
+    const OFF_WS = "00000000-0000-4000-8000-000000000002"
+    vi.mocked(isModuleEnabled).mockImplementation(async (workspaceId, key) => key === "following" && workspaceId === WS)
+    await followAfterCreate({ model: "doc", workspaceId: OFF_WS, row: { id: "d1" }, actor: { type: "USER", id: ME } })
+    expect(mocks.apply).not.toHaveBeenCalled()
+    await followAfterCreate({ model: "doc", workspaceId: WS, row: { id: "d2" }, actor: { type: "USER", id: ME } })
+    expect(mocks.apply).toHaveBeenCalledTimes(1)
+  })
+
   it("never throws, even when the availability probe does", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
-    mocks.available.mockRejectedValue(new Error("probe down"))
+    vi.mocked(followingTablesExist).mockRejectedValue(new Error("probe down"))
     await expect(followAfterCreate({ model: "doc", workspaceId: WS, row: { id: "d1" }, actor: { type: "USER", id: ME } })).resolves.toBeUndefined()
   })
 

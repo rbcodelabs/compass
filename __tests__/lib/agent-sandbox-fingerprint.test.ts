@@ -24,12 +24,14 @@
 import { describe, it, expect } from "vitest"
 import {
   computeDepsFingerprint,
+  GH_CLI,
+  ghInstallScript,
   SANDBOX_DEPENDENCIES,
   SANDBOX_SYSTEM_PACKAGES,
 } from "@/lib/agent-sandbox"
 
 const EXPECTED_DEPS_FINGERPRINT =
-  "842d2d596edb0ef5241b79daedfbceb3f0c6ad7122143d17825403bd5c25f9e5"
+  "f03a879b6392f248568c6cb49550960be6bcd5e284fb2369907535c714421a46"
 
 describe("sandbox deps fingerprint drift guard", () => {
   it("matches the pinned fingerprint (update + rebuild the snapshot if this fails)", () => {
@@ -62,5 +64,17 @@ describe("sandbox deps fingerprint drift guard", () => {
     const driver = SANDBOX_DEPENDENCIES["playwright-core"]
     expect(browser).toMatch(/^\d+\.\d+\.\d+$/)
     expect(driver).toBe(browser)
+  })
+})
+
+describe("GitHub CLI in the snapshot (agent shell)", () => {
+  it("is pinned, checksum-verified and smoke-checked in the build script", () => {
+    expect(GH_CLI.sha256).toMatch(/^[0-9a-f]{64}$/)
+    const script = ghInstallScript()
+    expect(script).toContain(`v${GH_CLI.version}/gh_${GH_CLI.version}_linux_amd64.tar.gz`)
+    expect(script).toContain(`${GH_CLI.sha256}  gh_${GH_CLI.version}_linux_amd64.tar.gz`)
+    expect(script.indexOf("sha256sum -c")).toBeLessThan(script.indexOf("tar -xzf"))
+    expect(script).toContain("set -euo pipefail")
+    expect(script).toContain("gh --version")
   })
 })

@@ -105,7 +105,7 @@ export function OpportunityCard({
   }
 
   return (
-    <div ref={setNodeRef} style={style} className="group">
+    <div ref={setNodeRef} style={style} className="group" data-flip-id={opportunity.id}>
       <EntityCard
         interactive
         title={

@@ -47,7 +47,7 @@ remain in page memory. See the [explorer guide](docs/content/09-api-explorer.md)
 The opt-in **[Updates](docs/content/22-updates.md)** landing page groups recent
 workspace activity into inspectable stories, with personal catch-up state and
 explicit Mark caught up / Undo controls. It requires the registered
-`060_workspace_updates` migration and `WORKSPACE_UPDATES_ENABLED=1`; capture is
+`060_workspace_updates` migration and the Workspace updates module (Settings > Modules); capture is
 prospective, with no historical backfill.
 
 Full product documentation lives in [`docs/content/`](docs/content/), starting
@@ -130,6 +130,26 @@ Then open http://localhost:3000/login and click **⚡ Dev Login** — developmen
 builds register a credentials provider instead of Google or magic-link email, so
 no mail service is needed. Production auth (Resend magic link + Google) is never
 constructed in dev.
+
+### Google credentials (Vercel Connect)
+
+Compass holds no Google OAuth client id or secret. Google sign-in and the Google
+Drive MCP connector both use one [Vercel Connect](https://vercel.com/docs/connect)
+connector (for example `google/compass`), which owns the OAuth client, consent,
+token storage and refresh.
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `COMPASS_GOOGLE_CONNECTOR` | For Google features | The Connect connector UID. No default. Unset: the Google sign-in button and provider are omitted (magic link and passkey still work) and Drive shows **Not configured on this deployment**. |
+
+The connector must be linked to the project for each environment that uses it
+(Production, Preview), and `https://connect.vercel.com/callback` must be an
+authorized redirect URI on the Google OAuth client. Previously Compass read
+`AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET`; they are no longer read and can be deleted from each
+environment after production is verified. Existing Drive connections made before
+this change are not migrated: each person reconnects Drive once in Settings →
+Agents.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full setup, the test tiers, and
 the checks a pull request must pass.

@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useTransition, useCallback, useEffect, useId } from "react";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import { useServerSyncedState } from "@/hooks/use-server-synced-state";
+import { useFlipAnimation } from "@/hooks/use-flip-animation";
 import {
   DndContext,
   DragOverlay,
@@ -238,7 +241,32 @@ export function RoadmapBoard({
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/roadmap`;
   const { openPanel, subscribeEntityMutated } = usePanelContext();
 
-  const [columns, setColumns] = useState<ColumnMap>(() => buildColumnMap(initialItems));
+  // In-flight drags and saves. Server data is adopted only while all of these
+  // are clear (see useServerSyncedState), so a refresh can't snap back an
+  // optimistic move. `isPending` covers every save below because they all run
+  // inside an awaited startTransition(async ...).
+  const [activeItem, setActiveItem] = useState<RoadmapCardData | null>(null);
+  const [activeUnscheduledItem, setActiveUnscheduledItem] = useState<UnscheduledItem | null>(null);
+  // Track the horizon the drag started from so handleDragEnd can detect cross-column moves.
+  const [dragSourceHorizon, setDragSourceHorizon] = useState<Horizon | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const busy = activeItem !== null || activeUnscheduledItem !== null || dragSourceHorizon !== null || isPending;
+
+  const { state: columns, setState: setColumns, generation } = useServerSyncedState(initialItems, buildColumnMap, busy);
+  const { state: unscheduled, setState: setUnscheduled } = useServerSyncedState(
+    unscheduledItems,
+    (source) => source ?? [],
+    busy,
+  );
+  const identity = <T,>(source: T) => source;
+  const { state: spec, setState: setSpec } = useServerSyncedState<SwimlaneSpec | null, SwimlaneSpec | null>(
+    swimlaneSpec,
+    identity,
+    busy,
+  );
+  const { containerRef, capture } = useFlipAnimation(generation);
+  useLiveRefresh({ orgSlug, workspaceSlug, scope: "roadmap", paused: busy, onBeforeRefresh: capture });
+
   const visibleHorizons = getInternalBoardHorizons(launchWorkflowEnabled);
   // Display-only fold: an item's stored horizon is untouched, so it
   // un-folds automatically if the flag is re-enabled. Mirrors the public
@@ -252,20 +280,12 @@ export function RoadmapBoard({
           (a, b) => a.sortOrder - b.sortOrder
         ),
       };
-  const [unscheduled, setUnscheduled] = useState<UnscheduledItem[]>(unscheduledItems ?? []);
-  const [activeItem, setActiveItem] = useState<RoadmapCardData | null>(null);
-  const [activeUnscheduledItem, setActiveUnscheduledItem] = useState<UnscheduledItem | null>(null);
-  // Track the horizon the drag started from so handleDragEnd can detect cross-column moves.
-  const [dragSourceHorizon, setDragSourceHorizon] = useState<Horizon | null>(null);
-  // Swimlanes. The spec lives in state because a lane drop updates it
+  // Swimlanes. The spec lives in state (above) because a lane drop updates it
   // optimistically (custom-field values); dragSourceLane is the lane the active
   // card started in, so handleDragEnd can tell a lane change from a plain move.
-  const [spec, setSpec] = useState<SwimlaneSpec | null>(swimlaneSpec);
   const [dragSourceLane, setDragSourceLane] = useState<string | null>(null);
   const [laneError, setLaneError] = useState<string | null>(null);
   const lanes = spec ? buildLanes(spec) : null;
-
-  const [, startTransition] = useTransition();
 
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
@@ -291,7 +311,7 @@ export function RoadmapBoard({
       if (!patch) return;
       setColumns((prev) => applyRoadmapItemPatch(prev, id, patch));
     });
-  }, [subscribeEntityMutated]);
+  }, [subscribeEntityMutated, setColumns]);
 
   // Optimistic lane change: squad mode rewrites the card's squad, custom-field
   // mode rewrites the spec's value map. Pure updaters, safe to call from a drag
@@ -353,8 +373,8 @@ export function RoadmapBoard({
   }
 
   function handleQuickAdd(item: UnscheduledItem, horizon: Horizon) {
-    startTransition(() => {
-      scheduleUnscheduledItem(item, horizon);
+    startTransition(async () => {
+      await scheduleUnscheduledItem(item, horizon);
     });
   }
 
@@ -457,8 +477,8 @@ export function RoadmapBoard({
       // Dropping into a named lane assigns it. The Unassigned lane leaves the
       // item alone (a solution may already inherit its opportunity's squad).
       const destLane = laneKey && lanes ? (lanes.find((l) => l.key === laneKey) ?? null) : null;
-      startTransition(() => {
-        scheduleUnscheduledItem(item, destHorizon, destLane && destLane.value !== null ? destLane : null);
+      startTransition(async () => {
+        await scheduleUnscheduledItem(item, destHorizon, destLane && destLane.value !== null ? destLane : null);
       });
       return;
     }
@@ -551,7 +571,7 @@ export function RoadmapBoard({
       }
       return next;
     });
-  }, []);
+  }, [setColumns]);
 
   // `lane`, when given, is the swimlane the item was created in; a named lane
   // is saved on the new item (the create/promote action doesn't know about it).
@@ -578,7 +598,7 @@ export function RoadmapBoard({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto md:overflow-hidden">
+      <div ref={containerRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto md:overflow-hidden">
         {laneError ? (
           <p
             role="alert"

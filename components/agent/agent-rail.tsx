@@ -372,13 +372,15 @@ export function AgentRail({ workspaceId, basePath, userInitials, userId }: Agent
     // would abort the turn, and for a new chat the id does not exist until the
     // turn completes, so the page would open empty.
     if (streaming) return
-    // Closing is not optional: leaving the rail mounted would put two live
-    // AgentChat instances on the agent page, each with its own stream. (The
-    // provider also hides the rail on that route, which covers every other way
-    // of getting there.)
-    closeRail()
+    // The rail is deliberately NOT closed here. Two things make that safe and
+    // better: the provider hides the rail on the agent route, so there are never
+    // two live AgentChats; and closing would change rail state while this push
+    // is still pending, and the provider's URL mirror (a history.replaceState to
+    // the *old* path) would then supersede the navigation. Leaving the
+    // preference alone also makes the round trip lossless: leaving the page
+    // brings the rail back on the thread `?c=` names.
     router.push(conversationId ? `${basePath}/agent?c=${conversationId}` : `${basePath}/agent`)
-  }, [basePath, closeRail, conversationId, router, streaming])
+  }, [basePath, conversationId, router, streaming])
 
   const resolveMaxWidth = useCallback(
     // Falling back to the absolute maximum rather than the current width: a

@@ -35,13 +35,14 @@ import { assertAgentRunAttributionMigration } from "@/lib/migrations/agent-run-a
 import { assertAgentDefaultSelectionMigration } from "@/lib/migrations/agent-default-selection";
 import { assertAgentRunCapsMigration } from "@/lib/migrations/agent-run-caps";
 import { SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, runSharedCompassAgentBootstrap } from "@/lib/migrations/shared-compass-agent-bootstrap";
+import { WORKSPACE_MODULES_MIGRATION, WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION, assertLegacyFlagBackfill, assertWorkspaceModulesMigration, backfillLaunchWorkflowModules, backfillLegacyFlagModules } from "@/lib/migrations/workspace-modules";
 import { assertAgentKindAndWorkspaceOwnerMigration, assertAgentOwnerUserNullableMigration } from "@/lib/migrations/agent-kind-and-workspace-owner";
 import { assertEntityLinksMigration } from "@/lib/migrations/entity-links";
 import { assertWorkItemIdsMigration, WORK_ITEM_IDS_MIGRATION } from "@/lib/migrations/work-item-ids";
 import { ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, assertEntityLinksSolutionKeyResultBackfill, backfillEntityLinksSolutionKeyResult, getEntityLinksSolutionKeyResultStatus } from "@/lib/migrations/entity-links-solution-key-result-backfill";
 import { ENTITY_LINKS_TASK_BACKFILL_MIGRATION, assertEntityLinksTaskBackfill, backfillEntityLinksTask, getEntityLinksTaskStatus } from "@/lib/migrations/entity-links-task-backfill";
 import { getEntityLinksReadParityStatus } from "@/lib/migrations/entity-links-read-parity";
-import { ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, assertEntityLinksOpportunityBackfill, backfillEntityLinksOpportunity, getEntityLinksOpportunityStatus } from "@/lib/migrations/entity-links-opportunity-backfill";
+import { ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, assertEntityLinksOpportunityBackfill, backfillEntityLinksOpportunity, getEntityLinksOpportunityStatus } from "@/lib/migrations/entity-links-opportunity-backfill";
 import { ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, assertEntityLinksArtifactBackfill, backfillEntityLinksArtifact, getEntityLinksArtifactStatus } from "@/lib/migrations/entity-links-artifact-backfill";
 import { assertWorkItemIdsBackfill, backfillWorkItemIds, getWorkItemIdsBackfillStatus, WORK_ITEM_IDS_BACKFILL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION } from "@/lib/migrations/work-item-ids-backfill";
 import { assertArtifactExternalShareMigration } from "@/lib/migrations/artifact-external-share";
@@ -55,6 +56,7 @@ import { assertReviewedManagedManifest } from "@/lib/preview-automation/managed-
 import { assertBackgroundAgentRunsMigration } from "@/lib/migrations/background-agent-runs";
 import { assertArtifactScreenshotsMigration } from "@/lib/migrations/artifact-screenshots";
 import { AGENT_RETENTION_INDEXES_MIGRATION, assertAgentRetentionIndexesMigration } from "@/lib/migrations/agent-retention-indexes";
+import { AGENT_CONVERSATION_REVIEWS_MIGRATION, assertAgentConversationReviewsMigration } from "@/lib/migrations/agent-conversation-reviews";
 
 
 
@@ -468,7 +470,7 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     // Following and in-app notifications (ADR, slice 1): follows and
     // notifications tables plus five async indexes, all idempotent. The ADR
     // reserved 065 at authoring time; 065-067 were taken by the time it landed.
-    // No backfill; empty tables. The feature stays off behind FOLLOWING_ENABLED.
+    // No backfill; empty tables. The feature stays off until a workspace turns on the following module.
     name: "068_follows_notifications",
     filePath: path.join(process.cwd(), "prisma/migrations/068_follows_notifications/migration.sql"),
   },
@@ -701,12 +703,42 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "104_agent_retention_indexes",
     filePath: path.join(process.cwd(), "prisma/migrations/104_agent_retention_indexes/migration.sql"),
   },
+  {
+    name: "105_workspace_agent_github_repos",
+    filePath: path.join(process.cwd(), "prisma/migrations/105_workspace_agent_github_repos/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY. Residual pass for 095: re-runs the same idempotent opportunity backfill + postconditions for links written while
+    // COMPASS_ENTITY_LINKS_OPPORTUNITY_MIRROR was off (the runner never re-runs an applied 095). POST it by name after the mirror flag is on.
+    name: "106_entity_links_residual_opportunity",
+    filePath: path.join(process.cwd(), "prisma/migrations/106_entity_links_residual_opportunity/migration.sql"),
+  },
+  {
+    // Workspace modules (docs/adr-workspace-modules.md): the workspace_modules table plus one unique async index, and the hook folds
+    // workspaces.launch_workflow_enabled into launch_workflow rows (insert-if-missing). The legacy column stays. Nothing reads the
+    // table until the code ships, and the code tolerates it being unapplied.
+    name: "107_workspace_modules",
+    filePath: path.join(process.cwd(), "prisma/migrations/107_workspace_modules/migration.sql"),
+  },
+  {
+    // No DDL, EXPLICIT-ONLY. Enables, for every existing workspace without a row, each module whose legacy COMPASS_*/WORKSPACE_UPDATES_*/
+    // FOLLOWING_* flag is exactly "1" in the environment that runs it. Reads the old flags at run time; unset flags write nothing. Idempotent.
+    name: "108_workspace_modules_legacy_flag_backfill",
+    filePath: path.join(process.cwd(), "prisma/migrations/108_workspace_modules_legacy_flag_backfill/migration.sql"),
+  },
+  {
+    // Per-user "reviewed" flag for the agent board: one new table (agent_conversation_reviews) with a unique (conversation, user) async index
+    // and a (user, workspace) async index. No backfill and no existing table touched. The 109 postcondition verifies the columns and that both
+    // indexes are valid and ready, before the receipt is written.
+    name: "109_agent_conversation_reviews",
+    filePath: path.join(process.cwd(), "prisma/migrations/109_agent_conversation_reviews/migration.sql"),
+  },
   // Four new tables for the external artifact share (link + one password, optional email
   // commenting). Nothing is added to `artifacts`, so the code can ship before this is applied.
-  // The 105 postcondition verifies the columns and that every index is valid and ready.
+  // The 110 postcondition verifies the columns and that every index is valid and ready.
   {
-    name: "105_artifact_external_share",
-    filePath: path.join(process.cwd(), "prisma/migrations/105_artifact_external_share/migration.sql"),
+    name: "110_artifact_external_share",
+    filePath: path.join(process.cwd(), "prisma/migrations/110_artifact_external_share/migration.sql"),
   },
 ];
 
@@ -860,7 +892,7 @@ const DECISION_GATE_COLUMNS = ["now_commitment_provenance", "now_decision_record
 const DECISION_GATE_INDEXES = ["idx_review_requests_workspace_state", "idx_review_revisions_request_id", "idx_review_options_revision_id", "idx_decision_records_workspace_decided", "idx_decision_records_request_id", "idx_decision_records_option_id", "idx_decision_applications_target", "idx_review_revisions_request_source", "idx_decision_evidence_refs_subject", "idx_now_policy_evidence_workspace_created", "idx_now_gate_evaluations_workspace_created", "idx_now_gate_evaluations_workspace_outcome_created", "idx_now_gate_evaluations_item_created", "idx_release_runs_workspace_state", "idx_release_runs_repository_pr", "idx_release_run_tasks_task_run", "idx_release_dispatches_claim", "idx_release_dispatches_run_status", "idx_capacity_plans_workspace_state", "idx_capacity_reservations_plan_state", "idx_capacity_reservations_item_history", "idx_capacity_reservations_decision", "idx_capacity_operations_plan_action_created"] as const;
 const DECISION_GATE_CONSTRAINTS = ["review_requests_pkey", "idx_review_requests_subject_gate", "idx_review_requests_current_revision", "review_revisions_pkey", "idx_review_revisions_request_number", "idx_review_revisions_request_fingerprint", "review_options_pkey", "idx_review_options_revision_action", "decision_records_pkey", "idx_decision_records_revision", "idx_decision_records_idempotency", "decision_applications_pkey", "idx_decision_applications_receipt", "idx_decision_applications_decision_continuation", "decision_evidence_refs_pkey", "idx_decision_evidence_refs_revision_authority", "now_policy_application_evidence_pkey", "idx_now_policy_evidence_receipt", "now_gate_evaluations_pkey", "chk_now_gate_evaluations_mode", "chk_now_gate_evaluations_outcome", "chk_now_gate_evaluations_actor", "chk_roadmap_items_commitment_provenance_not_null", "release_runs_pkey", "idx_release_runs_scope_fingerprint", "idx_release_runs_authorization_decision", "release_run_tasks_pkey", "idx_release_run_tasks_run_task", "release_dispatches_pkey", "idx_release_dispatches_decision_continuation", "idx_release_dispatches_idempotency", "portfolio_capacity_plans_pkey", "idx_capacity_plans_workspace_policy", "idx_capacity_plans_active_workspace", "chk_capacity_plans_active_claim", "portfolio_capacity_reservations_pkey", "idx_capacity_reservations_plan_item", "idx_capacity_reservations_active_item", "chk_capacity_reservations_state_claim", "portfolio_capacity_operations_pkey", "idx_capacity_operations_workspace_key"] as const;
 const DECISION_GATE_MIGRATIONS = ["039_native_decision_gates", "040_release_authorization", "041_portfolio_capacity_ledger", "042_native_decision_gates_repair", "043_decision_evidence_refs", "044_now_policy_application_evidence", "045_now_gate_shadow_evaluations"] as const;
-const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_agent_identity", "049_research_participant_voice", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "060_workspace_updates", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_work_item_ids", "098_agent_kind_and_workspace_owner", "100_saved_views_surface", "100_agent_runs_agent_attribution", "101_agent_default_selection", "104_agent_retention_indexes", "105_artifact_external_share"] as const;
+const ASYNC_WAIT_MIGRATIONS = [...DECISION_GATE_MIGRATIONS, "047_research_voice_control_plane", "049_agent_identity", "049_research_participant_voice", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "060_workspace_updates", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_work_item_ids", "098_agent_kind_and_workspace_owner", "100_saved_views_surface", "100_agent_runs_agent_attribution", "101_agent_default_selection", "104_agent_retention_indexes", "107_workspace_modules", "109_agent_conversation_reviews", "110_artifact_external_share"] as const;
 /** ADR-0012 step 5. Unique first: the idempotency lookup promotion depends on. */
 const RESEARCH_EVIDENCE_PROMOTION_INDEXES = ["idx_evidence_workspace_finding_key", "idx_evidence_research_sources_evidence_turn", "idx_evidence_research_synthesis", "idx_evidence_research_sources_turn"] as const;
 const RESEARCH_VOICE_CONTROL_PLANE_INDEXES = [
@@ -1920,10 +1952,10 @@ export async function getMigrationStatus(pool: Pool, schema: string) {
 }
 
 /** Migrations that an untargeted run must NOT pick up on its own: they are only correct at a moment a human chooses. */
-const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION];
+const EXPLICIT_ONLY_MIGRATIONS: readonly string[] = [WORKSPACE_ID_RESIDUAL_MIGRATION, TYPED_LINK_RESIDUAL_MIGRATION, WORK_ITEM_IDS_RESIDUAL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION, ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION, ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION, ENTITY_LINKS_TASK_BACKFILL_MIGRATION, ENTITY_LINKS_SOLUTION_KEY_RESULT_BACKFILL_MIGRATION, SHARED_COMPASS_AGENT_BOOTSTRAP_MIGRATION, WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION];
 
 /**
- * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 098_entity_links_backfill_solution_key_result, 103).
+ * Which pending migrations a POST runs: the named one, or everything except the explicit-only one-shots (069, 072, 094, 095, 096, 097, 098_entity_links_backfill_solution_key_result, 103, 106_entity_links_residual_opportunity).
  * `includeExplicitOnly` is for callers that provision a FRESH schema (the scoped preview worker): there is no old
  * deployment to drain, so applying 069 straight after 068 is correct and required for the schema to reach "ready".
  * Production-style callers (the admin route, an untargeted POST) never set it.
@@ -2153,7 +2185,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
             const jobId = result.rows[0]?.job_id
             // IF NOT EXISTS returns no job for an already-created agent index.
             // Its validity is checked before a completion receipt is written.
-            if (!jobId && ["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_work_item_ids", "098_agent_kind_and_workspace_owner", "100_saved_views_surface", "100_agent_runs_agent_attribution", "101_agent_default_selection", "104_agent_retention_indexes", "105_artifact_external_share"].includes(migration.name)) continue
+            if (!jobId && ["049_agent_identity", "050_pm_interviews", "051_pm_agent_handoff", "052_research_evidence_promotion", "053_shared_field_option_sets", "054_webauthn_authenticators", "055_oauth_authorization_server", "056_agent_scoped_oauth_binding", "058_oauth_authorization_events", "059_geode_document_storage", "061_product_analytics", "062_mcp_connectors", "064_embed_feedback_sources", "067_card_sort_rounds", "068_card_sort_new_entries", "068_follows_notifications", "068_workspace_id_on_solution_objective", "071_typed_link_tables", "074_portal_home_layout", "079_roadmap_views", "069_background_agent_runs", "082_agent_conversation_participants", "091_entity_links", "092_work_item_ids", "098_agent_kind_and_workspace_owner", "100_saved_views_surface", "100_agent_runs_agent_attribution", "101_agent_default_selection", "104_agent_retention_indexes", "107_workspace_modules", "109_agent_conversation_reviews", "110_artifact_external_share"].includes(migration.name)) continue
             if (!jobId) throw new Error(`Migration ${migration.name} async DDL returned no job_id.`)
             await client.query("CALL sys.wait_for_job($1)", [jobId])
             const waited = await client.query<{ status: string }>("SELECT status FROM sys.jobs WHERE job_id = $1", [jobId])
@@ -2240,7 +2272,8 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "101_agent_default_selection") await assertAgentDefaultSelectionMigration(client, schema)
       if (migration.name === "102_agent_run_caps") await assertAgentRunCapsMigration(client, schema)
       if (migration.name === AGENT_RETENTION_INDEXES_MIGRATION) await assertAgentRetentionIndexesMigration(client, schema)
-      if (migration.name === "105_artifact_external_share") await assertArtifactExternalShareMigration(client, schema)
+      if (migration.name === AGENT_CONVERSATION_REVIEWS_MIGRATION) await assertAgentConversationReviewsMigration(client, schema)
+      if (migration.name === "110_artifact_external_share") await assertArtifactExternalShareMigration(client, schema)
       if (migration.name === WORKSPACE_ID_MIGRATION || migration.name === WORKSPACE_ID_RESIDUAL_MIGRATION) {
         // Data half: backfill from the parent in bounded batches, then prove it.
         // Both run before the receipt below, so a failure leaves an unfinished
@@ -2268,7 +2301,7 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         await backfillWorkItemIds(client, schema, log)
         await assertWorkItemIdsBackfill(client, schema, migration.name)
       }
-      if (migration.name === ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION) {
+      if (migration.name === ENTITY_LINKS_OPPORTUNITY_BACKFILL_MIGRATION || migration.name === ENTITY_LINKS_OPPORTUNITY_RESIDUAL_MIGRATION) {
         // Data half: mirror the legacy rows (quarantining the inconsistent ones), then prove it. Before the receipt below, so a failure
         // leaves an unfinished attempt and the next POST resumes.
         await backfillEntityLinksOpportunity(client, schema, log)
@@ -2297,9 +2330,25 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
         // unfinished attempt and the next POST resumes.
         await runSharedCompassAgentBootstrap(client, schema, log)
       }
+      if (migration.name === WORKSPACE_MODULES_MIGRATION) {
+        // Data half: carry workspaces.launch_workflow_enabled into launch_workflow rows, then prove the table and the carry-over.
+        // Before the receipt below, so a failure leaves an unfinished attempt and the next POST resumes.
+        await backfillLaunchWorkflowModules(client, schema, log)
+        await assertWorkspaceModulesMigration(client, schema)
+      }
+      if (migration.name === WORKSPACE_MODULES_LEGACY_FLAG_BACKFILL_MIGRATION) {
+        // Data half only (explicit-only): enable the modules whose legacy env flag is "1" here, then prove every workspace has the row.
+        await backfillLegacyFlagModules(client, schema, log)
+        await assertLegacyFlagBackfill(client, schema)
+      }
       if (migration.name === "090_v0_chat_artifacts") {
         const columns = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND ((table_name='artifacts' AND column_name='v0_chat_id') OR (table_name='artifact_revisions' AND column_name='v0_version_id'))", [schema])
         if (columns.rows[0]?.count !== "2") throw new Error("Migration 090 postcondition failed: v0 artifact columns missing")
+      }
+
+      if (migration.name === "105_workspace_agent_github_repos") {
+        const column = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND table_name='workspaces' AND column_name='agent_github_repos'", [schema])
+        if (column.rows[0]?.count !== "1") throw new Error("Migration 105 postcondition failed: workspaces.agent_github_repos missing")
       }
 
       // Only this distinct attempt becomes a successful receipt. A failed

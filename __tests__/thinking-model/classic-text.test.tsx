@@ -155,7 +155,8 @@ const cycleWith = (row: typeof cycle, objectives: number) => ({
 })
 
 describe("CLASSIC text is identical to main", () => {
-  check("bottom-nav", <BottomNav {...common} />)
+  // Research is a workspace module now (default off); the recorded main text had it on.
+check("bottom-nav", <BottomNav {...common} researchCaptureEnabled />)
   check("add-objective closed", <AddObjectiveForm cycleId="c1" {...common} />)
   check("add-objective open", <AddObjectiveForm cycleId="c1" {...common} />, click("Add objective"))
   check("add-key-result closed", <AddKeyResultForm objectiveId="o1" objectiveTitle="Grow" {...common} />)

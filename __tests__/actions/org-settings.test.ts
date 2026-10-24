@@ -605,7 +605,6 @@ describe("archiveScoringModel", () => {
 
 describe("grantAgentScoringModelAdmin", () => {
   beforeEach(() => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1");
     mockAgent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "owner-1", status: "ACTIVE" });
     mockOrganizationMember.findFirst.mockResolvedValue({ role: "ADMIN", organizationId: "org-1" });
     mockAgentOrgAdminGrant.upsert.mockResolvedValue({ id: "grant-1" });
@@ -651,15 +650,6 @@ describe("grantAgentScoringModelAdmin", () => {
     await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
       ok: false,
       error: "Forbidden: organization admin required",
-    });
-    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
-  });
-
-  it("refuses when agent changes are disabled", async () => {
-    vi.unstubAllEnvs();
-    await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
-      ok: false,
-      error: "Agent changes are currently disabled",
     });
     expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
   });
@@ -754,7 +744,6 @@ describe("revokeAgentScoringModelAdmin", () => {
 // organization member" is a separate, explicit check below.
 describe("grantAgentScoringModelAdmin", () => {
   beforeEach(() => {
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1");
     mockAgent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "owner-1", status: "ACTIVE" });
     // First call (resolveOrgAdmin's own gate) resolves the caller; the second
     // (this action's explicit owner-membership check) resolves the agent
@@ -807,15 +796,6 @@ describe("grantAgentScoringModelAdmin", () => {
     await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
       ok: false,
       error: "Forbidden: organization admin required",
-    });
-    expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
-  });
-
-  it("returns a clean error when agent changes are disabled", async () => {
-    vi.unstubAllEnvs();
-    await expect(grantAgentScoringModelAdmin("org", "agent-1")).resolves.toEqual({
-      ok: false,
-      error: "Agent changes are currently disabled",
     });
     expect(mockAgentOrgAdminGrant.upsert).not.toHaveBeenCalled();
   });

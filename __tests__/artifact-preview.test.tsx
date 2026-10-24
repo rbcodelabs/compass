@@ -227,6 +227,17 @@ describe("ArtifactPreview holdPrevious (slide decks)", () => {
     expect(frames("Deck preview")).toHaveLength(1)
   })
 
+  it("releases the held frame when the new document is ready (settleOnReady, plain documents)", () => {
+    const view = render(<ArtifactPreview title="Doc" html={slide(1)} holdPrevious settleOnReady />)
+    post(frames("Doc preview")[0], handshake(frames("Doc preview")[0]), "READY")
+    view.rerender(<ArtifactPreview title="Doc" html={slide(2)} holdPrevious settleOnReady />)
+    const stacked = frames("Doc preview")
+    expect(stacked).toHaveLength(2)
+    post(stacked[1], handshake(stacked[1]), "READY")
+    expect(frames("Doc preview")).toHaveLength(1)
+    expect(frames("Doc preview")[0].srcdoc).toContain("Slide 2")
+  })
+
   it("remounts without stacking when holdPrevious is off", () => {
     const view = render(<ArtifactPreview title="Doc" html={slide(1)} />)
     view.rerender(<ArtifactPreview title="Doc" html={slide(2)} />)

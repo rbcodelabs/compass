@@ -217,7 +217,21 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "103_shared_compass_agent_bootstrap": "5eaf5543ac6be12db4b69a3d2250d095e48f361b33e683f1752c0ca7527f0929",
   // Two ASYNC created_at indexes (agent_run_events, agent_messages) for the agent-data retention job. Additive and optional: no table change,
   // no backfill, one DDL statement per transaction. The 104 postcondition proves both indexes exist and are valid.
-  "104_agent_retention_indexes": "2c6da24d861aa569f3ea44aca15f2ac98718ec13c3985a3a8997a1e7a65a1813"
+  "104_agent_retention_indexes": "2c6da24d861aa569f3ea44aca15f2ac98718ec13c3985a3a8997a1e7a65a1813",
+  // Per-workspace agent GitHub repo allowlist: one nullable TEXT column on workspaces (JSON array of "owner/name"). No index, no backfill.
+  // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
+  "105_workspace_agent_github_repos": "ed1b4077170a09220767762c3756c763bd6db1031896dd7f6e44da07b17bdd80",
+  // Residual entity_links pass for Opportunity (095 is the first pass): no DDL, EXPLICIT-ONLY, the work is the 095 hook.
+  "106_entity_links_residual_opportunity": "f9f553644f14b68a81c3ebb2df46f1b8348eb7db3a45adbdf1c3f8d90857c71c",
+  // Workspace modules (docs/adr-workspace-modules.md): one table plus one unique ASYNC index, IF NOT EXISTS, no foreign key. The hook carries
+  // workspaces.launch_workflow_enabled into launch_workflow rows (insert-if-missing) and is pinned in REVIEWED_MIGRATION_CODE_SHA256.
+  "107_workspace_modules": "0b29bd1bb85b4691225fece68f3f176692a990388490a53eee6a9a62012258a4",
+  // No DDL, EXPLICIT-ONLY; the work is the hook (lib/migrations/workspace-modules.ts): enables modules from the legacy env flags that are exactly "1".
+  "108_workspace_modules_legacy_flag_backfill": "7feab31f2a3d7456db6d3439b631621cb3dace106b1885efc8894346d42cce8d",
+  // Per-user "reviewed" flag for the agent board: one new table plus two ASYNC indexes (unique (conversation, user), non-unique (user, workspace)).
+  // Additive: no existing table touched, no backfill, one DDL statement per transaction. The 109 postcondition proves the columns and both indexes.
+  // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
+  "109_agent_conversation_reviews": "bde4475d8cd9ce2284029356db322a96967573dee058a963f76a147ce94595a9"
 };
 
 /**
@@ -290,7 +304,12 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 095 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
   "095_entity_links_backfill_opportunity": {
-    "lib/migrations/entity-links-opportunity-backfill.ts": "31720625e69bfca38bed0b230ae61aa421ae4c105db588141105d715d8beb857",
+    "lib/migrations/entity-links-opportunity-backfill.ts": "f456a0bda766ad7227e81c93ca857804682e120a8ac6195257469bf7bf89b5b5",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 106 residual pass runs the same hook as 095.
+  "106_entity_links_residual_opportunity": {
+    "lib/migrations/entity-links-opportunity-backfill.ts": "f456a0bda766ad7227e81c93ca857804682e120a8ac6195257469bf7bf89b5b5",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
   // The 096 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
@@ -340,6 +359,20 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 104 postcondition (both created_at indexes exist and are valid); editing it re-reviews the migration.
   "104_agent_retention_indexes": {
     "lib/migrations/agent-retention-indexes.ts": "02b0e57b758b7c42122e199580f4ce1f9bb4e40a77841590595ca16f056faa2f",
+  },
+  // The 107 hook (launch carry-over + postcondition) and the refusal type it imports; editing either re-reviews the migration.
+  "107_workspace_modules": {
+    "lib/migrations/workspace-modules.ts": "10dbe1f96ce6cf5813a942569095b672355d50b2436a5b4fcac4373ed418a4d1",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
+  },
+  // The 108 hook (legacy env flag backfill + postcondition); same file as 107's hook.
+  // The 109 postcondition (columns, plus both indexes valid, ready, and the right shape); editing it re-reviews the migration.
+  "109_agent_conversation_reviews": {
+    "lib/migrations/agent-conversation-reviews.ts": "970ff2d900951977feefd21dc9592b49b5d59dc0819c9b2e66e0e911718503ed",
+  },
+  "108_workspace_modules_legacy_flag_backfill": {
+    "lib/migrations/workspace-modules.ts": "10dbe1f96ce6cf5813a942569095b672355d50b2436a5b4fcac4373ed418a4d1",
+    "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
 };
 

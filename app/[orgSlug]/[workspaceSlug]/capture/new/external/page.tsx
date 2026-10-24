@@ -9,7 +9,6 @@ import { createExternalResearchStudy } from "../../actions"
 export const metadata = { title: "New external study" }
 
 export default async function NewExternalStudyPage({ params }: { params: Promise<{ orgSlug: string; workspaceSlug: string }> }) {
-  if (!isResearchCaptureEnabled()) notFound()
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
   const { orgSlug, workspaceSlug } = await params
@@ -18,6 +17,7 @@ export default async function NewExternalStudyPage({ params }: { params: Promise
     select: { id: true },
   })
   if (!workspace) notFound()
+  if (!(await isResearchCaptureEnabled(workspace.id))) notFound()
   return (
     <main className="flex flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8">
       <PageHeader title="New manual / external study" description="Record research that was run outside Compass so its findings can become evidence." />

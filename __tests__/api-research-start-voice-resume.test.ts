@@ -11,16 +11,17 @@ vi.mock("@/lib/research-session", async (importOriginal) => ({
 
 import { POST } from "@/app/api/research/start/route"
 import { ResearchSessionError } from "@/lib/research-session"
+import { setModules } from "./helpers/modules"
 
 describe("research start voice-resume gate", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "")
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
-    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    setModules({ research_voice_browser: false })
+    setModules({ research_voice_authoritative: false })
+    setModules({ research_voice_discovery: false })
     vi.stubEnv("E2E_FUNCTIONAL", "")
-    resolveActiveResearchStudy.mockResolvedValue({ study: { id: "study-1" } })
+    resolveActiveResearchStudy.mockResolvedValue({ study: { id: "study-1", workspaceId: "workspace-1" } })
   })
   afterEach(() => vi.unstubAllEnvs())
 
@@ -28,7 +29,7 @@ describe("research start voice-resume gate", () => {
     ["new", { token: "study-token", modality: "VOICE" }, undefined],
     ["resumed", { token: "study-token", sessionId: "voice-session-1", resumeToken: "resume-secret", modality: "VOICE" }, { sessionId: "voice-session-1", resumeToken: "resume-secret" }],
   ])("admits a %s browser voice session in production without the legacy authoritative flag", async (_label, body, resume) => {
-    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    setModules({ research_voice_browser: true })
     startOrResumeResearchSession.mockResolvedValue({ sessionId: "voice-session-1", status: "IN_PROGRESS", turns: [] })
 
     const response = await POST(new Request("http://localhost/api/research/start", {
@@ -49,12 +50,13 @@ describe("research start voice-resume gate", () => {
     }))
 
     expect(response.status).toBe(409)
-    expect(resolveActiveResearchStudy).not.toHaveBeenCalled()
+    // The workspace is only known once the study resolves, so the module check follows the resolution.
+    expect(resolveActiveResearchStudy).toHaveBeenCalledWith("study-token")
     expect(startOrResumeResearchSession).not.toHaveBeenCalled()
   })
 
   it("resolves an invalid token after production browser voice admission", async () => {
-    vi.stubEnv("COMPASS_RESEARCH_BROWSER_VOICE_ENABLED", "1")
+    setModules({ research_voice_browser: true })
     resolveActiveResearchStudy.mockResolvedValue(null)
 
     const response = await POST(new Request("http://localhost/api/research/start", {

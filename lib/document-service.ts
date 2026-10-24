@@ -60,7 +60,12 @@ export function documentRevision(doc: Pick<Doc, "revision" | "updatedAt">): stri
   return doc.revision ?? `legacy:${doc.updatedAt.toISOString()}`
 }
 function revisionWhere(doc: Pick<Doc, "revision" | "updatedAt">, expectedRevision: string) {
-  return doc.revision ? { revision: expectedRevision } : { revision: null, updatedAt: doc.updatedAt }
+  if (doc.revision) return { revision: expectedRevision }
+  // The legacy token is derived from a JS Date (milliseconds), but docs.updated_at is TIMESTAMPTZ (microseconds): a row stamped by the
+  // database default or raw SQL carries sub-millisecond digits, so bare equality on the truncated Date never matches and every guarded
+  // write to that doc conflicts forever. Match the whole millisecond instead.
+  const from = doc.updatedAt
+  return { revision: null, updatedAt: { gte: from, lt: new Date(from.getTime() + 1) } }
 }
 async function replay(workspaceId: string, operationId: string, payloadDigest: string, db = getPrisma()) {
   const receipt = await db.docOperation.findUnique({ where: { workspaceId_operationId: { workspaceId, operationId } } })

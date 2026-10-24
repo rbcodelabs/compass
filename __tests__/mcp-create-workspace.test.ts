@@ -235,7 +235,6 @@ describe("create_workspace called by an owner-delegated agent", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubEnv("COMPASS_AGENTS_ENABLED", "1")
     mockPrisma.agent.findFirst.mockResolvedValue({ id: "agent-1", ownerUserId: "owner-1", status: "ACTIVE" })
     mockPrisma.agentToolCall.create.mockResolvedValue({ id: "call-1" })
     mockPrisma.organizationMember.findFirst.mockResolvedValue({ role: "OWNER", organizationId: "org-uuid-1" })

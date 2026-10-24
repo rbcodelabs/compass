@@ -1,6 +1,7 @@
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db";
 import { agentRunsAvailable } from "@/lib/agent-runs";
 import { deleteWorkspaceAgentSessions } from "@/lib/agent-session";
+import { deleteWorkspaceConversationReviews } from "@/lib/agent-board-data";
 
 /**
  * Rejoining a workspace requires a fresh administrator grant. Only the removed member's USER-owned
@@ -30,6 +31,7 @@ export async function deleteWorkspaceAgentData(prisma: AppPrismaClient, workspac
   await deleteWorkspaceAgentSessions(prisma, workspaceId);
   await prisma.agentMessage.deleteMany({ where: { conversation: { workspaceId } } });
   await prisma.agentAuditLog.deleteMany({ where: { workspaceId } });
+  await deleteWorkspaceConversationReviews(prisma, workspaceId);
   await prisma.agentConversation.deleteMany({ where: { workspaceId } });
   await prisma.agentToolCall.deleteMany({ where: { workspaceId } });
   await prisma.agentWorkspaceGrant.deleteMany({ where: { workspaceId } });

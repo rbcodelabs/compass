@@ -9,6 +9,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refres
 
 import { AgentChat } from "@/components/agent/agent-chat"
 import { SendToAgentPicker } from "@/components/agent/send-to-agent-picker"
+import { choose, chipButton, chipValue, optionNames, queryChipButton, findChipButton } from "./composer-chips"
 
 const CHOICES = { agents: [{ id: "a-shared", name: "Triage", shared: true }, { id: "a-mine", name: "Mine", shared: false }], defaultAgentId: "a-shared" }
 
@@ -42,22 +43,22 @@ describe("AgentChat agent selector", () => {
     stubFetch({ agents: [], defaultAgentId: null })
     render(<AgentChat {...chatProps()} />)
     await act(async () => {})
-    expect(screen.queryByLabelText("Agent")).toBeNull()
+    expect(queryChipButton("Agent")).toBeNull()
   })
 
   it("is absent when the lookup fails (the chat behaves as before)", async () => {
     stubFetch({}, { status: 500 })
     render(<AgentChat {...chatProps()} />)
     await act(async () => {})
-    expect(screen.queryByLabelText("Agent")).toBeNull()
+    expect(queryChipButton("Agent")).toBeNull()
   })
 
   it("defaults to the resolved default and sends no agentId, leaving the choice to the server", async () => {
     const turns = stubFetch(CHOICES)
     render(<AgentChat {...chatProps()} />)
-    const select = (await screen.findByLabelText("Agent")) as HTMLSelectElement
-    expect(select.value).toBe("")
-    expect(screen.getByRole("option", { name: "Default (Triage)" })).toBeInTheDocument()
+    await findChipButton("Agent")
+    expect(chipValue("Agent")).toBe("Default (Triage)")
+    expect(await optionNames("Agent")).toEqual(["Default (Triage)", "Compass Agent", "Triage (shared)", "Mine"])
     await send("hello")
     await waitFor(() => expect(turns).toHaveBeenCalled())
     expect(JSON.parse(turns.mock.calls[0][1].body)).not.toHaveProperty("agentId")
@@ -66,7 +67,8 @@ describe("AgentChat agent selector", () => {
   it("sends the chosen agent's id", async () => {
     const turns = stubFetch(CHOICES)
     render(<AgentChat {...chatProps()} />)
-    fireEvent.change(await screen.findByLabelText("Agent"), { target: { value: "a-mine" } })
+    await findChipButton("Agent")
+    await choose("Agent", "Mine")
     await send("hello")
     await waitFor(() => expect(turns).toHaveBeenCalled())
     expect(JSON.parse(turns.mock.calls[0][1].body).agentId).toBe("a-mine")
@@ -75,7 +77,8 @@ describe("AgentChat agent selector", () => {
   it('sends "builtin" when the built-in agent is chosen on purpose', async () => {
     const turns = stubFetch(CHOICES)
     render(<AgentChat {...chatProps()} />)
-    fireEvent.change(await screen.findByLabelText("Agent"), { target: { value: "builtin" } })
+    await findChipButton("Agent")
+    await choose("Agent", "Compass Agent")
     await send("hello")
     await waitFor(() => expect(turns).toHaveBeenCalled())
     expect(JSON.parse(turns.mock.calls[0][1].body).agentId).toBe("builtin")
@@ -84,11 +87,68 @@ describe("AgentChat agent selector", () => {
   it("starts with the agent from ?agentId when the member can pick it, and ignores one they cannot", async () => {
     stubFetch(CHOICES)
     render(<AgentChat {...chatProps({ initialAgentId: "a-mine" })} />)
-    await waitFor(() => expect((screen.getByLabelText("Agent") as HTMLSelectElement).value).toBe("a-mine"))
+    await waitFor(() => expect(chipValue("Agent")).toBe("Mine"))
     cleanup()
     stubFetch(CHOICES)
     render(<AgentChat {...chatProps({ initialAgentId: "someone-elses" })} />)
-    await waitFor(() => expect((screen.getByLabelText("Agent") as HTMLSelectElement).value).toBe(""))
+    await waitFor(() => expect(chipValue("Agent")).toBe("Default (Triage)"))
+  })
+})
+
+describe("AgentChat composer layout", () => {
+  it("has no context strip until there is a status or a chip to show, and no footer without choices", async () => {
+    stubFetch({ agents: [], defaultAgentId: null })
+    const { container } = render(<AgentChat {...chatProps()} />)
+    await act(async () => {})
+    expect(container.querySelector('[data-slot="composer-strip"]')).toBeNull()
+    expect(container.querySelector('[data-slot="composer-footer"]')).toBeNull()
+  })
+
+  it("shows the Agent chip in the footer once there are agents to pick", async () => {
+    stubFetch(CHOICES)
+    const { container } = render(<AgentChat {...chatProps()} />)
+    await findChipButton("Agent")
+    expect(container.querySelector('[data-slot="composer-footer"]')).toContainElement(chipButton("Agent"))
+    expect(container.querySelector('[data-slot="composer-strip"]')).toBeNull()
+  })
+})
+
+describe("AgentChat chips follow the composer's disabled state", () => {
+  // Any reason the field is disabled (a run, an unreadable processing status, lost access) disables the chips too: composerDisabled.
+  for (const variant of ["page", "rail"] as const) {
+    it(`disables the Agent and Model chips when the composer is blocked (${variant})`, async () => {
+      vi.stubGlobal("fetch", (url: string) => {
+        const u = String(url)
+        if (u.startsWith("/api/agent/choices")) return Promise.resolve({ ok: true, status: 200, json: async () => ({ ...CHOICES, models: [{ value: "m1", label: "M1" }, { value: "m2", label: "M2" }], deploymentModel: "m1", modelLabels: {} }) })
+        if (u.includes("/processing")) return Promise.resolve(new Response("unavailable", { status: 503 }))
+        return Promise.resolve(new Response(JSON.stringify({ run: null, available: true })))
+      })
+      render(<AgentChat {...chatProps({ variant, activeConversationId: "c-1" })} />)
+      await findChipButton("Agent")
+      await waitFor(() => expect(screen.getByRole("textbox")).toBeDisabled())
+      expect(chipButton("Agent")).toBeDisabled()
+      expect(chipButton("Model")).toBeDisabled()
+    })
+  }
+
+  it("keeps both chips enabled when nothing blocks the composer", async () => {
+    stubFetch({ ...CHOICES, models: [{ value: "m1", label: "M1" }, { value: "m2", label: "M2" }], deploymentModel: "m1", modelLabels: {} })
+    render(<AgentChat {...chatProps()} />)
+    await findChipButton("Agent")
+    expect(chipButton("Agent")).toBeEnabled()
+    expect(chipButton("Model")).toBeEnabled()
+  })
+})
+
+describe("AgentChat in the rail", () => {
+  it("renders the same composer, with its chips, in the rail variant", async () => {
+    stubFetch(CHOICES)
+    const { container } = render(<AgentChat {...chatProps({ variant: "rail" })} />)
+    await findChipButton("Agent")
+    expect(container.querySelector('[data-slot="composer-card"]')).toContainElement(chipButton("Agent"))
+    expect(screen.getByRole("textbox", { name: "Message the agent" })).toBeInTheDocument()
+    await choose("Agent", "Mine")
+    expect(chipValue("Agent")).toBe("Mine")
   })
 })
 

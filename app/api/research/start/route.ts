@@ -22,15 +22,15 @@ export async function POST(request: Request) {
   if (modality !== "CHAT" && modality !== "VOICE") {
     return NextResponse.json({ error: "Invalid modality" }, { status: 400 })
   }
-  if (modality === "VOICE" && !isResearchParticipantVoiceEnabled()) {
-    return NextResponse.json({ error: "Voice is not available for this study" }, { status: 409 })
-  }
   const hasResume = body.sessionId !== undefined || body.resumeToken !== undefined
   if (hasResume && (typeof body.sessionId !== "string" || typeof body.resumeToken !== "string")) {
     return NextResponse.json({ error: "Both session and resume token are required" }, { status: 400 })
   }
   const resolved = await resolveActiveResearchStudy(body.token)
   if (!resolved) return NextResponse.json({ error: "Study not found" }, { status: 404 })
+  if (modality === "VOICE" && !(await isResearchParticipantVoiceEnabled(resolved.study.workspaceId))) {
+    return NextResponse.json({ error: "Voice is not available for this study" }, { status: 409 })
+  }
   try {
     const result = await startOrResumeResearchSession(
       resolved,

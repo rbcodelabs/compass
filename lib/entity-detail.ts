@@ -30,6 +30,7 @@
 import getPrisma from "@/lib/db";
 import { commentLinkTitles } from "@/lib/comment-link-titles";
 import { isPmInterviewEnabled, isResearchCaptureEnabled } from "@/lib/research-feature";
+import { isModuleEnabled } from "@/lib/modules/server";
 import { getLinkedKeyResultsBySolution, getLinkedObjectivesByOpportunity, getLinkedSolutionsByKeyResult } from "@/lib/typed-links";
 import { getSolutionArtifactIds } from "@/lib/artifacts";
 import { loadThinkingModelSource, offersSolutionToKrSurfaces } from "@/lib/thinking-model/link-surfaces";
@@ -40,6 +41,7 @@ import { loadCustomFieldsForObject } from "@/lib/custom-field-definitions";
 import { toOpportunityScoreData, toScoreSummary, toSolutionScoreData } from "@/lib/score-summary";
 import type { ScoringModelData } from "@/lib/types";
 import { resolveThinkingModel } from "@/lib/thinking-model/resolve";
+import { loadOpportunityChainExtras } from "@/lib/thinking-model/opportunity-chain-data";
 
 /**
  * ADR-0012 step 6a — the three OST detail fetchers that carry Evidence resolve
@@ -196,6 +198,12 @@ async function fetchOpportunity(id: string, workspaceId: string) {
         include: {
           _count: { select: { assumptions: true, evidence: true } },
           score: { select: { normalizedScore: true, modelVersion: true } },
+          // OST tab: roadmap items scheduled for this Solution (scoped on the item's own workspace).
+          roadmapItems: {
+            where: { workspaceId, status: { not: "ARCHIVED" } },
+            select: { id: true, title: true, horizon: true, status: true },
+            orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+          },
           assumptions: {
             orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
             include: {
@@ -237,11 +245,12 @@ async function fetchOpportunity(id: string, workspaceId: string) {
         select: { id: true, title: true, type: true, status: true },
         orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       },
-      roadmapItems: { select: { id: true, title: true, horizon: true } },
+      roadmapItems: { where: { workspaceId }, select: { id: true, title: true, horizon: true, status: true, solutionId: true } },
     },
   });
   if (!item) return null;
-  const offersObjectivePicker = resolveThinkingModel(item.workspace ?? {}).links.oppToObjective === "primary";
+  const thinkingModel = resolveThinkingModel(item.workspace ?? {});
+  const offersObjectivePicker = thinkingModel.links.oppToObjective === "primary";
   const [pmInterviews, linkedTasks, evidence, squads, keyResults, customFields, linkedObjectivesByOpportunity, pickerObjectives] = await Promise.all([
     pmInterviewHistory(workspaceId, "OPPORTUNITY", id),
     fetchLinkedTasksBundle(workspaceId, "OPPORTUNITY", id),
@@ -263,6 +272,14 @@ async function fetchOpportunity(id: string, workspaceId: string) {
   const solutionScoringModel = item.workspace?.scoringConfig?.solutionScoringModel ?? null;
   // A linked KR is scoped through its Objective: hide the link when that Objective is NULL / in another workspace.
   const linkedKeyResult = item.linkedKeyResult && item.linkedKeyResult.objective.workspaceId === workspaceId ? item.linkedKeyResult : null;
+  // OST tab extras (typed Solution->KR chips, solution tasks, the Objectives the chain touches): batch reads, no N+1.
+  const chain = await loadOpportunityChainExtras(
+    getPrisma(),
+    workspaceId,
+    thinkingModel,
+    { linkedObjectives: linkedObjectivesByOpportunity.get(id) ?? [], linkedKeyResult },
+    item.solutions ?? [],
+  );
   return {
     ...item, ...(item.linkedKeyResult ? { linkedKeyResult } : {}), evidence, ...linkedTasks, squads, customFields,
     linkedObjectives: linkedObjectivesByOpportunity.get(id) ?? [],
@@ -275,10 +292,13 @@ async function fetchOpportunity(id: string, workspaceId: string) {
     solutions: (item.solutions ?? []).map((solution) => ({
       ...solution,
       score: toScoreSummary(solution.score, solutionScoringModel),
+      ...(chain.keyResultsBySolution.has(solution.id) ? { linkedKeyResults: chain.keyResultsBySolution.get(solution.id) } : {}),
+      deliveryTasks: chain.tasksBySolution.get(solution.id) ?? [],
     })),
+    ...(chain.chainObjectives.length > 0 ? { chainObjectives: chain.chainObjectives } : {}),
     hasActiveSolutionScoringModel: solutionScoringModel !== null,
     availableKeyResults: keyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })),
-    pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews,
+    pmInterviewEnabled: await isPmInterviewEnabled(workspaceId), pmInterviews,
   };
 }
 
@@ -351,7 +371,7 @@ async function fetchSolution(id: string, workspaceId: string) {
       ? { availableKeyResults: pickerKeyResults.map((kr) => ({ id: kr.id, title: kr.title, objectiveTitle: kr.objective.title })) }
       : {}),
     artifacts: availableArtifacts.filter((artifact) => linkedIds.has(artifact.id)), availableArtifacts,
-    pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews, customFields,
+    pmInterviewEnabled: await isPmInterviewEnabled(workspaceId), pmInterviews, customFields,
     scoringModel: solutionScoringModel,
     existingScore: toSolutionScoreData(solution.score, solutionScoringModel),
   }
@@ -377,7 +397,7 @@ async function fetchAssumption(id: string, workspaceId: string) {
     pmInterviewHistory(workspaceId, "ASSUMPTION", id),
     resolveEvidenceProvenance(item.evidence),
   ])
-  return { ...item, evidence, pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews }
+  return { ...item, evidence, pmInterviewEnabled: await isPmInterviewEnabled(workspaceId), pmInterviews }
 }
 
 async function fetchExperiment(id: string, workspaceId: string) {
@@ -405,7 +425,7 @@ async function fetchExperiment(id: string, workspaceId: string) {
     pmInterviewHistory(workspaceId, "EXPERIMENT", id),
     fetchLinkedTasksBundle(workspaceId, "EXPERIMENT", id),
   ]);
-  return { ...item, ...linkedTasks, researchCaptureEnabled: isResearchCaptureEnabled(), pmInterviewEnabled: isPmInterviewEnabled(), pmInterviews };
+  return { ...item, ...linkedTasks, researchCaptureEnabled: await isResearchCaptureEnabled(workspaceId), pmInterviewEnabled: await isPmInterviewEnabled(workspaceId), pmInterviews };
 }
 
 async function fetchRoadmapItem(id: string, workspaceId: string) {
@@ -423,7 +443,6 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
       // positioning brief, if either exists. `horizon` is already a scalar.
       launchChecklist: { include: { items: { orderBy: { order: "asc" } } } },
       positioningBrief: { select: { id: true, title: true } },
-      workspace: { select: { launchWorkflowEnabled: true } },
       _count: { select: { votes: true } },
     },
   });
@@ -444,16 +463,16 @@ async function fetchRoadmapItem(id: string, workspaceId: string) {
     }),
   ]);
 
-  const { workspace, ...rest } = item;
+  const launchWorkflowEnabled = await isModuleEnabled(workspaceId, "launch_workflow");
   return {
-    ...rest,
+    ...item,
     ...linkedTasks,
     customFields,
     squads,
     availableOpportunities,
     // Flattened onto the panel payload so the client doesn't need a second
     // fetch just to know whether to render the Launch section.
-    launchWorkflowEnabled: workspace.launchWorkflowEnabled ?? false,
+    launchWorkflowEnabled,
   };
 }
 

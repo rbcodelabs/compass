@@ -9,7 +9,9 @@ import { WS_A, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
 const fake = vi.hoisted(() => ({ current: null as null | ReturnType<typeof createTenantFakePrisma> }));
 vi.mock("@/lib/db", () => ({ default: () => fake.current!.client }));
 vi.mock("@/lib/workspace-updates-capture", () => ({
-  withWorkspaceUpdates: async (prisma: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(prisma, false),
+  withWorkspaceUpdates: async (prisma: unknown, _workspaceId: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(prisma, false),
+  withAtomicRetry: async (prisma: unknown, callback: (tx: unknown) => unknown) => callback(prisma),
+  withUpdatesTables: async (prisma: unknown, callback: (tx: unknown, tablesExist: boolean) => unknown) => callback(prisma, false),
 }));
 
 import { linkArtifactToDecision, linkArtifactToSolution, unlinkArtifactFromDecision, unlinkArtifactFromSolution } from "@/lib/artifacts";

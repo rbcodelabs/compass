@@ -114,8 +114,10 @@ export type LinkTypeDef<A = unknown> = {
    * mirroring `eligible` so the picker never offers a pair the service would refuse. Absent means the type has no UI.
    */
   candidates?(input: LinkCandidatesInput): Promise<LinkCandidates>
-  /** Feature flag. When false every mutation is refused and the type is hidden from reads and summaries. */
+  /** Deployment-wide feature flag (the entity_links mirror env flags). When false every mutation is refused and the type is hidden from reads and summaries. */
   isEnabled?(): boolean
+  /** Workspace module gate (Settings > Modules). Same effect as `isEnabled`, decided per workspace, so it is async and takes the workspace. */
+  isEnabledForWorkspace?(workspaceId: string): Promise<boolean>
   lifecycle: { onFromDeleted: "delete" | "block"; onToDeleted: "delete" | "block"; onArchive: "keep" }
   summaries: { onFrom?: LinkSummarySpec; onTo?: LinkSummarySpec }
   /** Participant, PM-interview and synthesis contexts. Default (and only value used today) is "deny". */
@@ -156,7 +158,7 @@ const experimentInformedByStudy: LinkTypeDef = {
   labels: { forward: "Informed by", inverse: "Informs" },
   duplicatePolicy: "idempotent",
   authorize: defaultAuthorize,
-  isEnabled: isResearchCaptureEnabled,
+  isEnabledForWorkspace: isResearchCaptureEnabled,
   async eligible({ tx, workspaceId, to }) {
     const study = await tx.researchStudy.findFirst({
       where: { id: to.id, workspaceId },
@@ -463,6 +465,21 @@ export function requireLinkType(key: string): LinkTypeDef {
 /** A type behind a flag that is off is invisible to reads and refused for writes. */
 export function isLinkTypeEnabled(def: LinkTypeDef): boolean {
   return def.isEnabled ? def.isEnabled() : true
+}
+
+/** `isLinkTypeEnabled` plus the type's workspace module, when it has one. Use this wherever the workspace is known. */
+export async function isLinkTypeEnabledInWorkspace(def: LinkTypeDef, workspaceId: string): Promise<boolean> {
+  if (!isLinkTypeEnabled(def)) return false
+  return def.isEnabledForWorkspace ? def.isEnabledForWorkspace(workspaceId) : true
+}
+
+/** `linkTypesForEntity` narrowed to the types enabled in `workspaceId`. */
+export async function linkTypesForEntityInWorkspace(entityType: LinkableEntityType, workspaceId: string): Promise<{ def: LinkTypeDef; asFrom: boolean; asTo: boolean }[]> {
+  const out: { def: LinkTypeDef; asFrom: boolean; asTo: boolean }[] = []
+  for (const entry of linkTypesForEntity(entityType)) {
+    if (await isLinkTypeEnabledInWorkspace(entry.def, workspaceId)) out.push(entry)
+  }
+  return out
 }
 
 /** Every enabled type in which `entityType` is an endpoint, with the side(s) it plays. */

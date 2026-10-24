@@ -9,7 +9,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 import {
   DEFAULT_PANEL_PIN,
@@ -17,45 +17,62 @@ import {
   panelPinCookieString,
   type PanelPin,
 } from "@/lib/panel-pin";
+import {
+  decodeConversationId,
+  decodeRailParams,
+  railUrlFor,
+  type HelpArticleRef,
+  type RailView,
+} from "@/lib/agent-rail-url";
 
 /**
- * Open/close + active-thread state for the agent rail.
+ * Open/close + active-thread state for the agent rail, mirrored into the URL.
  *
- * ## Why this is not a URL search param, when every detail panel is
+ * ## React state is the source of truth; the URL is a mirror of it
  *
- * `PanelProvider` keeps the open detail panel in `?detail=<type>:<id>`, and for
- * that panel it is the right call: the panel is *about* a thing on the current
- * page, so it should be shareable, survive a refresh, and close on Back.
+ * The rail exists to stay put while the user moves around the workspace: the
+ * agent is mid-turn, streaming, and navigating to the Roadmap must not
+ * interrupt it. So the state lives in React, in a provider mounted in the
+ * workspace layout. The layout does not re-render across sibling route changes,
+ * so the state - and the streaming DOM under it - survives navigation.
  *
- * The rail is the opposite kind of object. Its whole reason for existing is to
- * stay put while the user moves around the workspace — the agent is mid-turn,
- * streaming, and navigating to the Roadmap must not interrupt it. A search
- * param cannot express that: every `<Link>` in the sidebar builds a fresh URL
- * with no `?agent=`, so the first navigation would drop the param and close the
- * rail. Worse, it would be a *remount*, which aborts the in-flight
- * `EventSource`/fetch stream and loses the transcript of the current turn.
+ * What the rail shows is *also* written to the URL (params in
+ * lib/agent-rail-url.ts), so a refresh restores it and a link shares it. That
+ * is done without involving the router:
  *
- * So the open flag is React state in a provider mounted in the workspace
- * layout. The layout does not re-render across sibling route changes, so the
- * state — and the streaming DOM under it — survives navigation. The cost is
- * that rail state is not shareable via URL, which is correct: "my agent chat is
- * open" is not a property of the page you are looking at.
+ *  - **Writes use `window.history.replaceState`.** Next's app router patches the
+ *    native history methods and feeds them into `usePathname`/`useSearchParams`,
+ *    so nothing is fetched, nothing navigates and nothing remounts. A real
+ *    `router.push`/`replace` is a navigation, and a remount would abort the
+ *    in-flight stream - the one thing this design must never do. `replace`
+ *    rather than `push` because switching rail views is not a place the Back
+ *    button should return to.
+ *  - **Reads happen once, at mount.** The provider seeds `view`,
+ *    `conversationId` and the open Help article from the URL, and a valid rail
+ *    param also opens the rail for someone whose cookie says it is closed.
+ *    After that the URL never drives the state, so a stray navigation cannot
+ *    swap the thread under a streaming turn.
+ *  - **In-app navigation re-applies the params.** Sidebar `<Link>`s and
+ *    `router.push` calls build fresh URLs that carry no rail params. Rather than
+ *    patch every call site, an effect re-mirrors the rail state onto whatever
+ *    URL the router lands on. Params are only added and removed by name, so
+ *    `?detail=` and page filters compose untouched.
  *
- * Refresh persistence is handled by the `compass_panel_agent` cookie instead,
- * which the layout reads server-side so the first painted frame is already
- * correct. See the `"agent"` entry in lib/panel-pin.ts for why that cookie's
- * `pinned` bit means "docked open" here.
+ * Open/closed itself stays the `compass_panel_agent` cookie (see the `"agent"`
+ * entry in lib/panel-pin.ts for why its `pinned` bit means "docked open"), read
+ * by the layout so the first painted frame is already right. A closed rail
+ * writes no params; the URL can open the rail but never close it.
  *
- * ## The active conversation is also client state, and deliberately decoupled
+ * ## The active conversation and the full page
  *
- * The full page selects a conversation with `?c=<id>` and server-loads it. The
- * rail cannot reuse that: changing the URL is the navigation this whole design
- * exists to avoid. So the rail owns `conversationId` locally and fetches
- * through the `/api/agent/conversations` routes.
- *
- * The two surfaces therefore hold the active thread in different places, which
- * is fine as long as the handoff between them is explicit: "expand to full
- * page" reads this value and puts it in the URL it navigates to.
+ * The full page selects a conversation with `?c=<id>`, server-loaded. The rail
+ * owns `conversationId` in state and fetches through `/api/agent/conversations`,
+ * mirrored as `?rc=<id>`. The two interoperate: "expand to full page" puts the
+ * rail's id in `c`, and while the page is showing (where the rail is hidden and
+ * its params are not written) `c` is adopted back into `conversationId`, so
+ * leaving the page and reopening the rail lands on the same thread. An id the
+ * viewer cannot read 404s from the messages route and shows as an empty thread,
+ * the same as on the page.
  */
 
 const AGENT_RAIL_SHORTCUT = "j";
@@ -75,8 +92,8 @@ export function isAgentPagePath(pathname: string | null): boolean {
   return segments[2] === "agent";
 }
 
-/** The views the rail can show. Add an id here and a row in VIEWS (agent-rail.tsx) to add one. */
-export type RailView = "agent" | "help" | "library";
+// Defined in lib/agent-rail-url.ts. Add an id there and a row in VIEWS (agent-rail.tsx) to add a view.
+export type { RailView };
 
 /** A one-shot request for the Help view to show something. `id` makes repeats distinct. */
 export type DocsIntent = { id: number; slug?: string; anchor?: string; query?: string };
@@ -98,6 +115,10 @@ type AgentRailContextValue = {
   view: RailView;
   setView: (view: RailView) => void;
   docsIntent: DocsIntent | null;
+  /** The Help article currently open in the rail, for mirroring into the URL. */
+  helpArticle: HelpArticleRef | null;
+  /** Called by the Help view when it opens or closes an article. */
+  reportHelpArticle: (article: HelpArticleRef | null) => void;
   /** Open the rail on the Help view, optionally straight to an article or a search. */
   openDocs: (options?: { slug?: string; anchor?: string; query?: string }) => void;
   /**
@@ -154,15 +175,23 @@ export function AgentRailProvider({
   // `wantsOpen` is the user's preference; `open` is what is actually shown.
   // Kept apart so visiting the agent page hides the rail without rewriting the
   // preference, which would otherwise close it on every screen afterwards.
-  const [wantsOpen, setOpen] = useState(initialPin.pinned);
-  const available = !isAgentPagePath(usePathname());
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // Read once: the URL seeds the state at mount and never drives it afterwards.
+  const [fromUrl] = useState(() => decodeRailParams(searchParams));
+  const [wantsOpen, setOpen] = useState(fromUrl?.open ?? initialPin.pinned);
+  const available = !isAgentPagePath(pathname);
   const open = available && wantsOpen;
   const [width, setWidth] = useState(() => clampPanelWidth(initialPin.width));
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [view, setView] = useState<RailView>("agent");
-  const [docsIntent, setDocsIntent] = useState<DocsIntent | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(fromUrl?.conversationId ?? null);
+  const [view, setView] = useState<RailView>(fromUrl?.view ?? "agent");
+  // A restored article is handed to the Help view as an ordinary one-shot intent.
+  const [docsIntent, setDocsIntent] = useState<DocsIntent | null>(
+    fromUrl?.helpArticle ? { id: 1, ...fromUrl.helpArticle } : null,
+  );
+  const [helpArticle, setHelpArticle] = useState<HelpArticleRef | null>(fromUrl?.helpArticle ?? null);
   const [agentSeed, setAgentSeed] = useState<AgentSeed | null>(null);
-  const intentCounter = useRef(0);
+  const intentCounter = useRef(fromUrl?.helpArticle ? 1 : 0);
 
   // Written from event handlers only, never in render and never in a mount
   // effect — the same discipline PanelShell documents. A write during mount
@@ -247,6 +276,77 @@ export function AgentRailProvider({
     setConversationId(id);
   }, []);
 
+  const reportHelpArticle = useCallback((article: HelpArticleRef | null) => {
+    setHelpArticle(article);
+  }, []);
+
+  // Mirror the rail into the URL. Runs on every route/param change too, which is
+  // what re-applies the params after a sidebar link or router push replaced the
+  // URL with one that has none. `searchParams` is a dependency only as the
+  // trigger: the write reads `window.location`, the freshest copy, and is
+  // skipped when the URL is already right, so the replaceState -> searchParams
+  // update it causes settles on the next pass instead of looping.
+  // Not on the agent page: the rail is hidden there and `?c=` owns the thread.
+  //
+  // Held while an in-app link navigation is pending (see below). A
+  // replaceState of the *old* path during that window supersedes the push, so
+  // the navigation silently never lands. Once it commits, `pathname` or
+  // `searchParams` changes, this effect reruns and applies the latest state.
+  const navigationPending = useRef(false);
+  const [flush, setFlush] = useState(0);
+  useEffect(() => {
+    navigationPending.current = false;
+  }, [pathname, searchParams]);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Capture phase: Next's <Link> calls preventDefault() in its own handler, so
+    // by bubble time a handled link is indistinguishable from a dead one.
+    const onClick = (event: MouseEvent) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = (event.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!link || (link.target && link.target !== "_self") || link.hasAttribute("download")) return;
+      const url = new URL(link.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      if (url.pathname === window.location.pathname && url.search === window.location.search) return;
+      navigationPending.current = true;
+      // Backstop for a click that never navigates (the link's handler bailed):
+      // stop holding writes after a generous wait, then flush the latest state.
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        navigationPending.current = false;
+        setFlush((n) => n + 1);
+      }, 10_000);
+    };
+    document.addEventListener("click", onClick, true);
+    return () => {
+      document.removeEventListener("click", onClick, true);
+      clearTimeout(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!available || navigationPending.current) return;
+    const href = railUrlFor(window.location.pathname, window.location.search, window.location.hash, {
+      open,
+      view,
+      conversationId,
+      helpArticle,
+    });
+    if (href) window.history.replaceState(null, "", href);
+  }, [available, open, view, conversationId, helpArticle, pathname, searchParams, flush]);
+
+  // The full page's `?c=` is the same thread the rail would show; adopt it so
+  // leaving the page and reopening the rail is lossless.
+  const pageConversation = decodeConversationId(searchParams.get("c"));
+  // Adjusted during render (React's "derive state from props" pattern) rather
+  // than in an effect, so the rail never paints a frame on the stale thread.
+  const adoptKey = available ? "off" : (pageConversation ?? "new");
+  const [adoptedKey, setAdoptedKey] = useState("off");
+  if (adoptKey !== adoptedKey) {
+    setAdoptedKey(adoptKey);
+    if (!available) setConversationId(pageConversation);
+  }
+
   // Cmd/Ctrl+J. Cmd+K is the workspace search palette and Cmd+B is the
   // sidebar, so J is the first unclaimed key in that family.
   useEffect(() => {
@@ -292,6 +392,8 @@ export function AgentRailProvider({
       view,
       setView,
       docsIntent,
+      helpArticle,
+      reportHelpArticle,
       openDocs,
       workspaceId,
       openLibrary,
@@ -311,6 +413,8 @@ export function AgentRailProvider({
     [
       view,
       docsIntent,
+      helpArticle,
+      reportHelpArticle,
       openDocs,
       workspaceId,
       openLibrary,

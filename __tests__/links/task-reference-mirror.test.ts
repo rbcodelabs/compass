@@ -10,7 +10,9 @@ type Row = Record<string, unknown>;
 const fake = vi.hoisted(() => ({ current: null as null | { client: unknown; state: Record<string, Row[]> } }));
 vi.mock("@/lib/db", () => ({ default: () => fake.current!.client }));
 vi.mock("@/lib/workspace-updates-capture", () => ({
-  withWorkspaceUpdates: async (prisma: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(prisma, false),
+  withWorkspaceUpdates: async (prisma: unknown, _workspaceId: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(prisma, false),
+  withAtomicRetry: async (prisma: unknown, callback: (tx: unknown) => unknown) => callback(prisma),
+  withUpdatesTables: async (prisma: unknown, callback: (tx: unknown, tablesExist: boolean) => unknown) => callback(prisma, false),
 }));
 
 import { createTaskLink, deleteTaskLink, drainMirroredTaskLinksTo, mirrorTaskLinks, upsertTaskLink } from "@/lib/task-link-writes";

@@ -298,3 +298,11 @@ export function usePanelContext() {
   if (!ctx) throw new Error("usePanelContext must be used inside PanelProvider");
   return ctx;
 }
+
+/**
+ * Like usePanelContext, but returns null instead of throwing outside a PanelProvider. For components that render both inside the
+ * workspace layout and outside it (jsdom tests, previews) and can fall back to something else when no panel exists.
+ */
+export function useOptionalPanelContext(): PanelContextValue | null {
+  return useContext(PanelContext);
+}

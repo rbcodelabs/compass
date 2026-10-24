@@ -54,7 +54,7 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export function DocsPanel() {
-  const { docsIntent, askAgent } = useAgentRail()
+  const { docsIntent, askAgent, reportHelpArticle } = useAgentRail()
   const pathname = usePathname()
 
   const [topics, setTopics] = useState<DocMeta[] | null>(null)
@@ -112,12 +112,20 @@ export function DocsPanel() {
       if (!res.ok) throw new Error(String(res.status))
       const data = (await res.json()) as { doc: DocPage }
       setArticle({ doc: data.doc, anchor })
+      reportHelpArticle({ slug: data.doc.slug, ...(anchor ? { anchor } : {}) })
     } catch {
       setArticleError(true)
+      // A restored article that no longer loads must not keep pinning itself into the URL.
+      reportHelpArticle(null)
     } finally {
       setLoadingSlug(null)
     }
-  }, [])
+  }, [reportHelpArticle])
+
+  const closeArticle = useCallback(() => {
+    setArticle(null)
+    reportHelpArticle(null)
+  }, [reportHelpArticle])
 
   // One-shot requests from elsewhere ("?" shortcut, future Help buttons).
   useEffect(() => {
@@ -126,11 +134,11 @@ export function DocsPanel() {
     if (docsIntent.slug) {
       void openArticle(docsIntent.slug, docsIntent.anchor)
     } else {
-      setArticle(null)
+      closeArticle()
       if (docsIntent.query !== undefined) setQuery(docsIntent.query)
       requestAnimationFrame(() => searchRef.current?.focus())
     }
-  }, [docsIntent, openArticle])
+  }, [docsIntent, openArticle, closeArticle])
 
   // Land on the anchor (or the top) whenever a different article is shown.
   useEffect(() => {
@@ -215,7 +223,7 @@ export function DocsPanel() {
     return (
       <div className="flex min-h-0 flex-1 flex-col" data-testid="docs-article">
         <div className="flex shrink-0 items-center gap-1 border-b border-border-default px-2 py-1.5">
-          <Button variant="ghost" size="sm" onClick={() => setArticle(null)}>
+          <Button variant="ghost" size="sm" onClick={closeArticle}>
             <ArrowLeft aria-hidden="true" />
             Docs
           </Button>

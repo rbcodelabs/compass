@@ -7,7 +7,7 @@ type ExpectedTable = {
 
 const c = (column: string, nullable = false) => ({ column, nullable })
 
-/** Tables 105_artifact_external_share must leave behind, with column nullability. */
+/** Tables 110_artifact_external_share must leave behind, with column nullability. */
 const EXPECTED_TABLES: ExpectedTable[] = [
   {
     table: "artifact_shares",
@@ -55,7 +55,7 @@ export async function assertArtifactExternalShareMigration(client: PoolClient, s
     const actual = new Map(result.rows.map((row) => [row.column_name, row.is_nullable === "YES"]))
     for (const { column, nullable } of columns) {
       if (actual.get(column) !== nullable) {
-        throw new Error(`Migration 105 postcondition failed: ${table}.${column} is missing or has the wrong nullability`)
+        throw new Error(`Migration 110 postcondition failed: ${table}.${column} is missing or has the wrong nullability`)
       }
     }
   }

@@ -24,7 +24,6 @@ import { deserializeResearchGuide } from "@/lib/research"
 import { LinkedEntitiesSection } from "@/components/links/linked-entities-section"
 
 export default async function StudyPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string; studyId: string }>; searchParams: Promise<{ token?: string; page?: string; synthesisPage?: string; turnId?: string }> }) {
-  if (!isResearchCaptureEnabled()) notFound()
   const session = await auth()
   if (!session?.user?.id) redirect("/login")
   const { orgSlug, workspaceSlug, studyId: studyParam } = await params
@@ -38,6 +37,7 @@ export default async function StudyPage({ params, searchParams }: { params: Prom
     select: { id: true },
   })
   if (!member) notFound()
+  if (!(await isResearchCaptureEnabled(member.id))) notFound()
   const resolvedStudy = await resolveWorkItemPage({ type: "researchStudy", param: studyParam, workspaceId: member.id, basePath: `/${orgSlug}/${workspaceSlug}/capture/studies`, searchParams: query })
   const access = await prisma.researchStudy.findFirst({
     where: {

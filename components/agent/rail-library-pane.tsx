@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { usePathname } from "next/navigation"
 
 import { DocTreeSidebar, type DocTreeItem } from "@/components/docs/doc-tree-sidebar"
 import type { ArtifactNavItem } from "@/components/docs/artifact-nav"
+import { useLiveRefresh } from "@/hooks/use-live-refresh"
 
 type Library = { workspaceId: string; docs: DocTreeItem[]; artifacts: ArtifactNavItem[] }
 
@@ -36,27 +37,40 @@ export function RailLibraryPane({
   const [library, setLibrary] = useState<Library | null>(null)
   const [failed, setFailed] = useState(false)
 
+  const load = useCallback(async (isCancelled: () => boolean) => {
+    try {
+      const qs = new URLSearchParams({ orgSlug, workspaceSlug })
+      const res = await fetch(`/api/docs-tree?${qs}`)
+      if (!res.ok) throw new Error(String(res.status))
+      const data = (await res.json()) as Library
+      if (!isCancelled()) {
+        setLibrary(data)
+        setFailed(false)
+      }
+    } catch {
+      if (!isCancelled()) setFailed(true)
+    }
+  }, [orgSlug, workspaceSlug])
+
   useEffect(() => {
     if (!active) return
     let cancelled = false
-    void (async () => {
-      try {
-        const qs = new URLSearchParams({ orgSlug, workspaceSlug })
-        const res = await fetch(`/api/docs-tree?${qs}`)
-        if (!res.ok) throw new Error(String(res.status))
-        const data = (await res.json()) as Library
-        if (!cancelled) {
-          setLibrary(data)
-          setFailed(false)
-        }
-      } catch {
-        if (!cancelled) setFailed(true)
-      }
-    })()
+    void load(() => cancelled)
     return () => {
       cancelled = true
     }
-  }, [active, orgSlug, workspaceSlug, pathname])
+  }, [active, load, pathname])
+
+  // The tree is client-fetched, so a change (an agent adding, renaming or moving
+  // a doc or artifact) refetches it rather than refreshing the route. Polls only
+  // while the Library view is the one showing.
+  useLiveRefresh({
+    orgSlug,
+    workspaceSlug,
+    scope: "docs-tree",
+    onChange: () => void load(() => false),
+    enabled: active,
+  })
 
   return (
     <div className="flex min-h-0 flex-1 flex-col px-2 pt-2" data-testid="rail-library">

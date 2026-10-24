@@ -1,4 +1,4 @@
--- Migration 105: external (outsider) artifact share.
+-- Migration 110: external (outsider) artifact share.
 -- Additive: four new tables and their async indexes. NOTHING is added to `artifacts`,
 -- so the code can ship before this is applied: until it is, no share row exists and
 -- every artifact behaves exactly as before.

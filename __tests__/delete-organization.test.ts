@@ -93,6 +93,7 @@ const mockPrisma = {
   agentSession: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
   agentAuditLog: { deleteMany: vi.fn() },
   agentConversation: { deleteMany: vi.fn() },
+  agentConversationReview: { deleteMany: vi.fn() },
   agentWorkspaceGrant: { deleteMany: vi.fn() },
   agentToolCall: { deleteMany: vi.fn() },
   // Deleting an org deletes its workspaces' background agent runs; the

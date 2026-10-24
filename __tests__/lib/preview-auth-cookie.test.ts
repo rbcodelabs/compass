@@ -15,9 +15,6 @@ vi.mock("next-auth", () => ({ default: mocks.nextAuth }));
 vi.mock("next-auth/providers/credentials", () => ({
   default: vi.fn(() => ({ id: "credentials" })),
 }));
-vi.mock("next-auth/providers/google", () => ({
-  default: vi.fn(() => ({ id: "google" })),
-}));
 vi.mock("next-auth/providers/resend", () => ({
   default: vi.fn(() => ({ id: "resend" })),
 }));

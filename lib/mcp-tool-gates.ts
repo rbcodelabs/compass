@@ -234,6 +234,10 @@ export const TOOL_GATES: Record<string, Gate> = {
   unfollow: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   list_notifications: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   mark_read: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  // Workspace modules: members (and delegated agents) read; only a human workspace administrator writes. No agentCapability is passed,
+  // so assertWorkspaceAdmin refuses every agent identity, matching the DENY policy below.
+  list_workspace_modules: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  update_workspace_module: async (a, x) => void (await assertWorkspaceAdmin(a, x.workspaceId)),
   // Workspace ---------------------------------------------------------------
   get_workspace_summary: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   // list_workspaces additionally filters its results to the caller's
@@ -648,6 +652,7 @@ const READ_TOOLS = [
   "list_notifications",
   "list_specs",
   "get_spec",
+  "list_workspace_modules",
 ] as const
 
 /**
@@ -692,7 +697,7 @@ const WRITE_TOOLS = [
   "request_release_authorization", "resolve_comment", "resolve_doc_comment",
   "restore_doc_version", "revoke_research_links", "rotate_research_link", "score_opportunity",
   "score_solution", "set_custom_field_value", "set_launch_tier", "set_objective_parent_kr",
-  "set_workspace_scoring_model", "unlink_artifact_from_decision",
+  "set_workspace_scoring_model", "update_workspace_module", "unlink_artifact_from_decision",
   "unlink_artifact_from_solution", "unlink_task", "refresh_artifact_from_v0", "update_artifact", "update_assumption",
   "edit_doc", "edit_canvas", "build_canvas_tree",
   "update_comment", "update_experiment", "update_feedback",
@@ -786,7 +791,7 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ...["generate_research_guide", "create_research_study", "update_research_study", "generate_research_synthesis", "promote_research_finding_to_evidence"].map(name => [name, "WRITE"]),
   ...["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
-    "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_doc_history", "capture_canvas", "list_doc_comments", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values", "list_links", "list_specs", "get_spec",
+    "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_doc_history", "capture_canvas", "list_doc_comments", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values", "list_links", "list_specs", "get_spec", "list_workspace_modules",
   ].map(name => [name, "READ"]),
   ...[
     "link_artifact_to_decision", "unlink_artifact_from_decision",
@@ -828,6 +833,9 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   // notifications", 2.7). An agent-scoped token acts as an Agent, so it must not
   // follow on, read, or clear the inbox of the human who owns it.
   ...["follow", "unfollow", "list_notifications", "mark_read"].map(name => [name, "DENY"]),
+  // Changing a module is an administrator decision, and some modules guard security-sensitive paths (research voice): an agent never
+  // switches its own capabilities on. It can read list_workspace_modules and tell a person what to enable.
+  ["update_workspace_module", "DENY"],
 ])
 
 /**

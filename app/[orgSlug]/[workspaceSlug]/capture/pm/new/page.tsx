@@ -8,11 +8,11 @@ import { launchPmInterview } from "../actions"
 import { getThinkingModelForSlugs } from "@/lib/thinking-model/server"
 
 export default async function NewPmInterviewPage({ params, searchParams }: { params: Promise<{ orgSlug: string; workspaceSlug: string }>; searchParams: Promise<{ targetType?: string; targetId?: string }> }) {
-  if (!isPmInterviewEnabled()) notFound()
   const member = await auth(); if (!member?.user?.id) redirect("/login")
   const { orgSlug, workspaceSlug } = await params, selected = await searchParams, prisma = getPrisma()
   const workspace = await prisma.workspace.findFirst({ where: { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: member.user.id } } }, select: { id: true } })
   if (!workspace) notFound()
+  if (!(await isPmInterviewEnabled(workspace.id))) notFound()
   const { labels } = await getThinkingModelForSlugs(orgSlug, workspaceSlug)
   const [opportunities, solutions, assumptions, experiments] = await Promise.all([
     prisma.opportunity.findMany({ where: { workspaceId: workspace.id }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" }, take: 100 }),

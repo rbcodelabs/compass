@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { Button } from "@/components/ui/button";
 import getPrisma from "@/lib/db";
 import { ManageFieldsPanel } from "@/components/custom-fields/manage-fields-panel";
 import { SharedOptionSetsPanel } from "@/components/custom-fields/shared-option-sets-panel";
@@ -11,7 +13,8 @@ import { OrgReadOnlyAccessPanel } from "@/components/settings/org-readonly-acces
 import { ManageApiKeysPanel } from "@/components/settings/manage-api-keys-panel";
 import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel";
 import { DeliveryLimitsPanel } from "@/components/settings/delivery-limits-panel";
-import { LaunchWorkflowSettingsPanel } from "@/components/settings/launch-workflow-settings-panel";
+import { parseStoredRepos } from "@/lib/agent-github-repos";
+import { AgentGithubReposPanel } from "@/components/settings/agent-github-repos-panel";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { ThinkingModelPanel } from "@/components/settings/thinking-model-panel";
 import { inspectStoredLabels, resolveThinkingModel } from "@/lib/thinking-model/resolve";
@@ -34,7 +37,6 @@ import { ThemePreferenceControl } from "@/components/theme/theme-preference-cont
 import { WorkspaceAgentsPanel } from "@/components/settings/workspace-agents-panel";
 import { AgentActivity } from "@/components/settings/agent-activity";
 import { invokedByForAgentActivity } from "@/lib/agent-activity";
-import { agentsEnabled } from "@/lib/agent-access";
 import type { AgentInvokePolicy } from "@/lib/agent-ownership";
 import { loadConfiguredAgentRunCaps } from "@/lib/agent-limits";
 import { agentKind, agentOwner, canInvokeAgent, isUserOwnedBy, listAgentsForWorkspace } from "@/lib/agent-ownership";
@@ -83,7 +85,7 @@ export default async function SettingsPage({ params }: Props) {
       portalAuthRequired: true,
       artifactFeedbackPublic: true,
       ssoEnabled: true,
-      launchWorkflowEnabled: true,
+      agentGithubRepos: true,
       ssoSecretEncrypted: true,
       ssoSecretUpdatedAt: true,
       brandingPaletteId: true,
@@ -386,7 +388,7 @@ export default async function SettingsPage({ params }: Props) {
       </SettingsSection>
 
       <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace, including cloud agents that run inside Compass. Assignment does not grant access; assigning a task to a cloud agent from the app starts a run, within the limits set on that agent.">
-        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} enabled={agentsEnabled()} canManage={canManageCapabilityPacks} models={allowedAgentModels()} agents={workspaceAgents.map((a) => {
+        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} canManage={canManageCapabilityPacks} models={allowedAgentModels()} agents={workspaceAgents.map((a) => {
           const owner = agentOwner(a);
           const ownerMember = owner?.type === "USER" ? rawMembers.find((m) => m.userId === owner.userId) : undefined;
           // Editing follows canManageAgent: the owner of a personal agent, an administrator for a shared one. Only editors receive the instructions.
@@ -433,19 +435,17 @@ export default async function SettingsPage({ params }: Props) {
         />
       </SettingsSection>
 
-      {/*
-        Placed after Portal, not before: several functional E2E specs
-        (feedback-attachments, feedback-bug-roadmap, roadmap-unscheduled-items)
-        select Portal's toggles by positional index
-        (page.getByRole("switch").nth(1), etc.) since PortalSettingsPanel's
-        toggles have no stable accessible name. Inserting a new switch above
-        Portal would silently shift those indices and break those specs.
-      */}
-      <SettingsSection title="Marketing launch" description="Turn on launch tiers, checklists, and positioning briefs for teams that run a formal marketing-launch process.">
-        <LaunchWorkflowSettingsPanel
+      {/* Links to the Modules page. No switch here, so it cannot shift the positional switch indices the Portal specs rely on. */}
+      <SettingsSection title="Modules" description="Turn product modules on or off for this workspace: research, voice, notifications, the marketing launch workflow and more. Workspace administrators only.">
+        <Button variant="outline" render={<Link href={`/${orgSlug}/${workspaceSlug}/settings/modules`} />}>Manage modules</Button>
+      </SettingsSection>
+
+      <SettingsSection title="Agent GitHub access" description="Repositories agents in this workspace may push branches and open pull requests to. Agents get a short-lived token limited to exactly these repos.">
+        <AgentGithubReposPanel
           orgSlug={orgSlug}
           workspaceSlug={workspaceSlug}
-          launchWorkflowEnabled={workspace.launchWorkflowEnabled ?? false}
+          initialRepos={parseStoredRepos(workspace.agentGithubRepos)}
+          canEdit={canManageCapabilityPacks}
         />
       </SettingsSection>
 

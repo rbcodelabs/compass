@@ -8,6 +8,7 @@
  * scoping filter, directly or via the parent chain.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { setModules } from "../helpers/modules";
 
 const models = {
   objective: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -194,10 +195,10 @@ describe("isEntityType", () => {
 describe("getEntityDetail — workspace scoping", () => {
   for (const { type, model, where } of CASES) {
     it(`scopes ${type} to the workspace (directly or via parent chain)`, async () => {
-      // workspace/launchWorkflowEnabled is only consumed by fetchRoadmapItem
+      // the launch workflow flag comes from the workspace module, resolved only by fetchRoadmapItem
       // (flattened onto the panel payload, see lib/entity-detail.ts) but is
       // harmless to include for every type in this generic matrix.
-      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [], workspace: { launchWorkflowEnabled: true } });
+      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
       await getEntityDetail(type, ID, WS);
       expect(models[model].findFirst).toHaveBeenCalledTimes(1);
       expect(models[model].findFirst).toHaveBeenCalledWith(
@@ -250,8 +251,19 @@ describe("getEntityDetail — return shape", () => {
     }));
   });
 
+  it.each([[true], [false]])("reports the launch_workflow module (%s) on the roadmap item payload", async (enabled) => {
+    setModules({ launch_workflow: enabled });
+    models.roadmapItem.findFirst.mockResolvedValue({ id: ID, workspaceId: WS });
+    models.task.findMany.mockResolvedValue([]);
+    models.workspaceMember.findMany.mockResolvedValue([]);
+
+    const result = await getEntityDetail("roadmapItem", ID, WS);
+
+    expect(result).toMatchObject({ data: { launchWorkflowEnabled: enabled } });
+  });
+
   it("returns active roadmap delivery tasks and linkable workspace tasks in deterministic delivery order", async () => {
-    models.roadmapItem.findFirst.mockResolvedValue({ id: ID, workspaceId: WS, workspace: { launchWorkflowEnabled: true } });
+    models.roadmapItem.findFirst.mockResolvedValue({ id: ID, workspaceId: WS });
     models.task.findMany
       .mockResolvedValueOnce([{ id: "blocked", status: "BLOCKED" }])
       .mockResolvedValueOnce([{ id: "candidate", title: "Candidate" }]);
@@ -331,10 +343,10 @@ describe("getEntityDetail — return shape", () => {
       models.workspaceMember.findMany.mockResolvedValue([]);
       models.artifactLink.findMany.mockResolvedValue([]);
       models.artifact.findMany.mockResolvedValue([]);
-      // workspace/launchWorkflowEnabled is only consumed by fetchRoadmapItem
+      // the launch workflow flag comes from the workspace module, resolved only by fetchRoadmapItem
       // (flattened onto the panel payload, see lib/entity-detail.ts) but is
       // harmless to include for every type in this generic matrix.
-      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [], workspace: { launchWorkflowEnabled: true } });
+      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
 
       const result = await getEntityDetail(type, ID, WS);
 
@@ -362,7 +374,7 @@ describe("getEntityDetail — return shape", () => {
     { type: "roadmapItem" as const, model: "roadmapItem" as const, objectType: "ROADMAP_ITEM" },
     { type: "solution" as const, model: "solution" as const, objectType: "SOLUTION" },
   ])("loads $objectType custom fields with their current values", async ({ type, model, objectType }) => {
-    models[model].findFirst.mockResolvedValue({ id: ID, evidence: [], workspace: { launchWorkflowEnabled: true } });
+    models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
     models.customFieldDefinition.findMany.mockResolvedValue([
       {
         id: "field-area",
@@ -401,10 +413,10 @@ describe("getEntityDetail — return shape", () => {
   it("dispatches each type to only its own model", async () => {
     for (const { type, model } of CASES) {
       vi.clearAllMocks();
-      // workspace/launchWorkflowEnabled is only consumed by fetchRoadmapItem
+      // the launch workflow flag comes from the workspace module, resolved only by fetchRoadmapItem
       // (flattened onto the panel payload, see lib/entity-detail.ts) but is
       // harmless to include for every type in this generic matrix.
-      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [], workspace: { launchWorkflowEnabled: true } });
+      models[model].findFirst.mockResolvedValue({ id: ID, evidence: [] });
       const result = await getEntityDetail(type, ID, WS);
       expect(result).toEqual({ type, data: expect.objectContaining({ id: ID }) });
       // no other model was touched

@@ -25,6 +25,9 @@ import type { TaskStatus, MemberData } from "@/lib/types";
 import { Board } from "@/components/patterns/board";
 import { usePanelContext } from "@/components/panels/panel-context";
 import { TASK_CREATED_EVENT } from "@/lib/task-created-event";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import { useServerSyncedState } from "@/hooks/use-server-synced-state";
+import { useFlipAnimation } from "@/hooks/use-flip-animation";
 
 type ColumnMap = Record<TaskStatus, TaskCardData[]>;
 
@@ -55,25 +58,35 @@ function findStatus(columns: ColumnMap, taskId: string): TaskStatus | null {
 }
 
 /**
- * Seeds its columns from `initialTasks` once, on mount, so drag-and-drop and the
- * other card edits can move cards optimistically without a revalidation
- * clobbering them.
+ * Columns are local state so drag-and-drop and the other card edits can move
+ * cards optimistically, and they follow `initialTasks` whenever the server data
+ * changes (another user or an agent moved a task; see useServerSyncedState and
+ * useLiveRefresh). Server data is adopted only while the board is idle - no drag
+ * and no local write in flight - so a revalidation can never snap back an
+ * optimistic move.
  *
- * That makes the board deliberately *not* reactive to `initialTasks` changing.
- * A filter change therefore has to remount it, which the page does by passing a
- * `key` built from `taskBoardFilterKey` — see that helper for why keying on the
- * filter beats reacting to the task set.
+ * The page still keys the board on the active filters (`taskBoardFilterKey`),
+ * which remounts it on a filter change; that stays correct and also resets
+ * view state such as the "show cancelled" toggle.
  */
 export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, members }: Props) {
   const revalidatePathStr = `/${orgSlug}/${workspaceSlug}/tasks`;
   const { subscribeEntityMutated } = usePanelContext();
 
-  const [columns, setColumns] = useState<ColumnMap>(() => buildColumnMap(initialTasks));
   const [activeTask, setActiveTask] = useState<TaskCardData | null>(null);
   const [dragSourceStatus, setDragSourceStatus] = useState<TaskStatus | null>(null);
   const [showCancelled, setShowCancelled] = useState(false);
 
-  const [, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();
+
+  const busy = activeTask !== null || dragSourceStatus !== null || isPending;
+  const {
+    state: columns,
+    setState: setColumns,
+    generation,
+  } = useServerSyncedState(initialTasks, buildColumnMap, busy);
+  const { containerRef, capture } = useFlipAnimation(generation);
+  useLiveRefresh({ orgSlug, workspaceSlug, scope: "tasks", paused: busy, onBeforeRefresh: capture });
 
   // Stable across server and client; without it @dnd-kit numbers its
   // aria-describedby ids from a global counter and hydration mismatches.
@@ -193,7 +206,7 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
       }
       return next;
     });
-  }, []);
+  }, [setColumns]);
 
   function handleTaskAdded(task: TaskCardData) {
     setColumns((prev) => ({ ...prev, [task.status]: [...prev[task.status], task] }));
@@ -212,7 +225,7 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
       next[updated.status] = [...next[updated.status], updated];
       return next;
     });
-  }, []);
+  }, [setColumns]);
 
   // The panel (PanelShell) renders as a layout sibling of TaskBoard, not a
   // child, so edits made there reach this board's own local column state via
@@ -236,12 +249,12 @@ export function TaskBoard({ initialTasks, workspaceId, orgSlug, workspaceSlug, m
     }
     window.addEventListener(TASK_CREATED_EVENT, onCreated);
     return () => window.removeEventListener(TASK_CREATED_EVENT, onCreated);
-  }, []);
+  }, [setColumns]);
 
   const cancelledCount = columns.CANCELLED.length;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
+    <div ref={containerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto md:overflow-hidden">
       {cancelledCount > 0 && (
         <button
           onClick={() => setShowCancelled((v) => !v)}

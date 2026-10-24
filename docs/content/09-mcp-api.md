@@ -336,7 +336,7 @@ Supported `targetType` values are `OBJECTIVE`, `KEY_RESULT`, `OPPORTUNITY`, `SOL
 
 ### Following and notifications
 
-Follow an object to get its status changes and comments in your in-app notifications inbox. These tools act on the **calling person's own** follows and inbox, so they need a user identity: agent-scoped tokens and credentials with no user get a clear error and never touch anyone's inbox. Following is gated by `FOLLOWING_ENABLED`; while it is off the tools return "Following is not enabled." Today `OPPORTUNITY`, `SOLUTION`, `TASK` and `DOC` are followable; the remaining subject types are rejected with "cannot be followed yet" until their rollout slice ships. Unfollowing is remembered: commenting on or being assigned an object you unfollowed does not re-follow it, but an explicit `follow` does.
+Follow an object to get its status changes and comments in your in-app notifications inbox. These tools act on the **calling person's own** follows and inbox, so they need a user identity: agent-scoped tokens and credentials with no user get a clear error and never touch anyone's inbox. Following is gated by the Following workspace module; while it is off the tools return "Following and notifications is not enabled for this workspace. A workspace admin can enable it in Settings > Modules." Today `OPPORTUNITY`, `SOLUTION`, `TASK` and `DOC` are followable; the remaining subject types are rejected with "cannot be followed yet" until their rollout slice ships. Unfollowing is remembered: commenting on or being assigned an object you unfollowed does not re-follow it, but an explicit `follow` does.
 
 | Tool | Description |
 |---|---|
@@ -357,6 +357,8 @@ Notification kinds are `STATUS_CHANGED`, `COMMENT_ADDED`, `COMMENT_REPLIED` and,
 | `list_workspaces` | List all workspaces in an organization by org slug; use as the first call when you don't yet know a workspace ID |
 | `get_workspace_by_slug` | Look up a single workspace's ID, name, and description directly by org slug + workspace slug, without listing all workspaces. Also returns the workspace's `thinkingModel` (see below) |
 | `create_workspace` | Create a new workspace inside an organization. Requires an organization OWNER/ADMIN; an agent may call it when its owner currently holds that role (see Inherited admin rights below) |
+| `list_workspace_modules` | List every module of a workspace (research capture, PM interviews, research voice, workspace updates, following, the marketing launch workflow) with whether it is enabled, the administrator's choice, its requirements and what blocks it. Any workspace member can read it. Call it when a tool fails with "... is not enabled for this workspace" to see which module to ask an administrator to turn on |
+| `update_workspace_module` | Switch one module on or off (`workspaceId`, `moduleKey`, `enabled`). Workspace administrators only, and only a human identity: agent-scoped credentials are refused, so an agent should tell the person to enable it in Settings > Modules. Enabling needs the module's requirements enabled first (the error names them); disabling also disables the modules that depend on it |
 
 ### The workspace's thinking model
 

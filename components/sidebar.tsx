@@ -9,7 +9,6 @@ import {
   ChevronDown,
   FlaskConical,
   HelpCircle,
-  Layers,
   Lightbulb,
   Puzzle,
   ListChecks,
@@ -56,7 +55,7 @@ import { WorkspaceSearchPalette } from "@/components/workspace-search-palette"
 import { useAgentRailOptional } from "@/components/agent/agent-rail-context"
 import { useLabels } from "@/components/thinking-model/thinking-model-provider"
 import { orderPrimaryNav } from "@/lib/workspace-nav"
-import { NotificationBellNavItem } from "@/components/notifications/notification-bell"
+import { NotificationBellIconButton } from "@/components/notifications/notification-bell"
 
 interface SidebarProps {
   orgSlug: string
@@ -70,6 +69,7 @@ interface SidebarProps {
   isOrgAdmin?: boolean
   /** Platform admins (PLATFORM_ADMIN_EMAILS) see an "Agent snapshot" link in the account menu. */
   isPlatformAdmin?: boolean
+  /** The research_capture module is enabled in this workspace (Settings > Modules); resolved by the layout. */
   researchCaptureEnabled?: boolean
   updatesEnabled?: boolean
   /** Following is on and available: show the notifications bell. Absent in the settings tree. */
@@ -149,7 +149,7 @@ export function Sidebar({
   workspaces,
   isOrgAdmin = false,
   isPlatformAdmin = false,
-  researchCaptureEnabled = true,
+  researchCaptureEnabled = false,
   updatesEnabled = false,
   followingEnabled = false,
   unreadNotifications = { count: 0, overflow: false },
@@ -211,6 +211,7 @@ export function Sidebar({
               workspaceSlug={workspaceSlug}
               workspaceName={workspaceName}
               userScope={userEmail || undefined}
+              orgRoadmapHref={orgWorkspaceCount > 1 || isOrgRoadmapActive ? orgRoadmapHref : undefined}
             />
           </SidebarMenuItem>
         </SidebarMenu>
@@ -221,21 +222,23 @@ export function Sidebar({
       <SidebarContent>
         <SidebarGroup className="py-3">
           <SidebarGroupContent>
-            <SidebarMenu className="mb-2">
-              <SidebarMenuItem>
-                <WorkspaceSearchPalette orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
-              </SidebarMenuItem>
-            </SidebarMenu>
-            <nav aria-label="Main navigation">
-              <SidebarMenu className="gap-0.5">
+            <div className="mb-2 flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
+              <SidebarMenu className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
+                <SidebarMenuItem>
+                  <WorkspaceSearchPalette orgSlug={orgSlug} workspaceSlug={workspaceSlug} />
+                </SidebarMenuItem>
+              </SidebarMenu>
               {followingEnabled && (
-                <NotificationBellNavItem
+                <NotificationBellIconButton
                   orgSlug={orgSlug}
                   workspaceSlug={workspaceSlug}
                   initialCount={unreadNotifications.count}
                   initialOverflow={unreadNotifications.overflow}
                 />
               )}
+            </div>
+            <nav aria-label="Main navigation">
+              <SidebarMenu className="gap-0.5">
               {navItems.map(({ label, path, Icon }) => {
                 const href = `${base}/${path}`
                 const isActive = pathname.startsWith(href)
@@ -263,29 +266,6 @@ export function Sidebar({
                   </SidebarMenuItem>
                 )
               })}
-              {(orgWorkspaceCount > 1 || isOrgRoadmapActive) && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    render={<Link href={orgRoadmapHref} />}
-                    isActive={isOrgRoadmapActive}
-                    tooltip="All roadmaps"
-                    className="relative h-9 rounded-lg text-text-secondary"
-                    data-testid="nav-org-roadmap"
-                  >
-                    {isOrgRoadmapActive && (
-                      <span
-                        className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary group-data-[collapsible=icon]:hidden"
-                        aria-hidden="true"
-                      />
-                    )}
-                    <Layers
-                      className={isOrgRoadmapActive ? "text-primary" : "text-text-subtle"}
-                      aria-hidden="true"
-                    />
-                    <span>All roadmaps</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
               </SidebarMenu>
             </nav>
           </SidebarGroupContent>

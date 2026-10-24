@@ -6,7 +6,6 @@ import { test, expect } from "../fixtures/index"
 // deterministic substitutes; this test never contacts a paid voice service.
 for (const studyType of ["CUSTOMER_INTERVIEW", "USABILITY_TEST"]) {
   test(`browser voice ${studyType} retains failed saves and finishes only after retry`, async ({ browser, baseURL }) => {
-    test.skip(process.env.COMPASS_RESEARCH_BROWSER_VOICE_ENABLED !== "1", "Dedicated default-off browser voice test run")
     const pool = new Pool({ connectionString: process.env.DATABASE_URL })
     const id = randomUUID(); const token = randomUUID().replaceAll("-", "").repeat(2)
     try {

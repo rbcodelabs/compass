@@ -1,4 +1,5 @@
 import { redirect, notFound } from "next/navigation";
+import { researchNavEnabled } from "@/lib/modules/server";
 import { getUserWorkspaces } from "@/lib/workspace";
 import { getSessionUser } from "@/lib/session";
 import { isOrgAdminRole } from "@/lib/roles";
@@ -69,6 +70,7 @@ export default async function OrgSettingsLayout({
     // workspace members) but fail safe rather than crash the chrome.
     notFound();
   }
+  const researchCaptureEnabled = await researchNavEnabled(anchorWorkspace.id);
   const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
   // Same server-seeded read as the workspace layout — see the note there.
@@ -104,6 +106,7 @@ export default async function OrgSettingsLayout({
           } as React.CSSProperties}
         >
           <Sidebar
+            researchCaptureEnabled={researchCaptureEnabled}
             orgSlug={orgSlug}
             workspaceSlug={anchorWorkspace.slug}
             workspaceName={anchorWorkspace.name}
@@ -124,7 +127,7 @@ export default async function OrgSettingsLayout({
         </SidebarProvider>
       </TooltipProvider>
 
-      <BottomNav orgSlug={orgSlug} workspaceSlug={anchorWorkspace.slug} />
+      <BottomNav orgSlug={orgSlug} workspaceSlug={anchorWorkspace.slug} researchCaptureEnabled={researchCaptureEnabled} />
     </PanelProvider>
   );
 }

@@ -3,14 +3,18 @@
  * race retry, read filtering and batched deletes for EXPERIMENT_INFORMED_BY_STUDY.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setModules } from "../helpers/modules"
 import { WS_A, WS_B, createTenantFakePrisma } from "../helpers/tenant-fake-prisma";
 
 const fake = vi.hoisted(() => ({ current: null as null | ReturnType<typeof createTenantFakePrisma> }));
 vi.mock("@/lib/db", () => ({ default: () => fake.current!.client }));
 vi.mock("@/lib/workspace-updates-capture", () => ({
-  withWorkspaceUpdates: async (prisma: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(prisma, false),
+  withWorkspaceUpdates: async (prisma: unknown, _workspaceId: unknown, callback: (tx: unknown, capture: boolean) => unknown) => callback(prisma, false),
+  withAtomicRetry: async (prisma: unknown, callback: (tx: unknown) => unknown) => callback(prisma),
+  withUpdatesTables: async (prisma: unknown, callback: (tx: unknown, tablesExist: boolean) => unknown) => callback(prisma, false),
 }));
 
+import { isModuleEnabled } from "@/lib/modules/server";
 import { LINK_WRITE_CHUNK, deleteLinksForEntity, deleteWorkspaceLinks, linkEntities, listLinks, unlinkEntities } from "@/lib/links/service";
 import { runTypedLinkTransaction, TypedLinkError } from "@/lib/typed-links";
 import type { AppTransactionClient } from "@/lib/db";
@@ -30,7 +34,10 @@ const seedLink = (row: Record<string, unknown>) =>
 beforeEach(() => {
   fake.current = createTenantFakePrisma();
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.mocked(isModuleEnabled).mockReset(); // back to the global stub's implementation after a per-workspace override
+});
 
 describe("linkEntities", () => {
   it("stores the link with the from row's workspace, the actor and the caller's source, and touches nothing else", async () => {
@@ -112,10 +119,18 @@ describe("linkEntities", () => {
 
   it("refuses mutations when the research feature flag is off", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("COMPASS_RESEARCH_CAPTURE_ENABLED", "");
+    setModules({ research_capture: false });
     await expect(link()).rejects.toThrow(/cannot be used: it is not enabled/);
     await expect(unlinkEntities(tx(), { linkType: TYPE, fromId: "exp-a", toId: "study-a", expectedWorkspaceId: WS_A.id })).rejects.toThrow(/not enabled/);
     expect(state().writes).toEqual([]);
+  });
+
+  it("decides the research module per workspace: the same link is accepted where it is on and refused where it is off", async () => {
+    vi.mocked(isModuleEnabled).mockImplementation(async (workspaceId, key) => key === "research_capture" && workspaceId === WS_A.id);
+    await expect(link()).resolves.toMatchObject({ created: true });
+    vi.mocked(isModuleEnabled).mockImplementation(async (workspaceId, key) => key === "research_capture" && workspaceId === WS_B.id);
+    await expect(link({ toId: "study-a-usability" })).rejects.toThrow(/not enabled/);
+    expect(state().entityLinks).toHaveLength(1);
   });
 
   it("rejects unknown link types, attrs on a type without a schema, and a mismatched toType", async () => {
@@ -226,7 +241,7 @@ describe("listLinks", () => {
     await expect(list({ entityType: "TASK", entityId: "task-1", linkType: TYPE })).rejects.toThrow();
     seedLink({ fromId: "exp-a", toId: "study-a" });
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("COMPASS_RESEARCH_CAPTURE_ENABLED", "");
+    setModules({ research_capture: false });
     expect((await list()).items).toEqual([]);
     expect((await list({ linkType: TYPE })).items).toEqual([]);
   });

@@ -4,12 +4,11 @@ import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import * as studies from "@/lib/research-study-service"
 import type { ResearchStudyType } from "@/lib/research"
-import { isResearchCaptureEnabled } from "@/lib/research-feature"
 import { ExternalResearchInputError } from "@/lib/research-external"
 import type { ExternalFormState } from "@/lib/research-external-constants"
 
 async function actor() {
-  if (!isResearchCaptureEnabled()) throw new Error("Research capture is not enabled")
+  // The workspace's research module is enforced by the study service, which knows the workspace.
   const session = await auth()
   if (!session?.user?.id) throw new Error("Unauthorized")
   return { userId: session.user.id, source: "UI" as const }

@@ -6,7 +6,7 @@
  * -> it is offered by the task assignee picker (the add-task form) -> the chat's Agent menu lists it and names it as the
  * default -> the page still fits a 390px viewport.
  *
- * Requires COMPASS_AGENTS_ENABLED=1 on the dev server and migrations 098, 099 and 101 on compass_e2e (the global setup
+ * Requires migrations 098, 099 and 101 on compass_e2e (the global setup
  * applies the registered migrations). Creating the agent exercises the real server actions; only cleanup touches SQL.
  */
 import { test, expect } from "../fixtures/index";
@@ -74,11 +74,15 @@ test("an admin creates a shared cloud agent that is listed, defaultable, assigna
 
     // Selectable in chat, named as the default.
     await page.goto(`${base}/agent`);
-    const agentMenu = page.getByLabel("Agent", { exact: true });
+    const agentMenu = page.getByRole("button", { name: /^Agent:/ });
     await expect(agentMenu).toBeVisible({ timeout: 15_000 });
-    await expect(agentMenu.getByRole("option", { name: `Default (${name})` })).toHaveCount(1);
-    await expect(agentMenu.getByRole("option", { name: `${name} (shared)` })).toHaveCount(1);
-    await expect(agentMenu.getByRole("option", { name: "Compass Agent" })).toHaveCount(1);
+    await expect(agentMenu).toHaveAccessibleName(`Agent: Default (${name})`);
+    await agentMenu.click();
+    const agentOptions = page.getByRole("listbox", { name: "Agent" });
+    await expect(agentOptions.getByRole("option", { name: `Default (${name})`, exact: true })).toHaveCount(1);
+    await expect(agentOptions.getByRole("option", { name: `${name} (shared)`, exact: true })).toHaveCount(1);
+    await expect(agentOptions.getByRole("option", { name: "Compass Agent", exact: true })).toHaveCount(1);
+    await page.keyboard.press("Escape");
 
     // Mobile: nothing overflows horizontally.
     await page.setViewportSize({ width: 390, height: 844 });

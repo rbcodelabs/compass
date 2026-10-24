@@ -11,9 +11,6 @@ vi.mock("next-auth", () => ({ default: mocks.nextAuth }));
 vi.mock("next-auth/providers/credentials", () => ({
   default: vi.fn(() => ({ id: "credentials" })),
 }));
-vi.mock("next-auth/providers/google", () => ({
-  default: vi.fn(() => ({ id: "google" })),
-}));
 vi.mock("next-auth/providers/resend", () => ({
   default: vi.fn(() => ({ id: "resend" })),
 }));
@@ -61,6 +58,57 @@ describe("production auth initialization", () => {
     const config = mocks.nextAuth.mock.calls[0]?.[0] as NextAuthConfig;
     expect(config.providers).toContainEqual({ id: "passkey" });
     expect(config.experimental).toEqual({ enableWebAuthn: true });
+  });
+});
+
+describe("production Google sign-in via Vercel Connect", () => {
+  type Provider = { id: string; allowDangerousEmailAccountLinking?: boolean; clientId?: string; profile?: (p: unknown, t: unknown) => unknown };
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubEnv("NODE_ENV", "production");
+    mocks.nextAuth.mockReset();
+    mocks.nextAuth.mockReturnValue({ handlers: {}, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() });
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  async function providers(): Promise<Provider[]> {
+    await import("@/auth");
+    return (mocks.nextAuth.mock.calls[0]?.[0] as NextAuthConfig).providers as unknown as Provider[];
+  }
+  const ids = (list: Provider[]) => list.map((p) => p.id);
+
+  it("omits Google but keeps magic link and passkey when COMPASS_GOOGLE_CONNECTOR is unset", async () => {
+    vi.stubEnv("COMPASS_GOOGLE_CONNECTOR", "");
+    expect(ids(await providers())).toEqual(["resend", "passkey"]);
+  });
+
+  it("registers Google as provider id 'google' backed by the configured connector", async () => {
+    vi.stubEnv("COMPASS_GOOGLE_CONNECTOR", "google/compass");
+    const list = await providers();
+    expect(ids(list)).toEqual(["resend", "google", "passkey"]);
+    const google = list.find((p) => p.id === "google")!;
+    expect(google.clientId).toBe("google/compass");
+    expect(google.allowDangerousEmailAccountLinking).toBe(true);
+  });
+
+  it("maps a verified Google profile", async () => {
+    vi.stubEnv("COMPASS_GOOGLE_CONNECTOR", "google/compass");
+    const google = (await providers()).find((p) => p.id === "google")!;
+    expect(google.profile!({ sub: "opaque-sub", email: "a@b.co", email_verified: true, name: "A", picture: "p" }, {})).toMatchObject({
+      id: "opaque-sub",
+      email: "a@b.co",
+    });
+  });
+
+  it.each([
+    ["email_verified=false", { sub: "s", email: "a@b.co", email_verified: false }],
+    ["email_verified missing (Connect does not map it)", { sub: "s", email: "a@b.co" }],
+    ["email_verified as a string", { sub: "s", email: "a@b.co", email_verified: "true" }],
+    ["no email", { sub: "s", email_verified: true }],
+  ])("refuses sign-in when %s, so email account linking stays safe", async (_label, profile) => {
+    vi.stubEnv("COMPASS_GOOGLE_CONNECTOR", "google/compass");
+    const google = (await providers()).find((p) => p.id === "google")!;
+    expect(() => google.profile!(profile, {})).toThrow(/Google sign-in refused/);
   });
 });
 

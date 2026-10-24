@@ -3,7 +3,7 @@
  * lib/workspace-update-mutations.ts so it can be reused without the Workspace
  * Updates machinery (ADR "Following and in-app notifications", open question 8).
  *
- * It has no I/O and no dependency on WORKSPACE_UPDATES_ENABLED. The adapter still
+ * It has no I/O and no dependency on the workspace_updates module. The adapter still
  * owns reading the before-state, resolving the actor and workspace, and deciding
  * whether to run at all; this only compares two rows.
  */

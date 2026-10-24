@@ -1,6 +1,7 @@
 import getPrisma from "@/lib/db";
 import type { AppPrismaClient, AppTransactionClient } from "@/lib/db";
-import { followingAvailable, followingEnabled } from "@/lib/following-flag";
+import { followingTablesExist } from "@/lib/feature-tables";
+import { isModuleEnabled } from "@/lib/modules/server";
 import { runAfterCommit } from "@/lib/following-commit";
 import {
   applyFollowingEffects,
@@ -14,7 +15,7 @@ import { withTaskWriteLock } from "@/lib/task-write-lock";
 import { detectFieldTransitions } from "@/lib/status-transitions";
 import {
   recordWorkspaceUpdate,
-  withWorkspaceUpdates,
+  withUpdatesTables,
   type WorkspaceUpdatesOptions,
 } from "@/lib/workspace-updates-capture";
 
@@ -124,15 +125,14 @@ async function followActorFor(
 }
 
 /**
- * Following is on, available, and this model's subject type has shipped. The
- * flag check is synchronous and first, so with FOLLOWING_ENABLED off this costs
- * nothing: no read, no auth() call. The availability probe uses the plain
- * client, never the caller's, because a missing-table error would abort a
- * transaction (and an MCP tool's client is already inside one).
+ * Following can matter for this model: its subject type has shipped and the tables exist. Whether the WORKSPACE has the `following`
+ * module on is decided later, once the written row names its workspace. The availability probe uses the plain client, never the
+ * caller's, because a missing-table error would abort a transaction (and an MCP tool's client is already inside one); only a positive
+ * answer is cached, so a model that following does not track costs nothing.
  */
-async function followingActiveFor(model: Model): Promise<boolean> {
-  if (!followingEnabled() || !followingTracksModel(model)) return false;
-  return followingAvailable(getPrisma());
+async function followingTablesFor(model: Model): Promise<boolean> {
+  if (!followingTracksModel(model)) return false;
+  return followingTablesExist(getPrisma());
 }
 
 /** Explicit call-site adapter: ordinary edits and ordering emit no events. */
@@ -162,14 +162,14 @@ async function captureUnlocked<T extends { id: string }>(
   mutate: (tx: AppTransactionClient) => Promise<T>,
   options?: WorkspaceUpdatesOptions,
 ): Promise<T> {
-  const following = await followingActiveFor(model);
+  const followingTables = await followingTablesFor(model);
   let pending: FollowingEffect[] = [];
   // Status a task held before this write, for the Doc comment thread sync below.
   const taskBefore: { status: string | null } = { status: null };
 
-  const result = await withWorkspaceUpdates(
+  const result = await withUpdatesTables(
     prisma,
-    async (tx, enabled) => {
+    async (tx, updatesTables) => {
       // This callback can replay on a rolled-back attempt; only the attempt
       // that commits may leave effects behind.
       pending = [];
@@ -182,15 +182,41 @@ async function captureUnlocked<T extends { id: string }>(
           console.error("[comment-task-sync] could not read previous task status", error);
         }
       }
-      if (!enabled && !following) return mutate(tx);
-      const updateActor = enabled ? await workspaceMutationActor(source) : null;
-      const followActor = following
-        ? await followActorFor(source, updateActor)
-        : null;
+      if (!updatesTables && !followingTables) return mutate(tx);
       const before =
         operation === "update" && id ? await readRow(tx, model, id) : null;
       const result = await mutate(tx);
       const after = result as Row;
+      // The row just written names its workspace; the modules are that workspace's. A callback that returns a narrow row (a select of
+      // `id` only) is attributed through the row as it was before the write instead. A write that still cannot be attributed to a
+      // workspace is neither captured nor followed: with the gate per workspace there is no module to consult, and failing the user's
+      // edit for bookkeeping would be worse. It is logged so it is visible.
+      let workspaceId: string | null = null;
+      for (const candidate of [after, before]) {
+        if (!candidate || workspaceId) continue;
+        try {
+          workspaceId = await scope(tx, model, candidate);
+        } catch {
+          /* try the next candidate */
+        }
+      }
+      if (!workspaceId) {
+        console.warn("[workspace-updates] write has no attributable workspace; not captured", { model, operation, id: after.id });
+        return result;
+      }
+      const enabled =
+        updatesTables &&
+        workspaceId !== null &&
+        (await isModuleEnabled(workspaceId, "workspace_updates"));
+      const following =
+        followingTables &&
+        workspaceId !== null &&
+        (await isModuleEnabled(workspaceId, "following"));
+      if (!enabled && !following) return result;
+      const updateActor = enabled ? await workspaceMutationActor(source) : null;
+      const followActor = following
+        ? await followActorFor(source, updateActor)
+        : null;
       const changed = detectFieldTransitions(model, before, after);
       if (followActor) {
         try {
@@ -201,7 +227,7 @@ async function captureUnlocked<T extends { id: string }>(
             after,
             actor: followActor,
             transitions: changed,
-            workspaceId: () => scope(tx, model, after),
+            workspaceId: async () => workspaceId!,
           });
         } catch (error) {
           // Best-effort by contract: a following problem never fails the edit.
@@ -211,7 +237,7 @@ async function captureUnlocked<T extends { id: string }>(
       }
       if (!enabled) return result;
       const actor = updateActor!;
-      return recordUpdates(tx, model, operation, actor, before, after, changed, result);
+      return recordUpdates(tx, model, operation, actor, before, after, changed, result, workspaceId!);
     },
     // A numbered create allocates its work item ID from the workspace counter in the same transaction as the
     // insert (lib/work-item-sequence.ts), so it must always run in a replayable transaction, capture or not.
@@ -245,6 +271,7 @@ async function recordUpdates<T extends { id: string }>(
   after: Row,
   changed: ReturnType<typeof detectFieldTransitions>,
   result: T,
+  workspaceId: string,
 ): Promise<T> {
   {
     const evidenceAttached =
@@ -255,7 +282,6 @@ async function recordUpdates<T extends { id: string }>(
       });
     if (operation === "update" && changed.length === 0 && !evidenceAttached)
       return result;
-    const workspaceId = await scope(tx, model, after);
     const entityType: string = types[model];
     let entityId = after.id;
     let groupType: string = entityType;

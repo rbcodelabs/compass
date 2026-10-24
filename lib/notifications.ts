@@ -121,7 +121,7 @@ function validateEvent(event: SubjectEvent): void {
  */
 export async function emitSubjectEvent(event: SubjectEvent, prisma: AppPrismaClient = getPrisma()): Promise<EmitResult> {
   try {
-    if (!(await followingAvailable(prisma))) return { status: "skipped", reason: "disabled" }
+    if (!(await followingAvailable(prisma, event.workspaceId))) return { status: "skipped", reason: "disabled" }
     validateEvent(event)
     if (!isSubjectTypeActive(event.subjectType)) return { status: "skipped", reason: "inactive_subject_type" }
     if (!emitsKind(event.subjectType, event.kind)) return { status: "skipped", reason: "kind_not_emitted" }
@@ -224,7 +224,7 @@ export async function listNotifications(
   options: { limit?: number; cursor?: string; unreadOnly?: boolean; prisma?: AppPrismaClient } = {},
 ): Promise<NotificationPage> {
   const prisma = options.prisma ?? getPrisma()
-  if (!(await followingAvailable(prisma))) return EMPTY_PAGE
+  if (!(await followingAvailable(prisma, workspaceId))) return EMPTY_PAGE
   if (!(await isCurrentMember(prisma, workspaceId, userId))) return EMPTY_PAGE
 
   const limit = Math.min(Math.max(options.limit ?? 25, 1), 100)
@@ -289,7 +289,7 @@ export async function listNotifications(
 /** Unread count for the bell, bounded at 99 so the query never scans an unbounded backlog. */
 export async function unreadCount(userId: string, workspaceId: string, prisma: AppPrismaClient = getPrisma()): Promise<{ count: number; overflow: boolean }> {
   const none = { count: 0, overflow: false }
-  if (!(await followingAvailable(prisma))) return none
+  if (!(await followingAvailable(prisma, workspaceId))) return none
   if (!(await isCurrentMember(prisma, workspaceId, userId))) return none
   const rows = await prisma.notification.findMany({
     where: { recipientUserId: userId, workspaceId, readAt: null },
@@ -301,7 +301,7 @@ export async function unreadCount(userId: string, workspaceId: string, prisma: A
 
 /** Marks the caller's own unread notifications read. Other users' rows are never touched. */
 export async function markRead(userId: string, workspaceId: string, ids: string[], prisma: AppPrismaClient = getPrisma()): Promise<number> {
-  if (ids.length === 0 || !(await followingAvailable(prisma))) return 0
+  if (ids.length === 0 || !(await followingAvailable(prisma, workspaceId))) return 0
   const readAt = new Date()
   let marked = 0
   for (let i = 0; i < ids.length; i += BATCH) {
@@ -326,7 +326,7 @@ export async function markAllRead(
   options: { before?: Date; now?: Date; prisma?: AppPrismaClient } = {},
 ): Promise<{ marked: number; pruned: number }> {
   const prisma = options.prisma ?? getPrisma()
-  if (!(await followingAvailable(prisma))) return { marked: 0, pruned: 0 }
+  if (!(await followingAvailable(prisma, workspaceId))) return { marked: 0, pruned: 0 }
   const now = options.now ?? new Date()
   const cutoff = new Date(now.getTime() - READ_RETENTION_DAYS * 24 * 60 * 60 * 1000)
 

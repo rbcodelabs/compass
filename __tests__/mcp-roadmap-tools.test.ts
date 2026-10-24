@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { runWithMcpActor } from "@/lib/mcp-authz"
 import { z } from "zod"
+import { setModules } from "./helpers/modules";
 
 vi.mock("@/lib/work-item-sequence", async () => (await import("./helpers/work-item-sequence-mock")).workItemSequenceMock())
 
@@ -470,7 +471,7 @@ describe("update_roadmap_item MCP tool — launch horizon guard", () => {
   })
 
   it("rejects horizon: LAUNCHING with the disabled-feature message when the workspace's launch workflow is off, without writing", async () => {
-    mockPrisma.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false })
+    setModules({ launch_workflow: false })
     const handler = getHandler("update_roadmap_item")
     const result = await handler({ itemId: "item-1", horizon: "LAUNCHING" })
 
@@ -479,7 +480,7 @@ describe("update_roadmap_item MCP tool — launch horizon guard", () => {
   })
 
   it("rejects horizon: LAUNCHED with the disabled-feature message when off, without writing", async () => {
-    mockPrisma.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: false })
+    setModules({ launch_workflow: false })
     const handler = getHandler("update_roadmap_item")
     const result = await handler({ itemId: "item-1", horizon: "LAUNCHED" })
 
@@ -488,7 +489,7 @@ describe("update_roadmap_item MCP tool — launch horizon guard", () => {
   })
 
   it("rejects horizon: LAUNCHING pointing at set_launch_tier when the launch workflow is on, without writing", async () => {
-    mockPrisma.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: true })
+    setModules({ launch_workflow: true })
     const handler = getHandler("update_roadmap_item")
     const result = await handler({ itemId: "item-1", horizon: "LAUNCHING" })
 
@@ -497,7 +498,7 @@ describe("update_roadmap_item MCP tool — launch horizon guard", () => {
   })
 
   it("rejects horizon: LAUNCHED when the launch workflow is on, without writing", async () => {
-    mockPrisma.workspace.findUnique.mockResolvedValueOnce({ launchWorkflowEnabled: true })
+    setModules({ launch_workflow: true })
     const handler = getHandler("update_roadmap_item")
     const result = await handler({ itemId: "item-1", horizon: "LAUNCHED" })
 

@@ -1,5 +1,7 @@
 import getPrisma from "@/lib/db"
-import { workspaceUpdatesAvailable, recordWorkspaceUpdate, retryUpdatesTransaction } from "@/lib/workspace-updates-capture"
+import { recordWorkspaceUpdate, retryUpdatesTransaction } from "@/lib/workspace-updates-capture"
+import { workspaceUpdatesTablesExist } from "@/lib/feature-tables"
+import { isModuleEnabled } from "@/lib/modules/server"
 import { isOrgAdminRole, normalizeWorkspaceRole } from "@/lib/roles"
 import { isSubmitAnswersActionKey, parseDecisionAnswers, parsePacketQuestions, type TrackedDecisionAnswer, type TrackedDecisionAnswerInput } from "@/lib/tracked-decision-types"
 
@@ -98,7 +100,8 @@ export async function recordDecision(input: {
   }
   const actorUserId = input.actor.userId
   const prisma = getPrisma()
-  const capture = await workspaceUpdatesAvailable(prisma)
+  // Tables first (cheap, before the transaction); the workspace's module is checked once the revision names its workspace.
+  const capture = await workspaceUpdatesTablesExist(prisma)
   const expectedIdentity = { actorUserId, revisionId: input.revisionId, optionId: input.optionId, fingerprint: input.fingerprint, answersKey: answersKeyOf(input.answers) }
   try {
     return await retryUpdatesTransaction(prisma, async (tx) => {
@@ -158,7 +161,7 @@ export async function recordDecision(input: {
         },
       })
       await tx.reviewRequest.update({ where: { id: revision.requestId }, data: { state: "DECIDED", updatedAt: new Date() } })
-      if (capture) await recordWorkspaceUpdate(tx, { workspaceId: revision.request.workspaceId, entityType: "DECISION", entityId: revision.requestId, kind: "DECISION_RECORDED", actorType: "USER", actorId: actorUserId })
+      if (capture && (await isModuleEnabled(revision.request.workspaceId, "workspace_updates"))) await recordWorkspaceUpdate(tx, { workspaceId: revision.request.workspaceId, entityType: "DECISION", entityId: revision.requestId, kind: "DECISION_RECORDED", actorType: "USER", actorId: actorUserId })
       return decision
     })
   } catch (error) {

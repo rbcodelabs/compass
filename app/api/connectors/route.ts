@@ -13,7 +13,8 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import { CONNECTOR_DEFINITIONS, connectorAccessView, isConnectorConfigured } from "@/lib/mcp-connectors/config"
-import { listConnectedGrants, mcpConnectorsAvailable } from "@/lib/mcp-connectors/store"
+import { mcpConnectorsAvailable } from "@/lib/mcp-connectors/store"
+import { listConnections } from "@/lib/mcp-connectors/vercel-connect"
 
 export const runtime = "nodejs"
 
@@ -26,7 +27,8 @@ export async function GET() {
   // deployment must not report a production grant as connected — its `client_id`
   // and `redirect_uri` belong to a different registration entirely.
   const origin = trustedCompassBaseUrl().origin
-  const grants = available ? await listConnectedGrants(session.user.id, origin) : []
+  // Connect-backed connectors need no migration, so they are probed either way.
+  const grants = await listConnections(session.user.id, origin, undefined, available)
   const scopeBySlug = new Map(grants.map(grant => [grant.slug, grant.scope]))
 
   return NextResponse.json(

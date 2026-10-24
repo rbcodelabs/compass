@@ -21,6 +21,7 @@ import type { ArtifactThumbnailDto } from "@/lib/artifacts"
 import { isGoogleDriveUrl } from "@/lib/google-drive-links"
 import { ArtifactSharePanel } from "./artifact-share-panel"
 import type { OwnerShareState } from "@/lib/artifact-share"
+import { useLiveRefresh } from "@/hooks/use-live-refresh"
 
 type ArtifactDetailProps = {
   artifact: { id: string; title: string; description: string | null; sourceType: string; kind?: "DOCUMENT" | "SLIDE_DECK"; status: string; currentRevision: { externalUrl: string | null; thumbnail: ArtifactThumbnailDto | null } | null; revisions: Array<{ id: string; revisionNumber: number; filename: string | null; byteSize: number | null; externalUrl: string | null; createdAt: string }> }
@@ -47,6 +48,14 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
   const [error, setError] = useState<string | null>(null)
   const [selectedSolution, setSelectedSolution] = useState("")
   const [notice, setNotice] = useState<string | null>(null)
+  // The viewer below is intentionally not keyed on the revision: a refresh swaps
+  // `html`/`slides` in place, so the slide index, pick state and any comment
+  // draft survive an agent publishing a new revision.
+  // basePath is `/<org>/<workspace>/docs`; the slugs address the change-token route.
+  const [, orgSlug = "", workspaceSlug = ""] = basePath.split("/")
+  useLiveRefresh({ orgSlug, workspaceSlug, scope: `artifact:${artifact.id}`, paused: pending, enabled: Boolean(orgSlug && workspaceSlug) })
+  const latestRevisionNumber = artifact.revisions.reduce((max, revision) => Math.max(max, revision.revisionNumber), 0)
+  const newRevisionNotice = useNewRevisionNotice(latestRevisionNumber)
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [commentsVisits, setCommentsVisits] = useState(0)
   const commentsTrigger = useRef<HTMLButtonElement>(null)
@@ -82,6 +91,7 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
       <h1 className="break-words [overflow-wrap:anywhere] text-xl font-semibold leading-tight text-text-primary @2xl:text-2xl">{artifact.title}</h1>
       {artifact.description && <ArtifactDescription>{artifact.description}</ArtifactDescription>}
     </header>
+    {newRevisionNotice !== null && <p role="status" aria-live="polite" className="text-xs text-text-subtle">{`New revision ${newRevisionNotice} is now showing.`}</p>}
     {artifact.status === "ARCHIVED" && <div className="rounded-md bg-status-warning-surface p-3 text-sm text-status-warning">This artifact is archived.</div>}
     <ArtifactViewer title={artifact.title} html={html} slides={slides} initialSlideIndex={initialSlideIndex} toolbarSlot={toolbarSlot} externalUrl={artifact.currentRevision?.externalUrl} thumbnail={artifact.currentRevision?.thumbnail} livePreviewSrc={livePreviewSrc} artifactId={artifact.id} fullScreenHref={`${basePath}/artifacts/${artifact.id}/full-screen`} onFeedbackPosted={() => setCommentsVisits((visits) => visits + 1)} />
     {artifact.sourceType === "EXTERNAL_LINK" && artifact.status === "ACTIVE" && artifact.currentRevision?.externalUrl && !isGoogleDriveUrl(artifact.currentRevision.externalUrl) && <ArtifactScreenshotControls
@@ -128,6 +138,30 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
       </DocPanelShell>
     )} />}
   </div>
+}
+
+/** How long the "New revision N" indicator stays up. */
+const NEW_REVISION_NOTICE_MS = 6_000
+
+/**
+ * The revision number to announce after the artifact gains a revision while the
+ * page is open (an agent or another viewer published it), else null. The first
+ * render and any revision already present never announce.
+ */
+function useNewRevisionNotice(latestRevisionNumber: number): number | null {
+  const [seen, setSeen] = useState(latestRevisionNumber)
+  const [announced, setAnnounced] = useState<number | null>(null)
+  // Adjusting state during render (not in an effect) is the React-recommended way to derive from a changed prop.
+  if (latestRevisionNumber !== seen) {
+    setSeen(latestRevisionNumber)
+    setAnnounced(latestRevisionNumber > seen ? latestRevisionNumber : null)
+  }
+  useEffect(() => {
+    if (announced === null) return
+    const timer = setTimeout(() => setAnnounced(null), NEW_REVISION_NOTICE_MS)
+    return () => clearTimeout(timer)
+  }, [announced])
+  return announced
 }
 
 /** Descriptions longer than this collapse behind "Show more" so the preview stays above the fold. */

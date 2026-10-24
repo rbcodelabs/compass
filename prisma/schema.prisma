@@ -256,6 +256,9 @@ model Workspace {
   // workflow and found the always-on surface noisy. See
   // Claude/2026-07-21-compass-gtm-planning-design.md for original context.
   launchWorkflowEnabled Boolean?               @default(false) @map("launch_workflow_enabled")
+  // JSON array of "owner/name" repos a workspace admin approved for agent
+  // sandboxes (migration 105). NULL/empty = agents get no GitHub token.
+  agentGithubRepos     String?                 @map("agent_github_repos") @db.Text
   // Ciphertext of the raw SSO shared secret (reversible AES-256-GCM
   // encryption via lib/crypto-secrets.ts, not a hash) — Compass must be
   // able to decrypt it to verify inbound customer-signed JWTs. The
@@ -2908,6 +2911,7 @@ model AgentConversation {
   messages  AgentMessage[]
   runs      AgentRun[]
   participants AgentConversationParticipant[]
+  reviews      AgentConversationReview[]
 
   @@index([workspaceId, userId])
   @@map("agent_conversations")
@@ -2937,6 +2941,27 @@ model AgentConversationParticipant {
   @@unique([conversationId, userId], map: "idx_agent_conversation_participants_conversation_user")
   @@index([userId, workspaceId], map: "idx_agent_conversation_participants_user_workspace")
   @@map("agent_conversation_participants")
+}
+
+/// When a user last reviewed an agent conversation: the agent board's per-user "New vs Done" flag
+/// (migration 109). One row per (conversation, user), written only after the shared conversation access
+/// check, so a participant's review never marks the owner's board. "Reviewed" is `reviewedAt` compared with
+/// the conversation's last activity, so new activity after review needs no write to make it New again.
+/// DSQL: no FKs, no @updatedAt (set explicitly).
+model AgentConversationReview {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  reviewedAt     DateTime @map("reviewed_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id])
+
+  @@unique([conversationId, userId], map: "idx_agent_conversation_reviews_conversation_user")
+  @@index([userId, workspaceId], map: "idx_agent_conversation_reviews_user_workspace")
+  @@map("agent_conversation_reviews")
 }
 
 /// Generic typed association link between two entities of one workspace (ADR "One generic
@@ -3834,4 +3859,23 @@ model ArtifactShareEvent {
 
   @@index([artifactId, createdAt], map: "idx_artifact_share_events_artifact_created")
   @@map("artifact_share_events")
+}
+
+/// Per-workspace opt-in/out of a product module (migration 107). One row per (workspace, module_key); NO row means "the registry
+/// default" (lib/modules/registry.ts), so a new module needs no migration. module_key is free text validated in application code
+/// against the registry: a key the code no longer knows is ignored on read. Bare UUIDs, no relations (DSQL). Read through
+/// lib/modules/server.ts, which tolerates the migration being unapplied (everything reads as disabled except the launch workflow,
+/// which falls back to the legacy workspaces.launch_workflow_enabled column that stays readable until a follow-up drops it).
+model WorkspaceModule {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  moduleKey String @map("module_key") @db.VarChar(64)
+  enabled Boolean
+  /// The last administrator to change it; NULL for a backfilled row.
+  updatedByUserId String? @map("updated_by_user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  /// Set by the application on every write (DSQL has no trigger).
+  updatedAt DateTime @default(now()) @map("updated_at")
+  @@unique([workspaceId, moduleKey], map: "workspace_modules_workspace_id_module_key_key")
+  @@map("workspace_modules")
 }

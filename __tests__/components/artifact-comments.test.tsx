@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import "@testing-library/jest-dom/vitest"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
+vi.mock("@/hooks/use-live-refresh", () => ({ useLiveRefresh: vi.fn() }))
 vi.mock("@/app/[orgSlug]/[workspaceSlug]/docs/actions", () => ({}))
 vi.mock("@/components/docs/artifact-preview", () => ({ ArtifactPreview: () => <input aria-label="Preview control" defaultValue="interactive" /> }))
 import { ArtifactDetail } from "@/components/docs/artifact-detail"

@@ -87,7 +87,7 @@ Study settings remain editable until the first participant session starts. After
 
 ![Guided usability study creation](/screenshots/docs/guided-study-create.png)
 
-Participants use Chat by default. The separate `COMPASS_RESEARCH_BROWSER_VOICE_ENABLED=1` gate enables browser voice for both study types after its migration and release checks. The authoritative voice flag does not enable this path. A non-production functional harness can exercise synthetic voice without contacting a provider. Chat remains available regardless of voice configuration.
+Participants use Chat by default. The separate Research voice: browser module (Settings > Modules, workspace administrators) enables browser voice for both study types after its migration and release checks. It requires Research capture. The authoritative voice module does not enable this path. A non-production functional harness can exercise synthetic voice without contacting a provider. Chat remains available regardless of voice configuration.
 
 Voice conversations in both study types give participants time to think. Compass uses the meaning of an answer to estimate when a thought is finished, with a less eager response setting to reduce interruptions during pauses. Replies still start automatically, and participants can interrupt the moderator by speaking. The wait varies with the answer; it is not a fixed delay or a guarantee against every interruption.
 

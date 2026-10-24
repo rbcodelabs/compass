@@ -32,6 +32,8 @@ vi.mock("@/app/[orgSlug]/[workspaceSlug]/discovery/actions", () => ({
   reorderOpportunity: vi.fn(),
   setOpportunityFieldValue: vi.fn(),
 }));
+// The boards poll for live updates via useLiveRefresh, which needs the app router.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/panels/panel-context", () => ({
   usePanelContext: () => ({ openPanel: vi.fn() }),
 }));

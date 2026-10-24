@@ -8,6 +8,7 @@
  */
 import { randomUUID } from "crypto";
 import getPrisma from "@/lib/db";
+import { isModuleEnabled } from "@/lib/modules/server";
 import { workspaceUpdatesAvailable, recordWorkspaceUpdate, retryUpdatesTransaction } from "@/lib/workspace-updates-capture";
 import { workspaceMutationActor } from "@/lib/workspace-update-mutations";
 import type { AppPrismaClient } from "@/lib/db";
@@ -28,21 +29,16 @@ export interface ResolvedTemplate {
  * assert on it without duplicating the copy.
  */
 export const LAUNCH_WORKFLOW_DISABLED_MESSAGE =
-  "The marketing launch workflow is disabled for this workspace. A workspace admin can turn it on in Settings → Marketing launch.";
+  "The marketing launch workflow is disabled for this workspace. A workspace admin can turn it on in Settings > Modules.";
 
 /**
  * Gate for the entire marketing-launch surface: throws when the workspace
- * hasn't turned on Workspace.launchWorkflowEnabled. Called from setLaunchTierCore
+ * hasn't turned on the launch_workflow module. Called from setLaunchTierCore
  * below (so every caller inherits it for free) and independently from the web
  * actions / MCP tool gates that don't route through setLaunchTierCore.
  */
 export async function assertLaunchWorkflowEnabled(workspaceId: string): Promise<void> {
-  const prisma = getPrisma();
-  const workspace = await prisma.workspace.findUnique({
-    where: { id: workspaceId },
-    select: { launchWorkflowEnabled: true },
-  });
-  if (!workspace?.launchWorkflowEnabled) {
+  if (!(await isModuleEnabled(workspaceId, "launch_workflow"))) {
     throw new Error(LAUNCH_WORKFLOW_DISABLED_MESSAGE);
   }
 }
@@ -73,7 +69,7 @@ export async function setLaunchTierCore(
   };
 
   const launchChecklistId = randomUUID();
-  const capture = await workspaceUpdatesAvailable(prisma);
+  const capture = await workspaceUpdatesAvailable(prisma, workspaceId);
   const actor = capture ? await workspaceMutationActor(source) : null;
 
   await retryUpdatesTransaction(prisma, async (tx) => {

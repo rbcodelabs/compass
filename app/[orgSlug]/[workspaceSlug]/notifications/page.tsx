@@ -29,7 +29,7 @@ export default async function NotificationsPage({
   const { workspace } = await requireWorkspaceContext(orgSlug, workspaceSlug)
 
   const prisma = getPrisma()
-  if (!(await followingAvailable(prisma))) {
+  if (!(await followingAvailable(prisma, workspace.id))) {
     return (
       <main className="mx-auto w-full max-w-3xl px-5 py-8 md:px-10 md:py-12">
         <h1 className="text-3xl font-semibold tracking-tight text-text-primary">Notifications</h1>

@@ -7,6 +7,7 @@ import {
   createResearchVoiceLease,
   releaseResearchVoiceLease,
 } from "@/lib/research-voice"
+import { setModules } from "../helpers/modules"
 import { hashResearchResumeToken } from "@/lib/research-session"
 import { MAX_RESEARCH_TRANSCRIPT_CHARS, MAX_RESEARCH_TURNS } from "@/lib/research-session"
 
@@ -43,13 +44,13 @@ function fixture() {
 
 describe("guided UX realtime voice", () => {
   beforeEach(() => {
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "1")
+    setModules({ research_voice_authoritative: true })
     vi.stubEnv("E2E_FUNCTIONAL", "1")
   })
   afterEach(() => vi.unstubAllEnvs())
 
   it("rejects every legacy voice operation while authoritative voice is disabled", async () => {
-    vi.stubEnv("COMPASS_RESEARCH_AUTHORITATIVE_VOICE_ENABLED", "")
+    setModules({ research_voice_authoritative: false })
     const { prisma, context } = fixture()
     const common = { context: context as never, sessionId: "session-1", resumeToken: "resume-secret" }
 
@@ -71,7 +72,7 @@ describe("guided UX realtime voice", () => {
 
   it("rejects every legacy voice operation in production even when all flags are enabled", async () => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "1")
+    setModules({ research_voice_discovery: true })
     const { prisma, context } = fixture()
     Object.assign(context.study, { studyType: "CUSTOMER_INTERVIEW", appUrl: null })
     const common = { context: context as never, sessionId: "session-1", resumeToken: "resume-secret" }
@@ -123,6 +124,7 @@ describe("guided UX realtime voice", () => {
   })
 
   it("creates a customer-discovery lease with discovery instructions", async () => {
+    setModules({ research_voice_discovery: true })
     const { prisma, context } = fixture()
     Object.assign(context.study, { studyType: "CUSTOMER_INTERVIEW", appUrl: null })
     prisma.researchSession.findFirst.mockResolvedValue({
@@ -136,7 +138,7 @@ describe("guided UX realtime voice", () => {
 
   it("rejects every customer-discovery voice operation when its production rollout gate is disabled", async () => {
     vi.stubEnv("NODE_ENV", "production")
-    vi.stubEnv("COMPASS_RESEARCH_DISCOVERY_VOICE_ENABLED", "")
+    setModules({ research_voice_discovery: false })
     try {
       const { prisma, context } = fixture()
       Object.assign(context.study, { studyType: "CUSTOMER_INTERVIEW", appUrl: null })

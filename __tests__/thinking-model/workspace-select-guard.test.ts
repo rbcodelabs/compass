@@ -33,7 +33,7 @@ export const SELECTLESS_WORKSPACE_SITES: Record<string, number> = {
   "app/[orgSlug]/[workspaceSlug]/okrs/page.tsx": 1,
   "app/[orgSlug]/[workspaceSlug]/reviews/[requestId]/page.tsx": 1,
   "app/[orgSlug]/[workspaceSlug]/roadmap/page.tsx": 1,
-  "app/[orgSlug]/[workspaceSlug]/settings/actions.ts": 5,
+  "app/[orgSlug]/[workspaceSlug]/settings/actions.ts": 4,
   "app/[orgSlug]/[workspaceSlug]/settings/feedback-source-actions.ts": 1,
   "app/api/admin/portal-sso-resync/route.ts": 1,
   "app/dashboard/page.tsx": 1,
