@@ -22,6 +22,7 @@ const CHOICES: AgentChoices = {
     { id: "a-mine", name: "Mine", shared: false, model: null },
   ],
   defaultAgentId: "a-shared",
+  connectors: [],
   models: MODELS,
   deploymentModel: "claude-sonnet-5",
   modelLabels: { "claude-sonnet-5": "Claude Sonnet 5", "claude-opus-9": "Claude Opus 9" },

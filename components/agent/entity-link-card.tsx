@@ -1,12 +1,14 @@
 "use client"
 
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useEffect, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react"
 import Link from "next/link"
 import { ArrowUpRight } from "lucide-react"
 
 import { parseEntityLink, type ParsedEntityLink } from "@/lib/entity-links"
 import type { EntitySummary } from "@/lib/entity-summary"
 import { Badge } from "@/components/ui/badge"
+import { useOptionalPanelContext, type PanelType } from "@/components/panels/panel-context"
+import { useWorkItemLinkScope } from "@/components/work-item-link-scope"
 import { cn } from "@/lib/utils"
 
 /**
@@ -95,12 +97,20 @@ const CARD =
 
 const subscribeNever = () => () => {}
 
+// Types whose canonical location is the workspace-global ?detail= panel (see entityPath in
+// lib/entity-links.ts). The panel mounts in the workspace layout, so it opens on whatever page the
+// reader is already on; navigating to the link instead drags them off that page (a solution link
+// points at its opportunity's discovery page) just to show the same panel.
+const PANEL_ADDRESSED: ReadonlySet<string> = new Set(["solution", "assumption", "feedback", "objective", "keyResult", "roadmapItem"])
+
 export function AgentLink({ href, children }: { href?: string; children?: ReactNode }) {
   // Absolute links only count when they point at this same origin, which is only
   // knowable in the browser — resolved after mount so SSR and hydration agree.
   const origin = useSyncExternalStore(subscribeNever, () => window.location.origin, () => null)
 
   const link = href ? parseEntityLink(href, origin) : null
+  const panels = useOptionalPanelContext()
+  const scope = useWorkItemLinkScope()
   const { summary, settled } = useEntitySummary(link)
 
   if (!href) return <span>{children}</span>
@@ -123,8 +133,25 @@ export function AgentLink({ href, children }: { href?: string; children?: ReactN
 
   // Same-origin, so use the client router: the chat (and the rail) keep their state.
   const internalHref = external ? new URL(href).pathname + new URL(href).search : href
+  // Same workspace as the page we are on: open the panel in place. Anything else (another workspace,
+  // outside a panel provider, a page-owning type) keeps the real navigation, as does a modified click
+  // so open-in-new-tab still works.
+  const openInPlace =
+    panels !== null &&
+    scope !== null &&
+    link !== null &&
+    PANEL_ADDRESSED.has(link.type) &&
+    link.orgSlug === scope.orgSlug &&
+    link.workspaceSlug === scope.workspaceSlug
+  const onClick = openInPlace && link
+    ? (event: MouseEvent<HTMLAnchorElement>) => {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+        event.preventDefault()
+        panels.openPanel(link.type as PanelType, link.id)
+      }
+    : undefined
   return (
-    <Link href={internalHref} data-entity-card={summary.type} className={cn(CARD, "group/card")}>
+    <Link href={internalHref} onClick={onClick} data-entity-card={summary.type} className={cn(CARD, "group/card")}>
       <span className="flex items-center justify-between gap-2 text-xs text-text-subtle">
         <span className="truncate">{[summary.typeLabel, summary.meta].filter(Boolean).join(" · ")}</span>
         <ArrowUpRight className="size-3.5 shrink-0 opacity-0 transition group-hover/card:opacity-100" aria-hidden="true" />

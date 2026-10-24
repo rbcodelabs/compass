@@ -14,6 +14,7 @@ import { PanelShell } from "@/components/panels/panel-shell"
 import { chainGraphEnabled } from "@/lib/chain-graph/flag"
 import { AgentRailProvider } from "@/components/agent/agent-rail-context"
 import { AgentRail } from "@/components/agent/agent-rail"
+import { AgentDrive } from "@/components/agent/agent-drive"
 import { initialsOf } from "@/lib/user-initials"
 import { WorkspaceThemeStyle } from "@/components/branding/workspace-theme-style"
 import { resolveWorkspaceBranding } from "@/lib/branding"
@@ -172,6 +173,8 @@ export default async function WorkspaceLayout({
               userInitials={initialsOf(user.name ?? user.email)}
               userId={user.id}
             />
+
+            <AgentDrive workspaceId={workspace.id} basePath={`/${orgSlug}/${workspaceSlug}`} />
 
             {/* Main content — extra bottom padding on mobile to clear the fixed bottom nav */}
             <SidebarInset className="min-w-0 overflow-y-auto bg-surface-app pb-16 md:pb-0">

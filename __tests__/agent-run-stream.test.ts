@@ -28,6 +28,16 @@ function fold(payloads: unknown[], from: AgentTurnState = emptyAgentTurnState) {
 }
 
 describe("applyAgentSdkEvent", () => {
+  it("captures a prompt_suggestion without touching text or steps", () => {
+    const state = fold([
+      sdk({ type: "text", text: "Done." }),
+      { message: { type: "prompt_suggestion", suggestion: "  Now draft the roadmap update  " } },
+    ])
+    expect(state.suggestion).toBe("Now draft the roadmap update")
+    expect(state.text).toBe("Done.")
+    expect(fold([{ message: { type: "prompt_suggestion", suggestion: "   " } }]).suggestion).toBeUndefined()
+  })
+
   it("accumulates text across events and blocks in arrival order", () => {
     const state = fold([sdk({ type: "text", text: "Hello" }), sdk({ type: "text", text: ", " }, { type: "text", text: "world" })])
     expect(state.text).toBe("Hello, world")

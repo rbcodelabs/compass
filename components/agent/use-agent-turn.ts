@@ -89,6 +89,8 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
   const [planVersion, setPlanVersion] = useState(0)
   const [liveSubagents, setLiveSubagents] = useState<Subagent[]>([])
   const [error, setError] = useState<string | null>(null)
+  /** The predicted next prompt from the last settled turn; cleared when a new turn starts or the thread resets. */
+  const [suggestion, setSuggestion] = useState<string | null>(null)
   /** The detached run this hook is currently viewing, if any. */
   const [activeRun, setActiveRun] = useState<SerializedRun | null>(null)
   const [transport, setTransport] = useState<"run" | "stream" | null>(null)
@@ -271,6 +273,7 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
       else if (finalRun && !succeeded) setError(runFailureText(finalRun.status, finalRun.error))
       clearLive()
       setActiveRun(null)
+      setSuggestion(succeeded && !reportedFailure ? (turn.suggestion ?? null) : null)
       onSettledRef.current?.({ assistant, detached: true })
     } catch (caught) {
       if (controller.signal.aborted) return
@@ -345,6 +348,7 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
     // hands off to — so the two abort points (unmount, thread switch) stop both.
     runController.current = controller
     setError(null)
+    setSuggestion(null)
     setPhase("booting")
     setStreamingText("")
     setLiveToolSteps([])
@@ -453,6 +457,7 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
         subagents: settled.subagents,
       }
       clearLive()
+      setSuggestion(turn.suggestion ?? null)
       const createdId = newConversationId && newConversationId !== (params.conversationId ?? null) ? newConversationId : null
       if (createdId) onConversationCreatedRef.current?.(createdId, { detached: false })
       onSettledRef.current?.({ assistant, detached: false })
@@ -506,6 +511,7 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
     setPlanVersion(0)
     setLiveSubagents([])
     setError(null)
+    setSuggestion(null)
     setPhase("idle")
     setTransport(null)
   }, [])
@@ -520,6 +526,8 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
     liveSubagents,
     error,
     setError,
+    suggestion,
+    clearSuggestion: useCallback(() => setSuggestion(null), []),
     activeRun,
     transport,
     /** True while a turn is being sent or watched; also read by shared-thread polling. */

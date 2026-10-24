@@ -57,6 +57,8 @@ export type AgentTurnState = {
    */
   planToolIds: string[]
   planVersion: number
+  /** The SDK's predicted next user prompt, if the turn produced one. */
+  suggestion?: string
 }
 
 export const emptyAgentTurnState: AgentTurnState = { text: "", steps: [], plan: [], subagents: [], planToolIds: [], planVersion: 0 }
@@ -128,7 +130,11 @@ function settleStep(steps: ToolStep[], id: string, isError: boolean, result: str
  * tool calls nest under it and their text is not part of the reply.
  */
 export function applyAgentSdkEvent(payload: unknown, state: AgentTurnState): AgentTurnState {
-  const envelope = payload as { message?: { parent_tool_use_id?: unknown; message?: { content?: unknown } } } | null | undefined
+  const envelope = payload as { message?: { type?: string; suggestion?: unknown; parent_tool_use_id?: unknown; message?: { content?: unknown } } } | null | undefined
+  if (envelope?.message?.type === "prompt_suggestion") {
+    const suggestion = typeof envelope.message.suggestion === "string" ? envelope.message.suggestion.trim() : ""
+    return suggestion && suggestion !== state.suggestion ? { ...state, suggestion } : state
+  }
   const content = envelope?.message?.message?.content
   if (!Array.isArray(content)) return state
   const parentId = typeof envelope?.message?.parent_tool_use_id === "string" ? envelope.message.parent_tool_use_id : null
@@ -189,7 +195,7 @@ export function applyAgentSdkEvent(payload: unknown, state: AgentTurnState): Age
   }
   return text === state.text && steps === state.steps && plan === state.plan && subagents === state.subagents && planToolIds === state.planToolIds && planVersion === state.planVersion
     ? state
-    : { text, steps, plan, subagents, planToolIds, planVersion }
+    : { ...state, text, steps, plan, subagents, planToolIds, planVersion }
 }
 
 /** Every still-running step marked done — what a finished turn's transcript row should show. Failures stay failures. */

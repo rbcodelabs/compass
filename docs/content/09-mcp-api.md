@@ -1230,3 +1230,15 @@ Add this to your Claude Desktop `claude_desktop_config.json`:
 - **Automated check-ins** — A scheduled agent that reads metrics from your analytics platform and creates KR check-ins
 - **Experiment logging** — An agent that monitors your A/B testing platform and records experiment results when tests complete
 - **Standup summaries** — An agent that reads your current roadmap and discovery board and generates a daily team update
+
+### Driving the user's screen
+
+These tools act on the calling user's own open Compass tab, and only after the user turns on **Let agent drive** (a banner with a Stop button stays visible while it is on). They cannot click or type. All three require `mcp:write` scope.
+
+| Tool | Description |
+|---|---|
+| `ui_navigate` | Move the user's tab to a path inside the workspace (e.g. `/{org}/{workspace}/roadmap`). Other origins and other workspaces are refused. |
+| `ui_screenshot` | Returns a PNG of what the user currently sees, captured by their browser. Cross-origin images and canvases may be blank. |
+| `ui_get_state` | Returns the tab's path, title and visible headings. Cheaper than a screenshot. |
+
+If the user has not opted in, or the tab is asleep, the call fails with a message saying so.
