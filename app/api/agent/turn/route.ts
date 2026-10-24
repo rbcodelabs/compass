@@ -60,6 +60,7 @@ import { agentMayUseOwnerConnectors, type AgentRecord } from "@/lib/agent-owners
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 import { readWorkspaceAgentRepos } from "@/lib/agent-github-repos"
 import { mintAgentGithubEnv } from "@/lib/github-app-token"
+import { gitAuthorEnv, readAgentGitAuthor } from "@/lib/agent-git-author"
 import { turnEgressPolicy, developerNpmToken, githubShellEnabled } from "@/lib/agent-github-access"
 import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
 import { prepareCapabilityPacksForTurn, type ActiveCapabilityPack } from "@/lib/capability-pack-runtime"
@@ -598,7 +599,8 @@ export async function POST(request: NextRequest) {
       apiKeyId = minted.apiKeyId
       // An agent-scoped key is honoured only while a live run names it, so the run must name it before the sandbox exists.
       if (runAgent && !(await attachAgentRunKey({ prisma, runId: run.id, apiKeyId }))) throw new Error("agent run ended before its key could be attached")
-      const githubEnv = await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))
+      // A named agent may commit as a configured identity (migration 111); otherwise the sandbox keeps the bot author.
+      const githubEnv = { ...(await mintAgentGithubEnv(await readWorkspaceAgentRepos(prisma, workspaceId))), ...(runAgent ? gitAuthorEnv(await readAgentGitAuthor(prisma, runAgent.id)) : {}) }
       // Bash + GitHub only when the docs tree will be materialized (same condition as docMaterial below). Every sandbox, shell or not, is created with a deny-by-default
       // egress allowlist, so there is never a moment where the agent can run with open egress.
       const githubShell = githubShellEnabled({ githubEnv, harness, docs: !scope && harness !== "opencode" })
