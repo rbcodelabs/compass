@@ -193,6 +193,9 @@ export const AGENT_PRIVATE_ENV = ["AGENT_RUN_TOKEN", "MCP_TOKEN", "MCP_BYPASS_SE
 /** Passed through to the CLI process only for a turn that has a shell. */
 export const GITHUB_ENV_NAMES = ["GH_TOKEN", "GITHUB_TOKEN"]
 
+/** Passed through to the CLI process only for a DEVELOPER-class turn that has a shell, so the Bash hook can hand it to the jail user. */
+export const NPM_ENV_NAMES = ["NPM_TOKEN"]
+
 /** Exact names the CLI process legitimately needs (runtime, locale, TLS, proxies). */
 const CLI_ENV_NAMES = new Set([
   "PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "LANG", "LANGUAGE", "TERM", "COLORTERM", "TMPDIR", "TMP", "TEMP", "TZ", "CI",
@@ -208,13 +211,17 @@ const CLI_ENV_PREFIXES = ["LC_", "XDG_", "NODE_", "ANTHROPIC_", "CLAUDE_", "CLAU
  * by default. ANTHROPIC_API_KEY is in it because the CLI cannot call the model
  * without it; the file-tool guard, not secrecy, is what protects that one.
  */
-export function scrubbedAgentEnv(env: Record<string, string | undefined>, opts: { github?: boolean } = {}): Record<string, string | undefined> {
+export function scrubbedAgentEnv(env: Record<string, string | undefined>, opts: { github?: boolean; npm?: boolean } = {}): Record<string, string | undefined> {
   const out: Record<string, string | undefined> = {}
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined || AGENT_PRIVATE_ENV.includes(name)) continue
     // The GitHub token rides in the CLI's environment ONLY when the turn has a shell: the Bash
     // hook (github-access.ts) reads it from here and hands it to the jail user, never in command text.
     if (opts.github && GITHUB_ENV_NAMES.includes(name)) {
+      out[name] = value
+      continue
+    }
+    if (opts.npm && NPM_ENV_NAMES.includes(name)) {
       out[name] = value
       continue
     }

@@ -30,6 +30,8 @@ export type WorkspaceAgentRow = {
   /** Configured run limits (null = default). Only sent for agents the viewer may edit. */
   maxConcurrentRuns?: number | null;
   maxRunsPerDay?: number | null;
+  /** STANDARD | DEVELOPER. Only sent for editable cloud agents. */
+  sandboxClass?: "STANDARD" | "DEVELOPER";
   canEdit?: boolean;
   /** The viewer could start a run as this agent right now (cloud, active, enabled here, allowed by its policy). */
   canUse?: boolean;
@@ -37,15 +39,28 @@ export type WorkspaceAgentRow = {
   isMyDefault?: boolean;
 };
 
-function CloudAgentEditor({ agent, models, disabled, onSave }: { agent: WorkspaceAgentRow; models: CloudAgentModelOption[]; disabled: boolean; onSave: (values: CloudAgentFormValues) => void }) {
+function SandboxClassSelect({ id, value, onChange, developerSandboxEnabled, disabled }: { id: string; value: "STANDARD" | "DEVELOPER"; onChange: (value: "STANDARD" | "DEVELOPER") => void; developerSandboxEnabled: boolean; disabled: boolean }) {
+  return <div className="space-y-1">
+    <Label htmlFor={id}>Sandbox</Label>
+    <select id={id} data-testid="agent-sandbox-class" className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value === "DEVELOPER" ? "DEVELOPER" : "STANDARD")}>
+      <option value="STANDARD">Standard</option>
+      <option value="DEVELOPER" disabled={!developerSandboxEnabled && value !== "DEVELOPER"}>Developer (PostgreSQL, pnpm, build tools)</option>
+    </select>
+    {!developerSandboxEnabled && <p className="text-xs text-muted-foreground">{value === "DEVELOPER" ? "The developer sandbox is turned off for this workspace, so runs of this agent are refused until an admin turns it on." : "The developer sandbox is turned off for this workspace. An admin can turn it on under Developer sandbox, above."}</p>}
+  </div>;
+}
+
+function CloudAgentEditor({ agent, models, disabled, developerSandboxEnabled, onSave }: { agent: WorkspaceAgentRow; models: CloudAgentModelOption[]; disabled: boolean; developerSandboxEnabled: boolean; onSave: (values: CloudAgentFormValues, sandboxClass: "STANDARD" | "DEVELOPER") => void }) {
+  const [sandboxClass, setSandboxClass] = useState<"STANDARD" | "DEVELOPER">(agent.sandboxClass ?? "STANDARD");
   const [values, setValues] = useState<CloudAgentFormValues>({ name: agent.name, description: agent.description ?? "", instructions: agent.instructions ?? "", model: agent.model ?? "", invokePolicy: agent.invokePolicy ?? "WORKSPACE_MEMBERS", maxConcurrentRuns: runLimitText(agent.maxConcurrentRuns), maxRunsPerDay: runLimitText(agent.maxRunsPerDay) });
-  return <form className="mt-3 min-w-0 space-y-2 border-t border-border-default pt-3" aria-label={`Edit ${agent.name}`} onSubmit={(e) => { e.preventDefault(); onSave(values); }}>
+  return <form className="mt-3 min-w-0 space-y-2 border-t border-border-default pt-3" aria-label={`Edit ${agent.name}`} onSubmit={(e) => { e.preventDefault(); onSave(values, sandboxClass); }}>
     <CloudAgentFields values={values} onChange={setValues} models={models} disabled={disabled} showInvokePolicy={!!agent.shared} showRunLimits />
+    {agent.shared && <SandboxClassSelect id={`sandbox-class-${agent.id}`} value={sandboxClass} onChange={setSandboxClass} developerSandboxEnabled={developerSandboxEnabled} disabled={disabled} />}
     <Button type="submit" size="sm" disabled={disabled || !values.name.trim()}>Save agent</Button>
   </form>;
 }
 
-export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage, models = [] }: { orgSlug: string; workspaceSlug: string; agents: WorkspaceAgentRow[]; canManage: boolean; models?: CloudAgentModelOption[] }) {
+export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage, models = [], developerSandboxEnabled = false }: { orgSlug: string; workspaceSlug: string; agents: WorkspaceAgentRow[]; canManage: boolean; models?: CloudAgentModelOption[]; developerSandboxEnabled?: boolean }) {
   const router = useRouter();
   const [selected, setSelected] = useState("");
   const [access, setAccess] = useState<"READ" | "WRITE">("READ");
@@ -54,6 +69,7 @@ export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage
   const [notice, setNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [newSandboxClass, setNewSandboxClass] = useState<"STANDARD" | "DEVELOPER">("STANDARD");
   const [ownerType, setOwnerType] = useState<"USER" | "WORKSPACE">("USER");
   const [newAccess, setNewAccess] = useState<"READ" | "WRITE">("READ");
   const [draft, setDraft] = useState<CloudAgentFormValues>(EMPTY_CLOUD_AGENT_VALUES);
@@ -89,15 +105,15 @@ export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage
           {canManage && <Button variant="outline" size="sm" aria-label={`Revoke access to ${a.name}`} disabled={pending} onClick={() => run(() => revokeWorkspaceAgent(orgSlug, workspaceSlug, a.id))}>Revoke access</Button>}
         </div>
       </div>
-      {editing === a.id && <CloudAgentEditor agent={a} models={models} disabled={pending} onSave={(values) => run(() => updateCloudAgent(a.id, { name: values.name, description: values.description, instructions: values.instructions, model: values.model || null, ...(a.shared ? { invokePolicy: values.invokePolicy === "OWNER" ? "ADMINS" : values.invokePolicy } : {}), ...changedRunLimits(values, a) }), () => setEditing(null))} />}
+      {editing === a.id && <CloudAgentEditor agent={a} models={models} disabled={pending} developerSandboxEnabled={developerSandboxEnabled} onSave={(values, sandboxClass) => run(() => updateCloudAgent(a.id, { name: values.name, description: values.description, instructions: values.instructions, model: values.model || null, ...(a.shared ? { invokePolicy: values.invokePolicy === "OWNER" ? "ADMINS" : values.invokePolicy } : {}), ...changedRunLimits(values, a), ...(a.shared && sandboxClass !== (a.sandboxClass ?? "STANDARD") ? { sandboxClass } : {}) }), () => setEditing(null))} />}
     </li>)}</ul>
     {(creating
       ? <form className="min-w-0 space-y-2 rounded-md border border-border-default p-3" aria-label="New cloud agent" onSubmit={(e) => {
           e.preventDefault();
           run(async () => {
-            const result = await createCloudAgent({ orgSlug, workspaceSlug, name: draft.name, description: draft.description, instructions: draft.instructions, model: draft.model || null, ownerType, access: newAccess, ...(ownerType === "WORKSPACE" ? { invokePolicy: draft.invokePolicy === "OWNER" ? "ADMINS" : draft.invokePolicy } : {}) });
+            const result = await createCloudAgent({ orgSlug, workspaceSlug, name: draft.name, description: draft.description, instructions: draft.instructions, model: draft.model || null, ownerType, access: newAccess, ...(ownerType === "WORKSPACE" ? { invokePolicy: draft.invokePolicy === "OWNER" ? "ADMINS" : draft.invokePolicy, ...(newSandboxClass === "DEVELOPER" ? { sandboxClass: newSandboxClass } : {}) } : {}) });
             setNotice(result.enabledInWorkspace ? "Agent created and enabled in this workspace." : "Agent created. A workspace administrator needs to enable it before it can run here.");
-          }, () => { setCreating(false); setDraft(EMPTY_CLOUD_AGENT_VALUES); });
+          }, () => { setCreating(false); setDraft(EMPTY_CLOUD_AGENT_VALUES); setNewSandboxClass("STANDARD"); });
         }}>
         <h3 className="text-sm font-medium">New cloud agent</h3>
         <Label htmlFor="new-agent-owner">Owner</Label>
@@ -106,6 +122,7 @@ export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage
           {canManage && <option value="WORKSPACE">Shared (owned by this workspace)</option>}
         </select>
         <CloudAgentFields values={draft} onChange={setDraft} models={models} disabled={pending} showInvokePolicy={ownerType === "WORKSPACE"} />
+        {ownerType === "WORKSPACE" ? <SandboxClassSelect id="new-agent-sandbox" value={newSandboxClass} onChange={setNewSandboxClass} developerSandboxEnabled={developerSandboxEnabled} disabled={pending} /> : <p className="text-xs text-muted-foreground">Personal agents run in the standard sandbox. Make the agent shared to use the developer sandbox.</p>}
         {canManage && <>
           <Label htmlFor="new-agent-access">Access in this workspace</Label>
           <select id="new-agent-access" className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm" value={newAccess} onChange={(e) => setNewAccess(e.target.value as "READ" | "WRITE")} disabled={pending}>

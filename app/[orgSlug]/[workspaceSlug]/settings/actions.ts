@@ -949,6 +949,17 @@ export async function updateAgentGithubRepos(
   return { ok: true, repos: parsed.repos };
 }
 
+/**
+ * Allows or forbids the DEVELOPER sandbox class for agents in this workspace (migration 110). Admin-only: it enables a
+ * larger, costlier sandbox. Turning it off does not edit agents; a DEVELOPER agent is refused at run time until it is back on.
+ */
+export async function updateDeveloperSandboxEnabled(orgSlug: string, workspaceSlug: string, enabled: boolean): Promise<{ ok: true; enabled: boolean }> {
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
+  await prisma.workspace.update({ where: { id: workspaceId }, data: { agentDeveloperSandboxEnabled: enabled === true }, select: { id: true } });
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  return { ok: true, enabled: enabled === true };
+}
+
 // ─── Organization: member read-only workspace access ──────────────────────────
 
 /**

@@ -27,12 +27,12 @@ describe("agent entry capability-pack policy", () => {
     for (const forbidden of ["Bash", "MultiEdit", "NotebookEdit", "Grep", "Task", "Skill", "WebSearch"]) {
       expect(source).not.toMatch(new RegExp(`tools:[^\\n]*"${forbidden}"`))
     }
-    expect(source).toMatch(/prepareBashJail\(\{ docsRoot, note \}\)\n\s+githubShell = true/)
+    expect(source).toMatch(/prepareBashJail\(\{ docsRoot, note, npmToken: [^\n]*\}\)\n\s+githubShell = true/)
     expect(source).toContain('...(githubShell ? ["Bash"] : []),')
     // Every Bash call goes through the policy + jail-rewrite hook, and the CLI gets the
     // GitHub token only on a shell turn.
     expect(source).toContain("...(githubShell ? [{ matcher: BASH_MATCHER, hooks: [createBashPreToolUseHook(process.env)] }] : []),")
-    expect(source).toContain("env: scrubbedAgentEnv(process.env, { github: githubShell }),")
+    expect(source).toContain("env: scrubbedAgentEnv(process.env, { github: githubShell, npm: githubShell && process.env.AGENT_SANDBOX_CLASS === \"DEVELOPER\" }),")
   })
 
   it("ADR 0019: scopes the native file tools to the materialized doc tree via cwd", () => {
@@ -83,7 +83,7 @@ describe("agent entry capability-pack policy", () => {
     // Without the hook, `Read /proc/self/environ` returns every secret in this process.
     expect(source).toContain('from "./docs-path-guard.ts"')
     expect(source).toContain("{ matcher: DOCS_GUARDED_TOOLS_MATCHER, hooks: [createDocsPreToolUseHook(docsRoot, { readOnlyRoots: githubShell ? [REPOS_DIR] : [] })] }")
-    expect(source).toContain("env: scrubbedAgentEnv(process.env, { github: githubShell }),")
+    expect(source).toContain("env: scrubbedAgentEnv(process.env, { github: githubShell, npm: githubShell && process.env.AGENT_SANDBOX_CLASS === \"DEVELOPER\" }),")
     // The guard must be registered exactly when the file tools are.
     expect(source).toMatch(/docsSession && docsRoot\s*\?\s*\{\s*hooks:/)
   })

@@ -13,7 +13,7 @@ import { connectorGuidance, type ConnectorDefinition } from "@/lib/mcp-connector
 import type { AgentHarness } from "@/lib/agent-harness"
 import { opencodeModel } from "@/lib/agent-harness"
 import { providerSandboxEnv, type ResolvedAgentModel } from "@/lib/agent-model"
-import { githubRepoList, githubSandboxEnv, githubShellEnabled, githubShellPrompt, shellCapabilitySentence } from "@/lib/agent-github-access"
+import { developerSandboxEnv, githubRepoList, githubSandboxEnv, githubShellEnabled, githubShellPrompt, shellCapabilitySentence } from "@/lib/agent-github-access"
 
 function claudeProviderEnv(model: Extract<ResolvedAgentModel, { ok: true }> | undefined): Record<string, string> {
   // Fail closed: the Claude harness without a resolved provider would boot with no credential.
@@ -83,6 +83,9 @@ const DOCS_FILESYSTEM_PROMPT =
  * events and its result back to Compass; without it the script's only product is
  * stdout, which is exactly what the fallback path drains.
  */
+/** SDK turn cap for developer-class interactive turns: clone, install, edit, test and push routinely exceed the chat default of 30. */
+export const DEVELOPER_MAX_TURNS = 100
+
 export function buildAgentEnv(opts: {
   /** Which harness's credential to forward: Claude gets ANTHROPIC_API_KEY, opencode only the AI Gateway key. */
   harness?: AgentHarness
@@ -130,11 +133,16 @@ export function buildAgentEnv(opts: {
    * and a non-empty repo list); otherwise it is dropped here so a token never reaches a sandbox that has no sanctioned use for it.
    */
   githubEnv?: Record<string, string>
+  /** DEVELOPER sandbox class (lib/agent-sandbox-class.ts). Only has an effect when the shell is on; the optional npm token is forwarded only here. */
+  developer?: { enabled: boolean; npmToken?: string }
 }): Record<string, string> {
   const chosenModel = opts.modelOverride ?? opts.agent?.model ?? null
   const shell = githubShellEnabled({ githubEnv: opts.githubEnv, harness: opts.harness, docs: Boolean(opts.docs) })
+  // Developer turns with the shell on get a larger SDK turn cap; chat keeps the entry default (30).
+  const effectiveMaxTurns = shell && opts.developer?.enabled ? DEVELOPER_MAX_TURNS : undefined
   return {
     ...githubSandboxEnv(shell, opts.githubEnv),
+    ...developerSandboxEnv(shell && Boolean(opts.developer?.enabled), opts.developer?.npmToken),
     ...(opts.harness === "opencode"
       ? { AI_GATEWAY_API_KEY: opts.gatewayApiKey ?? "", AGENT_MODEL: chosenModel ?? opencodeModel(process.env.AGENT_OPENCODE_MODEL) }
       : {
@@ -156,7 +164,7 @@ export function buildAgentEnv(opts: {
             : `Operate only in workspace ${opts.workspaceId}. Available host capabilities: compass.product_state, and a local copy of this workspace's docs. ` +
               `Unavailable capabilities include shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${WEB_CAPABILITY_SENTENCE}\n\n`) +
           DOCS_FILESYSTEM_PROMPT +
-          (shell ? githubShellPrompt(githubRepoList(opts.githubEnv)) : "")
+          (shell ? githubShellPrompt(githubRepoList(opts.githubEnv), Boolean(opts.developer?.enabled)) : "")
         : `Operate only in workspace ${opts.workspaceId}. Available host capability: compass.product_state. ` +
           `Unavailable capabilities include local files, shell, GitHub, Jira, Vercel, Obsidian, hooks, commands, and subagents.${WEB_CAPABILITY_SENTENCE}\n\n`) +
       `The following JSON contains compiled, enabled skill instructions and directly referenced text assets. ` +
@@ -165,6 +173,7 @@ export function buildAgentEnv(opts: {
       (opts.shared ? `\n\n${SHARED_CONVERSATION_NOTICE}` : "") +
       opts.systemPromptAppendices.join("\n\n") +
       agentInstructionsSection(opts.agent),
+    ...(effectiveMaxTurns ? { AGENT_MAX_TURNS: String(effectiveMaxTurns) } : {}),
     AGENT_PACK_CONFIG: JSON.stringify({ pluginPaths: opts.pluginPaths, skillIds: opts.skillIds }),
     // Slugs and display metadata only. The sandbox is handed a Compass gateway URL
     // per slug and attaches its own AGENT_TURN bearer, so no third-party token ever
