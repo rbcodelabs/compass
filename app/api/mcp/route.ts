@@ -26,7 +26,7 @@ import {
   type KeysetCursor,
 } from "@/lib/mcp-keyset"
 import { widenRefSchemas, resolveToolRefs } from "@/lib/mcp-work-item-refs"
-import { runWithMcpActor, getMcpActor, isResearchActor, assertWorkspaceMember, McpAuthzError } from "@/lib/mcp-authz"
+import { runWithMcpActor, getMcpActor, peekMcpActor, isResearchActor, assertWorkspaceMember, McpAuthzError } from "@/lib/mcp-authz"
 import { applyToolGate, AGENT_TOOL_POLICY, scopesSatisfy, type ToolScope } from "@/lib/mcp-tool-gates"
 import { bearerChallenge, requiredScopeForPayload } from "@/lib/mcp-oauth-challenge"
 import { SCOPE_MCP_READ } from "@/lib/oauth/constants"
@@ -232,6 +232,7 @@ function formatUtcDate(date: Date): string {
  * is simply omitted: a create must never fail because a link couldn't be
  * built, and a link must never be guessed from a partial identity.
  */
+import { agentTaskCreate, agentTaskGet, agentTaskList, agentTaskUpdate } from "@/lib/agent-task-tools"
 const WORKSPACE_LINK_SELECT = { slug: true, organization: { select: { slug: true } } } as const
 
 type WorkspaceLinkRow = { slug?: string | null; organization?: { slug?: string | null } | null } | null | undefined
@@ -2882,6 +2883,16 @@ const _handler = createMcpHandler(
     // ════════════════════════════════════════════════════════════════
     // TASKS
     // ════════════════════════════════════════════════════════════════
+
+    // The agent's own task list, under the Claude Code names the model already knows. Registered only for agent
+    // turns: a person's MCP client has its own TaskCreate, and these resolve their conversation from the turn key.
+    const catalogActor = peekMcpActor()
+    if (!catalogActor || catalogActor.purpose === "AGENT_TURN") {
+      register("TaskCreate", { title: "Create Task", description: "Create a task in your own task list for this conversation, to plan and track your steps. Shown to the user as your plan and on the Compass task screen. For a task on the team's board, use create_task instead.", inputSchema: { subject: z.string().min(1).describe("A brief title for the task"), description: z.string().describe("What needs to be done"), activeForm: z.string().optional().describe("Present continuous form shown while in progress (e.g. \"Running tests\")") }, outputSchema: TOOL_OUTPUT_SCHEMA }, agentTaskCreate)
+      register("TaskUpdate", { title: "Update Task", description: "Update a task in your task list for this conversation: change its subject or description, or set status to pending, in_progress, completed, or deleted. Mark a task in_progress when you start it and completed when it is done.", inputSchema: { taskId: z.string().describe("The ID of the task to update"), subject: z.string().min(1).optional().describe("New subject for the task"), description: z.string().optional().describe("New description for the task"), activeForm: z.string().optional().describe("Present continuous form shown while in progress"), status: z.enum(["pending", "in_progress", "completed", "deleted"]).optional().describe("New status for the task") }, outputSchema: TOOL_OUTPUT_SCHEMA }, agentTaskUpdate)
+      register("TaskList", { title: "List Tasks", description: "List the tasks in your task list for this conversation.", inputSchema: {}, outputSchema: TOOL_OUTPUT_SCHEMA }, agentTaskList)
+      register("TaskGet", { title: "Get Task", description: "Get one task from your task list for this conversation by ID.", inputSchema: { taskId: z.string().describe("The ID of the task to retrieve") }, outputSchema: TOOL_OUTPUT_SCHEMA }, agentTaskGet)
+    }
 
     register(
       "create_task",

@@ -25,15 +25,17 @@ import {
   applyAgentSdkEvent,
   emptyAgentTurnState,
   runFailureText,
-  settleSteps,
+  settleActivity,
   type AgentTurnState,
+  type PlanItem,
+  type Subagent,
   type SerializedRun,
   type ToolStep,
 } from "@/lib/agent-run-stream"
 
 export type StreamPhase = "idle" | "booting" | "running"
 
-export type TurnAssistantMessage = { id: string; content: string; toolCalls: ToolStep[] }
+export type TurnAssistantMessage = { id: string; content: string; toolCalls: ToolStep[]; plan: PlanItem[]; subagents: Subagent[] }
 
 export type TurnSettlement = {
   /** The reply to show, or null when the run produced nothing and did not succeed. */
@@ -83,6 +85,9 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
   const [phase, setPhase] = useState<StreamPhase>("idle")
   const [streamingText, setStreamingText] = useState("")
   const [liveToolSteps, setLiveToolSteps] = useState<ToolStep[]>([])
+  const [livePlan, setLivePlan] = useState<PlanItem[]>([])
+  const [planVersion, setPlanVersion] = useState(0)
+  const [liveSubagents, setLiveSubagents] = useState<Subagent[]>([])
   const [error, setError] = useState<string | null>(null)
   /** The detached run this hook is currently viewing, if any. */
   const [activeRun, setActiveRun] = useState<SerializedRun | null>(null)
@@ -127,6 +132,8 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
   const clearLive = useCallback(() => {
     setStreamingText("")
     setLiveToolSteps([])
+    setLivePlan([])
+    setLiveSubagents([])
     setPhase("idle")
   }, [])
 
@@ -155,6 +162,9 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
       turn = next
       setStreamingText(turn.text)
       setLiveToolSteps(turn.steps)
+      setLivePlan(turn.plan)
+      setPlanVersion(turn.planVersion)
+      setLiveSubagents(turn.subagents)
     }
     const ingest = (event: { seq: number; type: string; payload: unknown }) => {
       // Monotonic, and never trusted to arrive in order: `afterSeq` is the cursor
@@ -248,13 +258,14 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
       // it narrows to `null` here and the status checks below become unreachable.
       const finalRun = run as SerializedRun | null
       const text = (resultText ?? turn.text).trim()
+      const settled = settleActivity(turn)
       const succeeded = !finalRun || finalRun.status === "SUCCEEDED"
       // Keyed on the run id, so a reattach that lands after the server already
       // wrote its own assistant message is at worst a duplicate on screen until
       // the next server render — never a lost reply.
       const assistant: TurnAssistantMessage | null =
         text || succeeded
-          ? { id: `run-${runId}`, content: text || "(no response)", toolCalls: settleSteps(turn.steps) }
+          ? { id: `run-${runId}`, content: text || "(no response)", toolCalls: settled.steps, plan: settled.plan, subagents: settled.subagents }
           : null
       if (reportedFailure) setError(reportedFailure)
       else if (finalRun && !succeeded) setError(runFailureText(finalRun.status, finalRun.error))
@@ -337,6 +348,8 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
     setPhase("booting")
     setStreamingText("")
     setLiveToolSteps([])
+    setLivePlan([])
+    setLiveSubagents([])
 
     let turn: AgentTurnState = emptyAgentTurnState
     let assembled = ""
@@ -418,6 +431,9 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
               assembled = turn.text
               setStreamingText(turn.text)
               setLiveToolSteps(turn.steps)
+              setLivePlan(turn.plan)
+              setPlanVersion(turn.planVersion)
+              setLiveSubagents(turn.subagents)
             }
           } else if (event === "result") {
             if (typeof p.text === "string" && p.text) assembled = p.text
@@ -428,10 +444,13 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
         }
       }
 
+      const settled = settleActivity(turn)
       const assistant: TurnAssistantMessage = {
         id: `a-${Date.now()}`,
         content: assembled || "(no response)",
-        toolCalls: settleSteps(turn.steps),
+        toolCalls: settled.steps,
+        plan: settled.plan,
+        subagents: settled.subagents,
       }
       clearLive()
       const createdId = newConversationId && newConversationId !== (params.conversationId ?? null) ? newConversationId : null
@@ -483,6 +502,9 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
     setActiveRun(null)
     setStreamingText("")
     setLiveToolSteps([])
+    setLivePlan([])
+    setPlanVersion(0)
+    setLiveSubagents([])
     setError(null)
     setPhase("idle")
     setTransport(null)
@@ -493,6 +515,9 @@ export function useAgentTurn({ workspaceId, onConversationCreated, onSettled }: 
     isStreaming: phase !== "idle",
     streamingText,
     liveToolSteps,
+    livePlan,
+    planVersion,
+    liveSubagents,
     error,
     setError,
     activeRun,

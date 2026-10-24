@@ -22,6 +22,7 @@ import { assignmentUpdate, eligibleTaskAssignees, resolveTaskAssignees, taskLink
 import { getMcpActor } from "@/lib/mcp-authz"
 import { workspaceMutationSource, type ProgrammaticSource } from "@/lib/programmatic-source"
 import { allocateOneSeq } from "@/lib/work-item-sequence"
+import { agentConversationLinkTitles } from "@/lib/agent-conversation-link-titles"
 import { commentLinkTitles } from "@/lib/comment-link-titles"
 import { createTaskLink, deleteTaskLink } from "@/lib/task-link-writes"
 
@@ -73,6 +74,10 @@ async function resolveLinkTitles(
       for (const row of rows) titleById.set(`DECISION:${row.id}`, row.currentRevision?.title ?? "Untitled decision")
       continue
     }
+    if (linkedType === "AGENT_CONVERSATION") {
+      for (const [key, title] of await agentConversationLinkTitles(workspaceId, ids)) titleById.set(key, title)
+      continue
+    }
     if (linkedType === "COMMENT") {
       for (const [key, title] of await commentLinkTitles(workspaceId, ids)) titleById.set(key, title)
       continue
@@ -117,6 +122,7 @@ export async function createTask({
   dueDate,
   iteration,
   source = "MCP",
+  rowSource,
 }: {
   workspaceId: string
   title: string
@@ -132,6 +138,8 @@ export async function createTask({
   dueDate?: string
   iteration?: string
   source?: ProgrammaticSource
+  /** Overrides what is stored in tasks.source (e.g. "AGENT") without changing the audit transport above. */
+  rowSource?: string
 }) {
   const prisma = getPrisma()
 
@@ -187,7 +195,7 @@ export async function createTask({
       dueDate: dueDate ? new Date(dueDate) : undefined,
       iteration,
       sortOrder,
-      source,
+      source: rowSource ?? source,
     },
   }))
 
@@ -315,6 +323,8 @@ export async function listTasks({
   // parentTaskId: undefined = no filter, null = top-level only, string = children of that parent.
   const where = {
     workspaceId,
+    // The agent's own plan items (source AGENT) are not board work; they are read through the agent's TaskList.
+    source: { not: "AGENT" },
     ...(status ? { status } : {}),
     ...(priority ? { priority } : {}),
     ...(squadId ? { squadId } : {}),

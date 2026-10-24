@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
   toolCount: 203,
-  sortedToolNamesSha256: "ee195e09de7bd75d0643cfb4eff8fd84c4ddd3ec0049a5f3a8c80db0e54310eb",
+  sortedToolNamesSha256: "TBD",
 } as const
 
 export type McpRestParityDisposition =
@@ -15,8 +15,13 @@ const composition = (operationIds: readonly string[], rationale: string): McpRes
 const excluded = (category: "human-governance" | "execution-boundary" | "model-orchestration" | "transport-convenience", restAlternative: string, rationale: string): McpRestParityDisposition => ({ kind: "excluded", category, documentationAnchor: docs, restAlternative, rationale })
 
 const slackExcluded = excluded("execution-boundary", "None; read Slack directly, or ask an agent that has the MCP slack_* tools.", "These tools act through the deployment's single Slack bot credential (Vercel Connect), scoped by Slack channel invitation rather than Compass resources; REST exposes only Compass resources and has no per-caller Slack authorization to offer.")
+const agentTaskExcluded = excluded("execution-boundary", "create_task, update_task, list_tasks and get_task operate on the team task board over REST.", "The agent's own conversation-scoped plan list, registered only for agent turns and resolved from the turn key's live agent run; a stateless REST client has no agent conversation.")
 
 export const MCP_REST_PARITY_MANIFEST = {
+  TaskCreate: agentTaskExcluded,
+  TaskGet: agentTaskExcluded,
+  TaskList: agentTaskExcluded,
+  TaskUpdate: agentTaskExcluded,
   activate_research_study: direct("activateResearchStudy"),
   add_assumption: direct("createAssumption"),
   add_comment: direct("createComment"),

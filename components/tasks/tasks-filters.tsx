@@ -64,6 +64,7 @@ export function TasksFilters({
     params.delete("squad");
     params.delete("assignee");
     params.delete("priority");
+    params.delete("agentTasks");
     for (const name of CUSTOM_FIELD_FILTER_PARAMS) params.delete(name);
     push(params);
   }
@@ -106,6 +107,18 @@ export function TasksFilters({
             value: priority,
             label: TASK_PRIORITY_LABELS[priority],
           })),
+        },
+        {
+          id: "agentTasks",
+          label: "Agent tasks",
+          value: searchParams.get("agentTasks"),
+          onValueChange: (value) => {
+            const params = new URLSearchParams(searchParams.toString());
+            if (value) params.set("agentTasks", value);
+            else params.delete("agentTasks");
+            push(params);
+          },
+          options: [{ value: "include", label: "Show agent tasks" }],
         },
         ...customFieldFacetedGroups({
           groups: customFieldGroups,
