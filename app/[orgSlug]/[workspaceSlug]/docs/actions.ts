@@ -81,7 +81,8 @@ async function requireWorkspaceMember(workspaceId: string) {
     select: { id: true },
   });
   if (!workspace) throw new Error("Workspace not found or access denied");
-  return session.user;
+  // Narrow `id` to string: the check above proved it, but the session type keeps it optional.
+  return { ...session.user, id: session.user.id };
 }
 
 type Mutation = { expectedRevision?: string; operationId?: string };
