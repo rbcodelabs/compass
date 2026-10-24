@@ -786,6 +786,11 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "114_portal_home_template",
     filePath: path.join(process.cwd(), "prisma/migrations/114_portal_home_template/migration.sql"),
   },
+  {
+    // Per-agent git author: agents.git_author_name and agents.git_author_email (both nullable, no backfill, no index).
+    name: "111_agent_git_author",
+    filePath: path.join(process.cwd(), "prisma/migrations/111_agent_git_author/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));

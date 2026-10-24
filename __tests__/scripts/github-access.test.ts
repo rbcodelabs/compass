@@ -20,6 +20,9 @@ import {
   prepareBashJail,
   REPOS_DIR,
   systemGitConfig,
+  gitAuthorFromEnv,
+  AGENT_GIT_NAME,
+  AGENT_GIT_EMAIL,
   type JailRunner,
 } from "../../scripts/agent/github-access"
 
@@ -178,12 +181,28 @@ describe("prepareBashJail", () => {
 describe("systemGitConfig", () => {
   it("sets the agent identity, a token-from-env credential helper and the hooks path, quoting the helper", () => {
     const config = systemGitConfig()
-    expect(config).toContain("name = Compass Agent")
-    expect(config).toContain("email = compass-agent@users.noreply.github.com")
+    expect(config).toContain('name = "Compass Agent"')
+    expect(config).toContain('email = "compass-agent@users.noreply.github.com"')
     expect(config).toContain('[credential "https://github.com"]')
     expect(config).toContain("GH_TOKEN:-$GITHUB_TOKEN")
     expect(config).toContain("hooksPath = /etc/agent-git/hooks")
     expect(config).not.toMatch(/ghs_|github_pat_/)
+  })
+})
+
+describe("git author", () => {
+  it("uses a configured author in the system git config", () => {
+    const config = systemGitConfig(gitAuthorFromEnv({ AGENT_GIT_AUTHOR_NAME: "Rick B", AGENT_GIT_AUTHOR_EMAIL: "123+rick@users.noreply.github.com" }))
+    expect(config).toContain('name = "Rick B"')
+    expect(config).toContain('email = "123+rick@users.noreply.github.com"')
+  })
+  it.each([
+    ["only a name", { AGENT_GIT_AUTHOR_NAME: "Rick" }],
+    ["a malformed email", { AGENT_GIT_AUTHOR_NAME: "Rick", AGENT_GIT_AUTHOR_EMAIL: "not-an-email" }],
+    ["a newline that would inject config", { AGENT_GIT_AUTHOR_NAME: "x\n[core]\n\thooksPath = /tmp", AGENT_GIT_AUTHOR_EMAIL: "a@b.co" }],
+    ["a quote", { AGENT_GIT_AUTHOR_NAME: 'x" y', AGENT_GIT_AUTHOR_EMAIL: "a@b.co" }],
+  ])("falls back to the bot for %s", (_label, env) => {
+    expect(gitAuthorFromEnv(env)).toEqual({ name: AGENT_GIT_NAME, email: AGENT_GIT_EMAIL })
   })
 })
 

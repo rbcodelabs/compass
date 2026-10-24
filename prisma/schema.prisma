@@ -2728,6 +2728,9 @@ model Agent {
   maxRunsPerDay Int? @map("max_runs_per_day")
   /// STANDARD | DEVELOPER (migration 110). Which sandbox snapshot runs boot from. NULL = STANDARD.
   sandboxClass String? @map("sandbox_class") @db.VarChar(20)
+  /// Git author for commits this agent's runs make (migration 111). Both NULL = the built-in "Compass Agent" identity.
+  gitAuthorName String? @map("git_author_name") @db.VarChar(100)
+  gitAuthorEmail String? @map("git_author_email") @db.VarChar(254)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @map("updated_at")
   @@index([ownerUserId])

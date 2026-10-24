@@ -18,6 +18,7 @@ import { AgentGithubReposPanel } from "@/components/settings/agent-github-repos-
 import { AnthropicKeyPanel } from "@/components/settings/anthropic-key-panel";
 import { readAnthropicKeyLast4 } from "@/lib/workspace-anthropic-key";
 import { AgentDeveloperSandboxPanel } from "@/components/settings/agent-developer-sandbox-panel";
+import { loadAgentGitAuthors } from "@/lib/agent-git-author";
 import { loadAgentSandboxClasses, readWorkspaceDeveloperSandboxEnabled } from "@/lib/agent-sandbox-class";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { ThinkingModelPanel } from "@/components/settings/thinking-model-panel";
@@ -218,6 +219,7 @@ export default async function SettingsPage({ params }: Props) {
   // Both read tolerantly: the settings page must keep rendering on a deployment where migration 110 is not applied yet.
   const developerSandboxEnabled = await readWorkspaceDeveloperSandboxEnabled(prisma, workspace.id);
   const sandboxClasses = await loadAgentSandboxClasses(prisma, workspaceAgents.filter((a) => agentKind(a) === "CLOUD").map((a) => a.id));
+  const gitAuthors = await loadAgentGitAuthors(prisma, workspaceAgents.filter((a) => agentKind(a) === "CLOUD").map((a) => a.id));
   const storedDefaults = await getStoredDefaultAgentIds(prisma, { userId: session.user.id, workspaceId: workspace.id });
   const usableAgentIds = new Set((await Promise.all(workspaceAgents.map(async (a) => (agentKind(a) === "CLOUD" && a.status === "ACTIVE" && grants.some((g) => g.agentId === a.id) && (await canInvokeAgent(prisma, { userId: session.user!.id }, a)) ? a.id : null)))).filter((id): id is string => !!id));
   const agentActivity = canManageCapabilityPacks ? await prisma.agentToolCall.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "desc" }, take: 25 }) : [];
@@ -408,7 +410,7 @@ export default async function SettingsPage({ params }: Props) {
             eligible: owner?.type === "WORKSPACE" || !!ownerMember,
             access: grants.find((g) => g.agentId === a.id)?.access ?? null,
             kind: agentKind(a), shared: owner?.type === "WORKSPACE", description: a.description ?? null,
-            ...(canEdit && agentKind(a) === "CLOUD" ? { instructions: a.instructions ?? null, model: a.model ?? null, invokePolicy: (a.invokePolicy as AgentInvokePolicy | null) ?? null, ...(runCaps.get(a.id) ?? {}), sandboxClass: sandboxClasses.get(a.id) ?? "STANDARD" } : {}),
+            ...(canEdit && agentKind(a) === "CLOUD" ? { instructions: a.instructions ?? null, model: a.model ?? null, invokePolicy: (a.invokePolicy as AgentInvokePolicy | null) ?? null, ...(runCaps.get(a.id) ?? {}), sandboxClass: sandboxClasses.get(a.id) ?? "STANDARD", gitAuthorName: gitAuthors.get(a.id)?.name ?? null, gitAuthorEmail: gitAuthors.get(a.id)?.email ?? null } : {}),
             canEdit: canEdit && agentKind(a) === "CLOUD",
             canUse: usableAgentIds.has(a.id),
             isWorkspaceDefault: storedDefaults.workspaceDefaultAgentId === a.id,
