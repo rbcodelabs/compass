@@ -231,7 +231,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Per-user "reviewed" flag for the agent board: one new table plus two ASYNC indexes (unique (conversation, user), non-unique (user, workspace)).
   // Additive: no existing table touched, no backfill, one DDL statement per transaction. The 109 postcondition proves the columns and both indexes.
   // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
-  "109_agent_conversation_reviews": "bde4475d8cd9ce2284029356db322a96967573dee058a963f76a147ce94595a9"
+  "109_agent_conversation_reviews": "bde4475d8cd9ce2284029356db322a96967573dee058a963f76a147ce94595a9",
+  // External artifact share: four new tables plus their ASYNC indexes (no foreign keys, IF NOT EXISTS, one DDL per statement). Additive: nothing
+  // touches `artifacts`. The 110 postcondition proves the columns and that every index is valid and ready.
+  "110_artifact_external_share": "f68abc7262d4152869d68a11b41451384caa4ab0f8377d0759daec98782e3cd7"
 };
 
 /**
@@ -369,6 +372,10 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   // The 109 postcondition (columns, plus both indexes valid, ready, and the right shape); editing it re-reviews the migration.
   "109_agent_conversation_reviews": {
     "lib/migrations/agent-conversation-reviews.ts": "970ff2d900951977feefd21dc9592b49b5d59dc0819c9b2e66e0e911718503ed",
+  },
+  // The 110 postcondition (columns, plus every index valid and ready); editing it re-reviews the migration.
+  "110_artifact_external_share": {
+    "lib/migrations/artifact-external-share.ts": "b8b882fe110ef9d7b3e633d4910df18a577642fd8d5bf81cf95c5199facb36f8",
   },
   "108_workspace_modules_legacy_flag_backfill": {
     "lib/migrations/workspace-modules.ts": "10dbe1f96ce6cf5813a942569095b672355d50b2436a5b4fcac4373ed418a4d1",

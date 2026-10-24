@@ -2923,7 +2923,7 @@ model AgentConversation {
 /// (re-inviting clears it, the unique index keeps one row per user). Any participant may
 /// invite; there is no cap. Access is re-checked against live workspace membership on
 /// every call, never cached from this row.
-/// DSQL: no FKs, no @updatedAt (set explicitly).
+/// DSQL: no FKs, no auto-updated timestamp (updatedAt is set explicitly).
 model AgentConversationParticipant {
   id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   conversationId String   @map("conversation_id") @db.Uuid
@@ -2947,7 +2947,7 @@ model AgentConversationParticipant {
 /// (migration 109). One row per (conversation, user), written only after the shared conversation access
 /// check, so a participant's review never marks the owner's board. "Reviewed" is `reviewedAt` compared with
 /// the conversation's last activity, so new activity after review needs no write to make it New again.
-/// DSQL: no FKs, no @updatedAt (set explicitly).
+/// DSQL: no FKs, no auto-updated timestamp (updatedAt is set explicitly).
 model AgentConversationReview {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   conversationId String   @map("conversation_id") @db.Uuid
@@ -2967,7 +2967,7 @@ model AgentConversationReview {
 /// Generic typed association link between two entities of one workspace (ADR "One generic
 /// entity_links table for association links"). Phase 1: table only, no readers or writers.
 /// `fromType`/`toType` name the entity kinds; the ids are bare UUIDs, so the pair index needs no type.
-/// DSQL: no FKs, no @updatedAt (set explicitly).
+/// DSQL: no FKs, no auto-updated timestamp (updatedAt is set explicitly).
 model EntityLink {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId String   @map("workspace_id") @db.Uuid
@@ -3794,7 +3794,7 @@ model SavedView {
 /// At most one row per artifact. The raw link token is never stored (sha256 only) and the
 /// password is an scrypt hash. `commentsEnabled` additionally requires an email provider at
 /// request time. Revoking sets `revokedAt`; the row is kept for the audit trail.
-/// DSQL: no FKs, no @updatedAt (set explicitly).
+/// DSQL: no FKs, no auto-updated timestamp (updatedAt is set explicitly).
 model ArtifactShare {
   id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   artifactId        String    @map("artifact_id") @db.Uuid
