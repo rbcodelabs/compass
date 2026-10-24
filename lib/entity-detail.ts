@@ -28,6 +28,7 @@
  * it.
  */
 import getPrisma from "@/lib/db";
+import { agentConversationLinkTitles } from "@/lib/agent-conversation-link-titles";
 import { commentLinkTitles } from "@/lib/comment-link-titles";
 import { isPmInterviewEnabled, isResearchCaptureEnabled } from "@/lib/research-feature";
 import { isModuleEnabled } from "@/lib/modules/server";
@@ -562,6 +563,10 @@ async function fetchTask(id: string, workspaceId: string) {
           select: { id: true, currentRevision: { select: { title: true } } },
         });
         for (const row of rows) titleById.set(`DECISION:${row.id}`, row.currentRevision?.title ?? "Untitled decision");
+        return;
+      }
+      if (linkedType === "AGENT_CONVERSATION") {
+        for (const [key, title] of await agentConversationLinkTitles(workspaceId, ids)) titleById.set(key, title);
         return;
       }
       if (linkedType === "COMMENT") {

@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 199,
-  sortedToolNamesSha256: "dfa573de084c8480e6a007735c0bb37c604fcbcb5a79221203a850665f2862fd",
+  toolCount: 203,
+  sortedToolNamesSha256: "1b4669dbb9ab213de956a297a677168f764028c6492b776a43fb6b77c4a46e05",
 } as const
 
 export type McpRestParityDisposition =
@@ -14,7 +14,13 @@ const direct = (operationId: string): McpRestParityDisposition => ({ kind: "dire
 const composition = (operationIds: readonly string[], rationale: string): McpRestParityDisposition => ({ kind: "composition", operationIds, documentationAnchor: docs, rationale })
 const excluded = (category: "human-governance" | "execution-boundary" | "model-orchestration" | "transport-convenience", restAlternative: string, rationale: string): McpRestParityDisposition => ({ kind: "excluded", category, documentationAnchor: docs, restAlternative, rationale })
 
+const agentTaskExcluded = excluded("execution-boundary", "create_task, update_task, list_tasks and get_task operate on the team task board over REST.", "The agent's own conversation-scoped plan list, registered only for agent turns and resolved from the turn key's live agent run; a stateless REST client has no agent conversation.")
+
 export const MCP_REST_PARITY_MANIFEST = {
+  TaskCreate: agentTaskExcluded,
+  TaskGet: agentTaskExcluded,
+  TaskList: agentTaskExcluded,
+  TaskUpdate: agentTaskExcluded,
   activate_research_study: direct("activateResearchStudy"),
   add_assumption: direct("createAssumption"),
   add_comment: direct("createComment"),

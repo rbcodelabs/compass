@@ -22,11 +22,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Check, Loader2, Sparkles } from "lucide-react"
+import { Loader2, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { type SerializedRun, type ToolStep } from "@/lib/agent-run-stream"
+import { type PlanItem, type SerializedRun, type Subagent, type ToolStep } from "@/lib/agent-run-stream"
+import { AgentActivity, PlanCard } from "@/components/agent/agent-activity"
 import { useAgentTurn } from "@/components/agent/use-agent-turn"
 import { useAgentChoices } from "@/components/agent/use-agent-choices"
 import { ModelPicker, modelLabelFor, useModelPick } from "@/components/agent/model-picker"
@@ -43,6 +44,8 @@ type Message = {
   role: Role
   content: string
   toolCalls?: ToolStep[]
+  plan?: PlanItem[]
+  subagents?: Subagent[]
   /** ISO instant. Present on messages the server has stored; the polling cursor. */
   createdAt?: string
   /** Who sent a user message. Absent on a message this tab has only optimistically shown. */
@@ -204,7 +207,7 @@ export function AgentChat({
     },
     onSettled: ({ assistant, detached }) => {
       if (assistant) {
-        setMessages((m) => [...m, { id: assistant.id, role: "assistant", content: assistant.content, toolCalls: assistant.toolCalls }])
+        setMessages((m) => [...m, { id: assistant.id, role: "assistant", content: assistant.content, toolCalls: assistant.toolCalls, plan: assistant.plan, subagents: assistant.subagents }])
       }
       // In a shared conversation the server also stored this reply under its own id,
       // and other people's turns are in the history too, so take the stored
@@ -216,7 +219,7 @@ export function AgentChat({
       if (!isRail) router.refresh()
     },
   })
-  const { phase, streamingText, liveToolSteps, error, setError, activeRun, isStreaming, cancelRun, attachToRun, abortViewers, reset: resetTurn, sending, start: startTurn } = turn
+  const { phase, streamingText, liveToolSteps, livePlan, planVersion, liveSubagents, error, setError, activeRun, isStreaming, cancelRun, attachToRun, abortViewers, reset: resetTurn, sending, start: startTurn } = turn
   const bottomRef = useRef<HTMLDivElement>(null)
   /** Who is in this conversation; null until loaded, or when unavailable. */
   const [roster, setRoster] = useState<Roster | null>(null)
@@ -293,7 +296,7 @@ export function AgentChat({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
-  }, [messages, streamingText, liveToolSteps, phase])
+  }, [messages, streamingText, liveToolSteps, livePlan, liveSubagents, phase])
 
   // `handoffKind` is passed in rather than read from `processing` because the
   // auto-dispatch below fires from the same tick as its `setProcessing`, so this
@@ -333,6 +336,26 @@ export function AgentChat({
       continueTurn: !handoff && Boolean(processing?.canContinue),
     })
   }, [input, activeConversationId, isRail, processing?.canContinue, pendingSeedEntity, sending, startTurn, agentSelection, modelPick.model])
+
+  // The agent's plan is its Compass tasks for this conversation (TaskCreate/TaskUpdate), read from the server so it
+  // survives a reload and reaches participants. Refetched when a task tool call finishes (planVersion) and when a turn ends.
+  const [planState, setPlanState] = useState<{ conversationId: string; plan: PlanItem[] } | null>(null)
+  useEffect(() => {
+    if (!activeConversationId) return
+    const lookup = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch(`/api/agent/conversations/${activeConversationId}/tasks?workspaceId=${encodeURIComponent(workspaceId)}`, { signal: lookup.signal })
+        if (!res.ok) return
+        const body = await res.json() as { plan?: PlanItem[] }
+        setPlanState({ conversationId: activeConversationId, plan: Array.isArray(body.plan) ? body.plan : [] })
+      } catch {
+        // Best-effort: the card simply stays as it was.
+      }
+    })()
+    return () => lookup.abort()
+  }, [activeConversationId, workspaceId, planVersion, isStreaming])
+  const conversationPlan = planState && planState.conversationId === activeConversationId ? planState.plan : []
 
   // Reattach to a run already in flight for this conversation.
   //
@@ -401,10 +424,14 @@ export function AgentChat({
       setMessages((current) => {
         // The tool steps live only in this tab (the server stores the reply text),
         // so carry them onto the stored copy of the reply they belong to.
-        const steps = current.find((m) => m.id.startsWith("run-") && m.toolCalls?.length)?.toolCalls
-        if (!steps) return incoming
+        const carried = current.find((m) => m.id.startsWith("run-") && (m.toolCalls?.length || m.plan?.length || m.subagents?.length))
+        if (!carried) return incoming
         const lastAssistant = incoming.map((m) => m.role).lastIndexOf("assistant")
-        return incoming.map((m, i) => (i === lastAssistant && !m.toolCalls ? { ...m, toolCalls: steps } : m))
+        return incoming.map((m, i) =>
+          i === lastAssistant && !m.toolCalls && !m.plan && !m.subagents
+            ? { ...m, toolCalls: carried.toolCalls, plan: carried.plan, subagents: carried.subagents }
+            : m,
+        )
       })
       return
     }
@@ -497,9 +524,9 @@ export function AgentChat({
 
   const phaseLabel = useMemo(() => {
     if (phase === "booting") return "Starting the agent…"
-    if (phase === "running" && !streamingText && liveToolSteps.length === 0) return "Thinking…"
+    if (phase === "running" && !streamingText && liveToolSteps.length === 0 && livePlan.length === 0 && liveSubagents.length === 0) return "Thinking…"
     return null
-  }, [phase, streamingText, liveToolSteps.length])
+  }, [phase, streamingText, liveToolSteps.length, livePlan.length, liveSubagents.length])
 
   // Stop is for whoever started the run, and for the owner (enforced server-side too).
   const runStarterId = activeRun?.startedByUserId ?? null
@@ -622,7 +649,7 @@ export function AgentChat({
 
             {isStreaming && (
               <MessageRow
-                message={{ id: "streaming", role: "assistant", content: streamingText, toolCalls: liveToolSteps }}
+                message={{ id: "streaming", role: "assistant", content: streamingText, toolCalls: liveToolSteps, plan: livePlan, subagents: liveSubagents }}
                 userInitials={userInitials}
                 userId={userId}
                 shared={shared}
@@ -654,6 +681,11 @@ export function AgentChat({
             {error && (
               <div className="rounded-lg border border-default bg-status-danger-surface px-4 py-3 text-sm text-status-danger">
                 {error}
+              </div>
+            )}
+            {conversationPlan.length > 0 && (
+              <div className="pl-10">
+                <PlanCard plan={conversationPlan} running={isStreaming} taskHref={(taskId) => `${basePath}/tasks/${taskId}`} />
               </div>
             )}
             <div ref={bottomRef} />
@@ -709,24 +741,6 @@ export function AgentChat({
   )
 }
 
-function ToolSteps({ steps }: { steps: ToolStep[] }) {
-  if (steps.length === 0) return null
-  return (
-    <ul className="mb-2 flex flex-col gap-1 border-b border-default pb-2">
-      {steps.map((s) => (
-        <li key={s.id} className="flex items-center gap-1.5 text-xs text-text-subtle">
-          {s.status === "running" ? (
-            <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />
-          ) : (
-            <Check className="size-3 shrink-0 text-status-success" aria-hidden="true" />
-          )}
-          <span className="truncate">{s.label}</span>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 function MessageRow({
   message,
   userInitials,
@@ -762,7 +776,7 @@ function MessageRow({
               : "border border-default bg-surface-card text-text-primary"
           }`}
         >
-          {!isUser && message.toolCalls && <ToolSteps steps={message.toolCalls} />}
+          {!isUser && <AgentActivity toolCalls={message.toolCalls} plan={message.plan} subagents={message.subagents} running={message.id === "streaming"} />}
           {isUser ? (
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
           ) : message.content ? (

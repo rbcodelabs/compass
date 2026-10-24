@@ -107,6 +107,7 @@ export async function validateTaskLink(workspaceId: string, linkedType: TaskLink
     : linkedType === "EXPERIMENT" ? prisma.experiment.findFirst({ where })
     : linkedType === "DECISION" ? prisma.reviewRequest.findFirst({ where })
     // Any comment in the workspace is linkable (Doc comments and Discussion comments); the Comment row carries its own workspaceId.
+    : linkedType === "AGENT_CONVERSATION" ? prisma.agentConversation.findFirst({ where, select: { id: true } })
     : linkedType === "COMMENT" ? prisma.comment.findFirst({ where: { id: linkedId, workspaceId }, select: { id: true } })
     : prisma.feedbackItem.findFirst({ where }));
   if (!target) throw new Error("Linked object belongs to a different workspace or does not exist");

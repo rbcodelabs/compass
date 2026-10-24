@@ -16,6 +16,8 @@ export function taskBoardFilterKey(filters: {
   /** Custom-field tag filter: the resolved field id and the selected option value. */
   field?: string | null;
   fieldValue?: string | null;
+  /** Whether agent-created tasks are shown. */
+  agentTasks?: boolean;
 }): string {
   return boardFilterKey([
     filters.squad,
@@ -23,5 +25,6 @@ export function taskBoardFilterKey(filters: {
     filters.priority,
     filters.field,
     filters.fieldValue,
+    filters.agentTasks ? "agent" : null,
   ]);
 }

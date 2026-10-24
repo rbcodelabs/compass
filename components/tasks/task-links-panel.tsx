@@ -55,7 +55,7 @@ export function TaskLinksPanel({ taskId, initialLinks, revalidatePathStr, linkab
       ) : (
         <div className="rounded-xl border border-border overflow-hidden">
           {links.map((link, i) => {
-            const panelType = link.linkedType === "COMMENT" ? undefined : TASK_LINK_TO_PANEL_TYPE[link.linkedType];
+            const panelType = link.linkedType === "COMMENT" || link.linkedType === "AGENT_CONVERSATION" ? undefined : TASK_LINK_TO_PANEL_TYPE[link.linkedType];
             return (
               <div
                 key={link.id}
@@ -63,11 +63,18 @@ export function TaskLinksPanel({ taskId, initialLinks, revalidatePathStr, linkab
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-xs bg-muted rounded px-1.5 py-0.5 text-muted-foreground shrink-0">
-                    {link.linkedType === "COMMENT" ? "Comment" : typeLabels[link.linkedType]}
+                    {link.linkedType === "COMMENT" ? "Comment" : link.linkedType === "AGENT_CONVERSATION" ? "Conversation" : typeLabels[link.linkedType]}
                   </span>
                   {link.linkedType === "DOC" ? (
                     <Link
                       href={`/${orgSlug}/${workspaceSlug}/docs/${link.linkedId}`}
+                      className="text-sm truncate hover:underline underline-offset-2"
+                    >
+                      {link.linkedTitle}
+                    </Link>
+                  ) : link.linkedType === "AGENT_CONVERSATION" ? (
+                    <Link
+                      href={`/${orgSlug}/${workspaceSlug}/agent?c=${link.linkedId}`}
                       className="text-sm truncate hover:underline underline-offset-2"
                     >
                       {link.linkedTitle}
