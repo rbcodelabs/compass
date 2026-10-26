@@ -1,10 +1,12 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { usePathname, useRouter } from "next/navigation"
 import { Bot, OctagonX } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { SidebarMenuButton } from "@/components/ui/sidebar"
 import { parseSseFrames } from "@/lib/sse-frames"
 import { resolveNavigationPath, UI_SCREENSHOT_MAX_BASE64, type UiCommandKind } from "@/lib/ui-control"
 
@@ -20,6 +22,14 @@ import { resolveNavigationPath, UI_SCREENSHOT_MAX_BASE64, type UiCommandKind } f
  * Deliberately lives in the workspace layout: that is the only component that
  * survives navigation between screens, which is exactly what the agent causes.
  */
+
+/**
+ * The sidebar footer renders an empty list item with this id; the idle "Let agent drive" control is portalled into it. A floating
+ * button in the viewport corner sat on top of whatever the page docks there (the opportunity composer's Submit, detail panels),
+ * and no z-index fixes that for a control that has to stay clickable. The opted-in banner below stays fixed: it is a deliberate,
+ * short-lived status the user chose to turn on.
+ */
+export const AGENT_DRIVE_SLOT_ID = "agent-drive-slot"
 
 type StreamCommand = { id: string; kind: UiCommandKind; args: Record<string, unknown> }
 type Phase = "off" | "connecting" | "on"
@@ -72,6 +82,11 @@ export function AgentDrive({ workspaceId, basePath }: { workspaceId: string; bas
   const pathname = usePathname()
   const [phase, setPhase] = useState<Phase>("off")
   const [error, setError] = useState<string | null>(null)
+  // Where the idle control lives (see AGENT_DRIVE_SLOT_ID); found after mount because the sidebar renders it.
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    setSlot(document.getElementById(AGENT_DRIVE_SLOT_ID))
+  }, [])
   const tabId = useRef<string>("")
   const sessionId = useRef<string | null>(null)
   const abort = useRef<AbortController | null>(null)
@@ -228,14 +243,16 @@ export function AgentDrive({ workspaceId, basePath }: { workspaceId: string; bas
   }, [])
 
   if (phase === "off") {
-    return (
-      <div data-agent-drive-ui className="fixed bottom-4 right-4 z-50 hidden md:block">
-        <Button type="button" variant="outline" size="sm" onClick={start} title="Allow an agent to move you between screens and see this screen">
-          <Bot className="size-4" />
-          Let agent drive
-        </Button>
-        {error ? <p role="alert" className="mt-1 max-w-56 text-xs text-destructive">{error}</p> : null}
-      </div>
+    if (!slot) return null
+    return createPortal(
+      <div data-agent-drive-ui>
+        <SidebarMenuButton onClick={start} tooltip="Let an agent move you between screens and see this screen" className="text-text-secondary">
+          <Bot className="text-text-subtle" aria-hidden="true" />
+          <span>Let agent drive</span>
+        </SidebarMenuButton>
+        {error ? <p role="alert" className="mt-1 px-2 text-xs text-destructive group-data-[collapsible=icon]:hidden">{error}</p> : null}
+      </div>,
+      slot,
     )
   }
 
