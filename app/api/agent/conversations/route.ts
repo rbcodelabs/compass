@@ -31,7 +31,8 @@ export async function GET(request: Request) {
   const workspaceId = new URL(request.url).searchParams.get("workspaceId")
   if (!workspaceId) return new Response("Workspace required", { status: 400 })
 
-  const conversations = await listAgentConversations(workspaceId, session.user.id)
+  const archived = new URL(request.url).searchParams.get("archived") === "1"
+  const conversations = await listAgentConversations(workspaceId, session.user.id, { archived })
 
   return Response.json({ conversations })
 }
