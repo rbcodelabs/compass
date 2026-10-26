@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 0,
-  sortedToolNamesSha256: "TBD",
+  toolCount: 210,
+  sortedToolNamesSha256: "301882f685d43a66a2c76d5cb5a2ac763eddd8bcd7c5c08145cb0202a005df95",
 } as const
 
 export type McpRestParityDisposition =
