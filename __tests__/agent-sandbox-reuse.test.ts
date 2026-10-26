@@ -178,7 +178,8 @@ describe("acquireConversationSandbox", () => {
     expect(existing.extendTimeout).toHaveBeenCalledTimes(1)
     const extended = existing.extendTimeout.mock.calls[0][0] as number
     expect(extended).toBeGreaterThan(19 * 60_000)
-    expect(extended).toBeLessThanOrEqual(20 * 60_000)
+    // Clock time passes between building `expiresAt` and the call, so the gap can exceed 20 min by a few ms.
+    expect(extended).toBeLessThanOrEqual(20 * 60_000 + 1000)
   })
 
   it("does not extend when the sandbox already outlives the turn", async () => {
