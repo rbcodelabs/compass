@@ -9,7 +9,8 @@
  *   - a minimal Compass MCP endpoint that advertises one tool the entry script disallows.
  * Nothing leaves the machine and no key is spent. What is asserted is what the CLI actually did:
  *   1. the tool list a subagent's model request carried is a subset of its parent's (`tools` / `disallowedTools`),
- *   2. the PreToolUse hooks (docs jail, WebFetch allowlist) ran on the subagent's calls exactly as on the parent's,
+ *   2. egress and file access stay jailed: a subagent's WebFetch of a URL nobody named opens no connection (counted at a
+ *      refusing HTTPS proxy, with the parent's allowed fetch as the control group), and its out-of-tree Read is refused,
  *   3. a tool outside `tools` (Bash) or in `disallowedTools` (delete_assumption, TodoWrite) is unusable from a subagent,
  *   4. a positive control (reading inside the doc tree) works for parent and subagent alike, so the refusals are policy
  *      and not a broken tool.
@@ -31,15 +32,10 @@ type Reply = { tool: { name: string; input: Record<string, unknown> } } | { text
 const SUBAGENT_MARKER = "SUBAGENT_PROBE_MARKER"
 /** Every built-in agent type the Agent tool advertises; each must be bounded by the parent. */
 const SUBAGENT_TYPES = ["general-purpose", "Explore", "Plan"]
-/**
- * general-purpose runs in the parent's permission mode (bypassPermissions), where the CLI has no permission layer of its own
- * for WebFetch: only the entry script's PreToolUse hook can have refused it, so its wording is deterministic. The other types
- * (Explore, Plan) can be refused by the CLI's permission layer instead ("the user doesn't want..." -- there is no approver in a
- * sandbox), and which layer answers first varies with load. Both are refusals; only the refusal is pinned for them.
- */
-const HOOK_DECIDES = ["general-purpose"]
 const DOC_TEXT = "HELLO_FROM_THE_DOC_TREE"
 const EXFIL_URL = "https://attacker.example/?d=secret"
+/** Named in the user's prompt, so the WebFetch allowlist admits it: the egress control group. */
+const ALLOWED_URL = "https://allowed.example/page"
 const OUTSIDE_FILE = "/etc/hosts"
 const FORBIDDEN_TOOLS = ["Bash", "TodoWrite", "mcp__compass__delete_assumption", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "NotebookEdit", "WebSearch"]
 
@@ -90,6 +86,11 @@ const subagentAttempts = (docFile: string): { name: string; input: Record<string
 ]
 
 let mock: http.Server
+let proxy: http.Server
+/** Every host the CLI tried to open a tunnel to. The sink refuses them all, so nothing leaves the machine. */
+const egressAttempts: string[] = []
+/** How many attempts the parent's own allowed WebFetch caused, captured just before the first subagent is spawned. */
+let egressBeforeSubagents: number | undefined
 let parentTools: string[] = []
 let parentResults: ToolResult[] = []
 const subagents = new Map<string, { tools: string[]; results: ToolResult[] }>()
@@ -116,9 +117,11 @@ function nextReply(request: ApiRequest): Reply {
   const controls = [
     { name: "Read", input: { file_path: docFile } },
     { name: "Read", input: { file_path: OUTSIDE_FILE } },
+    { name: "WebFetch", input: { url: ALLOWED_URL, prompt: "summarize" } },
   ]
   if (results.length < controls.length) return { tool: controls[results.length] }
   const spawned = results.length - controls.length
+  if (egressBeforeSubagents === undefined) egressBeforeSubagents = egressAttempts.length
   if (spawned < SUBAGENT_TYPES.length) {
     const type = SUBAGENT_TYPES[spawned]
     return { tool: { name: "Agent", input: { description: `probe ${type}`, prompt: `${SUBAGENT_MARKER}:${type} try the following tools.`, subagent_type: type } } }
@@ -177,6 +180,12 @@ beforeAll(async () => {
     })
   })
   await new Promise<void>((resolve) => mock.listen(0, "127.0.0.1", resolve))
+  proxy = http.createServer((_req, res) => res.writeHead(403).end())
+  proxy.on("connect", (req, socket) => {
+    egressAttempts.push(String(req.url))
+    socket.end("HTTP/1.1 403 Forbidden\r\n\r\n")
+  })
+  await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve))
   const baseUrl = `http://127.0.0.1:${(mock.address() as AddressInfo).port}`
 
   docsRoot = path.join(scratch, "docs")
@@ -191,7 +200,9 @@ beforeAll(async () => {
       HOME: scratch,
       MCP_BASE_URL: baseUrl,
       MCP_TOKEN: "cmp_probe_token",
-      AGENT_PROMPT: "Probe the subagent boundary.",
+      AGENT_PROMPT: `Probe the subagent boundary. The user named ${ALLOWED_URL}.`,
+      HTTPS_PROXY: `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`,
+      NO_PROXY: "127.0.0.1,localhost",
       AGENT_SYSTEM_PROMPT: "You are a probe.",
       AGENT_MODEL: "claude-sonnet-4-5",
       ANTHROPIC_API_KEY: "sk-ant-probe",
@@ -218,6 +229,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => mock.close(() => resolve()))
+  await new Promise<void>((resolve) => proxy.close(() => resolve()))
   rmSync(scratch, { recursive: true, force: true })
 })
 
@@ -232,9 +244,17 @@ describe("subagents spawned via Agent/Task are no wider than the parent turn", (
 
   it("control: the parent can read the doc tree and is refused outside it", () => {
     const [inside, outside] = parentResults
+    // Egress control group: the parent's WebFetch of a URL the user named does open a tunnel (to the refusing proxy), so the
+    // unchanged count asserted for the subagents below is meaningful.
+    expect(egressBeforeSubagents, JSON.stringify(egressAttempts)).toBeGreaterThan(0)
     expect(inside?.isError, JSON.stringify(inside)).toBe(false)
     expect(inside?.text).toContain(DOC_TEXT)
     expect(outside?.isError, JSON.stringify(outside)).toBe(true)
+  })
+
+  it("no subagent's WebFetch of an unnamed URL opened a connection", () => {
+    expect(egressAttempts.filter((host) => host.startsWith("attacker.example"))).toEqual([])
+    expect(egressAttempts.length, JSON.stringify(egressAttempts)).toBe(egressBeforeSubagents)
   })
 
   it.each(SUBAGENT_TYPES)("%s: gets a tool list that is a subset of the parent's, with every disallowed tool absent", (type) => {
@@ -258,9 +278,8 @@ describe("subagents spawned via Agent/Task are no wider than the parent turn", (
     // Hooks: the WebFetch allowlist and the docs path guard run on the subagent's calls, with the parent's verdict.
     expect(webFetch?.isError, JSON.stringify(webFetch)).toBe(true)
     expect(outside?.isError, JSON.stringify(outside)).toBe(true)
-    // Which layer words the refusal varies from run to run for the out-of-tree read (the CLI's own outside-cwd check races the
-    // hook), so only the refusal is pinned there. WebFetch has no permission layer in bypass mode: only the hook can have refused it.
-    if (HOOK_DECIDES.includes(type)) expect(webFetch?.text).toContain("Blocked: WebFetch only opens URLs")
+    // Which layer refuses (the entry script's PreToolUse hook, or the CLI's own permission layer, which has no approver in a
+    // sandbox) varies from run to run, so only the refusal is pinned -- plus the stronger fact below that no connection was attempted.
     // Tools outside `tools` or in `disallowedTools`.
     for (const refused of [bash, deleteAssumption, todoWrite]) {
       expect(refused?.isError, JSON.stringify(refused)).toBe(true)
