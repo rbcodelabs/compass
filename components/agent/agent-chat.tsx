@@ -30,6 +30,7 @@ import { type PlanItem, type SerializedRun, type Subagent, type ToolStep } from 
 import { AgentActivity, PlanCard } from "@/components/agent/agent-activity"
 import { useAgentTurn } from "@/components/agent/use-agent-turn"
 import { useAgentChoices } from "@/components/agent/use-agent-choices"
+import { ToolsMenu, connectorsEnabledFor } from "@/components/agent/tools-menu"
 import { ModelPicker, modelLabelFor, useModelPick } from "@/components/agent/model-picker"
 import { AgentChip } from "@/components/agent/composer/agent-chip"
 import { ComposerCard } from "@/components/agent/composer/composer-card"
@@ -219,7 +220,7 @@ export function AgentChat({
       if (!isRail) router.refresh()
     },
   })
-  const { phase, streamingText, liveToolSteps, livePlan, planVersion, liveSubagents, error, setError, activeRun, isStreaming, cancelRun, attachToRun, abortViewers, reset: resetTurn, sending, start: startTurn } = turn
+  const { phase, streamingText, liveToolSteps, livePlan, planVersion, liveSubagents, error, setError, suggestion, clearSuggestion, activeRun, isStreaming, cancelRun, attachToRun, abortViewers, reset: resetTurn, sending, start: startTurn } = turn
   const bottomRef = useRef<HTMLDivElement>(null)
   /** Who is in this conversation; null until loaded, or when unavailable. */
   const [roster, setRoster] = useState<Roster | null>(null)
@@ -266,6 +267,9 @@ export function AgentChat({
   }, [isStreaming])
   const composerBlocked = processingLoading || Boolean(processing && (!processing.canContinue || processing.status === "RUNNING" || processing.status === "PENDING"))
 
+  // Set by a thread switch, read once by the scroll effect below. Declared before both effects so the compiler sees it before the first mutation.
+  const jumpToBottom = useRef(false)
+
   // Re-seed the transcript whenever the selected conversation changes — with one
   // exception, consumed exactly once.
   //
@@ -291,11 +295,17 @@ export function AgentChat({
     // going server-side, and coming back to that thread reattaches to it.
     resetTurn()
     setAccessLost(null)
+    jumpToBottom.current = true
     setMessages(initialMessages)
   }, [activeConversationId, initialMessages, resetTurn])
 
+  // Loading a different thread replaces the whole transcript, so jump straight
+  // to the end instead of animating through every message. Smooth scrolling is
+  // kept for incremental updates (new messages, streaming text).
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+    const instant = jumpToBottom.current
+    jumpToBottom.current = false
+    bottomRef.current?.scrollIntoView({ behavior: instant ? "auto" : "smooth", block: "end" })
   }, [messages, streamingText, liveToolSteps, livePlan, liveSubagents, phase])
 
   // `handoffKind` is passed in rather than read from `processing` because the
@@ -693,6 +703,23 @@ export function AgentChat({
         </ScrollArea>
 
         <div className={`border-t border-default bg-surface-panel ${isRail ? "p-3" : "p-3 sm:p-4"}`}>
+          {suggestion && !input.trim() && !composerDisabled && !isStreaming && (
+            <div className="mx-auto mb-2 flex w-full max-w-3xl">
+              <button
+                type="button"
+                data-testid="agent-prompt-suggestion"
+                className="max-w-full truncate rounded-full border border-default bg-surface-inset px-3 py-1 text-left text-sm text-text-subtle hover:bg-surface-interactive hover:text-text-primary"
+                title="Use this suggested reply"
+                onClick={() => {
+                  setInput(suggestion)
+                  clearSuggestion()
+                  composerRef.current?.focus()
+                }}
+              >
+                {suggestion}
+              </button>
+            </div>
+          )}
           <ComposerCard
             textareaRef={composerRef}
             value={input}
@@ -723,11 +750,12 @@ export function AgentChat({
               ) : null
             }
             chips={
-              (agentChoices.agents.length > 0 || modelPick.visible) && (
+              (agentChoices.agents.length > 0 || modelPick.visible || agentChoices.connectors.length > 0) && (
                 <>
                   {agentChoices.agents.length > 0 && (
                     <AgentChip choices={agentChoices} value={agentSelection} defaultAgentName={defaultAgentName} disabled={composerDisabled} onChange={setAgentPick} />
                   )}
+                  <ToolsMenu connectors={agentChoices.connectors} enabled={connectorsEnabledFor(agentSelection, agentChoices.defaultAgentId)} loaded={agentChoices.loaded} />
                   {modelPick.visible && (
                     <ModelPicker choices={agentChoices} value={modelPick.model} defaultLabel={modelPick.defaultLabel} disabled={composerDisabled} onChange={modelPick.select} />
                   )}

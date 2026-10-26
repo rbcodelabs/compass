@@ -3,6 +3,9 @@ import getPrisma from "@/lib/db"
 import { listRunnableAgents } from "@/lib/agent-run-identity"
 import { agentModelLabel } from "@/lib/agent-models"
 import { resolveAgentHarness } from "@/lib/agent-harness"
+import { connectorDefinition, connectorAccessView } from "@/lib/mcp-connectors/config"
+import { listConnectedGrants } from "@/lib/mcp-connectors/store"
+import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import { agentOwnModel, deploymentDefaultModel, modelChoiceSupported, selectableTurnModels } from "@/lib/agent-turn-model"
 
 export const dynamic = "force-dynamic"
@@ -32,7 +35,7 @@ export async function GET(request: Request) {
       ? { slug: workspaceSlug, organization: { slug: orgSlug }, members: { some: { userId: session.user.id } } }
       : null
   const workspace = where ? await prisma.workspace.findFirst({ where, select: { id: true } }) : null
-  const empty = Response.json({ agents: [], defaultAgentId: null, models: [], deploymentModel: null, modelLabels: {} })
+  const empty = Response.json({ agents: [], defaultAgentId: null, models: [], deploymentModel: null, modelLabels: {}, connectors: [] })
   if (!workspace) return empty
   const harness = resolveAgentHarness(process.env.AGENT_HARNESS)
   const { agents, defaultAgentId } = await listRunnableAgents(prisma, { userId: session.user.id, workspaceId: workspace.id })
@@ -42,5 +45,13 @@ export async function GET(request: Request) {
   const agentList = agents.map((agent) => ({ id: agent.id, name: agent.name, shared: agent.ownerType === "WORKSPACE", model: agentOwnModel(agent.model, harness) }))
   const labelled = new Set<string>([deploymentModel, ...agentList.flatMap((agent) => (agent.model ? [agent.model] : []))])
   const modelLabels = Object.fromEntries([...labelled].map((id) => [id, agentModelLabel(id)]))
-  return Response.json({ agents: agentList, defaultAgentId, models: supported ? models : [], deploymentModel, modelLabels })
+  // The caller's own connected third-party accounts, for the chat's Tools menu. Whether a turn actually gets them depends on
+  // the agent that answers (see app/api/agent/turn/route.ts); the client decides that from the agent it has selected.
+  const grants = await listConnectedGrants(session.user.id, trustedCompassBaseUrl().origin, prisma).catch(() => [])
+  const connectors = grants.flatMap((grant) => {
+    const definition = connectorDefinition(grant.slug)
+    if (!definition) return []
+    return [{ slug: grant.slug, name: definition.displayName, access: connectorAccessView(definition, grant.scope).accessLevel }]
+  })
+  return Response.json({ agents: agentList, defaultAgentId, models: supported ? models : [], deploymentModel, modelLabels, connectors })
 }

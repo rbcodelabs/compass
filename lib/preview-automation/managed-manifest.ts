@@ -234,7 +234,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   "109_agent_conversation_reviews": "bde4475d8cd9ce2284029356db322a96967573dee058a963f76a147ce94595a9",
   // Workspace BYOK Anthropic API key: two nullable TEXT columns on workspaces (ciphertext, last four). No index, no backfill, no FK.
   // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
-  "110_workspace_anthropic_api_key": "10eeaf45578415a34a20c7616318231957a2ac76e8c7f438d75796ef751499be" // gitleaks:allow -- reviewed public SHA256, not a credential
+  "110_workspace_anthropic_api_key": "10eeaf45578415a34a20c7616318231957a2ac76e8c7f438d75796ef751499be", // gitleaks:allow -- reviewed public SHA256, not a credential
+  // Agent UI control: two new tables plus ASYNC indexes, additive only (IF NOT EXISTS, no data writes, no FKs). Digest recorded from the shipped SQL; please review this line.
+  "110_agent_ui_control": "77d6623c31b682918b954421e3957b8b3c8eef6c1bc665a60d8e5817d6e77587"
 };
 
 /**
