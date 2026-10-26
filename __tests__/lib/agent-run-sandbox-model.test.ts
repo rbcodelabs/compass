@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildAgentEnv } from "@/lib/agent-run-sandbox"
+import { buildAgentEnv, DEVELOPER_MAX_TURNS } from "@/lib/agent-run-sandbox"
 import { resolveAgentModel } from "@/lib/agent-model"
 
 const base = { connectors: [], mcpBaseUrl: "https://compass.test", mcpToken: "t", prompt: "hi", workspaceId: "ws-1", systemPromptAppendices: [], pluginPaths: [], skillIds: [] }
@@ -31,5 +31,18 @@ describe("buildAgentEnv model selection", () => {
 
   it("applies the override on the opencode harness", () => {
     expect(buildAgentEnv({ ...base, harness: "opencode", gatewayApiKey: "g", modelOverride: "openai/gpt-9" }).AGENT_MODEL).toBe("openai/gpt-9")
+  })
+})
+
+describe("developer turn cap", () => {
+  const shellOn = { model: resolved({ ANTHROPIC_API_KEY: "sk-ant-test" }), connectors: [], mcpBaseUrl: "https://compass.test", mcpToken: "t", prompt: "hi", workspaceId: "ws-1", systemPromptAppendices: [], pluginPaths: [], skillIds: [], harness: "claude" as const, docs: true, githubEnv: { GH_TOKEN: "t", AGENT_GITHUB_REPOS: "acme/app" } }
+
+  it("raises the SDK turn cap for developer turns with the shell on", () => {
+    expect(buildAgentEnv({ ...shellOn, developer: { enabled: true } }).AGENT_MAX_TURNS).toBe(String(DEVELOPER_MAX_TURNS))
+  })
+
+  it("leaves other turns on the entry default", () => {
+    expect("AGENT_MAX_TURNS" in buildAgentEnv({ ...shellOn, developer: { enabled: false } })).toBe(false)
+    expect("AGENT_MAX_TURNS" in buildAgentEnv({ ...shellOn })).toBe(false)
   })
 })

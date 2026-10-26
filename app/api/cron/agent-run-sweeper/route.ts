@@ -60,6 +60,10 @@ async function sweep(request: Request) {
       truncated: result.truncated,
     })
   }
+  const idle = result.idleSandboxes
+  if (idle && (idle.stopped.length > 0 || idle.failed.length > 0)) {
+    console.info("[agent-run-sweeper] idle conversation sandboxes", idle)
+  }
   return json(result)
 }
 

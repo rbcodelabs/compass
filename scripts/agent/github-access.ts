@@ -151,6 +151,8 @@ export function buildJailedCommand(userCommand: string, env: Env = process.env):
     "GH_NO_UPDATE_NOTIFIER=1",
     'GH_TOKEN="$GH_TOKEN"',
     'GITHUB_TOKEN="${GITHUB_TOKEN:-$GH_TOKEN}"',
+    // DEVELOPER class only, and only when the host had a token: read from this process, like GH_TOKEN, never written into command text.
+    ...(env.AGENT_SANDBOX_CLASS === "DEVELOPER" && env.NPM_TOKEN?.trim() ? ['NPM_TOKEN="$NPM_TOKEN"'] : []),
     ...passthrough,
     "setpriv --no-new-privs",
     "bash --noprofile --norc -c",
@@ -196,7 +198,7 @@ const defaultRunner: JailRunner = (command, args, input) =>
  * as it. Throws if any REQUIRED step fails; the caller then runs the turn WITHOUT a shell.
  * Idempotent. `run` is injectable for tests.
  */
-export function prepareBashJail(opts: { docsRoot: string; run?: JailRunner; note?: (message: string) => void }): void {
+export function prepareBashJail(opts: { docsRoot: string; run?: JailRunner; note?: (message: string) => void; npmToken?: boolean }): void {
   const run = opts.run ?? defaultRunner
   const note = opts.note ?? (() => {})
   const sudo = (...args: string[]) => run("sudo", ["-n", ...args])
@@ -222,6 +224,15 @@ export function prepareBashJail(opts: { docsRoot: string; run?: JailRunner; note
   run("sudo", ["-n", "tee", `${JAIL_HOOKS_DIR}/pre-push`], prePushHook())
   sudo("chmod", "755", `${JAIL_HOOKS_DIR}/pre-push`)
   sudo("chmod", "644", JAIL_GITCONFIG)
+
+  // DEVELOPER class with a token: let npm and pnpm authenticate to the registry. The file holds a REFERENCE to $NPM_TOKEN, never the
+  // token, which the jail receives per command in its environment. Written only when a token exists, because npm refuses to start
+  // when .npmrc names an unset variable.
+  if (opts.npmToken) {
+    run("sudo", ["-n", "tee", `${JAIL_HOME}/.npmrc`], "//registry.npmjs.org/:_authToken=${NPM_TOKEN}\n//npm.pkg.github.com/:_authToken=${NPM_TOKEN}\n");
+    sudo("chown", `${JAIL_USER}:`, `${JAIL_HOME}/.npmrc`);
+    sudo("chmod", "600", `${JAIL_HOME}/.npmrc`);
+  }
 
   // Hide this process's siblings from the jail user's /proc view. Defense in depth: the
   // uid separation already denies environ/ptrace/kill, so a failure here is not fatal.
