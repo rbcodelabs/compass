@@ -66,7 +66,7 @@ applications.
 
 ## Emergency revocation
 
-This applies to connectors whose tokens Compass stores itself (v0). Google Drive
+This applies to connectors whose tokens Compass stores itself (v0). Google Drive and Vercel
 tokens live in Vercel Connect, not in Compass, so the sweep below cannot reach
 them: to cut off Drive for everyone, revoke or delete the grants (or the whole
 connector) in the Vercel Connect dashboard. Rows left in `mcp_connector_grants`
@@ -162,6 +162,15 @@ alone: the panel reports connectors as unavailable rather than failing, and agen
 turns are unaffected. Without the encryption key, a connection attempt reports
 that connector storage is not configured rather than storing a token it could not
 protect.
+
+### Vercel
+
+The Vercel connector points at Vercel's hosted MCP server (`https://mcp.vercel.com`). Vercel does
+not offer open dynamic client registration for self-hosted apps, so the grant is held by a
+Vercel Connect connector. Set `COMPASS_VERCEL_CONNECTOR` to its uid (for
+example `vercel/vercel-admin`). Until it is set, Vercel shows as **Not configured** and cannot be
+connected. Each person signs in with their own Vercel account, and the agent can only see what that
+account can see.
 
 ### Google Drive
 
