@@ -64,11 +64,19 @@ function mount(server: ReturnType<typeof fakeServer>, editable = true) {
 }
 const cardOf = (name: string) => screen.getByRole("group", { name })
 
+/** Cards start compact; every interaction below needs the body. */
+const expandAll = () => {
+  for (const toggle of screen.queryAllByTestId("embed-card-toggle")) if (toggle.getAttribute("aria-expanded") === "false") fireEvent.click(toggle)
+}
+/** Every button except the compact row's own expand/collapse toggle, which is always present. */
+const controlButtons = (root: ParentNode = document.body) => within(root as HTMLElement).queryAllByRole("button").filter((b) => b.getAttribute("data-testid") !== "embed-card-toggle")
+
 describe("editing a title from a card", () => {
   it("writes the record through the patch, re-resolves the card, shows the saved state, and leaves the document alone", async () => {
     const server = fakeServer()
     const { editor, onUpdate } = mount(server)
     await screen.findByRole("group", { name: "Solution: Live solution" })
+    expandAll()
     fireEvent.click(screen.getByRole("button", { name: "Rename Live solution" }))
     const input = screen.getByTestId("embed-title-input")
     fireEvent.change(input, { target: { value: "  Renamed solution  " } })
@@ -91,6 +99,7 @@ describe("editing a title from a card", () => {
     server.patch.mockRejectedValueOnce(new Error("save failed"))
     const { editor, onUpdate } = mount(server)
     await screen.findByRole("group", { name: "Solution: Live solution" })
+    expandAll()
     fireEvent.click(screen.getByRole("button", { name: "Rename Live solution" }))
     const input = screen.getByTestId("embed-title-input")
     fireEvent.change(input, { target: { value: "Will not stick" } })
@@ -109,6 +118,7 @@ describe("editing a title from a card", () => {
     const server = fakeServer()
     const { editor } = mount(server)
     await screen.findByRole("group", { name: "Solution: Live solution" })
+    expandAll()
     fireEvent.click(screen.getByRole("button", { name: "Rename Live solution" }))
     const input = screen.getByTestId("embed-title-input")
     fireEvent.change(input, { target: { value } })
@@ -122,6 +132,7 @@ describe("editing a title from a card", () => {
     const server = fakeServer()
     const { editor } = mount(server)
     await screen.findByRole("group", { name: "Solution: Live solution" })
+    expandAll()
     fireEvent.click(screen.getByRole("button", { name: "Rename Live solution" }))
     fireEvent.change(screen.getByTestId("embed-title-input"), { target: { value: "Typed then abandoned" } })
     fireEvent.keyDown(screen.getByTestId("embed-title-input"), { key: "Escape" })
@@ -136,6 +147,7 @@ describe("editing a title from a card", () => {
     const server = fakeServer()
     const { editor } = mount(server)
     await screen.findByRole("group", { name: "Solution: Live solution" })
+    expandAll()
     server.resolve.mockRejectedValueOnce(new Error("offline"))
     fireEvent.click(screen.getByRole("button", { name: "Rename Live solution" }))
     fireEvent.change(screen.getByTestId("embed-title-input"), { target: { value: "Saved remotely" } })
@@ -151,6 +163,7 @@ describe("the status picker", () => {
     const server = fakeServer()
     const { editor, onUpdate } = mount(server)
     await screen.findByRole("group", { name: "Solution: Live solution" })
+    expandAll()
     const select = within(cardOf("Solution: Live solution")).getByTestId("embed-status-select") as HTMLSelectElement
     expect([...select.options].map((o) => o.value)).toEqual(["IDEA", "VALIDATED", "IN_DELIVERY", "SHIPPED", "KILLED"])
     expect(select.value).toBe("IDEA")
@@ -167,6 +180,7 @@ describe("the status picker", () => {
     server.patch.mockRejectedValueOnce(new Error("nope"))
     const { editor } = mount(server)
     await screen.findByRole("group", { name: "Task: Live task" })
+    expandAll()
     const select = within(cardOf("Task: Live task")).getByTestId("embed-status-select") as HTMLSelectElement
     fireEvent.change(select, { target: { value: "DONE" } })
     expect(await screen.findByTestId("embed-save-error")).toHaveTextContent("Could not save the status")
@@ -179,6 +193,7 @@ describe("the status picker", () => {
     server.records[SOLUTION_ID].status = "SOMETHING_NEW"
     const { editor } = mount(server)
     await screen.findByRole("group", { name: "Solution: Live solution" })
+    expandAll()
     expect(within(cardOf("Solution: Live solution")).queryByTestId("embed-status-select")).toBeNull()
     expect(within(cardOf("Solution: Live solution")).getByText("Something new")).toBeInTheDocument()
     // Metrics have no simple edit: no rename, no select.
@@ -192,6 +207,7 @@ describe("the status picker", () => {
     const server = fakeServer()
     const { editor } = mount(server)
     await screen.findByRole("group", { name: "Task: Live task" })
+    expandAll()
     const select = within(cardOf("Task: Live task")).getByTestId("embed-status-select")
     fireEvent.click(screen.getByRole("button", { name: "Rename Live task" }))
     fireEvent.change(screen.getByTestId("embed-title-input"), { target: { value: "Renamed task" } })
@@ -210,6 +226,7 @@ describe("save messages are per attempt, never stale", () => {
     server.patch.mockRejectedValueOnce(new Error("title denied")).mockRejectedValueOnce(new Error("status denied"))
     const { editor } = mount(server)
     await screen.findByRole("group", { name: "Task: Live task" })
+    expandAll()
 
     fireEvent.click(screen.getByRole("button", { name: "Rename Live task" }))
     fireEvent.change(screen.getByTestId("embed-title-input"), { target: { value: "Nope" } })
@@ -233,6 +250,7 @@ describe("save messages are per attempt, never stale", () => {
     server.patch.mockRejectedValueOnce(new Error("x")).mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({}) }))
     const { editor } = mount(server)
     await screen.findByRole("group", { name: "Task: Live task" })
+    expandAll()
     fireEvent.change(within(cardOf("Task: Live task")).getByTestId("embed-status-select"), { target: { value: "DONE" } })
     expect(await screen.findByTestId("embed-save-error")).toBeInTheDocument()
     fireEvent.change(within(cardOf("Task: Live task")).getByTestId("embed-status-select"), { target: { value: "DONE" } })
@@ -248,6 +266,7 @@ describe("menus use an opaque surface", () => {
     const server = fakeServer()
     const { editor } = mount(server)
     const card = await screen.findByRole("group", { name: "Task: Live task" })
+    expandAll()
     fireEvent.click(within(card).getByTestId("embed-card-menu"))
     const cls = within(card).getByRole("menu").className
     expect(cls).toContain("bg-popover")
@@ -262,9 +281,11 @@ describe("who sees controls", () => {
     const server = fakeServer()
     const { editor } = mount(server, false)
     await screen.findByRole("group", { name: "Solution: Live solution" })
+    expandAll()
     await screen.findByText("Record unavailable")
+    expandAll()
     for (const wrapper of document.querySelectorAll("[data-compass-embed]")) {
-      expect(within(wrapper as HTMLElement).queryByRole("button")).toBeNull()
+      expect(controlButtons(wrapper as HTMLElement)).toHaveLength(0)
       expect(wrapper.querySelector("select,input,textarea")).toBeNull()
       for (const id of ["embed-card-menu", "embed-remove", "embed-title-edit", "embed-status-select"]) expect(within(wrapper as HTMLElement).queryByTestId(id)).toBeNull()
       expect(within(wrapper as HTMLElement).queryByRole("menu")).toBeNull()
@@ -276,7 +297,8 @@ describe("who sees controls", () => {
     const server = fakeServer({ canEdit: false })
     const { editor } = mount(server)
     await screen.findByRole("group", { name: "Solution: Live solution" })
-    expect(screen.queryByRole("button")).toBeNull()
+    expandAll()
+    expect(controlButtons()).toHaveLength(0)
     expect(document.querySelector("select,input")).toBeNull()
     editor.destroy()
   })
@@ -286,13 +308,14 @@ describe("who sees controls", () => {
     server.resolve.mockImplementation(async (refs) => ({ cards: Object.fromEntries(refs.map((r) => [`${r.kind}:${r.id}`, { state: "ok" as const, kind: r.kind, id: r.id, title: "T", status: null, facts: [], href: "/x" }])), deferred: [] }))
     const { editor } = mount(server)
     await screen.findAllByRole("group")
-    expect(screen.queryByRole("button")).toBeNull()
+    expandAll()
+    expect(controlButtons()).toHaveLength(0)
     editor.destroy()
   })
 
   it("presentational card with no controls given shows none", () => {
-    render(<SpecEmbedCard kind="solution" entry={{ status: "ready", card: { state: "ok", kind: "solution", id: SOLUTION_ID, title: "T", status: "IDEA", facts: [], href: "/x" } }} />)
-    expect(screen.queryByRole("button")).toBeNull()
+    render(<SpecEmbedCard kind="solution" defaultExpanded entry={{ status: "ready", card: { state: "ok", kind: "solution", id: SOLUTION_ID, title: "T", status: "IDEA", facts: [], href: "/x" } }} />)
+    expect(controlButtons()).toHaveLength(0)
     expect(screen.queryByRole("combobox")).toBeNull()
   })
 })
@@ -316,6 +339,7 @@ describe("Remove", () => {
     const server = fakeServer()
     const { editor, onUpdate } = mount(server)
     const card = await screen.findByRole("group", { name: "Task: Live task" })
+    expandAll()
     fireEvent.click(within(card).getByTestId("embed-card-menu"))
     expect(within(card).getByRole("menu")).toHaveTextContent("The record is not deleted")
     fireEvent.keyDown(within(card).getByRole("menu"), { key: "Escape" })
