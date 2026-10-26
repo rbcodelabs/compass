@@ -35,8 +35,9 @@ import { WorkspaceIdBackfillRefusal, withOccRetry } from "@/lib/migrations/works
  * workspace_id equals its task's and its target's, and no mirror row has a missing endpoint unless its legacy counterpart is one of the
  * reported quarantined rows (those mirror rows are KEPT and reported, never deleted).
  *
- * A residual re-run migration (the 072 / 094 pattern) is NOT built here: re-POSTing 097 is its own residual pass. If the read flip needs a
- * separately numbered one, register a DDL-free migration that calls the same two exported functions.
+ * RESIDUAL PASS. A residual re-run migration (the 072 / 094 pattern) is NOT built here. Re-POSTing 097 is a residual pass only until its
+ * receipt exists: the runner never re-runs an applied migration. If drift appears after the receipt, register a separately numbered,
+ * DDL-free, explicit-only migration that calls the same two exported functions (see 106_entity_links_residual_opportunity).
  */
 export const ENTITY_LINKS_TASK_BACKFILL_MIGRATION = "097_entity_links_backfill_task"
 
@@ -351,7 +352,7 @@ export type EntityLinksTaskStatus = {
   mirroredTaskReferences: number
   /** Consistent legacy rows the backfill would still insert or repair. */
   unmatched: number
-  /** Mirror rows with no legacy counterpart; a re-POST prunes them. */
+  /** Mirror rows with no legacy counterpart; a re-POST prunes them until the receipt exists (an applied migration is never re-run). */
   staleMirrorRows: number
   quarantined: TaskLinksQuarantine
   /** Mirror rows kept (not deleted) because their legacy row is quarantined. */
