@@ -10,6 +10,7 @@ import { isPermissionError, resolveOrgAdmin, resolveWorkspaceAdmin } from "@/lib
 import { countWorkspaceAdmins, normalizeWorkspaceRole } from "@/lib/roles";
 import { PRESET_PALETTES, PRESET_FONTS } from "@/lib/branding-presets";
 import { encrypt } from "@/lib/crypto-secrets";
+import { encryptAnthropicApiKey, validateAnthropicApiKey } from "@/lib/workspace-anthropic-key";
 import { generateSsoSecret } from "@/lib/portal-sso";
 import { requireProductEntity, requireProductWorkspace, type ProductEntityKind } from "@/lib/product-action-auth";
 import { deleteWorkspaceCascade } from "@/lib/delete-workspace-cascade";
@@ -975,6 +976,58 @@ export async function updateAgentGithubRepos(
 
   revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
   return { ok: true, repos: parsed.repos };
+}
+
+// ─── Agent Anthropic API key (BYOK) ───────────────────────────────────────────
+
+/**
+ * Stores (or replaces) the workspace's own Anthropic API key. Admin-only: the key spends the workspace's Anthropic account on
+ * every agent run. Validated (`sk-ant-` prefix), encrypted before it touches the database, and never echoed back: the result
+ * carries only the last four characters. Permission failures throw (resolveWorkspaceAdmin); validation and configuration
+ * failures return a value, and neither message ever contains the submitted key.
+ */
+export async function setWorkspaceAnthropicApiKey(
+  orgSlug: string,
+  workspaceSlug: string,
+  input: { apiKey: string }
+): Promise<{ ok: true; last4: string } | { ok: false; error: string }> {
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
+
+  const validated = validateAnthropicApiKey(input?.apiKey);
+  if (!validated.ok) return validated;
+
+  let ciphertext: string;
+  try {
+    ciphertext = encryptAnthropicApiKey(validated.key);
+  } catch {
+    return { ok: false, error: "Storing keys is not configured on this server." };
+  }
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: { anthropicApiKeyEncrypted: ciphertext, anthropicApiKeyLast4: validated.last4 },
+    select: { id: true },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  return { ok: true, last4: validated.last4 };
+}
+
+/** Removes the workspace's key; agents go back to the platform key. Admin-only. */
+export async function removeWorkspaceAnthropicApiKey(
+  orgSlug: string,
+  workspaceSlug: string
+): Promise<{ ok: true }> {
+  const { prisma, workspaceId } = await resolveWorkspaceAdmin(orgSlug, workspaceSlug);
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: { anthropicApiKeyEncrypted: null, anthropicApiKeyLast4: null },
+    select: { id: true },
+  });
+
+  revalidatePath(`/${orgSlug}/${workspaceSlug}/settings`);
+  return { ok: true };
 }
 
 // ─── Organization: member read-only workspace access ──────────────────────────

@@ -32,7 +32,7 @@ import { after } from "next/server"
 import getPrisma, { type AppPrismaClient } from "@/lib/db"
 import { authorColumn } from "@/lib/agent-attribution"
 import { checkAgentRunCaps, checkAgentUsageLimit } from "@/lib/agent-limits"
-import { resolveAgentModel } from "@/lib/agent-model"
+import { resolveWorkspaceAgentModel } from "@/lib/workspace-anthropic-key"
 import { agentKind, findAgentById } from "@/lib/agent-ownership"
 import { resolveGatewayCredential, resolveAgentHarness } from "@/lib/agent-harness"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
@@ -220,8 +220,8 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
   await reapUnstartedRuns(deps, runAgent.id, conversationId)
 
   const harness = resolveAgentHarness(deps.env.AGENT_HARNESS)
-  // The same provider/credential resolution the turn route uses (AGENT_MODEL_PROVIDER: anthropic or bedrock). Only the Claude harness has one.
-  const resolvedModel = harness === "claude" ? resolveAgentModel(deps.env) : null
+  // The same provider/credential resolution the turn route uses (AGENT_MODEL_PROVIDER: anthropic or bedrock), plus the workspace's own Anthropic key (BYOK) when it has one. Only the Claude harness has one.
+  const resolvedModel = harness === "claude" ? await resolveWorkspaceAgentModel(prisma, task.workspaceId, deps.env) : null
   const gatewayApiKey = harness === "opencode" ? await resolveGatewayCredential(deps.env) : undefined
   const snapshotId = await deps.getSnapshotId()
   if (!snapshotId || (resolvedModel !== null && !resolvedModel.ok) || (harness === "opencode" && !gatewayApiKey)) {

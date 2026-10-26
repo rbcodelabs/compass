@@ -500,6 +500,8 @@ async function main(): Promise<void> {
   // fall back to looking for a key we never set.
   if (process.env.CLAUDE_CODE_USE_BEDROCK === "1") {
     requireEnv("AWS_BEARER_TOKEN_BEDROCK", process.env.AWS_BEARER_TOKEN_BEDROCK)
+  } else if (process.env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
+    // Operator-only AGENT_MODEL_PROVIDER=claude-subscription: Compass forwards the token and no API key (lib/agent-model.ts).
   } else {
     requireEnv("ANTHROPIC_API_KEY", process.env.ANTHROPIC_API_KEY)
   }

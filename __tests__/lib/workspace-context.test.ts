@@ -102,6 +102,8 @@ describe("getWorkspaceContext", () => {
     expect(keys).not.toContain("ssoSecretEncrypted")
     expect(keys).not.toContain("ssoEnabled")
     expect(keys).not.toContain("ssoSecretUpdatedAt")
+    expect(keys).not.toContain("anthropicApiKeyEncrypted")
+    expect(keys).not.toContain("anthropicApiKeyLast4")
     // ...but must keep every branding column, which resolveWorkspaceBranding needs.
     for (const field of [
       "brandingPaletteId",

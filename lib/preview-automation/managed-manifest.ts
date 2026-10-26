@@ -231,7 +231,10 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Per-user "reviewed" flag for the agent board: one new table plus two ASYNC indexes (unique (conversation, user), non-unique (user, workspace)).
   // Additive: no existing table touched, no backfill, one DDL statement per transaction. The 109 postcondition proves the columns and both indexes.
   // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
-  "109_agent_conversation_reviews": "bde4475d8cd9ce2284029356db322a96967573dee058a963f76a147ce94595a9"
+  "109_agent_conversation_reviews": "bde4475d8cd9ce2284029356db322a96967573dee058a963f76a147ce94595a9",
+  // Workspace BYOK Anthropic API key: two nullable TEXT columns on workspaces (ciphertext, last four). No index, no backfill, no FK.
+  // Digest recorded from the shipped SQL, not a fresh audit: please review this line.
+  "110_workspace_anthropic_api_key": "10eeaf45578415a34a20c7616318231957a2ac76e8c7f438d75796ef751499be" // gitleaks:allow -- reviewed public SHA256, not a credential
 };
 
 /**
