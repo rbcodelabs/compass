@@ -713,6 +713,212 @@ describe("launcher position and style", () => {
 })
 
 /* ------------------------------------------------------------------ *
+ * No launcher, and the host-page API
+ * ------------------------------------------------------------------ */
+
+type WidgetApi = {
+  open: () => void
+  close: () => void
+  toggle: () => void
+  startPicking: () => void
+  stopPicking: () => void
+  getState: () => { mounted: boolean; open: boolean; picking: boolean; signedIn: boolean; count: number }
+  on: (name: string, fn: (detail: unknown) => void) => () => void
+  off: (name: string, fn: (detail: unknown) => void) => void
+}
+
+function api(): WidgetApi {
+  return (window as unknown as Record<string, WidgetApi>).__compassFeedbackWidget
+}
+
+function recordEvents(name: string) {
+  const seen: unknown[] = []
+  const handler = (event: Event) => seen.push((event as CustomEvent).detail)
+  window.addEventListener("compass-feedback:" + name, handler)
+  return seen
+}
+
+describe('data-compass-button="none"', () => {
+  it("renders no launcher but keeps the panel, pick control and layer attributes", async () => {
+    await mount({ button: "none", position: "top-left" })
+    expect(maybePart("launcher")).toBeNull()
+    expect(maybePart("panel")).not.toBeNull()
+    expect(maybePart("pick")).not.toBeNull()
+    const layer = shadow().querySelector(".layer") as HTMLElement
+    expect(layer.dataset.btn).toBe("none")
+    expect(layer.dataset.side).toBe("left")
+    expect(layer.dataset.vertical).toBe("top")
+    expect(layer.dataset.beside).toBe("false")
+  })
+
+  it("is accepted without a warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    await mount({ button: "none" })
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("opens the panel from the API and closes it with the panel's own close button", async () => {
+    await mount({ button: "none" })
+    api().open()
+    expect(part("panel").getAttribute("data-open")).toBe("true")
+    click(part("close"))
+    expect(part("panel").getAttribute("data-open")).toBe("false")
+  })
+
+  it("still counts comments and pins them without a launcher", async () => {
+    on("GET /api/embed/comments", reply(200, { artifactId: "art_1", comments: [comment({ anchor: anchor() })] }))
+    await mount({ button: "none" })
+    expect(api().getState().count).toBe(1)
+    expect(maybePart("pin")).not.toBeNull()
+  })
+
+  it("documents the none value in the shipped file", () => {
+    expect(WIDGET_SOURCE).toMatch(/text \(default\) \| icon \| tab \| none/)
+  })
+})
+
+describe("host-page API", () => {
+  it("exposes the commands next to identify", async () => {
+    await mount()
+    for (const name of ["identify", "open", "close", "toggle", "startPicking", "stopPicking", "getState", "on", "off"]) {
+      expect(typeof (api() as unknown as Record<string, unknown>)[name]).toBe("function")
+    }
+    expect((window as unknown as Record<string, { mounted: boolean }>).__compassFeedbackWidget.mounted).toBe(true)
+  })
+
+  it("opens, closes and toggles, firing one event per real change", async () => {
+    await mount()
+    const opened = recordEvents("open")
+    const closed = recordEvents("close")
+    api().open()
+    api().open()
+    expect(api().getState().open).toBe(true)
+    expect(opened).toEqual([{ open: true }])
+    api().toggle()
+    expect(api().getState().open).toBe(false)
+    api().close()
+    expect(closed).toEqual([{ open: false }])
+    api().toggle()
+    expect(api().getState().open).toBe(true)
+  })
+
+  it("keeps the launcher in step when it exists", async () => {
+    await mount()
+    api().open()
+    expect(part("launcher").getAttribute("aria-expanded")).toBe("true")
+    click(part("launcher"))
+    expect(api().getState().open).toBe(false)
+  })
+
+  it("starts and stops picking, and closes the panel while picking", async () => {
+    await mount({ button: "none" })
+    api().open()
+    api().startPicking()
+    expect(api().getState()).toMatchObject({ picking: true, open: false })
+    expect(part("hint").getAttribute("data-on")).toBe("true")
+    api().stopPicking()
+    expect(api().getState().picking).toBe(false)
+    expect(part("hint").getAttribute("data-on")).toBe("false")
+  })
+
+  it("fires a count event with the total of comments and replies, only when it changes", async () => {
+    const withReply = { ...comment(), replies: [comment({ id: "cmt_r" })] }
+    on("GET /api/embed/comments", reply(200, { artifactId: "art_1", comments: [withReply] }))
+    installScript()
+    const counts = recordEvents("count")
+    evaluateWidget()
+    await flush()
+    expect(counts).toEqual([{ count: 2 }])
+    expect(api().getState().count).toBe(2)
+  })
+
+  it("fires an identity event when the session resolves, carrying only a flag", async () => {
+    storeVisitor()
+    on("GET /api/embed/session", reply(200, { signedIn: true, email: "ada@example.com", name: "Ada" }))
+    installScript()
+    const identities = recordEvents("identity")
+    evaluateWidget()
+    await flush()
+    expect(identities).toEqual([{ signedIn: true }])
+    expect(api().getState().signedIn).toBe(true)
+  })
+
+  it("never puts a token, comment text or name in state or event details", async () => {
+    storeVisitor()
+    on("GET /api/embed/session", reply(200, { signedIn: true, email: "ada@example.com", name: "Ada" }))
+    on("GET /api/embed/comments", reply(200, { artifactId: "art_1", comments: [comment()] }))
+    installScript()
+    const all = [recordEvents("open"), recordEvents("close"), recordEvents("count"), recordEvents("identity")]
+    evaluateWidget()
+    await flush()
+    api().open()
+    api().close()
+    const dump = JSON.stringify([api().getState(), ...all])
+    expect(dump).not.toContain(TOKEN)
+    expect(dump).not.toContain("ada@example.com")
+    expect(dump).not.toContain("Ada")
+    expect(dump).not.toContain(comment().body)
+  })
+
+  it("replays commands made before mount, once the DOM exists", async () => {
+    Object.defineProperty(document, "readyState", { configurable: true, value: "loading" })
+    const bodyDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, "body")!
+    Object.defineProperty(document, "body", { configurable: true, get: () => null })
+    try {
+      installScript({ button: "none" })
+      evaluateWidget()
+      expect(api().getState().mounted).toBe(false)
+      api().open()
+      api().startPicking()
+      expect(hostElement()).toBeNull()
+    } finally {
+      delete (document as unknown as Record<string, unknown>).body
+      Object.defineProperty(Document.prototype, "body", bodyDescriptor)
+      delete (document as unknown as Record<string, unknown>).readyState
+    }
+    document.dispatchEvent(new Event("DOMContentLoaded"))
+    await flush()
+    expect(api().getState()).toMatchObject({ mounted: true, picking: true })
+  })
+
+  it("on() delivers the detail, returns an unsubscribe, and off() removes a listener", async () => {
+    await mount()
+    const a: unknown[] = []
+    const b: unknown[] = []
+    const stop = api().on("open", (detail) => a.push(detail))
+    const handlerB = (detail: unknown) => b.push(detail)
+    api().on("compass-feedback:open", handlerB)
+    api().open()
+    expect(a).toEqual([{ open: true }])
+    expect(b).toEqual([{ open: true }])
+    stop()
+    api().off("open", handlerB)
+    api().close()
+    api().open()
+    expect(a).toHaveLength(1)
+    expect(b).toHaveLength(1)
+  })
+
+  it("ignores an unknown event name or a non-function with a warning rather than throwing", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    await mount()
+    expect(() => api().on("nope", () => {})).not.toThrow()
+    expect(() => api().on("open", undefined as unknown as () => void)).not.toThrow()
+    expect(warn).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps a throwing host listener from breaking the widget", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    await mount()
+    api().on("open", () => {
+      throw new Error("host bug")
+    })
+    expect(() => api().open()).not.toThrow()
+    expect(api().getState().open).toBe(true)
+  })
+})
+
+/* ------------------------------------------------------------------ *
  * Isolation
  * ------------------------------------------------------------------ */
 
