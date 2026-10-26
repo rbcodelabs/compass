@@ -268,6 +268,15 @@ async function publishSession(store: MemorySessionStore, requestedId: string, ba
 
 type ConnectorRef = { slug: string; displayName: string; guidance?: string }
 
+/**
+ * The plan is the Compass-backed mcp__compass__Task* tools (a conversation's tasks, read back by the chat), so the SDK's TodoWrite is not
+ * offered: two competing lists. Agent (Task in older SDKs; both listed, a name the SDK does not know is inert) delegates to a subagent (its
+ * events carry parent_tool_use_id, which lib/agent-run-stream.ts nests). Neither
+ * touches the filesystem or network itself; a subagent is expected to inherit this same
+ * `tools`/hook set, so it is no wider than the parent.
+ */
+const PLANNING_TOOLS = ["Agent", "Task"]
+
 /** The shape the Agent SDK's `mcpServers` map takes for an HTTP transport. */
 type McpHttpServer = {
   type: "http"
@@ -653,7 +662,7 @@ async function main(): Promise<void> {
     // native access to the doc tree at `cwd`. Bash is omitted by default (see
     // buildDocsFsServer for why); it is added ONLY by agentTools(docs, githubShell) and only after the jail user was
     // proven (see above); its commands are rewritten to run as that user by the Bash hook.
-    tools: agentTools(Boolean(docsSession), githubShell),
+    tools: [...agentTools(Boolean(docsSession), githubShell), ...PLANNING_TOOLS],
     // Scopes the agent's native file tools to the materialized doc tree.
     ...(docsSession && docsRoot ? { cwd: docsRoot } : {}),
     // `cwd` alone confines nothing: under bypassPermissions Read/Write/Edit/Glob
@@ -690,6 +699,7 @@ async function main(): Promise<void> {
     allowedTools: [
       "mcp__compass",
       "WebFetch",
+      ...PLANNING_TOOLS,
       "mcp__web_search",
       ...(docsSession ? ["mcp__docsfs", "Read", "Write", "Edit", "Glob"] : []),
       ...(githubShell ? ["Bash"] : []),
@@ -705,6 +715,8 @@ async function main(): Promise<void> {
     // §2.5), as do the docId-addressed edit_doc/edit_canvas/build_canvas_tree/
     // capture_canvas, which act on the saved doc directly.
     disallowedTools: [
+      // The SDK's own task tools would duplicate (and not persist like) the Compass-backed mcp__compass__TaskCreate/TaskUpdate/TaskList/TaskGet ones. (Keep any glob character out of this list's comments: agent-turn-entry-policy.test.ts scans from "allowedTools: [" for one.)
+      "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TodoWrite",
       "mcp__compass__delete_assumption",
       "mcp__compass__delete_solution_comment",
       ...(docsSession ? ["mcp__compass__write_doc", "mcp__compass__delete_doc", "mcp__compass__move_doc"] : []),
