@@ -139,10 +139,10 @@ export function buildAgentEnv(opts: {
       ? { AI_GATEWAY_API_KEY: opts.gatewayApiKey ?? "", AGENT_MODEL: chosenModel ?? opencodeModel(process.env.AGENT_OPENCODE_MODEL) }
       : {
           ...claudeProviderEnv(opts.model),
-          // A named agent's own model wins, but only on the Anthropic API, where its id (validated as claude-*) is a real model name.
+          // A named agent's own model wins, but only on the Anthropic API (or the operator-only subscription path), where its id (validated as claude-*) is a real model name.
           // On Bedrock the ids are inference-profile ids, so the deployment's AGENT_MODEL_ID stays in force rather than sending an
           // Anthropic-API id to a provider that cannot serve it.
-          ...(chosenModel && opts.model?.provider === "anthropic" ? { AGENT_MODEL: chosenModel } : {}),
+          ...(chosenModel && opts.model && opts.model.provider !== "bedrock" ? { AGENT_MODEL: chosenModel } : {}),
         }),
     MCP_BASE_URL: opts.mcpBaseUrl,
     MCP_TOKEN: opts.mcpToken,

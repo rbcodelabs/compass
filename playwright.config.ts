@@ -70,10 +70,13 @@ export default defineConfig({
   // The `functional-setup` project already worked around this by narrowing its
   // testDir; ignore the directories globally so the next project that forgets
   // to narrow its own testDir cannot reintroduce the fan-out.
+  //
+  // The worktree globs are anchored at this checkout's root. Unanchored, "**/.claude/worktrees/**" also matched the path of a
+  // checkout that itself lives under .claude/worktrees, so every spec in an agent worktree was ignored ("No tests found").
   testIgnore: [
     "**/node_modules/**",
-    "**/.claude/worktrees/**",
-    "**/.worktrees/**",
+    `${process.cwd()}/.claude/worktrees/**`,
+    `${process.cwd()}/.worktrees/**`,
   ],
 
   ...(functional && {

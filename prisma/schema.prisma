@@ -271,6 +271,10 @@ model Workspace {
   // unrelated actions (e.g. branding updates), which would otherwise make
   // a "last rotated" timestamp in the settings UI lie.
   ssoSecretUpdatedAt   DateTime?               @map("sso_secret_updated_at")
+  // Bring-your-own Anthropic API key for the in-app cloud agent (migration 110, TASK-89). Ciphertext via lib/crypto-secrets.ts, never
+  // selected into any client-bound query; the last four characters are the only part Settings ever shows. NULL = platform key.
+  anthropicApiKeyEncrypted String?             @map("anthropic_api_key_encrypted") @db.Text
+  anthropicApiKeyLast4 String?                 @map("anthropic_api_key_last4") @db.Text
   createdAt            DateTime                @default(now()) @map("created_at")
   updatedAt            DateTime                @default(now()) @map("updated_at")
   organization         Organization            @relation(fields: [organizationId], references: [id])

@@ -37,7 +37,7 @@ import { randomUUID } from "node:crypto"
 import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
-import { resolveAgentModel } from "@/lib/agent-model"
+import { resolveWorkspaceAgentModel } from "@/lib/workspace-anthropic-key"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { resolveAgentPageContext } from "@/lib/agent-page-context"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
@@ -299,7 +299,8 @@ export async function POST(request: NextRequest) {
   // forwarded into the sandbox as a credential and only fail after a sandbox boot
   // and an MCP key mint, as an opaque auth error. Reject it here, where it is free.
   const harness = resolveAgentHarness(process.env.AGENT_HARNESS)
-  const resolved = harness === "claude" ? resolveAgentModel() : null
+  // A workspace's own Anthropic key (BYOK, TASK-89) beats the platform key and forces the Anthropic provider; absent one, the platform resolution is unchanged.
+  const resolved = harness === "claude" ? await resolveWorkspaceAgentModel(prisma, workspaceId) : null
   if (resolved && !resolved.ok) {
     await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
     return new Response(resolved.message, { status: 500 })

@@ -732,6 +732,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "109_agent_conversation_reviews",
     filePath: path.join(process.cwd(), "prisma/migrations/109_agent_conversation_reviews/migration.sql"),
   },
+  {
+    // Workspace BYOK Anthropic API key: two nullable TEXT columns on workspaces (ciphertext + last four). No index, no backfill, no FK.
+    // The 110 postcondition proves both columns exist. The code tolerates the migration being unapplied (no key stored).
+    name: "110_workspace_anthropic_api_key",
+    filePath: path.join(process.cwd(), "prisma/migrations/110_workspace_anthropic_api_key/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));
@@ -2340,6 +2346,11 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "105_workspace_agent_github_repos") {
         const column = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND table_name='workspaces' AND column_name='agent_github_repos'", [schema])
         if (column.rows[0]?.count !== "1") throw new Error("Migration 105 postcondition failed: workspaces.agent_github_repos missing")
+      }
+
+      if (migration.name === "110_workspace_anthropic_api_key") {
+        const columns = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND table_name='workspaces' AND column_name IN ('anthropic_api_key_encrypted','anthropic_api_key_last4')", [schema])
+        if (columns.rows[0]?.count !== "2") throw new Error("Migration 110 postcondition failed: workspaces.anthropic_api_key_encrypted/anthropic_api_key_last4 missing")
       }
 
       // Only this distinct attempt becomes a successful receipt. A failed

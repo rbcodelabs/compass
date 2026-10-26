@@ -15,6 +15,8 @@ import { PortalSettingsPanel } from "@/components/settings/portal-settings-panel
 import { DeliveryLimitsPanel } from "@/components/settings/delivery-limits-panel";
 import { parseStoredRepos } from "@/lib/agent-github-repos";
 import { AgentGithubReposPanel } from "@/components/settings/agent-github-repos-panel";
+import { AnthropicKeyPanel } from "@/components/settings/anthropic-key-panel";
+import { readAnthropicKeyLast4 } from "@/lib/workspace-anthropic-key";
 import { WorkspaceBrandingPanel } from "@/components/settings/workspace-branding-panel";
 import { ThinkingModelPanel } from "@/components/settings/thinking-model-panel";
 import { inspectStoredLabels, resolveThinkingModel } from "@/lib/thinking-model/resolve";
@@ -438,6 +440,15 @@ export default async function SettingsPage({ params }: Props) {
       {/* Links to the Modules page. No switch here, so it cannot shift the positional switch indices the Portal specs rely on. */}
       <SettingsSection title="Modules" description="Turn product modules on or off for this workspace: research, voice, notifications, the marketing launch workflow and more. Workspace administrators only.">
         <Button variant="outline" render={<Link href={`/${orgSlug}/${workspaceSlug}/settings/modules`} />}>Manage modules</Button>
+      </SettingsSection>
+
+      <SettingsSection title="Anthropic API key" description="Use your own Anthropic account for this workspace's cloud agent. When set, agent runs use this key instead of the Compass platform key.">
+        <AnthropicKeyPanel
+          orgSlug={orgSlug}
+          workspaceSlug={workspaceSlug}
+          initialLast4={await readAnthropicKeyLast4(prisma, workspace.id)}
+          canEdit={canManageCapabilityPacks}
+        />
       </SettingsSection>
 
       <SettingsSection title="Agent GitHub access" description="Repositories agents in this workspace may push branches and open pull requests to. Agents get a short-lived token limited to exactly these repos.">
