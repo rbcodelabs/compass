@@ -87,7 +87,7 @@ console warning) instead of stopping the widget.
 | Attribute | Values | Default |
 | --- | --- | --- |
 | `data-compass-position` | `bottom-right`, `bottom-left`, `top-right`, `top-left`, `right`, `left` | `bottom-right` |
-| `data-compass-button` | `text`, `icon`, `tab` | `text` |
+| `data-compass-button` | `text`, `icon`, `tab`, `none` | `text` |
 | `data-compass-label` | Any text, up to 24 characters | `Feedback` |
 
 - **`text`** is the labelled pill.
@@ -97,12 +97,17 @@ console warning) instead of stopping the widget.
   takes its side from the position (`…-left` and `left` use the left edge,
   everything else the right) and its height from it too (`top-…` near the top,
   `bottom-…` near the bottom, `left` / `right` vertically centred).
+- **`none`** renders no button at all, for a page that opens the widget from
+  its own UI (see [Driving the widget from your own UI](#driving-the-widget-from-your-own-ui)).
+  The panel, element picking and pins work as usual, and the position still
+  decides which side the panel opens on.
 - **`right`** and **`left`** hug that screen edge, vertically centred. The
   corner positions sit 20px in from the corner.
 
 The feedback panel opens on the same side as the launcher, above or below a
 corner button and beside a tab or an edge-centred button, so it never covers
-the button that opened it.
+the button that opened it. With `none` there is no button, so the panel sits in
+that corner or edge itself.
 
 ```html
 <!-- A small icon in the top-left corner -->
@@ -118,6 +123,46 @@ the button that opened it.
         data-compass-button="tab"
         data-compass-label="Give feedback" defer></script>
 ```
+
+## Driving the widget from your own UI
+
+Set `data-compass-button="none"` and the widget shows no button of its own.
+Your page opens it instead, through `window.__compassFeedbackWidget`:
+
+```html
+<script src="https://your-compass-host/embed/widget.js"
+        data-compass-token="cmpfb_…"
+        data-compass-button="none"
+        data-compass-position="bottom-right" defer></script>
+
+<button id="feedback">Feedback <span id="feedback-count"></span></button>
+<script>
+  var widget = window.__compassFeedbackWidget;
+  document.getElementById("feedback").addEventListener("click", widget.toggle);
+  widget.on("count", function (detail) {
+    document.getElementById("feedback-count").textContent = detail.count || "";
+  });
+</script>
+```
+
+| Method | What it does |
+| --- | --- |
+| `open()` / `close()` / `toggle()` | Show or hide the feedback panel. |
+| `startPicking()` / `stopPicking()` | Enter or leave element-picking mode (the panel closes while picking and reopens once an element is chosen). |
+| `getState()` | Returns `{ mounted, open, picking, signedIn, count }`. `count` is the number of comments and replies on this page. |
+| `on(name, fn)` / `off(name, fn)` | Subscribe to or remove a listener for `open`, `close`, `count` or `identity`. `fn` receives the event detail, and `on` returns a function that unsubscribes. |
+| `identify(jwt)` | Existing Portal SSO sign-in, unchanged. |
+
+The same events fire on `window` as `compass-feedback:open`,
+`compass-feedback:close`, `compass-feedback:count` and
+`compass-feedback:identity`, so you can use `addEventListener` instead of `on`.
+Their `detail` is `{ open }`, `{ count }` or `{ signedIn }`. Events and
+`getState()` only ever carry counts and flags, never a token, a comment, or a
+name.
+
+These work with any button style, not only `none`. Calls made before the widget
+has finished loading are queued and run once it is ready, so a script that runs
+right after the tag does not need to wait.
 
 ## Who can comment
 
