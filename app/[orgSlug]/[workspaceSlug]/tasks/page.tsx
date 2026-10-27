@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { agentConversationLinkTitles } from "@/lib/agent-conversation-link-titles";
 import { commentLinkTitles } from "@/lib/comment-link-titles";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
@@ -39,6 +40,8 @@ interface TasksPageProps {
     view?: string;
     field?: string;
     fieldValue?: string;
+    /** "include" shows tasks the in-app agent created for its own plan (source AGENT), hidden by default. */
+    agentTasks?: string;
   }>;
 }
 
@@ -54,7 +57,9 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
     view: viewParam,
     field: fieldParam,
     fieldValue: fieldValueParam,
+    agentTasks: agentTasksParam,
   } = await searchParams;
+  const includeAgentTasks = agentTasksParam === "include";
   const view = viewParam === "list" ? "list" : "board";
   const prisma = getPrisma();
 
@@ -80,6 +85,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
     prisma.task.findMany({
       where: {
         workspaceId: workspace.id,
+        ...(includeAgentTasks ? {} : { source: { not: "AGENT" } }),
         ...(squadFilter ? { squadId: squadFilter } : {}),
         ...parseAssigneeFilter(assigneeFilter),
         ...(priorityFilter ? { priority: priorityFilter } : {}),
@@ -144,6 +150,10 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
   const titleById = new Map<string, string>();
   await Promise.all(
     Array.from(linksByType.entries()).map(async ([linkedType, ids]) => {
+      if (linkedType === "AGENT_CONVERSATION") {
+        for (const [key, title] of await agentConversationLinkTitles(workspace.id, ids)) titleById.set(key, title);
+        return;
+      }
       if (linkedType === "COMMENT") {
         for (const [key, title] of await commentLinkTitles(workspace.id, ids)) titleById.set(key, title);
         return;
@@ -209,6 +219,7 @@ export default async function TasksPage({ params, searchParams }: TasksPageProps
               priority: priorityFilter,
               field: customFieldFilter?.fieldId,
               fieldValue: fieldValueParam,
+              agentTasks: includeAgentTasks,
             })}
             initialTasks={tasks}
             workspaceId={workspace.id}

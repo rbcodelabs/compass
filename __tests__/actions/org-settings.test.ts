@@ -3,7 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const mockScoringModel = {
   create: vi.fn(),
   update: vi.fn(),
+  updateMany: vi.fn(),
   findUnique: vi.fn(),
+  findFirst: vi.fn(),
 };
 const mockScoringModelMetric = {
   createMany: vi.fn(),
@@ -76,8 +78,8 @@ beforeEach(() => {
   mockScoringModel.create.mockResolvedValue({ id: "model-1", version: 1 });
   mockScoringModelMetric.createMany.mockResolvedValue({ count: 2 });
   mockScoringModelMetric.deleteMany.mockResolvedValue({ count: 0 });
-  mockScoringModel.findUnique.mockResolvedValue({ formulaType: "WEIGHTED_SUM", version: 1 });
-  mockScoringModel.update.mockResolvedValue({ id: "model-1" });
+  mockScoringModel.findFirst.mockResolvedValue({ formulaType: "WEIGHTED_SUM", version: 1 });
+  mockScoringModel.updateMany.mockResolvedValue({ count: 1 });
   mockOrganization.findUnique.mockResolvedValue({ id: "org-1", name: "Acme" });
   mockWorkspace.findFirst.mockResolvedValue(null);
   mockWorkspace.create.mockResolvedValue({
@@ -464,11 +466,11 @@ describe("updateScoringModelDetails", () => {
     const result = await updateScoringModelDetails("org", "model-1", { name: "New name" });
 
     expect(result).toEqual({ ok: true });
-    expect(mockScoringModel.update).toHaveBeenCalledWith({
-      where: { id: "model-1" },
+    expect(mockScoringModel.updateMany).toHaveBeenCalledWith({
+      where: { id: "model-1", organizationId: "org-1" },
       data: { name: "New name", updatedAt: expect.any(Date) },
     });
-    const data = mockScoringModel.update.mock.calls[0][0].data;
+    const data = mockScoringModel.updateMany.mock.calls[0][0].data;
     expect(data.version).toBeUndefined();
   });
 
@@ -503,8 +505,8 @@ describe("updateScoringModelMetrics", () => {
         expect.objectContaining({ key: "effort", order: 1 }),
       ],
     });
-    expect(mockScoringModel.update).toHaveBeenCalledWith({
-      where: { id: "model-1" },
+    expect(mockScoringModel.updateMany).toHaveBeenCalledWith({
+      where: { id: "model-1", organizationId: "org-1" },
       data: { formulaType: "WEIGHTED_SUM", version: 2, updatedAt: expect.any(Date) },
     });
   });
@@ -519,7 +521,7 @@ describe("updateScoringModelMetrics", () => {
     });
 
     expect(result.ok).toBe(true);
-    const data = mockScoringModel.update.mock.calls[0][0].data;
+    const data = mockScoringModel.updateMany.mock.calls[0][0].data;
     expect(data.formulaType).toBe("MULTIPLICATIVE");
   });
 
@@ -551,7 +553,7 @@ describe("updateScoringModelMetrics", () => {
   });
 
   it("returns Scoring model not found when the model does not exist", async () => {
-    mockScoringModel.findUnique.mockResolvedValue(null);
+    mockScoringModel.findFirst.mockResolvedValue(null);
     await expect(
       updateScoringModelMetrics("org", "missing", { metrics: weightedSumMetrics })
     ).resolves.toEqual({ ok: false, error: "Scoring model not found" });
@@ -572,8 +574,8 @@ describe("archiveScoringModel", () => {
     const result = await archiveScoringModel("org", "model-1");
 
     expect(result).toEqual({ ok: true });
-    expect(mockScoringModel.update).toHaveBeenCalledWith({
-      where: { id: "model-1" },
+    expect(mockScoringModel.updateMany).toHaveBeenCalledWith({
+      where: { id: "model-1", organizationId: "org-1" },
       data: { status: "ARCHIVED", updatedAt: expect.any(Date) },
     });
   });
@@ -584,7 +586,7 @@ describe("archiveScoringModel", () => {
       ok: false,
       error: "You are not signed in.",
     });
-    expect(mockScoringModel.update).not.toHaveBeenCalled();
+    expect(mockScoringModel.updateMany).not.toHaveBeenCalled();
   });
 
   it("returns a clean error when the caller is not an org admin", async () => {

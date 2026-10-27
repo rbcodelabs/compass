@@ -100,7 +100,8 @@ import {
 import { collectFinalDocState, isValidDocName, type CollectedDocState } from "./docs-final-state.ts"
 import { DEFAULT_HEARTBEAT_MS, RunReporter } from "./run-reporter.ts"
 import { createHash, randomUUID } from "node:crypto"
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { basename } from "node:path"
 import { gunzipSync, gzipSync } from "node:zlib"
 
 const MCP_BASE_URL = process.env.MCP_BASE_URL
@@ -139,6 +140,62 @@ function requireEnv(name: string, value: string | undefined): string {
 let reporter: RunReporter | undefined
 /** Captured at module scope so the session upload can authenticate after the env scrub. */
 let runCallbackHeaders: Record<string, string> | undefined
+
+// ── Inline chat images ──────────────────────────────────────────────────────
+
+/** Mirrors DOC_IMAGE_MAX_BYTES in lib/doc-images.ts; the server re-validates. */
+const MAX_SHOW_IMAGE_BYTES = 10 * 1024 * 1024
+/** The in-process MCP server's name; connectors may not take it. */
+const SHOW_IMAGE_SERVER = "chat"
+
+const toolText = (text: string, isError = false) => ({ content: [{ type: "text" as const, text }], ...(isError ? { isError: true } : {}) })
+
+/**
+ * `show_image`: the only way a sandbox file reaches the user's chat.
+ *
+ * This runs in THIS process, not in the agent's Bash, because the upload needs the run
+ * bearer token — which is deliberately scrubbed from the environment the agent can see.
+ * The agent supplies a path and gets back a markdown image to paste into its reply; it
+ * never holds a credential, and the server decides what is actually a servable image
+ * (magic bytes, size, workspace) rather than trusting anything said here.
+ */
+function createShowImageServer(baseUrl: string) {
+  return createSdkMcpServer({
+    name: SHOW_IMAGE_SERVER,
+    version: "1.0.0",
+    tools: [
+      tool(
+        "show_image",
+        "Show an image file from the sandbox (for example a screenshot saved with `agent-browser screenshot`) " +
+          "to the user. Returns a markdown image; include it verbatim in your reply and the user sees the picture inline. " +
+          "PNG, JPEG, GIF or WebP, up to 10 MiB.",
+        { path: z.string().min(1).describe("Absolute or relative path of the image file in the sandbox") },
+        async ({ path }) => {
+          try {
+            if (!runCallbackHeaders || !AGENT_RUN_ID) return toolText("Showing images is not available in this run.", true)
+            const size = statSync(path).size
+            if (size < 1) return toolText("That file is empty.", true)
+            if (size > MAX_SHOW_IMAGE_BYTES) return toolText("That image is larger than 10 MiB; take a smaller screenshot.", true)
+            const bytes = readFileSync(path)
+            const url = new URL(`/api/internal/agent/runs/${AGENT_RUN_ID}/images`, baseUrl).toString()
+            const response = await fetch(url, {
+              method: "POST",
+              headers: { ...runCallbackHeaders, "content-type": "application/octet-stream", "x-agent-image-name": basename(path) },
+              body: new Uint8Array(bytes),
+            })
+            const body = (await response.json().catch(() => ({}))) as { markdown?: string; error?: string }
+            if (!response.ok || !body.markdown) {
+              return toolText(`Could not show the image: ${body.error ?? `HTTP ${response.status}`}`, true)
+            }
+            return toolText(`Image uploaded. Include this in your reply to show it:\n\n${body.markdown}`)
+          } catch (error) {
+            return toolText(`Could not show the image: ${error instanceof Error ? error.message : String(error)}`, true)
+          }
+        },
+      ),
+    ],
+  })
+}
 
 // ── Session transcript ──────────────────────────────────────────
 
@@ -267,6 +324,15 @@ async function publishSession(store: MemorySessionStore, requestedId: string, ba
 // ── Outbound MCP connectors (ADR-0018) ──────────────────────────────────────
 
 type ConnectorRef = { slug: string; displayName: string; guidance?: string }
+
+/**
+ * The plan is the Compass-backed mcp__compass__Task* tools (a conversation's tasks, read back by the chat), so the SDK's TodoWrite is not
+ * offered: two competing lists. Agent (Task in older SDKs; both listed, a name the SDK does not know is inert) delegates to a subagent (its
+ * events carry parent_tool_use_id, which lib/agent-run-stream.ts nests). Neither
+ * touches the filesystem or network itself; a subagent is expected to inherit this same
+ * `tools`/hook set, so it is no wider than the parent.
+ */
+const PLANNING_TOOLS = ["Agent", "Task"]
 
 /** The shape the Agent SDK's `mcpServers` map takes for an HTTP transport. */
 type McpHttpServer = {
@@ -500,6 +566,8 @@ async function main(): Promise<void> {
   // fall back to looking for a key we never set.
   if (process.env.CLAUDE_CODE_USE_BEDROCK === "1") {
     requireEnv("AWS_BEARER_TOKEN_BEDROCK", process.env.AWS_BEARER_TOKEN_BEDROCK)
+  } else if (process.env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
+    // Operator-only AGENT_MODEL_PROVIDER=claude-subscription: Compass forwards the token and no API key (lib/agent-model.ts).
   } else {
     requireEnv("ANTHROPIC_API_KEY", process.env.ANTHROPIC_API_KEY)
   }
@@ -550,7 +618,7 @@ async function main(): Promise<void> {
   const githubAccess = githubAccessFromEnv(process.env, docsRoot)
   if (githubAccess.enabled && docsSession && docsRoot) {
     try {
-      prepareBashJail({ docsRoot, note })
+      prepareBashJail({ docsRoot, note, npmToken: process.env.AGENT_SANDBOX_CLASS === "DEVELOPER" && Boolean(process.env.NPM_TOKEN?.trim()) })
       githubShell = true
       note(`shell enabled for ${githubAccess.repos.length} repository(ies)`)
     } catch (error) {
@@ -581,6 +649,8 @@ async function main(): Promise<void> {
       alwaysLoad: true,
     },
     ...(docsSession ? { docsfs: buildDocsFsServer(docsSession, deletedByAgent) } : {}),
+    // `chat` (show_image) only exists for a durable run: the upload needs the run bearer token.
+    ...(runCallbackHeaders ? { [SHOW_IMAGE_SERVER]: createShowImageServer(baseUrl) } : {}),
   }
   // Compass-hosted search. The name is reserved before connectors are
   // read so a connector slug cannot shadow it.
@@ -596,7 +666,7 @@ async function main(): Promise<void> {
   for (const connector of connectors) {
     // `compass` is this file's own entry, and shadowing it would silently
     // redirect the agent's entire tool catalog through the gateway.
-    if (Object.prototype.hasOwnProperty.call(mcpServers, connector.slug)) {
+    if (connector.slug === SHOW_IMAGE_SERVER || Object.prototype.hasOwnProperty.call(mcpServers, connector.slug)) {
       note(`ignoring connector "${connector.slug}": name is reserved`)
       continue
     }
@@ -651,7 +721,7 @@ async function main(): Promise<void> {
     // native access to the doc tree at `cwd`. Bash is omitted by default (see
     // buildDocsFsServer for why); it is added ONLY by agentTools(docs, githubShell) and only after the jail user was
     // proven (see above); its commands are rewritten to run as that user by the Bash hook.
-    tools: agentTools(Boolean(docsSession), githubShell),
+    tools: [...agentTools(Boolean(docsSession), githubShell), ...PLANNING_TOOLS],
     // Scopes the agent's native file tools to the materialized doc tree.
     ...(docsSession && docsRoot ? { cwd: docsRoot } : {}),
     // `cwd` alone confines nothing: under bypassPermissions Read/Write/Edit/Glob
@@ -679,7 +749,7 @@ async function main(): Promise<void> {
     // The model-facing CLI process does not need this script's own credentials
     // (the run callback token and the MCP bearer are used in-process only), so it
     // does not inherit them.
-    env: scrubbedAgentEnv(process.env, { github: githubShell }),
+    env: scrubbedAgentEnv(process.env, { github: githubShell, npm: githubShell && process.env.AGENT_SANDBOX_CLASS === "DEVELOPER" }),
     strictMcpConfig: true,
     settingSources: [],
     systemPrompt: effectiveSystemPrompt,
@@ -688,7 +758,9 @@ async function main(): Promise<void> {
     allowedTools: [
       "mcp__compass",
       "WebFetch",
+      ...PLANNING_TOOLS,
       "mcp__web_search",
+      ...(runCallbackHeaders ? [`mcp__${SHOW_IMAGE_SERVER}`] : []),
       ...(docsSession ? ["mcp__docsfs", "Read", "Write", "Edit", "Glob"] : []),
       ...(githubShell ? ["Bash"] : []),
       ...connectorToolPrefixes,
@@ -703,10 +775,16 @@ async function main(): Promise<void> {
     // §2.5), as do the docId-addressed edit_doc/edit_canvas/build_canvas_tree/
     // capture_canvas, which act on the saved doc directly.
     disallowedTools: [
+      // The SDK's own task tools would duplicate (and not persist like) the Compass-backed mcp__compass__TaskCreate/TaskUpdate/TaskList/TaskGet ones. (Keep any glob character out of this list's comments: agent-turn-entry-policy.test.ts scans from "allowedTools: [" for one.)
+      "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TodoWrite",
       "mcp__compass__delete_assumption",
       "mcp__compass__delete_solution_comment",
       ...(docsSession ? ["mcp__compass__write_doc", "mcp__compass__delete_doc", "mcp__compass__move_doc"] : []),
     ],
+    // One predicted next user prompt per turn, emitted after `result` as a
+    // `prompt_suggestion` message. It rides the normal AGENT_EVENT path to the
+    // client, which offers it as a tap-to-fill chip (never auto-sent).
+    promptSuggestions: true,
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     maxTurns: Number(process.env.AGENT_MAX_TURNS) || 30,

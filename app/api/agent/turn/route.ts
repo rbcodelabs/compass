@@ -37,14 +37,16 @@ import { randomUUID } from "node:crypto"
 import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
-import { resolveAgentModel } from "@/lib/agent-model"
+import { resolveWorkspaceAgentModel } from "@/lib/workspace-anthropic-key"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { resolveAgentPageContext } from "@/lib/agent-page-context"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { getGoldenSnapshotId } from "@/lib/agent-runtime-config"
+import { resolveRunSnapshot } from "@/lib/agent-sandbox-class"
 import { agentCapReachedBody, checkAgentRunCaps, checkAgentUsageLimit } from "@/lib/agent-limits"
 import { isMutationTool, bareToolName } from "@/lib/agent-mutations"
-import { bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
+import { acquireConversationSandbox, bootSandboxFromSnapshot } from "@/lib/agent-sandbox"
+import { AGENT_SANDBOX_IDLE_MS, agentSandboxReuseEnabled, sandboxNetworkProfile } from "@/lib/agent-sandbox-reuse"
 import { resolveGatewayCredential, resolveAgentHarness, agentModelForHarness } from "@/lib/agent-harness"
 import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity"
 import { effectiveTurnModel, parseRequestedTurnModel } from "@/lib/agent-turn-model"
@@ -53,7 +55,7 @@ import type { AgentRecord } from "@/lib/agent-ownership"
 import { mintAgentMcpKey, revokeAgentMcpKey } from "@/lib/agent-mcp-key"
 import { readWorkspaceAgentRepos } from "@/lib/agent-github-repos"
 import { mintAgentGithubEnv } from "@/lib/github-app-token"
-import { agentEgressPolicy, githubShellEnabled } from "@/lib/agent-github-access"
+import { agentEgressPolicy, developerNpmToken, githubShellEnabled } from "@/lib/agent-github-access"
 import { getCapabilityPackArtifactStorage } from "@/lib/artifact-storage"
 import { prepareCapabilityPacksForTurn, type ActiveCapabilityPack } from "@/lib/capability-pack-runtime"
 import { claimInterviewProcessing, DEFAULT_INTERVIEW_CLAIM_LEASE_MS, finishInterviewProcessing, failPendingInterviewProcessing, reportPmAgentFailure } from "@/lib/pm-agent-service"
@@ -66,10 +68,12 @@ import { listConnections } from "@/lib/mcp-connectors/vercel-connect"
 import {
   AgentRunError,
   DEFAULT_AGENT_RUN_BUDGET_MS,
+  agentConversationSandboxName,
   agentRunAttributionAvailable,
   agentRunsAvailable,
   attachAgentRunKey,
   createAgentRun,
+  findPreviousRunForSandboxReuse,
   finalizeAgentRun,
   markAgentRunStarted,
   type AgentRunKind,
@@ -280,7 +284,8 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Runtime prerequisites ──────────────────────────────────────────────────
-  const snapshotId = await getGoldenSnapshotId().catch(async error => {
+  let sandboxClass: "STANDARD" | "DEVELOPER" = "STANDARD"
+  let snapshotId = await getGoldenSnapshotId().catch(async error => {
     await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
     throw error
   })
@@ -299,7 +304,8 @@ export async function POST(request: NextRequest) {
   // forwarded into the sandbox as a credential and only fail after a sandbox boot
   // and an MCP key mint, as an opaque auth error. Reject it here, where it is free.
   const harness = resolveAgentHarness(process.env.AGENT_HARNESS)
-  const resolved = harness === "claude" ? resolveAgentModel() : null
+  // A workspace's own Anthropic key (BYOK, TASK-89) beats the platform key and forces the Anthropic provider; absent one, the platform resolution is unchanged.
+  const resolved = harness === "claude" ? await resolveWorkspaceAgentModel(prisma, workspaceId) : null
   if (resolved && !resolved.ok) {
     await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
     return new Response(resolved.message, { status: 500 })
@@ -347,6 +353,17 @@ export async function POST(request: NextRequest) {
       return Response.json(agentCapReachedBody(capped), { status: 429 })
     }
   }
+  // A named agent can run on the developer snapshot instead of the golden one (lib/agent-sandbox-class.ts). Refused, not downgraded.
+  if (runAgent) {
+    const picked = await resolveRunSnapshot(prisma, { workspaceId, agentId: runAgent.id })
+    if (!picked.ok) {
+      await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
+      return Response.json({ error: picked.message, code: picked.code }, { status: 503 })
+    }
+    snapshotId = picked.snapshotId
+    sandboxClass = picked.sandboxClass
+  }
+  const developer = { enabled: sandboxClass === "DEVELOPER", npmToken: developerNpmToken() }
   // Final now (a default agent may have yielded to the built-in one above): what the run really runs on, recorded on the run.
   const turnModel = effectiveTurnModel({ explicit: explicitModel, agentModel: runAgent?.model, harness: resolveAgentHarness(process.env.AGENT_HARNESS) })
   if (linkedConversation?.interviewProcessingJson && !explicitContinuation) {
@@ -541,12 +558,39 @@ export async function POST(request: NextRequest) {
       // Bash + GitHub only when the docs tree will be materialized (same condition as docMaterial below). It comes with an
       // egress allowlist set at creation, so there is never a moment where the shell can run with open egress.
       const githubShell = githubShellEnabled({ githubEnv, harness, docs: !scope && harness !== "opencode" })
-      const sandbox = await bootSandboxFromSnapshot(snapshotId, {
-        timeoutMs: budgetMs + 2 * RUN_INFRA_GRACE_MS,
-        name: sandboxName,
-        tags: { runId: run.id, workspaceId },
-        ...(githubShell ? { networkPolicy: agentEgressPolicy({ mcpBaseUrl, model: resolved?.ok ? resolved : undefined }) } : {}),
-      })
+      const networkPolicy = githubShell ? agentEgressPolicy({ mcpBaseUrl, model: resolved?.ok ? resolved : undefined, developer: developer.enabled }) : undefined
+      // Interactive chat turns of the claude harness share one sandbox per conversation (kill switch AGENT_SANDBOX_REUSE=0).
+      // Everything else keeps its own sandbox named for the run. DEVELOPER-class agents reuse too (their clones and
+      // node_modules are the point), but under their own name so a persisted disk is never resumed under a different class
+      // (different snapshot, egress policy, npm token).
+      const reuseSandbox = agentSandboxReuseEnabled() && kind === "CHAT" && harness === "claude" && !scope
+      const runSandboxName = reuseSandbox ? agentConversationSandboxName(conversationIdResolved, { developer: developer.enabled }) : sandboxName
+      let sandbox: Awaited<ReturnType<typeof bootSandboxFromSnapshot>>
+      if (!reuseSandbox) {
+        sandbox = await bootSandboxFromSnapshot(snapshotId, {
+          timeoutMs: budgetMs + 2 * RUN_INFRA_GRACE_MS,
+          name: sandboxName,
+          tags: { runId: run.id, workspaceId },
+          ...(networkPolicy ? { networkPolicy } : {}),
+        })
+      } else {
+        // The run must name the sandbox before it exists, so finalize and the sweeper can reach it even if this
+        // request dies mid-boot (they derive the per-run name otherwise).
+        await prisma.agentRun.updateMany({ where: { id: run.id, status: "QUEUED" }, data: { sandboxName: runSandboxName } })
+        const previous = await findPreviousRunForSandboxReuse(prisma, conversationIdResolved, run.id)
+        const requiredMs = budgetMs + 2 * RUN_INFRA_GRACE_MS
+        const profile = sandboxNetworkProfile(networkPolicy)
+        const acquired = await acquireConversationSandbox({
+          name: runSandboxName,
+          snapshotId,
+          profile,
+          previous,
+          requiredMs,
+          // A cold boot also has to outlive the idle window the next turn may reuse it in.
+          boot: { timeoutMs: requiredMs + AGENT_SANDBOX_IDLE_MS, tags: { runId: run.id, workspaceId, snapshotId, profile }, ...(networkPolicy ? { networkPolicy } : {}) },
+        })
+        sandbox = acquired.sandbox
+      }
       // ADR 0019: materialize the doc tree and hand the sandbox a host-signed
       // manifest of what it was shown. This request will be gone before the agent
       // finishes, so the manifest is what lets the sandbox's own post-turn call to
@@ -592,13 +636,14 @@ export async function POST(request: NextRequest) {
           agent: runAgent ? { name: runAgent.name, instructions: runAgent.instructions ?? null, model: agentModelForHarness(runAgent.model, harness) } : undefined,
           modelOverride: explicitModel,
           githubEnv,
+          developer,
         }),
         detached: true,
         timeoutMs: budgetMs,
       })
       // QUEUED → RUNNING only now: before this, there was nothing to revoke or
       // stop, and a run that dies short of here is collected off `statusChangedAt`.
-      await markAgentRunStarted({ prisma, runId: run.id, apiKeyId, sandboxName })
+      await markAgentRunStarted({ prisma, runId: run.id, apiKeyId, sandboxName: runSandboxName })
     } catch (error) {
       console.error("[agent-turn] detached run failed to start", { runId: run.id, error })
       // `apiKeyId` is not on the row yet, so finalize's own revocation cannot see
@@ -660,7 +705,7 @@ export async function POST(request: NextRequest) {
         packProvenance = preparedPacks.provenanceJson
         sse("status", { phase: "booting", conversationId: conversationIdResolved })
         const githubShell = githubShellEnabled({ githubEnv, harness, docs: !scope && harness !== "opencode" })
-        sandbox = await analysisStep(() => bootSandboxFromSnapshot(snapshotId, githubShell ? { networkPolicy: agentEgressPolicy({ mcpBaseUrl, model: resolved?.ok ? resolved : undefined }) } : undefined), deadline, abort, async late => { await analysisStep(() => late.stop(), Date.now() + 5_000, new AbortController()) })
+        sandbox = await analysisStep(() => bootSandboxFromSnapshot(snapshotId, githubShell ? { networkPolicy: agentEgressPolicy({ mcpBaseUrl, model: resolved?.ok ? resolved : undefined, developer: developer.enabled }) } : undefined), deadline, abort, async late => { await analysisStep(() => late.stop(), Date.now() + 5_000, new AbortController()) })
 
         // ADR 0019 §2.4: read the doc tree's current state BEFORE writing
         // anything into the sandbox, so the baseline this turn reconciles
@@ -698,6 +743,7 @@ export async function POST(request: NextRequest) {
             docs: Boolean(docMaterial),
             modelOverride: explicitModel,
             githubEnv,
+            developer,
           }),
           detached: true,
           timeoutMs: 4 * 60_000,

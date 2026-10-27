@@ -329,16 +329,18 @@ export async function updateScoringModelDetails(
   input: { name?: string; description?: string }
 ): Promise<ScoringModelMutationResult> {
   try {
-    const { prisma } = await resolveOrgAdmin(orgSlug);
+    const { prisma, organizationId } = await resolveOrgAdmin(orgSlug);
 
-    await prisma.scoringModel.update({
-      where: { id: scoringModelId },
+    // Tenant filter on the write itself: the caller is an admin of THIS org only.
+    const updated = await prisma.scoringModel.updateMany({
+      where: { id: scoringModelId, organizationId },
       data: {
         ...(input.name !== undefined && { name: input.name }),
         ...(input.description !== undefined && { description: input.description }),
         updatedAt: new Date(),
       },
     });
+    if (updated.count !== 1) return { ok: false, error: "Scoring model not found" };
 
     revalidatePath(`/${orgSlug}/settings`);
     return { ok: true };
@@ -363,10 +365,12 @@ export async function updateScoringModelMetrics(
   input: { formulaType?: ScoringFormulaType; metrics: ScoringMetricInput[] }
 ): Promise<ScoringModelMutationResult> {
   try {
-    const { prisma } = await resolveOrgAdmin(orgSlug);
+    const { prisma, organizationId } = await resolveOrgAdmin(orgSlug);
 
-    const existing = await prisma.scoringModel.findUnique({
-      where: { id: scoringModelId },
+    // Scoped to the caller's org, so a foreign id fails closed before the
+    // destructive metric delete below.
+    const existing = await prisma.scoringModel.findFirst({
+      where: { id: scoringModelId, organizationId },
       select: { formulaType: true, version: true },
     });
     if (!existing) return { ok: false, error: "Scoring model not found" };
@@ -398,14 +402,15 @@ export async function updateScoringModelMetrics(
       });
     }
 
-    await prisma.scoringModel.update({
-      where: { id: scoringModelId },
+    const updated = await prisma.scoringModel.updateMany({
+      where: { id: scoringModelId, organizationId },
       data: {
         formulaType,
         version: existing.version + 1,
         updatedAt: new Date(),
       },
     });
+    if (updated.count !== 1) return { ok: false, error: "Scoring model not found" };
 
     revalidatePath(`/${orgSlug}/settings`);
     return { ok: true };
@@ -425,12 +430,13 @@ export async function archiveScoringModel(
   scoringModelId: string
 ): Promise<ScoringModelMutationResult> {
   try {
-    const { prisma } = await resolveOrgAdmin(orgSlug);
+    const { prisma, organizationId } = await resolveOrgAdmin(orgSlug);
 
-    await prisma.scoringModel.update({
-      where: { id: scoringModelId },
+    const archived = await prisma.scoringModel.updateMany({
+      where: { id: scoringModelId, organizationId },
       data: { status: "ARCHIVED", updatedAt: new Date() },
     });
+    if (archived.count !== 1) return { ok: false, error: "Scoring model not found" };
 
     revalidatePath(`/${orgSlug}/settings`);
     return { ok: true };

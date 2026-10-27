@@ -1,7 +1,7 @@
 /** Auditable MCP → REST ledger. It documents parity but never drives routing. */
 export const MCP_PARITY_CATALOG = {
-  toolCount: 199,
-  sortedToolNamesSha256: "dfa573de084c8480e6a007735c0bb37c604fcbcb5a79221203a850665f2862fd",
+  toolCount: 210,
+  sortedToolNamesSha256: "301882f685d43a66a2c76d5cb5a2ac763eddd8bcd7c5c08145cb0202a005df95",
 } as const
 
 export type McpRestParityDisposition =
@@ -14,7 +14,14 @@ const direct = (operationId: string): McpRestParityDisposition => ({ kind: "dire
 const composition = (operationIds: readonly string[], rationale: string): McpRestParityDisposition => ({ kind: "composition", operationIds, documentationAnchor: docs, rationale })
 const excluded = (category: "human-governance" | "execution-boundary" | "model-orchestration" | "transport-convenience", restAlternative: string, rationale: string): McpRestParityDisposition => ({ kind: "excluded", category, documentationAnchor: docs, restAlternative, rationale })
 
+const slackExcluded = excluded("execution-boundary", "None; read Slack directly, or ask an agent that has the MCP slack_* tools.", "These tools act through the deployment's single Slack bot credential (Vercel Connect), scoped by Slack channel invitation rather than Compass resources; REST exposes only Compass resources and has no per-caller Slack authorization to offer.")
+const agentTaskExcluded = excluded("execution-boundary", "create_task, update_task, list_tasks and get_task operate on the team task board over REST.", "The agent's own conversation-scoped plan list, registered only for agent turns and resolved from the turn key's live agent run; a stateless REST client has no agent conversation.")
+
 export const MCP_REST_PARITY_MANIFEST = {
+  TaskCreate: agentTaskExcluded,
+  TaskGet: agentTaskExcluded,
+  TaskList: agentTaskExcluded,
+  TaskUpdate: agentTaskExcluded,
   activate_research_study: direct("activateResearchStudy"),
   add_assumption: direct("createAssumption"),
   add_comment: direct("createComment"),
@@ -33,6 +40,9 @@ export const MCP_REST_PARITY_MANIFEST = {
   archive_research_study: direct("archiveResearchStudy"),
   archive_scoring_model: direct("archiveScoringModel"),
   assign_squad: composition(["updateOpportunity", "updateExperiment", "updateRoadmapItem", "updateObjective", "updateTask"], "Assign through the PATCH operation for the selected resource type; no polymorphic RPC endpoint is needed."),
+  ui_navigate: excluded("execution-boundary", "Read the resource the user is viewing through its REST operation; screen control exists only inside the browser session.", "Acts on the calling user's own opted-in browser tab through a live SSE session; there is no REST resource to read or write, and a stateless REST client has no tab to drive."),
+  ui_screenshot: excluded("execution-boundary", "Read the resource the user is viewing through its REST operation; screen control exists only inside the browser session.", "Acts on the calling user's own opted-in browser tab through a live SSE session; there is no REST resource to read or write, and a stateless REST client has no tab to drive."),
+  ui_get_state: excluded("execution-boundary", "Read the resource the user is viewing through its REST operation; screen control exists only inside the browser session.", "Acts on the calling user's own opted-in browser tab through a live SSE session; there is no REST resource to read or write, and a stateless REST client has no tab to drive."),
   capture_screenshot: excluded("execution-boundary", "Read the artifact resource; its stored thumbnail is captured server-side.", "Screenshot capture boots a Vercel Sandbox and renders a stored artifact revision in headless Chromium; that is an execution boundary REST must not expose as an ordinary resource mutation."),
   build_canvas_tree: composition(["getDoc", "updateDoc"], "Server-side OST-to-Canvas layout is an MCP convenience; over REST read the canvas, merge the tree client-side and write it back with updateDoc and expectedRevision."),
   capture_canvas: excluded("execution-boundary", "Read the canvas doc through getDoc; the JSON Canvas content is the source of truth.", "Rendering a canvas boots a Vercel Sandbox and rasterizes it in headless Chromium; that is an execution boundary REST must not expose as an ordinary resource read, and the result is an image, not a REST resource."),
@@ -176,6 +186,10 @@ export const MCP_REST_PARITY_MANIFEST = {
   score_opportunity: direct("scoreOpportunity"),
   score_solution: direct("scoreSolution"),
   search_help: direct("searchHelp"),
+  slack_list_channels: slackExcluded,
+  slack_read_channel: slackExcluded,
+  slack_read_thread: slackExcluded,
+  slack_search_users: slackExcluded,
   set_card_sort_round_state: composition(["revealCardSortRound", "closeCardSortRound"], "Use the explicit irreversible reveal or close action; REST has no generic state PATCH or unreveal operation."),
   set_custom_field_value: direct("setCustomFieldValue"),
   set_launch_tier: direct("setLaunchTier"),

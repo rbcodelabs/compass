@@ -10,8 +10,13 @@ const mockSolutionComment = {
   update: vi.fn(),
 };
 
+// Membership is checked by the real requireProductEntity against this fake; the
+// cross-tenant matrix lives in server-action-tenant-authz.test.ts.
+const mockSolution = { findFirst: vi.fn() };
+
 const mockPrisma = {
   solutionComment: mockSolutionComment,
+  solution: mockSolution,
 };
 
 vi.mock("@/lib/db", () => ({
@@ -45,9 +50,11 @@ const PATH = "/org/ws/discovery/opp-1";
 beforeEach(() => {
   vi.clearAllMocks();
   mockAuth.mockResolvedValue({ user: { id: "user-1" } } as ReturnType<typeof auth> extends Promise<infer T> ? T : never);
+  mockSolution.findFirst.mockResolvedValue({ workspaceId: "ws-1" });
   mockSolutionComment.findUnique.mockResolvedValue({
     id: COMMENT_ID,
     commentType: "PLAN",
+    solutionId: "sol-1",
   });
   mockSolutionComment.update.mockImplementation(({ where, data }) =>
     Promise.resolve({ id: where.id, commentType: "PLAN", ...data })
@@ -73,6 +80,7 @@ describe("approveSolutionPlan", () => {
     mockSolutionComment.findUnique.mockResolvedValueOnce({
       id: COMMENT_ID,
       commentType: "COMMENT",
+      solutionId: "sol-1",
     });
 
     await expect(approveSolutionPlan(COMMENT_ID, PATH)).rejects.toThrow(
@@ -85,7 +93,7 @@ describe("approveSolutionPlan", () => {
     await approveSolutionPlan(COMMENT_ID, PATH);
 
     expect(mockSolutionComment.update).toHaveBeenCalledWith({
-      where: { id: COMMENT_ID },
+      where: { id: COMMENT_ID, solution: { workspaceId: "ws-1" } },
       data: { planStatus: "APPROVED", updatedAt: expect.any(Date) },
     });
     expect(revalidatePath).toHaveBeenCalledWith(PATH);
@@ -111,6 +119,7 @@ describe("rejectSolutionPlan", () => {
     mockSolutionComment.findUnique.mockResolvedValueOnce({
       id: COMMENT_ID,
       commentType: "COMMENT",
+      solutionId: "sol-1",
     });
 
     await expect(rejectSolutionPlan(COMMENT_ID, PATH)).rejects.toThrow(
@@ -123,7 +132,7 @@ describe("rejectSolutionPlan", () => {
     await rejectSolutionPlan(COMMENT_ID, PATH);
 
     expect(mockSolutionComment.update).toHaveBeenCalledWith({
-      where: { id: COMMENT_ID },
+      where: { id: COMMENT_ID, solution: { workspaceId: "ws-1" } },
       data: { planStatus: "REJECTED", updatedAt: expect.any(Date) },
     });
     expect(revalidatePath).toHaveBeenCalledWith(PATH);

@@ -88,6 +88,8 @@ function stream(lines: string[], exitCode = 0) {
 }
 
 beforeEach(() => {
+  // These tests are about the per-run sandbox (the reuse kill switch restores exactly that); conversation-sandbox reuse is covered in agent-sandbox-reuse.test.ts.
+  process.env.AGENT_SANDBOX_REUSE = "0"
   vi.clearAllMocks()
   process.env.ANTHROPIC_API_KEY = "sk-ant-test"
   delete process.env.AGENT_MODEL_PROVIDER

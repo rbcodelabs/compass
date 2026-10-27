@@ -71,6 +71,7 @@ describe("GET /api/connectors", () => {
     expect(body.available).toBe(true)
     expect(body.connectors).toEqual([
       expect.objectContaining({ slug: "v0", connected: true, serverUrl: "https://v0.app/api/mcp", configured: true }),
+      expect.objectContaining({ slug: "vercel", connected: false, serverUrl: "https://mcp.vercel.com" }),
       expect.objectContaining({ slug: "google-drive", connected: false }),
     ])
     // A preview deployment must not report a production grant: that registration

@@ -217,6 +217,7 @@ describe("card edits and Remove inside the doc editor", () => {
     const patch = vi.fn<PatchRecordField>(async (_t, _i, _f, value) => { title = value })
     const editor = await mount({ content: withCards, specScopes: [SOLUTION_SCOPE], patchRecordField: patch })
     const before = markdownOf(editor)
+    fireEvent.click(await screen.findByTestId("embed-card-toggle"))
     fireEvent.click(await screen.findByRole("button", { name: "Rename Live title" }))
     fireEvent.change(screen.getByTestId("embed-title-input"), { target: { value: "Renamed live" } })
     fireEvent.keyDown(screen.getByTestId("embed-title-input"), { key: "Enter" })
@@ -256,8 +257,9 @@ describe("card edits and Remove inside the doc editor", () => {
     await mount({ content: withCards, specScopes: [SOLUTION_SCOPE], readOnly: true })
     await screen.findByRole("group", { name: "Solution: Live title" })
     await screen.findByText("Record unavailable")
+    for (const toggle of screen.getAllByTestId("embed-card-toggle")) fireEvent.click(toggle)
     for (const wrapper of document.querySelectorAll("[data-compass-embed]")) {
-      expect(within(wrapper as HTMLElement).queryByRole("button")).toBeNull()
+      expect(within(wrapper as HTMLElement).queryAllByRole("button").filter((b) => b.getAttribute("data-testid") !== "embed-card-toggle")).toHaveLength(0)
       expect(wrapper.querySelector("select,input")).toBeNull()
     }
   })

@@ -33,11 +33,10 @@ import { NextRequest, NextResponse } from "next/server";
 import getPrisma from "@/lib/db";
 import { deleteLinksForEntity } from "@/lib/links/service";
 import { drainAfterParentDelete } from "@/lib/typed-links";
+import { secretMatches } from "@/lib/secret-compare";
 
 function checkAuth(req: NextRequest): boolean {
-  const secret = process.env.MIGRATION_SECRET;
-  if (!secret) return false;
-  return req.headers.get("x-migration-secret") === secret;
+  return secretMatches(req.headers.get("x-migration-secret"), process.env.MIGRATION_SECRET);
 }
 
 export async function POST(req: NextRequest) {

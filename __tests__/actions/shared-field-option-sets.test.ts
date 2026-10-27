@@ -12,6 +12,7 @@ const mockCustomFieldDefinition = {
   count: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
+  updateMany: vi.fn(),
   delete: vi.fn(),
   findFirst: vi.fn(),
   findMany: vi.fn(),
@@ -55,7 +56,7 @@ beforeEach(() => {
   });
   mockCustomFieldDefinition.count.mockResolvedValue(0);
   mockCustomFieldDefinition.create.mockResolvedValue({ id: "field-1" });
-  mockCustomFieldDefinition.update.mockResolvedValue({ id: "field-1" });
+  mockCustomFieldDefinition.updateMany.mockResolvedValue({ count: 1 });
   mockCustomFieldDefinition.findMany.mockResolvedValue([]);
   mockCustomFieldDefinition.findFirst.mockResolvedValue({
     id: "field-1",
@@ -152,7 +153,7 @@ describe("deleteSharedFieldOptionSet", () => {
   it("never cascades a null into referencing field definitions", async () => {
     mockCustomFieldDefinition.count.mockResolvedValue(2);
     await deleteSharedFieldOptionSet("org", "ws", "set-1");
-    expect(mockCustomFieldDefinition.update).not.toHaveBeenCalled();
+    expect(mockCustomFieldDefinition.updateMany).not.toHaveBeenCalled();
     expect(mockSharedFieldOptionSet.delete).not.toHaveBeenCalled();
   });
 
@@ -208,7 +209,7 @@ describe("updateFieldDefinition attach / detach", () => {
   it("attaching clears the local options so the two can never disagree", async () => {
     await updateFieldDefinition("org", "ws", "field-1", { sharedOptionSetId: "set-1" });
 
-    const data = mockCustomFieldDefinition.update.mock.calls[0][0].data;
+    const data = mockCustomFieldDefinition.updateMany.mock.calls[0][0].data;
     expect(data.sharedOptionSetId).toBe("set-1");
     expect(Array.isArray(data.options)).toBe(false);
   });
@@ -232,7 +233,7 @@ describe("updateFieldDefinition attach / detach", () => {
 
     await updateFieldDefinition("org", "ws", "field-1", { sharedOptionSetId: null });
 
-    const data = mockCustomFieldDefinition.update.mock.calls[0][0].data;
+    const data = mockCustomFieldDefinition.updateMany.mock.calls[0][0].data;
     expect(data.sharedOptionSetId).toBeNull();
     expect(data.options).toEqual([
       { label: "Payments", value: "payments" },
@@ -249,10 +250,10 @@ describe("updateFieldDefinition attach / detach", () => {
       sharedOptionSetId: "set-1",
       sharedOptionSet: { id: "set-1", name: "Product Area", options: [] },
     });
-    mockCustomFieldDefinition.update.mockClear();
+    mockCustomFieldDefinition.updateMany.mockClear();
 
     await updateFieldDefinition("org", "ws", "field-1", { sharedOptionSetId: null });
-    const data = mockCustomFieldDefinition.update.mock.calls[0][0].data;
+    const data = mockCustomFieldDefinition.updateMany.mock.calls[0][0].data;
     // An empty shared set legitimately copies down as an empty local list, but
     // the detach must not silently discard a non-empty one — covered above.
     expect(data.options).toEqual([]);
@@ -261,7 +262,7 @@ describe("updateFieldDefinition attach / detach", () => {
 
   it("leaves the shared link alone when the caller does not mention it", async () => {
     await updateFieldDefinition("org", "ws", "field-1", { name: "Renamed" });
-    const data = mockCustomFieldDefinition.update.mock.calls[0][0].data;
+    const data = mockCustomFieldDefinition.updateMany.mock.calls[0][0].data;
     expect(data).not.toHaveProperty("sharedOptionSetId");
     expect(data.name).toBe("Renamed");
   });
@@ -306,6 +307,6 @@ describe("option lists sent by the option-list editor", () => {
 
   it("updateFieldDefinition normalizes local options instead of storing them raw", async () => {
     await updateFieldDefinition("org", "ws", "field-1", { options: edited });
-    expect(mockCustomFieldDefinition.update.mock.calls[0][0].data.options).toEqual(expected);
+    expect(mockCustomFieldDefinition.updateMany.mock.calls[0][0].data.options).toEqual(expected);
   });
 });

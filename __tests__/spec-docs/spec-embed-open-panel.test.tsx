@@ -32,9 +32,9 @@ const entry = (kind: DocEmbedKind): EmbedEntry =>
 const EDIT: CardEditControls = { statuses: ["IDEA", "BUILDING"], save: vi.fn(async () => {}) }
 
 function mount(kind: DocEmbedKind, { provider = true, edit = null }: { provider?: boolean; edit?: CardEditControls | null } = {}) {
-  const card = <SpecEmbedCard kind={kind} entry={entry(kind)} edit={edit} onRemove={edit ? () => {} : null} />
+  const card = <SpecEmbedCard kind={kind} entry={entry(kind)} edit={edit} onRemove={edit ? () => {} : null} defaultExpanded />
   render(provider ? <PanelProvider orgSlug="acme" workspaceSlug="alpha">{card}</PanelProvider> : card)
-  return screen.getByRole("link", { name: "Live title" })
+  return screen.getByRole("link", { name: "Open Live title" })
 }
 
 /** Dispatches a click and reports whether anything called preventDefault on it (which is what stops a link navigating). */

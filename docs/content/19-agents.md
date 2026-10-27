@@ -262,6 +262,15 @@ For task creation or reassignment, use:
 Use `"USER"` for a person or `"assignee": null` to clear the assignment.
 Do not send both `assignee` and the legacy `assigneeUserId` field.
 
+## Bring your own Anthropic API key
+
+A workspace administrator can make the in-app agent run on their own Anthropic account in **Settings -> Anthropic API key**. Paste an Anthropic API key (it starts with `sk-ant-api`). While one is set, every agent run in that workspace uses it instead of the Compass platform key, and usage is billed to your Anthropic account. Remove it to go back to the platform key.
+
+- The key is stored encrypted and is never shown again; Settings shows only its last four characters. Only workspace administrators (and organization admins) can set, replace or remove it.
+- Claude subscription tokens (`sk-ant-oat...`) are not accepted. Anthropic's terms do not allow them to be used this way.
+- If a stored key cannot be decrypted, runs in that workspace are refused rather than silently falling back to the platform key; set the key again in Settings.
+- Requires the database update `110_workspace_anthropic_api_key`.
+
 ## GitHub access
 
 By default the in-app agent has no shell and cannot reach GitHub. A workspace administrator can change that in **Settings -> Agent GitHub access** by listing the repositories (owner/name, all under one GitHub owner, at most 10) that the Compass GitHub App is installed on.

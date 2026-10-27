@@ -43,14 +43,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import getPrisma from "@/lib/db"
 import { normalizeMemberRoles } from "@/lib/normalize-member-roles"
+import { secretMatches } from "@/lib/secret-compare"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
 function checkAuth(req: NextRequest): boolean {
-  const secret = process.env.MIGRATION_SECRET
-  if (!secret) return false
-  return req.headers.get("x-migration-secret") === secret
+  return secretMatches(req.headers.get("x-migration-secret"), process.env.MIGRATION_SECRET)
 }
 
 /** POST body: { dryRun?: boolean } — omitted or unparseable means dryRun: true. */

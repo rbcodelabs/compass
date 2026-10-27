@@ -184,6 +184,11 @@ export const TOOL_GATES: Record<string, Gate> = {
   get_pm_interview: async () => {},
   update_experiment: async (a, x) => void (await assertEntityAccess(a, "experiment", x.experimentId)),
   get_current_identity: async () => {},
+  // Agent task list: no workspace/task args to gate on. The handlers resolve the conversation from the turn key and only touch tasks linked to it.
+  TaskCreate: async () => {},
+  TaskUpdate: async () => {},
+  TaskList: async () => {},
+  TaskGet: async () => {},
   list_task_assignees: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   generate_research_guide: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   create_research_study: (a, x) => assertWorkspaceMember(a, x.workspaceId),
@@ -240,6 +245,11 @@ export const TOOL_GATES: Record<string, Gate> = {
   update_workspace_module: async (a, x) => void (await assertWorkspaceAdmin(a, x.workspaceId)),
   // Workspace ---------------------------------------------------------------
   get_workspace_summary: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  // UI control: acts on the caller's own opted-in tab; membership of
+  // the workspace is the gate, the per-session opt-in is the consent.
+  ui_navigate: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  ui_screenshot: (a, x) => assertWorkspaceMember(a, x.workspaceId),
+  ui_get_state: (a, x) => assertWorkspaceMember(a, x.workspaceId),
   // list_workspaces additionally filters its results to the caller's
   // memberships in the handler; org membership is the gate.
   list_workspaces: async (a, x) => void (await assertOrgMemberBySlug(a, x.orgSlug)),
@@ -576,6 +586,22 @@ export const TOOL_GATES: Record<string, Gate> = {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   get_help: async (_a, _x) => {},
 
+  // Slack (read-only) ------------------------------------------------------
+  // Not workspace- or org-scoped: these read Slack through the Compass bot's
+  // Vercel Connect credential, and Slack itself limits that bot to channels it
+  // has been invited to -- that invitation is the access boundary. Any
+  // authenticated caller (already established by validateMcpAuth) may use them;
+  // they are READ-only in every capability map below. Explicit no-op entries so
+  // the fail-closed completeness check passes deliberately.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  slack_list_channels: async (_a, _x) => {},
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  slack_read_channel: async (_a, _x) => {},
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  slack_read_thread: async (_a, _x) => {},
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  slack_search_users: async (_a, _x) => {},
+
   // Scoring models (org-scoped) ---------------------------------------------
   list_scoring_models: async (a, x) => void (await assertOrgMemberBySlug(a, x.orgSlug)),
   get_scoring_model: async (a, x) => void (await assertScoringModelAccess(a, x.scoringModelId)),
@@ -634,7 +660,7 @@ const READ_TOOLS = [
   "list_card_sort_factors", "list_card_sort_rounds", "get_card_sort_proposals",
   "get_card_sort_board", "get_card_sort_tally",
   "list_analytics_connections", "list_metrics", "get_metric", "list_metric_bindings", "get_metric_binding", "list_metric_observations", "get_metric_observation",
-  "get_artifact", "get_comment", "get_current_identity", "get_custom_field_values",
+  "get_artifact", "get_comment", "get_current_identity", "TaskList", "TaskGet", "get_custom_field_values",
   "get_decision", "capture_canvas", "get_experiment",
   "get_feedback_item", "get_help", "get_launch_checklist", "get_okr_cycle", "get_opportunity",
   "get_opportunity_score", "get_pm_interview", "get_research_session", "get_research_study",
@@ -653,6 +679,7 @@ const READ_TOOLS = [
   "list_specs",
   "get_spec",
   "list_workspace_modules",
+  "slack_list_channels", "slack_read_channel", "slack_read_thread", "slack_search_users",
 ] as const
 
 /**
@@ -683,6 +710,7 @@ const WRITE_TOOLS = [
   "conclude_experiment", "create_artifact", "create_checklist_template",
   "create_experiment", "create_feedback", "create_feedback_source", "update_feedback_source", "create_objective",
   "create_okr_cycle", "create_opportunity", "create_opportunities", "create_solutions", "create_research_study", "create_scoring_model",
+  "TaskCreate", "TaskUpdate",
   "create_squad", "create_task", "create_workspace", "delete_assumption", "delete_comment",
   "delete_doc", "delete_key_result", "delete_objective", "delete_solution_comment",
   "generate_research_guide", "generate_research_synthesis", "issue_research_link",
@@ -708,6 +736,9 @@ const WRITE_TOOLS = [
   "update_solution_status", "update_squad", "update_task", "write_doc",
   // Following changes the caller's own follow rows and read state only.
   "follow", "unfollow", "mark_read",
+  // Even the observers need write scope: a screenshot exposes whatever
+  // the user has on screen, which a read-only token was never granted.
+  "ui_navigate", "ui_screenshot", "ui_get_state",
 ] as const
 
 export type ToolScope = typeof SCOPE_MCP_READ | typeof SCOPE_MCP_WRITE
@@ -746,6 +777,8 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ...["list_analytics_connections", "list_metrics", "get_metric", "list_metric_bindings", "get_metric_binding", "list_metric_observations", "get_metric_observation"].map(name => [name, "READ"]),
   ...["create_metric", "update_metric", "archive_metric", "link_metric", "update_metric_binding", "unlink_metric", "refresh_metric_binding"].map(name => [name, "WRITE"]),
   ["get_pm_interview", "READ"],
+  // Observing the screen is READ; moving the user is WRITE.
+  ["ui_get_state", "READ"], ["ui_screenshot", "READ"], ["ui_navigate", "WRITE"],
   ["update_experiment", "WRITE"],
   // Research tools reviewed 2026-09-13. Reads return only publicMetadata()
   // (id, workspaceId, name, goal, studyType, guide, targetMinutes, appUrl,
@@ -791,11 +824,11 @@ export const AGENT_TOOL_POLICY: Record<string, "READ" | "WRITE" | "DENY"> = Obje
   ...["generate_research_guide", "create_research_study", "update_research_study", "generate_research_synthesis", "promote_research_finding_to_evidence"].map(name => [name, "WRITE"]),
   ...["activate_research_study", "close_research_study", "archive_research_study", "issue_research_link", "rotate_research_link", "revoke_research_links"].map(name => [name, "DENY"]),
   ...[
-    "get_current_identity", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_doc_history", "capture_canvas", "list_doc_comments", "list_artifacts", "get_artifact", "search_help", "get_help", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values", "list_links", "list_specs", "get_spec", "list_workspace_modules",
+    "get_current_identity", "TaskList", "TaskGet", "list_task_assignees", "list_comments", "get_comment", "get_workspace_summary", "list_workspaces", "get_workspace_by_slug", "list_okr_cycles", "get_okr_cycle", "list_eligible_parent_key_results", "list_opportunities", "list_solutions", "list_assumptions", "get_opportunity", "list_solution_comments", "get_solution_comment", "list_experiments", "get_experiment", "list_roadmap_items", "list_decisions", "get_decision", "list_release_runs", "get_review_request", "list_review_requests", "list_checklist_templates", "get_launch_checklist", "list_squads", "get_squad", "get_task", "list_tasks", "list_task_links", "list_feedback", "get_feedback_item", "list_evidence", "list_doc_history", "capture_canvas", "list_doc_comments", "list_artifacts", "get_artifact", "search_help", "get_help", "slack_list_channels", "slack_read_channel", "slack_read_thread", "slack_search_users", "list_scoring_models", "get_scoring_model", "get_workspace_scoring_model", "get_opportunity_score", "get_solution_score", "list_top_opportunities", "list_custom_field_definitions", "get_custom_field_values", "list_links", "list_specs", "get_spec", "list_workspace_modules",
   ].map(name => [name, "READ"]),
   ...[
     "link_artifact_to_decision", "unlink_artifact_from_decision",
-    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "create_opportunities", "create_solutions", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "link_opportunity_to_objective", "unlink_opportunity_from_objective", "link_solution_to_key_result", "unlink_solution_from_key_result", "link_entities", "unlink_entities", "create_spec", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_artifact_upload", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "write_doc", "delete_doc", "move_doc", "restore_doc_version", "add_doc_comment", "resolve_doc_comment", "edit_doc", "edit_canvas", "build_canvas_tree", "create_artifact", "refresh_artifact_from_v0", "update_artifact", "create_feedback_source", "update_feedback_source", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "capture_screenshot", "score_opportunity", "score_solution", "set_custom_field_value",
+    "add_comment", "delete_comment", "resolve_comment", "reopen_comment", "create_okr_cycle", "create_objective", "update_objective", "delete_objective", "add_key_result", "update_key_result", "delete_key_result", "log_checkin", "set_objective_parent_kr", "create_opportunity", "create_opportunities", "create_solutions", "update_opportunity", "update_opportunity_status", "link_opportunity_to_kr", "link_opportunity_to_objective", "unlink_opportunity_from_objective", "link_solution_to_key_result", "unlink_solution_from_key_result", "link_entities", "unlink_entities", "create_spec", "add_solution", "update_solution_status", "update_solution", "add_assumption", "update_assumption", "delete_assumption", "promote_to_roadmap", "add_solution_plan", "add_solution_comment", "delete_solution_comment", "create_experiment", "log_experiment_result", "conclude_experiment", "update_roadmap_item", "add_to_roadmap", "request_decision", "close_decision_no_action", "apply_recorded_decision", "create_checklist_template", "set_launch_tier", "update_launch_checklist_item", "create_squad", "update_squad", "assign_squad", "TaskCreate", "TaskUpdate", "create_task", "update_task", "move_task_status", "link_task", "unlink_task", "create_feedback", "update_feedback", "update_feedback_status", "link_feedback_to_opportunity", "update_feedback_type", "prepare_artifact_upload", "prepare_doc_image_upload", "prepare_feedback_attachment_upload", "add_feedback_attachment", "promote_feedback_to_roadmap", "add_evidence", "link_evidence", "write_doc", "delete_doc", "move_doc", "restore_doc_version", "add_doc_comment", "resolve_doc_comment", "edit_doc", "edit_canvas", "build_canvas_tree", "create_artifact", "refresh_artifact_from_v0", "update_artifact", "create_feedback_source", "update_feedback_source", "link_artifact_to_solution", "unlink_artifact_from_solution", "archive_artifact", "capture_screenshot", "score_opportunity", "score_solution", "set_custom_field_value",
   ].map(name => [name, "WRITE"]),
   // ADR 0020: no longer unconditionally human-only. Each of these four now
   // carries its own agentCapability check inside its TOOL_GATES entry above

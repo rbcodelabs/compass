@@ -96,11 +96,16 @@
    *   data-compass-position  bottom-right (default) | bottom-left | top-right |
    *                          top-left | right | left
    *                          `right` / `left` hug that screen edge, vertically centred.
-   *   data-compass-button    text (default) | icon | tab
+   *   data-compass-button    text (default) | icon | tab | none
    *                          `tab` is a slim vertical tab flush against a side edge; it
    *                          takes its side from the position (…-left / left → left edge,
    *                          otherwise right) and its vertical anchor from it too
    *                          (top-… → top, bottom-… → bottom, left/right → centred).
+   *                          `none` renders no launcher at all, for a host page that opens
+   *                          the widget from its own UI through `window[GLOBAL_KEY]` (see
+   *                          "Host-page API" below). The panel, element picking and pins
+   *                          work as usual, and the position still decides which side the
+   *                          panel opens on.
    *   data-compass-label     Launcher text for `text` and `tab` (max 24 chars,
    *                          default "Feedback"); also the accessible name for `icon`.
    */
@@ -108,7 +113,9 @@
   var BUTTON_ATTR = "data-compass-button";
   var LABEL_ATTR = "data-compass-label";
   var POSITIONS = ["bottom-right", "bottom-left", "top-right", "top-left", "right", "left"];
-  var BUTTONS = ["text", "icon", "tab"];
+  var BUTTONS = ["text", "icon", "tab", "none"];
+  var EVENT_PREFIX = "compass-feedback:";
+  var EVENT_NAMES = ["open", "close", "count", "identity"];
   var MAX_LABEL_LENGTH = 24;
   var DEFAULT_LABEL = "Feedback";
 
@@ -218,7 +225,8 @@
     var vertical = positionChoice === "left" || positionChoice === "right"
       ? "center"
       : positionChoice.indexOf("top") === 0 ? "top" : "bottom";
-    return { side: side, vertical: vertical, beside: buttonStyle === "tab" || vertical === "center" };
+    // With no launcher there is nothing to sit beside or stack above.
+    return { side: side, vertical: vertical, beside: buttonStyle !== "none" && (buttonStyle === "tab" || vertical === "center") };
   })();
 
   if (window[GLOBAL_KEY]) return;
@@ -242,6 +250,28 @@
   // it is fully hoisted and safe to reference here, before its textual
   // definition.
   window[GLOBAL_KEY].identify = identify;
+
+  /**
+   * Driving the widget from the host page. Everything below is a hoisted function
+   * declaration, so it is attached now, before `mount()` has built any DOM.
+   *
+   * A command made before the widget has mounted is queued and replayed, in order,
+   * once `mount()` finishes (see `runPending`), so a host script that runs the
+   * moment the tag evaluates still gets the behaviour it asked for.
+   *
+   * Events are `CustomEvent`s on `window`, named `compass-feedback:<name>`:
+   * open, close, count, identity. Their `detail` and `getState()` carry only
+   * counts and booleans, never a visitor token, an embed token, a comment body
+   * or an author name.
+   */
+  window[GLOBAL_KEY].open = queued("open", openFromHost);
+  window[GLOBAL_KEY].close = queued("close", closeFromHost);
+  window[GLOBAL_KEY].toggle = queued("toggle", toggleFromHost);
+  window[GLOBAL_KEY].startPicking = queued("startPicking", startPickingFromHost);
+  window[GLOBAL_KEY].stopPicking = queued("stopPicking", stopPickingFromHost);
+  window[GLOBAL_KEY].getState = guarded("getState", getPublicState);
+  window[GLOBAL_KEY].on = guarded("on", addHostListener);
+  window[GLOBAL_KEY].off = guarded("off", removeHostListener);
 
   /* ------------------------------------------------------------------ *
    * Small utilities
@@ -485,6 +515,128 @@
     busy: false
   };
 
+  /* ------------------------------------------------------------------ *
+   * Host-page API (see the note where it is attached to the global)
+   * ------------------------------------------------------------------ */
+
+  var pendingCalls = [];
+  var lastCount = 0;
+  var lastSignedIn = false;
+  var hostListeners = [];
+
+  /** Wraps a host-facing command: runs now once mounted, otherwise replays after mount. */
+  function queued(label, fn) {
+    return guarded(label, function () {
+      if (!ui.panel) {
+        pendingCalls.push(fn);
+        return undefined;
+      }
+      return fn();
+    });
+  }
+
+  function runPending() {
+    var calls = pendingCalls;
+    pendingCalls = [];
+    for (var i = 0; i < calls.length; i++) guarded("pending call", calls[i])();
+  }
+
+  function emit(name, detail) {
+    try {
+      window.dispatchEvent(new CustomEvent(EVENT_PREFIX + name, { detail: detail }));
+    } catch (err) {
+      warn("event " + name, err);
+    }
+  }
+
+  function totalCount() {
+    var total = 0;
+    for (var i = 0; i < state.comments.length; i++) {
+      total += 1 + ((state.comments[i].replies && state.comments[i].replies.length) || 0);
+    }
+    return total;
+  }
+
+  function notifyCount() {
+    var total = totalCount();
+    if (total === lastCount) return;
+    lastCount = total;
+    emit("count", { count: total });
+  }
+
+  function notifyIdentity() {
+    var signedIn = !!state.identity;
+    if (signedIn === lastSignedIn) return;
+    lastSignedIn = signedIn;
+    emit("identity", { signedIn: signedIn });
+  }
+
+  function getPublicState() {
+    return {
+      mounted: !!ui.panel,
+      open: !!state.open,
+      picking: !!state.picking,
+      signedIn: !!state.identity,
+      count: totalCount()
+    };
+  }
+
+  function openFromHost() {
+    if (!state.open) openPanel();
+  }
+
+  function closeFromHost() {
+    if (state.open) closePanel();
+  }
+
+  function toggleFromHost() {
+    if (state.open) closePanel();
+    else openPanel();
+  }
+
+  function startPickingFromHost() {
+    if (!state.picking) startPicking();
+  }
+
+  function stopPickingFromHost() {
+    if (state.picking) stopPicking();
+  }
+
+  function eventNameOf(type) {
+    var name = String(type || "");
+    if (name.indexOf(EVENT_PREFIX) === 0) name = name.slice(EVENT_PREFIX.length);
+    return EVENT_NAMES.indexOf(name) === -1 ? null : name;
+  }
+
+  /** `on("open", fn)`: `fn` receives the event's `detail`. Returns an unsubscribe function. */
+  function addHostListener(type, callback) {
+    var name = eventNameOf(type);
+    if (!name || typeof callback !== "function") {
+      warn("on() needs one of " + EVENT_NAMES.join(", ") + " and a function", type);
+      return function () {};
+    }
+    var handler = guarded("listener", function (event) {
+      callback(event.detail);
+    });
+    hostListeners.push({ name: name, callback: callback, handler: handler });
+    window.addEventListener(EVENT_PREFIX + name, handler);
+    return function () {
+      removeHostListener(name, callback);
+    };
+  }
+
+  function removeHostListener(type, callback) {
+    var name = eventNameOf(type);
+    if (!name) return;
+    for (var i = hostListeners.length - 1; i >= 0; i--) {
+      var entry = hostListeners[i];
+      if (entry.name === name && entry.callback === callback) {
+        window.removeEventListener(EVENT_PREFIX + name, entry.handler);
+        hostListeners.splice(i, 1);
+      }
+    }
+  }
+
   /**
    * Every request to Compass goes through here, so the invariants hold in one place.
    *
@@ -628,6 +780,10 @@
     ".layer[data-vertical='top'] .panel { bottom: auto; top: 76px; }",
     /* Beside (tab, or vertically centred): clear the launcher horizontally; the inset is
        measured at open time (see layoutPanel) because a label can be any width. */
+    /* No launcher: the panel takes the launcher's corner or edge itself. */
+    ".layer[data-btn='none'] .panel { bottom: 20px; }",
+    ".layer[data-btn='none'][data-vertical='top'] .panel { bottom: auto; top: 20px; }",
+    ".layer[data-btn='none'][data-vertical='center'] .panel { bottom: auto; top: 50%; transform: translateY(-50%); }",
     ".layer[data-beside='true'] .panel { right: var(--inset, 64px); bottom: 20px; }",
     ".layer[data-beside='true'][data-side='left'] .panel { right: auto; left: var(--inset, 64px); }",
     ".layer[data-beside='true'][data-vertical='top'] .panel { bottom: auto; top: 20px; }",
@@ -758,7 +914,7 @@
     ui.highlight = make("div", { "class": "hl", "data-compass": "highlight", "data-on": "false" });
     ui.pins = make("div", { "class": "pins", "data-compass": "pins" });
 
-    ui.launcher = make(
+    if (buttonStyle !== "none") ui.launcher = make(
       "button",
       {
         type: "button",
@@ -771,15 +927,17 @@
         title: buttonStyle === "icon" ? launcherLabel : null
       }
     );
-    if (buttonStyle === "icon") {
-      ui.launcher.appendChild(makeGlyph());
-    } else {
-      ui.launcherLabel = make("span", null, launcherLabel);
-      ui.launcher.appendChild(ui.launcherLabel);
+    if (ui.launcher) {
+      if (buttonStyle === "icon") {
+        ui.launcher.appendChild(makeGlyph());
+      } else {
+        ui.launcherLabel = make("span", null, launcherLabel);
+        ui.launcher.appendChild(ui.launcherLabel);
+      }
+      ui.launcherCount = make("span", { "class": "count", "data-compass": "count" });
+      ui.launcherCount.hidden = true;
+      ui.launcher.appendChild(ui.launcherCount);
     }
-    ui.launcherCount = make("span", { "class": "count", "data-compass": "count" });
-    ui.launcherCount.hidden = true;
-    ui.launcher.appendChild(ui.launcherCount);
 
     ui.panel = make("div", {
       "class": "panel",
@@ -842,7 +1000,7 @@
     layer.appendChild(ui.highlight);
     layer.appendChild(ui.pins);
     layer.appendChild(ui.panel);
-    layer.appendChild(ui.launcher);
+    if (ui.launcher) layer.appendChild(ui.launcher);
     shadow.appendChild(layer);
 
     (document.documentElement || document.body).appendChild(host);
@@ -851,6 +1009,7 @@
     wireEvents();
     updateCounter();
     renderIdentity();
+    runPending();
   }
 
   /**
@@ -870,6 +1029,7 @@
    * ------------------------------------------------------------------ */
 
   function renderIdentity() {
+    notifyIdentity();
     if (!ui.who) return;
     clear(ui.who);
 
@@ -1069,11 +1229,9 @@
   }
 
   function renderCount() {
+    notifyCount();
     if (!ui.launcherCount) return;
-    var total = 0;
-    for (var i = 0; i < state.comments.length; i++) {
-      total += 1 + ((state.comments[i].replies && state.comments[i].replies.length) || 0);
-    }
+    var total = totalCount();
     if (total > 0) {
       ui.launcherCount.textContent = String(total);
       ui.launcherCount.hidden = false;
@@ -2087,23 +2245,27 @@
   }
 
   function openPanel() {
+    var changed = !state.open;
     state.open = true;
     layoutPanel();
     if (ui.layer) ui.layer.setAttribute("data-open", "true");
     if (ui.panel) ui.panel.setAttribute("data-open", "true");
     if (ui.launcher) ui.launcher.setAttribute("aria-expanded", "true");
+    if (changed) emit("open", { open: true });
   }
 
   function closePanel(keepFlag) {
+    var changed = state.open;
     state.open = false;
     if (ui.layer) ui.layer.setAttribute("data-open", "false");
     if (ui.panel) ui.panel.setAttribute("data-open", "false");
     if (ui.launcher) ui.launcher.setAttribute("aria-expanded", "false");
     if (!keepFlag && state.picking) stopPicking();
+    if (changed) emit("close", { open: false });
   }
 
   function wireEvents() {
-    ui.launcher.addEventListener("click", guarded("launcher", function () {
+    if (ui.launcher) ui.launcher.addEventListener("click", guarded("launcher", function () {
       if (state.open) {
         closePanel();
         return;

@@ -316,14 +316,50 @@ export async function addAssumption(
   return assumption;
 }
 
+const NOT_FOUND = "Entity not found or access denied";
+
+/**
+ * Child records (assumptions, evidence, solution comments) are addressed by a
+ * client-supplied id, and a server action is a public POST endpoint. Each helper
+ * resolves the owning workspace through the same membership-scoped lookups the
+ * parent entities use, so a record outside the caller's workspaces reads as
+ * "not found". Writes below additionally filter on the resolved workspace.
+ */
+async function requireAssumptionWorkspace(assumptionId: string, expectedWorkspaceId?: string) {
+  const row = await getPrisma().assumption.findUnique({ where: { id: assumptionId }, select: { solutionId: true } });
+  if (!row) throw new Error(NOT_FOUND);
+  const { workspaceId } = await requireProductEntity("solution", row.solutionId, expectedWorkspaceId);
+  return workspaceId;
+}
+
+async function requireEvidenceWorkspace(evidenceId: string) {
+  const row = await getPrisma().evidence.findUnique({ where: { id: evidenceId }, select: { workspaceId: true } });
+  if (!row) throw new Error(NOT_FOUND);
+  return requireProductWorkspace(row.workspaceId);
+}
+
+async function requireEvidenceTargets(workspaceId: string, target: EvidenceTarget) {
+  if (target.opportunityId) await requireProductEntity("opportunity", target.opportunityId, workspaceId);
+  if (target.solutionId) await requireProductEntity("solution", target.solutionId, workspaceId);
+  if (target.assumptionId) await requireAssumptionWorkspace(target.assumptionId, workspaceId);
+}
+
+async function requireSolutionCommentWorkspace(commentId: string) {
+  const row = await getPrisma().solutionComment.findUnique({ where: { id: commentId }, select: { solutionId: true } });
+  if (!row) throw new Error(NOT_FOUND);
+  const { workspaceId } = await requireProductEntity("solution", row.solutionId);
+  return workspaceId;
+}
+
 export async function updateAssumptionStatus(
   assumptionId: string,
   status: AssumptionStatus,
   revalidatePathStr: string
 ) {
+  const workspaceId = await requireAssumptionWorkspace(assumptionId);
   const prisma = getPrisma();
   const assumption = await captureWorkspaceMutation(prisma, "assumption", "update", "UI", assumptionId, tx => tx.assumption.update({
-    where: { id: assumptionId },
+    where: { id: assumptionId, solution: { workspaceId } },
     data: { status },
   }));
   revalidatePath(revalidatePathStr);
@@ -384,8 +420,9 @@ export async function deleteAssumption(
   assumptionId: string,
   revalidatePathStr: string
 ) {
+  const workspaceId = await requireAssumptionWorkspace(assumptionId);
   const prisma = getPrisma();
-  await prisma.assumption.delete({ where: { id: assumptionId } });
+  await prisma.assumption.delete({ where: { id: assumptionId, solution: { workspaceId } } });
   revalidatePath(revalidatePathStr);
 }
 
@@ -531,9 +568,10 @@ export async function reorderAssumption(
   sortOrder: number,
   revalidatePathStr: string
 ) {
+  const workspaceId = await requireAssumptionWorkspace(assumptionId);
   const prisma = getPrisma();
   await captureWorkspaceMutation(prisma, "assumption", "update", "UI", assumptionId, tx => tx.assumption.update({
-    where: { id: assumptionId },
+    where: { id: assumptionId, solution: { workspaceId } },
     data: { sortOrder },
   }));
   revalidatePath(revalidatePathStr);
@@ -792,6 +830,10 @@ export async function addEvidence(
   revalidatePathStr: string
 ) {
   assertExactlyOneTarget(data);
+  // The workspace comes from the client, so membership is checked here and the
+  // linked record must live in that same workspace.
+  await requireProductWorkspace(data.workspaceId);
+  await requireEvidenceTargets(data.workspaceId, data);
   const prisma = getPrisma();
   const evidence = await captureWorkspaceMutation(prisma, "evidence", "create", "UI", undefined, tx => tx.evidence.create({
     data: {
@@ -813,8 +855,9 @@ export async function deleteEvidence(
   evidenceId: string,
   revalidatePathStr: string
 ) {
+  const workspaceId = await requireEvidenceWorkspace(evidenceId);
   const prisma = getPrisma();
-  await prisma.evidence.delete({ where: { id: evidenceId } });
+  await prisma.evidence.delete({ where: { id: evidenceId, workspaceId } });
   revalidatePath(revalidatePathStr);
 }
 
@@ -824,9 +867,11 @@ export async function linkEvidence(
   revalidatePathStr: string
 ) {
   assertExactlyOneTarget(target);
+  const workspaceId = await requireEvidenceWorkspace(evidenceId);
+  await requireEvidenceTargets(workspaceId, target);
   const prisma = getPrisma();
   const evidence = await captureWorkspaceMutation(prisma, "evidence", "update", "UI", evidenceId, tx => tx.evidence.update({
-    where: { id: evidenceId },
+    where: { id: evidenceId, workspaceId },
     data: {
       opportunityId: target.opportunityId ?? null,
       solutionId: target.solutionId ?? null,
@@ -847,6 +892,7 @@ export async function addSolutionComment(
   data: { body: string; commentType?: CommentType },
   revalidatePathStr: string
 ) {
+  await requireProductEntity("solution", solutionId);
   const session = await auth();
   if (!session?.user?.id) throw new Error("Unauthorized");
 
@@ -873,12 +919,11 @@ export async function updateSolutionComment(
   body: string,
   revalidatePathStr: string
 ) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
+  const workspaceId = await requireSolutionCommentWorkspace(commentId);
 
   const prisma = getPrisma();
   const comment = await prisma.solutionComment.update({
-    where: { id: commentId },
+    where: { id: commentId, solution: { workspaceId } },
     data: { body: body.trim(), updatedAt: new Date() },
   });
   await updateMirroredComment(commentId, comment.body);
@@ -890,11 +935,10 @@ export async function deleteSolutionComment(
   commentId: string,
   revalidatePathStr: string
 ) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
+  const workspaceId = await requireSolutionCommentWorkspace(commentId);
 
   const prisma = getPrisma();
-  await prisma.solutionComment.delete({ where: { id: commentId } });
+  await prisma.solutionComment.delete({ where: { id: commentId, solution: { workspaceId } } });
   await deleteMirroredComment(commentId);
   revalidatePath(revalidatePathStr);
 }
@@ -906,21 +950,19 @@ async function setSolutionPlanStatus(
   planStatus: PlanStatus,
   revalidatePathStr: string
 ) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
-
   const prisma = getPrisma();
   const existing = await prisma.solutionComment.findUnique({
     where: { id: commentId },
-    select: { id: true, commentType: true },
+    select: { id: true, commentType: true, solutionId: true },
   });
   if (!existing) throw new Error("Comment not found");
+  const { workspaceId } = await requireProductEntity("solution", existing.solutionId);
   if (existing.commentType !== "PLAN") {
     throw new Error("Only PLAN entries can be approved or rejected");
   }
 
   const comment = await prisma.solutionComment.update({
-    where: { id: commentId },
+    where: { id: commentId, solution: { workspaceId } },
     data: { planStatus, updatedAt: new Date() },
   });
   await updateMirroredLegacyPlanStatus(commentId, planStatus);

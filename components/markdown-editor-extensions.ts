@@ -1,5 +1,5 @@
 import StarterKit from "@tiptap/starter-kit";
-import Link from "@tiptap/extension-link";
+import { CompassLink } from "@/components/docs/compass-link-extension";
 import Placeholder from "@tiptap/extension-placeholder";
 import { TableKit } from "@tiptap/extension-table";
 import { Markdown, type MarkdownStorage } from "tiptap-markdown";
@@ -21,7 +21,7 @@ export function createMarkdownEditorExtensions(
   return [
     StarterKit.configure({ link: false, underline: false, ...(codeBlock ? { codeBlock: false as const } : {}) }),
     ...(codeBlock ? [codeBlock] : []),
-    Link.configure({ openOnClick: false }),
+    CompassLink.configure({ openOnClick: false, protocols: ["compass"] }),
     Placeholder.configure({ placeholder }),
     TableKit.configure({ table: false }),
     MarkdownAlignedTable,

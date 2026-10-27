@@ -276,9 +276,10 @@ export type TaskLinkedType =
 /**
  * Every value a TaskLink row can hold. COMMENT (a Doc comment: Comment.id, shared
  * with the legacy DocComment id) is written only by the Doc comment -> task flow,
- * so it is deliberately not a user-pickable TaskLinkedType.
+ * so it is deliberately not a user-pickable TaskLinkedType. AGENT_CONVERSATION (an AgentConversation id) is
+ * likewise legacy-only: written when an agent creates a task in a conversation, never mirrored or user-pickable.
  */
-export type TaskLinkRecordType = TaskLinkedType | "COMMENT"
+export type TaskLinkRecordType = TaskLinkedType | "COMMENT" | "AGENT_CONVERSATION"
 
 export interface TaskLinkData {
   id: string

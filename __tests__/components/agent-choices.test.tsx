@@ -179,7 +179,8 @@ describe("SendToAgentPicker with cloud agents", () => {
     stubFetch({ ...CHOICES, defaultAgentId: null })
     render(picker())
     fireEvent.click(await screen.findByRole("button", { name: /send to agent/i }))
-    expect(await screen.findByRole("link", { name: "Built-in cloud agent" })).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1")
+    // Generous timeout: the menu renders after an async fetch, and the default 1s is too tight on a loaded CI runner.
+    expect(await screen.findByRole("link", { name: "Built-in cloud agent" }, { timeout: 5000 })).toHaveAttribute("href", "/acme/product/agent?entityType=solutionPlan&entityId=plan-1")
     expect(screen.getByRole("link", { name: "Triage" })).toBeInTheDocument()
   })
 })

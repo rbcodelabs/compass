@@ -28,6 +28,16 @@ function fold(payloads: unknown[], from: AgentTurnState = emptyAgentTurnState) {
 }
 
 describe("applyAgentSdkEvent", () => {
+  it("captures a prompt_suggestion without touching text or steps", () => {
+    const state = fold([
+      sdk({ type: "text", text: "Done." }),
+      { message: { type: "prompt_suggestion", suggestion: "  Now draft the roadmap update  " } },
+    ])
+    expect(state.suggestion).toBe("Now draft the roadmap update")
+    expect(state.text).toBe("Done.")
+    expect(fold([{ message: { type: "prompt_suggestion", suggestion: "   " } }]).suggestion).toBeUndefined()
+  })
+
   it("accumulates text across events and blocks in arrival order", () => {
     const state = fold([sdk({ type: "text", text: "Hello" }), sdk({ type: "text", text: ", " }, { type: "text", text: "world" })])
     expect(state.text).toBe("Hello, world")
@@ -177,5 +187,61 @@ describe("serializeAgentRunEvent", () => {
   it("surfaces unparseable text as { raw } so one bad row cannot poison a transcript", () => {
     const event = serializeAgentRunEvent({ ...base, payloadJson: "{not json" })
     expect(event.payload).toEqual({ raw: "{not json" })
+  })
+})
+
+describe("plan and subagents", () => {
+  const child = (parent: string, ...content: unknown[]) => ({ type: "assistant", message: { parent_tool_use_id: parent, message: { content } } })
+  const todos = (...items: [string, string][]) =>
+    sdk({ type: "tool_use", id: "p", name: "TodoWrite", input: { todos: items.map(([content, status]) => ({ content, status, activeForm: `Doing ${content}` })) } })
+
+  it("keeps the latest TodoWrite as the plan, not as a tool step", () => {
+    const state = fold([todos(["a", "in_progress"], ["b", "pending"]), todos(["a", "completed"], ["b", "in_progress"])])
+    expect(state.steps).toEqual([])
+    expect(state.plan.map((i) => i.status)).toEqual(["completed", "in_progress"])
+  })
+
+  it("keeps Compass Task tool calls out of the tool strip and ticks planVersion once each finishes", () => {
+    const state = fold([
+      sdk({ type: "tool_use", id: "t1", name: "mcp__compass__TaskCreate", input: { subject: "a", description: "d" } }),
+      sdk({ type: "tool_use", id: "t2", name: "mcp__compass__TaskUpdate", input: { taskId: "x", status: "completed" } }),
+    ])
+    expect(state.steps).toEqual([])
+    expect(state.planVersion).toBe(0)
+    const done = fold([
+      sdk({ type: "tool_use", id: "t1", name: "mcp__compass__TaskCreate", input: {} }),
+      sdk({ type: "tool_result", tool_use_id: "t1", content: "ok" }),
+    ])
+    expect(done.planVersion).toBe(1)
+    expect(done.steps).toEqual([])
+  })
+
+  it("nests a subagent's calls and text under its Task, and settles it on the result", () => {
+    const state = fold([
+      sdk({ type: "tool_use", id: "s1", name: "Task", input: { description: "Scan feedback", subagent_type: "researcher" } }),
+      child("s1", { type: "text", text: "internal chatter" }, { type: "tool_use", id: "c1", name: "mcp__compass__list_feedback", input: { query: "login" } }),
+      child("s1", { type: "tool_result", tool_use_id: "c1", is_error: true, content: [{ type: "text", text: "403" }] }),
+      sdk({ type: "tool_result", tool_use_id: "s1", content: "Found 3 themes" }),
+    ])
+    expect(state.text).toBe("")
+    expect(state.steps).toEqual([])
+    expect(state.subagents).toHaveLength(1)
+    const [agent] = state.subagents
+    expect(agent).toMatchObject({ description: "Scan feedback", agentType: "researcher", status: "done", summary: "Found 3 themes" })
+    expect(agent.steps).toEqual([{ id: "c1", label: "List feedback", status: "error", detail: "query: login", result: "403" }])
+  })
+
+  it("is replay-safe and returns the same state for a repeated event", () => {
+    const events = [
+      sdk({ type: "tool_use", id: "s1", name: "Agent", input: { description: "x" } }),
+      child("s1", { type: "tool_use", id: "c1", name: "web_fetch" }),
+    ]
+    const once = fold(events)
+    expect(fold(events, once)).toBe(once)
+    expect(fold([...events, ...events])).toEqual(once)
+  })
+
+  it("ignores a child of an unknown parent rather than throwing", () => {
+    expect(fold([child("ghost", { type: "tool_use", id: "c", name: "x" })]).subagents).toEqual([])
   })
 })

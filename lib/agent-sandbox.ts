@@ -42,8 +42,16 @@
  */
 
 import { createHash } from "node:crypto"
-import { Sandbox, Snapshot, type NetworkPolicy } from "@vercel/sandbox"
+import { APIError, Sandbox, Snapshot, type NetworkPolicy } from "@vercel/sandbox"
 import { OPENCODE_PINNED_VERSION } from "@/lib/agent-harness"
+import {
+  AGENT_SANDBOX_RETENTION_MS,
+  decideSandboxReuse,
+  reusedSandboxCleanupScript,
+  type ExistingSandboxState,
+  type PreviousRunState,
+  type SandboxReuseReason,
+} from "@/lib/agent-sandbox-reuse"
 
 export const SANDBOX_RUNTIME = "node24"
 const SANDBOX_TIMEOUT_MS = 5 * 60_000
@@ -250,7 +258,7 @@ export type BuildSnapshotResult = {
  * install`): the rebuild endpoint reports progress live, and a failure shows
  * the package manager's own diagnostics rather than just an exit code.
  */
-async function runStep(
+export async function runStep(
   sandbox: Sandbox,
   label: string,
   params: { cmd: string; args: string[]; sudo?: boolean },
@@ -445,7 +453,7 @@ function parseBrowserVersion(smokeOutput: string): string {
  */
 export async function bootSandboxFromSnapshot(
   snapshotId: string,
-  opts?: { timeoutMs?: number; name?: string; tags?: Record<string, string>; networkPolicy?: NetworkPolicy }
+  opts?: { timeoutMs?: number; name?: string; tags?: Record<string, string>; networkPolicy?: NetworkPolicy; persistent?: boolean; snapshotExpirationMs?: number }
 ): Promise<Sandbox> {
   return Sandbox.create({
     source: { type: "snapshot", snapshotId },
@@ -454,6 +462,9 @@ export async function bootSandboxFromSnapshot(
     ...(opts?.networkPolicy ? { networkPolicy: opts.networkPolicy } : {}),
     ...(opts?.name ? { name: opts.name } : {}),
     ...(opts?.tags ? { tags: opts.tags } : {}),
+    ...(opts?.persistent !== undefined ? { persistent: opts.persistent } : {}),
+    // Persistent sandboxes snapshot on every stop; keep only the latest, and let it expire after the retention window.
+    ...(opts?.snapshotExpirationMs ? { snapshotExpiration: opts.snapshotExpirationMs, keepLastSnapshots: { count: 1 } } : {}),
   })
 }
 
@@ -467,8 +478,108 @@ export async function bootSandboxFromSnapshot(
  * correctness.
  */
 export async function stopSandboxByName(name: string): Promise<void> {
-  const sandbox = await Sandbox.get({ name })
+  // resume:false — stopping must never boot a stopped sandbox just to stop it again. Stopping a persistent
+  // sandbox is a pause: the platform snapshots its disk and the next turn resumes it.
+  const sandbox = await Sandbox.get({ name, resume: false })
   await sandbox.stop()
+}
+
+/** The platform-reported state the reuse decision reads. A handle with no session reads as not running. */
+function describeSandbox(sandbox: Sandbox): ExistingSandboxState {
+  try {
+    return { status: sandbox.status, tags: sandbox.tags }
+  } catch {
+    return { status: "unknown" }
+  }
+}
+
+function isNotFound(error: unknown): boolean {
+  return error instanceof APIError && error.response.status === 404
+}
+
+export type ConversationSandboxResult = { sandbox: Sandbox; reused: boolean; reason: SandboxReuseReason }
+
+/**
+ * Get this conversation's sandbox. Conversation sandboxes are PERSISTENT and are never deleted by the turn
+ * path: their disk is the user's work (repo clones), so every outcome other than "no sandbox yet" keeps it.
+ *   - warm: still running from the previous turn (decideSandboxReuse) -> use as is.
+ *   - resume: stopped, or running but not trustworthy -> stop it if running, then resume from its persisted
+ *     disk. The egress policy is re-applied (it can differ from the one it was created with) BEFORE any
+ *     agent code runs, and last turn's per-turn files and stray processes are removed.
+ *   - boot: no sandbox under the name -> a fresh one from the golden snapshot.
+ * A resume that fails throws instead of falling back to a clean boot, because a clean boot would have to
+ * discard the disk. The turn fails visibly and the next attempt resumes again.
+ *
+ * The caller has already made the run non-terminal (createAgentRun's RUN_IN_FLIGHT check), so no
+ * other turn of this conversation can be using the sandbox while we look at it.
+ *
+ * `requiredMs` is how long this turn needs the sandbox to stay alive from now; its platform timeout is
+ * extended to cover it (a resumed sandbox starts with only a couple of minutes).
+ */
+export async function acquireConversationSandbox(opts: {
+  name: string
+  snapshotId: string
+  profile: string
+  previous: PreviousRunState | null
+  requiredMs: number
+  boot: { timeoutMs: number; tags: Record<string, string>; networkPolicy?: NetworkPolicy }
+}): Promise<ConversationSandboxResult> {
+  let existing: Sandbox | null = null
+  let lookupFailed = false
+  try {
+    existing = await Sandbox.get({ name: opts.name, resume: false })
+  } catch (error) {
+    if (!isNotFound(error)) {
+      lookupFailed = true
+      console.warn("[agent-sandbox] conversation sandbox lookup failed", { name: opts.name, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  // Without a successful lookup we cannot tell "no sandbox" from "sandbox we cannot see"; creating under the
+  // name could collide with (or, worse, shadow) someone's saved work. Fail the turn instead.
+  if (lookupFailed) throw new Error("Could not look up this conversation's sandbox; try again.")
+
+  const decision = decideSandboxReuse({
+    enabled: true,
+    existing: existing ? describeSandbox(existing) : null,
+    profile: opts.profile,
+    name: opts.name,
+    previous: opts.previous,
+  })
+
+  if (existing && decision.action !== "boot") {
+    let sandbox = existing
+    if (decision.action === "resume") {
+      // Pause a running-but-untrusted sandbox first: that ends its processes and snapshots its disk.
+      if (existing.status === "running") await existing.stop().catch(() => {})
+      sandbox = await Sandbox.get({ name: opts.name }) // resume
+      await sandbox.updateNetworkPolicy(opts.boot.networkPolicy ?? "allow-all")
+    }
+    await resetReusedSandbox(sandbox)
+    const remaining = sandbox.expiresAt ? sandbox.expiresAt.getTime() - Date.now() : 0
+    if (remaining < opts.requiredMs) await sandbox.extendTimeout(opts.requiredMs - Math.max(remaining, 0))
+    return { sandbox, reused: true, reason: decision.reason }
+  }
+
+  const sandbox = await bootSandboxFromSnapshot(opts.snapshotId, {
+    timeoutMs: opts.boot.timeoutMs,
+    name: opts.name,
+    tags: opts.boot.tags,
+    persistent: true,
+    snapshotExpirationMs: AGENT_SANDBOX_RETENTION_MS,
+    ...(opts.boot.networkPolicy ? { networkPolicy: opts.boot.networkPolicy } : {}),
+  })
+  return { sandbox, reused: false, reason: decision.reason }
+}
+
+/**
+ * Remove last turn's leftovers from a reused sandbox before the new turn's files are written:
+ * stray processes, and the per-turn files (the doc tree above all, so a doc deleted since the last
+ * turn cannot linger). The agent's own work, notably the repo clones, is outside this set.
+ * Runs with sudo because the jail user may have created files the entry user cannot remove.
+ */
+async function resetReusedSandbox(sandbox: Sandbox): Promise<void> {
+  const result = await sandbox.runCommand({ cmd: "bash", args: ["-c", reusedSandboxCleanupScript("/vercel/sandbox")], sudo: true })
+  if (result.exitCode !== 0) throw new Error(`reused sandbox cleanup exited ${result.exitCode}`)
 }
 
 /**

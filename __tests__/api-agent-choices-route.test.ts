@@ -7,6 +7,9 @@ vi.mock("@/lib/db", () => ({ default: () => mockPrisma }))
 const identity = vi.hoisted(() => ({ list: vi.fn() }))
 vi.mock("@/lib/agent-run-identity", () => ({ listRunnableAgents: identity.list }))
 
+const grants = vi.hoisted(() => ({ list: vi.fn() }))
+vi.mock("@/lib/mcp-connectors/store", () => ({ listConnectedGrants: grants.list }))
+
 import { GET } from "@/app/api/agent/choices/route"
 
 const get = (query: string) => GET(new Request(`https://compass.test/api/agent/choices?${query}`))
@@ -15,6 +18,7 @@ afterEach(() => { delete process.env.COMPASS_CLOUD_AGENT_MODELS; delete process.
 
 beforeEach(() => {
   vi.clearAllMocks()
+  grants.list.mockResolvedValue([])
   mockAuth.mockResolvedValue({ user: { id: "u1" } })
   mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })
   identity.list.mockResolvedValue({ agents: [{ id: "a1", name: "Triage", ownerType: "WORKSPACE", instructions: "SECRET", model: "claude-opus-9" }, { id: "a2", name: "Mine", ownerType: "USER", model: "gpt-5; bad" }], defaultAgentId: "a1" })
@@ -33,6 +37,20 @@ describe("GET /api/agent/choices", () => {
     expect(identity.list).toHaveBeenCalledWith(mockPrisma, { userId: "u1", workspaceId: "ws-1" })
   })
 
+  it("lists the caller's own connected accounts, skipping slugs the catalog no longer knows", async () => {
+    grants.list.mockResolvedValue([{ slug: "google-drive", scope: "" }, { slug: "retired-connector", scope: "" }])
+    const body = await (await get("workspaceId=ws-1")).json()
+    expect(grants.list).toHaveBeenCalledWith("u1", expect.any(String), mockPrisma)
+    expect(body.connectors.map((c: { slug: string }) => c.slug)).toEqual(["google-drive"])
+  })
+
+  it("still answers when the connector lookup fails", async () => {
+    grants.list.mockRejectedValue(new Error("boom"))
+    const body = await (await get("workspaceId=ws-1")).json()
+    expect(body.connectors).toEqual([])
+    expect(body.agents).toHaveLength(2)
+  })
+
   it("scopes the workspace lookup to the caller's memberships, by id or by slugs", async () => {
     await get("workspaceId=ws-1")
     expect(mockPrisma.workspace.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "ws-1", members: { some: { userId: "u1" } } } }))
@@ -42,8 +60,8 @@ describe("GET /api/agent/choices", () => {
 
   it("gives a non-member, or no workspace at all, the same empty answer without listing anything", async () => {
     mockPrisma.workspace.findFirst.mockResolvedValue(null)
-    expect(await (await get("workspaceId=ws-9")).json()).toEqual({ agents: [], defaultAgentId: null, models: [], deploymentModel: null, modelLabels: {} })
-    expect(await (await get("")).json()).toEqual({ agents: [], defaultAgentId: null, models: [], deploymentModel: null, modelLabels: {} })
+    expect(await (await get("workspaceId=ws-9")).json()).toEqual({ agents: [], defaultAgentId: null, models: [], deploymentModel: null, modelLabels: {}, connectors: [] })
+    expect(await (await get("")).json()).toEqual({ agents: [], defaultAgentId: null, models: [], deploymentModel: null, modelLabels: {}, connectors: [] })
     expect(identity.list).not.toHaveBeenCalled()
   })
 
@@ -60,7 +78,7 @@ describe("GET /api/agent/choices", () => {
       process.env.COMPASS_CLOUD_AGENT_MODELS = "claude-opus-9"
       mockPrisma.workspace.findFirst.mockResolvedValue(null)
       const body = await (await get("workspaceId=ws-9")).json()
-      expect(body).toEqual({ agents: [], defaultAgentId: null, models: [], deploymentModel: null, modelLabels: {} })
+      expect(body).toEqual({ agents: [], defaultAgentId: null, models: [], deploymentModel: null, modelLabels: {}, connectors: [] })
     })
 
     it("follows AGENT_MODEL_ID for the default", async () => {
