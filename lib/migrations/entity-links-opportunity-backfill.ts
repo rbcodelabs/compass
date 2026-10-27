@@ -368,7 +368,7 @@ export type EntityLinksOpportunityStatus = {
   mirroredKeyResultPointers: number
   /** Consistent legacy rows the backfill would still insert or repair. */
   unmatched: { objectiveLinks: number; keyResultPointers: number }
-  /** Mirror rows with no legacy counterpart; a re-POST prunes them. */
+  /** Mirror rows with no legacy counterpart; a re-POST prunes them until the receipt exists (an applied migration is never re-run). */
   staleMirrorRows: { objectiveLinks: number; keyResultPointers: number }
   quarantined: OpportunityLinksQuarantine
   /** Mirror rows kept (not deleted) because their legacy row is quarantined. */

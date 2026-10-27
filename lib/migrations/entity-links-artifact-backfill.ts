@@ -30,8 +30,9 @@ import { WorkspaceIdBackfillRefusal, withOccRetry } from "@/lib/migrations/works
  * workspace_id equals both endpoints', and no mirror row has a missing endpoint unless its legacy counterpart is one of the reported
  * quarantined rows.
  *
- * A residual re-run migration (the 072 / 094 pattern) is NOT built here. If the dual-write code leaves drift between this migration and the
- * read flip, register a DDL-free residual that calls the same two exported functions.
+ * A residual re-run migration (the 072 / 094 pattern) is NOT built here. The runner never re-runs an applied migration, so drift left after
+ * the receipt needs a separately numbered, DDL-free, explicit-only residual that calls the same two exported functions
+ * (see 106_entity_links_residual_opportunity).
  */
 export const ENTITY_LINKS_ARTIFACT_BACKFILL_MIGRATION = "096_entity_links_backfill_artifact"
 
@@ -312,7 +313,7 @@ export type EntityLinksArtifactStatus = {
   mirroredDecisionLinks: number
   /** Consistent legacy rows the backfill would still insert or repair. */
   unmatched: number
-  /** Mirror rows with no legacy counterpart; a re-POST prunes them. */
+  /** Mirror rows with no legacy counterpart; a re-POST prunes them until the receipt exists (an applied migration is never re-run). */
   staleMirrorRows: number
   quarantined: ArtifactLinksQuarantine
   /** Mirror rows kept (not deleted) because their legacy row is quarantined. */

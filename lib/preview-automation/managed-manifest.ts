@@ -314,22 +314,22 @@ export const REVIEWED_MIGRATION_CODE_SHA256: Readonly<Record<string, Readonly<Re
   },
   // The 095 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
   "095_entity_links_backfill_opportunity": {
-    "lib/migrations/entity-links-opportunity-backfill.ts": "f456a0bda766ad7227e81c93ca857804682e120a8ac6195257469bf7bf89b5b5",
+    "lib/migrations/entity-links-opportunity-backfill.ts": "81b1f10701393117185dbb76f052ff7dd8aa57fdbb4f678747373fd0298fdc41",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
   // The 106 residual pass runs the same hook as 095.
   "106_entity_links_residual_opportunity": {
-    "lib/migrations/entity-links-opportunity-backfill.ts": "f456a0bda766ad7227e81c93ca857804682e120a8ac6195257469bf7bf89b5b5",
+    "lib/migrations/entity-links-opportunity-backfill.ts": "81b1f10701393117185dbb76f052ff7dd8aa57fdbb4f678747373fd0298fdc41",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
   // The 096 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
   "096_entity_links_backfill_artifact": {
-    "lib/migrations/entity-links-artifact-backfill.ts": "994adc6269188d5c99e018dd4fa7d5a7c33d05da65cc133e8ff308e3ec4f7fa7",
+    "lib/migrations/entity-links-artifact-backfill.ts": "2e7e71c55577617408b590e5c6565ec0efdf191894d672ff77447f4ff6794343",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
   // The 097 backfill hook and the OCC retry it imports; editing either re-reviews the migration.
   "097_entity_links_backfill_task": {
-    "lib/migrations/entity-links-task-backfill.ts": "761445d5aafdfafe2d6294dfde95b36e4d1da608cf78758341d716116362196b",
+    "lib/migrations/entity-links-task-backfill.ts": "90ee98823171cf7e1ac43aed2427ab6733a26d1b863ed7fa763ee8f6cd932d54",
     "lib/migrations/workspace-id-on-solution-objective.ts": "43295c27b84b319d6cfcada757c7dab6c598c930e237aa642c8d05fa94a3f8c7",
   },
   // The 098 and 099 postconditions (098: six nullable columns, owner_workspace_id index valid and ready; 099: owner_user_id really nullable).
