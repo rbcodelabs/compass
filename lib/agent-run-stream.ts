@@ -11,6 +11,7 @@
  * from `afterSeq = 0`, and a reducer that mutates shared state cannot be replayed.
  */
 
+import type { AgentCredentialSource } from "@/lib/agent-credential-source"
 import { humanizeToolName } from "@/lib/agent-tools"
 
 export type StepStatus = "running" | "done" | "error"
@@ -233,6 +234,8 @@ export type SerializedRun = {
   agentName?: string | null
   /** The model the run answers on (recorded when it starts); absent or null from an older server or run. */
   model?: string | null
+  /** Which model credential the run used (a closed non-secret label, see lib/agent-credential-source.ts); absent or null from an older server or run. */
+  credentialSource?: AgentCredentialSource | null
 }
 
 /** The banner text for a run that ended without a result of its own. */

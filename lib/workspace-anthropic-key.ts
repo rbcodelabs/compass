@@ -12,6 +12,7 @@
  */
 import type { AppPrismaClient } from "@/lib/db"
 import { decrypt, encrypt } from "@/lib/crypto-secrets"
+import { credentialSourceForProvider } from "@/lib/agent-credential-source"
 import { DEFAULT_MODEL_IDS, resolveAgentModel, resolveProviderName, type ResolvedAgentModel } from "@/lib/agent-model"
 
 /** Only Anthropic API keys (console.anthropic.com) are accepted. */
@@ -100,7 +101,7 @@ export async function loadWorkspaceAnthropicKey(prisma: WorkspaceDb, workspaceId
 export function modelFromWorkspaceKey(workspaceKey: string, env: Env = process.env): Extract<ResolvedAgentModel, { ok: true }> {
   const override = env.AGENT_MODEL_ID?.trim()
   const modelId = resolveProviderName(env) !== "bedrock" && override ? override : DEFAULT_MODEL_IDS.anthropic
-  return { ok: true, provider: "anthropic", modelId, keyEnv: "ANTHROPIC_API_KEY", apiKey: workspaceKey, env }
+  return { ok: true, provider: "anthropic", modelId, keyEnv: "ANTHROPIC_API_KEY", apiKey: workspaceKey, env, credentialSource: credentialSourceForProvider("anthropic", true) }
 }
 
 /**

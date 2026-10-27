@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 import { resetAgentParticipantsAvailabilityCache } from "@/lib/agent-conversation-participants"
-import { AgentRunError, cancelAgentRun, finalizeAgentRun, getAgentRunForViewer, resetAgentRunAttributionAvailabilityCache } from "@/lib/agent-runs"
+import { AgentRunError, cancelAgentRun, finalizeAgentRun, getAgentRunForViewer, resetAgentRunAttributionAvailabilityCache, resetAgentRunCredentialSourceAvailabilityCache } from "@/lib/agent-runs"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -38,6 +38,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   resetAgentParticipantsAvailabilityCache()
   resetAgentRunAttributionAvailabilityCache()
+  resetAgentRunCredentialSourceAvailabilityCache()
 })
 
 describe("getAgentRunForViewer", () => {
@@ -69,6 +70,24 @@ describe("getAgentRunForViewer", () => {
     const run = await getAgentRunForViewer({ prisma, runId: RUN_ID, userId: "owner" })
     expect(run).toMatchObject({ id: RUN_ID, agentId: null, agentName: null })
     expect(prisma.agentRun.findFirst).toHaveBeenCalledTimes(1)
+  })
+
+  it("returns the credential source label for the viewer, and null (unknown) for a run that has none or while migration 111 is unapplied", async () => {
+    const prisma = fakePrisma({ userId: "owner" })
+    prisma.agentRun.findFirst
+      .mockResolvedValueOnce({ id: RUN_ID, userId: "starter", conversationId: "c-1", workspaceId: "ws-1" })
+      .mockResolvedValueOnce({ agentId: null })
+      .mockResolvedValueOnce({ credentialSource: "workspace-api-key" })
+    expect(await getAgentRunForViewer({ prisma, runId: RUN_ID, userId: "owner" })).toMatchObject({ credentialSource: "workspace-api-key" })
+
+    resetAgentRunCredentialSourceAvailabilityCache()
+    prisma.agentRun.findMany.mockImplementation(({ select }: { select: Record<string, boolean> }) =>
+      select.credentialSource ? Promise.reject(Object.assign(new Error("column credential_source does not exist"), { code: "P2022" })) : Promise.resolve([]))
+    prisma.agentRun.findFirst.mockReset()
+    prisma.agentRun.findFirst
+      .mockResolvedValueOnce({ id: RUN_ID, userId: "starter", conversationId: "c-1", workspaceId: "ws-1" })
+      .mockResolvedValueOnce({ agentId: null })
+    expect(await getAgentRunForViewer({ prisma, runId: RUN_ID, userId: "owner" })).toMatchObject({ credentialSource: null })
   })
 
   it("returns null (a 404 upstream) when the viewer has no access, even to their own old run", async () => {
