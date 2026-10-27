@@ -2950,7 +2950,7 @@ model AgentConversation {
 /// (re-inviting clears it, the unique index keeps one row per user). Any participant may
 /// invite; there is no cap. Access is re-checked against live workspace membership on
 /// every call, never cached from this row.
-/// DSQL: no FKs, no @updatedAt (set explicitly).
+/// DSQL: no FKs, no auto-updated timestamp (updatedAt is set explicitly).
 model AgentConversationParticipant {
   id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   conversationId String   @map("conversation_id") @db.Uuid
@@ -2974,7 +2974,7 @@ model AgentConversationParticipant {
 /// (migration 109). One row per (conversation, user), written only after the shared conversation access
 /// check, so a participant's review never marks the owner's board. "Reviewed" is `reviewedAt` compared with
 /// the conversation's last activity, so new activity after review needs no write to make it New again.
-/// DSQL: no FKs, no @updatedAt (set explicitly).
+/// DSQL: no FKs, no auto-updated timestamp (updatedAt is set explicitly).
 model AgentConversationReview {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   conversationId String   @map("conversation_id") @db.Uuid
@@ -2994,7 +2994,7 @@ model AgentConversationReview {
 /// Generic typed association link between two entities of one workspace (ADR "One generic
 /// entity_links table for association links"). Phase 1: table only, no readers or writers.
 /// `fromType`/`toType` name the entity kinds; the ids are bare UUIDs, so the pair index needs no type.
-/// DSQL: no FKs, no @updatedAt (set explicitly).
+/// DSQL: no FKs, no auto-updated timestamp (updatedAt is set explicitly).
 model EntityLink {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId String   @map("workspace_id") @db.Uuid
@@ -3815,6 +3815,77 @@ model SavedView {
   @@index([organizationId, workspaceId], map: "idx_roadmap_views_org_surface")
   @@index([organizationId, workspaceId, surface], map: "idx_roadmap_views_org_surface_kind")
   @@map("roadmap_views")
+}
+
+/// External (outsider) share of one HTML artifact: a secret link plus ONE shared password.
+/// At most one row per artifact. The raw link token is never stored (sha256 only) and the
+/// password is an scrypt hash. `commentsEnabled` additionally requires an email provider at
+/// request time. Revoking sets `revokedAt`; the row is kept for the audit trail.
+/// DSQL: no FKs, no auto-updated timestamp (updatedAt is set explicitly).
+model ArtifactShare {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  artifactId        String    @map("artifact_id") @db.Uuid
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  tokenHash         String    @map("token_hash") @db.VarChar(64)
+  passwordHash      String    @map("password_hash") @db.VarChar(255)
+  /// Unlock and commenter sessions created before this are invalid.
+  passwordChangedAt DateTime  @default(now()) @map("password_changed_at")
+  commentsEnabled   Boolean   @default(false) @map("comments_enabled")
+  enabledAt         DateTime  @default(now()) @map("enabled_at")
+  revokedAt         DateTime? @map("revoked_at")
+  failedAttempts    Int       @default(0) @map("failed_attempts")
+  failedWindowAt    DateTime? @map("failed_window_at")
+  createdById       String    @map("created_by_id") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @map("updated_at")
+
+  @@unique([artifactId], map: "idx_artifact_shares_artifact")
+  @@unique([tokenHash], map: "idx_artifact_shares_token_hash")
+  @@map("artifact_shares")
+}
+
+/// One successful password unlock. Opaque token (sha256 stored), scoped to a share.
+model ArtifactShareSession {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shareId    String   @map("share_id") @db.Uuid
+  artifactId String   @map("artifact_id") @db.Uuid
+  tokenHash  String   @map("token_hash") @db.VarChar(64)
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([tokenHash], map: "idx_artifact_share_sessions_token_hash")
+  @@index([shareId], map: "idx_artifact_share_sessions_share")
+  @@map("artifact_share_sessions")
+}
+
+/// A verified-email (portal magic link) commenter session, scoped to one share.
+model ArtifactShareCommenter {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shareId         String   @map("share_id") @db.Uuid
+  artifactId      String   @map("artifact_id") @db.Uuid
+  portalAccountId String   @map("portal_account_id") @db.Uuid
+  tokenHash       String   @map("token_hash") @db.VarChar(64)
+  expiresAt       DateTime @map("expires_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([tokenHash], map: "idx_artifact_share_commenters_token_hash")
+  @@index([shareId], map: "idx_artifact_share_commenters_share")
+  @@map("artifact_share_commenters")
+}
+
+/// Append-only owner-action audit trail for a share.
+/// eventType: ENABLED | PASSWORD_CHANGED | LINK_ROTATED | COMMENTS_ENABLED | COMMENTS_DISABLED | REVOKED
+model ArtifactShareEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shareId     String   @map("share_id") @db.Uuid
+  artifactId  String   @map("artifact_id") @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  eventType   String   @map("event_type") @db.VarChar(40)
+  actorId     String   @map("actor_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([artifactId, createdAt], map: "idx_artifact_share_events_artifact_created")
+  @@map("artifact_share_events")
 }
 
 /// Per-workspace opt-in/out of a product module (migration 107). One row per (workspace, module_key); NO row means "the registry

@@ -34,6 +34,7 @@ export const RESERVED_ORG_SLUGS: ReadonlySet<string> = new Set([
   "portal",
   "preview-login",
   "research",
+  "s",
   "settings",
   "chain-graph-bench",
   "ui",

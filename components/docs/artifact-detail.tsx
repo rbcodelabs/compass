@@ -19,6 +19,8 @@ import type { PanelPin } from "@/lib/panel-pin"
 import { DocsLibraryButton } from "@/components/docs/docs-library-button"
 import type { ArtifactThumbnailDto } from "@/lib/artifacts"
 import { isGoogleDriveUrl } from "@/lib/google-drive-links"
+import { ArtifactSharePanel } from "./artifact-share-panel"
+import type { OwnerShareState } from "@/lib/artifact-share"
 import { useLiveRefresh } from "@/hooks/use-live-refresh"
 
 type ArtifactDetailProps = {
@@ -31,13 +33,15 @@ type ArtifactDetailProps = {
   initialCommentsPin?: PanelPin
   /** V0_CHAT only: v0's running preview, fetched per view with the viewer's own grant. */
   livePreviewSrc?: string | null
+  /** HTML_UPLOAD only: the owner's external-share state. Absent for other sources. */
+  shareState?: OwnerShareState
   workspaceId: string
   basePath: string
   solutions: Array<{ id: string; title: string; linked: boolean }>
   decisions: Array<{ id: string; title: string; state: string }>
 }
 
-export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, workspaceId, basePath, solutions, decisions, initialCommentsPin, livePreviewSrc }: ArtifactDetailProps) {
+export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, workspaceId, basePath, solutions, decisions, initialCommentsPin, livePreviewSrc, shareState }: ArtifactDetailProps) {
   const labels = useLabels()
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -106,6 +110,7 @@ export function ArtifactDetail({ artifact, html, slides, initialSlideIndex, work
         <h2 className="font-semibold">New revision</h2>{artifact.sourceType === "V0_CHAT" ? <p className="text-sm text-text-subtle">Revisions of a v0 chat come from v0. Use “Refresh from v0” above.</p> : artifact.sourceType === "EXTERNAL_LINK" ? <Input name="url" type="url" required placeholder="https://…" /> : <Input name="file" type="file" accept=".html,text/html" required />}{artifact.sourceType !== "V0_CHAT" && <Button type="submit" disabled={pending}>Replace current revision</Button>}
       </form>
     </div>
+    {shareState && artifact.sourceType === "HTML_UPLOAD" && (artifact.status === "ACTIVE" || shareState.enabled) && <ArtifactSharePanel workspaceId={workspaceId} artifactId={artifact.id} basePath={basePath} state={shareState} />}
     <section className="rounded-lg border p-4 space-y-3"><h2 className="font-semibold">{`Linked ${labels.solution.lowerPlural}`}</h2>{linked.length === 0 ? <p className="text-sm text-text-subtle">{`Not linked to ${labels.solution.indefinite}.`}</p> : <ul className="space-y-2">{linked.map((solution) => <li key={solution.id} className="flex items-center justify-between gap-2"><span>{solution.title}</span><Button size="sm" variant="ghost" onClick={() => run(() => unlinkArtifact(workspaceId, artifact.id, solution.id, basePath))}>Unlink</Button></li>)}</ul>}
       {available.length > 0 && <div className="flex gap-2"><select aria-label={`${labels.solution.singular} to link`} className="flex-1 rounded-md border px-3 text-sm" value={selectedSolution} onChange={(event) => setSelectedSolution(event.target.value)}><option value="">{`Select ${labels.solution.indefinite}…`}</option>{available.map((solution) => <option key={solution.id} value={solution.id}>{solution.title}</option>)}</select><Button disabled={!selectedSolution || pending} onClick={() => run(() => linkArtifact(workspaceId, artifact.id, selectedSolution, basePath))}>Link</Button></div>}
     </section>

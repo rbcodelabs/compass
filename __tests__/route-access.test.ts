@@ -224,3 +224,18 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/api/connectors/v0/callback")).toBe(false);
   });
 });
+
+describe("isPublicPath — external artifact share", () => {
+  it("allows the share page and its auth/comments routes without a session", () => {
+    expect(isPublicPath("/s/abc123")).toBe(true);
+    expect(isPublicPath("/s/abc123/auth/send")).toBe(true);
+    expect(isPublicPath("/s/abc123/auth/verify")).toBe(true);
+    expect(isPublicPath("/s/abc123/comments")).toBe(true);
+  });
+
+  it("does not widen to lookalike prefixes", () => {
+    expect(isPublicPath("/s")).toBe(false);
+    expect(isPublicPath("/share/abc")).toBe(false);
+    expect(isPublicPath("/sx/abc")).toBe(false);
+  });
+});

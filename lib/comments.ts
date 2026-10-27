@@ -21,8 +21,9 @@ export type CommentStatus = "OPEN" | "RESOLVED"
 export type CommentAuthorType = "AGENT" | "HUMAN"
 /// "WIDGET" is a comment submitted from an embedded feedback widget on a page
 /// Compass does not serve. `source` is a plain VarChar(20) column, so widening
-/// this union needs no migration.
-export type CommentSource = "UI" | "MCP" | "MIGRATION" | "WIDGET"
+/// this union needs no migration. "SHARE" is a comment left by an outsider on a
+/// password-protected external artifact share (lib/artifact-share-comments.ts).
+export type CommentSource = "UI" | "MCP" | "MIGRATION" | "WIDGET" | "SHARE"
 
 export type DocAnchorInput = {
   anchorText: string
