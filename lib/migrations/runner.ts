@@ -751,6 +751,12 @@ const MIGRATIONS: readonly MigrationEntry[] = [
     name: "110_agent_sandbox_class",
     filePath: path.join(process.cwd(), "prisma/migrations/110_agent_sandbox_class/migration.sql"),
   },
+  {
+    // Which model credential a run used: agent_runs.credential_source, one nullable VARCHAR(30) holding a closed non-secret label. No index,
+    // no backfill, no FK. The 111 postcondition proves the column exists. The code tolerates the migration being unapplied (label unknown).
+    name: "111_agent_run_credential_source",
+    filePath: path.join(process.cwd(), "prisma/migrations/111_agent_run_credential_source/migration.sql"),
+  },
 ];
 
 const MIGRATIONS_BY_NAME = new Map(MIGRATIONS.map((migration) => [migration.name, migration]));
@@ -2365,6 +2371,11 @@ export async function applyMigrations(pool: Pool, schema: string, targetScript?:
       if (migration.name === "110_workspace_anthropic_api_key") {
         const columns = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND table_name='workspaces' AND column_name IN ('anthropic_api_key_encrypted','anthropic_api_key_last4')", [schema])
         if (columns.rows[0]?.count !== "2") throw new Error("Migration 110 postcondition failed: workspaces.anthropic_api_key_encrypted/anthropic_api_key_last4 missing")
+      }
+
+      if (migration.name === "111_agent_run_credential_source") {
+        const column = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema=$1 AND table_name='agent_runs' AND column_name='credential_source'", [schema])
+        if (column.rows[0]?.count !== "1") throw new Error("Migration 111 postcondition failed: agent_runs.credential_source missing")
       }
 
       // Only this distinct attempt becomes a successful receipt. A failed

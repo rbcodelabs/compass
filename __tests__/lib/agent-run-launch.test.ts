@@ -49,7 +49,7 @@ function context(over: Partial<LaunchContext> = {}): LaunchContext {
     prompt: "PROMPT",
     snapshotId: "snap-1",
     harness: "claude",
-    model: { ok: true, provider: "anthropic", modelId: "claude-sonnet-5", keyEnv: "ANTHROPIC_API_KEY", apiKey: "anthropic-key", env: {} },
+    model: { ok: true, provider: "anthropic", modelId: "claude-sonnet-5", keyEnv: "ANTHROPIC_API_KEY", apiKey: "anthropic-key", env: {}, credentialSource: "platform-api-key" as const },
     budgetMs: 20 * 60_000,
     mcpBaseUrl: "https://compass.test",
     bypassSecret: "bypass",
@@ -146,7 +146,7 @@ describe("launchQueuedAgentRun", () => {
   })
 
   it("on Bedrock, forwards only the Bedrock credential and keeps the deployment's model id over the agent's Anthropic-API id", async () => {
-    const bedrock = { ok: true as const, provider: "bedrock" as const, modelId: "global.anthropic.claude-sonnet-5-5", keyEnv: "BEDROCK_API_KEY", apiKey: "bedrock-token", env: { AWS_REGION: "eu-west-1" } }
+    const bedrock = { ok: true as const, provider: "bedrock" as const, modelId: "global.anthropic.claude-sonnet-5-5", keyEnv: "BEDROCK_API_KEY", apiKey: "bedrock-token", env: { AWS_REGION: "eu-west-1" }, credentialSource: "bedrock" as const }
     await launchQueuedAgentRun(context({ model: bedrock }))
     const { env } = m.runCommand.mock.calls[0][0]
     expect(env.AWS_BEARER_TOKEN_BEDROCK).toBe("bedrock-token")

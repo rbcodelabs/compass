@@ -287,6 +287,7 @@ async function run(input: TriggerInput, deps: TriggerDeps): Promise<AgentRunOutc
       kind: "TASK_ASSIGNMENT",
       budgetMs: DEFAULT_AGENT_RUN_BUDGET_MS,
       fenceConversation: true,
+      credentialSource: resolvedModel?.ok ? resolvedModel.credentialSource : harness === "opencode" ? "gateway" : null,
     })
   } catch (error) {
     if (error instanceof AgentRunError) {

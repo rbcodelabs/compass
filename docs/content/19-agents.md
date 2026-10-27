@@ -271,6 +271,10 @@ A workspace administrator can make the in-app agent run on their own Anthropic a
 - If a stored key cannot be decrypted, runs in that workspace are refused rather than silently falling back to the platform key; set the key again in Settings.
 - Requires the database update `110_workspace_anthropic_api_key`.
 
+### Which credential a run used
+
+While an agent run is working, the composer shows **Model credential: Platform API key**, **Workspace API key**, **Claude subscription**, **Bedrock** or **AI Gateway**, so you can tell which credential is paying for it. Only this label is recorded on the run; the key or token itself is never stored, logged or shown. Runs that started before the database update `111_agent_run_credential_source` is applied show no credential line.
+
 ## GitHub access
 
 By default the in-app agent has no shell and cannot reach GitHub. A workspace administrator can change that in **Settings -> Agent GitHub access** by listing the repositories (owner/name, all under one GitHub owner, at most 10) that the Compass GitHub App is installed on.

@@ -38,6 +38,7 @@ import { NextRequest } from "next/server"
 import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { resolveWorkspaceAgentModel } from "@/lib/workspace-anthropic-key"
+import type { AgentCredentialSource } from "@/lib/agent-credential-source"
 import { resolveAgentHandoffContext } from "@/lib/agent-context"
 import { resolveAgentPageContext } from "@/lib/agent-page-context"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
@@ -310,6 +311,8 @@ export async function POST(request: NextRequest) {
     await failPendingInterviewProcessing(conversationIdResolved, userId, workspaceId)
     return new Response(resolved.message, { status: 500 })
   }
+  // Which credential pays for this run, recorded on the run row (a closed non-secret label, never the key itself).
+  const credentialSource: AgentCredentialSource | null = resolved?.ok ? resolved.credentialSource : harness === "opencode" ? "gateway" : null
   // opencode needs only the gateway credential; the Anthropic key is not forwarded to it.
   const gatewayApiKey = harness === "opencode" ? await resolveGatewayCredential(process.env) : undefined
   if (harness === "opencode" && !gatewayApiKey) {
@@ -521,6 +524,7 @@ export async function POST(request: NextRequest) {
         agentId: runAgent?.id ?? null,
         invokedByUserId: userId,
         model: turnModel,
+        credentialSource,
         kind,
         claimId: scope?.scopeClaimId ?? null,
         packProvenance: preparedPacks.provenanceJson,

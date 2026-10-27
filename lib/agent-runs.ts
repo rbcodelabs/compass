@@ -30,6 +30,7 @@
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import { findAgentById } from "@/lib/agent-ownership"
+import { parseAgentCredentialSource, type AgentCredentialSource } from "@/lib/agent-credential-source"
 import type { AppPrismaClient } from "@/lib/db"
 import { resolveConversationAccess } from "@/lib/agent-conversation-access"
 import { authorColumn } from "@/lib/agent-attribution"
@@ -269,6 +270,35 @@ export function resetAgentRunAttributionAvailabilityCache() {
   attributionCache = null
 }
 
+// ── Credential source (migration 111) ───────────────────────────────────────
+
+let credentialSourceCache: { value: boolean; checkedAt: number } | null = null
+
+/**
+ * Whether `111_agent_run_credential_source` has been applied. Same contract as {@link agentRunAttributionAvailable}. Until it is true,
+ * runs are written without a credential source and read back as unknown (null); nothing fails.
+ */
+export async function agentRunCredentialSourceAvailable(prisma: Pick<AppPrismaClient, "agentRun">): Promise<boolean> {
+  if (credentialSourceCache?.value) return true
+  if (credentialSourceCache && Date.now() - credentialSourceCache.checkedAt < AVAILABILITY_NEGATIVE_TTL_MS) return false
+  try {
+    await prisma.agentRun.findMany({ take: 1, select: { credentialSource: true } })
+    credentialSourceCache = { value: true, checkedAt: Date.now() }
+    return true
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && (error.code === "P2022" || error.code === "P2021")) {
+      credentialSourceCache = { value: false, checkedAt: Date.now() }
+      return false
+    }
+    throw error
+  }
+}
+
+/** Test seam: forget the probe result so a suite can exercise both branches. */
+export function resetAgentRunCredentialSourceAvailabilityCache() {
+  credentialSourceCache = null
+}
+
 /**
  * Columns that exist with or without migration 100. A create must name them: with no `select` Prisma
  * RETURNs every mapped column, so the unapplied agent_id would fail every run, attributed or not.
@@ -303,6 +333,7 @@ export async function createAgentRun({
   now = new Date(),
   fenceConversation = false,
   model = null,
+  credentialSource = null,
 }: {
   prisma: AgentRunPrisma
   conversationId: string
@@ -330,6 +361,8 @@ export async function createAgentRun({
   fenceConversation?: boolean
   /** The model the run is about to use (lib/agent-turn-model.ts), recorded up front so the viewer can show it while the run is live. */
   model?: string | null
+  /** Which model credential the run will use (lib/agent-credential-source.ts). A closed label, never a key. Dropped when migration 111 is unapplied. */
+  credentialSource?: AgentCredentialSource | null
 }) {
   if (kind !== "CHAT" && !(HANDOFF_KINDS as readonly string[]).includes(kind)) {
     throw new AgentRunError("Unsupported agent run kind", 400, "INVALID_RUN_KIND")
@@ -338,6 +371,9 @@ export async function createAgentRun({
   if (agentId && !attributable) {
     throw new AgentRunError("Running as a named agent needs migration 100 to be applied", 503, "AGENT_ATTRIBUTION_UNAVAILABLE")
   }
+  // Re-validated against the closed set here as well, so nothing but a known label can ever reach the column.
+  const recordedCredentialSource = parseAgentCredentialSource(credentialSource)
+  const recordCredentialSource = recordedCredentialSource !== null && (await agentRunCredentialSourceAvailable(prisma))
   const deadlineAt = new Date(now.getTime() + resolveAgentRunBudgetMs(budgetMs))
   const credential = createAgentRunCredential()
   const runId = randomUUID()
@@ -368,6 +404,7 @@ export async function createAgentRun({
         claimId,
         packProvenance,
         ...(model ? { model: model.slice(0, 100) } : {}),
+        ...(recordCredentialSource ? { credentialSource: recordedCredentialSource } : {}),
         deadlineAt,
         statusChangedAt: now,
         createdAt: now,
@@ -1067,7 +1104,17 @@ export async function getAgentRunForViewer({
     userId,
   })
   if (!access) return null
-  return { ...run, ...(await runAgentIdentity(prisma, run.id)) }
+  return { ...run, ...(await runAgentIdentity(prisma, run.id)), credentialSource: await runCredentialSource(prisma, run.id) }
+}
+
+/**
+ * Which model credential a run used, for display. Behind its own column probe: until migration 111 is applied this reads as unknown
+ * (null). Only the closed label is returned, and only to someone who can already see the run's conversation.
+ */
+async function runCredentialSource(prisma: AppPrismaClient, runId: string): Promise<AgentCredentialSource | null> {
+  if (!(await agentRunCredentialSourceAvailable(prisma))) return null
+  const row = await prisma.agentRun.findFirst({ where: { id: runId }, select: { credentialSource: true } })
+  return parseAgentCredentialSource(row?.credentialSource)
 }
 
 /**

@@ -238,7 +238,9 @@ const REVIEWED_SQL_SHA256: Readonly<Record<string, string>> = {
   // Agent UI control: two new tables plus ASYNC indexes, additive only (IF NOT EXISTS, no data writes, no FKs). Digest recorded from the shipped SQL; please review this line.
   "110_agent_ui_control": "77d6623c31b682918b954421e3957b8b3c8eef6c1bc665a60d8e5817d6e77587",
   // Developer sandbox class: two nullable ADD COLUMNs (agents, workspaces) plus the agent_runtime_snapshots table and one unique ASYNC index. Additive, no backfill.
-  "110_agent_sandbox_class": "3756f4a2853f5b8a9d09322c94b24bfd220ea7def3d4809afecd385196a03f1e"
+  "110_agent_sandbox_class": "3756f4a2853f5b8a9d09322c94b24bfd220ea7def3d4809afecd385196a03f1e",
+  // Which model credential a run used: one nullable VARCHAR(30) ADD COLUMN on agent_runs. No index, no backfill, no FK. Digest recorded from the shipped SQL; please review this line.
+  "111_agent_run_credential_source": "b54e97c36a2b8f2ad39f83ea82eebd383f6ec2b06ac7dc71593fc97dfbdf7ef1" // gitleaks:allow -- reviewed public SHA256, not a credential
 };
 
 /**

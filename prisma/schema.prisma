@@ -3119,6 +3119,9 @@ model AgentRun {
   agentId         String?   @map("agent_id") @db.Uuid
   /// The human who started the run. NULL reads as userId (the invoker before migration 100).
   invokedByUserId String?   @map("invoked_by_user_id") @db.Uuid
+  /// Which model credential the run used: platform-api-key | workspace-api-key | claude-subscription | bedrock | gateway
+  /// (lib/agent-credential-source.ts). A closed non-secret label, never a key. NULL = unknown (runs before migration 111).
+  credentialSource String?  @map("credential_source") @db.VarChar(30)
 
   conversation AgentConversation @relation(fields: [conversationId], references: [id])
   events       AgentRunEvent[]

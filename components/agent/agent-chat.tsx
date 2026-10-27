@@ -26,6 +26,7 @@ import { Loader2, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { agentCredentialSourceLabel } from "@/lib/agent-credential-source"
 import { type PlanItem, type SerializedRun, type Subagent, type ToolStep } from "@/lib/agent-run-stream"
 import { AgentActivity, PlanCard } from "@/components/agent/agent-activity"
 import { useAgentTurn } from "@/components/agent/use-agent-turn"
@@ -552,6 +553,8 @@ export function AgentChat({
           ? `Answering on ${modelLabelFor(agentChoices, activeRun.model)}.`
           : null
       : null
+  // Which model credential pays for the live run (platform key, workspace key, subscription, Bedrock, gateway). Label only, never a key.
+  const runCredentialLine = activeRun && !activeRun.done && activeRun.credentialSource ? `Model credential: ${agentCredentialSourceLabel(activeRun.credentialSource)}` : null
 
   return (
     <div
@@ -733,10 +736,15 @@ export function AgentChat({
             stopTitle={canCancelRun ? "Stop this run (Esc)" : "Only the person who asked, or the owner, can stop this run"}
             readOnly={Boolean(accessLost)}
             runStartedByMe={!runStartedByOther}
-            status={runStatusLine && (
-              <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
-                <Loader2 className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                <span className="min-w-0 truncate font-medium text-foreground">{runStatusLine}</span>
+            status={(runStatusLine || runCredentialLine) && (
+              <span className="flex min-w-0 flex-col gap-0.5 text-[12.5px] text-muted-foreground">
+                {runStatusLine && (
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Loader2 className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                    <span className="min-w-0 truncate font-medium text-foreground">{runStatusLine}</span>
+                  </span>
+                )}
+                {runCredentialLine && <span data-testid="run-credential-line" className="min-w-0 truncate">{runCredentialLine}</span>}
               </span>
             )}
             contextChips={

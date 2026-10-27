@@ -26,6 +26,8 @@
  * sandbox (`node entry.ts`) and cannot import this module, so the env contract
  * built by {@link providerSandboxEnv} is how the choice reaches it.
  */
+import { credentialSourceForProvider, type AgentCredentialSource } from "@/lib/agent-credential-source"
+
 export type AgentModelProvider = "anthropic" | "bedrock" | "claude-subscription"
 
 export const DEFAULT_AGENT_MODEL_PROVIDER: AgentModelProvider = "anthropic"
@@ -48,7 +50,7 @@ export const DEFAULT_BEDROCK_REGION = "us-east-1"
 type Env = Record<string, string | undefined>
 
 export type ResolvedAgentModel =
-  | { ok: true; provider: AgentModelProvider; modelId: string; keyEnv: string; apiKey: string; env: Env }
+  | { ok: true; provider: AgentModelProvider; modelId: string; keyEnv: string; apiKey: string; env: Env; credentialSource: AgentCredentialSource }
   | { ok: false; message: string }
 
 /** Unset or blank selects the default; anything else must be a known provider. */
@@ -79,7 +81,7 @@ export function resolveAgentModel(env: Env = process.env): ResolvedAgentModel {
   if (!apiKey?.trim()) {
     return { ok: false, message: `${keyEnv} is not configured on this deployment.` }
   }
-  return { ok: true, provider, modelId: resolveModelId(provider, env), keyEnv, apiKey, env }
+  return { ok: true, provider, modelId: resolveModelId(provider, env), keyEnv, apiKey, env, credentialSource: credentialSourceForProvider(provider, false) }
 }
 
 /**
