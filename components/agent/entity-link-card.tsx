@@ -1,12 +1,10 @@
 "use client"
 
 import { useEffect, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react"
-import Link from "next/link"
-import { ArrowUpRight } from "lucide-react"
 
 import { parseEntityLink, type ParsedEntityLink } from "@/lib/entity-links"
 import type { EntitySummary } from "@/lib/entity-summary"
-import { Badge } from "@/components/ui/badge"
+import { EntityPill, PILL, type EntityPillData } from "@/components/patterns/entity-pill"
 import { useOptionalPanelContext, type PanelType } from "@/components/panels/panel-context"
 import { useWorkItemLinkScope } from "@/components/work-item-link-scope"
 import { cn } from "@/lib/utils"
@@ -85,15 +83,28 @@ function useEntitySummary(link: ParsedEntityLink | null): { summary: EntitySumma
   return { summary: entry?.summary ?? null, settled: entry !== undefined }
 }
 
-function humanize(value: string): string {
-  const spaced = value.replace(/_/g, " ").toLowerCase()
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+// What the single meta line of an entity summary is, per type, so the hover card can label it.
+const META_LABEL: Partial<Record<string, string>> = {
+  solution: "Opportunity",
+  assumption: "Solution",
+  keyResult: "Progress",
+  roadmapItem: "Horizon",
+  feedback: "Type",
+  artifact: "Type",
+  doc: "Type",
 }
 
-// A real <a> whose children are all <span>s: it sits inside the <p>/<li> markdown
-// wraps it in without producing invalid block-in-paragraph nesting.
-const CARD =
-  "my-1.5 block max-w-full rounded-lg border border-default bg-surface-inset px-3 py-2 text-text-primary! no-underline! transition hover:border-border-strong"
+function pillData(summary: EntitySummary, href: string): EntityPillData {
+  return {
+    kind: summary.type,
+    typeLabel: summary.typeLabel,
+    title: summary.title,
+    status: summary.status,
+    description: summary.description,
+    facts: summary.meta ? [{ label: META_LABEL[summary.type] ?? "Details", value: summary.meta }] : [],
+    href,
+  }
+}
 
 const subscribeNever = () => () => {}
 
@@ -123,12 +134,7 @@ export function AgentLink({ href, children }: { href?: string; children?: ReactN
   if (!link || (settled && !summary)) return plain
 
   if (!summary) {
-    return (
-      <a href={href} className={cn(CARD, "animate-pulse")} aria-busy="true">
-        <span className="block h-3 w-16 rounded bg-surface-interactive" />
-        <span className="mt-1.5 block h-4 w-2/3 rounded bg-surface-interactive" />
-      </a>
-    )
+    return <a href={href} className={cn(PILL, "w-28 animate-pulse bg-surface-interactive")} aria-busy="true" aria-label="Loading" />
   }
 
   // Same-origin, so use the client router: the chat (and the rail) keep their state.
@@ -139,34 +145,15 @@ export function AgentLink({ href, children }: { href?: string; children?: ReactN
   const openInPlace =
     panels !== null &&
     scope !== null &&
-    link !== null &&
     PANEL_ADDRESSED.has(link.type) &&
     link.orgSlug === scope.orgSlug &&
     link.workspaceSlug === scope.workspaceSlug
-  const onClick = openInPlace && link
-    ? (event: MouseEvent<HTMLAnchorElement>) => {
-        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-        event.preventDefault()
-        panels.openPanel(link.type as PanelType, link.id)
-      }
-    : undefined
-  return (
-    <Link href={internalHref} onClick={onClick} data-entity-card={summary.type} className={cn(CARD, "group/card")}>
-      <span className="flex items-center justify-between gap-2 text-xs text-text-subtle">
-        <span className="truncate">{[summary.typeLabel, summary.meta].filter(Boolean).join(" · ")}</span>
-        <ArrowUpRight className="size-3.5 shrink-0 opacity-0 transition group-hover/card:opacity-100" aria-hidden="true" />
-      </span>
-      <span className="mt-0.5 flex items-start justify-between gap-2">
-        <span className="min-w-0 text-sm font-medium leading-5">{summary.title}</span>
-        {summary.status && (
-          <Badge variant="secondary" className="shrink-0">
-            {humanize(summary.status)}
-          </Badge>
-        )}
-      </span>
-      {summary.description && (
-        <span className="mt-1 line-clamp-2 block text-xs leading-4 text-text-secondary">{summary.description}</span>
-      )}
-    </Link>
-  )
+  const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    if (openInPlace && panels) {
+      event.preventDefault()
+      panels.openPanel(link.type as PanelType, link.id)
+    }
+  }
+  return <EntityPill data={pillData(summary, internalHref)} onClick={onClick} dataAttrs={{ "data-entity-card": summary.type }} clientNav />
 }
