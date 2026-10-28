@@ -27,6 +27,7 @@ import {
 } from "@/lib/mcp-keyset"
 import { widenRefSchemas, resolveToolRefs } from "@/lib/mcp-work-item-refs"
 import { runWithMcpActor, getMcpActor, peekMcpActor, isResearchActor, assertWorkspaceMember, McpAuthzError } from "@/lib/mcp-authz"
+import { listArtifactResources, readArtifactResource } from "@/lib/artifact-resource"
 import { applyToolGate, AGENT_TOOL_POLICY, scopesSatisfy, type ToolScope } from "@/lib/mcp-tool-gates"
 import { bearerChallenge, requiredScopeForPayload } from "@/lib/mcp-oauth-challenge"
 import { SCOPE_MCP_READ } from "@/lib/oauth/constants"
@@ -3617,12 +3618,42 @@ const _handler = createMcpHandler(
       buildCanvasTree
     )
 
+    // ── artifact:// resource — read side of Artifact content ──
+    // Two templates, not one with an optional `{/revisionId}`: the SDK's
+    // UriTemplate does not match an optional trailing segment. Only the
+    // latest-revision template lists. Logic lives in lib/artifact-resource.ts.
+    const firstVar = (value: string | string[] | undefined) => decodeURIComponent(String(Array.isArray(value) ? value[0] : value ?? ""))
+    const artifactResourceMeta = {
+      title: "Compass Artifact",
+      description:
+        "Content of a Compass Artifact. HTML is returned as text; other uploads as base64 blob; EXTERNAL_LINK and V0_CHAT " +
+        "artifacts return their URL as text/uri-list. _meta carries artifactId, revisionId, kind and sha256. Capped at 5 MiB.",
+    }
+    server.registerResource(
+      "artifact",
+      new ResourceTemplate("artifact://{workspaceId}/{artifactId}", { list: async () => listArtifactResources(getMcpActor()) }),
+      artifactResourceMeta,
+      async (uri, variables) =>
+        readArtifactResource(getMcpActor(), { workspaceId: firstVar(variables.workspaceId), artifactId: firstVar(variables.artifactId) })
+    )
+    server.registerResource(
+      "artifact-revision",
+      new ResourceTemplate("artifact://{workspaceId}/{artifactId}/{revisionId}", { list: undefined }),
+      { ...artifactResourceMeta, title: "Compass Artifact Revision" },
+      async (uri, variables) =>
+        readArtifactResource(getMcpActor(), {
+          workspaceId: firstVar(variables.workspaceId),
+          artifactId: firstVar(variables.artifactId),
+          revisionId: firstVar(variables.revisionId),
+        })
+    )
+
     register("list_artifacts", {
       title: "List Artifacts", description: "Lists HTML prototypes and external artifacts in a workspace.",
       inputSchema: { workspaceId: z.string().uuid(), includeArchived: z.boolean().optional() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, listArtifacts)
     register("get_artifact", {
-      title: "Get Artifact", description: "Returns artifact metadata (including kind), immutable revision history, linked Solutions and Decisions without exposing private storage keys or HTML content. A SLIDE_DECK also returns its slides as { index, title, description } — index is the zero-based slideIndex add_comment accepts.",
+      title: "Get Artifact", description: "Returns artifact metadata (including kind), immutable revision history, linked Solutions and Decisions without exposing private storage keys or HTML content. A SLIDE_DECK also returns its slides as { index, title, description } — index is the zero-based slideIndex add_comment accepts. To read the content itself, read the MCP resource artifact://{workspaceId}/{artifactId} (latest revision) or artifact://{workspaceId}/{artifactId}/{revisionId}.",
       inputSchema: { artifactId: z.string().uuid() }, outputSchema: TOOL_OUTPUT_SCHEMA,
     }, getArtifact)
     const artifactUploadReceipt = z.string().min(1).optional().describe("Signed receipt from prepare_artifact_upload after the file was uploaded. Use instead of html so the document never passes through the conversation.")
