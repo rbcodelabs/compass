@@ -12,7 +12,7 @@ import { CardMenu } from "@/components/ui/card-menu";
 import { Badge } from "@/components/ui/badge";
 import { cancelTask } from "@/app/[orgSlug]/[workspaceSlug]/tasks/actions";
 import { usePanelContext } from "@/components/panels/panel-context";
-import { TaskLinksBadge } from "./task-links-badge";
+import { isPanelOpen } from "@/components/panels/is-panel-open"; import { TaskLinksBadge } from "./task-links-badge";
 import { UNASSIGNED_ASSIGNEE_CLASS, taskAssigneeDisplay } from "@/lib/task-assignee-display";
 import { TASK_PRIORITY_LABELS } from "@/lib/task-meta";
 import type { TaskStatus, TaskPriority, TaskLinkedType } from "@/lib/types";
@@ -65,7 +65,7 @@ type Props = {
 
 export function TaskCard({ task, revalidatePathStr, members, onCancel }: Props) {
   const [, startCancelTransition] = useTransition();
-  const { openPanel } = usePanelContext();
+  const { openPanel, panel } = usePanelContext();
 
   const {
     attributes,
@@ -97,6 +97,7 @@ export function TaskCard({ task, revalidatePathStr, members, onCancel }: Props) 
     <div ref={setNodeRef} style={style} className="group" data-flip-id={task.id}>
       <EntityCard
         interactive
+        selected={isPanelOpen(panel, "task", task.id)}
         className="w-full p-3 data-[dragging=true]:shadow-[var(--shadow-panel)] data-[dragging=true]:ring-2 data-[dragging=true]:ring-ring/30"
         data-dragging={isDragging ? true : undefined}
         leading={

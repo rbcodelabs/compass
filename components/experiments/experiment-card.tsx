@@ -9,6 +9,7 @@ import { EntityCard } from "@/components/patterns/entity-card"
 import { StatusBadge } from "@/components/patterns/status-badge"
 import { CardMenu } from "@/components/ui/card-menu"
 import { usePanelContext } from "@/components/panels/panel-context"
+import { isPanelOpen } from "@/components/panels/is-panel-open"
 import { archiveExperiment } from "@/app/[orgSlug]/[workspaceSlug]/experiments/actions"
 import type { ExperimentStatus } from "@/lib/types"
 
@@ -41,7 +42,7 @@ interface ExperimentCardProps {
 
 export function ExperimentCard({ experiment, revalidatePathStr }: ExperimentCardProps) {
   const [, startTransition] = useTransition()
-  const { openPanel } = usePanelContext()
+  const { openPanel, panel } = usePanelContext()
 
   const {
     attributes,
@@ -71,6 +72,7 @@ export function ExperimentCard({ experiment, revalidatePathStr }: ExperimentCard
     <div ref={setNodeRef} style={style} className="group" data-flip-id={experiment.id}>
       <EntityCard
         interactive
+        selected={isPanelOpen(panel, "experiment", experiment.id)}
         className="w-full p-3 data-[dragging=true]:shadow-[var(--shadow-panel)] data-[dragging=true]:ring-2 data-[dragging=true]:ring-ring/30"
         data-dragging={isDragging ? true : undefined}
         leading={

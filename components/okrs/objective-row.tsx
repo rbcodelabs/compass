@@ -44,6 +44,7 @@ import {
 } from "@/app/[orgSlug]/[workspaceSlug]/okrs/actions";
 import { CardMenu, type CardMenuItem } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { isPanelOpen } from "@/components/panels/is-panel-open";
 import { EntityCard } from "@/components/patterns/entity-card";
 import { MiniRing } from "@/components/okrs/okr-visuals";
 import { useLabels } from "@/components/thinking-model/thinking-model-provider";
@@ -131,7 +132,7 @@ export function ObjectiveRow({
   const [isParentLinkOpen, setIsParentLinkOpen] = useState(false);
   const [isAddKROpen, setIsAddKROpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
-  const { openPanel } = usePanelContext();
+  const { openPanel, panel } = usePanelContext();
   const [localParentKRId, setLocalParentKRId] = useState<string | null>(
     parentKeyResultId ?? null
   );
@@ -221,6 +222,7 @@ export function ObjectiveRow({
       ref={setNodeRef}
       style={style}
       interactive
+      selected={isPanelOpen(panel, "objective", objective.id)}
       className="touch-none okx-obj"
       data-pending={isPending || isParentKRPending ? true : undefined}
       leading={

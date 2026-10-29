@@ -12,6 +12,7 @@ import { CardMenu } from "@/components/ui/card-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { archiveItem } from "@/app/[orgSlug]/[workspaceSlug]/roadmap/actions";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { isPanelOpen } from "@/components/panels/is-panel-open";
 import { setPanelSeed } from "@/lib/panel-seed";
 import { DeliveryStatusBadge } from "./delivery-status-badge";
 
@@ -86,7 +87,7 @@ type Props = {
 
 export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, orgSlug, workspaceSlug, launchWorkflowEnabled = true }: Props) {
   const [isArchiving, startArchiveTransition] = useTransition();
-  const { openPanel: openPanelRaw } = usePanelContext();
+  const { openPanel: openPanelRaw, panel } = usePanelContext();
   // Hand the card's own data to the panel so it paints before its fetch lands.
   const openPanel: typeof openPanelRaw = (type, id, options) => {
     if (type === "roadmapItem" && id === item.id) setPanelSeed(type, id, item);
@@ -130,6 +131,7 @@ export function RoadmapCard({ item, workspaceId, revalidatePathStr, onArchive, o
     <div ref={setNodeRef} style={style} className="group" data-flip-id={item.id}>
       <EntityCard
         interactive
+        selected={isPanelOpen(panel, "roadmapItem", item.id)}
         className="w-full p-3 data-[pending]:opacity-60 data-[dragging=true]:shadow-[var(--shadow-panel)] data-[dragging=true]:ring-2 data-[dragging=true]:ring-ring/30"
         data-dragging={isDragging ? true : undefined}
         data-pending={isArchiving ? true : undefined}

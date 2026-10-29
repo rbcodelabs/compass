@@ -21,6 +21,7 @@ import { Board, BoardColumn, EmptyState } from "@/components/patterns";
 import { EntityCard } from "@/components/patterns/entity-card";
 import { CardMenu } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { isPanelOpen } from "@/components/panels/is-panel-open";
 import { setOpportunityFieldValue } from "@/app/[orgSlug]/[workspaceSlug]/discovery/actions";
 import { fieldColumns, type FieldColumn } from "@/lib/opportunity-field-board";
 import type { SelectOption, SquadData } from "@/lib/types";
@@ -302,11 +303,12 @@ function FieldBoardCardBody({
   actions?: ReactNode;
 }) {
   const labels = useLabels();
-  const { openPanel } = usePanelContext();
+  const { openPanel, panel } = usePanelContext();
 
   return (
     <EntityCard
       interactive
+      selected={isPanelOpen(panel, "opportunity", opportunity.id)}
       title={
         <button
           type="button"

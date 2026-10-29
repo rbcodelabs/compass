@@ -79,6 +79,7 @@ import {
 } from "@/components/ui/collapsible"
 import { EvidenceBadge } from "@/components/discovery/evidence-badge"
 import { ScoreBadge } from "@/components/discovery/score-badge"
+import { isPanelOpen } from "@/components/panels/is-panel-open"
 import { usePanelContext, type EntityPanelType } from "@/components/panels/panel-context"
 import { ProposeContextMenu, ProposeMenuButton } from "./card-sort-propose-menu"
 import type { CardSortView } from "./card-sort-round-header"
@@ -184,7 +185,7 @@ type CardContext = {
  */
 function SolidCard({ card, ctx }: { card: PlacedCard; ctx: CardContext }) {
   const labels = useLabels()
-  const { openPanel } = usePanelContext()
+  const { openPanel, panel } = usePanelContext()
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
     id: card.objectId,
     disabled: !ctx.draggable,
@@ -208,7 +209,7 @@ function SolidCard({ card, ctx }: { card: PlacedCard; ctx: CardContext }) {
   const article = (
     <EntityCard
       interactive
-      selected={landed}
+      selected={landed || isPanelOpen(panel, ctx.panelType, card.objectId)}
       title={
         <button
           type="button"

@@ -12,6 +12,7 @@ import { EvidenceBadge } from "@/components/discovery/evidence-badge";
 import { ScoreBadge } from "@/components/discovery/score-badge";
 import { CardMenu } from "@/components/ui/card-menu";
 import { usePanelContext } from "@/components/panels/panel-context";
+import { isPanelOpen } from "@/components/panels/is-panel-open";
 import {
   updateOpportunityStatus,
   archiveOpportunity,
@@ -72,7 +73,7 @@ export function OpportunityCard({
 }: Props) {
   const labels = useLabels();
   const [isPending, startTransition] = useTransition();
-  const { openPanel } = usePanelContext();
+  const { openPanel, panel } = usePanelContext();
 
   const {
     attributes,
@@ -108,6 +109,7 @@ export function OpportunityCard({
     <div ref={setNodeRef} style={style} className="group" data-flip-id={opportunity.id}>
       <EntityCard
         interactive
+        selected={isPanelOpen(panel, "opportunity", opportunity.id)}
         title={
           <button
             type="button"
