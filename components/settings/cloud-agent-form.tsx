@@ -4,9 +4,12 @@ import { useId } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ModelCatalogPicker } from "@/components/settings/model-catalog-picker";
 import type { AgentInvokePolicy } from "@/lib/agent-ownership";
 
-export type CloudAgentModelOption = { value: string; label: string };
+export type CloudAgentModelOption = { value: string; label: string; provider?: string };
+/** How the Model field renders: the searchable gateway-catalog picker, and a short helper text (why the list is limited). */
+export type CloudAgentModelUi = { searchable?: boolean; note?: string | null };
 /** `maxConcurrentRuns` / `maxRunsPerDay` are the typed text of the run limits; "" = use the default. */
 export type CloudAgentFormValues = { name: string; description: string; instructions: string; model: string; invokePolicy: AgentInvokePolicy; maxConcurrentRuns: string; maxRunsPerDay: string };
 
@@ -19,7 +22,7 @@ const selectClass = "h-8 w-full min-w-0 rounded-lg border border-input bg-transp
  * The fields shared by "New cloud agent" and "Edit cloud agent". Controlled: the parent owns the values and the submit.
  * `showInvokePolicy` is for shared agents only; a personal agent is always invoked by its owner alone.
  */
-export function CloudAgentFields({ values, onChange, models, disabled, showInvokePolicy, showRunLimits = false }: { values: CloudAgentFormValues; onChange: (next: CloudAgentFormValues) => void; models: CloudAgentModelOption[]; disabled?: boolean; showInvokePolicy: boolean; showRunLimits?: boolean }) {
+export function CloudAgentFields({ values, onChange, models, modelUi, disabled, showInvokePolicy, showRunLimits = false }: { values: CloudAgentFormValues; onChange: (next: CloudAgentFormValues) => void; models: CloudAgentModelOption[]; modelUi?: CloudAgentModelUi; disabled?: boolean; showInvokePolicy: boolean; showRunLimits?: boolean }) {
   const id = useId();
   const set = <K extends keyof CloudAgentFormValues>(key: K, value: CloudAgentFormValues[K]) => onChange({ ...values, [key]: value });
   return <div className="min-w-0 space-y-2">
@@ -29,12 +32,13 @@ export function CloudAgentFields({ values, onChange, models, disabled, showInvok
     <Input id={`${id}-description`} value={values.description} maxLength={2000} onChange={(e) => set("description", e.target.value)} disabled={disabled} />
     <Label htmlFor={`${id}-instructions`}>Instructions</Label>
     <Textarea id={`${id}-instructions`} value={values.instructions} maxLength={8000} rows={5} placeholder="What this agent is for and how it should work. Instructions guide the agent; they cannot widen its access." onChange={(e) => set("instructions", e.target.value)} disabled={disabled} />
-    <Label htmlFor={`${id}-model`}>Model</Label>
-    <select id={`${id}-model`} className={selectClass} value={values.model} onChange={(e) => set("model", e.target.value)} disabled={disabled}>
+    <Label id={`${id}-model-label`} htmlFor={`${id}-model`}>Model</Label>
+    {modelUi?.searchable ? <ModelCatalogPicker labelId={`${id}-model-label`} value={values.model} onChange={(next) => set("model", next)} options={models} disabled={disabled} /> : <select id={`${id}-model`} className={selectClass} value={values.model} onChange={(e) => set("model", e.target.value)} disabled={disabled}>
       <option value="">System default</option>
       {values.model && !models.some((m) => m.value === values.model) && <option value={values.model}>{values.model} (no longer offered)</option>}
       {models.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-    </select>
+    </select>}
+    {modelUi?.note && <p className="text-xs text-text-muted">{modelUi.note}</p>}
     {showRunLimits && <>
       <Label htmlFor={`${id}-max-concurrent`}>Concurrent run limit</Label>
       <Input id={`${id}-max-concurrent`} type="number" inputMode="numeric" min={1} max={50} step={1} value={values.maxConcurrentRuns} placeholder={CAP_PLACEHOLDERS.concurrent} onChange={(e) => set("maxConcurrentRuns", e.target.value)} disabled={disabled} />
