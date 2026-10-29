@@ -11,6 +11,7 @@ const grants = vi.hoisted(() => ({ list: vi.fn() }))
 vi.mock("@/lib/mcp-connectors/store", () => ({ listConnectedGrants: grants.list }))
 
 import { GET } from "@/app/api/agent/choices/route"
+import { resetCatalogFailureCache } from "@/lib/agent-model-catalog"
 
 const get = (query: string) => GET(new Request(`https://compass.test/api/agent/choices?${query}`))
 
@@ -18,6 +19,7 @@ afterEach(() => { delete process.env.COMPASS_CLOUD_AGENT_MODELS; delete process.
 
 beforeEach(() => {
   vi.clearAllMocks()
+  resetCatalogFailureCache()
   grants.list.mockResolvedValue([])
   mockAuth.mockResolvedValue({ user: { id: "u1" } })
   mockPrisma.workspace.findFirst.mockResolvedValue({ id: "ws-1" })

@@ -17,7 +17,18 @@ import { allowedAgentModels, MODEL_SHAPE, parseAgentModel, type AgentModelOption
 
 export const GATEWAY_MODELS_URL = "https://ai-gateway.vercel.sh/v1/models"
 const REVALIDATE_SECONDS = 3600
-const TIMEOUT_MS = 5000
+const TIMEOUT_MS = 2000
+/**
+ * A failed read is remembered briefly (Next's fetch cache only stores successes), so a gateway outage costs one short timeout
+ * per minute per server instance instead of stalling every settings render and every save.
+ */
+const FAILURE_TTL_MS = 60_000
+let failedUntil = 0
+
+/** Forgets a remembered failure (tests). */
+export function resetCatalogFailureCache(): void {
+  failedUntil = 0
+}
 
 type Env = Record<string, string | undefined>
 type FetchLike = typeof fetch
@@ -57,17 +68,22 @@ export function filterGatewayCatalog(payload: unknown): AgentModelOption[] {
 
 /** Fetches and filters the catalog. Null on any failure or an empty result. */
 export async function fetchGatewayCatalog(fetchImpl: FetchLike = fetch): Promise<AgentModelOption[] | null> {
+  if (Date.now() < failedUntil) return null
+  const fail = (): null => {
+    failedUntil = Date.now() + FAILURE_TTL_MS
+    return null
+  }
   try {
     const response = await fetchImpl(GATEWAY_MODELS_URL, {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(TIMEOUT_MS),
       next: { revalidate: REVALIDATE_SECONDS },
     } as RequestInit)
-    if (!response.ok) return null
+    if (!response.ok) return fail()
     const models = filterGatewayCatalog(await response.json())
-    return models.length ? models : null
+    return models.length ? models : fail()
   } catch {
-    return null
+    return fail()
   }
 }
 

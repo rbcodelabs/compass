@@ -28,6 +28,14 @@ describe("model picker in the cloud agent form", () => {
     expect(screen.getByText(/Claude harness/)).toBeInTheDocument()
   })
 
+  it("points the Model label at a real control (the search box) in picker mode", () => {
+    const { container } = render(<Harness ui={{ searchable: true }} />)
+    const label = container.querySelector("label[for$='-model']") as HTMLLabelElement
+    expect(label).not.toBeNull()
+    const target = container.ownerDocument.getElementById(label.htmlFor)
+    expect(target).toBe(screen.getByLabelText("Search models"))
+  })
+
   it("searches by name, id and provider", () => {
     render(<Harness ui={{ searchable: true }} />)
     const list = screen.getByRole("listbox", { name: "Models" })

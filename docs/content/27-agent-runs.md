@@ -211,7 +211,8 @@ not just the short allowed list:
   by provider, showing each model's name and id. The curated models appear first as
   "Recommended"; "System default" stays the first row.
 - **Cache and timeout.** The listing is fetched server-side and cached for about one
-  hour (Next.js `fetch` revalidation); each fetch has a five second timeout.
+  hour (Next.js `fetch` revalidation); each fetch has a two second timeout, and a failed
+  read is remembered for about a minute so an outage never stalls every page render.
 - **Fallback.** If the gateway cannot be read (error, timeout, bad response) the picker
   shows the curated list with a short note, and saving accepts only curated models plus
   an agent's already stored model. Editing an agent never clears its stored model.

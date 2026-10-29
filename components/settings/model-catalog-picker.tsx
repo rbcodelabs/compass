@@ -21,7 +21,7 @@ export function matchesModelQuery(option: CatalogPickerOption, query: string): b
  * scrollable list grouped by provider. The curated entries (no provider) are grouped first as "Recommended". "System
  * default" stays the first row. A stored value that is not in the list is still shown, so editing never silently drops it.
  */
-export function ModelCatalogPicker({ value, onChange, options, disabled, labelId }: { value: string; onChange: (next: string) => void; options: CatalogPickerOption[]; disabled?: boolean; labelId: string }) {
+export function ModelCatalogPicker({ value, onChange, options, disabled, labelId, inputId }: { value: string; onChange: (next: string) => void; options: CatalogPickerOption[]; disabled?: boolean; labelId: string; inputId: string /* the search box's id, so the field's <Label htmlFor> targets a real control */ }) {
   const id = useId();
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState("");
@@ -41,7 +41,7 @@ export function ModelCatalogPicker({ value, onChange, options, disabled, labelId
   return <div role="group" aria-labelledby={labelId} className="min-w-0 space-y-2">
     <p className="break-words text-xs text-text-muted" data-testid="model-selected">Selected: {selectedText}</p>
     <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-      <Input aria-label="Search models" type="search" placeholder="Search by name, id or provider" value={query} onChange={(e) => setQuery(e.target.value)} disabled={disabled} className="sm:flex-1" />
+      <Input id={inputId} aria-label="Search models" type="search" placeholder="Search by name, id or provider" value={query} onChange={(e) => setQuery(e.target.value)} disabled={disabled} className="sm:flex-1" />
       <select aria-label="Filter by provider" className={cn(selectClass, "sm:w-44")} value={provider} onChange={(e) => setProvider(e.target.value)} disabled={disabled}>
         <option value="">All providers</option>
         {options.some((o) => !o.provider) && <option value={CURATED_GROUP}>{CURATED_GROUP}</option>}

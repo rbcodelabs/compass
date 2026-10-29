@@ -17,6 +17,7 @@ vi.mock("@/lib/agent-access", () => ({ liveGrantedWorkspaceIds: mocks.liveGrants
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }))
 
 import { createCloudAgent, updateCloudAgent } from "@/app/settings/agents/actions"
+import { resetCatalogFailureCache } from "@/lib/agent-model-catalog"
 
 const catalog = { data: [{ id: "openai/gpt-5", name: "GPT-5", type: "language", tags: ["tool-use"], owned_by: "openai" }] }
 const base = { orgSlug: "acme", workspaceSlug: "home", name: "Triage", model: "openai/gpt-5", ownerType: "USER" as const }
@@ -33,6 +34,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.unstubAllGlobals()
+  resetCatalogFailureCache()
   delete process.env.AGENT_HARNESS
 })
 

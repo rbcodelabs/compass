@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   agentModelPicker,
   fetchGatewayCatalog,
@@ -6,6 +6,7 @@ import {
   GATEWAY_MODELS_URL,
   loadAgentModelCatalog,
   parseAgentModelWithCatalog,
+  resetCatalogFailureCache,
 } from "@/lib/agent-model-catalog"
 import { agentModelLabel, parseAgentModel } from "@/lib/agent-models"
 
@@ -24,6 +25,7 @@ const payload = {
 const okFetch = () => vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 })) as unknown as typeof fetch
 const downFetch = () => vi.fn(() => Promise.reject(new Error("down"))) as unknown as typeof fetch
 const opencodeEnv = { AGENT_HARNESS: "opencode" }
+beforeEach(() => resetCatalogFailureCache())
 
 describe("filterGatewayCatalog", () => {
   it("keeps only tool-use language models with well-formed provider/model ids, sorted by provider then name", () => {
@@ -59,6 +61,36 @@ describe("fetchGatewayCatalog", () => {
     ["an empty catalog", () => Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }))],
   ])("returns null (never throws) on %s", async (_name, impl) => {
     expect(await fetchGatewayCatalog(vi.fn(impl) as unknown as typeof fetch)).toBeNull()
+  })
+})
+
+describe("failure caching", () => {
+  it("remembers a failure for about a minute so an outage does not stall every call, then retries", async () => {
+    vi.useFakeTimers()
+    try {
+      const down = downFetch()
+      expect(await fetchGatewayCatalog(down)).toBeNull()
+      expect(await fetchGatewayCatalog(down)).toBeNull()
+      expect(down).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(59_000)
+      expect(await fetchGatewayCatalog(down)).toBeNull()
+      expect(down).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(2_000)
+      const ok = okFetch()
+      expect(await fetchGatewayCatalog(ok)).toHaveLength(2)
+      expect(ok).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+  it("does not remember a success as a failure, and bounds each request to about two seconds", async () => {
+    const spy = vi.spyOn(AbortSignal, "timeout")
+    const ok = okFetch()
+    await fetchGatewayCatalog(ok)
+    await fetchGatewayCatalog(ok)
+    expect(ok).toHaveBeenCalledTimes(2)
+    expect(spy).toHaveBeenCalledWith(2000)
+    spy.mockRestore()
   })
 })
 

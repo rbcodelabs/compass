@@ -33,7 +33,7 @@ export function CloudAgentFields({ values, onChange, models, modelUi, disabled, 
     <Label htmlFor={`${id}-instructions`}>Instructions</Label>
     <Textarea id={`${id}-instructions`} value={values.instructions} maxLength={8000} rows={5} placeholder="What this agent is for and how it should work. Instructions guide the agent; they cannot widen its access." onChange={(e) => set("instructions", e.target.value)} disabled={disabled} />
     <Label id={`${id}-model-label`} htmlFor={`${id}-model`}>Model</Label>
-    {modelUi?.searchable ? <ModelCatalogPicker labelId={`${id}-model-label`} value={values.model} onChange={(next) => set("model", next)} options={models} disabled={disabled} /> : <select id={`${id}-model`} className={selectClass} value={values.model} onChange={(e) => set("model", e.target.value)} disabled={disabled}>
+    {modelUi?.searchable ? <ModelCatalogPicker labelId={`${id}-model-label`} inputId={`${id}-model`} value={values.model} onChange={(next) => set("model", next)} options={models} disabled={disabled} /> : <select id={`${id}-model`} className={selectClass} value={values.model} onChange={(e) => set("model", e.target.value)} disabled={disabled}>
       <option value="">System default</option>
       {values.model && !models.some((m) => m.value === values.model) && <option value={values.model}>{values.model} (no longer offered)</option>}
       {models.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
