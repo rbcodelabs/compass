@@ -2,6 +2,7 @@ import { auth } from "@/auth"
 import getPrisma from "@/lib/db"
 import { listRunnableAgents } from "@/lib/agent-run-identity"
 import { agentModelLabel } from "@/lib/agent-models"
+import { loadAgentModelCatalog } from "@/lib/agent-model-catalog"
 import { resolveAgentHarness } from "@/lib/agent-harness"
 import { connectorDefinition, connectorAccessView } from "@/lib/mcp-connectors/config"
 import { listConnectedGrants } from "@/lib/mcp-connectors/store"
@@ -44,7 +45,11 @@ export async function GET(request: Request) {
   const deploymentModel = deploymentDefaultModel(harness)
   const agentList = agents.map((agent) => ({ id: agent.id, name: agent.name, shared: agent.ownerType === "WORKSPACE", model: agentOwnModel(agent.model, harness) }))
   const labelled = new Set<string>([deploymentModel, ...agentList.flatMap((agent) => (agent.model ? [agent.model] : []))])
-  const modelLabels = Object.fromEntries([...labelled].map((id) => [id, agentModelLabel(id)]))
+  // An agent can own a gateway-catalog model (set in agent setup) that the curated chat menu does not list: show its catalog
+  // name when the catalog is readable, else the bare id. The chat menu itself stays on the curated list.
+  const needsCatalogName = [...labelled].some((id) => agentModelLabel(id) === id)
+  const catalog = needsCatalogName ? await loadAgentModelCatalog(process.env) : null
+  const modelLabels = Object.fromEntries([...labelled].map((id) => [id, agentModelLabel(id) !== id ? agentModelLabel(id) : (catalog?.find((option) => option.value === id)?.label ?? id)]))
   // The caller's own connected third-party accounts, for the chat's Tools menu. Whether a turn actually gets them depends on
   // the agent that answers (see app/api/agent/turn/route.ts); the client decides that from the agent it has selected.
   const grants = await listConnectedGrants(session.user.id, trustedCompassBaseUrl().origin, prisma).catch(() => [])

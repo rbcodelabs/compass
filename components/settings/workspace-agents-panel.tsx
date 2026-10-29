@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { changedRunLimits, CloudAgentFields, EMPTY_CLOUD_AGENT_VALUES, runLimitText, type CloudAgentFormValues, type CloudAgentModelOption } from "@/components/settings/cloud-agent-form";
+import { changedRunLimits, CloudAgentFields, EMPTY_CLOUD_AGENT_VALUES, runLimitText, type CloudAgentFormValues, type CloudAgentModelOption, type CloudAgentModelUi } from "@/components/settings/cloud-agent-form";
 import type { AgentInvokePolicy } from "@/lib/agent-ownership";
 
 export type WorkspaceAgentRow = {
@@ -50,17 +50,17 @@ function SandboxClassSelect({ id, value, onChange, developerSandboxEnabled, disa
   </div>;
 }
 
-function CloudAgentEditor({ agent, models, disabled, developerSandboxEnabled, onSave }: { agent: WorkspaceAgentRow; models: CloudAgentModelOption[]; disabled: boolean; developerSandboxEnabled: boolean; onSave: (values: CloudAgentFormValues, sandboxClass: "STANDARD" | "DEVELOPER") => void }) {
+function CloudAgentEditor({ agent, models, modelUi, disabled, developerSandboxEnabled, onSave }: { agent: WorkspaceAgentRow; models: CloudAgentModelOption[]; modelUi?: CloudAgentModelUi; disabled: boolean; developerSandboxEnabled: boolean; onSave: (values: CloudAgentFormValues, sandboxClass: "STANDARD" | "DEVELOPER") => void }) {
   const [sandboxClass, setSandboxClass] = useState<"STANDARD" | "DEVELOPER">(agent.sandboxClass ?? "STANDARD");
   const [values, setValues] = useState<CloudAgentFormValues>({ name: agent.name, description: agent.description ?? "", instructions: agent.instructions ?? "", model: agent.model ?? "", invokePolicy: agent.invokePolicy ?? "WORKSPACE_MEMBERS", maxConcurrentRuns: runLimitText(agent.maxConcurrentRuns), maxRunsPerDay: runLimitText(agent.maxRunsPerDay) });
   return <form className="mt-3 min-w-0 space-y-2 border-t border-border-default pt-3" aria-label={`Edit ${agent.name}`} onSubmit={(e) => { e.preventDefault(); onSave(values, sandboxClass); }}>
-    <CloudAgentFields values={values} onChange={setValues} models={models} disabled={disabled} showInvokePolicy={!!agent.shared} showRunLimits />
+    <CloudAgentFields values={values} onChange={setValues} models={models} modelUi={modelUi} disabled={disabled} showInvokePolicy={!!agent.shared} showRunLimits />
     {agent.shared && <SandboxClassSelect id={`sandbox-class-${agent.id}`} value={sandboxClass} onChange={setSandboxClass} developerSandboxEnabled={developerSandboxEnabled} disabled={disabled} />}
     <Button type="submit" size="sm" disabled={disabled || !values.name.trim()}>Save agent</Button>
   </form>;
 }
 
-export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage, models = [], developerSandboxEnabled = false }: { orgSlug: string; workspaceSlug: string; agents: WorkspaceAgentRow[]; canManage: boolean; models?: CloudAgentModelOption[]; developerSandboxEnabled?: boolean }) {
+export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage, models = [], modelUi, developerSandboxEnabled = false }: { orgSlug: string; workspaceSlug: string; agents: WorkspaceAgentRow[]; canManage: boolean; models?: CloudAgentModelOption[]; modelUi?: CloudAgentModelUi; developerSandboxEnabled?: boolean }) {
   const router = useRouter();
   const [selected, setSelected] = useState("");
   const [access, setAccess] = useState<"READ" | "WRITE">("READ");
@@ -105,7 +105,7 @@ export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage
           {canManage && <Button variant="outline" size="sm" aria-label={`Revoke access to ${a.name}`} disabled={pending} onClick={() => run(() => revokeWorkspaceAgent(orgSlug, workspaceSlug, a.id))}>Revoke access</Button>}
         </div>
       </div>
-      {editing === a.id && <CloudAgentEditor agent={a} models={models} disabled={pending} developerSandboxEnabled={developerSandboxEnabled} onSave={(values, sandboxClass) => run(() => updateCloudAgent(a.id, { name: values.name, description: values.description, instructions: values.instructions, model: values.model || null, ...(a.shared ? { invokePolicy: values.invokePolicy === "OWNER" ? "ADMINS" : values.invokePolicy } : {}), ...changedRunLimits(values, a), ...(a.shared && sandboxClass !== (a.sandboxClass ?? "STANDARD") ? { sandboxClass } : {}) }), () => setEditing(null))} />}
+      {editing === a.id && <CloudAgentEditor agent={a} models={models} modelUi={modelUi} disabled={pending} developerSandboxEnabled={developerSandboxEnabled} onSave={(values, sandboxClass) => run(() => updateCloudAgent(a.id, { name: values.name, description: values.description, instructions: values.instructions, model: values.model || null, ...(a.shared ? { invokePolicy: values.invokePolicy === "OWNER" ? "ADMINS" : values.invokePolicy } : {}), ...changedRunLimits(values, a), ...(a.shared && sandboxClass !== (a.sandboxClass ?? "STANDARD") ? { sandboxClass } : {}) }), () => setEditing(null))} />}
     </li>)}</ul>
     {(creating
       ? <form className="min-w-0 space-y-2 rounded-md border border-border-default p-3" aria-label="New cloud agent" onSubmit={(e) => {
@@ -121,7 +121,7 @@ export function WorkspaceAgentsPanel({ orgSlug, workspaceSlug, agents, canManage
           <option value="USER">Personal (only you can run it)</option>
           {canManage && <option value="WORKSPACE">Shared (owned by this workspace)</option>}
         </select>
-        <CloudAgentFields values={draft} onChange={setDraft} models={models} disabled={pending} showInvokePolicy={ownerType === "WORKSPACE"} />
+        <CloudAgentFields values={draft} onChange={setDraft} models={models} modelUi={modelUi} disabled={pending} showInvokePolicy={ownerType === "WORKSPACE"} />
         {ownerType === "WORKSPACE" ? <SandboxClassSelect id="new-agent-sandbox" value={newSandboxClass} onChange={setNewSandboxClass} developerSandboxEnabled={developerSandboxEnabled} disabled={pending} /> : <p className="text-xs text-muted-foreground">Personal agents run in the standard sandbox. Make the agent shared to use the developer sandbox.</p>}
         {canManage && <>
           <Label htmlFor="new-agent-access">Access in this workspace</Label>

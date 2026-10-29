@@ -45,7 +45,7 @@ import type { AgentInvokePolicy } from "@/lib/agent-ownership";
 import { loadConfiguredAgentRunCaps } from "@/lib/agent-limits";
 import { agentKind, agentOwner, canInvokeAgent, isUserOwnedBy, listAgentsForWorkspace } from "@/lib/agent-ownership";
 import { getStoredDefaultAgentIds } from "@/lib/agent-defaults";
-import { allowedAgentModels } from "@/lib/agent-models";
+import { agentModelPicker } from "@/lib/agent-model-catalog";
 import { AnalyticsSettingsPanel } from "@/components/analytics/analytics-settings-panel";
 import { listConnections } from "@/lib/analytics/service";
 import {
@@ -196,6 +196,7 @@ export default async function SettingsPage({ params }: Props) {
   // Same code path as the resolver: the form shows only what is actually applied,
   // and anything stored but not applied is surfaced rather than silently dropped.
   const storedLabels = inspectStoredLabels(workspace);
+  const modelPicker = await agentModelPicker();
   const canManageCapabilityPacks = normalizeWorkspaceRole(currentWorkspaceRole) === "ADMIN" || isOrgAdminRole(workspace.organization.members[0]?.role);
   // Deliberately NOT combined with canManageCapabilityPacks/workspace-admin
   // above: the Organization section below controls
@@ -395,7 +396,7 @@ export default async function SettingsPage({ params }: Props) {
       </SettingsSection>
 
       <SettingsSection title="Workspace agents" description="Agents explicitly authorized in this workspace, including cloud agents that run inside Compass. Assignment does not grant access; assigning a task to a cloud agent from the app starts a run, within the limits set on that agent.">
-        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} canManage={canManageCapabilityPacks} developerSandboxEnabled={developerSandboxEnabled} models={allowedAgentModels()} agents={workspaceAgents.map((a) => {
+        <WorkspaceAgentsPanel orgSlug={orgSlug} workspaceSlug={workspaceSlug} canManage={canManageCapabilityPacks} developerSandboxEnabled={developerSandboxEnabled} models={modelPicker.models} modelUi={{ searchable: modelPicker.searchable, note: modelPicker.note }} agents={workspaceAgents.map((a) => {
           const owner = agentOwner(a);
           const ownerMember = owner?.type === "USER" ? rawMembers.find((m) => m.userId === owner.userId) : undefined;
           // Editing follows canManageAgent: the owner of a personal agent, an administrator for a shared one. Only editors receive the instructions.

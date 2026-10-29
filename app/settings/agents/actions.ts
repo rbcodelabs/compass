@@ -9,7 +9,7 @@ import { liveGrantedWorkspaceIds } from "@/lib/agent-access";
 import { AGENT_LEGACY_SELECT, agentKind, agentOwner, canManageAgent, findAgentById, isUserOwnedBy, isWorkspaceAdminUser, type AgentInvokePolicy } from "@/lib/agent-ownership";
 import { AgentSelectionError, resolveRunAgent } from "@/lib/agent-run-identity";
 import { clearUserDefaultAgent, clearWorkspaceDefaultAgent, setUserDefaultAgent, setWorkspaceDefaultAgent } from "@/lib/agent-defaults";
-import { parseAgentModel } from "@/lib/agent-models";
+import { parseAgentModelWithCatalog } from "@/lib/agent-model-catalog";
 import { parseAgentCap } from "@/lib/agent-limits";
 import { readWorkspaceDeveloperSandboxEnabled } from "@/lib/agent-sandbox-class";
 
@@ -106,7 +106,7 @@ export async function createCloudAgent(input: {
     name: nameValue(input.name),
     description: descriptionValue(input.description),
     instructions: instructionsValue(input.instructions),
-    model: parseAgentModel(input.model),
+    model: await parseAgentModelWithCatalog(input.model),
     kind: "CLOUD",
     status: "ACTIVE",
     ownerType: input.ownerType,
@@ -153,7 +153,7 @@ export async function updateCloudAgent(id: string, input: {
   if (input.description !== undefined) data.description = descriptionValue(input.description);
   if (input.instructions !== undefined) data.instructions = instructionsValue(input.instructions);
   // A model saved before the allowed set changed stays valid as long as it is left alone.
-  if (input.model !== undefined && (input.model ?? null) !== (agent.model ?? null)) data.model = parseAgentModel(input.model);
+  if (input.model !== undefined && (input.model ?? null) !== (agent.model ?? null)) data.model = await parseAgentModelWithCatalog(input.model);
   if (input.invokePolicy !== undefined) {
     // A personal agent is invoked by its owner alone (the intersection rule for others is an open ADR question), so there is nothing to choose.
     if (owner?.type !== "WORKSPACE") throw new Error("Only shared agents have an invoke policy");

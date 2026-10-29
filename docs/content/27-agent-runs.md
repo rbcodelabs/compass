@@ -182,6 +182,34 @@ With `opencode`, `AGENT_MODEL_PROVIDER`, `AGENT_MODEL_ID`, `ANTHROPIC_API_KEY` a
 an invalid one, and neither an Anthropic nor a Bedrock credential is ever passed to
 that harness. The blank-key check described above applies only to `claude`.
 
+### Choosing an agent's model (AI Gateway catalog)
+
+People who can create or edit cloud agents (Settings > Agents, and the workspace's
+Agents section) choose the agent's own model in the **Model** field. On a deployment
+that runs the `opencode` harness the field offers the full Vercel AI Gateway catalog,
+not just the short allowed list:
+
+- **Source and filter.** The public listing `https://ai-gateway.vercel.sh/v1/models`
+  (no credential is sent). Only entries with `type` `language` and the `tool-use` tag
+  are kept, because an agent run is a tool-calling loop.
+- **Picker.** A search box (name, id or provider), a provider filter, and a list grouped
+  by provider, showing each model's name and id. The curated models appear first as
+  "Recommended"; "System default" stays the first row.
+- **Cache and timeout.** The listing is fetched server-side and cached for about one
+  hour (Next.js `fetch` revalidation); each fetch has a five second timeout.
+- **Fallback.** If the gateway cannot be read (error, timeout, bad response) the picker
+  shows the curated list with a short note, and saving accepts only curated models plus
+  an agent's already stored model. Editing an agent never clears its stored model.
+- **Validation.** The server action re-checks the chosen id against a fresh read of the
+  catalog (and the usual id shape rule); the browser's list is never trusted. Curated
+  models are accepted without a catalog fetch.
+- **Claude harness.** The Claude harness can only serve Claude model ids, so the catalog
+  is neither offered nor accepted there; the field keeps the curated list and says why.
+- **Chat is unchanged.** The chat's per-message **Model** menu above still offers only
+  the curated list. A turn for an agent whose own model is a catalog model runs on that
+  model (the agent's own model, second in the precedence order); the chat shows its
+  catalog name when the catalog is readable, otherwise the bare id.
+
 ## Deployment
 
 Administrators must apply and verify migration `069_background_agent_runs`
