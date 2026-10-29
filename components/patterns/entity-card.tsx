@@ -22,6 +22,7 @@ export function EntityCard({ title, description, eyebrow, leading, metadata, sta
       data-slot="card"
       data-pattern="entity-card"
       data-selected={selected || undefined}
+      aria-current={selected ? "true" : undefined}
       className={cn(
         "group rounded-xl border bg-surface-card p-4 shadow-[var(--shadow-card)] transition",
         selected ? "border-border-interactive ring-2 ring-ring/15" : "border-border-default",
