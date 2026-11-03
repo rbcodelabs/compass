@@ -5,7 +5,8 @@ import { getMcpActor } from "@/lib/mcp-authz"
 import { isAgentIdentityActor } from "@/lib/agent-access"
 import { findAgentById } from "@/lib/agent-ownership"
 import { ok, fail } from "@/lib/mcp-output"
-import { prepareReleaseRun, queueAuthorizedRelease, unconfiguredReleaseSourceRevalidator, type ReleaseScope } from "@/lib/release-authorization"
+import { prepareReleaseRun, queueAuthorizedRelease, type ReleaseScope } from "@/lib/release-authorization"
+import { getReleaseSourceRevalidator } from "@/lib/github-release-source-revalidator"
 import { applyTrackedDecision, createTrackedDecisionRequest, getTrackedDecision, listTrackedDecisions, recordDecisionNoAction, TrackedDecisionError, type TrackedDecisionOptionInput, type TrackedDecisionQuestionInput, type TrackedDecisionSourceInput, type TrackedSubjectType } from "@/lib/tracked-decisions"
 import { isChoiceActionKey, parseDecisionAnswers, parsePacketQuestions } from "@/lib/tracked-decision-types"
 import { CompassUrlNotConfiguredError, reviewRequestUrl, withUrlLine } from "@/lib/compass-url"
@@ -326,7 +327,7 @@ export async function applyRecordedDecision({ decisionId }: { decisionId: string
         decision.revision.request.subjectId,
         decision.id,
         decision.revision.sourceFingerprint,
-        unconfiguredReleaseSourceRevalidator,
+        getReleaseSourceRevalidator(),
       )
       if (dispatch.status === "BLOCKED") return fail(`Release dispatch blocked: ${dispatch.code}`)
       return ok(`Release dispatch recorded.\nID: ${dispatch.dispatchId}\nStatus: ${dispatch.status}`, dispatch)

@@ -660,10 +660,17 @@ human admin chooses an option, via the review URL above.
   outside the database transaction, then a short transaction binds the
   unchanged snapshot and human decision to a durable dispatch row. Compass
   does not merge, deploy, or otherwise invoke external release automation in
-  this implementation. Provider validation is unconfigured by default and
-  therefore fails closed (`PR_NOT_READY`); a dispatch worker must use a
-  configured provider and repeat the same head/check/policy revalidation at
-  the dispatch-claim boundary before any future external side effect.
+  this implementation. When the GitHub App connector
+  (`COMPASS_GITHUB_CONNECTOR`) is configured, validation reads the live PR and
+  head-commit checks with a read-only installation token: the PR must be open,
+  not draft, not conflicted, on the reviewed base ref and head SHA, with at
+  least one check reported and every check/status passing. The release policy
+  id must exist in `COMPASS_RELEASE_POLICIES` (JSON, for example
+  `{"default":{"requiredChecks":["build","test"]}}`); unknown policies block as
+  `POLICY_CHANGED`, failing checks as `CHECKS_FAILED`. Without the connector it
+  stays unconfigured and fails closed (`PR_NOT_READY`). A dispatch worker must
+  repeat the same head/check/policy revalidation at the dispatch-claim boundary
+  before any future external side effect.
 
 `list_release_runs` reports Compass ledger facts only. A release-run state does
 not prove that GitHub merged the PR, that a deployment reached production, or
