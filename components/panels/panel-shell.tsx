@@ -31,6 +31,7 @@ import { SolutionPanel } from "./solution-panel";
 import { AssumptionPanel } from "./assumption-panel";
 import { RoadmapItemPanel } from "./roadmap-item-panel";
 import { FeedbackPanel } from "./feedback-panel";
+import { PullRequestPanel } from "./pull-request-panel";
 import { FeedbackComposer } from "@/components/feedback/feedback-composer";
 import { OpportunityComposer } from "@/components/discovery/opportunity-composer";
 import { ExperimentComposer } from "@/components/experiments/experiment-composer";
@@ -247,6 +248,7 @@ export function PanelShell({ initialPin = DEFAULT_PANEL_PIN, chainGraphEnabled =
       )}
       {panel?.type === "roadmapItem" && <RoadmapItemPanel key={panel.id} id={panel.id} {...common} />}
       {panel?.type === "feedback" && <FeedbackPanel id={panel.id} {...common} />}
+      {panel?.type === "pullRequest" && <PullRequestPanel id={panel.id} {...common} />}
       {panel?.type === "feedback-new" && <FeedbackComposer {...common} />}
       {panel?.type === "opportunity-new" && <OpportunityComposer composerId={panel.id} {...common} />}
       {panel?.type === "experiment-new" && <ExperimentComposer composerId={panel.id} {...common} />}

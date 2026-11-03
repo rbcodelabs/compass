@@ -41,7 +41,10 @@ export function parseAgentRepos(input: string[]): { ok: true; repos: string[] } 
  * regardless of what the app itself is granted. Connect caches and refreshes;
  * the token is returned to the caller and never stored or logged here.
  */
-export async function mintRepoInstallationToken(repo: { owner: string; names: string[] }): Promise<{ token: string; expiresAt: number }> {
+export async function mintRepoInstallationToken(
+  /** `permissions` overrides the default agent set (e.g. read-only PR lookups). */
+  repo: { owner: string; names: string[]; permissions?: readonly string[] },
+): Promise<{ token: string; expiresAt: number }> {
   const uid = githubConnectorUid()
   if (!uid) throw new Error(`${GITHUB_CONNECTOR_ENV} must be configured`)
   if (!REPO_PART.test(repo.owner) || !repo.names.length || !repo.names.every(n => REPO_PART.test(n))) throw new Error("Invalid repository")
@@ -49,7 +52,7 @@ export async function mintRepoInstallationToken(repo: { owner: string; names: st
     const minted = await getTokenResponse(uid, {
       subject: { type: "app" },
       authorizationDetails: [
-        { type: "github_app_installation", org: repo.owner, repositories: repo.names, permissions: [...AGENT_GITHUB_PERMISSIONS] },
+        { type: "github_app_installation", org: repo.owner, repositories: repo.names, permissions: [...(repo.permissions ?? AGENT_GITHUB_PERMISSIONS)] },
       ],
     })
     return { token: minted.token, expiresAt: minted.expiresAt }
