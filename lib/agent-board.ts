@@ -81,3 +81,35 @@ export function formatRelativeTime(iso: string, now: number = Date.now()): strin
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
   return `${Math.floor(diff / 86_400_000)}d ago`
 }
+
+/** Chat-list row: a conversation plus the optional status fields the board already derives. */
+export type AgentListConversation = {
+  id: string
+  title: string | null
+  messageCount?: number
+  runStatus?: string | null
+  lastActivityAt?: string
+  reviewedAt?: string | null
+}
+
+export type AgentListGroup = { id: BoardColumnId; label: string; items: (AgentListConversation & { lastActivityAt: string })[] }
+
+/**
+ * Groups the chat list by status (same buckets as the board) and sorts each group by last activity, newest
+ * first. Returns null when the rows carry no status data (the rail list), so callers fall back to a flat list.
+ */
+export function groupConversationsByStatus(conversations: readonly AgentListConversation[]): AgentListGroup[] | null {
+  if (conversations.length === 0 || conversations.some((c) => !c.lastActivityAt)) return null
+  const byId = new Map(conversations.map((c) => [c.id, c as AgentListConversation & { lastActivityAt: string }]))
+  const columns = bucketizeBoard(
+    conversations.map((c) => ({
+      id: c.id,
+      title: c.title,
+      messageCount: c.messageCount ?? 1,
+      runStatus: c.runStatus ?? null,
+      lastActivityAt: c.lastActivityAt!,
+      reviewedAt: c.reviewedAt ?? null,
+    }))
+  )
+  return columns.filter((col) => col.cards.length > 0).map((col) => ({ id: col.id, label: col.label, items: col.cards.map((card) => byId.get(card.id)!) }))
+}
