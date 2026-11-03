@@ -33,6 +33,8 @@ import { mcpConnectorsAvailable } from "@/lib/mcp-connectors/store"
 import { refreshConnectorToken, resolveConnectorToken } from "@/lib/mcp-connectors/tokens"
 import { trustedCompassBaseUrl } from "@/lib/compass-url"
 import { validateMcpAuth } from "@/lib/mcp-auth"
+import getPrisma from "@/lib/db"
+import { agentRunMayUseOwnerConnectors } from "@/lib/agent-run-identity"
 
 export const runtime = "nodejs"
 // A proxied tool call can be slow. This is a chosen ceiling rather than a platform
@@ -65,9 +67,11 @@ async function proxy(request: NextRequest, context: { params: Promise<{ slug: st
   if (!authResult.valid || authResult.purpose !== "AGENT_TURN" || !authResult.userId)
     return jsonRpcError(401, -32001, "This endpoint requires an agent turn credential.")
   const userId = authResult.userId
-  // Connected third-party accounts are a person's own credentials. A run acting as a named agent (personal or
-  // shared) is not that person, so it never borrows them: the agent's reach is its Compass grants only.
-  if (authResult.agentId) return jsonRpcError(403, -32004, "Connected accounts are not available to agent runs.")
+  // Connected third-party accounts belong to one person. A shared agent is not that person, and neither is any
+  // run that can start without them (task assignment, mention, handoff), so those never borrow them. The one exception
+  // is an ordinary chat run of a personal agent that its owner started: the owner acting through their own agent.
+  if (authResult.agentId && !(await agentRunMayUseOwnerConnectors(getPrisma(), { agentId: authResult.agentId, agentRunId: authResult.agentRunId, userId })))
+    return jsonRpcError(403, -32004, "Connected accounts are not available to this agent run. Only a personal agent you run in chat can use them.")
 
   if (!(await mcpConnectorsAvailable()))
     return jsonRpcError(503, -32002, "Connectors are not available on this deployment.")

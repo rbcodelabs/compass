@@ -905,7 +905,7 @@ export function AgentChat({
                 {agentChoices.agents.length > 0 && (
                   <AgentChip choices={agentChoices} value={agentSelection} defaultAgentName={defaultAgentName} disabled={composerDisabled} onChange={setAgentPick} />
                 )}
-                <ToolsMenu connectors={agentChoices.connectors} enabled={connectorsEnabledFor(agentSelection, agentChoices.defaultAgentId)} loaded={agentChoices.loaded} />
+                <ToolsMenu connectors={agentChoices.connectors} enabled={connectorsEnabledFor(agentSelection, agentChoices.defaultAgentId, agentChoices.agents)} loaded={agentChoices.loaded} />
                 {modelPick.visible && (
                   <ModelPicker choices={agentChoices} value={modelPick.model} defaultLabel={modelPick.defaultLabel} disabled={composerDisabled} onChange={modelPick.select} />
                 )}

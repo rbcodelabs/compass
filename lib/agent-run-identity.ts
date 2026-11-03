@@ -16,7 +16,7 @@
 import type { AppPrismaClient } from "@/lib/db"
 import { agentIdentityValidForActor, liveGrantedWorkspaceIds } from "@/lib/agent-access"
 import { BUILT_IN_AGENT_SELECTION, getStoredDefaultAgentIds } from "@/lib/agent-defaults"
-import { agentKind, canInvokeAgent, findAgentById, findAgentsByIds, type AgentRecord } from "@/lib/agent-ownership"
+import { agentKind, agentMayUseOwnerConnectors, canInvokeAgent, findAgentById, findAgentsByIds, type AgentRecord } from "@/lib/agent-ownership"
 
 /**
  * Statuses in which a run is still allowed to act. Mirrors NON_TERMINAL_AGENT_RUN_STATUSES in
@@ -160,5 +160,26 @@ export async function authorizeAgentTurnKey(prisma: AppPrismaClient, key: AgentT
     return valid ? run.id : null
   } catch {
     return null
+  }
+}
+
+/**
+ * Whether a live agent run may use the connected third-party accounts of the user who started it, through the
+ * connector gateway. Only an ordinary CHAT run of a personal agent that its owner started: the owner acting through
+ * their own agent. Shared agents, runs started by task assignment or mention, handoff claims and operations runs
+ * never qualify. Re-checked against the live run on every gateway request; any lookup failure denies.
+ */
+export async function agentRunMayUseOwnerConnectors(prisma: AppPrismaClient, input: { agentId: string; agentRunId: string | undefined; userId: string }): Promise<boolean> {
+  if (!input.agentRunId) return false
+  try {
+    const run = await prisma.agentRun.findFirst({
+      where: { id: input.agentRunId, agentId: input.agentId, userId: input.userId, invokedByUserId: input.userId, kind: "CHAT" },
+      select: { id: true },
+    })
+    if (!run) return false
+    const agent = await findAgentById(prisma, input.agentId)
+    return !!agent && agentKind(agent) === "CLOUD" && agentMayUseOwnerConnectors(agent, input.userId)
+  } catch {
+    return false
   }
 }
