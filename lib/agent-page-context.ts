@@ -25,7 +25,7 @@
  */
 
 import { getEntitySummary } from "@/lib/entity-summary"
-import { parseEntityLink } from "@/lib/entity-links"
+import { isEntityId, parseEntityLink } from "@/lib/entity-links"
 import getPrisma from "@/lib/db"
 import { resolveWorkItem } from "@/lib/work-item-resolve"
 import { resolveThinkingModel, type ThinkingModelSource } from "@/lib/thinking-model/resolve"
@@ -141,7 +141,10 @@ async function resolve({ pageUrl, workspace }: ResolvePageContextInput): Promise
   if (link && link.orgSlug === orgSlug && link.workspaceSlug === workspaceSlug) {
     const labels = resolveThinkingModel(workspace).labels
     // The link may carry a display ID (`TASK-5`); resolve it inside this turn's workspace before reading.
-    const resolved = await resolveWorkItem(getPrisma(), workspace.id, link.type, link.id)
+    // Decision requests carry no display ID, so they skip the work item registry.
+    const resolved = link.type === "review"
+      ? (isEntityId(link.id) ? { ok: true as const, id: link.id } : { ok: false as const })
+      : await resolveWorkItem(getPrisma(), workspace.id, link.type, link.id)
     const summary = resolved.ok ? await getEntitySummary(link.type, resolved.id, workspace.id, labels) : null
     if (summary) {
       entity = {

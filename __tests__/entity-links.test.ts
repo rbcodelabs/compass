@@ -32,6 +32,16 @@ describe("entityPath — entities with their own page", () => {
     expect(entityPath({ ...slugs, type: "task", id: "task-1" })).toBe("/rbcodelabs/compass/tasks/task-1")
   })
 
+  it("links a decision request to its reviews page and parses it back", () => {
+    const id = "5a1086f3-1391-4529-99b2-74477a5dec29"
+    const path = entityPath({ ...slugs, type: "review", id })
+    expect(path).toBe(`/rbcodelabs/compass/reviews/${id}`)
+    expect(parseEntityLink(path)).toEqual({ ...slugs, type: "review", id })
+    expect(parseEntityLink("/rbcodelabs/compass/reviews/not-a-uuid")).toBeNull()
+    expect(parseEntityLink("/rbcodelabs/compass?detail=review%3A" + id)).toEqual({ ...slugs, type: "review", id })
+    expect(parseEntityLink("/rbcodelabs/compass?detail=review%3ADEC-3")).toBeNull()
+  })
+
   it("links an artifact to its own page under docs/artifacts", () => {
     expect(entityPath({ ...slugs, type: "artifact", id: "art-1" })).toBe("/rbcodelabs/compass/docs/artifacts/art-1")
   })
