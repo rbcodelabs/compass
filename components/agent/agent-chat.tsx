@@ -101,6 +101,8 @@ type Props = {
    * it); ignored by the rail, which has no inline list.
    */
   listOpen?: boolean
+  /** Conversations the shell has marked read this session (after its dwell), overriding the server-rendered status. */
+  reviewedIds?: ReadonlySet<string>
   /**
    * Called when turn 1 of a brand-new chat comes back with the id the server
    * assigned to it.
@@ -154,6 +156,7 @@ export function AgentChat({
   initialAgentId,
   variant = "page",
   listOpen = true,
+  reviewedIds,
   onConversationCreated,
   onStreamingChange,
 }: Props) {
@@ -581,7 +584,14 @@ export function AgentChat({
     void sendRef2.current(false, false, undefined, text)
   }, [queued, isStreaming, composerBlocked, accessLost, sending])
   // Who is answering and on what, shown in the composer card while a detached run is live.
-  const groups = useMemo(() => groupConversationsByStatus(conversations), [conversations])
+  // A chat counts as read only after the shell dwell, so the list follows reviewedIds rather than merely being open.
+  const groups = useMemo(
+    () =>
+      groupConversationsByStatus(
+        conversations.map((c) => (reviewedIds?.has(c.id) && c.lastActivityAt ? { ...c, reviewedAt: c.lastActivityAt } : c))
+      ),
+    [conversations, reviewedIds]
+  )
   const runStatusLine =
     activeRun && !activeRun.done
       ? activeRun.agentName

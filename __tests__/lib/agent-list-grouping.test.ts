@@ -29,3 +29,12 @@ describe("groupConversationsByStatus", () => {
     expect(groups[0].items.map((c) => c.id)).toEqual(["run-new", "run-old"])
   })
 })
+
+describe("open conversation", () => {
+  it("lands in Done when its reviewedAt is set to its last activity", () => {
+    const unread = row("open", { reviewedAt: null })
+    const asOpened = { ...unread, reviewedAt: unread.lastActivityAt }
+    expect(groupConversationsByStatus([unread])![0].id).toBe("new")
+    expect(groupConversationsByStatus([asOpened])![0].id).toBe("done")
+  })
+})
