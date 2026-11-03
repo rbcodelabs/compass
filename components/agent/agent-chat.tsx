@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Loader2, Sparkles } from "lucide-react"
+import { Loader2, Sparkles, X as XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -313,12 +313,13 @@ export function AgentChat({
   // closure would still see the previous value. Optimistic text only: the server
   // replaces a claimed turn's message with the registered per-kind instruction
   // (lib/agent-handoff-kinds.ts).
-  const send = useCallback(async (handoff = false, retry = false, handoffKind?: Processing["kind"]) => {
-    const text = handoff
+  const send = useCallback(async (handoff = false, retry = false, handoffKind?: Processing["kind"], queuedText?: string) => {
+    const text = queuedText ?? (handoff
       ? handoffKind === "RESEARCH_SYNTHESIS" ? "Synthesize my saved research for this study." : "Use my saved interview to update the item."
-      : input.trim()
+      : input.trim())
     if (!text || sending.current) return
-    setInput("")
+    // A queued message was already cleared from the field; whatever is typed now is the next draft.
+    if (queuedText === undefined) setInput("")
     setMessages((m) => [...m, { id: `local-${Date.now()}`, role: "user", content: text }])
 
     // Only turn 1 of a brand-new conversation carries seedContext — never a
@@ -543,6 +544,23 @@ export function AgentChat({
   const runStartedByOther = Boolean(runStarterId && runStarterId !== userId)
   const canCancelRun = !runStartedByOther || roster?.viewerRole === "OWNER"
   const composerDisabled = isStreaming || composerBlocked || Boolean(accessLost)
+  // While a turn streams the user can still write a follow-up; it is held here and sent when the turn settles.
+  const canQueue = isStreaming && !composerBlocked && !accessLost
+  const [queued, setQueued] = useState<string | null>(null)
+  const queueFollowUp = () => {
+    const text = input.trim()
+    if (!text) return
+    setQueued((q) => (q ? q + "\n\n" + text : text))
+    setInput("")
+  }
+  const sendRef2 = useRef(send)
+  useEffect(() => { sendRef2.current = send }, [send])
+  useEffect(() => {
+    if (!queued || isStreaming || composerBlocked || accessLost || sending.current) return
+    const text = queued
+    setQueued(null)
+    void sendRef2.current(false, false, undefined, text)
+  }, [queued, isStreaming, composerBlocked, accessLost, sending])
   // Who is answering and on what, shown in the composer card while a detached run is live.
   const runStatusLine =
     activeRun && !activeRun.done
@@ -724,21 +742,31 @@ export function AgentChat({
             textareaRef={composerRef}
             value={input}
             onChange={setInput}
-            onSend={() => { if (!composerDisabled && input.trim()) void send() }}
-            textareaDisabled={composerDisabled}
+            onSend={() => {
+              if (canQueue) queueFollowUp()
+              else if (!composerDisabled && input.trim()) void send()
+            }}
+            textareaDisabled={composerDisabled && !canQueue}
             sendDisabled={composerDisabled || !input.trim()}
             running={Boolean(activeRun && !activeRun.done)}
-            onStop={() => { if (activeRun) void cancelRun(activeRun.id) }}
+            onStop={() => { setQueued(null); if (activeRun) void cancelRun(activeRun.id) }}
             stopDisabled={!canCancelRun}
             stopTitle={canCancelRun ? "Stop this run (Esc)" : "Only the person who asked, or the owner, can stop this run"}
             readOnly={Boolean(accessLost)}
             runStartedByMe={!runStartedByOther}
-            status={runStatusLine && (
-              <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
-                <Loader2 className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                <span className="min-w-0 truncate font-medium text-foreground">{runStatusLine}</span>
-              </span>
-            )}
+            status={(runStatusLine || queued) ? (
+              <>
+                {runStatusLine && (
+                  <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
+                    <Loader2 className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                    <span className="min-w-0 truncate font-medium text-foreground">{runStatusLine}</span>
+                  </span>
+                )}
+                {queued && (
+                  <AttachedChip label={queued} hint="Queued, sends when the agent finishes" onRemove={() => setQueued(null)} />
+                )}
+              </>
+            ) : null}
             contextChips={
               pendingSeedEntity || docChip ? (
                 <>
@@ -765,6 +793,17 @@ export function AgentChat({
           />
         </div>
       </div>
+    </div>
+  )
+}
+
+function AttachedChip({ label, hint, onRemove }: { label: string; hint: string; onRemove: () => void }) {
+  return (
+    <div title={`${hint}: ${label}`} className="inline-flex h-6 min-w-0 max-w-full items-center gap-1 rounded-md border border-border bg-muted pr-0.5 pl-2 text-xs">
+      <span className="min-w-0 truncate font-medium text-foreground">{label}</span>
+      <button type="button" aria-label={`Remove ${label}`} onClick={onRemove} className="relative grid size-[18px] shrink-0 place-items-center rounded text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+        <XIcon className="size-3" aria-hidden="true" />
+      </button>
     </div>
   )
 }
