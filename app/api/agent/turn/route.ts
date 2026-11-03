@@ -86,6 +86,7 @@ import { labelUserTurn } from "@/lib/agent-author-label"
 import * as docFs from "@/lib/doc-fs"
 import { coerceFinalState, reconcileAgentDocs, type DocBaselineEntry, type DocFinalState } from "@/lib/agent-doc-reconciliation"
 import { selectMaterializable } from "@/lib/agent-doc-materialize"
+import { GOOGLE_DRIVE_CONNECTOR_SLUG, buildGoogleResourcesContext, parseGoogleResourceUrls } from "@/lib/agent-google-resources"
 import { parseContextItems, parseUploadRefs, resolveTurnAttachments } from "@/lib/agent-turn-attachments"
 import { signDocManifest, DOC_MANIFEST_FILE } from "@/lib/agent-doc-manifest"
 
@@ -390,7 +391,15 @@ export async function POST(request: NextRequest) {
         contextItems: parseContextItems(body.contextItems),
         uploadRefs: parseUploadRefs(body.uploads),
       })
-  if (attached?.labels.length) turnMessage = `${turnMessage}\n\n[Attached: ${attached.labels.join("; ")}]`
+  // Google Drive links the user pasted as chips (ADR-0027 phase 1b). Nothing is fetched here: the agent reads them through the
+  // user's own Drive connection, and is told plainly when there is none. A named agent never borrows its invoker's connectors.
+  const googleRefs = interviewClaim?.claimed ? [] : parseGoogleResourceUrls(body.googleLinks)
+  const driveConnected = googleRefs.length > 0 && !runAgent
+    ? (await listConnections(userId, trustedCompassBaseUrl().origin, prisma).catch(() => [] as Array<{ slug: string }>)).some(grant => grant.slug === GOOGLE_DRIVE_CONNECTOR_SLUG)
+    : false
+  const google = buildGoogleResourcesContext(googleRefs, { driveConnected })
+  const attachedLabels = [...(attached?.labels ?? []), ...google.labels]
+  if (attachedLabels.length) turnMessage = turnMessage + "\n\n[Attached: " + attachedLabels.join("; ") + "]"
   const savedMessage = await prisma.agentMessage.create({
     data: { conversationId: conversationIdResolved, role: "user", content: turnMessage, ...authorData },
     // Not the default RETURNING-everything: naming no columns would ask for author_user_id.
@@ -420,7 +429,7 @@ export async function POST(request: NextRequest) {
           thinkingModelLabels: workspace.thinkingModelLabels,
         },
       }))?.promptBlock
-  const turnContextBlock = [pageContextBlock, attached?.promptBlock].filter(Boolean).join("\n\n") || undefined
+  const turnContextBlock = [pageContextBlock, attached?.promptBlock, google.promptBlock].filter(Boolean).join("\n\n") || undefined
   const prompt = assemblePrompt(
     {
       id: workspace.id,
