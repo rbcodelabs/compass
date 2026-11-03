@@ -36,6 +36,7 @@ import { ModelPicker, modelLabelFor, useModelPick } from "@/components/agent/mod
 import { AgentChip } from "@/components/agent/composer/agent-chip"
 import { ComposerCard } from "@/components/agent/composer/composer-card"
 import { Markdown } from "@/components/agent/markdown"
+import { RecentMentions } from "@/components/agent/recent-mentions"
 import { AttachMenu, uploadAgentFiles, type AttachedItem, type AttachedUpload } from "@/components/agent/composer/attach-menu"
 import { SeedContextChip } from "@/components/agent/seed-context-chip"
 import { AgentParticipantsPanel, type Roster } from "@/components/agent/agent-participants"
@@ -810,6 +811,13 @@ export function AgentChat({
               </button>
             </div>
           )}
+          <RecentMentions
+            messages={messages}
+            onInsert={(text) => {
+              setInput((prev) => (prev.trim() ? prev.trimEnd() + " " + text : text))
+              composerRef.current?.focus()
+            }}
+          />
           <ComposerCard
             textareaRef={composerRef}
             value={input}
